@@ -272,11 +272,13 @@ impl AbilityType {
 
 /// Helper function to check if a combatant is currently silenced.
 ///
-/// Silence prevents the combatant from using any mana-cost ability, but ONLY
-/// applies to combatants whose resource type is Mana. Warriors (Rage) and Rogues
-/// (Energy) are never blocked by this helper, even if they somehow received a
-/// Silence aura. This matches the design intent from the brainstorm: silence is
-/// a caster-class counter, not a universal CC.
+/// The CASTER's half of the silence rule; the ability's half is
+/// [`AbilityConfig::silence_stops`](super::ability_config::AbilityConfig::silence_stops)
+/// (Silence-prevented and costing mana), and every silence check asks both.
+/// Only applies to combatants whose resource type is Mana. Warriors (Rage) and
+/// Rogues (Energy) are never blocked by this helper, even if they somehow
+/// received a Silence aura: silence is a caster-class counter, not a universal
+/// CC.
 ///
 /// Applied by Unstable Affliction dispel backlash.
 pub fn is_silenced(caster: &super::components::Combatant, auras: Option<&ActiveAuras>) -> bool {

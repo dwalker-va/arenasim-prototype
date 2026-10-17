@@ -363,6 +363,8 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
                               // omit it and the config fails to parse at startup.
                               // For a PET ability this is the pet's OWNER, and
                               // `pet: Some(Spider)` names the pet.
+       prevention: Silence,   // REQUIRED - TBC's PreventionType: Silence, Pacify
+                              // or None. Run the as287 TBC check script (below).
        icon: "icons/abilities/<icon_name>.jpg",
        cast_time: 1.5,        // 0.0 for instant
        range: 40.0,           // Use MELEE_RANGE (2.5) for melee
@@ -517,12 +519,18 @@ takes it (`AbilityConfig::has_cast_bar`, read from `cast_time`; see Interrupts i
 `docs/design/wow-mechanics.md`). A heal may also `consumes_aura: Some(<Ability>)`
 — Swiftmend eats the target's Rejuvenation as it lands.
 
-A cast-time ability that no interrupt takes sets `uninterruptible: true` (Aimed
-Shot): interrupters pass it by unspent, its cast bar is grey and its text says
-"Cannot be interrupted." Crowd control still stops it, with no lockout. TBC
-decides which casts those are (`PreventionType` Pacify):
-`docs/design/balance/sweeps/2026-10-12-as287-tbc-interruptibility.py` checks the
-whole book's flags against the client data.
+**Every ability declares `prevention`** — TBC's `SpellCategories.PreventionType`:
+`Silence` (a spell), `Pacify` (a physical attack or shot) or `None` (Travel
+Form). It is required, with no default, and
+`docs/design/balance/sweeps/2026-10-12-as287-tbc-interruptibility.py` checks
+every ability's value against the TBC client (an ability whose name the client
+lacks is listed there with the spells it is read from). It decides two things.
+A silence stops only a `Silence` ability that costs mana, begun or already
+being cast (`AbilityConfig::silence_stops`): a silenced Hunter still shoots, and
+a silenced Druid still shifts. An interrupt takes only a `Silence` cast bar
+(`AbilityConfig::can_be_interrupted`): a `Pacify` one (Aimed Shot) is passed by
+unspent, its cast bar is grey and its text says "Cannot be interrupted." Crowd
+control still stops any cast, with no lockout. Nothing in the sim pacifies.
 
 **Shared cooldowns** — `cooldown_category: Some(<CooldownCategory>)` puts the
 ability in a cooldown category, after the Classic client's `SpellCategory`:

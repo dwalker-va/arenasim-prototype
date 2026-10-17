@@ -77,9 +77,9 @@ pub fn requirement_sentence(config: &AbilityConfig) -> Option<String> {
 }
 
 /// A property of the ability's CAST, as a trailing sentence: "Cannot be
-/// interrupted." for an [`uninterruptible`](AbilityConfig::uninterruptible)
-/// one (Aimed Shot). Read from the flag, so the next ability that sets it gets
-/// the sentence with no edit here.
+/// interrupted." for an [uninterruptible](AbilityConfig::is_uninterruptible_cast)
+/// one (Aimed Shot). Read from its `prevention`, so the next cast bar that is
+/// not Silence-prevented gets the sentence with no edit here.
 ///
 /// Composed by `encyclopedia::abilities::mechanics_text`, after the aura
 /// sentence and before the precondition — so it reaches the surfaces drawn
@@ -90,7 +90,7 @@ pub fn requirement_sentence(config: &AbilityConfig) -> Option<String> {
 /// `tests/uninterruptible_casts.rs`.
 pub fn cast_sentence(config: &AbilityConfig) -> Option<String> {
     config
-        .uninterruptible
+        .is_uninterruptible_cast()
         .then(|| "Cannot be interrupted.".to_string())
 }
 
@@ -440,10 +440,7 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
             )
         }
         AuraType::Silence => {
-            format!(
-                "Silenced for {:.0} sec. Cannot cast mana-cost abilities.",
-                aura.duration
-            )
+            format!("Silenced for {:.0} sec. Cannot cast spells.", aura.duration)
         }
         AuraType::WeaponPoison => {
             "Weapon coated with poison. Attacks may apply a poison debuff.".to_string()

@@ -68,7 +68,7 @@ impl CastTake {
             CastTake::Nothing
         } else if def.can_be_interrupted() {
             CastTake::Takes
-        } else if def.has_cast_bar() && def.uninterruptible {
+        } else if def.is_uninterruptible_cast() {
             CastTake::Uninterruptible
         } else {
             CastTake::Nothing

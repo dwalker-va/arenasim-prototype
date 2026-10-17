@@ -14,6 +14,7 @@
         Frostbolt: (
             name: "Frostbolt",
             class: Mage,
+            prevention: Silence,
             icon: "icons/abilities/spell_frost_frostbolt02.jpg",
             cast_time: 1.5,
             range: 40.0,
@@ -40,6 +41,7 @@
         FrostNova: (
             name: "Frost Nova",
             class: Mage,
+            prevention: Silence,
             icon: "icons/abilities/spell_frost_frostnova.jpg",
             cast_time: 0.0,
             range: 10.0,
@@ -61,6 +63,7 @@
         ArcaneIntellect: (
             name: "Arcane Intellect",
             class: Mage,
+            prevention: Silence,
             icon: "icons/abilities/spell_holy_magicalsentry.jpg",
             cast_time: 0.0,
             range: 40.0,
@@ -77,6 +80,7 @@
         IceBarrier: (
             name: "Ice Barrier",
             class: Mage,
+            prevention: Silence,
             icon: "icons/abilities/spell_ice_lament.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -93,6 +97,7 @@
         Polymorph: (
             name: "Polymorph",
             class: Mage,
+            prevention: Silence,
             icon: "icons/abilities/spell_nature_polymorph.jpg",
             cast_time: 1.5,
             range: 30.0,
@@ -114,6 +119,7 @@
         FlashHeal: (
             name: "Flash Heal",
             class: Priest,
+            prevention: Silence,
             icon: "icons/abilities/spell_holy_flashheal.jpg",
             cast_time: 1.5,
             range: 40.0,
@@ -128,6 +134,7 @@
         MindBlast: (
             name: "Mind Blast",
             class: Priest,
+            prevention: Silence,
             icon: "icons/abilities/spell_shadow_unholyfrenzy.jpg",
             cast_time: 1.5,
             range: 30.0,
@@ -143,6 +150,7 @@
         PowerWordFortitude: (
             name: "Power Word: Fortitude",
             class: Priest,
+            prevention: Silence,
             icon: "icons/abilities/spell_holy_wordfortitude.jpg",
             cast_time: 0.0,
             range: 40.0,
@@ -159,6 +167,7 @@
         PowerWordShield: (
             name: "Power Word: Shield",
             class: Priest,
+            prevention: Silence,
             icon: "icons/abilities/spell_holy_powerwordshield.jpg",
             cast_time: 0.0,
             range: 40.0,
@@ -180,6 +189,7 @@
         DispelMagic: (
             name: "Dispel Magic",
             class: Priest,
+            prevention: Silence,
             icon: "icons/abilities/spell_holy_dispelmagic.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -192,6 +202,7 @@
         PsychicScream: (
             name: "Psychic Scream",
             class: Priest,
+            prevention: Silence,
             icon: "icons/abilities/spell_shadow_psychicscream.jpg",
             cast_time: 0.0,
             range: 8.0,
@@ -210,6 +221,7 @@
         ManaBurn: (
             name: "Mana Burn",
             class: Priest,
+            prevention: Silence,
             icon: "icons/abilities/spell_shadow_manaburn.jpg",
             description: "Destroys 50 mana on an enemy mana user. Interruptible Shadow cast (deals no damage, so it never breaks crowd control) — the lockout blocks Mind Blast and Psychic Scream, not heals.",
             cast_time: 1.5,
@@ -227,6 +239,7 @@
         HeroicStrike: (
             name: "Heroic Strike",
             class: Warrior,
+            prevention: Pacify,
             icon: "icons/abilities/ability_rogue_ambush.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -242,6 +255,7 @@
         Charge: (
             name: "Charge",
             class: Warrior,
+            prevention: Pacify,
             icon: "icons/abilities/ability_warrior_charge.jpg",
             cast_time: 0.0,
             range: 25.0,
@@ -254,6 +268,7 @@
         Rend: (
             name: "Rend",
             class: Warrior,
+            prevention: Pacify,
             icon: "icons/abilities/ability_gouge.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -271,6 +286,7 @@
         MortalStrike: (
             name: "Mortal Strike",
             class: Warrior,
+            prevention: Pacify,
             icon: "icons/abilities/ability_warrior_savageblow.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -291,6 +307,7 @@
         Pummel: (
             name: "Pummel",
             class: Warrior,
+            prevention: Pacify,
             icon: "icons/abilities/inv_gauntlets_04.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -304,6 +321,7 @@
         BattleShout: (
             name: "Battle Shout",
             class: Warrior,
+            prevention: Silence,
             icon: "icons/abilities/ability_warrior_battleshout.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -328,6 +346,7 @@
         BerserkerRage: (
             name: "Berserker Rage",
             class: Warrior,
+            prevention: None,
             icon: "icons/abilities/spell_nature_ancestralguardian.jpg",
             cast_time: 0.0,
             range: 0.0,           // Self-cast
@@ -349,6 +368,7 @@
         Ambush: (
             name: "Ambush",
             class: Rogue,
+            prevention: Pacify,
             icon: "icons/abilities/ability_rogue_ambush.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -365,6 +385,7 @@
         CheapShot: (
             name: "Cheap Shot",
             class: Rogue,
+            prevention: Pacify,
             icon: "icons/abilities/ability_cheapshot.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -382,6 +403,7 @@
         SinisterStrike: (
             name: "Sinister Strike",
             class: Rogue,
+            prevention: Pacify,
             icon: "icons/abilities/spell_shadow_ritualofsacrifice.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -397,6 +419,7 @@
         KidneyShot: (
             name: "Kidney Shot",
             class: Rogue,
+            prevention: Pacify,
             icon: "icons/abilities/ability_rogue_kidneyshot.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -417,6 +440,7 @@
         Kick: (
             name: "Kick",
             class: Rogue,
+            prevention: Pacify,
             icon: "icons/abilities/ability_kick.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -434,6 +458,7 @@
         CripplingPoison: (
             name: "Crippling Poison",
             class: Rogue,
+            prevention: None,
             icon: "icons/abilities/ability_poisonsting.jpg",
             cast_time: 0.0,
             range: 2.5,
@@ -456,6 +481,7 @@
         Corruption: (
             name: "Corruption",
             class: Warlock,
+            prevention: Silence,
             icon: "icons/abilities/spell_shadow_abominationexplosion.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -473,6 +499,7 @@
         Shadowbolt: (
             name: "Shadow Bolt",
             class: Warlock,
+            prevention: Silence,
             icon: "icons/abilities/spell_shadow_shadowbolt.jpg",
             cast_time: 2.0,
             range: 30.0,
@@ -493,6 +520,7 @@
         Fear: (
             name: "Fear",
             class: Warlock,
+            prevention: Silence,
             icon: "icons/abilities/spell_shadow_possession.jpg",
             cast_time: 1.5,
             range: 30.0,
@@ -512,6 +540,7 @@
         Immolate: (
             name: "Immolate",
             class: Warlock,
+            prevention: Silence,
             icon: "icons/abilities/spell_fire_immolation.jpg",
             cast_time: 2.0,
             range: 30.0,
@@ -533,6 +562,7 @@
         DrainLife: (
             name: "Drain Life",
             class: Warlock,
+            prevention: Silence,
             icon: "icons/abilities/spell_shadow_lifedrain02.jpg",
             cast_time: 0.0,
             range: 20.0,
@@ -560,6 +590,7 @@
         CurseOfAgony: (
             name: "Curse of Agony",
             class: Warlock,
+            prevention: Silence,
             icon: "icons/abilities/spell_shadow_curseofsargeras.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -580,6 +611,7 @@
         CurseOfWeakness: (
             name: "Curse of Weakness",
             class: Warlock,
+            prevention: Silence,
             icon: "icons/abilities/spell_shadow_curseofmannoroth.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -599,6 +631,7 @@
         CurseOfTongues: (
             name: "Curse of Tongues",
             class: Warlock,
+            prevention: Silence,
             icon: "icons/abilities/spell_shadow_curseoftounges.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -619,6 +652,7 @@
         UnstableAffliction: (
             name: "Unstable Affliction",
             class: Warlock,
+            prevention: Silence,
             icon: "icons/abilities/spell_shadow_unstableaffliction_3.jpg",
             cast_time: 1.5,
             range: 30.0,
@@ -651,6 +685,7 @@
         DeathCoil: (
             name: "Death Coil",
             class: Warlock,
+            prevention: Silence,
             icon: "icons/abilities/spell_shadow_deathcoil.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -688,6 +723,7 @@
         FlashOfLight: (
             name: "Flash of Light",
             class: Paladin,
+            prevention: Silence,
             icon: "icons/abilities/spell_holy_flashheal.jpg",
             cast_time: 1.5,
             range: 40.0,
@@ -705,6 +741,7 @@
         HolyLight: (
             name: "Holy Light",
             class: Paladin,
+            prevention: Silence,
             icon: "icons/abilities/spell_holy_holybolt.jpg",
             cast_time: 2.5,
             range: 40.0,
@@ -726,6 +763,7 @@
         HolyShock: (
             name: "Holy Shock",
             class: Paladin,
+            prevention: Silence,
             icon: "icons/abilities/spell_holy_searinglight.jpg",
             cast_time: 0.0,
             range: 40.0,
@@ -749,6 +787,7 @@
         HammerOfJustice: (
             name: "Hammer of Justice",
             class: Paladin,
+            prevention: Silence,
             icon: "icons/abilities/spell_holy_sealofmight.jpg",
             cast_time: 0.0,
             range: 10.0,
@@ -768,6 +807,7 @@
         PaladinCleanse: (
             name: "Cleanse",
             class: Paladin,
+            prevention: Silence,
             icon: "icons/abilities/spell_holy_renew.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -783,6 +823,7 @@
         DevotionAura: (
             name: "Devotion Aura",
             class: Paladin,
+            prevention: Silence,
             icon: "icons/abilities/spell_holy_devotionaura.jpg",
             cast_time: 0.0,
             range: 100.0,  // Unlimited range for team buff
@@ -805,6 +846,7 @@
         DivineShield: (
             name: "Divine Shield",
             class: Paladin,
+            prevention: Silence,
             icon: "icons/abilities/spell_holy_divineintervention.jpg",
             cast_time: 0.0,
             range: 0.0,  // Self-cast
@@ -828,6 +870,7 @@
             name: "Spell Lock",
             class: Warlock,
             pet: Some(Felhunter),
+            prevention: Silence,
             icon: "icons/abilities/spell_shadow_mindrot.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -845,6 +888,7 @@
             name: "Devour Magic",
             class: Warlock,
             pet: Some(Felhunter),
+            prevention: Silence,
             icon: "icons/abilities/spell_nature_purge.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -863,11 +907,11 @@
         AimedShot: (
             name: "Aimed Shot",
             class: Hunter,
+            // Pacify: no interrupt takes the cast (its bar is grey), and a
+            // silence does not stop it. A stun or fear still does.
+            prevention: Pacify,
             icon: "icons/abilities/inv_spear_07.jpg",
             cast_time: 2.5,
-            // A Pacify-prevented cast (TBC `PreventionType` 2): no interrupt
-            // takes it, and its cast bar is grey. A stun or fear still stops it.
-            uninterruptible: true,
             range: 35.0,
             min_range: Some(8.0),
             mana_cost: 34.0,
@@ -892,6 +936,7 @@
         ArcaneShot: (
             name: "Arcane Shot",
             class: Hunter,
+            prevention: Pacify,
             icon: "icons/abilities/ability_impalingbolt.jpg",
             cast_time: 0.0,
             range: 35.0,
@@ -913,6 +958,7 @@
         ConcussiveShot: (
             name: "Concussive Shot",
             class: Hunter,
+            prevention: Pacify,
             icon: "icons/abilities/spell_frost_stun.jpg",
             cast_time: 0.0,
             range: 35.0,
@@ -939,6 +985,7 @@
         SerpentSting: (
             name: "Serpent Sting",
             class: Hunter,
+            prevention: Pacify,
             icon: "icons/abilities/ability_hunter_quickshot.jpg",
             cast_time: 0.0,
             range: 35.0,
@@ -965,6 +1012,7 @@
         Disengage: (
             name: "Disengage",
             class: Hunter,
+            prevention: Pacify,
             icon: "icons/abilities/ability_rogue_feint.jpg",
             cast_time: 0.0,
             range: 0.0,  // Self-cast, no target needed
@@ -984,6 +1032,7 @@
         FreezingTrap: (
             name: "Freezing Trap",
             class: Hunter,
+            prevention: Silence,
             icon: "icons/abilities/spell_frost_chainsofice.jpg",
             cast_time: 0.0,
             range: 30.0,  // Placement range
@@ -1006,6 +1055,7 @@
         FrostTrap: (
             name: "Frost Trap",
             class: Hunter,
+            prevention: Silence,
             icon: "icons/abilities/spell_frost_freezingbreath.jpg",
             cast_time: 0.0,
             range: 30.0,  // Placement range
@@ -1028,6 +1078,7 @@
         Flare: (
             name: "Flare",
             class: Hunter,
+            prevention: Silence,
             icon: "icons/abilities/spell_fire_flare.jpg",
             cast_time: 0.0,
             range: 30.0,  // Placement range
@@ -1047,6 +1098,9 @@
             name: "Web",
             class: Hunter,
             pet: Some(Spider),
+            // TBC has no Hunter-pet Web; 4167 "Web" (the spider Web hunter
+            // pets learn in Wrath) reads PreventionType 1 in both clients.
+            prevention: Silence,
             icon: "icons/abilities/spell_nature_web.jpg",
             cast_time: 0.0,
             range: 20.0,
@@ -1073,6 +1127,9 @@
             name: "Boar Charge",
             class: Hunter,
             pet: Some(Boar),
+            // The client's name is "Charge", on the Pet - Boar skill line
+            // (7371 and its ranks): PreventionType 2.
+            prevention: Pacify,
             icon: "icons/abilities/ability_golemstormbolt.jpg",
             cast_time: 0.0,
             range: 25.0,
@@ -1093,6 +1150,9 @@
             name: "Master's Call",
             class: Hunter,
             pet: Some(Bird),
+            // Master's Call (53271) arrives in Wrath; that client gives it no
+            // SpellCategories row, so PreventionType 0.
+            prevention: None,
             icon: "icons/abilities/ability_hunter_masterscall.jpg",
             cast_time: 0.0,
             range: 40.0,  // Can target allies at range
@@ -1111,6 +1171,7 @@
         DemoralizingShout: (
             name: "Demoralizing Shout",
             class: Warrior,
+            prevention: Silence,
             icon: "icons/abilities/demoralizing_shout.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -1129,6 +1190,7 @@
         CommandingShout: (
             name: "Commanding Shout",
             class: Warrior,
+            prevention: Silence,
             icon: "icons/abilities/commanding_shout.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -1147,6 +1209,7 @@
         FrostArmor: (
             name: "Frost Armor",
             class: Mage,
+            prevention: Silence,
             icon: "icons/abilities/frost_armor.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1166,6 +1229,7 @@
         MageArmorSpell: (
             name: "Mage Armor",
             class: Mage,
+            prevention: Silence,
             icon: "icons/abilities/mage_armor.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1185,6 +1249,7 @@
         MoltenArmor: (
             name: "Molten Armor",
             class: Mage,
+            prevention: Silence,
             icon: "icons/abilities/molten_armor.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1204,6 +1269,7 @@
         ShadowResistanceAura: (
             name: "Shadow Resistance Aura",
             class: Paladin,
+            prevention: Silence,
             icon: "icons/abilities/shadow_resistance_aura.jpg",
             cast_time: 0.0,
             range: 100.0,
@@ -1223,6 +1289,7 @@
         ConcentrationAura: (
             name: "Concentration Aura",
             class: Paladin,
+            prevention: Silence,
             icon: "icons/abilities/concentration_aura.jpg",
             cast_time: 0.0,
             range: 100.0,
@@ -1248,6 +1315,7 @@
         LightningBolt: (
             name: "Lightning Bolt",
             class: Shaman,
+            prevention: Silence,
             icon: "icons/abilities/spell_nature_lightning.jpg",
             cast_time: 2.0,
             range: 30.0,
@@ -1276,6 +1344,7 @@
         FrostShock: (
             name: "Frost Shock",
             class: Shaman,
+            prevention: Silence,
             icon: "icons/abilities/spell_frost_frostshock.jpg",
             cast_time: 0.0,
             range: 25.0,
@@ -1298,6 +1367,7 @@
         LesserHealingWave: (
             name: "Lesser Healing Wave",
             class: Shaman,
+            prevention: Silence,
             icon: "icons/abilities/spell_nature_healingwavelesser.jpg",
             cast_time: 1.5,
             range: 40.0,
@@ -1315,6 +1385,7 @@
         Purge: (
             name: "Purge",
             class: Shaman,
+            prevention: Silence,
             description: "Removes one beneficial magic effect from an enemy, chosen at random. A stacked effect loses one stack.",
             icon: "icons/abilities/spell_nature_purge.jpg",
             cast_time: 0.0,
@@ -1330,6 +1401,9 @@
         WindShear: (
             name: "Wind Shear",
             class: Shaman,
+            // Wind Shear (57994) arrives in Wrath, which gives it
+            // PreventionType 1. Earth Shock, TBC's interrupt, is 1 as well.
+            prevention: Silence,
             icon: "icons/abilities/spell_nature_cyclone.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -1344,6 +1418,7 @@
         AirTotem: (
             name: "Windfury Totem",
             class: Shaman,
+            prevention: Silence,
             icon: "icons/abilities/spell_nature_windfury.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1361,6 +1436,7 @@
         WaterTotem: (
             name: "Healing Stream Totem",
             class: Shaman,
+            prevention: Silence,
             icon: "icons/abilities/inv_spear_04.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1373,6 +1449,7 @@
         EarthTotem: (
             name: "Strength of Earth Totem",
             class: Shaman,
+            prevention: Silence,
             icon: "icons/abilities/spell_nature_strengthofearthtotem02.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1385,6 +1462,7 @@
         FireTotem: (
             name: "Flametongue Totem",
             class: Shaman,
+            prevention: Silence,
             icon: "icons/abilities/spell_fire_flametounge.jpg",
             cast_time: 0.0,
             range: 0.0,
@@ -1404,6 +1482,7 @@
         Rejuvenation: (
             name: "Rejuvenation",
             class: Druid,
+            prevention: Silence,
             icon: "icons/abilities/spell_nature_rejuvenation.jpg",
             cast_time: 0.0,
             range: 40.0,
@@ -1426,6 +1505,7 @@
         Lifebloom: (
             name: "Lifebloom",
             class: Druid,
+            prevention: Silence,
             icon: "icons/abilities/inv_misc_herb_felblossom.jpg",
             cast_time: 0.0,
             range: 40.0,
@@ -1448,6 +1528,7 @@
         Swiftmend: (
             name: "Swiftmend",
             class: Druid,
+            prevention: Silence,
             icon: "icons/abilities/inv_relics_idolofrejuvenation.jpg",
             cast_time: 0.0,
             range: 40.0,
@@ -1465,6 +1546,7 @@
         Moonfire: (
             name: "Moonfire",
             class: Druid,
+            prevention: Silence,
             icon: "icons/abilities/spell_nature_starfall.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -1490,6 +1572,7 @@
         MarkOfTheWild: (
             name: "Mark of the Wild",
             class: Druid,
+            prevention: Silence,
             icon: "icons/abilities/spell_nature_regeneration.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -1510,6 +1593,7 @@
         Innervate: (
             name: "Innervate",
             class: Druid,
+            prevention: Silence,
             icon: "icons/abilities/spell_nature_lightning.jpg",
             cast_time: 0.0,
             range: 30.0,
@@ -1539,6 +1623,7 @@
         EntanglingRoots: (
             name: "Entangling Roots",
             class: Druid,
+            prevention: Silence,
             icon: "icons/abilities/spell_nature_stranglevines.jpg",
             // The damage rider is not in the numeric fields, so it is stated here.
             description: "Roots the target in place for 8 sec and deals 3 Nature damage every 3 sec. Breaks after 80 damage.",
@@ -1562,6 +1647,7 @@
         Cyclone: (
             name: "Cyclone",
             class: Druid,
+            prevention: Silence,
             icon: "icons/abilities/spell_nature_earthbind.jpg",
             cast_time: 1.5,
             range: 20.0,
@@ -1586,6 +1672,7 @@
         TravelForm: (
             name: "Travel Form",
             class: Druid,
+            prevention: None,
             icon: "icons/abilities/ability_druid_travelform.jpg",
             cast_time: 0.0,
             range: 0.0,

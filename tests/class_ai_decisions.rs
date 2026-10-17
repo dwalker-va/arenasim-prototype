@@ -1946,11 +1946,13 @@ fn disengage_bends_toward_the_healer_only_when_the_leap_would_lose_it() {
 }
 
 /// The shipped ability book with Aimed Shot made interruptible: the
-/// counterfactual that shows what `uninterruptible` changes in the Hunter's own
+/// counterfactual that shows what its Pacify `prevention` changes in the Hunter's own
 /// model of its cast.
 fn defs_with_interruptible_aimed_shot(
 ) -> arenasim::states::play_match::ability_config::AbilityDefinitions {
-    use arenasim::states::play_match::ability_config::{AbilitiesConfig, AbilityDefinitions};
+    use arenasim::states::play_match::ability_config::{
+        AbilitiesConfig, AbilityDefinitions, Prevention,
+    };
     let path = arenasim::paths::asset_path_str("config/abilities.ron");
     let mut config: AbilitiesConfig =
         ron::from_str(&std::fs::read_to_string(path).expect("abilities.ron")).expect("parses");
@@ -1958,7 +1960,7 @@ fn defs_with_interruptible_aimed_shot(
         .abilities
         .get_mut(&arenasim::states::play_match::AbilityType::AimedShot)
         .expect("Aimed Shot")
-        .uninterruptible = false;
+        .prevention = Prevention::Silence;
     AbilityDefinitions::new(config)
 }
 

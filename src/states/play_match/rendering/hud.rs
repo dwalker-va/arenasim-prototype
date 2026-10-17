@@ -609,7 +609,7 @@ pub fn render_health_bars(
 
                             // WoW's convention: an interruptible cast fills
                             // orange, an uninterruptible one (Aimed Shot) grey.
-                            let (fill, edge) = if ability_def.uninterruptible {
+                            let (fill, edge) = if ability_def.is_uninterruptible_cast() {
                                 (
                                     hud_theme::CAST_BAR_UNINTERRUPTIBLE_FILL,
                                     hud_theme::CAST_BAR_UNINTERRUPTIBLE_EDGE,

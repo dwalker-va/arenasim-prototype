@@ -1391,7 +1391,7 @@ pub fn aimed_shot_before_sting(
 /// outright. Each visible enemy, pets included, that could stop it has a
 /// reach: the Hunter's dead zone for a melee kite-threat, and — only while
 /// Aimed Shot [`can_be_interrupted`](crate::states::play_match::ability_config::AbilityConfig::can_be_interrupted),
-/// which it cannot as shipped (it is `uninterruptible`) — its own kit's
+/// which it cannot as shipped (it is Pacify-prevented) — its own kit's
 /// interrupt range ([`interrupt_reach`](super::interrupt_reach): Spell Lock and
 /// Wind Shear at range, Kick and Pummel in melee). A Felhunter or Shaman at
 /// range therefore does not hold the cast. Its time to come within that reach
