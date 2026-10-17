@@ -181,9 +181,13 @@ const SCALE_DEATH: &[(f32, [f32; 2])] = &[
     (1100.0, [1.271, 1.158]),
 ];
 
-/// The three colours, sRGB (the client's per-batch colour tracks).
+/// The three colours, sRGB (the client's per-batch colour tracks). The 0.318
+/// blue is the client's own colour-track value, not an approximation of 1/π.
+#[allow(clippy::approx_constant)]
 const RIM_RGB: [f32; 3] = [1.0, 0.91, 0.318];
+#[allow(clippy::approx_constant)]
 const STREAK_A_RGB: [f32; 3] = [0.969, 0.992, 0.318];
+#[allow(clippy::approx_constant)]
 const STREAK_B_RGB: [f32; 3] = [1.0, 0.976, 0.318];
 
 /// Measured radial profiles (angular mean of the decoded textures; r is the
@@ -504,10 +508,11 @@ fn pws_material(texture: &Handle<Image>, layer: PwsLayer) -> StandardMaterial {
 
 /// Update (graphical-only): start, advance and end each bearer's shield.
 ///
-/// A bearer whose live shield has no rig in birth or loop gets a new one. A rig
-/// whose bearer no longer has a live shield (it broke, ran out, was dispelled,
-/// or the bearer died) plays its death and then despawns. A rig whose bearer
-/// entity is gone despawns at once.
+/// A living bearer whose live shield has no rig in birth or loop gets a new
+/// one. A rig whose bearer no longer holds a live shield plays its death and
+/// then despawns: the shield broke, ran out or was dispelled, or the bearer
+/// died (auras stay on a corpse, so death ends the shield here, as it ends
+/// the aura band). A rig whose bearer entity is gone despawns at once.
 pub fn update_pw_shield_visuals(
     mut commands: Commands,
     time: Res<Time>,
@@ -515,20 +520,22 @@ pub fn update_pw_shield_visuals(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut assets: Local<Option<PwsAssets>>,
-    bearers: Query<(Entity, &ActiveAuras), With<Combatant>>,
-    alive: Query<(), With<Combatant>>,
+    bearers: Query<(Entity, &Combatant, &ActiveAuras)>,
+    present: Query<(), With<Combatant>>,
     mut rigs: Query<(Entity, &mut PwShieldVisual)>,
 ) {
     let dt = time.delta_secs();
     let shielded: Vec<Entity> = bearers
         .iter()
-        .filter(|(_, auras)| auras.auras.iter().any(is_live_pw_shield))
-        .map(|(e, _)| e)
+        .filter(|(_, combatant, auras)| {
+            combatant.is_alive() && auras.auras.iter().any(is_live_pw_shield)
+        })
+        .map(|(e, _, _)| e)
         .collect();
 
     let mut held: Vec<Entity> = Vec::new();
     for (rig_entity, mut rig) in rigs.iter_mut() {
-        if alive.get(rig.bearer).is_err() {
+        if present.get(rig.bearer).is_err() {
             commands.entity(rig_entity).despawn();
             continue;
         }
@@ -633,9 +640,16 @@ pub fn place_pw_shield_cards(
             tf.translation = at;
             tf.rotation = pws_card_rotation(at, cam.translation);
             tf.scale = Vec3::new(half.x.max(PWS_MIN_SCALE), half.y.max(PWS_MIN_SCALE), 1.0);
-            if let Some(m) = materials.get_mut(&material.0) {
-                m.base_color
-                    .set_alpha(sample.weight(card.layer).clamp(0.0, 1.0));
+            // Only touch the asset when the weight moved: `get_mut` marks it
+            // changed and re-uploads it, and a held weight is common.
+            let alpha = sample.weight(card.layer).clamp(0.0, 1.0);
+            if materials
+                .get(&material.0)
+                .is_some_and(|m| m.base_color.alpha() != alpha)
+            {
+                if let Some(m) = materials.get_mut(&material.0) {
+                    m.base_color.set_alpha(alpha);
+                }
             }
         }
     }

@@ -19,6 +19,7 @@ use bevy::transform::TransformSystem;
 
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
+use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::{
     ActiveAuras, Aura, AuraType, CastEnding, CastEndingKind, Combatant, HealCastHand, HealCastKind,
     InstantAbilityFired, LandedCast, PwShieldCard, PwShieldVisual, PwsLayer, PwsPhase,
@@ -277,7 +278,7 @@ fn the_held_shield_is_faint_hollow_and_shimmers() {
         let (_, _, _, a) = h.card(bearer, PwsLayer::StreakA);
         let (_, _, _, b) = h.card(bearer, PwsLayer::StreakB);
         assert!(
-            rim <= 0.151 && rim >= 0.059,
+            (0.059..=0.151).contains(&rim),
             "rim weight {rim} outside the client's 0.06–0.15"
         );
         assert!(a <= 0.201 && b <= 0.201, "a streak is too bright: {a} {b}");
@@ -600,4 +601,187 @@ fn a_landed_shield_with_its_marker_flashes_the_hands_once() {
     fire(&mut app, priest);
     app.update();
     assert_eq!(hand_kinds(&mut app).len(), 2);
+}
+
+// --- the real Priest decision --------------------------------------------------
+
+const PRIEST: &str = "priest";
+const ALLY: &str = "warrior";
+const FOE: &str = "rogue";
+const PRIEST_XZ: (f32, f32) = (0.0, 0.0);
+const ALLY_XZ: (f32, f32) = (8.0, 0.0);
+
+/// An enemy Rogue on the Priest's hurt Warrior.
+fn shield_scene() -> Scene {
+    Scene::new()
+        .unit(PRIEST, 1, CharacterClass::Priest)
+        .at(PRIEST_XZ.0, PRIEST_XZ.1)
+        .unit(ALLY, 1, CharacterClass::Warrior)
+        .at(ALLY_XZ.0, ALLY_XZ.1)
+        .health(0.6)
+        .unit(FOE, 2, CharacterClass::Rogue)
+        .at(ALLY_XZ.0 + 1.5, 0.5)
+        .targeting(ALLY)
+        // Fortitude is already up, so the shield is the Priest's first call.
+        .aura_full(PRIEST, fortitude())
+        .aura_full(ALLY, fortitude())
+}
+
+fn fortitude() -> Aura {
+    Aura {
+        effect_type: AuraType::MaxHealthIncrease,
+        ability_name: "Power Word: Fortitude".to_string(),
+        duration: 1800.0,
+        ..Default::default()
+    }
+}
+
+/// Replays what a scene decision spawned through the real hand system, against
+/// rendered stand-ins for the Priest and its ally at the scene's positions,
+/// and returns every hand's world position.
+fn hands_from_decision(view: &DecisionView) -> Vec<Vec3> {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        bevy::asset::AssetPlugin::default(),
+        bevy::transform::TransformPlugin,
+    ));
+    app.init_asset::<Mesh>();
+    app.init_asset::<StandardMaterial>();
+    app.init_asset::<Image>();
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
+    app.insert_resource(AbilityDefinitions::default());
+    app.add_systems(Update, spawn_instant_cast_hands);
+    let mut stand_in = |class, (x, z): (f32, f32)| {
+        let unit = app
+            .world_mut()
+            .spawn((Combatant::new(1, 0, class), Transform::from_xyz(x, 1.0, z)))
+            .id();
+        let body = app
+            .world_mut()
+            .spawn((VisualBody { rest_y: 0.0 }, Transform::default()))
+            .id();
+        app.world_mut().entity_mut(unit).add_child(body);
+        unit
+    };
+    let priest = stand_in(CharacterClass::Priest, PRIEST_XZ);
+    let ally = stand_in(CharacterClass::Warrior, ALLY_XZ);
+    let named = |who: &str| match who {
+        PRIEST => priest,
+        ALLY => ally,
+        other => panic!("the decision named {other}, who has no stand-in"),
+    };
+    for marker in &view.instant_markers {
+        app.world_mut().spawn(InstantAbilityFired {
+            caster: named(marker.caster),
+            target: marker.target.map(named),
+            ability: marker.ability,
+            is_crit: false,
+        });
+    }
+    app.update();
+    app.update();
+    let mut hands = app.world_mut().query::<(&HealCastHand, &GlobalTransform)>();
+    hands
+        .iter(app.world())
+        .map(|(hand, at)| {
+            assert_eq!(hand.kind, HealCastKind::Holy, "PW:S plays the Holy hands");
+            at.translation()
+        })
+        .collect()
+}
+
+/// The real Priest AI shields its hurt Warrior, and the Holy launch flashes on
+/// the PRIEST's two spell hands — none on the Warrior it shielded. The pair's
+/// control: with Weakened Soul on both of them nobody can be shielded, and no
+/// hand lights at all.
+#[test]
+fn the_priests_own_hands_flash_when_it_shields_an_ally() {
+    let view = shield_scene().decide(PRIEST);
+    assert!(
+        view.choices
+            .contains(&(AbilityType::PowerWordShield, Some(ALLY))),
+        "the Priest did not shield its Warrior: {:?}",
+        view.choices
+    );
+    let hands = hands_from_decision(&view);
+    assert_eq!(hands.len(), 2, "two spell hands: {hands:?}");
+    let priest = Vec3::new(PRIEST_XZ.0, 1.0, PRIEST_XZ.1);
+    let ally = Vec3::new(ALLY_XZ.0, 1.0, ALLY_XZ.1);
+    for at in &hands {
+        assert!(
+            at.distance(priest) < 1.2,
+            "a hand lit {:.2} yd from the Priest, at {at}",
+            at.distance(priest)
+        );
+        assert!(
+            at.distance(ally) > 5.0,
+            "a hand lit on the Warrior, at {at}"
+        );
+    }
+    // Both sides of the Priest, not one hand twice.
+    assert!((hands[0] - hands[1]).length() > 1.0, "{hands:?}");
+
+    let mut control = shield_scene();
+    control =
+        control
+            .aura(ALLY, AuraType::WeakenedSoul, 15.0)
+            .aura(PRIEST, AuraType::WeakenedSoul, 15.0);
+    let view = control.decide(PRIEST);
+    assert!(!view
+        .choices
+        .iter()
+        .any(|(a, _)| *a == AbilityType::PowerWordShield));
+    assert!(hands_from_decision(&view).is_empty(), "no shield, no hands");
+}
+
+// --- the bearer going away ---------------------------------------------------
+
+/// A bearer removed from the world (a pet unsummoned, the match torn down)
+/// takes its shield with it on the next frame: the rig and all three cards.
+#[test]
+fn a_despawned_bearer_takes_its_shield_within_a_frame() {
+    let (mut h, bearer, _) = standard_harness();
+    h.give(bearer, PW_SHIELD_AURA_NAME);
+    h.run_to(bearer, PwsPhase::Loop, 0.1);
+    assert_eq!(h.cards(bearer).len(), 3);
+    h.app.world_mut().entity_mut(bearer).despawn();
+    h.tick(1);
+    assert!(h.rigs().is_empty(), "the rig outlived its bearer");
+    let mut cards = h.app.world_mut().query::<&PwShieldCard>();
+    assert_eq!(
+        cards.iter(h.app.world()).count(),
+        0,
+        "a card outlived its bearer"
+    );
+}
+
+/// A bearer that dies keeps its auras on the corpse, but its shield goes: it
+/// plays the one ending and is gone by the end of it, not after 30 s.
+#[test]
+fn a_dying_bearer_lets_its_shield_go() {
+    let (mut h, bearer, _) = standard_harness();
+    h.give(bearer, PW_SHIELD_AURA_NAME);
+    h.run_to(bearer, PwsPhase::Loop, 0.1);
+    h.app
+        .world_mut()
+        .get_mut::<Combatant>(bearer)
+        .unwrap()
+        .current_health = 0.0;
+    let seq = ending(&mut h, bearer);
+    assert!(
+        (60..=75).contains(&seq.len()),
+        "the shield lasted {} frames past its bearer's death",
+        seq.len()
+    );
+    assert!(seq.iter().any(|s| s.0 > 1.2), "it left without the swell");
+    // The aura is still on the corpse: the death, not the aura, ended it.
+    assert!(h
+        .app
+        .world()
+        .get::<ActiveAuras>(bearer)
+        .unwrap()
+        .auras
+        .iter()
+        .any(|a| a.ability_name == PW_SHIELD_AURA_NAME));
 }

@@ -53,8 +53,9 @@ use crate::states::play_match::combat_ai::{
     dispatch_class_decision, DispatchAccumulators, DispatchFrame, DispatchIo,
 };
 use crate::states::play_match::components::{
-    ActiveAuras, Aura, AuraType, Combatant, DRTracker, GameRng, HealerPosture, KitePosture,
-    MeleeResetState, MovementDirective, RogueFlareState, Trap, TrapLaunchProjectile, TrapType,
+    ActiveAuras, Aura, AuraType, Combatant, DRTracker, GameRng, HealerPosture, InstantAbilityFired,
+    KitePosture, MeleeResetState, MovementDirective, RogueFlareState, Trap, TrapLaunchProjectile,
+    TrapType,
 };
 use crate::states::play_match::decision_trace::{
     AbilityCandidate, AbilityOutcome, CandidateStatus, DecisionTrace, EventKind, EventPayload,
@@ -607,6 +608,13 @@ impl Scene {
                 .iter(&exec_world)
                 .map(|launch| (launch.trap_type, launch.landing_position)),
         );
+        let mut fired = exec_world.query::<&InstantAbilityFired>();
+        view.instant_markers
+            .extend(fired.iter(&exec_world).map(|m| SceneInstantMarker {
+                caster: self.who(m.caster.index()),
+                target: m.target.map(|t| self.who(t.index())),
+                ability: m.ability,
+            }));
         view
     }
 }
@@ -769,6 +777,18 @@ pub struct DecisionView {
     /// decision replaced or removed it. A tick that refreshes nothing leaves
     /// no movement event in the trace, so this is how a walk is seen to go on.
     pub directive: Option<MovementDirective>,
+    /// Every `InstantAbilityFired` the decision spawned — the cosmetic marker
+    /// a graphical consumer turns into a caster gesture — with its units named,
+    /// so a test can replay it against a rendered stand-in for the scene.
+    pub instant_markers: Vec<SceneInstantMarker>,
+}
+
+/// An [`InstantAbilityFired`] a scene decision spawned, its units named.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SceneInstantMarker {
+    pub caster: Who,
+    pub target: Option<Who>,
+    pub ability: AbilityType,
 }
 
 impl DecisionView {
@@ -782,6 +802,7 @@ impl DecisionView {
             movement: Vec::new(),
             situation: None,
             directive: None,
+            instant_markers: Vec::new(),
         };
         let mine = trace.pending_events.iter().filter(|e| {
             e.actor
