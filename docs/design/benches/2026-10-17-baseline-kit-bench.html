@@ -1,0 +1,561 @@
+<title>Baseline Kit Visuals Bench</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one stage + a control rail; single dark theme by choice (an effects bench reads against the arena floor). */
+:root{
+  color-scheme: dark;
+  --bg:#141317; --panel:#1c1a21; --panel2:#25222c; --line:#353140;
+  --text:#e7e4ec; --muted:#968fa3; --accent:#9482c9; --warn:#e8b04a; --stage:#0d0c10;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --sans:"IBM Plex Sans", system-ui, -apple-system, sans-serif;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+body{padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));padding-block:16px 32px}
+h1{font-size:18px;font-weight:600;margin:0;letter-spacing:.01em;text-wrap:balance}
+.sub{color:var(--muted);font-size:12.5px;margin-top:2px;max-width:72ch}
+header{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:end;justify-content:space-between;margin-bottom:12px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tab{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+.tab[aria-selected="true"]{border-color:var(--accent);color:var(--accent);background:var(--panel2)}
+.tab:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px}
+@media (max-width:860px){.grid{grid-template-columns:1fr}}
+.stage{background:var(--stage);border:1px solid var(--line);border-radius:8px;position:relative;overflow:hidden}
+canvas{display:block;width:100%;height:auto;aspect-ratio:16/10;max-width:100%;cursor:grab}
+.hud{position:absolute;left:10px;top:8px;font-family:var(--mono);font-size:11.5px;color:var(--muted);pointer-events:none;white-space:pre}
+.transport{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px;border-top:1px solid var(--line);background:var(--panel)}
+button.btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+button.btn.primary{border-color:var(--accent);color:var(--accent)}
+select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:4px;font:inherit}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;min-width:0}
+.card h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;font-weight:600}
+.layer{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--line)}
+.layer:first-of-type{border-top:0}
+.layer label{flex:1;cursor:pointer;min-width:0}
+.layer .nm{font-weight:500}
+.layer .ds{display:block;color:var(--muted);font-size:12px;line-height:1.35}
+.layer.aid .nm::after{content:" · viewing aid";color:var(--muted);font-weight:400;font-size:12px}
+.layer.authored .nm::after{content:" · authored, not client";color:var(--warn);font-weight:400;font-size:12px}
+.sw{width:10px;height:10px;border-radius:2px;margin-top:5px;flex:none}
+.knob{display:grid;grid-template-columns:118px minmax(0,1fr) 86px;gap:8px;align-items:center;padding:3px 0}
+.knob span{font-size:12.5px;color:var(--muted)}
+.knob output{font-family:var(--mono);font-size:12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.notes{color:var(--muted);font-size:12.5px;line-height:1.5;margin:0;padding-left:16px}
+.notes li{margin:3px 0}
+.notes b{color:var(--text);font-weight:500}
+.inferred{color:var(--warn)}
+.ask{color:var(--text);border-left:2px solid var(--accent);padding-left:8px;margin:6px 0 0;font-size:12.5px;line-height:1.5}
+pre{font-family:var(--mono);font-size:12px;line-height:1.5;background:var(--stage);border:1px solid var(--line);border-radius:6px;padding:10px;overflow-x:auto;margin:0;color:#d9d0ec}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+</style>
+
+<header>
+  <div>
+    <h1>Baseline Kit Visuals Bench <span style="color:var(--muted);font-weight:400">· AS-333</span></h1>
+    <div class="sub">Client values from Classic Era 1.15.9 (TBC 2.5.6 matches unless a note says otherwise), parsed from each model's M2 file. Each slider starts at the client value (×1.0), and playback starts at real time. Untick the layers you don't want, then copy the constants block. Layers marked "authored" are not in the client. They are proposals for you to rule on.</div>
+  </div>
+  <div class="legend"><span>drag = orbit</span><span>wheel = zoom</span><span>body: capsule ±1.25 about y=1.0</span></div>
+</header>
+
+<nav class="tabs" role="tablist" id="tabs"></nav>
+
+<div class="grid">
+  <div style="min-width:0">
+    <div class="stage">
+      <canvas id="cv" width="1280" height="800" aria-label="Effect preview"></canvas>
+      <div class="hud" id="hud"></div>
+      <div class="transport">
+        <button class="btn primary" id="replay">Replay</button>
+        <button class="btn" id="pause">Pause</button>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="loop" checked> loop</label>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px">speed
+          <select id="speed"><option value="1" selected>1.0× (real)</option><option value="0.5">0.5×</option><option value="0.25">0.25×</option></select></label>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="moving"> victim moving</label>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="row"><h2 style="margin:0">Rust constants for this effect</h2><button class="btn" id="copy">Copy</button></div>
+      <pre id="out"></pre>
+    </div>
+  </div>
+  <div class="side">
+    <div class="card"><h2>Layers</h2><div id="layers"></div></div>
+    <div class="card"><h2>Multipliers over client</h2><div id="knobs"></div></div>
+    <div class="card"><h2>What the client data says</h2><ul class="notes" id="notes"></ul><div id="asks"></div></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ---------- small math ----------
+const TAU=Math.PI*2, rnd=Math.random;
+const lerp=(a,b,t)=>a+(b-a)*t, clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function keys(k,t){ if(t<=k[0][0]) return k[0][1];
+  for(let i=1;i<k.length;i++){ if(t<=k[i][0]){const a=k[i-1],b=k[i],u=(t-a[0])/(b[0]-a[0]||1);
+    return Array.isArray(a[1])?a[1].map((x,j)=>lerp(x,b[1][j],u)):lerp(a[1],b[1],u);} }
+  return k[k.length-1][1]; }
+function windowOn(win,ms){ if(!win) return true; let on=win[0][1]; for(const [t,v] of win){ if(ms>=t) on=v; } return !!on; }
+const rgb=(c,a)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const norm=a=>{const l=Math.hypot(...a)||1;return[a[0]/l,a[1]/l,a[2]/l]};
+
+// ---------- camera ----------
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const cam={yaw:0.65,pitch:0.42,dist:12,target:[0,1.2,0]};
+let drag=null;
+cv.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing'});
+cv.addEventListener('pointermove',e=>{if(!drag)return;cam.yaw-=(e.clientX-drag[0])*0.008;cam.pitch=clamp(cam.pitch+(e.clientY-drag[1])*0.006,0.05,1.35);drag=[e.clientX,e.clientY]});
+cv.addEventListener('pointerup',()=>{drag=null;cv.style.cursor='grab'});
+cv.addEventListener('wheel',e=>{e.preventDefault();cam.dist=clamp(cam.dist*(1+e.deltaY*0.001),3,60)},{passive:false});
+let VIEW;
+function setupView(){
+  const cp=Math.cos(cam.pitch),sp=Math.sin(cam.pitch);
+  const eye=[cam.target[0]+cam.dist*cp*Math.sin(cam.yaw),cam.target[1]+cam.dist*sp,cam.target[2]+cam.dist*cp*Math.cos(cam.yaw)];
+  const f=norm(sub(cam.target,eye)), r=norm(cross(f,[0,1,0])), u=cross(r,f);
+  VIEW={eye,f,r,u,fl:cv.height*1.25};
+}
+function proj(p){const d=sub(p,VIEW.eye),z=dot(d,VIEW.f); if(z<0.1) return null;
+  const s=VIEW.fl/z; return {x:cv.width/2+dot(d,VIEW.r)*s,y:cv.height/2-dot(d,VIEW.u)*s,s,z};}
+
+// ---------- scene primitives ----------
+const FLOOR=[0.79*255,0.66*255,0.46*255];
+const CLASS={warlock:[148,130,201],priest:[235,235,235],rogue:[255,245,105],warrior:[199,156,110],victim:[150,160,175]};
+function drawFloor(){
+  const pts=[];for(let i=0;i<48;i++){const a=i/48*TAU;const q=proj([9*Math.cos(a),0,9*Math.sin(a)]);if(q)pts.push(q)}
+  g.fillStyle=rgb(FLOOR.map(c=>c*0.82),1);g.beginPath();pts.forEach((q,i)=>i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y));g.closePath();g.fill();
+  g.strokeStyle='rgba(0,0,0,0.08)';g.lineWidth=1;
+  for(let i=-8;i<=8;i+=2){line3([i,0,-8],[i,0,8]);line3([-8,0,i],[8,0,i]);}
+}
+function line3(a,b){const p=proj(a),q=proj(b);if(!p||!q)return;g.beginPath();g.moveTo(p.x,p.y);g.lineTo(q.x,q.y);g.stroke();}
+function drawCapsule(c,col,alpha=1){
+  const top=proj([c[0],c[1]+0.75,c[2]]),bot=proj([c[0],c[1]-0.75,c[2]]);if(!top||!bot)return;
+  const w=0.5*top.s;
+  g.globalAlpha=alpha;
+  const gr=g.createLinearGradient(top.x-w,0,top.x+w,0);
+  gr.addColorStop(0,rgb(col.map(x=>x*0.55),1));gr.addColorStop(0.45,rgb(col,1));gr.addColorStop(1,rgb(col.map(x=>x*0.45),1));
+  g.fillStyle=gr;g.beginPath();
+  g.arc(top.x,top.y,w,Math.PI,0);g.lineTo(bot.x+w,bot.y);g.arc(bot.x,bot.y,w,0,Math.PI);g.closePath();g.fill();
+  g.globalAlpha=1;
+}
+function shadow(c,r=0.55){const p=proj([c[0],0.01,c[2]]);if(!p)return;g.fillStyle='rgba(0,0,0,0.22)';g.beginPath();g.ellipse(p.x,p.y,r*p.s,r*p.s*Math.max(0.15,Math.sin(cam.pitch)),0,0,TAU);g.fill();}
+
+function sprite(kind,p,size,col,a,ang=0,streak=null){
+  const q=proj(p);if(!q||a<=0.003)return;const r=Math.max(0.6,size*q.s*0.5);
+  g.save();g.translate(q.x,q.y);
+  if(kind==='glow'||kind==='cloud'||kind==='smoke'||kind==='dust'||kind==='flame'){
+    const gr=g.createRadialGradient(0,0,0,0,0,r);
+    const soft=kind==='glow'?[1,0.45,0]:kind==='cloud'?[0.9,0.6,0]:kind==='flame'?[0.8,0.55,0]:[0.85,0.5,0];
+    gr.addColorStop(0,rgb(col,a*soft[0]));gr.addColorStop(0.45,rgb(col,a*soft[1]));gr.addColorStop(1,rgb(col,0));
+    g.fillStyle=gr;g.beginPath();
+    if(kind==='flame'){g.ellipse(0,-r*0.25,r*0.6,r,0,0,TAU);}else g.arc(0,0,r,0,TAU);
+    g.fill();
+  } else if(kind==='star'){
+    g.rotate(ang);g.fillStyle=rgb(col,a);
+    for(let k=0;k<2;k++){g.rotate(Math.PI/4*k*2);g.beginPath();g.ellipse(0,0,r,r*0.12,0,0,TAU);g.fill();g.beginPath();g.ellipse(0,0,r*0.12,r,0,0,TAU);g.fill();}
+    const gr=g.createRadialGradient(0,0,0,0,0,r*0.45);gr.addColorStop(0,rgb([255,255,255],a));gr.addColorStop(1,rgb(col,0));g.fillStyle=gr;g.beginPath();g.arc(0,0,r*0.45,0,TAU);g.fill();
+  } else if(kind==='blob'){
+    g.fillStyle=rgb(col,a);g.beginPath();g.arc(0,0,r*0.7,0,TAU);g.fill();
+  }
+  g.restore();
+  if(streak){const q2=proj(streak);if(!q2)return;
+    g.strokeStyle=rgb(col,a*0.85);g.lineCap='round';g.lineWidth=Math.max(1,r*0.7);
+    g.beginPath();g.moveTo(q.x,q.y);g.lineTo(q2.x,q2.y);g.stroke();}
+}
+
+// ---------- particle emitter (M2-shaped) ----------
+// spec: anchor, pos:[x,z,y], vRange (0 = straight up, >=3.1 = sphere), speed, life, rate, win:[[ms,on]],
+//  color/alpha/scale keyed over life 0..1, gravity (negative rises), drag, tail, kind, blend 'add'|'alpha',
+//  area (xz box), areaY, inward: shell radius (yd) the particle starts on, moving toward the anchor,
+//  trig: name of the fx trigger list that (re)starts this emitter's timeline.
+class Emitter{
+  constructor(s,fx){this.s=s;this.fx=fx;this.ps=[];this.acc=0;}
+  reset(){this.ps=[];this.acc=0;}
+  update(dt,ms,origin){
+    const s=this.s,K=this.fx.knobs,dmul=K.density??1;
+    const add=lm=>{ if(windowOn(s.win,lm)){ const rate=Array.isArray(s.rate)?keys(s.rate,lm):s.rate; this.acc+=rate*dt*dmul; } };
+    const tl=this.fx.trig && this.fx.trig[s.trig||'main'];
+    if(tl){ const span=(s.span||this.fx.durMs)*(K.duration??1);
+      for(const t of tl){ const lm=ms-t; if(lm>=0 && lm<=span) add(lm/(K.duration??1)); } }
+    else { const lm=s.loopMs?(ms%s.loopMs):ms; if(!this.fx.loopFx || true) add(s.loopMs?lm:ms/(K.duration??1)); }
+    while(this.acc>=1){this.acc-=1;this.spawn(origin);}
+    const gy=-(s.gravity||0);
+    for(const p of this.ps){
+      p.age+=dt; p.v[1]+=gy*dt; const dr=Math.max(0,1-(s.drag||0)*dt*3); p.v=p.v.map(x=>x*dr);
+      p.x=[p.x[0]+p.v[0]*dt,p.x[1]+p.v[1]*dt,p.x[2]+p.v[2]*dt];
+      if(s.follow){p.x[0]+=origin[0]-p.o[0];p.x[2]+=origin[2]-p.o[2];p.o=[...origin];}
+      if(s.floorKill&&p.x[1]<0.02){p.x[1]=0.02;p.v=[0,0,0];}
+      p.ang+=(s.spin||0)*TAU*dt;
+    }
+    this.ps=this.ps.filter(p=>p.age<p.life);
+  }
+  spawn(origin){
+    const s=this.s,K=this.fx.knobs,spread=K.spread??1;
+    const off=s.pos||[0,0,0], area=(s.area||0)*spread, areaY=(s.areaY||0)*spread;
+    const c=[origin[0]+off[0]*spread,origin[1]+this.fx.anchorY(s.anchor)+off[2],origin[2]+off[1]*spread];
+    let start,v;
+    if(s.inward){ const d=norm([rnd()*2-1,(rnd()*2-1)*(s.inwardFlat??1),rnd()*2-1]), R=s.inward*spread*(0.6+0.4*rnd());
+      start=[c[0]+d[0]*R,c[1]+d[1]*R,c[2]+d[2]*R]; v=d.map(x=>-x*Math.abs(s.speed)*spread); }
+    else {
+      let dir; if((s.vRange||0)>=3.1) dir=norm([rnd()*2-1,rnd()*2-1,rnd()*2-1]);
+      else {const pol=(rnd()*2-1)*(s.vRange||0), az=rnd()*TAU; dir=[Math.sin(pol)*Math.cos(az),Math.cos(pol),Math.sin(pol)*Math.sin(az)];}
+      start=[c[0]+(rnd()-0.5)*area,c[1]+(rnd()-0.5)*areaY,c[2]+(rnd()-0.5)*area];
+      const sp=s.speed*spread*(1+(s.speedVar||0)*(rnd()*2-1)); v=dir.map(d=>d*sp); }
+    this.ps.push({x:start,v,age:0,life:s.life*(K.duration??1),ang:rnd()*TAU,o:[...origin]});
+  }
+  draw(){
+    const s=this.s,K=this.fx.knobs,size=K.size??1;
+    g.globalCompositeOperation=s.blend==='alpha'?'source-over':'lighter';
+    for(const p of this.ps){
+      const t=p.age/p.life; let col=keys(s.color,t); if(this.fx.colorMap) col=this.fx.colorMap(col,s);
+      const a=keys(s.alpha,t)*(K.opacity??1), sc=keys(s.scale,t)*size*2;
+      let streak=null;
+      if(s.tail){const sp=Math.hypot(...p.v);if(sp>0.2){const L=Math.min(s.tail*0.12,sp*0.06)*size;const vv=norm(p.v);streak=[p.x[0]-vv[0]*L,p.x[1]-vv[1]*L,p.x[2]-vv[2]*L];}}
+      sprite(s.kind||'glow',p.x,sc,col,a,p.ang,streak);
+    }
+    g.globalCompositeOperation='source-over';
+  }
+}
+
+// ---------- floating combat text (matches floating_text.rs: rise 1.5 yd/s, 1.5 s life, fade over the last 0.5 s) ----------
+let FCT=[];
+function fct(text,col,px,pos,bold=true){FCT.push({text,col,px,pos:[...pos],age:0,bold});}
+function drawFct(dt){
+  for(const f of FCT){f.age+=dt;}
+  FCT=FCT.filter(f=>f.age<1.5);
+  for(const f of FCT){
+    const q=proj([f.pos[0],f.pos[1]+1.5*f.age,f.pos[2]]); if(!q) continue;
+    const a=f.age>1.0?(1.5-f.age)/0.5:1;
+    const px=f.px*1.6;
+    g.font=`${f.bold?700:600} ${px}px "IBM Plex Sans", system-ui, sans-serif`;g.textAlign='center';g.textBaseline='middle';
+    g.lineWidth=Math.max(2,px*0.14);g.strokeStyle=`rgba(0,0,0,${a})`;g.strokeText(f.text,q.x,q.y);
+    g.fillStyle=rgb(f.col,a);g.fillText(f.text,q.x,q.y);
+  }
+}
+
+// ---------- effect registry ----------
+const ANCH={feet:0.0,origin:0.0,chest:1.45,head:2.25,hands:1.35};
+function mkFx(def){
+  const fx={...def,knobs:{},layersOn:{},emitters:[]};
+  for(const k of def.knobDefs) fx.knobs[k.key]=k.def;
+  for(const L of def.layers) fx.layersOn[L.id]=L.on!==false;
+  fx.anchorY=a=>ANCH[a]??0;
+  for(const L of def.layers) if(L.emitter) fx.emitters.push({id:L.id,e:new Emitter(L.emitter,fx)});
+  return fx;
+}
+const STD=[
+  {key:'size',label:'size ×',min:0.2,max:2,step:0.05,def:1},
+  {key:'spread',label:'spread ×',min:0.2,max:2,step:0.05,def:1},
+  {key:'duration',label:'duration ×',min:0.3,max:2,step:0.05,def:1},
+  {key:'density',label:'density ×',min:0.1,max:2,step:0.05,def:1},
+];
+const on=(l,id)=>l.layersOn[id];
+const b=(v)=>v?'true':'false', f2=v=>(+v).toFixed(2), f3=v=>(+v).toFixed(3);
+const hex=c=>'0x'+c.map(x=>(x|0).toString(16).padStart(2,'0')).join('').toUpperCase();
+
+const POISONS=[
+  {name:'Deadly',chance:0.30,stacks:5,tint:[86,196,40]},
+  {name:'Wound',chance:0.50,stacks:5,tint:[196,44,44]},
+  {name:'Mind-numbing',chance:0.50,stacks:1,tint:[150,86,230]},
+  {name:'Crippling',chance:0.50,stacks:1,tint:[60,178,168]},
+];
+
+const EFFECTS=[
+// ================================================================ Life Tap
+mkFx({id:'lifetap',name:'Life Tap',sub:'landing · lifetap.m2 @Chest (on the Warlock) · 3334 ms',durMs:3334,frame:{dist:8,ty:1.3},
+ notes:[
+  'Kit 1167 plays on the Warlock\'s <b>own chest</b>. Life Tap is self-cast, so the caster sees it. It is one-shot, with no sustained state. Era and TBC are byte-identical.',
+  '<b>Glow</b>: two camera-facing quads, 1.84 × 2.38 and 1.66 × 2.14 yd, genericglow, additive, constant blue #5165FF. Alpha 0 → 1 at 1334 ms → 0 at 3334 ms. Both scale-pulse 0.67 → 0.99 → 0.72 → 0.84 → 0.73 on an 833 ms loop.',
+  '<b>Converging motes</b> (P3): 834–2167 ms, 50/s, 1.0 s life, moving <b>inward</b> at 2.22 yd/s from a 1.39 yd area, red → blue. This red-to-blue pull reads as health turning into mana.',
+  'Green puff (P0, 0–334 ms, 100/s, drag 8) and green sparks (P1). Cyan twinkles (P2) are gated on and off from 1.0 s. <span class="inferred">Gates after 2067 ms are extrapolated from the doc\'s "…".</span>',
+  'Cast side: the shipped Warlock shadow hands, which are not part of this bench.'],
+ asks:['The card says Life Tap "must not read as a heal". The client opens with a <b>green</b> puff and sparks, and green is our heal colour (floating-text heals are green, and the Healing Wave kit is green). <b>Keep or untick the two green layers?</b> The red → blue motes and the blue glow carry the identity without them.'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'glow',name:'Blue glow (2 quads)',desc:'genericglow #5165FF, 1.84 × 2.38 yd, peaks at 1.33 s, 833 ms throb',sw:[81,101,255],custom:true},
+  {id:'motes',name:'Converging motes',desc:'P3 blue_glow2, inward 2.22 yd/s, red → blue, 834–2167 ms',sw:[255,40,60],emitter:{anchor:'chest',inward:0.7,speed:-2.22,life:1.0,rate:50,win:[[0,0],[834,1],[2167,0]],
+    color:[[0,[255,0,0]],[1,[63,179,255]]],alpha:[[0,0.2],[0.3,1],[1,0.9]],scale:[[0,0.03],[0.5,0.14],[1,0.28]],kind:'glow'}},
+  {id:'twinkle',name:'Cyan twinkles',desc:'P2 star4, gated blinks from 1.0 s, 0.56 × 1.11 yd area',sw:[0,199,255],emitter:{anchor:'chest',vRange:3.14,speed:0.28,life:0.2,rate:50,area:0.56,areaY:1.11,
+    win:[[0,0],[1000,1],[1167,0],[1334,1],[1500,0],[1634,1],[1834,0],[2067,1],[2234,0],[2467,1],[2634,0]],
+    color:[[0,[0,199,255]],[1,[155,216,255]]],alpha:[[0,1],[1,0.8]],scale:[[0,0.014],[0.5,0.11],[1,0.014]],spin:-0.64,kind:'star'}},
+  {id:'puff',name:'Green puff',desc:'P0 clouds8x8fade, 0–334 ms, 100/s, 1.94 yd/s with drag 8',sw:[67,177,0],emitter:{anchor:'chest',vRange:3.14,speed:1.94,drag:8,life:1.0,rate:100,win:[[0,1],[334,0]],blend:'alpha',
+    color:[[0,[67,177,0]],[0.5,[67,177,0]],[1,[30,0,0]]],alpha:[[0,0.7],[0.5,0.45],[1,0]],scale:[[0,0.11],[0.5,0.44],[1,1.11]],kind:'cloud'}},
+  {id:'sparks',name:'Green sparks',desc:'P1 flare, 34–334 ms, 100/s, 1.39 yd/s',sw:[39,165,0],emitter:{anchor:'chest',vRange:3.14,speed:1.39,life:1.0,rate:100,win:[[0,0],[34,1],[334,0]],
+    color:[[0,[39,165,0]],[1,[90,10,0]]],alpha:[[0,1],[1,0]],scale:[[0,0.08],[0.5,0.06],[1,0.03]],kind:'star'}},
+ ],
+ bodies(fx,vp){drawCapsule(vp,CLASS.warlock);},
+ customDraw(fx,ms,vp){
+  if(!on(fx,'glow')) return; const K=fx.knobs, d=K.duration, t=ms/d;
+  if(t>3334) return;
+  const a=keys([[0,0],[1334,1],[3334,0]],t)*(K.opacity??1);
+  const ph=(ms%833)/833, pulse=keys([[0,0.67],[0.25,0.99],[0.5,0.72],[0.75,0.84],[1,0.73]],ph);
+  const q=proj([vp[0],1.45,vp[2]]); if(!q) return;
+  g.globalCompositeOperation='lighter';
+  for(const [w,h] of [[1.84,2.38],[1.66,2.14]]){
+    const rx=w*0.5*pulse*K.size*K.spread*q.s, ry=h*0.5*pulse*K.size*K.spread*q.s;
+    g.save();g.translate(q.x,q.y);g.scale(1,ry/rx);
+    const gr=g.createRadialGradient(0,0,0,0,0,rx);gr.addColorStop(0,rgb([81,101,255],a*0.55));gr.addColorStop(0.5,rgb([81,101,255],a*0.25));gr.addColorStop(1,rgb([81,101,255],0));
+    g.fillStyle=gr;g.beginPath();g.arc(0,0,rx,0,TAU);g.fill();g.restore();
+  }
+  g.globalCompositeOperation='source-over';
+ },
+ constants(fx){const K=fx.knobs;return [
+  `// Life Tap landing: lifetap.m2 (kit 1167) on the caster's chest. AS-333 bench.`,
+  `pub const LIFE_TAP_SECS: f32 = ${f2(3.334*K.duration)};`,
+  `pub const LIFE_TAP_GLOW: bool = ${b(on(fx,'glow'))}; // #5165FF, 1.84 x 2.38 yd, peak at 40%, 833 ms throb`,
+  `pub const LIFE_TAP_MOTES: bool = ${b(on(fx,'motes'))}; // inward 2.22 yd/s, red -> blue`,
+  `pub const LIFE_TAP_TWINKLES: bool = ${b(on(fx,'twinkle'))};`,
+  `pub const LIFE_TAP_GREEN_PUFF: bool = ${b(on(fx,'puff'))};`,
+  `pub const LIFE_TAP_GREEN_SPARKS: bool = ${b(on(fx,'sparks'))};`,
+  `pub const LIFE_TAP_SIZE_MUL: f32 = ${f2(K.size)};`,
+  `pub const LIFE_TAP_SPREAD_MUL: f32 = ${f2(K.spread)};`,
+  `pub const LIFE_TAP_DENSITY_MUL: f32 = ${f2(K.density)};`,
+  `pub const LIFE_TAP_OPACITY_MUL: f32 = ${f2(K.opacity)};`];}
+}),
+// ================================================================ Poisons
+mkFx({id:'poison',name:'Poison on hit',sub:'landing · poison_impact_chest.m2 @Chest (kit 3031) · 3.0 s emit + 2.5 s life',durMs:3000,frame:{dist:8,ty:1.3},loopTotal:12000,
+ notes:[
+  '<b>All four Rogue poisons land the same kit</b> (3031, poison_impact_chest.m2) at both builds. The client has <b>no persistent poisoned state</b> for any of them, and nothing per Deadly tick.',
+  '<b>Burst</b> (P1): about 25 green flares in the first 0.167 s, at 3.33 yd/s, with a 0.6 s life.',
+  '<b>Cloud</b> (P0 puffs + P2 pin-point motes): 20/s each for 3.0 s. They drift at 0.28 yd/s and swell from 0.22 to 0.69 yd, olive → yellow-green, with a 2.5 s life. One landing therefore lingers about 5.5 s.',
+  'In this bench a Rogue swings at the victim every <i>swing</i> seconds and rolls the selected poison\'s chance on each swing. "Landing plays on" decides which procs replay the kit.',
+  'Shipped today: Crippling\'s first application plays the Nature school impact at the chest, a stand-in for this kit. Wound\'s healing reduction already draws Mortal Wounds\' grey ash on every heal, because that tell keys on the aura type.'],
+ asks:[
+  'Deadly and Wound stack to 5 and re-proc on almost every hit. <b>If every proc replays the kit, the cloud is up most of the time</b>, which in practice is a sustained chest channel. Set "Landing plays on" to <i>every proc</i> to see it. The recommendation is <b>first application, plus each new stack</b> (at most 5 landings per poison window), which matches Crippling\'s first-apply rule.',
+  'The client has no way to tell the poisons apart. <b>Do you want the authored per-poison tint</b>, or the one shared green (client-faithful)? Mind-numbing gets no other visual, and Wound is otherwise told apart only by the ash on heals.'],
+ knobDefs:[...STD,
+  {key:'poison',label:'poison',min:0,max:3,step:1,def:0,names:POISONS.map(p=>p.name)},
+  {key:'mode',label:'landing plays on',min:0,max:2,step:1,def:2,names:['first apply','each new stack','every proc']},
+  {key:'swing',label:'swing s',min:0.6,max:2.6,step:0.1,def:1.0}],
+ layers:[
+  {id:'burst',name:'Green flare burst',desc:'P1 flare, 150/s for 167 ms, 3.33 yd/s, 0.6 s life',sw:[99,136,20],emitter:{anchor:'chest',trig:'main',span:167,vRange:3.14,speed:3.33,life:0.6,rate:150,win:[[0,1],[167,0]],area:0.28,areaY:0.28,blend:'alpha',
+    color:[[0,[49,102,1]],[0.5,[99,136,20]],[1,[115,152,1]]],alpha:[[0,1],[0.5,1],[1,0]],scale:[[0,0.11],[0.5,0.06],[1,0.03]],kind:'star',follow:true}},
+  {id:'cloud',name:'Olive cloud puffs',desc:'P0 clouds8x8fade, 20/s for 3 s, 2.5 s life, 0.22 → 0.69 yd',sw:[106,146,0],emitter:{anchor:'chest',trig:'main',vRange:3.14,speed:0.28,speedVar:0.5,life:2.5,rate:20,area:0.56,areaY:0.56,blend:'alpha',
+    color:[[0,[18,55,0]],[0.5,[106,146,0]],[1,[163,196,64]]],alpha:[[0,0.39],[0.5,0.85],[1,0]],scale:[[0,0.22],[0.5,0.31],[1,0.69]],kind:'cloud',follow:true}},
+  {id:'motes',name:'Pin-point motes',desc:'P2 flare (additive), 20/s, 0.056 yd',sw:[163,196,64],emitter:{anchor:'chest',trig:'main',vRange:3.14,speed:0.28,speedVar:0.5,life:2.5,rate:20,area:0.56,areaY:0.56,
+    color:[[0,[18,55,0]],[0.5,[106,146,0]],[1,[163,196,64]]],alpha:[[0,0.39],[0.5,1],[1,0]],scale:[[0,0.056],[1,0.056]],kind:'star',follow:true}},
+  {id:'ash',name:'Mortal Wounds ash on heals (shipped)',desc:'Wound only: a heal lands every 3 s; its refused share sheds as grey ash',sw:[158,150,138],emitter:{anchor:'chest',trig:'heal',span:250,vRange:3.14,speed:0.6,gravity:1.2,life:1.2,rate:70,win:[[0,1],[250,0]],area:0.6,areaY:0.6,blend:'alpha',
+    color:[[0,[158,150,138]],[1,[120,114,104]]],alpha:[[0,0.9],[1,0]],scale:[[0,0.07],[1,0.05]],kind:'dust',follow:true}},
+  {id:'tint',name:'Per-poison tint',desc:'Deadly green, Wound red, Mind-numbing violet, Crippling teal',sw:[196,44,44],custom:true,on:false,cls:'authored'},
+ ],
+ reset(fx){fx.trig={main:[],heal:[]};fx.st={next:400,stacks:0,applied:false,heal:1500};},
+ tick(fx,ms){
+  const K=fx.knobs, P=POISONS[K.poison], st=fx.st;
+  while(ms>=st.next){
+   st.next+=K.swing*1000;
+   fct(String(30+((rnd()*12)|0)),[255,255,255],24,[cur.vp[0]+0.3,2.6,cur.vp[2]]);
+   if(rnd()<P.chance){
+    const newStack=st.stacks<P.stacks; const first=!st.applied;
+    st.applied=true; if(newStack) st.stacks++;
+    const play=K.mode==2||(K.mode==1&&newStack)||(K.mode==0&&first);
+    if(play) fx.trig.main.push(ms);
+   }
+  }
+  if(K.poison==1&&st.applied&&on(fx,'ash')&&ms>=st.heal){ st.heal+=3000; fx.trig.heal.push(ms); fct('+'+(60+((rnd()*20)|0)),[100,255,100],24,[cur.vp[0]-0.3,2.6,cur.vp[2]]); }
+  else if(ms>=st.heal) st.heal+=3000;
+  fx.trig.main=fx.trig.main.filter(t=>ms-t<6000); fx.trig.heal=fx.trig.heal.filter(t=>ms-t<2000);
+ },
+ colorMap(col,s){ if(!this.layersOn.tint||s.kind==='dust') return col; const T=POISONS[this.knobs.poison].tint;
+   const l=(col[0]*0.3+col[1]*0.59+col[2]*0.11)/150; return T.map(x=>clamp(x*l,0,255)); },
+ bodies(fx,vp){drawCapsule(vp,CLASS.victim); drawCapsule([vp[0]-1.3,1.0,vp[2]+0.2],CLASS.rogue);},
+ hud(fx){const st=fx.st,P=POISONS[fx.knobs.poison];return `${P.name} Poison · ${(P.chance*100)|0}% a swing · stacks ${st.stacks}/${P.stacks}`;},
+ constants(fx){const K=fx.knobs;return [
+  `// Weapon poison landing: poison_impact_chest.m2 (kit 3031), shared by all four poisons. AS-333 bench.`,
+  `pub const POISON_LANDING_EMIT_SECS: f32 = ${f2(3.0*K.duration)};`,
+  `pub const POISON_LANDING_PUFF_LIFE_SECS: f32 = ${f2(2.5*K.duration)};`,
+  `pub const POISON_FLARE_BURST: bool = ${b(on(fx,'burst'))}; // ~25 flares in 167 ms at 3.33 yd/s`,
+  `pub const POISON_CLOUD_PUFFS: bool = ${b(on(fx,'cloud'))}; // 20/s, 0.22 -> 0.69 yd`,
+  `pub const POISON_CLOUD_MOTES: bool = ${b(on(fx,'motes'))};`,
+  `pub const POISON_LANDING_ON: PoisonLandingOn = PoisonLandingOn::${['FirstApply','EachNewStack','EveryProc'][K.mode]};`,
+  `pub const POISON_PER_POISON_TINT: bool = ${b(on(fx,'tint'))};${on(fx,'tint')?' // '+POISONS.map(p=>p.name+' '+hex(p.tint)).join(', '):''}`,
+  `pub const POISON_SIZE_MUL: f32 = ${f2(K.size)};`,
+  `pub const POISON_SPREAD_MUL: f32 = ${f2(K.spread)};`,
+  `pub const POISON_DENSITY_MUL: f32 = ${f2(K.density)};`,
+  `// No persistent poisoned state (client has no (7,8) row for any Rogue poison).`,
+  `// Wound Poison: Mortal Wounds ash on heals comes free (keys on HealingReduction).`];}
+}),
+// ================================================================ Shadow Word: Pain
+mkFx({id:'swp',name:'Shadow Word: Pain',sub:'landing · shadowwordpain_chest.m2 @Chest · 900 ms (smoke trails to ~2.3 s)',durMs:2400,frame:{dist:10,ty:1.3},
+ notes:[
+  'Kit 304 plays on the victim\'s chest. There is <b>no sustained state and no tick visual</b>, the same finding as Moonfire and Curse of Agony. Era and TBC use the same model.',
+  'Violet streaks are <b>sucked inward</b> for 0.17 s (P4, −4.58 yd/s). Then at 0.23 s comes the burst: black toonsmoke (P0, P9), streaking black blobs (P1, P2), violet and magenta streaks (P6–P8) and blue → violet stars (P5). Late dark sparks follow at 0.7 s (P3).',
+  'P9 smoke has the longest tail (emits to 0.9 s, 1.44 s life), so the hit trails off by about 2.3 s.',
+  'The dark layers are alpha-blended, so they read against our sandy floor. The violet layers are additive.'],
+ asks:['Recommended: <b>client-faithful, impact only</b>, with the aura icon carrying the DoT (the Moonfire ruling). Is anything to trim?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'suck',name:'Inward violet streaks',desc:'P4 gradient64flipb, 0–167 ms, −4.58 yd/s inward, tail 3',sw:[177,42,240],emitter:{anchor:'chest',inward:0.9,inwardFlat:1.4,speed:-4.58,life:0.375,rate:104,win:[[0,1],[167,0]],tail:3,
+    color:[[0,[177,42,240]],[1,[255,0,216]]],alpha:[[0,0],[0.4,1],[1,0]],scale:[[0,0.01],[0.5,0.05],[1,0.01]],kind:'glow'}},
+  {id:'smoke',name:'Black smoke',desc:'P0 + P9 toonsmoke16, 233–900 ms, P9 1.44 s life',sw:[84,84,83],emitter:{anchor:'chest',vRange:3.14,speed:1.1,drag:2,spin:-0.8,life:1.44,rate:[[233,100],[733,60]],win:[[0,0],[233,1],[900,0]],blend:'alpha',
+    color:[[0,[0,0,0]],[0.5,[84,84,83]],[1,[192,192,190]]],alpha:[[0,0.85],[0.6,0.5],[1,0]],scale:[[0,0.17],[0.5,0.26],[1,0.4]],kind:'smoke'}},
+  {id:'blobs',name:'Black blobs (streaking)',desc:'P1 + P2 blobs_black, 233–433 ms, tail 10',sw:[4,0,84],emitter:{anchor:'chest',vRange:3.14,speed:1.3,life:1.0,rate:80,win:[[0,0],[233,1],[433,0]],tail:10,blend:'alpha',
+    color:[[0,[4,0,84]],[0.5,[0,0,0]],[1,[4,0,84]]],alpha:[[0,1],[0.7,0.8],[1,0]],scale:[[0,0.02],[0.5,0.16],[1,0.17]],kind:'blob'}},
+  {id:'streaks',name:'Violet / magenta streaks',desc:'P7 + P8 gradient64flipb, 2.27 yd/s',sw:[255,35,252],emitter:{anchor:'chest',vRange:3.14,speed:2.27,life:0.62,rate:95,win:[[0,0],[233,1],[467,0]],tail:4,
+    color:[[0,[214,170,255]],[0.5,[255,35,252]],[1,[60,0,120]]],alpha:[[0,1],[1,0]],scale:[[0,0.02],[0.5,0.11],[1,0.02]],kind:'glow'}},
+  {id:'dark',name:'Dark streaks',desc:'P6 gradient64flipb, black, alpha ≤ 0.6',sw:[30,30,30],emitter:{anchor:'chest',vRange:3.14,speed:2.09,life:1.03,rate:39,win:[[0,0],[233,1],[400,0]],tail:4,blend:'alpha',
+    color:[[0,[0,0,0]],[1,[0,0,0]]],alpha:[[0,0.6],[1,0]],scale:[[0,0.01],[0.5,0.14],[1,0.03]],kind:'glow'}},
+  {id:'stars',name:'Blue → violet stars',desc:'P5 star5a, 233–500 ms, tail 10, spin −7',sw:[44,136,240],emitter:{anchor:'chest',vRange:3.14,speed:1.88,life:1.0,rate:48,win:[[0,0],[233,1],[500,0]],tail:10,spin:-1.1,
+    color:[[0,[44,136,240]],[0.5,[102,35,225]],[1,[90,90,120]]],alpha:[[0,1],[1,0]],scale:[[0,0.05],[0.5,0.11],[1,0.04]],kind:'star'}},
+  {id:'late',name:'Late dark sparks',desc:'P3 flare, 700–900 ms, indigo → black',sw:[40,20,110],emitter:{anchor:'chest',vRange:3.14,speed:1.11,life:1.0,rate:50,win:[[0,0],[700,1],[900,0]],tail:10,blend:'alpha',
+    color:[[0,[40,20,110]],[1,[0,0,0]]],alpha:[[0,1],[1,0]],scale:[[0,0.04],[0.5,0.09],[1,0.04]],kind:'star'}},
+ ],
+ bodies(fx,vp){drawCapsule([-4,1.0,0],CLASS.priest);drawCapsule(vp,CLASS.victim);},
+ constants(fx){const K=fx.knobs;return [
+  `// Shadow Word: Pain landing: shadowwordpain_chest.m2 (kit 304) on the victim's chest. AS-333 bench.`,
+  `pub const SWP_LANDING_SECS: f32 = ${f2(0.9*K.duration)}; // smoke tail to ~${f2(2.34*K.duration)} s`,
+  `pub const SWP_INWARD_STREAKS: bool = ${b(on(fx,'suck'))};`,
+  `pub const SWP_SMOKE: bool = ${b(on(fx,'smoke'))};`,
+  `pub const SWP_BLOBS: bool = ${b(on(fx,'blobs'))};`,
+  `pub const SWP_VIOLET_STREAKS: bool = ${b(on(fx,'streaks'))};`,
+  `pub const SWP_DARK_STREAKS: bool = ${b(on(fx,'dark'))};`,
+  `pub const SWP_STARS: bool = ${b(on(fx,'stars'))};`,
+  `pub const SWP_LATE_SPARKS: bool = ${b(on(fx,'late'))};`,
+  `pub const SWP_SIZE_MUL: f32 = ${f2(K.size)};`,
+  `pub const SWP_DENSITY_MUL: f32 = ${f2(K.density)};`,
+  `// DoT state: none (DotStateVisual::for_dot stays None for "Shadow Word: Pain").`];}
+}),
+// ================================================================ Shadowform
+mkFx({id:'shadowform',name:'Shadowform',sub:'state · kit 3129 · tint #270042 + alpha 0.65 + shadow_precast_med_base.m2 @Base',durMs:6000,loopFx:true,frame:{dist:8,ty:1.4},
+ notes:[
+  'Kit 3129 is a (7,8) state held for the whole form. The landing is <b>sound only</b>. The state has three parts at once, the same at both builds:',
+  '<b>Body tint</b> #270042, near-black violet (procedural type 1). <b>Body transparency</b> 0.65 (procedural type 14).',
+  '<b>Feet shroud</b> (shadow_precast_med_base.m2): additive flames lick up and are born large (1.39 yd), shrinking as they rise green → dark violet at alpha ≤ 0.39 (P0, 50/s). Small flares rise with them (P1). About once a second a long smoke streak climbs 4–5 yd, blue → violet (P2 0.8/s, P3 0.3/s).',
+  '<span class="inferred">How the client mixes the tint into the body (multiply vs lerp, Value_1 0.2) is unresolved. The strength knob lets you judge it.</span>',
+  'Engine fit: our stealth already edits the body material in place (rgb ×0.6, alpha 0.4) without the Fear/Polymorph restore slot. A tint and alpha can do the same.'],
+ asks:[
+  '<b>Transparency competes with stealth.</b> A stealthed Rogue here is drawn at alpha 0.4; Shadowform\'s 0.65 reads as "half stealthed". The recommendation is to <b>keep the tint and drop the transparency</b>, so translucency keeps meaning stealth. The comparison Rogue is beside the Priest.',
+  'The feet shroud is additive dark violet: faint on our sandy floor, and nearly invisible at low pitch. Keep it, or let the tint carry the form?'],
+ knobDefs:[...STD,{key:'opacity',label:'shroud opacity ×',min:0.1,max:2.5,step:0.05,def:1},{key:'tint',label:'tint strength',min:0,max:1,step:0.05,def:1},{key:'alpha',label:'body alpha',min:0.3,max:1,step:0.05,def:0.65}],
+ layers:[
+  {id:'tintL',name:'Body tint #270042',desc:'procedural type 1',sw:[39,0,66],custom:true},
+  {id:'alphaL',name:'Body transparency',desc:'procedural type 14, 0.65',sw:[120,110,140],custom:true},
+  {id:'flames',name:'Feet flames',desc:'P0 flamelicksmallblue, 50/s, 1.39 → 0.28 yd, alpha ≤ 0.39',sw:[24,0,86],emitter:{anchor:'feet',vRange:0.35,speed:0.56,gravity:-1.39,life:1.0,rate:50,area:0.69,tail:0.5,
+    color:[[0,[0,104,7]],[0.5,[24,0,86]],[1,[34,0,119]]],alpha:[[0,0],[0.5,0.39],[1,0]],scale:[[0,1.39],[0.5,0.56],[1,0.28]],kind:'flame',follow:true}},
+  {id:'flares',name:'Rising flares',desc:'P1 flare, 50/s, 1.11 yd/s up',sw:[60,0,160],emitter:{anchor:'feet',vRange:0.35,speed:1.11,gravity:-1.39,life:1.0,rate:50,area:0.42,
+    color:[[0,[0,104,7]],[0.5,[24,0,86]],[1,[34,0,119]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0.28],[0.5,0.28],[1,0.14]],kind:'star',follow:true}},
+  {id:'smoke',name:'Smoke streaks',desc:'P2 + P3, ~1.1/s, 3 s life, climbing 4–5 yd, tail 6–7',sw:[47,139,210],emitter:{anchor:'feet',vRange:0.05,speed:1.6,life:3.0,rate:1.1,area:0.1,tail:6.5,
+    color:[[0,[47,139,210]],[0.5,[45,31,179]],[1,[64,6,150]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0.42],[0.5,0.58],[1,0.9]],kind:'smoke',follow:true}},
+  {id:'stealth',name:'Stealthed Rogue beside it',desc:'our shipped stealth: rgb ×0.6, alpha 0.4',sw:[255,245,105],custom:true,cls:'aid'},
+ ],
+ bodies(fx,vp){
+  const K=fx.knobs, base=CLASS.priest, T=[39,0,66];
+  const col=on(fx,'tintL')?base.map((x,i)=>lerp(x,T[i]*1.0+x*0.12,K.tint)):base;
+  drawCapsule(vp,col,on(fx,'alphaL')?K.alpha:1);
+  if(on(fx,'stealth')){drawCapsule([vp[0]+2.2,1.0,vp[2]-0.4],CLASS.rogue.map(x=>x*0.6),0.4);}
+ },
+ constants(fx){const K=fx.knobs;return [
+  `// Shadowform state: kit 3129, held for the whole form. AS-333 bench.`,
+  `pub const SHADOWFORM_TINT: bool = ${b(on(fx,'tintL'))};`,
+  `pub const SHADOWFORM_TINT_RGB: [u8; 3] = [39, 0, 66]; // #270042`,
+  `pub const SHADOWFORM_TINT_STRENGTH: f32 = ${f2(K.tint)};`,
+  `pub const SHADOWFORM_TRANSPARENT: bool = ${b(on(fx,'alphaL'))};${on(fx,'alphaL')?'':' // translucency stays stealth\'s'}`,
+  `pub const SHADOWFORM_BODY_ALPHA: f32 = ${f2(on(fx,'alphaL')?K.alpha:1)};`,
+  `pub const SHADOWFORM_FEET_FLAMES: bool = ${b(on(fx,'flames'))};`,
+  `pub const SHADOWFORM_RISING_FLARES: bool = ${b(on(fx,'flares'))};`,
+  `pub const SHADOWFORM_SMOKE_STREAKS: bool = ${b(on(fx,'smoke'))};`,
+  `pub const SHADOWFORM_SHROUD_OPACITY_MUL: f32 = ${f2(K.opacity)};`,
+  `pub const SHADOWFORM_SIZE_MUL: f32 = ${f2(K.size)};`,
+  `pub const SHADOWFORM_DENSITY_MUL: f32 = ${f2(K.density)};`,
+  `// Body edits go in place on the material (as stealth does), never through OriginalBodyMaterial.`];}
+}),
+// ================================================================ Dodge / Parry
+mkFx({id:'avoid',name:'Dodge / Parry text',sub:'floating combat text · a Warrior swings at a Combat Rogue every 1.0 s',durMs:6000,loopFx:true,frame:{dist:9,ty:1.8},
+ notes:[
+  'These are combat text, not spells. <b>No DB2 table holds combat-text colours</b>. These come from FrameXML (Gethe/wow-ui-source classic_era at 1.15.9 and tag 2.5.6, identical in both).',
+  'Wording is title case: <b>"Dodge"</b>, <b>"Parry"</b> (also "Miss", "Block", "Immune").',
+  'Classic\'s own scrolling text draws <b>melee avoidance in red #FF1A1A</b> and spell avoidance in white. The portrait hit indicator is white, lasts 1.2 s, and draws Immune at half size. Attacker-side text is drawn by the engine, not Lua (unresolved).',
+  'Ours today: auto hits are white numbers (24 px), ability damage yellow, heals green, absorbs light blue, "Immune" yellow, states ("Travel Form") white. Divine Shield is gold. <b>Red is unused</b>.',
+  'The bench repeats hit, Dodge, hit, Parry. Size matches our floating text: number 24 px, label 14 px.'],
+ asks:['<b>Which colour and size?</b> The recommendation is <b>white at number size</b> (24 px): it is Classic\'s neutral for avoidance, spends no new hue, and the word itself tells it apart from a white auto-hit number. Red is Classic\'s own-character melee colour, but it would be our first red floating text. Our Mortal Strike and Berserk read red elsewhere.'],
+ knobDefs:[
+  {key:'colour',label:'colour',min:0,max:3,step:1,def:0,names:['white','red #FF1A1A','grey','yellow (as Immune)']},
+  {key:'px',label:'size',min:0,max:1,step:1,def:0,names:['number 24','label 14']},
+  {key:'swing',label:'swing s',min:0.5,max:2,step:0.1,def:1.0}],
+ layers:[
+  {id:'hits',name:'Landed hits (white numbers)',desc:'shipped auto-attack text, for contrast',sw:[255,255,255],custom:true,cls:'aid'},
+ ],
+ reset(fx){fx.st={next:300,i:0};},
+ tick(fx,ms){
+  const K=fx.knobs, st=fx.st, seq=['hit','Dodge','hit','Parry'];
+  const COLS=[[255,255,255],[255,26,26],[170,170,178],[255,255,0]];
+  while(ms>=st.next){ st.next+=K.swing*1000; const o=seq[st.i++%seq.length]; const pos=[cur.vp[0]+(rnd()-0.5)*0.3,2.6,cur.vp[2]];
+    if(o==='hit'){ if(on(fx,'hits')) fct(String(28+((rnd()*14)|0)),[255,255,255],24,pos); }
+    else fct(o,COLS[K.colour],K.px==0?24:14,pos); fx.swingAt=ms; }
+ },
+ bodies(fx,vp,ms){ drawCapsule(vp,CLASS.rogue);
+  const ph=fx.swingAt!=null?Math.max(0,1-(ms-fx.swingAt)/250):0; drawCapsule([vp[0]-1.4+0.35*ph,1.0,vp[2]],CLASS.warrior); },
+ constants(fx){const K=fx.knobs; const C=[['AVOID','255, 255, 255'],['AVOID','255, 26, 26'],['AVOID','170, 170, 178'],['AVOID','255, 255, 0']][K.colour];return [
+  `// Dodge / Parry floating combat text. AS-333 bench. Wording: "Dodge", "Parry" (title case).`,
+  `// ui::theme::fct`,
+  `pub const ${C[0]}: Color32 = Color32::from_rgb(${C[1]});${K.colour==3?' // same as IMMUNE / DAMAGE':K.colour==0?' // same as AUTO / STATE':''}`,
+  `// size: ${K.px==0?'NUMBER_SIZE (24), drawn like a number':'LABEL_SIZE (14)'}`,
+  `// lifetime 1.5 s, rise 1.5 yd/s: the shipped FCT defaults.`];}
+}),
+];
+
+// ---------- UI wiring ----------
+let cur=EFFECTS[0], simMs=0, paused=false, lastNow=performance.now();
+const $=id=>document.getElementById(id);
+function buildTabs(){const nav=$('tabs');nav.innerHTML='';
+  for(const fx of EFFECTS){const bt=document.createElement('button');bt.className='tab';bt.role='tab';bt.id='tab-'+fx.id;bt.textContent=fx.name;bt.setAttribute('aria-selected',fx===cur);
+    bt.onclick=()=>{cur=fx;try{localStorage.setItem('as333bench.tab',fx.id)}catch(e){};select();};nav.appendChild(bt);} }
+const knobText=(k,v)=>k.names?k.names[v|0]:(+v).toFixed(2);
+function select(){
+  document.querySelectorAll('.tab').forEach(bt=>bt.setAttribute('aria-selected',bt.id==='tab-'+cur.id));
+  cam.dist=cur.frame.dist;cam.target=[0,cur.frame.ty,0];
+  $('moving').checked=false;
+  const L=$('layers');L.innerHTML='';
+  for(const l of cur.layers){const d=document.createElement('div');d.className='layer'+(l.cls?' '+l.cls:'');const id='ly-'+cur.id+'-'+l.id;
+    d.innerHTML=`<input type="checkbox" id="${id}" ${cur.layersOn[l.id]?'checked':''}><span class="sw" style="background:${rgb(l.sw,1)}"></span><label for="${id}"><span class="nm">${l.name}</span><span class="ds">${l.desc}</span></label>`;
+    d.querySelector('input').onchange=e=>{cur.layersOn[l.id]=e.target.checked;renderOut();};L.appendChild(d);}
+  const Kn=$('knobs');Kn.innerHTML='';
+  for(const k of cur.knobDefs){const d=document.createElement('div');d.className='knob';const id='kn-'+cur.id+'-'+k.key;
+    d.innerHTML=`<span>${k.label}</span><input type="range" id="${id}" min="${k.min}" max="${k.max}" step="${k.step}" value="${cur.knobs[k.key]}"><output for="${id}">${knobText(k,cur.knobs[k.key])}</output>`;
+    const inp=d.querySelector('input'),o=d.querySelector('output');inp.oninput=()=>{cur.knobs[k.key]=+inp.value;o.textContent=knobText(k,+inp.value);renderOut();if(k.names)restart();};Kn.appendChild(d);}
+  const rs=document.createElement('button');rs.className='btn';rs.textContent='Reset to client values';rs.style.marginTop='8px';
+  rs.onclick=()=>{for(const k of cur.knobDefs)cur.knobs[k.key]=k.def;for(const l of cur.layers)cur.layersOn[l.id]=l.on!==false;select();};Kn.appendChild(rs);
+  $('notes').innerHTML=cur.notes.map(n=>`<li>${n}</li>`).join('');
+  $('asks').innerHTML=(cur.asks||[]).map(a=>`<p class="ask">${a}</p>`).join('');
+  restart();renderOut();
+}
+function renderOut(){$('out').textContent=cur.constants(cur).join('\n');}
+function restart(){simMs=0;FCT=[];cur.emitters.forEach(x=>x.e.reset());cur.swingAt=null;if(cur.reset)cur.reset(cur);}
+$('replay').onclick=restart;
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Play':'Pause';};
+$('copy').onclick=()=>{const txt=$('out').textContent;const done=()=>{$('copy').textContent='Copied';setTimeout(()=>$('copy').textContent='Copy',1200)};
+  const sel=()=>{const r=document.createRange();r.selectNodeContents($('out'));const s=getSelection();s.removeAllRanges();s.addRange(r);};
+  try{navigator.clipboard.writeText(txt).then(done,sel);}catch(e){sel();}};
+
+// ---------- main loop ----------
+function victimPos(ms){ if(!$('moving').checked) return [0,1.0,0];
+  const R=3.2, a=(ms/1000)*3/R; return [R*Math.cos(a)-R,1.0,R*Math.sin(a)]; }
+function frame(now){
+  const dt=Math.min(0.05,(now-lastNow)/1000)*(+$('speed').value); lastNow=now;
+  const step=paused?0:dt; simMs+=step*1000;
+  const total=cur.loopFx?Infinity:(cur.loopTotal??(cur.durMs*(cur.knobs.duration??1)+1200));
+  if(simMs>total){ if($('loop').checked) restart(); else simMs=total; }
+  setupView();
+  g.fillStyle='#0d0c10';g.fillRect(0,0,cv.width,cv.height);
+  drawFloor();
+  const vp=victimPos(simMs); cur.vp=vp; const origin=[vp[0],0,vp[2]];
+  if(!paused && cur.tick) cur.tick(cur,simMs);
+  for(const {id,e} of cur.emitters){ if(!cur.layersOn[id]){e.ps=[];continue;} if(!paused) e.update(step,simMs,origin); }
+  shadow(vp);
+  cur.bodies(cur,vp,simMs);
+  if(cur.customDraw) cur.customDraw(cur,simMs,vp);
+  for(const {id,e} of cur.emitters) if(cur.layersOn[id]) e.draw();
+  drawFct(step);
+  $('hud').textContent=`${cur.name} — ${cur.sub}\nt = ${(simMs/1000).toFixed(2)} s${cur.hud?'\n'+cur.hud(cur):''}`;
+  requestAnimationFrame(frame);
+}
+buildTabs();
+try{const saved=localStorage.getItem('as333bench.tab');const fx=EFFECTS.find(x=>x.id===saved);if(fx)cur=fx;}catch(e){}
+select();
+requestAnimationFrame(frame);
+</script>
