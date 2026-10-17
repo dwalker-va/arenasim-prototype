@@ -1022,6 +1022,17 @@ mod tests {
         );
         // The nearest such spot: just clear of the pillar, not round the far side.
         assert!(at.distance(open) < 4.5, "{at:?}");
+
+        // A second light over the nearer side of the pillar (-z): that spot is
+        // passed over for the dark one on the other side.
+        let lit = [f[0], flare(-14.0, -14.0)];
+        let FlarePath::Wait { at: dark, .. } = plan_among(from, target, &lit, &obstacles) else {
+            panic!("expected a wait");
+        };
+        assert!(!is_dark(&lit, at), "the -z spot must be lit: {at:?}");
+        assert!(!blocked(&obstacles, dark), "{dark:?}");
+        assert!(is_dark(&lit, dark), "held in the second light: {dark:?}");
+        assert!(dark.y > 0.0, "{dark:?}");
     }
 
     // ---- The call site: `evaluate_rogue_flare` through a CombatContext ----
