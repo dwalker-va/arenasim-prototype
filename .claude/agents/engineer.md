@@ -26,6 +26,11 @@ an open, review-ready PR — nothing more.
    keep every check a single plain command.** None of that is deducible from anything
    else, and it is why the check below is not a git command.
 
+   **Check the pin first.** Make `git -C <your own tree> status` your first command.
+   If it is refused, and the refusal names a tree that is not yours, the guard was
+   pinned wrong at spawn. That is a harness race (AS-345), and `EnterWorktree` did not
+   fix it in AS-291. Report NEEDS_INPUT with the refusal text before you do any work.
+
    **Know which tree you are in before anything that writes** — commit, reset,
    checkout, push, not the push alone. `pwd` gives the flapped location, not your
    branch, and `branch --show-current` is itself refusable, so read the tree's own
