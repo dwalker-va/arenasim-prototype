@@ -850,9 +850,23 @@ step-8 Roots also passes over an attacker immune to damage. Its Roots PEEL for a
 dying teammate is reach-first (range, then sight, then immunity): an attacker it
 cannot land on yields to the next, then to the next dying teammate's. The
 Druid's peels take an attacker in sight even when the ally they peel for is
-not: the control focus is ranked over every ally. The Priest's defensive Psychic Scream holds for
-a critical heal only when the dying ally is in reach — one behind cover is the
-medic chase's to reach, and no heal can land on it yet.
+not: the control focus is ranked over every ally. Both of the Priest's Psychic
+Screams — the defensive one and the offensive dip's — hold for a critical heal
+(the Priest's own included) only when the dying ally is in reach — one behind
+cover is the medic chase's to reach, and no heal can land on it yet. (A dying
+teammate also aborts the dip outright, in reach or not.)
+**A cast aimed at one fixed target** falls back only to a target that serves
+the same purpose, and otherwise waits for sight. The Druid's step-8 Cyclone
+passes an occluded enemy healer over for another enemy healer in sight, never
+for anyone else: the kill needs a healer gone. Moonfire and Lightning Bolt wait
+for sight of the kill target. Moonfire's DoT on any other enemy would stand the
+team's Polymorph, traps and Chain hand-offs down on it
+(`has_friendly_dots_on_target`). Lightning Bolt sits above the Shaman's
+sustain heal, so a bolt at whoever is in sight costs the heal its time.
+Measured on a fallback: across the TwinPillars juke bank the Shaman's Warrior
+died sooner, and on PillaredArena four of its six flips were losses turned into
+300-second stalemates. A refusal
+for sight reports the caster's own refusal first.
 The dispel walk asks `cast_reach`, so it ends exactly where the cast becomes
 possible. The pet strikes, Spider Web and Boar Charge, ask
 `pet_ai::pet_strike_reach` (range, Boar Charge's dead zone, sight) on every

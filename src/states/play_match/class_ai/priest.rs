@@ -209,6 +209,7 @@ pub fn decide_priest_action(
             my_pos,
             auras,
             ctx,
+            &movement.shared,
             same_frame_cc_queue,
             &mut builder,
         ) {
@@ -408,23 +409,7 @@ fn try_psychic_scream(
         return false;
     }
 
-    // Defer to a critical ally heal: a dying heal target (at/below the urgency
-    // HP threshold, within heal range) must be healed before the peel. The
-    // scream is priority 3 — above Flash Heal — so without this gate it would
-    // burn a GCD and delay a life-saving heal, breaking the critical-heal-wins
-    // invariant (see `try_flash_heal`). The scream still fires next GCD. Only a
-    // dying ally the heal REACHES (range, then sight) holds it: one behind
-    // cover is the medic walk's to reach, and no heal can land on it yet.
-    if ctx
-        .lowest_health_ally_in_reach(shared.urgency_hp_threshold, shared.heal_range, my_pos)
-        .is_ok()
-    {
-        builder.reject(
-            scream,
-            RejectionReason::PreconditionUnmet {
-                note: "critical heal pending".into(),
-            },
-        );
+    if held_for_critical_heal(ctx, shared, my_pos, builder) {
         return false;
     }
 
@@ -636,12 +621,45 @@ fn fire_psychic_scream(
     );
 }
 
+/// Whether a critical heal holds Psychic Scream this tick, traced
+/// `"critical heal pending"` when it does. Both screams sit above Flash Heal
+/// (the defensive one at priority 3, the dip's at 2.5), so without this hold
+/// either would burn a GCD and delay a life-saving heal, breaking the
+/// critical-heal-wins invariant (see `try_flash_heal`); the scream still fires
+/// next GCD. Only a dying ally (the Priest included) the heal REACHES — range,
+/// then sight — holds it: one behind cover is the medic walk's to reach, and no
+/// heal can land on it yet.
+fn held_for_critical_heal(
+    ctx: &CombatContext,
+    shared: &SharedMovementConfig,
+    my_pos: Vec3,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let pending = ctx
+        .lowest_health_ally_in_reach(shared.urgency_hp_threshold, shared.heal_range, my_pos)
+        .is_ok();
+    if pending {
+        builder.reject(
+            AbilityType::PsychicScream,
+            RejectionReason::PreconditionUnmet {
+                note: "critical heal pending".into(),
+            },
+        );
+    }
+    pending
+}
+
 /// Offensive dip cast (U4): on dip arrival, fire Psychic Scream as a
 /// self-centered AoE. The dip target only drove the walk — the cast fears every
 /// fear-eligible enemy in radius (the enemy healer plus anyone else caught).
 /// Readiness is re-checked (mana/cooldown can shift across the walk); the
 /// pressured gate is intentionally absent (a dip runs only when NOT pressured).
-/// Returns true iff the scream fired (≥1 enemy in radius).
+/// A critical heal the Priest can land holds it, as it holds the defensive
+/// scream ([`held_for_critical_heal`]). A dying TEAMMATE never gets that far
+/// in practice: the dip aborts for one, in reach or not
+/// (`scream_dip_should_abort`), the same tick, before this runs. So the hold
+/// is what keeps the Priest's OWN critical heal ahead of the scream. Returns
+/// true iff the scream fired (≥1 enemy in radius).
 fn try_dip_psychic_scream(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -651,6 +669,7 @@ fn try_dip_psychic_scream(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    shared: &SharedMovementConfig,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
@@ -667,6 +686,10 @@ fn try_dip_psychic_scream(
             return false;
         }
     };
+
+    if held_for_critical_heal(ctx, shared, my_pos, builder) {
+        return false;
+    }
 
     let targets = scream_targets(ctx, entity, my_pos, scream_def.range);
     if targets.is_empty() {
@@ -2621,6 +2644,64 @@ mod reach_tests {
             "no pillar: held"
         );
         let trace = scream(&mut s, &pillar());
+        assert!(screamed(&trace), "the occluded dying Warrior holds nothing");
+    }
+
+    // ------------------------------------------------------------------------
+    // AS-208: the dip's Psychic Scream holds for a critical heal too
+    // ------------------------------------------------------------------------
+
+    /// The offensive dip's scream, on arrival, by a Priest on `priest_hp`.
+    fn dip_scream(
+        s: &mut ReachScene,
+        obstacles: &[ObstacleVolume],
+        priest_hp: f32,
+    ) -> DecisionTrace {
+        let abilities = AbilityDefinitions::default();
+        let movement = crate::states::play_match::movement_config::MovementConfig::default();
+        let me = s.units[0];
+        s.roster.get_mut(&me).unwrap().current_health = 100.0 * priest_hp;
+        s.run(obstacles, |commands, ctx, combatant, builder| {
+            try_dip_psychic_scream(
+                commands,
+                &mut CombatLog::default(),
+                &abilities,
+                me,
+                combatant,
+                CASTER,
+                None,
+                ctx,
+                &movement.shared,
+                &mut Vec::new(),
+                builder,
+            )
+        })
+    }
+
+    /// The Priest dying at the enemy healer's feet heals before it screams;
+    /// the control, the same dip on a healthy Priest, screams.
+    #[test]
+    fn the_dip_scream_holds_for_the_priests_own_critical_heal() {
+        let mut s = screamable(1.0, 1.0);
+        assert!(screamed(&dip_scream(&mut s, &[], 1.0)), "healthy: screams");
+        let trace = dip_scream(&mut s, &[], 0.3);
+        assert!(
+            !screamed(&trace) && held_for_a_heal(&trace),
+            "dying: held for the heal"
+        );
+    }
+
+    /// The hold is reach-gated, as the defensive scream's is: a dying ally in
+    /// sight holds the dip's scream, one behind the pillar does not.
+    #[test]
+    fn an_occluded_dying_ally_does_not_hold_the_dip_scream() {
+        let mut s = screamable(0.3, 1.0);
+        let trace = dip_scream(&mut s, &[], 1.0);
+        assert!(
+            !screamed(&trace) && held_for_a_heal(&trace),
+            "no pillar: held"
+        );
+        let trace = dip_scream(&mut s, &pillar(), 1.0);
         assert!(screamed(&trace), "the occluded dying Warrior holds nothing");
     }
 
