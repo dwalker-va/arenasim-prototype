@@ -9,7 +9,8 @@ Every ability in `abilities.ron` now declares `prevention`. This is TBC's
 `SpellCategories.PreventionType`, and it replaces AS-287's `uninterruptible`
 flag. A silence stops an ability only when its prevention is `Silence` and it
 costs mana. That holds whether the ability is about to be cast (the AI's
-`pre_cast_ok`) or is already being cast or channelled (`process_casting`).
+`pre_cast_ok`) or is already being cast (`process_casting`) or channelled
+(`process_channeling`).
 An interrupt still takes only a `Silence` cast bar.
 
 The TBC client gives these mana-costing abilities a prevention other than

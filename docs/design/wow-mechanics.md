@@ -216,7 +216,8 @@ tests fail if a full-CC type or spell is left unlabelled.
   its traps and Flare are spells, and are stopped. A silenced Druid still
   shifts into Travel Form (`None`), and is stopped from everything else.
 - Two conditions are the sim's own, not TBC's: a silence never stops a free
-  ability (Divine Shield, the Felhunter's Spell Lock, the Paladin auras), and
+  ability (Divine Shield, the Paladin auras, the Mage armors, the Felhunter's
+  Spell Lock and Devour Magic, the Spider's Web), and
   it never touches a Warrior's or Rogue's kit.
 - Nothing in the sim pacifies, so `Pacify` stops nothing today; a pacify
   effect would stop exactly those abilities.
