@@ -579,6 +579,10 @@ pub fn spawn_heal_cast_glows(
 /// announces itself through that marker never plays through a `Landed`
 /// marker as well: the animation sandbox lands such an entry through a
 /// zero-length cast AND spawns its marker, and the hands must flash once.
+///
+/// Divine Shield is resolved through its own `DivineShieldPending`, queued in
+/// the AI one tick and resolved the next, so its hands play off that, the
+/// tick it is queued (the same shape as the Travel Form shift).
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_instant_cast_hands(
     mut commands: Commands,
@@ -589,6 +593,7 @@ pub fn spawn_instant_cast_hands(
     abilities: Res<crate::states::play_match::ability_config::AbilityDefinitions>,
     landed: Query<(&CastEnding, &LandedCast), Added<CastEnding>>,
     shifts: Query<&ShapeshiftPending, Added<ShapeshiftPending>>,
+    bubbles: Query<&DivineShieldPending, Added<DivineShieldPending>>,
     fired: Query<&InstantAbilityFired, Added<InstantAbilityFired>>,
     casters: Query<&Children>,
     bodies: Query<(), With<VisualBody>>,
@@ -601,6 +606,9 @@ pub fn spawn_instant_cast_hands(
             ending.kind == CastEndingKind::Landed
                 && abilities.get_unchecked(&cast.ability).cast_time <= 0.0
                 && !InstantAbilityFired::is_spawned_for(cast.ability)
+                // Divine Shield's hands come off its own pending component,
+                // never a `Landed` marker, so they play once per cast.
+                && cast.ability != AbilityType::DivineShield
         })
         .map(|(ending, cast)| (ending.caster, cast.ability));
     let marked = fired.iter().map(|signal| (signal.caster, signal.ability));
@@ -608,8 +616,14 @@ pub fn spawn_instant_cast_hands(
         .iter()
         .filter(|pending| pending.shift == Shift::IntoTravelForm)
         .map(|pending| (pending.caster, AbilityType::TravelForm));
+    // Divine Shield is self-cast and instant, resolved through its own pending
+    // component — both AI paths (`try_divine_shield`, the while-CC break) and
+    // the animation sandbox spawn it, so its hands play wherever it is cast.
+    let bubbles_up = bubbles
+        .iter()
+        .map(|pending| (pending.caster, AbilityType::DivineShield));
 
-    for (caster, ability) in instants.chain(shifts_in).chain(marked) {
+    for (caster, ability) in instants.chain(shifts_in).chain(bubbles_up).chain(marked) {
         let Some(kind) = HealCastKind::for_ability(ability) else {
             continue;
         };

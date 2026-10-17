@@ -246,8 +246,10 @@ pub struct ShieldBubble {
     pub is_immunity: bool,
 }
 
-/// Lifecycle phase of a [`PwShieldVisual`]: the three sequences of the
-/// client's `holydivineshield_state_base.m2` (`rendering/effects/pw_shield.rs`).
+/// Lifecycle phase of a [`PwShieldVisual`]: the three sequences the client's
+/// two shield models share, `holydivineshield_state_base.m2` (Power Word:
+/// Shield) and `divineshield_low_base.m2` (Divine Shield)
+/// (`rendering/effects/pw_shield.rs`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PwsPhase {
     /// Sequence 0, 700 ms: the 200 ms delay, then the tall full-strength pop.
@@ -259,13 +261,45 @@ pub enum PwsPhase {
     Death,
 }
 
-/// One Power Word: Shield on one bearer: the rig whose three [`PwShieldCard`]
-/// children draw it. Graphical-only; spawned and advanced by
+/// Which client shield a [`PwShieldVisual`] draws. The two models share their
+/// skeleton, cards and timing; Divine Shield adds a blue fill, recolours
+/// streak A cyan and throws off sparkles
+/// (`docs/design/2026-10-16-divine-shield-client-data.md`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum ShieldKind {
+    /// `holydivineshield_state_base.m2` (fdid 166342): hollow, all gold.
+    PowerWordShield,
+    /// `divineshield_low_base.m2` (fdid 165961): filled blue-white, sparkling.
+    DivineShield,
+}
+
+impl ShieldKind {
+    pub const ALL: [ShieldKind; 2] = [ShieldKind::PowerWordShield, ShieldKind::DivineShield];
+
+    /// The cards this shield wears, in draw order.
+    pub fn layers(self) -> &'static [PwsLayer] {
+        match self {
+            ShieldKind::PowerWordShield => &PwsLayer::ALL,
+            ShieldKind::DivineShield => &[
+                PwsLayer::FillOuter,
+                PwsLayer::FillInner,
+                PwsLayer::Rim,
+                PwsLayer::StreakA,
+                PwsLayer::StreakB,
+            ],
+        }
+    }
+}
+
+/// One client shield on one bearer: the rig whose [`PwShieldCard`] children
+/// draw it. A bearer may wear one of each [`ShieldKind`] at once (a Priest's
+/// shield on a bubbled Paladin). Graphical-only; spawned and advanced by
 /// `update_pw_shield_visuals`, placed by `place_pw_shield_cards`.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct PwShieldVisual {
     /// The shielded combatant.
     pub bearer: Entity,
+    pub kind: ShieldKind,
     pub phase: PwsPhase,
     /// Seconds into `phase`.
     pub t: f32,
@@ -274,27 +308,49 @@ pub struct PwShieldVisual {
     pub from_scale: Vec2,
     /// Rim weight at the moment the shield went down, which the death fades.
     pub from_rim: f32,
+    /// Fill weight at the moment the shield went down (Divine Shield only;
+    /// the fill rides the rim's track, so it fades with it).
+    pub from_fill: f32,
 }
 
-/// The three cards of the client state model.
+/// The cards of the client shield models.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum PwsLayer {
-    /// Bone 2, `genericglow2b1`: the gold outline with a hard inner edge.
+    /// `genericglow2b1`: the gold outline with a hard inner edge.
     Rim,
-    /// Bone 1, `shockwave10d`: about 17 radial streaks.
+    /// `shockwave10d`: about 17 radial streaks (yellow on PW:S, cyan on
+    /// Divine Shield).
     StreakA,
-    /// Bone 3, `shockwave10b`: about 15 streaks, flickering against A.
+    /// `shockwave10b`: about 15 streaks, flickering against A.
     StreakB,
+    /// Divine Shield only, bone 3: `genericglow64`, a filled blue disc on the
+    /// rim-sized card.
+    FillOuter,
+    /// Divine Shield only, bone 2: the same blue disc on the streak-sized card.
+    FillInner,
 }
 
 impl PwsLayer {
+    /// The three cards both shields wear.
     pub const ALL: [PwsLayer; 3] = [PwsLayer::Rim, PwsLayer::StreakA, PwsLayer::StreakB];
+    /// The two fill cards only Divine Shield wears.
+    pub const FILL: [PwsLayer; 2] = [PwsLayer::FillOuter, PwsLayer::FillInner];
 }
 
 /// One card of a [`PwShieldVisual`] (its child).
 #[derive(Component, Clone, Copy, Debug)]
 pub struct PwShieldCard {
     pub layer: PwsLayer,
+}
+
+/// The particle emitters on a Divine Shield rig: the star sparkles and the
+/// halo fall. Fractional particles carry from frame to frame.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct DivineShieldEmitters {
+    pub sparkle_carry: f32,
+    pub halo_carry: f32,
+    /// Particles emitted so far: the jitter seed of the next one.
+    pub emitted: u32,
 }
 
 /// Component that stores the original mesh handle for a combatant.
@@ -994,6 +1050,9 @@ impl HealCastKind {
             // Kit 270, the Holy launch, is PW:S's whole cast side. It has no
             // `CastingState`, so its hands fire off `InstantAbilityFired`.
             AbilityType::PowerWordShield => Some(HealCastKind::Holy),
+            // Kit 417 is kit 270 plus a sound. Divine Shield has no
+            // `CastingState` either; its hands fire off `DivineShieldPending`.
+            AbilityType::DivineShield => Some(HealCastKind::Holy),
             AbilityType::LesserHealingWave => Some(HealCastKind::Nature),
             // The Druid: kits 345/181 and 100/183 are the Shaman's two Nature
             // hand models, on every cast but Moonfire. Travel Form carries no
@@ -1314,8 +1373,8 @@ pub enum AuraApplyOwner {
     Polymorph,
     /// Freezing Trap's ice block (`ice_block.rs`).
     IceBlock,
-    /// The shields: the sphere for absorbs and Divine Shield
-    /// (`shield_bubbles.rs`), Power Word: Shield's client cards
+    /// The shields: the sphere for the other absorbs (`shield_bubbles.rs`),
+    /// the client cards of Power Word: Shield and Divine Shield
     /// (`pw_shield.rs`), and Weakened Soul, which only ever lands WITH
     /// Power Word: Shield.
     ShieldBubble,
@@ -2428,6 +2487,10 @@ pub enum ParticleFacing {
     /// Facing the camera, its long axis laid along the particle's own flight —
     /// a ribbon-blur or a streak (Holy Shock).
     Streak,
+    /// Facing the camera and spinning in the view plane at its own rate from
+    /// its own start angle, both in milliradians (an M2 emitter's `spin`):
+    /// Divine Shield's star glints.
+    Spin { mrad_per_sec: i16, start_mrad: i16 },
 }
 
 /// One particle of a transcribed client emitter

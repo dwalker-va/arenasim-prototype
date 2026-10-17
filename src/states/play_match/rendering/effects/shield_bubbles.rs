@@ -30,27 +30,9 @@ pub fn update_shield_bubbles(
 
     for (entity, transform, auras) in combatants.iter() {
         if let Some(auras) = auras {
-            // Check for DamageImmunity auras (Divine Shield) — takes priority over absorb
-            let has_immunity = auras
-                .auras
-                .iter()
-                .any(|a| a.effect_type == AuraType::DamageImmunity);
-            if has_immunity {
-                combatants_with_shield.insert(entity);
-                if !combatants_with_bubbles.contains(&entity) {
-                    combatants_needing_bubbles.push((
-                        entity,
-                        transform.translation,
-                        SpellSchool::Holy,
-                        true,
-                    ));
-                }
-                continue; // Don't also spawn absorb bubble
-            }
-
-            // Check for Absorb auras. Power Word: Shield is not a sphere: it
-            // wears the client's own cards (`pw_shield.rs`), so it never
-            // reaches this path.
+            // Check for Absorb auras. Power Word: Shield and Divine Shield are
+            // not spheres: each wears the client's own cards (`pw_shield.rs`),
+            // so neither reaches this path.
             for aura in &auras.auras {
                 if aura.effect_type == AuraType::Absorb
                     && aura.magnitude > 0.0
