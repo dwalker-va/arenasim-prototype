@@ -275,7 +275,7 @@ mkFx({id:'lifetap',name:'Life Tap',sub:'landing · lifetap.m2 @Chest (on the War
   '<b>Converging motes</b> (P3): 834–2167 ms, 50/s, 1.0 s life, moving <b>inward</b> at 2.22 yd/s from a 1.39 yd area, red → blue. This red-to-blue pull reads as health turning into mana.',
   'Green puff (P0, 0–334 ms, 100/s, drag 8) and green sparks (P1). Cyan twinkles (P2) are gated on and off from 1.0 s. <span class="inferred">Gates after 2067 ms are extrapolated from the doc\'s "…".</span>',
   'Cast side: the shipped Warlock shadow hands, which are not part of this bench.'],
- asks:['The card says Life Tap "must not read as a heal". The client opens with a <b>green</b> puff and sparks, and green is our heal colour (floating-text heals are green, and the Healing Wave kit is green). <b>Keep or untick the two green layers?</b> The red → blue motes and the blue glow carry the identity without them.'],
+ asks:['<b>Ruled (2026-10-17):</b> client-faithful, green layers kept. Green is also one of the Warlock\'s own spell colours (Death Coil, Drain Life).'],
  knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
  layers:[
   {id:'glow',name:'Blue glow (2 quads)',desc:'genericglow #5165FF, 1.84 × 2.38 yd, peaks at 1.33 s, 833 ms throb',sw:[81,101,255],custom:true},
@@ -327,11 +327,11 @@ mkFx({id:'poison',name:'Poison on hit',sub:'landing · poison_impact_chest.m2 @C
   'In this bench a Rogue swings at the victim every <i>swing</i> seconds and rolls the selected poison\'s chance on each swing. "Landing plays on" decides which procs replay the kit.',
   'Shipped today: Crippling\'s first application plays the Nature school impact at the chest, a stand-in for this kit. Wound\'s healing reduction already draws Mortal Wounds\' grey ash on every heal, because that tell keys on the aura type.'],
  asks:[
-  'Deadly and Wound stack to 5 and re-proc on almost every hit. <b>If every proc replays the kit, the cloud is up most of the time</b>, which in practice is a sustained chest channel. Set "Landing plays on" to <i>every proc</i> to see it. The recommendation is <b>first application, plus each new stack</b> (at most 5 landings per poison window), which matches Crippling\'s first-apply rule.',
-  'The client has no way to tell the poisons apart. <b>Do you want the authored per-poison tint</b>, or the one shared green (client-faithful)? Mind-numbing gets no other visual, and Wound is otherwise told apart only by the ash on heals.'],
+  '<b>Ruled (2026-10-17):</b> the landing plays on <b>every application</b>, as in the client: each proc is the proc spell landing, and its only visual is the impact. The client data does not say whether a new proc overlaps a cloud still drifting or restarts it. <b>Proposed: restart</b> (one cloud at a time, never denser), so it reads as a green cloud on the Rogue\'s target without becoming overpowering. Compare with "every proc, overlap".',
+  '<b>Ruled (2026-10-17):</b> one shared green for all poisons, no per-poison tint.'],
  knobDefs:[...STD,
   {key:'poison',label:'poison',min:0,max:3,step:1,def:0,names:POISONS.map(p=>p.name)},
-  {key:'mode',label:'landing plays on',min:0,max:2,step:1,def:2,names:['first apply','each new stack','every proc']},
+  {key:'mode',label:'landing plays on',min:0,max:3,step:1,def:3,names:['first apply','each new stack','every proc, overlap','every proc, restart']},
   {key:'swing',label:'swing s',min:0.6,max:2.6,step:0.1,def:1.0}],
  layers:[
   {id:'burst',name:'Green flare burst',desc:'P1 flare, 150/s for 167 ms, 3.33 yd/s, 0.6 s life',sw:[99,136,20],emitter:{anchor:'chest',trig:'main',span:167,vRange:3.14,speed:3.33,life:0.6,rate:150,win:[[0,1],[167,0]],area:0.28,areaY:0.28,blend:'alpha',
@@ -353,8 +353,8 @@ mkFx({id:'poison',name:'Poison on hit',sub:'landing · poison_impact_chest.m2 @C
    if(rnd()<P.chance){
     const newStack=st.stacks<P.stacks; const first=!st.applied;
     st.applied=true; if(newStack) st.stacks++;
-    const play=K.mode==2||(K.mode==1&&newStack)||(K.mode==0&&first);
-    if(play) fx.trig.main.push(ms);
+    const play=K.mode>=2||(K.mode==1&&newStack)||(K.mode==0&&first);
+    if(play){ if(K.mode==3) fx.trig.main=[ms]; else fx.trig.main.push(ms); }
    }
   }
   if(K.poison==1&&st.applied&&on(fx,'ash')&&ms>=st.heal){ st.heal+=3000; fx.trig.heal.push(ms); fct('+'+(60+((rnd()*20)|0)),[100,255,100],24,[cur.vp[0]-0.3,2.6,cur.vp[2]]); }
@@ -372,7 +372,7 @@ mkFx({id:'poison',name:'Poison on hit',sub:'landing · poison_impact_chest.m2 @C
   `pub const POISON_FLARE_BURST: bool = ${b(on(fx,'burst'))}; // ~25 flares in 167 ms at 3.33 yd/s`,
   `pub const POISON_CLOUD_PUFFS: bool = ${b(on(fx,'cloud'))}; // 20/s, 0.22 -> 0.69 yd`,
   `pub const POISON_CLOUD_MOTES: bool = ${b(on(fx,'motes'))};`,
-  `pub const POISON_LANDING_ON: PoisonLandingOn = PoisonLandingOn::${['FirstApply','EachNewStack','EveryProc'][K.mode]};`,
+  `pub const POISON_LANDING_ON: PoisonLandingOn = PoisonLandingOn::${['FirstApply','EachNewStack','EveryProcOverlapping','EveryProcRestart'][K.mode]};`,
   `pub const POISON_PER_POISON_TINT: bool = ${b(on(fx,'tint'))};${on(fx,'tint')?' // '+POISONS.map(p=>p.name+' '+hex(p.tint)).join(', '):''}`,
   `pub const POISON_SIZE_MUL: f32 = ${f2(K.size)};`,
   `pub const POISON_SPREAD_MUL: f32 = ${f2(K.spread)};`,
@@ -429,7 +429,7 @@ mkFx({id:'shadowform',name:'Shadowform',sub:'state · kit 3129 · tint #270042 +
   '<span class="inferred">How the client mixes the tint into the body (multiply vs lerp, Value_1 0.2) is unresolved. The strength knob lets you judge it.</span>',
   'Engine fit: our stealth already edits the body material in place (rgb ×0.6, alpha 0.4) without the Fear/Polymorph restore slot. A tint and alpha can do the same.'],
  asks:[
-  '<b>Transparency competes with stealth.</b> A stealthed Rogue here is drawn at alpha 0.4; Shadowform\'s 0.65 reads as "half stealthed". The recommendation is to <b>keep the tint and drop the transparency</b>, so translucency keeps meaning stealth. The comparison Rogue is beside the Priest.',
+  '<b>Ruled (2026-10-17):</b> keep the transparency (0.65) with the tint. It is central to Shadowform\'s look and sets it apart from the Warlock.',
   'The feet shroud is additive dark violet: faint on our sandy floor, and nearly invisible at low pitch. Keep it, or let the tint carry the form?'],
  knobDefs:[...STD,{key:'opacity',label:'shroud opacity ×',min:0.1,max:2.5,step:0.05,def:1},{key:'tint',label:'tint strength',min:0,max:1,step:0.05,def:1},{key:'alpha',label:'body alpha',min:0.3,max:1,step:0.05,def:0.65}],
  layers:[
@@ -472,7 +472,7 @@ mkFx({id:'avoid',name:'Dodge / Parry text',sub:'floating combat text · a Warrio
   'Classic\'s own scrolling text draws <b>melee avoidance in red #FF1A1A</b> and spell avoidance in white. The portrait hit indicator is white, lasts 1.2 s, and draws Immune at half size. Attacker-side text is drawn by the engine, not Lua (unresolved).',
   'Ours today: auto hits are white numbers (24 px), ability damage yellow, heals green, absorbs light blue, "Immune" yellow, states ("Travel Form") white. Divine Shield is gold. <b>Red is unused</b>.',
   'The bench repeats hit, Dodge, hit, Parry. Size matches our floating text: number 24 px, label 14 px.'],
- asks:['<b>Which colour and size?</b> The recommendation is <b>white at number size</b> (24 px): it is Classic\'s neutral for avoidance, spends no new hue, and the word itself tells it apart from a white auto-hit number. Red is Classic\'s own-character melee colour, but it would be our first red floating text. Our Mortal Strike and Berserk read red elsewhere.'],
+ asks:['<b>Ruled (2026-10-17):</b> white at number size (24 px), title case "Dodge" / "Parry".'],
  knobDefs:[
   {key:'colour',label:'colour',min:0,max:3,step:1,def:0,names:['white','red #FF1A1A','grey','yellow (as Immune)']},
   {key:'px',label:'size',min:0,max:1,step:1,def:0,names:['number 24','label 14']},
