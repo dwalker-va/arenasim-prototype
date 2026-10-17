@@ -59,7 +59,7 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::{
     bolt_kind_for, client_landing_style, curse_spec, hunter_shot_for, root_style_for,
-    DotStateVisual, InterruptLanding, SlowTint,
+    DotStateVisual, InterruptLanding, SlowTint, PW_SHIELD_AURA_NAME,
 };
 
 use AbilityType::*;
@@ -663,6 +663,11 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             // A non-heal the client lands with a heal's kit (Innervate).
             _ if HealImpact::kind_for(a).is_some() => {
                 Some("heal-kit landing on cast (heal_impact.rs)")
+            }
+            // Power Word: Shield wears the client's cards, keyed on the aura's
+            // name; every other absorb (and immunity) keeps the sphere.
+            AuraType::Absorb if c.name == PW_SHIELD_AURA_NAME => {
+                Some("client shield cards (pw_shield.rs)")
             }
             AuraType::Absorb | AuraType::DamageImmunity => {
                 Some("shield bubble (shield_bubbles.rs)")

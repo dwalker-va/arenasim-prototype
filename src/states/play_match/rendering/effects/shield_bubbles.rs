@@ -48,16 +48,21 @@ pub fn update_shield_bubbles(
                 continue; // Don't also spawn absorb bubble
             }
 
-            // Check for Absorb auras
+            // Check for Absorb auras. Power Word: Shield is not a sphere: it
+            // wears the client's own cards (`pw_shield.rs`), so it never
+            // reaches this path.
             for aura in &auras.auras {
-                if aura.effect_type == AuraType::Absorb && aura.magnitude > 0.0 {
+                if aura.effect_type == AuraType::Absorb
+                    && aura.magnitude > 0.0
+                    && aura.ability_name != super::PW_SHIELD_AURA_NAME
+                {
                     combatants_with_shield.insert(entity);
 
                     // Determine spell school based on ability name
                     let spell_school = if aura.ability_name.contains("Ice Barrier") {
                         SpellSchool::Frost
                     } else {
-                        SpellSchool::Holy // Power Word: Shield
+                        SpellSchool::Holy
                     };
 
                     // If combatant doesn't have a bubble yet, spawn one
