@@ -579,6 +579,9 @@ pub fn spawn_heal_cast_glows(
 /// announces itself through that marker never plays through a `Landed`
 /// marker as well: the animation sandbox lands such an entry through a
 /// zero-length cast AND spawns its marker, and the hands must flash once.
+///
+/// Divine Shield plays its hands elsewhere, in
+/// [`spawn_divine_shield_cast_hands`], off its own pending component.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_instant_cast_hands(
     mut commands: Commands,
@@ -601,6 +604,10 @@ pub fn spawn_instant_cast_hands(
             ending.kind == CastEndingKind::Landed
                 && abilities.get_unchecked(&cast.ability).cast_time <= 0.0
                 && !InstantAbilityFired::is_spawned_for(cast.ability)
+                // Divine Shield's hands come off its own pending component
+                // (`spawn_divine_shield_cast_hands`), never a `Landed` marker,
+                // so they play once per cast.
+                && cast.ability != AbilityType::DivineShield
         })
         .map(|(ending, cast)| (ending.caster, cast.ability));
     let marked = fired.iter().map(|signal| (signal.caster, signal.ability));
@@ -610,38 +617,103 @@ pub fn spawn_instant_cast_hands(
         .map(|pending| (pending.caster, AbilityType::TravelForm));
 
     for (caster, ability) in instants.chain(shifts_in).chain(marked) {
-        let Some(kind) = HealCastKind::for_ability(ability) else {
-            continue;
-        };
-        if kind == HealCastKind::Arcane && !MOONFIRE_CAST_HANDS {
-            continue;
-        }
-        let Some(body) = casters
-            .get(caster)
-            .ok()
-            .and_then(|children| children.iter().find(|&child| bodies.get(child).is_ok()))
-        else {
-            continue; // headless-shaped caster with no rendered body
-        };
-        let assets = assets.get_or_insert_with(|| HealCastAssets::build(&mut meshes, &mut images));
-        for side in [1.0_f32, -1.0] {
-            spawn_hand_rig(
-                &mut commands,
-                &mut materials,
-                assets,
-                HandRig {
-                    caster,
-                    body,
-                    kind,
-                    side,
-                    phase: HealCastPhase::Flare {
-                        remaining: heal_cast_flare_secs(kind),
-                    },
-                    has_launch_flash: true,
-                    drives_posture: false,
+        flash_instant_hands(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut images,
+            &mut assets,
+            &casters,
+            &bodies,
+            caster,
+            ability,
+        );
+    }
+}
+
+/// FixedUpdate (graphical-only), BEFORE `CombatSystemPhase::ResourcesAndAuras`:
+/// Divine Shield's hands (kit 417, the Holy launch), off its
+/// `DivineShieldPending`.
+///
+/// Divine Shield has no cast state and no `InstantAbilityFired`: the Paladin AI
+/// queues a `DivineShieldPending` (both paths, `try_divine_shield` and the
+/// while-CC break) and `process_divine_shield` resolves it in Phase 1 of the
+/// next sim tick, despawning it. The animation sandbox spawns the same pending
+/// from `Update`. So the one place both are still alive and newly added is the
+/// head of the NEXT fixed tick, ahead of Phase 1: an AI pending queued in
+/// Phase 2 and a sandbox pending queued in `Update` are both read here once.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_divine_shield_cast_hands(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut assets: Local<Option<HealCastAssets>>,
+    bubbles: Query<&DivineShieldPending, Added<DivineShieldPending>>,
+    casters: Query<&Children>,
+    bodies: Query<(), With<VisualBody>>,
+) {
+    for pending in bubbles.iter() {
+        flash_instant_hands(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut images,
+            &mut assets,
+            &casters,
+            &bodies,
+            pending.caster,
+            crate::states::play_match::abilities::AbilityType::DivineShield,
+        );
+    }
+}
+
+/// The launch alone on both of `caster`'s spell hands, in the family
+/// [`HealCastKind::for_ability`] routes `ability` to (nothing if unrouted, or
+/// for a caster with no rendered body).
+#[allow(clippy::too_many_arguments)]
+fn flash_instant_hands(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+    assets: &mut Option<HealCastAssets>,
+    casters: &Query<&Children>,
+    bodies: &Query<(), With<VisualBody>>,
+    caster: Entity,
+    ability: crate::states::play_match::abilities::AbilityType,
+) {
+    let Some(kind) = HealCastKind::for_ability(ability) else {
+        return;
+    };
+    if kind == HealCastKind::Arcane && !MOONFIRE_CAST_HANDS {
+        return;
+    }
+    let Some(body) = casters
+        .get(caster)
+        .ok()
+        .and_then(|children| children.iter().find(|&child| bodies.get(child).is_ok()))
+    else {
+        return; // headless-shaped caster with no rendered body
+    };
+    let assets = assets.get_or_insert_with(|| HealCastAssets::build(meshes, images));
+    for side in [1.0_f32, -1.0] {
+        spawn_hand_rig(
+            commands,
+            materials,
+            assets,
+            HandRig {
+                caster,
+                body,
+                kind,
+                side,
+                phase: HealCastPhase::Flare {
+                    remaining: heal_cast_flare_secs(kind),
                 },
-            );
-        }
+                has_launch_flash: true,
+                drives_posture: false,
+            },
+        );
     }
 }
 
