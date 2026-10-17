@@ -567,11 +567,18 @@ pub fn spawn_heal_cast_glows(
 /// state at all, so its shift into the form plays it the same way.
 ///
 /// Scoped by [`HealCastKind::for_ability`], not by the instant: only the
-/// Druid's instants are routed, so every other class's instants (Frost
-/// Shock among them) still draw no hands. Runs in `FixedUpdate` after
+/// Druid's instants and Power Word: Shield are routed, so every other
+/// instant (Frost Shock among them) still draws no hands. Runs in `FixedUpdate` after
 /// `CombatResolution` and before `consume_cast_ending_signals`, which
 /// despawns the marker; a shift is read the tick it is queued, before
 /// `process_travel_form` resolves it the next tick.
+///
+/// Power Word: Shield is applied inline by the Priest AI with no cast state,
+/// so its hands play off its [`InstantAbilityFired`] marker instead (read
+/// before `consume_instant_ability_signals` despawns it). An ability that
+/// announces itself through that marker never plays through a `Landed`
+/// marker as well: the animation sandbox lands such an entry through a
+/// zero-length cast AND spawns its marker, and the hands must flash once.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_instant_cast_hands(
     mut commands: Commands,
@@ -582,6 +589,7 @@ pub fn spawn_instant_cast_hands(
     abilities: Res<crate::states::play_match::ability_config::AbilityDefinitions>,
     landed: Query<(&CastEnding, &LandedCast), Added<CastEnding>>,
     shifts: Query<&ShapeshiftPending, Added<ShapeshiftPending>>,
+    fired: Query<&InstantAbilityFired, Added<InstantAbilityFired>>,
     casters: Query<&Children>,
     bodies: Query<(), With<VisualBody>>,
 ) {
@@ -592,14 +600,16 @@ pub fn spawn_instant_cast_hands(
         .filter(|(ending, cast)| {
             ending.kind == CastEndingKind::Landed
                 && abilities.get_unchecked(&cast.ability).cast_time <= 0.0
+                && !InstantAbilityFired::is_spawned_for(cast.ability)
         })
         .map(|(ending, cast)| (ending.caster, cast.ability));
+    let marked = fired.iter().map(|signal| (signal.caster, signal.ability));
     let shifts_in = shifts
         .iter()
         .filter(|pending| pending.shift == Shift::IntoTravelForm)
         .map(|pending| (pending.caster, AbilityType::TravelForm));
 
-    for (caster, ability) in instants.chain(shifts_in) {
+    for (caster, ability) in instants.chain(shifts_in).chain(marked) {
         let Some(kind) = HealCastKind::for_ability(ability) else {
             continue;
         };

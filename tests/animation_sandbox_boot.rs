@@ -347,3 +347,170 @@ fn every_interrupt_entry_cuts_a_cast_and_heroic_strike_swings_its_blow() {
         }
     }
 }
+
+/// Power Word: Shield previews through the real registration: the entry lands
+/// the absorb on the dummy, which wears the client's three cards (placed, not
+/// just spawned), and the Priest's two hands flash the Holy launch exactly
+/// once — the entry lands through a zero-length cast AND spawns the instant
+/// marker, and only the marker may draw the hands.
+#[test]
+fn power_word_shield_previews_its_cards_and_both_hands() {
+    use arenasim::states::animation_sandbox::playback::{
+        EntryFamily, SandboxEntry, SandboxPlayback,
+    };
+    use arenasim::states::animation_sandbox::SandboxConfig;
+    use arenasim::states::match_config::CharacterClass;
+    use arenasim::states::play_match::abilities::AbilityType;
+    use arenasim::states::play_match::components::{HealCastHand, HealCastKind, PwShieldCard};
+    use bevy::time::TimeUpdateStrategy;
+    use std::time::Duration;
+
+    let mut app = boot_app();
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+        16,
+    )));
+    app.update();
+    app.insert_resource(SandboxConfig {
+        caster_class: CharacterClass::Priest,
+        ..Default::default()
+    });
+    app.world_mut()
+        .resource_mut::<NextState<GameState>>()
+        .set(GameState::AnimationSandbox);
+    for _ in 0..4 {
+        app.update();
+    }
+    {
+        let mut playback = app.world_mut().resource_mut::<SandboxPlayback>();
+        playback.select(
+            SandboxEntry::Ability(AbilityType::PowerWordShield),
+            EntryFamily::Residue,
+        );
+        playback.restart_requested = true;
+    }
+    let (mut most_hands, mut cards_seen, mut placed) = (0, 0, false);
+    for _ in 0..60 {
+        app.update();
+        let mut hands = app.world_mut().query::<&HealCastHand>();
+        let kinds: Vec<HealCastKind> = hands.iter(app.world()).map(|h| h.kind).collect();
+        assert!(kinds.iter().all(|k| *k == HealCastKind::Holy), "{kinds:?}");
+        most_hands = most_hands.max(kinds.len());
+        let mut cards = app.world_mut().query::<(&PwShieldCard, &Transform)>();
+        let now: Vec<f32> = cards.iter(app.world()).map(|(_, t)| t.scale.y).collect();
+        cards_seen = cards_seen.max(now.len());
+        placed |= now.iter().any(|s| *s > 1.0);
+    }
+    assert_eq!(most_hands, 2, "the Holy launch must flash both hands, once");
+    assert_eq!(
+        cards_seen, 3,
+        "the shielded dummy must wear the three cards"
+    );
+    assert!(
+        placed,
+        "the cards were spawned but never placed on the dummy"
+    );
+}
+
+/// The shield's cards stand on the RENDERED body after every writer of it,
+/// the Cyclone lift (`PostUpdate`) included: a cycloned, shielded dummy rises
+/// and its rim rises with it, centred just above the body centre on every
+/// frame. Placed before the lift, the rim would sit at the unlifted height and
+/// fall below the body centre — the order the leg-crossing arc's draw order
+/// rests on (`pw_shield.rs`).
+#[test]
+fn the_shield_rides_a_cyclone_lift() {
+    use arenasim::states::animation_sandbox::playback::{
+        EntryFamily, SandboxEntry, SandboxPlayback,
+    };
+    use arenasim::states::animation_sandbox::SandboxConfig;
+    use arenasim::states::match_config::CharacterClass;
+    use arenasim::states::play_match::abilities::AbilityType;
+    use arenasim::states::play_match::components::{
+        ActiveAuras, Aura, AuraType, PwShieldCard, PwShieldVisual, PwsLayer, VisualBody,
+    };
+    use bevy::time::TimeUpdateStrategy;
+    use std::time::Duration;
+
+    let mut app = boot_app();
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+        16,
+    )));
+    app.update();
+    app.insert_resource(SandboxConfig {
+        caster_class: CharacterClass::Priest,
+        ..Default::default()
+    });
+    app.world_mut()
+        .resource_mut::<NextState<GameState>>()
+        .set(GameState::AnimationSandbox);
+    for _ in 0..4 {
+        app.update();
+    }
+    {
+        let mut playback = app.world_mut().resource_mut::<SandboxPlayback>();
+        playback.select(
+            SandboxEntry::Ability(AbilityType::PowerWordShield),
+            EntryFamily::Residue,
+        );
+        playback.restart_requested = true;
+    }
+    for _ in 0..50 {
+        app.update();
+    }
+    let mut rigs = app.world_mut().query::<&PwShieldVisual>();
+    let bearer = rigs
+        .iter(app.world())
+        .next()
+        .expect("the preview shielded no one")
+        .bearer;
+    app.world_mut()
+        .get_mut::<ActiveAuras>(bearer)
+        .expect("the shielded unit has auras")
+        .auras
+        .push(Aura {
+            effect_type: AuraType::Cyclone,
+            duration: 6.0,
+            ability_name: "Cyclone".to_string(),
+            ..Default::default()
+        });
+    let body = app
+        .world()
+        .get::<Children>(bearer)
+        .unwrap()
+        .iter()
+        .find(|c| app.world().get::<VisualBody>(*c).is_some())
+        .unwrap();
+
+    // This app has no `TransformPlugin`, so read local transforms: the rig
+    // sits at the origin, so a card's local pose is its world pose, and the
+    // body's world centre is its parent's transform applied to its own.
+    let (mut frames, mut highest) = (0, 0.0_f32);
+    for _ in 0..40 {
+        app.update();
+        let root = *app.world().get::<Transform>(bearer).unwrap();
+        let lifted = app.world().get::<Transform>(body).unwrap().translation;
+        let body_at = root.transform_point(lifted);
+        highest = highest.max(body_at.y - root.translation.y);
+        let mut cards = app.world_mut().query::<(&PwShieldCard, &Transform)>();
+        for (card, t) in cards.iter(app.world()) {
+            if card.layer != PwsLayer::Rim {
+                continue;
+            }
+            let rise = t.translation.y - body_at.y;
+            assert!(
+                (0.1..0.2).contains(&rise),
+                "the rim stands {rise:.3} above a body lifted {:.3}",
+                body_at.y - root.translation.y
+            );
+            frames += 1;
+        }
+    }
+    assert!(
+        highest > 0.3,
+        "the Cyclone never lifted the dummy ({highest:.3})"
+    );
+    assert_eq!(
+        frames, 40,
+        "the rim was not on screen for every frame of the lift"
+    );
+}

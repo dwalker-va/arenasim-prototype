@@ -246,6 +246,57 @@ pub struct ShieldBubble {
     pub is_immunity: bool,
 }
 
+/// Lifecycle phase of a [`PwShieldVisual`]: the three sequences of the
+/// client's `holydivineshield_state_base.m2` (`rendering/effects/pw_shield.rs`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PwsPhase {
+    /// Sequence 0, 700 ms: the 200 ms delay, then the tall full-strength pop.
+    Birth,
+    /// Sequence 158, 633 ms, repeating: the faint shimmer and wobble.
+    Loop,
+    /// Sequence 159, 1100 ms: the swell-and-fade the shield leaves on, whether
+    /// it broke or ran out (the client plays one ending for both).
+    Death,
+}
+
+/// One Power Word: Shield on one bearer: the rig whose three [`PwShieldCard`]
+/// children draw it. Graphical-only; spawned and advanced by
+/// `update_pw_shield_visuals`, placed by `place_pw_shield_cards`.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct PwShieldVisual {
+    /// The shielded combatant.
+    pub bearer: Entity,
+    pub phase: PwsPhase,
+    /// Seconds into `phase`.
+    pub t: f32,
+    /// Card scale (width, height) at the moment the shield went down: the
+    /// death swell starts from where the wobble was, not from a fixed pose.
+    pub from_scale: Vec2,
+    /// Rim weight at the moment the shield went down, which the death fades.
+    pub from_rim: f32,
+}
+
+/// The three cards of the client state model.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum PwsLayer {
+    /// Bone 2, `genericglow2b1`: the gold outline with a hard inner edge.
+    Rim,
+    /// Bone 1, `shockwave10d`: about 17 radial streaks.
+    StreakA,
+    /// Bone 3, `shockwave10b`: about 15 streaks, flickering against A.
+    StreakB,
+}
+
+impl PwsLayer {
+    pub const ALL: [PwsLayer; 3] = [PwsLayer::Rim, PwsLayer::StreakA, PwsLayer::StreakB];
+}
+
+/// One card of a [`PwShieldVisual`] (its child).
+#[derive(Component, Clone, Copy, Debug)]
+pub struct PwShieldCard {
+    pub layer: PwsLayer,
+}
+
 /// Component that stores the original mesh handle for a combatant.
 /// Used to restore the mesh when polymorph ends.
 #[derive(Component)]
@@ -940,6 +991,9 @@ impl HealCastKind {
             AbilityType::FlashHeal | AbilityType::HolyLight | AbilityType::FlashOfLight => {
                 Some(HealCastKind::Holy)
             }
+            // Kit 270, the Holy launch, is PW:S's whole cast side. It has no
+            // `CastingState`, so its hands fire off `InstantAbilityFired`.
+            AbilityType::PowerWordShield => Some(HealCastKind::Holy),
             AbilityType::LesserHealingWave => Some(HealCastKind::Nature),
             // The Druid: kits 345/181 and 100/183 are the Shaman's two Nature
             // hand models, on every cast but Moonfire. Travel Form carries no
@@ -1260,8 +1314,10 @@ pub enum AuraApplyOwner {
     Polymorph,
     /// Freezing Trap's ice block (`ice_block.rs`).
     IceBlock,
-    /// Shield bubbles: absorbs, Divine Shield, and Weakened Soul, which only
-    /// ever lands WITH Power Word: Shield's bubble (`shield_bubbles.rs`).
+    /// The shields: the sphere for absorbs and Divine Shield
+    /// (`shield_bubbles.rs`), Power Word: Shield's client cards
+    /// (`pw_shield.rs`), and Weakened Soul, which only ever lands WITH
+    /// Power Word: Shield.
     ShieldBubble,
     /// Berserker Rage's mask (`berserk.rs`).
     BerserkMask,
@@ -2119,8 +2175,9 @@ impl InstantAbilityFired {
             // Resolved through the `QueuedInstantAttack` drain in combat_ai.rs.
             MortalStrike | Ambush | SinisterStrike
             // Instant AND aura-only: applied inline in class AI, entering
-            // neither generic caster hook (A2).
-            | CheapShot | KidneyShot | HammerOfJustice | FrostNova
+            // neither generic caster hook (A2). Power Word: Shield's marker
+            // carries its Holy launch hands (`spawn_instant_cast_hands`).
+            | CheapShot | KidneyShot | HammerOfJustice | FrostNova | PowerWordShield
             // The melee interrupts: spawned at the committed-use site in
             // combat_ai.rs's interrupt system (roadmap B). Wind Shear is
             // deliberately absent — the Shaman has no weapon sockets and its

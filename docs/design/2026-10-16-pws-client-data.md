@@ -1,11 +1,9 @@
 # Power Word: Shield — client data and the gap (AS-344)
 
 Research for AS-344: what the Classic and TBC clients draw for Power Word: Shield, and
-how that differs from `ShieldBubble` (`rendering/effects/shield_bubbles.rs`). Phase 1 of
-the card. The bench (phase 2) is
+how that differed from the `ShieldBubble` sphere we drew for it. The signed-off bench is
 [`benches/2026-10-16-pws-bench.html`](benches/2026-10-16-pws-bench.html) (published at
-https://claude.ai/artifact/1PPVBh7jQFVRj8SdcbQEfX). Nothing in Rust
-changes until the user signs off on it.
+https://claude.ai/artifact/1PPVBh7jQFVRj8SdcbQEfX), and §5 records what shipped.
 
 Sources: wago.tools DB2 tables and CASC files for Classic Era `1.15.9.69547` and TBC
 `2.5.6.69795`. The join is `scripts/db2_spell_sweep.py` over skill line **613 Discipline**,
@@ -96,14 +94,14 @@ All interpolation is linear. Read as a whole:
 The client has **one ending**. Sequence 159 plays when the aura goes, whether the shield
 expired or was broken. Nothing marks an absorbed hit except the combat-text "Absorb".
 
-## 3. What we draw today
+## 3. What we drew before
 
-`update_shield_bubbles` spawns a `Sphere::new(1.0)` scaled **0.9 × 1.4 × 0.9** at the
-capsule centre whenever any `Absorb` aura is up. It has base colour `(1.0, 0.95, 0.7, 0.25)`
-and emissive `(2.0, 1.8, 1.0)`, with `AlphaMode::Add`. It despawns on the frame the aura
-is gone.
+`update_shield_bubbles` spawned a `Sphere::new(1.0)` scaled **0.9 × 1.4 × 0.9** at the
+capsule centre whenever any `Absorb` aura was up, with base colour `(1.0, 0.95, 0.7, 0.25)`
+and emissive `(2.0, 1.8, 1.0)`, `AlphaMode::Add`, and despawned it on the frame the aura
+was gone. It still draws Ice Barrier and Divine Shield.
 
-| | client | ours |
+| | client | ours, before |
 |---|---|---|
 | form | upright **billboard card**: a hollow gold outline | **solid** additive ellipsoid that washes the whole body gold |
 | size | rim inner edge 0.98 × 1.25 semi-axes | 0.9 × 1.4 semi-axes. **Size is about right.** |
@@ -133,24 +131,28 @@ is gone.
 Not a gap: **colour.** Both are Holy gold, which is the existing Holy palette
 (`holy_gold_pale`, the heal impacts), so the change spends no new hue.
 
-## 5. Constraints for phase 3
+## 5. What shipped
 
-These are open until the user signs off on the bench:
+The user signed off on the bench at its default values: all three layers, the birth pop
+and the death swell, at the client's own numbers. The `PWS_*` constants in
+`rendering/effects/pw_shield.rs` carry the bench's numeric knobs under the same names.
+The layer toggles have no constant because every layer is kept, and the bench's break
+burst was left out.
 
-- **Break vs expiry.** The card requires both endings to read as distinct from "shield
-  up", and the client's death sequence already does that for both. Whether a break should
-  ALSO differ from an expiry is a design call the client does not make. The bench offers
-  an authored "break burst" (our own, off by default).
-- **Draw order.** The client's quad sits on the body's centre plane, with no depth write.
-  Our capsule material is `AlphaMode::Blend` and is sorted by entity distance with no depth write (`play_match/mod.rs`; the trap
-  the dispel ribbon hit). A card at the same
-  origin as the body sorts ambiguously against it wherever the two overlap. Because the
-  ring is hollow, they only overlap where the lower arc crosses the legs. The bench's
-  `push` knob (yd toward the camera) is the lever: 0 is the client's placement, and ≥0.5
-  puts the whole card in front of the body.
-- **No textures from the client ship.** The three textures are to be generated
-  procedurally from the measured radial profiles and streak counts, like
-  `soft_dot_texture`. The bench draws exactly those procedural textures.
-- **Scope.** Ice Barrier and Divine Shield share `ShieldBubble` today but have their own
-  client identities (166392 and 165961). PW:S moving to its own card leaves them on the
-  sphere until they get their own research.
+- **Break vs expiry.** Both play the client's one swell-and-fade. Either way it reads as
+  an ending, distinct from the held shield: the outline swells past anything the wobble
+  does and fades out over 1.1 s.
+- **Draw order.** The capsule is `AlphaMode::Blend` with no depth write, so Bevy orders
+  the cards against it by the view depth of their translations. The cards follow the
+  unit's rendered body, as the client's Base attachment does, and every card centre sits
+  above the body centre on the same vertical. They therefore sort in front at every
+  camera pitch, whatever the body is doing. Anchored on the sim transform instead, a fear
+  bob (0.22 at its crest) lifts the body past the rim's 0.11–0.14 and the arc across the
+  legs would flicker. `push` stays at the client's 0
+  (`the_cards_sort_in_front_of_the_body_at_every_pitch`).
+- **Caster.** The Priest AI spawns `InstantAbilityFired` for PW:S, and
+  `spawn_instant_cast_hands` plays the Holy launch off it.
+- **Textures** are generated from the measured profiles, as the bench drew them. No
+  client art ships.
+- **Scope.** Ice Barrier and Divine Shield keep the sphere. Each has its own client
+  identity (166392 and 165961) and needs its own research.

@@ -645,6 +645,7 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .after(play_match::consume_heal_cast_endings)
                 .before(play_match::consume_cast_ending_signals)
+                .before(play_match::consume_instant_ability_signals)
                 .run_if(in_combat_scene),
         )
         // Combat resolution, death, and visual effects (after core combat)
@@ -660,8 +661,14 @@ impl Plugin for StatesPlugin {
                 play_match::cleanup_expired_floating_text,
                 play_match::animate_shadow_sight_orbs, // Pulsing orb animation
                 play_match::animate_orb_consumption,   // Orb pickup shrink/move animation
-                play_match::update_shield_bubbles,     // Spawn/despawn shield bubbles
-                play_match::follow_shield_bubbles,     // Update bubble positions
+                // The shields, nested to keep the outer tuple within Bevy's
+                // 20-item limit: the sphere (Ice Barrier, Divine Shield) and
+                // Power Word: Shield's client cards (placed in PostUpdate).
+                (
+                    play_match::update_shield_bubbles, // Spawn/despawn shield bubbles
+                    play_match::follow_shield_bubbles, // Update bubble positions
+                    play_match::update_pw_shield_visuals, // Power Word: Shield lifecycle
+                ),
                 // Polymorph BEFORE Fear, chained so a sync point flushes
                 // PolymorphedVisual before Fear evaluates its
                 // `Without<PolymorphedVisual>` filter. A unit hit by both on the
@@ -820,6 +827,17 @@ impl Plugin for StatesPlugin {
         .add_systems(
             PostUpdate,
             play_match::apply_cyclone_lift
+                .before(TransformSystem::TransformPropagate)
+                .run_if(in_combat_scene),
+        )
+        // Power Word: Shield's cards stand on the bearer's RENDERED body, so
+        // they are placed after every writer of it — the cyclone lift
+        // included — and before propagation. Riding the body is what keeps
+        // their draw order fixed against the blended capsule (`pw_shield.rs`).
+        .add_systems(
+            PostUpdate,
+            play_match::place_pw_shield_cards
+                .after(play_match::apply_cyclone_lift)
                 .before(TransformSystem::TransformPropagate)
                 .run_if(in_combat_scene),
         )

@@ -983,6 +983,21 @@ fn try_power_word_shield(
         },
     });
 
+    // The Holy launch on the Priest's hands (client kit 270). PW:S never has a
+    // `CastingState`, so the marker is its only route to a caster gesture.
+    // Spawned on the committed-use branch in BOTH modes (headless never reads
+    // it; the match-exit `PlayMatchEntity` sweep reclaims it), per
+    // `cosmetic-marker-cross-mode-spawn-parity.md`.
+    commands.spawn((
+        InstantAbilityFired {
+            caster: entity,
+            target: Some(shield_entity),
+            ability: pw_shield,
+            is_crit: false,
+        },
+        PlayMatchEntity,
+    ));
+
     shielded_this_frame.insert(shield_entity);
 
     true
