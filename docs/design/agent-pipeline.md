@@ -831,7 +831,40 @@ are**, and `EnterWorktree` is the one that gets you out.
 commit through the GitHub Git Data API skips local hooks, authors through the `gh`
 credentials, and is a guard bypass. Auto mode flagged one Engineer that did this
 (AS-291), so it is not an option. Report `NEEDS_INPUT` with the refusal text. The
-orchestrator then re-spawns the agent or fixes the pin (AS-345).
+orchestrator then re-spawns the agent.
+
+**The guard belongs to the harness, not the repo.** The refusal text ("This agent is
+isolated in the worktree `<path>`, but this command redirects git to the shared
+checkout via -C ...") is written by Claude Code's worktree isolation. No repo hook
+produces it: `.claude/settings.json` holds only a PostToolUse commit reminder,
+`settings.local.json` and the user settings hold no PreToolUse hook, and no enabled
+plugin registers one. So the pin cannot be fixed from this repo. The guard is right
+when its pinned path is your own tree, and it calls *every* other path, sibling
+worktrees included, "the shared checkout".
+
+**What was reproduced (AS-345, 2026-10-17).** An Engineer spawned with worktree
+isolation from an orchestrator sitting in `card-as162-druid-control`, plus one
+worktree-isolated subagent spawned from that Engineer, ran `pwd`, a bare `git`,
+`git -C <own tree>`, `git -C <parent tree>` and `git -C <orchestrator tree>` over
+several calls each. Both guards stayed pinned to their **own** trees every time.
+Own-tree git ran, and every other tree was refused. The AS-291 pin onto the
+orchestrator's tree **did not reproduce** in this shape, so it is intermittent
+and not caused by nesting alone. One process-global leak *was* visible, though.
+Both agents' session-start `gitStatus` snapshot named `card/AS-358-ice-barrier-visual`.
+That branch is checked out in neither agent's tree nor the orchestrator's. It
+belongs to a sibling Engineer spawned around the same time. The harness records
+an agent's "current tree" from state that concurrent spawns share. The AS-291 pin
+fits that race: the guard took a tree that was current *when the agent was
+spawned*, not the agent's own tree.
+
+**Workaround: check the pin first, and re-spawn on a wrong one.** An agent's first
+command is `git -C <own tree> status`. If it is refused, and the refusal names a
+tree that is not the agent's, the pin is wrong from the start. `EnterWorktree` did
+not move it in AS-291, so the agent reports `NEEDS_INPUT` with the refusal text
+before doing any work. The orchestrator then re-spawns it, ideally when no other
+spawn is in flight, since a spawn that does not overlap another one has nothing to
+race. Running the orchestrator from the main checkout does not help: a pin that
+leaks onto the main checkout refuses own-tree git just the same.
 
 **Scope.** This section is about *losing commits*. The same flap has a second
 consequence — a headless run reading another tree's **assets** and silently measuring
