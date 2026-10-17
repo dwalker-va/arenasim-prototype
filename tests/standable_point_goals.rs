@@ -1,5 +1,5 @@
-//! Every `MovementGoal::Point` a healer is sent to on a pillar map is a spot it
-//! can stand on (AS-190, AS-203).
+//! Every `MovementGoal::Point` a healer, or a Rogue walking round a Flare, is
+//! sent to on a pillar map is a spot it can stand on (AS-190, AS-203, AS-207).
 //!
 //! The executor stops a body radius short of a goal it cannot reach (AS-181),
 //! so the position track never shows a bad goal — this reads the goal itself,
@@ -43,7 +43,7 @@ use bevy::prelude::{Transform, Vec2, Vec3};
 
 /// `(map, profile, team 1, team 2, seed)` — each issued an in-pillar goal
 /// before the fix.
-const CASES: [(&str, &str, &[&str], &[&str], u64); 21] = [
+const CASES: [(&str, &str, &[&str], &[&str], u64); 22] = [
     // Fail without the solve's projection only. First offender: a Priest,
     // Priest, Shaman, Paladin, Priest, Druid.
     (
@@ -199,6 +199,17 @@ const CASES: [(&str, &str, &[&str], &[&str], u64); 21] = [
         &["Hunter", "Druid"],
         &["Warrior", "Priest"],
         5,
+    ),
+    // The Rogue's Flare walk (AS-207): fails without the plan's obstacles.
+    // Its wait point 4yd outside the Flare landed on TwinPillars' west
+    // pillar, (-8, 0), on every seed tried. The staged case below is the
+    // guard that does not depend on a seed.
+    (
+        "TwinPillars",
+        "TeamPlan",
+        &["Rogue", "Priest"],
+        &["Hunter", "Priest"],
+        0,
     ),
 ];
 
