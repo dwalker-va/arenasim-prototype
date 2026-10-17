@@ -274,6 +274,9 @@ the same with `'{"ai_profile":"TeamPlan","map":"PillaredArena"}'
 --label-suffix TeamPlan` (`-teamplan-pillaredarena`). Run by `main` @
 `5ca3e72d` (`-before.csv.gz`) and the branch (`-after.csv.gz`) with `--jobs 6
 --trace-mode off`, analysed with `scripts/paired_sweep.py --affects Priest
---tier directional --expect nothing`. The log-identity seed bank is
+--tier directional --expect nothing`, and scored from the Priest's side (the
+write-up's tables) by `2026-10-17-as325-priest-side.py before.csv.gz
+after.csv.gz`. The log-identity seed bank, which also prints where each
+diverging match first differs and how its winner moved, is
 `2026-10-17-as325-bank.py --before <main binary> --after <branch binary>
 --work <dir>`; its docstring says how each binary must be placed.

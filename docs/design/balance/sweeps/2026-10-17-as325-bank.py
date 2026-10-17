@@ -112,9 +112,51 @@ def run_one(args, i, cfg):
             counts = trace_counts(traces[0])
         shutil.rmtree(cwd)
     same = digests["before"] == digests["after"]
+    divergence = None
     if same:
         shutil.rmtree(d)
-    return i, cfg, {"same": same, "kills": kills, "counts": counts}, None
+    else:
+        divergence = classify_divergence(cfg, os.path.join(d, "before.txt"),
+                                         os.path.join(d, "after.txt"))
+    return i, cfg, {"same": same, "kills": kills, "counts": counts,
+                    "divergence": divergence}, None
+
+
+def read_log(path):
+    """The timestamped event lines, and the `Winner:` value."""
+    events, winner = [], None
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if line.startswith("["):
+                events.append(line)
+            elif line.startswith("Winner:"):
+                winner = line.split(":", 1)[1].strip()
+    return events, winner
+
+
+def classify_divergence(cfg, before_path, after_path):
+    """What a diverging match's first different event is, and how its winner
+    moved, scored from the Priest's side when only one side fields a Priest."""
+    t1, t2 = cfg[0], cfg[1]
+    before, w_before = read_log(before_path)
+    after, w_after = read_log(after_path)
+    first = next((b for b, a in zip(before, after) if b != a), None)
+    starts_at_burn = first is not None and "begins casting Mana Burn" in first
+    p1, p2 = "Priest" in t1, "Priest" in t2
+    if p1 and p2:
+        outcome = "mirror: winner unchanged" if w_before == w_after else "mirror: winner changed"
+    else:
+        priest_team = "Team 1" if p1 else "Team 2"
+        if w_before == w_after:
+            outcome = "single Priest: winner unchanged"
+        elif w_after == priest_team:
+            outcome = "single Priest: Priest side gains"
+        elif w_before == priest_team:
+            outcome = "single Priest: Priest side loses"
+        else:
+            outcome = "single Priest: other winner change"
+    return {"starts_at_burn": starts_at_burn, "first_before": first, "outcome": outcome}
 
 
 def main():
@@ -127,6 +169,8 @@ def main():
     cs = configs()
     os.makedirs(args.work, exist_ok=True)
     total, diffs, errors = Counter(), [], []
+    by_arm, outcomes, other_starts = Counter(), Counter(), []
+    starts_at_burn = 0
     with cf.ThreadPoolExecutor(args.jobs) as ex:
         for fut in cf.as_completed([ex.submit(run_one, args, i, c) for i, c in enumerate(cs)]):
             i, cfg, out, err = fut.result()
@@ -137,9 +181,26 @@ def main():
             total["kills"] += out["kills"]
             if not out["same"]:
                 diffs.append((i, cfg))
+                div = out["divergence"]
+                by_arm[(cfg[3], cfg[2])] += 1
+                outcomes[div["outcome"]] += 1
+                if div["starts_at_burn"]:
+                    starts_at_burn += 1
+                else:
+                    other_starts.append((i, div["first_before"]))
     print(f"matches: {len(cs)}  errors: {len(errors)}  logs that differ: {len(diffs)}")
     for k in sorted(total):
         print(f"  {k}: {total[k]}")
+    print("logs that differ, by profile and map:")
+    for (prof, mp), n in sorted(by_arm.items()):
+        print(f"  {prof} {mp}: {n}")
+    print(f"first differing event is a before-side 'begins casting Mana Burn': "
+          f"{starts_at_burn} of {len(diffs)}")
+    for i, line in sorted(other_starts):
+        print(f"  OTHER FIRST DIFFERENCE {i}: {line}")
+    print("winner, after vs before:")
+    for k in sorted(outcomes):
+        print(f"  {k}: {outcomes[k]}")
     for d in sorted(diffs):
         print("DIFF", d)
     for e in errors:
