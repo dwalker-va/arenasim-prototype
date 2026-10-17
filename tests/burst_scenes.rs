@@ -25,7 +25,7 @@ use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::burst::burst_tools;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::decision_trace::{PlayStep, PlayTag, RejectionReason};
-use arenasim::states::play_match::situation::{ClassSet, PlaySet, CHAIN};
+use arenasim::states::play_match::situation::{ClassSet, Play, PlaySet, CHAIN};
 use arenasim::states::play_match::{AbilityType, AuraType};
 
 const ME: &str = "me";
@@ -539,7 +539,7 @@ fn a_healer_does_not_burst() {
 #[test]
 fn an_excepted_class_does_not_burst() {
     let view = scene(Mage, 25.0, Some(2.0), AiProfile::TeamPlan)
-        .burst_exceptions(ClassSet::of(&[Mage]))
+        .exceptions(Play::Burst, ClassSet::of(&[Mage]))
         .decide(ME);
     let situation = view.situation.expect("a situation");
     assert!(situation.kill_window.is_some());
@@ -550,7 +550,7 @@ fn an_excepted_class_does_not_burst() {
         .all(|c| !matches!(c.reason, Some(RejectionReason::OutlastsWindow { .. }))));
     // ...and one it does not name still bursts.
     let other = scene(Mage, 25.0, Some(LOCK), AiProfile::TeamPlan)
-        .burst_exceptions(ClassSet::of(&[Hunter]))
+        .exceptions(Play::Burst, ClassSet::of(&[Hunter]))
         .decide(ME);
     assert_eq!(other.situation.unwrap().play_step, Some(PlayStep::Burst));
 }

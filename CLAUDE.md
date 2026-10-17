@@ -399,8 +399,8 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
      after each instant CC an earlier unit lands that frame. Read it through
      `ctx.situation()`: `.phase` / `.attrition_remaining()`, `.tempo`,
      `.enemy_healer_locked`, `.ally_in_danger`, `.dying_allies()`,
-     `.is_pressured(unit)`, or pick an order with `.play_for(role)`
-     (`Play::Burst` / `Play::Default`, an exhaustive match). Every
+     `.is_pressured(unit)`, or pick an order with `ctx.play(role)`
+     (the play pipeline, *Plays* below; an exhaustive match). Every
      `ability_decision` in the trace carries the `situation` it saw. Its
      thresholds are `movement.ron`'s `shared:` block, and the table in the
      module docs names which neighbouring constants were deliberately NOT
@@ -1383,49 +1383,65 @@ constructed:
   bank's own noise (a z), never against a fitted number.
 
 **Plays.** A play is a named reordering of a class's own chain
-(`situation::Play`, chosen by `TeamSituation::play_for`). `Burst` is gated
-under `TeamPlan`: while `kill_window` names an enemy (low, below
-`kill_hp_threshold`, and beyond every enemy healer's help — locked, out of
-mana, or out of reach), every DPS puts its burst step at the head of its
-chain — its `burst::burst_tools` on that enemy — and the cast gate refuses
-any cast on it that would land after the window's `until`
-(`cast_guard::fits_window`, traced `OutlastsWindow`). Classes it measured
-negative for are named in `situation::BURST_EXCEPTIONS`; a sweep re-checks
-them with `"burst_exceptions": []` in the headless config. Under `Legacy` (or
-with the play withheld) the old lock-window reorder runs instead
-(`CombatContext::lock_window`), because deleting it moves `Legacy`. Findings
-and the graduate criterion: `docs/design/balance/2026-10-12-as275-burst-play.md`.
-`Peel` is gated under `TeamPlan`: while
-`ally_in_danger` names a teammate, every OTHER unit on the team puts its peel
-step at the head of its chain — crowd control on one of the teammate's
-`danger_attackers` (`class_ai::peel`; the tools per class are
+(`situation::Play`). Every play is gated under `TeamPlan` and graduates or is
+deleted at a milestone sweep. Each play is a STAGE (`class_ai::plays::PlayStage`):
+its id, `calls` (the team situation asks for it, for this unit and role),
+`admits` (this unit has a tool for it), its own named exceptions table with
+the measurement behind each entry, and its config key. ONE table orders them,
+`plays::PLAY_ORDER`: **Peel, TakeCover, Chain, Burst**, then the class's
+default chain. `plays::walk` is the only composition rule, and both
+`TeamSituation::play_for` and `CombatContext::play` take it: a unit runs the
+first stage its team runs, the situation calls and the unit admits (its
+exceptions included), and a stage that does not apply passes it to the NEXT
+stage — a gated peeler still chains, and a unit with nothing to hand off
+still bursts. `plays::tests` pins the order and the walk.
+
+**Adding a play.** A new play is: a new module holding its stage and its
+exceptions table; its step in each class's chain that runs it; its enum arms
+(`Play`, `PlayId`, `PlayId::ALL`, `Play::id`, and the trace's `PlayTag`, which
+the compiler asks for); usually a window accessor on `CombatContext` for its
+step to read (as `burst_window` and `chain_window` are); the pinned order
+tests (`plays::tests`); and ONE line in `PLAY_ORDER`. What needs no change:
+withholding (`team{1,2}_withheld_plays`), exceptions overrides
+(`team{1,2}_exceptions`), `situation::WithheldPlays`, the scene builder
+(`Scene::withhold` / `lift` / `exceptions`) and the walk, all keyed by the
+play's id. A play card that edits another play's stage, or the walk, is a
+composition change, not an addition.
+
+**Exceptions (user ruling, 2026-10-12).** A play that measures negative in a
+context is not used there: not every behaviour suits every composition. An
+exception is a NAMED entry in the play's own table — never a scattered `if` —
+with a one-line justification citing its measurement: for Peel,
+`peel::PEEL_GATES`, a (peeler class, class of the teammate in danger) pair;
+for Chain and Burst, `chain::CHAIN_EXCEPTIONS` and `burst::BURST_EXCEPTIONS`,
+by class. `tests/peel_gates.rs` lists the Peel gates by set equality and
+plays every peeler for every teammate class, so adding or removing one fails
+a default test until the list is edited too. Every exception is re-checked at
+each milestone sweep with it lifted for the side under test
+(`"team1_exceptions": {"Peel": []}` — an empty table lifts the play's
+exceptions; a named one, `{"Burst": ["Hunter"]}` or `{"Peel": ["Mage/Hunter"]}`,
+replaces them): it stays only while it still measures negative, and a context
+that turns negative joins. The bar and the method are in
+`docs/design/balance/2026-10-12-as290-peel-context-gates.md`. The older keys
+`team{1,2}_lifted_gates`, `burst_exceptions` and `chain_exceptions` are a
+deprecation shim onto the same overrides, kept so the committed sweep
+generators still run.
+
+`Peel`: while `ally_in_danger` names a teammate, every OTHER unit on the team
+puts its peel step at the head of its chain — crowd control on one of the
+teammate's `danger_attackers` (`class_ai::peel`; the tools per class are
 `peel::peel_tools`, and the Warrior has none). Every peel goes through the
 cast gate, skips an attacker the team already holds, and a movement peel
 (root, snare) answers only a melee or pet. The Hunter's Spider and Boar peel
-too, through its pet dispatch (`peel::pet_peel_tool`). It graduates or is
-deleted at the 0.8 milestone sweep (`docs/design/balance/2026-10-12-as274-peel-play.md`),
-judged in the contexts where it is enabled.
+too, through its pet dispatch (`peel::pet_peel_tool`). Judged at the 0.8
+milestone sweep (`docs/design/balance/2026-10-12-as274-peel-play.md`) in the
+contexts where it is enabled.
 
-**Context gates (user ruling, 2026-10-12).** A play that measures negative in
-a context is not used there: not every behaviour suits every composition. A
-gate is a NAMED entry in the play's own definition — for Peel,
-`peel::PEEL_GATES`, a (peeler class, class of the teammate in danger) pair with
-a one-line justification citing its measurement — never a scattered `if`;
-Burst's `BURST_EXCEPTIONS` is the same rule by class. A gated unit runs the play
-it would without the peel (`TeamSituation::play_without_peel`: a last-stand
-healer's TakeCover, then Chain while a lock is ending, else the fallback), then Chain's and Burst's exceptions apply
-to that, in that order (`CombatContext::play`). `tests/peel_gates.rs` lists the gates by set
-equality and plays every peeler for every teammate class, so adding or
-removing one fails a default test until the list is edited too. Every gate is
-re-checked at each milestone sweep with the gates lifted for the side under
-test (`team{1,2}_lifted_gates`, a measurement-only config field beside
-`team{1,2}_withheld_plays`): it stays only while it still measures negative,
-and a context that turns negative joins. The bar and the method are in
-`docs/design/balance/2026-10-12-as290-peel-context-gates.md`.
+`TakeCover`: a last-stand healer hides (`class_ai::take_cover`; the movement
+is *Last stand: take cover* above).
 
-`Chain` is gated under `TeamPlan`, between Peel and Burst: while the team's
-hold on an enemy (`lock_ending`: the soonest-ending stun, fear, polymorph,
-incapacitate or cyclone on a visible enemy) ends within
+`Chain`: while the team's hold on an enemy (`lock_ending`: the soonest-ending
+stun, fear, polymorph, incapacitate or cyclone on a visible enemy) ends within
 `CHAIN_HORIZON_SECS`, every unit with a hand-off (`chain::chain_tools` —
 Hammer of Justice, Kidney Shot, Fear, Death Coil, Polymorph, Cyclone) puts
 its chain step at the head of its chain: the hand-off goes when it would
@@ -1435,12 +1451,20 @@ within one. Under the play the hold rule judges a hand-off where it lands
 (`cast_guard::hold_lands_after`). A hand-off never deals damage onto a lock
 that breaks on damage, never puts a breakable or shielding CC on an enemy
 the team is hitting, and a healer does not chain while a teammate is dying.
-A gated peeler still chains. Classes it measured negative for go in
-`situation::CHAIN_EXCEPTIONS`
-(re-checked with `"chain_exceptions": []`). It is scored on lockout, not win
-rate alone: `tests/cc_lifecycle_probe.rs` measures denied, healer-locked and
-counterplay-free seconds and the longest lockout per arm. Findings and the
-graduate criterion: `docs/design/balance/2026-10-12-as276-chain-play.md`.
+It is scored on lockout, not win rate alone: `tests/cc_lifecycle_probe.rs`
+measures denied, healer-locked and counterplay-free seconds and the longest
+lockout per arm. Findings and the graduate criterion:
+`docs/design/balance/2026-10-12-as276-chain-play.md`.
+
+`Burst`: while `kill_window` names an enemy (low, below `kill_hp_threshold`,
+and beyond every enemy healer's help — locked, out of mana, or out of reach),
+every DPS puts its burst step at the head of its chain — its
+`burst::burst_tools` on that enemy — and the cast gate refuses any cast on it
+that would land after the window's `until` (`cast_guard::fits_window`, traced
+`OutlastsWindow`). Under `Legacy` (or with the play withheld) the old
+lock-window reorder runs instead (`CombatContext::lock_window`), because
+deleting it moves `Legacy`. Findings and the graduate criterion:
+`docs/design/balance/2026-10-12-as275-burst-play.md`.
 
 **The migrate-not-re-pin rule (user decision, 2026-10-12).** When a
 seed-pinned probe goes stale — a change moved the RNG stream and the seed no

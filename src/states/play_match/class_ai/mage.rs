@@ -100,7 +100,7 @@ pub fn decide_mage_action(
         }
     }
 
-    // The Chain play (TeamPlan): the lock on the enemy healer is about to
+    // The Chain play (TeamPlan): a lock the team holds on an enemy is about to
     // end, so Polymorph hands off onto it, landing in its last moments — or
     // the global cooldown is held for that moment.
     if let Some(call) = super::chain::chain_call(ctx) {

@@ -164,8 +164,8 @@ pub enum PlayStep {
     Peel,
     /// The Burst play's hard hitter on the kill window's subject.
     Burst,
-    /// The Chain play's hand-off: crowd control on the locked enemy healer,
-    /// landing in its lock's last moments.
+    /// The Chain play's hand-off: crowd control on the locked enemy (any
+    /// enemy the team holds), landing in its lock's last moments.
     Chain,
 }
 

@@ -2371,8 +2371,8 @@ fn lands_after(r: &Record, ability: AbilityType, target: &str) -> f32 {
 #[test]
 fn every_burst_tool_is_reached_aimed_at_the_subject_and_landed_inside_the_window() {
     use arenasim::states::play_match::class_ai::burst::burst_tools;
+    use arenasim::states::play_match::class_ai::burst::BURST_EXCEPTIONS;
     use arenasim::states::play_match::decision_trace::{PlayStep, PlayTag};
-    use arenasim::states::play_match::situation::BURST_EXCEPTIONS;
     let g = grid();
     let mut burst: BTreeSet<(String, String)> = BTreeSet::new();
     let mut misaimed = Vec::new();
@@ -2504,9 +2504,9 @@ fn every_burst_tool_is_reached_aimed_at_the_subject_and_landed_inside_the_window
 /// - no Chain play, and no chain step, outside `TeamPlan`.
 #[test]
 fn every_chain_tool_is_reached_aimed_at_the_lock_and_landed_in_its_last_moments() {
+    use arenasim::states::play_match::class_ai::chain::CHAIN_EXCEPTIONS;
     use arenasim::states::play_match::class_ai::chain::{chain_tools, HANDOFF_LEAD};
     use arenasim::states::play_match::decision_trace::{PlayStep, PlayTag};
-    use arenasim::states::play_match::situation::CHAIN_EXCEPTIONS;
     let g = grid();
     let mut handed: BTreeSet<(String, String)> = BTreeSet::new();
     let mut misaimed = Vec::new();

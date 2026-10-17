@@ -30,12 +30,14 @@ pub mod paladin;
 pub(crate) mod paladin_postures;
 pub mod peel;
 pub mod pet_ai;
+pub mod plays;
 pub mod priest;
 pub mod rogue;
 pub mod rogue_flare;
 #[doc(hidden)]
 pub mod scene;
 pub mod shaman;
+pub mod take_cover;
 pub mod warlock;
 pub mod warrior;
 
@@ -342,44 +344,20 @@ impl<'a> CombatContext<'a> {
         )
     }
 
-    /// The play this unit runs as `role` ([`TeamSituation::play_for`]): its
-    /// team's situation, seen from where it stands — a unit never peels for
-    /// itself. Three mappings, in this order:
-    ///
-    /// 1. Peel's gate: a unit that does not peel for that teammate
-    ///    ([`peel::peels_for`]: a Warrior, which has no peel tool, or a context
-    ///    [`peel::PEEL_GATES`] switches off) runs the play it would without a
-    ///    peel ([`TeamSituation::play_without_peel`]) — a Chain while a lock is
-    ///    ending, else the fallback;
-    /// 2. Chain's: a class with nothing to hand off ([`chain::chain_tools`]) or
-    ///    that the Chain play is not used for ([`TeamSituation::chains`]) runs
-    ///    the fallback instead of [`Play::Chain`];
-    /// 3. Burst's: a class the Burst play is not used for
-    ///    ([`TeamSituation::bursts`]) never bursts, whether Burst is its play or
-    ///    the fallback a gate left it.
+    /// The play this unit runs as `role`: the pipeline's walk
+    /// (`plays::walk`, over [`plays::PLAY_ORDER`]) — the first stage its team
+    /// runs and its situation calls ([`TeamSituation::play_for`]) that THIS
+    /// unit admits: it has a tool for the play, and the stage's exceptions do
+    /// not name it ([`plays::admitted`]). A stage it does not admit passes it
+    /// to the next — a peeler its context gates off still chains, and a unit
+    /// with nothing to hand off still bursts — and a unit no stage takes runs
+    /// [`Play::Default`].
     ///
     /// Panics where [`Self::situation`] does.
     pub fn play(&self, role: Role) -> Play {
         let situation = self.situation();
-        let play = match situation.play_for(role, self.self_entity) {
-            Play::Peel { ally } if !peel::peels_for(self, ally) => {
-                situation.play_without_peel(role, self.self_entity)
-            }
-            play => play,
-        };
-        let play = match play {
-            Play::Chain { .. } if !self.self_chains(situation) => situation.fallback_play(role),
-            play => play,
-        };
-        match play {
-            Play::Burst if !self.self_bursts(situation) => Play::Default,
-            play => play,
-        }
-    }
-
-    fn self_chains(&self, situation: &TeamSituation) -> bool {
-        self.self_info().is_some_and(|info| {
-            situation.chains(info.class) && !chain::chain_tools(info.class).is_empty()
+        plays::walk(situation, role, self.self_entity, None, |stage, play| {
+            plays::admitted(self, stage, play)
         })
     }
 
@@ -396,37 +374,38 @@ impl<'a> CombatContext<'a> {
         }
     }
 
-    fn self_bursts(&self, situation: &TeamSituation) -> bool {
-        self.self_info()
-            .is_some_and(|info| situation.bursts(info.class))
+    /// Whether this unit runs the Burst play its team runs: the Burst stage
+    /// admits it (its class is not one of the stage's exceptions).
+    fn self_bursts(&self) -> bool {
+        plays::admitted(self, &burst::BurstStage, &Play::Burst)
     }
 
     /// The kill window this unit is bursting into: `Some` when its chain runs
-    /// under the Burst play — its play is Burst, or it is a Peel whose chain
-    /// below the peel step falls back to Burst — and its class bursts.
+    /// under the Burst play — the Burst stage applies to it, whether Burst is
+    /// its play or the stage below a Peel or a Chain step that did not fire.
     /// `None` on a context nobody classified (a pet's): unlike
     /// [`Self::situation`] it does not panic, because the cast gate asks it of
     /// every targeted cast ([`cast_guard::fits_window`]).
     pub fn burst_window(&self) -> Option<Window> {
         let situation = self.situation.as_ref()?;
         let role = Role::of(self.self_info()?.class);
-        (situation.fallback_play(role) == Play::Burst && self.self_bursts(situation))
-            .then_some(situation.kill_window)
-            .flatten()
+        plays::called(&burst::BurstStage, situation, role, self.self_entity)
+            .filter(|play| plays::admitted(self, &burst::BurstStage, play))
+            .and(situation.kill_window)
     }
 
     /// The lock-window rule, as `Legacy` has always run it: a DPS whose enemy
     /// healer is locked (`enemy_healer_locked`) reorders its chain toward its
     /// hard hitter (the Warrior's Mortal Strike ahead of Rend, the Hunter's
     /// Aimed Shot ahead of its rotation). The Burst play REPLACES it: a unit
-    /// that runs the play ([`TeamSituation::bursts`]) never runs this, so it
+    /// the Burst stage admits ([`plays::admitted`]) never runs this, so it
     /// runs only under `Legacy`, with the play withheld, or for a class the
     /// play's exceptions name. Kept rather than deleted because deleting it
     /// moves `Legacy` (22 of 3,600 matches of the AS-275 byte-identity
     /// batch). Panics where [`Self::situation`] does.
     pub fn lock_window(&self) -> bool {
         let situation = self.situation();
-        !self.self_bursts(situation) && situation.enemy_healer_locked.is_some()
+        !self.self_bursts() && situation.enemy_healer_locked.is_some()
     }
 
     /// The clock this unit's situation was classified at (the trace's

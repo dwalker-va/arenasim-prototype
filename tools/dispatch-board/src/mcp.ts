@@ -7,12 +7,20 @@
  * ignores it (the tag is caller-supplied: trusted localhost, not auth). `by` (optional)
  * is the activity-log author and defaults to the actor.
  *
+ * A card WRITE returns a receipt — {id, version, column, agent, updated} plus
+ * only what that write produced (a merge's sha, a cancellation, a ruling) —
+ * never the body: a standing card's body is tens of thousands of tokens, and
+ * the orchestrator writes several times a day. `full: true` returns the whole
+ * card instead. Reads are unchanged; `get_card` takes `fields` to read, say,
+ * `version` and `activity` without the body.
+ *
  * Refusals (stale version, failed claim, PR-link gate) come back as tool
- * errors whose JSON carries `error`, `message` and the card as it is now.
+ * errors whose JSON carries `error`, `message` and the card's receipt as it
+ * is now (the whole card under `full: true`).
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { AREAS, Board, BoardError, COLUMNS, GUIDE_ID, GUIDE_MAX_CHECKS, GUIDE_MAX_UNITS, ROLES, SWEEP_STATUSES, TRIAGE_OUTCOMES } from "./board.js";
+import { AREAS, Board, BoardError, Card, COLUMNS, receipt, GUIDE_ID, GUIDE_MAX_CHECKS, GUIDE_MAX_UNITS, ROLES, SWEEP_STATUSES, TRIAGE_OUTCOMES } from "./board.js";
 
 const actor = z
   .string()
@@ -25,6 +33,15 @@ const expectedVersion = z
   .int()
   .describe("The card version you read. A stale version is REFUSED with the current card; re-read and re-apply.");
 const column = z.enum(COLUMNS);
+const full = z
+  .boolean()
+  .optional()
+  .describe("Return the whole card (body, activity) instead of the receipt. Default false: a write returns {id, version, column, agent, updated} plus what it produced.");
+const blockedBy = z
+  .array(z.string().min(1))
+  .describe(
+    'The ids of the cards this one waits on, e.g. ["AS-276"]; [] clears it. The card is blocked until every one is merged (or later), and the board emits `unblocked` on it when the last one merges. Each must be a card, not this one, and close no cycle.',
+  );
 const link = z.object({ label: z.string(), url: z.string() }).describe("A reference (a prerequisite PR, where a finding was made, a workshop page) — never the card's own PR");
 const pr = z
   .object({ url: z.string().describe("The card's OWN pull request, https://.../pull/<n>"), number: z.number().int().optional() })
@@ -71,6 +88,7 @@ const patch = z
       })
       .nullable(),
     released: z.string().min(1),
+    blocked_by: blockedBy,
     ...milestoneFields,
   })
   .partial()
@@ -91,6 +109,26 @@ function run(fn: () => unknown) {
   }
 }
 
+/**
+ * A card write: the receipt plus `extra` (the fields this write produced), or
+ * the whole card under `full`. A refusal carries the card's receipt the same
+ * way, or the whole card under `full`.
+ */
+function write(fullCard: boolean | undefined, fn: () => Card, extra: readonly string[] | ((card: Card) => Record<string, unknown>) = []) {
+  try {
+    const card = fn();
+    if (fullCard) return ok(card);
+    return ok(typeof extra === "function" ? { ...receipt(card), ...extra(card) } : receipt(card, extra));
+  } catch (e) {
+    if (e instanceof BoardError) {
+      const j = e.toJSON();
+      const out = fullCard || !j.card ? j : { ...j, card: receipt(j.card) };
+      return { isError: true, content: [{ type: "text" as const, text: JSON.stringify(out, null, 1) }] };
+    }
+    throw e;
+  }
+}
+
 export function buildMcpServer(board: Board): McpServer {
   const server = new McpServer(
     { name: "dispatch-board", version: "1.0.0" },
@@ -98,6 +136,7 @@ export function buildMcpServer(board: Board): McpServer {
       instructions:
         "ArenaSim Dispatch board (docs/design/agent-pipeline.md). list_cards returns SUMMARIES; call get_card for a body. " +
         "Every write needs `actor`; versioned writes need the `version` you read and are refused if it is stale. " +
+        "A card write returns a receipt ({id, version, column, agent, updated} + what it produced), not the card; pass full: true for the whole card. " +
         "claim_card is compare-and-set: if it fails, someone else holds the card — do not spawn.",
     },
   );
@@ -125,11 +164,21 @@ export function buildMcpServer(board: Board): McpServer {
   server.registerTool(
     "get_card",
     {
-      description: "One full card: body, question, links, agent, version, and activity (the last `activity_limit` entries if given; activity_total says how many exist).",
-      inputSchema: { id, activity_limit: z.number().int().min(0).optional() },
+      description:
+        "One full card: body, question, links, agent, version, and activity (the last `activity_limit` entries if given; activity_total says how many exist). " +
+        '`fields` returns only the named fields, plus id and version: e.g. ["activity"] with activity_limit 1 reads the version and latest entry without the body. ' +
+        "A card with blocked_by also carries waiting_on: the blockers not yet merged.",
+      inputSchema: {
+        id,
+        activity_limit: z.number().int().min(0).optional(),
+        fields: z
+          .array(z.string().min(1))
+          .optional()
+          .describe('Only these fields (plus id, version). "activity" (honours activity_limit) and "activity_total" are included only when named.'),
+      },
       annotations: { readOnlyHint: true },
     },
-    async (a) => run(() => board.getCard(a.id, { activity_limit: a.activity_limit })),
+    async (a) => run(() => board.getCard(a.id, { activity_limit: a.activity_limit, fields: a.fields })),
   );
 
   server.registerTool(
@@ -146,12 +195,14 @@ export function buildMcpServer(board: Board): McpServer {
         links: z.array(link).optional(),
         pr: pr.optional(),
         worktree: worktree.optional(),
+        blocked_by: blockedBy.optional(),
         ...Object.fromEntries(Object.entries(milestoneFields).map(([k, v]) => [k, v.optional()])),
         actor,
         by,
+        full,
       },
     },
-    async (a) => run(() => board.createCard(a as Parameters<Board["createCard"]>[0], { actor: a.actor, by: a.by })),
+    async (a) => write(a.full, () => board.createCard(a as Parameters<Board["createCard"]>[0], { actor: a.actor, by: a.by })),
   );
 
   server.registerTool(
@@ -159,9 +210,9 @@ export function buildMcpServer(board: Board): McpServer {
     {
       description:
         "Patch card fields (title, body, role, priority, links, pr, worktree, question, agent, released, and the milestone fields: milestone, iteration, area, summary, human_testing, sweep, gaps) under optimistic concurrency. Rulings are appended with record_ruling, never patched. Column changes go through move_card. `agent` may be null (clear the claim) or {status: done} (close out a WORKING claim) — never working: claims come only from claim_card. Optionally append an activity line in the same write.",
-      inputSchema: { id, patch, expected_version: expectedVersion, activity: z.string().optional(), actor, by },
+      inputSchema: { id, patch, expected_version: expectedVersion, activity: z.string().optional(), actor, by, full },
     },
-    async (a) => run(() => board.updateCard(a.id, a.patch, a.expected_version, { actor: a.actor, by: a.by, activity: a.activity })),
+    async (a) => write(a.full, () => board.updateCard(a.id, a.patch, a.expected_version, { actor: a.actor, by: a.by, activity: a.activity })),
   );
 
   server.registerTool(
@@ -178,10 +229,11 @@ export function buildMcpServer(board: Board): McpServer {
         activity: z.string().optional(),
         actor,
         by,
+        full,
       },
     },
     async (a) =>
-      run(() =>
+      write(a.full, () =>
         board.moveCard(a.id, a.column, a.expected_version, { actor: a.actor, by: a.by, activity: a.activity, patch: a.patch, append: a.append }),
       ),
   );
@@ -197,9 +249,10 @@ export function buildMcpServer(board: Board): McpServer {
         expected_version: expectedVersion,
         actor,
         by,
+        full,
       },
     },
-    async (a) => run(() => board.cancelCard(a.id, a.reason, a.expected_version, { actor: a.actor, by: a.by })),
+    async (a) => write(a.full, () => board.cancelCard(a.id, a.reason, a.expected_version, { actor: a.actor, by: a.by }), ["cancelled"]),
   );
 
   server.registerTool(
@@ -214,9 +267,11 @@ export function buildMcpServer(board: Board): McpServer {
         activity: z.string().optional(),
         actor,
         by,
+        full,
       },
     },
-    async (a) => run(() => board.claimCard(a.id, a.name, { actor: a.actor, by: a.by, activity: a.activity, worktree: a.worktree })),
+    async (a) =>
+      write(a.full, () => board.claimCard(a.id, a.name, { actor: a.actor, by: a.by, activity: a.activity, worktree: a.worktree }), a.worktree === undefined ? [] : ["worktree"]),
   );
 
   const claimClose = {
@@ -226,6 +281,7 @@ export function buildMcpServer(board: Board): McpServer {
     activity: z.string().optional(),
     actor,
     by,
+    full,
   };
   server.registerTool(
     "release_claim",
@@ -233,7 +289,7 @@ export function buildMcpServer(board: Board): McpServer {
       description: "working claim -> agent: null (startup recovery, the live-claim audit, or a dropped spawn). Refused when there is no working claim.",
       inputSchema: claimClose,
     },
-    async (a) => run(() => board.releaseClaim(a.id, a)),
+    async (a) => write(a.full, () => board.releaseClaim(a.id, a)),
   );
   server.registerTool(
     "finish_claim",
@@ -241,41 +297,41 @@ export function buildMcpServer(board: Board): McpServer {
       description: "working claim -> {status: done, finished: now}. Use with move_card for the Engineer/Tester hand-offs, and for a release trigger card's closeout.",
       inputSchema: claimClose,
     },
-    async (a) => run(() => board.finishClaim(a.id, a)),
+    async (a) => write(a.full, () => board.finishClaim(a.id, a)),
   );
 
   server.registerTool(
     "append_activity",
     {
       description: "Append one activity entry {t: now, by, msg}. Activity is append-only.",
-      inputSchema: { id, msg: z.string().min(1), actor, by },
+      inputSchema: { id, msg: z.string().min(1), actor, by, full },
     },
-    async (a) => run(() => board.appendActivity(a.id, a.msg, { actor: a.actor, by: a.by })),
+    async (a) => write(a.full, () => board.appendActivity(a.id, a.msg, { actor: a.actor, by: a.by })),
   );
 
   server.registerTool(
     "append_to_body",
     {
       description: "Append text to the card body under `## <heading>` — Tester and User findings (put the date in the heading).",
-      inputSchema: { id, heading: z.string().min(1), text: z.string().min(1), activity: z.string().optional(), actor, by },
+      inputSchema: { id, heading: z.string().min(1), text: z.string().min(1), activity: z.string().optional(), actor, by, full },
     },
-    async (a) => run(() => board.appendToBody(a.id, a.heading, a.text, { actor: a.actor, by: a.by, activity: a.activity })),
+    async (a) => write(a.full, () => board.appendToBody(a.id, a.heading, a.text, { actor: a.actor, by: a.by, activity: a.activity })),
   );
 
   server.registerTool(
     "answer_question",
     {
       description: "Answer a card's pending question: records the answer, moves the card to in_progress with agent: null (the board's Answer & resume).",
-      inputSchema: { id, answer: z.string().min(1), expected_version: expectedVersion, actor, by },
+      inputSchema: { id, answer: z.string().min(1), expected_version: expectedVersion, actor, by, full },
     },
-    async (a) => run(() => board.answerQuestion(a.id, a.answer, a.expected_version, { actor: a.actor, by: a.by })),
+    async (a) => write(a.full, () => board.answerQuestion(a.id, a.answer, a.expected_version, { actor: a.actor, by: a.by }), ["question"]),
   );
 
   server.registerTool(
     "events_since",
     {
       description:
-        "Board events (created, moved, edited, answered, claimed, claim_released, claim_finished, activity, body_appended, deleted, ruling, merged, cancelled, milestone_created, milestone_updated, milestone_sweep, milestone_guide, milestone_closed, review_submitted, feedback_triaged, migrated) after `cursor`, oldest first. Returns the next cursor to pass. ignore_actors drops your own writes. cursor 0 = from the beginning; `head` gives the current cursor without events. A cursor past `head` is refused (cursor_ahead): it belongs to a re-created board — re-read the board and resume from head.",
+        "Board events (created, moved, edited, answered, claimed, claim_released, claim_finished, activity, body_appended, deleted, ruling, merged, cancelled, unblocked (actor board-rules: the card's last blocker just merged), milestone_created, milestone_updated, milestone_sweep, milestone_guide, milestone_closed, review_submitted, feedback_triaged, migrated) after `cursor`, oldest first. Returns the next cursor to pass. ignore_actors drops your own writes. cursor 0 = from the beginning; `head` gives the current cursor without events. A cursor past `head` is refused (cursor_ahead): it belongs to a re-created board — re-read the board and resume from head.",
       inputSchema: {
         cursor: z.number().int().min(0),
         ignore_actors: z.array(z.string()).optional(),
@@ -300,9 +356,16 @@ export function buildMcpServer(board: Board): McpServer {
         expected_version: expectedVersion.optional(),
         actor,
         by,
+        full,
       },
     },
-    async (a) => run(() => board.recordRuling(a.id, { text: a.text, numbers: a.numbers }, { actor: a.actor, by: a.by, expected_version: a.expected_version })),
+    async (a) =>
+      write(
+        a.full,
+        () => board.recordRuling(a.id, { text: a.text, numbers: a.numbers }, { actor: a.actor, by: a.by, expected_version: a.expected_version }),
+        // The ruling this write recorded, not every ruling the card has.
+        (c) => ({ ruling: Array.isArray(c.rulings) ? c.rulings[c.rulings.length - 1] : null }),
+      ),
   );
 
   server.registerTool(
@@ -318,9 +381,15 @@ export function buildMcpServer(board: Board): McpServer {
         activity: z.string().optional().describe("e.g. the Tester's FINDINGS note"),
         actor,
         by,
+        full,
       },
     },
-    async (a) => run(() => board.markMerged(a.id, { pr: a.pr, merge_sha: a.merge_sha }, a.expected_version, { actor: a.actor, by: a.by, activity: a.activity })),
+    async (a) =>
+      write(a.full, () => board.markMerged(a.id, { pr: a.pr, merge_sha: a.merge_sha }, a.expected_version, { actor: a.actor, by: a.by, activity: a.activity }), [
+        "pr",
+        "merge_sha",
+        "merged_at",
+      ]),
   );
 
   const milestoneVersion = z.number().int().describe("The milestone version you read. A stale version is REFUSED with the current milestone.");

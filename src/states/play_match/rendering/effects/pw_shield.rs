@@ -57,7 +57,9 @@
 //!
 //! One bearer can wear both rigs at once (a Priest shielding a bubbled
 //! Paladin): they are keyed per kind, and both add. Divine Shield's cast is kit
-//! 417, the same Holy launch plus a sound, played off its `DivineShieldPending`.
+//! 417, the same Holy launch plus a sound, played off its `DivineShieldPending`
+//! by `heal_cast.rs`'s `spawn_divine_shield_cast_hands`, in matches and in the
+//! animation sandbox alike.
 //! Its values are the Divine Shield Bench's defaults, signed off at the
 //! client's own numbers (`docs/design/benches/2026-10-16-divine-shield-bench.html`).
 //!

@@ -161,7 +161,36 @@ export const SUMMARY_FIELDS = [
   "milestone",
   "iteration",
   "area",
+  "blocked_by",
 ] as const;
+
+/**
+ * What a card write returns by default: enough to chain the next versioned
+ * write and see where the card now stands, never its body or activity. A
+ * standing card's body runs to tens of thousands of tokens, and echoing it on
+ * every append was the orchestrator's largest single cost (AS-339). A write
+ * adds only what it produced (see the MCP tools); `full: true` asks for the
+ * whole card instead.
+ */
+export const RECEIPT_FIELDS = ["id", "version", "column", "agent", "updated"] as const;
+
+/** A card's receipt: RECEIPT_FIELDS (null when absent) plus the named fields it has. */
+export function receipt(card: Record<string, unknown>, extra: readonly string[] = []): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const f of RECEIPT_FIELDS) out[f] = card[f] ?? null;
+  for (const f of extra) if (card[f] !== undefined) out[f] = card[f];
+  return out;
+}
+
+/**
+ * The actor on events the board derives itself rather than records for a
+ * caller: `unblocked`. It is never a session's tag, so no session's wait
+ * filters it out: the orchestrator's own `mark_merged` of a blocker must
+ * still wake the orchestrator's wait for the card it unblocked.
+ */
+export const RULE_ACTOR = "board-rules";
+/** The most cards one card may wait on. */
+const MAX_BLOCKERS = 50;
 
 /**
  * Patchable through update_card / move_card. `column` is move_card's alone;
@@ -186,6 +215,7 @@ const PATCHABLE = new Set([
   "human_testing",
   "sweep",
   "gaps",
+  "blocked_by",
 ]);
 
 /** Pull the `<script id="state">` JSON out of a saved artifact board page. */
@@ -648,9 +678,25 @@ function checkPatch(patch: Record<string, unknown>): Record<string, unknown> {
       case "sweep":
         checkSweep(v);
         break;
+      case "blocked_by":
+        checkBlockedBy(v);
+        break;
     }
   }
   return out;
+}
+
+/**
+ * The shape of `blocked_by`: the ids of the cards this one waits on, each
+ * once. That they exist, are not the card itself and close no cycle is
+ * checked inside the write, against the table (Board.checkBlockers).
+ */
+function checkBlockedBy(v: unknown): string[] {
+  if (!Array.isArray(v) || !v.every((x) => typeof x === "string" && x.trim() !== "")) invalid("blocked_by must be an array of card ids");
+  const ids = v as string[];
+  if (new Set(ids).size !== ids.length) invalid("blocked_by names a card twice");
+  if (ids.length > MAX_BLOCKERS) invalid(`blocked_by names more than ${MAX_BLOCKERS} cards`);
+  return ids;
 }
 
 /** The named fields of `o` that it has, in the order named. */
@@ -1051,6 +1097,83 @@ export class Board extends EventEmitter {
     this.pending.push({ cursor: Number(info.lastInsertRowid), t, actor, kind, card, data });
   }
 
+  // ---------------------------------------------------------- dependencies
+
+  /** Cards that became finished in the current write (commitDoc fills it). */
+  private finishing = new Set<string>();
+
+  /** Whether a card is finished as STORED: its work is on main. A missing or deleted card is not. */
+  private finishedNow(id: string): boolean {
+    const r = this.db
+      .prepare("SELECT col, json_extract(doc, '$.cancelled') IS NOT NULL AS cx FROM cards WHERE id = ? AND deleted_at IS NULL")
+      .get(id) as { col: string; cx: number } | undefined;
+    return !!r && FINISHED_COLUMNS.includes(r.col) && !r.cx;
+  }
+
+  /**
+   * The cards in `blockedBy` still holding a card up: every one not yet
+   * finished. A cancelled blocker never ships, so it holds the card up until
+   * someone takes it off the list; so does a deleted one.
+   */
+  private waitingOn(blockedBy: unknown, finished: (id: string) => boolean = (id) => this.finishedNow(id)): string[] {
+    return Array.isArray(blockedBy) ? (blockedBy as string[]).filter((b) => !finished(b)) : [];
+  }
+
+  /**
+   * A card's `blocked_by` inside a write: every id names a live card, never
+   * the card itself, and no blocker waits (however indirectly) on this card.
+   */
+  private checkBlockers(id: string | null, blockedBy: string[]): void {
+    for (const b of blockedBy) {
+      if (b === id) invalid(`${id} cannot be blocked by itself`);
+      if (!this.db.prepare("SELECT 1 FROM cards WHERE id = ? AND deleted_at IS NULL").get(b)) invalid(`blocked_by names ${b}, which is not a card`);
+    }
+    if (id === null) return;
+    // Walk what the blockers wait on; reaching `id` would close a cycle no merge can open.
+    const seen = new Set<string>();
+    const stack = [...blockedBy];
+    while (stack.length) {
+      const c = stack.pop() as string;
+      if (seen.has(c)) continue;
+      seen.add(c);
+      const r = this.db.prepare("SELECT json_extract(doc, '$.blocked_by') AS b FROM cards WHERE id = ? AND deleted_at IS NULL").get(c) as
+        | { b: string | null }
+        | undefined;
+      const next = r?.b ? (JSON.parse(r.b) as unknown) : [];
+      for (const n of Array.isArray(next) ? (next as string[]) : []) {
+        if (n === id) invalid(`blocked_by would close a cycle: ${c} already waits on ${id}`);
+        stack.push(n);
+      }
+    }
+  }
+
+  /**
+   * After a write's own events: each card it unblocked — one whose last
+   * blocker this write finished — gets one `unblocked` event, so a wait
+   * wakes on it. A card that is itself finished, or still waits on another
+   * card, gets none.
+   */
+  private recordUnblocks(): void {
+    if (!this.finishing.size) return;
+    const done = [...this.finishing];
+    this.finishing = new Set();
+    const woken = new Set<string>();
+    for (const b of done) {
+      const rows = this.db
+        .prepare(
+          "SELECT id, doc FROM cards WHERE deleted_at IS NULL AND EXISTS (SELECT 1 FROM json_each(cards.doc, '$.blocked_by') WHERE value = ?) ORDER BY rowid",
+        )
+        .all(b) as { id: string; doc: string }[];
+      for (const r of rows) {
+        if (woken.has(r.id)) continue;
+        const doc = JSON.parse(r.doc) as Record<string, unknown>;
+        if (isFinished(doc) || this.waitingOn(doc.blocked_by).length) continue;
+        woken.add(r.id);
+        this.recordEvent(RULE_ACTOR, "unblocked", r.id, { blocked_by: doc.blocked_by, last: b });
+      }
+    }
+  }
+
   /**
    * Run a write. IMMEDIATE takes the write lock before the first read, so the
    * read-validate-write sequence is atomic against every other connection.
@@ -1058,9 +1181,16 @@ export class Board extends EventEmitter {
    */
   private write<T>(fn: () => T): T {
     this.pending = [];
+    this.finishing = new Set();
     let out: T;
     try {
-      out = this.db.transaction(fn).immediate();
+      out = this.db
+        .transaction(() => {
+          const r = fn();
+          this.recordUnblocks();
+          return r;
+        })
+        .immediate();
     } catch (e) {
       this.pending = [];
       throw e;
@@ -1077,6 +1207,7 @@ export class Board extends EventEmitter {
    */
   private commitDoc(id: string, fromVersion: number, doc: Record<string, unknown>): number {
     doc.updated = now();
+    if (isFinished(doc) && !this.finishedNow(id)) this.finishing.add(id);
     const info = this.db
       .prepare("UPDATE cards SET doc = ?, version = version + 1 WHERE id = ? AND version = ? AND deleted_at IS NULL")
       .run(JSON.stringify(doc), id, fromVersion);
@@ -1176,7 +1307,7 @@ export class Board extends EventEmitter {
     }
   }
 
-  private summary(r: CardRow, fields?: string[]): Record<string, unknown> {
+  private summary(r: CardRow, fields: string[] | undefined, finished: (id: string) => boolean): Record<string, unknown> {
     const doc = JSON.parse(r.doc) as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     if (fields && fields.includes("*")) {
@@ -1188,6 +1319,7 @@ export class Board extends EventEmitter {
       }
       out.id = doc.id;
     }
+    if (Array.isArray(out.blocked_by) && out.blocked_by.length) out.waiting_on = this.waitingOn(out.blocked_by, finished);
     out.version = r.version;
     return out;
   }
@@ -1223,13 +1355,51 @@ export class Board extends EventEmitter {
     const rows = this.db
       .prepare(`SELECT id, version, doc FROM cards WHERE ${where.join(" AND ")} ORDER BY rowid`)
       .all(...args) as CardRow[];
-    return rows.map((r) => this.summary(r, opts.fields));
+    // One read of every card's finished state, for the summaries' waiting_on.
+    let finishedIds: Set<string> | null = null;
+    const finished = (b: string) => {
+      finishedIds ??= new Set(
+        (
+          this.db
+            .prepare(
+              `SELECT id FROM cards WHERE deleted_at IS NULL AND col IN (${FINISHED_COLUMNS.map(() => "?").join(", ")}) AND json_extract(doc, '$.cancelled') IS NULL`,
+            )
+            .all(...FINISHED_COLUMNS) as { id: string }[]
+        ).map((x) => x.id),
+      );
+      return finishedIds.has(b);
+    };
+    return rows.map((r) => this.summary(r, opts.fields, finished));
   }
 
-  getCard(id: string, opts: { activity_limit?: number } = {}): Card {
+  /**
+   * One card. Whole by default: body, every field, `activity` (the last
+   * `activity_limit` entries if given) and `activity_total`. `fields` picks
+   * instead: those doc fields it has, plus `id` and `version` always —
+   * `activity` (honouring `activity_limit`) and `activity_total` only when
+   * named, so a caller can read a card's version and log without its body.
+   * `waiting_on` (the blockers not yet merged) rides with `blocked_by`.
+   */
+  getCard(id: string, opts: { activity_limit?: number; fields?: string[] } = {}): Card {
     const r = this.row(id);
+    if (opts.fields !== undefined) {
+      if (!Array.isArray(opts.fields) || !opts.fields.every((f) => typeof f === "string")) invalid("fields must be an array of field names");
+      const doc = JSON.parse(r.doc) as Record<string, unknown>;
+      const out: Record<string, unknown> = { id: doc.id };
+      for (const f of opts.fields) {
+        if (f === "activity") out.activity = this.activity(id, opts.activity_limit);
+        else if (f === "activity_total") out.activity_total = this.activityCount(id);
+        else if (f === "waiting_on") out.waiting_on = this.waitingOn(doc.blocked_by);
+        else if (f in doc && f !== "version") out[f] = doc[f];
+      }
+      if ("activity" in out) out.activity_total = this.activityCount(id);
+      if (Array.isArray(out.blocked_by) && out.blocked_by.length) out.waiting_on = this.waitingOn(out.blocked_by);
+      out.version = r.version;
+      return out as Card;
+    }
     const c = this.materialise(r, opts.activity_limit);
     c.activity_total = this.activityCount(id);
+    if (Array.isArray(c.blocked_by) && c.blocked_by.length) c.waiting_on = this.waitingOn(c.blocked_by);
     return c;
   }
 
@@ -1292,15 +1462,16 @@ export class Board extends EventEmitter {
       human_testing?: string | null;
       sweep?: unknown;
       gaps?: string | null;
+      blocked_by?: string[];
     },
     meta: WriteMeta,
   ): Card {
     const actor = checkActor(meta.actor);
     const column = checkColumn(input.column ?? "backlog");
-    // The milestone fields ride along only when given, so a card filed
-    // without them keeps the same shape as every card before milestones.
+    // The milestone fields (and blocked_by) ride along only when given, so a
+    // card filed without them keeps the same shape as every card before them.
     const extra: Record<string, unknown> = {};
-    for (const k of ["milestone", "iteration", "area", "summary", "human_testing", "sweep", "gaps"] as const) {
+    for (const k of ["milestone", "iteration", "area", "summary", "human_testing", "sweep", "gaps", "blocked_by"] as const) {
       if (input[k] !== undefined) extra[k] = input[k];
     }
     const checked = checkPatch({
@@ -1315,6 +1486,7 @@ export class Board extends EventEmitter {
     });
     return this.write(() => {
       this.checkAttach(extra.milestone);
+      if (extra.blocked_by !== undefined) this.checkBlockers(null, extra.blocked_by as string[]);
       if (extra.milestone != null && extra.iteration == null) extra.iteration = 1;
       const t = now();
       const doc: Record<string, unknown> = {
@@ -1375,6 +1547,7 @@ export class Board extends EventEmitter {
       const { r, doc } = this.loadExpecting(id, expectedVersion);
       checkAgentTransition(id, doc.agent, patch, () => this.current(id));
       const claimNote = claimChangeNote(doc.agent, patch);
+      if (patch.blocked_by !== undefined) this.checkBlockers(id, patch.blocked_by as string[]);
       this.applyMilestonePatch(doc, patch, doc.column as string);
       if (GATED_COLUMNS.includes(doc.column as string) && !gateAllows(doc, doc.column as string)) {
         throw new BoardError("gate_refused", `${id} is in ${String(doc.column)}: a non-pm card there must keep its own PR (pr)`, this.current(id));
@@ -1407,6 +1580,7 @@ export class Board extends EventEmitter {
       const from = doc.column as string;
       checkAgentTransition(id, doc.agent, patch, () => this.current(id));
       const stored = doc.agent;
+      if (patch.blocked_by !== undefined) this.checkBlockers(id, patch.blocked_by as string[]);
       this.applyMilestonePatch(doc, patch, to);
       if (append) doc.body = withSection(doc.body, append.heading, append.text);
       if (!gateAllows(doc, to)) {

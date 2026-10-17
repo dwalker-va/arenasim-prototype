@@ -30,7 +30,7 @@ const ENV = {
   ...(realBoardPage() ? { DISPATCH_BOARD_FIXTURE: realBoardPage() } : {}),
   ...(realBoardExport() ? { DISPATCH_BOARD_EXPORT_FIXTURE: realBoardExport() } : {}),
 };
-const SUITES = ["board", "race", "daemon", "roundtrip", "ui", "prwork", "milestone", "migration", "review", "guide", "replay", "feedback"];
+const SUITES = ["board", "race", "daemon", "roundtrip", "ui", "prwork", "milestone", "migration", "review", "guide", "replay", "feedback", "receipt", "blocked"];
 
 /** A copy of the package's dist/ui/test under .mutants/<name>/, optionally with one edit applied. */
 function copyTo(name) {
@@ -915,6 +915,99 @@ const MUTANTS = [
       "review page: ▶ launches the check's replay and shows launched, or the error",
       "review page: ▶ with no binary says to build first",
     ],
+  },
+  // ---- AS-339: writes return a receipt; first-class dependencies.
+  {
+    name: "write-returns-receipt",
+    file: "dist/mcp.js",
+    find: 'return ok(typeof extra === "function" ? { ...receipt(card), ...extra(card) } : receipt(card, extra));',
+    replace: "return ok(card);",
+    mustFail: ["receipt: every card write returns {id, version, column, agent, updated} plus what it produced", "MCP: move_card with append is the one-write REJECT"],
+  },
+  {
+    name: "write-full-opt-in",
+    file: "dist/mcp.js",
+    find: "if (fullCard)\n            return ok(card);",
+    replace: "",
+    mustFail: ["receipt: full: true returns today's whole card from every write"],
+  },
+  {
+    name: "refusal-carries-receipt",
+    file: "dist/mcp.js",
+    find: "const out = fullCard || !j.card ? j : { ...j, card: receipt(j.card) };",
+    replace: "const out = j;",
+    mustFail: ["receipt: a refusal carries the card's receipt as it is now", "MCP: a stale version is refused as a tool error carrying the current card"],
+  },
+  {
+    name: "get-card-fields",
+    file: "dist/board.js",
+    find: "if (opts.fields !== undefined) {",
+    replace: "if (false) {",
+    mustFail: ["get_card: fields reads version and activity without the body"],
+  },
+  {
+    name: "blocker-must-exist",
+    file: "dist/board.js",
+    find: "invalid(`blocked_by names ${b}, which is not a card`);",
+    replace: "{ }",
+    mustFail: ["blocked_by: names live cards only"],
+  },
+  {
+    name: "blocker-no-cycle",
+    file: "dist/board.js",
+    find: "if (n === id)\n                    invalid(",
+    replace: "if (false)\n                    invalid(",
+    mustFail: ["blocked_by: names live cards only"],
+  },
+  {
+    name: "commit-notes-finish",
+    file: "dist/board.js",
+    find: "if (isFinished(doc) && !this.finishedNow(id))\n            this.finishing.add(id);",
+    replace: "",
+    mustFail: ["unblocked: the LAST blocker's merge emits one event", "MCP: the orchestrator's own mark_merged of the last blocker wakes its own wait"],
+  },
+  {
+    name: "unblock-only-the-last",
+    file: "dist/board.js",
+    find: "if (isFinished(doc) || this.waitingOn(doc.blocked_by).length)",
+    replace: "if (isFinished(doc))",
+    mustFail: ["unblocked: the LAST blocker's merge emits one event"],
+  },
+  {
+    name: "unblock-skips-finished",
+    file: "dist/board.js",
+    find: "if (isFinished(doc) || this.waitingOn(doc.blocked_by).length)",
+    replace: "if (this.waitingOn(doc.blocked_by).length)",
+    mustFail: ["unblocked: a pm blocker finishing in done counts; a waiting card that is itself finished gets no event"],
+  },
+  {
+    // The derived event must not carry a session's tag, or the orchestrator's own merge hides it from its own wait.
+    name: "unblock-actor-is-the-boards",
+    file: "dist/board.js",
+    find: 'export const RULE_ACTOR = "board-rules";',
+    replace: 'export const RULE_ACTOR = "orchestrator";',
+    mustFail: ["MCP: the orchestrator's own mark_merged of the last blocker wakes its own wait"],
+  },
+  {
+    name: "cancelled-blocker-waits",
+    file: "dist/board.js",
+    find: "return !!r && FINISHED_COLUMNS.includes(r.col) && !r.cx;",
+    replace: "return !!r && FINISHED_COLUMNS.includes(r.col);",
+    mustFail: ["blocked_by: waiting_on lists the blockers not yet merged; a cancelled blocker keeps waiting"],
+  },
+  {
+    name: "summary-cancelled-blocker-waits",
+    file: "dist/board.js",
+    find: " AND json_extract(doc, '$.cancelled') IS NULL`)",
+    replace: "`)",
+    mustFail: ["blocked_by: waiting_on lists the blockers not yet merged; a cancelled blocker keeps waiting"],
+  },
+  {
+    name: "ui-blocked-face",
+    file: "ui/board.html",
+    find: '(bs && bs.blocked ? " blocked" : "")',
+    replace: '""',
+    mustFail: ["blocked_by: a waiting card is visibly blocked on its face and in its drawer"],
   },
 ];
 

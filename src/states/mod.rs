@@ -648,6 +648,16 @@ impl Plugin for StatesPlugin {
                 .before(play_match::consume_instant_ability_signals)
                 .run_if(in_combat_scene),
         )
+        // Divine Shield's hands, off its pending component: at the head of the
+        // fixed tick, before Phase 1's `process_divine_shield` consumes it,
+        // so a pending the AI queued last tick and one the animation sandbox
+        // queued in Update are both read (`spawn_divine_shield_cast_hands`).
+        .add_systems(
+            FixedUpdate,
+            play_match::spawn_divine_shield_cast_hands
+                .before(CombatSystemPhase::ResourcesAndAuras)
+                .run_if(in_combat_scene),
+        )
         // Combat resolution, death, and visual effects (after core combat)
         .add_systems(
             Update,

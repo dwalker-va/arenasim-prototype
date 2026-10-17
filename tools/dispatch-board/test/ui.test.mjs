@@ -48,6 +48,8 @@ async function openPage(t, base) {
   await until("the board to load", () => doc.querySelector(".card"));
   const page = {
     doc,
+    /** The daemon's nudge, with no drawer to wait on. */
+    nudge: () => es.onmessage({}),
     /** The daemon's nudge after a write: reload the board (and the open card). */
     async refresh(expectVersion) {
       es.onmessage({});
@@ -156,7 +158,7 @@ for (const [shape, body] of [
     const client = await mcpClient(t, d.base);
     let c = (await call(client, "create_card", { title: "shape", body, role: "engineer", actor: "pm-test" })).value;
     if (body === "") c = (await call(client, "append_to_body", { id: c.id, heading: "Tester findings", text: "1. x", actor: "orchestrator" })).value;
-    const stored = c.body;
+    const stored = (await getCard(client, c.id)).body;
     const page = await openPage(t, d.base);
     await page.open(c.id, c.version);
     page.set("d-pri", "P1");
@@ -364,4 +366,43 @@ test("the page's PR check is the board's own definition, not a copy", async () =
   const { PR_URL } = await import("../dist/board.js");
   assert.ok(HTML.includes(JSON.stringify(PR_URL.source)), "the served page does not carry board.ts's PR_URL");
   assert.doesNotMatch(HTML, /\\\/pull\\\/\\d\+/, "the page carries a hand-written PR regex of its own");
+});
+
+test("blocked_by: a waiting card is visibly blocked on its face and in its drawer, and reads unblocked once its blocker merges", async (t) => {
+  const d = await spawnDaemon(t);
+  const client = await mcpClient(t, d.base);
+  const o = { actor: "orchestrator" };
+  const pr = { url: "https://github.com/o/r/pull/7" };
+  let x = (await call(client, "create_card", { title: "the blocker", role: "engineer", column: "review", pr, ...o })).value;
+  x = (await call(client, "claim_card", { id: x.id, name: `${x.id}-test`, ...o })).value;
+  const w = (await call(client, "create_card", { title: "waits", role: "engineer", blocked_by: [x.id], ...o })).value;
+  const free = (await call(client, "create_card", { title: "free", role: "engineer", ...o })).value;
+
+  const page = await openPage(t, d.base);
+  const face = () => page.doc.querySelector(`.card[data-id="${w.id}"]`);
+  assert.ok(face().classList.contains("blocked"), "the waiting card's face is not marked blocked");
+  assert.match(face().querySelector(".tag.blk").textContent, new RegExp(`blocked by ${x.id}`));
+  const freeFace = page.doc.querySelector(`.card[data-id="${free.id}"]`);
+  assert.equal(freeFace.querySelector(".tag.blk, .tag.unblk"), null, "a card with no blockers shows a dependency tag");
+  assert.ok(!freeFace.classList.contains("blocked"));
+
+  await page.open(w.id, w.version);
+  const sec = page.doc.getElementById("d-blockers");
+  assert.match(sec.querySelector("h3").textContent, /waiting on 1/);
+  assert.match(sec.textContent, /the blocker/);
+  assert.match(sec.querySelector(".brow.open .bst").textContent, /review/);
+  page.doc.getElementById("d-close").click();
+
+  assert.ok((await call(client, "mark_merged", { id: x.id, pr, merge_sha: "d".repeat(40), expected_version: x.version, ...o })).ok);
+  page.nudge();
+  await until("the face to read unblocked", () => face()?.querySelector(".tag.unblk"));
+  assert.ok(!face().classList.contains("blocked"));
+  await page.open(w.id, w.version);
+  // The drawer first shows the copy it fetched before, then its fresh read.
+  const after = await until("the drawer to read unblocked", () => {
+    const s = page.doc.getElementById("d-blockers");
+    return s && /unblocked/.test(s.querySelector("h3").textContent) && s;
+  });
+  assert.equal(after.querySelector(".brow.open"), null);
+  assert.match(after.querySelector(".bst").textContent, /merged/);
 });

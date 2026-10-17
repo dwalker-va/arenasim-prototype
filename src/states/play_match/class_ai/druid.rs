@@ -658,7 +658,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             return true;
         }
 
-        // The Chain play (TeamPlan): the lock on the enemy healer is about to
+        // The Chain play (TeamPlan): a lock the team holds on an enemy is about to
         // end, so Cyclone hands off onto it, landing in its last moments — or
         // the global cooldown is held for that moment. The play does not run
         // while a teammate is dying (`TeamSituation::play_for`).
@@ -895,7 +895,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
     }
 
     /// The Chain play's step ([`super::chain`]): `Some(true)` when Cyclone
-    /// was handed off onto the locked enemy healer, `Some(false)` when the
+    /// was handed off onto the locked enemy, `Some(false)` when the
     /// global cooldown is held for a hand-off still to come, `None` when the
     /// rotation goes on.
     fn try_chain(&mut self, combatant: &mut Combatant) -> Option<bool> {

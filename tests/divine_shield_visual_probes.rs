@@ -32,7 +32,7 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::systems::process_divine_shield;
 use arenasim::states::play_match::{
     animate_client_particles, ds_halo_on, ds_sparkle_rate, particle_rotation,
-    place_pw_shield_cards, shield_card_extent, shield_layer_rgb, spawn_instant_cast_hands,
+    place_pw_shield_cards, shield_card_extent, shield_layer_rgb, spawn_divine_shield_cast_hands,
     update_pw_shield_visuals, HaloMode, DIVINE_SHIELD_AURA_NAME, DS_HALO_MODE, DS_SPARKLE_HEIGHT,
     PWS_CLIENT_TO_RIG, PW_SHIELD_AURA_NAME,
 };
@@ -759,12 +759,19 @@ fn hands_app() -> (App, Entity) {
     app.init_asset::<Image>();
     app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
     app.insert_resource(AbilityDefinitions::default());
-    app.add_systems(Update, spawn_instant_cast_hands);
+    app.insert_resource(CombatLog::default());
+    // Production order: the hands read the pending at the head of the tick,
+    // and Phase 1's resolver consumes it after them.
+    app.add_systems(
+        Update,
+        (spawn_divine_shield_cast_hands, process_divine_shield).chain(),
+    );
     let paladin = app
         .world_mut()
         .spawn((
             Combatant::new(0, 0, CharacterClass::Paladin),
             Transform::from_xyz(0.0, 1.0, 0.0),
+            ActiveAuras::default(),
         ))
         .id();
     let body = app
@@ -784,8 +791,11 @@ fn hands(app: &mut App) -> Vec<(HealCastKind, Vec3)> {
 }
 
 /// Kit 417: the bubble's cast flashes both of the Paladin's own hands with the
-/// Holy launch, off its pending component (Divine Shield has no cast state).
-/// The control: a Paladin that casts nothing lights no hands.
+/// Holy launch, off its pending component (Divine Shield has no cast state),
+/// read before `process_divine_shield` consumes it. The control: a Paladin
+/// that casts nothing lights no hands. The sandbox's own path, where the
+/// pending is queued from `Update`, is `animation_sandbox_boot.rs`
+/// `divine_shield_previews_its_cards_and_both_hands`.
 #[test]
 fn the_bubble_cast_flashes_the_paladins_holy_hands() {
     let (mut app, paladin) = hands_app();

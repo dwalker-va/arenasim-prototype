@@ -34,17 +34,20 @@
 //!
 //! **Context gates.** The play is not run where it measured negative: a
 //! peeling class does not peel for a teammate of a class it hurts
-//! ([`PEEL_GATES`]). A unit whose context is gated runs its fallback play,
-//! as a Warrior (no tool) does.
+//! ([`PEEL_GATES`]). A unit whose context is gated passes to the next stage
+//! of the pipeline (`plays::PLAY_ORDER`), as a Warrior (no tool) does.
 
 use bevy::prelude::*;
 use smallvec::SmallVec;
 
+use super::plays::{own_class, PlayStage};
 use super::{CombatContext, Incoming};
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::{AuraType, PetType};
-use crate::states::play_match::situation::{Play, Role};
+use crate::states::play_match::situation::{
+    ExceptionKey, ExceptionSet, Play, PlayId, Role, TeamSituation,
+};
 
 /// The peel a unit owes this tick: the teammate in danger, and the attackers
 /// it can peel, nearest that teammate first.
@@ -168,7 +171,8 @@ pub const PEEL_GATES_FINDINGS: &str = "docs/design/balance/2026-10-12-as290-peel
 /// significant on the 12 confirmation seeds alone. A gate is a whole
 /// peeler-for-ally context:
 /// within each, no single tool measured positive. Every gate is re-checked at
-/// the milestone sweep with the gates lifted (`team{1,2}_lifted_gates`); it
+/// the milestone sweep with the gates lifted (`"team1_exceptions": {"Peel":
+/// []}`, and team 2's); it
 /// stays only while it still measures negative, and a context that turns
 /// negative joins. `tests/peel_gates.rs` names them by set equality, so adding
 /// or removing one is a visible edit there too.
@@ -228,16 +232,56 @@ pub fn gated(peeler: CharacterClass, ally: CharacterClass) -> bool {
         .any(|g| g.context == PeelContext { peeler, ally })
 }
 
-/// Whether the deciding unit runs the Peel play for `ally`: it has a peel
-/// tool, and — unless its team's gates are lifted for a measurement
-/// (`TeamSituation::peel_gates_lifted`) — its context is not gated.
-pub fn peels_for(ctx: &CombatContext, ally: Entity) -> bool {
-    let class = |e: Entity| ctx.combatants.get(&e).map(|info| info.class);
-    let Some(peeler) = class(ctx.self_entity) else {
-        return false;
-    };
-    if peel_tools(peeler).is_empty() {
-        return false;
+/// The Peel play, as a stage of the pipeline (`plays::PLAY_ORDER`).
+pub struct PeelStage;
+
+impl PlayStage for PeelStage {
+    fn id(&self) -> PlayId {
+        PlayId::Peel
     }
-    ctx.situation().peel_gates_lifted || class(ally).is_none_or(|ally| !gated(peeler, ally))
+
+    fn config_key(&self) -> &'static str {
+        "Peel"
+    }
+
+    /// Every role, for a teammate in danger with an attacker to peel — never
+    /// the teammate in danger itself: its own defence is its chain's.
+    fn calls(&self, situation: &TeamSituation, _role: Role, me: Entity) -> Option<Play> {
+        situation
+            .ally_in_danger
+            .filter(|w| w.subject != me && !situation.danger_attackers.is_empty())
+            .map(|w| Play::Peel { ally: w.subject })
+    }
+
+    /// A unit with a peel tool ([`peel_tools`]): a Warrior has none.
+    fn admits(&self, ctx: &CombatContext, _play: &Play) -> bool {
+        own_class(ctx).is_some_and(|class| !peel_tools(class).is_empty())
+    }
+
+    /// The peeler's class, for the class of the teammate it peels for: the
+    /// context [`PEEL_GATES`] switches off. A teammate whose class its view
+    /// does not know is gated by nothing.
+    fn exception_key(&self, ctx: &CombatContext, play: &Play) -> Option<ExceptionKey> {
+        let Play::Peel { ally } = *play else {
+            return None;
+        };
+        let class = |e: Entity| ctx.combatants.get(&e).map(|info| info.class);
+        Some(ExceptionKey::in_context(
+            class(ctx.self_entity)?,
+            class(ally)?,
+        ))
+    }
+
+    fn exceptions_have_context(&self) -> bool {
+        true
+    }
+
+    fn exceptions(&self) -> ExceptionSet {
+        ExceptionSet::of(
+            &PEEL_GATES
+                .iter()
+                .map(|g| ExceptionKey::in_context(g.context.peeler, g.context.ally))
+                .collect::<Vec<_>>(),
+        )
+    }
 }

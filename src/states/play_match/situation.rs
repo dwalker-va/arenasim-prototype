@@ -71,39 +71,38 @@
 //! ## Plays
 //!
 //! A [`Play`] is what a unit does about the situation: a named reordering of
-//! its own priority chain ([`TeamSituation::play_for`]).
+//! its own priority chain ([`TeamSituation::play_for`]). Each gated play is a
+//! STAGE of one pipeline, `class_ai::plays::PLAY_ORDER` — Peel, TakeCover,
+//! Chain, Burst — and a unit runs the first stage its team runs, the
+//! situation calls, and the unit admits; a stage that does not apply passes
+//! it to the next (the walk is `class_ai::plays`'s). Every play is a NEW
+//! behaviour, gated under `AiProfile::TeamPlan` ([`SituationConfig::under`])
+//! and graduated or deleted at a milestone sweep (the architecture's §4.5);
+//! [`WithheldPlays`] denies a play to one team — the paired control its probe
+//! and its head-to-head measure it against — or replaces its exceptions.
 //!
-//! - **`Burst`** — a kill window is open, so a DPS puts its BURST step at the
-//!   head of its chain: its hard hitters on the window's subject
-//!   (`class_ai::burst`), each cast only if it lands before the window's
-//!   `until` (the cast gate's fit, `class_ai::cast_guard`). A NEW behaviour,
-//!   gated under `AiProfile::TeamPlan` ([`SituationConfig::burst`]) like Peel;
-//!   withheld for measurement the same way, and not run by the classes
-//!   [`BURST_EXCEPTIONS`] names.
 //! - **`Peel`** — a teammate is in danger, so a unit other than that teammate
 //!   puts its PEEL step at the head of its chain: crowd control on one of the
 //!   teammate's [`danger_attackers`](TeamSituation::danger_attackers)
-//!   (`class_ai::peel`). A NEW behaviour, so it is gated under
-//!   `AiProfile::TeamPlan` ([`SituationConfig::peel`]), and graduates or is
-//!   deleted at the next milestone sweep (the architecture's §4.5).
-//!   [`WithheldPlays`] denies it to one team — the paired control its probe
-//!   and its head-to-head measure it against.
+//!   (`class_ai::peel`), except in the contexts `peel::PEEL_GATES` names.
 //! - **`TakeCover`** — the team is in its `last_stand` and the unit is a
 //!   healer, so it breaks the enemy casters' line of sight behind cover
 //!   instead of standing in the open (`team_solve::last_stand_cover`, driven
-//!   from the healers' posture machines). A MOVEMENT play: the chain is the
-//!   ordinary one. A NEW behaviour, gated under `AiProfile::TeamPlan`
-//!   ([`SituationConfig::take_cover`]) and withheld for measurement like the
-//!   others; inert on a map with nothing to hide behind.
+//!   from the healers' posture machines; `class_ai::take_cover`). A MOVEMENT
+//!   play: the chain is the ordinary one. Inert on a map with nothing to
+//!   hide behind.
 //! - **`Chain`** — a lock the team holds is about to end (`lock_ending`
 //!   within [`CHAIN_HORIZON_SECS`]), so a unit with a hand-off puts its
 //!   CHAIN step between a peel and a burst: its own crowd control on the
 //!   locked enemy, landing in the lock's last moments, or its global
 //!   cooldown held for that moment (`class_ai::chain`). A healer does not
-//!   chain while a teammate of its own is dying. A NEW behaviour, gated
-//!   under `AiProfile::TeamPlan` ([`SituationConfig::chain`]); withheld for
-//!   measurement the same way, and not run by the classes
-//!   [`CHAIN_EXCEPTIONS`] names.
+//!   chain while a teammate of its own is dying. Not run by the classes
+//!   `chain::CHAIN_EXCEPTIONS` names.
+//! - **`Burst`** — a kill window is open, so a DPS puts its BURST step at the
+//!   head of its chain: its hard hitters on the window's subject
+//!   (`class_ai::burst`), each cast only if it lands before the window's
+//!   `until` (the cast gate's fit, `class_ai::cast_guard`). Not run by the
+//!   classes `burst::BURST_EXCEPTIONS` names.
 //!
 //! ## Thresholds
 //!
@@ -166,6 +165,7 @@ use smallvec::SmallVec;
 
 use super::ai_profile::AiProfile;
 use super::class_ai::combat_snapshot::CombatSnapshot;
+use super::class_ai::plays;
 use super::class_ai::{pressing_when_ahead, stealth_visible, team_hp_sums, CombatantInfo};
 use super::components::{Aura, AuraType};
 use super::constants::{DAMPENING_RAMP_SECS, DAMPENING_START_SECS};
@@ -287,13 +287,13 @@ pub struct TeamSituation {
     /// nearest to it first (entity order on a tie). Empty while no teammate is
     /// in danger.
     pub danger_attackers: SmallVec<[Entity; 4]>,
-    /// Whether this team runs the gated [`Play::Peel`]
-    /// ([`SituationConfig::peel`]).
-    pub peel_play: bool,
-    /// Whether the Peel play's context gates (`class_ai::peel::PEEL_GATES`)
-    /// are lifted for this team, so it peels in the contexts they switch off:
-    /// a measurement control ([`WithheldPlays::team1_lifted`]), off by default.
-    pub peel_gates_lifted: bool,
+    /// The gated plays this team runs ([`SituationConfig::runs`]): under
+    /// `AiProfile::TeamPlan`, every one not withheld from it.
+    pub runs: PlaySet,
+    /// Each play's exceptions for this team: the stage's shipped table
+    /// (`PlayStage::exceptions`), unless a measurement override replaces it
+    /// ([`WithheldPlays::team1_exceptions`]).
+    pub exceptions: PlayExceptions,
     /// Every living non-pet teammate (the deciding unit included), in entity
     /// order.
     pub allies: SmallVec<[AllyStanding; 3]>,
@@ -312,30 +312,15 @@ pub struct TeamSituation {
     /// The most injured enemy that is low and that no enemy healer can heal
     /// (the module docs' `kill_window`).
     pub kill_window: Option<Window>,
-    /// Whether this team runs the gated [`Play::Burst`]
-    /// ([`SituationConfig::burst`]).
-    pub burst_play: bool,
-    /// The classes of this team that do NOT burst ([`BURST_EXCEPTIONS`], or
-    /// the measurement override [`WithheldPlays::burst_exceptions`]).
-    pub burst_exceptions: ClassSet,
     /// The trace's `sim_time` this was classified at: the clock a window's
     /// `until` is on, which a cast is fitted against.
     pub now: f32,
     /// The team's last living non-pet unit, while it faces two or more living
     /// non-pet enemies it can see (the module docs' `last_stand`).
     pub last_stand: Option<Window>,
-    /// Whether this team runs the gated [`Play::TakeCover`]
-    /// ([`SituationConfig::take_cover`]).
-    pub cover_play: bool,
     /// The enemy whose hold by this team ends soonest — the lock a chain
     /// hands off from (the module docs' `lock_ending`).
     pub lock_ending: Option<Window>,
-    /// Whether this team runs the gated [`Play::Chain`]
-    /// ([`SituationConfig::chain`]).
-    pub chain_play: bool,
-    /// The classes of this team that do NOT chain ([`CHAIN_EXCEPTIONS`], or
-    /// the measurement override [`WithheldPlays::chain_exceptions`]).
-    pub chain_exceptions: ClassSet,
 }
 
 /// What a unit does about a situation: a named reordering of its own priority
@@ -351,8 +336,10 @@ pub enum Play {
     Burst,
     /// `ally` is in danger: the PEEL step — crowd control on one of its
     /// [`danger_attackers`](TeamSituation::danger_attackers) — heads the
-    /// chain. When it does not fire, the chain below it runs as
-    /// [`TeamSituation::fallback_play`] orders it. Gated under
+    /// chain. When it does not fire, the class's own chain runs below it,
+    /// led by a burst step when the Burst stage applies to the unit
+    /// (`CombatContext::burst_window`); never by a chain step, which runs
+    /// only under the Chain play (`CombatContext::chain_window`). Gated under
     /// `AiProfile::TeamPlan`.
     Peel { ally: Entity },
     /// The unit is its team's [`last_stand`](TeamSituation::last_stand), and
@@ -366,10 +353,53 @@ pub enum Play {
     /// class's own crowd control onto the subject, landing in the lock's last
     /// moments
     /// (`class_ai::chain`) — heads the chain. When it does not fire, or
-    /// holds the global cooldown for a hand-off still to come, the chain
-    /// below runs as [`TeamSituation::fallback_play`] orders it. Gated under
+    /// holds the global cooldown for a hand-off still to come, the class's
+    /// own chain runs below it, led by a burst step when the Burst stage
+    /// applies to the unit (`CombatContext::burst_window`). Gated under
     /// `AiProfile::TeamPlan`.
     Chain { subject: Entity },
+}
+
+impl Play {
+    /// The gated play this is; `None` for [`Play::Default`], which is no
+    /// stage and cannot be withheld.
+    pub fn id(&self) -> Option<PlayId> {
+        match self {
+            Play::Default => None,
+            Play::Burst => Some(PlayId::Burst),
+            Play::Peel { .. } => Some(PlayId::Peel),
+            Play::TakeCover => Some(PlayId::TakeCover),
+            Play::Chain { .. } => Some(PlayId::Chain),
+        }
+    }
+}
+
+/// A gated play's identity: a [`Play`] without its payload. Withholding a
+/// play, overriding its exceptions and placing it in the pipeline
+/// (`class_ai::plays::PLAY_ORDER`) are all keyed by it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PlayId {
+    Peel,
+    TakeCover,
+    Chain,
+    Burst,
+}
+
+impl PlayId {
+    /// Every gated play, in declaration order.
+    pub const ALL: [PlayId; 4] = [
+        PlayId::Peel,
+        PlayId::TakeCover,
+        PlayId::Chain,
+        PlayId::Burst,
+    ];
+
+    /// How many gated plays there are.
+    pub const COUNT: usize = Self::ALL.len();
+
+    fn index(self) -> usize {
+        self as usize
+    }
 }
 
 /// The part a unit plays for its team, as far as choosing a play goes.
@@ -420,91 +450,34 @@ impl TeamSituation {
         (1.0 - self.since_gates / ATTRITION_ONSET_SECS).clamp(0.0, 1.0)
     }
 
-    /// The play the unit `me`, playing `role`, runs in this situation.
-    ///
-    /// [`Play::Peel`] comes first, for every role: a teammate in danger is
-    /// answered before a burst is spent. Only a team that runs it
-    /// ([`Self::peel_play`]) peels, only for a teammate with an attacker to
-    /// peel, and never the teammate in danger itself — its own defence is its
-    /// chain's.
-    ///
-    /// Otherwise [`Self::play_without_peel`]: a last-stand healer's
-    /// [`Play::TakeCover`], then [`Play::Chain`] while a lock the team holds
-    /// is about to end, then [`Self::fallback_play`].
+    /// The play the unit `me`, playing `role`, runs in this situation, as
+    /// its TEAM sees it: the first stage of the pipeline
+    /// (`class_ai::plays::PLAY_ORDER` — Peel, TakeCover, Chain, Burst) that
+    /// the team runs ([`Self::runs`]) and that the situation calls for `me`;
+    /// else [`Play::Default`]. The unit's own admission — its tools and each
+    /// stage's exceptions — is `CombatContext::play`'s, over the same walk.
     pub fn play_for(&self, role: Role, me: Entity) -> Play {
-        match self.ally_in_danger {
-            Some(w) if self.peel_play && w.subject != me && !self.danger_attackers.is_empty() => {
-                Play::Peel { ally: w.subject }
-            }
-            _ => self.play_without_peel(role, me),
-        }
+        plays::walk(self, role, me, None, |_, _| true)
     }
 
-    /// The play the unit `me`, playing `role`, runs when it does not peel —
-    /// no teammate in danger, or a peel its context gates off
-    /// (`class_ai::peel::peels_for`). The ONE place both the ungated and the
-    /// gated-peel paths take, so a gated peeler still chains. In order:
-    ///
-    /// 1. [`Play::TakeCover`] — `me` is a healer and its team's
-    ///    [`last_stand`](Self::last_stand): alone against two or more, it hides
-    ///    rather than holding a global cooldown for a hand-off (a last stand
-    ///    has no teammate to make a lock it could extend);
-    /// 2. [`Play::Chain`] while a lock is ending ([`Self::chain_window`]; a
-    ///    healer only while no teammate of its own is dying);
-    /// 3. else [`Self::fallback_play`].
-    pub fn play_without_peel(&self, role: Role, me: Entity) -> Play {
-        match self.chain_window() {
-            _ if role == Role::Healer
-                && self.cover_play
-                && self.last_stand.is_some_and(|w| w.subject == me) =>
-            {
-                Play::TakeCover
-            }
-            Some(w) if role != Role::Healer || self.dying_allies().next().is_none() => {
-                Play::Chain { subject: w.subject }
-            }
-            _ => self.fallback_play(role),
-        }
+    /// The play the unit `me`, playing `role`, runs when the stage `id` and
+    /// every stage before it do not apply: the same walk, from the stage
+    /// after `id`, as the team sees it. Test-only: it pins the walk's
+    /// composition from the team's side; the AI reads `CombatContext::play`.
+    #[cfg(test)]
+    pub fn play_after(&self, id: PlayId, role: Role, me: Entity) -> Play {
+        plays::walk(self, role, me, Some(id), |_, _| true)
     }
 
     /// The lock a chain hands off from: [`Self::lock_ending`], on a team that
-    /// runs [`Play::Chain`] ([`Self::chain_play`]), while its `until` is no
-    /// more than [`CHAIN_HORIZON_SECS`] away.
+    /// runs [`Play::Chain`] ([`Self::runs`]), while its `until` is no more
+    /// than [`CHAIN_HORIZON_SECS`] away.
     pub fn chain_window(&self) -> Option<Window> {
         self.lock_ending.filter(|w| {
-            self.chain_play
+            self.runs.contains(PlayId::Chain)
                 && w.until
                     .is_some_and(|until| until - self.now <= CHAIN_HORIZON_SECS)
         })
-    }
-
-    /// Whether a unit of `class` runs the Chain play this team runs: not one
-    /// of [`Self::chain_exceptions`].
-    pub fn chains(&self, class: CharacterClass) -> bool {
-        self.chain_play && !self.chain_exceptions.contains(class)
-    }
-
-    /// The play `role` runs when it does not peel: the order of the chain
-    /// below a peel step that did not fire. A DPS on a team that runs it
-    /// ([`Self::burst_play`]) bursts while a kill window is open. Exhaustive
-    /// over [`Role`], so a new role is a compile error here until it answers.
-    ///
-    /// Per role, not per class: a class [`Self::burst_exceptions`] names is
-    /// answered by [`Self::bursts`], which every reader of the play asks
-    /// (`CombatContext::play`, `CombatContext::burst_window`).
-    pub fn fallback_play(&self, role: Role) -> Play {
-        match role {
-            Role::MeleeDps | Role::RangedDps if self.burst_play && self.kill_window.is_some() => {
-                Play::Burst
-            }
-            Role::MeleeDps | Role::RangedDps | Role::Healer => Play::Default,
-        }
-    }
-
-    /// Whether a unit of `class` runs the Burst play this team runs: not one
-    /// of [`Self::burst_exceptions`].
-    pub fn bursts(&self, class: CharacterClass) -> bool {
-        self.burst_play && !self.burst_exceptions.contains(class)
     }
 }
 
@@ -539,28 +512,7 @@ impl ClassSet {
     }
 }
 
-/// A DPS class the Burst play is NOT used for, and the measurement that put it
-/// here. The ruling (2026-10-12): a play that measures negative in a context
-/// is not used there; each exception is named here, with its finding, and is
-/// re-checked at each milestone sweep by running the head-to-head with the
-/// exceptions lifted (`"burst_exceptions": []` in a headless config, read into
-/// [`WithheldPlays::burst_exceptions`]).
-#[derive(Clone, Copy, Debug)]
-pub struct BurstException {
-    pub class: CharacterClass,
-    /// The measurement that put it here: the findings note and its row.
-    pub finding: &'static str,
-}
-
-/// The classes the Burst play is not used for (see [`BurstException`]).
-pub const BURST_EXCEPTIONS: &[BurstException] = &[];
-
-/// [`BURST_EXCEPTIONS`] as a set.
-pub fn burst_exception_classes() -> ClassSet {
-    ClassSet::of(&BURST_EXCEPTIONS.iter().map(|e| e.class).collect::<Vec<_>>())
-}
-
-/// How long before the lock on the enemy healer ends the Chain play runs
+/// How long before a lock the team holds ends the Chain play runs
 /// ([`TeamSituation::chain_window`]). It covers the slowest hand-off in the
 /// kit — a 1.5s cast slowed by Curse of Tongues, 2.25s — landing in the
 /// lock's last moments, plus the global cooldown held for it
@@ -568,23 +520,133 @@ pub fn burst_exception_classes() -> ClassSet {
 /// the unit runs its fallback play.
 pub const CHAIN_HORIZON_SECS: f32 = 4.0;
 
-/// A class the Chain play is NOT used for, and the measurement that put it
-/// here: the same ruling, and the same re-check at each milestone sweep, as
-/// [`BurstException`] (`"chain_exceptions": []` in a headless config, read
-/// into [`WithheldPlays::chain_exceptions`]).
-#[derive(Clone, Copy, Debug)]
-pub struct ChainException {
+/// The key an exceptions table is looked up under: the class of the unit
+/// deciding, and for a play switched off by CONTEXT (the Peel play, by the
+/// teammate it peels for) the class of that context. Every play's table is
+/// one shape of it, so one override type serves them all
+/// ([`ExceptionOverrides`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExceptionKey {
     pub class: CharacterClass,
-    /// The measurement that put it here: the findings note and its row.
-    pub finding: &'static str,
+    pub context: Option<CharacterClass>,
 }
 
-/// The classes the Chain play is not used for (see [`ChainException`]).
-pub const CHAIN_EXCEPTIONS: &[ChainException] = &[];
+impl ExceptionKey {
+    /// `class`, in any context.
+    pub fn class(class: CharacterClass) -> Self {
+        Self {
+            class,
+            context: None,
+        }
+    }
 
-/// [`CHAIN_EXCEPTIONS`] as a set.
-pub fn chain_exception_classes() -> ClassSet {
-    ClassSet::of(&CHAIN_EXCEPTIONS.iter().map(|e| e.class).collect::<Vec<_>>())
+    /// `class`, in the context of `context`.
+    pub fn in_context(class: CharacterClass, context: CharacterClass) -> Self {
+        Self {
+            class,
+            context: Some(context),
+        }
+    }
+
+    fn bit(self) -> u128 {
+        let index = |c: CharacterClass| {
+            CharacterClass::all()
+                .iter()
+                .position(|x| *x == c)
+                .expect("every class is in CharacterClass::all")
+        };
+        let stride = CharacterClass::all().len() + 1;
+        let slot = index(self.class) * stride + self.context.map_or(0, |c| index(c) + 1);
+        assert!(slot < 128, "ExceptionSet holds {slot} keys: widen it");
+        1 << slot
+    }
+
+    /// Parse a config's exception entry: `"Mage"`, or `"Mage/Hunter"` (a
+    /// Mage, peeling for a Hunter), with `parse_class` naming each class.
+    pub fn parse(
+        entry: &str,
+        parse_class: impl Fn(&str) -> Result<CharacterClass, String>,
+    ) -> Result<Self, String> {
+        match entry.split_once('/') {
+            Some((class, context)) => Ok(Self::in_context(
+                parse_class(class.trim())?,
+                parse_class(context.trim())?,
+            )),
+            None => Ok(Self::class(parse_class(entry.trim())?)),
+        }
+    }
+}
+
+/// A set of [`ExceptionKey`]s: one play's exceptions table.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct ExceptionSet(u128);
+
+impl ExceptionSet {
+    /// The set of exactly `keys`.
+    pub fn of(keys: &[ExceptionKey]) -> Self {
+        Self(keys.iter().fold(0, |bits, k| bits | k.bit()))
+    }
+
+    pub fn contains(&self, key: ExceptionKey) -> bool {
+        self.0 & key.bit() != 0
+    }
+}
+
+impl From<ClassSet> for ExceptionSet {
+    /// Each class of `classes`, in any context.
+    fn from(classes: ClassSet) -> Self {
+        Self::of(
+            &classes
+                .classes()
+                .map(ExceptionKey::class)
+                .collect::<Vec<_>>(),
+        )
+    }
+}
+
+/// Every gated play's exceptions, as one team runs them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PlayExceptions([ExceptionSet; PlayId::COUNT]);
+
+impl PlayExceptions {
+    /// `id`'s exceptions.
+    pub fn of(&self, id: PlayId) -> ExceptionSet {
+        self.0[id.index()]
+    }
+
+    /// Each play's shipped table (`PlayStage::exceptions`), less what
+    /// `overrides` replaces.
+    pub fn resolve(overrides: &ExceptionOverrides) -> Self {
+        Self(PlayId::ALL.map(|id| {
+            overrides
+                .get(id)
+                .unwrap_or_else(|| plays::stage(id).exceptions())
+        }))
+    }
+}
+
+/// A measurement's replacement exceptions tables, per gated play: `None`
+/// keeps the shipped table, `Some(set)` runs `set` in its place, and
+/// `Some(ExceptionSet::default())` LIFTS every exception — how a milestone
+/// sweep re-checks one against the same side with it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ExceptionOverrides([Option<ExceptionSet>; PlayId::COUNT]);
+
+impl ExceptionOverrides {
+    /// `id`'s replacement table, if any.
+    pub fn get(&self, id: PlayId) -> Option<ExceptionSet> {
+        self.0[id.index()]
+    }
+
+    /// Run `set` in place of `id`'s shipped table.
+    pub fn set(&mut self, id: PlayId, set: ExceptionSet) {
+        self.0[id.index()] = Some(set);
+    }
+
+    /// Lift every exception of `id`.
+    pub fn lift(&mut self, id: PlayId) {
+        self.set(id, ExceptionSet::default());
+    }
 }
 
 /// The situation of both teams. Team `t` lives at index `t - 1`.
@@ -650,25 +712,15 @@ pub struct SituationConfig {
     /// `shared.heal_range`: an enemy healer farther than this from a unit
     /// cannot heal it.
     pub heal_range: f32,
-    /// Whether the team runs the gated [`Play::Peel`]. Off until
-    /// [`Self::under`] puts the team under `TeamPlan`, so a context classified
-    /// with the bare thresholds (a test's) never peels.
-    pub peel: bool,
-    /// Whether the team runs the gated [`Play::Burst`] — off until
-    /// [`Self::under`] puts it under `TeamPlan`, as [`Self::peel`] is.
-    pub burst: bool,
-    /// Whether the Peel play's context gates are lifted for the team
-    /// ([`TeamSituation::peel_gates_lifted`]); set by [`Self::for_team`] from
-    /// [`Self::withheld`].
-    pub peel_gates_lifted: bool,
-    /// Whether the team runs the gated [`Play::TakeCover`] — off until
-    /// [`Self::under`] puts it under `TeamPlan`, as [`Self::peel`] is.
-    pub take_cover: bool,
-    /// Whether the team runs the gated [`Play::Chain`] — off until
-    /// [`Self::under`] puts it under `TeamPlan`, as [`Self::peel`] is.
-    pub chain: bool,
-    /// The gated plays each team is denied ([`WithheldPlays`]), applied by
-    /// [`Self::for_team`].
+    /// The gated plays the team runs. None until [`Self::under`] puts the
+    /// team under `TeamPlan`, so a context classified with the bare
+    /// thresholds (a test's) runs no play.
+    pub runs: PlaySet,
+    /// The team's replacement exceptions tables, if a measurement set any;
+    /// set by [`Self::for_team`] from [`Self::withheld`].
+    pub exceptions: ExceptionOverrides,
+    /// The gated plays each team is denied, and its exceptions overrides
+    /// ([`WithheldPlays`]), applied by [`Self::for_team`].
     pub withheld: WithheldPlays,
 }
 
@@ -693,11 +745,8 @@ impl SituationConfig {
             kill_hp_release: config.shared.kill_hp_release,
             kill_oom_mana: config.shared.kill_oom_mana,
             heal_range: config.shared.heal_range,
-            peel: false,
-            burst: false,
-            peel_gates_lifted: false,
-            take_cover: false,
-            chain: false,
+            runs: PlaySet::default(),
+            exceptions: ExceptionOverrides::default(),
             withheld: WithheldPlays::default(),
         }
     }
@@ -705,77 +754,44 @@ impl SituationConfig {
     /// The thresholds a team under `profile` is classified with. Tempo's
     /// hysteresis band is a behaviour change, so it is gated: `TeamPlan` keeps
     /// the configured release, and `Legacy` releases at the onset — no band,
-    /// which is exactly the unlatched `>=` test it has always run. The Peel
-    /// and Burst plays are gated the same way: `TeamPlan` runs them, `Legacy`
-    /// never does. Every other threshold is the same under both.
+    /// which is exactly the unlatched `>=` test it has always run. The plays
+    /// are gated the same way: `TeamPlan` runs every one, `Legacy` none.
+    /// Every other threshold is the same under both.
     pub fn under(self, profile: AiProfile) -> Self {
         match profile {
             AiProfile::TeamPlan => Self {
-                peel: true,
-                burst: true,
-                take_cover: true,
-                chain: true,
+                runs: PlaySet::all(),
                 ..self
             },
             AiProfile::Legacy => Self {
                 press_release_margin: self.press_advantage_margin,
-                peel: false,
-                burst: false,
-                take_cover: false,
-                chain: false,
+                runs: PlaySet::default(),
                 ..self
             },
         }
     }
 
     /// The configuration team `team`, under `profile`, is classified with:
-    /// [`Self::under`], less the plays [`Self::withheld`] denies the team, and
-    /// with the context gates it lifts for the team lifted.
+    /// [`Self::under`], less the plays [`Self::withheld`] denies the team,
+    /// and with the exceptions overrides it sets for the team.
     pub fn for_team(self, team: u8, profile: AiProfile) -> Self {
         let cfg = self.under(profile);
-        let denied = self.withheld.for_team(team);
         Self {
-            peel: cfg.peel && !denied.denies(&PEEL),
-            burst: cfg.burst && !denied.denies(&Play::Burst),
-            peel_gates_lifted: self.withheld.lifted_for_team(team).denies(&PEEL),
-            take_cover: cfg.take_cover && !denied.denies(&Play::TakeCover),
-            chain: cfg.chain && !denied.denies(&CHAIN),
+            runs: cfg.runs.without(self.withheld.for_team(team)),
+            exceptions: self.withheld.exceptions_for_team(team),
             ..cfg
         }
     }
-
-    /// The classes that do not burst: [`BURST_EXCEPTIONS`], unless the
-    /// measurement override [`WithheldPlays::burst_exceptions`] names others.
-    pub fn burst_exceptions(&self) -> ClassSet {
-        self.withheld
-            .burst_exceptions
-            .unwrap_or_else(burst_exception_classes)
-    }
-
-    /// The classes that do not chain: [`CHAIN_EXCEPTIONS`], unless the
-    /// measurement override [`WithheldPlays::chain_exceptions`] names others.
-    pub fn chain_exceptions(&self) -> ClassSet {
-        self.withheld
-            .chain_exceptions
-            .unwrap_or_else(chain_exception_classes)
-    }
 }
 
-/// The gated plays one team is denied: one flag per gated [`Play`] variant,
-/// read and written only through the exhaustive matches in [`Self::denies`]
-/// and [`Self::withhold`]. Deleting a gated play is therefore a compile error
-/// here until its flag goes with it, and gating a new one is a compile error
-/// until it answers.
+/// A set of gated plays, a bit per [`PlayId`]: the plays a team runs, or the
+/// plays withheld from it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PlaySet {
-    peel: bool,
-    burst: bool,
-    take_cover: bool,
-    chain: bool,
-}
+pub struct PlaySet(u8);
 
 impl PlaySet {
-    /// The set that denies exactly `plays`.
+    /// The set of exactly `plays` ([`Play::Default`] is no gated play, and
+    /// adds nothing).
     pub fn of(plays: &[Play]) -> Self {
         let mut set = Self::default();
         for play in plays {
@@ -784,26 +800,43 @@ impl PlaySet {
         set
     }
 
-    /// Deny `play` (a no-op for an ungated one: it cannot be withheld).
+    /// Every gated play.
+    pub fn all() -> Self {
+        let mut set = Self::default();
+        for id in PlayId::ALL {
+            set.insert(id);
+        }
+        set
+    }
+
+    /// Add `play` (a no-op for an ungated one: it cannot be withheld).
     pub fn withhold(&mut self, play: &Play) {
-        match play {
-            Play::Peel { .. } => self.peel = true,
-            Play::Burst => self.burst = true,
-            Play::TakeCover => self.take_cover = true,
-            Play::Chain { .. } => self.chain = true,
-            Play::Default => {}
+        if let Some(id) = play.id() {
+            self.insert(id);
         }
     }
 
-    /// Whether `play` is denied. An ungated play never is.
+    pub fn insert(&mut self, id: PlayId) {
+        self.0 |= 1 << id.index();
+    }
+
+    pub fn contains(&self, id: PlayId) -> bool {
+        self.0 & (1 << id.index()) != 0
+    }
+
+    /// Whether `play` is in the set. An ungated play never is.
     pub fn denies(&self, play: &Play) -> bool {
-        match play {
-            Play::Peel { .. } => self.peel,
-            Play::Burst => self.burst,
-            Play::TakeCover => self.take_cover,
-            Play::Chain { .. } => self.chain,
-            Play::Default => false,
-        }
+        play.id().is_some_and(|id| self.contains(id))
+    }
+
+    /// This set less `other`'s plays.
+    pub fn without(self, other: PlaySet) -> Self {
+        Self(self.0 & !other.0)
+    }
+
+    /// Its plays, in [`PlayId::ALL`] order.
+    pub fn ids(&self) -> impl Iterator<Item = PlayId> + '_ {
+        PlayId::ALL.into_iter().filter(|id| self.contains(*id))
     }
 }
 
@@ -819,40 +852,33 @@ pub const CHAIN: Play = Play::Chain {
     subject: Entity::PLACEHOLDER,
 };
 
-/// The gated plays ([`Play::Peel`], [`Play::Burst`], [`Play::Chain`]) each team is DENIED, for
-/// measurement: a team under `TeamPlan` with a play withheld is the paired
-/// control the play is measured against — in a tier-4 probe (the same seed
-/// bank with the play off) and in a head-to-head (one side with it, one
-/// without, on one seed).
+/// The measurement controls on the gated plays, per team, keyed by play id:
+///
+/// - **Withheld** ([`Self::team1`], [`Self::team2`]): the plays each team is
+///   DENIED. A team under `TeamPlan` with a play withheld is the paired
+///   control the play is measured against — in a tier-4 probe (the same seed
+///   bank with the play off) and in a head-to-head (one side with it, one
+///   without, on one seed).
+/// - **Exceptions** ([`Self::team1_exceptions`], [`Self::team2_exceptions`]):
+///   a play's exceptions table replaced for a team. An empty table LIFTS
+///   every exception, so the play runs even where it measured negative: how
+///   a milestone sweep re-checks an exception, the same side with it and
+///   without, on one seed.
 ///
 /// A MEASUREMENT CONTROL, not a behaviour switch: nothing in the game sets it,
-/// but it is reachable from a headless match's JSON
-/// (`team1_withheld_plays` / `team2_withheld_plays`, `burst_exceptions`) and
-/// so from `--replay`, which honours the same config. The default withholds
-/// nothing. It lives only as long as the plays it names stay gated: when a
-/// play graduates or is deleted (§4.5) its flag goes, and with the last gated
-/// play this type and the config fields are deleted too.
-///
-/// It carries the Peel play's second measurement control too: whether each
-/// team has its CONTEXT GATES lifted (`team1_lifted_gates` /
-/// `team2_lifted_gates`), so Peel runs even in the contexts it is switched
-/// off in (`class_ai::peel::PEEL_GATES`). That is how a milestone sweep
-/// re-checks a gate: the same side with its gates and without, on one seed.
+/// but it is reachable from a headless match's JSON (`team1_withheld_plays`,
+/// `team1_exceptions` and team 2's) and so from `--replay`, which honours the
+/// same config. The default withholds and overrides nothing. It lives only as
+/// long as plays stay gated: when the last gated play graduates or is deleted
+/// (§4.5), this type and the config fields are deleted too.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WithheldPlays {
     pub team1: PlaySet,
     pub team2: PlaySet,
-    /// Replaces [`BURST_EXCEPTIONS`] for both teams when set: how a milestone
-    /// sweep re-checks an exception (`Some(ClassSet::default())` lifts them
-    /// all). `None`, the default, keeps the shipped exceptions.
-    pub burst_exceptions: Option<ClassSet>,
-    /// The plays whose context gates team 1 has lifted.
-    pub team1_lifted: PlaySet,
-    /// The plays whose context gates team 2 has lifted.
-    pub team2_lifted: PlaySet,
-    /// Replaces [`CHAIN_EXCEPTIONS`] for both teams when set, as
-    /// [`Self::burst_exceptions`] does for the Burst play.
-    pub chain_exceptions: Option<ClassSet>,
+    /// Team 1's replacement exceptions tables.
+    pub team1_exceptions: ExceptionOverrides,
+    /// Team 2's replacement exceptions tables.
+    pub team2_exceptions: ExceptionOverrides,
 }
 
 impl WithheldPlays {
@@ -866,37 +892,63 @@ impl WithheldPlays {
         }
     }
 
-    /// The plays whose context gates team `team` has lifted (a set "denies" a
-    /// play it names; only Peel has context gates); team 1's for a team id
-    /// outside 1..=2.
-    pub fn lifted_for_team(&self, team: u8) -> PlaySet {
+    /// Team `team`'s exceptions overrides; team 1's for a team id outside
+    /// 1..=2.
+    pub fn exceptions_for_team(&self, team: u8) -> ExceptionOverrides {
         if team == 2 {
-            self.team2_lifted
+            self.team2_exceptions
         } else {
-            self.team1_lifted
+            self.team1_exceptions
         }
     }
 
-    /// Parse a config's list of gated play names (`"Peel"`, `"Burst"`, `"Chain"`) into
-    /// the set it denies.
+    /// Team `team`'s exceptions overrides, to set; team 1's for a team id
+    /// outside 1..=2.
+    pub fn exceptions_mut(&mut self, team: u8) -> &mut ExceptionOverrides {
+        if team == 2 {
+            &mut self.team2_exceptions
+        } else {
+            &mut self.team1_exceptions
+        }
+    }
+
+    /// Parse a config's list of gated play names (each stage's config key,
+    /// `class_ai::plays::parse_play`) into the set it names.
     pub fn parse_set(names: &[String]) -> Result<PlaySet, String> {
         let mut set = PlaySet::default();
         for name in names {
-            let play = match name.as_str() {
-                "Peel" | "peel" => PEEL,
-                "Burst" | "burst" => Play::Burst,
-                "TakeCover" | "take_cover" => Play::TakeCover,
-                "Chain" | "chain" => CHAIN,
-                other => {
-                    return Err(format!(
-                        "Unknown withheld play: '{other}'. Gated plays: Peel, Burst, TakeCover, \
-                         Chain"
-                    ))
-                }
-            };
-            set.withhold(&play);
+            set.insert(plays::parse_play(name)?);
         }
         Ok(set)
+    }
+
+    /// Parse a config's exceptions table for the play `id`: each entry a
+    /// class (`"Mage"`) or, for a play switched off by context, a class in
+    /// a context (`"Mage/Hunter"`) — the shape the play's stage keys its
+    /// exceptions by (`PlayStage::exceptions_have_context`).
+    pub fn parse_exceptions(
+        id: PlayId,
+        entries: &[String],
+        parse_class: impl Fn(&str) -> Result<CharacterClass, String>,
+    ) -> Result<ExceptionSet, String> {
+        let stage = plays::stage(id);
+        let mut keys = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let key = ExceptionKey::parse(entry, &parse_class)?;
+            if key.context.is_some() != stage.exceptions_have_context() {
+                return Err(format!(
+                    "Exception '{entry}' for {}: its exceptions are {}",
+                    stage.config_key(),
+                    if stage.exceptions_have_context() {
+                        "a class in a context, as \"Mage/Hunter\""
+                    } else {
+                        "a class, as \"Mage\""
+                    }
+                ));
+            }
+            keys.push(key);
+        }
+        Ok(ExceptionSet::of(&keys))
     }
 }
 
@@ -956,21 +1008,16 @@ pub fn classify_roster(
         enemy_healer_locked: enemy_healer_locked(roster, auras, team, prev, clock.now),
         ally_in_danger,
         danger_attackers,
-        peel_play: cfg.peel,
-        peel_gates_lifted: cfg.peel_gates_lifted,
+        runs: cfg.runs,
+        exceptions: PlayExceptions::resolve(&cfg.exceptions),
         allies,
         in_danger: danger.in_danger,
         danger_cleared_at: danger.cleared_at,
         classified: true,
         kill_window: kill_window(roster, auras, obstacles, team, prev, clock.now, cfg),
-        burst_play: cfg.burst,
-        burst_exceptions: cfg.burst_exceptions(),
         now: clock.now,
         last_stand: last_stand(roster, auras, team, prev, clock.now),
-        cover_play: cfg.take_cover,
         lock_ending: lock_ending(roster, auras, team, prev, clock.now),
-        chain_play: cfg.chain,
-        chain_exceptions: cfg.chain_exceptions(),
     }
 }
 
@@ -1790,10 +1837,7 @@ mod tests {
         assert_eq!(
             teamplan,
             SituationConfig {
-                peel: true,
-                burst: true,
-                take_cover: true,
-                chain: true,
+                runs: PlaySet::all(),
                 ..SituationConfig::default()
             }
         );
@@ -1802,10 +1846,7 @@ mod tests {
             legacy,
             SituationConfig {
                 press_release_margin: teamplan.press_advantage_margin,
-                peel: false,
-                burst: false,
-                take_cover: false,
-                chain: false,
+                runs: PlaySet::default(),
                 ..teamplan
             },
             "only the release and the gated plays differ"
@@ -1862,7 +1903,7 @@ mod tests {
         };
         let open = TeamSituation {
             kill_window: Some(window),
-            burst_play: true,
+            runs: PlaySet::of(&[Play::Burst]),
             ..Default::default()
         };
         let me = Entity::from_raw(9);
@@ -1870,7 +1911,7 @@ mod tests {
         assert_eq!(open.play_for(Role::RangedDps, me), Play::Burst);
         assert_eq!(open.play_for(Role::Healer, me), Play::Default);
         let gated = TeamSituation {
-            burst_play: false,
+            runs: PlaySet::default(),
             ..open.clone()
         };
         assert_eq!(gated.play_for(Role::MeleeDps, me), Play::Default);
@@ -1886,11 +1927,13 @@ mod tests {
     /// not burst; every other class of a team that runs the play does.
     #[test]
     fn a_burst_exception_names_a_class_that_does_not_burst() {
+        let mut withheld = WithheldPlays::default();
+        withheld.exceptions_mut(1).set(
+            PlayId::Burst,
+            ClassSet::of(&[CharacterClass::Hunter]).into(),
+        );
         let cfg = SituationConfig {
-            withheld: WithheldPlays {
-                burst_exceptions: Some(ClassSet::of(&[CharacterClass::Hunter])),
-                ..Default::default()
-            },
+            withheld,
             ..SituationConfig::default()
         }
         .for_team(1, AiProfile::TeamPlan);
@@ -1904,21 +1947,30 @@ mod tests {
             &MatchClock::after_gates(30.0),
             &cfg,
         );
-        assert!(!s.bursts(CharacterClass::Hunter));
-        assert!(s.bursts(CharacterClass::Warrior));
-        // The shipped exceptions, unless overridden.
+        let burst = s.exceptions.of(PlayId::Burst);
+        assert!(burst.contains(ExceptionKey::class(CharacterClass::Hunter)));
+        assert!(!burst.contains(ExceptionKey::class(CharacterClass::Warrior)));
+        // The shipped exceptions, unless overridden; an override for one team
+        // only.
         assert_eq!(
-            SituationConfig::default().burst_exceptions(),
-            burst_exception_classes()
+            PlayExceptions::resolve(&ExceptionOverrides::default()).of(PlayId::Burst),
+            plays::stage(PlayId::Burst).exceptions()
         );
-        let lifted = SituationConfig {
-            withheld: WithheldPlays {
-                burst_exceptions: Some(ClassSet::default()),
-                ..Default::default()
-            },
-            ..SituationConfig::default()
-        };
-        assert_eq!(lifted.burst_exceptions(), ClassSet::default());
+        assert_eq!(
+            SituationConfig {
+                withheld,
+                ..SituationConfig::default()
+            }
+            .for_team(2, AiProfile::TeamPlan)
+            .exceptions,
+            ExceptionOverrides::default()
+        );
+        let mut lifted = ExceptionOverrides::default();
+        lifted.lift(PlayId::Burst);
+        assert_eq!(
+            PlayExceptions::resolve(&lifted).of(PlayId::Burst),
+            ExceptionSet::default()
+        );
     }
 
     /// Peel heads every role's play while a teammate is in danger with an
@@ -1942,32 +1994,37 @@ mod tests {
                 since: 0.0,
                 until: None,
             }),
-            peel_play: true,
-            burst_play: true,
+            runs: PlaySet::of(&[PEEL, Play::Burst]),
             ..Default::default()
         };
         for role in [Role::MeleeDps, Role::RangedDps, Role::Healer] {
             assert_eq!(danger.play_for(role, me), Play::Peel { ally }, "{role:?}");
             assert_eq!(
                 danger.play_for(role, ally),
-                danger.fallback_play(role),
+                danger.play_after(PlayId::Chain, role, ally),
                 "the teammate in danger does not peel for itself"
             );
             let gated = TeamSituation {
-                peel_play: false,
+                runs: PlaySet::of(&[Play::Burst]),
                 ..danger.clone()
             };
-            assert_eq!(gated.play_for(role, me), gated.fallback_play(role));
+            assert_eq!(
+                gated.play_for(role, me),
+                gated.play_after(PlayId::Chain, role, me)
+            );
             let unattacked = TeamSituation {
                 danger_attackers: SmallVec::new(),
                 ..danger.clone()
             };
             assert_eq!(
                 unattacked.play_for(role, me),
-                unattacked.fallback_play(role)
+                unattacked.play_after(PlayId::Chain, role, me)
             );
         }
-        assert_eq!(danger.fallback_play(Role::MeleeDps), Play::Burst);
+        assert_eq!(
+            danger.play_after(PlayId::Chain, Role::MeleeDps, me),
+            Play::Burst
+        );
     }
 
     /// The danger's attackers are the enemies pressuring its subject, nearest
@@ -2005,9 +2062,18 @@ mod tests {
             withheld,
             ..SituationConfig::default()
         };
-        assert!(cfg.for_team(1, AiProfile::TeamPlan).peel);
-        assert!(!cfg.for_team(2, AiProfile::TeamPlan).peel);
-        assert!(!cfg.for_team(1, AiProfile::Legacy).peel);
+        assert!(cfg
+            .for_team(1, AiProfile::TeamPlan)
+            .runs
+            .contains(PlayId::Peel));
+        assert!(!cfg
+            .for_team(2, AiProfile::TeamPlan)
+            .runs
+            .contains(PlayId::Peel));
+        assert!(!cfg
+            .for_team(1, AiProfile::Legacy)
+            .runs
+            .contains(PlayId::Peel));
         assert_eq!(
             WithheldPlays::parse_set(&["Peel".to_string()]),
             Ok(PlaySet::of(&[PEEL]))
@@ -2024,10 +2090,24 @@ mod tests {
             },
             ..SituationConfig::default()
         };
-        assert!(!cfg.for_team(1, AiProfile::TeamPlan).burst);
-        assert!(cfg.for_team(1, AiProfile::TeamPlan).peel, "Peel stays");
-        assert!(cfg.for_team(2, AiProfile::TeamPlan).burst);
-        assert!(!cfg.for_team(2, AiProfile::Legacy).burst);
+        assert!(!cfg
+            .for_team(1, AiProfile::TeamPlan)
+            .runs
+            .contains(PlayId::Burst));
+        assert!(
+            cfg.for_team(1, AiProfile::TeamPlan)
+                .runs
+                .contains(PlayId::Peel),
+            "Peel stays"
+        );
+        assert!(cfg
+            .for_team(2, AiProfile::TeamPlan)
+            .runs
+            .contains(PlayId::Burst));
+        assert!(!cfg
+            .for_team(2, AiProfile::Legacy)
+            .runs
+            .contains(PlayId::Burst));
         assert_eq!(
             WithheldPlays::parse_set(&["Burst".to_string(), "Peel".to_string()]),
             Ok(PlaySet::of(&[Play::Burst, PEEL]))
@@ -2097,8 +2177,7 @@ mod tests {
         let ending = TeamSituation {
             lock_ending: Some(lock(30.0 + CHAIN_HORIZON_SECS)),
             now: 30.0,
-            chain_play: true,
-            burst_play: true,
+            runs: PlaySet::of(&[CHAIN, Play::Burst]),
             kill_window: Some(lock(31.0)),
             ..Default::default()
         };
@@ -2109,7 +2188,10 @@ mod tests {
                 "{role:?}"
             );
         }
-        assert_eq!(ending.fallback_play(Role::MeleeDps), Play::Burst);
+        assert_eq!(
+            ending.play_after(PlayId::Chain, Role::MeleeDps, me),
+            Play::Burst
+        );
         let far = TeamSituation {
             lock_ending: Some(lock(30.01 + CHAIN_HORIZON_SECS)),
             ..ending.clone()
@@ -2117,7 +2199,7 @@ mod tests {
         assert_eq!(far.play_for(Role::RangedDps, me), Play::Burst);
         assert_eq!(far.play_for(Role::Healer, me), Play::Default);
         let gated = TeamSituation {
-            chain_play: false,
+            runs: PlaySet::of(&[Play::Burst]),
             ..ending.clone()
         };
         assert_eq!(gated.play_for(Role::Healer, me), Play::Default);
@@ -2137,7 +2219,7 @@ mod tests {
         let danger = TeamSituation {
             ally_in_danger: Some(lock(0.0)),
             danger_attackers: [Entity::from_raw(2)].into_iter().collect(),
-            peel_play: true,
+            runs: PlaySet::of(&[PEEL, CHAIN, Play::Burst]),
             ..ending.clone()
         };
         assert_eq!(
@@ -2155,17 +2237,31 @@ mod tests {
             },
             ..SituationConfig::default()
         };
-        assert!(cfg.for_team(1, AiProfile::TeamPlan).chain);
-        assert!(!cfg.for_team(2, AiProfile::TeamPlan).chain);
-        assert!(cfg.for_team(2, AiProfile::TeamPlan).burst, "Burst stays");
-        assert!(!cfg.for_team(1, AiProfile::Legacy).chain);
+        assert!(cfg
+            .for_team(1, AiProfile::TeamPlan)
+            .runs
+            .contains(PlayId::Chain));
+        assert!(!cfg
+            .for_team(2, AiProfile::TeamPlan)
+            .runs
+            .contains(PlayId::Chain));
+        assert!(
+            cfg.for_team(2, AiProfile::TeamPlan)
+                .runs
+                .contains(PlayId::Burst),
+            "Burst stays"
+        );
+        assert!(!cfg
+            .for_team(1, AiProfile::Legacy)
+            .runs
+            .contains(PlayId::Chain));
         assert_eq!(
             WithheldPlays::parse_set(&["Chain".to_string()]),
             Ok(PlaySet::of(&[CHAIN]))
         );
         assert_eq!(
-            SituationConfig::default().chain_exceptions(),
-            chain_exception_classes()
+            PlayExceptions::resolve(&ExceptionOverrides::default()).of(PlayId::Chain),
+            plays::stage(PlayId::Chain).exceptions()
         );
     }
 
@@ -2530,22 +2626,28 @@ mod tests {
                 since: 0.0,
                 until: None,
             }),
-            cover_play: true,
+            runs: PlaySet::of(&[Play::TakeCover]),
             ..Default::default()
         };
         assert_eq!(standing.play_for(Role::Healer, me), Play::TakeCover);
         assert_eq!(standing.play_for(Role::RangedDps, me), Play::Default);
         assert_eq!(standing.play_for(Role::Healer, other), Play::Default);
         let ungated = TeamSituation {
-            cover_play: false,
+            runs: PlaySet::default(),
             ..standing.clone()
         };
         assert_eq!(ungated.play_for(Role::Healer, me), Play::Default);
         // The gate: TeamPlan runs it, Legacy never does, and a withheld team
         // does not.
         let cfg = SituationConfig::default();
-        assert!(cfg.under(AiProfile::TeamPlan).take_cover);
-        assert!(!cfg.under(AiProfile::Legacy).take_cover);
+        assert!(cfg
+            .under(AiProfile::TeamPlan)
+            .runs
+            .contains(PlayId::TakeCover));
+        assert!(!cfg
+            .under(AiProfile::Legacy)
+            .runs
+            .contains(PlayId::TakeCover));
         let withheld = SituationConfig {
             withheld: WithheldPlays {
                 team1: PlaySet::of(&[Play::TakeCover]),
@@ -2553,8 +2655,14 @@ mod tests {
             },
             ..cfg
         };
-        assert!(!withheld.for_team(1, AiProfile::TeamPlan).take_cover);
-        assert!(withheld.for_team(2, AiProfile::TeamPlan).take_cover);
+        assert!(!withheld
+            .for_team(1, AiProfile::TeamPlan)
+            .runs
+            .contains(PlayId::TakeCover));
+        assert!(withheld
+            .for_team(2, AiProfile::TeamPlan)
+            .runs
+            .contains(PlayId::TakeCover));
         assert_eq!(
             WithheldPlays::parse_set(&["TakeCover".to_string()]),
             Ok(PlaySet::of(&[Play::TakeCover]))
@@ -2562,7 +2670,7 @@ mod tests {
     }
 
     /// TakeCover and Chain: a last-stand healer with a lock ending takes
-    /// cover rather than chaining — in `play_for` and in `play_without_peel`,
+    /// cover rather than chaining — in `play_for` and in `play_after(PlayId::Peel, ..)`,
     /// the path a gated peeler takes — and chains once the cover play is
     /// gated off. Any other unit chains.
     #[test]
@@ -2576,19 +2684,18 @@ mod tests {
                 since: 0.0,
                 until: None,
             }),
-            cover_play: true,
+            runs: PlaySet::of(&[Play::TakeCover, CHAIN]),
             lock_ending: Some(Window {
                 subject,
                 since: 0.0,
                 until: Some(31.0),
             }),
             now: 30.0,
-            chain_play: true,
             ..Default::default()
         };
         assert_eq!(standing.play_for(Role::Healer, me), Play::TakeCover);
         assert_eq!(
-            standing.play_without_peel(Role::Healer, me),
+            standing.play_after(PlayId::Peel, Role::Healer, me),
             Play::TakeCover
         );
         assert_eq!(
@@ -2600,7 +2707,7 @@ mod tests {
             Play::Chain { subject }
         );
         let uncovered = TeamSituation {
-            cover_play: false,
+            runs: PlaySet::of(&[CHAIN]),
             ..standing.clone()
         };
         assert_eq!(

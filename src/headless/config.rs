@@ -3,7 +3,7 @@
 //! Parses JSON match configurations and converts them to the game's MatchConfig format.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::str::FromStr;
 
@@ -68,32 +68,39 @@ pub struct HeadlessMatchConfig {
     pub team1_ai_profile: Option<String>,
     #[serde(default)]
     pub team2_ai_profile: Option<String>,
-    /// Gated plays (`"Peel"`, `"Burst"`, `"Chain"`) to DENY each team, for measurement:
-    /// a team under `TeamPlan` with a play withheld is the paired control the
-    /// play is measured against (`situation::WithheldPlays`). Empty — the
-    /// default — withholds nothing.
+    /// Gated plays (`"Peel"`, `"TakeCover"`, `"Chain"`, `"Burst"` — each
+    /// play stage's config key) to DENY each team, for measurement: a team
+    /// under `TeamPlan` with a play withheld is the paired control the play
+    /// is measured against (`situation::WithheldPlays`). Empty — the default
+    /// — withholds nothing.
     #[serde(default)]
     pub team1_withheld_plays: Vec<String>,
     #[serde(default)]
     pub team2_withheld_plays: Vec<String>,
-    /// The classes (`"Hunter"`, ...) that do not run the Burst play, for
-    /// measurement: replaces the shipped `situation::BURST_EXCEPTIONS` for
-    /// both teams. `[]` lifts every exception — how a milestone sweep
-    /// re-checks one. Omitted, the shipped exceptions hold.
+    /// Per gated play, the exceptions table to run IN PLACE of the shipped
+    /// one for each team, for measurement: `{"Peel": []}` lifts every Peel
+    /// context gate, `{"Burst": ["Hunter"]}` stops the Hunter bursting. An
+    /// entry is a class, or for a play switched off by context (Peel) a class
+    /// in a context: `"Mage/Hunter"`, a Mage peeling for a Hunter. Omitted,
+    /// the shipped tables hold.
+    #[serde(default)]
+    pub team1_exceptions: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    pub team2_exceptions: BTreeMap<String, Vec<String>>,
+    /// DEPRECATED — `team1_exceptions: {"Burst": [...]}` and team 2's. Kept so
+    /// the committed sweep generators still run: the classes that do not run
+    /// the Burst play, for both teams.
     #[serde(default)]
     pub burst_exceptions: Option<Vec<String>>,
-    /// Gated plays (`"Peel"`) whose CONTEXT GATES each team has lifted, for
-    /// measurement: the play runs even in the contexts it is switched off in
-    /// (`class_ai::peel::PEEL_GATES`), so a milestone sweep can re-check a
-    /// gate against the same side with it. Empty — the default — lifts
-    /// nothing.
+    /// DEPRECATED — `team1_exceptions: {"<play>": []}`. Kept so the committed
+    /// sweep generators still run: each play named has every exception lifted
+    /// for the team.
     #[serde(default)]
     pub team1_lifted_gates: Vec<String>,
     #[serde(default)]
     pub team2_lifted_gates: Vec<String>,
-    /// The classes that do not run the Chain play, for measurement: replaces
-    /// the shipped `situation::CHAIN_EXCEPTIONS` for both teams, as
-    /// `burst_exceptions` does for the Burst play.
+    /// DEPRECATED — `team1_exceptions: {"Chain": [...]}` and team 2's, as
+    /// `burst_exceptions`.
     #[serde(default)]
     pub chain_exceptions: Option<Vec<String>>,
     /// Optional grouping label echoed verbatim into batch-runner output. Lets a
@@ -185,6 +192,8 @@ impl Default for HeadlessMatchConfig {
             team2_ai_profile: None,
             team1_withheld_plays: Vec::new(),
             team2_withheld_plays: Vec::new(),
+            team1_exceptions: BTreeMap::new(),
+            team2_exceptions: BTreeMap::new(),
             burst_exceptions: None,
             team1_lifted_gates: Vec::new(),
             team2_lifted_gates: Vec::new(),
@@ -242,33 +251,61 @@ impl HeadlessMatchConfig {
     }
 
     /// Resolve `team1_withheld_plays` / `team2_withheld_plays` and
-    /// `team1_lifted_gates` / `team2_lifted_gates` to the
+    /// `team1_exceptions` / `team2_exceptions` to the
     /// [`WithheldPlays`](crate::states::play_match::situation::WithheldPlays)
     /// resource — the one authority, as [`Self::ai_profiles`] is for the
-    /// profiles.
+    /// profiles. The deprecated keys (`team{1,2}_lifted_gates`,
+    /// `burst_exceptions`, `chain_exceptions`) are read into the same
+    /// overrides; a play's exceptions set twice for one team is an error.
     pub fn withheld_plays(
         &self,
     ) -> Result<crate::states::play_match::situation::WithheldPlays, String> {
-        use crate::states::play_match::situation::WithheldPlays;
-        let class_set = |names: &Option<Vec<String>>| -> Result<_, String> {
-            Ok(match names {
-                None => None,
-                Some(names) => Some(crate::states::play_match::situation::ClassSet::of(
-                    &names
-                        .iter()
-                        .map(|n| Self::parse_class(n))
-                        .collect::<Result<Vec<_>, _>>()?,
-                )),
-            })
-        };
-        Ok(WithheldPlays {
+        use crate::states::play_match::class_ai::plays::parse_play;
+        use crate::states::play_match::situation::{ExceptionSet, PlayId, WithheldPlays};
+        let mut out = WithheldPlays {
             team1: WithheldPlays::parse_set(&self.team1_withheld_plays)?,
             team2: WithheldPlays::parse_set(&self.team2_withheld_plays)?,
-            team1_lifted: WithheldPlays::parse_set(&self.team1_lifted_gates)?,
-            team2_lifted: WithheldPlays::parse_set(&self.team2_lifted_gates)?,
-            burst_exceptions: class_set(&self.burst_exceptions)?,
-            chain_exceptions: class_set(&self.chain_exceptions)?,
-        })
+            ..Default::default()
+        };
+        let mut set_once = |team: u8, id: PlayId, set: ExceptionSet| -> Result<(), String> {
+            let overrides = out.exceptions_mut(team);
+            if overrides.get(id).is_some() {
+                return Err(format!(
+                    "Team {team}'s {id:?} exceptions are set twice (a deprecated key and \
+                     team{team}_exceptions, or two deprecated keys)"
+                ));
+            }
+            overrides.set(id, set);
+            Ok(())
+        };
+        for (team, tables) in [(1, &self.team1_exceptions), (2, &self.team2_exceptions)] {
+            for (play, entries) in tables {
+                let id = parse_play(play)?;
+                set_once(
+                    team,
+                    id,
+                    WithheldPlays::parse_exceptions(id, entries, Self::parse_class)?,
+                )?;
+            }
+        }
+        // The deprecated keys.
+        for (team, plays) in [(1, &self.team1_lifted_gates), (2, &self.team2_lifted_gates)] {
+            for id in WithheldPlays::parse_set(plays)?.ids() {
+                set_once(team, id, ExceptionSet::default())?;
+            }
+        }
+        for (id, classes) in [
+            (PlayId::Burst, &self.burst_exceptions),
+            (PlayId::Chain, &self.chain_exceptions),
+        ] {
+            if let Some(classes) = classes {
+                let set = WithheldPlays::parse_exceptions(id, classes, Self::parse_class)?;
+                for team in [1, 2] {
+                    set_once(team, id, set)?;
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// Validate the configuration
@@ -753,43 +790,122 @@ impl HeadlessMatchConfig {
 mod tests {
     use super::*;
 
-    /// `team{1,2}_lifted_gates` reach `WithheldPlays` on their own team, and
-    /// only there: team 1's lifts team 1's Peel gates, team 2's team 2's, and
-    /// neither withholds a play.
+    fn parse_withheld(json: &str) -> crate::states::play_match::situation::WithheldPlays {
+        serde_json::from_str::<HeadlessMatchConfig>(json)
+            .unwrap()
+            .withheld_plays()
+            .unwrap()
+    }
+
+    fn withheld_err(json: &str) -> String {
+        serde_json::from_str::<HeadlessMatchConfig>(json)
+            .unwrap()
+            .withheld_plays()
+            .unwrap_err()
+    }
+
+    /// `team{1,2}_exceptions` reach `WithheldPlays` on their own team, and
+    /// only there, keyed by play: an empty table lifts the play's exceptions,
+    /// a named one replaces them, and neither withholds a play.
     #[test]
-    fn lifted_gates_reach_their_own_team() {
+    fn exceptions_reach_their_own_team_by_play() {
+        use crate::states::play_match::situation::{ExceptionKey, ExceptionSet, PlayId, PlaySet};
+        use CharacterClass::*;
+        let one = parse_withheld(
+            r#"{"team1":["Mage"],"team2":["Warrior"],
+                "team1_exceptions":{"Peel":[],"Burst":["Hunter","Mage"]}}"#,
+        );
+        let team1 = one.exceptions_for_team(1);
+        assert_eq!(team1.get(PlayId::Peel), Some(ExceptionSet::default()));
+        assert_eq!(
+            team1.get(PlayId::Burst),
+            Some(ExceptionSet::of(&[
+                ExceptionKey::class(Hunter),
+                ExceptionKey::class(Mage)
+            ]))
+        );
+        assert_eq!(team1.get(PlayId::Chain), None);
+        assert_eq!(one.exceptions_for_team(2), Default::default());
+        assert_eq!(
+            (one.for_team(1), one.for_team(2)),
+            (PlaySet::default(), PlaySet::default())
+        );
+        let two = parse_withheld(
+            r#"{"team1":["Mage"],"team2":["Warrior"],
+                "team2_exceptions":{"Peel":["Mage/Hunter"]}}"#,
+        );
+        assert_eq!(two.exceptions_for_team(1), Default::default());
+        assert_eq!(
+            two.exceptions_for_team(2).get(PlayId::Peel),
+            Some(ExceptionSet::of(&[ExceptionKey::in_context(Mage, Hunter)]))
+        );
+        let none = parse_withheld(r#"{"team1":["Mage"],"team2":["Warrior"]}"#);
+        assert_eq!(none, Default::default());
+        // An unknown play, an unknown class, and an entry of the wrong shape.
+        withheld_err(r#"{"team1":["Mage"],"team2":["Warrior"],"team1_exceptions":{"Pell":[]}}"#);
+        withheld_err(
+            r#"{"team1":["Mage"],"team2":["Warrior"],"team1_exceptions":{"Burst":["Mgae"]}}"#,
+        );
+        withheld_err(
+            r#"{"team1":["Mage"],"team2":["Warrior"],"team1_exceptions":{"Peel":["Mage"]}}"#,
+        );
+        withheld_err(
+            r#"{"team1":["Mage"],"team2":["Warrior"],"team1_exceptions":{"Burst":["Mage/Hunter"]}}"#,
+        );
+    }
+
+    /// The deprecated keys still parse, into the same overrides the generic
+    /// key sets: `team{1,2}_lifted_gates` lifts each named play's exceptions
+    /// on its own team, and `burst_exceptions` / `chain_exceptions` replace
+    /// the play's table on both. Setting one play's table twice for a team
+    /// is an error.
+    #[test]
+    fn deprecated_exception_keys_are_the_generic_overrides() {
         use crate::states::play_match::situation::{PlaySet, PEEL};
-        let parse = |json: &str| {
-            serde_json::from_str::<HeadlessMatchConfig>(json)
-                .unwrap()
-                .withheld_plays()
-                .unwrap()
+        let lifted = |team: u8| {
+            parse_withheld(&format!(
+                r#"{{"team1":["Mage"],"team2":["Warrior"],"team{team}_lifted_gates":["Peel"]}}"#
+            ))
         };
-        let peel = PlaySet::of(&[PEEL]);
-        let one = parse(r#"{"team1":["Mage"],"team2":["Warrior"],"team1_lifted_gates":["Peel"]}"#);
-        assert_eq!(
-            (one.lifted_for_team(1), one.lifted_for_team(2)),
-            (peel, PlaySet::default())
-        );
-        let two = parse(r#"{"team1":["Mage"],"team2":["Warrior"],"team2_lifted_gates":["Peel"]}"#);
-        assert_eq!(
-            (two.lifted_for_team(1), two.lifted_for_team(2)),
-            (PlaySet::default(), peel)
-        );
-        for w in [one, two] {
+        for team in [1u8, 2] {
+            let old = lifted(team);
+            let new = parse_withheld(&format!(
+                r#"{{"team1":["Mage"],"team2":["Warrior"],"team{team}_exceptions":{{"Peel":[]}}}}"#
+            ));
+            assert_eq!(old, new, "team {team}");
             assert_eq!(
-                (w.for_team(1), w.for_team(2)),
+                (old.for_team(1), old.for_team(2)),
                 (PlaySet::default(), PlaySet::default())
             );
+            assert_ne!(old, Default::default());
         }
-        let none = parse(r#"{"team1":["Mage"],"team2":["Warrior"]}"#);
-        assert_eq!(none, Default::default());
-        let bad = serde_json::from_str::<HeadlessMatchConfig>(
-            r#"{"team1":["Mage"],"team2":["Warrior"],"team1_lifted_gates":["Pell"]}"#,
-        )
-        .unwrap()
-        .withheld_plays();
-        assert!(bad.is_err());
+        let old = parse_withheld(
+            r#"{"team1":["Mage"],"team2":["Warrior"],"burst_exceptions":["Hunter"],
+                "chain_exceptions":[]}"#,
+        );
+        let new = parse_withheld(
+            r#"{"team1":["Mage"],"team2":["Warrior"],
+                "team1_exceptions":{"Burst":["Hunter"],"Chain":[]},
+                "team2_exceptions":{"Burst":["Hunter"],"Chain":[]}}"#,
+        );
+        assert_eq!(old, new);
+        withheld_err(
+            r#"{"team1":["Mage"],"team2":["Warrior"],"team1_lifted_gates":["Peel"],
+                "team1_exceptions":{"Peel":[]}}"#,
+        );
+        withheld_err(
+            r#"{"team1":["Mage"],"team2":["Warrior"],"burst_exceptions":[],
+                "team2_exceptions":{"Burst":[]}}"#,
+        );
+        withheld_err(r#"{"team1":["Mage"],"team2":["Warrior"],"team1_lifted_gates":["Pell"]}"#);
+        // Withholding stays its own key.
+        let withheld = parse_withheld(
+            r#"{"team1":["Mage"],"team2":["Warrior"],"team2_withheld_plays":["Peel"]}"#,
+        );
+        assert_eq!(
+            (withheld.for_team(1), withheld.for_team(2)),
+            (PlaySet::default(), PlaySet::of(&[PEEL]))
+        );
     }
 
     /// Scenario 5: the headless map-name parser accepts "TestVerticality".

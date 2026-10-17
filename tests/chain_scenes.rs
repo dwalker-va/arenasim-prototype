@@ -35,9 +35,6 @@ const ALLY: &str = "ally";
 const TARGET: &str = "enemy warrior";
 const HEALER: &str = "enemy priest";
 
-/// The scene clock (`Scene::now`'s default).
-const NOW: f32 = 30.0;
-
 /// Where the scene's other units stand, and who the ally is.
 #[derive(Clone, Copy)]
 struct Layout {
@@ -507,7 +504,7 @@ fn a_healer_does_not_chain_while_a_teammate_is_dying() {
 #[test]
 fn a_chain_exception_names_a_class_that_does_not_chain() {
     let with = scene(Paladin, 6.0, 0.2, AiProfile::TeamPlan)
-        .chain_exceptions(ClassSet::of(&[Paladin]))
+        .exceptions(CHAIN, ClassSet::of(&[Paladin]))
         .decide(ME);
     assert_eq!(with.situation.unwrap().play, None, "{}", describe(&with));
     assert_ne!(

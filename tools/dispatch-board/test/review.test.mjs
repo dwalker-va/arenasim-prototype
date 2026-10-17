@@ -27,7 +27,7 @@ async function mergedCard(client, fields, n) {
   c = (await call(client, "claim_card", { id: c.id, name: `Engineer-${c.id}`, ...orch })).value;
   c = (await call(client, "move_card", { id: c.id, column: "review", expected_version: c.version, patch: { pr: PR(n), agent: { ...c.agent, status: "done" } }, ...orch })).value;
   c = (await call(client, "claim_card", { id: c.id, name: `${c.id}-test`, ...orch })).value;
-  const m = await call(client, "mark_merged", { id: c.id, pr: PR(n), merge_sha: String(n).repeat(40).slice(0, 40), expected_version: c.version, ...orch });
+  const m = await call(client, "mark_merged", { id: c.id, pr: PR(n), merge_sha: String(n).repeat(40).slice(0, 40), expected_version: c.version, full: true, ...orch });
   assert.ok(m.ok, JSON.stringify(m.value));
   return m.value;
 }
