@@ -5,9 +5,8 @@
 //! A placed trap triggers on the FIRST enemy inside its radius (`traps.rs`), so
 //! a Freezing Trap thrown at the Hunter↔healer midpoint while a melee chases is
 //! eaten by the chaser, not the healer. The fix is two-part:
-//!   1. The opportunistic placement (in `hunter.rs`) aims at the healer's
-//!      POSITION, not the midpoint, and only fires when the healer (with no
-//!      nearer enemy) will trigger it — otherwise it HOLDS the trap.
+//!   1. While such an off-target healer exists, the rotation (in `hunter.rs`)
+//!      HOLDS the trap rather than lob it into the lane.
 //!   2. This dip: when the off-target enemy healer is out of throw range and
 //!      the Hunter is NOT the enemy's kill target (safe to reposition), the
 //!      Hunter walks toward the healer until it is in range, then the ability
@@ -42,8 +41,8 @@ use crate::states::play_match::constants::{
 /// `TRAP_TRIGGER_RADIUS` (5yd), so lobbing it from max throw range lands it
 /// where the (mobile) healer *was*. The dip closes to point-blank so the trap
 /// drops on the healer and arms before it can walk clear of the trigger radius.
-/// Also the threshold below which the opportunistic placement in `hunter.rs`
-/// fires without a dip.
+/// Also the threshold within which no dip starts: the healer is already
+/// point-blank.
 pub const HUNTER_TRAP_PLANT_RANGE: f32 = 8.0;
 
 /// Plan handed from [`evaluate_hunter_dip`] to the Hunter ability pass.
@@ -227,9 +226,13 @@ pub fn pressure_trap_healer(
 }
 
 /// Where a pressure trap on `healer` would land from `my_pos`, when it would
-/// catch it cleanly: within the trap's configured range, `healer` predicted to
-/// spring it ([`predicted_trap_springer`]) and no other enemy near the landing
-/// now. `Err` names why the throw is held.
+/// catch it cleanly: its led landing ([`trap_lead_landing`]) within the trap's
+/// configured range, `healer` predicted to spring it
+/// ([`predicted_trap_springer`]) and no other enemy near the landing now.
+/// `Err` names the gate that held the throw: the healer itself beyond range
+/// ([`PRESSURE_TRAP_OUT_OF_RANGE`]) is told apart from a healer in range whose
+/// lead carries the landing beyond it ([`PRESSURE_TRAP_LEAD_OUT_OF_RANGE`]) —
+/// a healer walking away is led by up to three trigger radii.
 pub fn pressure_trap_landing(
     ctx: &CombatContext,
     abilities: &AbilityDefinitions,
@@ -241,7 +244,12 @@ pub fn pressure_trap_landing(
     let range = abilities.get_unchecked(&AbilityType::FreezingTrap).range;
     let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
     if flat(my_pos).distance(flat(landing)) > range {
-        return Err(PRESSURE_TRAP_OUT_OF_RANGE);
+        let healer_at = ctx.combatants.get(&healer).map_or(landing, |h| h.position);
+        return Err(if flat(my_pos).distance(flat(healer_at)) > range {
+            PRESSURE_TRAP_OUT_OF_RANGE
+        } else {
+            PRESSURE_TRAP_LEAD_OUT_OF_RANGE
+        });
     }
     let crowded = ctx.combatants.values().any(|other| {
         other.team != my_team
@@ -371,9 +379,14 @@ pub const PRESSURE_TRAP_TEAM_ATTACKING: &str = "healer trap held: a teammate is 
 /// free it.
 pub const PRESSURE_TRAP_FREEABLE: &str = "healer trap held: a teammate would free the healer";
 
-/// Trace note: a pressure trap held because its lead landing is beyond the
+/// Trace note: a pressure trap held because the healer itself is beyond the
 /// trap's configured range.
 pub const PRESSURE_TRAP_OUT_OF_RANGE: &str = "healer trap held: the healer is out of throw range";
+
+/// Trace note: a pressure trap held because the healer is within throw range
+/// but its lead landing, ahead of it along its heading, is not.
+pub const PRESSURE_TRAP_LEAD_OUT_OF_RANGE: &str =
+    "healer trap held: the healer's lead lands out of throw range";
 
 /// Trace note: a pressure trap held because the healer is not the enemy that
 /// would spring it — another enemy is near the landing, or it would not reach
@@ -469,7 +482,7 @@ fn flat(v: Vec3) -> Vec3 {
 /// preferred range of its own target, as pursuit in `move_to_target` does: the
 /// closest approach along its heading, less that range. Heading away (a
 /// kiter), or with no target in view, it keeps going.
-fn first_inside(
+pub(super) fn first_inside(
     ctx: &CombatContext,
     enemy: &super::CombatantInfo,
     landing: Vec3,
@@ -590,8 +603,8 @@ pub fn unseen_victim_would_be_freed(
 /// killing (so the trap CCs the off-target, not the kill target), and whose trap
 /// is worth throwing ([`trap_victim_worth_it`]). Prefers a healer (highest CC
 /// value — shut down enemy sustain, and the dispeller itself) and breaks ties
-/// by nearest. `reach` may be `f32::INFINITY` for the no-walk opportunistic
-/// path.
+/// by nearest. `reach` may be `f32::INFINITY` for the off-target the
+/// rotation holds the trap for.
 pub fn dip_target_candidate(
     ctx: &CombatContext,
     abilities: &AbilityDefinitions,
@@ -621,7 +634,7 @@ pub fn dip_target_candidate(
         .map(|e| e.entity)
 }
 
-/// The off-target candidate for the no-walk opportunistic placement: no reach
+/// The off-target the rotation holds the trap for (the dip throws it): no reach
 /// limit, excluding `focused` ([`trap_focus`]). Returns `(entity, position)`.
 pub fn opportunistic_off_target(
     ctx: &CombatContext,
@@ -761,8 +774,8 @@ pub fn evaluate_hunter_dip(
         return HunterDipPlan::Rotation;
     };
 
-    // Already point-blank → no dip needed; the opportunistic placement in the
-    // ability pass drops it on the healer this tick.
+    // Already point-blank → no dip needed. (A healer this near puts the Hunter
+    // in its dead-zone block, where the pressure trap takes it.)
     let plant_close = ctx
         .combatants
         .get(&target)

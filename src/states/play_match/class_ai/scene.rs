@@ -95,6 +95,10 @@ struct SceneUnit {
     /// The ability the unit is casting or channelling, as its snapshot row
     /// reports it.
     casting: Option<AbilityType>,
+    /// The ground-plane direction the unit faces, as a moving unit faces the
+    /// way it last stepped; `None` faces +Z. Its snapshot row estimates its
+    /// velocity from this.
+    facing: Option<Vec3>,
 }
 
 /// A constructed situation. See the module docs.
@@ -192,6 +196,7 @@ impl Scene {
             flare: None,
             dr: DRTracker::default(),
             casting: None,
+            facing: None,
         });
         self
     }
@@ -203,6 +208,14 @@ impl Scene {
     /// The last unit's position on the ground plane.
     pub fn at(mut self, x: f32, z: f32) -> Self {
         self.last().position = Vec3::new(x, UNIT_Y, z);
+        self
+    }
+
+    /// The direction the last unit faces on the ground plane — the way it is
+    /// walking, which its snapshot row reads as its heading (a unit not
+    /// casting is estimated to move along its facing at its base speed).
+    pub fn facing(mut self, x: f32, z: f32) -> Self {
+        self.last().facing = Some(Vec3::new(x, 0.0, z));
         self
     }
 
@@ -431,7 +444,10 @@ impl Scene {
         let mut dr_trackers = BTreeMap::new();
         let mut ability_cooldowns = BTreeMap::new();
         for u in &self.units {
-            let transform = Transform::from_translation(u.position);
+            let mut transform = Transform::from_translation(u.position);
+            if let Some(f) = u.facing {
+                transform.rotation = Quat::from_rotation_y(f.x.atan2(f.z));
+            }
             let combatant = self.combatant_of(u);
             combatants.insert(
                 u.entity,

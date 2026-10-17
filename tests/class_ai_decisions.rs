@@ -1876,19 +1876,21 @@ fn a_pressure_trap_lands_only_where_it_catches_the_healer_cleanly() {
     use arenasim::states::play_match::abilities::AbilityType;
     use arenasim::states::play_match::ability_config::AbilityDefinitions;
     use arenasim::states::play_match::class_ai::hunter_dip::{
-        pressure_trap_landing, PRESSURE_TRAP_NOT_CLEAN, PRESSURE_TRAP_OUT_OF_RANGE,
+        pressure_trap_landing, PRESSURE_TRAP_LEAD_OUT_OF_RANGE, PRESSURE_TRAP_NOT_CLEAN,
+        PRESSURE_TRAP_OUT_OF_RANGE,
     };
 
     let defs = AbilityDefinitions::default();
     let range = defs.get_unchecked(&AbilityType::FreezingTrap).range;
     let hunter = Entity::from_raw(0);
     let (healer, rogue) = (Entity::from_raw(1), Entity::from_raw(2));
-    let landing = |healer_at: Vec3, rogue_at: Vec3| {
+    let walking = |healer_at: Vec3, heading: Vec3, rogue_at: Vec3| {
         let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
         snap.combatants.insert(
             healer,
             CombatantInfo {
                 position: healer_at,
+                velocity: heading,
                 ..info(healer, 2, CharacterClass::Priest)
             },
         );
@@ -1902,6 +1904,7 @@ fn a_pressure_trap_lands_only_where_it_catches_the_healer_cleanly() {
         );
         pressure_trap_landing(&snap.context_for(hunter), &defs, 1, Vec3::ZERO, healer)
     };
+    let landing = |healer_at: Vec3, rogue_at: Vec3| walking(healer_at, Vec3::ZERO, rogue_at);
     let on_hunter = Vec3::new(2.0, 0.0, 0.0);
 
     // A planted Priest 20yd off, the Rogue on the Hunter: dropped on it.
@@ -1911,6 +1914,12 @@ fn a_pressure_trap_lands_only_where_it_catches_the_healer_cleanly() {
     assert_eq!(
         landing(Vec3::new(0.0, 0.0, range + 1.0), on_hunter),
         Err(PRESSURE_TRAP_OUT_OF_RANGE)
+    );
+    // In range itself, but walking away: its lead carries the landing past
+    // range, and the hold names the lead, not the healer (AS-295).
+    assert_eq!(
+        walking(at, Vec3::new(0.0, 0.0, 7.0), on_hunter),
+        Err(PRESSURE_TRAP_LEAD_OUT_OF_RANGE)
     );
     // The Rogue beside the Priest would spring it first: held.
     assert_eq!(

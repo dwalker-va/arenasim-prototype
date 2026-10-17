@@ -861,7 +861,10 @@ pet's re-check when it executes a dispatched command
 (`pet_ai::pet_command_rejection`), which also re-checks a Master's Call's
 sight. A Hunter trap is thrown at a POINT, so every throw asks sight of
 its landing instead (`hunter::try_place_trap_at`, after range): one a pillar
-hides is held, traced `LosBlocked`, never moved. A no-op on obstacle-free maps
+hides is held, traced `LosBlocked`, never moved. The lane Freezing Trap picks
+its landing with sight in mind: when a pillar hides the lane, it lands on an
+enemy's route round that pillar, at the first point of it the Hunter sees once
+the trap would arm (`hunter_lane::route_lane`). A no-op on obstacle-free maps
 (BasicArena stays byte-identical).
 
 **Dying teammate first (Druid)** — no RON knob; reuses `urgency_hp_threshold`.
