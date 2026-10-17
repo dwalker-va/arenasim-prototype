@@ -323,3 +323,102 @@ fn a_route_lane_trap_is_held_for_an_immune_walker() {
         describe(&view)
     );
 }
+
+/// `heading` turned `degrees` anticlockwise on the ground plane.
+fn turned(heading: Vec2, degrees: f32) -> Vec2 {
+    let (s, c) = degrees.to_radians().sin_cos();
+    Vec2::new(heading.x * c - heading.y * s, heading.x * s + heading.y * c)
+}
+
+/// How closely a walker's heading must follow its route for the route to be
+/// believed (`ROUTE_HEADING_AGREEMENT`, cos 30°): a Warrior heading 20° off
+/// its route is taken to be walking it, and one heading 45° off is not, so the
+/// hidden lane stands and is held.
+#[test]
+fn a_heading_within_thirty_degrees_of_the_route_follows_it() {
+    for degrees in [20.0, -20.0] {
+        let view = scene(turned(route_heading(), degrees), true).decide(ME);
+        assert_eq!(
+            view.chose(),
+            Some((AbilityType::FreezingTrap, Some(WARRIOR))),
+            "{degrees}° off: {}",
+            describe(&view)
+        );
+    }
+    for degrees in [45.0, -45.0] {
+        let view = scene(turned(route_heading(), degrees), true).decide(ME);
+        assert_eq!(
+            freezing_landing(&view),
+            None,
+            "{degrees}° off: {}",
+            describe(&view)
+        );
+    }
+}
+
+/// While an enemy the dip would trap is in view — an off-target, here the
+/// enemy Warrior, which the team is not killing and nobody could free — the
+/// rotation holds Freezing Trap for the dip and throws no lane trap, whether
+/// the lane is open or hidden behind a pillar with a route round it. The
+/// control diminishes the Warrior to immunity against incapacitates, so it is
+/// no off-target: the same lane is then thrown, at it.
+#[test]
+fn no_lane_trap_while_an_off_target_waits_for_the_dip() {
+    const MAGE: &str = "enemy mage";
+    let warrior_at = Vec2::new(36.0, 0.0);
+    let pillar = vec![ObstacleVolume::Cylinder {
+        center_xz: Vec2::new(20.0, 0.0),
+        radius: 2.5,
+        base_y: 0.0,
+        height: 10.0,
+    }];
+    let build = |hidden: bool, off_target: bool| {
+        let heading = if hidden {
+            steer_toward_goal(&pillar, warrior_at, Vec2::ZERO, 1.0).expect("blocked")
+        } else {
+            Vec2::new(-1.0, 0.0)
+        };
+        let mut s = Scene::new()
+            .unit(ME, 1, Hunter)
+            .at(0.0, 0.0)
+            .targeting(MAGE)
+            .unit(WARRIOR, 2, Warrior)
+            .at(warrior_at.x, warrior_at.y)
+            .facing(heading.x, heading.y)
+            .targeting(ME)
+            .unit(MAGE, 2, Mage)
+            .at(40.0, 0.0)
+            .casting(MAGE, AbilityType::Frostbolt)
+            .cooldown(ME, AbilityType::ConcussiveShot, 5.0)
+            .cooldown(ME, AbilityType::SerpentSting, 5.0)
+            .cooldown(ME, AbilityType::AimedShot, 5.0)
+            .cooldown(ME, AbilityType::ArcaneShot, 5.0);
+        if !off_target {
+            let mut diminished = DRTracker::default();
+            while !diminished.is_immune(DRCategory::Incapacitates) {
+                diminished.apply(DRCategory::Incapacitates);
+            }
+            s = s.dr_tracker(WARRIOR, diminished);
+        }
+        if hidden {
+            s = s.obstacles(pillar.clone());
+        }
+        s
+    };
+    for hidden in [false, true] {
+        let control = build(hidden, false).decide(ME);
+        assert_eq!(
+            control.chose(),
+            Some((AbilityType::FreezingTrap, Some(WARRIOR))),
+            "control, lane hidden {hidden}: {}",
+            describe(&control)
+        );
+        let view = build(hidden, true).decide(ME);
+        assert_eq!(
+            freezing_landing(&view),
+            None,
+            "lane hidden {hidden}: {}",
+            describe(&view)
+        );
+    }
+}
