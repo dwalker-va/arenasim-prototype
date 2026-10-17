@@ -24,12 +24,22 @@
 //! the `Legacy` cases alone. A rebase that moves a seed off the defect leaves
 //! the guard looking at nothing there, so re-run those mutation checks when a
 //! producer's inputs change.
+//!
+//! A third producer is the stealthed Rogue's walk round a lit Flare
+//! (`rogue_flare::plan_flare_path`, AS-207), whose spot beside a target is
+//! offset from the target with no regard for cover. No seeded match was found
+//! sending it there, so its case is STAGED: the situation is built, not
+//! searched for (`flare_spot_beside_a_target_against_a_pillar_is_standable`).
 
-use arenasim::headless::{run_headless_match_observed, HeadlessMatchConfig};
+use arenasim::headless::{
+    run_headless_match_observed, run_headless_match_staged, HeadlessMatchConfig, Stage, Unit,
+};
+use arenasim::states::play_match::components::{Aura, AuraType, FlareZone, PlayMatchEntity};
+use arenasim::states::play_match::constants::FLARE_RADIUS;
 use arenasim::states::play_match::map_config::load_map_geometry_config;
 use arenasim::states::play_match::map_geometry::{position_blocked, ObstacleVolume, MOVER_RADIUS};
 use arenasim::ArenaMap;
-use bevy::prelude::Vec2;
+use bevy::prelude::{Transform, Vec2, Vec3};
 
 /// `(map, profile, team 1, team 2, seed)` — each issued an in-pillar goal
 /// before the fix.
@@ -292,4 +302,126 @@ fn healer_point_goals_are_standable_on_pillar_maps() {
              {NEAR_SKIN}yd of a pillar"
         );
     }
+}
+
+const HUNTER: Unit = Unit::new(1, 0);
+const ROGUE: Unit = Unit::new(2, 0);
+
+/// The Hunter, held in place, stands with its back to TwinPillars' east pillar
+/// (centre (9, 0), 2.5yd) and its face in its own Flare, lit 9.8yd in front of
+/// it. The stealthed Rogue's spot beside it, `reach` straight away from the
+/// light, is (10.2, 0): dark, and inside the pillar.
+fn flare_stage() -> Stage {
+    Stage::new()
+        .place(HUNTER, 12.2, 0.0)
+        .place(ROGUE, 5.0, 12.0)
+        .combatant(ROGUE, |c| c.stealthed = true)
+        .target(ROGUE, HUNTER)
+        .aura(
+            HUNTER,
+            Aura {
+                effect_type: AuraType::Stun,
+                duration: 3.0,
+                break_on_damage_threshold: -1.0,
+                ..Default::default()
+            },
+        )
+        .world(|world| {
+            let owner = HUNTER.entity(world);
+            world.spawn((
+                Transform::from_translation(Vec3::new(22.0, 0.0, 0.0)),
+                FlareZone {
+                    owner_team: 1,
+                    owner,
+                    radius: FLARE_RADIUS,
+                    duration_remaining: 30.0,
+                },
+                PlayMatchEntity,
+            ));
+        })
+}
+
+/// Every Point goal the Rogue is sent to in the staged match on `map`, in
+/// frame order.
+fn rogue_flare_goals(map: &str) -> Vec<Vec3> {
+    let mut goals = Vec::new();
+    run_headless_match_staged(
+        HeadlessMatchConfig {
+            team1: vec!["Hunter".into()],
+            team2: vec!["Rogue".into()],
+            map: map.to_string(),
+            max_duration_secs: 20.0,
+            random_seed: Some(1),
+            ..Default::default()
+        },
+        true,
+        None,
+        flare_stage(),
+        |f| {
+            for obs in f.combatants.values() {
+                if obs.alive && obs.team == 2 && !obs.is_pet {
+                    goals.extend(obs.point_goal);
+                }
+            }
+        },
+    )
+    .expect("match runs");
+    goals
+}
+
+/// The Rogue's Flare walk sends it only to spots it can stand on. The pair:
+/// on BasicArena (no pillars) the same stage sends it to the spot TwinPillars'
+/// pillar covers — the situation reaches the defect — and on TwinPillars no
+/// goal is inside the pillar.
+#[test]
+fn flare_spot_beside_a_target_against_a_pillar_is_standable() {
+    let pillars = volumes("TwinPillars");
+    let behind = Vec2::new(10.2, 0.0);
+
+    let open = rogue_flare_goals("BasicArena");
+    let where_the_pillar_stands = open
+        .iter()
+        .filter(|g| position_blocked(&pillars, **g))
+        .count();
+    assert!(
+        open.iter()
+            .any(|g| Vec2::new(g.x, g.z).distance(behind) < 1e-3),
+        "control: the BasicArena Rogue was never sent behind the Hunter ({} goals)",
+        open.len()
+    );
+    assert!(
+        where_the_pillar_stands > 0,
+        "control: no BasicArena goal falls where TwinPillars' pillar stands"
+    );
+
+    let goals = rogue_flare_goals("TwinPillars");
+    assert!(!goals.is_empty(), "the TwinPillars Rogue was sent nowhere");
+    let bad: Vec<&Vec3> = goals
+        .iter()
+        .filter(|g| position_blocked(&pillars, **g))
+        .collect();
+    assert!(
+        bad.is_empty(),
+        "{} of {} Rogue Point goals inside a pillar, first {:?}",
+        bad.len(),
+        goals.len(),
+        bad.first()
+    );
+    // Non-vacuity: the goals hug the pillar, where the defect lived.
+    let near = goals
+        .iter()
+        .filter(|g| {
+            pillars.iter().any(|v| {
+                let (c, r) = v.footprint_disc();
+                Vec2::new(g.x, g.z).distance(c) < r + MOVER_RADIUS + NEAR_SKIN
+            })
+        })
+        .count();
+    assert!(near > 0, "no Rogue goal within {NEAR_SKIN}yd of a pillar");
+    println!(
+        "Rogue Flare: BasicArena {} goal-frames ({where_the_pillar_stands} where the pillar \
+         stands); TwinPillars {} goal-frames, {near} within {NEAR_SKIN}yd of a pillar",
+        open.len(),
+        goals.len()
+    );
 }

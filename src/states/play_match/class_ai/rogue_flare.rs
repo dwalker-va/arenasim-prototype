@@ -30,7 +30,9 @@
 //! No teleports and no new movement machinery: the pre-pass issues ordinary
 //! `MovementGoal::Point` directives, which `move_to_target` walks with the
 //! same pillar steering as every other point walk, and every point it walks to
-//! lies inside the arena (a light against a wall is skirted on its open side).
+//! lies inside the arena (a light against a wall is skirted on its open side)
+//! and outside every pillar (a point the plan would put inside one is replaced
+//! by a standable spot that is still dark, AS-207).
 //! With no enemy Flare lit it does nothing at all, so every match without a
 //! Hunter facing a Rogue is unchanged.
 //!
@@ -54,6 +56,9 @@ use crate::states::play_match::components::*;
 use crate::states::play_match::constants::LOW_HP_THRESHOLD;
 use crate::states::play_match::decision_trace::{
     DecisionTrace, MovementGoalKind, MovementTrigger, Posture as TracePosture,
+};
+use crate::states::play_match::map_geometry::{
+    nearest_standable, position_blocked, ObstacleVolume,
 };
 use crate::states::play_match::utils::combat_log_id_for;
 
@@ -131,15 +136,38 @@ pub enum FlarePath {
 ///    light against a wall), when it takes the other side. Both sides walled
 ///    off → [`FlarePath::Wait`].
 ///
-/// Every point it returns lies inside `bounds`.
+/// Every point it returns lies inside `bounds`, and is a spot a body at
+/// `mover_y` can stand on — outside every footprint in `obstacles` (AS-207).
+/// A point the rules above would put inside a pillar is replaced by one that
+/// is standable AND dark, never merely pushed out of the pillar: the nearest
+/// way out of a pillar can lead into the light.
+///
+/// - **The spot beside the target**: the nearest standable dark spot at
+///   `reach` from the target, fanning round it from the blocked one; none →
+///   that light gives no way in, as for a lit spot.
+/// - **A skirt waypoint**: the pillar's nearest outside point, if it is dark;
+///   otherwise that side is closed, as for a wall.
+/// - **The wait point**: the nearest standable spot on the same wait ring,
+///   inside the arena and dark; none → where the Rogue already stands.
+///
+/// With no obstacles (BasicArena) no point is ever blocked, so every plan is
+/// exactly what it was without them.
 pub fn plan_flare_path(
     from: Vec2,
     target: Vec2,
     reach: f32,
     flares: &[LitFlare],
     bounds: &ArenaBounds,
+    obstacles: &[ObstacleVolume],
+    mover_y: f32,
 ) -> FlarePath {
-    let inside = |p: Vec2| bounds.contains(Vec3::new(p.x, 0.0, p.y));
+    let ground = Ground {
+        flares,
+        bounds,
+        obstacles,
+        mover_y,
+    };
+    let inside = |p: Vec2| ground.inside(p);
     let covering: Vec<&LitFlare> = flares
         .iter()
         .filter(|f| target.distance(f.center) < f.radius + FLARE_SKIRT_MARGIN + reach)
@@ -148,37 +176,84 @@ pub fn plan_flare_path(
     let goal = if covering.is_empty() {
         None
     } else {
-        let dark = |p: Vec2| {
-            inside(p)
-                && flares
-                    .iter()
-                    .all(|f| p.distance(f.center) >= f.radius + FLARE_EDGE_MARGIN)
-        };
         let spot = covering.iter().find_map(|f| {
             let away = (target - f.center)
                 .try_normalize()
                 .or_else(|| (from - target).try_normalize())
                 .unwrap_or(Vec2::X);
             let spot = target + away * reach;
-            dark(spot).then_some(spot)
+            if ground.standable(spot) {
+                ground.dark(spot).then_some(spot)
+            } else {
+                fan(target, reach, away).find(|&p| ground.standable(p) && ground.dark(p))
+            }
         });
         match spot {
             Some(spot) => Some(spot),
-            None => return wait(from, target, &covering, bounds),
+            None => return wait(from, target, &covering, &ground),
         }
     };
 
     let dest = goal.unwrap_or(target);
     match first_blocking(from, dest, flares) {
-        Some(flare) => match skirt_waypoint(from, dest, flare, &inside) {
+        Some(flare) => match skirt_waypoint(from, dest, flare, &inside, &|w| ground.settle(w)) {
             Some(waypoint) => FlarePath::Skirt { waypoint },
-            None => wait(from, target, &[flare], bounds),
+            None => wait(from, target, &[flare], &ground),
         },
         None => match goal {
             Some(spot) => FlarePath::Skirt { waypoint: spot },
             None => FlarePath::Clear,
         },
     }
+}
+
+/// The ground a plan's points must stand on: inside the arena, outside every
+/// obstacle's footprint, and — where a rule asks — dark.
+struct Ground<'a> {
+    flares: &'a [LitFlare],
+    bounds: &'a ArenaBounds,
+    obstacles: &'a [ObstacleVolume],
+    mover_y: f32,
+}
+
+impl Ground<'_> {
+    fn inside(&self, p: Vec2) -> bool {
+        self.bounds.contains(Vec3::new(p.x, 0.0, p.y))
+    }
+
+    /// Inside the arena and [`FLARE_EDGE_MARGIN`] outside every light.
+    fn dark(&self, p: Vec2) -> bool {
+        self.inside(p)
+            && self
+                .flares
+                .iter()
+                .all(|f| p.distance(f.center) >= f.radius + FLARE_EDGE_MARGIN)
+    }
+
+    /// Outside every obstacle's footprint, for a body at the mover's height.
+    fn standable(&self, p: Vec2) -> bool {
+        !position_blocked(self.obstacles, Vec3::new(p.x, self.mover_y, p.y))
+    }
+
+    /// `p` when a body can stand there, else the nearest spot out of the
+    /// footprint that holds it — only if that spot is dark.
+    fn settle(&self, p: Vec2) -> Option<Vec2> {
+        if self.standable(p) {
+            return Some(p);
+        }
+        nearest_standable(self.obstacles, p, self.mover_y).filter(|&q| self.dark(q))
+    }
+}
+
+/// Points on the circle of `radius` round `center`: first the one in
+/// direction `dir`, then fanning out from it a step at a time to either side
+/// in turn (the counter-clockwise side first), to the far side.
+fn fan(center: Vec2, radius: f32, dir: Vec2) -> impl Iterator<Item = Vec2> {
+    const STEPS: i32 = 32;
+    let step = std::f32::consts::PI / STEPS as f32;
+    (0..=STEPS)
+        .flat_map(|k| if k == 0 { vec![0] } else { vec![k, -k] })
+        .map(move |k| center + Vec2::from_angle(k as f32 * step).rotate(dir) * radius)
 }
 
 /// The skirt ring a line from `from` to `to` must stay outside for `f`: the
@@ -235,7 +310,9 @@ fn first_blocking(from: Vec2, to: Vec2, flares: &[LitFlare]) -> Option<&LitFlare
 /// more progress toward `dest` (the first-computed side on an exact tie), or
 /// the other side when the way round the better one leaves the arena — `None`
 /// when both do. A side is open when its next point and the ring's widest
-/// point on that side (square to the line to `dest`) are both inside.
+/// point on that side (square to the line to `dest`) are both inside, and
+/// `settle` finds a standable dark spot for its next point (which it returns
+/// in place of the next point).
 ///
 /// - **Outside the ring:** a point along the tangent to it, past the tangent
 ///   point.
@@ -248,6 +325,7 @@ fn skirt_waypoint(
     dest: Vec2,
     f: &LitFlare,
     inside: &impl Fn(Vec2) -> bool,
+    settle: &impl Fn(Vec2) -> Option<Vec2>,
 ) -> Option<Vec2> {
     let ring = f.radius + FLARE_SKIRT_MARGIN;
     let to_center = f.center - from;
@@ -295,15 +373,17 @@ fn skirt_waypoint(
     };
     [better, worse]
         .into_iter()
-        .find(|side| open(*side))
-        .map(|(waypoint, _)| waypoint)
+        .filter(|side| open(*side))
+        .find_map(|(waypoint, _)| settle(waypoint))
 }
 
 /// Where to hold when no way in is dark: [`FLARE_WAIT_BUFFER`] outside the
 /// covering light nearest the Rogue — where its line to the target crosses
 /// that ring, or straight out from the centre when it is already inside it —
-/// brought back inside the arena when that lands beyond a wall.
-fn wait(from: Vec2, target: Vec2, covering: &[&LitFlare], bounds: &ArenaBounds) -> FlarePath {
+/// brought back inside the arena when that lands beyond a wall. When that
+/// spot is inside a pillar, the nearest standable spot on the same ring
+/// inside the arena and dark instead; with none, where the Rogue stands.
+fn wait(from: Vec2, target: Vec2, covering: &[&LitFlare], ground: &Ground) -> FlarePath {
     let covering_remaining = covering.iter().map(|f| f.remaining).fold(0.0_f32, f32::max);
     let nearest = covering
         .iter()
@@ -321,8 +401,19 @@ fn wait(from: Vec2, target: Vec2, covering: &[&LitFlare], bounds: &ArenaBounds) 
                 .unwrap_or((from - target).normalize_or(Vec2::X))
                 * hold
     };
-    let at = bounds.clamp(Vec3::new(at.x, 0.0, at.y));
+    let at = ground.bounds.clamp(Vec3::new(at.x, 0.0, at.y));
     let at = Vec2::new(at.x, at.z);
+    let at = if ground.standable(at) {
+        at
+    } else {
+        fan(
+            nearest.center,
+            hold,
+            (at - nearest.center).normalize_or(Vec2::X),
+        )
+        .find(|&p| ground.standable(p) && ground.dark(p))
+        .unwrap_or(from)
+    };
     FlarePath::Wait {
         at,
         covering_remaining,
@@ -402,6 +493,8 @@ pub fn evaluate_rogue_flare(
         CharacterClass::Rogue.preferred_range(),
         &lit,
         &ctx.bounds,
+        ctx.obstacles,
+        my_pos.y,
     );
 
     let directive = |commands: &mut Commands, at: Vec2| {
@@ -542,7 +635,15 @@ mod tests {
         let step = 0.1_f32;
         let mut plan = FlarePath::Clear;
         for _ in 0..2000 {
-            plan = plan_flare_path(pos, target, REACH, flares, &ArenaBounds::default());
+            plan = plan_flare_path(
+                pos,
+                target,
+                REACH,
+                flares,
+                &ArenaBounds::default(),
+                &[],
+                0.0,
+            );
             let dest = match plan {
                 FlarePath::Clear => {
                     if pos.distance(target) <= REACH {
@@ -577,6 +678,8 @@ mod tests {
             REACH,
             &[],
             &ArenaBounds::default(),
+            &[],
+            0.0,
         );
         assert_eq!(plan, FlarePath::Clear);
     }
@@ -590,6 +693,8 @@ mod tests {
             REACH,
             &f,
             &ArenaBounds::default(),
+            &[],
+            0.0,
         );
         assert_eq!(plan, FlarePath::Clear);
     }
@@ -651,6 +756,8 @@ mod tests {
             REACH,
             &f,
             &ArenaBounds::default(),
+            &[],
+            0.0,
         );
         let FlarePath::Wait { at, .. } = plan else {
             panic!("expected a wait, got {plan:?}");
@@ -669,6 +776,8 @@ mod tests {
             REACH,
             &f,
             &ArenaBounds::default(),
+            &[],
+            0.0,
         );
         assert!(matches!(plan, FlarePath::Wait { .. }), "{plan:?}");
     }
@@ -711,6 +820,8 @@ mod tests {
             REACH,
             &f,
             &ArenaBounds::default(),
+            &[],
+            0.0,
         );
         let FlarePath::Skirt { waypoint } = plan else {
             panic!("expected a skirt, got {plan:?}");
@@ -737,11 +848,180 @@ mod tests {
             REACH,
             &[flare(0.0, 0.0)],
             &bounds,
+            &[],
+            0.0,
         );
         let FlarePath::Wait { at, .. } = plan else {
             panic!("expected a wait, got {plan:?}");
         };
         assert!((at - Vec2::new(-14.0, 0.0)).length() < 1e-3, "{at:?}");
+    }
+
+    // ---- Pillars (AS-207): every point standable, and still dark ----
+
+    /// A TwinPillars-sized pillar (2.5yd) at `(x, z)`.
+    fn pillar(x: f32, z: f32) -> ObstacleVolume {
+        ObstacleVolume::Cylinder {
+            center_xz: Vec2::new(x, z),
+            radius: 2.5,
+            base_y: 0.0,
+            height: 5.0,
+        }
+    }
+
+    fn plan_among(
+        from: Vec2,
+        target: Vec2,
+        flares: &[LitFlare],
+        obstacles: &[ObstacleVolume],
+    ) -> FlarePath {
+        plan_flare_path(
+            from,
+            target,
+            REACH,
+            flares,
+            &ArenaBounds::default(),
+            obstacles,
+            0.0,
+        )
+    }
+
+    fn blocked(obstacles: &[ObstacleVolume], p: Vec2) -> bool {
+        position_blocked(obstacles, Vec3::new(p.x, 0.0, p.y))
+    }
+
+    /// Dark as the plan means it: [`FLARE_EDGE_MARGIN`] outside every light.
+    fn is_dark(flares: &[LitFlare], p: Vec2) -> bool {
+        flares
+            .iter()
+            .all(|f| p.distance(f.center) >= f.radius + FLARE_EDGE_MARGIN)
+    }
+
+    /// The target stands with its back to a pillar and its face in the light.
+    /// The spot `reach` behind it, away from the light, is dark — and inside
+    /// the pillar. Pushing it out of the pillar the short way would put it
+    /// back beside the target, in the light; the spot taken is the nearest
+    /// standable dark one at reach. Control: no pillar, and the plan is the
+    /// spot behind the target, which IS inside the pillar.
+    #[test]
+    fn the_spot_beside_a_target_against_a_pillar_is_standable_and_dark() {
+        let f = [flare(22.0, 0.0)];
+        let (from, target) = (Vec2::new(5.0, 12.0), Vec2::new(12.2, 0.0));
+        let obstacles = [pillar(9.0, 0.0)];
+
+        let open = plan_among(from, target, &f, &[]);
+        let FlarePath::Skirt { waypoint: behind } = open else {
+            panic!("control: expected the spot behind the target, got {open:?}");
+        };
+        assert!(
+            (behind - Vec2::new(10.2, 0.0)).length() < 1e-4,
+            "{behind:?}"
+        );
+        assert!(
+            blocked(&obstacles, behind),
+            "the control spot is in the pillar"
+        );
+
+        let plan = plan_among(from, target, &f, &obstacles);
+        let FlarePath::Skirt { waypoint } = plan else {
+            panic!("expected a skirt to a spot beside the target, got {plan:?}");
+        };
+        assert!(
+            !blocked(&obstacles, waypoint),
+            "in the pillar: {waypoint:?}"
+        );
+        assert!(is_dark(&f, waypoint), "in the light: {waypoint:?}");
+        assert!(
+            (waypoint.distance(target) - REACH).abs() < 1e-3,
+            "not at reach of the target: {waypoint:?}"
+        );
+        // The pillar's own exit from the control spot is lit: the plan did not
+        // just push it out.
+        let pushed = nearest_standable(&obstacles, behind, 0.0).unwrap();
+        assert!(!is_dark(&f, pushed), "{pushed:?}");
+    }
+
+    /// The same target, but every spot at reach that the pillar leaves free is
+    /// lit: no way in by that light, so the Rogue waits instead of being sent
+    /// into the pillar.
+    #[test]
+    fn a_target_whose_only_dark_spot_is_in_a_pillar_is_waited_out() {
+        let f = [flare(20.5, 0.0)];
+        let (from, target) = (Vec2::new(-5.0, 12.0), Vec2::new(10.7, 0.0));
+        let obstacles = [pillar(9.0, 0.0)];
+        // Control: without the pillar the spot behind the target is the way in.
+        assert!(matches!(
+            plan_among(from, target, &f, &[]),
+            FlarePath::Skirt { .. }
+        ));
+        let plan = plan_among(from, target, &f, &obstacles);
+        let FlarePath::Wait { at, .. } = plan else {
+            panic!("expected a wait, got {plan:?}");
+        };
+        assert!(!blocked(&obstacles, at), "{at:?}");
+    }
+
+    /// The walk round a light, its tangent waypoint inside a pillar. Pushed
+    /// out of the pillar and still dark, it is taken; pushed out into the
+    /// light, that side is closed like a wall and the walk goes round the
+    /// other. Control: no pillar, the near (+z) side's waypoint.
+    #[test]
+    fn a_skirt_waypoint_in_a_pillar_is_settled_dark_or_the_side_closes() {
+        let f = [flare(0.0, 0.0)];
+        let (from, target) = (Vec2::new(-30.0, 0.0), Vec2::new(30.0, 6.0));
+
+        let FlarePath::Skirt { waypoint: open } = plan_among(from, target, &f, &[]) else {
+            panic!("control: expected a skirt");
+        };
+        assert!(open.y > 10.0, "control went the +z way: {open:?}");
+
+        // A pillar beyond the ring: its exit toward the light stops short of
+        // the light.
+        let outer = [pillar(open.x, open.y + 2.0)];
+        assert!(blocked(&outer, open));
+        let FlarePath::Skirt { waypoint } = plan_among(from, target, &f, &outer) else {
+            panic!("expected a skirt round the outer pillar");
+        };
+        assert!(waypoint.y > 0.0, "kept its side: {waypoint:?}");
+        assert!(!blocked(&outer, waypoint), "{waypoint:?}");
+        assert!(is_dark(&f, waypoint), "{waypoint:?}");
+
+        // A pillar straddling the ring: its nearest exit is in the light.
+        let inner = [pillar(open.x + 0.5, open.y + 1.5)];
+        assert!(blocked(&inner, open));
+        let pushed = nearest_standable(&inner, open, 0.0).unwrap();
+        assert!(!is_dark(&f, pushed), "the exit must be lit: {pushed:?}");
+        let FlarePath::Skirt { waypoint } = plan_among(from, target, &f, &inner) else {
+            panic!("expected a skirt round the other side");
+        };
+        assert!(waypoint.y < 0.0, "went round the other side: {waypoint:?}");
+        assert!(!blocked(&inner, waypoint), "{waypoint:?}");
+    }
+
+    /// The wait point on the Rogue's line in lands in a pillar: it holds at
+    /// the nearest standable spot on the same ring, 4yd outside the light.
+    /// Control: no pillar, the spot on the line (-14, 0).
+    #[test]
+    fn a_wait_point_in_a_pillar_moves_round_the_wait_ring() {
+        let f = [flare(0.0, 0.0)];
+        let (from, target) = (Vec2::new(-34.0, 0.0), Vec2::new(5.0, 0.0));
+        let obstacles = [pillar(-14.0, 0.0)];
+
+        let FlarePath::Wait { at: open, .. } = plan_among(from, target, &f, &[]) else {
+            panic!("control: expected a wait");
+        };
+        assert!((open - Vec2::new(-14.0, 0.0)).length() < 1e-3, "{open:?}");
+
+        let FlarePath::Wait { at, .. } = plan_among(from, target, &f, &obstacles) else {
+            panic!("expected a wait");
+        };
+        assert!(!blocked(&obstacles, at), "{at:?}");
+        assert!(
+            (at.length() - (10.0 + FLARE_WAIT_BUFFER)).abs() < 1e-3,
+            "off the wait ring: {at:?}"
+        );
+        // The nearest such spot: just clear of the pillar, not round the far side.
+        assert!(at.distance(open) < 4.5, "{at:?}");
     }
 
     // ---- The call site: `evaluate_rogue_flare` through a CombatContext ----
@@ -776,6 +1056,8 @@ mod tests {
         state: Option<RogueFlareState>,
         /// A directive someone else issued, standing on the Rogue.
         foreign_directive: bool,
+        /// The map's obstacles.
+        obstacles: Vec<ObstacleVolume>,
     }
 
     impl Default for Scene {
@@ -789,6 +1071,7 @@ mod tests {
                 flares: vec![(1, flare(0.0, 0.0))],
                 state: None,
                 foreign_directive: false,
+                obstacles: Vec::new(),
             }
         }
     }
@@ -857,7 +1140,7 @@ mod tests {
             &auras,
             &dr,
             &cds,
-            &[],
+            &scene.obstacles,
             ArenaBounds::default(),
             AiProfile::Legacy,
         );
@@ -957,6 +1240,26 @@ mod tests {
         assert_eq!(frame.state.unwrap().mode, FlareApproach::Wait);
         let at = point(frame.directive);
         assert!((at - Vec2::new(-14.0, 0.0)).length() < 1e-3, "{at:?}");
+    }
+
+    /// The same hold with a pillar standing on it: the directive the Rogue
+    /// walks is a spot outside the pillar on the same ring — the map's
+    /// obstacles reach the plan through the context (AS-207). The control is
+    /// the test above.
+    #[test]
+    fn a_hold_in_a_pillar_is_moved_out_of_it_through_the_call_site() {
+        let obstacles = vec![pillar(-14.0, 0.0)];
+        let frame = run(Scene {
+            obstacles: obstacles.clone(),
+            ..Default::default()
+        });
+        assert_eq!(frame.triggers, ["FlareWait"]);
+        let at = point(frame.directive);
+        assert!(!blocked(&obstacles, at), "sent into the pillar: {at:?}");
+        assert!(
+            (at.length() - (10.0 + FLARE_WAIT_BUFFER)).abs() < 1e-3,
+            "{at:?}"
+        );
     }
 
     /// The half-health line, exercised where it is read: 49% goes in, 51%
