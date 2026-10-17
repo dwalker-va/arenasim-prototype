@@ -92,7 +92,7 @@ pub const AUTO_ARROW_SPEED: f32 = 45.0;
 
 /// Steps in a colour-ramp palette. Every particle of an emitter shares these
 /// materials and swaps between them as it ages.
-const PALETTE_STEPS: usize = 8;
+pub(super) const PALETTE_STEPS: usize = 8;
 /// Emissive gain of an additive particle over its ramp colour — the low end of
 /// the repo's 2-4x glow convention.
 const EMITTER_GLOW: f32 = 2.5;
@@ -265,7 +265,7 @@ impl ClientEmitter {
 }
 
 /// Linear interpolation over a birth / `mid` / death ramp.
-fn ramp3(keys: [f32; 3], mid: f32, t: f32) -> f32 {
+pub(super) fn ramp3(keys: [f32; 3], mid: f32, t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     let mid = mid.clamp(1e-3, 1.0 - 1e-3);
     if t < mid {
@@ -275,7 +275,7 @@ fn ramp3(keys: [f32; 3], mid: f32, t: f32) -> f32 {
     }
 }
 
-fn ramp_color(keys: [[u8; 3]; 3], mid: f32, t: f32) -> Color {
+pub(super) fn ramp_color(keys: [[u8; 3]; 3], mid: f32, t: f32) -> Color {
     let channel = |c: usize| {
         ramp3(
             [keys[0][c] as f32, keys[1][c] as f32, keys[2][c] as f32],
@@ -954,6 +954,15 @@ pub fn particle_rotation(particle: &ClientParticle, parent: Quat, camera: Quat) 
             Quat::from_rotation_y(particle.age * RUNE_SPIN) * Quat::from_rotation_x(-FRAC_PI_2)
         }
         ParticleFacing::Seal => camera * Quat::from_rotation_z(particle.age * RUNE_SPIN),
+        ParticleFacing::Spin {
+            mrad_per_sec,
+            start_mrad,
+        } => {
+            camera
+                * Quat::from_rotation_z(
+                    (start_mrad as f32 + particle.age * mrad_per_sec as f32) / 1000.0,
+                )
+        }
         ParticleFacing::Streak => {
             // Roll the camera-facing quad about the view axis until its long
             // (local Y) axis lies along the flight as the camera sees it.

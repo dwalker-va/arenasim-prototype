@@ -1,9 +1,11 @@
 # Divine Shield — client data and the gap (AS-359)
 
 Research for AS-359: what the Classic and TBC clients draw for Divine Shield, and how it
-differs from the `ShieldBubble` sphere we draw for it today. The bench is
-[`benches/2026-10-16-divine-shield-bench.html`](benches/2026-10-16-divine-shield-bench.html)
-(published at https://claude.ai/artifact/AehhwbuxGwuaDhttmDYqS2). It awaits the user's sign-off, and no Rust has been written.
+differed from the `ShieldBubble` sphere we drew for it. The bench is
+[`benches/2026-10-16-divine-shield-bench.html`](benches/2026-10-16-divine-shield-bench.html).
+**The blessed design is its published artifact,
+https://claude.ai/artifact/AehhwbuxGwuaDhttmDYqS2, version `1792216579-ec72`, at its
+defaults**, and §6 records what shipped.
 
 Sources: wago.tools DB2 tables and CASC files for Classic Era `1.15.9.69547` and TBC
 `2.5.6.69795`. The join is `scripts/db2_spell_sweep.py` over the three Paladin skill lines,
@@ -180,3 +182,29 @@ Divine Shield has no caster gesture: it is spawned as `DivineShieldPending` and 
   never land on a Paladin.
 - *Sustained channels.* Divine Shield is self-only and lasts 12 s on a 5-minute cooldown.
   At worst it shares the Paladin with PW:S and an aura band.
+
+## 6. What shipped
+
+The user signed off on the bench at its defaults: client values, with every gain and
+multiplier at 1.0 (not the *Harder read* preset). All layers are kept: rim, blue fill,
+cyan streak A, gold streak B, the star sparkles, the birth pop, the death swell and the
+caster's hands. The halo fall takes the literal reading, `DS_HALO_MODE = DeathOnly`.
+
+- **One machine, two models.** `rendering/effects/pw_shield.rs` now draws both shields.
+  A rig carries its `ShieldKind`, and each kind has a `ShieldTuning`: `PWS_TUNING` for the
+  AS-344 constants and `DS_TUNING` for the bench's `DS_*` constants, under the same names
+  the bench emits. The layer toggles have no constant, as for PW:S, because every layer is
+  kept. The timelines, cards, anchor, billboard and lifecycle are AS-344's, unchanged.
+  Divine Shield adds its two fill cards (`PwsLayer::FillOuter` and `FillInner`, on the
+  rim's weight track) and its own two colours.
+- **Both shields at once.** Rigs are keyed by bearer and kind, so a Priest's shield on a
+  bubbled Paladin draws both, and each one lives and ends on its own clock.
+- **Particles.** The sparkles and the halo are world-space `ClientParticle`s, aged and
+  turned by the shared `animate_client_particles` and `billboard_hunter_shots`. They use
+  the cards' material (unlit, additive). The glints spin through a new
+  `ParticleFacing::Spin`, using the shared star sprite.
+- **Caster.** Kit 417 plays the Holy launch off `DivineShieldPending`, which both AI paths
+  and the animation sandbox spawn (`spawn_instant_cast_hands`). Divine Shield stays out of
+  `InstantAbilityFired`, because the sandbox previews it through its pending component.
+- **The sphere** no longer draws Divine Shield. Ice Barrier is its last user.
+- **Textures** are generated from the measured profiles. No client art ships.
