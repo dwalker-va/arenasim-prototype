@@ -11,7 +11,7 @@
 //!   danger, and asserts the peel happens exactly where no gate stands — so
 //!   un-gating a gated context, and gating an enabled one, each fail it on
 //!   behaviour, not only on the list. Its control lifts the team's gates
-//!   (`Scene::lift_gates`, the milestone sweep's re-check), and every gated
+//!   (`Scene::lift`, the milestone sweep's re-check), and every gated
 //!   context then peels: the gate is what stops it.
 
 use std::collections::BTreeSet;
@@ -25,7 +25,7 @@ use arenasim::states::play_match::class_ai::peel::{
 };
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::decision_trace::{PlayStep, PlayTag};
-use arenasim::states::play_match::situation::{PlaySet, PEEL};
+use arenasim::states::play_match::situation::{Play, PlaySet, CHAIN, PEEL};
 
 /// Every gate, as (peeler, teammate in danger). Edit this list together with
 /// `PEEL_GATES`, and only on a measurement.
@@ -192,9 +192,7 @@ fn every_peeler_peels_for_every_teammate_but_the_gated_ones() {
                 ));
             }
 
-            let lifted = scene(peeler, ally)
-                .lift_gates(1, PlaySet::of(&[PEEL]))
-                .decide(ME);
+            let lifted = scene(peeler, ally).lift(1, PlaySet::of(&[PEEL])).decide(ME);
             if !peeled(peeler, &lifted) {
                 wrong.push(format!(
                     "{peeler:?} for {ally:?}, gates lifted: no peel: {}",
@@ -256,9 +254,11 @@ fn a_gated_peeler_falls_back_to_burst_unless_it_is_excepted() {
     };
     let gated = build().decide(ME);
     assert_eq!(tag(&gated), Some(PlayTag::Burst), "{}", describe(&gated));
-    let excepted = build().burst_exceptions(ClassSet::of(&[Mage])).decide(ME);
+    let excepted = build()
+        .exceptions(Play::Burst, ClassSet::of(&[Mage]))
+        .decide(ME);
     assert_eq!(tag(&excepted), None, "{}", describe(&excepted));
-    let lifted = build().lift_gates(1, PlaySet::of(&[PEEL])).decide(ME);
+    let lifted = build().lift(1, PlaySet::of(&[PEEL])).decide(ME);
     assert!(
         matches!(tag(&lifted), Some(PlayTag::Peel { .. })),
         "{}",
@@ -267,8 +267,8 @@ fn a_gated_peeler_falls_back_to_burst_unless_it_is_excepted() {
 }
 
 /// The composition order of `CombatContext::play`: Peel's gate, then Chain,
-/// then Burst's exceptions. A gated peeler runs the play it would without the
-/// peel (`TeamSituation::play_without_peel`), so with the enemy Priest's stun
+/// then Burst's exceptions. A gated peeler passes to the next stage of the
+/// pipeline (`class_ai::plays::PLAY_ORDER`), so with the enemy Priest's stun
 /// ending inside the Chain play's horizon the gated Mage CHAINS (onto the
 /// Priest); named a Chain exception it falls to the Burst play (the kill
 /// window); named a Burst exception too, to the default chain. With its gates
@@ -292,7 +292,7 @@ fn a_gated_peeler_still_chains_when_a_lock_is_ending() {
         "{}",
         describe(&gated)
     );
-    let no_chain = build().chain_exceptions(ClassSet::of(&[Mage])).decide(ME);
+    let no_chain = build().exceptions(CHAIN, ClassSet::of(&[Mage])).decide(ME);
     assert_eq!(
         tag(&no_chain),
         Some(PlayTag::Burst),
@@ -300,11 +300,11 @@ fn a_gated_peeler_still_chains_when_a_lock_is_ending() {
         describe(&no_chain)
     );
     let neither = build()
-        .chain_exceptions(ClassSet::of(&[Mage]))
-        .burst_exceptions(ClassSet::of(&[Mage]))
+        .exceptions(CHAIN, ClassSet::of(&[Mage]))
+        .exceptions(Play::Burst, ClassSet::of(&[Mage]))
         .decide(ME);
     assert_eq!(tag(&neither), None, "{}", describe(&neither));
-    let lifted = build().lift_gates(1, PlaySet::of(&[PEEL])).decide(ME);
+    let lifted = build().lift(1, PlaySet::of(&[PEEL])).decide(ME);
     assert!(
         matches!(tag(&lifted), Some(PlayTag::Peel { .. })),
         "{}",

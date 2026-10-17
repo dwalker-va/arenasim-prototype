@@ -3,7 +3,7 @@
 //! While a kill window is open (`TeamSituation::kill_window`: an enemy low and
 //! beyond its healers' help), a DPS on a team that runs the play —
 //! `AiProfile::TeamPlan`, unless the play is withheld for measurement, and not
-//! a class `situation::BURST_EXCEPTIONS` names — puts its BURST step at the
+//! a class [`BURST_EXCEPTIONS`] names — puts its BURST step at the
 //! head of its chain, below a peel step: its [`burst_tools`], in order, on the
 //! window's subject.
 //!
@@ -28,9 +28,75 @@
 
 use bevy::prelude::*;
 
+use super::plays::{own_class, PlayStage};
 use super::CombatContext;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::situation::{
+    ExceptionKey, ExceptionSet, Play, PlayId, Role, TeamSituation,
+};
+
+/// A DPS class the Burst play is NOT used for, and the measurement that put it
+/// here. The ruling (2026-10-12): a play that measures negative in a context
+/// is not used there; each exception is named here, with its finding, and is
+/// re-checked at each milestone sweep by running the head-to-head with the
+/// exceptions lifted (`"team1_exceptions": {"Burst": []}` in a headless
+/// config; `situation::WithheldPlays`).
+#[derive(Clone, Copy, Debug)]
+pub struct BurstException {
+    pub class: CharacterClass,
+    /// The measurement that put it here: the findings note and its row.
+    pub finding: &'static str,
+}
+
+/// The classes the Burst play is not used for (see [`BurstException`]).
+pub const BURST_EXCEPTIONS: &[BurstException] = &[];
+
+/// The Burst play, as a stage of the pipeline (`plays::PLAY_ORDER`).
+pub struct BurstStage;
+
+impl PlayStage for BurstStage {
+    fn id(&self) -> PlayId {
+        PlayId::Burst
+    }
+
+    fn config_key(&self) -> &'static str {
+        "Burst"
+    }
+
+    /// A DPS, while a kill window is open. Per role, not per class: a class
+    /// [`BURST_EXCEPTIONS`] names is answered by the unit's admission.
+    fn calls(&self, situation: &TeamSituation, role: Role, _me: Entity) -> Option<Play> {
+        match role {
+            Role::MeleeDps | Role::RangedDps if situation.kill_window.is_some() => {
+                Some(Play::Burst)
+            }
+            Role::MeleeDps | Role::RangedDps | Role::Healer => None,
+        }
+    }
+
+    /// Any unit whose class its own view knows.
+    fn admits(&self, ctx: &CombatContext, _play: &Play) -> bool {
+        own_class(ctx).is_some()
+    }
+
+    fn exception_key(&self, ctx: &CombatContext, _play: &Play) -> Option<ExceptionKey> {
+        own_class(ctx).map(ExceptionKey::class)
+    }
+
+    fn exceptions_have_context(&self) -> bool {
+        false
+    }
+
+    fn exceptions(&self) -> ExceptionSet {
+        ExceptionSet::of(
+            &BURST_EXCEPTIONS
+                .iter()
+                .map(|e| ExceptionKey::class(e.class))
+                .collect::<Vec<_>>(),
+        )
+    }
+}
 
 /// The burst a unit owes this tick: the kill window's subject, and when the
 /// window ends (if that is known).

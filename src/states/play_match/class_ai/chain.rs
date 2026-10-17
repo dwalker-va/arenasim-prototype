@@ -6,7 +6,7 @@
 //! incapacitate or a cyclone, the one whose hold ends SOONEST — the healer on
 //! a tie), a unit on a team that runs the play — `AiProfile::TeamPlan`,
 //! unless the play is withheld for measurement, and not a class
-//! `situation::CHAIN_EXCEPTIONS` names — puts its CHAIN step at the head of
+//! [`CHAIN_EXCEPTIONS`] names — puts its CHAIN step at the head of
 //! its chain, below a peel step and above a burst step: a HAND-OFF of its own
 //! crowd control ([`chain_tools`]) onto that enemy, timed to land in the
 //! lock's last moments, so the enemy never gets a free global cooldown
@@ -81,6 +81,70 @@ use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinition
 use crate::states::play_match::components::{ActiveAuras, Combatant, DRCategory};
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::decision_trace::{DecisionEventBuilder, RejectionReason};
+use crate::states::play_match::situation::{
+    ExceptionKey, ExceptionSet, Play, PlayId, Role, TeamSituation,
+};
+
+use super::plays::{own_class, PlayStage};
+
+/// A class the Chain play is NOT used for, and the measurement that put it
+/// here: the same ruling, and the same re-check at each milestone sweep, as
+/// `burst::BurstException` (`"team1_exceptions": {"Chain": []}` in a headless
+/// config).
+#[derive(Clone, Copy, Debug)]
+pub struct ChainException {
+    pub class: CharacterClass,
+    /// The measurement that put it here: the findings note and its row.
+    pub finding: &'static str,
+}
+
+/// The classes the Chain play is not used for (see [`ChainException`]).
+pub const CHAIN_EXCEPTIONS: &[ChainException] = &[];
+
+/// The Chain play, as a stage of the pipeline (`plays::PLAY_ORDER`).
+pub struct ChainStage;
+
+impl PlayStage for ChainStage {
+    fn id(&self) -> PlayId {
+        PlayId::Chain
+    }
+
+    fn config_key(&self) -> &'static str {
+        "Chain"
+    }
+
+    /// Any role while a lock the team holds is about to end
+    /// ([`TeamSituation::chain_window`]); a healer only while no teammate of
+    /// its own is dying.
+    fn calls(&self, situation: &TeamSituation, role: Role, _me: Entity) -> Option<Play> {
+        let window = situation.chain_window()?;
+        (role != Role::Healer || situation.dying_allies().next().is_none()).then_some(Play::Chain {
+            subject: window.subject,
+        })
+    }
+
+    /// A unit with something to hand off ([`chain_tools`]).
+    fn admits(&self, ctx: &CombatContext, _play: &Play) -> bool {
+        own_class(ctx).is_some_and(|class| !chain_tools(class).is_empty())
+    }
+
+    fn exception_key(&self, ctx: &CombatContext, _play: &Play) -> Option<ExceptionKey> {
+        own_class(ctx).map(ExceptionKey::class)
+    }
+
+    fn exceptions_have_context(&self) -> bool {
+        false
+    }
+
+    fn exceptions(&self) -> ExceptionSet {
+        ExceptionSet::of(
+            &CHAIN_EXCEPTIONS
+                .iter()
+                .map(|e| ExceptionKey::class(e.class))
+                .collect::<Vec<_>>(),
+        )
+    }
+}
 
 /// How early before the lock's `until` a hand-off may land: the last quarter
 /// second. Inside the hold rule's chain window (`CC_CHAIN_WINDOW`, 0.5s), and
