@@ -177,7 +177,11 @@ fn the_solve_walk_round_a_pillar_holds_damage_until_its_teammate_is_reached() {
         "the solve walks straight at the dying Warrior: {}",
         describe(&walk)
     );
-    assert!(held(&walk), "Moonfire held for the walk: {}", describe(&walk));
+    assert!(
+        held(&walk),
+        "Moonfire held for the walk: {}",
+        describe(&walk)
+    );
 
     let reached = behind(Vec::new());
     assert_eq!(
@@ -203,10 +207,18 @@ fn the_solve_walk_into_heal_range_holds_damage() {
         "the solve steps toward the Warrior: {}",
         describe(&walk)
     );
-    assert!(held(&walk), "Moonfire held for the walk: {}", describe(&walk));
+    assert!(
+        held(&walk),
+        "Moonfire held for the walk: {}",
+        describe(&walk)
+    );
 
     let not_dying = scene(AiProfile::TeamPlan, OUT_OF_RANGE, HURT, Vec::new()).decide(DRUID);
-    assert!(moonfired(&not_dying), "nobody dying: {}", describe(&not_dying));
+    assert!(
+        moonfired(&not_dying),
+        "nobody dying: {}",
+        describe(&not_dying)
+    );
 }
 
 /// The walk is `TeamPlan`'s: `Legacy` has no walk into heal range (its medic
