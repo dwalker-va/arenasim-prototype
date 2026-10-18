@@ -38,6 +38,12 @@ const OUT_OF_RANGE: (f32, f32) = (45.0, 0.0);
 /// 30yd east: in heal range (and, with no pillar, in sight).
 const IN_RANGE: (f32, f32) = (30.0, 0.0);
 
+/// 39.5yd east: inside the 40yd heal range, outside its 1yd
+/// `HEAL_REACH_MARGIN` — not reached, by the solve's own measure.
+const INSIDE_RANGE_OUTSIDE_MARGIN: (f32, f32) = (39.5, 0.0);
+/// 38.5yd east: inside the margin — reached.
+const INSIDE_MARGIN: (f32, f32) = (38.5, 0.0);
+
 /// A 6yd pillar at (15, 0), squarely between the Paladin at the origin and
 /// the Warrior [`IN_RANGE`].
 fn pillar() -> Vec<ObstacleVolume> {
@@ -152,6 +158,31 @@ fn a_dying_teammate_behind_a_pillar_lifts_the_park() {
 
     let reached = scene(AiProfile::TeamPlan, IN_RANGE, DYING, cover()).decide(PALADIN);
     assert!(parked(&reached), "teammate reached: {}", describe(&reached));
+}
+
+/// The reach edge is the solve's: `heal_range` less `HEAL_REACH_MARGIN`. A
+/// dying Warrior 39.5yd off — in heal range, outside the margin — is not
+/// reached, so the Paladin walks. One 38.5yd off, inside the margin, is
+/// reached, and the Paladin parks beside cover the solve would have walked
+/// it to. The pair fails if the park measures reach with no margin, or with
+/// a margin out of step with the solve's.
+#[test]
+fn the_park_measures_reach_with_the_solves_margin() {
+    let edge = scene(
+        AiProfile::TeamPlan,
+        INSIDE_RANGE_OUTSIDE_MARGIN,
+        DYING,
+        cover(),
+    )
+    .decide(PALADIN);
+    assert!(
+        walks_toward_warrior(&edge),
+        "outside the margin, the solve walks: {}",
+        describe(&edge)
+    );
+
+    let inside = scene(AiProfile::TeamPlan, INSIDE_MARGIN, DYING, cover()).decide(PALADIN);
+    assert!(parked(&inside), "inside the margin: {}", describe(&inside));
 }
 
 /// The rule is `TeamPlan`'s: `Legacy` has no solve and keeps its park beside
