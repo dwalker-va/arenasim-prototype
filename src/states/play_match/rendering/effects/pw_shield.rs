@@ -1344,7 +1344,11 @@ fn emit_divine_shield_particles(
         emitters.sparkle_carry -= 1.0;
         let seed = base.wrapping_add(emitters.emitted.wrapping_mul(2_654_435_761));
         // The two emitters alternate: one spins each way.
-        let sign: i16 = if emitters.emitted % 2 == 0 { 1 } else { -1 };
+        let sign: i16 = if emitters.emitted.is_multiple_of(2) {
+            1
+        } else {
+            -1
+        };
         emitters.emitted = emitters.emitted.wrapping_add(1);
         let (offset, velocity) = ds_sparkle_launch(seed);
         let size = SPARKLE_HALF.map(|h| 2.0 * h * r * DS_SPARKLE_SIZE);

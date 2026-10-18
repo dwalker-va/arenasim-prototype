@@ -54,6 +54,9 @@ an open, review-ready PR — nothing more.
    than output** (a passing run still prints the `block v0.1.6` future-incompat line)
    — and never through a pipe: zsh leaves `PIPESTATUS` unpopulated, so
    `cargo test … | tail; echo $?` reports the pipe's status, not the test's.
+   Lint's two commands, exactly as `.github/workflows/lint.yaml` runs them, must pass
+   too: `cargo fmt --check` and `cargo clippy -- -D warnings`. The Tester rejects a
+   failure in either, like a failed build.
 
    Then run the opt-in suites your diff touches. The Tester will run them; the only
    question is whether it finds them green or spends a REJECT round telling you to:

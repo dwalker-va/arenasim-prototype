@@ -398,10 +398,7 @@ pub(crate) fn solve_dying_walk(
     state: &HealerPosture,
     shared: &SharedMovementConfig,
 ) -> Option<Entity> {
-    if !ctx.ai_profile.is_team_plan()
-        || state.posture != Posture::Pressured
-        || ctx.is_ccd(entity)
-    {
+    if !ctx.ai_profile.is_team_plan() || state.posture != Posture::Pressured || ctx.is_ccd(entity) {
         return None;
     }
     let ally = state.solve_dying?;
@@ -1222,8 +1219,7 @@ pub(super) fn healer_pressured_tick_shared(
         // The dying teammate this solve walks the healer to reach — the
         // `TeamPlan` medic walk ([`solve_dying_walk`]). Recorded, not acted
         // on: the spot above already is the walk.
-        state.solve_dying =
-            crate::states::play_match::team_solve::dying_anchor(&world, entity);
+        state.solve_dying = crate::states::play_match::team_solve::dying_anchor(&world, entity);
         // A `Point` goal, not a bearing: the chosen spot can be tens of yards
         // off and behind a pillar, and `Point` is the branch that tangent-steers
         // around one. `None` means the solve is already satisfied here — hold,
