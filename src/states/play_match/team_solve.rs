@@ -1355,7 +1355,10 @@ pub fn dying_unreached(world: &SolveWorld, entity: Entity) -> Option<Entity> {
 /// The candidates are `OccupyCover`'s: the healer's spot, every (obstacle,
 /// caster) shadow along its centre line ([`SHADOW_DEPTHS`]), and the local
 /// ring. No peek shoulders: peeking is for keeping an ally in sight, and there
-/// is none. The winner is moved onto standable ground, as [`solve_unit`]'s is.
+/// is none. Unlike [`solve_unit`], which projects every candidate onto
+/// standable ground before scoring it, this still scores candidates in place
+/// and projects only the winner, so an in-pillar ring step can win cover its
+/// landing spot lacks (AS-362 tracks the fix).
 pub fn last_stand_cover(entity: Entity, world: &SolveWorld) -> Option<Vec2> {
     if world.obstacles.is_empty() {
         return None;
