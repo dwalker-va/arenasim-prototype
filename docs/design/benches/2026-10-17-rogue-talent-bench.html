@@ -1,0 +1,575 @@
+<title>Rogue Talent Visuals Bench</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one stage + a control rail; single dark theme by choice (an effects bench reads against the arena floor). */
+:root{
+  color-scheme: dark;
+  --bg:#141317; --panel:#1c1a21; --panel2:#25222c; --line:#353140;
+  --text:#e7e4ec; --muted:#968fa3; --accent:#9482c9; --warn:#e8b04a; --stage:#0d0c10;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --sans:"IBM Plex Sans", system-ui, -apple-system, sans-serif;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+body{padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));padding-block:16px 32px}
+h1{font-size:18px;font-weight:600;margin:0;letter-spacing:.01em;text-wrap:balance}
+.sub{color:var(--muted);font-size:12.5px;margin-top:2px;max-width:72ch}
+header{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:end;justify-content:space-between;margin-bottom:12px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tab{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+.tab[aria-selected="true"]{border-color:var(--accent);color:var(--accent);background:var(--panel2)}
+.tab:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px}
+@media (max-width:860px){.grid{grid-template-columns:1fr}}
+.stage{background:var(--stage);border:1px solid var(--line);border-radius:8px;position:relative;overflow:hidden}
+canvas{display:block;width:100%;height:auto;aspect-ratio:16/10;max-width:100%;cursor:grab}
+.hud{position:absolute;left:10px;top:8px;font-family:var(--mono);font-size:11.5px;color:var(--muted);pointer-events:none;white-space:pre}
+.transport{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px;border-top:1px solid var(--line);background:var(--panel)}
+button.btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+button.btn.primary{border-color:var(--accent);color:var(--accent)}
+select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:4px;font:inherit}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;min-width:0}
+.card h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;font-weight:600}
+.layer{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--line)}
+.layer:first-of-type{border-top:0}
+.layer label{flex:1;cursor:pointer;min-width:0}
+.layer .nm{font-weight:500}
+.layer .ds{display:block;color:var(--muted);font-size:12px;line-height:1.35}
+.layer.aid .nm::after{content:" · viewing aid";color:var(--muted);font-weight:400;font-size:12px}
+.layer.authored .nm::after{content:" · authored, not client";color:var(--warn);font-weight:400;font-size:12px}
+.sw{width:10px;height:10px;border-radius:2px;margin-top:5px;flex:none}
+.knob{display:grid;grid-template-columns:118px minmax(0,1fr) 86px;gap:8px;align-items:center;padding:3px 0}
+.knob span{font-size:12.5px;color:var(--muted)}
+.knob output{font-family:var(--mono);font-size:12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.notes{color:var(--muted);font-size:12.5px;line-height:1.5;margin:0;padding-left:16px}
+.notes li{margin:3px 0}
+.notes b{color:var(--text);font-weight:500}
+.inferred{color:var(--warn)}
+.ask{color:var(--text);border-left:2px solid var(--accent);padding-left:8px;margin:6px 0 0;font-size:12.5px;line-height:1.5}
+pre{font-family:var(--mono);font-size:12px;line-height:1.5;background:var(--stage);border:1px solid var(--line);border-radius:6px;padding:10px;overflow-x:auto;margin:0;color:#d9d0ec}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+</style>
+
+<header>
+  <div>
+    <h1>Rogue Talent Visuals Bench <span style="color:var(--muted);font-weight:400">· AS-336</span></h1>
+    <div class="sub">Client values from TBC 2.5.6 (Shadow Dance from Wrath Classic 3.4.5), parsed from each model's M2 file. Each slider starts at the client value (×1.0), and playback starts at real time. Untick the layers you don't want, then copy the constants block. Layers marked "authored" are not in the client. They are proposals for you to rule on.</div>
+  </div>
+  <div class="legend"><span>drag = orbit</span><span>wheel = zoom</span><span>body: capsule ±1.25 about y=1.0</span></div>
+</header>
+
+<nav class="tabs" role="tablist" id="tabs"></nav>
+
+<div class="grid">
+  <div style="min-width:0">
+    <div class="stage">
+      <canvas id="cv" width="1280" height="800" aria-label="Effect preview"></canvas>
+      <div class="hud" id="hud"></div>
+      <div class="transport">
+        <button class="btn primary" id="replay">Replay</button>
+        <button class="btn" id="pause">Pause</button>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="loop" checked> loop</label>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px">speed
+          <select id="speed"><option value="1" selected>1.0× (real)</option><option value="0.5">0.5×</option><option value="0.25">0.25×</option></select></label>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="moving"> victim moving</label>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="row"><h2 style="margin:0">Rust constants for this effect</h2><button class="btn" id="copy">Copy</button></div>
+      <pre id="out"></pre>
+    </div>
+  </div>
+  <div class="side">
+    <div class="card"><h2>Layers</h2><div id="layers"></div></div>
+    <div class="card"><h2>Multipliers over client</h2><div id="knobs"></div></div>
+    <div class="card"><h2>What the client data says</h2><ul class="notes" id="notes"></ul><div id="asks"></div></div>
+  </div>
+</div>
+
+<script>
+
+"use strict";
+// ---------- small math ----------
+const TAU=Math.PI*2, rnd=Math.random;
+const lerp=(a,b,t)=>a+(b-a)*t, clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function keys(k,t){ if(t<=k[0][0]) return k[0][1];
+  for(let i=1;i<k.length;i++){ if(t<=k[i][0]){const a=k[i-1],b=k[i],u=(t-a[0])/(b[0]-a[0]||1);
+    return Array.isArray(a[1])?a[1].map((x,j)=>lerp(x,b[1][j],u)):lerp(a[1],b[1],u);} }
+  return k[k.length-1][1]; }
+function windowOn(win,ms){ if(!win) return true; let on=win[0][1]; for(const [t,v] of win){ if(ms>=t) on=v; } return !!on; }
+const rgb=(c,a)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const norm=a=>{const l=Math.hypot(...a)||1;return[a[0]/l,a[1]/l,a[2]/l]};
+
+// ---------- camera ----------
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const cam={yaw:0.65,pitch:0.42,dist:12,target:[0,1.2,0]};
+let drag=null;
+cv.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing'});
+cv.addEventListener('pointermove',e=>{if(!drag)return;cam.yaw-=(e.clientX-drag[0])*0.008;cam.pitch=clamp(cam.pitch+(e.clientY-drag[1])*0.006,0.05,1.35);drag=[e.clientX,e.clientY]});
+cv.addEventListener('pointerup',()=>{drag=null;cv.style.cursor='grab'});
+cv.addEventListener('wheel',e=>{e.preventDefault();cam.dist=clamp(cam.dist*(1+e.deltaY*0.001),3,60)},{passive:false});
+let VIEW;
+function setupView(){
+  const cp=Math.cos(cam.pitch),sp=Math.sin(cam.pitch);
+  const eye=[cam.target[0]+cam.dist*cp*Math.sin(cam.yaw),cam.target[1]+cam.dist*sp,cam.target[2]+cam.dist*cp*Math.cos(cam.yaw)];
+  const f=norm(sub(cam.target,eye)), r=norm(cross(f,[0,1,0])), u=cross(r,f);
+  VIEW={eye,f,r,u,fl:cv.height*1.25};
+}
+function proj(p){const d=sub(p,VIEW.eye),z=dot(d,VIEW.f); if(z<0.1) return null;
+  const s=VIEW.fl/z; return {x:cv.width/2+dot(d,VIEW.r)*s,y:cv.height/2-dot(d,VIEW.u)*s,s,z};}
+
+// ---------- scene primitives ----------
+const FLOOR=[0.79*255,0.66*255,0.46*255];
+const CLASS={warlock:[148,130,201],priest:[235,235,235],rogue:[255,245,105],warrior:[199,156,110],victim:[150,160,175]};
+function drawFloor(){
+  const pts=[];for(let i=0;i<48;i++){const a=i/48*TAU;const q=proj([9*Math.cos(a),0,9*Math.sin(a)]);if(q)pts.push(q)}
+  g.fillStyle=rgb(FLOOR.map(c=>c*0.82),1);g.beginPath();pts.forEach((q,i)=>i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y));g.closePath();g.fill();
+  g.strokeStyle='rgba(0,0,0,0.08)';g.lineWidth=1;
+  for(let i=-8;i<=8;i+=2){line3([i,0,-8],[i,0,8]);line3([-8,0,i],[8,0,i]);}
+}
+function line3(a,b){const p=proj(a),q=proj(b);if(!p||!q)return;g.beginPath();g.moveTo(p.x,p.y);g.lineTo(q.x,q.y);g.stroke();}
+function drawCapsule(c,col,alpha=1){
+  const top=proj([c[0],c[1]+0.75,c[2]]),bot=proj([c[0],c[1]-0.75,c[2]]);if(!top||!bot)return;
+  const w=0.5*top.s;
+  g.globalAlpha=alpha;
+  const gr=g.createLinearGradient(top.x-w,0,top.x+w,0);
+  gr.addColorStop(0,rgb(col.map(x=>x*0.55),1));gr.addColorStop(0.45,rgb(col,1));gr.addColorStop(1,rgb(col.map(x=>x*0.45),1));
+  g.fillStyle=gr;g.beginPath();
+  g.arc(top.x,top.y,w,Math.PI,0);g.lineTo(bot.x+w,bot.y);g.arc(bot.x,bot.y,w,0,Math.PI);g.closePath();g.fill();
+  g.globalAlpha=1;
+}
+function shadow(c,r=0.55){const p=proj([c[0],0.01,c[2]]);if(!p)return;g.fillStyle='rgba(0,0,0,0.22)';g.beginPath();g.ellipse(p.x,p.y,r*p.s,r*p.s*Math.max(0.15,Math.sin(cam.pitch)),0,0,TAU);g.fill();}
+
+function sprite(kind,p,size,col,a,ang=0,streak=null){
+  const q=proj(p);if(!q||a<=0.003)return;const r=Math.max(0.6,size*q.s*0.5);
+  g.save();g.translate(q.x,q.y);
+  if(kind==='glow'||kind==='cloud'||kind==='smoke'||kind==='dust'||kind==='flame'){
+    const gr=g.createRadialGradient(0,0,0,0,0,r);
+    const soft=kind==='glow'?[1,0.45,0]:kind==='cloud'?[0.9,0.6,0]:kind==='flame'?[0.8,0.55,0]:[0.85,0.5,0];
+    gr.addColorStop(0,rgb(col,a*soft[0]));gr.addColorStop(0.45,rgb(col,a*soft[1]));gr.addColorStop(1,rgb(col,0));
+    g.fillStyle=gr;g.beginPath();
+    if(kind==='flame'){g.ellipse(0,-r*0.25,r*0.6,r,0,0,TAU);}else g.arc(0,0,r,0,TAU);
+    g.fill();
+  } else if(kind==='star'){
+    g.rotate(ang);g.fillStyle=rgb(col,a);
+    for(let k=0;k<2;k++){g.rotate(Math.PI/4*k*2);g.beginPath();g.ellipse(0,0,r,r*0.12,0,0,TAU);g.fill();g.beginPath();g.ellipse(0,0,r*0.12,r,0,0,TAU);g.fill();}
+    const gr=g.createRadialGradient(0,0,0,0,0,r*0.45);gr.addColorStop(0,rgb([255,255,255],a));gr.addColorStop(1,rgb(col,0));g.fillStyle=gr;g.beginPath();g.arc(0,0,r*0.45,0,TAU);g.fill();
+  } else if(kind==='blob'){
+    g.fillStyle=rgb(col,a);g.beginPath();g.arc(0,0,r*0.7,0,TAU);g.fill();
+  }
+  g.restore();
+  if(streak){const q2=proj(streak);if(!q2)return;
+    g.strokeStyle=rgb(col,a*0.85);g.lineCap='round';g.lineWidth=Math.max(1,r*0.7);
+    g.beginPath();g.moveTo(q.x,q.y);g.lineTo(q2.x,q2.y);g.stroke();}
+}
+
+// ---------- particle emitter (M2-shaped) ----------
+// spec: anchor, pos:[x,z,y], vRange (0 = straight up, >=3.1 = sphere), speed, life, rate, win:[[ms,on]],
+//  color/alpha/scale keyed over life 0..1, gravity (negative rises), drag, tail, kind, blend 'add'|'alpha',
+//  area (xz box), areaY, inward: shell radius (yd) the particle starts on, moving toward the anchor,
+//  trig: name of the fx trigger list that (re)starts this emitter's timeline.
+class Emitter{
+  constructor(s,fx){this.s=s;this.fx=fx;this.ps=[];this.acc=0;}
+  reset(){this.ps=[];this.acc=0;}
+  update(dt,ms,origin){
+    const s=this.s,K=this.fx.knobs,dmul=(K.density??1)*(this.fx.rateMul?this.fx.rateMul(this.fx,ms):1);
+    const add=lm=>{ if(windowOn(s.win,lm)){ const rate=Array.isArray(s.rate)?keys(s.rate,lm):s.rate; this.acc+=rate*dt*dmul; } };
+    const tl=this.fx.trig && this.fx.trig[s.trig||'main'];
+    if(tl){ const span=(s.span||this.fx.durMs)*(K.duration??1);
+      for(const t of tl){ const lm=ms-t; if(lm>=0 && lm<=span) add(lm/(K.duration??1)); } }
+    else { const lm=s.loopMs?(ms%s.loopMs):ms; if(!this.fx.loopFx || true) add(s.loopMs?lm:ms/(K.duration??1)); }
+    while(this.acc>=1){this.acc-=1;this.spawn(origin);}
+    const gy=-(s.gravity||0);
+    for(const p of this.ps){
+      p.age+=dt; p.v[1]+=gy*dt; const dr=Math.max(0,1-(s.drag||0)*dt*3); p.v=p.v.map(x=>x*dr);
+      p.x=[p.x[0]+p.v[0]*dt,p.x[1]+p.v[1]*dt,p.x[2]+p.v[2]*dt];
+      if(s.follow){p.x[0]+=origin[0]-p.o[0];p.x[2]+=origin[2]-p.o[2];p.o=[...origin];}
+      if(s.floorKill&&p.x[1]<0.02){p.x[1]=0.02;p.v=[0,0,0];}
+      p.ang+=(s.spin||0)*TAU*dt;
+    }
+    this.ps=this.ps.filter(p=>p.age<p.life);
+  }
+  spawn(origin){
+    if(this.s.at){const k=Array.isArray(this.s.at)?this.s.at[(rnd()*this.s.at.length)|0]:this.s.at; if(AT[k]) origin=AT[k];}
+    const s=this.s,K=this.fx.knobs,spread=K.spread??1;
+    const off=s.pos||[0,0,0], area=(s.area||0)*spread, areaY=(s.areaY||0)*spread;
+    const c=[origin[0]+off[0]*spread,origin[1]+this.fx.anchorY(s.anchor)+off[2],origin[2]+off[1]*spread];
+    if(s.orbit){const k=(rnd()*3)|0, ang=(simMs/1000)*(this.fx.knobs.spin??s.orbitRevS??1)*TAU+k*TAU/3, R=s.orbit*spread; c[0]+=R*Math.cos(ang); c[2]+=R*Math.sin(ang);}
+    let start,v;
+    if(s.inward){ const d=norm([rnd()*2-1,(rnd()*2-1)*(s.inwardFlat??1),rnd()*2-1]), R=s.inward*spread*(0.6+0.4*rnd());
+      start=[c[0]+d[0]*R,c[1]+d[1]*R,c[2]+d[2]*R]; v=d.map(x=>-x*Math.abs(s.speed)*spread); }
+    else {
+      let dir; if((s.vRange||0)>=3.1) dir=norm([rnd()*2-1,rnd()*2-1,rnd()*2-1]);
+      else {const pol=(rnd()*2-1)*(s.vRange||0), az=rnd()*TAU; dir=[Math.sin(pol)*Math.cos(az),Math.cos(pol),Math.sin(pol)*Math.sin(az)];}
+      start=[c[0]+(rnd()-0.5)*area,c[1]+(rnd()-0.5)*areaY,c[2]+(rnd()-0.5)*area];
+      const sp=s.speed*spread*(1+(s.speedVar||0)*(rnd()*2-1)); v=dir.map(d=>d*sp); }
+    this.ps.push({x:start,v,age:0,life:s.life*(K.duration??1),ang:rnd()*TAU,o:[...origin]});
+  }
+  draw(){
+    const s=this.s,K=this.fx.knobs,size=K.size??1;
+    g.globalCompositeOperation=s.blend==='alpha'?'source-over':'lighter';
+    for(const p of this.ps){
+      const t=p.age/p.life; let col=keys(s.color,t); if(this.fx.colorMap) col=this.fx.colorMap(col,s);
+      const a=keys(s.alpha,t)*(K.opacity??1), sc=keys(s.scale,t)*size*2;
+      let streak=null;
+      if(s.tail){const sp=Math.hypot(...p.v);if(sp>0.2){const L=Math.min(s.tail*0.12,sp*0.06)*size;const vv=norm(p.v);streak=[p.x[0]-vv[0]*L,p.x[1]-vv[1]*L,p.x[2]-vv[2]*L];}}
+      sprite(s.kind||'glow',p.x,sc,col,a,p.ang,streak);
+    }
+    g.globalCompositeOperation='source-over';
+  }
+}
+
+// ---------- floating combat text (matches floating_text.rs: rise 1.5 yd/s, 1.5 s life, fade over the last 0.5 s) ----------
+let FCT=[];
+function fct(text,col,px,pos,bold=true){FCT.push({text,col,px,pos:[...pos],age:0,bold});}
+function drawFct(dt){
+  for(const f of FCT){f.age+=dt;}
+  FCT=FCT.filter(f=>f.age<1.5);
+  for(const f of FCT){
+    const q=proj([f.pos[0],f.pos[1]+1.5*f.age,f.pos[2]]); if(!q) continue;
+    const a=f.age>1.0?(1.5-f.age)/0.5:1;
+    const px=f.px*1.6;
+    g.font=`${f.bold?700:600} ${px}px "IBM Plex Sans", system-ui, sans-serif`;g.textAlign='center';g.textBaseline='middle';
+    g.lineWidth=Math.max(2,px*0.14);g.strokeStyle=`rgba(0,0,0,${a})`;g.strokeText(f.text,q.x,q.y);
+    g.fillStyle=rgb(f.col,a);g.fillText(f.text,q.x,q.y);
+  }
+}
+
+// ---------- effect registry ----------
+const ANCH={feet:0.0,origin:0.0,chest:1.45,head:2.25,hands:1.35};
+function mkFx(def){
+  const fx={...def,knobs:{},layersOn:{},emitters:[]};
+  for(const k of def.knobDefs) fx.knobs[k.key]=k.def;
+  for(const L of def.layers) fx.layersOn[L.id]=L.on!==false;
+  fx.anchorY=a=>ANCH[a]??0;
+  for(const L of def.layers) if(L.emitter) fx.emitters.push({id:L.id,e:new Emitter(L.emitter,fx)});
+  return fx;
+}
+const STD=[
+  {key:'size',label:'size ×',min:0.2,max:2,step:0.05,def:1},
+  {key:'spread',label:'spread ×',min:0.2,max:2,step:0.05,def:1},
+  {key:'duration',label:'duration ×',min:0.3,max:2,step:0.05,def:1},
+  {key:'density',label:'density ×',min:0.1,max:2,step:0.05,def:1},
+];
+const on=(l,id)=>l.layersOn[id];
+const b=(v)=>v?'true':'false', f2=v=>(+v).toFixed(2), f3=v=>(+v).toFixed(3);
+const hex=c=>'0x'+c.map(x=>(x|0).toString(16).padStart(2,'0')).join('').toUpperCase();
+
+// ---------- bench helpers ----------
+const AT={rogue:[-1.5,0,0],victim:[0,0,0],far:[3.2,0,1.6]};
+function groundDisc(c,y,r,col,a){ if(a<=0.003||r<=0.001) return;
+  const pts=[];for(let i=0;i<40;i++){const t=i/40*TAU;const q=proj([c[0]+r*Math.cos(t),y,c[2]+r*Math.sin(t)]);if(!q)return;pts.push(q);}
+  const ctr=proj([c[0],y,c[2]]); if(!ctr) return;
+  g.save();g.globalCompositeOperation='lighter';
+  const rx=Math.max(...pts.map(p=>Math.abs(p.x-ctr.x)))||1;
+  const gr=g.createRadialGradient(ctr.x,ctr.y,0,ctr.x,ctr.y,rx);
+  gr.addColorStop(0,rgb(col,a));gr.addColorStop(0.55,rgb(col,a*0.55));gr.addColorStop(1,rgb(col,0));
+  g.fillStyle=gr;g.beginPath();pts.forEach((p,i)=>i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y));g.closePath();g.fill();g.restore(); }
+function ring3(c,y,r,col,a,lw=2){ if(a<=0.003||r<=0.001) return;
+  g.save();g.globalCompositeOperation='lighter';g.strokeStyle=rgb(col,a);g.lineWidth=lw;g.beginPath();
+  for(let i=0;i<=48;i++){const t=i/48*TAU;const q=proj([c[0]+r*Math.cos(t),y,c[2]+r*Math.sin(t)]);if(!q){g.restore();return;}i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y);}
+  g.stroke();g.restore(); }
+// A camera-facing soft glow panel w x h yd centred on p (the client's billboard quads).
+function bbGlow(p,w,h,col,a){ if(a<=0.003) return; const q=proj(p); if(!q) return;
+  const rx=Math.max(1,w*0.5*q.s), ry=Math.max(1,h*0.5*q.s);
+  g.save();g.globalCompositeOperation='lighter';g.translate(q.x,q.y);g.scale(1,ry/rx);
+  const gr=g.createRadialGradient(0,0,0,0,0,rx);gr.addColorStop(0,rgb(col,a));gr.addColorStop(0.5,rgb(col,a*0.45));gr.addColorStop(1,rgb(col,0));
+  g.fillStyle=gr;g.beginPath();g.arc(0,0,rx,0,TAU);g.fill();g.restore(); }
+const hands=c=>[[c[0]+0.45,1.3,c[2]+0.15],[c[0]-0.45,1.3,c[2]+0.15]];
+const SHIP='<span class="inferred">shipped</span>';
+
+// ---------- AS-336 helpers ----------
+const BLOOD=[150,8,8];
+const handsAt=c=>[[c[0]+0.45,1.3,c[2]+0.2],[c[0]-0.45,1.3,c[2]+0.2]];
+// The finisher hand flash (bloodlust_state_hand.m2 on both hands): red_glow3 quad + yellow->red rings + red puffs.
+function handFlash(c,u,s,op){ if(u<0||u>700) return; const a=keys([[0,0],[60,1],[450,0.8],[700,0]],u)*op;
+  for(const h of handsAt(c)){ bbGlow(h,0.9*s,0.9*s,[255,30,10],a*0.55);
+    const r=keys([[0,0.22],[700,0.41]],u)*s; ring3([h[0],0,h[2]],h[1],r*0.5,keys([[0,[255,216,0]],[450,[250,5,0]]],u),a*0.9,2);
+    for(let k=0;k<6;k++){ const ph=((u/700)+k/6)%1; sprite('cloud',[h[0]+0.15*Math.cos(k*2.1)*ph,h[1]+0.2*ph,h[2]+0.15*Math.sin(k*2.1)*ph],0.28*(1-ph)*s,[255,40,0],a*(1-ph)); } } }
+// Shipped bleed drips (DripKind::Bleed, Rend's): opaque deep-red drops falling from the body.
+function bleedDrips(c,ms){ for(let k=0;k<5;k++){ const per=900+k*130, ph=((ms+k*377)%per)/per; const y=1.6-ph*1.55;
+  const q=proj([c[0]+0.32*Math.cos(k*1.9),y,c[2]+0.32*Math.sin(k*1.9)]); if(!q) continue;
+  g.fillStyle=rgb([128,8,8],1);g.beginPath();g.arc(q.x,q.y,Math.max(1.5,0.13*q.s*0.5),0,TAU);g.fill(); } }
+// A heater-shield crest outline, centred on p, w x h yd.
+function crest(p,w,h,col,a,fill){ if(a<=0.003) return; const q=proj(p); if(!q) return; const W=w*0.5*q.s, H=h*0.5*q.s;
+  g.save();g.translate(q.x,q.y);g.globalCompositeOperation='lighter';
+  g.beginPath();g.moveTo(-W,-H);g.lineTo(W,-H);g.lineTo(W,-H*0.1);g.quadraticCurveTo(W*0.9,H*0.6,0,H);g.quadraticCurveTo(-W*0.9,H*0.6,-W,-H*0.1);g.closePath();
+  g.fillStyle=rgb(fill,a*0.45);g.fill();g.lineWidth=Math.max(1.5,W*0.16);g.strokeStyle=rgb(col,a);g.stroke();
+  g.beginPath();g.moveTo(0,-H*0.75);g.lineTo(0,H*0.7);g.moveTo(-W*0.6,-H*0.25);g.lineTo(W*0.6,-H*0.25);g.lineWidth=Math.max(1,W*0.1);g.stroke();
+  g.restore(); }
+// A lavender skull billboard (cheat_death.m2 batch 0 + eye glows).
+function skull(p,sz,col,a){ if(a<=0.003) return; const q=proj(p); if(!q) return; const R=sz*0.5*q.s;
+  g.save();g.translate(q.x,q.y);g.globalCompositeOperation='lighter';g.fillStyle=rgb(col,a*0.75);
+  g.beginPath();g.arc(0,-R*0.15,R*0.62,Math.PI*0.95,Math.PI*0.05,false);g.lineTo(R*0.42,R*0.42);g.lineTo(-R*0.42,R*0.42);g.closePath();g.fill();
+  g.globalCompositeOperation='source-over';g.fillStyle=`rgba(20,10,40,${a*0.85})`;
+  for(const sx of [-1,1]){g.beginPath();g.ellipse(sx*R*0.24,-R*0.12,R*0.14,R*0.17,0,0,TAU);g.fill();}
+  g.beginPath();g.moveTo(0,R*0.05);g.lineTo(R*0.07,R*0.2);g.lineTo(-R*0.07,R*0.2);g.closePath();g.fill();
+  g.globalCompositeOperation='lighter';for(const sx of [-1,1]) {const gr=g.createRadialGradient(sx*R*0.24,-R*0.12,0,sx*R*0.24,-R*0.12,R*0.2);gr.addColorStop(0,`rgba(255,255,255,${a})`);gr.addColorStop(1,'rgba(255,255,255,0)');g.fillStyle=gr;g.beginPath();g.arc(sx*R*0.24,-R*0.12,R*0.2,0,TAU);g.fill();}
+  g.restore(); }
+// The lavender ghost-fire column (cheat_death.m2 batch 3): a 0.8 yd x 2.5 yd cylinder of desaturated fire.
+function ghostFire(c,ms,s,a){ if(a<=0.003) return; for(let k=0;k<18;k++){ const ang=k/18*TAU+ms/900, per=520+(k%5)*60, ph=((ms+k*97)%per)/per;
+  const y=-0.1+ph*2.3*s, r=0.4*s*(1-ph*0.35); sprite('flame',[c[0]+r*Math.cos(ang),y,c[2]+r*Math.sin(ang)],0.42*s*(1-ph*0.5),[181,134,244],a*Math.sin(ph*Math.PI)*0.8); } }
+const bloodSpray=(trig,at)=>({anchor:'chest',at,trig,span:700,vRange:1.25,speed:2.2,speedVar:0.25,gravity:6.9,life:0.5,rate:[[0,150*6],[167,150*6],[333,50*6],[500,0]],win:[[0,1],[500,0]],blend:'alpha',tail:0.05,
+  color:[[0,BLOOD],[1,[110,4,4]]],alpha:[[0,1],[0.25,0.69],[1,0]],scale:[[0,0.03],[0.25,0.11],[1,0.02]],kind:'blob'});
+
+const EFFECTS=[
+// ================================================================ Rupture
+mkFx({id:'rupture',name:'Rupture',sub:'cast: finisher hand flash (kit 394) · landing: bloodyexplosion.m2 @Chest · 12 s bleed',durMs:3000,frame:{dist:7,ty:1.3},loopTotal:3200,
+ notes:[
+  'The Rogue (left) gets the <b>finisher hand flash</b>: a red glow and yellow-to-red rings on both hands. Rupture and Expose Armor share it, and so does Warrior Execute.',
+  'The victim gets <b>bloodyexplosion.m2</b>: twelve blood-spurt emitters spraying from the chest for 0.5 s at 2.2 yd/s under gravity 6.9, droplets 0.09 yd at peak. <b>Rend\'s client landing is the same model</b>; we ship Rend\'s drips but not this landing.',
+  '<b>The 12 s bleed has no client state.</b> The proposal: route Rupture to Rend\'s red drips ('+SHIP+'), one line in the DoT router. No new channel on the kill target.'],
+ asks:['Keep the blood spray and the hand flash? Drips for the bleed (recommended), or icon only?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'hands',name:'Finisher hand flash (Rogue)',desc:'bloodlust_state_hand.m2 ×2: red_glow3 + rings (255,216,0) → (250,5,0) + red puffs',sw:[255,40,0],custom:true},
+  {id:'spray',name:'Blood spray (victim)',desc:'bloodyexplosion.m2: 12 × spurts, 0.5 s, 2.2 yd/s, gravity 6.9, 0.09 yd',sw:BLOOD,emitter:bloodSpray('hit')},
+  {id:'drips',name:'Bleed drips (Rend\'s, shipped)',desc:'DripKind::Bleed: deep-red drops, for the 12 s',sw:[128,8,8],custom:true,cls:'authored'},
+ ],
+ reset(fx){fx.trig={hit:[150]};},
+ bodies(fx,vp){drawCapsule(AT.rogue,CLASS.rogue);drawCapsule(vp,CLASS.warrior);},
+ customDraw(fx,ms,vp){ const K=fx.knobs; if(on(fx,'hands')) handFlash(AT.rogue,ms,K.size,K.opacity??1);
+  if(on(fx,'drips')&&ms>250) bleedDrips(vp,ms);
+  if(ms>150&&ms<190) fct(String(110+((rnd()*30)|0)),[255,255,255],24,[vp[0],2.6,vp[2]]); },
+ constants(fx){const K=fx.knobs;return [
+  `// Rupture: kit 394 (bloodlust_state_hand.m2 on both hands) on cast; kit 220 (bloodyexplosion.m2 @Chest) on the victim. AS-336 bench.`,
+  `pub const RUPTURE_HAND_FLASH: bool = ${b(on(fx,'hands'))}; // shared FinisherHandFlash with Expose Armor`,
+  `pub const RUPTURE_BLOOD_SPRAY: bool = ${b(on(fx,'spray'))}; // shared BleedSpray: 0.5 s, 2.2 yd/s, gravity 6.9`,
+  `pub const RUPTURE_DOT_STATE: Option<DotStateVisual> = ${on(fx,'drips')?'Some(DotStateVisual::Drip(DripKind::Bleed))':'None'};`,
+  `pub const RUPTURE_SIZE_MUL: f32 = ${f2(K.size)};`];}
+}),
+// ================================================================ Hemorrhage
+mkFx({id:'hemo',name:'Hemorrhage',sub:'strike: Special1H + type-8 trail (undrawn) · landing: bloodyexplosion.m2 @Chest every hit · stacks to 5',durMs:2000,loopFx:true,frame:{dist:7,ty:1.3},
+ notes:[
+  'Hemorrhage\'s cast plays <b>Special1H</b>, Mortal Strike\'s anim, with a deep-red weapon trail (procedural type 8, 0xBE0307). The engine records these trails for Sinister Strike and Kidney Shot and draws none, so the stroke is a question: our '+SHIP+' Sinister Strike stroke (Hemorrhage replaces it in the rotation), or a heavier Mortal Strike-family one.',
+  '<b>Every hit</b> plays the same blood spray as Rupture on the victim. The stacking debuff (+2 % Physical damage taken a stack, 15 s) has <b>no client state</b>; the stack count is on the icon.',
+  'The client also lists the spray on the Rogue (target 1), as Rend\'s kit does. We read it as data carried over with the kit and leave it off by default.',
+  'The bench strikes every 2 s and counts the stacks in the HUD.'],
+ asks:['Stroke: Sinister Strike\'s (recommended) or a Mortal Strike-family stroke? Keep the spray on every hit?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1},{key:'stroke',label:'stroke',min:0,max:1,step:1,def:0,names:['Sinister Strike (shipped)','Mortal Strike family']}],
+ layers:[
+  {id:'spray',name:'Blood spray (victim), every hit',desc:'bloodyexplosion.m2 as Rupture',sw:BLOOD,emitter:bloodSpray('hit')},
+  {id:'selfspray',name:'Blood spray on the Rogue (client target-1 row)',desc:'kit 4490 also listed on the caster',sw:[110,4,4],emitter:bloodSpray('hit','rogue'),on:false},
+ ],
+ reset(fx){fx.trig={hit:[]};fx.st={next:200,n:0};},
+ tick(fx,ms){ const st=fx.st; while(ms>=st.next){ fx.trig.hit.push(st.next); st.n=Math.min(5,st.n+1); st.swing=st.next; st.next+=2000;
+   fct(String(60+((rnd()*15)|0)),[255,255,255],24,[cur.vp[0],2.6,cur.vp[2]]); } fx.trig.hit=fx.trig.hit.filter(t=>ms-t<1000); },
+ hud(fx){return `Hemorrhage stacks: ${fx.st?fx.st.n:0} / 5 (icon)`;},
+ bodies(fx,vp,ms){ const st=fx.st, u=st&&st.swing!=null?ms-st.swing:9999; const heavy=fx.knobs.stroke==1;
+  const lean=u<600?Math.sin(Math.min(1,u/(heavy?600:450))*Math.PI)*(heavy?0.35:0.18):0;
+  drawCapsule([AT.rogue[0]+lean,1.0,AT.rogue[2]],CLASS.rogue); drawCapsule(vp,CLASS.warrior);
+  if(u<450){ const a=1-u/450, h=[AT.rogue[0]+0.6+lean,1.35,AT.rogue[2]+0.2]; const q=proj(h); if(q){ g.save();g.globalCompositeOperation='lighter';g.strokeStyle=rgb([230,230,240],a*0.7);g.lineWidth=2;
+    g.beginPath();g.arc(q.x,q.y,0.6*q.s,heavy?-2.2:-1.6,heavy?0.6:0.3);g.stroke();g.restore(); } } },
+ constants(fx){const K=fx.knobs;return [
+  `// Hemorrhage: kit 4491 (Special1H + type-8 trail 0xBE0307, undrawn) on cast; kit 4490 (bloodyexplosion.m2 @Chest) on the victim each hit. AS-336 bench.`,
+  `// swing_style_for_ability(Hemorrhage) = SwingStyle::${K.stroke==1?'MortalStrike':'SinisterStrike'}`,
+  `pub const HEMORRHAGE_BLOOD_SPRAY: bool = ${b(on(fx,'spray'))}; // shared BleedSpray`,
+  `pub const HEMORRHAGE_SPRAY_ON_CASTER: bool = ${b(on(fx,'selfspray'))};`,
+  `// Debuff: no state (client has none); stacks on the icon. AuraApplyRoute: the spray replaces the debuff band.`];}
+}),
+// ================================================================ Expose Armor
+mkFx({id:'expose',name:'Expose Armor',sub:'cast: finisher hand flash (kit 394) · landing: exposearmor_head.m2 @Head · 3 s',durMs:3000,frame:{dist:6,ty:2.2},loopTotal:4200,
+ notes:[
+  'The Rogue gets Rupture\'s finisher hand flash. The victim gets <b>exposearmor_head.m2</b> for 3 s: a <b>shield crest</b> about 1 yd above the head (a silver item texture, ~0.75 × 0.6 yd at the start).',
+  'The crest glints <b>gold</b> with star sparkles to 0.67 s, then <b>turns blue</b> by 1.0 s and jolts (scale 1.5 → squash → 1.0 at 0.7–1.0 s) while a <b>shatter burst</b> of magenta-to-violet streaks falls through it (150/s, 0.4–0.8 s). A faint blue haze drifts about it to 2.6 s, then it fades out by 3 s.',
+  'Read: the target\'s armor breaks. <b>The 15 s debuff has no state after that</b>; the icon carries it.',
+  'The crest would be an authored shape; we have no item textures.'],
+ asks:['Keep the crest at client size, and all its layers?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'hands',name:'Finisher hand flash (Rogue)',desc:'kit 394, as Rupture',sw:[255,40,0],custom:true},
+  {id:'crest',name:'Shield crest, gold → blue',desc:'(0.94,0.83,0.32) → (0.32,0.54,0.94) at 0.67–1.0 s; squash 0.7–1.0 s; out 2.8–3.0 s',sw:[240,212,81],custom:true},
+  {id:'glow',name:'Glow quad',desc:'blue_glowd ~0.9 yd, gold → blue, weight 0.83',sw:[0,90,255],custom:true},
+  {id:'sparkle',name:'Gold-to-cyan sparkles',desc:'star4 ×4, 0.13–0.3 s and 0.5–0.67 s, 0.02 → 0.21 yd',sw:[255,210,0],emitter:{anchor:'head',pos:[0,0,1.0],vRange:3.14,speed:0.28,spin:1.1,life:0.2,rate:[[0,45]],win:[[0,0],[134,1],[300,0],[300,1],[500,0],[500,1],[667,0]],area:0.42,areaY:0.6,
+    color:[[0,[255,210,0]],[0.5,[255,255,255]],[1,[0,246,255]]],alpha:[[0,1],[0.5,1],[1,0]],scale:[[0,0.02],[0.5,0.21],[1,0.02]],kind:'star',follow:true}},
+  {id:'haze',name:'Blue haze',desc:'toonsmoke16 25/s 0.5–2.6 s, alpha ≤ 0.2, 0.24 → 0.57 yd',sw:[186,210,255],emitter:{anchor:'head',pos:[0,0,0.97],vRange:3.14,speed:0.56,drag:2.5,life:1.0,rate:25,win:[[0,0],[500,1],[2600,0]],
+    color:[[0,[195,207,225]],[0.5,[186,210,255]],[1,[12,0,255]]],alpha:[[0,0],[0.5,0.2],[1,0]],scale:[[0,0.24],[0.5,0.36],[1,0.57]],kind:'smoke',follow:true}},
+  {id:'shatter',name:'Shatter streaks',desc:'grad2db 150/s 0.4–0.8 s, falling, magenta → blue → violet',sw:[255,18,115],emitter:{anchor:'head',pos:[0,0,1.25],vRange:0.5,speed:-0.9,gravity:2,life:0.5,rate:150,win:[[0,0],[400,1],[800,0]],area:0.6,areaY:0.3,tail:4,
+    color:[[0,[255,18,115]],[0.3,[0,162,255]],[1,[120,0,255]]],alpha:[[0,0.39],[0.3,1],[1,0]],scale:[[0,0.03],[0.3,0.17],[1,0.01]],kind:'glow',follow:true}},
+ ],
+ bodies(fx,vp){drawCapsule(AT.rogue,CLASS.rogue);drawCapsule(vp,CLASS.warrior);},
+ customDraw(fx,ms,vp){ const K=fx.knobs, op=K.opacity??1, s=K.size, t=ms/(K.duration??1);
+  if(on(fx,'hands')) handFlash(AT.rogue,ms,K.size,op);
+  if(t>3000) return; const col=keys([[0,[240,212,81]],[667,[240,212,81]],[1000,[81,137,240]]],t), fade=keys([[0,0],[134,1],[2800,1],[3000,0]],t)*op;
+  const sc=keys([[0,[1.5,1.5]],[700,[1.5,1.5]],[800,[1.5,1.7]],[900,[1.0,0.8]],[1000,[1,1]]],t); const p=[vp[0],2.25+1.0,vp[2]];
+  if(on(fx,'glow')) bbGlow(p,0.92*s,1.0*s,keys([[0,[255,210,0]],[667,[255,210,0]],[1000,[0,90,255]]],t),keys([[0,0],[400,0.83],[2600,0.83],[3000,0]],t)*0.6*op);
+  if(on(fx,'crest')) crest(p,0.38*sc[0]*s,0.5*sc[1]*s,col.map(x=>Math.min(255,x*1.1)),fade,col); },
+ constants(fx){const K=fx.knobs;return [
+  `// Expose Armor: kit 394 (finisher hand flash) on cast; kit 3069 (exposearmor_head.m2 @Head, 3 s) on the victim. AS-336 bench.`,
+  `pub const EXPOSE_ARMOR_HAND_FLASH: bool = ${b(on(fx,'hands'))};`,
+  `pub const EXPOSE_ARMOR_CREST: bool = ${b(on(fx,'crest'))}; // ~0.38 x 0.5 yd x1.5, 1.0 yd over the head; gold -> blue 0.667-1.0 s`,
+  `pub const EXPOSE_ARMOR_GLOW: bool = ${b(on(fx,'glow'))};`,
+  `pub const EXPOSE_ARMOR_SPARKLES: bool = ${b(on(fx,'sparkle'))};`,
+  `pub const EXPOSE_ARMOR_HAZE: bool = ${b(on(fx,'haze'))};`,
+  `pub const EXPOSE_ARMOR_SHATTER: bool = ${b(on(fx,'shatter'))}; // 150/s, 0.4-0.8 s`,
+  `pub const EXPOSE_ARMOR_SECS: f32 = ${f2(3*(K.duration??1))};`,
+  `pub const EXPOSE_ARMOR_SIZE_MUL: f32 = ${f2(K.size)};`];}
+}),
+// ================================================================ Shadow Dance
+mkFx({id:'dance',name:'Shadow Dance',sub:'state on the Rogue · shadowdance_state.m2 @Chest, looping (Wrath 3.4.5) · 8 s window',durMs:8000,frame:{dist:7,ty:1.3},loopTotal:9800,
+ notes:[
+  'Shadow Dance is a Wrath spell, read from <b>Wrath Classic 3.4.5.63697</b>. There is no cast kit and no aura-state event: one chest kit plays <b>shadowdance_state.m2</b>, a <b>looping</b> model (1.97 s, constant rates).',
+  'It is a <b>dark-red bloom</b> swelling from the chest to 1.74 yd (alpha-blended, white → dark red → near black), <b>dark-red shadow ribbons</b> drifting off the body (33/s, additive) and <b>black shadow drawn into the chest</b> (33/s, inward 1.39 yd/s).',
+  '<span class="inferred">Whether it persists for the window is unresolved.</span> The same kit shape carries ICC\'s permanent Essence of the Blood Queen, which suggests the looping model stays attached for the aura.',
+  '<b>It is not a transparency</b>, so it cannot read as our stealth (40 % alpha, darkened). Tick "reference: stealth look" to compare them side by side.',
+  'The client marks <b>no end</b>. Answers are timed against the Dance, so the bench offers an authored ending: the state thins and flickers over its last 1.5 s.'],
+ asks:['Hold the client model for the whole 8 s (recommended, so the window reads), or the onset only? Keep the authored ending?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1},{key:'mode',label:'state',min:0,max:1,step:1,def:0,names:['held for the 8 s','onset only (1.97 s)']}],
+ moverDefault:false,
+ layers:[
+  {id:'bloom',name:'Dark-red bloom',desc:'genericglow2c, 3/s, 1.5 s, 0.04 → 0.43 → 1.74 yd, alpha ≤ 0.78',sw:[144,35,35],emitter:{anchor:'chest',vRange:3.14,speed:0,life:1.5,rate:3,blend:'alpha',
+    color:[[0,[255,255,255]],[0.5,[144,35,35]],[1,[43,5,5]]],alpha:[[0,0],[0.5,0.78],[1,0]],scale:[[0,0.04],[0.5,0.43],[1,1.74]],kind:'glow',follow:true}},
+  {id:'red',name:'Red shadow ribbons (out)',desc:'robe texture, additive, 33/s, 1.2 s, 0.56 yd/s out, 0.18 → 0.24 yd',sw:[126,44,44],emitter:{anchor:'chest',vRange:3.14,speed:0.56,life:1.2,rate:33,area:0.5,areaY:1.2,
+    color:[[0,[55,47,47]],[0.5,[126,44,44]],[1,[92,0,0]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0.18],[0.5,0.18],[1,0.24]],kind:'smoke',follow:true}},
+  {id:'black',name:'Black shadow (drawn in)',desc:'robe texture, alpha, 33/s, 1.0 s, inward 1.39 yd/s, 0.16 → 0.48 yd',sw:[30,30,30],emitter:{anchor:'chest',inward:1.3,inwardFlat:1.2,speed:-1.39,life:1.0,rate:33,blend:'alpha',
+    color:[[0,[117,47,47]],[0.5,[44,44,44]],[1,[0,0,0]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0.16],[0.5,0.36],[1,0.48]],kind:'smoke',follow:true}},
+  {id:'endcue',name:'Ending: thin and flicker over the last 1.5 s',desc:'authored; rates fall to 0 and the bloom flickers 6.5–8 s',sw:[200,60,60],custom:true,cls:'authored'},
+  {id:'stealth',name:'Reference: stealth look',desc:'a second Rogue at our stealth (40 % alpha, darkened), for comparison',sw:[120,120,90],custom:true,cls:'authored',on:false},
+ ],
+ reset(fx){ const end=fx.knobs.mode==1?1967:8000; for(const {e} of fx.emitters) e.s.win=[[0,1],[end*(fx.knobs.duration??1),0]]; },
+ rateMul(fx,ms){ if(fx.knobs.mode==1||!fx.layersOn.endcue) return 1; const D=8000*(fx.knobs.duration??1), u=ms-(D-1500); if(u<0) return 1; if(ms>D) return 0;
+   return Math.max(0,1-u/1500)*(Math.floor(ms/120)%3?1:0.15); },
+ hud(fx){return `window: ${simMs<8000*(fx.knobs.duration??1)?'Dancing':'over'}`;},
+ bodies(fx,vp){ drawCapsule(vp,CLASS.rogue); if(on(fx,'stealth')) drawCapsule(AT.far,CLASS.rogue.map(c=>c*0.55),0.4); drawCapsule([vp[0]+1.6,1.0,vp[2]-1.2],CLASS.warrior); },
+ constants(fx){const K=fx.knobs;return [
+  `// Shadow Dance: shadowdance_state.m2 (Wrath kit 10921) on the Rogue's chest. AS-336 bench.`,
+  `pub const SHADOW_DANCE_STATE: ShadowDanceState = ShadowDanceState::${K.mode==1?'OnsetOnly':'HeldForWindow'};`,
+  `pub const SHADOW_DANCE_BLOOM: bool = ${b(on(fx,'bloom'))}; // 3/s, 1.5 s, to 1.74 yd, alpha-blended`,
+  `pub const SHADOW_DANCE_RED_RIBBONS: bool = ${b(on(fx,'red'))}; // 33/s additive`,
+  `pub const SHADOW_DANCE_BLACK_INWARD: bool = ${b(on(fx,'black'))}; // 33/s alpha, -1.39 yd/s`,
+  `pub const SHADOW_DANCE_ENDING_SECS: f32 = ${on(fx,'endcue')&&K.mode!=1?'1.5':'0.0'}; // thin + flicker before the window ends`,
+  `pub const SHADOW_DANCE_SIZE_MUL: f32 = ${f2(K.size)};`,
+  `pub const SHADOW_DANCE_OPACITY_MUL: f32 = ${f2(K.opacity)};`,
+  `// Emitters on the Rogue; never through the body material (stealth owns it).`];}
+}),
+// ================================================================ Cheat Death
+mkFx({id:'cheat',name:'Cheat Death',sub:'"Cheating Death" 3 s buff · cheat_death.m2 @feet: onset 1.9 s, then ghost-fire loop · + shared "Saved" cue',durMs:3600,frame:{dist:8,ty:1.8},loopTotal:5200,
+ notes:[
+  'AS-335 ruled that a prevented death plays the shared authored <b>"Saved" cue</b>: gold "Saved" text and a 0.6 s gold body flash. Cheat Death uses it.',
+  'The client also has <b>its own moment</b>, on the 3 s "Cheating Death" buff (TBC 45182, a −90 % damage-taken aura). <b>Onset, 1.9 s:</b> a <b>lavender skull</b> appears over the head (2.2–3.6 yd up) and is gone by 0.87 s; rings, flares and a spray of 300/s light streaks burst from it at 0.57–0.83 s; a column of light flashes through the body at 0.77 s.',
+  '<b>State, the rest of the 3 s:</b> the body is wrapped in a <b>lavender ghost-fire column</b> (~0.8 yd across, 2.5 yd tall), fading over 0.6 s when the buff ends.',
+  'Played together, the gold flash comes first and the skull peaks just after, so they overlap. The killing blow lands at 0 s.'],
+ asks:['Saved cue alone (DR on the icon); Saved cue plus the client skull and ghost-fire (faithful); or the client model in place of the gold flash, keeping the "Saved" text?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'saved',name:'"Saved" cue (shared, AS-354)',desc:'gold "Saved" text (fct::INVULNERABLE) + 0.6 s gold body flash',sw:[255,209,0],custom:true,cls:'authored'},
+  {id:'skull',name:'Skull over the head',desc:'skull.blp (0.58,0.47,1.0), 2.2–3.6 yd up, gone by 0.87 s',sw:[149,120,255],custom:true},
+  {id:'rings',name:'Rings, flares, shockwave',desc:'over the head, 0.57–0.9 s, 0.56 → 1.67 yd',sw:[240,230,255],custom:true},
+  {id:'streaks',name:'Light streaks',desc:'t_vfx_flar_blur, 300/s 0.57–0.83 s, 8.3 yd/s, white → lavender',sw:[183,183,255],emitter:{anchor:'feet',pos:[-0.2,0,3.17],vRange:3.14,speed:8.3,drag:0.6,life:0.9,rate:300,win:[[0,0],[567,1],[833,0]],tail:3,
+    color:[[0,[255,255,255]],[0.05,[235,210,255]],[1,[183,183,255]]],alpha:[[0,0.2],[0.05,1],[1,0]],scale:[[0,0.4],[0.05,0.056],[1,0.056]],kind:'glow',follow:true}},
+  {id:'smoke',name:'Indigo smoke',desc:'toonsmoke16 at 3.3 yd, 50 → 100/s to 1.1 s, sinking',sw:[60,15,203],emitter:{anchor:'feet',pos:[0,0,3.3],vRange:0.23,speed:-0.56,life:2.5,rate:[[0,50],[567,100],[1100,0]],win:[[0,0],[167,1],[1100,0]],
+    color:[[0,[42,12,157]],[0.5,[60,15,203]],[1,[97,110,203]]],alpha:[[0,0.31],[0.5,0.7],[1,0]],scale:[[0,0.83],[0.5,0.26],[1,0.42]],kind:'smoke',follow:true}},
+  {id:'column',name:'Light column flash',desc:'t_vfx_flare05, 3.2 yd wide, floor → 12 yd, peak 0.77 s',sw:[216,241,251],custom:true},
+  {id:'fire',name:'Ghost-fire column (the 3 s state)',desc:'desaturated fire tinted (0.71,0.53,0.96), 0.8 × 2.5 yd; in at 0.8–1.37 s, out over 0.6 s',sw:[181,134,244],custom:true},
+ ],
+ bodies(fx,vp){ drawCapsule(vp,CLASS.rogue); drawCapsule([vp[0]+1.4,1.0,vp[2]+0.4],CLASS.warrior); },
+ customDraw(fx,ms,vp){ const K=fx.knobs, op=K.opacity??1, s=K.size, t=ms/(K.duration??1);
+  if(ms<40) fct('-1840',[255,255,255],24,[vp[0]+0.4,2.6,vp[2]]);
+  if(on(fx,'saved')&&t<600){ if(ms<40) fct('Saved',[255,209,0],24,[vp[0]-0.5,3.0,vp[2]]); bbGlow([vp[0],1.3,vp[2]],2.2*s,3.0*s,[255,215,90],keys([[0,0],[80,0.7],[600,0]],t)*op); }
+  if(on(fx,'column')&&t>700&&t<1150) bbGlow([vp[0],3.8,vp[2]],3.2*s*0.35,16.8*s*0.6,[216,241,251],keys([[700,0],[767,1],[1100,0]],t)*0.6*op);
+  if(on(fx,'skull')&&t<900){ const a=keys([[0,0],[120,1],[567,1],[867,0]],t)*op; skull([vp[0],2.9,vp[2]],1.3*s,[149,120,255],a); }
+  if(on(fx,'rings')&&t>540&&t<1400){ const hp=[vp[0],3.04,vp[2]];
+    const r1=keys([[567,0.56],[1067,0.97]],t), a1=keys([[540,0],[700,1],[1100,0]],t); ring3([hp[0],0,hp[2]],hp[1],r1*s*0.5,[255,250,240],a1*op,3);
+    const r2=keys([[700,0.56],[1200,0.83]],t), a2=keys([[680,0],[760,1],[1200,0]],t); ring3([hp[0],0,hp[2]],hp[1],r2*s*0.55,[255,255,214],a2*op,4);
+    const r3=keys([[700,0.56],[1300,1.67]],t), a3=keys([[680,0],[760,1],[1300,0]],t); bbGlow(hp,r3*s,r3*s,keys([[700,[91,117,150]],[880,[255,255,255]],[1300,[152,99,157]]],t),a3*0.5*op);
+    bbGlow(hp,1.3*s,1.3*s,[255,255,255],keys([[540,0],[650,0.39],[1300,0]],t)*op); }
+  if(on(fx,'fire')){ const D=3000*(K.duration??1); const a=t<800?0:t<1367?(t-800)/567:ms<D?1:Math.max(0,1-(ms-D)/600); ghostFire([vp[0],0,vp[2]],ms,s,a*op); } },
+ constants(fx){const K=fx.knobs;return [
+  `// Cheat Death: the shared "Saved" cue (AS-354) on the prevented death; cheat_death.m2 (kit 9543) @feet on the 3 s Cheating Death buff. AS-336 bench.`,
+  `pub const CHEAT_DEATH_SAVED_CUE: bool = ${b(on(fx,'saved'))};`,
+  `pub const CHEAT_DEATH_SKULL: bool = ${b(on(fx,'skull'))}; // 1.3 yd, (0.58,0.47,1.0), out by 0.867 s`,
+  `pub const CHEAT_DEATH_RINGS: bool = ${b(on(fx,'rings'))};`,
+  `pub const CHEAT_DEATH_STREAKS: bool = ${b(on(fx,'streaks'))}; // 300/s, 0.567-0.833 s, 8.3 yd/s`,
+  `pub const CHEAT_DEATH_SMOKE: bool = ${b(on(fx,'smoke'))};`,
+  `pub const CHEAT_DEATH_LIGHT_COLUMN: bool = ${b(on(fx,'column'))};`,
+  `pub const CHEAT_DEATH_GHOST_FIRE: bool = ${b(on(fx,'fire'))}; // for the 3 s buff, 0.6 s fade`,
+  `pub const CHEAT_DEATH_SIZE_MUL: f32 = ${f2(K.size)};`,
+  `pub const CHEAT_DEATH_OPACITY_MUL: f32 = ${f2(K.opacity)};`];}
+}),
+// ================================================================ Master of Subtlety
+mkFx({id:'mos',name:'Master of Subtlety',sub:'proc on leaving stealth · no client visual · +5 % damage for 6 s',durMs:7000,frame:{dist:7,ty:1.3},loopTotal:8500,
+ notes:[
+  '<b>No client visual</b>: neither the talent nor its 6 s buff (TBC 31665 / 31666) has a visual row in TBC or Wrath.',
+  'Our engine gives any new buff the generic rising aura band ('+SHIP+', school-less near-white). Inspiration got the same on AS-335. It fires as the Rogue leaves stealth, where the unstealth already draws the eye.',
+  'The bench shows the Rogue stealthed (our 40 % alpha), breaking stealth at 1 s, and the band.'],
+ asks:['The generic band plus the icon (recommended), or icon only?'],
+ knobDefs:[...STD],
+ layers:[
+  {id:'band',name:'Generic buff band ('+'shipped)',desc:'AuraBand: one soft near-white ring rising feet → crown',sw:[235,235,225],custom:true},
+ ],
+ hud(){return simMs<1000?'stealthed':simMs<7000?'Master of Subtlety: +5 % (icon)':'—';},
+ bodies(fx,vp,ms){ const st=ms<1000; drawCapsule(vp,st?CLASS.rogue.map(c=>c*0.55):CLASS.rogue,st?0.4:1); drawCapsule([vp[0]+1.4,1.0,vp[2]+0.3],CLASS.warrior); },
+ customDraw(fx,ms,vp){ if(!on(fx,'band')) return; const u=ms-1000; if(u<0||u>900) return; const ph=u/900;
+  ring3([vp[0],0,vp[2]],0.05+ph*2.3,0.62+0.12*ph,[235,235,225],Math.sin(ph*Math.PI)*0.8,3); },
+ constants(fx){return [
+  `// Master of Subtlety: no client visual. AS-336 bench.`,
+  `pub const MASTER_OF_SUBTLETY_BAND: bool = ${b(on(fx,'band'))}; // AuraApplyRoute::Band (default)`];}
+}),
+];
+// ---------- UI wiring ----------
+let cur=EFFECTS[0], simMs=0, paused=false, lastNow=performance.now();
+const $=id=>document.getElementById(id);
+function buildTabs(){const nav=$('tabs');nav.innerHTML='';
+  for(const fx of EFFECTS){const bt=document.createElement('button');bt.className='tab';bt.role='tab';bt.id='tab-'+fx.id;bt.textContent=fx.name;bt.setAttribute('aria-selected',fx===cur);
+    bt.onclick=()=>{cur=fx;try{localStorage.setItem('as336bench.tab',fx.id)}catch(e){};select();};nav.appendChild(bt);} }
+const knobText=(k,v)=>k.names?k.names[v|0]:(+v).toFixed(2);
+function select(){
+  document.querySelectorAll('.tab').forEach(bt=>bt.setAttribute('aria-selected',bt.id==='tab-'+cur.id));
+  cam.dist=cur.frame.dist;cam.target=[0,cur.frame.ty,0];
+  $('moving').checked=!!cur.moverDefault;
+  const L=$('layers');L.innerHTML='';
+  for(const l of cur.layers){const d=document.createElement('div');d.className='layer'+(l.cls?' '+l.cls:'');const id='ly-'+cur.id+'-'+l.id;
+    d.innerHTML=`<input type="checkbox" id="${id}" ${cur.layersOn[l.id]?'checked':''}><span class="sw" style="background:${rgb(l.sw,1)}"></span><label for="${id}"><span class="nm">${l.name}</span><span class="ds">${l.desc}</span></label>`;
+    d.querySelector('input').onchange=e=>{cur.layersOn[l.id]=e.target.checked;renderOut();};L.appendChild(d);}
+  const Kn=$('knobs');Kn.innerHTML='';
+  for(const k of cur.knobDefs){const d=document.createElement('div');d.className='knob';const id='kn-'+cur.id+'-'+k.key;
+    d.innerHTML=`<span>${k.label}</span><input type="range" id="${id}" min="${k.min}" max="${k.max}" step="${k.step}" value="${cur.knobs[k.key]}"><output for="${id}">${knobText(k,cur.knobs[k.key])}</output>`;
+    const inp=d.querySelector('input'),o=d.querySelector('output');inp.oninput=()=>{cur.knobs[k.key]=+inp.value;o.textContent=knobText(k,+inp.value);renderOut();if(k.names)restart();};Kn.appendChild(d);}
+  const rs=document.createElement('button');rs.className='btn';rs.textContent='Reset to client values';rs.style.marginTop='8px';
+  rs.onclick=()=>{for(const k of cur.knobDefs)cur.knobs[k.key]=k.def;for(const l of cur.layers)cur.layersOn[l.id]=l.on!==false;select();};Kn.appendChild(rs);
+  $('notes').innerHTML=cur.notes.map(n=>`<li>${n}</li>`).join('');
+  $('asks').innerHTML=(cur.asks||[]).map(a=>`<p class="ask">${a}</p>`).join('');
+  restart();renderOut();
+}
+function renderOut(){$('out').textContent=cur.constants(cur).join('\n');}
+function restart(){simMs=0;FCT=[];cur.emitters.forEach(x=>x.e.reset());cur.swingAt=null;if(cur.reset)cur.reset(cur);}
+$('replay').onclick=restart;
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Play':'Pause';};
+$('copy').onclick=()=>{const txt=$('out').textContent;const done=()=>{$('copy').textContent='Copied';setTimeout(()=>$('copy').textContent='Copy',1200)};
+  const sel=()=>{const r=document.createRange();r.selectNodeContents($('out'));const s=getSelection();s.removeAllRanges();s.addRange(r);};
+  try{navigator.clipboard.writeText(txt).then(done,sel);}catch(e){sel();}};
+
+// ---------- main loop ----------
+function victimPos(ms){ if(!$('moving').checked) return [0,1.0,0];
+  const R=3.2, a=(ms/1000)*3/R; return [R*Math.cos(a)-R,1.0,R*Math.sin(a)]; }
+function frame(now){
+  const dt=Math.min(0.05,(now-lastNow)/1000)*(+$('speed').value); lastNow=now;
+  const step=paused?0:dt; simMs+=step*1000;
+  const total=cur.loopFx?Infinity:(cur.loopTotal??(cur.durMs*(cur.knobs.duration??1)+1200));
+  if(simMs>total){ if($('loop').checked) restart(); else simMs=total; }
+  setupView();
+  g.fillStyle='#0d0c10';g.fillRect(0,0,cv.width,cv.height);
+  drawFloor();
+  const vp=victimPos(simMs); cur.vp=vp; const origin=[vp[0],0,vp[2]];
+  if(!paused && cur.tick) cur.tick(cur,simMs);
+  for(const {id,e} of cur.emitters){ if(!cur.layersOn[id]){e.ps=[];continue;} if(!paused) e.update(step,simMs,origin); }
+  shadow(vp);
+  cur.bodies(cur,vp,simMs);
+  if(cur.customDraw) cur.customDraw(cur,simMs,vp);
+  for(const {id,e} of cur.emitters) if(cur.layersOn[id]) e.draw();
+  drawFct(step);
+  $('hud').textContent=`${cur.name} — ${cur.sub}\nt = ${(simMs/1000).toFixed(2)} s${cur.hud?'\n'+cur.hud(cur):''}`;
+  requestAnimationFrame(frame);
+}
+buildTabs();
+try{const saved=localStorage.getItem('as336bench.tab');const fx=EFFECTS.find(x=>x.id===saved);if(fx)cur=fx;}catch(e){}
+select();
+requestAnimationFrame(frame);
+</script>
