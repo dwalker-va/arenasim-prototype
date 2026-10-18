@@ -309,3 +309,29 @@ after.csv.gz`. The log-identity seed bank, which also prints where each
 diverging match first differs and how its winner moved, is
 `2026-10-17-as325-bank.py --before <main binary> --after <branch binary>
 --work <dir>`; its docstring says how each binary must be placed.
+
+## `2026-10-17-as360-*`
+
+Behind `../2026-10-17-as360-pursuit-sight-walk.md` (card AS-360). Three paired
+sweeps, each run by `main` @ `0a8f8a36` (`-before.csv.gz`) and the branch
+(`-after.csv.gz`) with `--trace-mode off`:
+
+- `-legacy-basicarena` (1,800 configs): `gen_sweep.py --full 2
+  --exclude-double-healer --n 2 --extra '{"map":"BasicArena"}'`. The control:
+  the two CSVs are byte-identical.
+- `-legacy-pillaredarena` (9,000): `gen_sweep.py --full 2
+  --exclude-double-healer --affects Warrior,Mage,Rogue,Warlock,Hunter
+  --control-cells 0 --n 10 --extra '{"map":"PillaredArena"}'`.
+- `-teamplan-pillaredarena` (9,000): the same, with `--extra
+  '{"map":"PillaredArena","ai_profile":"TeamPlan"}'`.
+
+The PillaredArena pairs, gunzipped, are analysed with `scripts/paired_sweep.py --affects
+Warrior,Mage,Rogue,Warlock,Hunter --tier directional --expect move
+--control-elsewhere "BasicArena byte-identity"`. The write-up's table, scored
+from the Warlock's side with draw counts, comes from
+`2026-10-17-as360-warlock-side.py before.csv.gz after.csv.gz`. Every moved
+match is attributed by `2026-10-17-as360-attribute.py --before <main binary>
+--probe <probe binary> --configs <jsonl.gz> --before-csv <csv.gz> --after-csv
+<csv.gz> --work <dir>`. The probe binary is the branch built with
+`2026-10-17-as360-fire-probe.patch` applied (`git apply` it, then
+`cargo build --release`).

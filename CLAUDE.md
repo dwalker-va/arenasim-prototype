@@ -984,6 +984,20 @@ consequence is that a pressured healer's `cover_pull` LoS-denial buys far less
 sustained occlusion against a steered melee trainer (a competent melee now
 re-acquires around the pillar quickly — see the `u8_healer_cover` probe note).
 
+**Pursuit walks for sight** — `combat_core::movement::pursuit_closes` (no RON
+knob). Normal pursuit stops at a unit's preferred range only once it SEES its
+target: a non-healer in range and out of sight keeps walking (the same
+tangent-steered pursuit step), and stops the frame sight returns — sight by
+`has_line_of_sight` between the two positions, the casts' own test. Stopping
+in range behind a pillar parked a Warlock with every cast refused `LosBlocked`
+beside a lone, out-of-mana healer that was parked too, and the match drew at
+the cap (AS-360). Healers do not walk for sight: their posture machine owns
+where they stand, and one out of sight of its enemy is usually in cover on
+purpose. Both AI profiles; a no-op on obstacle-free maps (BasicArena stays
+byte-identical). The Warlock is the class it moves — the Mage and Hunter
+answer occlusion with their ENGAGE machine first. Staged guard:
+`tests/pursuit_sight_walk.rs`.
+
 **DPS kiter blocks** (`mage:` / `hunter:` — the shared ENGAGE/KITE machine, `DpsMovementConfig`):
 - `weights:` (above) plus `range_band_min`/`max` (orbit ring; min = SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE 8), `kite_hold` (anti-strobe hysteresis), `directive_ttl` (must cover the longest cast), `commit_window`.
 - `kite_entry_radius`/`kite_sustain_radius` — proximity-gated kiters only (Hunter: KITE when a melee is within entry, exit when kited past sustain). The Mage is aura-gated (KITE keys off its own root/slow), so it ignores these.
