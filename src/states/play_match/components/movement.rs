@@ -164,7 +164,7 @@ pub struct HealerPosture {
     /// `Some` while the play drives the healer's position, `None` otherwise; a
     /// new spot (or `None` → `Some`) is what emits its `TakeCover` trace event.
     pub cover_spot: Option<Vec2>,
-    /// `TeamPlan` only: where the FREE formation point was last repaired to
+    /// `TeamPlan` only: the exit the FREE formation point was last repaired to
     /// (`class_ai::formation`, AS-206). The repair keeps to the exit nearest it
     /// until another is better by `formation::KEEP_MARGIN`, so a point near a
     /// shadow's centre line, or between two teammates' shadows, does not jump

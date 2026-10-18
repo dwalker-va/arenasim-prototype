@@ -254,6 +254,39 @@ impl GoalTrack {
     }
 }
 
+/// How many times a goal moves more than `yards` within half a second of
+/// consecutive formation frames; each counted span is skipped past.
+fn half_second_spans_over(yards: f32, goals: &[(f32, Vec3)]) -> usize {
+    let consecutive = |a: f32, b: f32| (b - a - FRAME).abs() < FRAME / 2.0;
+    let (mut n, mut k) = (0, 0);
+    while k < goals.len() {
+        let (t, p) = goals[k];
+        let mut last = t;
+        let mut hit = None;
+        for (j, &(u, q)) in goals.iter().enumerate().skip(k + 1) {
+            if !consecutive(last, u) || u - t > 0.5 {
+                break;
+            }
+            if flat(p, q) > yards {
+                hit = Some(j);
+                break;
+            }
+            last = u;
+        }
+        match hit {
+            Some(j) => {
+                n += 1;
+                k = goals[j..]
+                    .iter()
+                    .position(|&(u, _)| u - t > 0.5)
+                    .map_or(goals.len(), |i| j + i);
+            }
+            None => k += 1,
+        }
+    }
+    n
+}
+
 fn flat(a: Vec3, b: Vec3) -> f32 {
     ((a.x - b.x).powi(2) + (a.z - b.z).powi(2)).sqrt()
 }
@@ -352,15 +385,18 @@ fn formation_tracks(
 }
 
 /// The comps whose healers repair their formation point most on Nagrand: a
-/// Priest's Warrior walking round the camp pillar (2v2), and a 3v3 whose
-/// Priest's teammates stand close behind pillars far from it, the case that
-/// once sent the point ~70yd.
-const FLIP_BANK: [(&[&str], &[&str]); 2] = [
+/// Priest's Warrior walking round the camp pillar (2v2); a 3v3 whose Priest's
+/// teammates stand close behind pillars far from it, the case that once sent
+/// the point ~70yd; and a 2v2 whose Priest stands beside a pillar with its raw
+/// point inside the footprint, where a shadow's near end and changes of exit
+/// once stepped the goal 9-12yd.
+const FLIP_BANK: [(&[&str], &[&str]); 3] = [
     (&["Warrior", "Priest"], &["Mage", "Rogue"]),
     (
         &["Warrior", "Mage", "Priest"],
         &["Rogue", "Warlock", "Druid"],
     ),
+    (&["Warlock", "Priest"], &["Rogue", "Druid"]),
 ];
 
 /// The repaired formation point never flips across a shadow: over the bank's
@@ -400,8 +436,10 @@ fn the_repaired_point_never_flips_across_a_shadow() {
     assert!(returns.is_empty(), "formation goal returns: {returns:#?}");
 }
 
-/// Measurement, not a gate: per comp, the formation goals' jumps over 5yd and
-/// 10yd and their returns. Run on two binaries to compare; set
+/// Measurement, not a gate: per comp, the formation goals' frame-to-frame jumps
+/// over 5yd, 10yd and 25yd, their returns, and the half-second spans over which
+/// a goal moves more than 10yd. Run on two binaries to compare; set
+/// `FORMATION_JUMPS_SEEDS` for the seed count (default 10) and
 /// `FORMATION_JUMPS_LIST` to print every jump over 10yd.
 #[test]
 #[ignore = "measurement: run with --release -- --ignored --nocapture"]
@@ -416,9 +454,14 @@ fn measure_formation_goal_jumps() {
         (&["Warlock", "Priest"], &["Rogue", "Druid"]),
         (&["Hunter", "Shaman"], &["Warrior", "Paladin"]),
     ];
+    let seeds: u64 = std::env::var("FORMATION_JUMPS_SEEDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
     for (a, b) in comps {
         let (mut over5, mut over10, mut over25, mut ret, mut pairs) = (0, 0, 0, 0, 0);
-        for seed in 0..10 {
+        let mut spans = 0;
+        for seed in 0..seeds {
             for (t1, t2) in [(a, b), (b, a)] {
                 for (class, track, goals) in formation_tracks(t1, t2, seed, 120.0) {
                     if std::env::var("FORMATION_JUMPS_LIST").is_ok() {
@@ -431,11 +474,13 @@ fn measure_formation_goal_jumps() {
                     over10 += track.over(10.0);
                     over25 += track.over(25.0);
                     ret += track.returns(5.0, &goals);
+                    spans += half_second_spans_over(10.0, &goals);
                 }
             }
         }
         println!(
-            "{a:?} v {b:?}: pairs {pairs}, over5 {over5}, over10 {over10}, over25 {over25}, returns {ret}"
+            "{a:?} v {b:?}: pairs {pairs}, over5 {over5}, over10 {over10}, over25 {over25}, \
+             returns {ret}, 0.5s spans over 10yd {spans}"
         );
     }
 }
