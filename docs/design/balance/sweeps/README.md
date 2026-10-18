@@ -376,7 +376,7 @@ scripts/gen_sweep.py --full 2 --exclude-double-healer \
   --extra '{"map":"PillaredArena","ai_profile":"TeamPlan"}'
 ```
 
-Run by `main` @ `15309d38` (`-before.csv.gz`) and the branch
+Run by `main` @ `261eedf2` (`-before.csv.gz`) and the branch
 (`-after.csv.gz`) with `--jobs 6 --trace-mode off`, analysed with
 `scripts/paired_sweep.py before.csv after.csv --affects Priest,Druid,Shaman
 --tier directional --expect nothing`.

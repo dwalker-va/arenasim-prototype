@@ -5,7 +5,7 @@
 **Success condition, stated up front:** the defect goes (a FREE healer no
 longer idles blind behind a pillar from a healthy teammate), the repaired goal
 does not jump about, and there is no balance movement worth the name. Measured
-2026-10-18, `main` at `15309d38` against this branch.
+2026-10-18, `main` at `261eedf2` against this branch.
 
 ## The shape
 
@@ -90,34 +90,17 @@ formation healer's goal on FREE formation frames:
 | Comp | jumps > 5yd, main → branch | > 10yd | > 25yd | returns (> 5yd, back within 1s) |
 |---|---|---|---|---|
 | Warrior+Priest v Mage+Rogue | 20 → 0 | 0 → 0 | 0 → 0 | 0 → 0 |
-| Warrior+Mage+Priest v Rogue+Warlock+Druid | 14 → 84 | 7 → 33 | 0 → 0 | 0 → 1 |
+| Warrior+Mage+Priest v Rogue+Warlock+Druid | 21 → 21 | 14 → 14 | 1 → 1 | 0 → 0 |
 | Mage+Druid v Hunter+Paladin | 10 → 10 | 3 → 3 | 0 → 0 | 1 → 1 |
-| Warlock+Priest v Rogue+Druid | 15 → 22 | 5 → 13 | 0 → 0 | 1 → 1 |
-| Hunter+Shaman v Warrior+Paladin | 1 → 1 | 1 → 1 | 0 → 0 | 0 → 0 |
+| Warlock+Priest v Rogue+Druid | 3 → 5 | 2 → 2 | 0 → 0 | 0 → 0 |
+| Hunter+Shaman v Warrior+Paladin | 2 → 2 | 2 → 2 | 0 → 0 | 0 → 0 |
 
-The 3v3's and Warlock+Priest's higher counts are mostly not the repair. With the
-repair's output logged per call (a scratch instrumentation, not committed) and
-each step over 5yd attributed — to the raw point's own jump, or to the repair
-changing exit, starting, or letting go — the 3v3 over the same bank:
-
-| Cause of a step over 5yd | main | branch |
-|---|---|---|
-| The raw (unconstrained) point jumped | 102 (41 over 10yd) | 145 (53 over 10yd) |
-| The repair changed exit | — | 20 (one per match) |
-| The repair started or let go | — | 1 |
-
-The raw point is the unconstrained machine's (the engaged-ally centroid offset
-away from the nearest enemy, which flips as enemies cross it); its jumps are the
-same code on both binaries, and their count differs because the healers' paths
-differ. Of the branch's 84 jumps over 5yd in the 3v3 measurement, 40 are two
-steps at 27.65s in every match, a Druid's raw point stepping 6-8yd per frame
-with no repair involved. The one
-repair-caused change per match is at 21.85s: the Druid's kept exit sees the
-anchor and one teammate, and another teammate's shadow's exit, 3.9yd nearer the
-raw point, comes to see both — better by more than the band, so the point moves
-there once (16yd) and stays. In Warlock+Priest the repair changes exit 7 times
-over 20 matches, each to an exit that ranks better by more than the band, and
-lets go 3 times (5-7yd). None comes back.
+The jumps that remain on both binaries are the raw (unconstrained) formation
+point's own: the engaged-ally centroid offset away from the nearest enemy, which
+flips as enemies cross it. The 2v2 camp comp's 20 on `main` are one per match:
+the Priest's projected point stepping 8.6yd between two faces of the camp pillar
+at the camp release (16.67s). The branch measures from the raw point there and
+has none.
 
 ## Balance
 
@@ -127,15 +110,15 @@ and both CSVs: `sweeps/2026-10-17-as206-teamplan-pillaredarena*`):
 
 ```
 CONTROL: 80/80 matches with no affected class on either side are IDENTICAL
-ALL reachable   n=6750  44.4% -> 44.5%  +0.1pt  flips 111 (+57/-50) z=0.58 ns
-CLEAN           n=2250  45.8% -> 45.9%  +0.1pt  flips 32 (+17/-14)  z=0.36 ns
-AGAINST         n=2250  46.0% -> 46.1%  +0.1pt  flips 30 (+16/-14)  z=0.18 ns
-MIRRORED        n=2250  41.5% -> 41.6%  +0.1pt  flips 49 (+24/-22)  z=0.15 ns
-NON-VACUITY: 6072/6830 ended by elimination; 1025 moved in winner or duration
+ALL reachable   n=6750  50.0% -> 50.0%  +0.0pt  flips 115 (+56/-55) z=0.00 ns
+CLEAN           n=2250  47.9% -> 48.0%  +0.1pt  flips 33 (+17/-14)  z=0.36 ns
+AGAINST         n=2250  52.5% -> 52.4%  -0.1pt  flips 30 (+14/-16)  z=0.18 ns
+MIRRORED        n=2250  49.6% -> 49.6%  +0.0pt  flips 52 (+25/-25)  z=0.00 ns
+NON-VACUITY: 6774/6830 ended by elimination; 1060 moved in winner or duration
 SLICES TESTED: 3. Significant: none.
 ```
 
-No cell moves more than 4 of its 10 seeds; Warrior+Priest v Mage+Rogue, whose
+No cell moves more than 5 of its 10 seeds; Warrior+Priest v Mage+Rogue, whose
 Priest repairs most, is unchanged (0/10 and 10/10 in its two orders).
 
 **Head-to-head**, n=100 per cell, both assignments (`scripts/headtohead_sweep.py`
@@ -146,12 +129,12 @@ the two binaries; the `Legacy`-only cell cannot move:
 |---|---|---|
 | Mage+Druid vs Hunter+Paladin (the AS-206 repro comp) | 0 / 300 | 0 |
 | Mage+Druid vs Warrior+Paladin | 2 / 300 (durations only) | 0 |
-| Warrior+Priest vs Warlock+Priest | 8 / 300 (durations only) | 0 |
+| Warrior+Priest vs Warlock+Priest | 11 / 300 (durations only) | 0 |
 | Hunter+Shaman vs Rogue+Priest | 0 / 300 | 0 |
 
-**`camp_sweep`** (Warrior+Priest vs Warlock+Priest, seeds 1-12): one `TeamPlan`
-seed's duration moves (57.2s to 55.7s, seed 3, same winner); denial and
-occlusion figures unchanged.
+**`camp_sweep`** (Warrior+Priest vs Warlock+Priest, seeds 1-12): two `TeamPlan`
+seeds' durations move (57.4s to 55.7s and 97.4s to 98.7s, same winners); 15.1s /
+12.4s denied pre / post contact on both binaries, heal line occluded 26%.
 
 ## Byte-identity
 
