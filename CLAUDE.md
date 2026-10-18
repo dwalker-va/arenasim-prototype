@@ -878,7 +878,9 @@ its landing instead (`hunter::try_place_trap_at`, after range): one a pillar
 hides is held, traced `LosBlocked`, never moved. The lane Freezing Trap picks
 its landing with sight in mind: when a pillar hides the lane, it lands on an
 enemy's route round that pillar, at the first point of it the Hunter sees once
-the trap would arm (`hunter_lane::route_lane`). A no-op on obstacle-free maps
+the trap would arm (`hunter_lane::route_lane`). With no such route it is held
+in `fallback_trap` itself (`LosBlocked`), so the Serpent Sting never stays
+reserved for that throw. A no-op on obstacle-free maps
 (BasicArena stays byte-identical).
 
 **Dying teammate first (Druid)** — no RON knob; reuses `urgency_hp_threshold`.

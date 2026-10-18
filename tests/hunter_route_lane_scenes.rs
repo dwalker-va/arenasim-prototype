@@ -12,7 +12,7 @@
 //! Hunter's shots are cooling and the Warrior's rage rules out the sting, so
 //! the trap is the Hunter's one cast.
 
-use arenasim::states::match_config::CharacterClass::{Hunter, Mage, Warrior};
+use arenasim::states::match_config::CharacterClass::{Hunter, Mage, Rogue, Shaman, Warrior};
 use arenasim::states::play_match::class_ai::hunter::TRAP_HELD_NO_SPRINGER;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::{DRCategory, DRTracker, TrapType};
@@ -134,11 +134,28 @@ fn a_hidden_lane_trap_lands_on_the_route_round_the_pillar_in_sight() {
 }
 
 /// Control: the same Warrior not walking the route (facing away from it) has
-/// no route to predict, so the hidden lane stands, decided as it always was:
-/// nobody is heading into it, and the trap is held.
+/// no route to predict, and the hidden lane is no landing the Hunter would
+/// throw, so the trap is held — traced `LosBlocked`, as the placement traces a
+/// hidden landing.
 #[test]
 fn a_walker_heading_elsewhere_leaves_the_hidden_lane_held() {
     let view = scene(-route_heading(), true).decide(ME);
+    assert_eq!(freezing_landing(&view), None, "{}", describe(&view));
+    assert!(
+        matches!(
+            view.rejected(AbilityType::FreezingTrap),
+            Some(RejectionReason::LosBlocked)
+        ),
+        "{}",
+        describe(&view)
+    );
+}
+
+/// Control: with the pillar gone, the Warrior walking away is nobody heading
+/// into the lane, and the trap is held for that.
+#[test]
+fn a_seen_lane_nobody_walks_into_is_held_for_no_springer() {
+    let view = scene(-route_heading(), false).decide(ME);
     assert_eq!(freezing_landing(&view), None, "{}", describe(&view));
     assert!(
         matches!(
@@ -147,6 +164,111 @@ fn a_walker_heading_elsewhere_leaves_the_hidden_lane_held() {
         ),
         "{}",
         describe(&view)
+    );
+}
+
+/// The Serpent Sting reserves the enemy the lane trap would catch, and that
+/// reservation must agree with the throw (AS-361).
+///
+/// The scene: the Hunter alone (with a teammate, the team would break a trap
+/// on the Hunter's own target, and the lane trap would be held for that)
+/// against an enemy Shaman, which cannot free a Freezing Trap and is
+/// diminished to immunity against it, so it is no off-target, and a Rogue out
+/// of stealth, the Hunter's target, 24yd out. The lane toward the Shaman is
+/// inside a pillar that the Rogue's path to the Hunter grazes: the Hunter sees
+/// past it to the Rogue (so the sting has its target in sight), but the Rogue,
+/// body radius and all, has to steer round it.
+///
+/// - **A seen route** — the Rogue pursuing the Hunter round the pillar: the
+///   trap lands on its route, so the sting is reserved and the trap thrown.
+/// - **No route** — the same Rogue, facing the same way, with no target to
+///   pursue, so no route is predicted. Carried straight on it still walks
+///   into the hidden lane, but no throw lands there: the trap is held for
+///   sight, and the sting, which waited on that throw before, goes out.
+#[test]
+fn the_sting_waits_for_a_route_trap_and_not_for_a_hidden_lane() {
+    const ROGUE: &str = "enemy rogue";
+    const SHAMAN: &str = "enemy shaman";
+    // Clear of the Hunter's sightline to the Rogue by 0.3yd, inside the
+    // Rogue's body radius of it.
+    let grazed = vec![ObstacleVolume::Cylinder {
+        center_xz: Vec2::new(12.0, 2.8),
+        radius: 2.5,
+        base_y: 0.0,
+        height: 10.0,
+    }];
+    let rogue_at = Vec2::new(24.0, 0.0);
+    let shaman_at = Vec2::new(24.0, 3.0);
+    let heading = steer_toward_goal(&grazed, rogue_at, Vec2::ZERO, 1.0)
+        .expect("the Rogue's body grazes the pillar");
+    let eye = |p: Vec2| Vec3::new(p.x, 1.0, p.y);
+    assert!(has_line_of_sight(&grazed, eye(Vec2::ZERO), eye(rogue_at)));
+    assert!(!has_line_of_sight(
+        &grazed,
+        eye(Vec2::ZERO),
+        eye(shaman_at / 2.0)
+    ));
+    let mut diminished = DRTracker::default();
+    while !diminished.is_immune(DRCategory::Incapacitates) {
+        diminished.apply(DRCategory::Incapacitates);
+    }
+    let build = |pursuing: bool| {
+        let s = Scene::new()
+            .unit(ME, 1, Hunter)
+            .at(0.0, 0.0)
+            .targeting(ROGUE)
+            .unit(SHAMAN, 2, Shaman)
+            .at(shaman_at.x, shaman_at.y)
+            .dr_tracker(SHAMAN, diminished.clone())
+            .unit(ROGUE, 2, Rogue)
+            .at(rogue_at.x, rogue_at.y)
+            .facing(heading.x, heading.y);
+        let s = if pursuing { s.targeting(ME) } else { s };
+        let mut s = s
+            .obstacles(grazed.clone())
+            .cooldown(ME, AbilityType::ConcussiveShot, 5.0)
+            .cooldown(ME, AbilityType::AimedShot, 5.0)
+            .cooldown(ME, AbilityType::ArcaneShot, 5.0);
+        // A Rogue opens stealthed; this one has been seen.
+        s.combatant_mut(ROGUE).stealthed = false;
+        s
+    };
+    let reserved = |view: &DecisionView| {
+        matches!(
+            view.rejected(AbilityType::SerpentSting),
+            Some(RejectionReason::PreconditionUnmet { note })
+                if note == "trap victim reserved for Freezing Trap"
+        )
+    };
+
+    let route = build(true).decide(ME);
+    assert!(reserved(&route), "seen route: {}", describe(&route));
+    assert_eq!(
+        route.chose(),
+        Some((AbilityType::FreezingTrap, Some(ROGUE))),
+        "seen route: {}",
+        describe(&route)
+    );
+
+    let hidden = build(false).decide(ME);
+    assert_eq!(
+        hidden.chose(),
+        Some((AbilityType::SerpentSting, Some(ROGUE))),
+        "no route: {}",
+        describe(&hidden)
+    );
+    // With the sting cooling, the trap itself is reached: held for sight.
+    let held = build(false)
+        .cooldown(ME, AbilityType::SerpentSting, 5.0)
+        .decide(ME);
+    assert_eq!(freezing_landing(&held), None, "{}", describe(&held));
+    assert!(
+        matches!(
+            held.rejected(AbilityType::FreezingTrap),
+            Some(RejectionReason::LosBlocked)
+        ),
+        "no route, sting cooling: {}",
+        describe(&held)
     );
 }
 

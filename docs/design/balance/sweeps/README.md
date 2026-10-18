@@ -279,6 +279,20 @@ lane, exempt from the sight rule). The instrument writes stderr only; keep it
 (`2> <arm>.raw`) and read it with `2026-10-17-as295-lane-counts.py`, whose
 output is `2026-10-17-as295-lane-counts.txt`.
 
+## `2026-10-17-as361-*`
+
+Behind `../2026-10-17-as361-lane-trap-no-route.md` (card AS-361). AS-295's
+inputs (`2026-10-17-as295-<Map>.jsonl.gz`, TwinPillars and BasicArena) are
+run by `main` @ `fd8ac5e1` (`-before-<Map>.csv.gz`) and the branch
+(`-after-<Map>.csv.gz`) with `--trace-mode off`. On both maps the two CSVs are
+the same file. Score them with `2026-10-12-as281-hunter-side.py`.
+`-variant-pethold-{route,all}-TwinPillars.csv.gz` are the branch with
+`2026-10-17-as361-pet-hold.patch` and `AS361_PET_HOLD=route|all`. Its stderr
+`AS361 THROW <route|lane> <pet|player|unseen>` lines count the lane throws.
+`2026-10-17-as361-reservation-probe.patch` prints `AS361 DIFF` /
+`AS361 OLDOK_NEWHELD` wherever the old and new `fallback_trap` disagree at a
+sting decision. Its CSV equals the branch's.
+
 ## `2026-10-17-as325-*`
 
 Behind `../2026-10-17-as325-mana-burn-cc-window.md` (card AS-325). Two paired

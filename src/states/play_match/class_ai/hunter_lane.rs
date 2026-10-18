@@ -15,7 +15,9 @@
 //! the enemy reaches after the trap has armed ([`seen_route_landing`]): seen,
 //! in range, on the route. Who springs it is then predicted along each enemy's
 //! own route ([`route_springer`]), and the throw is decided on that enemy as
-//! every lane throw is.
+//! every lane throw is. With no such landing the lane trap is held, so the
+//! Serpent Sting's reservation of the trap's victim never waits on a throw the
+//! sight rule would refuse.
 //!
 //! A no-op with no obstacles: there no landing is hidden and nothing here is
 //! asked.
