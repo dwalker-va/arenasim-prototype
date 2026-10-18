@@ -144,6 +144,14 @@ pub struct HealerPosture {
     /// (or `None` → `Some`) is what emits its `DispelChase` trace event. Always
     /// `None` under `Legacy`, whose dispel walk is `medic_target`'s.
     pub solve_dispel: Option<Entity>,
+    /// `TeamPlan` PRESSURED only: the dying teammate the team solve owed reach
+    /// to at its last re-solve (`team_solve::dying_anchor` — `C_DYING`, and
+    /// the sight fallback that walks straight at it). The `TeamPlan` medic
+    /// walk, as `medic_target` is the `Legacy` one's; read it through
+    /// `healer_postures::solve_dying_walk`, which drops it once the posture,
+    /// the healer or the teammate no longer owes the walk. Always `None` under
+    /// `Legacy`.
+    pub solve_dying: Option<Entity>,
     /// The `Legacy` dispel walk's phase (Paladin AS-180, Priest AS-187):
     /// `Walking` while it walks to a teammate it cannot yet free, `Holding`
     /// once that teammate is in reach and the dispel is still owed — the healer
@@ -184,6 +192,7 @@ impl HealerPosture {
             dip_until: 0.0,
             medic_target: None,
             solve_dispel: None,
+            solve_dying: None,
             dispel_walk: DispelWalkPhase::Off,
             cover_spot: None,
         }

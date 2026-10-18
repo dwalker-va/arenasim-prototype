@@ -17,8 +17,8 @@ use crate::states::play_match::movement_config::{CasterHealerMovementConfig, Mov
 
 use super::healer_postures::{
     compound_pressure_onset, compound_pressure_trigger, escape_tick, escape_window_from,
-    healer_pressured_tick_shared, medic_chase_override, medic_chase_tick, start_movement_event,
-    take_cover_tick,
+    healer_pressured_tick_shared, medic_chase_override, medic_chase_tick, solve_dying_walk,
+    start_movement_event, take_cover_tick,
 };
 use super::CombatContext;
 
@@ -34,10 +34,12 @@ pub struct CasterHealerPlan {
     /// The live PRESSURED trigger this tick (`compound_pressure_trigger`),
     /// kept for parity with the Priest plan.
     pub pressured: bool,
-    /// The teammate a live medic walk is walking to, if one is. The Druid's
-    /// rotation holds its damage and utility casts while that teammate is out
-    /// of its reach (`class_ai::druid`), so the global cooldown is free for
-    /// the heal the walk is about to make possible.
+    /// The teammate a live medic walk is walking to, if one is: the `Legacy`
+    /// medic chase's, or under `TeamPlan` PRESSURED the team solve's walk to
+    /// reach a dying teammate ([`solve_dying_walk`]). The Druid's rotation
+    /// holds its damage and utility casts while that teammate is out of its
+    /// reach (`class_ai::druid`), so the global cooldown is free for the heal
+    /// the walk is about to make possible.
     pub medic_walk: Option<Entity>,
 }
 
@@ -273,12 +275,23 @@ pub fn evaluate_caster_healer_posture(
         commands.entity(entity).try_insert(*state);
     }
 
+    // The ESCAPE-style cast deferral is the `Legacy` walk's alone: the
+    // `TeamPlan` walk feeds only the Druid's hold.
     let escape_defer =
         if medic_walk.is_some() || state.posture == Posture::Escape || cover == Some(true) {
             Some(shared.urgency_hp_threshold)
         } else {
             None
         };
+
+    // Under `TeamPlan` PRESSURED the team solve is the walk: it owes the
+    // dying teammate reach (`C_DYING`) where the retired medic chase would
+    // have walked to it.
+    let medic_walk = if cover.is_some() {
+        None
+    } else {
+        medic_walk.or_else(|| solve_dying_walk(entity, ctx, state, shared))
+    };
 
     CasterHealerPlan {
         escape_defer,

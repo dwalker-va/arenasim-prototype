@@ -551,6 +551,13 @@ fn frost_shock_on(
 /// target (modeled on the Mage's Frostbolt). Deferred outright while an ESCAPE
 /// window is live (`escape_defer` is `Some`): a hardcast would freeze the
 /// Shaman mid-escape. Mana is consumed at cast completion by the casting system.
+///
+/// A kill target behind cover is waited for, never swapped for an enemy in
+/// sight. The bolt sits above the sustain heal, so a bolt at whoever is in
+/// sight would spend two seconds of the Shaman's time that the heal below it
+/// gets today (AS-208 measured a fallback: across the TwinPillars juke bank
+/// the Shaman's Warrior died sooner). The cast gate refuses it
+/// `LosBlocked`, after the Shaman's own state.
 fn try_lightning_bolt(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -1282,5 +1289,70 @@ mod reach_tests {
                 );
             }
         }
+    }
+
+    // ------------------------------------------------------------------------
+    // AS-208: Lightning Bolt waits for sight of its kill target
+    // ------------------------------------------------------------------------
+
+    /// The Shaman, its kill target (an enemy Warrior) at `kill`, and an enemy
+    /// Rogue at each of `others`. Units: the Shaman, the Warrior, the Rogues.
+    fn bolt_scene(kill: Vec3, others: &[Vec3]) -> ReachScene {
+        let mut units = vec![(2, Warrior, kill, 1.0)];
+        units.extend(others.iter().map(|&p| (2, Rogue, p, 1.0)));
+        ReachScene::new(Shaman, &units)
+    }
+
+    /// One Lightning Bolt decision on the Warrior, with `mana` left (full when
+    /// `None`).
+    fn bolt(s: &mut ReachScene, obstacles: &[ObstacleVolume], mana: Option<f32>) -> DecisionTrace {
+        let abilities = AbilityDefinitions::default();
+        let (me, kill) = (s.units[0], s.units[1]);
+        s.run(obstacles, |commands, ctx, combatant, builder| {
+            combatant.target = Some(kill);
+            if let Some(mana) = mana {
+                combatant.current_mana = mana;
+            }
+            try_lightning_bolt(
+                commands,
+                &mut CombatLog::default(),
+                &abilities,
+                me,
+                combatant,
+                CASTER,
+                None,
+                ctx,
+                None,
+                builder,
+            )
+        })
+    }
+
+    /// The kill target is bolted; behind the pillar the bolt waits for it,
+    /// refused `LosBlocked`, though an enemy Rogue stands in sight.
+    #[test]
+    fn lightning_bolt_waits_for_sight_of_its_kill_target() {
+        let mut s = bolt_scene(BEHIND, &[IN_SIGHT]);
+        let kill = s.units[1];
+        assert_eq!(
+            outcome(&bolt(&mut s, &[], None)),
+            chose("LightningBolt", kill),
+            "no pillar: the kill target"
+        );
+        let trace = bolt(&mut s, &pillar(), None);
+        assert_eq!(outcome(&trace), None, "the Rogue in sight is not bolted");
+        assert_eq!(candidate(&trace, "LightningBolt")["reason"], "LosBlocked");
+    }
+
+    /// An out-of-mana Shaman is refused the bolt for mana, whether its kill
+    /// target is in sight or behind the pillar.
+    #[test]
+    fn an_occluded_bolt_still_reports_the_shaman_out_of_mana() {
+        let mut s = bolt_scene(BEHIND, &[]);
+        let open = candidate(&bolt(&mut s, &[], Some(0.0)), "LightningBolt")["reason"].clone();
+        assert!(open.get("InsufficientMana").is_some(), "{open}");
+        let behind =
+            candidate(&bolt(&mut s, &pillar(), Some(0.0)), "LightningBolt")["reason"].clone();
+        assert_eq!(behind, open, "behind the pillar");
     }
 }

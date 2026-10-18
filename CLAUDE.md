@@ -868,9 +868,23 @@ step-8 Roots also passes over an attacker immune to damage. Its Roots PEEL for a
 dying teammate is reach-first (range, then sight, then immunity): an attacker it
 cannot land on yields to the next, then to the next dying teammate's. The
 Druid's peels take an attacker in sight even when the ally they peel for is
-not: the control focus is ranked over every ally. The Priest's defensive Psychic Scream holds for
-a critical heal only when the dying ally is in reach — one behind cover is the
-medic chase's to reach, and no heal can land on it yet.
+not: the control focus is ranked over every ally. Both of the Priest's Psychic
+Screams — the defensive one and the offensive dip's — hold for a critical heal
+(the Priest's own included) only when the dying ally is in reach — one behind
+cover is the medic chase's to reach, and no heal can land on it yet. (A dying
+teammate also aborts the dip outright, in reach or not.)
+**A cast aimed at one fixed target** falls back only to a target that serves
+the same purpose, and otherwise waits for sight. The Druid's step-8 Cyclone
+passes an occluded enemy healer over for another enemy healer in sight, never
+for anyone else: the kill needs a healer gone. Moonfire and Lightning Bolt wait
+for sight of the kill target. Moonfire's DoT on any other enemy would stand the
+team's Polymorph, traps and Chain hand-offs down on it
+(`has_friendly_dots_on_target`). Lightning Bolt sits above the Shaman's
+sustain heal, so a bolt at whoever is in sight costs the heal its time.
+Measured on a fallback: across the TwinPillars juke bank the Shaman's Warrior
+died sooner, and on PillaredArena four of its six flips were losses turned into
+300-second stalemates. A refusal
+for sight reports the caster's own refusal first.
 The dispel walk asks `cast_reach`, so it ends exactly where the cast becomes
 possible. The pet strikes, Spider Web and Boar Charge, ask
 `pet_ai::pet_strike_reach` (range, Boar Charge's dead zone, sight) on every
@@ -879,7 +893,12 @@ pet's re-check when it executes a dispatched command
 (`pet_ai::pet_command_rejection`), which also re-checks a Master's Call's
 sight. A Hunter trap is thrown at a POINT, so every throw asks sight of
 its landing instead (`hunter::try_place_trap_at`, after range): one a pillar
-hides is held, traced `LosBlocked`, never moved. A no-op on obstacle-free maps
+hides is held, traced `LosBlocked`, never moved. The lane Freezing Trap picks
+its landing with sight in mind: when a pillar hides the lane, it lands on an
+enemy's route round that pillar, at the first point of it the Hunter sees once
+the trap would arm (`hunter_lane::route_lane`). With no such route it is held
+in `fallback_trap` itself (`LosBlocked`), so the Serpent Sting never stays
+reserved for that throw. A no-op on obstacle-free maps
 (BasicArena stays byte-identical).
 
 **Dying teammate first (Druid)** — no RON knob; reuses `urgency_hp_threshold`.
@@ -900,7 +919,16 @@ teammate), Travel Form, Innervate and the heals are never held. The rule lives
 in the Druid's rotation order (`class_ai/druid.rs`, `DruidTurn::take` /
 `try_dying_heal` / `try_roots_peel` / `held_for_medic_walk`; the walk's
 teammate reaches it as `CasterHealerPlan::medic_walk`), so no other healer's
-deferral changes (`tests/druid_dying_heal.rs`).
+deferral changes (`tests/druid_dying_heal.rs`). Under `TeamPlan` PRESSURED,
+where the medic chase is retired, the walk is the team solve's: the dying
+teammate its last re-solve owed reach to (`C_DYING`, and the sight fallback
+that walks straight at it — `team_solve::dying_anchor`), kept on
+`HealerPosture::solve_dying` and read through
+`healer_postures::solve_dying_walk`, which drops it outside PRESSURED, while
+the healer is hard-CC'd, and once the teammate is dead or no longer dying. Unlike
+the `Legacy` walk it covers a dying teammate in sight but beyond heal range,
+since the solve walks into range too. It feeds only the Druid's hold; any other
+healer may read it (`tests/druid_teamplan_dying_walk.rs`).
 
 **Travel Form escape (Druid)** — `druid.weights.flee`. A shifted Druid is in
 ESCAPE for as long as it stays shifted (`evaluate_caster_healer_posture`'s
@@ -973,6 +1001,20 @@ makes competent pursuers (melee and Mage) round pillars cleanly; a documented
 consequence is that a pressured healer's `cover_pull` LoS-denial buys far less
 sustained occlusion against a steered melee trainer (a competent melee now
 re-acquires around the pillar quickly — see the `u8_healer_cover` probe note).
+
+**Pursuit walks for sight** — `combat_core::movement::pursuit_closes` (no RON
+knob). Normal pursuit stops at a unit's preferred range only once it SEES its
+target: a non-healer in range and out of sight keeps walking (the same
+tangent-steered pursuit step), and stops the frame sight returns — sight by
+`has_line_of_sight` between the two positions, the casts' own test. Stopping
+in range behind a pillar parked a Warlock with every cast refused `LosBlocked`
+beside a lone, out-of-mana healer that was parked too, and the match drew at
+the cap (AS-360). Healers do not walk for sight: their posture machine owns
+where they stand, and one out of sight of its enemy is usually in cover on
+purpose. Both AI profiles; a no-op on obstacle-free maps (BasicArena stays
+byte-identical). The Warlock is the class it moves — the Mage and Hunter
+answer occlusion with their ENGAGE machine first. Staged guard:
+`tests/pursuit_sight_walk.rs`.
 
 **DPS kiter blocks** (`mage:` / `hunter:` — the shared ENGAGE/KITE machine, `DpsMovementConfig`):
 - `weights:` (above) plus `range_band_min`/`max` (orbit ring; min = SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE 8), `kite_hold` (anti-strobe hysteresis), `directive_ttl` (must cover the longest cast), `commit_window`.

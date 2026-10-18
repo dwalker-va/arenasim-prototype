@@ -52,8 +52,10 @@ verify that PR and render a verdict — nothing more.
    files at the head SHA with `gh api` and diff them against your worktree copies —
    that is how the near-miss above was caught. See *Worktree discipline* in
    `docs/design/agent-pipeline.md`.
-3. **Build and test.** `cargo build --release` and `cargo test` must both pass. A failure
-   in either is an automatic REJECT with the failing output quoted in the findings.
+3. **Build, test and lint.** `cargo build --release` and `cargo test` must both pass,
+   and so must Lint's two commands, exactly as `.github/workflows/lint.yaml` runs them:
+   `cargo fmt --check` and `cargo clippy -- -D warnings`. A failure in any of the four
+   is an automatic REJECT with the failing output quoted in the findings.
 4. **Run the suites the diff touches.** Inspect the diff (`gh pr diff <PR>`, or
    `git diff main...HEAD`) and run the relevant opt-in suites on top of the default
    `cargo test`:
@@ -99,7 +101,8 @@ verify that PR and render a verdict — nothing more.
      DEFAULT test is a REJECT finding unless the report already names it and
      explains why no test can see it.
    - **Merge check.** Run `git merge-tree` of the PR head onto current
-     `origin/main`, and run the default `cargo test` once on the merged tree. Name
+     `origin/main`, and run the default `cargo test` and Lint's two commands once on
+     the merged tree. Name
      any conflicting files. A clean merge needs no rebase (*Merging* in
      `docs/design/agent-pipeline.md`).
 5. **Review the diff independently.** Read the changed code, not just the tests:

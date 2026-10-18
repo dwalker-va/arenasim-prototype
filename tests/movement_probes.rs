@@ -5372,15 +5372,19 @@ mod u10_press {
 
     /// The seeds the endgame guard plays: the same bank `scan_press_seeds`
     /// prints. (Pinned seeds carried it until the past-75s one had been
-    /// re-picked four times; AS-293 migrated it here.)
-    const PRESS_BANK: std::ops::Range<u64> = 0..40;
+    /// re-picked four times; AS-293 migrated it here.) 120 seeds since AS-360:
+    /// once the Warlock walked round a pillar for sight instead of standing
+    /// out of it, fewer of these matches ran past 75s, and the first 40 seeds
+    /// held one.
+    const PRESS_BANK: std::ops::Range<u64> = 0..120;
 
     /// The most matches of the bank that may run to the cap (1 of 40 on
-    /// `main` @ 68b9a0c, and after AS-293).
+    /// `main` @ 68b9a0c, and after AS-293; 0 of 120 after AS-360).
     const MAX_CAPPED: usize = 2;
 
-    /// The fewest kills past the 75s dampening onset the bank must hold (5 on
-    /// `main` @ 68b9a0c, 4 after AS-293).
+    /// The fewest kills past the 75s dampening onset the bank must hold (5 of
+    /// 40 on `main` @ 68b9a0c, 4 after AS-293; 10 of 120 on `main` @
+    /// 0a8f8a36, 4 after AS-360).
     const MIN_DEEP_KILLS: usize = 2;
 
     /// F4 endgame guard: the healer-heavy comp RESOLVES by elimination — not

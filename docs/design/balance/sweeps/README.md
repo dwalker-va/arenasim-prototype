@@ -264,6 +264,35 @@ Behind `2026-10-13-as249-healer-positioning.md` (card AS-249). Two sweeps:
   per arm), results `2026-10-13-as249-cover.csv.gz`, analysed by
   `2026-10-13-as249-cover.py`.
 
+## `2026-10-17-as295-*`
+
+Behind `../2026-10-17-as295-lane-trap-route.md` (card AS-295). 4,240 configs
+per map, one file per map: `gen_sweep.py --full 2 --exclude-double-healer
+--affects Hunter --control-cells 8 --n 10 --extra '{"map":"<Map>"}'`. Run by
+`main` @ `2368e2b9` (`-before-<Map>.csv.gz`) and the branch
+(`-after-<Map>.csv.gz`) with `--trace-mode off`, then
+`scripts/paired_sweep.py --affects Hunter --tier directional` and
+`2026-10-12-as281-hunter-side.py` on the two CSVs.
+`-variant-unseen-TwinPillars.csv.gz` is the branch with
+`2026-10-17-as295-instrument.patch` applied and `AS295_MODE=unseen` (main's
+lane, exempt from the sight rule). The instrument writes stderr only; keep it
+(`2> <arm>.raw`) and read it with `2026-10-17-as295-lane-counts.py`, whose
+output is `2026-10-17-as295-lane-counts.txt`.
+
+## `2026-10-17-as361-*`
+
+Behind `../2026-10-17-as361-lane-trap-no-route.md` (card AS-361). AS-295's
+inputs (`2026-10-17-as295-<Map>.jsonl.gz`, TwinPillars and BasicArena) are
+run by `main` @ `fd8ac5e1` (`-before-<Map>.csv.gz`) and the branch
+(`-after-<Map>.csv.gz`) with `--trace-mode off`. On both maps the two CSVs are
+the same file. Score them with `2026-10-12-as281-hunter-side.py`.
+`-variant-pethold-{route,all}-TwinPillars.csv.gz` are the branch with
+`2026-10-17-as361-pet-hold.patch` and `AS361_PET_HOLD=route|all`. Its stderr
+`AS361 THROW <route|lane> <pet|player|unseen>` lines count the lane throws.
+`2026-10-17-as361-reservation-probe.patch` prints `AS361 DIFF` /
+`AS361 OLDOK_NEWHELD` wherever the old and new `fallback_trap` disagree at a
+sting decision. Its CSV equals the branch's.
+
 ## `2026-10-17-as325-*`
 
 Behind `../2026-10-17-as325-mana-burn-cc-window.md` (card AS-325). Two paired
@@ -280,6 +309,32 @@ after.csv.gz`. The log-identity seed bank, which also prints where each
 diverging match first differs and how its winner moved, is
 `2026-10-17-as325-bank.py --before <main binary> --after <branch binary>
 --work <dir>`; its docstring says how each binary must be placed.
+
+## `2026-10-17-as360-*`
+
+Behind `../2026-10-17-as360-pursuit-sight-walk.md` (card AS-360). Three paired
+sweeps, each run by `main` @ `0a8f8a36` (`-before.csv.gz`) and the branch
+(`-after.csv.gz`) with `--trace-mode off`:
+
+- `-legacy-basicarena` (1,800 configs): `gen_sweep.py --full 2
+  --exclude-double-healer --n 2 --extra '{"map":"BasicArena"}'`. The control:
+  the two CSVs are byte-identical.
+- `-legacy-pillaredarena` (9,000): `gen_sweep.py --full 2
+  --exclude-double-healer --affects Warrior,Mage,Rogue,Warlock,Hunter
+  --control-cells 0 --n 10 --extra '{"map":"PillaredArena"}'`.
+- `-teamplan-pillaredarena` (9,000): the same, with `--extra
+  '{"map":"PillaredArena","ai_profile":"TeamPlan"}'`.
+
+The PillaredArena pairs, gunzipped, are analysed with `scripts/paired_sweep.py --affects
+Warrior,Mage,Rogue,Warlock,Hunter --tier directional --expect move
+--control-elsewhere "BasicArena byte-identity"`. The write-up's table, scored
+from the Warlock's side with draw counts, comes from
+`2026-10-17-as360-warlock-side.py before.csv.gz after.csv.gz`. Every moved
+match is attributed by `2026-10-17-as360-attribute.py --before <main binary>
+--probe <probe binary> --configs <jsonl.gz> --before-csv <csv.gz> --after-csv
+<csv.gz> --work <dir>`. The probe binary is the branch built with
+`2026-10-17-as360-fire-probe.patch` applied (`git apply` it, then
+`cargo build --release`).
 
 ## `2026-10-17-as206-teamplan-pillaredarena*`
 

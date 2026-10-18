@@ -1,0 +1,27 @@
+== instr-off-TwinPillars.raw
+ticks: 1491501 considered, lane seen 745561, hidden 745940
+  hidden with a seen route point: 232022 (31.1%), none: 513918
+throws dip             134  sprung     53 (39.6%)  on the intended enemy     45 (33.6%)  expired     0  median secs to spring 2.35
+throws lane            612  sprung    498 (81.4%)  on the intended enemy    253 (41.3%)  expired     1  median secs to spring 2.65
+throws pressure        278  sprung    152 (54.7%)  on the intended enemy    144 (51.8%)  expired     1  median secs to spring 2.95
+== instr-ship-TwinPillars.raw
+ticks: 1059664 considered, lane seen 552408, hidden 507256
+  hidden with a seen route point: 54465 (10.7%), none: 452791
+throws dip             134  sprung     53 (39.6%)  on the intended enemy     45 (33.6%)  expired     0  median secs to spring 2.35
+throws lane            386  sprung    326 (84.5%)  on the intended enemy     99 (25.6%)  expired     0  median secs to spring 2.98
+throws pressure        278  sprung    152 (54.7%)  on the intended enemy    144 (51.8%)  expired     1  median secs to spring 2.95
+throws route          1236  sprung   1124 (90.9%)  on the intended enemy   1035 (83.7%)  expired     0  median secs to spring 4.78
+== instr-unseen-TwinPillars.raw
+ticks: 1019380 considered, lane seen 549167, hidden 470213
+  hidden with a seen route point: 63429 (13.5%), none: 406784
+throws dip              81  sprung     42 (51.9%)  on the intended enemy     34 (42.0%)  expired     0  median secs to spring 4.32
+throws lane            267  sprung    234 (87.6%)  on the intended enemy    109 (40.8%)  expired     1  median secs to spring 3.83
+throws lane_unseen    1861  sprung   1795 (96.5%)  on the intended enemy    909 (48.8%)  expired     0  median secs to spring 4.05
+throws pressure        274  sprung    143 (52.2%)  on the intended enemy    134 (48.9%)  expired     1  median secs to spring 2.98
+== instr-shipP-PillaredArena.raw
+ticks: 1720423 considered, lane seen 1703115, hidden 17308
+  hidden with a seen route point: 802 (4.6%), none: 16506
+throws dip              26  sprung      6 (23.1%)  on the intended enemy      5 (19.2%)  expired     0  median secs to spring 5.05
+throws lane           2308  sprung   2135 (92.5%)  on the intended enemy   1315 (57.0%)  expired     0  median secs to spring 3.78
+throws pressure        298  sprung    176 (59.1%)  on the intended enemy    171 (57.4%)  expired     5  median secs to spring 2.90
+throws route             3  sprung      3 (100.0%)  on the intended enemy      3 (100.0%)  expired     0  median secs to spring 2.10

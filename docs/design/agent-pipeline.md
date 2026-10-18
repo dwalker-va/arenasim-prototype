@@ -412,6 +412,8 @@ Cards run in parallel. A PR does not rebase just because main moved.
   default `cargo test` once on that merged tree, and the orchestrator merges with a
   merge commit (`gh pr merge --merge --match-head-commit <full sha>`). Nothing is
   re-swept.
+- **The merged-tree check includes Lint's two commands** — `cargo fmt --check` and
+  `cargo clippy -- -D warnings`, as `.github/workflows/lint.yaml` runs them.
 - **Rebase only for one of two reasons:**
   - a textual conflict;
   - the change that just landed touches the mechanism this PR measures: the same
