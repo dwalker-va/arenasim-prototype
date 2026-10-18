@@ -369,8 +369,15 @@ fn caster_healer_free_tick(
         commands.entity(entity).remove::<MovementDirective>();
     }
 
-    let Some(point) = compute_formation_point(entity, combatant, my_pos, ctx, movement, block)
-    else {
+    let Some(point) = compute_formation_point(
+        entity,
+        combatant,
+        my_pos,
+        ctx,
+        movement,
+        block,
+        &mut state.formation_side,
+    ) else {
         if transitioned {
             if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
                 builder.transition(
@@ -439,6 +446,7 @@ fn compute_formation_point(
     ctx: &CombatContext,
     movement: &MovementConfig,
     block: &CasterHealerMovementConfig,
+    side: &mut Option<FormationSide>,
 ) -> Option<Vec3> {
     let shared = &movement.shared;
     let mut all_sum = Vec3::ZERO;
@@ -510,11 +518,10 @@ fn compute_formation_point(
         }
     }
 
-    let point =
-        super::healer_postures::standable_formation_point(ctx, clamp_to_arena(&ctx.bounds, point));
+    let point = clamp_to_arena(&ctx.bounds, point);
     Some(if super::formation::sight_constrained(ctx) {
-        super::formation::sighted_formation_point(ctx, entity, point)
+        super::formation::sighted_formation_point(ctx, entity, point, side)
     } else {
-        point
+        super::healer_postures::standable_formation_point(ctx, point)
     })
 }

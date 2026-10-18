@@ -753,19 +753,25 @@ utility for the walk instead — see *Dying teammate first* below.
 (AS-206; no RON knob). The medic chase walks only for a teammate below
 `urgency_hp_threshold`, so a formation point in a pillar's shadow from a
 HEALTHY teammate used to park the Priest, Shaman or Druid there blind. Under
-`TeamPlan` the point (after its arena clamp and standable projection) is held
-to sight of every living non-pet teammate when a nearby spot has it, else of
-the most injured one: a constraint with a nearest-feasible repair, not a scored
-term. The candidates are geometry-anchored — the point projected onto the two
-tangent rays bounding the teammate's shadow past the obstacle's footprint disc,
-pushed `SIGHT_MARGIN` (2.5yd, past the 1.5yd formation dead zone) clear — so
-the repaired point slides with the fight instead of hopping. A point already
-in sight comes back bit-identical. The Paladin has no formation point.
-`Legacy` is untouched (byte-identical), and BasicArena with it under both
-profiles. Pinned by `tests/formation_sight.rs`: a staged pillar edge where the
-`TeamPlan` Druid and Priest each regain sight of their Mage within 1s and the
-`Legacy` pair stays blind. A new FREE goal (AS-328's standoff) belongs behind
-the same constraint.
+`TeamPlan` the point is held to sight of every living non-pet teammate when a
+nearby spot has it, else of the most injured one: a constraint with a
+nearest-feasible repair, not a scored term. A point whose standable projection
+is already in sight comes back exactly as the unconstrained machine returns it.
+The candidates are geometry-anchored — the point projected onto the two tangent
+rays bounding the teammate's shadow past the obstacle's footprint disc, pushed
+`SIGHT_MARGIN` (2.5yd, past the 1.5yd formation dead zone) clear — and measured
+from the raw point, not its standable projection, which jumps between a
+pillar's faces. The choice between a shadow's two sides has hysteresis: the
+side the point was last repaired to (`HealerPosture::formation_side`) is kept
+until the other is nearer by `SIDE_MARGIN` (6yd) or it loses sight. So the
+repaired point slides along one side of a shadow instead of flipping across it.
+The Paladin has no formation point. `Legacy` is untouched (byte-identical), and
+BasicArena with it under both profiles. Pinned by `tests/formation_sight.rs` (a
+staged pillar edge where the `TeamPlan` Druid and Priest each regain sight of
+their Mage within 1s while the `Legacy` pair stays blind; and a seed bank bounding every
+frame-to-frame jump of the Priest's formation goal) and by the side tests in
+`formation.rs`. A new FREE goal (AS-328's standoff) belongs behind the same
+constraint.
 
 **Dispel walk (Paladin, Priest)** — `healer_postures::dispel_chase_override`,
 choosing its ally with `class_ai::dispel_chase_target` (no RON knob). Cleanse and

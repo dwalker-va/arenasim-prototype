@@ -8,10 +8,16 @@
 //! teammate when it can (of the most injured when it cannot;
 //! `class_ai::formation`).
 //!
-//! The probe stages the pillar edge the defect was found on (tier 3) for each
-//! formation machine — the Druid's (the caster-healer machine it shares with
-//! the Shaman) and the Priest's — and pins the walk out of the shadow to within
-//! a second, paired with `Legacy` keeping the healer blind.
+//! Two probes, both in the default run:
+//! - `a_free_healer_regains_sight_of_its_teammate` stages the pillar edge the
+//!   defect was found on (tier 3) for each formation machine — the Druid's (the
+//!   caster-healer machine it shares with the Shaman) and the Priest's — and
+//!   pins the walk out of the shadow to within a second, paired with `Legacy`
+//!   keeping the healer blind;
+//! - `the_priests_repaired_point_never_flips_across_a_shadow` reads the comp
+//!   whose Priest repairs most over a seed bank and bounds every
+//!   frame-to-frame jump of its formation goal: the repaired point slides along
+//!   one side of a shadow, it does not flip across it.
 
 use arenasim::headless::HeadlessMatchConfig;
 use arenasim::states::play_match::map_config::load_map_geometry_config;
@@ -186,4 +192,131 @@ fn a_free_healer_regains_sight_of_its_teammate() {
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// The repaired point keeps its side (seed bank)
+// ---------------------------------------------------------------------------
+
+/// A point-goal jump this long between consecutive frames is a flip across a
+/// shadow (Nagrand's are ~20yd wide at formation distance), not a slide.
+const FLIP: f32 = 10.0;
+
+/// The movement triggers whose `Point` goal is the FREE formation point: a
+/// formation re-commit, or the re-anchor on entering FREE. Every other FREE
+/// point walk (the medic chase's `SeekLos`, the dispel walk's) aims elsewhere.
+const FORMATION_TRIGGERS: [&str; 3] = ["FormationShift", "PressuredExit", "EscapeWindowClosed"];
+
+/// Every frame-to-frame jump longer than `FLIP` of the Priest's FORMATION point
+/// goal — frames on which, per the trace, the Priest is FREE and its last
+/// movement decision was a formation one — as (combat seconds, yards). In
+/// Warrior+Priest v Mage+Rogue on Nagrand under `TeamPlan`: the comp whose
+/// Priest repairs its formation point most, as its Warrior walks round the camp
+/// pillar and the camp releases. `swap` puts the Priest's pair on team 2.
+/// Also returns how many formation-goal frames it read.
+fn priest_formation_jumps(seed: u64, swap: bool) -> (Vec<(f32, f32)>, usize) {
+    let (ours, theirs) = (
+        vec!["Warrior".to_string(), "Priest".to_string()],
+        vec!["Mage".to_string(), "Rogue".to_string()],
+    );
+    let (team1, team2, team) = if swap {
+        (theirs, ours, 2)
+    } else {
+        (ours, theirs, 1)
+    };
+    let played = common::staged::play_seeded(HeadlessMatchConfig {
+        team1,
+        team2,
+        map: "PillaredArena".to_string(),
+        ai_profile: Some("TeamPlan".to_string()),
+        random_seed: Some(seed),
+        max_duration_secs: 25.0,
+        ..Default::default()
+    });
+    let (priest, _) = played.frames[0]
+        .combatants
+        .iter()
+        .find(|(_, c)| c.team == team && !c.is_pet && c.class == arenasim::CharacterClass::Priest)
+        .expect("the Priest");
+    // The Priest's movement decisions as (trace frame, posture, trigger). The
+    // trace's frame counter is the observer's frame index.
+    let decisions: Vec<(usize, String, String)> = played
+        .trace
+        .iter()
+        .filter(|e| {
+            e["kind"] == "movement_decision"
+                && e["actor"]["entity_id"].as_u64() == Some(u64::from(priest.index()))
+        })
+        .map(|e| {
+            (
+                e["frame"].as_u64().unwrap() as usize,
+                e["posture"].as_str().unwrap_or_default().to_string(),
+                e["trigger"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    let formation =
+        |d: &(usize, String, String)| d.1 == "free" && FORMATION_TRIGGERS.contains(&d.2.as_str());
+    let formation_at = |frame: usize| {
+        // Every decision in force from a frame before `frame` to a frame after
+        // it is a formation one (the two clocks may sit a frame apart). A
+        // formation re-commit ON the frame counts: a jump past the shift
+        // threshold is exactly what emits one.
+        let first = decisions.partition_point(|d| d.0 + 1 <= frame);
+        let last = decisions.partition_point(|d| d.0 <= frame + 1);
+        first > 0 && decisions[first - 1..last].iter().all(formation)
+    };
+    let gates = played
+        .frames
+        .iter()
+        .position(|f| f.gates_open)
+        .expect("the gates open");
+    let goal = |i: usize| {
+        played.frames[i]
+            .combatants
+            .get(priest)
+            .filter(|c| c.alive)
+            .and_then(|c| c.point_goal)
+            .filter(|_| formation_at(i))
+    };
+    let mut frames = 0;
+    let mut jumps = Vec::new();
+    for i in gates + 1..played.frames.len() {
+        let (Some(a), Some(b)) = (goal(i - 1), goal(i)) else {
+            continue;
+        };
+        frames += 1;
+        let d = ((a.x - b.x).powi(2) + (a.z - b.z).powi(2)).sqrt();
+        if d > FLIP {
+            jumps.push(((i - gates) as f32 * FRAME, d));
+        }
+    }
+    (jumps, frames)
+}
+
+/// The Priest's repaired formation point never flips across a shadow: over
+/// seeds 0-9 in both team orders, no frame-to-frame jump of its formation goal
+/// longer than `FLIP` in the first 25s, which hold the walk out of the room and
+/// the camp release (~16.7s). With the side's hysteresis removed, or with the
+/// repair measuring from the standable projection rather than the raw point,
+/// every one of these matches flips at the camp release.
+#[test]
+fn the_priests_repaired_point_never_flips_across_a_shadow() {
+    let mut all = Vec::new();
+    let mut frames = 0;
+    for seed in 0..10 {
+        for swap in [false, true] {
+            let (jumps, n) = priest_formation_jumps(seed, swap);
+            frames += n;
+            for (t, d) in jumps {
+                all.push(format!("seed {seed} swap {swap}: {d:.1}yd at {t:.2}s"));
+            }
+        }
+    }
+    println!("{frames} formation-goal frame pairs; jumps over {FLIP}yd: {all:#?}");
+    assert!(
+        frames > 1_000,
+        "the bank no longer walks the Priest to its formation point ({frames} frames)"
+    );
+    assert!(all.is_empty(), "{all:#?}");
 }

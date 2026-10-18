@@ -26,7 +26,13 @@
 //! teammate is bounded by the two tangent rays from the teammate past the
 //! obstacle's footprint disc, and the nearest point outside the shadow lies on
 //! one of them. Each candidate is that projection pushed `margin` clear of the
-//! ray, so it slides continuously as the teammate and the point move.
+//! ray, so it slides continuously as the teammate and the point move. The
+//! choice BETWEEN the two sides has hysteresis: the side the point was last
+//! repaired to is kept until the other is nearer by [`SIDE_MARGIN`] or it loses
+//! sight, and distances are measured from the raw point rather than its
+//! standable projection (which jumps between a pillar's faces), so the point
+//! slides along one side of the shadow instead of flipping across it as it
+//! drifts over the centre line.
 //!
 //! **Profile.** `TeamPlan` only (the AI-profile rule: every new AI behaviour
 //! lands gated). The callers ask [`sight_constrained`]; `Legacy` keeps the
@@ -39,6 +45,8 @@ use crate::states::play_match::map_geometry::{
     has_line_of_sight, nearest_standable, ObstacleVolume, EYE_HEIGHT,
 };
 
+use crate::states::play_match::components::FormationSide;
+
 use super::{CombatContext, CombatantInfo};
 
 /// How far past the edge of a teammate's shadow the repaired point stands.
@@ -49,6 +57,17 @@ use super::{CombatContext, CombatantInfo};
 /// the tangent to the obstacle's footprint DISC — the circumscribed circle for a
 /// Nagrand prism — which is itself already outside the true silhouette.
 pub const SIGHT_MARGIN: f32 = 2.5;
+
+/// How much nearer the other side of a teammate's shadow must be before the
+/// repaired formation point switches to it ([`sighted_formation_point`]).
+///
+/// The hysteresis band: the point crosses the shadow's centre line by about
+/// half this before it changes side. Nagrand's shadows are up to ~20yd wide at
+/// formation distance, so a crossing is a ~20yd jump; 6yd of band is three
+/// commit-window walks at base speed, wide enough that the fight's drift does
+/// not carry the point back and forth, narrow enough that a point well past
+/// the centre line takes the shorter way out.
+pub const SIDE_MARGIN: f32 = 6.0;
 
 /// Whether the formation point is held to sight of the teammates under this
 /// unit's AI profile: `TeamPlan` only.
@@ -110,11 +129,17 @@ pub fn sight_of_teammates(ctx: &CombatContext, healer: Entity, spot: Vec2) -> Si
 }
 
 /// The two points just outside `obstacle`'s shadow from `viewer` nearest to
-/// `spot`: `spot` projected onto each tangent ray from `viewer` past the
-/// obstacle's footprint disc (never short of the tangent point), then pushed
-/// `margin` outward, away from the shadow. Empty when the viewer stands at the
-/// disc's centre (no bearing to take a shadow along).
-pub fn shadow_exits(viewer: Vec2, obstacle: &ObstacleVolume, spot: Vec2, margin: f32) -> Vec<Vec2> {
+/// `spot`, each with the side (`1` or `-1`) of the tangent ray it lies on:
+/// `spot` projected onto each tangent ray from `viewer` past the obstacle's
+/// footprint disc (never short of the tangent point), then pushed `margin`
+/// outward, away from the shadow. Empty when the viewer stands at the disc's
+/// centre (no bearing to take a shadow along).
+pub fn shadow_exits(
+    viewer: Vec2,
+    obstacle: &ObstacleVolume,
+    spot: Vec2,
+    margin: f32,
+) -> Vec<(i8, Vec2)> {
     let (center, radius) = obstacle.footprint_disc();
     let to_center = center - viewer;
     let dist = to_center.length();
@@ -126,63 +151,98 @@ pub fn shadow_exits(viewer: Vec2, obstacle: &ObstacleVolume, spot: Vec2, margin:
     // shadow is all but a half-plane, so cap the half-angle just short of 90°.
     let half = (radius / dist).min(0.98).asin();
     let tangent_len = dist * half.cos();
-    [1.0_f32, -1.0]
+    [1_i8, -1]
         .into_iter()
         .map(|side| {
-            let ray = Vec2::from_angle(side * half).rotate(along);
+            let sign = f32::from(side);
+            let ray = Vec2::from_angle(sign * half).rotate(along);
             let t = (spot - viewer).dot(ray).max(tangent_len);
             // Outward: rotate the ray a further quarter turn away from the centre line.
-            let outward = Vec2::from_angle(side * std::f32::consts::FRAC_PI_2).rotate(ray);
-            viewer + ray * t + outward * margin
+            let outward = Vec2::from_angle(sign * std::f32::consts::FRAC_PI_2).rotate(ray);
+            (side, viewer + ray * t + outward * margin)
         })
         .collect()
 }
 
 /// The formation point held to sight of the healer's teammates (AS-206).
 ///
-/// `point` is the formation point as its machine computed it — already clamped
-/// into the arena and projected onto standable ground. When it sees every
-/// living non-pet teammate it comes back bit-identical (always, on an
-/// obstacle-free map). Otherwise it moves to the nearest
+/// `raw` is the formation point as its machine computed it, clamped into the
+/// arena but NOT yet projected onto standable ground; the healer would stand at
+/// its projection (`healer_postures::standable_formation_point`). When that
+/// projection sees every living non-pet teammate it is returned unchanged —
+/// exactly what the unconstrained machine returns (always, on an obstacle-free
+/// map) — and `side` is cleared. Otherwise the point moves to the
 /// [`shadow_exits`] candidate that sees strictly better ([`Sight`]: the anchor
-/// first, then more teammates), clamped and projected the same way; with no
-/// candidate better than the point, the point stands.
-pub fn sighted_formation_point(ctx: &CombatContext, healer: Entity, point: Vec3) -> Vec3 {
+/// first, then more teammates), clamped and projected the same way, and `side`
+/// records which one; with no better candidate, the projection stands and
+/// `side` is cleared.
+///
+/// Distances are measured from `raw`, not from its projection. A raw point
+/// inside a pillar's footprint moves continuously, but its projection jumps
+/// from face to face as it crosses the footprint's medial line, and measuring
+/// from the projection carried those jumps into the choice of side.
+///
+/// Among candidates that see equally well the nearest wins — except that the
+/// side the point was last repaired to (`side`, carried on the healer's
+/// posture state) counts [`SIDE_MARGIN`] nearer than it is. Near a shadow's
+/// centre line its two exits are about equally near, and without that margin a
+/// tenth of a yard's drift flips the point across the whole shadow; with it the
+/// point keeps its side until the other is nearer by the margin, or this side
+/// loses sight.
+pub fn sighted_formation_point(
+    ctx: &CombatContext,
+    healer: Entity,
+    raw: Vec3,
+    side: &mut Option<FormationSide>,
+) -> Vec3 {
+    let point = super::healer_postures::standable_formation_point(ctx, raw);
     if ctx.obstacles.is_empty() {
         return point;
     }
     let allies = teammates(ctx, healer);
     let origin = xz(point);
-    let mut best = (sight_from(ctx.obstacles, origin, &allies), 0.0_f32, origin);
-    if best.0.seen == allies.len() {
-        return point;
-    }
-    for ally in &allies {
-        let ally_xz = xz(ally.position);
-        if has_line_of_sight(ctx.obstacles, eye(origin), eye(ally_xz)) {
-            continue;
-        }
-        for obstacle in ctx.obstacles {
-            if has_line_of_sight(std::slice::from_ref(obstacle), eye(origin), eye(ally_xz)) {
+    let from = xz(raw);
+    let origin_sight = sight_from(ctx.obstacles, origin, &allies);
+    let mut best: Option<(Sight, f32, Vec2, FormationSide)> = None;
+    if origin_sight.seen < allies.len() {
+        for ally in &allies {
+            let ally_xz = xz(ally.position);
+            if has_line_of_sight(ctx.obstacles, eye(origin), eye(ally_xz)) {
                 continue;
             }
-            for exit in shadow_exits(ally_xz, obstacle, origin, SIGHT_MARGIN) {
-                let clamped = clamp_to_arena(&ctx.bounds, Vec3::new(exit.x, point.y, exit.y));
-                let Some(spot) = nearest_standable(ctx.obstacles, xz(clamped), point.y) else {
+            for (index, obstacle) in ctx.obstacles.iter().enumerate() {
+                if has_line_of_sight(std::slice::from_ref(obstacle), eye(origin), eye(ally_xz)) {
                     continue;
-                };
-                let sight = sight_from(ctx.obstacles, spot, &allies);
-                let dist = spot.distance(origin);
-                // The point itself is the incumbent at distance 0, so only a
-                // candidate that sees strictly better can displace it; among
-                // those, the nearest wins.
-                if sight > best.0 || (sight == best.0 && dist < best.1) {
-                    best = (sight, dist, spot);
+                }
+                for (sign, exit) in shadow_exits(ally_xz, obstacle, from, SIGHT_MARGIN) {
+                    let clamped = clamp_to_arena(&ctx.bounds, Vec3::new(exit.x, point.y, exit.y));
+                    let Some(spot) = nearest_standable(ctx.obstacles, xz(clamped), point.y) else {
+                        continue;
+                    };
+                    let sight = sight_from(ctx.obstacles, spot, &allies);
+                    // Only a candidate that sees strictly better than the
+                    // point itself can displace it.
+                    if sight <= origin_sight {
+                        continue;
+                    }
+                    let key = FormationSide {
+                        ally: ally.entity,
+                        obstacle: index,
+                        side: sign,
+                    };
+                    let kept = if *side == Some(key) { SIDE_MARGIN } else { 0.0 };
+                    let dist = spot.distance(from) - kept;
+                    let better =
+                        best.is_none_or(|(s, d, ..)| sight > s || (sight == s && dist < d));
+                    if better {
+                        best = Some((sight, dist, spot, key));
+                    }
                 }
             }
         }
     }
-    Vec3::new(best.2.x, point.y, best.2.y)
+    *side = best.map(|(.., key)| key);
+    best.map_or(point, |(_, _, spot, _)| Vec3::new(spot.x, point.y, spot.y))
 }
 
 #[cfg(test)]
@@ -241,11 +301,24 @@ mod tests {
             )
         }
 
+        /// One repair from a healer with no side remembered.
         fn repair(&self, obstacles: &[ObstacleVolume], point: Vec2) -> Vec2 {
+            self.repair_from(obstacles, point, &mut None)
+        }
+
+        /// One repair, reading and updating the remembered `side` as the
+        /// healer's posture state carries it frame to frame.
+        fn repair_from(
+            &self,
+            obstacles: &[ObstacleVolume],
+            point: Vec2,
+            side: &mut Option<FormationSide>,
+        ) -> Vec2 {
             xz(sighted_formation_point(
                 &self.ctx(obstacles),
                 self.healer,
                 Vec3::new(point.x, 1.0, point.y),
+                side,
             ))
         }
     }
@@ -312,6 +385,82 @@ mod tests {
             );
             last = now;
         }
+    }
+
+    /// The largest step between consecutive repairs of `points`, carrying the
+    /// remembered side from one to the next when `remember`.
+    fn largest_step(f: &Fixture, points: &[Vec2], remember: bool) -> (f32, Vec<Vec2>) {
+        let mut side = None;
+        let repaired: Vec<Vec2> = points
+            .iter()
+            .map(|&p| {
+                if !remember {
+                    side = None;
+                }
+                f.repair_from(&pillar(), p, &mut side)
+            })
+            .collect();
+        let step = repaired
+            .windows(2)
+            .map(|w| w[0].distance(w[1]))
+            .fold(0.0, f32::max);
+        (step, repaired)
+    }
+
+    /// The point drifting over the shadow's centre line (z = 0, the line from
+    /// the Mage through the pillar) in 0.05yd steps, inside the hysteresis band.
+    fn across_the_centre_line() -> Vec<Vec2> {
+        (0..=80)
+            .map(|i| Vec2::new(0.0, 2.0 - i as f32 * 0.05))
+            .collect()
+    }
+
+    /// The point keeps its side as it drifts over the centre line: no repair
+    /// jumps more than a few yards. The pair: with no side remembered (each
+    /// repair from scratch), the same drift flips the point across the whole
+    /// shadow at the centre line.
+    #[test]
+    fn the_point_keeps_its_side_across_the_centre_line() {
+        let f = fixture(&[MAGE]);
+        let points = across_the_centre_line();
+        let (kept, repaired) = largest_step(&f, &points, true);
+        assert!(kept < 2.0, "a repair jumped {kept}yd: {repaired:?}");
+        assert!(
+            repaired.iter().all(|p| p.y > 0.0),
+            "the point left its side"
+        );
+        let (forgetful, _) = largest_step(&f, &points, false);
+        assert!(
+            forgetful > 8.0,
+            "without a remembered side the drift should flip the point across the shadow \
+             (largest step {forgetful}yd) — the scene no longer crosses the centre line"
+        );
+    }
+
+    /// The band is a band, not a lock: a point carried well past the centre
+    /// line changes side once — when the other exit is nearer by `SIDE_MARGIN`
+    /// — and stays changed.
+    #[test]
+    fn the_point_changes_side_once_well_past_the_centre_line() {
+        let f = fixture(&[MAGE]);
+        let points: Vec<Vec2> = (0..=85)
+            .map(|i| Vec2::new(0.0, 0.5 - i as f32 * 0.05))
+            .collect();
+        let (_, repaired) = largest_step(&f, &points, true);
+        let switches = repaired
+            .windows(2)
+            .filter(|w| w[0].y * w[1].y < 0.0)
+            .count();
+        assert_eq!(switches, 1, "{repaired:?}");
+        let at = repaired
+            .windows(2)
+            .position(|w| w[0].y * w[1].y < 0.0)
+            .unwrap();
+        let crossed = -points[at + 1].y;
+        assert!(
+            crossed > SIDE_MARGIN / 2.0 - 0.5 && crossed < SIDE_MARGIN / 2.0 + 0.5,
+            "switched {crossed}yd past the centre line"
+        );
     }
 
     /// Sight of every teammate wins when some spot has it; when none does,
