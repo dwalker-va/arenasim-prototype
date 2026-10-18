@@ -1,0 +1,98 @@
+diff --git a/src/states/play_match/class_ai/hunter.rs b/src/states/play_match/class_ai/hunter.rs
+index 8e26ca66..ae84228a 100644
+--- a/src/states/play_match/class_ai/hunter.rs
++++ b/src/states/play_match/class_ai/hunter.rs
+@@ -42,6 +42,23 @@ use crate::states::play_match::traps::replace_previous_trap;
+ /// (after ~0.9s projectile travel) lands with no uptime gap and no wasted GCD.
+ const CONCUSSIVE_REFRESH_WINDOW: f32 = 1.0;
+ 
++/// AS-361 measurement instrument (stderr only). `AS361_PET_HOLD`: `off`
++/// (default, the branch), `route` (a route-lane throw decided on a pet is
++/// held), `all` (any fallback lane throw decided on a pet is held).
++pub mod as361 {
++    pub fn mode() -> &'static str {
++        static MODE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
++        match MODE
++            .get_or_init(|| std::env::var("AS361_PET_HOLD").unwrap_or_else(|_| "off".into()))
++            .as_str()
++        {
++            "route" => "route",
++            "all" => "all",
++            _ => "off",
++        }
++    }
++}
++
+ /// Hunter AI: Decides and executes abilities for a Hunter combatant.
+ pub fn decide_hunter_action(
+     commands: &mut Commands,
+@@ -713,7 +730,11 @@ pub fn decide_hunter_action(
+                     RejectionReason::FriendlyBreakableCC,
+                 );
+             }
+-            Ok(FallbackThrow { lane, victim, .. }) => {
++            Ok(FallbackThrow {
++                lane,
++                victim,
++                via_route,
++            }) => {
+                 if try_place_trap_at(
+                     commands,
+                     combat_log,
+@@ -728,6 +749,15 @@ pub fn decide_hunter_action(
+                     ctx,
+                     &mut builder,
+                 ) {
++                    let kind = match victim.and_then(|v| ctx.combatants.get(&v)) {
++                        Some(info) if info.is_pet => "pet",
++                        Some(_) => "player",
++                        None => "unseen",
++                    };
++                    eprintln!(
++                        "AS361 THROW {} {kind}",
++                        if via_route { "route" } else { "lane" }
++                    );
+                     builder.finish();
+                     return true;
+                 }
+@@ -810,6 +840,7 @@ pub fn decide_hunter_action(
+ struct FallbackThrow {
+     lane: Vec3,
+     victim: Option<Entity>,
++    via_route: bool,
+ }
+ 
+ /// The fallback Freezing Trap, when there is no off-target to CC — a
+@@ -891,7 +922,11 @@ fn fallback_trap(
+         if super::hunter_dip::unseen_victim_would_be_freed(ctx, abilities, entity, my_team) {
+             return held(TRAP_HELD_UNSEEN);
+         }
+-        return Some(Ok(FallbackThrow { lane, victim: None }));
++        return Some(Ok(FallbackThrow {
++            lane,
++            victim: None,
++            via_route: false,
++        }));
+     }
+     // Cover hides the lane: land it instead on an enemy's route round that
+     // cover, where the Hunter can see it (`hunter_lane`). With no such route
+@@ -934,9 +969,19 @@ fn fallback_trap(
+     if super::hunter_dip::teammate_would_break_it(ctx, entity, Some(kill_target), victim) {
+         return held(TRAP_HELD_TEAM_BREAKS);
+     }
++    if ctx.combatants.get(&victim).is_some_and(|i| i.is_pet)
++        && match as361::mode() {
++            "route" => lane_hidden,
++            "all" => true,
++            _ => false,
++        }
++    {
++        return held("as361: pet victim held");
++    }
+     Some(Ok(FallbackThrow {
+         lane,
+         victim: Some(victim),
++        via_route: lane_hidden,
+     }))
+ }
+ 
