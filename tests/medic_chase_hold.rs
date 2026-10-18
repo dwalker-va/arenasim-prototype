@@ -489,6 +489,12 @@ fn the_hold_does_not_keep_a_dispel_walk() {
 /// (behind the Mage, away from the Paladin) falls inside the pillar and is
 /// projected onto its east face — the occluded side of that corner. So the
 /// formation walk takes sight away and the medic chase gives it back.
+///
+/// The Druid's team plays `druid_profile`. Under `Legacy` its formation point
+/// is unconstrained, so the trade happens and the hold is the guard. Under
+/// `TeamPlan` the point keeps sight of the Mage (AS-206,
+/// `class_ai::formation`), so the walk seldom takes sight away — but a strobe
+/// there would still be a defect, so that arm keeps the switch bound.
 mod staged {
     use super::*;
     use arenasim::headless::{Stage, Unit};
@@ -498,12 +504,13 @@ mod staged {
     pub const MAGE: Unit = Unit::new(2, 0);
     pub const DRUID: Unit = Unit::new(2, 1);
 
-    pub fn config(seed: u64) -> HeadlessMatchConfig {
+    pub fn config(seed: u64, druid_profile: &str) -> HeadlessMatchConfig {
         HeadlessMatchConfig {
             team1: vec!["Warrior".into(), "Paladin".into()],
             team2: vec!["Mage".into(), "Druid".into()],
             map: "PillaredArena".to_string(),
             ai_profile: Some("TeamPlan".to_string()),
+            team2_ai_profile: Some(druid_profile.to_string()),
             team1_kill_target: Some(0),
             team2_kill_target: Some(0),
             random_seed: Some(seed),
@@ -557,18 +564,28 @@ fn max_switches_per_second(events: &[(f32, String)]) -> usize {
 /// a chase-formation-chase cycle takes over 0.6s: at most four switches fit in
 /// any second. Over three seeds: the stage puts the Druid on the edge by
 /// construction, and the seed only moves the rolls.
+///
+/// Both profiles are bound; only the `Legacy` arm must show the trade, since
+/// under `TeamPlan` the formation point keeps sight and there is little to
+/// trade (see the stage).
 #[test]
 fn the_druid_on_the_pillar_edge_commits_to_one_goal() {
-    for seed in [1, 2, 3] {
-        let played = play(staged::config(seed), staged::stage());
+    for (profile, seed) in [1, 2, 3]
+        .into_iter()
+        .flat_map(|seed| [("Legacy", seed), ("TeamPlan", seed)])
+    {
+        let played = play(staged::config(seed, profile), staged::stage());
         let events = druid_movement(&played);
 
         let worst = max_switches_per_second(&events);
         assert!(
             worst <= 4,
-            "seed {seed}: the Druid switched movement goal {worst} times inside one second \
-             (the medic chase and the formation point trading it every frame)"
+            "{profile} seed {seed}: the Druid switched movement goal {worst} times inside \
+             one second (the medic chase and the formation point trading it every frame)"
         );
+        if profile == "TeamPlan" {
+            continue;
+        }
         // Not vacuous: the chase and the formation point do trade the Druid on
         // the edge, at the hold's cadence, through the match.
         let chases = events.iter().filter(|(_, t)| t == "SeekLos").count();

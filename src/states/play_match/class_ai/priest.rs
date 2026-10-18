@@ -1739,6 +1739,7 @@ fn priest_dip_tick(
         completed.dip_until = 0.0;
         completed.last_direction = None;
         completed.last_point = None;
+        completed.formation_repair = None;
         ScreamDipPlan::DipCast {
             target,
             completed_state: completed,
@@ -1869,6 +1870,7 @@ pub fn evaluate_priest_posture(
         state.since = now;
         state.last_direction = None;
         state.last_point = None;
+        state.formation_repair = None;
         match next {
             Posture::Pressured => {
                 state.hold_until = now + shared.pressured_hold;
@@ -2165,8 +2167,15 @@ fn free_tick(
         commands.entity(entity).remove::<MovementDirective>();
     }
 
-    let Some(point) = compute_formation_point(abilities, entity, combatant, my_pos, ctx, movement)
-    else {
+    let Some(point) = compute_formation_point(
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        ctx,
+        movement,
+        &mut state.formation_repair,
+    ) else {
         // DEGENERATE (R5/AE4): no formation directive; fall through to the
         // legacy ladder. Exit transitions still emit — goal_kind
         // Entity records "legacy target pursuit governs".
@@ -2255,6 +2264,7 @@ fn compute_formation_point(
     my_pos: Vec3,
     ctx: &CombatContext,
     movement: &MovementConfig,
+    kept: &mut Option<Vec2>,
 ) -> Option<Vec3> {
     let shared = &movement.shared;
     // Single pass over living non-pet allies (excluding self): accumulate the
@@ -2363,10 +2373,12 @@ fn compute_formation_point(
         }
     }
 
-    Some(super::healer_postures::standable_formation_point(
-        ctx,
-        clamp_to_arena(&ctx.bounds, point),
-    ))
+    let point = clamp_to_arena(&ctx.bounds, point);
+    Some(if super::formation::sight_constrained(ctx) {
+        super::formation::sighted_formation_point(ctx, entity, point, kept)
+    } else {
+        super::healer_postures::standable_formation_point(ctx, point)
+    })
 }
 
 // ----------------------------------------------------------------------------

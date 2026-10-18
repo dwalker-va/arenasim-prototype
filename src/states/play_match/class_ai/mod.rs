@@ -21,6 +21,7 @@ pub mod chain;
 pub mod combat_snapshot;
 pub mod dps_postures;
 pub mod druid;
+pub mod formation;
 pub(crate) mod healer_postures;
 pub mod hunter;
 pub mod hunter_dip;

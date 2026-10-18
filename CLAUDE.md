@@ -749,6 +749,36 @@ instants (Holy Shock, Power Word: Shield, the Druid's kit) still fire
 (`tests/medic_chase_heal_rule.rs`). The Druid holds its own damage and
 utility for the walk instead — see *Dying teammate first* below.
 
+**The FREE formation point keeps sight (`TeamPlan`)** — `class_ai::formation`
+(AS-206; no RON knob). The medic chase walks only for a teammate below
+`urgency_hp_threshold`, so a formation point in a pillar's shadow from a
+HEALTHY teammate used to park the Priest, Shaman or Druid there blind. Under
+`TeamPlan` the point is moved out of any teammate's shadow it stands in, cast by
+an obstacle near it, widened by `SIGHT_MARGIN` (2.5yd, past the 1.5yd formation
+dead zone): toward the exit — the point moved out until it stands that margin
+beyond the shadow's edge ray — that sees the teammates best (the anchor, the
+most injured, first). It is a constraint with a nearest-feasible repair, not a
+scored term. A point in no widened shadow comes back exactly as the
+unconstrained machine returns it. Distances are measured from the raw point,
+not its standable projection (which jumps between a pillar's faces). An exit up
+to `REPAIR_FULL` (10yd) from the raw point is taken in full, one up to
+`REPAIR_LIMIT` (16yd) part of the way, a farther one not at all. The exit nearest
+the one last chosen (`HealerPosture::formation_repair`, cleared on leaving FREE)
+counts `KEEP_MARGIN` (6yd) nearer, so the point keeps to its exit until another
+is better by that band or its own loses the anchor. Every exit is continuous in
+the raw point across every edge of its region (`EDGE_FADE` fades the move out at
+the shadow's near end and the near-obstacle limit), so the repair starts and
+lets go where the point stands; a change of exit still moves the point the whole
+gap at once (four such steps of 9.8-16.2yd per 100 Warrior+Mage+Priest v
+Rogue+Warlock+Druid matches, three of them over 10yd; AS-370 smooths them).
+The Paladin has no formation point. `Legacy` is untouched (byte-identical), and
+BasicArena with it under both profiles. Pinned by `tests/formation_sight.rs` (a
+staged pillar edge where the `TeamPlan` Druid and Priest each regain sight of
+their Mage within 1s while the `Legacy` pair stays blind; a seed bank over three
+comps bounding the healers' formation goals; leaving FREE drops the kept exit)
+and the tests in `formation.rs`. A new FREE goal (AS-328's standoff) belongs
+behind the same constraint.
+
 **Dispel walk (Paladin, Priest)** — `healer_postures::dispel_chase_override`,
 choosing its ally with `class_ai::dispel_chase_target` (no RON knob). Cleanse and
 Dispel Magic only reach allies within their 30yd range AND in sight, so a
