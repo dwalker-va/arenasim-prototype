@@ -489,6 +489,11 @@ fn the_hold_does_not_keep_a_dispel_walk() {
 /// (behind the Mage, away from the Paladin) falls inside the pillar and is
 /// projected onto its east face — the occluded side of that corner. So the
 /// formation walk takes sight away and the medic chase gives it back.
+///
+/// The Druid's team plays `Legacy`. Under `TeamPlan` its formation point keeps
+/// sight of the Mage (AS-206, `class_ai::formation`), so the walk never takes
+/// sight away and there is nothing to trade; `Legacy`'s point is unconstrained,
+/// and there the hold is still the guard.
 mod staged {
     use super::*;
     use arenasim::headless::{Stage, Unit};
@@ -504,6 +509,7 @@ mod staged {
             team2: vec!["Mage".into(), "Druid".into()],
             map: "PillaredArena".to_string(),
             ai_profile: Some("TeamPlan".to_string()),
+            team2_ai_profile: Some("Legacy".to_string()),
             team1_kill_target: Some(0),
             team2_kill_target: Some(0),
             random_seed: Some(seed),

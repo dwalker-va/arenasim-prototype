@@ -749,6 +749,26 @@ instants (Holy Shock, Power Word: Shield, the Druid's kit) still fire
 (`tests/medic_chase_heal_rule.rs`). The Druid holds its own damage and
 utility for the walk instead — see *Dying teammate first* below.
 
+**The FREE formation point keeps sight (`TeamPlan`)** — `class_ai::formation`
+(AS-206; no RON knob). The medic chase walks only for a teammate below
+`urgency_hp_threshold`, so a formation point in a pillar's shadow from a
+HEALTHY teammate used to park the Priest, Shaman or Druid there blind. Under
+`TeamPlan` the point (after its arena clamp and standable projection) is held
+to sight of every living non-pet teammate when a nearby spot has it, else of
+the most injured one: a constraint with a nearest-feasible repair, not a scored
+term. The candidates are geometry-anchored — the point projected onto the two
+tangent rays bounding the teammate's shadow past the obstacle's footprint disc,
+pushed `SIGHT_MARGIN` (2.5yd, past the 1.5yd formation dead zone) clear — so
+the repaired point slides with the fight instead of hopping. A point already
+in sight comes back bit-identical, and a healer standing blind on a blind
+point is re-sent however short the move (`formation::sight_shift`). The
+Paladin has no formation point. `Legacy` is untouched (byte-identical), and
+BasicArena with it under both profiles. Pinned by `tests/formation_sight.rs`:
+a staged pillar edge where the `TeamPlan` Druid regains sight of its Mage
+within 1s and its `Legacy` pair stays blind, plus an `#[ignore]`d seed-bank
+probe bounding every FREE blind spell. A new FREE goal (AS-328's standoff)
+belongs behind the same constraint.
+
 **Dispel walk (Paladin, Priest)** — `healer_postures::dispel_chase_override`,
 choosing its ally with `class_ai::dispel_chase_target` (no RON knob). Cleanse and
 Dispel Magic only reach allies within their 30yd range AND in sight, so a
