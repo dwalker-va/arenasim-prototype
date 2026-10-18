@@ -841,8 +841,9 @@ struct FallbackThrow {
 /// When cover hides the lane, it lands instead on an enemy's route round that
 /// cover, at the first point of it the Hunter can see
 /// ([`route_lane`](super::hunter_lane::route_lane)), and is decided on the
-/// enemy predicted to spring it there. With no such route, the hidden lane
-/// stands and the placement holds it for sight.
+/// enemy predicted to spring it there. With no such route there is no landing
+/// the placement would throw, so it holds, traced `LosBlocked` as the
+/// placement traces a hidden landing.
 ///
 /// Either way it holds when:
 ///
@@ -894,27 +895,28 @@ fn fallback_trap(
     }
     // Cover hides the lane: land it instead on an enemy's route round that
     // cover, where the Hunter can see it (`hunter_lane`). With no such route
-    // the lane stands, and the placement holds it for sight. Asked of the
-    // landing as the placement measures it — clamped to the arena — so the
-    // two agree; never asked with no obstacles, where every lane is seen.
+    // there is no landing the placement would throw — it asks sight of every
+    // landing — so the trap is held here, traced as the placement would trace
+    // it, and the sting's reservation of the victim agrees with the throw.
+    // Asked of the landing as the placement measures it — clamped to the
+    // arena — so the two agree; never asked with no obstacles, where every
+    // lane is seen.
     let lane_hidden = !crate::states::play_match::map_geometry::has_line_of_sight(
         ctx.obstacles,
         my_pos,
         crate::states::play_match::combat_core::clamp_to_arena(&ctx.bounds, lane),
     );
-    let route = lane_hidden
-        .then(|| super::hunter_lane::route_lane(ctx, abilities, my_team, my_pos))
-        .flatten();
-    let (lane, victim) = match route {
-        Some(route) => route,
-        None => {
-            let Some(victim) =
-                super::hunter_dip::predicted_trap_springer(ctx, my_team, my_pos, lane)
-            else {
-                return held(TRAP_HELD_NO_SPRINGER);
-            };
-            (lane, victim)
-        }
+    let (lane, victim) = if lane_hidden {
+        let Some(route) = super::hunter_lane::route_lane(ctx, abilities, my_team, my_pos) else {
+            return Some(Err(RejectionReason::LosBlocked));
+        };
+        route
+    } else {
+        let Some(victim) = super::hunter_dip::predicted_trap_springer(ctx, my_team, my_pos, lane)
+        else {
+            return held(TRAP_HELD_NO_SPRINGER);
+        };
+        (lane, victim)
     };
     let trap = super::Incoming::of(abilities.get_unchecked(&AbilityType::FreezingTrap));
     if ctx.held_in_hard_cc(victim, trap).is_some() {
