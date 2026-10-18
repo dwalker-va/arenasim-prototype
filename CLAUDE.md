@@ -753,23 +753,26 @@ utility for the walk instead — see *Dying teammate first* below.
 (AS-206; no RON knob). The medic chase walks only for a teammate below
 `urgency_hp_threshold`, so a formation point in a pillar's shadow from a
 HEALTHY teammate used to park the Priest, Shaman or Druid there blind. Under
-`TeamPlan` the point is held to sight of every living non-pet teammate when a
-nearby spot has it, else of the most injured one: a constraint with a
-nearest-feasible repair, not a scored term. A point whose standable projection
-is already in sight comes back exactly as the unconstrained machine returns it.
-The candidates are geometry-anchored — the point projected onto the two tangent
-rays bounding the teammate's shadow past the obstacle's footprint disc, pushed
-`SIGHT_MARGIN` (2.5yd, past the 1.5yd formation dead zone) clear — and measured
-from the raw point, not its standable projection, which jumps between a
-pillar's faces. The choice between a shadow's two sides has hysteresis: the
-side the point was last repaired to (`HealerPosture::formation_side`) is kept
-until the other is nearer by `SIDE_MARGIN` (6yd) or it loses sight. So the
-repaired point slides along one side of a shadow instead of flipping across it.
-The Paladin has no formation point. `Legacy` is untouched (byte-identical), and
-BasicArena with it under both profiles. Pinned by `tests/formation_sight.rs` (a
-staged pillar edge where the `TeamPlan` Druid and Priest each regain sight of
-their Mage within 1s while the `Legacy` pair stays blind; and a seed bank bounding every
-frame-to-frame jump of the Priest's formation goal) and by the side tests in
+`TeamPlan` the point is moved out of any teammate's shadow it stands in, cast by
+an obstacle near it, widened by `SIGHT_MARGIN` (2.5yd, past the 1.5yd formation dead zone): to the
+exit — the point moved straight out until it stands that margin beyond the
+shadow's edge ray — that sees the teammates best (the anchor, the most injured,
+first). It is a constraint with a nearest-feasible repair, not a scored term. A
+point in no widened shadow comes back exactly as the unconstrained machine
+returns it, and a point on the widened edge is its own exit, so the repair
+starts and lets go without a step. Distances are measured from the raw point,
+not its standable projection (which jumps between a pillar's faces). The repair
+is bounded: an exit up to `REPAIR_FULL` (10yd) from the raw point is taken in
+full, one between that and `REPAIR_LIMIT` (16yd) part of the way, a farther one
+not at all. The choice of exit has hysteresis: the exit nearest where the point
+was last repaired to (`HealerPosture::formation_repair`, cleared on leaving FREE
+and on a point in no shadow) is kept until another is better by `KEEP_MARGIN`
+(6yd) or it loses the anchor. The Paladin has no formation point. `Legacy` is untouched
+(byte-identical), and BasicArena with it under both profiles. Pinned by
+`tests/formation_sight.rs` (a staged pillar edge where the `TeamPlan` Druid and
+Priest each regain sight of their Mage within 1s while the `Legacy` pair stays
+blind; a seed bank over a 2v2 and a 3v3 bounding every jump of the healers'
+formation goals; leaving FREE forgets the kept exit) and the tests in
 `formation.rs`. A new FREE goal (AS-328's standoff) belongs behind the same
 constraint.
 

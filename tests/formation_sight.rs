@@ -8,16 +8,21 @@
 //! teammate when it can (of the most injured when it cannot;
 //! `class_ai::formation`).
 //!
-//! Two probes, both in the default run:
+//! In the default run:
 //! - `a_free_healer_regains_sight_of_its_teammate` stages the pillar edge the
 //!   defect was found on (tier 3) for each formation machine — the Druid's (the
 //!   caster-healer machine it shares with the Shaman) and the Priest's — and
 //!   pins the walk out of the shadow to within a second, paired with `Legacy`
 //!   keeping the healer blind;
-//! - `the_priests_repaired_point_never_flips_across_a_shadow` reads the comp
-//!   whose Priest repairs most over a seed bank and bounds every
-//!   frame-to-frame jump of its formation goal: the repaired point slides along
-//!   one side of a shadow, it does not flip across it.
+//! - `the_repaired_point_never_flips_across_a_shadow` reads every formation
+//!   healer over a seed bank — a 2v2 whose Priest's Warrior walks round the camp
+//!   pillar, and a 3v3 whose teammates stand close behind distant pillars — and
+//!   bounds its formation goal's frame-to-frame jumps and returns;
+//! - `kept_exit_reset::leaving_free_forgets_the_kept_exit` holds the kept exit
+//!   to FREE.
+//!
+//! `measure_formation_goal_jumps` (`#[ignore]`d) counts formation-goal jumps
+//! over five comps for comparing two binaries.
 
 use arenasim::headless::HeadlessMatchConfig;
 use arenasim::states::play_match::map_config::load_map_geometry_config;
@@ -195,128 +200,395 @@ fn a_free_healer_regains_sight_of_its_teammate() {
 }
 
 // ---------------------------------------------------------------------------
-// The repaired point keeps its side (seed bank)
+// The repaired point stays near the formation and keeps its side (seed bank)
 // ---------------------------------------------------------------------------
-
-/// A point-goal jump this long between consecutive frames is a flip across a
-/// shadow (Nagrand's are ~20yd wide at formation distance), not a slide.
-const FLIP: f32 = 10.0;
 
 /// The movement triggers whose `Point` goal is the FREE formation point: a
 /// formation re-commit, or the re-anchor on entering FREE. Every other FREE
 /// point walk (the medic chase's `SeekLos`, the dispel walk's) aims elsewhere.
 const FORMATION_TRIGGERS: [&str; 3] = ["FormationShift", "PressuredExit", "EscapeWindowClosed"];
 
-/// Every frame-to-frame jump longer than `FLIP` of the Priest's FORMATION point
-/// goal — frames on which, per the trace, the Priest is FREE and its last
-/// movement decision was a formation one — as (combat seconds, yards). In
-/// Warrior+Priest v Mage+Rogue on Nagrand under `TeamPlan`: the comp whose
-/// Priest repairs its formation point most, as its Warrior walks round the camp
-/// pillar and the camp releases. `swap` puts the Priest's pair on team 2.
-/// Also returns how many formation-goal frames it read.
-fn priest_formation_jumps(seed: u64, swap: bool) -> (Vec<(f32, f32)>, usize) {
-    let (ours, theirs) = (
-        vec!["Warrior".to_string(), "Priest".to_string()],
-        vec!["Mage".to_string(), "Rogue".to_string()],
-    );
-    let (team1, team2, team) = if swap {
-        (theirs, ours, 2)
-    } else {
-        (ours, theirs, 1)
-    };
+const FORMATION_HEALERS: [&str; 3] = ["Priest", "Druid", "Shaman"];
+
+/// What one healer's formation goal did over a match: every frame-to-frame jump
+/// (combat seconds, yards) of its goal on frames the trace shows it FREE on a
+/// formation decision, and how many such frame pairs there were.
+#[derive(Default)]
+struct GoalTrack {
+    jumps: Vec<(f32, f32)>,
+    pairs: usize,
+}
+
+impl GoalTrack {
+    fn over(&self, yards: f32) -> usize {
+        self.jumps.iter().filter(|j| j.1 > yards).count()
+    }
+
+    /// Returns: a frame-to-frame jump over `yards` undone, to within 2yd,
+    /// inside one second of consecutive formation frames — a goal that went
+    /// somewhere and came straight back.
+    fn returns(&self, yards: f32, goals: &[(f32, Vec3)]) -> usize {
+        let consecutive = |a: f32, b: f32| (b - a - FRAME).abs() < FRAME / 2.0;
+        let mut n = 0;
+        for k in 1..goals.len() {
+            let ((s, prev), (t, p)) = (goals[k - 1], goals[k]);
+            if !consecutive(s, t) || flat(prev, p) <= yards {
+                continue;
+            }
+            let mut last = t;
+            for &(u, q) in &goals[k + 1..] {
+                if !consecutive(last, u) || u - t > 1.0 {
+                    break;
+                }
+                if flat(q, prev) <= 2.0 {
+                    n += 1;
+                    if std::env::var("FORMATION_JUMPS_LIST").is_ok() {
+                        println!("    return: {prev} -> {p} at {t:.2}s, back at {u:.2}s");
+                    }
+                    break;
+                }
+                last = u;
+            }
+        }
+        n
+    }
+}
+
+fn flat(a: Vec3, b: Vec3) -> f32 {
+    ((a.x - b.x).powi(2) + (a.z - b.z).powi(2)).sqrt()
+}
+
+/// One match, both teams `TeamPlan`, on Nagrand for `secs`: per formation healer
+/// (by entity index) its formation-goal track, and the consecutive formation
+/// goals it read.
+fn formation_tracks(
+    team1: &[&str],
+    team2: &[&str],
+    seed: u64,
+    secs: f32,
+) -> Vec<(String, GoalTrack, Vec<(f32, Vec3)>)> {
     let played = common::staged::play_seeded(HeadlessMatchConfig {
-        team1,
-        team2,
+        team1: team1.iter().map(|s| s.to_string()).collect(),
+        team2: team2.iter().map(|s| s.to_string()).collect(),
         map: "PillaredArena".to_string(),
         ai_profile: Some("TeamPlan".to_string()),
         random_seed: Some(seed),
-        max_duration_secs: 25.0,
+        max_duration_secs: secs,
         ..Default::default()
     });
-    let (priest, _) = played.frames[0]
-        .combatants
-        .iter()
-        .find(|(_, c)| c.team == team && !c.is_pet && c.class == arenasim::CharacterClass::Priest)
-        .expect("the Priest");
-    // The Priest's movement decisions as (trace frame, posture, trigger). The
-    // trace's frame counter is the observer's frame index.
-    let decisions: Vec<(usize, String, String)> = played
-        .trace
-        .iter()
-        .filter(|e| {
-            e["kind"] == "movement_decision"
-                && e["actor"]["entity_id"].as_u64() == Some(u64::from(priest.index()))
-        })
-        .map(|e| {
-            (
-                e["frame"].as_u64().unwrap() as usize,
-                e["posture"].as_str().unwrap_or_default().to_string(),
-                e["trigger"].as_str().unwrap_or_default().to_string(),
-            )
-        })
-        .collect();
-    let formation =
-        |d: &(usize, String, String)| d.1 == "free" && FORMATION_TRIGGERS.contains(&d.2.as_str());
-    let formation_at = |frame: usize| {
-        // Every decision in force from a frame before `frame` to a frame after
-        // it is a formation one (the two clocks may sit a frame apart). A
-        // formation re-commit ON the frame counts: a jump past the shift
-        // threshold is exactly what emits one.
-        let first = decisions.partition_point(|d| d.0 + 1 <= frame);
-        let last = decisions.partition_point(|d| d.0 <= frame + 1);
-        first > 0 && decisions[first - 1..last].iter().all(formation)
-    };
     let gates = played
         .frames
         .iter()
         .position(|f| f.gates_open)
         .expect("the gates open");
-    let goal = |i: usize| {
-        played.frames[i]
-            .combatants
-            .get(priest)
-            .filter(|c| c.alive)
-            .and_then(|c| c.point_goal)
-            .filter(|_| formation_at(i))
-    };
-    let mut frames = 0;
-    let mut jumps = Vec::new();
-    for i in gates + 1..played.frames.len() {
-        let (Some(a), Some(b)) = (goal(i - 1), goal(i)) else {
-            continue;
-        };
-        frames += 1;
-        let d = ((a.x - b.x).powi(2) + (a.z - b.z).powi(2)).sqrt();
-        if d > FLIP {
-            jumps.push(((i - gates) as f32 * FRAME, d));
-        }
-    }
-    (jumps, frames)
+    let healers: Vec<_> = played.frames[0]
+        .combatants
+        .iter()
+        .filter(|(_, c)| {
+            !c.is_pet && FORMATION_HEALERS.contains(&format!("{:?}", c.class).as_str())
+        })
+        .map(|(e, c)| (*e, format!("{:?}", c.class)))
+        .collect();
+    healers
+        .into_iter()
+        .map(|(healer, class)| {
+            // The healer's movement decisions as (trace frame, posture,
+            // trigger). The trace's frame counter is the observer's index.
+            let decisions: Vec<(usize, bool)> = played
+                .trace
+                .iter()
+                .filter(|e| {
+                    e["kind"] == "movement_decision"
+                        && e["actor"]["entity_id"].as_u64() == Some(u64::from(healer.index()))
+                })
+                .map(|e| {
+                    let formation = e["posture"] == "free"
+                        && FORMATION_TRIGGERS.contains(&e["trigger"].as_str().unwrap_or_default());
+                    (e["frame"].as_u64().unwrap() as usize, formation)
+                })
+                .collect();
+            // Every decision in force from a frame before to a frame after is
+            // a formation one (the two clocks may sit a frame apart); a
+            // re-commit ON the frame counts, since a jump past the shift
+            // threshold is exactly what emits one.
+            let formation_at = |frame: usize| {
+                let first = decisions.partition_point(|d| d.0 + 1 <= frame);
+                let last = decisions.partition_point(|d| d.0 <= frame + 1);
+                first > 0 && decisions[first - 1..last].iter().all(|d| d.1)
+            };
+            let goal = |i: usize| {
+                played.frames[i]
+                    .combatants
+                    .get(&healer)
+                    .filter(|c| c.alive)
+                    .and_then(|c| c.point_goal)
+                    .filter(|_| formation_at(i))
+            };
+            let mut track = GoalTrack::default();
+            let mut goals = Vec::new();
+            for i in gates + 1..played.frames.len() {
+                let t = (i - gates) as f32 * FRAME;
+                let (Some(a), Some(b)) = (goal(i - 1), goal(i)) else {
+                    continue;
+                };
+                // Runs of consecutive formation frames; a gap (the goal was
+                // something else meanwhile) starts a new run.
+                if goals
+                    .last()
+                    .is_none_or(|&(u, _)| t - FRAME - u > FRAME / 2.0)
+                {
+                    goals.push((t - FRAME, a));
+                }
+                goals.push((t, b));
+                track.pairs += 1;
+                let d = flat(a, b);
+                if d > 0.0 {
+                    track.jumps.push((t, d));
+                }
+            }
+            (class, track, goals)
+        })
+        .collect()
 }
 
-/// The Priest's repaired formation point never flips across a shadow: over
-/// seeds 0-9 in both team orders, no frame-to-frame jump of its formation goal
-/// longer than `FLIP` in the first 25s, which hold the walk out of the room and
-/// the camp release (~16.7s). With the side's hysteresis removed, or with the
-/// repair measuring from the standable projection rather than the raw point,
-/// every one of these matches flips at the camp release.
+/// The comps whose healers repair their formation point most on Nagrand: a
+/// Priest's Warrior walking round the camp pillar (2v2), and a 3v3 whose
+/// Priest's teammates stand close behind pillars far from it, the case that
+/// once sent the point ~70yd.
+const FLIP_BANK: [(&[&str], &[&str]); 2] = [
+    (&["Warrior", "Priest"], &["Mage", "Rogue"]),
+    (
+        &["Warrior", "Mage", "Priest"],
+        &["Rogue", "Warlock", "Druid"],
+    ),
+];
+
+/// The repaired formation point never flips across a shadow: over the bank's
+/// comps, seeds 0-9, both team orders and the first 30s (the walk out of the
+/// room, the camp release and first contact), no frame-to-frame jump of any
+/// formation healer's goal over 25yd — the repair stays within `REPAIR_LIMIT`
+/// (16yd) of the formation — and no jump over 10yd that is undone inside a
+/// second.
 #[test]
-fn the_priests_repaired_point_never_flips_across_a_shadow() {
-    let mut all = Vec::new();
-    let mut frames = 0;
-    for seed in 0..10 {
-        for swap in [false, true] {
-            let (jumps, n) = priest_formation_jumps(seed, swap);
-            frames += n;
-            for (t, d) in jumps {
-                all.push(format!("seed {seed} swap {swap}: {d:.1}yd at {t:.2}s"));
+fn the_repaired_point_never_flips_across_a_shadow() {
+    let mut big = Vec::new();
+    let mut returns = Vec::new();
+    let mut pairs = 0;
+    for (a, b) in FLIP_BANK {
+        for seed in 0..10 {
+            for (t1, t2) in [(a, b), (b, a)] {
+                for (class, track, goals) in formation_tracks(t1, t2, seed, 30.0) {
+                    pairs += track.pairs;
+                    let label = format!("{t1:?} v {t2:?} seed {seed} {class}");
+                    for &(t, d) in track.jumps.iter().filter(|j| j.1 > 25.0) {
+                        big.push(format!("{label}: {d:.1}yd at {t:.2}s"));
+                    }
+                    let r = track.returns(10.0, &goals);
+                    if r > 0 {
+                        returns.push(format!("{label}: {r} returns"));
+                    }
+                }
             }
         }
     }
-    println!("{frames} formation-goal frame pairs; jumps over {FLIP}yd: {all:#?}");
+    println!("{pairs} formation-goal frame pairs");
     assert!(
-        frames > 1_000,
-        "the bank no longer walks the Priest to its formation point ({frames} frames)"
+        pairs > 5_000,
+        "the bank no longer walks its healers to their formation points ({pairs} frames)"
     );
-    assert!(all.is_empty(), "{all:#?}");
+    assert!(big.is_empty(), "formation goal jumps over 25yd: {big:#?}");
+    assert!(returns.is_empty(), "formation goal returns: {returns:#?}");
+}
+
+/// Measurement, not a gate: per comp, the formation goals' jumps over 5yd and
+/// 10yd and their returns. Run on two binaries to compare; set
+/// `FORMATION_JUMPS_LIST` to print every jump over 10yd.
+#[test]
+#[ignore = "measurement: run with --release -- --ignored --nocapture"]
+fn measure_formation_goal_jumps() {
+    let comps: [(&[&str], &[&str]); 5] = [
+        (&["Warrior", "Priest"], &["Mage", "Rogue"]),
+        (
+            &["Warrior", "Mage", "Priest"],
+            &["Rogue", "Warlock", "Druid"],
+        ),
+        (&["Mage", "Druid"], &["Hunter", "Paladin"]),
+        (&["Warlock", "Priest"], &["Rogue", "Druid"]),
+        (&["Hunter", "Shaman"], &["Warrior", "Paladin"]),
+    ];
+    for (a, b) in comps {
+        let (mut over5, mut over10, mut over25, mut ret, mut pairs) = (0, 0, 0, 0, 0);
+        for seed in 0..10 {
+            for (t1, t2) in [(a, b), (b, a)] {
+                for (class, track, goals) in formation_tracks(t1, t2, seed, 120.0) {
+                    if std::env::var("FORMATION_JUMPS_LIST").is_ok() {
+                        for &(t, d) in track.jumps.iter().filter(|j| j.1 > 10.0) {
+                            println!("  {t1:?} v {t2:?} s{seed} {class}: {d:.1}yd at {t:.2}s");
+                        }
+                    }
+                    pairs += track.pairs;
+                    over5 += track.over(5.0);
+                    over10 += track.over(10.0);
+                    over25 += track.over(25.0);
+                    ret += track.returns(5.0, &goals);
+                }
+            }
+        }
+        println!(
+            "{a:?} v {b:?}: pairs {pairs}, over5 {over5}, over10 {over10}, over25 {over25}, returns {ret}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The kept exit does not outlive FREE
+// ---------------------------------------------------------------------------
+
+mod kept_exit_reset {
+    use std::collections::BTreeMap;
+
+    use arenasim::states::match_config::CharacterClass;
+    use arenasim::states::play_match::ai_profile::AiProfile;
+    use arenasim::states::play_match::class_ai::caster_healer_posture::evaluate_caster_healer_posture;
+    use arenasim::states::play_match::class_ai::priest::evaluate_priest_posture;
+    use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo};
+    use arenasim::states::play_match::decision_trace::DecisionTrace;
+    use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
+    use arenasim::states::play_match::{
+        AbilityDefinitions, AbilityType, Combatant, DRTracker, HealerPosture, MovementConfig,
+        Posture,
+    };
+    use bevy::ecs::world::CommandQueue;
+    use bevy::prelude::*;
+
+    static NO_DR: BTreeMap<Entity, DRTracker> = BTreeMap::new();
+    static NO_CD: BTreeMap<Entity, BTreeMap<AbilityType, f32>> = BTreeMap::new();
+
+    fn info(entity: Entity, team: u8, class: CharacterClass, x: f32, z: f32) -> CombatantInfo {
+        CombatantInfo {
+            entity,
+            team,
+            slot: 0,
+            class,
+            current_health: 100.0,
+            max_health: 100.0,
+            current_mana: 100.0,
+            max_mana: 100.0,
+            position: Vec3::new(x, 1.0, z),
+            velocity: Vec3::ZERO,
+            is_alive: true,
+            stealthed: false,
+            target: None,
+            is_pet: false,
+            casting_ability: None,
+            pet_type: None,
+            pet: None,
+        }
+    }
+
+    /// One posture tick for a FREE `class` healer carrying a kept exit,
+    /// with an enemy Warrior on it (`pressed`) or nowhere near. Returns the
+    /// posture state after the tick.
+    fn tick(class: CharacterClass, pressed: bool) -> HealerPosture {
+        let mut world = World::new();
+        let healer = world.spawn_empty().id();
+        let mage = world.spawn_empty().id();
+        let warrior = world.spawn_empty().id();
+        let enemy_at = if pressed { (2.0, 0.0) } else { (0.0, 60.0) };
+        let mut enemy = info(warrior, 2, CharacterClass::Warrior, enemy_at.0, enemy_at.1);
+        enemy.target = Some(healer);
+        let mut ally = info(mage, 1, CharacterClass::Mage, 10.0, 0.0);
+        ally.target = Some(warrior);
+        let roster: BTreeMap<Entity, CombatantInfo> =
+            [info(healer, 1, class, 0.0, 0.0), ally, enemy]
+                .into_iter()
+                .map(|u| (u.entity, u))
+                .collect();
+        let auras = BTreeMap::new();
+        let ctx = CombatContext::new(
+            healer,
+            1,
+            &roster,
+            &auras,
+            &NO_DR,
+            &NO_CD,
+            &[],
+            Default::default(),
+            AiProfile::TeamPlan,
+        )
+        .classified(&SituationConfig::default(), MatchClock::after_gates(5.0));
+        let mut state = HealerPosture::new(0.0);
+        state.formation_repair = Some(Vec2::new(10.0, 5.0));
+        let combatant = Combatant::new(1, 0, class);
+        let movement = MovementConfig::default();
+        let abilities = AbilityDefinitions::default();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut trace = DecisionTrace::default();
+        let pos = Vec3::new(0.0, 1.0, 0.0);
+        match class {
+            CharacterClass::Priest => {
+                evaluate_priest_posture(
+                    &mut commands,
+                    healer,
+                    &combatant,
+                    pos,
+                    &ctx,
+                    &abilities,
+                    None,
+                    Some(&mut state),
+                    None,
+                    &movement,
+                    5.0,
+                    &mut trace,
+                );
+            }
+            _ => {
+                evaluate_caster_healer_posture(
+                    &mut commands,
+                    healer,
+                    &combatant,
+                    pos,
+                    &ctx,
+                    Some(&mut state),
+                    None,
+                    &movement,
+                    &movement.druid,
+                    false,
+                    5.0,
+                    &mut trace,
+                );
+            }
+        }
+        state
+    }
+
+    /// A healer pressed out of FREE drops its kept exit, as it drops its
+    /// last formation point; the control, left FREE, keeps it (nothing in an
+    /// obstacle-free tick touches it).
+    #[test]
+    fn leaving_free_forgets_the_kept_exit() {
+        for class in [CharacterClass::Priest, CharacterClass::Druid] {
+            let pressed = tick(class, true);
+            assert_ne!(
+                pressed.posture,
+                Posture::Free,
+                "{class:?}: the scene presses it"
+            );
+            assert_eq!(
+                pressed.formation_repair, None,
+                "{class:?}: side carried out of FREE"
+            );
+            let free = tick(class, false);
+            assert_eq!(
+                free.posture,
+                Posture::Free,
+                "{class:?}: the control stays FREE"
+            );
+            assert!(
+                free.formation_repair.is_some(),
+                "{class:?}: the control keeps it"
+            );
+        }
+    }
 }

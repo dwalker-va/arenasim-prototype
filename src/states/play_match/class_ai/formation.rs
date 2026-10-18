@@ -14,25 +14,40 @@
 //! teammate when some point near it does; when none does, of the most injured
 //! one (the anchor). It is a CONSTRAINT with a nearest-feasible repair — the
 //! same shape as `nearest_standable` — not a scored term: the formation point is
-//! one goal, not a choice among scored steps, and the repair moves it only as
-//! far as sight needs, so everywhere sight already holds (every point on an
-//! obstacle-free map) it comes back bit-identical.
+//! one goal, not a choice among scored steps. A point in no teammate's shadow
+//! (every point on an obstacle-free map) comes back bit-identical.
 //!
 //! **Where the repair looks.** Not a lattice round the point: a lattice moves
 //! with its centre, so the winner hops between cells as the fight drifts
 //! (`team_solve::candidates_for` explains the pathology). The candidates are
-//! anchored to the geometry that hides the teammate: for each obstacle between
-//! the point and a teammate it cannot see, the obstacle's shadow from that
-//! teammate is bounded by the two tangent rays from the teammate past the
-//! obstacle's footprint disc, and the nearest point outside the shadow lies on
-//! one of them. Each candidate is that projection pushed `margin` clear of the
-//! ray, so it slides continuously as the teammate and the point move. The
-//! choice BETWEEN the two sides has hysteresis: the side the point was last
-//! repaired to is kept until the other is nearer by [`SIDE_MARGIN`] or it loses
-//! sight, and distances are measured from the raw point rather than its
-//! standable projection (which jumps between a pillar's faces), so the point
-//! slides along one side of the shadow instead of flipping across it as it
-//! drifts over the centre line.
+//! anchored to the geometry that hides the teammate: an obstacle's shadow from a
+//! teammate is the wedge between the two tangent rays from the teammate past the
+//! obstacle's footprint disc, and a point in that wedge — widened by
+//! [`SIGHT_MARGIN`] — has one exit per side, the point moved straight out until
+//! it stands the margin beyond that side's ray ([`shadow_exits`]).
+//!
+//! **Why it does not jump.** Every source of a step was found in a match and
+//! removed:
+//! - a point on the widened edge is its own exit, so the repair starts and lets
+//!   go where the point stands;
+//! - the choice of exit has hysteresis: the exit nearest where the point was
+//!   last repaired to is kept until another is better by [`KEEP_MARGIN`] or it
+//!   loses the anchor, so a point drifting over a shadow's centre line keeps
+//!   its side, and one in two teammates' shadows behind the same pillar keeps
+//!   to one of them;
+//! - only a shadow cast by an obstacle near the point counts: a teammate close
+//!   behind a distant pillar casts one whose edges sweep across the point far
+//!   faster than the teammate moves;
+//! - distances are measured from the raw point, not its standable projection,
+//!   which jumps between a pillar's faces;
+//! - the repair is bounded and fades: an exit is taken in full to
+//!   [`REPAIR_FULL`] from the raw point, part of the way to [`REPAIR_LIMIT`],
+//!   and not at all beyond — the far exits of a teammate close behind a distant
+//!   pillar swing too fast for any band, and sent the point across the arena.
+//!
+//! The remaining steps are a change of exit when the kept one loses sight of
+//! the anchor, and the raw point's own jumps, which the unconstrained machine
+//! makes too.
 //!
 //! **Profile.** `TeamPlan` only (the AI-profile rule: every new AI behaviour
 //! lands gated). The callers ask [`sight_constrained`]; `Legacy` keeps the
@@ -45,8 +60,6 @@ use crate::states::play_match::map_geometry::{
     has_line_of_sight, nearest_standable, ObstacleVolume, EYE_HEIGHT,
 };
 
-use crate::states::play_match::components::FormationSide;
-
 use super::{CombatContext, CombatantInfo};
 
 /// How far past the edge of a teammate's shadow the repaired point stands.
@@ -58,16 +71,63 @@ use super::{CombatContext, CombatantInfo};
 /// Nagrand prism — which is itself already outside the true silhouette.
 pub const SIGHT_MARGIN: f32 = 2.5;
 
-/// How much nearer the other side of a teammate's shadow must be before the
-/// repaired formation point switches to it ([`sighted_formation_point`]).
+/// How much better (nearer, in [`sighted_formation_point`]'s ranking) another
+/// exit must be before the repaired formation point leaves the one it was
+/// last repaired to.
 ///
-/// The hysteresis band: the point crosses the shadow's centre line by about
-/// half this before it changes side. Nagrand's shadows are up to ~20yd wide at
-/// formation distance, so a crossing is a ~20yd jump; 6yd of band is three
-/// commit-window walks at base speed, wide enough that the fight's drift does
-/// not carry the point back and forth, narrow enough that a point well past
-/// the centre line takes the shorter way out.
-pub const SIDE_MARGIN: f32 = 6.0;
+/// The hysteresis band. Two exits of one shadow sit either side of its centre
+/// line, so a point near the line has two about equally near, and the exits of
+/// two teammates' shadows behind one pillar lie apart in the same way; switching
+/// between them is a jump of the gap. With the band the point crosses about half
+/// of it before it switches. 6yd is three commit-window walks at base speed,
+/// wide enough that the fight's drift does not carry the point back and forth,
+/// narrow enough that a point well past the line takes the shorter way out.
+pub const KEEP_MARGIN: f32 = 6.0;
+
+/// The kept exit is the candidate within this distance of where the point was
+/// last repaired to: an exit moves with the point and the teammate, a few
+/// tenths of a yard a frame near the pillar.
+pub const KEEP_RADIUS: f32 = 3.0;
+
+/// How much nearer, in yards, a candidate counts for each teammate it sees
+/// beyond the first (the anchor first: a candidate that sees the anchor always
+/// beats one that does not).
+///
+/// Sight of a second teammate is worth having, but not at any distance: as an
+/// outright priority it overrode the band, and a 3v3 healer flipped ~15yd
+/// across a shadow the moment the far exit saw two teammates. At 3yd — half the
+/// band — one more teammate in sight takes the point to a new exit only when
+/// that exit is decidedly the nearer.
+pub const TEAMMATE_YARDS: f32 = 3.0;
+
+/// Up to this distance from the raw formation point, an exit is taken in full.
+///
+/// The defect the repair exists for is a point a few yards inside a shadow cast
+/// across a nearby pillar, whose nearest exit is about the shadow's half-width
+/// plus `SIGHT_MARGIN` away — 7-9yd on Nagrand's pillars at the distances
+/// healers stand, a little more from a raw point deep inside a footprint.
+pub const REPAIR_FULL: f32 = 10.0;
+
+/// Beyond this distance from the raw formation point, an exit is not taken at
+/// all; between [`REPAIR_FULL`] and here the point is moved only part of the
+/// way, in proportion. So the repair never sends the point far from where the
+/// healer would otherwise stand, and fades out rather than snapping as an exit
+/// recedes.
+///
+/// Exits much farther than a near pillar's belong to a teammate standing close
+/// behind a pillar far from the healer, whose shadow is wide where the healer
+/// is: following them sent the point tens of yards across the arena, and their
+/// exits swing fast as the teammate moves — fast enough to outrun the band (a
+/// shadow's edges are rays from the teammate, so an exit's speed grows with its
+/// distance). Within this limit they cannot.
+pub const REPAIR_LIMIT: f32 = 16.0;
+
+/// How much of the way to an exit `dist` yards from the raw point the repair
+/// moves the point: all of it to [`REPAIR_FULL`], none of it from
+/// [`REPAIR_LIMIT`], linear between.
+pub fn repair_weight(dist: f32) -> f32 {
+    ((REPAIR_LIMIT - dist) / (REPAIR_LIMIT - REPAIR_FULL)).clamp(0.0, 1.0)
+}
 
 /// Whether the formation point is held to sight of the teammates under this
 /// unit's AI profile: `TeamPlan` only.
@@ -128,16 +188,33 @@ pub fn sight_of_teammates(ctx: &CombatContext, healer: Entity, spot: Vec2) -> Si
     sight_from(ctx.obstacles, spot, &teammates(ctx, healer))
 }
 
-/// The two points just outside `obstacle`'s shadow from `viewer` nearest to
-/// `spot`, each with the side (`1` or `-1`) of the tangent ray it lies on:
-/// `spot` projected onto each tangent ray from `viewer` past the obstacle's
-/// footprint disc (never short of the tangent point), then pushed `margin`
-/// outward, away from the shadow. Empty when the viewer stands at the disc's
-/// centre (no bearing to take a shadow along).
+/// The exits from `obstacle`'s shadow from `viewer` for a point `raw` standing
+/// in it, each with the side (`1` or `-1`) of the tangent ray it lies beyond.
+///
+/// The shadow is the wedge between the two tangent rays from `viewer` past the
+/// obstacle's footprint disc, beyond the tangent points, widened by `margin`
+/// on each side. A point in that widened wedge has one exit per side: the point
+/// itself moved straight out until it stands `margin` beyond that side's ray.
+/// Empty when `raw` is not in the widened wedge, or the viewer stands at the
+/// disc's centre (no bearing to take a shadow along).
+///
+/// Empty, too, when `raw` stands farther from the obstacle than the viewer
+/// does and beyond [`REPAIR_FULL`] of its footprint: a teammate close behind a
+/// distant pillar. Its shadow's edges are rays from the teammate, so where the
+/// point stands they sweep at the teammate's speed times the ratio of the two
+/// distances — 1.5yd a frame when the teammate stepped round a pillar 60yd away
+/// — and an exit that fast cannot be followed. Near the pillar, or nearer it
+/// than the teammate, the ratio is small and the edge moves about as fast as
+/// the teammate does.
+///
+/// **The exit is continuous in `raw` across the wedge's widened edge:** a point
+/// exactly `margin` beyond a ray is its own exit on that side, so as the point
+/// drifts into the shadow the repair starts from where it is, and as it drifts
+/// out the repair lets go where it is — no step at either end.
 pub fn shadow_exits(
     viewer: Vec2,
     obstacle: &ObstacleVolume,
-    spot: Vec2,
+    raw: Vec2,
     margin: f32,
 ) -> Vec<(i8, Vec2)> {
     let (center, radius) = obstacle.footprint_disc();
@@ -150,17 +227,29 @@ pub fn shadow_exits(
     // A viewer flush against a prism's face stands inside its circumradius: its
     // shadow is all but a half-plane, so cap the half-angle just short of 90°.
     let half = (radius / dist).min(0.98).asin();
-    let tangent_len = dist * half.cos();
-    [1_i8, -1]
+    // Only a shadow the point stands near the obstacle in: no farther from it
+    // than the teammate is, or within `REPAIR_FULL` of its footprint.
+    if raw.distance(center) > dist.max(radius + REPAIR_FULL) {
+        return Vec::new();
+    }
+    let rel = raw - viewer;
+    // Beyond the tangent points, measured along the centre line.
+    if rel.dot(along) < dist * half.cos() * half.cos() {
+        return Vec::new();
+    }
+    let sides = [1_i8, -1].map(|side| {
+        let sign = f32::from(side);
+        let ray = Vec2::from_angle(sign * half).rotate(along);
+        // Outward: a further quarter turn away from the centre line.
+        let outward = Vec2::from_angle(sign * std::f32::consts::FRAC_PI_2).rotate(ray);
+        (side, outward, rel.dot(outward))
+    });
+    if sides.iter().any(|&(_, _, out)| out >= margin) {
+        return Vec::new();
+    }
+    sides
         .into_iter()
-        .map(|side| {
-            let sign = f32::from(side);
-            let ray = Vec2::from_angle(sign * half).rotate(along);
-            let t = (spot - viewer).dot(ray).max(tangent_len);
-            // Outward: rotate the ray a further quarter turn away from the centre line.
-            let outward = Vec2::from_angle(sign * std::f32::consts::FRAC_PI_2).rotate(ray);
-            (side, viewer + ray * t + outward * margin)
-        })
+        .map(|(side, outward, out)| (side, raw + outward * (margin - out)))
         .collect()
 }
 
@@ -168,32 +257,35 @@ pub fn shadow_exits(
 ///
 /// `raw` is the formation point as its machine computed it, clamped into the
 /// arena but NOT yet projected onto standable ground; the healer would stand at
-/// its projection (`healer_postures::standable_formation_point`). When that
-/// projection sees every living non-pet teammate it is returned unchanged —
-/// exactly what the unconstrained machine returns (always, on an obstacle-free
-/// map) — and `side` is cleared. Otherwise the point moves to the
-/// [`shadow_exits`] candidate that sees strictly better ([`Sight`]: the anchor
-/// first, then more teammates), clamped and projected the same way, and `side`
-/// records which one; with no better candidate, the projection stands and
-/// `side` is cleared.
+/// its projection (`healer_postures::standable_formation_point`). When `raw`
+/// stands in no teammate's widened shadow near its obstacle ([`shadow_exits`])
+/// — always, on an obstacle-free map — that projection is returned unchanged,
+/// exactly what the unconstrained machine returns, and `kept` is cleared.
+/// Otherwise the point moves toward the best exit that sees the teammates no
+/// worse than the projection does, by [`repair_weight`] of the way, and `kept`
+/// records that exit; with no such exit within [`REPAIR_LIMIT`] of `raw`, the
+/// projection stands and `kept` is cleared. A point moved only part of the way
+/// may not see: past [`REPAIR_FULL`] the repair trades sight for staying near
+/// the formation.
 ///
 /// Distances are measured from `raw`, not from its projection. A raw point
 /// inside a pillar's footprint moves continuously, but its projection jumps
 /// from face to face as it crosses the footprint's medial line, and measuring
-/// from the projection carried those jumps into the choice of side.
+/// from the projection carried those jumps into the repair.
 ///
-/// Among candidates that see equally well the nearest wins — except that the
-/// side the point was last repaired to (`side`, carried on the healer's
-/// posture state) counts [`SIDE_MARGIN`] nearer than it is. Near a shadow's
-/// centre line its two exits are about equally near, and without that margin a
-/// tenth of a yard's drift flips the point across the whole shadow; with it the
-/// point keeps its side until the other is nearer by the margin, or this side
-/// loses sight.
+/// "Best": an exit that sees the anchor beats one that does not; among the
+/// rest the nearest wins, each teammate seen beyond the first counting
+/// [`TEAMMATE_YARDS`] nearer, and the exit nearest where the point was last
+/// repaired to (`kept`, carried on the healer's posture state; within
+/// [`KEEP_RADIUS`] of it) counting [`KEEP_MARGIN`] nearer. So the point keeps to
+/// its exit — over a shadow's centre line, or past another teammate's exit
+/// behind the same pillar — until another is better by the band, or its own
+/// loses the anchor.
 pub fn sighted_formation_point(
     ctx: &CombatContext,
     healer: Entity,
     raw: Vec3,
-    side: &mut Option<FormationSide>,
+    kept: &mut Option<Vec2>,
 ) -> Vec3 {
     let point = super::healer_postures::standable_formation_point(ctx, raw);
     if ctx.obstacles.is_empty() {
@@ -202,47 +294,74 @@ pub fn sighted_formation_point(
     let allies = teammates(ctx, healer);
     let origin = xz(point);
     let from = xz(raw);
-    let origin_sight = sight_from(ctx.obstacles, origin, &allies);
-    let mut best: Option<(Sight, f32, Vec2, FormationSide)> = None;
-    if origin_sight.seen < allies.len() {
-        for ally in &allies {
-            let ally_xz = xz(ally.position);
-            if has_line_of_sight(ctx.obstacles, eye(origin), eye(ally_xz)) {
-                continue;
-            }
-            for (index, obstacle) in ctx.obstacles.iter().enumerate() {
-                if has_line_of_sight(std::slice::from_ref(obstacle), eye(origin), eye(ally_xz)) {
+    let mut origin_sight: Option<Sight> = None;
+    // (spot, distance from raw, sight) of every exit that repairs the point.
+    let mut candidates: Vec<(Vec2, f32, Sight)> = Vec::new();
+    for ally in &allies {
+        let ally_xz = xz(ally.position);
+        for obstacle in ctx.obstacles {
+            for (_, exit) in shadow_exits(ally_xz, obstacle, from, SIGHT_MARGIN) {
+                let clamped = clamp_to_arena(&ctx.bounds, Vec3::new(exit.x, point.y, exit.y));
+                let Some(spot) = nearest_standable(ctx.obstacles, xz(clamped), point.y) else {
+                    continue;
+                };
+                let dist = spot.distance(from);
+                if dist >= REPAIR_LIMIT {
                     continue;
                 }
-                for (sign, exit) in shadow_exits(ally_xz, obstacle, from, SIGHT_MARGIN) {
-                    let clamped = clamp_to_arena(&ctx.bounds, Vec3::new(exit.x, point.y, exit.y));
-                    let Some(spot) = nearest_standable(ctx.obstacles, xz(clamped), point.y) else {
-                        continue;
-                    };
-                    let sight = sight_from(ctx.obstacles, spot, &allies);
-                    // Only a candidate that sees strictly better than the
-                    // point itself can displace it.
-                    if sight <= origin_sight {
-                        continue;
-                    }
-                    let key = FormationSide {
-                        ally: ally.entity,
-                        obstacle: index,
-                        side: sign,
-                    };
-                    let kept = if *side == Some(key) { SIDE_MARGIN } else { 0.0 };
-                    let dist = spot.distance(from) - kept;
-                    let better =
-                        best.is_none_or(|(s, d, ..)| sight > s || (sight == s && dist < d));
-                    if better {
-                        best = Some((sight, dist, spot, key));
-                    }
+                let sight = sight_from(ctx.obstacles, spot, &allies);
+                // An exit that sees worse than the point itself is no repair.
+                let at_origin =
+                    *origin_sight.get_or_insert_with(|| sight_from(ctx.obstacles, origin, &allies));
+                if sight >= at_origin {
+                    candidates.push((spot, dist, sight));
                 }
             }
         }
     }
-    *side = best.map(|(.., key)| key);
-    best.map_or(point, |(_, _, spot, _)| Vec3::new(spot.x, point.y, spot.y))
+    // The kept exit: the candidate nearest where the point was last repaired
+    // to, if within `KEEP_RADIUS` of it.
+    let kept_index = kept.and_then(|last| {
+        candidates
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (i, c.0.distance(last)))
+            .filter(|&(_, d)| d <= KEEP_RADIUS)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i)
+    });
+    let ranked = |i: usize| {
+        let (_, dist, sight) = candidates[i];
+        let band = if kept_index == Some(i) {
+            KEEP_MARGIN
+        } else {
+            0.0
+        };
+        // Each teammate seen beyond the first counts as `TEAMMATE_YARDS`
+        // nearer: seeing one more teammate is a trade against distance, not an
+        // override of the band.
+        dist - band - TEAMMATE_YARDS * sight.seen.saturating_sub(1) as f32
+    };
+    let best = (0..candidates.len()).min_by(|&a, &b| {
+        // The anchor first (`true` sorts before `false` here), then the rank.
+        candidates[b]
+            .2
+            .anchor
+            .cmp(&candidates[a].2.anchor)
+            .then(ranked(a).total_cmp(&ranked(b)))
+    });
+    *kept = best.map(|i| candidates[i].0);
+    let Some(i) = best else {
+        return point;
+    };
+    let (spot, dist, _) = candidates[i];
+    let w = repair_weight(dist);
+    if w >= 1.0 {
+        return Vec3::new(spot.x, point.y, spot.y);
+    }
+    let partial = origin + (spot - origin) * w;
+    let partial = nearest_standable(ctx.obstacles, partial, point.y).unwrap_or(partial);
+    Vec3::new(partial.x, point.y, partial.y)
 }
 
 #[cfg(test)]
@@ -267,7 +386,16 @@ mod tests {
     }
 
     fn fixture(teammates: &[(f32, f32, f32)]) -> Fixture {
+        fixture_after(0, teammates)
+    }
+
+    /// [`fixture`], with `spare` entities spawned first, so its units are
+    /// different entities from another fixture's in the same places.
+    fn fixture_after(spare: usize, teammates: &[(f32, f32, f32)]) -> Fixture {
         let mut world = World::new();
+        for _ in 0..spare {
+            world.spawn_empty();
+        }
         let healer = world.spawn_empty().id();
         let mut units = vec![unit(healer, 1, Druid, Vec3::new(-10.0, 1.0, 0.0), 1.0)];
         for (i, &(x, z, hp)) in teammates.iter().enumerate() {
@@ -301,24 +429,24 @@ mod tests {
             )
         }
 
-        /// One repair from a healer with no side remembered.
+        /// One repair from a healer with no kept exit.
         fn repair(&self, obstacles: &[ObstacleVolume], point: Vec2) -> Vec2 {
             self.repair_from(obstacles, point, &mut None)
         }
 
-        /// One repair, reading and updating the remembered `side` as the
-        /// healer's posture state carries it frame to frame.
+        /// One repair, reading and updating the `kept` exit as the healer's
+        /// posture state carries it frame to frame.
         fn repair_from(
             &self,
             obstacles: &[ObstacleVolume],
             point: Vec2,
-            side: &mut Option<FormationSide>,
+            kept: &mut Option<Vec2>,
         ) -> Vec2 {
             xz(sighted_formation_point(
                 &self.ctx(obstacles),
                 self.healer,
                 Vec3::new(point.x, 1.0, point.y),
-                side,
+                kept,
             ))
         }
     }
@@ -388,16 +516,16 @@ mod tests {
     }
 
     /// The largest step between consecutive repairs of `points`, carrying the
-    /// remembered side from one to the next when `remember`.
+    /// kept exit from one to the next when `remember`.
     fn largest_step(f: &Fixture, points: &[Vec2], remember: bool) -> (f32, Vec<Vec2>) {
-        let mut side = None;
+        let mut kept = None;
         let repaired: Vec<Vec2> = points
             .iter()
             .map(|&p| {
                 if !remember {
-                    side = None;
+                    kept = None;
                 }
-                f.repair_from(&pillar(), p, &mut side)
+                f.repair_from(&pillar(), p, &mut kept)
             })
             .collect();
         let step = repaired
@@ -416,7 +544,7 @@ mod tests {
     }
 
     /// The point keeps its side as it drifts over the centre line: no repair
-    /// jumps more than a few yards. The pair: with no side remembered (each
+    /// jumps more than a few yards. The pair: with no exit kept (each
     /// repair from scratch), the same drift flips the point across the whole
     /// shadow at the centre line.
     #[test]
@@ -432,13 +560,13 @@ mod tests {
         let (forgetful, _) = largest_step(&f, &points, false);
         assert!(
             forgetful > 8.0,
-            "without a remembered side the drift should flip the point across the shadow \
+            "without a kept exit the drift should flip the point across the shadow \
              (largest step {forgetful}yd) — the scene no longer crosses the centre line"
         );
     }
 
     /// The band is a band, not a lock: a point carried well past the centre
-    /// line changes side once — when the other exit is nearer by `SIDE_MARGIN`
+    /// line changes side once — when the other exit is nearer by `KEEP_MARGIN`
     /// — and stays changed.
     #[test]
     fn the_point_changes_side_once_well_past_the_centre_line() {
@@ -458,7 +586,7 @@ mod tests {
             .unwrap();
         let crossed = -points[at + 1].y;
         assert!(
-            crossed > SIDE_MARGIN / 2.0 - 0.5 && crossed < SIDE_MARGIN / 2.0 + 0.5,
+            crossed > KEEP_MARGIN / 2.0 - 0.5 && crossed < KEEP_MARGIN / 2.0 + 0.5,
             "switched {crossed}yd past the centre line"
         );
     }
@@ -499,5 +627,156 @@ mod tests {
         assert!(sight_constrained(&ctx));
         ctx.ai_profile = AiProfile::Legacy;
         assert!(!sight_constrained(&ctx));
+    }
+
+    /// The point drifting from open ground into the Mage's shadow and on to its
+    /// centre line, 0.05yd a step: the repair takes over from where the point
+    /// stands, with no step at the shadow's edge — and lets go the same way on
+    /// the way back out.
+    #[test]
+    fn the_repair_starts_and_ends_where_the_point_stands() {
+        let f = fixture(&[MAGE]);
+        let inward: Vec<Vec2> = (0..=160)
+            .map(|i| Vec2::new(0.0, 8.0 - i as f32 * 0.05))
+            .collect();
+        let mut both = inward.clone();
+        both.extend(inward.iter().rev());
+        let (step, repaired) = largest_step(&f, &both, true);
+        assert!(step < 0.5, "a repair stepped {step}yd: {repaired:?}");
+        // Not vacuous: the far end is blind and repaired; the near end is in
+        // sight and left alone.
+        assert!(!sees(&pillar(), both[160], MAGE_XZ));
+        assert!(repaired[160].distance(both[160]) > SIGHT_MARGIN);
+        assert_eq!(repaired[0], both[0]);
+        assert_eq!(repaired[both.len() - 1], both[0]);
+    }
+
+    /// A Mage close behind the pillar casts a wide shadow: a point 12yd behind
+    /// the pillar is repaired only part of the way (its nearest exit lies
+    /// between `REPAIR_FULL` and `REPAIR_LIMIT`), and one 19yd behind not at
+    /// all — while a point just behind the pillar is repaired in full.
+    #[test]
+    fn a_far_exit_is_taken_part_of_the_way_or_not_at_all() {
+        // The pillar at (8, 0) r2; the Mage at (11, 0), 3yd from its centre.
+        let f = fixture(&[(11.0, 0.0, 0.7)]);
+        let mage = Vec2::new(11.0, 0.0);
+        let mut kept = None;
+        let near = Vec2::new(5.0, 0.0);
+        let fixed = f.repair_from(&pillar(), near, &mut kept);
+        assert!(
+            sees(&pillar(), fixed, mage),
+            "near: repaired in full ({fixed})"
+        );
+        assert!(fixed.distance(near) < REPAIR_FULL);
+
+        let mid = Vec2::new(-4.0, 0.0);
+        let partial = f.repair_from(&pillar(), mid, &mut None);
+        let moved = partial.distance(mid);
+        let exit = shadow_exits(mage, &pillar()[0], mid, SIGHT_MARGIN)
+            .into_iter()
+            .map(|(_, e)| e.distance(mid))
+            .fold(f32::MAX, f32::min);
+        assert!(exit > REPAIR_FULL && exit < REPAIR_LIMIT, "exit {exit}yd");
+        assert!(
+            moved > 1.0 && moved < exit - 0.5,
+            "mid: moved part of the way ({moved}yd of {exit}yd, to {partial})"
+        );
+
+        let far = Vec2::new(-11.0, 0.0);
+        assert!(!sees(&pillar(), far, mage));
+        let mut kept = None;
+        assert_eq!(
+            f.repair_from(&pillar(), far, &mut kept),
+            far,
+            "far: left alone"
+        );
+        assert_eq!(kept, None, "far: no exit kept");
+    }
+
+    /// A point back in sight forgets its side: the next repair takes the
+    /// nearer exit, where a kept exit would have held it on the far one.
+    #[test]
+    fn a_point_in_sight_forgets_its_kept_exit() {
+        let f = fixture(&[MAGE]);
+        let mut kept = None;
+        // Repaired to the +z side from just +z of the centre line.
+        let first = f.repair_from(&pillar(), Vec2::new(0.0, 0.5), &mut kept);
+        assert!(first.y > 0.0);
+        // Back in open ground.
+        f.repair_from(&pillar(), Vec2::new(0.0, 9.0), &mut kept);
+        // Into the shadow again just -z of the centre line: the -z exit is
+        // nearer, and nothing holds the point on +z.
+        let again = f.repair_from(&pillar(), Vec2::new(0.0, -1.5), &mut kept);
+        assert!(again.y < 0.0, "held on the side it had left: {again}");
+        // The control: without the open-ground frame, the band holds +z.
+        let mut held = None;
+        f.repair_from(&pillar(), Vec2::new(0.0, 0.5), &mut held);
+        let kept = f.repair_from(&pillar(), Vec2::new(0.0, -1.5), &mut held);
+        assert!(kept.y > 0.0, "the band should hold +z: {kept}");
+    }
+
+    /// The band belongs to the exit nearest where the point was last repaired
+    /// to, and only within `KEEP_RADIUS` of it: a kept spot far from every
+    /// exit holds nothing.
+    #[test]
+    fn the_band_is_for_the_exit_the_point_was_at() {
+        let f = fixture(&[MAGE]);
+        let mut kept = None;
+        let first = f.repair_from(&pillar(), Vec2::new(0.0, 0.5), &mut kept);
+        assert_eq!(kept, Some(first));
+        // Held: the +z exit is the one the point was at.
+        let held = f.repair_from(&pillar(), Vec2::new(0.0, -1.5), &mut kept);
+        assert!(held.y > 0.0, "held: {held}");
+        // A kept spot 4yd off the +z exit (beyond `KEEP_RADIUS`) holds nothing.
+        let mut stray = Some(first + Vec2::new(-4.0, 0.0));
+        let free = f.repair_from(&pillar(), Vec2::new(0.0, -1.5), &mut stray);
+        assert!(free.y < 0.0, "a stray kept spot held the point: {free}");
+    }
+
+    /// With a second teammate behind the pillar the point stands in two
+    /// shadows and has an exit from each; drifting over them, it keeps to the
+    /// exit it was at. The control: with no kept exit, the same drift jumps
+    /// between exits.
+    #[test]
+    fn the_point_keeps_its_exit_with_two_teammates_behind_the_pillar() {
+        // The Mage behind the pillar on the x axis; a healthy Warrior just
+        // behind it, a yard off the axis.
+        let f = fixture(&[MAGE, (10.0, 1.0, 0.9)]);
+        let points: Vec<Vec2> = (0..=120)
+            .map(|i| Vec2::new(0.0, 3.0 - i as f32 * 0.05))
+            .collect();
+        let (kept_step, kept) = largest_step(&f, &points, true);
+        let (free_step, _) = largest_step(&f, &points, false);
+        assert!(
+            kept_step < 2.0,
+            "a kept repair jumped {kept_step}yd: {kept:?}"
+        );
+        assert!(
+            free_step > 6.0,
+            "with no kept exit the drift should change exits (largest step {free_step}yd)"
+        );
+    }
+
+    /// Only a shadow the point stands near the obstacle in counts: a teammate
+    /// close behind the pillar (the Mage 3yd from its centre) casts one whose
+    /// edges sweep fast where the point stands far behind. A point 13yd from the
+    /// pillar's centre — farther than the Mage and beyond `REPAIR_FULL` of the
+    /// footprint — is left alone though blind and its exit within
+    /// `REPAIR_LIMIT`; one 11yd from it is repaired.
+    #[test]
+    fn a_shadow_counts_only_near_its_obstacle() {
+        let f = fixture(&[(11.0, 0.0, 0.7)]);
+        let mage = Vec2::new(11.0, 0.0);
+        let far = Vec2::new(-5.0, 0.0);
+        assert!(!sees(&pillar(), far, mage), "the far point is blind");
+        assert!(shadow_exits(mage, &pillar()[0], far, SIGHT_MARGIN).is_empty());
+        assert_eq!(f.repair(&pillar(), far), far, "far: left alone");
+
+        let near = Vec2::new(-3.0, 0.0);
+        assert!(!sees(&pillar(), near, mage));
+        assert!(
+            f.repair(&pillar(), near).distance(near) > 1.0,
+            "near: repaired"
+        );
     }
 }

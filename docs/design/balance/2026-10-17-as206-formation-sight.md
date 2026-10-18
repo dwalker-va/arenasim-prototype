@@ -3,18 +3,19 @@
 **Tier:** DIRECTIONAL (paired sweep) plus a head-to-head per
 `docs/design/team-level-positioning-ai.md` *How to measure a step*.
 **Success condition, stated up front:** the defect goes (a FREE healer no
-longer idles blind behind a pillar from a healthy teammate), with no balance
-movement worth the name. Measured 2026-10-18, `main` at `15309d38` against this
-branch.
+longer idles blind behind a pillar from a healthy teammate), the repaired goal
+does not jump about, and there is no balance movement worth the name. Measured
+2026-10-18, `main` at `15309d38` against this branch.
 
 ## The shape
 
 | Question | Answer | Why |
 |---|---|---|
-| Sight to whom? | Every living non-pet teammate when a nearby spot has it; otherwise the most injured (the anchor). | A FREE healer has no one dying, so every teammate is a heal target it should keep. In a 2v2 the two rules are the same rule. When no spot sees all (two pillars, two shadows), the anchor is never given up for the others. |
-| Constraint or scored term? | A constraint with a nearest-feasible repair. | The formation point is one goal, not a choice among scored steps — there is nothing to add a term to. The repair has `nearest_standable`'s shape: a point whose standable projection already sees comes back exactly as the unconstrained machine returns it, so every point in sight (all of them on an obstacle-free map) is untouched. |
-| Where does the repair look? | The two tangent rays bounding the teammate's shadow past the obstacle's footprint disc; the raw point projected onto each, pushed `SIGHT_MARGIN` (2.5yd) clear. | Geometry-anchored candidates slide continuously with the fight. A lattice round the point moves with it and hops cells (`team_solve::candidates_for` documents the pathology). 2.5yd exceeds the 1.5yd formation dead zone, so wherever the walk stops is in sight. |
-| Which side of the shadow? | The side the point was last repaired to, kept until the other is nearer by `SIDE_MARGIN` (6yd) or it loses sight; remembered on `HealerPosture::formation_side`. Distances are taken from the raw point, not its standable projection. | Near a shadow's centre line the two exits are about equally near, and a tenth of a yard's drift would otherwise flip the point ~20yd across the shadow. A raw point inside a pillar moves continuously, but its standable projection jumps between faces; measuring from the projection carried that jump into the side choice at Nagrand's camp release. |
+| Sight to whom? | Every living non-pet teammate when a nearby spot has it; otherwise the most injured (the anchor). | A FREE healer has no one dying, so every teammate is a heal target it should keep. In a 2v2 the two rules are the same rule. An exit that sees the anchor always beats one that does not; each teammate seen beyond the first counts `TEAMMATE_YARDS` (3yd) nearer. |
+| Constraint or scored term? | A constraint with a nearest-feasible repair. | The formation point is one goal, not a choice among scored steps — there is nothing to add a term to. A point in no shadow comes back exactly as the unconstrained machine returns it, so every such point (all of them on an obstacle-free map) is untouched. |
+| Where does the repair look? | An obstacle's shadow from a teammate is the wedge between the tangent rays past its footprint disc, widened by `SIGHT_MARGIN` (2.5yd). A point in it has one exit per side: the point moved straight out until it stands the margin beyond that side's ray. Distances are from the raw point, not its standable projection. | Geometry-anchored, so the exits slide with the fight. A point on the widened edge is its own exit, so the repair starts and lets go without a step. 2.5yd exceeds the 1.5yd formation dead zone, so wherever the walk stops is in sight. The projection jumps between a pillar's faces; the raw point does not. |
+| How far? | An exit up to `REPAIR_FULL` (10yd) from the raw point is taken in full, one up to `REPAIR_LIMIT` (16yd) part of the way, none farther. Only shadows of an obstacle near the point count: no farther from it than the teammate is, or within `REPAIR_FULL` of its footprint. | The defect is a point a few yards into a nearby pillar's shadow (exits 7-9yd away). A teammate close behind a distant pillar casts a shadow whose exits are tens of yards off and whose edges sweep across the point many times faster than the teammate moves (1.5yd a frame, measured); following them sent the point ~70yd and back. |
+| Which exit, frame to frame? | The exit nearest where the point was last repaired to (within `KEEP_RADIUS`, 3yd), remembered on `HealerPosture::formation_repair`, counts `KEEP_MARGIN` (6yd) nearer. Cleared when the point is in no shadow and when the healer leaves FREE. | Near a shadow's centre line its two exits are about equally near, and the exits of two teammates' shadows behind one pillar lie apart the same way; without the band a tenth of a yard's drift flips the point across the gap. |
 | Profile | `TeamPlan` only. | The AI-profile rule. `Legacy` is unchanged. |
 
 The repaired point reaches the healer through the free tick's existing issue
@@ -40,32 +41,83 @@ as the healer, each out of mana so no cast holds it still. Seeds 1-3 each:
 | `TeamPlan` (this change), Druid and Priest | within 1s, every seed | never |
 | `Legacy` (the pair: unconstrained point) | never | the whole window |
 
-**No flip across a shadow** —
-`the_priests_repaired_point_never_flips_across_a_shadow` (default run, seed
-bank): Warrior+Priest v Mage+Rogue on Nagrand under `TeamPlan`, seeds 0-9 in
-both team orders, the first 25s (the walk out of the room and the camp release
-at ~16.7s). It reads the Priest's point goal on every frame the trace shows it
-FREE on a formation decision and finds no frame-to-frame jump over 10yd, across
-3,340 frame pairs. In-module, `the_point_keeps_its_side_across_the_centre_line`
-drifts a point over a shadow's centre line in 0.05yd steps (largest repair step
-under 2yd; with no side remembered, the same drift jumps over 8yd), and
-`the_point_changes_side_once_well_past_the_centre_line` shows the band lets go
-once, about `SIDE_MARGIN / 2` past the line.
+The bound and the near-obstacle rule leave this scene alone: its exit is well
+inside `REPAIR_FULL`. The AS-206 repro seed itself no longer reaches the
+situation (the match ends at 77s); a 288-match FREE-healer bank on `main` found
+no blind spell longer than 1.73s, so the staged scene is the guard.
 
-**Mutation-checked:**
+**No flip** — `the_repaired_point_never_flips_across_a_shadow` (default run,
+seed bank): every formation healer in Warrior+Priest v Mage+Rogue and in
+Warrior+Mage+Priest v Rogue+Warlock+Druid on Nagrand under `TeamPlan`, seeds
+0-9, both team orders, the first 30s. On every frame the trace shows the healer
+FREE on a formation decision, its point goal never jumps over 25yd frame to
+frame and never jumps over 10yd and comes back within a second.
+
+**Leaving FREE** — `kept_exit_reset::leaving_free_forgets_the_kept_exit`: a
+Priest and a Druid pressed out of FREE drop the kept exit; the control, left
+FREE, keeps it.
+
+**In-module** (`formation.rs`): a point drifting from open ground to a shadow's
+centre line and back steps under 0.5yd; drifting over the centre line keeps its
+side (largest step under 2yd, against over 8yd with nothing kept) and changes
+side once, about `KEEP_MARGIN / 2` past it; with a second teammate behind the
+pillar it keeps its exit; the band holds only the exit within `KEEP_RADIUS` of
+the kept spot; a point back in sight forgets its exit; an exit between
+`REPAIR_FULL` and `REPAIR_LIMIT` is taken part of the way and one beyond not at
+all; a shadow far from its obstacle does not count.
+
+**Mutation-checked** — each mutant fails the named test(s):
 
 | Mutation | Fails |
 |---|---|
-| The Priest's `compute_formation_point` skips the repair | the staged probe (`Priest seed 1: regained sight of the Mage at None`) |
-| The caster-healer `compute_formation_point` skips the repair | the staged probe (`Druid seed 1`) |
-| The repair runs under `Legacy` too | the staged probe's `Legacy` pair |
-| No side hysteresis (`SIDE_MARGIN` never applied) | both side tests, and the seed bank (a 12.3yd jump at 16.63s in all 20 matches) |
-| Distances from the standable projection, not the raw point | the seed bank (an 18.2yd jump at 16.67s in all 20 matches) |
+| The Priest's `compute_formation_point` skips the repair | staged probe (`Priest seed 1`) |
+| The caster-healer one skips it | staged probe (`Druid seed 1`) |
+| No hysteresis (band never applied) | six in-module tests, including the centre-line and two-teammate ones |
+| The band given to every candidate | six in-module tests |
+| `KEEP_RADIUS` unbounded | `the_band_is_for_the_exit_the_point_was_at` |
+| The kept exit not cleared on a point in no shadow | `a_point_in_sight_forgets_its_kept_exit` |
+| Posture transitions keep the kept exit | `leaving_free_forgets_the_kept_exit` |
+| No `REPAIR_LIMIT` | `a_far_exit_is_taken_part_of_the_way_or_not_at_all` |
+| No fade (full weight up to the limit) | `a_far_exit_is_taken_part_of_the_way_or_not_at_all` |
+| Shadows of distant obstacles count | `a_shadow_counts_only_near_its_obstacle` |
+| The exit pushed a full margin out from inside the widened edge (a step at onset) | `the_repair_starts_and_ends_where_the_point_stands` |
 
-Reached from seeds, the blind-healer defect itself is rare: the AS-206 repro
-seed no longer contains it (the match ends at 77s), and a 288-match FREE-healer
-bank on `main` found no blind spell longer than 1.73s. The staged scene is the
-guard.
+## Formation-goal jumps against `main`
+
+`measure_formation_goal_jumps` (`#[ignore]`d), seeds 0-9 both orders, 120s, every
+formation healer's goal on FREE formation frames:
+
+| Comp | jumps > 5yd, main → branch | > 10yd | > 25yd | returns (> 5yd, back within 1s) |
+|---|---|---|---|---|
+| Warrior+Priest v Mage+Rogue | 20 → 0 | 0 → 0 | 0 → 0 | 0 → 0 |
+| Warrior+Mage+Priest v Rogue+Warlock+Druid | 14 → 84 | 7 → 33 | 0 → 0 | 0 → 1 |
+| Mage+Druid v Hunter+Paladin | 10 → 10 | 3 → 3 | 0 → 0 | 1 → 1 |
+| Warlock+Priest v Rogue+Druid | 15 → 22 | 5 → 13 | 0 → 0 | 1 → 1 |
+| Hunter+Shaman v Warrior+Paladin | 1 → 1 | 1 → 1 | 0 → 0 | 0 → 0 |
+
+The 3v3's and Warlock+Priest's higher counts are mostly not the repair. With the
+repair's output logged per call (a scratch instrumentation, not committed) and
+each step over 5yd attributed — to the raw point's own jump, or to the repair
+changing exit, starting, or letting go — the 3v3 over the same bank:
+
+| Cause of a step over 5yd | main | branch |
+|---|---|---|
+| The raw (unconstrained) point jumped | 102 (41 over 10yd) | 145 (53 over 10yd) |
+| The repair changed exit | — | 20 (one per match) |
+| The repair started or let go | — | 1 |
+
+The raw point is the unconstrained machine's (the engaged-ally centroid offset
+away from the nearest enemy, which flips as enemies cross it); its jumps are the
+same code on both binaries, and their count differs because the healers' paths
+differ. Of the branch's 84 jumps over 5yd in the 3v3 measurement, 40 are two
+steps at 27.65s in every match, a Druid's raw point stepping 6-8yd per frame
+with no repair involved. The one
+repair-caused change per match is at 21.85s: the Druid's kept exit sees the
+anchor and one teammate, and another teammate's shadow's exit, 3.9yd nearer the
+raw point, comes to see both — better by more than the band, so the point moves
+there once (16yd) and stays. In Warlock+Priest the repair changes exit 7 times
+over 20 matches, each to an exit that ranks better by more than the band, and
+lets go 3 times (5-7yd). None comes back.
 
 ## Balance
 
@@ -75,37 +127,31 @@ and both CSVs: `sweeps/2026-10-17-as206-teamplan-pillaredarena*`):
 
 ```
 CONTROL: 80/80 matches with no affected class on either side are IDENTICAL
-ALL reachable   n=6750  44.4% -> 44.6%  +0.1pt  flips 100 (+54/-44) z=0.91 ns
-CLEAN           n=2250  45.8% -> 46.5%  +0.8pt  flips 34 (+25/-8)   z=2.79 SIG
-AGAINST         n=2250  46.0% -> 45.7%  -0.3pt  flips 32 (+12/-19)  z=1.08 ns
-MIRRORED        n=2250  41.5% -> 41.5%  +0.0pt  flips 34 (+17/-17)  z=0.00 ns
-NON-VACUITY: 6068/6830 ended by elimination; 794 moved in winner or duration
-One significant slice out of 3 tested.
+ALL reachable   n=6750  44.4% -> 44.5%  +0.1pt  flips 111 (+57/-50) z=0.58 ns
+CLEAN           n=2250  45.8% -> 45.9%  +0.1pt  flips 32 (+17/-14)  z=0.36 ns
+AGAINST         n=2250  46.0% -> 46.1%  +0.1pt  flips 30 (+16/-14)  z=0.18 ns
+MIRRORED        n=2250  41.5% -> 41.6%  +0.1pt  flips 49 (+24/-22)  z=0.15 ns
+NON-VACUITY: 6072/6830 ended by elimination; 1025 moved in winner or duration
+SLICES TESTED: 3. Significant: none.
 ```
 
-**One cell is the whole one-sided signal: Warrior+Priest vs Mage+Rogue**, which
-goes from 0/10 to 10/10 Warrior+Priest wins in both team orders — +10 of CLEAN's
-+25 and -10 of AGAINST's -19, one cell seen from both sides. It is the Priest's
-formation point: the two binaries' traces first differ at a team-1 Priest FREE
-`FormationShift` at 3.57s (seed 3), before contact, and that match goes from a
-team-2 win at 32s to a team-1 win at 43s. Without that cell the one-sided slices
-are CLEAN +15/-8 and AGAINST +12/-9: nothing beyond noise, and no other cell
-moves more than 3 of its 10 seeds.
+No cell moves more than 4 of its 10 seeds; Warrior+Priest v Mage+Rogue, whose
+Priest repairs most, is unchanged (0/10 and 10/10 in its two orders).
 
 **Head-to-head**, n=100 per cell, both assignments (`scripts/headtohead_sweep.py`
 on each binary). The change's effect is the `TeamPlan` cells' movement between
 the two binaries; the `Legacy`-only cell cannot move:
 
-| Comp (team 1 vs team 2) | `TeamPlan` cells changed, main -> branch | Winner flips |
+| Comp (team 1 vs team 2) | rows changed, main -> branch | Winner flips |
 |---|---|---|
-| Mage+Druid vs Hunter+Paladin (the AS-206 repro comp) | 0 / 200 | 0 |
-| Mage+Druid vs Warrior+Paladin | 2 / 200 (durations only) | 0 |
-| Warrior+Priest vs Warlock+Priest | 4 / 200 (durations only) | 0 |
-| Hunter+Shaman vs Rogue+Priest | 0 / 200 | 0 |
+| Mage+Druid vs Hunter+Paladin (the AS-206 repro comp) | 0 / 300 | 0 |
+| Mage+Druid vs Warrior+Paladin | 2 / 300 (durations only) | 0 |
+| Warrior+Priest vs Warlock+Priest | 8 / 300 (durations only) | 0 |
+| Hunter+Shaman vs Rogue+Priest | 0 / 300 | 0 |
 
 **`camp_sweep`** (Warrior+Priest vs Warlock+Priest, seeds 1-12): one `TeamPlan`
-seed's duration moves (57.2s to 55.7s, seed 3, same winner); 15.1s / 9.4s
-denied pre / post contact and 21% heal line occluded on both binaries.
+seed's duration moves (57.2s to 55.7s, seed 3, same winner); denial and
+occlusion figures unchanged.
 
 ## Byte-identity
 

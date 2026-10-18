@@ -134,6 +134,7 @@ pub fn evaluate_caster_healer_posture(
         state.since = now;
         state.last_direction = None;
         state.last_point = None;
+        state.formation_repair = None;
         match next {
             Posture::Pressured => {
                 state.hold_until = now + shared.pressured_hold;
@@ -376,7 +377,7 @@ fn caster_healer_free_tick(
         ctx,
         movement,
         block,
-        &mut state.formation_side,
+        &mut state.formation_repair,
     ) else {
         if transitioned {
             if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
@@ -446,7 +447,7 @@ fn compute_formation_point(
     ctx: &CombatContext,
     movement: &MovementConfig,
     block: &CasterHealerMovementConfig,
-    side: &mut Option<FormationSide>,
+    kept: &mut Option<Vec2>,
 ) -> Option<Vec3> {
     let shared = &movement.shared;
     let mut all_sum = Vec3::ZERO;
@@ -520,7 +521,7 @@ fn compute_formation_point(
 
     let point = clamp_to_arena(&ctx.bounds, point);
     Some(if super::formation::sight_constrained(ctx) {
-        super::formation::sighted_formation_point(ctx, entity, point, side)
+        super::formation::sighted_formation_point(ctx, entity, point, kept)
     } else {
         super::healer_postures::standable_formation_point(ctx, point)
     })

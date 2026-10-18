@@ -587,6 +587,7 @@ pub(super) fn dispel_walk_tick(
             state.medic_target = None;
             state.last_direction = None;
             state.last_point = None;
+            state.formation_repair = None;
             if reached_now {
                 if let Some(mut builder) =
                     start_movement_event_with_target(decision_trace, ctx, ally, my_pos)
@@ -837,6 +838,7 @@ pub(super) fn ally_walk_tick(
     // normal tick re-anchors cleanly once sight is regained.
     state.last_direction = None;
     state.last_point = None;
+    state.formation_repair = None;
 
     if let Some(mut builder) =
         start_movement_event_with_target(decision_trace, ctx, ally.entity, my_pos)

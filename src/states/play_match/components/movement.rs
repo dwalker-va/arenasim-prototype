@@ -164,25 +164,13 @@ pub struct HealerPosture {
     /// `Some` while the play drives the healer's position, `None` otherwise; a
     /// new spot (or `None` → `Some`) is what emits its `TakeCover` trace event.
     pub cover_spot: Option<Vec2>,
-    /// `TeamPlan` only: which side of which teammate's shadow the FREE
-    /// formation point was last repaired to (`class_ai::formation`, AS-206).
-    /// The repair keeps that side until the other is nearer by
-    /// `formation::SIDE_MARGIN` or this side loses sight, so a point near the
-    /// shadow's centre line does not flip across it. `None` when the last
-    /// formation point needed no repair; always `None` under `Legacy`.
-    pub formation_side: Option<FormationSide>,
-}
-
-/// One side of one teammate's shadow behind one obstacle: the identity of a
-/// formation-point repair candidate ([`HealerPosture::formation_side`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FormationSide {
-    /// The teammate whose shadow it is.
-    pub ally: Entity,
-    /// The obstacle casting it, by index into the map's obstacle list.
-    pub obstacle: usize,
-    /// Which tangent ray bounds this side: `1` or `-1`.
-    pub side: i8,
+    /// `TeamPlan` only: where the FREE formation point was last repaired to
+    /// (`class_ai::formation`, AS-206). The repair keeps to the exit nearest it
+    /// until another is better by `formation::KEEP_MARGIN`, so a point near a
+    /// shadow's centre line, or between two teammates' shadows, does not jump
+    /// between exits. `None` when the last formation point needed no repair, and
+    /// after leaving FREE; always `None` under `Legacy`.
+    pub formation_repair: Option<Vec2>,
 }
 
 /// Phase of a healer's `Legacy` dispel walk ([`HealerPosture::dispel_walk`]).
@@ -214,7 +202,7 @@ impl HealerPosture {
             solve_dying: None,
             dispel_walk: DispelWalkPhase::Off,
             cover_spot: None,
-            formation_side: None,
+            formation_repair: None,
         }
     }
 }
