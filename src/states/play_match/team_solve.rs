@@ -8,7 +8,7 @@
 //! |---|---|
 //! | `OccupyCover` via [`solve_position`] | **LIVE** under `TeamPlan` (healer PRESSURED/FREE, `healer_postures.rs`). Measured at n=100 head-to-head: +36pt Warlock+Priest, +14pt Hunter+Priest, +10pt Warrior+Priest, -6pt (noise) Rogue+Priest. |
 //! | [`DispelGoal`] on `OccupyCover` | **LIVE** under `TeamPlan` (Priest, Paladin PRESSURED; AS-187). The `Legacy` dispel walk's job: while a teammate is owed an urgent dispel the healer cannot reach, reaching it is the only constraint scored, and the goal holds on reach until the dispel lands. |
-//! | [`C_DYING`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-198). While the healer can heal, the most hurt teammate below `urgency_hp_threshold` anchors it, and reaching that teammate ranks above cover. |
+//! | [`C_DYING`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-198). While the healer can heal, the most hurt teammate below `urgency_hp_threshold` anchors it, and reaching that teammate ranks above cover. Which teammate that is, [`dying_anchor`], is the `TeamPlan` medic walk the Druid holds its damage for (AS-218). |
 //! | `HoldRange` | Wired to the Mage/Hunter kiter, **measured ~-17pt, reverted — and the ending is now DECIDED: ranged DPS stays on the scorer permanently** (design doc, 2026-08-06). Constraint definition kept for the lone-healer fallback and future melee use; do not re-wire kiters absent step 8's reopening condition. |
 //! | `ScreenPartner`, `PressTarget`, `StackAnchor` | **NEVER RUN IN BATTLE.** Unit-tested against their written definitions only. All three consumed intents were under-specified in ways only measurement exposed (sight-of-ally, castability, the range ceiling) — assume these carry the same debt and budget a measurement pass before trusting them. |
 //! | [`solve_team`] / [`solve_order`] / [`focal_point`] / [`assign_intents`] / cohesion | **NO CALLERS.** The dependent team-level solve, kept because the design requires convergent AND divergent shapes from the start (retrofitting divergence would mean redoing the solve). It has never placed a unit in a real match. |
@@ -374,6 +374,11 @@ impl SolveContext<'_> {
     /// [`SolveWorld::urgency_hp_threshold`], the first in unit order on a tie.
     /// `None` while nobody is below it.
     fn dying_ally_pos(&self) -> Option<Vec2> {
+        self.dying_ally().map(|a| self.ally_pos(a))
+    }
+
+    /// The dying teammate itself, as [`Self::dying_ally_pos`] picks it.
+    fn dying_ally(&self) -> Option<&SolveUnit> {
         let threshold = self.world.urgency_hp_threshold;
         self.world
             .allies_of(self.unit.team, self.unit.entity)
@@ -383,7 +388,6 @@ impl SolveContext<'_> {
                     .partial_cmp(&b.health_pct)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
-            .map(|a| self.ally_pos(a))
     }
 
     /// The ally an `OccupyCover` healer must stay able to reach — the most
@@ -1291,6 +1295,30 @@ pub fn solve_position(
     };
     let spot = solve_unit(intent, &ctx);
     (spot.distance(unit.pos) > 1e-3).then_some(spot)
+}
+
+/// The dying teammate `entity`'s `OccupyCover` solve owes REACH to
+/// ([`C_DYING`]) — and, when no candidate spot can see it, walks straight at
+/// (the sight fallback in [`solve_unit`]): the living non-pet teammate furthest
+/// below [`SolveWorld::urgency_hp_threshold`]. `None` while nobody is dying, for
+/// a healer that cannot heal (it owes no reach), and while a dispel is owed
+/// ([`DispelGoal`] — then reaching that teammate is the only constraint the
+/// solve scores, and none is owed while another teammate dies).
+///
+/// The one place a reader asks which teammate the solve is walking a healer to
+/// for a heal, so the answer cannot drift from what the solve scores.
+pub fn dying_anchor(world: &SolveWorld, entity: Entity) -> Option<Entity> {
+    let unit = *world.unit(entity)?;
+    if !unit.can_cast_heal || unit.dispel_goal.is_some() {
+        return None;
+    }
+    let ctx = SolveContext {
+        world,
+        unit,
+        focus: None,
+        placed: &BTreeMap::new(),
+    };
+    ctx.dying_ally().map(|a| a.entity)
 }
 
 /// Where a healer standing ALONE against two or more enemies takes cover —

@@ -376,6 +376,41 @@ pub(super) fn medic_chase_target<'c>(
 // obstacle-free maps, so BasicArena stays byte-identical.
 // ---------------------------------------------------------------------------
 
+/// The teammate the `TeamPlan` team solve is walking this healer to because it
+/// is dying — the `TeamPlan` medic walk, beside `Legacy`'s
+/// [`medic_chase_override`], which `TeamPlan` retires in PRESSURED.
+///
+/// It is the teammate the solve's last re-solve owed reach to
+/// ([`team_solve::dying_anchor`](crate::states::play_match::team_solve::dying_anchor):
+/// `C_DYING`, and the sight fallback that walks straight at it), while that
+/// walk is still the one driving the healer: under `TeamPlan`, in PRESSURED
+/// (the only posture the solve runs in), with the healer not hard-CC'd (the
+/// `Legacy` walk's own gate — a rooted healer walks nowhere), and with the
+/// teammate still alive and below `urgency_hp_threshold`. `None` otherwise,
+/// and always under `Legacy`.
+///
+/// It names the teammate whether or not the healer has reached it yet: the
+/// reader asks reach for itself (the Druid's hold, `class_ai::druid`), as it
+/// does of the `Legacy` walk's teammate in the frames its hold runs on.
+pub(crate) fn solve_dying_walk(
+    entity: Entity,
+    ctx: &CombatContext,
+    state: &HealerPosture,
+    shared: &SharedMovementConfig,
+) -> Option<Entity> {
+    if !ctx.ai_profile.is_team_plan()
+        || state.posture != Posture::Pressured
+        || ctx.is_ccd(entity)
+    {
+        return None;
+    }
+    let ally = state.solve_dying?;
+    ctx.combatants
+        .get(&ally)
+        .filter(|a| a.is_alive && !a.is_pet && a.health_pct() < shared.urgency_hp_threshold)
+        .map(|a| a.entity)
+}
+
 /// Whether the medic chase should override the normal movement tick this frame:
 /// the walk is allowed ([`ally_walk_allowed`]) and either a dying occluded
 /// teammate exists — returned at once, so the chase's onset and a switch to a
@@ -1123,6 +1158,7 @@ pub(super) fn healer_pressured_tick_shared(
                 }
             }
             state.solve_dispel = None;
+            state.solve_dying = None;
             return false;
         }
     }
@@ -1183,6 +1219,11 @@ pub(super) fn healer_pressured_tick_shared(
         };
         let spot =
             crate::states::play_match::team_solve::solve_position(intent, entity, &world, focus);
+        // The dying teammate this solve walks the healer to reach — the
+        // `TeamPlan` medic walk ([`solve_dying_walk`]). Recorded, not acted
+        // on: the spot above already is the walk.
+        state.solve_dying =
+            crate::states::play_match::team_solve::dying_anchor(&world, entity);
         // A `Point` goal, not a bearing: the chosen spot can be tens of yards
         // off and behind a pillar, and `Point` is the branch that tangent-steers
         // around one. `None` means the solve is already satisfied here — hold,
