@@ -17,7 +17,7 @@
 //! runs. Every scene is a pair: the walk, and the same scene with its one
 //! condition removed.
 
-use arenasim::states::match_config::CharacterClass::{self, Druid, Mage, Warrior};
+use arenasim::states::match_config::CharacterClass::{self, Druid, Mage, Shaman, Warrior};
 use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::{
@@ -25,12 +25,13 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::decision_trace::RejectionReason;
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
-use arenasim::states::play_match::AbilityType;
+use arenasim::states::play_match::{AbilityType, SpellSchool};
 use bevy::prelude::{Vec2, Vec3};
 
 const DRUID: &str = "druid";
 const WARRIOR: &str = "dying warrior";
 const ENEMY: &str = "enemy";
+const SHAMAN: &str = "shaman";
 
 /// Below `urgency_hp_threshold` (0.5), above `DRUID_EMERGENCY_HP` (0.45).
 const DYING: f32 = 0.47;
@@ -285,5 +286,103 @@ fn a_walk_left_from_an_earlier_pressured_stint_holds_nothing() {
         moonfired(&recovered),
         "teammate recovered: {}",
         describe(&recovered)
+    );
+
+    // ...and at once if its teammate dies mid-walk: a dead teammate is below
+    // the threshold too, so only its being dead lets the hold go.
+    let died = decide(0.0, carried(Posture::Pressured), Some(committed));
+    assert!(moonfired(&died), "teammate died: {}", describe(&died));
+}
+
+/// `school`'s lockout, as an interrupt lands it.
+fn lockout(school: SpellSchool) -> Aura {
+    Aura {
+        effect_type: AuraType::SpellSchoolLockout,
+        duration: 4.0,
+        magnitude: school.to_lockout_magnitude(),
+        break_on_damage_threshold: -1.0,
+        ability_name: "Counterspell".into(),
+        ..Default::default()
+    }
+}
+
+/// A Druid that cannot heal owes no reach, so there is no walk to hold for:
+/// locked out of Nature, it Moonfires (Arcane) at once rather than hold the
+/// global cooldown through the lockout for a heal it cannot cast. Locked out
+/// of a school its heals are not in, it holds as before.
+#[test]
+fn a_druid_that_cannot_heal_holds_nothing_for_the_walk() {
+    let nature_locked = scene(AiProfile::TeamPlan, OUT_OF_RANGE, DYING, Vec::new())
+        .aura_full(DRUID, lockout(SpellSchool::Nature))
+        .decide(DRUID);
+    assert!(
+        moonfired(&nature_locked),
+        "Nature locked: {}",
+        describe(&nature_locked)
+    );
+
+    let frost_locked = scene(AiProfile::TeamPlan, OUT_OF_RANGE, DYING, Vec::new())
+        .aura_full(DRUID, lockout(SpellSchool::Frost))
+        .decide(DRUID);
+    assert!(
+        held(&frost_locked),
+        "Frost locked: {}",
+        describe(&frost_locked)
+    );
+}
+
+/// The `TeamPlan` walk feeds only the Druid's hold: the Shaman's cast
+/// deferral (`escape_defer`) stays the `Legacy` walk's, so a PRESSURED
+/// `TeamPlan` Shaman walked toward a dying teammate out of reach still casts
+/// its Lightning Bolt. Its pair: under `Legacy`, the medic walk to the same
+/// teammate behind a pillar defers the bolt.
+#[test]
+fn the_teamplan_walk_leaves_the_shaman_cast_deferral_alone() {
+    let shaman = |profile: AiProfile, warrior: (f32, f32), obstacles: Vec<ObstacleVolume>| {
+        Scene::new()
+            .now(NOW)
+            .ai_profile(1, profile)
+            .unit(SHAMAN, 1, Shaman)
+            .targeting(ENEMY)
+            .unit(WARRIOR, 1, Warrior)
+            .at(warrior.0, warrior.1)
+            .health(DYING)
+            .unit(ENEMY, 2, Mage)
+            .at(0.0, 25.0)
+            // Every totem down and Frost Shock spent: the bolt is the turn.
+            .totems(SHAMAN, [60.0; 4])
+            .cooldown(SHAMAN, AbilityType::FrostShock, 6.0)
+            .healer_posture(SHAMAN, pressured())
+            .obstacles(obstacles)
+            .decide(SHAMAN)
+    };
+    let deferred = |view: &DecisionView| {
+        matches!(
+            view.rejected(AbilityType::LightningBolt),
+            Some(RejectionReason::PreconditionUnmet { note }) if note.contains("medic walk")
+        )
+    };
+
+    let team_plan = shaman(AiProfile::TeamPlan, OUT_OF_RANGE, Vec::new());
+    assert!(
+        matches!(
+            team_plan.directive.map(|d| d.goal),
+            Some(MovementGoal::Point(p)) if p.x > 0.5
+        ),
+        "the solve walks the Shaman toward the Warrior: {}",
+        describe(&team_plan)
+    );
+    assert_eq!(
+        team_plan.chose(),
+        Some((AbilityType::LightningBolt, Some(ENEMY))),
+        "TeamPlan walk, no deferral: {}",
+        describe(&team_plan)
+    );
+
+    let legacy = shaman(AiProfile::Legacy, BEHIND_PILLAR, pillar());
+    assert!(
+        deferred(&legacy),
+        "Legacy medic walk defers: {}",
+        describe(&legacy)
     );
 }
