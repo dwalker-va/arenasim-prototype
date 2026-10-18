@@ -131,9 +131,11 @@ reading rests on inference rather than a table, the row says so (**UNRESOLVED** 
 ### What this means for design (Rupture)
 
 - Landing: `bloodyexplosion.m2` on the victim, plus the finisher hand flash on the Rogue.
-- The motion (user, 2026-10-17): an authored **apply stroke**, shared with Expose Armor. The
-  weapon hand draws back, drives into the victim's chest and holds a beat; the hand flash rides
-  the striking hand and the landing fires at contact. Reusing a generic cast pose does not read
+- The motion (user, 2026-10-17): an authored **apply stroke**, shared with Expose Armor: a
+  **backhand sweep**. The weapon hand winds up across the body, sweeps outward across the
+  victim's chest (contact mid-arc) and follows through wide, so it reads apart from the Rogue's
+  thrusts and Sinister Strike's rising slash; the hand flash rides the striking hand and the
+  landing fires at contact. Reusing a generic cast pose does not read
   as putting the debuff on the target. The client's Special1H is not drawn.
 - State: none in the client. **Route Rupture to `DripKind::Bleed`**, Rend's shipped drips:
   one line in `DotStateVisual::for_dot`, and the drip is already this game's "bleeding"

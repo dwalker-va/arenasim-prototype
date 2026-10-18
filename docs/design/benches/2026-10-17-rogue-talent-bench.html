@@ -316,19 +316,28 @@ function skull(p,sz,col,a){ if(a<=0.003) return; const q=proj(p); if(!q) return;
 // The lavender ghost-fire column (cheat_death.m2 batch 3): a 0.8 yd x 2.5 yd cylinder of desaturated fire.
 function ghostFire(c,ms,s,a){ if(a<=0.003) return; for(let k=0;k<18;k++){ const ang=k/18*TAU+ms/900, per=520+(k%5)*60, ph=((ms+k*97)%per)/per;
   const y=-0.1+ph*2.3*s, r=0.4*s*(1-ph*0.35); sprite('flame',[c[0]+r*Math.cos(ang),y,c[2]+r*Math.sin(ang)],0.42*s*(1-ph*0.5),[181,134,244],a*Math.sin(ph*Math.PI)*0.8); } }
-// The "apply" stroke for Rupture and Expose Armor (user, AS-336): the weapon hand draws back, drives into the
-// victim's chest and holds a beat, so the debuff is visibly put ON the target; the landing fires at contact.
-const APPLY_CONTACT_MS=380;
-function applyStroke(c,vp,u){ const rest=[c[0]+0.35,1.25,c[2]+0.25], back=[c[0]-0.1,1.6,c[2]+0.35];
-  const d=norm(sub([vp[0],0,vp[2]],[c[0],0,c[2]])), hit=[vp[0]-d[0]*0.42,1.45,vp[2]-d[2]*0.42+0.1];
+// The "apply" stroke for Rupture and Expose Armor (user, AS-336): a BACKHAND sweep, not another stab. The weapon
+// hand winds up across the body to the off shoulder, then sweeps outward across the victim's chest (contact at the
+// middle of the arc) and follows through wide on the weapon side, so it reads apart from the Rogue's thrusts
+// (Ambush, Kidney Shot) and Sinister Strike's rising slash. The landing fires at contact.
+const APPLY_CONTACT_MS=330;
+function applyStroke(c,vp,u){ const d=norm(sub([vp[0],0,vp[2]],[c[0],0,c[2]])), r=[-d[2],0,d[0]];
+  const at=(o,rs,ds,y)=>[o[0]+r[0]*rs+d[0]*ds,y,o[2]+r[2]*rs+d[2]*ds];
+  const rest=at(c,0.35,0.1,1.25), wind=at(c,-0.35,0.2,1.55), hit=[vp[0]-d[0]*0.42,1.45,vp[2]-d[2]*0.42], fol=at(hit,0.85,-0.35,1.35);
+  const ctl=hit.map((v,i)=>2*v-0.5*(wind[i]+fol[i])), bez=(k)=>wind.map((v,i)=>(1-k)*(1-k)*v+2*(1-k)*k*ctl[i]+k*k*fol[i]);
   const ease=x=>x*x*(3-2*x); let hand=rest, lean=0;
-  if(u>=0&&u<220){const k=ease(u/220); hand=rest.map((v,i)=>lerp(v,back[i],k)); lean=-0.08*k;}
-  else if(u>=220&&u<APPLY_CONTACT_MS){const k=(u-220)/(APPLY_CONTACT_MS-220); const kk=k*k; hand=back.map((v,i)=>lerp(v,hit[i],kk)); lean=lerp(-0.08,0.32,kk);}
-  else if(u>=APPLY_CONTACT_MS&&u<520){hand=[hit[0],hit[1]+0.03*Math.sin((u-APPLY_CONTACT_MS)/140*TAU),hit[2]]; lean=0.32;}
-  else if(u>=520&&u<900){const k=ease((u-520)/380); hand=hit.map((v,i)=>lerp(v,rest[i],k)); lean=lerp(0.32,0,k);}
-  return {hand:[hand[0]+lean*d[0],hand[1],hand[2]+lean*d[2]],lean,d}; }
+  if(u>=0&&u<220){const k=ease(u/220); hand=rest.map((v,i)=>lerp(v,wind[i],k)); lean=-0.06*k;}
+  else if(u>=220&&u<440){const k=(u-220)/220; hand=bez(k); lean=lerp(-0.06,0.28,Math.min(1,k*1.6));}
+  else if(u>=440&&u<540){hand=fol; lean=0.28;}
+  else if(u>=540&&u<900){const k=ease((u-540)/360); hand=fol.map((v,i)=>lerp(v,rest[i],k)); lean=lerp(0.28,0,k);}
+  return {hand:[hand[0]+lean*d[0],hand[1],hand[2]+lean*d[2]],lean,d,r}; }
 function drawApplyRogue(c,vp,u){ const st=applyStroke(c,vp,u); drawCapsule([c[0]+st.lean*st.d[0],1.0,c[2]+st.lean*st.d[2]],CLASS.rogue);
-  const h=st.hand, q=proj(h), tip=proj([h[0]+st.d[0]*0.45,h[1]+0.05,h[2]+st.d[2]*0.45]);
+  // the sweep's trail: the last 120 ms of the hand's path, fading
+  if(u>220&&u<560){ g.save();g.globalCompositeOperation='lighter';g.lineCap='round'; let prev=null;
+    for(let k=0;k<=8;k++){ const uu=u-k*15; if(uu<220) break; const p=proj(applyStroke(c,vp,uu).hand); if(p&&prev){g.strokeStyle=`rgba(235,235,245,${0.55*(1-k/8)})`;g.lineWidth=Math.max(1.5,0.12*p.s*(1-k/8));g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();} prev=p; }
+    g.restore(); }
+  const h=st.hand, nx=applyStroke(c,vp,u+16).hand, tdir=norm(sub(nx,h)), blade=Math.hypot(...sub(nx,h))>0.002?tdir:st.d;
+  const q=proj(h), tip=proj([h[0]+blade[0]*0.45,h[1]+blade[1]*0.45+0.04,h[2]+blade[2]*0.45]);
   if(q&&tip){ g.strokeStyle='rgba(200,205,215,1)';g.lineWidth=Math.max(1.5,0.05*q.s);g.lineCap='round';g.beginPath();g.moveTo(q.x,q.y);g.lineTo(tip.x,tip.y);g.stroke();
     g.fillStyle=rgb([225,185,145],1);g.beginPath();g.arc(q.x,q.y,Math.max(2,0.11*q.s),0,TAU);g.fill(); }
   return st; }
@@ -345,7 +354,7 @@ const EFFECTS=[
 // ================================================================ Rupture
 mkFx({id:'rupture',name:'Rupture',sub:'apply stroke + finisher hand flash (kit 394) · landing at contact: bloodyexplosion.m2 @Chest · 12 s bleed',durMs:3000,frame:{dist:7,ty:1.3},loopTotal:3200,
  notes:[
-  '<b>Apply stroke</b> (authored, per your note): the weapon hand draws back (0–0.22 s), drives into the victim\'s chest (contact at 0.38 s), holds a beat and recovers by 0.9 s. The red hand glow rides the striking hand, and the landing fires at contact. The client plays Special1H here; the stroke is ours.',
+  '<b>Apply stroke</b> (authored, per your note): a <b>backhand sweep</b>. The weapon hand winds up across the body to the off shoulder (0–0.22 s), sweeps outward across the victim\'s chest (contact at 0.33 s, mid-arc), follows through wide on the weapon side, holds and recovers by 0.9 s. It reads apart from the Rogue\'s thrusts (Ambush, Kidney Shot) and Sinister Strike\'s rising slash. The red hand glow rides the striking hand, and the landing fires at contact. The client plays Special1H here; the stroke is ours.',
   'The Rogue (left) gets the <b>finisher hand flash</b>: a red glow and yellow-to-red rings on both hands. Rupture and Expose Armor share it, and so does Warrior Execute.',
   'The victim gets <b>bloodyexplosion.m2</b>: twelve blood-spurt emitters spraying from the chest for 0.5 s at 2.2 yd/s under gravity 6.9, droplets 0.09 yd at peak. <b>Rend\'s client landing is the same model</b>; we ship Rend\'s drips but not this landing.',
   '<b>The 12 s bleed has no client state.</b> The proposal: route Rupture to Rend\'s red drips ('+SHIP+'), one line in the DoT router. No new channel on the kill target.'],
@@ -363,7 +372,7 @@ mkFx({id:'rupture',name:'Rupture',sub:'apply stroke + finisher hand flash (kit 3
   if(ms>APPLY_CONTACT_MS&&ms<APPLY_CONTACT_MS+40) fct(String(110+((rnd()*30)|0)),[255,255,255],24,[vp[0],2.6,vp[2]]); },
  constants(fx){const K=fx.knobs;return [
   `// Rupture: kit 394 (bloodlust_state_hand.m2 on both hands) on cast; kit 220 (bloodyexplosion.m2 @Chest) on the victim. AS-336 bench.`,
-  `// swing_style_for_ability(Rupture) = SwingStyle::FinisherApply: draw back 0.22 s, drive to contact at 0.38 s, hold to 0.52 s, recover by 0.9 s; landing at impact_at.`,
+  `// swing_style_for_ability(Rupture) = SwingStyle::Backhand: wind up across the body 0.22 s, outward sweep through contact at 0.33 s (mid-arc) to 0.44 s, hold to 0.54 s, recover by 0.9 s; landing at impact_at.`,
   `pub const RUPTURE_HAND_FLASH: bool = ${b(on(fx,'hands'))}; // shared FinisherHandFlash with Expose Armor, on the striking hand`,
   `pub const RUPTURE_BLOOD_SPRAY: bool = ${b(on(fx,'spray'))}; // shared BleedSpray: 0.5 s, 2.2 yd/s, gravity 6.9`,
   `pub const RUPTURE_DOT_STATE: Option<DotStateVisual> = ${on(fx,'drips')?'Some(DotStateVisual::Drip(DripKind::Bleed))':'None'};`,
@@ -401,7 +410,7 @@ mkFx({id:'hemo',name:'Hemorrhage',sub:'strike: Special1H + type-8 trail (undrawn
 // ================================================================ Expose Armor
 mkFx({id:'expose',name:'Expose Armor',sub:'apply stroke + finisher hand flash (kit 394) · landing at contact: exposearmor_head.m2 @Head · 3 s',durMs:3000,frame:{dist:6,ty:2.2},loopTotal:4700,
  notes:[
-  '<b>Apply stroke</b> (authored, per your note): the weapon hand draws back (0–0.22 s), drives into the victim\'s chest (contact at 0.38 s), holds a beat and recovers by 0.9 s. The red hand glow rides the striking hand, and the landing fires at contact. The client plays Special1H here; the stroke is ours.',
+  '<b>Apply stroke</b> (authored, per your note): a <b>backhand sweep</b>. The weapon hand winds up across the body to the off shoulder (0–0.22 s), sweeps outward across the victim\'s chest (contact at 0.33 s, mid-arc), follows through wide on the weapon side, holds and recovers by 0.9 s. It reads apart from the Rogue\'s thrusts (Ambush, Kidney Shot) and Sinister Strike\'s rising slash. The red hand glow rides the striking hand, and the landing fires at contact. The client plays Special1H here; the stroke is ours.',
   'The Rogue gets Rupture\'s apply stroke and hand flash. At contact the victim gets <b>exposearmor_head.m2</b> for 3 s: a <b>shield crest</b> about 1 yd above the head (a silver item texture, ~0.75 × 0.6 yd at the start).',
   'The crest glints <b>gold</b> with star sparkles to 0.67 s, then <b>turns blue</b> by 1.0 s and jolts (scale 1.5 → squash → 1.0 at 0.7–1.0 s) while a <b>shatter burst</b> of magenta-to-violet streaks falls through it (150/s, 0.4–0.8 s). A faint blue haze drifts about it to 2.6 s, then it fades out by 3 s.',
   'Read: the target\'s armor breaks. <b>The 15 s debuff has no state after that</b>; the icon carries it.',
@@ -429,7 +438,7 @@ mkFx({id:'expose',name:'Expose Armor',sub:'apply stroke + finisher hand flash (k
   if(on(fx,'crest')) crest(p,0.38*sc[0]*s,0.5*sc[1]*s,col.map(x=>Math.min(255,x*1.1)),fade,col); },
  constants(fx){const K=fx.knobs;return [
   `// Expose Armor: kit 394 (finisher hand flash) on cast; kit 3069 (exposearmor_head.m2 @Head, 3 s) on the victim. AS-336 bench.`,
-  `// swing_style_for_ability(ExposeArmor) = SwingStyle::FinisherApply: draw back 0.22 s, drive to contact at 0.38 s, hold to 0.52 s, recover by 0.9 s; landing at impact_at.`,
+  `// swing_style_for_ability(ExposeArmor) = SwingStyle::Backhand: wind up across the body 0.22 s, outward sweep through contact at 0.33 s (mid-arc) to 0.44 s, hold to 0.54 s, recover by 0.9 s; landing at impact_at.`,
   `pub const EXPOSE_ARMOR_HAND_FLASH: bool = ${b(on(fx,'hands'))};`,
   `pub const EXPOSE_ARMOR_CREST: bool = ${b(on(fx,'crest'))}; // ~0.38 x 0.5 yd x1.5, 1.0 yd over the head; gold -> blue 0.667-1.0 s`,
   `pub const EXPOSE_ARMOR_GLOW: bool = ${b(on(fx,'glow'))};`,
