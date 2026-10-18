@@ -336,6 +336,24 @@ match is attributed by `2026-10-17-as360-attribute.py --before <main binary>
 `2026-10-17-as360-fire-probe.patch` applied (`git apply` it, then
 `cargo build --release`).
 
+## `2026-10-17-as363-*`
+
+Behind `../2026-10-17-as363-mutual-camp.md` (card AS-363). Arms are `main` @
+`15309d38` (`-before`) and the branch (`-after`), `--jobs 4 --trace-mode off`.
+
+- `-teamplan-pillaredarena` (9,000): the configs are
+  `2026-10-17-as360-teamplan-pillaredarena.jsonl.gz`, unchanged. Scored by
+  `2026-10-17-as363-attribute.py before.csv.gz after.csv.gz`, which exits 1 if
+  a match outside a mutual-camp cell moved.
+- `-headtohead-campers` (2,420): every mutual-camp cell of the above, played
+  `TeamPlan` vs `Legacy` in both assignments (`team1_ai_profile` /
+  `team2_ai_profile`). The two arms are byte-identical, so one CSV is kept.
+
+Controls, not kept: `2026-10-17-as360-legacy-pillaredarena.jsonl.gz` (9,000)
+and `gen_sweep.py --full 2 --exclude-double-healer --n 1 --extra
+'{"map":"BasicArena","ai_profile":"TeamPlan"}'` (900) are byte-identical
+across the arms.
+
 ## `2026-10-18-as201-*`
 
 Behind `../2026-10-18-as201-project-before-scoring.md` (card AS-201). One

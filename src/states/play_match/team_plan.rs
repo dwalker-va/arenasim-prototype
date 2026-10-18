@@ -474,6 +474,22 @@ pub fn should_hold(nearest_enemy_distance: Option<f32>, engage_radius: f32) -> b
     }
 }
 
+/// Whether a team that would camp actually holds its pillar, given whether the
+/// enemy would camp too.
+///
+/// A camp exists to make the enemy cross the arena, and it ends only at contact
+/// ([`teams_in_contact`]). When BOTH teams camp, nobody crosses: each holds its
+/// own pillar waiting for the other, contact never comes, and the match draws
+/// at the duration cap with no damage dealt. Measured under a uniform
+/// `TeamPlan` on PillaredArena: every melee+healer vs melee+healer 2v2 drew,
+/// 640 of 640 matches, and so did every cell against Mage+Paladin (the Paladin
+/// counts as melee). So a camp holds only against an enemy that will come;
+/// two would-be campers both press, which is the pre-camp behaviour. An enemy
+/// on `Legacy` never camps, so a head-to-head is unaffected.
+pub fn camp_holds(own_would_camp: bool, enemy_would_camp: bool) -> bool {
+    own_would_camp && !enemy_would_camp
+}
+
 /// Have the two teams met? True once ANY enemy is within `engage_radius` of ANY
 /// living member of the camping team.
 ///
@@ -626,12 +642,12 @@ pub fn update_team_plans(
         .map(|g| g.bounds.team_spawn_x())
         .unwrap_or(1.0);
 
-    for team in [1u8, 2u8] {
+    // The anchor each team WOULD camp on, asked of both teams before either plan
+    // is written, because whether a camp holds depends on the other side's.
+    let would_camp: [Option<Anchor>; 2] = [1u8, 2u8].map(|team| {
         if !profiles.for_team(team).is_team_plan() {
-            *plans.for_team_mut(team) = TeamPlan::default();
-            continue;
+            return None;
         }
-
         let classes: Vec<CharacterClass> = combatants
             .iter()
             .map(|(_, c, _, _)| c)
@@ -652,9 +668,23 @@ pub fn update_team_plans(
         // ...and only BEFORE contact. Without the latch, the commonest replan
         // trigger (a death) lands mid-fight and would re-arm the camp, marching a
         // healer back to its pillar at the worst possible moment.
-        let anchor = (comp.wants_to_camp() && !plans.has_contact(team))
+        (comp.wants_to_camp() && !plans.has_contact(team))
             .then(|| choose_anchor(volumes, spawn_x))
-            .flatten();
+            .flatten()
+    });
+
+    for team in [1u8, 2u8] {
+        if !profiles.for_team(team).is_team_plan() {
+            *plans.for_team_mut(team) = TeamPlan::default();
+            continue;
+        }
+
+        let own = TeamPlans::index(team);
+        let anchor = if camp_holds(would_camp[own].is_some(), would_camp[1 - own].is_some()) {
+            would_camp[own]
+        } else {
+            None
+        };
 
         let plan = plans.for_team_mut(team);
         plan.anchor = anchor;
@@ -720,13 +750,21 @@ mod tests {
         profile: AiProfile,
         roster: &[(u8, u8, CharacterClass)],
     ) -> TeamPlans {
+        run_planner_with_profiles(AiProfiles::uniform(profile), roster)
+    }
+
+    /// As `run_planner_with_profile`, with a profile per team (a head-to-head).
+    fn run_planner_with_profiles(
+        profiles: AiProfiles,
+        roster: &[(u8, u8, CharacterClass)],
+    ) -> TeamPlans {
         let mut app = App::new();
         app.insert_resource(MatchCountdown {
             time_remaining: 0.0,
             gates_opened: true,
         });
         app.insert_resource(TeamPlans::default());
-        app.insert_resource(AiProfiles::uniform(profile));
+        app.insert_resource(profiles);
         app.insert_resource(ActiveMapGeometry {
             bounds: super::super::arena_bounds::ArenaBounds::Bowl {
                 semi_x: 59.72,
@@ -831,6 +869,61 @@ mod tests {
             "a pure-ranged comp gains nothing from camping"
         );
         assert_eq!(p2.stance, Stance::Press);
+    }
+
+    /// Two camping comps would each hold a pillar and wait for the other, and
+    /// contact — the only thing that ends a camp — would never come: the match
+    /// drew at the cap with no damage dealt. So when both would camp, neither does.
+    #[test]
+    fn two_camping_comps_both_press() {
+        let plans = run_planner_with_profile(
+            AiProfile::TeamPlan,
+            &[
+                (1, 0, CharacterClass::Warrior),
+                (1, 1, CharacterClass::Shaman),
+                (2, 0, CharacterClass::Rogue),
+                (2, 1, CharacterClass::Priest),
+            ],
+        );
+        for team in [1u8, 2u8] {
+            assert_eq!(
+                plans.for_team(team).anchor,
+                None,
+                "team {team}: a camp against a camp is a standoff"
+            );
+            assert_eq!(plans.for_team(team).stance, Stance::Press);
+        }
+    }
+
+    /// ...but only against an enemy that would really camp. A melee+healer enemy
+    /// on `Legacy` never camps, so the `TeamPlan` side of a head-to-head keeps
+    /// its pillar.
+    #[test]
+    fn a_camp_holds_against_a_legacy_melee_healer_comp() {
+        let plans = run_planner_with_profiles(
+            AiProfiles {
+                team1: AiProfile::TeamPlan,
+                team2: AiProfile::Legacy,
+            },
+            &[
+                (1, 0, CharacterClass::Warrior),
+                (1, 1, CharacterClass::Shaman),
+                (2, 0, CharacterClass::Rogue),
+                (2, 1, CharacterClass::Priest),
+            ],
+        );
+        assert!(plans.for_team(1).anchor.is_some());
+        assert_eq!(plans.for_team(1).stance, Stance::Hold);
+        assert_eq!(plans.for_team(2).anchor, None);
+        assert_eq!(plans.for_team(2).stance, Stance::Press);
+    }
+
+    #[test]
+    fn a_camp_holds_only_against_an_enemy_that_will_come() {
+        assert!(camp_holds(true, false));
+        assert!(!camp_holds(true, true));
+        assert!(!camp_holds(false, false));
+        assert!(!camp_holds(false, true));
     }
 
     /// Dead combatants leave the roster, so a death triggers a replan — that is
