@@ -131,6 +131,10 @@ reading rests on inference rather than a table, the row says so (**UNRESOLVED** 
 ### What this means for design (Rupture)
 
 - Landing: `bloodyexplosion.m2` on the victim, plus the finisher hand flash on the Rogue.
+- The motion (user, 2026-10-17): an authored **apply stroke**, shared with Expose Armor. The
+  weapon hand draws back, drives into the victim's chest and holds a beat; the hand flash rides
+  the striking hand and the landing fires at contact. Reusing a generic cast pose does not read
+  as putting the debuff on the target. The client's Special1H is not drawn.
 - State: none in the client. **Route Rupture to `DripKind::Bleed`**, Rend's shipped drips:
   one line in `DotStateVisual::for_dot`, and the drip is already this game's "bleeding"
   read. No new channel.
@@ -191,7 +195,7 @@ reading rests on inference rather than a table, the row says so (**UNRESOLVED** 
 
 ### What this means for design (Expose Armor)
 
-- A 3 s apply: the finisher hand flash on the Rogue, then a crest above the victim's head
+- A 3 s apply: Rupture's apply stroke and hand flash on the Rogue, then a crest above the victim's head
   that glints gold, cracks blue with a streak burst, and fades. The crest is an item
   texture; ours would be an authored crest shape.
 - No state for the 15 s after; the icon carries it.

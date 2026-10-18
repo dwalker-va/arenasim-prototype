@@ -316,31 +316,55 @@ function skull(p,sz,col,a){ if(a<=0.003) return; const q=proj(p); if(!q) return;
 // The lavender ghost-fire column (cheat_death.m2 batch 3): a 0.8 yd x 2.5 yd cylinder of desaturated fire.
 function ghostFire(c,ms,s,a){ if(a<=0.003) return; for(let k=0;k<18;k++){ const ang=k/18*TAU+ms/900, per=520+(k%5)*60, ph=((ms+k*97)%per)/per;
   const y=-0.1+ph*2.3*s, r=0.4*s*(1-ph*0.35); sprite('flame',[c[0]+r*Math.cos(ang),y,c[2]+r*Math.sin(ang)],0.42*s*(1-ph*0.5),[181,134,244],a*Math.sin(ph*Math.PI)*0.8); } }
+// The "apply" stroke for Rupture and Expose Armor (user, AS-336): the weapon hand draws back, drives into the
+// victim's chest and holds a beat, so the debuff is visibly put ON the target; the landing fires at contact.
+const APPLY_CONTACT_MS=380;
+function applyStroke(c,vp,u){ const rest=[c[0]+0.35,1.25,c[2]+0.25], back=[c[0]-0.1,1.6,c[2]+0.35];
+  const d=norm(sub([vp[0],0,vp[2]],[c[0],0,c[2]])), hit=[vp[0]-d[0]*0.42,1.45,vp[2]-d[2]*0.42+0.1];
+  const ease=x=>x*x*(3-2*x); let hand=rest, lean=0;
+  if(u>=0&&u<220){const k=ease(u/220); hand=rest.map((v,i)=>lerp(v,back[i],k)); lean=-0.08*k;}
+  else if(u>=220&&u<APPLY_CONTACT_MS){const k=(u-220)/(APPLY_CONTACT_MS-220); const kk=k*k; hand=back.map((v,i)=>lerp(v,hit[i],kk)); lean=lerp(-0.08,0.32,kk);}
+  else if(u>=APPLY_CONTACT_MS&&u<520){hand=[hit[0],hit[1]+0.03*Math.sin((u-APPLY_CONTACT_MS)/140*TAU),hit[2]]; lean=0.32;}
+  else if(u>=520&&u<900){const k=ease((u-520)/380); hand=hit.map((v,i)=>lerp(v,rest[i],k)); lean=lerp(0.32,0,k);}
+  return {hand:[hand[0]+lean*d[0],hand[1],hand[2]+lean*d[2]],lean,d}; }
+function drawApplyRogue(c,vp,u){ const st=applyStroke(c,vp,u); drawCapsule([c[0]+st.lean*st.d[0],1.0,c[2]+st.lean*st.d[2]],CLASS.rogue);
+  const h=st.hand, q=proj(h), tip=proj([h[0]+st.d[0]*0.45,h[1]+0.05,h[2]+st.d[2]*0.45]);
+  if(q&&tip){ g.strokeStyle='rgba(200,205,215,1)';g.lineWidth=Math.max(1.5,0.05*q.s);g.lineCap='round';g.beginPath();g.moveTo(q.x,q.y);g.lineTo(tip.x,tip.y);g.stroke();
+    g.fillStyle=rgb([225,185,145],1);g.beginPath();g.arc(q.x,q.y,Math.max(2,0.11*q.s),0,TAU);g.fill(); }
+  return st; }
+// The finisher hand flash rides the striking hand (red_glow3 + rings + puffs), building through the stroke.
+function strikeFlash(c,vp,u,s,op){ if(u<0||u>900) return; const st=applyStroke(c,vp,u), h=st.hand, a=keys([[0,0],[120,0.8],[APPLY_CONTACT_MS,1],[650,0.6],[900,0]],u)*op;
+  bbGlow(h,0.9*s,0.9*s,[255,30,10],a*0.55); const r=keys([[0,0.22],[900,0.41]],u)*s;
+  ring3([h[0],0,h[2]],h[1],r*0.5,keys([[0,[255,216,0]],[450,[250,5,0]]],u),a*0.9,2);
+  for(let k=0;k<6;k++){ const ph=((u/700)+k/6)%1; sprite('cloud',[h[0]-st.d[0]*0.25*ph,h[1]+0.15*ph,h[2]-st.d[2]*0.25*ph],0.28*(1-ph)*s,[255,40,0],a*(1-ph)); }
+  const off=[c[0]-0.45,1.3,c[2]+0.15]; bbGlow(off,0.6*s,0.6*s,[255,30,10],a*0.35); }
 const bloodSpray=(trig,at)=>({anchor:'chest',at,trig,span:700,vRange:1.25,speed:2.2,speedVar:0.25,gravity:6.9,life:0.5,rate:[[0,150*6],[167,150*6],[333,50*6],[500,0]],win:[[0,1],[500,0]],blend:'alpha',tail:0.05,
   color:[[0,BLOOD],[1,[110,4,4]]],alpha:[[0,1],[0.25,0.69],[1,0]],scale:[[0,0.03],[0.25,0.11],[1,0.02]],kind:'blob'});
 
 const EFFECTS=[
 // ================================================================ Rupture
-mkFx({id:'rupture',name:'Rupture',sub:'cast: finisher hand flash (kit 394) · landing: bloodyexplosion.m2 @Chest · 12 s bleed',durMs:3000,frame:{dist:7,ty:1.3},loopTotal:3200,
+mkFx({id:'rupture',name:'Rupture',sub:'apply stroke + finisher hand flash (kit 394) · landing at contact: bloodyexplosion.m2 @Chest · 12 s bleed',durMs:3000,frame:{dist:7,ty:1.3},loopTotal:3200,
  notes:[
+  '<b>Apply stroke</b> (authored, per your note): the weapon hand draws back (0–0.22 s), drives into the victim\'s chest (contact at 0.38 s), holds a beat and recovers by 0.9 s. The red hand glow rides the striking hand, and the landing fires at contact. The client plays Special1H here; the stroke is ours.',
   'The Rogue (left) gets the <b>finisher hand flash</b>: a red glow and yellow-to-red rings on both hands. Rupture and Expose Armor share it, and so does Warrior Execute.',
   'The victim gets <b>bloodyexplosion.m2</b>: twelve blood-spurt emitters spraying from the chest for 0.5 s at 2.2 yd/s under gravity 6.9, droplets 0.09 yd at peak. <b>Rend\'s client landing is the same model</b>; we ship Rend\'s drips but not this landing.',
   '<b>The 12 s bleed has no client state.</b> The proposal: route Rupture to Rend\'s red drips ('+SHIP+'), one line in the DoT router. No new channel on the kill target.'],
  asks:['Keep the blood spray and the hand flash? Drips for the bleed (recommended), or icon only?'],
  knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
  layers:[
-  {id:'hands',name:'Finisher hand flash (Rogue)',desc:'bloodlust_state_hand.m2 ×2: red_glow3 + rings (255,216,0) → (250,5,0) + red puffs',sw:[255,40,0],custom:true},
+  {id:'hands',name:'Finisher hand flash on the striking hand',desc:'bloodlust_state_hand.m2: red_glow3 + rings (255,216,0) → (250,5,0) + red puffs, riding the stroke',sw:[255,40,0],custom:true},
   {id:'spray',name:'Blood spray (victim)',desc:'bloodyexplosion.m2: 12 × spurts, 0.5 s, 2.2 yd/s, gravity 6.9, 0.09 yd',sw:BLOOD,emitter:bloodSpray('hit')},
   {id:'drips',name:'Bleed drips (Rend\'s, shipped)',desc:'DripKind::Bleed: deep-red drops, for the 12 s',sw:[128,8,8],custom:true,cls:'authored'},
  ],
- reset(fx){fx.trig={hit:[150]};},
- bodies(fx,vp){drawCapsule(AT.rogue,CLASS.rogue);drawCapsule(vp,CLASS.warrior);},
- customDraw(fx,ms,vp){ const K=fx.knobs; if(on(fx,'hands')) handFlash(AT.rogue,ms,K.size,K.opacity??1);
-  if(on(fx,'drips')&&ms>250) bleedDrips(vp,ms);
-  if(ms>150&&ms<190) fct(String(110+((rnd()*30)|0)),[255,255,255],24,[vp[0],2.6,vp[2]]); },
+ reset(fx){fx.trig={hit:[APPLY_CONTACT_MS]};},
+ bodies(fx,vp,ms){drawApplyRogue(AT.rogue,vp,ms);drawCapsule(vp,CLASS.warrior);},
+ customDraw(fx,ms,vp){ const K=fx.knobs; if(on(fx,'hands')) strikeFlash(AT.rogue,vp,ms,K.size,K.opacity??1);
+  if(on(fx,'drips')&&ms>APPLY_CONTACT_MS+80) bleedDrips(vp,ms);
+  if(ms>APPLY_CONTACT_MS&&ms<APPLY_CONTACT_MS+40) fct(String(110+((rnd()*30)|0)),[255,255,255],24,[vp[0],2.6,vp[2]]); },
  constants(fx){const K=fx.knobs;return [
   `// Rupture: kit 394 (bloodlust_state_hand.m2 on both hands) on cast; kit 220 (bloodyexplosion.m2 @Chest) on the victim. AS-336 bench.`,
-  `pub const RUPTURE_HAND_FLASH: bool = ${b(on(fx,'hands'))}; // shared FinisherHandFlash with Expose Armor`,
+  `// swing_style_for_ability(Rupture) = SwingStyle::FinisherApply: draw back 0.22 s, drive to contact at 0.38 s, hold to 0.52 s, recover by 0.9 s; landing at impact_at.`,
+  `pub const RUPTURE_HAND_FLASH: bool = ${b(on(fx,'hands'))}; // shared FinisherHandFlash with Expose Armor, on the striking hand`,
   `pub const RUPTURE_BLOOD_SPRAY: bool = ${b(on(fx,'spray'))}; // shared BleedSpray: 0.5 s, 2.2 yd/s, gravity 6.9`,
   `pub const RUPTURE_DOT_STATE: Option<DotStateVisual> = ${on(fx,'drips')?'Some(DotStateVisual::Drip(DripKind::Bleed))':'None'};`,
   `pub const RUPTURE_SIZE_MUL: f32 = ${f2(K.size)};`];}
@@ -375,34 +399,37 @@ mkFx({id:'hemo',name:'Hemorrhage',sub:'strike: Special1H + type-8 trail (undrawn
   `// Debuff: no state (client has none); stacks on the icon. AuraApplyRoute: the spray replaces the debuff band.`];}
 }),
 // ================================================================ Expose Armor
-mkFx({id:'expose',name:'Expose Armor',sub:'cast: finisher hand flash (kit 394) · landing: exposearmor_head.m2 @Head · 3 s',durMs:3000,frame:{dist:6,ty:2.2},loopTotal:4200,
+mkFx({id:'expose',name:'Expose Armor',sub:'apply stroke + finisher hand flash (kit 394) · landing at contact: exposearmor_head.m2 @Head · 3 s',durMs:3000,frame:{dist:6,ty:2.2},loopTotal:4700,
  notes:[
-  'The Rogue gets Rupture\'s finisher hand flash. The victim gets <b>exposearmor_head.m2</b> for 3 s: a <b>shield crest</b> about 1 yd above the head (a silver item texture, ~0.75 × 0.6 yd at the start).',
+  '<b>Apply stroke</b> (authored, per your note): the weapon hand draws back (0–0.22 s), drives into the victim\'s chest (contact at 0.38 s), holds a beat and recovers by 0.9 s. The red hand glow rides the striking hand, and the landing fires at contact. The client plays Special1H here; the stroke is ours.',
+  'The Rogue gets Rupture\'s apply stroke and hand flash. At contact the victim gets <b>exposearmor_head.m2</b> for 3 s: a <b>shield crest</b> about 1 yd above the head (a silver item texture, ~0.75 × 0.6 yd at the start).',
   'The crest glints <b>gold</b> with star sparkles to 0.67 s, then <b>turns blue</b> by 1.0 s and jolts (scale 1.5 → squash → 1.0 at 0.7–1.0 s) while a <b>shatter burst</b> of magenta-to-violet streaks falls through it (150/s, 0.4–0.8 s). A faint blue haze drifts about it to 2.6 s, then it fades out by 3 s.',
   'Read: the target\'s armor breaks. <b>The 15 s debuff has no state after that</b>; the icon carries it.',
   'The crest would be an authored shape; we have no item textures.'],
  asks:['Keep the crest at client size, and all its layers?'],
  knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
  layers:[
-  {id:'hands',name:'Finisher hand flash (Rogue)',desc:'kit 394, as Rupture',sw:[255,40,0],custom:true},
+  {id:'hands',name:'Finisher hand flash on the striking hand',desc:'kit 394, as Rupture',sw:[255,40,0],custom:true},
   {id:'crest',name:'Shield crest, gold → blue',desc:'(0.94,0.83,0.32) → (0.32,0.54,0.94) at 0.67–1.0 s; squash 0.7–1.0 s; out 2.8–3.0 s',sw:[240,212,81],custom:true},
   {id:'glow',name:'Glow quad',desc:'blue_glowd ~0.9 yd, gold → blue, weight 0.83',sw:[0,90,255],custom:true},
-  {id:'sparkle',name:'Gold-to-cyan sparkles',desc:'star4 ×4, 0.13–0.3 s and 0.5–0.67 s, 0.02 → 0.21 yd',sw:[255,210,0],emitter:{anchor:'head',pos:[0,0,1.0],vRange:3.14,speed:0.28,spin:1.1,life:0.2,rate:[[0,45]],win:[[0,0],[134,1],[300,0],[300,1],[500,0],[500,1],[667,0]],area:0.42,areaY:0.6,
+  {id:'sparkle',name:'Gold-to-cyan sparkles',desc:'star4 ×4, 0.13–0.3 s and 0.5–0.67 s, 0.02 → 0.21 yd',sw:[255,210,0],emitter:{anchor:'head',pos:[0,0,1.0],vRange:3.14,speed:0.28,spin:1.1,life:0.2,rate:[[0,45]],trig:'hit',span:3000,win:[[0,0],[134,1],[300,0],[300,1],[500,0],[500,1],[667,0]],area:0.42,areaY:0.6,
     color:[[0,[255,210,0]],[0.5,[255,255,255]],[1,[0,246,255]]],alpha:[[0,1],[0.5,1],[1,0]],scale:[[0,0.02],[0.5,0.21],[1,0.02]],kind:'star',follow:true}},
-  {id:'haze',name:'Blue haze',desc:'toonsmoke16 25/s 0.5–2.6 s, alpha ≤ 0.2, 0.24 → 0.57 yd',sw:[186,210,255],emitter:{anchor:'head',pos:[0,0,0.97],vRange:3.14,speed:0.56,drag:2.5,life:1.0,rate:25,win:[[0,0],[500,1],[2600,0]],
+  {id:'haze',name:'Blue haze',desc:'toonsmoke16 25/s 0.5–2.6 s, alpha ≤ 0.2, 0.24 → 0.57 yd',sw:[186,210,255],emitter:{anchor:'head',pos:[0,0,0.97],vRange:3.14,speed:0.56,drag:2.5,life:1.0,rate:25,trig:'hit',span:3000,win:[[0,0],[500,1],[2600,0]],
     color:[[0,[195,207,225]],[0.5,[186,210,255]],[1,[12,0,255]]],alpha:[[0,0],[0.5,0.2],[1,0]],scale:[[0,0.24],[0.5,0.36],[1,0.57]],kind:'smoke',follow:true}},
-  {id:'shatter',name:'Shatter streaks',desc:'grad2db 150/s 0.4–0.8 s, falling, magenta → blue → violet',sw:[255,18,115],emitter:{anchor:'head',pos:[0,0,1.25],vRange:0.5,speed:-0.9,gravity:2,life:0.5,rate:150,win:[[0,0],[400,1],[800,0]],area:0.6,areaY:0.3,tail:4,
+  {id:'shatter',name:'Shatter streaks',desc:'grad2db 150/s 0.4–0.8 s, falling, magenta → blue → violet',sw:[255,18,115],emitter:{anchor:'head',pos:[0,0,1.25],vRange:0.5,speed:-0.9,gravity:2,life:0.5,rate:150,trig:'hit',span:3000,win:[[0,0],[400,1],[800,0]],area:0.6,areaY:0.3,tail:4,
     color:[[0,[255,18,115]],[0.3,[0,162,255]],[1,[120,0,255]]],alpha:[[0,0.39],[0.3,1],[1,0]],scale:[[0,0.03],[0.3,0.17],[1,0.01]],kind:'glow',follow:true}},
  ],
- bodies(fx,vp){drawCapsule(AT.rogue,CLASS.rogue);drawCapsule(vp,CLASS.warrior);},
- customDraw(fx,ms,vp){ const K=fx.knobs, op=K.opacity??1, s=K.size, t=ms/(K.duration??1);
-  if(on(fx,'hands')) handFlash(AT.rogue,ms,K.size,op);
-  if(t>3000) return; const col=keys([[0,[240,212,81]],[667,[240,212,81]],[1000,[81,137,240]]],t), fade=keys([[0,0],[134,1],[2800,1],[3000,0]],t)*op;
+ reset(fx){fx.trig={hit:[APPLY_CONTACT_MS]};},
+ bodies(fx,vp,ms){drawApplyRogue(AT.rogue,vp,ms);drawCapsule(vp,CLASS.warrior);},
+ customDraw(fx,ms,vp){ const K=fx.knobs, op=K.opacity??1, s=K.size, t=(ms-APPLY_CONTACT_MS)/(K.duration??1);
+  if(on(fx,'hands')) strikeFlash(AT.rogue,vp,ms,K.size,op);
+  if(t<0||t>3000) return; const col=keys([[0,[240,212,81]],[667,[240,212,81]],[1000,[81,137,240]]],t), fade=keys([[0,0],[134,1],[2800,1],[3000,0]],t)*op;
   const sc=keys([[0,[1.5,1.5]],[700,[1.5,1.5]],[800,[1.5,1.7]],[900,[1.0,0.8]],[1000,[1,1]]],t); const p=[vp[0],2.25+1.0,vp[2]];
   if(on(fx,'glow')) bbGlow(p,0.92*s,1.0*s,keys([[0,[255,210,0]],[667,[255,210,0]],[1000,[0,90,255]]],t),keys([[0,0],[400,0.83],[2600,0.83],[3000,0]],t)*0.6*op);
   if(on(fx,'crest')) crest(p,0.38*sc[0]*s,0.5*sc[1]*s,col.map(x=>Math.min(255,x*1.1)),fade,col); },
  constants(fx){const K=fx.knobs;return [
   `// Expose Armor: kit 394 (finisher hand flash) on cast; kit 3069 (exposearmor_head.m2 @Head, 3 s) on the victim. AS-336 bench.`,
+  `// swing_style_for_ability(ExposeArmor) = SwingStyle::FinisherApply: draw back 0.22 s, drive to contact at 0.38 s, hold to 0.52 s, recover by 0.9 s; landing at impact_at.`,
   `pub const EXPOSE_ARMOR_HAND_FLASH: bool = ${b(on(fx,'hands'))};`,
   `pub const EXPOSE_ARMOR_CREST: bool = ${b(on(fx,'crest'))}; // ~0.38 x 0.5 yd x1.5, 1.0 yd over the head; gold -> blue 0.667-1.0 s`,
   `pub const EXPOSE_ARMOR_GLOW: bool = ${b(on(fx,'glow'))};`,
