@@ -528,8 +528,9 @@ measured.** Assume the three intents that still have no consumer
   time. Sight is binary, so a pillar that hides the ally from every candidate
   spot gives the solve no gradient; then it walks straight at the ally until a
   candidate sees it, rather than letting the stand-still tie-break park the
-  healer blind. (The Paladin's band-hold still parks it before the solve —
-  AS-209.)
+  healer blind. The Paladin's band-hold, which parks it before the solve
+  runs, parks only where the heal reaches the dying teammate; from a spot
+  that violates `C_DYING` it steps aside and the solve walks it (AS-209).
 
 #### The framing does not fit a kiter, and that is structural
 
