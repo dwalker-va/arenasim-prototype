@@ -185,26 +185,6 @@ pub fn sighted_formation_point(ctx: &CombatContext, healer: Entity, point: Vec3)
     Vec3::new(best.2.x, point.y, best.2.y)
 }
 
-/// Whether the formation walk is re-sent to `point` for sight, however little
-/// it moved from `last` (the point the healer is walking to): under the sight
-/// constraint, when BOTH the healer where it stands (`at`) and `last` see the
-/// teammates worse than `point` does. The healer is blind and so is where it is
-/// going — a teammate's shadow swept over the point it parked on.
-///
-/// Both, not either: a healer that still sees from where it stands keeps its
-/// walk while the repaired point slides a little each frame with the shadow's
-/// edge, and one that is blind only on its way to a sighted point is already
-/// going the right way. So a walk is re-sent once per sweep, not every frame.
-/// Always false under `Legacy` and on an obstacle-free map.
-pub fn sight_shift(ctx: &CombatContext, healer: Entity, at: Vec2, last: Vec2, point: Vec2) -> bool {
-    if !sight_constrained(ctx) || ctx.obstacles.is_empty() || last == point {
-        return false;
-    }
-    let allies = teammates(ctx, healer);
-    let goal = sight_from(ctx.obstacles, point, &allies);
-    goal > sight_from(ctx.obstacles, last, &allies) && goal > sight_from(ctx.obstacles, at, &allies)
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -370,32 +350,5 @@ mod tests {
         assert!(sight_constrained(&ctx));
         ctx.ai_profile = AiProfile::Legacy;
         assert!(!sight_constrained(&ctx));
-    }
-
-    /// A healer parked blind on a blind point is re-sent however short the
-    /// move; one that still sees, or is walking to a sighted point, is not.
-    #[test]
-    fn a_sight_shift_is_a_blind_healer_on_a_blind_point() {
-        let f = fixture(&[MAGE]);
-        let obstacles = pillar();
-        let ctx = f.ctx(&obstacles);
-        let fixed = f.repair(&obstacles, BLIND);
-        let open = Vec2::new(0.0, 9.0);
-        assert!(sight_shift(&ctx, f.healer, BLIND, BLIND, fixed));
-        // The healer sees from where it stands.
-        assert!(!sight_shift(&ctx, f.healer, open, BLIND, fixed));
-        // The healer is blind, but already walking to a sighted point.
-        assert!(!sight_shift(
-            &ctx,
-            f.healer,
-            BLIND,
-            fixed,
-            fixed + Vec2::X * 0.1
-        ));
-        // No pillar, no shift; and none under `Legacy`.
-        assert!(!sight_shift(&f.ctx(&[]), f.healer, BLIND, BLIND, fixed));
-        let mut legacy = f.ctx(&obstacles);
-        legacy.ai_profile = AiProfile::Legacy;
-        assert!(!sight_shift(&legacy, f.healer, BLIND, BLIND, fixed));
     }
 }

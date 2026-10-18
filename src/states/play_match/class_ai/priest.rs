@@ -2163,12 +2163,9 @@ fn free_tick(
 
     let point_xz = Vec2::new(point.x, point.z);
     let my_xz = Vec2::new(my_pos.x, my_pos.z);
-    // A blind healer walking to a blind point is re-sent to a sighted one
-    // however short the move (AS-206, `formation::sight_shift`).
-    let moved = state.last_point.is_none_or(|lp| {
-        lp.distance(point_xz) > movement.priest.formation_shift_threshold
-            || super::formation::sight_shift(ctx, entity, my_xz, lp, point_xz)
-    });
+    let moved = state
+        .last_point
+        .is_none_or(|lp| lp.distance(point_xz) > movement.priest.formation_shift_threshold);
     let near = my_xz.distance(point_xz) <= movement.priest.formation_deadzone;
 
     let issue = |commands: &mut Commands| {

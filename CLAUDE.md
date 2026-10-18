@@ -760,14 +760,12 @@ term. The candidates are geometry-anchored — the point projected onto the two
 tangent rays bounding the teammate's shadow past the obstacle's footprint disc,
 pushed `SIGHT_MARGIN` (2.5yd, past the 1.5yd formation dead zone) clear — so
 the repaired point slides with the fight instead of hopping. A point already
-in sight comes back bit-identical, and a healer standing blind on a blind
-point is re-sent however short the move (`formation::sight_shift`). The
-Paladin has no formation point. `Legacy` is untouched (byte-identical), and
-BasicArena with it under both profiles. Pinned by `tests/formation_sight.rs`:
-a staged pillar edge where the `TeamPlan` Druid regains sight of its Mage
-within 1s and its `Legacy` pair stays blind, plus an `#[ignore]`d seed-bank
-probe bounding every FREE blind spell. A new FREE goal (AS-328's standoff)
-belongs behind the same constraint.
+in sight comes back bit-identical. The Paladin has no formation point.
+`Legacy` is untouched (byte-identical), and BasicArena with it under both
+profiles. Pinned by `tests/formation_sight.rs`: a staged pillar edge where the
+`TeamPlan` Druid and Priest each regain sight of their Mage within 1s and the
+`Legacy` pair stays blind. A new FREE goal (AS-328's standoff) belongs behind
+the same constraint.
 
 **Dispel walk (Paladin, Priest)** — `healer_postures::dispel_chase_override`,
 choosing its ally with `class_ai::dispel_chase_target` (no RON knob). Cleanse and

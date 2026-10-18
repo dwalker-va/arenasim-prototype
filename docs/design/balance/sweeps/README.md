@@ -280,3 +280,20 @@ after.csv.gz`. The log-identity seed bank, which also prints where each
 diverging match first differs and how its winner moved, is
 `2026-10-17-as325-bank.py --before <main binary> --after <branch binary>
 --work <dir>`; its docstring says how each binary must be placed.
+
+## `2026-10-17-as206-teamplan-pillaredarena*`
+
+Behind `../2026-10-17-as206-formation-sight.md` (card AS-206). One paired
+directional sweep, 6,830 configs (683 cells x seeds 0-9), both teams
+`TeamPlan` on Nagrand. Regenerates byte-identically with:
+
+```bash
+scripts/gen_sweep.py --full 2 --exclude-double-healer \
+  --affects Priest,Druid,Shaman --control-cells 8 --n 10 --seed-base 0 \
+  --extra '{"map":"PillaredArena","ai_profile":"TeamPlan"}'
+```
+
+Run by `main` @ `0a8f8a36` (`-before.csv.gz`) and the branch
+(`-after.csv.gz`) with `--jobs 4`/`8 --trace-mode off`, analysed with
+`scripts/paired_sweep.py before.csv after.csv --affects Priest,Druid,Shaman
+--tier directional --expect nothing`.
