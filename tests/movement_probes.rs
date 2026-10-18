@@ -6176,7 +6176,9 @@ mod juke_chase {
     /// the bank where the Warrior dies early and the surviving Shaman kites a
     /// pillar, the Mage's fizzle-length occlusion windows during the 2v1 are
     /// FEW (the chase closes distance so the angular juke stops breaking sight
-    /// mid-cast), and the 2v1 resolves by ELIMINATION well before the cap.
+    /// mid-cast), and the 2v1 resolves by ELIMINATION well before the cap —
+    /// to Mage+Priest in at least [`MIN_TEAM1_DANCE_SHARE`] of the dances
+    /// (rebaselined for AS-292 from "every dance"; see that constant).
     #[test]
     fn juke_bounded_over_the_seed_bank() {
         let dances: Vec<(u64, JukeStats)> = JUKE_BANK
@@ -6214,12 +6216,10 @@ mod juke_chase {
                 s.lone_secs,
                 fizzle_rate(s),
             );
-            // (b) Resolves by elimination (team 1) well before the cap.
-            assert_eq!(
-                s.winner,
-                Some(1),
-                "seed {seed}: expected team 1 (Mage+Priest) to win by elimination, got {:?}",
-                s.winner,
+            // (b) Resolves by elimination well before the cap.
+            assert!(
+                s.winner.is_some(),
+                "seed {seed}: the 2v1 ended without a winner — the dance ran to the cap",
             );
             assert!(
                 s.duration <= 200.0,
@@ -6227,7 +6227,30 @@ mod juke_chase {
                 s.duration,
             );
         }
+        // (c) Mage+Priest wins the 2v1 it is chasing in nearly every dance.
+        let caught = dances.iter().filter(|(_, s)| s.winner == Some(1)).count();
+        let share = caught as f32 / dances.len() as f32;
+        assert!(
+            share >= MIN_TEAM1_DANCE_SHARE,
+            "Mage+Priest won {caught} of {} dances ({:.0}% < {:.0}%) — the chase is losing \
+             the 2v1s it exists to end",
+            dances.len(),
+            100.0 * share,
+            100.0 * MIN_TEAM1_DANCE_SHARE,
+        );
     }
+
+    /// The share of dances Mage+Priest must win. Every dance was a team-1 win
+    /// until AS-292 (user ruling, 2026-10-18): with an enemy healer in its
+    /// closing band no longer pressure under `TeamPlan`, the lone `TeamPlan`
+    /// Shaman wins 3 of the bank's 32 dances (29/32, 91%; seeds 30, 42, 43),
+    /// each a 2v1 that ended inside about ten seconds with the fizzle rate
+    /// normal — the Mage dying, not the juke going unbounded. The floor is
+    /// 80%, about three more losses below that. A chase that stops closing
+    /// fails the rate and duration bounds above long before it moves this.
+    /// AS-362 (the `TeamPlan` healer's positioning) should bring it back to
+    /// every dance.
+    const MIN_TEAM1_DANCE_SHARE: f32 = 0.8;
 }
 
 // ---------------------------------------------------------------------------
@@ -7556,15 +7579,36 @@ mod nagrand_teamplan {
     /// `docs/design/balance/2026-09-28-as167-weapon-speed.md` in case it is
     /// the start of something. Seed 2 (17%, 3613 paired frames) replaces it;
     /// the ceiling is unchanged.
+    ///
+    /// # Rebaselined for AS-292 (35% -> 50%), by the user's ruling of 2026-10-18
+    ///
+    /// AS-292 stopped an enemy healer in its 28-30yd band counting as pressure
+    /// under `TeamPlan`. Most of this Priest's PRESSURED time had been the
+    /// enemy Priest standing there, so it now spends far less of the match in
+    /// the solve's cover-with-sight posture and more in FREE formation: it
+    /// heals its Warrior 2.6x as much (`camp_sweep`) and buys more cover from
+    /// the Warlock, but sees its Warrior less. `scan_nagrand_teamplan`, seeds
+    /// 1-12:
+    ///
+    /// ```text
+    /// main    4  4 19  4 30  4 19  6 21 39  9 11   (median 10%)
+    /// AS-292 30 13 29 27 22 42 20 35  8 23 23 43   (median 25%)
+    /// ```
+    ///
+    /// The ceiling is the new worst (43%) plus 7 points. It now catches only
+    /// the top of the old 40-55% pathology band, not its start. AS-362 (the
+    /// `TeamPlan` healer's positioning without the phantom pressure) is the
+    /// card that should bring the distribution back and this ceiling with it.
+    /// The seeds are unchanged.
     #[test]
     fn teamplan_healer_keeps_its_heal_line_on_nagrand() {
         for seed in [7u64, 2, 12] {
             let s = measure_pillar(seed);
             assert!(s.paired_frames > 500, "seed {seed}: probe went vacuous");
             assert!(
-                s.blocked_share <= 0.35,
-                "seed {seed}: heal line blocked {:.0}% of frames — regressing toward the \
-                 40-55% self-blocking pathology (healthy is 12-18%)",
+                s.blocked_share <= 0.50,
+                "seed {seed}: heal line blocked {:.0}% of frames — into the 40-55% \
+                 self-blocking pathology (seeds 1-12 run 8-43% after AS-292, median 25%)",
                 100.0 * s.blocked_share
             );
         }
@@ -7692,6 +7736,35 @@ mod nagrand_teamplan {
     /// 1724 pressured frames at 2.97 u/s. With 13 in the set the minimum is
     /// 1.23 u/s (seed 4) and the median 2.12. The floor and the median
     /// thresholds are unchanged.
+    ///
+    /// # Rebaselined for AS-292 (floor 0.75 -> 0.30), by the user's ruling of 2026-10-18
+    ///
+    /// AS-292 stopped an enemy healer in its 28-30yd band counting as pressure
+    /// under `TeamPlan`. That pressure used to back this Priest off before the
+    /// Rogue arrived; without it the Priest walks into the fight in FREE
+    /// formation, and on some seeds the enemy Priest then pressures it from a
+    /// couple of yards and the flat-field solve parks it (seed 14: 12s at
+    /// 1.3yd). `scan_statue_seeds`, this set:
+    ///
+    /// ```text
+    /// AS-292  2.07 1.83 0.71 2.49 1.95 2.08 2.10 1.11 0.40 0.67 3.58 1.86
+    /// ```
+    ///
+    /// The minimum is 0.40 (seed 10; 0.22 at seed 14, outside the set), the
+    /// median 1.91. The floor is 0.30, 0.10 under the set's worst. It no longer
+    /// separates the ~0.65 statue band from healthy movement, only a frozen
+    /// healer from a moving one: a Priest made to stand still whenever an
+    /// enemy is within 12yd measures 0.00 u/s on seed 1 and fails it.
+    ///
+    /// It does NOT catch the solve-level mutants, on this build: with the
+    /// flat-field key disarmed the set runs 0.90-1.93 u/s (seed 14: 1.47), and
+    /// with the PRESSURED solve made to hold in place 0.90-1.72 — the Priest
+    /// keeps moving through the frames a Rogue is within 12yd but not on it
+    /// (FREE, ESCAPE). So the low seeds above are not the statue the key
+    /// fixed, and the key itself is unguarded here until AS-362 re-derives
+    /// this probe. The median threshold is unchanged and still holds. AS-362
+    /// (the parking) is the card that should restore the 0.75 floor. The seeds
+    /// are unchanged.
     #[test]
     fn teamplan_healer_is_not_a_statue_on_basicarena() {
         let mut rates: Vec<f32> = Vec::new();
@@ -7709,10 +7782,10 @@ mod nagrand_teamplan {
                  = {rate:.2} u/s"
             );
             assert!(
-                rate >= 0.75,
-                "seed {seed}: {rate:.2} u/s while a Rogue stands on the healer — that \
-                 is into the ~0.65 statue band, so the flat-field anti-statue key has \
-                 regressed. Measured floor is 0.78 (empty off hand) / 0.90 (armed).",
+                rate >= 0.30,
+                "seed {seed}: {rate:.2} u/s while a Rogue stands on the healer — the \
+                 healer has frozen while stood on. Measured minimum after AS-292 is \
+                 0.40 (0.75 restores with AS-362).",
             );
             rates.push(rate);
         }
