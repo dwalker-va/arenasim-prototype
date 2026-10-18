@@ -43,10 +43,10 @@
 //! [`EDGE_FADE`] — so the repair starts and lets go where the point stands. A
 //! change of exit (the kept one lost the anchor, or another became better by
 //! the band) still moves the point the whole gap between the two exits at
-//! once: on Nagrand, three more jumps over 10yd per 100 Warrior+Mage+Priest v
-//! Rogue+Warlock+Druid matches than the unconstrained point makes, 11-16yd
-//! each. Smoothing those is AS-370. The raw point's own jumps, which the
-//! unconstrained machine makes too, pass through.
+//! once: on Nagrand, four changes of exit per 100 Warrior+Mage+Priest v
+//! Rogue+Warlock+Druid matches step the goal 9.8-16.2yd (three more jumps over
+//! 10yd than the unconstrained point makes). Smoothing those is AS-370. The raw
+//! point's own jumps, which the unconstrained machine makes too, pass through.
 //!
 //! **Profile.** `TeamPlan` only (the AI-profile rule: every new AI behaviour
 //! lands gated). The callers ask [`sight_constrained`]; `Legacy` keeps the

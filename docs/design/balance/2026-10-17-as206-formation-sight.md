@@ -106,17 +106,20 @@ formation frames, main → branch:
 | Hunter+Shaman v Warrior+Paladin | 13 → 13 | 11 → 11 | 3 → 3 | 0 → 0 | 12 → 11 |
 
 **The one cell worse than `main`** is Warrior+Mage+Priest v Rogue+Warlock+Druid:
-three more jumps over 10yd per 100 matches (68 → 71). Diffing the two binaries'
-lists, the branch's extra three are all the Priest's, and each — traced with a
-per-call log of the repair — is a change of exit made in one evaluation:
+three more jumps over 10yd per 100 matches (68 → 71), and three more over 5yd
+(103 → 106). The branch makes four changes of exit there that step the goal
+over 5yd, all the Priest's, each a change of exit made in one evaluation (traced
+with a per-call log of the repair): three over 10yd, and one just under.
 
 | Seed, order | Jump | Exit, before → after |
 |---|---|---|
 | 20, Rogue+Warlock+Druid first | 15.1yd at 53.88s | (48.78, -16.11) → (29.67, -21.64); the kept exit 12.7yd from the raw point, in the part-way zone |
 | 36, Rogue+Warlock+Druid first | 11.6yd at 49.80s | (36.98, -29.03) → (47.17, -25.39) |
 | 49, Warrior+Mage+Priest first | 16.2yd at 57.63s | (43.17, -28.52) → (35.22, -11.81) |
+| 27, Warrior+Mage+Priest first | 9.8yd at 45.52s | (33.64, -31.84) → (32.18, -7.04); the raw point moved 0.05yd |
 
-The other 68 occur on `main` too. AS-370 smooths changes of exit.
+The other 68 jumps over 10yd occur on `main` too. AS-370 smooths changes of
+exit.
 
 The 2v2 camp comp's jumps on `main` are one per match: the Priest's projected
 point stepping 8.6yd between two faces of the camp pillar at the camp release
@@ -140,8 +143,11 @@ SLICES TESTED: 3. Significant: AGAINST.
 
 **One cell carries the significant slice: Warrior+Priest vs Mage+Rogue**, which
 goes from 0/10 to 10/10 Warrior+Priest wins in both team orders — -10 of
-AGAINST's -27 and +10 of CLEAN's +22, one cell seen from both sides, the
-Priest's formation point (the comp whose Priest repairs most). AGAINST's 39
+AGAINST's -27 and +10 of CLEAN's +22, one cell seen from both sides. It is
+the Priest's formation point, the comp whose Priest repairs most: the two
+binaries first diverge at the Priest's repair as the camp releases (16.6s),
+and there is no change of exit anywhere in the cell, so it is the continuous
+repair, not a side switch. AGAINST's 39
 winner flips fall in 11 cells; without that one the slice is +12/-17 (z ≈ 0.8),
 spread over ten cells of at most five flips each:
 

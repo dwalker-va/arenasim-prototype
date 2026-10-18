@@ -769,8 +769,8 @@ is better by that band or its own loses the anchor. Every exit is continuous in
 the raw point across every edge of its region (`EDGE_FADE` fades the move out at
 the shadow's near end and the near-obstacle limit), so the repair starts and
 lets go where the point stands; a change of exit still moves the point the whole
-gap at once (three more jumps over 10yd per 100 Warrior+Mage+Priest v
-Rogue+Warlock+Druid matches than the unconstrained point; AS-370 smooths them).
+gap at once (four such steps of 9.8-16.2yd per 100 Warrior+Mage+Priest v
+Rogue+Warlock+Druid matches, three of them over 10yd; AS-370 smooths them).
 The Paladin has no formation point. `Legacy` is untouched (byte-identical), and
 BasicArena with it under both profiles. Pinned by `tests/formation_sight.rs` (a
 staged pillar edge where the `TeamPlan` Druid and Priest each regain sight of
