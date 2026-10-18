@@ -8,7 +8,7 @@
 //! |---|---|
 //! | `OccupyCover` via [`solve_position`] | **LIVE** under `TeamPlan` (healer PRESSURED/FREE, `healer_postures.rs`). Measured at n=100 head-to-head: +36pt Warlock+Priest, +14pt Hunter+Priest, +10pt Warrior+Priest, -6pt (noise) Rogue+Priest. |
 //! | [`DispelGoal`] on `OccupyCover` | **LIVE** under `TeamPlan` (Priest, Paladin PRESSURED; AS-187). The `Legacy` dispel walk's job: while a teammate is owed an urgent dispel the healer cannot reach, reaching it is the only constraint scored, and the goal holds on reach until the dispel lands. |
-//! | [`C_DYING`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-198). While the healer can heal, the most hurt teammate below `urgency_hp_threshold` anchors it, and reaching that teammate ranks above cover. Which teammate that is, [`dying_anchor`], is the `TeamPlan` medic walk the Druid holds its damage for (AS-218). |
+//! | [`C_DYING`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-198). While the healer can heal, the most hurt teammate below `urgency_hp_threshold` anchors it, and reaching that teammate ranks above cover. Which teammate that is, [`dying_anchor`], is the `TeamPlan` medic walk the Druid holds its damage for (AS-218). The Paladin's band-hold parks only where it reaches that teammate ([`dying_unreached`], AS-209). |
 //! | `HoldRange` | Wired to the Mage/Hunter kiter, **measured ~-17pt, reverted — and the ending is now DECIDED: ranged DPS stays on the scorer permanently** (design doc, 2026-08-06). Constraint definition kept for the lone-healer fallback and future melee use; do not re-wire kiters absent step 8's reopening condition. |
 //! | `ScreenPartner`, `PressTarget`, `StackAnchor` | **NEVER RUN IN BATTLE.** Unit-tested against their written definitions only. All three consumed intents were under-specified in ways only measurement exposed (sight-of-ally, castability, the range ceiling) — assume these carry the same debt and budget a measurement pass before trusting them. |
 //! | [`solve_team`] / [`solve_order`] / [`focal_point`] / [`assign_intents`] / cohesion | **NO CALLERS.** The dependent team-level solve, kept because the design requires convergent AND divergent shapes from the start (retrofitting divergence would mean redoing the solve). It has never placed a unit in a real match. |
@@ -1319,6 +1319,27 @@ pub fn dying_anchor(world: &SolveWorld, entity: Entity) -> Option<Entity> {
         placed: &BTreeMap::new(),
     };
     ctx.dying_ally().map(|a| a.entity)
+}
+
+/// The dying teammate [`dying_anchor`] names, while `entity` does NOT reach it
+/// from where it stands — its own spot violates [`C_DYING`] (beyond
+/// `heal_range` less [`HEAL_REACH_MARGIN`], or out of sight). `None` when
+/// nobody is dying, when the healer owes no reach, or when it already reaches.
+///
+/// The question a caller asks before it holds a healer still in place of the
+/// solve (the Paladin's band-hold): standing still is fine only where the heal
+/// lands. Asked through [`violations`], so "reached" means exactly what the
+/// solve scores, and a spot the solve walks to counts as reached here.
+pub fn dying_unreached(world: &SolveWorld, entity: Entity) -> Option<Entity> {
+    let dying = dying_anchor(world, entity)?;
+    let unit = *world.unit(entity)?;
+    let ctx = SolveContext {
+        world,
+        unit,
+        focus: None,
+        placed: &BTreeMap::new(),
+    };
+    (violations(RoleIntent::OccupyCover, unit.pos, &ctx) & C_DYING != 0).then_some(dying)
 }
 
 /// Where a healer standing ALONE against two or more enemies takes cover —

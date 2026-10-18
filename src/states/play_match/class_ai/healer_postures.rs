@@ -398,10 +398,7 @@ pub(crate) fn solve_dying_walk(
     state: &HealerPosture,
     shared: &SharedMovementConfig,
 ) -> Option<Entity> {
-    if !ctx.ai_profile.is_team_plan()
-        || state.posture != Posture::Pressured
-        || ctx.is_ccd(entity)
-    {
+    if !ctx.ai_profile.is_team_plan() || state.posture != Posture::Pressured || ctx.is_ccd(entity) {
         return None;
     }
     let ally = state.solve_dying?;
@@ -1045,8 +1042,10 @@ pub(super) struct HealerDispel<'a> {
 ///   retreat band: the threat set is gathered out to the band (wider than the
 ///   Priest's `danger_radius`), and once every threat is at/beyond the band
 ///   (or there is no proximate threat at all) a Point directive parks the
-///   Paladin to stand-and-heal instead of face-tanking at melee. `None`
-///   (Priest) skips the band-hold and gathers threats out to `danger_radius`.
+///   Paladin to stand-and-heal instead of face-tanking at melee — under
+///   `TeamPlan`, only where it reaches a dying teammate (else the solve walks
+///   it into reach). `None` (Priest) skips the band-hold and gathers threats
+///   out to `danger_radius`.
 /// - `dispel` — the healer's ally dispel (Priest, Paladin), `None` for a healer
 ///   without one. Read only under `TeamPlan`, where a teammate it owes an urgent
 ///   dispel it cannot reach becomes the solve's [`DispelGoal`](crate::states::play_match::team_solve::DispelGoal):
@@ -1121,6 +1120,26 @@ pub(super) fn healer_pressured_tick_shared(
         None
     };
 
+    // The team solve's world (`TeamPlan` only), built before the band-hold
+    // because the band-hold asks it whether a dying teammate is reached from
+    // here.
+    let world = ctx.ai_profile.is_team_plan().then(|| {
+        crate::states::play_match::team_solve::world_from_context(
+            ctx,
+            shared.heal_range,
+            threat_radius,
+            None,
+        )
+        .with_urgency_hp_threshold(shared.urgency_hp_threshold)
+        .with_dispel_goal(entity, dispel_goal)
+    });
+    // TeamPlan: a dying teammate the healer does not reach from where it
+    // stands (AS-209). The solve walks into reach of it (`C_DYING`); the
+    // band-hold below must not park the Paladin out of reach first.
+    let dying_unreached = world
+        .as_ref()
+        .and_then(|w| crate::states::play_match::team_solve::dying_unreached(w, entity));
+
     // Band-hold (Paladin only): once every threat is at/beyond fallback_range,
     // STOP — a Point directive at the current position parks the Paladin at the
     // band to heal (and self-peel: the reservation is released while
@@ -1128,7 +1147,13 @@ pub(super) fn healer_pressured_tick_shared(
     // legacy melee pursuit and walk the Paladin straight back into the pressure
     // it just retreated from. Also covers healing-heavy pressure with no
     // proximate threat at all: no aimless wandering, no re-engage.
-    if let Some(band) = fallback_range.filter(|_| dispel_goal.is_none()) {
+    //
+    // Under `TeamPlan` it parks only where the heal reaches a dying teammate:
+    // while one is out of reach from here, or a dispel is owed, the solve
+    // walks the Paladin instead, and the hold resumes once the walk arrives.
+    if let Some(band) =
+        fallback_range.filter(|_| dispel_goal.is_none() && dying_unreached.is_none())
+    {
         let nearest = threat_positions
             .values()
             .map(|p| my_pos.distance(*p))
@@ -1178,15 +1203,7 @@ pub(super) fn healer_pressured_tick_shared(
     // calibrated probe runs) is untouched and any drift is attributable to this
     // line alone. The ESCAPE and DIP windows are deliberately NOT rerouted: they
     // are committed scripts with their own abort conditions, not positioning.
-    if ctx.ai_profile.is_team_plan() {
-        let world = crate::states::play_match::team_solve::world_from_context(
-            ctx,
-            shared.heal_range,
-            threat_radius,
-            None,
-        )
-        .with_urgency_hp_threshold(shared.urgency_hp_threshold)
-        .with_dispel_goal(entity, dispel_goal);
+    if let Some(world) = world {
         // A healer with no living non-pet partner is not a healer any more:
         // `OccupyCover`'s sight and leash constraints go vacuous and the last
         // unit standing hides forever next to a corpse. It fights at range
@@ -1222,8 +1239,7 @@ pub(super) fn healer_pressured_tick_shared(
         // The dying teammate this solve walks the healer to reach — the
         // `TeamPlan` medic walk ([`solve_dying_walk`]). Recorded, not acted
         // on: the spot above already is the walk.
-        state.solve_dying =
-            crate::states::play_match::team_solve::dying_anchor(&world, entity);
+        state.solve_dying = crate::states::play_match::team_solve::dying_anchor(&world, entity);
         // A `Point` goal, not a bearing: the chosen spot can be tens of yards
         // off and behind a pillar, and `Point` is the branch that tangent-steers
         // around one. `None` means the solve is already satisfied here — hold,

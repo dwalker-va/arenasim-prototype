@@ -816,8 +816,11 @@ heal still lands from. When no candidate spot can see the healer's anchor
 ally at all (a pillar between them), the solve walks straight at the ally,
 tangent-steered, until one can — the dispel goal's fallback — instead of
 parking blind. A silenced or school-locked healer owes no reach and keeps to
-cover and distance. Not yet for the Paladin: its `TeamPlan` band-hold parks
-it before the solve runs (AS-209).
+cover and distance. The Paladin's band-hold parks it only where it reaches
+such a teammate (`team_solve::dying_unreached`); out of reach, it steps aside
+for the solve, as it does for an owed dispel. The Priest's Psychic Scream dip
+needs no reach rule: it already aborts for any teammate at or below the
+threshold, reached or not.
 
 **Target choice needs sight.** Every cast that CHOOSES its target from
 several candidates filters by reach before it ranks: `class_ai::cast_reach`,
