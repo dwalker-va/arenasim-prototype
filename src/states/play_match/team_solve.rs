@@ -8,7 +8,7 @@
 //! |---|---|
 //! | `OccupyCover` via [`solve_position`] | **LIVE** under `TeamPlan` (healer PRESSURED/FREE, `healer_postures.rs`). Measured at n=100 head-to-head: +36pt Warlock+Priest, +14pt Hunter+Priest, +10pt Warrior+Priest, -6pt (noise) Rogue+Priest. |
 //! | [`DispelGoal`] on `OccupyCover` | **LIVE** under `TeamPlan` (Priest, Paladin PRESSURED; AS-187). The `Legacy` dispel walk's job: while a teammate is owed an urgent dispel the healer cannot reach, reaching it is the only constraint scored, and the goal holds on reach until the dispel lands. |
-//! | [`C_DYING`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-198). While the healer can heal, the most hurt teammate below `urgency_hp_threshold` anchors it, and reaching that teammate ranks above cover. Which teammate that is, [`dying_anchor`], is the `TeamPlan` medic walk the Druid holds its damage for (AS-218). |
+//! | [`C_DYING`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-198). While the healer can heal, the most hurt teammate below `urgency_hp_threshold` anchors it, and reaching that teammate ranks above cover. Which teammate that is, [`dying_anchor`], is the `TeamPlan` medic walk the Druid holds its damage for (AS-218). The Paladin's band-hold parks only where it reaches that teammate ([`dying_unreached`], AS-209). |
 //! | `HoldRange` | Wired to the Mage/Hunter kiter, **measured ~-17pt, reverted — and the ending is now DECIDED: ranged DPS stays on the scorer permanently** (design doc, 2026-08-06). Constraint definition kept for the lone-healer fallback and future melee use; do not re-wire kiters absent step 8's reopening condition. |
 //! | `ScreenPartner`, `PressTarget`, `StackAnchor` | **NEVER RUN IN BATTLE.** Unit-tested against their written definitions only. All three consumed intents were under-specified in ways only measurement exposed (sight-of-ally, castability, the range ceiling) — assume these carry the same debt and budget a measurement pass before trusting them. |
 //! | [`solve_team`] / [`solve_order`] / [`focal_point`] / [`assign_intents`] / cohesion | **NO CALLERS.** The dependent team-level solve, kept because the design requires convergent AND divergent shapes from the start (retrofitting divergence would mean redoing the solve). It has never placed a unit in a real match. |
@@ -930,14 +930,10 @@ const W_DYING: f32 = 1.0e6;
 /// satisfies its intent, standing still also satisfies it, and standing still is
 /// nearest.
 pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
-    // Out-of-bounds is the one hard exclusion. Screening candidates that sit
-    // INSIDE an obstacle was tried (a review finding: an in-pillar point is
-    // occluded from everyone and "unreachable") and MEASURED AT -10pt on the
-    // flagship comp, so it is deliberately absent: a healer pressed against
-    // cover IS in cover, and that pillar-hugging equilibrium beats every
-    // "reachable" alternative candidate. Do not re-add the screen without
-    // re-measuring. An in-pillar WINNER is never issued as it stands, though:
-    // see the projection at the end of this function.
+    // Out-of-bounds is the one hard exclusion. An in-pillar candidate is not
+    // DROPPED (that screen measured -10pt on the flagship comp: a healer
+    // pressed against cover IS in cover) but projected onto the skin it would
+    // actually stand on — see `scored` below.
     let usable = |c: &Vec2| {
         ctx.world
             .bounds
@@ -968,8 +964,15 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
             .fold(0.0f32, f32::max)
     };
 
+    // Every candidate is scored WHERE IT WOULD BE STOOD ON: the local ring and
+    // the steps toward an ally are offsets that take no account of the pillar
+    // beside the unit, so one can lie inside a footprint, where it is hidden
+    // from everyone and can be reached by no one. It is moved out through the
+    // footprint's nearest face before it is scored (AS-201). A candidate no
+    // projection frees (touching footprints) is dropped.
     let scored: Vec<(f32, Vec2)> = candidates_for(ctx)
         .into_iter()
+        .filter_map(|c| nearest_standable(&ctx.world.obstacles, c, ctx.unit.y))
         .filter(usable)
         .map(|c| (infeasibility(intent, c, ctx), c))
         .collect();
@@ -1052,22 +1055,10 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
         return ally;
     }
     // Every candidate excluded (a unit already outside the arena): hold. The
-    // executor clamps and slides, so this is a safe terminal answer.
-    //
-    // THE ANSWER IS A SPOT THE UNIT CAN STAND ON. The local ring and the steps
-    // toward an ally are offsets from the unit that take no account of the
-    // pillar beside it, so near cover the winner can lie inside a footprint —
-    // a goal nobody can reach, which the executor only approaches and stalls
-    // a body radius short of (AS-190). It is moved out through the footprint's
-    // nearest face — the spot the steering helper was already heading for —
-    // so the unit walks onto the skin on the side it was already pressed
-    // against. The CHOICE is unchanged: it is still scored at the in-pillar
-    // point, which can be more hidden than the skin spot the unit ends up on
-    // (scoring candidates where they would be stood on is AS-201). A winner no
-    // projection frees (touching footprints — see `nearest_standable`) holds.
-    best.map_or(ctx.unit.pos, |(_, p)| {
-        nearest_standable(&ctx.world.obstacles, p, ctx.unit.y).unwrap_or(ctx.unit.pos)
-    })
+    // executor clamps and slides, so this is a safe terminal answer. The
+    // answer is always a spot the unit can stand on: every candidate was
+    // projected before it was scored.
+    best.map_or(ctx.unit.pos, |(_, p)| p)
 }
 
 /// Solve the whole team, in [`solve_order`], each unit seeing the placements
@@ -1321,6 +1312,27 @@ pub fn dying_anchor(world: &SolveWorld, entity: Entity) -> Option<Entity> {
     ctx.dying_ally().map(|a| a.entity)
 }
 
+/// The dying teammate [`dying_anchor`] names, while `entity` does NOT reach it
+/// from where it stands — its own spot violates [`C_DYING`] (beyond
+/// `heal_range` less [`HEAL_REACH_MARGIN`], or out of sight). `None` when
+/// nobody is dying, when the healer owes no reach, or when it already reaches.
+///
+/// The question a caller asks before it holds a healer still in place of the
+/// solve (the Paladin's band-hold): standing still is fine only where the heal
+/// lands. Asked through [`violations`], so "reached" means exactly what the
+/// solve scores, and a spot the solve walks to counts as reached here.
+pub fn dying_unreached(world: &SolveWorld, entity: Entity) -> Option<Entity> {
+    let dying = dying_anchor(world, entity)?;
+    let unit = *world.unit(entity)?;
+    let ctx = SolveContext {
+        world,
+        unit,
+        focus: None,
+        placed: &BTreeMap::new(),
+    };
+    (violations(RoleIntent::OccupyCover, unit.pos, &ctx) & C_DYING != 0).then_some(dying)
+}
+
 /// Where a healer standing ALONE against two or more enemies takes cover —
 /// the [`TakeCover`](super::situation::Play::TakeCover) play (AS-249). `None`
 /// when the map has no obstacles (nothing to hide behind: the healer's ordinary
@@ -1343,7 +1355,10 @@ pub fn dying_anchor(world: &SolveWorld, entity: Entity) -> Option<Entity> {
 /// The candidates are `OccupyCover`'s: the healer's spot, every (obstacle,
 /// caster) shadow along its centre line ([`SHADOW_DEPTHS`]), and the local
 /// ring. No peek shoulders: peeking is for keeping an ally in sight, and there
-/// is none. The winner is moved onto standable ground, as [`solve_unit`]'s is.
+/// is none. Unlike [`solve_unit`], which projects every candidate onto
+/// standable ground before scoring it, this still scores candidates in place
+/// and projects only the winner, so an in-pillar ring step can win cover its
+/// landing spot lacks (AS-362 tracks the fix).
 pub fn last_stand_cover(entity: Entity, world: &SolveWorld) -> Option<Vec2> {
     if world.obstacles.is_empty() {
         return None;
@@ -1852,16 +1867,18 @@ mod tests {
     /// No candidate reaches the ally owed a dispel — it stands behind a pillar
     /// wider than every approach sample — so the solve walks straight at the
     /// ally, the `Point` goal the executor tangent-steers around the pillar.
+    /// (Every approach sample that lands inside the pillar is nearer its near
+    /// face, so none projects out on the ally's side.)
     #[test]
     fn with_no_reaching_candidate_the_solve_walks_at_the_owed_ally() {
         let w = SolveWorld {
             obstacles: vec![ObstacleVolume::Cylinder {
-                center_xz: Vec2::new(20.0, 0.0),
-                radius: 10.0,
+                center_xz: Vec2::new(24.0, 0.0),
+                radius: 14.0,
                 base_y: 0.0,
                 height: 10.0,
             }],
-            ..world(vec![healer(1, 1, 0, 0.0, 0.0), melee(2, 1, 1, 32.0, 0.0)])
+            ..world(vec![healer(1, 1, 0, 0.0, 0.0), melee(2, 1, 1, 40.0, 0.0)])
         }
         .with_dispel_goal(
             e(1),
@@ -1878,7 +1895,7 @@ mod tests {
         };
         assert_eq!(
             solve_unit(RoleIntent::OccupyCover, &ctx),
-            Vec2::new(32.0, 0.0)
+            Vec2::new(40.0, 0.0)
         );
     }
 
@@ -2605,8 +2622,8 @@ mod tests {
 
     /// AS-190: the solve never answers with a spot inside a footprint. A healer
     /// pressed against a pillar has local-ring candidates inside it, and an
-    /// in-pillar point is occluded from every caster, so it can win
-    /// `OccupyCover` — the answer is then moved onto the pillar's skin.
+    /// in-pillar point is occluded from every caster — each is moved onto the
+    /// pillar's skin before it is scored (AS-201).
     /// Swept round the pillar, with the ally and the caster at several
     /// bearings; the second count proves the sweep reached the case (an answer
     /// that is none of the candidates was projected).
@@ -2656,6 +2673,131 @@ mod tests {
             projected > 0,
             "no answer of {cases} needed projecting — the sweep never reached an \
              in-pillar winner, so it proves nothing"
+        );
+    }
+
+    /// AS-201 / AS-209: the solve and [`dying_unreached`] agree on what reaches
+    /// a dying teammate. Whenever a spot the healer could stand on reaches it,
+    /// the answer reaches it too — so a healer that walks to the answer is
+    /// "reached" by the question the Paladin's band-hold asks, and is not sent
+    /// round again. Swept round a pillar against several dying-teammate
+    /// placements; the second count proves the sweep had candidates inside the
+    /// pillar to project. (An in-pillar point sees no one, so it never reaches:
+    /// scoring in place could only UNDER-rate such a candidate for this
+    /// constraint, and the agreement held before AS-201 as well.)
+    #[test]
+    fn a_reaching_answer_reaches_from_where_it_is_stood_on() {
+        use crate::states::play_match::map_geometry::position_blocked;
+        let skin = super::super::map_geometry::prism_apothem(6.0, 8) + MOVER_RADIUS;
+        let (mut cases, mut in_pillar) = (0, 0);
+        for i in 0..32 {
+            let a = i as f32 * std::f32::consts::TAU / 32.0;
+            let at = Vec2::from_angle(a) * (skin / (std::f32::consts::PI / 8.0).cos() + 0.05);
+            for (dying, caster) in [
+                (Vec2::new(-30.0, 3.0), Vec2::new(25.0, 0.0)),
+                (Vec2::new(0.0, -36.0), Vec2::new(0.0, 25.0)),
+                (Vec2::new(33.0, 4.0), Vec2::new(-20.0, -20.0)),
+                (Vec2::new(25.0, 28.0), Vec2::new(-25.0, 0.0)),
+            ] {
+                let mut w = world(vec![
+                    healer(1, 1, 0, at.x, at.y),
+                    SolveUnit {
+                        health_pct: 0.2,
+                        ..unit(2, 1, 1, dying.x, dying.y)
+                    },
+                    unit(3, 2, 0, caster.x, caster.y),
+                ]);
+                w.obstacles = vec![pillar_at(0.0, 0.0)];
+                if position_blocked(&w.obstacles, Vec3::new(at.x, 1.0, at.y)) {
+                    continue;
+                }
+                let ctx = SolveContext {
+                    world: &w,
+                    unit: w.units[0],
+                    focus: None,
+                    placed: &BTreeMap::new(),
+                };
+                let reaches = |p: Vec2| violations(RoleIntent::OccupyCover, p, &ctx) & C_DYING == 0;
+                let raw = candidates_for(&ctx);
+                let landed: Vec<Vec2> = raw
+                    .iter()
+                    .filter_map(|&c| nearest_standable(&w.obstacles, c, 1.0))
+                    .collect();
+                if !landed.iter().any(|&p| reaches(p)) {
+                    continue;
+                }
+                cases += 1;
+                in_pillar += raw
+                    .iter()
+                    .any(|&c| position_blocked(&w.obstacles, Vec3::new(c.x, 1.0, c.y)))
+                    as usize;
+                let spot = solve_unit(RoleIntent::OccupyCover, &ctx);
+                let mut moved = w.clone();
+                moved.units[0].pos = spot;
+                assert_eq!(
+                    dying_unreached(&moved, e(1)),
+                    None,
+                    "healer at {at:?} (dying {dying:?}, caster {caster:?}) sent to {spot:?}, \
+                     which does not reach the dying teammate"
+                );
+            }
+        }
+        assert!(
+            cases > 0,
+            "no case had a reaching spot — the sweep proves nothing"
+        );
+        assert!(
+            in_pillar > 0,
+            "no case had a candidate inside the pillar — the projection was never exercised"
+        );
+    }
+
+    /// AS-201: a candidate is scored where the unit would stand on it. A healer
+    /// against the caster's side of a pillar has a local-ring step INSIDE the
+    /// pillar, and an in-pillar point is hidden from the caster — but the spot
+    /// it projects to is the skin the healer already stands on, in the open.
+    /// Scored in place, that step won cover it could never give; scored where
+    /// it lands, it loses to a spot really behind the pillar.
+    #[test]
+    fn an_in_pillar_step_does_not_win_cover_its_landing_spot_lacks() {
+        use crate::states::play_match::map_geometry::position_blocked;
+        let caster = Vec2::new(25.0, 0.0);
+        let mut w = world(vec![
+            healer(1, 1, 0, 6.6, 0.0),
+            unit(2, 2, 0, caster.x, caster.y),
+        ]);
+        w.obstacles = vec![pillar_at(0.0, 0.0)];
+        let ctx = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        let blocked = |p: Vec2| position_blocked(&w.obstacles, Vec3::new(p.x, 1.0, p.y));
+        assert!(
+            w.sees(ctx.unit.pos, caster),
+            "the healer starts in the open"
+        );
+
+        // The situation: a raw candidate inside the pillar that the caster
+        // cannot see, whose landing spot the caster CAN see.
+        let lying = candidates_for(&ctx)
+            .into_iter()
+            .filter(|&c| blocked(c) && !w.sees(c, caster))
+            .find(|&c| {
+                nearest_standable(&w.obstacles, c, 1.0).is_some_and(|land| w.sees(land, caster))
+            });
+        assert!(
+            lying.is_some(),
+            "no in-pillar candidate hides a seen landing spot — the scene proves nothing"
+        );
+
+        let spot = solve_unit(RoleIntent::OccupyCover, &ctx);
+        assert!(!blocked(spot), "{spot:?} lies inside the pillar");
+        assert!(
+            !w.sees(spot, caster),
+            "{spot:?} is in the caster's sight: an in-pillar step won on cover its \
+             landing spot does not have"
         );
     }
 
