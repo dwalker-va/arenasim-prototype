@@ -1,0 +1,21 @@
+--- a/src/states/play_match/combat_core/movement.rs
++++ b/src/states/play_match/combat_core/movement.rs
+@@ -659,6 +659,18 @@
+         // stops being refused `LosBlocked`. Always sighted on an obstacle-free
+         // map, so BasicArena pursuit is unchanged.
+         let walks_for_sight = !combatant.class.is_healer();
++        if distance <= stop_distance
++            && walks_for_sight
++            && !has_line_of_sight(&map_geometry.volumes, my_pos, target_pos)
++        {
++            eprintln!(
++                "AS360FIRE t={:.4} team={} class={:?} pet={}",
++                now,
++                combatant.team,
++                combatant.class,
++                pet_query.get(entity).is_ok()
++            );
++        }
+         if pursuit_closes(distance, stop_distance, walks_for_sight, || {
+             has_line_of_sight(&map_geometry.volumes, my_pos, target_pos)
+         }) {
