@@ -160,6 +160,14 @@ All under `docs/design/balance/sweeps/` (inputs and outputs gzipped):
 
 - **TakeCover three-arm.** `2026-10-13-as249-cover.jsonl.gz` from
   `2026-10-13-as249-gen.py cover 3`, analysed by `2026-10-13-as249-cover.py`.
+- **AS-372: candidates projected before scoring.** `last_stand_cover` now
+  scores each candidate where it would be stood on (AS-201's fix to
+  `solve_unit`). `2026-10-18-as372-{before,after}.csv.gz` from
+  `2026-10-18-as372-gen.py 2 1` (TeamPlan v Legacy head-to-head, 900 2v2
+  cells, `main` @ 55849194 vs the branch), scored by `2026-10-18-as372-score.py`:
+  `Legacy` 4,500/4,500 and BasicArena 1,800/1,800 identical; from the TeamPlan
+  side with a healer 507 of 4,800 pillar-map matches move, wins 54.5% → 54.5%
+  (2 up / 4 down).
 
 Directional tier: these are directions, not class standings.
 
