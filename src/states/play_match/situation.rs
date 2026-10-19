@@ -2646,7 +2646,11 @@ mod tests {
             assert_eq!(at(&f, AiProfile::TeamPlan), (false, false), "{class:?}");
             assert!(at(&f, AiProfile::Legacy).0, "{class:?} under Legacy");
             place(&mut f, healer, cfg.danger_radius, 0.0, Some(warrior));
-            assert_eq!(at(&f, AiProfile::TeamPlan), (true, true), "{class:?} close in");
+            assert_eq!(
+                at(&f, AiProfile::TeamPlan),
+                (true, true),
+                "{class:?} close in"
+            );
         }
         // The control: a ranged DPS in the same spot is closing.
         f.roster.get_mut(&healer).unwrap().class = CharacterClass::Warlock;

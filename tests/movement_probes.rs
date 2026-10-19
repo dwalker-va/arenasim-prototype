@@ -6180,9 +6180,7 @@ mod juke_chase {
     /// the bank where the Warrior dies early and the surviving Shaman kites a
     /// pillar, the Mage's fizzle-length occlusion windows during the 2v1 are
     /// FEW (the chase closes distance so the angular juke stops breaking sight
-    /// mid-cast), and the 2v1 resolves by ELIMINATION well before the cap —
-    /// to Mage+Priest in at least [`MIN_TEAM1_DANCE_SHARE`] of the dances
-    /// (rebaselined for AS-292 from "every dance"; see that constant).
+    /// mid-cast), and the 2v1 resolves by ELIMINATION well before the cap.
     #[test]
     fn juke_bounded_over_the_seed_bank() {
         let dances: Vec<(u64, JukeStats)> = JUKE_BANK
@@ -6220,10 +6218,12 @@ mod juke_chase {
                 s.lone_secs,
                 fizzle_rate(s),
             );
-            // (b) Resolves by elimination well before the cap.
-            assert!(
-                s.winner.is_some(),
-                "seed {seed}: the 2v1 ended without a winner — the dance ran to the cap",
+            // (b) Resolves by elimination (team 1) well before the cap.
+            assert_eq!(
+                s.winner,
+                Some(1),
+                "seed {seed}: expected team 1 (Mage+Priest) to win by elimination, got {:?}",
+                s.winner,
             );
             assert!(
                 s.duration <= 200.0,
@@ -6231,30 +6231,7 @@ mod juke_chase {
                 s.duration,
             );
         }
-        // (c) Mage+Priest wins the 2v1 it is chasing in nearly every dance.
-        let caught = dances.iter().filter(|(_, s)| s.winner == Some(1)).count();
-        let share = caught as f32 / dances.len() as f32;
-        assert!(
-            share >= MIN_TEAM1_DANCE_SHARE,
-            "Mage+Priest won {caught} of {} dances ({:.0}% < {:.0}%) — the chase is losing \
-             the 2v1s it exists to end",
-            dances.len(),
-            100.0 * share,
-            100.0 * MIN_TEAM1_DANCE_SHARE,
-        );
     }
-
-    /// The share of dances Mage+Priest must win. Every dance was a team-1 win
-    /// until AS-292 (user ruling, 2026-10-18): with an enemy healer in its
-    /// closing band no longer pressure under `TeamPlan`, the lone `TeamPlan`
-    /// Shaman wins 3 of the bank's 32 dances (29/32, 91%; seeds 30, 42, 43),
-    /// each a 2v1 that ended inside about ten seconds with the fizzle rate
-    /// normal — the Mage dying, not the juke going unbounded. The floor is
-    /// 80%, about three more losses below that. A chase that stops closing
-    /// fails the rate and duration bounds above long before it moves this.
-    /// AS-362 (the `TeamPlan` healer's positioning) should bring it back to
-    /// every dance.
-    const MIN_TEAM1_DANCE_SHARE: f32 = 0.8;
 }
 
 // ---------------------------------------------------------------------------
@@ -7584,38 +7561,157 @@ mod nagrand_teamplan {
     /// the start of something. Seed 2 (17%, 3613 paired frames) replaces it;
     /// the ceiling is unchanged.
     ///
-    /// # Rebaselined for AS-292 (35% -> 50%), by the user's ruling of 2026-10-18
+    /// # What it measures since AS-292: the solve's own heal line
     ///
-    /// AS-292 stopped an enemy healer in its 28-30yd band counting as pressure
-    /// under `TeamPlan`. Most of this Priest's PRESSURED time had been the
-    /// enemy Priest standing there, so it now spends far less of the match in
-    /// the solve's cover-with-sight posture and more in FREE formation: it
-    /// heals its Warrior 2.6x as much (`camp_sweep`) and buys more cover from
-    /// the Warlock, but sees its Warrior less. `scan_nagrand_teamplan`, seeds
-    /// 1-12:
+    /// The share of ALL frames with the line blocked stopped measuring the
+    /// solve once AS-292 took the enemy Priest at 28-30yd out of `pressured`:
+    /// seeds 1-24 run 3-33% on `main` (pooled 20.7%) and 12-49% with AS-292
+    /// (pooled 29.5%), and with `OccupyCover`'s sight constraint removed
+    /// 24-63% (pooled 37.4%). The two overlap seed for seed — at the pinned
+    /// seeds AS-292 is 44 / 33 / 22% and the mutant 46 / 35 / 46% — so no
+    /// ceiling on that share fails the mutant and passes AS-292. The frames
+    /// AS-292 adds are ones the line does not matter on: blocked while the
+    /// Warrior is below 80% and the Priest can cast is 46.3% of such frames
+    /// on `main` and 47.0% with AS-292 (63.1% for the mutant), and the camp's
+    /// wins are 21 of 24 on both.
+    ///
+    /// So the probe measures the thing `C_SIGHT` decides: on frames the Priest
+    /// is PRESSURED (the team solve's posture) and free to cast, the share
+    /// whose movement goal — the spot the solve picked — has no line to the
+    /// Warrior ([`solve_goal_blind_share`]). Seeds 1-24:
     ///
     /// ```text
-    /// main    4  4 19  4 30  4 19  6 21 39  9 11   (median 10%)
-    /// AS-292 30 13 29 27 22 42 20 35  8 23 23 43   (median 25%)
+    /// main         4-30%, pooled 13.6%   (pinned 7 / 2 / 12:  7 / 16 / 11%)
+    /// AS-292       5-42%, pooled 21.5%   (pinned:            31 / 21 / 12%)
+    /// no C_SIGHT  52-94%, pooled 78.6%   (pinned:            68 / 63 / 81%)
     /// ```
     ///
-    /// The ceiling is the new worst (43%) plus 7 points. It now catches only
-    /// the top of the old 40-55% pathology band, not its start. AS-362 (the
-    /// `TeamPlan` healer's positioning without the phantom pressure) is the
-    /// card that should bring the distribution back and this ceiling with it.
-    /// The seeds are unchanged.
+    /// The ceiling is 50%: above every seed with the constraint in place,
+    /// below every seed without it. AS-292 raises it (the Priest now hides
+    /// from a Warlock fighting its Warrior where it used to stand off the
+    /// enemy Priest); that is the cost the ceiling leaves room for. The seeds
+    /// are unchanged.
     #[test]
     fn teamplan_healer_keeps_its_heal_line_on_nagrand() {
         for seed in [7u64, 2, 12] {
-            let s = measure_pillar(seed);
-            assert!(s.paired_frames > 500, "seed {seed}: probe went vacuous");
+            let (frames, share) = solve_goal_blind_share(seed);
+            assert_min_occurrences(&format!("seed {seed} pressured solve frames"), frames, 300);
             assert!(
-                s.blocked_share <= 0.50,
-                "seed {seed}: heal line blocked {:.0}% of frames — into the 40-55% \
-                 self-blocking pathology (seeds 1-12 run 8-43% after AS-292, median 25%)",
-                100.0 * s.blocked_share
+                share <= 0.50,
+                "seed {seed}: the PRESSURED solve's goal had no line to the Warrior on \
+                 {:.0}% of the frames the Priest could heal — the solve has stopped asking \
+                 for sight of its ally (healthy is 5-42%; without C_SIGHT 52-94%)",
+                100.0 * share
             );
         }
+    }
+
+    /// The heal-line probe's measurement at one seed (the Nagrand camp,
+    /// `TeamPlan`): over the frames the team-1 Priest is PRESSURED — read off
+    /// its `movement_decision` posture — with a `Point` goal, both it and its
+    /// Warrior alive, and no hard CC, silence or school lockout on it (the
+    /// solve asks for sight only while the healer can cast,
+    /// `team_solve::can_cast_heal`), the count of such frames and the share
+    /// whose goal point has no line of sight to the Warrior.
+    fn solve_goal_blind_share(seed: u64) -> (usize, f32) {
+        use arenasim::headless::runner::TraceConfig;
+        use arenasim::states::play_match::components::AuraType;
+
+        let mut cfg = create_config(
+            vec!["Warrior", "Priest"],
+            vec!["Warlock", "Priest"],
+            Some(seed),
+        );
+        cfg.map = "PillaredArena".to_string();
+        cfg.ai_profile = Some("TeamPlan".to_string());
+        cfg.max_duration_secs = 300.0;
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        drop(tmp);
+
+        // (combat time, goal, Warrior position) on each frame the Priest could heal.
+        let mut frames: Vec<(f32, Vec3, Vec3)> = Vec::new();
+        let mut gate: Option<f32> = None;
+        let mut priest_slot = None;
+        run_headless_match_observed(
+            cfg,
+            true,
+            Some(TraceConfig {
+                output_path: path.clone(),
+            }),
+            |f| {
+                if !f.gates_open {
+                    return;
+                }
+                let gate = *gate.get_or_insert(f.sim_time);
+                let find = |class| {
+                    f.combatants
+                        .values()
+                        .find(|c| c.team == 1 && c.class == class && !c.is_pet)
+                };
+                let (Some(p), Some(w)) =
+                    (find(CharacterClass::Priest), find(CharacterClass::Warrior))
+                else {
+                    return;
+                };
+                priest_slot = Some(p.slot);
+                let held = p.aura_types.iter().any(|a| {
+                    matches!(
+                        a,
+                        AuraType::Stun
+                            | AuraType::Fear
+                            | AuraType::Polymorph
+                            | AuraType::Incapacitate
+                            | AuraType::Silence
+                            | AuraType::SpellSchoolLockout
+                    )
+                });
+                if p.alive && w.alive && !held {
+                    if let Some(goal) = p.point_goal {
+                        frames.push((f.sim_time - gate, goal, w.position));
+                    }
+                }
+            },
+        )
+        .expect("observed traced headless match failed");
+
+        let slot = priest_slot.expect("no team-1 Priest");
+        let postures: Vec<(f32, String)> = std::fs::read_to_string(&path)
+            .expect("read trace file")
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|v| {
+                v["kind"] == "movement_decision"
+                    && v["actor"]["team"].as_u64() == Some(1)
+                    && v["actor"]["slot"].as_u64() == Some(slot as u64)
+            })
+            .map(|v| {
+                (
+                    v["sim_time"].as_f64().unwrap() as f32,
+                    v["posture"].as_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect();
+        let _ = std::fs::remove_file(path);
+
+        let vols = volumes();
+        let (mut pressured, mut blind) = (0usize, 0usize);
+        let mut next = 0usize;
+        let mut posture = "";
+        for (t, goal, warrior) in frames {
+            while next < postures.len() && postures[next].0 <= t {
+                posture = &postures[next].1;
+                next += 1;
+            }
+            if posture != "pressured" {
+                continue;
+            }
+            pressured += 1;
+            if !has_line_of_sight(&vols, eye(xz(goal)), eye(xz(warrior))) {
+                blind += 1;
+            }
+        }
+        (pressured, blind as f32 / pressured.max(1) as f32)
     }
 
     /// THE KITER LEASH. A `TeamPlan` Hunter must stay healable: `flee` is
@@ -7740,35 +7836,6 @@ mod nagrand_teamplan {
     /// 1724 pressured frames at 2.97 u/s. With 13 in the set the minimum is
     /// 1.23 u/s (seed 4) and the median 2.12. The floor and the median
     /// thresholds are unchanged.
-    ///
-    /// # Rebaselined for AS-292 (floor 0.75 -> 0.30), by the user's ruling of 2026-10-18
-    ///
-    /// AS-292 stopped an enemy healer in its 28-30yd band counting as pressure
-    /// under `TeamPlan`. That pressure used to back this Priest off before the
-    /// Rogue arrived; without it the Priest walks into the fight in FREE
-    /// formation, and on some seeds the enemy Priest then pressures it from a
-    /// couple of yards and the flat-field solve parks it (seed 14: 12s at
-    /// 1.3yd). `scan_statue_seeds`, this set:
-    ///
-    /// ```text
-    /// AS-292  2.07 1.83 0.71 2.49 1.95 2.08 2.10 1.11 0.40 0.67 3.58 1.86
-    /// ```
-    ///
-    /// The minimum is 0.40 (seed 10; 0.22 at seed 14, outside the set), the
-    /// median 1.91. The floor is 0.30, 0.10 under the set's worst. It no longer
-    /// separates the ~0.65 statue band from healthy movement, only a frozen
-    /// healer from a moving one: a Priest made to stand still whenever an
-    /// enemy is within 12yd measures 0.00 u/s on seed 1 and fails it.
-    ///
-    /// It does NOT catch the solve-level mutants, on this build: with the
-    /// flat-field key disarmed the set runs 0.90-1.93 u/s (seed 14: 1.47), and
-    /// with the PRESSURED solve made to hold in place 0.90-1.72 — the Priest
-    /// keeps moving through the frames a Rogue is within 12yd but not on it
-    /// (FREE, ESCAPE). So the low seeds above are not the statue the key
-    /// fixed, and the key itself is unguarded here until AS-362 re-derives
-    /// this probe. The median threshold is unchanged and still holds. AS-362
-    /// (the parking) is the card that should restore the 0.75 floor. The seeds
-    /// are unchanged.
     #[test]
     fn teamplan_healer_is_not_a_statue_on_basicarena() {
         let mut rates: Vec<f32> = Vec::new();
@@ -7786,10 +7853,10 @@ mod nagrand_teamplan {
                  = {rate:.2} u/s"
             );
             assert!(
-                rate >= 0.30,
-                "seed {seed}: {rate:.2} u/s while a Rogue stands on the healer — the \
-                 healer has frozen while stood on. Measured minimum after AS-292 is \
-                 0.40 (0.75 restores with AS-362).",
+                rate >= 0.75,
+                "seed {seed}: {rate:.2} u/s while a Rogue stands on the healer — that \
+                 is into the ~0.65 statue band, so the flat-field anti-statue key has \
+                 regressed. Measured floor is 0.78 (empty off hand) / 0.90 (armed).",
             );
             rates.push(rate);
         }
@@ -7874,11 +7941,14 @@ mod nagrand_teamplan {
     fn scan_nagrand_teamplan() {
         for seed in 1u64..=12 {
             let s = measure_pillar(seed);
+            let (solve_frames, goal_blind) = solve_goal_blind_share(seed);
             println!(
-                "pillar seed {seed:2}: occl {:.1}s | blocked {:.0}% | frames {}",
+                "pillar seed {seed:2}: occl {:.1}s | blocked {:.0}% | frames {} | solve goal \
+                 blind {:.0}% of {solve_frames}",
                 s.occlusion_secs,
                 100.0 * s.blocked_share,
-                s.paired_frames
+                s.paired_frames,
+                100.0 * goal_blind,
             );
         }
         for profile in ["TeamPlan", "Legacy"] {

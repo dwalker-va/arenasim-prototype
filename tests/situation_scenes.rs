@@ -486,14 +486,22 @@ fn an_enemy_healer_in_its_closing_band_does_not_pressure_a_teamplan_healer() {
     // Controls, the same spot: a ranged DPS still closing to its own 28yd...
     let mut warlock = banded_scene(AiProfile::TeamPlan, Warlock, PRIEST, band);
     let view = warlock.decide(PRIEST);
-    assert!(pressured_enter(&view), "a Warlock closing: {}", describe(&view));
+    assert!(
+        pressured_enter(&view),
+        "a Warlock closing: {}",
+        describe(&view)
+    );
     assert!(is_pressured(&mut warlock, PRIEST));
     // ...a melee inside the intent radius...
     let view = banded_scene(AiProfile::TeamPlan, Warrior, PRIEST, band).decide(PRIEST);
     assert!(pressured_enter(&view), "a Warrior: {}", describe(&view));
     // ...and the enemy healer itself, once inside the danger radius.
     let view = banded_scene(AiProfile::TeamPlan, Priest, PRIEST, 10.0).decide(PRIEST);
-    assert!(pressured_enter(&view), "a Priest at 10yd: {}", describe(&view));
+    assert!(
+        pressured_enter(&view),
+        "a Priest at 10yd: {}",
+        describe(&view)
+    );
 }
 
 #[test]
