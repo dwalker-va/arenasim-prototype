@@ -888,8 +888,9 @@ is judged by `reach + margin / 2`, so a healer on the rim is not moved by the
 caster's every step. Two consumers read it: the team solve's
 `team_solve::C_CC_REACH` on `OccupyCover` (PRESSURED Priest, Paladin, Shaman,
 Druid), ranked above occlusion from casters at any caster count (`W_CC` plus
-`W_OCCLUDED` per enemy caster) and below sight of the anchor (a blind spot
-pays the CC ceiling on top of `W_SIGHT`), below a dying teammate's reach and
+`W_OCCLUDED` per enemy caster) and below sight of the anchor at any caster
+count (a blind spot pays the CC ceiling plus `W_OCCLUDED` per enemy caster on
+top of `W_SIGHT`), below a dying teammate's reach and
 an owed dispel; a spot beyond heal range earns no credit for being out of
 reach. And the FREE formation point's reach
 repair (`formation::reach_repaired_point`, Priest, Shaman, Druid — never the

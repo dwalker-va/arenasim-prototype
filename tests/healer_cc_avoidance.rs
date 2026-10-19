@@ -341,13 +341,14 @@ fn measure(case: &Case, profile: &str, arm: Arm, seed: u64) -> Window {
     window(&played, case.from, case.to, case.reach)
 }
 
-/// The walk out of reach is traced: on every stage the ready arm's healer
-/// records an `OutOfCcReach` movement decision — from the solve, the
-/// Paladin's band-hold, or the FREE reach repair — and the control's records
-/// none.
+/// The walk out of reach is traced, once per walk: on every stage the ready
+/// arm's healer records an `OutOfCcReach` movement decision — from the solve,
+/// the Paladin's band-hold, or the FREE reach repair — no two of them within a
+/// second of each other (a walk is not re-traced as it re-solves), and the
+/// control's records none.
 #[test]
-fn the_walk_out_of_reach_is_traced() {
-    let traced = |case: &Case, arm: Arm| {
+fn the_walk_out_of_reach_is_traced_once_per_walk() {
+    let traced = |case: &Case, arm: Arm| -> Vec<f32> {
         let played = play(config(case, 1, "TeamPlan"), (case.stage)(arm));
         played
             .staged_trace()
@@ -357,21 +358,80 @@ fn the_walk_out_of_reach_is_traced() {
                     && e["actor"]["class"] == case.healer
                     && e["trigger"] == "OutOfCcReach"
             })
-            .count()
+            .map(|e| e["sim_time"].as_f64().unwrap() as f32)
+            .collect()
     };
     for case in &CASES {
         let (ready, control) = (traced(case, Arm::Ready), traced(case, Arm::Control));
         println!(
-            "{}: OutOfCcReach ready {ready} / control {control}",
+            "{}: OutOfCcReach ready {ready:?} / control {control:?}",
             case.name
         );
         assert!(
-            ready >= 1,
+            !ready.is_empty(),
             "{}: the walk out of reach was not traced",
             case.name
         );
-        assert_eq!(control, 0, "{}: traced with nothing ready", case.name);
+        for pair in ready.windows(2) {
+            assert!(
+                pair[1] - pair[0] >= 1.0,
+                "{}: one walk traced twice ({ready:?})",
+                case.name
+            );
+        }
+        assert!(
+            control.is_empty(),
+            "{}: traced with nothing ready",
+            case.name
+        );
     }
+}
+
+/// A walk that begins after a FREE interlude is a new walk, and is traced: a
+/// Priest the stage hands to the posture machine FREE but still marked as
+/// walking out of reach (`cc_walk`, left over from an earlier PRESSURED spell)
+/// enters PRESSURED under a Warlock's ready Fear and traces `OutOfCcReach`.
+/// The control, already PRESSURED mid-walk, does not re-trace it.
+#[test]
+fn a_walk_after_a_free_interlude_is_traced_again() {
+    use arenasim::states::match_config::CharacterClass::{Priest, Warlock, Warrior};
+    use arenasim::states::play_match::ai_profile::AiProfile;
+    use arenasim::states::play_match::class_ai::scene::Scene;
+    use arenasim::states::play_match::decision_trace::MovementTrigger;
+    let scene = |posture: Posture| {
+        Scene::new()
+            .now(30.0)
+            .ai_profile(1, AiProfile::TeamPlan)
+            .unit("priest", 1, Priest)
+            .unit("warrior", 1, Warrior)
+            .at(-10.0, 0.0)
+            .unit("warlock", 2, Warlock)
+            .at(10.0, 0.0)
+            .targeting("priest")
+            .healer_posture(
+                "priest",
+                HealerPosture {
+                    posture,
+                    hold_until: 40.0,
+                    cc_walk: true,
+                    ..HealerPosture::new(20.0)
+                },
+            )
+    };
+    let walks = |posture: Posture| {
+        scene(posture)
+            .decide("priest")
+            .movement
+            .iter()
+            .filter(|m| m.trigger == MovementTrigger::OutOfCcReach)
+            .count()
+    };
+    assert_eq!(walks(Posture::Free), 1, "the new walk was not traced");
+    assert_eq!(
+        walks(Posture::Pressured),
+        0,
+        "the walk under way was re-traced"
+    );
 }
 
 /// The rule, and its control. With the CC ready the `TeamPlan` healer stands

@@ -195,6 +195,9 @@ pub fn evaluate_paladin_posture(
     if transitioned {
         state.posture = next;
         state.since = now;
+        // A walk out of crowd-control reach belongs to the PRESSURED spell it
+        // began in: the next one is a new walk, traced again (AS-362).
+        state.cc_walk = false;
         state.last_direction = None;
         state.last_point = None;
         match next {

@@ -428,7 +428,11 @@ as its own arm:
 
 `TeamPlan` only, as ruled. `Legacy` builds no field. Measured against `main` @
 `7b7595c2` (the tester's round-1 REJECT re-measured on current `main`; the
-earlier round's figures, against `55849194`, are superseded).
+earlier round's figures, against `55849194`, are superseded). The round-3
+change — the blind-spot surcharge scaled by caster count — was re-measured on
+the same base: of the 16,160 head-to-head matches one changed (a Rogue+Druid
+mirror, its duration only) and two of the 6,000 bank rows, so every table
+below holds to the digit.
 
 ### 10.1 What differs from the proposal
 
@@ -443,10 +447,15 @@ earlier round's figures, against `55849194`, are superseded).
     pays `W_CC` (200) plus `W_OCCLUDED` (100) per enemy caster in the world,
     so no count of casters seeing an open spot makes a hidden spot inside a
     ready disc win (a fixed 200 lost to three casters' 300);
-  - sight outranks cover and CC *together*: while a field is in play a blind
-    spot pays the CC ceiling on top of `W_SIGHT` (a spot seen by two casters
-    and covered cost more than a blind hidden one, and a Priest stood 8s blind
-    behind Nagrand's camp pillar).
+  - sight outranks cover and CC *together*, at any caster count (user ruling,
+    2026-10-19): while a field is in play a blind spot pays, on top of
+    `W_SIGHT`, the CC ceiling plus `W_OCCLUDED` per enemy caster — the most a
+    sighted spot can pay for CC and cover together. (A spot seen by two
+    casters and covered cost more than a blind hidden one, and a Priest stood
+    8s blind behind Nagrand's camp pillar; with the surcharge at the CC
+    ceiling alone, five casters — Felhunters and Spiders count — still took
+    the blind spot.) A world with no field is unchanged; its own
+    sight-against-cover order is AS-381's.
 
   The anti-statue key is armed on the flatness of everything but the CC term,
   so a melee's 5.5yd stun disc does not disarm it.
@@ -533,7 +542,9 @@ distinct durations.
 
 ### 10.3 Known costs, recorded
 
-- **Paladin reversals against some comps.** Per healer × map cell the Paladin
+- **Paladin reversals against some comps.** §5's "no cell gains reversals"
+  means a healer × profile × map cell (user ruling, 2026-10-19), and none
+  does; the per-enemy-comp residual below is accepted. Per healer × map cell the Paladin
   is flat (Nagrand 4.5 → 4.5) or down (BasicArena 8.7 → 8.1). By enemy comp on
   Nagrand, 8 of 30 rise (Warrior+Priest 3.8 → 5.7, Hunter+Druid 5.2 → 7.0,
   Warlock+Shaman 5.0 → 6.6, Warlock+Druid 6.9 → 8.4) and 22 fall or hold. For
@@ -551,7 +562,7 @@ distinct durations.
   goals 0 → 3 frames). That comp's wins went 184 → 199 of 200. Making the
   keep-alive yield while the anchor is out of sight changed none of it.
 - **Formation-goal jumps** (`measure_formation_goal_jumps`, five comps): over
-  5yd 4 → 48, over 25yd 2 → 4, no returns. They are the repair's onset steps
+  5yd 4 → 47, over 25yd 2 → 3, no returns. They are the repair's onset steps
   and the stays branch's re-anchors (above), not a strobe; the default
   no-flip test (no jump over 25yd and no return in the first 30s) passes.
 

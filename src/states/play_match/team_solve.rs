@@ -1010,25 +1010,30 @@ fn infeasibility_parts(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) 
             w_cc + grade.min(W_CC_GRADE_CAP)
         };
     }
-    // Sight still outranks crowd control AND cover together. A spot that
-    // sees the anchor can pay both (seen by the casters, and in a covered
-    // disc), and the two summed could otherwise undercut a blind spot that
-    // pays only `W_SIGHT`: measured on Nagrand, a PRESSURED Priest stood 8s
-    // behind the camp pillar blind to its Warrior, out of the Warlock's sight
-    // and Fear. While a crowd-control field is in play, losing sight costs
-    // the crowd-control term's ceiling on top of `W_SIGHT`; with none, the
-    // costs are as they were.
+    // Sight still outranks crowd control AND cover together, at any number
+    // of casters. A spot that sees the anchor can pay both — the CC term's
+    // ceiling, and `W_OCCLUDED` for every enemy caster that sees it — and the
+    // two summed could otherwise undercut a blind spot that pays only
+    // `W_SIGHT`: measured on Nagrand, a PRESSURED Priest stood 8s behind the
+    // camp pillar blind to its Warrior, out of the Warlock's sight and Fear;
+    // with the surcharge at the ceiling alone, five casters still did it.
+    // While a crowd-control field is in play, losing sight costs both maxima
+    // on top of `W_SIGHT`. With no field the costs are as they were (the
+    // no-field sight-against-cover order is AS-381's).
     if v & C_SIGHT != 0 && !world.cc.is_empty() {
-        cc += ceiling;
+        cc += ceiling + W_OCCLUDED * casters;
     }
     (cost, cc)
 }
 
 /// The base cost of a spot covered by enemy crowd control ([`C_CC_REACH`]),
 /// before `W_OCCLUDED` per enemy caster is added to it (so out of reach
-/// outranks cover at any caster count). Sight outranks it however it is set:
-/// a blind spot pays the crowd-control ceiling on top of `W_SIGHT` while a
-/// field is in play.
+/// outranks cover at any caster count). Sight outranks both together however
+/// it is set: while a field is in play a blind spot pays, on top of
+/// `W_SIGHT`, the crowd-control ceiling plus `W_OCCLUDED` per enemy caster —
+/// the most a sighted spot can pay for crowd control and cover. Within those
+/// orders its value sets only how hard the gradient pulls against the
+/// continuous terms (leash, standoff, cohesion).
 const W_CC: f32 = 200.0;
 /// Per control-second a landing would cost — the grade among covered spots.
 const W_CC_SECOND: f32 = 2.0;
@@ -3266,59 +3271,115 @@ mod tests {
         }
     }
 
-    /// Out of reach outranks cover at ANY number of casters (AS-362 round 2):
-    /// three casters see an open spot out of a ready disc, and a spot behind a
-    /// pillar is hidden from all three but inside the disc. The open spot wins;
-    /// the control, with no crowd control ready, takes the hidden one. (A
-    /// fixed 200 for crowd control lost to three casters' 300 of occlusion.)
+    /// `n` enemy casters at x = 30, spread over z in [-5, 5].
+    fn casters_at_30(n: usize) -> Vec<SolveUnit> {
+        (0..n)
+            .map(|i| {
+                let z = if n == 1 {
+                    0.0
+                } else {
+                    -5.0 + 10.0 * i as f32 / (n - 1) as f32
+                };
+                unit(10 + i as u32, 2, i as u8, 30.0, z)
+            })
+            .collect()
+    }
+
+    fn total(w: &SolveWorld, p: Vec2) -> f32 {
+        let (b, c) = infeasibility_parts(RoleIntent::OccupyCover, p, &ctx_of(w));
+        b + c
+    }
+
+    /// Out of reach outranks cover at ANY number of casters (AS-362 round 2),
+    /// at three casters and at six: every caster sees an open spot out of a
+    /// ready disc, and a spot behind a pillar is hidden from all of them but
+    /// inside the disc. The open spot wins; the control, with no crowd
+    /// control ready, takes the hidden one. (A fixed 200 for crowd control
+    /// lost to three casters' 300 of occlusion; half the per-caster scaling
+    /// loses at six.)
     #[test]
     fn out_of_reach_outranks_cover_at_any_caster_count() {
-        let units = vec![
-            healer(1, 1, 1, 0.0, 0.0),
-            melee(2, 1, 0, -10.0, 0.0),
-            unit(3, 2, 0, 30.0, -5.0),
-            unit(4, 2, 1, 30.0, 0.0),
-            unit(5, 2, 2, 30.0, 5.0),
-        ];
         let hidden = Vec2::new(2.0, 0.0);
         let open = Vec2::new(-5.0, 20.0);
-        let cost = |w: &SolveWorld, p: Vec2| {
-            let (b, c) = infeasibility_parts(RoleIntent::OccupyCover, p, &ctx_of(w));
-            b + c
-        };
-        let mut w =
-            world(units.clone()).with_cc_field(field(vec![threat(4, 30.0, 0.0, 31.0, false)]));
-        w.obstacles = vec![pillar_at(10.0, 0.0)];
-        let ctx = ctx_of(&w);
-        assert_eq!(
-            violations(RoleIntent::OccupyCover, hidden, &ctx) & C_OCCLUDED,
-            0
-        );
-        assert_ne!(
-            violations(RoleIntent::OccupyCover, hidden, &ctx) & C_CC_REACH,
-            0
-        );
-        assert_eq!(
-            violations(RoleIntent::OccupyCover, open, &ctx) & C_CC_REACH,
-            0
-        );
-        let seen = w
-            .enemy_casters_of(1)
-            .filter(|e| w.sees(open, e.pos))
-            .count();
-        assert_eq!(seen, 3, "all three casters see the open spot");
-        assert!(
-            cost(&w, open) < cost(&w, hidden),
-            "{} vs {}",
-            cost(&w, open),
-            cost(&w, hidden)
-        );
-        let mut control = world(units);
-        control.obstacles = vec![pillar_at(10.0, 0.0)];
-        assert!(
-            cost(&control, hidden) < cost(&control, open),
-            "the control prefers cover"
-        );
+        for n in [3, 6] {
+            let mut units = vec![healer(1, 1, 1, 0.0, 0.0), melee(2, 1, 0, -10.0, 0.0)];
+            units.extend(casters_at_30(n));
+            let mut w =
+                world(units.clone()).with_cc_field(field(vec![threat(10, 30.0, 0.0, 31.0, false)]));
+            w.obstacles = vec![pillar_at(10.0, 0.0)];
+            let ctx = ctx_of(&w);
+            assert_eq!(
+                violations(RoleIntent::OccupyCover, hidden, &ctx) & C_OCCLUDED,
+                0,
+                "{n}"
+            );
+            assert_ne!(
+                violations(RoleIntent::OccupyCover, hidden, &ctx) & C_CC_REACH,
+                0,
+                "{n}"
+            );
+            assert_eq!(
+                violations(RoleIntent::OccupyCover, open, &ctx) & C_CC_REACH,
+                0,
+                "{n}"
+            );
+            let seen = w
+                .enemy_casters_of(1)
+                .filter(|e| w.sees(open, e.pos))
+                .count();
+            assert_eq!(seen, n, "every caster sees the open spot");
+            assert!(
+                total(&w, open) < total(&w, hidden),
+                "{n} casters: {} vs {}",
+                total(&w, open),
+                total(&w, hidden)
+            );
+            let mut control = world(units);
+            control.obstacles = vec![pillar_at(10.0, 0.0)];
+            assert!(
+                total(&control, hidden) < total(&control, open),
+                "{n} casters: the control prefers cover"
+            );
+        }
+    }
+
+    /// Sight outranks crowd control AND cover together at any number of
+    /// casters (user ruling, 2026-10-19), from two casters to ten: a spot that
+    /// sees the Warrior, seen by every caster and inside a ready disc, beats
+    /// one blind to it behind a pillar, hidden from every caster and out of
+    /// the disc. (With the blind-spot surcharge at the crowd-control ceiling
+    /// alone, five casters' occlusion took the blind spot. `W_SIGHT`'s own
+    /// margin hides a partly scaled surcharge until more casters than a 3v3
+    /// can field, so the cases run past six to pin "any count".)
+    #[test]
+    fn sight_outranks_cover_and_crowd_control_at_any_caster_count() {
+        let seeing = Vec2::new(10.0, 0.0);
+        let blind = Vec2::new(-15.0, 0.0);
+        for n in [2, 4, 5, 6, 8, 10] {
+            let mut units = vec![healer(1, 1, 1, 0.0, 0.0), melee(2, 1, 0, 20.0, 0.0)];
+            units.extend(casters_at_30(n));
+            let mut w = world(units).with_cc_field(field(vec![threat(10, 30.0, 0.0, 45.0, true)]));
+            w.obstacles = vec![pillar_at(-8.0, 0.0)];
+            let ctx = ctx_of(&w);
+            let vs = violations(RoleIntent::OccupyCover, seeing, &ctx);
+            let vb = violations(RoleIntent::OccupyCover, blind, &ctx);
+            assert_eq!(vs & C_SIGHT, 0, "{n}");
+            assert_ne!(vs & C_OCCLUDED, 0, "{n}");
+            assert_ne!(vs & C_CC_REACH, 0, "{n}");
+            assert_ne!(vb & C_SIGHT, 0, "{n}");
+            assert_eq!(vb & (C_OCCLUDED | C_CC_REACH | C_LEASH), 0, "{n}");
+            let seen = w
+                .enemy_casters_of(1)
+                .filter(|e| w.sees(seeing, e.pos))
+                .count();
+            assert_eq!(seen, n, "every caster sees the sighted spot");
+            assert!(
+                total(&w, seeing) < total(&w, blind),
+                "{n} casters: sighted {} vs blind {}",
+                total(&w, seeing),
+                total(&w, blind)
+            );
+        }
     }
 
     /// The rim candidate: with the Warrior standing between the healer and
@@ -3360,50 +3421,6 @@ mod tests {
         let (_, beyond) = infeasibility_parts(RoleIntent::OccupyCover, Vec2::new(31.0, 0.0), &ctx);
         let (_, inside) = infeasibility_parts(RoleIntent::OccupyCover, Vec2::new(25.0, 0.0), &ctx);
         assert!(beyond >= inside, "beyond {beyond} < inside {inside}");
-    }
-
-    /// Sight outranks cover and crowd control TOGETHER: a spot that sees the
-    /// Warrior but is seen by both enemy casters and stands in their area's
-    /// disc beats a blind one hidden behind the pillar and clear of the disc.
-    /// (Summed, the two once undercut sight, and a Priest stood blind behind
-    /// Nagrand's camp pillar for 8s.)
-    #[test]
-    fn sight_outranks_cover_and_crowd_control_together() {
-        let mut w = world(vec![
-            healer(1, 1, 1, 5.0, 5.0),
-            melee(2, 1, 0, -20.0, 15.0),
-            unit(3, 2, 0, 0.0, 20.0),
-            unit(4, 2, 1, 2.0, 20.0),
-        ])
-        .with_cc_field(field(vec![threat(3, 0.0, 20.0, 15.0, false)]));
-        w.obstacles = vec![ObstacleVolume::Prism {
-            center_xz: Vec2::ZERO,
-            circumradius: 8.0,
-            sides: 8,
-            rotation: 0.0,
-            base_y: 0.0,
-            height: 5.0,
-        }];
-        let ctx = ctx_of(&w);
-        let seeing = Vec2::new(10.0, 12.0);
-        let blind = Vec2::new(0.0, -9.0);
-        let v_seeing = violations(RoleIntent::OccupyCover, seeing, &ctx);
-        let v_blind = violations(RoleIntent::OccupyCover, blind, &ctx);
-        assert_eq!(v_seeing & C_SIGHT, 0);
-        assert_ne!(v_seeing & C_OCCLUDED, 0);
-        assert_ne!(v_seeing & C_CC_REACH, 0);
-        assert_ne!(v_blind & C_SIGHT, 0);
-        assert_eq!(v_blind & (C_OCCLUDED | C_CC_REACH), 0);
-        let cost = |p: Vec2| {
-            let (b, c) = infeasibility_parts(RoleIntent::OccupyCover, p, &ctx);
-            b + c
-        };
-        assert!(
-            cost(seeing) < cost(blind),
-            "{} vs {}",
-            cost(seeing),
-            cost(blind)
-        );
     }
 
     /// However deep in however many discs, a covered spot that sees the
