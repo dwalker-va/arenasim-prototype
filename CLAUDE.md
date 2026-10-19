@@ -887,15 +887,21 @@ spot is covered inside `reach + cc_reach_margin`; the spot a healer stands on
 is judged by `reach + margin / 2`, so a healer on the rim is not moved by the
 caster's every step. Two consumers read it: the team solve's
 `team_solve::C_CC_REACH` on `OccupyCover` (PRESSURED Priest, Paladin, Shaman,
-Druid), ranked above occlusion from casters and below sight of the anchor,
-below a dying teammate's reach and an owed dispel; a spot beyond heal range
-earns no credit for being out of reach. And the FREE formation point's reach
+Druid), ranked above occlusion from casters at any caster count (`W_CC` plus
+`W_OCCLUDED` per enemy caster) and below sight of the anchor (a blind spot
+pays the CC ceiling on top of `W_SIGHT`), below a dying teammate's reach and
+an owed dispel; a spot beyond heal range earns no credit for being out of
+reach. And the FREE formation point's reach
 repair (`formation::reach_repaired_point`, Priest, Shaman, Druid — never the
 Paladin, whose FREE is melee pursuit): the nearest spot out of every disc that
 still reaches every teammate the point reached and sees them no worse,
 composed after the sight repair on AS-370's turned heading; with no such spot,
-heal first and the point stands. The Paladin's band-hold steps aside while
-the spot it would park on is covered. The solve's flat-field anti-statue key
+heal first and the point stands. The Paladin keeps out only of discs it can
+leave without leaving PRESSURED — none reaching past `threat_intent_radius`
+(a Warlock's Fear) and none of its own target's — and its band-hold parks at
+the nearest spot out of them (`CcField::nearest_exit`); otherwise PRESSURED
+walked it out and its FREE pursuit walked it back. Each walk out of reach is
+traced once as it begins, trigger `OutOfCcReach`. The solve's flat-field anti-statue key
 is judged without the crowd-control term, so a melee's small stun disc does
 not disarm it. Under `TeamPlan` a healer parked at its FREE formation point
 also keeps its walk alive (`formation::continuous`): a lapsed one handed the

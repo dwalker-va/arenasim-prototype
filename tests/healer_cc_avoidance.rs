@@ -13,8 +13,10 @@
 //! - an enemy Mage on our Warrior with Polymorph ready, nothing pressuring the
 //!   healer — the FREE formation point's reach repair, for the Priest's
 //!   machine and the caster-healer machine the Druid and Shaman share;
-//! - a Warlock with Fear ready against a PRESSURED Paladin, which the
-//!   band-hold would otherwise park in reach;
+//! - a Druid with Cyclone ready against a PRESSURED Paladin, which the
+//!   band-hold parks at the edge of the disc instead of in it — and the discs
+//!   the Paladin does NOT answer (one reaching past the pressure radius, its
+//!   own target's, and any while FREE), each against its control;
 //! - an enemy Rogue in melee with Kidney Shot ready — the solve, against a
 //!   chaser's stun.
 //!
@@ -218,26 +220,27 @@ fn polymorph_stage(arm: Arm) -> Stage {
     planted(stage, ENEMY)
 }
 
-/// Our Paladin held PRESSURED with no enemy within its 15yd retreat band —
-/// so its band-hold would park it where it stands — and an enemy Warlock
-/// planted 24yd off on our Warrior, Death Coil spent; Fear ready, or on
-/// cooldown. The Paladin's FREE is its melee pursuit, which the rule leaves
-/// alone: it reaches the Paladin only in PRESSURED.
+/// Our Paladin at (-6, 0), 18yd from its Warrior, held PRESSURED.
+fn pressured_paladin() -> Stage {
+    lineup().place(HEALER, -6.0, 0.0).healer_posture(
+        HEALER,
+        HealerPosture {
+            posture: Posture::Pressured,
+            hold_until: 60.0,
+            ..HealerPosture::new(0.0)
+        },
+    )
+}
+
+/// Our PRESSURED Paladin with no enemy within its 15yd retreat band — so its
+/// band-hold parks it — and an enemy Druid planted 20yd off on our Warrior,
+/// inside its Cyclone's reach; Cyclone ready, or on cooldown. The band-hold
+/// parks the Paladin at the nearest spot out of the disc instead.
 fn paladin_stage(arm: Arm) -> Stage {
-    let stage = lineup()
-        .place(HEALER, -6.0, 0.0)
-        .healer_posture(
-            HEALER,
-            HealerPosture {
-                posture: Posture::Pressured,
-                hold_until: 60.0,
-                ..HealerPosture::new(0.0)
-            },
-        )
-        .place(ENEMY, 18.0, 0.0)
+    let stage = pressured_paladin()
+        .place(ENEMY, 14.0, 0.0)
         .target(ENEMY, WARRIOR)
-        .cooldown(ENEMY, AbilityType::DeathCoil, 60.0)
-        .cooldown(ENEMY, AbilityType::Fear, cooldown(arm));
+        .cooldown(ENEMY, AbilityType::Cyclone, cooldown(arm));
     planted(stage, ENEMY)
 }
 
@@ -310,12 +313,12 @@ const CASES: [Case; 6] = [
         to: 3.0,
     },
     Case {
-        name: "Fear from a Warlock, against a PRESSURED Paladin",
+        name: "Cyclone from a Druid, against a PRESSURED Paladin",
         healer: "Paladin",
-        enemy: "Warlock",
+        enemy: "Druid",
         after: 0,
         stage: paladin_stage,
-        reach: 30.0,
+        reach: 20.0,
         from: 1.0,
         to: 4.0,
     },
@@ -336,6 +339,39 @@ const SEEDS: [u64; 2] = [1, 2];
 fn measure(case: &Case, profile: &str, arm: Arm, seed: u64) -> Window {
     let played = play(config(case, seed, profile), (case.stage)(arm));
     window(&played, case.from, case.to, case.reach)
+}
+
+/// The walk out of reach is traced: on every stage the ready arm's healer
+/// records an `OutOfCcReach` movement decision — from the solve, the
+/// Paladin's band-hold, or the FREE reach repair — and the control's records
+/// none.
+#[test]
+fn the_walk_out_of_reach_is_traced() {
+    let traced = |case: &Case, arm: Arm| {
+        let played = play(config(case, 1, "TeamPlan"), (case.stage)(arm));
+        played
+            .staged_trace()
+            .filter(|e| {
+                e["kind"] == "movement_decision"
+                    && e["actor"]["team"] == 1
+                    && e["actor"]["class"] == case.healer
+                    && e["trigger"] == "OutOfCcReach"
+            })
+            .count()
+    };
+    for case in &CASES {
+        let (ready, control) = (traced(case, Arm::Ready), traced(case, Arm::Control));
+        println!(
+            "{}: OutOfCcReach ready {ready} / control {control}",
+            case.name
+        );
+        assert!(
+            ready >= 1,
+            "{}: the walk out of reach was not traced",
+            case.name
+        );
+        assert_eq!(control, 0, "{}: traced with nothing ready", case.name);
+    }
 }
 
 /// The rule, and its control. With the CC ready the `TeamPlan` healer stands
@@ -460,6 +496,109 @@ fn a_parked_teamplan_healer_stays_parked() {
             "{}: the Legacy control never stepped off its point",
             case.name
         );
+    }
+}
+
+/// The Paladin's track over the first `secs` after the stage lands.
+fn paladin_track(config: HeadlessMatchConfig, stage: Stage, secs: f32) -> Vec<Vec2> {
+    let played = play(config, stage);
+    let landed = played.landed().app;
+    played
+        .staged_frames()
+        .filter(|f| f.sim_time - landed <= secs)
+        .map(|f| xz(unit_in(f, HEALER).position))
+        .collect()
+}
+
+fn paladin_config(enemy: &str, paladin_target: usize) -> HeadlessMatchConfig {
+    HeadlessMatchConfig {
+        team1: vec!["Warrior".into(), "Paladin".into()],
+        team2: vec![enemy.into(), "Warrior".into()],
+        map: "BasicArena".into(),
+        ai_profile: Some("TeamPlan".into()),
+        team1_kill_target: Some(paladin_target),
+        team2_kill_target: Some(0),
+        random_seed: Some(1),
+        max_duration_secs: 8.0,
+        ..Default::default()
+    }
+}
+
+/// The Paladin keeps out only of the discs it can leave without leaving the
+/// posture the rule reaches it in, PRESSURED — each a pair, the same stage
+/// with the crowd control ready and on cooldown, played over the second
+/// before the cooldown would come off:
+///
+/// - a Warlock's Fear, whose 33yd disc reaches past the pressure test's 30yd
+///   intent radius: stepping out of it would end PRESSURED and pursuit would
+///   walk the Paladin back, so the PRESSURED Paladin does not step;
+/// - the Kidney Shot of the enemy Rogue the Paladin is after: pursuit's goal
+///   is that disc's centre, so it does not step out of that either;
+/// - a FREE Paladin pursuing an enemy Warrior through a ready Fear: FREE is
+///   its melee pursuit, untouched by the rule, and it closes as before.
+#[test]
+fn the_paladin_keeps_out_only_of_discs_it_can_leave_in_pressured() {
+    type Build = fn(Arm) -> Stage;
+    let fear: Build = |arm| {
+        let stage = pressured_paladin()
+            .place(ENEMY, 18.0, 0.0)
+            .target(ENEMY, WARRIOR)
+            .cooldown(ENEMY, AbilityType::DeathCoil, 60.0)
+            .cooldown(ENEMY, AbilityType::Fear, cooldown(arm));
+        planted(stage, ENEMY)
+    };
+    // At the edge of heal range of its Warrior (39yd), so the solve's field
+    // is not flat and nothing but the disc would move it; its own Hammer of
+    // Justice spent, so it does not stun the Rogue out of the picture.
+    let own_target: Build = |arm| {
+        let stage = pressured_paladin()
+            .place(HEALER, 15.0, 0.0)
+            .cooldown(HEALER, AbilityType::HammerOfJustice, 60.0)
+            .place(ENEMY, 18.0, 0.0)
+            .combatant(ENEMY, |c| c.stealthed = false)
+            .target(HEALER, ENEMY)
+            .target(ENEMY, HEALER)
+            .cooldown(ENEMY, AbilityType::KidneyShot, cooldown(arm));
+        planted(stage, ENEMY)
+    };
+    let free: Build = |arm| {
+        let stage = lineup()
+            .place(HEALER, -6.0, 0.0)
+            .place(ENEMY_WARRIOR, 16.0, 0.0)
+            .target(HEALER, ENEMY_WARRIOR)
+            .target(ENEMY_WARRIOR, WARRIOR)
+            .place(ENEMY, 20.0, 6.0)
+            .target(ENEMY, WARRIOR)
+            .cooldown(ENEMY, AbilityType::DeathCoil, 60.0)
+            .cooldown(ENEMY, AbilityType::Fear, cooldown(arm));
+        planted(stage, ENEMY)
+    };
+    let cases: [(&str, &str, usize, Build); 3] = [
+        (
+            "a Fear reaching past the pressure radius",
+            "Warlock",
+            1,
+            fear,
+        ),
+        ("its own target's Kidney Shot", "Rogue", 0, own_target),
+        ("a FREE Paladin pursuing through a Fear", "Warlock", 1, free),
+    ];
+    for (name, enemy, target, build) in cases {
+        let ready = paladin_track(paladin_config(enemy, target), build(Arm::Ready), 1.0);
+        let control = paladin_track(paladin_config(enemy, target), build(Arm::Control), 1.0);
+        assert!(ready.len() > 30, "{name}: vacuous");
+        assert_eq!(
+            ready, control,
+            "{name}: the Paladin moved for crowd control it should not answer"
+        );
+        if name.starts_with("a FREE") {
+            let closed = ready[0].distance(Vec2::new(16.0, 0.0))
+                - ready.last().unwrap().distance(Vec2::new(16.0, 0.0));
+            assert!(
+                closed > 3.0,
+                "{name}: the FREE Paladin did not pursue ({closed}yd)"
+            );
+        }
     }
 }
 

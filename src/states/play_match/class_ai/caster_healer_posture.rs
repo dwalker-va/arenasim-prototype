@@ -378,6 +378,7 @@ fn caster_healer_free_tick(
         commands.entity(entity).remove::<MovementDirective>();
     }
 
+    let repairing = state.formation.reach.is_some();
     let Some(point) = compute_formation_point(
         entity,
         combatant,
@@ -403,6 +404,18 @@ fn caster_healer_free_tick(
         return;
     };
 
+    // The reach repair took the point out of crowd-control reach (AS-362):
+    // traced as the repair begins.
+    if !repairing && state.formation.reach.is_some() {
+        if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
+            builder.direction_change(
+                TracePosture::Free,
+                MovementTrigger::OutOfCcReach,
+                MovementGoalKind::Point,
+            );
+            builder.finish();
+        }
+    }
     let point_xz = Vec2::new(point.x, point.z);
     let my_xz = Vec2::new(my_pos.x, my_pos.z);
     let moved = state

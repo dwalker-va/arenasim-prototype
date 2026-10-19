@@ -1028,6 +1028,27 @@ pub(super) struct HealerDispel<'a> {
     pub current_mana: f32,
 }
 
+/// Records whether the PRESSURED healer is being walked out of crowd-control
+/// reach (AS-362), and traces `OutOfCcReach` as such a walk begins.
+fn trace_cc_walk(
+    state: &mut HealerPosture,
+    walking: bool,
+    decision_trace: &mut DecisionTrace,
+    ctx: &CombatContext,
+) {
+    if walking && !state.cc_walk {
+        if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
+            builder.direction_change(
+                TracePosture::Pressured,
+                MovementTrigger::OutOfCcReach,
+                MovementGoalKind::Point,
+            );
+            builder.finish();
+        }
+    }
+    state.cc_walk = walking;
+}
+
 /// Shared PRESSURED tick (R6/R8): sticky anchor selection, hard-commitment
 /// window, scored retreat direction, directive issuance, and the
 /// transition/direction-change trace events. Extracted verbatim from the
@@ -1141,13 +1162,31 @@ pub(super) fn healer_pressured_tick_shared(
         )
         .with_urgency_hp_threshold(shared.urgency_hp_threshold)
         .with_dispel_goal(entity, dispel_goal)
-        .with_cc_field(super::cc_reach::CcField::for_healer(
-            ctx,
-            abilities,
-            entity,
-            shared.cc_ready_horizon,
-            shared.cc_reach_margin,
-        ))
+        .with_cc_field({
+            let field = super::cc_reach::CcField::for_healer(
+                ctx,
+                abilities,
+                entity,
+                shared.cc_ready_horizon,
+                shared.cc_reach_margin,
+            );
+            // The Paladin (the one healer with a retreat band) is reached only
+            // in PRESSURED; its FREE is melee pursuit of its target. Two kinds
+            // of disc would trade it between the two postures: one reaching
+            // past the pressure test's intent radius (stepping out of it ends
+            // PRESSURED, and pursuit walks it back in), and its own target's
+            // (pursuit's goal is the centre of that disc). Measured, each
+            // was a heading reversal every few seconds — against a Warlock's
+            // 30yd Fear, and against the Psychic Scream of the enemy Priest it
+            // was hammering. So it keeps out of neither.
+            if fallback_range.is_some() {
+                field
+                    .within(shared.threat_intent_radius)
+                    .without_source(ctx.self_info().and_then(|me| me.target))
+            } else {
+                field
+            }
+        })
     });
     // TeamPlan: a dying teammate the healer does not reach from where it
     // stands (AS-209). The solve walks into reach of it (`C_DYING`); the
@@ -1157,17 +1196,41 @@ pub(super) fn healer_pressured_tick_shared(
         .and_then(|w| crate::states::play_match::team_solve::dying_unreached(w, entity));
     // TeamPlan: the spot the healer stands on is in reach of an enemy crowd
     // control ready to land on it (AS-362), judged by the inner disc so a
-    // healer the solve walked to the rim is not handed back and forth. The
-    // solve walks it out; the band-hold below must not park the Paladin in
-    // reach first.
+    // healer walked to the rim is not walked back and forth.
+    let my_xz = Vec2::new(my_pos.x, my_pos.z);
     let cc_covered = world.as_ref().is_some_and(|w| {
-        w.cc.covering(
-            &w.obstacles,
-            Vec2::new(my_pos.x, my_pos.z),
-            super::cc_reach::Disc::Inner,
-        )
-        .next()
-        .is_some()
+        w.cc.covering(&w.obstacles, my_xz, super::cc_reach::Disc::Inner)
+            .next()
+            .is_some()
+    });
+    // The Paladin's band-hold parks at the nearest spot out of those discs
+    // instead of where it stands (AS-362): a local step to the edge, never the
+    // whole `OccupyCover` solve, which would walk the Paladin off to cover and
+    // hand it back to the band-hold when it got there — measured as a heading
+    // reversal every few seconds. Only spots inside the arena and in heal
+    // range of every teammate the Paladin already reaches.
+    let cc_exit = world.as_ref().filter(|_| cc_covered).and_then(|w| {
+        let held: Vec<Vec2> = w
+            .units
+            .iter()
+            .filter(|u| {
+                u.team == ctx.self_info().map_or(0, |s| s.team) && u.entity != entity && !u.is_pet
+            })
+            .map(|u| u.pos)
+            .filter(|a| a.distance(my_xz) <= shared.heal_range)
+            .collect();
+        w.cc.nearest_exit(&w.obstacles, my_xz, |c| {
+            held.iter().all(|a| a.distance(c) <= shared.heal_range)
+                && w.bounds
+                    .as_ref()
+                    .is_none_or(|b| b.contains(Vec3::new(c.x, 0.0, c.y)))
+                && crate::states::play_match::map_geometry::nearest_standable(
+                    &w.obstacles,
+                    c,
+                    my_pos.y,
+                )
+                .is_some_and(|s| s.distance(c) < 1e-3)
+        })
     });
 
     // Band-hold (Paladin only): once every threat is at/beyond fallback_range,
@@ -1182,19 +1245,21 @@ pub(super) fn healer_pressured_tick_shared(
     // while one is out of reach from here, or a dispel is owed, the solve
     // walks the Paladin instead, and the hold resumes once the walk arrives.
     if let Some(band) =
-        fallback_range.filter(|_| dispel_goal.is_none() && dying_unreached.is_none() && !cc_covered)
+        fallback_range.filter(|_| dispel_goal.is_none() && dying_unreached.is_none())
     {
         let nearest = threat_positions
             .values()
             .map(|p| my_pos.distance(*p))
             .fold(f32::MAX, f32::min);
         if threat_positions.is_empty() || nearest >= band {
+            let goal = cc_exit.map_or(my_pos, |e| Vec3::new(e.x, my_pos.y, e.y));
             commands.entity(entity).try_insert(MovementDirective {
-                goal: MovementGoal::Point(my_pos),
+                goal: MovementGoal::Point(goal),
                 expires: now + shared.directive_ttl,
                 committed_until: now + shared.commit_window,
             });
             state.last_direction = None;
+            trace_cc_walk(state, cc_exit.is_some(), decision_trace, ctx);
             if transitioned {
                 if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
                     let trigger = if prev == Posture::Escape {
@@ -1266,6 +1331,17 @@ pub(super) fn healer_pressured_tick_shared(
         };
         let spot =
             crate::states::play_match::team_solve::solve_position(intent, entity, &world, focus);
+        // The solve walks the healer out of crowd-control reach when the spot
+        // it stands on is covered and the spot it chose is not.
+        let cc_walk = cc_covered
+            && spot.is_some_and(|s| {
+                world
+                    .cc
+                    .covering(&world.obstacles, s, super::cc_reach::Disc::Outer)
+                    .next()
+                    .is_none()
+            });
+        trace_cc_walk(state, cc_walk, decision_trace, ctx);
         // The dying teammate this solve walks the healer to reach — the
         // `TeamPlan` medic walk ([`solve_dying_walk`]). Recorded, not acted
         // on: the spot above already is the walk.

@@ -175,6 +175,10 @@ pub fn reach(ability: AbilityType, def: &AbilityConfig) -> f32 {
 /// every member) at most `horizon`, the resource to pay for it, and stealth
 /// for an opener that needs it. Range and sight are the disc's business, not
 /// this.
+///
+/// Conservative where the sim has state this does not read: a Rogue's Kidney
+/// Shot counts as ready on energy and cooldown alone, whatever its combo
+/// points — the healer gives ground to a finisher the Rogue may not yet have.
 pub fn could_cast(
     ctx: &CombatContext,
     enemy: &CombatantInfo,
@@ -345,6 +349,41 @@ impl CcField {
             threats: threats(ctx, abilities, healer, horizon),
             margin,
         }
+    }
+
+    /// This field less every threat whose outer disc reaches `radius` or
+    /// beyond: the discs a healer can step out of while still standing inside
+    /// `radius` of their caster.
+    pub fn within(mut self, radius: f32) -> Self {
+        let margin = self.margin;
+        self.threats.retain(|t| t.reach + margin < radius);
+        self
+    }
+
+    /// The nearest spot to `p` out of every disc covering it: for each disc
+    /// covering `p` (the inner disc — a healer already outside it stays), the
+    /// point just past its outer rim on the ray from its caster through `p`,
+    /// kept when no disc covers it and `allowed` admits it. `None` when `p` is
+    /// covered by none, or no such spot exists.
+    pub fn nearest_exit(
+        &self,
+        obstacles: &[ObstacleVolume],
+        p: Vec2,
+        allowed: impl Fn(Vec2) -> bool,
+    ) -> Option<Vec2> {
+        self.covering(obstacles, p, Disc::Inner)
+            .filter_map(|t| {
+                let away = (p - t.center).normalize_or_zero();
+                (away != Vec2::ZERO).then(|| t.center + away * (self.radius(t, Disc::Outer) + 0.25))
+            })
+            .filter(|c| self.covering(obstacles, *c, Disc::Outer).next().is_none() && allowed(*c))
+            .min_by(|a, b| a.distance(p).total_cmp(&b.distance(p)))
+    }
+
+    /// This field less every threat from `source`.
+    pub fn without_source(mut self, source: Option<Entity>) -> Self {
+        self.threats.retain(|t| Some(t.source) != source);
+        self
     }
 
     pub fn is_empty(&self) -> bool {
@@ -659,6 +698,71 @@ mod tests {
         f.obstacles = pillar();
         let field = f.field();
         assert!(field.covered(&f.obstacles, Vec2::new(5.0, 0.0), Disc::Outer) > 0.0);
+    }
+
+    fn disc(source: u32, x: f32, reach: f32) -> CcThreat {
+        CcThreat {
+            source: Entity::from_raw(source),
+            ability: AbilityType::Fear,
+            center: Vec2::new(x, 0.0),
+            reach,
+            needs_sight: false,
+            weight: 8.0,
+        }
+    }
+
+    #[test]
+    fn within_keeps_only_discs_inside_the_radius_and_without_source_drops_one() {
+        let field = CcField {
+            threats: vec![disc(1, 0.0, 8.0), disc(2, 0.0, 26.0), disc(3, 0.0, 27.0)],
+            margin: 3.0,
+        };
+        let kept: Vec<u32> = field
+            .clone()
+            .within(30.0)
+            .threats
+            .iter()
+            .map(|t| t.source.index())
+            .collect();
+        assert_eq!(kept, vec![1, 2]);
+        let kept: Vec<u32> = field
+            .without_source(Some(Entity::from_raw(2)))
+            .threats
+            .iter()
+            .map(|t| t.source.index())
+            .collect();
+        assert_eq!(kept, vec![1, 3]);
+    }
+
+    /// The nearest exit is just past the outer rim, away from the caster; a
+    /// spot another disc covers, or `allowed` refuses, is no exit; a spot
+    /// outside the inner disc needs none.
+    #[test]
+    fn the_nearest_exit_steps_just_past_the_rim() {
+        let field = CcField {
+            threats: vec![disc(1, 10.0, 8.0)],
+            margin: 3.0,
+        };
+        let exit = field
+            .nearest_exit(&[], Vec2::new(1.0, 0.0), |_| true)
+            .expect("an exit");
+        assert!((exit - Vec2::new(-1.25, 0.0)).length() < 1e-4, "{exit}");
+        assert_eq!(
+            field.nearest_exit(&[], Vec2::new(-0.2, 0.0), |_| true),
+            None
+        );
+        assert_eq!(
+            field.nearest_exit(&[], Vec2::new(1.0, 0.0), |c| c.x > 0.0),
+            None
+        );
+        let blocked = CcField {
+            threats: vec![disc(1, 10.0, 8.0), disc(2, -4.0, 3.0)],
+            margin: 3.0,
+        };
+        assert_eq!(
+            blocked.nearest_exit(&[], Vec2::new(1.0, 0.0), |_| true),
+            None
+        );
     }
 
     #[test]

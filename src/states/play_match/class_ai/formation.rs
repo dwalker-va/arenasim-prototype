@@ -696,7 +696,10 @@ pub fn reach_repaired_point(
     // already standing out of reach — and in heal reach and sight of its
     // teammates — stays where it stands, as a satisfied solve does. Its own
     // spot is judged by the inner disc: the Schmitt pair the solve uses for
-    // the spot a healer stands on.
+    // the spot a healer stands on. The goal is then where the HEALER stands,
+    // however far that is from the formation point: this branch is not bound
+    // by `REACH_REPAIR_LIMIT`, and taking it (or leaving it) can move the goal
+    // further than the limit in one evaluation.
     let stays = best.is_none_or(through)
         && field
             .covering(ctx.obstacles, me, Disc::Inner)

@@ -990,15 +990,24 @@ fn infeasibility_parts(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) 
     // what a landing would cost and how deep in the discs it stands, which is
     // the gradient out when no step leaves them. One out of heal range pays
     // the cap: leaving heal range buys no crowd-control credit.
+    //
+    // Above occlusion at ANY number of casters: occlusion costs `W_OCCLUDED`
+    // per enemy caster that sees the spot, so the base is that much per enemy
+    // caster in the world on top of `W_CC`. A fixed 200 lost to three casters'
+    // 300 and took a hidden spot inside a ready disc over an open one out of
+    // reach.
+    let casters = world.enemy_casters_of(ctx.unit.team).count() as f32;
+    let w_cc = W_CC + W_OCCLUDED * casters;
+    let ceiling = w_cc + W_CC_GRADE_CAP;
     let mut cc = 0.0;
     if v & C_CC_REACH != 0 {
         cc = if v & C_LEASH != 0 {
-            W_CC_OUT_OF_RANGE
+            ceiling
         } else {
             let disc = cc_disc(candidate, ctx);
             let grade = W_CC_SECOND * world.cc.covered(&world.obstacles, candidate, disc)
                 + W_CC_YARD * world.cc.deficit(&world.obstacles, candidate, disc);
-            W_CC + grade.min(W_CC_GRADE_CAP)
+            w_cc + grade.min(W_CC_GRADE_CAP)
         };
     }
     // Sight still outranks crowd control AND cover together. A spot that
@@ -1010,15 +1019,16 @@ fn infeasibility_parts(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) 
     // the crowd-control term's ceiling on top of `W_SIGHT`; with none, the
     // costs are as they were.
     if v & C_SIGHT != 0 && !world.cc.is_empty() {
-        cc += W_CC_OUT_OF_RANGE;
+        cc += ceiling;
     }
     (cost, cc)
 }
 
-/// The cost of a spot covered by enemy crowd control ([`C_CC_REACH`]): above
-/// `W_OCCLUDED` (100 per caster that sees the spot), so out of reach outranks
-/// one caster's cover. Sight outranks it however it is set: a blind spot pays
-/// the crowd-control ceiling on top of `W_SIGHT` while a field is in play.
+/// The base cost of a spot covered by enemy crowd control ([`C_CC_REACH`]),
+/// before `W_OCCLUDED` per enemy caster is added to it (so out of reach
+/// outranks cover at any caster count). Sight outranks it however it is set:
+/// a blind spot pays the crowd-control ceiling on top of `W_SIGHT` while a
+/// field is in play.
 const W_CC: f32 = 200.0;
 /// Per control-second a landing would cost — the grade among covered spots.
 const W_CC_SECOND: f32 = 2.0;
@@ -1027,9 +1037,6 @@ const W_CC_YARD: f32 = 10.0;
 /// The most the grade adds, so a covered spot always costs less than one that
 /// loses sight of the anchor.
 const W_CC_GRADE_CAP: f32 = 190.0;
-/// What a spot beyond heal range of the anchor pays for crowd control, however
-/// far from every disc it stands: as much as the worst covered spot in range.
-const W_CC_OUT_OF_RANGE: f32 = W_CC + W_CC_GRADE_CAP;
 /// Yards past a disc's outer rim the rim candidate stands, so it is out of the
 /// disc after the projection onto standable ground.
 const CC_RIM_CLEARANCE: f32 = 0.25;
@@ -3257,6 +3264,61 @@ mod tests {
             focus: None,
             placed: Box::leak(Box::new(BTreeMap::new())),
         }
+    }
+
+    /// Out of reach outranks cover at ANY number of casters (AS-362 round 2):
+    /// three casters see an open spot out of a ready disc, and a spot behind a
+    /// pillar is hidden from all three but inside the disc. The open spot wins;
+    /// the control, with no crowd control ready, takes the hidden one. (A
+    /// fixed 200 for crowd control lost to three casters' 300 of occlusion.)
+    #[test]
+    fn out_of_reach_outranks_cover_at_any_caster_count() {
+        let units = vec![
+            healer(1, 1, 1, 0.0, 0.0),
+            melee(2, 1, 0, -10.0, 0.0),
+            unit(3, 2, 0, 30.0, -5.0),
+            unit(4, 2, 1, 30.0, 0.0),
+            unit(5, 2, 2, 30.0, 5.0),
+        ];
+        let hidden = Vec2::new(2.0, 0.0);
+        let open = Vec2::new(-5.0, 20.0);
+        let cost = |w: &SolveWorld, p: Vec2| {
+            let (b, c) = infeasibility_parts(RoleIntent::OccupyCover, p, &ctx_of(w));
+            b + c
+        };
+        let mut w =
+            world(units.clone()).with_cc_field(field(vec![threat(4, 30.0, 0.0, 31.0, false)]));
+        w.obstacles = vec![pillar_at(10.0, 0.0)];
+        let ctx = ctx_of(&w);
+        assert_eq!(
+            violations(RoleIntent::OccupyCover, hidden, &ctx) & C_OCCLUDED,
+            0
+        );
+        assert_ne!(
+            violations(RoleIntent::OccupyCover, hidden, &ctx) & C_CC_REACH,
+            0
+        );
+        assert_eq!(
+            violations(RoleIntent::OccupyCover, open, &ctx) & C_CC_REACH,
+            0
+        );
+        let seen = w
+            .enemy_casters_of(1)
+            .filter(|e| w.sees(open, e.pos))
+            .count();
+        assert_eq!(seen, 3, "all three casters see the open spot");
+        assert!(
+            cost(&w, open) < cost(&w, hidden),
+            "{} vs {}",
+            cost(&w, open),
+            cost(&w, hidden)
+        );
+        let mut control = world(units);
+        control.obstacles = vec![pillar_at(10.0, 0.0)];
+        assert!(
+            cost(&control, hidden) < cost(&control, open),
+            "the control prefers cover"
+        );
     }
 
     /// The rim candidate: with the Warrior standing between the healer and
