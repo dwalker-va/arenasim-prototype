@@ -445,3 +445,23 @@ Run by `main` @ `5e13a22a` (`-before.csv.gz`) and the branch
 (`-after.csv.gz`) with `--jobs 6 --trace-mode off`, analysed with
 `scripts/paired_sweep.py before.csv after.csv --affects Priest,Druid,Shaman
 --tier directional --expect nothing`.
+
+## `2026-10-19-as371-legacy*`, `2026-10-19-as371-teamplan-pillaredarena*`
+
+Behind `../2026-10-19-as371-priest-dip-abort.md` (card AS-371). A paired
+directional `Legacy` sweep, 2,830 configs (275 Priest cells + 8 control x seeds
+0-9, BasicArena by default), and the same configs under `TeamPlan` on Nagrand
+for the byte-identity check. Regenerate with:
+
+```bash
+scripts/gen_sweep.py --full 2 --exclude-double-healer \
+  --affects Priest --control-cells 8 --n 10            # -legacy.jsonl
+# -teamplan-pillaredarena.jsonl: the same lines with
+# "ai_profile":"TeamPlan","map":"PillaredArena" added
+```
+
+Run by `main` @ `55849194` (`-before`) and the branch (`-after`) with
+`--jobs 4 --trace-mode off`; the `Legacy` pair analysed with
+`scripts/paired_sweep.py before.csv after.csv --affects Priest --tier
+directional --expect nothing`. The two `TeamPlan` CSVs were byte-identical,
+so one is committed.

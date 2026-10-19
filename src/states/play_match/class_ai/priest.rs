@@ -1827,10 +1827,12 @@ pub fn evaluate_priest_posture(
         None
     };
 
-    // --- DIP abort check (only while mid-dip and not being preempted) ---
-    let dip_aborts = prev == Posture::Dip
-        && !trigger
-        && scream_dip_should_abort(state, combatant, ctx, shared, now);
+    // --- DIP abort check (only while mid-dip) --- independent of pressure:
+    // the `onset` preemption below outranks it, and under `Legacy` a closing
+    // caster can hold the trigger without the onset, so gating on the trigger
+    // left the dip running with no budget and no dying-teammate exit (AS-371).
+    let dip_aborts =
+        prev == Posture::Dip && scream_dip_should_abort(state, combatant, ctx, shared, now);
 
     // --- DIP entry (FREE only, no pressure): the offensive scream dip ---
     let dip_entry = if prev == Posture::Free && !trigger {
