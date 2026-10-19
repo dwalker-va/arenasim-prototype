@@ -154,9 +154,12 @@ pub fn evaluate_paladin_posture(
         None
     };
 
-    // --- DIP abort check (only while mid-dip and not being preempted) ---
-    let dip_aborts =
-        prev == Posture::Dip && !focused && dip_should_abort(state, combatant, ctx, shared, now);
+    // --- DIP abort check (only while mid-dip) --- independent of focus: the
+    // `focused_onset` preemption below outranks it, and under `Legacy` a
+    // closing caster can focus the Paladin without the onset, so gating on
+    // `focused` left the dip running with no budget and no dying-teammate
+    // exit (AS-380).
+    let dip_aborts = prev == Posture::Dip && dip_should_abort(state, combatant, ctx, shared, now);
 
     // --- DIP entry (FREE only, no pressure) ---
     let dip_entry = if prev == Posture::Free && !trigger {
@@ -430,8 +433,8 @@ fn evaluate_dip_entry(
     dip_target_candidate(ctx, combatant.team, my_pos, reach)
 }
 
-/// Mid-dip abort conditions (R8/AE3), checked each tick while DIP holds and
-/// the focused preempt did not fire: budget exceeded, dip target no longer
+/// Mid-dip abort conditions (R8/AE3), checked each tick while DIP holds
+/// (the focused-onset preempt outranks them): budget exceeded, dip target no longer
 /// HoJ-eligible (dead / immune / stun-DR-immune / stealthed), or the anchor
 /// teammate's HP at/below the urgency threshold (the dip aborts WITHOUT
 /// casting — the heal fires immediately after, un-deferred, because the
