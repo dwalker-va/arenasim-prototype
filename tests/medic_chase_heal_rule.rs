@@ -373,6 +373,7 @@ fn the_paladin_medic_walk_defers_non_critical_heals() {
 #[test]
 fn the_shaman_medic_walk_defers_non_critical_casts() {
     let mut s = scene(CharacterClass::Shaman, DYING, 0.7);
+    let abilities = AbilityDefinitions::default();
     let movement = MovementConfig::default();
     let mut trace = DecisionTrace::default();
     let mut queue = CommandQueue::default();
@@ -385,6 +386,7 @@ fn the_shaman_medic_walk_defers_non_critical_casts() {
             &s.combatant,
             HEALER_POS,
             &ctx,
+            &abilities,
             None,
             None,
             &movement,

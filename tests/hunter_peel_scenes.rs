@@ -10,9 +10,10 @@
 //! Trap peel, the Peel play's Frost Trap, the pressure trap, the fallback lane
 //! and the dip's arrival. Sight is of the LANDING, never of the enemy the trap
 //! is aimed at. Two paths have none. The Frost Trap at the Hunter's feet
-//! always sees its landing. The opportunistic off-target drop cannot fire: it
-//! wants its healer within plant range (8yd), and any enemy that near sends
-//! the Hunter into its dead-zone block before the rotation reaches it.
+//! always sees its landing. The rotation throws nothing at an off-target
+//! itself — it holds the trap for the dip — and any off-target within plant
+//! range (8yd) sends the Hunter into its dead-zone or closing block before the
+//! rotation reaches it.
 
 use arenasim::states::match_config::CharacterClass::{Hunter, Mage, Priest, Warlock, Warrior};
 use arenasim::states::play_match::ai_profile::AiProfile;

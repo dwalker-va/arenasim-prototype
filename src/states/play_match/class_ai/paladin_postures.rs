@@ -154,9 +154,12 @@ pub fn evaluate_paladin_posture(
         None
     };
 
-    // --- DIP abort check (only while mid-dip and not being preempted) ---
-    let dip_aborts =
-        prev == Posture::Dip && !focused && dip_should_abort(state, combatant, ctx, shared, now);
+    // --- DIP abort check (only while mid-dip) --- independent of focus: the
+    // `focused_onset` preemption below outranks it, and under `Legacy` a
+    // closing caster can focus the Paladin without the onset, so gating on
+    // `focused` left the dip running with no budget and no dying-teammate
+    // exit (AS-380).
+    let dip_aborts = prev == Posture::Dip && dip_should_abort(state, combatant, ctx, shared, now);
 
     // --- DIP entry (FREE only, no pressure) ---
     let dip_entry = if prev == Posture::Free && !trigger {
@@ -192,6 +195,9 @@ pub fn evaluate_paladin_posture(
     if transitioned {
         state.posture = next;
         state.since = now;
+        // A walk out of crowd-control reach belongs to the PRESSURED spell it
+        // began in: the next one is a new walk, traced again (AS-362).
+        state.cc_walk = false;
         state.last_direction = None;
         state.last_point = None;
         match next {
@@ -430,8 +436,8 @@ fn evaluate_dip_entry(
     dip_target_candidate(ctx, combatant.team, my_pos, reach)
 }
 
-/// Mid-dip abort conditions (R8/AE3), checked each tick while DIP holds and
-/// the focused preempt did not fire: budget exceeded, dip target no longer
+/// Mid-dip abort conditions (R8/AE3), checked each tick while DIP holds
+/// (the focused-onset preempt outranks them): budget exceeded, dip target no longer
 /// HoJ-eligible (dead / immune / stun-DR-immune / stealthed), or the anchor
 /// teammate's HP at/below the urgency threshold (the dip aborts WITHOUT
 /// casting — the heal fires immediately after, un-deferred, because the
@@ -489,6 +495,7 @@ fn paladin_pressured_tick(
         ctx,
         state,
         directive,
+        abilities,
         &movement.shared,
         &movement.paladin.weights,
         // No wand — the Paladin's wand_pull weight is 0 in config.

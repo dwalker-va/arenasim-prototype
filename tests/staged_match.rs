@@ -482,7 +482,11 @@ fn first_difference(a: &[String], b: &[String]) -> String {
 fn a_stage_built_to_a_seeded_state_plays_on_as_the_seed_does() {
     const SEEDED: u64 = 3;
     const OTHER: u64 = 11;
-    let (at, snap) = quiet_state(|| nagrand(SEEDED), 18.0);
+    // The first quiet frame from 15s: late enough that the two seeds have
+    // diverged, early enough that a long fight follows it. (From 18s, AS-362's
+    // crowd-control reach left too little of seed 3's fight after T for the
+    // non-vacuity floor below.)
+    let (at, snap) = quiet_state(|| nagrand(SEEDED), 15.0);
     let seeded = play_seeded(nagrand(SEEDED));
     let staged = play(
         nagrand(OTHER),

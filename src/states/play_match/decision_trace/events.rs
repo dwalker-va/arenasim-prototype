@@ -503,6 +503,12 @@ pub enum MovementTrigger {
     /// `point` goal). Fires when the play takes the healer's movement and
     /// whenever the spot it chose moves.
     TakeCover,
+    /// `TeamPlan` (AS-362): the healer's goal was chosen to take it out of
+    /// the reach of an enemy crowd control ready to land on it — the team
+    /// solve's `C_CC_REACH` (PRESSURED), the Paladin's band-hold stepping to
+    /// a disc's edge, or the FREE formation point's reach repair. Fires once
+    /// as each such walk begins, not per re-solve.
+    OutOfCcReach,
 }
 
 /// Shape of the movement goal carried by the directive this decision issued.

@@ -1048,6 +1048,7 @@ pub fn dispatch_class_decision(
                         combatant,
                         my_pos,
                         ctx,
+                        abilities,
                         healer_posture.map(bevy::prelude::Mut::into_inner),
                         directive,
                         movement_config,
@@ -1078,8 +1079,9 @@ pub fn dispatch_class_decision(
         // `druid:` block, then a rotation of instants. The posture's
         // ESCAPE deferral is not threaded into the rotation — every heal
         // the Druid has is an instant, so there is nothing to defer. The
-        // medic walk's teammate is: while it is out of reach the rotation
-        // holds damage and utility for the heal (`class_ai::druid`).
+        // medic walk's teammate is — the `Legacy` chase's, or the `TeamPlan`
+        // solve's walk to a dying teammate: while it is out of reach the
+        // rotation holds damage and utility for the heal (`class_ai::druid`).
         match_config::CharacterClass::Druid => {
             let mut plan = class_ai::caster_healer_posture::CasterHealerPlan::default();
             if gates_opened {
@@ -1090,6 +1092,7 @@ pub fn dispatch_class_decision(
                         combatant,
                         my_pos,
                         ctx,
+                        abilities,
                         healer_posture.map(bevy::prelude::Mut::into_inner),
                         directive,
                         movement_config,

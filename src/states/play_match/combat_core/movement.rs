@@ -3,7 +3,9 @@
 use super::super::arena_bounds::ArenaBounds;
 use super::super::components::*;
 use super::super::map_config::ActiveMapGeometry;
-use super::super::map_geometry::{resolve_movement, steer_toward_goal, ObstacleVolume};
+use super::super::map_geometry::{
+    has_line_of_sight, resolve_movement, steer_toward_goal, ObstacleVolume,
+};
 use super::super::match_config::CharacterClass;
 use super::super::team_plan::{
     hold_position, should_break_cover, should_hold, Stance, TeamPlans, CAMP_ARRIVAL_EPSILON,
@@ -49,6 +51,37 @@ pub fn effective_movement_speed(base: f32, auras: Option<&ActiveAuras>) -> f32 {
         }
     }
     movement_speed
+}
+
+/// Whether normal pursuit keeps closing on its target this frame.
+///
+/// Beyond `stop_distance` (the class's preferred range) it always does. Inside
+/// it, a unit that `walks_for_sight` keeps closing while `in_sight` says a
+/// pillar stands between it and its target: stopping there parks it where
+/// every cast it has is refused `LosBlocked`, and against a target that is
+/// itself parked — a lone healer out of mana behind a Nagrand pillar — nothing
+/// else moves either, and the match draws at the cap (AS-360). The walk is the
+/// pursuit's own tangent-steered step, so it rounds the pillar and stops the
+/// frame sight returns.
+///
+/// Healers do not walk for sight (`walks_for_sight` false): their posture
+/// machine owns where they stand, and a healer out of sight of the enemy it
+/// targets is usually there on purpose — in cover. The Mage and Hunter answer
+/// occlusion with their own ENGAGE machine (`los_seek` and the occlusion
+/// chase); the pursuit sees them in range and out of sight only on the odd
+/// frames before that machine has, and walks them there too.
+///
+/// Both AI profiles: the pursuit belongs to neither, and a unit parked with
+/// every cast refused is a defect under either.
+///
+/// `in_sight` is evaluated only when it can change the answer.
+pub fn pursuit_closes(
+    distance: f32,
+    stop_distance: f32,
+    walks_for_sight: bool,
+    in_sight: impl FnOnce() -> bool,
+) -> bool {
+    distance > stop_distance || (walks_for_sight && !in_sight())
 }
 
 pub fn move_to_target(
@@ -623,8 +656,16 @@ pub fn move_to_target(
             combatant.class.preferred_range()
         };
 
-        // If out of range, move towards target
-        if distance > stop_distance {
+        // Move towards the target while out of range — or, for a unit that does
+        // not hold ground in cover, while in range but out of its sight. The
+        // sight test is the casts' own (`has_line_of_sight` between the two
+        // positions), so the walk ends exactly where a cast at the target
+        // stops being refused `LosBlocked`. Always sighted on an obstacle-free
+        // map, so BasicArena pursuit is unchanged.
+        let walks_for_sight = !combatant.class.is_healer();
+        if pursuit_closes(distance, stop_distance, walks_for_sight, || {
+            has_line_of_sight(&map_geometry.volumes, my_pos, target_pos)
+        }) {
             // Calculate direction to target (only in XZ plane, keep Y constant).
             // Tangent-steer around any obstacle between here and the target so a
             // pursuer rounds a pillar in a clean arc instead of oozing along its
@@ -661,5 +702,50 @@ pub fn move_to_target(
                 transform.rotation = target_rotation;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod pursuit_sight_tests {
+    use super::pursuit_closes;
+
+    /// Beyond its range a pursuer closes, sighted or not, healer or not.
+    #[test]
+    fn beyond_range_always_closes() {
+        for walks in [true, false] {
+            for sight in [true, false] {
+                assert!(pursuit_closes(30.0, 28.0, walks, || sight));
+            }
+        }
+    }
+
+    /// In range and in sight it stands, healer or not.
+    #[test]
+    fn in_range_and_in_sight_stands() {
+        assert!(!pursuit_closes(20.0, 28.0, true, || true));
+        assert!(!pursuit_closes(20.0, 28.0, false, || true));
+    }
+
+    /// The pair: in range, out of sight. The unit that walks for sight keeps
+    /// closing; the one that holds ground in cover (a healer) stands.
+    #[test]
+    fn in_range_out_of_sight_closes_only_when_walking_for_sight() {
+        assert!(pursuit_closes(20.0, 28.0, true, || false));
+        assert!(!pursuit_closes(20.0, 28.0, false, || false));
+    }
+
+    /// Exactly at its range the pursuer has arrived: the strict `>` the
+    /// pursuit always used.
+    #[test]
+    fn at_range_has_arrived() {
+        assert!(!pursuit_closes(28.0, 28.0, true, || true));
+    }
+
+    /// Sight is not asked when it cannot change the answer.
+    #[test]
+    fn sight_is_asked_only_when_it_decides() {
+        let ask = || -> bool { panic!("sight asked") };
+        assert!(pursuit_closes(30.0, 28.0, true, ask));
+        assert!(!pursuit_closes(20.0, 28.0, false, ask));
     }
 }

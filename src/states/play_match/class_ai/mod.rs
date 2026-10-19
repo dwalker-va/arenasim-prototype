@@ -17,13 +17,16 @@
 pub mod burst;
 pub mod cast_guard;
 pub mod caster_healer_posture;
+pub mod cc_reach;
 pub mod chain;
 pub mod combat_snapshot;
 pub mod dps_postures;
 pub mod druid;
+pub mod formation;
 pub(crate) mod healer_postures;
 pub mod hunter;
 pub mod hunter_dip;
+pub mod hunter_lane;
 pub mod interrupts;
 pub mod mage;
 pub mod paladin;
@@ -1866,7 +1869,8 @@ pub fn cast_reach(ctx: &CombatContext, range: f32, from: Vec3, to: Vec3) -> Cast
 ///
 /// For the choosers that rank their candidates without a range filter — Power
 /// Word: Shield, Power Word: Fortitude, Mark of the Wild, the Druid's heal
-/// focus and its Cyclone and Entangling Roots peel picks. They drop such a
+/// focus, its Cyclone and Entangling Roots peel picks, and its step-8 Cyclone's
+/// enemy healer. They drop such a
 /// candidate before ranking, so an occluded best pick yields to the best one
 /// in sight, while a best pick beyond range is still
 /// picked and refused exactly as it always was. On an obstacle-free map this is

@@ -209,6 +209,7 @@ pub fn decide_priest_action(
             my_pos,
             auras,
             ctx,
+            &movement.shared,
             same_frame_cc_queue,
             &mut builder,
         ) {
@@ -403,23 +404,7 @@ fn try_psychic_scream(
         return false;
     }
 
-    // Defer to a critical ally heal: a dying heal target (at/below the urgency
-    // HP threshold, within heal range) must be healed before the peel. The
-    // scream is priority 3 — above Flash Heal — so without this gate it would
-    // burn a GCD and delay a life-saving heal, breaking the critical-heal-wins
-    // invariant (see `try_flash_heal`). The scream still fires next GCD. Only a
-    // dying ally the heal REACHES (range, then sight) holds it: one behind
-    // cover is the medic walk's to reach, and no heal can land on it yet.
-    if ctx
-        .lowest_health_ally_in_reach(shared.urgency_hp_threshold, shared.heal_range, my_pos)
-        .is_ok()
-    {
-        builder.reject(
-            scream,
-            RejectionReason::PreconditionUnmet {
-                note: "critical heal pending".into(),
-            },
-        );
+    if held_for_critical_heal(ctx, shared, my_pos, builder) {
         return false;
     }
 
@@ -631,12 +616,45 @@ fn fire_psychic_scream(
     );
 }
 
+/// Whether a critical heal holds Psychic Scream this tick, traced
+/// `"critical heal pending"` when it does. Both screams sit above Flash Heal
+/// (the defensive one at priority 3, the dip's at 2.5), so without this hold
+/// either would burn a GCD and delay a life-saving heal, breaking the
+/// critical-heal-wins invariant (see `try_flash_heal`); the scream still fires
+/// next GCD. Only a dying ally (the Priest included) the heal REACHES — range,
+/// then sight — holds it: one behind cover is the medic walk's to reach, and no
+/// heal can land on it yet.
+fn held_for_critical_heal(
+    ctx: &CombatContext,
+    shared: &SharedMovementConfig,
+    my_pos: Vec3,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let pending = ctx
+        .lowest_health_ally_in_reach(shared.urgency_hp_threshold, shared.heal_range, my_pos)
+        .is_ok();
+    if pending {
+        builder.reject(
+            AbilityType::PsychicScream,
+            RejectionReason::PreconditionUnmet {
+                note: "critical heal pending".into(),
+            },
+        );
+    }
+    pending
+}
+
 /// Offensive dip cast (U4): on dip arrival, fire Psychic Scream as a
 /// self-centered AoE. The dip target only drove the walk — the cast fears every
 /// fear-eligible enemy in radius (the enemy healer plus anyone else caught).
 /// Readiness is re-checked (mana/cooldown can shift across the walk); the
 /// pressured gate is intentionally absent (a dip runs only when NOT pressured).
-/// Returns true iff the scream fired (≥1 enemy in radius).
+/// A critical heal the Priest can land holds it, as it holds the defensive
+/// scream ([`held_for_critical_heal`]). A dying TEAMMATE never gets that far
+/// in practice: the dip aborts for one, in reach or not
+/// (`scream_dip_should_abort`), the same tick, before this runs. So the hold
+/// is what keeps the Priest's OWN critical heal ahead of the scream. Returns
+/// true iff the scream fired (≥1 enemy in radius).
 fn try_dip_psychic_scream(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -646,6 +664,7 @@ fn try_dip_psychic_scream(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    shared: &SharedMovementConfig,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
@@ -662,6 +681,10 @@ fn try_dip_psychic_scream(
             return false;
         }
     };
+
+    if held_for_critical_heal(ctx, shared, my_pos, builder) {
+        return false;
+    }
 
     let targets = scream_targets(ctx, entity, my_pos, scream_def.range);
     if targets.is_empty() {
@@ -1716,6 +1739,7 @@ fn priest_dip_tick(
         completed.dip_until = 0.0;
         completed.last_direction = None;
         completed.last_point = None;
+        completed.formation.forget();
         ScreamDipPlan::DipCast {
             target,
             completed_state: completed,
@@ -1803,10 +1827,12 @@ pub fn evaluate_priest_posture(
         None
     };
 
-    // --- DIP abort check (only while mid-dip and not being preempted) ---
-    let dip_aborts = prev == Posture::Dip
-        && !trigger
-        && scream_dip_should_abort(state, combatant, ctx, shared, now);
+    // --- DIP abort check (only while mid-dip) --- independent of pressure:
+    // the `onset` preemption below outranks it, and under `Legacy` a closing
+    // caster can hold the trigger without the onset, so gating on the trigger
+    // left the dip running with no budget and no dying-teammate exit (AS-371).
+    let dip_aborts =
+        prev == Posture::Dip && scream_dip_should_abort(state, combatant, ctx, shared, now);
 
     // --- DIP entry (FREE only, no pressure): the offensive scream dip ---
     let dip_entry = if prev == Posture::Free && !trigger {
@@ -1844,8 +1870,12 @@ pub fn evaluate_priest_posture(
     if transitioned {
         state.posture = next;
         state.since = now;
+        // A walk out of crowd-control reach belongs to the PRESSURED spell it
+        // began in: the next one is a new walk, traced again (AS-362).
+        state.cc_walk = false;
         state.last_direction = None;
         state.last_point = None;
+        state.formation.forget();
         match next {
             Posture::Pressured => {
                 state.hold_until = now + shared.pressured_hold;
@@ -2085,6 +2115,7 @@ fn pressured_tick(
         ctx,
         state,
         directive,
+        abilities,
         &movement.shared,
         &movement.priest.weights,
         combatant.target,
@@ -2142,8 +2173,17 @@ fn free_tick(
         commands.entity(entity).remove::<MovementDirective>();
     }
 
-    let Some(point) = compute_formation_point(abilities, entity, combatant, my_pos, ctx, movement)
-    else {
+    let repairing = state.formation.reach.is_some();
+    let Some(point) = compute_formation_point(
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        ctx,
+        movement,
+        &mut state.formation,
+        now,
+    ) else {
         // DEGENERATE (R5/AE4): no formation directive; fall through to the
         // legacy ladder. Exit transitions still emit — goal_kind
         // Entity records "legacy target pursuit governs".
@@ -2161,12 +2201,30 @@ fn free_tick(
         return;
     };
 
+    // The reach repair took the point out of crowd-control reach (AS-362):
+    // traced as the repair begins.
+    if !repairing && state.formation.reach.is_some() {
+        if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
+            builder.direction_change(
+                TracePosture::Free,
+                MovementTrigger::OutOfCcReach,
+                MovementGoalKind::Point,
+            );
+            builder.finish();
+        }
+    }
     let point_xz = Vec2::new(point.x, point.z);
     let my_xz = Vec2::new(my_pos.x, my_pos.z);
     let moved = state
         .last_point
         .is_none_or(|lp| lp.distance(point_xz) > movement.priest.formation_shift_threshold);
     let near = my_xz.distance(point_xz) <= movement.priest.formation_deadzone;
+    let stale = super::formation::continuous(ctx)
+        && super::formation::walk_is_stale(
+            directive,
+            point_xz,
+            movement.priest.formation_shift_threshold,
+        );
 
     let issue = |commands: &mut Commands| {
         commands.entity(entity).try_insert(MovementDirective {
@@ -2193,9 +2251,13 @@ fn free_tick(
             );
             builder.finish();
         }
-    } else if moved && !near {
+    } else if (moved && !near) || stale {
         // Formation goal moved enough to re-commit (engaged-ally centroid
-        // shifted) — FormationShift, within the same posture.
+        // shifted) — FormationShift, within the same posture. Under
+        // `TeamPlan`, also when the Priest already stands near the new point
+        // but the walk it is on aims more than the shift threshold away
+        // (AS-370): that walk would carry it off, where the new directive's
+        // arrival-hold parks it.
         issue(commands);
         state.last_point = Some(point_xz);
         if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
@@ -2206,11 +2268,12 @@ fn free_tick(
             );
             builder.finish();
         }
-    } else if !near
+    } else if (!near || super::formation::continuous(ctx))
         && directive.is_none_or(|d| d.expires - now < movement.priest.directive_refresh_margin)
     {
         // Keep the standing walk alive (post-cast gaps, TTL expiry) without
-        // re-scoring or emitting — refreshes are not decisions.
+        // re-scoring or emitting — refreshes are not decisions. Under
+        // `TeamPlan`, the parked one too (`formation::continuous`).
         issue(commands);
     }
     // `near` with no meaningful point move: the executor's Point-arrival
@@ -2232,6 +2295,8 @@ fn compute_formation_point(
     my_pos: Vec3,
     ctx: &CombatContext,
     movement: &MovementConfig,
+    memory: &mut FormationMemory,
+    now: f32,
 ) -> Option<Vec3> {
     let shared = &movement.shared;
     // Single pass over living non-pet allies (excluding self): accumulate the
@@ -2288,6 +2353,20 @@ fn compute_formation_point(
     if dir == Vec2::ZERO {
         dir = away;
     }
+    // Under `TeamPlan`, turned from the last heading at no more than the
+    // healer's walk round the centroid (AS-370): the nearest enemy crossing
+    // the centroid swings the point round instead of flipping it to the far
+    // side.
+    let dir = if super::formation::continuous(ctx) {
+        super::formation::turn_limited(
+            dir,
+            &mut memory.heading,
+            now,
+            combatant.base_movement_speed / shared.formation_offset,
+        )
+    } else {
+        dir
+    };
     let mut point = Vec3::new(
         centroid.x + dir.x * shared.formation_offset,
         my_pos.y,
@@ -2340,10 +2419,35 @@ fn compute_formation_point(
         }
     }
 
-    Some(super::healer_postures::standable_formation_point(
-        ctx,
-        clamp_to_arena(&ctx.bounds, point),
-    ))
+    let point = clamp_to_arena(&ctx.bounds, point);
+    let point = if super::formation::sight_constrained(ctx) {
+        super::formation::sighted_formation_point(ctx, entity, point, &mut memory.exit)
+    } else {
+        super::healer_postures::standable_formation_point(ctx, point)
+    };
+    // Under `TeamPlan`, held out of the reach of the enemy crowd control
+    // ready to land on the healer (AS-362), on whatever point the heading and
+    // the sight repair produced.
+    Some(if super::formation::reach_constrained(ctx) {
+        let field = super::cc_reach::CcField::for_healer(
+            ctx,
+            abilities,
+            entity,
+            shared.cc_ready_horizon,
+            shared.cc_reach_margin,
+        );
+        super::formation::reach_repaired_point(
+            ctx,
+            entity,
+            my_pos,
+            point,
+            &field,
+            shared.heal_range - crate::states::play_match::team_solve::HEAL_REACH_MARGIN,
+            &mut memory.reach,
+        )
+    } else {
+        point
+    })
 }
 
 // ----------------------------------------------------------------------------
@@ -2602,6 +2706,64 @@ mod reach_tests {
             "no pillar: held"
         );
         let trace = scream(&mut s, &pillar());
+        assert!(screamed(&trace), "the occluded dying Warrior holds nothing");
+    }
+
+    // ------------------------------------------------------------------------
+    // AS-208: the dip's Psychic Scream holds for a critical heal too
+    // ------------------------------------------------------------------------
+
+    /// The offensive dip's scream, on arrival, by a Priest on `priest_hp`.
+    fn dip_scream(
+        s: &mut ReachScene,
+        obstacles: &[ObstacleVolume],
+        priest_hp: f32,
+    ) -> DecisionTrace {
+        let abilities = AbilityDefinitions::default();
+        let movement = crate::states::play_match::movement_config::MovementConfig::default();
+        let me = s.units[0];
+        s.roster.get_mut(&me).unwrap().current_health = 100.0 * priest_hp;
+        s.run(obstacles, |commands, ctx, combatant, builder| {
+            try_dip_psychic_scream(
+                commands,
+                &mut CombatLog::default(),
+                &abilities,
+                me,
+                combatant,
+                CASTER,
+                None,
+                ctx,
+                &movement.shared,
+                &mut Vec::new(),
+                builder,
+            )
+        })
+    }
+
+    /// The Priest dying at the enemy healer's feet heals before it screams;
+    /// the control, the same dip on a healthy Priest, screams.
+    #[test]
+    fn the_dip_scream_holds_for_the_priests_own_critical_heal() {
+        let mut s = screamable(1.0, 1.0);
+        assert!(screamed(&dip_scream(&mut s, &[], 1.0)), "healthy: screams");
+        let trace = dip_scream(&mut s, &[], 0.3);
+        assert!(
+            !screamed(&trace) && held_for_a_heal(&trace),
+            "dying: held for the heal"
+        );
+    }
+
+    /// The hold is reach-gated, as the defensive scream's is: a dying ally in
+    /// sight holds the dip's scream, one behind the pillar does not.
+    #[test]
+    fn an_occluded_dying_ally_does_not_hold_the_dip_scream() {
+        let mut s = screamable(0.3, 1.0);
+        let trace = dip_scream(&mut s, &[], 1.0);
+        assert!(
+            !screamed(&trace) && held_for_a_heal(&trace),
+            "no pillar: held"
+        );
+        let trace = dip_scream(&mut s, &pillar(), 1.0);
         assert!(screamed(&trace), "the occluded dying Warrior holds nothing");
     }
 

@@ -1,0 +1,92 @@
+diff --git a/src/states/play_match/class_ai/hunter.rs b/src/states/play_match/class_ai/hunter.rs
+index 8e26ca66..bddc5969 100644
+--- a/src/states/play_match/class_ai/hunter.rs
++++ b/src/states/play_match/class_ai/hunter.rs
+@@ -688,6 +688,7 @@ pub fn decide_hunter_action(
+             my_pos,
+             target_entity,
+             kill_target_hidden,
++            false,
+         )
+     });
+     if let Some(fallback) = fallback.flatten() {
+@@ -871,6 +872,7 @@ fn fallback_trap(
+     my_pos: Vec3,
+     kill_target: Entity,
+     kill_target_hidden: bool,
++    old: bool,
+ ) -> Option<Result<FallbackThrow, RejectionReason>> {
+     let held = |note: &str| {
+         Some(Err(RejectionReason::PreconditionUnmet {
+@@ -906,11 +908,13 @@ fn fallback_trap(
+         my_pos,
+         crate::states::play_match::combat_core::clamp_to_arena(&ctx.bounds, lane),
+     );
+-    let (lane, victim) = if lane_hidden {
+-        let Some(route) = super::hunter_lane::route_lane(ctx, abilities, my_team, my_pos) else {
+-            return Some(Err(RejectionReason::LosBlocked));
+-        };
++    let route = lane_hidden
++        .then(|| super::hunter_lane::route_lane(ctx, abilities, my_team, my_pos))
++        .flatten();
++    let (lane, victim) = if let Some(route) = route {
+         route
++    } else if lane_hidden && !old {
++        return Some(Err(RejectionReason::LosBlocked));
+     } else {
+         let Some(victim) = super::hunter_dip::predicted_trap_springer(ctx, my_team, my_pos, lane)
+         else {
+@@ -2135,8 +2139,53 @@ fn try_serpent_sting(
+         my_pos,
+         target_entity,
+         kill_target_hidden,
++        false,
+     )
+     .and_then(|f| f.ok());
++    {
++        let old = fallback_trap(
++            ctx,
++            abilities,
++            entity,
++            combatant.team,
++            my_pos,
++            target_entity,
++            kill_target_hidden,
++            true,
++        )
++        .and_then(|f| f.ok());
++        let reserves = |f: Option<FallbackThrow>| f.is_some_and(|f| f.victim == Some(target_entity));
++        let teammate = ctx
++            .alive_allies()
++            .into_iter()
++            .any(|a| a.entity != entity && !a.is_pet);
++        if reserves(old) != reserves(fallback) {
++            let sight = crate::states::play_match::map_geometry::has_line_of_sight(
++                ctx.obstacles,
++                my_pos,
++                target_info.position,
++            );
++            let range = my_pos.distance(target_info.position) <= def.range;
++            eprintln!(
++                "AS361 DIFF sight={sight} range={range} mana={} poised={} teammate={teammate}",
++                combatant.current_mana - def.mana_cost >= 100.0,
++                !combatant
++                    .ability_cooldowns
++                    .contains_key(&AbilityType::FreezingTrap)
++                    && !ctx.has_friendly_dots_on_target(target_entity)
++            );
++        }
++        if old.is_some() && fallback.is_none() {
++            let victim = old.and_then(|f| f.victim);
++            let pet = victim
++                .and_then(|v| ctx.combatants.get(&v))
++                .is_some_and(|i| i.is_pet);
++            eprintln!(
++                "AS361 OLDOK_NEWHELD teammate={teammate} victim_is_target={} victim_pet={pet}",
++                victim == Some(target_entity)
++            );
++        }
++    }
+     // The healer the trap is held for while a melee could come onto the
+     // Hunter ([`try_pressure_trap`]): a sting on it would make it untrappable
+     // at the moment that trap is thrown.

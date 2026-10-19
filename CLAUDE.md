@@ -672,6 +672,7 @@ fractions in 0..1; values below are the shipped defaults):
 - `wand_range: 30.0` — wand-range pull target distance (Priest)
 - `press_advantage_margin: 0.2` — tempo ONSET: team-HP-fraction lead at/above which a team "presses" (the same deficit makes it trail): its healers' `cover_pull` zeroes and the melee tempo reset stays disarmed (denial is reserved for the trailing side)
 - `press_release_margin: 0.1` — tempo RELEASE: a pressing (trailing) team keeps that tempo until its lead (deficit) falls below this, so a lead wobbling around the onset does not flip it with every hit and heal. `TeamPlan` only (`SituationConfig::under`): a `Legacy` team releases at the onset, unlatched as before, and stays byte-identical. At most `press_advantage_margin` (`validate()`); equal disables the band
+- `cc_ready_horizon: 1.5` / `cc_reach_margin: 3.0` — `TeamPlan` crowd-control reach (*Out of the enemy's crowd-control reach* below): an enemy hard CC is READY when its owner could start it within the horizon (seconds), and a healer keeps out of its reach plus the margin (yards)
 
 **Per-class scorer weights** (`priest.weights:` / `paladin.weights:` —
 `score_directions` term weights; `0.0` disables a term). All terms here are
@@ -749,6 +750,55 @@ instants (Holy Shock, Power Word: Shield, the Druid's kit) still fire
 (`tests/medic_chase_heal_rule.rs`). The Druid holds its own damage and
 utility for the walk instead — see *Dying teammate first* below.
 
+**The FREE formation point keeps sight (`TeamPlan`)** — `class_ai::formation`
+(AS-206; no RON knob). The medic chase walks only for a teammate below
+`urgency_hp_threshold`, so a formation point in a pillar's shadow from a
+HEALTHY teammate used to park the Priest, Shaman or Druid there blind. Under
+`TeamPlan` the point is moved out of any teammate's shadow it stands in, cast by
+an obstacle near it, widened by `SIGHT_MARGIN` (2.5yd, past the 1.5yd formation
+dead zone): toward the exit — the point moved out until it stands that margin
+beyond the shadow's edge ray — that sees the teammates best (the anchor, the
+most injured, first). It is a constraint with a nearest-feasible repair, not a
+scored term. A point in no widened shadow comes back exactly as the
+unconstrained machine returns it. Distances are measured from the raw point,
+not its standable projection (which jumps between a pillar's faces). An exit up
+to `REPAIR_FULL` (10yd) from the raw point is taken in full, one up to
+`REPAIR_LIMIT` (16yd) part of the way, a farther one not at all. The exit nearest
+the one last chosen (`HealerPosture::formation`, forgotten on leaving FREE)
+counts `KEEP_MARGIN` (6yd) nearer, so the point keeps to its exit until another
+is better by that band or its own loses the anchor. Every exit is continuous in
+the raw point across every edge of its region (`EDGE_FADE` fades the move out at
+the shadow's near end and the near-obstacle limit), so the repair starts and
+lets go where the point stands; a change of exit still moves the point the whole
+gap at once, and is left a step: the exits stand either side of a shadow, so any
+path between them crosses blind ground or detours round the pillar, and easing
+the goal across blind ground was ruled out (about six such steps over 5yd per
+100 Warrior+Mage+Priest v Rogue+Warlock+Druid matches).
+The Paladin has no formation point. `Legacy` is untouched (byte-identical), and
+BasicArena with it under both profiles. Pinned by `tests/formation_sight.rs` (a
+staged pillar edge where the `TeamPlan` Druid and Priest each regain sight of
+their Mage within 1s while the `Legacy` pair stays blind; a seed bank over three
+comps bounding the healers' formation goals; leaving FREE drops the kept exit)
+and the tests in `formation.rs`. A new FREE goal (AS-328's standoff) belongs
+behind the same constraint.
+
+**The FREE formation point turns instead of flipping (`TeamPlan`)** —
+`formation::turn_limited` (AS-370; no RON knob). "Behind the line" flips
+whenever the enemy nearest the engaged-ally centroid crosses it, and the point
+used to flip with it, 5-16yd in a frame. The heading now turns from the last
+one at no more than the healer's walking speed over `formation_offset`, so the
+point swings round the centroid instead; and the free tick re-issues a walk
+that aims more than `formation_shift_threshold` off the point even while the
+healer stands in its dead zone (`formation::walk_is_stale`). Both are asked
+through `formation::continuous`; the heading is remembered on
+`HealerPosture::formation` with the kept exit. Over the five comps of `measure_formation_goal_jumps` (100
+matches each) the goal's jumps over 5yd fall from 193 to 25 in all; the
+measure attributes each jump to its cause. BasicArena moves under `TeamPlan`
+(the heading needs no obstacle); `Legacy` keeps the flip and stays
+byte-identical. Pinned by `tests/formation_continuity.rs` (a staged crossing
+on BasicArena paired with `Legacy`, and one-tick scenes of each formation
+machine) and the tests in `formation.rs`.
+
 **Dispel walk (Paladin, Priest)** — `healer_postures::dispel_chase_override`,
 choosing its ally with `class_ai::dispel_chase_target` (no RON knob). Cleanse and
 Dispel Magic only reach allies within their 30yd range AND in sight, so a
@@ -816,8 +866,51 @@ heal still lands from. When no candidate spot can see the healer's anchor
 ally at all (a pillar between them), the solve walks straight at the ally,
 tangent-steered, until one can — the dispel goal's fallback — instead of
 parking blind. A silenced or school-locked healer owes no reach and keeps to
-cover and distance. Not yet for the Paladin: its `TeamPlan` band-hold parks
-it before the solve runs (AS-209).
+cover and distance. The Paladin's band-hold parks it only where it reaches
+such a teammate (`team_solve::dying_unreached`); out of reach, it steps aside
+for the solve, as it does for an owed dispel. The Priest's Psychic Scream dip
+needs no reach rule: it already aborts for any teammate at or below the
+threshold, reached or not.
+
+**Out of the enemy's crowd-control reach (`TeamPlan`).** `class_ai::cc_reach`
+is the one definition of which enemy crowd control can land on a healer, and
+where: every (enemy, ability) pair whose ability HOLDS (`holds`: stun, fear,
+polymorph, incapacitate, cyclone — never a root) and that its owner could start
+within `cc_ready_horizon` — the cast gate's own-state checks asked from the
+enemy's side (shapeshift, held, school lockout, silence, cooldown with its
+category, resource, stealth for an opener). Reach is the ability's `range`,
+plus `TRAP_TRIGGER_RADIUS` for one thrown at the ground; a spell aimed at a
+unit covers only what its caster can SEE, an area round the caster or a trap
+its whole disc (`cc_reach::aim`, an exhaustive match). A healer immune to the
+landing (DR-immune, damage-immune, fear-immune to a fear) is not threatened. A
+spot is covered inside `reach + cc_reach_margin`; the spot a healer stands on
+is judged by `reach + margin / 2`, so a healer on the rim is not moved by the
+caster's every step. Two consumers read it: the team solve's
+`team_solve::C_CC_REACH` on `OccupyCover` (PRESSURED Priest, Paladin, Shaman,
+Druid), ranked above occlusion from casters at any caster count (`W_CC` plus
+`W_OCCLUDED` per enemy caster) and below sight of the anchor at any caster
+count (a blind spot pays the CC ceiling plus `W_OCCLUDED` per enemy caster on
+top of `W_SIGHT`), below a dying teammate's reach and
+an owed dispel; a spot beyond heal range earns no credit for being out of
+reach. And the FREE formation point's reach
+repair (`formation::reach_repaired_point`, Priest, Shaman, Druid — never the
+Paladin, whose FREE is melee pursuit): the nearest spot out of every disc that
+still reaches every teammate the point reached and sees them no worse,
+composed after the sight repair on AS-370's turned heading; with no such spot,
+heal first and the point stands. The Paladin keeps out only of discs it can
+leave without leaving PRESSURED — none reaching past `threat_intent_radius`
+(a Warlock's Fear) and none of its own target's — and its band-hold parks at
+the nearest spot out of them (`CcField::nearest_exit`); otherwise PRESSURED
+walked it out and its FREE pursuit walked it back. Each walk out of reach is
+traced once as it begins, trigger `OutOfCcReach`. The solve's flat-field anti-statue key
+is judged without the crowd-control term, so a melee's small stun disc does
+not disarm it. Under `TeamPlan` a healer parked at its FREE formation point
+also keeps its walk alive (`formation::continuous`): a lapsed one handed the
+legs to target pursuit for a step and back every directive TTL, and healers
+kept FREE longer by the reach rule reversed heading about once a second.
+`Legacy` builds no field and is byte-identical. Pinned by
+`tests/healer_cc_avoidance.rs` (staged pairs, each against its CC on
+cooldown). Design: `docs/design/2026-10-18-healer-cc-avoidance.md`.
 
 **Target choice needs sight.** Every cast that CHOOSES its target from
 several candidates filters by reach before it ranks: `class_ai::cast_reach`,
@@ -850,9 +943,23 @@ step-8 Roots also passes over an attacker immune to damage. Its Roots PEEL for a
 dying teammate is reach-first (range, then sight, then immunity): an attacker it
 cannot land on yields to the next, then to the next dying teammate's. The
 Druid's peels take an attacker in sight even when the ally they peel for is
-not: the control focus is ranked over every ally. The Priest's defensive Psychic Scream holds for
-a critical heal only when the dying ally is in reach — one behind cover is the
-medic chase's to reach, and no heal can land on it yet.
+not: the control focus is ranked over every ally. Both of the Priest's Psychic
+Screams — the defensive one and the offensive dip's — hold for a critical heal
+(the Priest's own included) only when the dying ally is in reach — one behind
+cover is the medic chase's to reach, and no heal can land on it yet. (A dying
+teammate also aborts the dip outright, in reach or not.)
+**A cast aimed at one fixed target** falls back only to a target that serves
+the same purpose, and otherwise waits for sight. The Druid's step-8 Cyclone
+passes an occluded enemy healer over for another enemy healer in sight, never
+for anyone else: the kill needs a healer gone. Moonfire and Lightning Bolt wait
+for sight of the kill target. Moonfire's DoT on any other enemy would stand the
+team's Polymorph, traps and Chain hand-offs down on it
+(`has_friendly_dots_on_target`). Lightning Bolt sits above the Shaman's
+sustain heal, so a bolt at whoever is in sight costs the heal its time.
+Measured on a fallback: across the TwinPillars juke bank the Shaman's Warrior
+died sooner, and on PillaredArena four of its six flips were losses turned into
+300-second stalemates. A refusal
+for sight reports the caster's own refusal first.
 The dispel walk asks `cast_reach`, so it ends exactly where the cast becomes
 possible. The pet strikes, Spider Web and Boar Charge, ask
 `pet_ai::pet_strike_reach` (range, Boar Charge's dead zone, sight) on every
@@ -861,7 +968,12 @@ pet's re-check when it executes a dispatched command
 (`pet_ai::pet_command_rejection`), which also re-checks a Master's Call's
 sight. A Hunter trap is thrown at a POINT, so every throw asks sight of
 its landing instead (`hunter::try_place_trap_at`, after range): one a pillar
-hides is held, traced `LosBlocked`, never moved. A no-op on obstacle-free maps
+hides is held, traced `LosBlocked`, never moved. The lane Freezing Trap picks
+its landing with sight in mind: when a pillar hides the lane, it lands on an
+enemy's route round that pillar, at the first point of it the Hunter sees once
+the trap would arm (`hunter_lane::route_lane`). With no such route it is held
+in `fallback_trap` itself (`LosBlocked`), so the Serpent Sting never stays
+reserved for that throw. A no-op on obstacle-free maps
 (BasicArena stays byte-identical).
 
 **Dying teammate first (Druid)** — no RON knob; reuses `urgency_hp_threshold`.
@@ -882,7 +994,16 @@ teammate), Travel Form, Innervate and the heals are never held. The rule lives
 in the Druid's rotation order (`class_ai/druid.rs`, `DruidTurn::take` /
 `try_dying_heal` / `try_roots_peel` / `held_for_medic_walk`; the walk's
 teammate reaches it as `CasterHealerPlan::medic_walk`), so no other healer's
-deferral changes (`tests/druid_dying_heal.rs`).
+deferral changes (`tests/druid_dying_heal.rs`). Under `TeamPlan` PRESSURED,
+where the medic chase is retired, the walk is the team solve's: the dying
+teammate its last re-solve owed reach to (`C_DYING`, and the sight fallback
+that walks straight at it — `team_solve::dying_anchor`), kept on
+`HealerPosture::solve_dying` and read through
+`healer_postures::solve_dying_walk`, which drops it outside PRESSURED, while
+the healer is hard-CC'd, and once the teammate is dead or no longer dying. Unlike
+the `Legacy` walk it covers a dying teammate in sight but beyond heal range,
+since the solve walks into range too. It feeds only the Druid's hold; any other
+healer may read it (`tests/druid_teamplan_dying_walk.rs`).
 
 **Travel Form escape (Druid)** — `druid.weights.flee`. A shifted Druid is in
 ESCAPE for as long as it stays shifted (`evaluate_caster_healer_posture`'s
@@ -955,6 +1076,20 @@ makes competent pursuers (melee and Mage) round pillars cleanly; a documented
 consequence is that a pressured healer's `cover_pull` LoS-denial buys far less
 sustained occlusion against a steered melee trainer (a competent melee now
 re-acquires around the pillar quickly — see the `u8_healer_cover` probe note).
+
+**Pursuit walks for sight** — `combat_core::movement::pursuit_closes` (no RON
+knob). Normal pursuit stops at a unit's preferred range only once it SEES its
+target: a non-healer in range and out of sight keeps walking (the same
+tangent-steered pursuit step), and stops the frame sight returns — sight by
+`has_line_of_sight` between the two positions, the casts' own test. Stopping
+in range behind a pillar parked a Warlock with every cast refused `LosBlocked`
+beside a lone, out-of-mana healer that was parked too, and the match drew at
+the cap (AS-360). Healers do not walk for sight: their posture machine owns
+where they stand, and one out of sight of its enemy is usually in cover on
+purpose. Both AI profiles; a no-op on obstacle-free maps (BasicArena stays
+byte-identical). The Warlock is the class it moves — the Mage and Hunter
+answer occlusion with their ENGAGE machine first. Staged guard:
+`tests/pursuit_sight_walk.rs`.
 
 **DPS kiter blocks** (`mage:` / `hunter:` — the shared ENGAGE/KITE machine, `DpsMovementConfig`):
 - `weights:` (above) plus `range_band_min`/`max` (orbit ring; min = SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE 8), `kite_hold` (anti-strobe hysteresis), `directive_ttl` (must cover the longest cast), `commit_window`.

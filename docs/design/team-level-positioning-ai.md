@@ -528,8 +528,9 @@ measured.** Assume the three intents that still have no consumer
   time. Sight is binary, so a pillar that hides the ally from every candidate
   spot gives the solve no gradient; then it walks straight at the ally until a
   candidate sees it, rather than letting the stand-still tie-break park the
-  healer blind. (The Paladin's band-hold still parks it before the solve —
-  AS-209.)
+  healer blind. The Paladin's band-hold, which parks it before the solve
+  runs, parks only where the heal reaches the dying teammate; from a spot
+  that violates `C_DYING` it steps aside and the solve walks it (AS-209).
 
 #### The framing does not fit a kiter, and that is structural
 
@@ -693,6 +694,12 @@ different from adjusting them because the AI finds them inconvenient.
 - **Matchups with no camper.** The comp→plan table only camps for melee/healer.
   Double-ranged mirrors have no reason to approach a pillar and will still fight
   in the open. Closing that is further AI work, not a geometry question.
+- **Matchups with two campers.** A camp only ends at contact, so two camping
+  comps would each wait at their own pillar for the whole match (every
+  melee/healer `TeamPlan` mirror on Nagrand drew at the cap with no damage
+  dealt, AS-363). A camp therefore holds only when the enemy would not camp
+  too (`team_plan::camp_holds`); two would-be campers both press. Who should
+  take the pillar when both want it is an open question.
 
 ## Migration plan
 

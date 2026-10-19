@@ -8,7 +8,8 @@
 //! |---|---|
 //! | `OccupyCover` via [`solve_position`] | **LIVE** under `TeamPlan` (healer PRESSURED/FREE, `healer_postures.rs`). Measured at n=100 head-to-head: +36pt Warlock+Priest, +14pt Hunter+Priest, +10pt Warrior+Priest, -6pt (noise) Rogue+Priest. |
 //! | [`DispelGoal`] on `OccupyCover` | **LIVE** under `TeamPlan` (Priest, Paladin PRESSURED; AS-187). The `Legacy` dispel walk's job: while a teammate is owed an urgent dispel the healer cannot reach, reaching it is the only constraint scored, and the goal holds on reach until the dispel lands. |
-//! | [`C_DYING`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-198). While the healer can heal, the most hurt teammate below `urgency_hp_threshold` anchors it, and reaching that teammate ranks above cover. |
+//! | [`C_CC_REACH`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-362). Out of the reach of every enemy crowd control ready to land on the healer (`class_ai::cc_reach`), ranked above cover and below sight of the anchor. |
+//! | [`C_DYING`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-198). While the healer can heal, the most hurt teammate below `urgency_hp_threshold` anchors it, and reaching that teammate ranks above cover. Which teammate that is, [`dying_anchor`], is the `TeamPlan` medic walk the Druid holds its damage for (AS-218). The Paladin's band-hold parks only where it reaches that teammate ([`dying_unreached`], AS-209). |
 //! | `HoldRange` | Wired to the Mage/Hunter kiter, **measured ~-17pt, reverted — and the ending is now DECIDED: ranged DPS stays on the scorer permanently** (design doc, 2026-08-06). Constraint definition kept for the lone-healer fallback and future melee use; do not re-wire kiters absent step 8's reopening condition. |
 //! | `ScreenPartner`, `PressTarget`, `StackAnchor` | **NEVER RUN IN BATTLE.** Unit-tested against their written definitions only. All three consumed intents were under-specified in ways only measurement exposed (sight-of-ally, castability, the range ceiling) — assume these carry the same debt and budget a measurement pass before trusting them. |
 //! | [`solve_team`] / [`solve_order`] / [`focal_point`] / [`assign_intents`] / cohesion | **NO CALLERS.** The dependent team-level solve, kept because the design requires convergent AND divergent shapes from the start (retrofitting divergence would mean redoing the solve). It has never placed a unit in a real match. |
@@ -46,6 +47,7 @@ use bevy::prelude::*;
 use std::collections::BTreeMap;
 
 use super::arena_bounds::ArenaBounds;
+use super::class_ai::cc_reach::{CcField, Disc};
 use super::map_geometry::{
     has_line_of_sight, nearest_standable, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS,
 };
@@ -128,6 +130,9 @@ pub struct SolveWorld {
     /// this health fraction is dying ([`C_DYING`]). `0.0` — the default —
     /// counts nobody as dying.
     pub urgency_hp_threshold: f32,
+    /// The enemy crowd control that can reach the unit being solved
+    /// ([`C_CC_REACH`], AS-362). Empty — the default — covers nothing.
+    pub cc: CcField,
 }
 
 impl SolveWorld {
@@ -143,6 +148,13 @@ impl SolveWorld {
     /// teammate is dying.
     pub fn with_urgency_hp_threshold(mut self, threshold: f32) -> Self {
         self.urgency_hp_threshold = threshold;
+        self
+    }
+
+    /// This world with `cc` as the crowd control that can reach the unit
+    /// being solved ([`C_CC_REACH`]).
+    pub fn with_cc_field(mut self, cc: CcField) -> Self {
+        self.cc = cc;
         self
     }
 
@@ -374,6 +386,11 @@ impl SolveContext<'_> {
     /// [`SolveWorld::urgency_hp_threshold`], the first in unit order on a tie.
     /// `None` while nobody is below it.
     fn dying_ally_pos(&self) -> Option<Vec2> {
+        self.dying_ally().map(|a| self.ally_pos(a))
+    }
+
+    /// The dying teammate itself, as [`Self::dying_ally_pos`] picks it.
+    fn dying_ally(&self) -> Option<&SolveUnit> {
         let threshold = self.world.urgency_hp_threshold;
         self.world
             .allies_of(self.unit.team, self.unit.entity)
@@ -383,7 +400,6 @@ impl SolveContext<'_> {
                     .partial_cmp(&b.health_pct)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
-            .map(|a| self.ally_pos(a))
     }
 
     /// The ally an `OccupyCover` healer must stay able to reach — the most
@@ -453,6 +469,24 @@ pub const C_DISPEL: u16 = 1 << 6;
 /// (silenced, or locked out of its school) owes no reach — it could not use
 /// it — and keeps to cover and distance as before.
 pub const C_DYING: u16 = 1 << 7;
+
+/// Must stand out of the reach of every enemy crowd control READY to land on
+/// the healer ([`SolveWorld::cc`], `class_ai::cc_reach`, AS-362): outside each
+/// disc, or out of its caster's sight where the crowd control needs it. A
+/// healer held in a Fear or a Polymorph heals nothing for its length, so for
+/// `OccupyCover` this ranks above occlusion from casters and below sight of the
+/// anchor ([`infeasibility`]); it is never scored while a dispel is owed or a
+/// dying teammate is out of reach, which both rank above it.
+///
+/// **Heal reach first, by construction:** a candidate beyond `heal_range` of
+/// the anchor counts as covered whatever its true distance, so leaving heal
+/// range never earns crowd-control credit.
+///
+/// **The Schmitt pair:** the healer's own spot is judged by the inner disc
+/// ([`Disc::Inner`]), every other candidate by the outer, so a healer just
+/// outside the inner disc stays where it is rather than stepping on and off
+/// the rim as the caster moves.
+pub const C_CC_REACH: u16 = 1 << 8;
 
 /// Yards inside `heal_range` a spot must be to count as reaching a dying
 /// teammate, for the reason [`DISPEL_REACH_MARGIN`] gives: the solve measures
@@ -565,6 +599,16 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
             {
                 v |= C_STANDOFF;
             }
+            if !world.cc.is_empty()
+                && (v & C_LEASH != 0
+                    || world
+                        .cc
+                        .covering(&world.obstacles, candidate, cc_disc(candidate, ctx))
+                        .next()
+                        .is_some())
+            {
+                v |= C_CC_REACH;
+            }
         }
         RoleIntent::ScreenPartner => {
             if let Some(ally) = ctx.anchor_ally_pos() {
@@ -634,6 +678,16 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
         }
     }
     v
+}
+
+/// The side of the crowd-control Schmitt pair a candidate is judged by: the
+/// inner disc for the spot the unit stands on, the outer for every other.
+fn cc_disc(candidate: Vec2, ctx: &SolveContext) -> Disc {
+    if candidate.distance(ctx.unit.pos) <= 1e-3 {
+        Disc::Inner
+    } else {
+        Disc::Outer
+    }
 }
 
 /// Melee reach used by `PressTarget`'s leash. Deliberately generous — the intent
@@ -764,6 +818,24 @@ pub fn candidates_for(ctx: &SolveContext) -> Vec<Vec2> {
         }
     }
 
+    // Out of the crowd control covering the unit: for each disc covering it,
+    // the point on the disc's rim on the ray from its caster through the unit —
+    // the nearest spot out of that disc. Anchored to the caster, not to a
+    // lattice round the mover. Absent when nothing covers the unit, so a solve
+    // with no crowd control in reach is unchanged.
+    if !world.cc.is_empty() {
+        for threat in world
+            .cc
+            .covering(&world.obstacles, ctx.unit.pos, Disc::Inner)
+        {
+            let away = (ctx.unit.pos - threat.center).normalize_or_zero();
+            if away != Vec2::ZERO {
+                let rim = world.cc.radius(threat, Disc::Outer) + CC_RIM_CLEARANCE;
+                out.push(threat.center + away * rim);
+            }
+        }
+    }
+
     // Local ring: the fine adjustment, and the fallback gradient when no
     // geometric candidate is an improvement.
     for i in 0..SOLVE_DIRECTIONS {
@@ -789,7 +861,17 @@ pub fn candidates_for(ctx: &SolveContext) -> Vec<Vec2> {
 /// of reach. The per-constraint scales are priorities among *violated*
 /// constraints, not competing interests — nothing here can pull a unit off a
 /// position that already satisfies its intent.
+#[cfg(test)]
 fn infeasibility(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> f32 {
+    let (base, cc) = infeasibility_parts(intent, candidate, ctx);
+    base + cc
+}
+
+/// [`infeasibility`] split in two: everything but the crowd-control term, and
+/// the crowd-control term ([`C_CC_REACH`]). [`solve_unit`] arms its anti-statue
+/// key on the flatness of the first, so the crowd-control field does not
+/// disarm it.
+fn infeasibility_parts(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> (f32, f32) {
     let world = ctx.world;
     // Scales, in the order the design doc treats them: giving up sight or cover
     // defeats the intent, the leash and standoff degrade it, cohesion is a
@@ -819,7 +901,7 @@ fn infeasibility(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> f32
     // dispel reaches, so cover and sight are back on the next re-solve after
     // the cast.
     if ctx.unit.dispel_goal.is_some() && intent == RoleIntent::OccupyCover {
-        return if v & C_DISPEL != 0 { W_DISPEL } else { 0.0 };
+        return (if v & C_DISPEL != 0 { W_DISPEL } else { 0.0 }, 0.0);
     }
     // A dying teammate's reach comes next, on the same lexicographic terms:
     // every spot that reaches it outranks every spot that does not, and among
@@ -839,7 +921,7 @@ fn infeasibility(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> f32
             let reach = world.heal_range - HEAL_REACH_MARGIN;
             cost += W_LEASH * (candidate.distance(dying) - reach).max(0.0);
         }
-        return cost;
+        return (cost, 0.0);
     }
     let mut cost = 0.0;
 
@@ -902,8 +984,67 @@ fn infeasibility(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> f32
             cost += W_STANDOFF * (world.threat_radius - nearest).max(0.0);
         }
     }
-    cost
+    // Out of crowd-control reach: above occlusion (`W_OCCLUDED` per caster),
+    // below sight of the anchor (`W_SIGHT`), whatever the grade — so the term
+    // is capped under `W_SIGHT`. A covered spot pays `W_CC`, plus a grade by
+    // what a landing would cost and how deep in the discs it stands, which is
+    // the gradient out when no step leaves them. One out of heal range pays
+    // the cap: leaving heal range buys no crowd-control credit.
+    //
+    // Above occlusion at ANY number of casters: occlusion costs `W_OCCLUDED`
+    // per enemy caster that sees the spot, so the base is that much per enemy
+    // caster in the world on top of `W_CC`. A fixed 200 lost to three casters'
+    // 300 and took a hidden spot inside a ready disc over an open one out of
+    // reach.
+    let casters = world.enemy_casters_of(ctx.unit.team).count() as f32;
+    let w_cc = W_CC + W_OCCLUDED * casters;
+    let ceiling = w_cc + W_CC_GRADE_CAP;
+    let mut cc = 0.0;
+    if v & C_CC_REACH != 0 {
+        cc = if v & C_LEASH != 0 {
+            ceiling
+        } else {
+            let disc = cc_disc(candidate, ctx);
+            let grade = W_CC_SECOND * world.cc.covered(&world.obstacles, candidate, disc)
+                + W_CC_YARD * world.cc.deficit(&world.obstacles, candidate, disc);
+            w_cc + grade.min(W_CC_GRADE_CAP)
+        };
+    }
+    // Sight still outranks crowd control AND cover together, at any number
+    // of casters. A spot that sees the anchor can pay both — the CC term's
+    // ceiling, and `W_OCCLUDED` for every enemy caster that sees it — and the
+    // two summed could otherwise undercut a blind spot that pays only
+    // `W_SIGHT`: measured on Nagrand, a PRESSURED Priest stood 8s behind the
+    // camp pillar blind to its Warrior, out of the Warlock's sight and Fear;
+    // with the surcharge at the ceiling alone, five casters still did it.
+    // While a crowd-control field is in play, losing sight costs both maxima
+    // on top of `W_SIGHT`. With no field the costs are as they were (the
+    // no-field sight-against-cover order is AS-381's).
+    if v & C_SIGHT != 0 && !world.cc.is_empty() {
+        cc += ceiling + W_OCCLUDED * casters;
+    }
+    (cost, cc)
 }
+
+/// The base cost of a spot covered by enemy crowd control ([`C_CC_REACH`]),
+/// before `W_OCCLUDED` per enemy caster is added to it (so out of reach
+/// outranks cover at any caster count). Sight outranks both together however
+/// it is set: while a field is in play a blind spot pays, on top of
+/// `W_SIGHT`, the crowd-control ceiling plus `W_OCCLUDED` per enemy caster —
+/// the most a sighted spot can pay for crowd control and cover. Within those
+/// orders its value sets only how hard the gradient pulls against the
+/// continuous terms (leash, standoff, cohesion).
+const W_CC: f32 = 200.0;
+/// Per control-second a landing would cost — the grade among covered spots.
+const W_CC_SECOND: f32 = 2.0;
+/// Per yard inside the covering discs — the gradient out.
+const W_CC_YARD: f32 = 10.0;
+/// The most the grade adds, so a covered spot always costs less than one that
+/// loses sight of the anchor.
+const W_CC_GRADE_CAP: f32 = 190.0;
+/// Yards past a disc's outer rim the rim candidate stands, so it is out of the
+/// disc after the projection onto standable ground.
+const CC_RIM_CLEARANCE: f32 = 0.25;
 
 /// The cost of a spot that does not reach the teammate owed a dispel (a
 /// reaching one costs zero).
@@ -926,14 +1067,10 @@ const W_DYING: f32 = 1.0e6;
 /// satisfies its intent, standing still also satisfies it, and standing still is
 /// nearest.
 pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
-    // Out-of-bounds is the one hard exclusion. Screening candidates that sit
-    // INSIDE an obstacle was tried (a review finding: an in-pillar point is
-    // occluded from everyone and "unreachable") and MEASURED AT -10pt on the
-    // flagship comp, so it is deliberately absent: a healer pressed against
-    // cover IS in cover, and that pillar-hugging equilibrium beats every
-    // "reachable" alternative candidate. Do not re-add the screen without
-    // re-measuring. An in-pillar WINNER is never issued as it stands, though:
-    // see the projection at the end of this function.
+    // Out-of-bounds is the one hard exclusion. An in-pillar candidate is not
+    // DROPPED (that screen measured -10pt on the flagship comp: a healer
+    // pressed against cover IS in cover) but projected onto the skin it would
+    // actually stand on — see `scored` below.
     let usable = |c: &Vec2| {
         ctx.world
             .bounds
@@ -964,10 +1101,20 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
             .fold(0.0f32, f32::max)
     };
 
-    let scored: Vec<(f32, Vec2)> = candidates_for(ctx)
+    // Every candidate is scored WHERE IT WOULD BE STOOD ON: the local ring and
+    // the steps toward an ally are offsets that take no account of the pillar
+    // beside the unit, so one can lie inside a footprint, where it is hidden
+    // from everyone and can be reached by no one. It is moved out through the
+    // footprint's nearest face before it is scored (AS-201). A candidate no
+    // projection frees (touching footprints) is dropped.
+    let scored: Vec<(f32, f32, Vec2)> = candidates_for(ctx)
         .into_iter()
+        .filter_map(|c| nearest_standable(&ctx.world.obstacles, c, ctx.unit.y))
         .filter(usable)
-        .map(|c| (infeasibility(intent, c, ctx), c))
+        .map(|c| {
+            let (base, cc) = infeasibility_parts(intent, c, ctx);
+            (base, cc, c)
+        })
         .collect();
 
     // THE ANTI-STATUE KEY, ARMED ONLY WHEN THE CONSTRAINT FIELD IS FLAT.
@@ -985,9 +1132,15 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
     // retreat. Gating on a flat field keeps it provably inert wherever the
     // constraints have ANY gradient (any cover map mid-fight) and active
     // exactly where the statue lives: a field with nothing else to prefer.
+    //
+    // Flatness is judged WITHOUT the crowd-control term (AS-362): that term is
+    // primary in the key below, so a covered spot never wins on the danger
+    // key, but a field flat on every other constraint keeps its anti-statue
+    // key — on BasicArena a Rogue's Kidney Shot disc reaches only 5.5yd, and
+    // the healer still has to get out of its 12yd stand-on range.
     let flat = scored
         .iter()
-        .map(|(c, _)| *c)
+        .map(|(c, _, _)| *c)
         .fold((f32::MAX, f32::MIN), |(lo, hi), c| (lo.min(c), hi.max(c)));
     let field_is_flat = !scored.is_empty() && (flat.1 - flat.0) < 1e-6;
 
@@ -1000,10 +1153,11 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
                 && ctx.unit.dispel_goal.is_none()
     });
     let sight_reachable =
-        sight_ward.is_none_or(|ally| scored.iter().any(|(_, c)| ctx.world.sees(*c, ally)));
+        sight_ward.is_none_or(|ally| scored.iter().any(|(_, _, c)| ctx.world.sees(*c, ally)));
 
     let mut best: Option<((f32, f32, f32), Vec2)> = None;
-    for (cost, candidate) in scored {
+    for (base, cc, candidate) in scored {
+        let cost = base + cc;
         // Lexicographic: satisfy the intent, then (flat fields only) get out of
         // stand-on range, then prefer not moving. Standing still is candidate 0
         // and ties at equal cost, which is what keeps a satisfied, unthreatened
@@ -1048,22 +1202,10 @@ pub fn solve_unit(intent: RoleIntent, ctx: &SolveContext) -> Vec2 {
         return ally;
     }
     // Every candidate excluded (a unit already outside the arena): hold. The
-    // executor clamps and slides, so this is a safe terminal answer.
-    //
-    // THE ANSWER IS A SPOT THE UNIT CAN STAND ON. The local ring and the steps
-    // toward an ally are offsets from the unit that take no account of the
-    // pillar beside it, so near cover the winner can lie inside a footprint —
-    // a goal nobody can reach, which the executor only approaches and stalls
-    // a body radius short of (AS-190). It is moved out through the footprint's
-    // nearest face — the spot the steering helper was already heading for —
-    // so the unit walks onto the skin on the side it was already pressed
-    // against. The CHOICE is unchanged: it is still scored at the in-pillar
-    // point, which can be more hidden than the skin spot the unit ends up on
-    // (scoring candidates where they would be stood on is AS-201). A winner no
-    // projection frees (touching footprints — see `nearest_standable`) holds.
-    best.map_or(ctx.unit.pos, |(_, p)| {
-        nearest_standable(&ctx.world.obstacles, p, ctx.unit.y).unwrap_or(ctx.unit.pos)
-    })
+    // executor clamps and slides, so this is a safe terminal answer. The
+    // answer is always a spot the unit can stand on: every candidate was
+    // projected before it was scored.
+    best.map_or(ctx.unit.pos, |(_, p)| p)
 }
 
 /// Solve the whole team, in [`solve_order`], each unit seeing the placements
@@ -1264,6 +1406,7 @@ pub fn world_from_context(
         threat_radius,
         kill_target,
         urgency_hp_threshold: 0.0,
+        cc: CcField::default(),
     }
 }
 
@@ -1293,6 +1436,51 @@ pub fn solve_position(
     (spot.distance(unit.pos) > 1e-3).then_some(spot)
 }
 
+/// The dying teammate `entity`'s `OccupyCover` solve owes REACH to
+/// ([`C_DYING`]) — and, when no candidate spot can see it, walks straight at
+/// (the sight fallback in [`solve_unit`]): the living non-pet teammate furthest
+/// below [`SolveWorld::urgency_hp_threshold`]. `None` while nobody is dying, for
+/// a healer that cannot heal (it owes no reach), and while a dispel is owed
+/// ([`DispelGoal`] — then reaching that teammate is the only constraint the
+/// solve scores, and none is owed while another teammate dies).
+///
+/// The one place a reader asks which teammate the solve is walking a healer to
+/// for a heal, so the answer cannot drift from what the solve scores.
+pub fn dying_anchor(world: &SolveWorld, entity: Entity) -> Option<Entity> {
+    let unit = *world.unit(entity)?;
+    if !unit.can_cast_heal || unit.dispel_goal.is_some() {
+        return None;
+    }
+    let ctx = SolveContext {
+        world,
+        unit,
+        focus: None,
+        placed: &BTreeMap::new(),
+    };
+    ctx.dying_ally().map(|a| a.entity)
+}
+
+/// The dying teammate [`dying_anchor`] names, while `entity` does NOT reach it
+/// from where it stands — its own spot violates [`C_DYING`] (beyond
+/// `heal_range` less [`HEAL_REACH_MARGIN`], or out of sight). `None` when
+/// nobody is dying, when the healer owes no reach, or when it already reaches.
+///
+/// The question a caller asks before it holds a healer still in place of the
+/// solve (the Paladin's band-hold): standing still is fine only where the heal
+/// lands. Asked through [`violations`], so "reached" means exactly what the
+/// solve scores, and a spot the solve walks to counts as reached here.
+pub fn dying_unreached(world: &SolveWorld, entity: Entity) -> Option<Entity> {
+    let dying = dying_anchor(world, entity)?;
+    let unit = *world.unit(entity)?;
+    let ctx = SolveContext {
+        world,
+        unit,
+        focus: None,
+        placed: &BTreeMap::new(),
+    };
+    (violations(RoleIntent::OccupyCover, unit.pos, &ctx) & C_DYING != 0).then_some(dying)
+}
+
 /// Where a healer standing ALONE against two or more enemies takes cover —
 /// the [`TakeCover`](super::situation::Play::TakeCover) play (AS-249). `None`
 /// when the map has no obstacles (nothing to hide behind: the healer's ordinary
@@ -1315,30 +1503,19 @@ pub fn solve_position(
 /// The candidates are `OccupyCover`'s: the healer's spot, every (obstacle,
 /// caster) shadow along its centre line ([`SHADOW_DEPTHS`]), and the local
 /// ring. No peek shoulders: peeking is for keeping an ally in sight, and there
-/// is none. The winner is moved onto standable ground, as [`solve_unit`]'s is.
+/// is none.
+///
+/// Every candidate is scored WHERE IT WOULD BE STOOD ON, as in [`solve_unit`]
+/// (AS-201): a ring step or shadow inside a footprint is hidden from every
+/// caster, but the spot it lands on need not be, so it is moved out through
+/// the footprint's nearest face before it is scored, and one no projection
+/// frees (touching footprints) is dropped (AS-372).
 pub fn last_stand_cover(entity: Entity, world: &SolveWorld) -> Option<Vec2> {
     if world.obstacles.is_empty() {
         return None;
     }
     let unit = *world.unit(entity)?;
-    let mut candidates = vec![unit.pos];
-    for obstacle in &world.obstacles {
-        let (center, radius) = obstacle.footprint_disc();
-        let ring = radius + MOVER_RADIUS + COVER_STANDOFF;
-        for caster in world.enemy_casters_of(unit.team) {
-            let away = (center - caster.pos).normalize_or_zero();
-            if away == Vec2::ZERO {
-                continue;
-            }
-            for depth in SHADOW_DEPTHS {
-                candidates.push(center + away * (ring + depth));
-            }
-        }
-    }
-    for i in 0..SOLVE_DIRECTIONS {
-        let a = (i as f32) * std::f32::consts::TAU / SOLVE_DIRECTIONS as f32;
-        candidates.push(unit.pos + Vec2::from_angle(a) * SOLVE_LOOKAHEAD);
-    }
+    let candidates = last_stand_candidates(&unit, world);
     let usable = |c: &Vec2| {
         world
             .bounds
@@ -1357,16 +1534,41 @@ pub fn last_stand_cover(entity: Entity, world: &SolveWorld) -> Option<Vec2> {
         (seen, depth, c.distance(unit.pos))
     };
     let mut best: Option<((usize, f32, f32), Vec2)> = None;
-    for c in candidates.into_iter().filter(usable) {
+    for c in candidates
+        .into_iter()
+        .filter_map(|c| nearest_standable(&world.obstacles, c, unit.y))
+        .filter(usable)
+    {
         let k = key(c);
         if best.is_none_or(|(bk, _)| k < bk) {
             best = Some((k, c));
         }
     }
-    let spot = best.map_or(unit.pos, |(_, p)| {
-        nearest_standable(&world.obstacles, p, unit.y).unwrap_or(unit.pos)
-    });
-    Some(spot)
+    Some(best.map_or(unit.pos, |(_, p)| p))
+}
+
+/// [`last_stand_cover`]'s raw candidates, before projection: the unit's spot,
+/// every (obstacle, enemy caster) shadow, and the local ring.
+fn last_stand_candidates(unit: &SolveUnit, world: &SolveWorld) -> Vec<Vec2> {
+    let mut candidates = vec![unit.pos];
+    for obstacle in &world.obstacles {
+        let (center, radius) = obstacle.footprint_disc();
+        let ring = radius + MOVER_RADIUS + COVER_STANDOFF;
+        for caster in world.enemy_casters_of(unit.team) {
+            let away = (center - caster.pos).normalize_or_zero();
+            if away == Vec2::ZERO {
+                continue;
+            }
+            for depth in SHADOW_DEPTHS {
+                candidates.push(center + away * (ring + depth));
+            }
+        }
+    }
+    for i in 0..SOLVE_DIRECTIONS {
+        let a = (i as f32) * std::f32::consts::TAU / SOLVE_DIRECTIONS as f32;
+        candidates.push(unit.pos + Vec2::from_angle(a) * SOLVE_LOOKAHEAD);
+    }
+    candidates
 }
 
 #[cfg(test)]
@@ -1419,6 +1621,7 @@ mod tests {
             threat_radius: 12.0,
             kill_target: None,
             urgency_hp_threshold: 0.5,
+            cc: CcField::default(),
         }
     }
 
@@ -1486,6 +1689,179 @@ mod tests {
         for caster in [Vec2::new(25.0, 0.0), Vec2::new(30.0, 0.0)] {
             assert!(!w.sees(spot, caster), "{spot:?} left cover from {caster:?}");
         }
+    }
+
+    /// AS-372 (AS-201's defect, in the last stand): a candidate is scored where
+    /// the healer would stand on it. A lone healer against the casters' side of
+    /// a pillar has local-ring steps INSIDE the pillar, hidden from both casters
+    /// — but each lands on the skin it already stands on, in the open. Scored
+    /// in place, such a step won (hidden, and nearer than any shadow); scored
+    /// where it lands, it loses to a spot really behind the pillar.
+    #[test]
+    fn a_last_stand_in_pillar_step_does_not_win_cover_its_landing_spot_lacks() {
+        use crate::states::play_match::map_geometry::position_blocked;
+        let casters = [Vec2::new(25.0, 3.0), Vec2::new(25.0, -3.0)];
+        let mut w = world(vec![
+            healer(1, 1, 0, 6.6, 0.0),
+            unit(2, 2, 0, casters[0].x, casters[0].y),
+            unit(3, 2, 1, casters[1].x, casters[1].y),
+        ]);
+        w.obstacles = vec![pillar_at(0.0, 0.0)];
+        let blocked = |p: Vec2| position_blocked(&w.obstacles, Vec3::new(p.x, 1.0, p.y));
+        let hidden = |p: Vec2| casters.iter().all(|&c| !w.sees(p, c));
+        assert!(!hidden(w.units[0].pos), "the healer starts in the open");
+
+        // The situation: raw candidates inside the pillar that no caster sees,
+        // whose landing spots a caster does see — and they are the NEAREST
+        // hidden raw candidates, so in-place scoring picks one of them.
+        let raw = last_stand_candidates(&w.units[0], &w);
+        let lying: Vec<Vec2> = raw
+            .iter()
+            .copied()
+            .filter(|&c| blocked(c) && hidden(c))
+            .filter(|&c| nearest_standable(&w.obstacles, c, 1.0).is_some_and(|l| !hidden(l)))
+            .collect();
+        assert!(
+            !lying.is_empty(),
+            "no in-pillar candidate hides a seen landing spot — the scene proves nothing"
+        );
+        let me = w.units[0].pos;
+        let nearest_hidden = raw
+            .iter()
+            .copied()
+            .filter(|&c| hidden(c))
+            .map(|c| c.distance(me))
+            .fold(f32::MAX, f32::min);
+        assert!(
+            lying.iter().any(|c| c.distance(me) <= nearest_hidden),
+            "an honest hidden candidate is nearer than every lying one — \
+             in-place scoring would not have picked a lying step"
+        );
+
+        let spot = last_stand_cover(e(1), &w).expect("a map with cover");
+        assert!(!blocked(spot), "{spot:?} lies inside the pillar");
+        assert!(
+            hidden(spot),
+            "{spot:?} is in a caster's sight: an in-pillar step won on cover its \
+             landing spot does not have"
+        );
+    }
+
+    /// The control: the same pillar and casters, the healer far enough off the
+    /// pillar's face that no candidate lies inside it — the projection moves
+    /// nothing, and the healer still reaches the shadow.
+    #[test]
+    fn a_last_stand_with_no_candidate_inside_a_pillar_takes_the_shadow() {
+        use crate::states::play_match::map_geometry::position_blocked;
+        let casters = [Vec2::new(25.0, 3.0), Vec2::new(25.0, -3.0)];
+        let mut w = world(vec![
+            healer(1, 1, 0, 12.0, 0.0),
+            unit(2, 2, 0, casters[0].x, casters[0].y),
+            unit(3, 2, 1, casters[1].x, casters[1].y),
+        ]);
+        w.obstacles = vec![pillar_at(0.0, 0.0)];
+        let blocked = |p: Vec2| position_blocked(&w.obstacles, Vec3::new(p.x, 1.0, p.y));
+        let hidden = |p: Vec2| casters.iter().all(|&c| !w.sees(p, c));
+        assert!(!hidden(w.units[0].pos), "the healer starts in the open");
+        let raw = last_stand_candidates(&w.units[0], &w);
+        assert!(
+            raw.iter().all(|&c| !blocked(c)),
+            "a candidate lies inside the pillar — this is not the control"
+        );
+        let spot = last_stand_cover(e(1), &w).expect("a map with cover");
+        assert!(
+            raw.contains(&spot),
+            "{spot:?} was moved, with nothing to move"
+        );
+        assert!(!blocked(spot) && hidden(spot), "{spot:?} is not in cover");
+    }
+
+    /// Two boxes with a gap narrower than a body: a point in the gap pushes out
+    /// of one footprint into the other and back, so no projection frees it.
+    fn touching_boxes() -> Vec<ObstacleVolume> {
+        vec![
+            ObstacleVolume::Aabb {
+                min: Vec3::new(-5.0, 0.0, -5.0),
+                max: Vec3::new(-0.1, 5.0, 5.0),
+            },
+            ObstacleVolume::Aabb {
+                min: Vec3::new(0.1, 0.0, -5.0),
+                max: Vec3::new(5.0, 5.0, 5.0),
+            },
+        ]
+    }
+
+    /// AS-372: a candidate no projection frees is DROPPED, not scored in
+    /// place. The healer stands at the mouth of a gap too narrow to stand in;
+    /// its ring steps into the gap are hidden from both casters and nearer than
+    /// any shadow, but nobody can stand there.
+    #[test]
+    fn a_last_stand_drops_a_candidate_no_projection_frees() {
+        use crate::states::play_match::map_geometry::position_blocked;
+        let casters = [Vec2::new(-10.0, 30.0), Vec2::new(10.0, 30.0)];
+        let mut w = world(vec![
+            healer(1, 1, 0, 0.0, 6.0),
+            unit(2, 2, 0, casters[0].x, casters[0].y),
+            unit(3, 2, 1, casters[1].x, casters[1].y),
+        ]);
+        w.obstacles = touching_boxes();
+        let blocked = |p: Vec2| position_blocked(&w.obstacles, Vec3::new(p.x, 1.0, p.y));
+        let hidden = |p: Vec2| casters.iter().all(|&c| !w.sees(p, c));
+        assert!(!blocked(w.units[0].pos), "the healer starts on open ground");
+        assert!(!hidden(w.units[0].pos), "the healer starts in the open");
+
+        let raw = last_stand_candidates(&w.units[0], &w);
+        let stuck: Vec<Vec2> = raw
+            .iter()
+            .copied()
+            .filter(|&c| nearest_standable(&w.obstacles, c, 1.0).is_none())
+            .collect();
+        assert!(
+            !stuck.is_empty(),
+            "no candidate is unprojectable — the drop is never exercised"
+        );
+        assert!(
+            stuck.iter().all(|&c| hidden(c)),
+            "an unprojectable candidate is seen — kept in place it could lose"
+        );
+
+        let spot = last_stand_cover(e(1), &w).expect("a map with cover");
+        assert!(!blocked(spot), "{spot:?} lies inside a box");
+        assert!(hidden(spot), "{spot:?} is in a caster's sight");
+    }
+
+    /// The control: the same boxes pulled apart to a gap a body fits in —
+    /// every candidate projects, and the answer is a standable hidden spot.
+    #[test]
+    fn a_last_stand_with_every_candidate_projectable_takes_cover() {
+        use crate::states::play_match::map_geometry::position_blocked;
+        let casters = [Vec2::new(-10.0, 30.0), Vec2::new(10.0, 30.0)];
+        let mut w = world(vec![
+            healer(1, 1, 0, 0.0, 6.0),
+            unit(2, 2, 0, casters[0].x, casters[0].y),
+            unit(3, 2, 1, casters[1].x, casters[1].y),
+        ]);
+        w.obstacles = vec![
+            ObstacleVolume::Aabb {
+                min: Vec3::new(-8.0, 0.0, -5.0),
+                max: Vec3::new(-3.0, 5.0, 5.0),
+            },
+            ObstacleVolume::Aabb {
+                min: Vec3::new(3.0, 0.0, -5.0),
+                max: Vec3::new(8.0, 5.0, 5.0),
+            },
+        ];
+        let blocked = |p: Vec2| position_blocked(&w.obstacles, Vec3::new(p.x, 1.0, p.y));
+        let hidden = |p: Vec2| casters.iter().all(|&c| !w.sees(p, c));
+        let raw = last_stand_candidates(&w.units[0], &w);
+        assert!(
+            raw.iter()
+                .all(|&c| nearest_standable(&w.obstacles, c, 1.0).is_some()),
+            "a candidate is unprojectable — this is not the control"
+        );
+        let spot = last_stand_cover(e(1), &w).expect("a map with cover");
+        assert!(!blocked(spot), "{spot:?} lies inside a box");
+        assert!(hidden(spot), "{spot:?} is in a caster's sight");
     }
 
     // --- focus ---
@@ -1824,16 +2200,18 @@ mod tests {
     /// No candidate reaches the ally owed a dispel — it stands behind a pillar
     /// wider than every approach sample — so the solve walks straight at the
     /// ally, the `Point` goal the executor tangent-steers around the pillar.
+    /// (Every approach sample that lands inside the pillar is nearer its near
+    /// face, so none projects out on the ally's side.)
     #[test]
     fn with_no_reaching_candidate_the_solve_walks_at_the_owed_ally() {
         let w = SolveWorld {
             obstacles: vec![ObstacleVolume::Cylinder {
-                center_xz: Vec2::new(20.0, 0.0),
-                radius: 10.0,
+                center_xz: Vec2::new(24.0, 0.0),
+                radius: 14.0,
                 base_y: 0.0,
                 height: 10.0,
             }],
-            ..world(vec![healer(1, 1, 0, 0.0, 0.0), melee(2, 1, 1, 32.0, 0.0)])
+            ..world(vec![healer(1, 1, 0, 0.0, 0.0), melee(2, 1, 1, 40.0, 0.0)])
         }
         .with_dispel_goal(
             e(1),
@@ -1850,7 +2228,7 @@ mod tests {
         };
         assert_eq!(
             solve_unit(RoleIntent::OccupyCover, &ctx),
-            Vec2::new(32.0, 0.0)
+            Vec2::new(40.0, 0.0)
         );
     }
 
@@ -2577,8 +2955,8 @@ mod tests {
 
     /// AS-190: the solve never answers with a spot inside a footprint. A healer
     /// pressed against a pillar has local-ring candidates inside it, and an
-    /// in-pillar point is occluded from every caster, so it can win
-    /// `OccupyCover` — the answer is then moved onto the pillar's skin.
+    /// in-pillar point is occluded from every caster — each is moved onto the
+    /// pillar's skin before it is scored (AS-201).
     /// Swept round the pillar, with the ally and the caster at several
     /// bearings; the second count proves the sweep reached the case (an answer
     /// that is none of the candidates was projected).
@@ -2628,6 +3006,131 @@ mod tests {
             projected > 0,
             "no answer of {cases} needed projecting — the sweep never reached an \
              in-pillar winner, so it proves nothing"
+        );
+    }
+
+    /// AS-201 / AS-209: the solve and [`dying_unreached`] agree on what reaches
+    /// a dying teammate. Whenever a spot the healer could stand on reaches it,
+    /// the answer reaches it too — so a healer that walks to the answer is
+    /// "reached" by the question the Paladin's band-hold asks, and is not sent
+    /// round again. Swept round a pillar against several dying-teammate
+    /// placements; the second count proves the sweep had candidates inside the
+    /// pillar to project. (An in-pillar point sees no one, so it never reaches:
+    /// scoring in place could only UNDER-rate such a candidate for this
+    /// constraint, and the agreement held before AS-201 as well.)
+    #[test]
+    fn a_reaching_answer_reaches_from_where_it_is_stood_on() {
+        use crate::states::play_match::map_geometry::position_blocked;
+        let skin = super::super::map_geometry::prism_apothem(6.0, 8) + MOVER_RADIUS;
+        let (mut cases, mut in_pillar) = (0, 0);
+        for i in 0..32 {
+            let a = i as f32 * std::f32::consts::TAU / 32.0;
+            let at = Vec2::from_angle(a) * (skin / (std::f32::consts::PI / 8.0).cos() + 0.05);
+            for (dying, caster) in [
+                (Vec2::new(-30.0, 3.0), Vec2::new(25.0, 0.0)),
+                (Vec2::new(0.0, -36.0), Vec2::new(0.0, 25.0)),
+                (Vec2::new(33.0, 4.0), Vec2::new(-20.0, -20.0)),
+                (Vec2::new(25.0, 28.0), Vec2::new(-25.0, 0.0)),
+            ] {
+                let mut w = world(vec![
+                    healer(1, 1, 0, at.x, at.y),
+                    SolveUnit {
+                        health_pct: 0.2,
+                        ..unit(2, 1, 1, dying.x, dying.y)
+                    },
+                    unit(3, 2, 0, caster.x, caster.y),
+                ]);
+                w.obstacles = vec![pillar_at(0.0, 0.0)];
+                if position_blocked(&w.obstacles, Vec3::new(at.x, 1.0, at.y)) {
+                    continue;
+                }
+                let ctx = SolveContext {
+                    world: &w,
+                    unit: w.units[0],
+                    focus: None,
+                    placed: &BTreeMap::new(),
+                };
+                let reaches = |p: Vec2| violations(RoleIntent::OccupyCover, p, &ctx) & C_DYING == 0;
+                let raw = candidates_for(&ctx);
+                let landed: Vec<Vec2> = raw
+                    .iter()
+                    .filter_map(|&c| nearest_standable(&w.obstacles, c, 1.0))
+                    .collect();
+                if !landed.iter().any(|&p| reaches(p)) {
+                    continue;
+                }
+                cases += 1;
+                in_pillar += raw
+                    .iter()
+                    .any(|&c| position_blocked(&w.obstacles, Vec3::new(c.x, 1.0, c.y)))
+                    as usize;
+                let spot = solve_unit(RoleIntent::OccupyCover, &ctx);
+                let mut moved = w.clone();
+                moved.units[0].pos = spot;
+                assert_eq!(
+                    dying_unreached(&moved, e(1)),
+                    None,
+                    "healer at {at:?} (dying {dying:?}, caster {caster:?}) sent to {spot:?}, \
+                     which does not reach the dying teammate"
+                );
+            }
+        }
+        assert!(
+            cases > 0,
+            "no case had a reaching spot — the sweep proves nothing"
+        );
+        assert!(
+            in_pillar > 0,
+            "no case had a candidate inside the pillar — the projection was never exercised"
+        );
+    }
+
+    /// AS-201: a candidate is scored where the unit would stand on it. A healer
+    /// against the caster's side of a pillar has a local-ring step INSIDE the
+    /// pillar, and an in-pillar point is hidden from the caster — but the spot
+    /// it projects to is the skin the healer already stands on, in the open.
+    /// Scored in place, that step won cover it could never give; scored where
+    /// it lands, it loses to a spot really behind the pillar.
+    #[test]
+    fn an_in_pillar_step_does_not_win_cover_its_landing_spot_lacks() {
+        use crate::states::play_match::map_geometry::position_blocked;
+        let caster = Vec2::new(25.0, 0.0);
+        let mut w = world(vec![
+            healer(1, 1, 0, 6.6, 0.0),
+            unit(2, 2, 0, caster.x, caster.y),
+        ]);
+        w.obstacles = vec![pillar_at(0.0, 0.0)];
+        let ctx = SolveContext {
+            world: &w,
+            unit: w.units[0],
+            focus: None,
+            placed: &BTreeMap::new(),
+        };
+        let blocked = |p: Vec2| position_blocked(&w.obstacles, Vec3::new(p.x, 1.0, p.y));
+        assert!(
+            w.sees(ctx.unit.pos, caster),
+            "the healer starts in the open"
+        );
+
+        // The situation: a raw candidate inside the pillar that the caster
+        // cannot see, whose landing spot the caster CAN see.
+        let lying = candidates_for(&ctx)
+            .into_iter()
+            .filter(|&c| blocked(c) && !w.sees(c, caster))
+            .find(|&c| {
+                nearest_standable(&w.obstacles, c, 1.0).is_some_and(|land| w.sees(land, caster))
+            });
+        assert!(
+            lying.is_some(),
+            "no in-pillar candidate hides a seen landing spot — the scene proves nothing"
+        );
+
+        let spot = solve_unit(RoleIntent::OccupyCover, &ctx);
+        assert!(!blocked(spot), "{spot:?} lies inside the pillar");
+        assert!(
+            !w.sees(spot, caster),
+            "{spot:?} is in the caster's sight: an in-pillar step won on cover its \
+             landing spot does not have"
         );
     }
 
@@ -2693,5 +3196,382 @@ mod tests {
         ]);
         let placed = solve_team(Stance::Press, None, 1, &w);
         assert_eq!(placed.len(), 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // C_CC_REACH (AS-362)
+    // -----------------------------------------------------------------------
+
+    use crate::states::play_match::abilities::AbilityType;
+    use crate::states::play_match::class_ai::cc_reach::CcThreat;
+
+    /// A crowd control from `source` at (`x`, `z`) reaching `reach` yards.
+    fn threat(source: u32, x: f32, z: f32, reach: f32, needs_sight: bool) -> CcThreat {
+        CcThreat {
+            source: e(source),
+            ability: AbilityType::Fear,
+            center: Vec2::new(x, z),
+            reach,
+            needs_sight,
+            weight: 8.0,
+        }
+    }
+
+    fn field(threats: Vec<CcThreat>) -> CcField {
+        CcField {
+            threats,
+            margin: 3.0,
+        }
+    }
+
+    /// The healer at the origin, its Warrior 10yd west, and an enemy caster
+    /// 20yd east: nothing within the 12yd threat radius, so the field is flat
+    /// on every other constraint and a satisfied healer stands still.
+    fn reach_world() -> SolveWorld {
+        world(vec![
+            healer(1, 1, 1, 0.0, 0.0),
+            melee(2, 1, 0, -10.0, 0.0),
+            unit(3, 2, 0, 20.0, 0.0),
+        ])
+    }
+
+    fn solved(w: &SolveWorld) -> Vec2 {
+        solve_position(RoleIntent::OccupyCover, e(1), w, None).unwrap_or(Vec2::ZERO)
+    }
+
+    /// Covered by a ready Fear, the healer walks out of its disc and stays in
+    /// heal range of its Warrior; the control, with nothing ready, stands.
+    #[test]
+    fn a_covered_healer_walks_out_of_reach_and_the_control_stands() {
+        let control = reach_world();
+        assert_eq!(solved(&control), Vec2::ZERO, "nothing moves the control");
+        let w = reach_world().with_cc_field(field(vec![threat(3, 20.0, 0.0, 30.0, true)]));
+        let spot = solved(&w);
+        assert!(
+            spot.distance(Vec2::new(20.0, 0.0)) >= 33.0,
+            "still in the disc at {spot}"
+        );
+        assert!(
+            spot.distance(Vec2::new(-10.0, 0.0)) <= 40.0,
+            "left heal range: {spot}"
+        );
+        assert_eq!(
+            violations(RoleIntent::OccupyCover, Vec2::ZERO, &ctx_of(&w)) & C_CC_REACH,
+            C_CC_REACH
+        );
+    }
+
+    fn ctx_of(w: &SolveWorld) -> SolveContext<'_> {
+        let unit = *w.unit(e(1)).expect("the healer");
+        SolveContext {
+            world: w,
+            unit,
+            focus: None,
+            placed: Box::leak(Box::new(BTreeMap::new())),
+        }
+    }
+
+    /// `n` enemy casters at x = 30, spread over z in [-5, 5].
+    fn casters_at_30(n: usize) -> Vec<SolveUnit> {
+        (0..n)
+            .map(|i| {
+                let z = if n == 1 {
+                    0.0
+                } else {
+                    -5.0 + 10.0 * i as f32 / (n - 1) as f32
+                };
+                unit(10 + i as u32, 2, i as u8, 30.0, z)
+            })
+            .collect()
+    }
+
+    fn total(w: &SolveWorld, p: Vec2) -> f32 {
+        let (b, c) = infeasibility_parts(RoleIntent::OccupyCover, p, &ctx_of(w));
+        b + c
+    }
+
+    /// Out of reach outranks cover at ANY number of casters (AS-362 round 2),
+    /// at three casters and at six: every caster sees an open spot out of a
+    /// ready disc, and a spot behind a pillar is hidden from all of them but
+    /// inside the disc. The open spot wins; the control, with no crowd
+    /// control ready, takes the hidden one. (A fixed 200 for crowd control
+    /// lost to three casters' 300 of occlusion; half the per-caster scaling
+    /// loses at six.)
+    #[test]
+    fn out_of_reach_outranks_cover_at_any_caster_count() {
+        let hidden = Vec2::new(2.0, 0.0);
+        let open = Vec2::new(-5.0, 20.0);
+        for n in [3, 6] {
+            let mut units = vec![healer(1, 1, 1, 0.0, 0.0), melee(2, 1, 0, -10.0, 0.0)];
+            units.extend(casters_at_30(n));
+            let mut w =
+                world(units.clone()).with_cc_field(field(vec![threat(10, 30.0, 0.0, 31.0, false)]));
+            w.obstacles = vec![pillar_at(10.0, 0.0)];
+            let ctx = ctx_of(&w);
+            assert_eq!(
+                violations(RoleIntent::OccupyCover, hidden, &ctx) & C_OCCLUDED,
+                0,
+                "{n}"
+            );
+            assert_ne!(
+                violations(RoleIntent::OccupyCover, hidden, &ctx) & C_CC_REACH,
+                0,
+                "{n}"
+            );
+            assert_eq!(
+                violations(RoleIntent::OccupyCover, open, &ctx) & C_CC_REACH,
+                0,
+                "{n}"
+            );
+            let seen = w
+                .enemy_casters_of(1)
+                .filter(|e| w.sees(open, e.pos))
+                .count();
+            assert_eq!(seen, n, "every caster sees the open spot");
+            assert!(
+                total(&w, open) < total(&w, hidden),
+                "{n} casters: {} vs {}",
+                total(&w, open),
+                total(&w, hidden)
+            );
+            let mut control = world(units);
+            control.obstacles = vec![pillar_at(10.0, 0.0)];
+            assert!(
+                total(&control, hidden) < total(&control, open),
+                "{n} casters: the control prefers cover"
+            );
+        }
+    }
+
+    /// Sight outranks crowd control AND cover together at any number of
+    /// casters (user ruling, 2026-10-19), from two casters to ten: a spot that
+    /// sees the Warrior, seen by every caster and inside a ready disc, beats
+    /// one blind to it behind a pillar, hidden from every caster and out of
+    /// the disc. (With the blind-spot surcharge at the crowd-control ceiling
+    /// alone, five casters' occlusion took the blind spot. `W_SIGHT`'s own
+    /// margin hides a partly scaled surcharge until more casters than a 3v3
+    /// can field, so the cases run past six to pin "any count".)
+    #[test]
+    fn sight_outranks_cover_and_crowd_control_at_any_caster_count() {
+        let seeing = Vec2::new(10.0, 0.0);
+        let blind = Vec2::new(-15.0, 0.0);
+        for n in [2, 4, 5, 6, 8, 10] {
+            let mut units = vec![healer(1, 1, 1, 0.0, 0.0), melee(2, 1, 0, 20.0, 0.0)];
+            units.extend(casters_at_30(n));
+            let mut w = world(units).with_cc_field(field(vec![threat(10, 30.0, 0.0, 45.0, true)]));
+            w.obstacles = vec![pillar_at(-8.0, 0.0)];
+            let ctx = ctx_of(&w);
+            let vs = violations(RoleIntent::OccupyCover, seeing, &ctx);
+            let vb = violations(RoleIntent::OccupyCover, blind, &ctx);
+            assert_eq!(vs & C_SIGHT, 0, "{n}");
+            assert_ne!(vs & C_OCCLUDED, 0, "{n}");
+            assert_ne!(vs & C_CC_REACH, 0, "{n}");
+            assert_ne!(vb & C_SIGHT, 0, "{n}");
+            assert_eq!(vb & (C_OCCLUDED | C_CC_REACH | C_LEASH), 0, "{n}");
+            let seen = w
+                .enemy_casters_of(1)
+                .filter(|e| w.sees(seeing, e.pos))
+                .count();
+            assert_eq!(seen, n, "every caster sees the sighted spot");
+            assert!(
+                total(&w, seeing) < total(&w, blind),
+                "{n} casters: sighted {} vs blind {}",
+                total(&w, seeing),
+                total(&w, blind)
+            );
+        }
+    }
+
+    /// The rim candidate: with the Warrior standing between the healer and
+    /// the caster, no step toward the Warrior leaves the disc and the local
+    /// ring only inches out of it, so the one solve that reaches the rim is
+    /// the rim candidate's.
+    #[test]
+    fn the_rim_candidate_takes_the_healer_out_in_one_solve() {
+        let w = world(vec![
+            healer(1, 1, 1, 0.0, 0.0),
+            melee(2, 1, 0, 10.0, 0.0),
+            unit(3, 2, 0, 20.0, 0.0),
+        ])
+        .with_cc_field(field(vec![threat(3, 20.0, 0.0, 30.0, true)]));
+        let spot = solved(&w);
+        assert!(
+            spot.distance(Vec2::new(20.0, 0.0)) >= 33.0,
+            "still in the disc at {spot}"
+        );
+        assert!(spot.distance(Vec2::new(10.0, 0.0)) <= 40.0, "{spot}");
+    }
+
+    /// Heal reach first: a disc centred on the Warrior covers exactly the
+    /// spots in heal range of it, and the solve does not buy its way out of
+    /// the disc by leaving heal range.
+    #[test]
+    fn leaving_heal_range_earns_no_crowd_control_credit() {
+        let mut w = reach_world().with_cc_field(field(vec![threat(3, -10.0, 0.0, 37.0, false)]));
+        w.units[0].pos = Vec2::new(25.0, 0.0);
+        let spot =
+            solve_position(RoleIntent::OccupyCover, e(1), &w, None).unwrap_or(Vec2::new(25.0, 0.0));
+        assert!(
+            spot.distance(Vec2::new(-10.0, 0.0)) <= 40.0,
+            "left heal range: {spot}"
+        );
+        // A spot beyond heal range pays at least what the worst covered spot
+        // in range does.
+        let ctx = ctx_of(&w);
+        let (_, beyond) = infeasibility_parts(RoleIntent::OccupyCover, Vec2::new(31.0, 0.0), &ctx);
+        let (_, inside) = infeasibility_parts(RoleIntent::OccupyCover, Vec2::new(25.0, 0.0), &ctx);
+        assert!(beyond >= inside, "beyond {beyond} < inside {inside}");
+    }
+
+    /// However deep in however many discs, a covered spot that sees the
+    /// anchor still costs less than one that does not: the grade is capped
+    /// under sight.
+    #[test]
+    fn no_depth_of_crowd_control_outranks_sight() {
+        let mut w = reach_world().with_cc_field(field(
+            (0..4).map(|_| threat(3, 0.0, 0.0, 30.0, false)).collect(),
+        ));
+        w.obstacles = vec![pillar_at(-10.0, 12.0)];
+        let ctx = ctx_of(&w);
+        let cost = |p: Vec2| {
+            let (b, c) = infeasibility_parts(RoleIntent::OccupyCover, p, &ctx);
+            b + c
+        };
+        let deep_seen = Vec2::new(0.5, 0.0);
+        let blind_clear = Vec2::new(-10.0, 22.0);
+        assert_ne!(
+            violations(RoleIntent::OccupyCover, blind_clear, &ctx) & C_SIGHT,
+            0
+        );
+        assert!(cost(deep_seen) < cost(blind_clear));
+    }
+
+    /// The anti-statue key is judged without the crowd-control term: a
+    /// melee's small stun disc does not disarm it, so the healer gets out of
+    /// the melee's stand-on range, not merely out of its stun's reach.
+    #[test]
+    fn a_stun_disc_does_not_disarm_the_anti_statue_key() {
+        let w = world(vec![
+            healer(1, 1, 1, 0.0, 0.0),
+            melee(2, 1, 0, -10.0, 0.0),
+            melee(3, 2, 0, 3.0, 0.0),
+        ])
+        .with_cc_field(field(vec![threat(3, 3.0, 0.0, 2.5, true)]));
+        let spot = solved(&w);
+        assert!(
+            spot.distance(Vec2::new(3.0, 0.0)) >= 12.0,
+            "parked at the stun's rim, {spot}"
+        );
+    }
+
+    /// The order: sight of the anchor > out of crowd-control reach >
+    /// occluded from casters.
+    #[test]
+    fn crowd_control_ranks_between_sight_and_cover() {
+        let mut w = world(vec![
+            healer(1, 1, 1, 0.0, 0.0),
+            melee(2, 1, 0, -10.0, 0.0),
+            unit(3, 2, 0, 20.0, 0.0),
+        ])
+        .with_cc_field(field(vec![threat(3, 20.0, 0.0, 10.0, false)]));
+        w.obstacles = vec![pillar_at(-10.0, 12.0)];
+        let ctx = ctx_of(&w);
+        let cost = |p: Vec2| {
+            let (b, c) = infeasibility_parts(RoleIntent::OccupyCover, p, &ctx);
+            b + c
+        };
+        // Covered (inside 13yd of the caster) but sighted and in range ...
+        let covered_seen = Vec2::new(10.0, 0.0);
+        assert_ne!(
+            violations(RoleIntent::OccupyCover, covered_seen, &ctx) & C_CC_REACH,
+            0
+        );
+        assert_eq!(
+            violations(RoleIntent::OccupyCover, covered_seen, &ctx) & C_SIGHT,
+            0
+        );
+        // ... against out of reach but blind to the Warrior (behind the pillar).
+        let blind = Vec2::new(-10.0, 22.0);
+        assert_ne!(
+            violations(RoleIntent::OccupyCover, blind, &ctx) & C_SIGHT,
+            0
+        );
+        assert_eq!(
+            violations(RoleIntent::OccupyCover, blind, &ctx) & C_CC_REACH,
+            0
+        );
+        assert!(cost(covered_seen) < cost(blind), "sight must outrank reach");
+        // Out of reach and seen by the caster beats covered and occluded.
+        let w2 = world(vec![
+            healer(1, 1, 1, 0.0, 0.0),
+            melee(2, 1, 0, -10.0, 0.0),
+            unit(3, 2, 0, 20.0, 0.0),
+        ])
+        .with_cc_field(field(vec![threat(3, 20.0, 0.0, 20.0, false)]));
+        let mut w2 = w2;
+        w2.obstacles = vec![pillar_at(15.0, 8.0)];
+        let ctx2 = ctx_of(&w2);
+        let cost2 = |p: Vec2| {
+            let (b, c) = infeasibility_parts(RoleIntent::OccupyCover, p, &ctx2);
+            b + c
+        };
+        // Just inside the area's disc (22.5 of 23yd), so the grade is small
+        // and the comparison is the base weight against one caster's cover.
+        let hidden_covered = Vec2::new(12.0, 21.0);
+        assert_ne!(
+            violations(RoleIntent::OccupyCover, hidden_covered, &ctx2) & C_CC_REACH,
+            0
+        );
+        assert_eq!(
+            violations(RoleIntent::OccupyCover, hidden_covered, &ctx2) & C_OCCLUDED,
+            0
+        );
+        let open_clear = Vec2::new(-5.0, 0.0);
+        assert_ne!(
+            violations(RoleIntent::OccupyCover, open_clear, &ctx2) & C_OCCLUDED,
+            0
+        );
+        assert_eq!(
+            violations(RoleIntent::OccupyCover, open_clear, &ctx2) & C_CC_REACH,
+            0
+        );
+        assert!(
+            cost2(open_clear) < cost2(hidden_covered),
+            "reach must outrank cover"
+        );
+    }
+
+    /// The Schmitt pair: a healer between the inner and the outer disc stands
+    /// where it is; the same spot is covered for a healer walking to it.
+    #[test]
+    fn a_healer_between_the_discs_is_not_moved() {
+        // Fear reach 30, margin 3: inner 31.5, outer 33. The healer at 32.
+        let w = reach_world().with_cc_field(field(vec![threat(3, 32.0, 0.0, 30.0, true)]));
+        assert_eq!(solved(&w), Vec2::ZERO, "moved off the rim");
+        let ctx = ctx_of(&w);
+        assert_eq!(
+            violations(RoleIntent::OccupyCover, Vec2::ZERO, &ctx) & C_CC_REACH,
+            0
+        );
+        assert_ne!(
+            violations(RoleIntent::OccupyCover, Vec2::new(0.5, 0.0), &ctx) & C_CC_REACH,
+            0
+        );
+        // Inside the inner disc it moves.
+        let w = reach_world().with_cc_field(field(vec![threat(3, 31.0, 0.0, 30.0, true)]));
+        assert_ne!(solved(&w), Vec2::ZERO);
+    }
+
+    /// A dying teammate's reach outranks crowd control: when only covered
+    /// spots reach it, the healer stays where the heal lands.
+    #[test]
+    fn a_dying_teammates_reach_outranks_crowd_control() {
+        let mut w = reach_world().with_cc_field(field(vec![threat(3, 0.0, 0.0, 50.0, false)]));
+        w.units[1].health_pct = 0.2;
+        let spot = solved(&w);
+        assert!(
+            spot.distance(Vec2::new(-10.0, 0.0)) <= w.heal_range - HEAL_REACH_MARGIN,
+            "walked off the dying teammate to {spot}"
+        );
     }
 }
