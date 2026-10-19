@@ -448,14 +448,14 @@ below holds to the digit.
     so no count of casters seeing an open spot makes a hidden spot inside a
     ready disc win (a fixed 200 lost to three casters' 300);
   - sight outranks cover and CC *together*, at any caster count (user ruling,
-    2026-10-19): while a field is in play a blind spot pays, on top of
-    `W_SIGHT`, the CC ceiling plus `W_OCCLUDED` per enemy caster — the most a
-    sighted spot can pay for CC and cover together. (A spot seen by two
-    casters and covered cost more than a blind hidden one, and a Priest stood
-    8s blind behind Nagrand's camp pillar; with the surcharge at the CC
-    ceiling alone, five casters — Felhunters and Spiders count — still took
-    the blind spot.) A world with no field is unchanged; its own
-    sight-against-cover order is AS-381's.
+    2026-10-19): a blind spot pays, on top of `W_SIGHT`, `W_OCCLUDED` per
+    enemy caster — with a field or without one (AS-381) — and while a field
+    is in play the CC ceiling too: the most a sighted spot can pay for cover
+    and CC together. (A spot seen by two casters and covered cost more than a
+    blind hidden one, and a Priest stood 8s blind behind Nagrand's camp
+    pillar; with the surcharge at the CC ceiling alone, five casters —
+    Felhunters and Spiders count — still took the blind spot. With no field
+    and a flat `W_SIGHT`, four casters tied and five took it.)
 
   The anti-statue key is armed on the flatness of everything but the CC term,
   so a melee's 5.5yd stun disc does not disarm it.

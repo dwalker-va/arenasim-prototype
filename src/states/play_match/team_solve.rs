@@ -876,14 +876,8 @@ fn infeasibility_parts(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) 
     // Scales, in the order the design doc treats them: giving up sight or cover
     // defeats the intent, the leash and standoff degrade it, cohesion is a
     // preference.
-    // Sight OUTRANKS cover, and deliberately: these two are near-opposite
-    // demands for a healer (its partner fights in roughly the same direction as
-    // the enemies shooting at it), so when no position satisfies both, the
-    // solve must choose. A healer that cannot heal is worse than one that can be
-    // shot at — the same call the step-3 camp made when it filtered candidates
-    // on ally sight and only scored occlusion among the survivors.
-    const W_SIGHT: f32 = 400.0;
-    const W_OCCLUDED: f32 = 100.0;
+    // (`W_SIGHT` and `W_OCCLUDED` are module constants, beside the
+    // crowd-control scales they are ordered against.)
     const W_LEASH: f32 = 10.0;
     const W_STANDOFF: f32 = 10.0;
     const W_COHESION: f32 = 1.0;
@@ -924,12 +918,22 @@ fn infeasibility_parts(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) 
         return (cost, 0.0);
     }
     let mut cost = 0.0;
+    let casters = world.enemy_casters_of(ctx.unit.team).count() as f32;
 
     // Binary constraints contribute their full scale — there is no "partly in
     // line of sight". The gradient for these comes from the geometry moving the
     // candidate in or out of the shadow, not from a magnitude.
+    //
+    // Sight outranks cover at ANY number of enemy casters (user ruling,
+    // 2026-10-19): occlusion below costs `W_OCCLUDED` for every caster that
+    // sees a spot, so a blind spot pays that much for every enemy caster in
+    // the world on top of `W_SIGHT` — the most a sighted spot can pay for
+    // cover. With a flat `W_SIGHT`, four casters (pets count, see
+    // `enemy_casters_of`) tied a blind, hidden spot with a sighted, exposed
+    // one, and five or more took the blind one. The crowd-control term below
+    // adds its own ceiling while a field is in play.
     if v & C_SIGHT != 0 {
-        cost += W_SIGHT;
+        cost += W_SIGHT + W_OCCLUDED * casters;
     }
     if v & C_OCCLUDED != 0 {
         // Graded by HOW MANY casters still see the spot, so a healer breaking one
@@ -996,7 +1000,6 @@ fn infeasibility_parts(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) 
     // caster in the world on top of `W_CC`. A fixed 200 lost to three casters'
     // 300 and took a hidden spot inside a ready disc over an open one out of
     // reach.
-    let casters = world.enemy_casters_of(ctx.unit.team).count() as f32;
     let w_cc = W_CC + W_OCCLUDED * casters;
     let ceiling = w_cc + W_CC_GRADE_CAP;
     let mut cc = 0.0;
@@ -1013,25 +1016,37 @@ fn infeasibility_parts(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) 
     // Sight still outranks crowd control AND cover together, at any number
     // of casters. A spot that sees the anchor can pay both — the CC term's
     // ceiling, and `W_OCCLUDED` for every enemy caster that sees it — and the
-    // two summed could otherwise undercut a blind spot that pays only
-    // `W_SIGHT`: measured on Nagrand, a PRESSURED Priest stood 8s behind the
-    // camp pillar blind to its Warrior, out of the Warlock's sight and Fear;
-    // with the surcharge at the ceiling alone, five casters still did it.
-    // While a crowd-control field is in play, losing sight costs both maxima
-    // on top of `W_SIGHT`. With no field the costs are as they were (the
-    // no-field sight-against-cover order is AS-381's).
+    // two summed could otherwise undercut a blind spot: measured on Nagrand, a
+    // PRESSURED Priest stood 8s behind the camp pillar blind to its Warrior,
+    // out of the Warlock's sight and Fear. The cover maximum is already in the
+    // sight cost above, at any field or none; while a crowd-control field is
+    // in play, losing sight also costs the CC term's ceiling.
     if v & C_SIGHT != 0 && !world.cc.is_empty() {
-        cc += ceiling + W_OCCLUDED * casters;
+        cc += ceiling;
     }
     (cost, cc)
 }
 
+/// The cost of a spot that loses sight of the anchor ([`C_SIGHT`]), before
+/// `W_OCCLUDED` per enemy caster is added to it (so sight outranks cover at
+/// any caster count).
+///
+/// Sight OUTRANKS cover, and deliberately: these two are near-opposite
+/// demands for a healer (its partner fights in roughly the same direction as
+/// the enemies shooting at it), so when no position satisfies both, the
+/// solve must choose. A healer that cannot heal is worse than one that can be
+/// shot at — the same call the step-3 camp made when it filtered candidates
+/// on ally sight and only scored occlusion among the survivors.
+const W_SIGHT: f32 = 400.0;
+/// Per enemy caster that sees a spot ([`C_OCCLUDED`]).
+const W_OCCLUDED: f32 = 100.0;
+
 /// The base cost of a spot covered by enemy crowd control ([`C_CC_REACH`]),
 /// before `W_OCCLUDED` per enemy caster is added to it (so out of reach
 /// outranks cover at any caster count). Sight outranks both together however
-/// it is set: while a field is in play a blind spot pays, on top of
-/// `W_SIGHT`, the crowd-control ceiling plus `W_OCCLUDED` per enemy caster —
-/// the most a sighted spot can pay for crowd control and cover. Within those
+/// it is set: a blind spot always pays, on top of `W_SIGHT`, `W_OCCLUDED` per
+/// enemy caster, and while a field is in play the crowd-control ceiling too —
+/// the most a sighted spot can pay for cover and crowd control. Within those
 /// orders its value sets only how hard the gradient pulls against the
 /// continuous terms (leash, standoff, cohesion).
 const W_CC: f32 = 200.0;
@@ -3379,6 +3394,170 @@ mod tests {
                 total(&w, seeing),
                 total(&w, blind)
             );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Sight over cover with no crowd-control field (AS-381)
+    // -----------------------------------------------------------------------
+
+    /// The sighted-against-blind geometry of the test above, with no field:
+    /// the healer at the origin, its Warrior 20yd east, `n` enemy casters at
+    /// x = 30 (the last two of them pets, which count as casters — see
+    /// `enemy_casters_of`) and a pillar at x = -8. The sighted spot (10, 0) is
+    /// seen by every caster; the blind spot (-15, 0) behind the pillar is
+    /// hidden from every caster and from the Warrior.
+    fn sight_world(n: usize, can_cast_heal: bool) -> SolveWorld {
+        let mut units = vec![
+            SolveUnit {
+                can_cast_heal,
+                ..healer(1, 1, 1, 0.0, 0.0)
+            },
+            melee(2, 1, 0, 20.0, 0.0),
+        ];
+        let mut casters = casters_at_30(n);
+        let pets = casters.len().saturating_sub(2);
+        for pet in &mut casters[pets..] {
+            pet.is_pet = true;
+        }
+        units.extend(casters);
+        let mut w = world(units);
+        w.obstacles = vec![pillar_at(-8.0, 0.0)];
+        w
+    }
+
+    const SEEING: Vec2 = Vec2::new(10.0, 0.0);
+    const BLIND: Vec2 = Vec2::new(-15.0, 0.0);
+    const WARRIOR: Vec2 = Vec2::new(20.0, 0.0);
+
+    /// The geometry holds at every count, so no comparison below is vacuous:
+    /// the sighted spot is seen by all `n` casters (pets included) and pays
+    /// only occlusion; the blind spot pays only sight.
+    fn assert_sight_geometry(w: &SolveWorld, n: usize) {
+        assert!(w.cc.is_empty(), "no field");
+        assert_eq!(
+            w.units.iter().filter(|u| u.team == 2 && u.is_pet).count(),
+            2
+        );
+        assert_eq!(w.enemy_casters_of(1).count(), n, "{n}: pets count");
+        let ctx = ctx_of(w);
+        let vs = violations(RoleIntent::OccupyCover, SEEING, &ctx);
+        let vb = violations(RoleIntent::OccupyCover, BLIND, &ctx);
+        assert_eq!(vs, C_OCCLUDED, "{n}: the sighted spot is only exposed");
+        assert_eq!(vb, C_SIGHT, "{n}: the blind spot is only blind");
+        let seen = w
+            .enemy_casters_of(1)
+            .filter(|e| w.sees(SEEING, e.pos))
+            .count();
+        assert_eq!(seen, n, "{n}: every caster sees the sighted spot");
+    }
+
+    /// Sight outranks cover at any number of casters with NO crowd-control
+    /// field (user ruling, 2026-10-19): a spot that sees the Warrior, seen by
+    /// every caster, beats one blind to it and hidden from every caster. With
+    /// a flat `W_SIGHT` four casters tied and five took the blind spot; half
+    /// the per-caster scaling loses past eight, hence the ten. The control —
+    /// the same world with a healer that cannot heal, which owes no sight —
+    /// takes the hidden spot, so the comparison is between two spots the
+    /// solve really does rank on cover.
+    #[test]
+    fn sight_outranks_cover_without_a_field_at_any_caster_count() {
+        for n in [3, 5, 6, 10] {
+            let w = sight_world(n, true);
+            assert_sight_geometry(&w, n);
+            assert!(
+                total(&w, SEEING) < total(&w, BLIND),
+                "{n} casters: sighted {} vs blind {}",
+                total(&w, SEEING),
+                total(&w, BLIND)
+            );
+            let control = sight_world(n, false);
+            let ctx = ctx_of(&control);
+            assert_eq!(violations(RoleIntent::OccupyCover, BLIND, &ctx), 0, "{n}");
+            assert!(
+                total(&control, BLIND) < total(&control, SEEING),
+                "{n} casters: the control prefers cover"
+            );
+        }
+    }
+
+    /// The solve itself, not just the cost: at each count the healer, who
+    /// stands where it sees the Warrior, chooses a spot that still sees it;
+    /// the control, who cannot heal, walks behind the pillar out of every
+    /// caster's sight.
+    #[test]
+    fn the_solve_keeps_sight_of_the_anchor_without_a_field_at_any_caster_count() {
+        for n in [3, 5, 6, 10] {
+            let w = sight_world(n, true);
+            assert_sight_geometry(&w, n);
+            let spot = solved(&w);
+            assert!(w.sees(spot, WARRIOR), "{n} casters: blind at {spot}");
+            let control = sight_world(n, false);
+            let hid = solved(&control);
+            assert!(
+                !control
+                    .enemy_casters_of(1)
+                    .any(|e| control.sees(hid, e.pos)),
+                "{n} casters: the control stayed exposed at {hid}"
+            );
+            assert!(
+                !control.sees(hid, WARRIOR),
+                "{n}: the control hid behind the pillar"
+            );
+        }
+    }
+
+    /// The no-field gate, pinned (AS-116's note: nothing pinned AS-362's
+    /// `!world.cc.is_empty()` gate). With no field a blind spot pays exactly
+    /// `W_SIGHT` plus `W_OCCLUDED` per enemy caster in the world — not per
+    /// caster that sees it, and with no crowd-control ceiling; with a field
+    /// it pays the ceiling on top.
+    #[test]
+    fn a_blind_spot_costs_sight_plus_the_cover_maximum_and_the_ceiling_only_with_a_field() {
+        for n in [3, 5, 6, 10] {
+            let w = sight_world(n, true);
+            assert_sight_geometry(&w, n);
+            let casters = n as f32;
+            assert_eq!(
+                infeasibility_parts(RoleIntent::OccupyCover, BLIND, &ctx_of(&w)),
+                (W_SIGHT + W_OCCLUDED * casters, 0.0),
+                "{n}: no field"
+            );
+            let fielded =
+                sight_world(n, true).with_cc_field(field(vec![threat(10, 30.0, 0.0, 45.0, true)]));
+            let ctx = ctx_of(&fielded);
+            assert_eq!(
+                violations(RoleIntent::OccupyCover, BLIND, &ctx),
+                C_SIGHT,
+                "{n}: out of the disc"
+            );
+            let ceiling = W_CC + W_OCCLUDED * casters + W_CC_GRADE_CAP;
+            assert_eq!(
+                infeasibility_parts(RoleIntent::OccupyCover, BLIND, &ctx),
+                (W_SIGHT + W_OCCLUDED * casters, ceiling),
+                "{n}: with a field"
+            );
+        }
+    }
+
+    /// Why standoff never joins the sighted spot's bill (AS-381's card read
+    /// "with standoff it can lose at three"): `OccupyCover` owes sight only
+    /// while the healer can heal and standoff only while it cannot, so no
+    /// spot violates both. Pinned at spots inside a caster's threat radius
+    /// and blind to the Warrior.
+    #[test]
+    fn occupy_cover_never_owes_sight_and_standoff_together() {
+        for can_cast_heal in [true, false] {
+            let mut w = sight_world(3, can_cast_heal);
+            w.units.push(unit(30, 2, 3, -20.0, 0.0));
+            let ctx = ctx_of(&w);
+            for p in [BLIND, Vec2::new(-18.0, 3.0), Vec2::new(-16.0, -2.0)] {
+                assert!(!w.sees(p, WARRIOR), "{p} is blind");
+                assert!(p.distance(Vec2::new(-20.0, 0.0)) < w.threat_radius, "{p}");
+                let v = violations(RoleIntent::OccupyCover, p, &ctx);
+                let owed = if can_cast_heal { C_SIGHT } else { C_STANDOFF };
+                assert_eq!(v & (C_SIGHT | C_STANDOFF), owed, "{p} heal={can_cast_heal}");
+            }
         }
     }
 
