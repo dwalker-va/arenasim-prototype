@@ -18,17 +18,18 @@
 //!   healer over a seed bank — a 2v2 whose Priest's Warrior walks round the camp
 //!   pillar, and a 3v3 whose teammates stand close behind distant pillars — and
 //!   bounds its formation goal's frame-to-frame jumps and returns;
-//! - `kept_exit_reset::leaving_free_forgets_the_kept_exit` holds the kept exit
-//!   to FREE.
+//! - `kept_exit_reset::leaving_free_forgets_the_kept_exit` holds the kept exit,
+//!   and the formation heading (AS-370), to FREE.
 //!
-//! `measure_formation_goal_jumps` (`#[ignore]`d) counts formation-goal jumps
-//! over five comps for comparing two binaries.
+//! `measure_formation_goal_jumps` (`#[ignore]`d) counts formation-goal jumps,
+//! attributes each to its cause, and counts frames out of sight, over five
+//! comps, for comparing two binaries.
 
-use arenasim::headless::HeadlessMatchConfig;
+use arenasim::headless::{FrameObservation, HeadlessMatchConfig, ObservedCombatant};
 use arenasim::states::play_match::map_config::load_map_geometry_config;
 use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
 use arenasim::ArenaMap;
-use bevy::prelude::Vec3;
+use bevy::prelude::{Entity, Vec3};
 
 /// The shipped `urgency_hp_threshold`: below it the medic chase owns the walk.
 const URGENCY: f32 = 0.5;
@@ -212,11 +213,82 @@ const FORMATION_HEALERS: [&str; 3] = ["Priest", "Druid", "Shaman"];
 
 /// What one healer's formation goal did over a match: every frame-to-frame jump
 /// (combat seconds, yards) of its goal on frames the trace shows it FREE on a
-/// formation decision, and how many such frame pairs there were.
+/// formation decision, how many such frame pairs there were, and what changed
+/// in the world as each jump over 5yd was made ([`jump_cause`]).
 #[derive(Default)]
 struct GoalTrack {
     jumps: Vec<(f32, f32)>,
     pairs: usize,
+    causes: Vec<&'static str>,
+    /// Of the `pairs` frames, those on which the goal, and those on which the
+    /// healer itself, had no line of sight to the anchor (the most injured
+    /// living teammate).
+    blind_goal: usize,
+    blind_healer: usize,
+}
+
+/// What changed in the frames leading up to frame `i` (the three before it,
+/// the decision's snapshot lagging the observation by up to a frame or two)
+/// that a formation goal over 5yd away from the last one answers to, checked
+/// in this order:
+/// - `engaged`: a teammate died, or which teammates have a target changed, so
+///   the centroid's membership changed;
+/// - `target`: the healer's own target changed (the wand-range clamp's anchor);
+/// - `crossing`: the enemy nearest the centroid (as the formation machine takes
+///   it: any visible enemy, pets included) turned more than 90 degrees about
+///   it — the "behind the line" direction flipping (AS-370);
+/// - `other`: none of those (a change of repair exit, a clamp, ...).
+fn jump_cause(frames: &[FrameObservation], healer: Entity, i: usize) -> &'static str {
+    let window = &frames[i.saturating_sub(3)..=i];
+    let Some(me) = frames[i].combatants.get(&healer) else {
+        return "other";
+    };
+    let team = me.team;
+    let allies = |f: &FrameObservation| -> Vec<(Entity, bool, bool)> {
+        f.combatants
+            .iter()
+            .filter(|(e, c)| **e != healer && c.team == team && !c.is_pet)
+            .map(|(e, c)| (*e, c.alive, c.target.is_some()))
+            .collect()
+    };
+    if window.windows(2).any(|w| allies(&w[0]) != allies(&w[1])) {
+        return "engaged";
+    }
+    let target = |f: &FrameObservation| f.combatants.get(&healer).and_then(|c| c.target);
+    if window.windows(2).any(|w| target(&w[0]) != target(&w[1])) {
+        return "target";
+    }
+    // The bearing of the enemy nearest the centroid, from the centroid.
+    let bearing = |f: &FrameObservation| -> Option<Vec3> {
+        let members: Vec<&ObservedCombatant> = f
+            .combatants
+            .iter()
+            .filter(|(e, c)| **e != healer && c.team == team && !c.is_pet && c.alive)
+            .map(|(_, c)| c)
+            .collect();
+        let engaged: Vec<_> = members.iter().filter(|c| c.target.is_some()).collect();
+        let group: Vec<Vec3> = if engaged.is_empty() {
+            members.iter().map(|c| c.position).collect()
+        } else {
+            engaged.iter().map(|c| c.position).collect()
+        };
+        if group.is_empty() {
+            return None;
+        }
+        let centroid = group.iter().copied().sum::<Vec3>() / group.len() as f32;
+        f.combatants
+            .values()
+            .filter(|c| c.team != team && c.alive && !c.stealthed)
+            .min_by(|a, b| flat(a.position, centroid).total_cmp(&flat(b.position, centroid)))
+            .map(|e| Vec3::new(centroid.x - e.position.x, 0.0, centroid.z - e.position.z))
+    };
+    let (first, last) = (bearing(&window[0]), bearing(&frames[i]));
+    if let (Some(a), Some(b)) = (first, last) {
+        if a.length() > 0.0 && b.length() > 0.0 && a.normalize().dot(b.normalize()) < 0.0 {
+            return "crossing";
+        }
+    }
+    "other"
 }
 
 impl GoalTrack {
@@ -291,20 +363,21 @@ fn flat(a: Vec3, b: Vec3) -> f32 {
     ((a.x - b.x).powi(2) + (a.z - b.z).powi(2)).sqrt()
 }
 
-/// One match, both teams `TeamPlan`, on Nagrand for `secs`: per formation healer
-/// (by entity index) its formation-goal track, and the consecutive formation
-/// goals it read.
+/// One match, both teams on `profile`, on Nagrand for `secs`: per formation
+/// healer (by entity index) its formation-goal track, and the consecutive
+/// formation goals it read.
 fn formation_tracks(
     team1: &[&str],
     team2: &[&str],
     seed: u64,
     secs: f32,
+    profile: &str,
 ) -> Vec<(String, GoalTrack, Vec<(f32, Vec3)>)> {
     let played = common::staged::play_seeded(HeadlessMatchConfig {
         team1: team1.iter().map(|s| s.to_string()).collect(),
         team2: team2.iter().map(|s| s.to_string()).collect(),
         map: "PillaredArena".to_string(),
-        ai_profile: Some("TeamPlan".to_string()),
+        ai_profile: Some(profile.to_string()),
         random_seed: Some(seed),
         max_duration_secs: secs,
         ..Default::default()
@@ -345,7 +418,7 @@ fn formation_tracks(
             // re-commit ON the frame counts, since a jump past the shift
             // threshold is exactly what emits one.
             let formation_at = |frame: usize| {
-                let first = decisions.partition_point(|d| d.0 + 1 <= frame);
+                let first = decisions.partition_point(|d| d.0 < frame);
                 let last = decisions.partition_point(|d| d.0 <= frame + 1);
                 first > 0 && decisions[first - 1..last].iter().all(|d| d.1)
             };
@@ -359,6 +432,21 @@ fn formation_tracks(
             };
             let mut track = GoalTrack::default();
             let mut goals = Vec::new();
+            let obstacles = nagrand();
+            let team = played.frames[0].combatants[&healer].team;
+            // Whether `from` sees the most injured living teammate on frame `i`.
+            let sees_anchor = |i: usize, from: Vec3| {
+                played.frames[i]
+                    .combatants
+                    .iter()
+                    .filter(|(e, c)| **e != healer && c.team == team && !c.is_pet && c.alive)
+                    .map(|(_, c)| c)
+                    .min_by(|a, b| {
+                        (a.current_health / a.max_health)
+                            .total_cmp(&(b.current_health / b.max_health))
+                    })
+                    .is_none_or(|a| has_line_of_sight(&obstacles, eye(from), eye(a.position)))
+            };
             for i in gates + 1..played.frames.len() {
                 let t = (i - gates) as f32 * FRAME;
                 let (Some(a), Some(b)) = (goal(i - 1), goal(i)) else {
@@ -374,9 +462,21 @@ fn formation_tracks(
                 }
                 goals.push((t, b));
                 track.pairs += 1;
+                if !sees_anchor(i, b) {
+                    track.blind_goal += 1;
+                    if std::env::var("FORMATION_JUMPS_BLIND").is_ok() {
+                        println!("    blind goal {class} at {t:.2}s: {b}");
+                    }
+                }
+                if !sees_anchor(i, played.frames[i].combatants[&healer].position) {
+                    track.blind_healer += 1;
+                }
                 let d = flat(a, b);
                 if d > 0.0 {
                     track.jumps.push((t, d));
+                    if d > 5.0 {
+                        track.causes.push(jump_cause(&played.frames, healer, i));
+                    }
                 }
             }
             (class, track, goals)
@@ -413,7 +513,7 @@ fn the_repaired_point_never_flips_across_a_shadow() {
     for (a, b) in FLIP_BANK {
         for seed in 0..10 {
             for (t1, t2) in [(a, b), (b, a)] {
-                for (class, track, goals) in formation_tracks(t1, t2, seed, 30.0) {
+                for (class, track, goals) in formation_tracks(t1, t2, seed, 30.0, "TeamPlan") {
                     pairs += track.pairs;
                     let label = format!("{t1:?} v {t2:?} seed {seed} {class}");
                     for &(t, d) in track.jumps.iter().filter(|j| j.1 > 25.0) {
@@ -437,10 +537,14 @@ fn the_repaired_point_never_flips_across_a_shadow() {
 }
 
 /// Measurement, not a gate: per comp, the formation goals' frame-to-frame jumps
-/// over 5yd, 10yd and 25yd, their returns, and the half-second spans over which
-/// a goal moves more than 10yd. Run on two binaries to compare; set
-/// `FORMATION_JUMPS_SEEDS` for the seed count (default 10) and
-/// `FORMATION_JUMPS_LIST` to print every jump over 10yd.
+/// over 5yd, 10yd and 25yd, their returns, the half-second spans over which a
+/// goal moves more than 10yd, the jumps over 5yd by cause ([`jump_cause`]), and
+/// the frames on which the goal, and the healer, had no sight of the most
+/// injured teammate. Run on two binaries to compare; set
+/// `FORMATION_JUMPS_SEEDS` for the seed count (default 10),
+/// `FORMATION_JUMPS_PROFILE` for the AI profile both teams run (default
+/// `TeamPlan`), `FORMATION_JUMPS_LIST` to print every jump over 10yd and
+/// `FORMATION_JUMPS_BLIND` to print every frame whose goal is out of sight.
 #[test]
 #[ignore = "measurement: run with --release -- --ignored --nocapture"]
 fn measure_formation_goal_jumps() {
@@ -458,12 +562,16 @@ fn measure_formation_goal_jumps() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10);
+    let profile =
+        std::env::var("FORMATION_JUMPS_PROFILE").unwrap_or_else(|_| "TeamPlan".to_string());
     for (a, b) in comps {
         let (mut over5, mut over10, mut over25, mut ret, mut pairs) = (0, 0, 0, 0, 0);
         let mut spans = 0;
+        let mut causes: std::collections::BTreeMap<&str, usize> = Default::default();
+        let (mut blind_goal, mut blind_healer) = (0, 0);
         for seed in 0..seeds {
             for (t1, t2) in [(a, b), (b, a)] {
-                for (class, track, goals) in formation_tracks(t1, t2, seed, 120.0) {
+                for (class, track, goals) in formation_tracks(t1, t2, seed, 120.0, &profile) {
                     if std::env::var("FORMATION_JUMPS_LIST").is_ok() {
                         for &(t, d) in track.jumps.iter().filter(|j| j.1 > 10.0) {
                             println!("  {t1:?} v {t2:?} s{seed} {class}: {d:.1}yd at {t:.2}s");
@@ -475,12 +583,18 @@ fn measure_formation_goal_jumps() {
                     over25 += track.over(25.0);
                     ret += track.returns(5.0, &goals);
                     spans += half_second_spans_over(10.0, &goals);
+                    blind_goal += track.blind_goal;
+                    blind_healer += track.blind_healer;
+                    for c in &track.causes {
+                        *causes.entry(c).or_default() += 1;
+                    }
                 }
             }
         }
         println!(
             "{a:?} v {b:?}: pairs {pairs}, over5 {over5}, over10 {over10}, over25 {over25}, \
-             returns {ret}, 0.5s spans over 10yd {spans}"
+             returns {ret}, 0.5s spans over 10yd {spans}; over5 by cause {causes:?}; \
+             anchor out of sight: goal {blind_goal}, healer {blind_healer}"
         );
     }
 }
@@ -500,8 +614,8 @@ mod kept_exit_reset {
     use arenasim::states::play_match::decision_trace::DecisionTrace;
     use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
     use arenasim::states::play_match::{
-        AbilityDefinitions, AbilityType, Combatant, DRTracker, HealerPosture, MovementConfig,
-        Posture,
+        AbilityDefinitions, AbilityType, Combatant, DRTracker, FormationHeading, FormationMemory,
+        HealerPosture, MovementConfig, Posture,
     };
     use bevy::ecs::world::CommandQueue;
     use bevy::prelude::*;
@@ -531,7 +645,8 @@ mod kept_exit_reset {
         }
     }
 
-    /// One posture tick for a FREE `class` healer carrying a kept exit,
+    /// One posture tick for a FREE `class` healer carrying a kept exit and a
+    /// formation heading,
     /// with an enemy Warrior on it (`pressed`) or nowhere near. Returns the
     /// posture state after the tick.
     fn tick(class: CharacterClass, pressed: bool) -> HealerPosture {
@@ -563,7 +678,11 @@ mod kept_exit_reset {
         )
         .classified(&SituationConfig::default(), MatchClock::after_gates(5.0));
         let mut state = HealerPosture::new(0.0);
-        state.formation_repair = Some(Vec2::new(10.0, 5.0));
+        state.formation.exit = Some(Vec2::new(10.0, 5.0));
+        state.formation.heading = Some(FormationHeading {
+            dir: Vec2::Y,
+            at: 4.9,
+        });
         let combatant = Combatant::new(1, 0, class);
         let movement = MovementConfig::default();
         let abilities = AbilityDefinitions::default();
@@ -608,8 +727,9 @@ mod kept_exit_reset {
         state
     }
 
-    /// A healer pressed out of FREE drops its kept exit, as it drops its
-    /// last formation point; the control, left FREE, keeps it (nothing in an
+    /// A healer pressed out of FREE drops its kept exit and its heading, as it
+    /// drops its last formation point; the control, left FREE, keeps the exit
+    /// (nothing in an
     /// obstacle-free tick touches it).
     #[test]
     fn leaving_free_forgets_the_kept_exit() {
@@ -621,8 +741,9 @@ mod kept_exit_reset {
                 "{class:?}: the scene presses it"
             );
             assert_eq!(
-                pressed.formation_repair, None,
-                "{class:?}: side carried out of FREE"
+                pressed.formation,
+                FormationMemory::default(),
+                "{class:?}: side or heading carried out of FREE"
             );
             let free = tick(class, false);
             assert_eq!(
@@ -631,8 +752,12 @@ mod kept_exit_reset {
                 "{class:?}: the control stays FREE"
             );
             assert!(
-                free.formation_repair.is_some(),
+                free.formation.exit.is_some(),
                 "{class:?}: the control keeps it"
+            );
+            assert!(
+                free.formation.heading.is_some(),
+                "{class:?}: the control turns its heading"
             );
         }
     }

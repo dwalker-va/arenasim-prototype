@@ -1739,7 +1739,7 @@ fn priest_dip_tick(
         completed.dip_until = 0.0;
         completed.last_direction = None;
         completed.last_point = None;
-        completed.formation_repair = None;
+        completed.formation.forget();
         ScreamDipPlan::DipCast {
             target,
             completed_state: completed,
@@ -1870,7 +1870,7 @@ pub fn evaluate_priest_posture(
         state.since = now;
         state.last_direction = None;
         state.last_point = None;
-        state.formation_repair = None;
+        state.formation.forget();
         match next {
             Posture::Pressured => {
                 state.hold_until = now + shared.pressured_hold;
@@ -2174,7 +2174,8 @@ fn free_tick(
         my_pos,
         ctx,
         movement,
-        &mut state.formation_repair,
+        &mut state.formation,
+        now,
     ) else {
         // DEGENERATE (R5/AE4): no formation directive; fall through to the
         // legacy ladder. Exit transitions still emit — goal_kind
@@ -2199,6 +2200,12 @@ fn free_tick(
         .last_point
         .is_none_or(|lp| lp.distance(point_xz) > movement.priest.formation_shift_threshold);
     let near = my_xz.distance(point_xz) <= movement.priest.formation_deadzone;
+    let stale = super::formation::continuous(ctx)
+        && super::formation::walk_is_stale(
+            directive,
+            point_xz,
+            movement.priest.formation_shift_threshold,
+        );
 
     let issue = |commands: &mut Commands| {
         commands.entity(entity).try_insert(MovementDirective {
@@ -2225,9 +2232,13 @@ fn free_tick(
             );
             builder.finish();
         }
-    } else if moved && !near {
+    } else if (moved && !near) || stale {
         // Formation goal moved enough to re-commit (engaged-ally centroid
-        // shifted) — FormationShift, within the same posture.
+        // shifted) — FormationShift, within the same posture. Under
+        // `TeamPlan`, also when the Priest already stands near the new point
+        // but the walk it is on aims more than the shift threshold away
+        // (AS-370): that walk would carry it off, where the new directive's
+        // arrival-hold parks it.
         issue(commands);
         state.last_point = Some(point_xz);
         if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
@@ -2264,7 +2275,8 @@ fn compute_formation_point(
     my_pos: Vec3,
     ctx: &CombatContext,
     movement: &MovementConfig,
-    kept: &mut Option<Vec2>,
+    memory: &mut FormationMemory,
+    now: f32,
 ) -> Option<Vec3> {
     let shared = &movement.shared;
     // Single pass over living non-pet allies (excluding self): accumulate the
@@ -2321,6 +2333,20 @@ fn compute_formation_point(
     if dir == Vec2::ZERO {
         dir = away;
     }
+    // Under `TeamPlan`, turned from the last heading at no more than the
+    // healer's walk round the centroid (AS-370): the nearest enemy crossing
+    // the centroid swings the point round instead of flipping it to the far
+    // side.
+    let dir = if super::formation::continuous(ctx) {
+        super::formation::turn_limited(
+            dir,
+            &mut memory.heading,
+            now,
+            combatant.base_movement_speed / shared.formation_offset,
+        )
+    } else {
+        dir
+    };
     let mut point = Vec3::new(
         centroid.x + dir.x * shared.formation_offset,
         my_pos.y,
@@ -2375,7 +2401,7 @@ fn compute_formation_point(
 
     let point = clamp_to_arena(&ctx.bounds, point);
     Some(if super::formation::sight_constrained(ctx) {
-        super::formation::sighted_formation_point(ctx, entity, point, kept)
+        super::formation::sighted_formation_point(ctx, entity, point, &mut memory.exit)
     } else {
         super::healer_postures::standable_formation_point(ctx, point)
     })
