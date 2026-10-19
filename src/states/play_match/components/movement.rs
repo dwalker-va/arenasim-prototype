@@ -164,13 +164,47 @@ pub struct HealerPosture {
     /// `Some` while the play drives the healer's position, `None` otherwise; a
     /// new spot (or `None` → `Some`) is what emits its `TakeCover` trace event.
     pub cover_spot: Option<Vec2>,
-    /// `TeamPlan` only: the exit the FREE formation point was last repaired to
-    /// (`class_ai::formation`, AS-206). The repair keeps to the exit nearest it
-    /// until another is better by `formation::KEEP_MARGIN`, so a point near a
-    /// shadow's centre line, or between two teammates' shadows, does not jump
-    /// between exits. `None` when the last formation point needed no repair, and
-    /// after leaving FREE; always `None` under `Legacy`.
-    pub formation_repair: Option<Vec2>,
+    /// What the FREE formation point remembers from one evaluation to the next
+    /// (`class_ai::formation`, `TeamPlan` only): the heading it stands off the
+    /// centroid along, and the exit it was last repaired to. Forgotten on
+    /// leaving FREE, and whenever another walk (the medic chase, a dispel hold)
+    /// takes the healer off its formation point.
+    pub formation: FormationMemory,
+}
+
+/// The FREE formation point's memory ([`HealerPosture::formation`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FormationMemory {
+    /// The direction the point last stood off the engaged-ally centroid, and
+    /// the sim time it was taken (AS-370). The next evaluation turns it toward
+    /// the new "behind the line" direction no faster than the healer can walk
+    /// round the centroid (`formation::turn_limited`), so a nearest enemy
+    /// crossing the centroid swings the point round instead of flipping it to
+    /// the far side. `None` until the first evaluation; always `None` under
+    /// `Legacy`.
+    pub heading: Option<FormationHeading>,
+    /// `TeamPlan` only: the exit the point was last repaired to (AS-206). The
+    /// repair keeps to the exit nearest it until another is better by
+    /// `formation::KEEP_MARGIN`, so a point near a shadow's centre line, or
+    /// between two teammates' shadows, does not jump between exits. `None`
+    /// when the last formation point needed no repair; always `None` under
+    /// `Legacy`.
+    pub exit: Option<Vec2>,
+}
+
+impl FormationMemory {
+    /// Forget everything: the next formation point starts afresh.
+    pub fn forget(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// A formation heading ([`FormationMemory::heading`]): a unit direction on the
+/// XZ plane and the sim time it was taken.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FormationHeading {
+    pub dir: Vec2,
+    pub at: f32,
 }
 
 /// Phase of a healer's `Legacy` dispel walk ([`HealerPosture::dispel_walk`]).
@@ -202,7 +236,7 @@ impl HealerPosture {
             solve_dying: None,
             dispel_walk: DispelWalkPhase::Off,
             cover_spot: None,
-            formation_repair: None,
+            formation: FormationMemory::default(),
         }
     }
 }
