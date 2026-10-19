@@ -355,3 +355,22 @@ Counted per unit, with every option at its client form:
   will ask for a visual, or for a `SilentByDesign` entry citing this doc.
 - **The `Special1H` swing** is drawn for Mortal Strike (`SwingStyle::MortalStrike`), and the
   red trail by Heroic Strike's `heroic_strike_trail()`. Crusader Strike can use both.
+
+## Rulings (user, 2026-10-18)
+
+The user signed off the bench at its defaults, version **1792379243-e3d6**
+(`benches/2026-10-18-paladin-talent-bench.html`): every client layer kept at client values,
+every authored layer off.
+
+- **Retribution Aura**: the rune disc on cast; nothing standing; the hit is silent by design.
+- **Blessing of Sacrifice**: the impact at both units' feet; no link.
+- **Aura Mastery**: the ward on the Paladin only.
+- **Sacred Shield**: the disc on cast; the absorb card held while the absorb lasts.
+- **Repentance**: the gold impact, then the violet head swirl, routed by name.
+- **Crusader Strike**: Mortal Strike's stroke, Heroic Strike's trail, TBC's landing.
+- **Vengeance** and **Divine Protection**: held for the whole buff.
+- **Divine Favor, Infusion of Light, The Art of War**: the client one-shots. **Light's Grace**:
+  icon only.
+
+Build cards: AS-374 (the one-shots and the instant hand flash), AS-375 (Sacred Shield), AS-376
+(Divine Protection), AS-377 (Vengeance), AS-378 (Repentance), AS-379 (Crusader Strike).
