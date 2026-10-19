@@ -714,6 +714,7 @@ mod kept_exit_reset {
                     &combatant,
                     pos,
                     &ctx,
+                    &abilities,
                     Some(&mut state),
                     None,
                     &movement,

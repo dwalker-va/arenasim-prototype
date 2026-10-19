@@ -71,6 +71,7 @@ use crate::states::play_match::map_geometry::{
     has_line_of_sight, nearest_standable, ObstacleVolume, EYE_HEIGHT,
 };
 
+use super::cc_reach::{CcField, CcThreat, Disc};
 use super::{CombatContext, CombatantInfo};
 
 /// How far past the edge of a teammate's shadow the repaired point stands.
@@ -202,6 +203,14 @@ pub fn turn_limited(
 /// a walk gone stale is re-issued ([`walk_is_stale`]). `TeamPlan` only, like
 /// the sight repair ([`sight_constrained`]); `Legacy` keeps the point as it
 /// was and stays byte-identical.
+///
+/// Under it, too, a healer parked at its formation point keeps its `Point`
+/// directive alive (AS-362) instead of letting it lapse. A lapsed directive
+/// handed the legs to target pursuit until the free tick re-issued the walk,
+/// so a parked healer stepped toward its target and back every directive TTL:
+/// 0.7yd each way, about a heading reversal a second by AS-249's metric. A
+/// healer kept FREE longer (out of a closing caster's reach, so not pressured
+/// by it) showed it most.
 pub fn continuous(ctx: &CombatContext) -> bool {
     ctx.ai_profile.is_team_plan()
 }
@@ -459,6 +468,265 @@ pub fn sighted_formation_point(
     let partial = origin + (spot - origin) * w;
     let partial = nearest_standable(ctx.obstacles, partial, point.y).unwrap_or(partial);
     Vec3::new(partial.x, point.y, partial.y)
+}
+
+/// Whether the formation point is held out of enemy crowd-control reach under
+/// this unit's AI profile (AS-362): `TeamPlan` only, like the sight repair.
+pub fn reach_constrained(ctx: &CombatContext) -> bool {
+    ctx.ai_profile.is_team_plan()
+}
+
+/// Yards of heal-range slack a spot needs before the reach repair STARTS: once
+/// live, a spot inside heal reach is enough, but a repair that only just fits
+/// would let go and take hold again as the teammates step. The feasibility
+/// half of the repair's hysteresis; the disc's Schmitt pair is the other.
+pub const REACH_SLACK: f32 = 1.0;
+
+/// Yards past a disc's outer rim a repaired point stands, so it is still out
+/// of the disc after the projection onto standable ground.
+const RIM_CLEARANCE: f32 = 0.25;
+
+/// Up to this distance from the formation point, the reach repair's spot is
+/// taken in full. Wider than the sight repair's [`REPAIR_FULL`]: a caster's
+/// reach is 30yd, and with the teammate fighting near the caster the nearest
+/// spot out of it is 20-25yd from the formation point. A shorter limit left
+/// the FREE point inside the reach the PRESSURED solve had just walked the
+/// healer out of, and the healer walked back in until the closing caster
+/// pressured it again — AS-249's bob, measured at three reversals in eight
+/// seconds on `tests/healer_cc_avoidance.rs`'s strobe stage.
+pub const REACH_REPAIR_FULL: f32 = 24.0;
+
+/// Beyond this distance from the formation point the reach repair's spot is
+/// not taken at all; between [`REACH_REPAIR_FULL`] and here, part of the way.
+/// Its own bound, the sight repair's [`REPAIR_LIMIT`] reasoning in reach
+/// terms: never carry the point across the arena.
+pub const REACH_REPAIR_LIMIT: f32 = 30.0;
+
+/// [`repair_weight`] on the reach repair's own bounds.
+fn reach_repair_weight(dist: f32) -> f32 {
+    ((REACH_REPAIR_LIMIT - dist) / (REACH_REPAIR_LIMIT - REACH_REPAIR_FULL)).clamp(0.0, 1.0)
+}
+
+/// Whether walking straight from `from` to `to` takes a mover deeper into the
+/// disc `(center, radius)` than `from` already is: through it from outside, or
+/// further in from inside. A walk that starts inside and only moves outward
+/// does not.
+fn walks_through(from: Vec2, to: Vec2, center: Vec2, radius: f32) -> bool {
+    let step = to - from;
+    let len2 = step.length_squared();
+    if len2 <= f32::EPSILON {
+        return false;
+    }
+    let t = ((center - from).dot(step) / len2).clamp(0.0, 1.0);
+    t > 1e-3 && (from + step * t).distance(center) < radius - 1e-2
+}
+
+/// The points where the circles `(c1, r1)` and `(c2, r2)` cross — none, or
+/// two (a tangent pair counts as two equal points).
+fn circle_crossings(c1: Vec2, r1: f32, c2: Vec2, r2: f32) -> Vec<Vec2> {
+    let d = c1.distance(c2);
+    if d <= f32::EPSILON || d > r1 + r2 || d < (r1 - r2).abs() {
+        return Vec::new();
+    }
+    let along = (r1 * r1 - r2 * r2 + d * d) / (2.0 * d);
+    let h = (r1 * r1 - along * along).max(0.0).sqrt();
+    let axis = (c2 - c1) / d;
+    let mid = c1 + axis * along;
+    let perp = axis.perp();
+    vec![mid + perp * h, mid - perp * h]
+}
+
+/// The formation point held out of the reach of the enemy crowd control that
+/// can land on the healer (AS-362, `TeamPlan` only).
+///
+/// `point` is the formation point after the sight repair
+/// ([`sighted_formation_point`]), on standable ground. The repair is a
+/// CONSTRAINT with a nearest-feasible repair — the sight repair's shape, not a
+/// push. A **feasible** spot is:
+///
+/// - out of every disc of `field` (the outer disc, [`Disc::Outer`]);
+/// - within `heal_reach` of every teammate `point` was within `heal_reach` of
+///   (the most injured teammate when it was within reach of none) — the heal
+///   comes first, so a spot out of reach is no repair at all;
+/// - seeing the teammates no worse than `point` does, so the reach repair
+///   cannot undo the sight repair it runs on;
+/// - standable, inside the arena.
+///
+/// The **candidates** are anchored to the discs that cover `point`: the rim
+/// point nearest `point`, the rim point nearest the healer, where each rim
+/// crosses each teammate's heal circle, and where two rims cross. The nearest
+/// feasible one to `point` wins, the one nearest the spot last chosen (`kept`)
+/// counting [`KEEP_MARGIN`] nearer. Each candidate slides continuously as the
+/// caster and the teammates move, so the point does too; only a change of
+/// candidate is a step, and the band covers that. Like the sight repair, the
+/// spot is taken in full to [`REPAIR_FULL`] from `point`, part of the way to
+/// [`REPAIR_LIMIT`], and not at all beyond ([`repair_weight`]): a disc the
+/// formation sits deep inside is the PRESSURED solve's business, not a reason
+/// to carry the formation across the arena.
+///
+/// **Hysteresis.** While no repair is live (`kept` is `None`), `point` stands
+/// unless it is inside a disc's INNER radius ([`Disc::Inner`]), and a repair
+/// starts only where a feasible spot has [`REACH_SLACK`] of heal range to
+/// spare. While one is live, `point` stands only once it is out of every outer
+/// disc. With no feasible spot (the teammates' heal circles lie wholly in
+/// reach — a 3v3 with casters on both flanks) `point` stands: heal first.
+///
+/// An empty `field` — every map, every `Legacy` call, a healer no ready crowd
+/// control reaches — returns `point` unchanged.
+pub fn reach_repaired_point(
+    ctx: &CombatContext,
+    healer: Entity,
+    my_pos: Vec3,
+    point: Vec3,
+    field: &CcField,
+    heal_reach: f32,
+    kept: &mut Option<Vec2>,
+) -> Vec3 {
+    let origin = xz(point);
+    let live = kept.is_some();
+    let judged = if live { Disc::Outer } else { Disc::Inner };
+    let covering: Vec<&CcThreat> = field.covering(ctx.obstacles, origin, judged).collect();
+    if covering.is_empty() {
+        *kept = None;
+        return point;
+    }
+    let allies = teammates(ctx, healer);
+    let mut held: Vec<Vec2> = allies
+        .iter()
+        .map(|a| xz(a.position))
+        .filter(|a| a.distance(origin) <= heal_reach)
+        .collect();
+    if held.is_empty() {
+        if let Some(anchor) = allies.first() {
+            held.push(xz(anchor.position));
+        }
+    }
+    let reach = if live {
+        heal_reach
+    } else {
+        heal_reach - REACH_SLACK
+    };
+    let origin_sight =
+        (!ctx.obstacles.is_empty()).then(|| sight_from(ctx.obstacles, origin, &allies));
+
+    let mut raw: Vec<Vec2> = Vec::new();
+    let rims: Vec<(Vec2, f32)> = covering
+        .iter()
+        .map(|t| (t.center, field.radius(t, Disc::Outer) + RIM_CLEARANCE))
+        .collect();
+    let me = xz(my_pos);
+    for &(center, rim) in &rims {
+        for from in [origin, me] {
+            let away = (from - center).normalize_or_zero();
+            if away != Vec2::ZERO {
+                raw.push(center + away * rim);
+            }
+        }
+        for &ally in &held {
+            raw.extend(circle_crossings(center, rim, ally, reach));
+        }
+    }
+    for (i, &(c1, r1)) in rims.iter().enumerate() {
+        for &(c2, r2) in &rims[i + 1..] {
+            raw.extend(circle_crossings(c1, r1, c2, r2));
+        }
+    }
+
+    let feasible: Vec<Vec2> = raw
+        .into_iter()
+        .filter_map(|c| {
+            let clamped = clamp_to_arena(&ctx.bounds, Vec3::new(c.x, point.y, c.y));
+            nearest_standable(ctx.obstacles, xz(clamped), point.y)
+        })
+        .filter(|&c| {
+            field
+                .covering(ctx.obstacles, c, Disc::Outer)
+                .next()
+                .is_none()
+        })
+        .filter(|&c| held.iter().all(|a| a.distance(c) <= reach + 1e-3))
+        .filter(|&c| origin_sight.is_none_or(|at| sight_from(ctx.obstacles, c, &allies) >= at))
+        .collect();
+    let rank = |c: Vec2| {
+        let band = if kept.is_some_and(|k| k.distance(c) <= KEEP_RADIUS) {
+            KEEP_MARGIN
+        } else {
+            0.0
+        };
+        c.distance(origin) - band
+    };
+    // A spot the healer would have to walk through a disc to reach comes
+    // after every spot it would not: the far rim of a caster standing between
+    // the healer and its formation point is nearest the point, and walking to
+    // it carries the healer through the reach it is avoiding — into the
+    // closing caster's PRESSURED onset, back out, and in again.
+    let through = |c: Vec2| {
+        covering
+            .iter()
+            .any(|t| walks_through(me, c, t.center, field.radius(t, Disc::Outer)))
+    };
+    // The spot last chosen stands while it is still a repair — out of every
+    // disc, in heal reach and sight of the teammates, within reach of the
+    // point, and reached without walking through a disc — as a satisfied
+    // solve stands still. Re-picking the nearest spot every evaluation made
+    // the point follow the caster's every step: back in when it stepped back,
+    // out when it stepped in, and the healer's heading reversed with it.
+    if let Some(k) = *kept {
+        let still = k.distance(origin) < REACH_REPAIR_FULL
+            && field
+                .covering(ctx.obstacles, k, Disc::Outer)
+                .next()
+                .is_none()
+            && held.iter().all(|a| a.distance(k) <= heal_reach)
+            && origin_sight.is_none_or(|at| sight_from(ctx.obstacles, k, &allies) >= at)
+            && !through(k);
+        if still {
+            return Vec3::new(k.x, point.y, k.y);
+        }
+    }
+    let best = feasible
+        .into_iter()
+        .filter(|c| c.distance(origin) < REACH_REPAIR_LIMIT)
+        .min_by(|a, b| {
+            through(*a)
+                .cmp(&through(*b))
+                .then(rank(*a).total_cmp(&rank(*b)))
+        });
+    // With no spot it can reach without walking through a disc, a healer
+    // already standing out of reach — and in heal reach and sight of its
+    // teammates — stays where it stands, as a satisfied solve does. Its own
+    // spot is judged by the inner disc: the Schmitt pair the solve uses for
+    // the spot a healer stands on. The goal is then where the HEALER stands,
+    // however far that is from the formation point: this branch is not bound
+    // by `REACH_REPAIR_LIMIT`, and taking it (or leaving it) can move the goal
+    // further than the limit in one evaluation.
+    let stays = best.is_none_or(through)
+        && field
+            .covering(ctx.obstacles, me, Disc::Inner)
+            .next()
+            .is_none()
+        && held.iter().all(|a| a.distance(me) <= heal_reach)
+        && origin_sight.is_none_or(|at| sight_from(ctx.obstacles, me, &allies) >= at);
+    if stays {
+        *kept = Some(me);
+        return Vec3::new(me.x, point.y, me.y);
+    }
+    *kept = best;
+    let Some(spot) = best else {
+        return point;
+    };
+    // As far as the sight repair goes, and no further: in full to
+    // `REPAIR_FULL`, fading to nothing at `REPAIR_LIMIT`, so the repair never
+    // carries the point across the arena and lets go without a step as its
+    // spot recedes.
+    let w = reach_repair_weight(spot.distance(origin));
+    let moved = origin + (spot - origin) * w;
+    let moved = if w >= 1.0 {
+        spot
+    } else {
+        nearest_standable(ctx.obstacles, moved, point.y).unwrap_or(moved)
+    };
+    Vec3::new(moved.x, point.y, moved.y)
 }
 
 #[cfg(test)]
@@ -1071,5 +1339,290 @@ mod tests {
         let mut fresh = None;
         assert_eq!(turn_limited(-Vec2::Y, &mut fresh, 2.5, RATE), -Vec2::Y);
         assert_eq!(fresh.map(|h| h.dir), Some(-Vec2::Y));
+    }
+
+    // -----------------------------------------------------------------------
+    // The reach repair (AS-362)
+    // -----------------------------------------------------------------------
+
+    use crate::states::play_match::class_ai::cc_reach::CcThreat;
+
+    /// A Fear from (`x`, 0) reaching 30yd, margin 3: inner 31.5, outer 33.
+    fn fear_from(x: f32) -> CcField {
+        CcField {
+            threats: vec![CcThreat {
+                source: Entity::from_raw(77),
+                ability: AbilityType::Fear,
+                center: Vec2::new(x, 0.0),
+                reach: 30.0,
+                needs_sight: true,
+                weight: 8.0,
+            }],
+            margin: 3.0,
+        }
+    }
+
+    /// The Warrior at the origin; heal reach 39.
+    const WARRIOR_AT: (f32, f32, f32) = (0.0, 0.0, 1.0);
+    const HEAL_REACH: f32 = 39.0;
+
+    impl Fixture {
+        fn reach_from(&self, field: &CcField, point: Vec2, kept: &mut Option<Vec2>) -> Vec2 {
+            xz(reach_repaired_point(
+                &self.ctx(&[]),
+                self.healer,
+                Vec3::new(-10.0, 1.0, 0.0),
+                Vec3::new(point.x, 1.0, point.y),
+                field,
+                HEAL_REACH,
+                kept,
+            ))
+        }
+    }
+
+    /// A point out of every disc — and every point, with nothing ready —
+    /// comes back bit-identical.
+    #[test]
+    fn a_point_out_of_reach_comes_back_unchanged() {
+        let f = fixture(&[WARRIOR_AT]);
+        let mut kept = None;
+        let point = Vec2::new(-8.0, 0.0);
+        assert_eq!(f.reach_from(&CcField::default(), point, &mut kept), point);
+        assert_eq!(f.reach_from(&fear_from(30.0), point, &mut kept), point);
+        assert_eq!(kept, None);
+    }
+
+    /// The pair: the same point inside the Fear's disc moves just out of it,
+    /// staying in heal reach of the Warrior.
+    #[test]
+    fn a_covered_point_moves_just_out_of_reach_and_keeps_heal_reach() {
+        let f = fixture(&[WARRIOR_AT]);
+        let mut kept = None;
+        let point = Vec2::new(-8.0, 0.0);
+        let fixed = f.reach_from(&fear_from(15.0), point, &mut kept);
+        let caster = Vec2::new(15.0, 0.0);
+        assert!(fixed.distance(caster) > 33.0, "{fixed}");
+        assert!(
+            fixed.distance(caster) < 33.5,
+            "moved further than reach needs: {fixed}"
+        );
+        assert!(fixed.distance(Vec2::ZERO) <= HEAL_REACH, "{fixed}");
+        assert_eq!(kept, Some(fixed));
+    }
+
+    /// Heal first: when every spot in heal reach of the Warrior is in reach of
+    /// the Fear, the point stands.
+    #[test]
+    fn with_no_spot_in_heal_reach_out_of_reach_the_point_stands() {
+        let f = fixture(&[WARRIOR_AT]);
+        let mut kept = None;
+        let point = Vec2::new(-8.0, 0.0);
+        let mut field = fear_from(0.0);
+        field.threats[0].reach = 80.0;
+        assert_eq!(f.reach_from(&field, point, &mut kept), point);
+        assert_eq!(kept, None);
+    }
+
+    /// The Schmitt pair: a point between the inner and the outer disc stands
+    /// while no repair is live, and is moved out while one is.
+    #[test]
+    fn the_repair_starts_inside_the_inner_disc_and_lets_go_outside_the_outer() {
+        let f = fixture(&[WARRIOR_AT]);
+        // 32yd from the caster: between the discs.
+        let point = Vec2::new(-8.0, 0.0);
+        let field = fear_from(24.0);
+        let mut idle = None;
+        assert_eq!(f.reach_from(&field, point, &mut idle), point);
+        let mut live = Some(Vec2::new(-8.5, 0.0));
+        let moved = f.reach_from(&field, point, &mut live);
+        assert!(moved.distance(Vec2::new(24.0, 0.0)) > 33.0, "{moved}");
+    }
+
+    /// Heal first: the rim point nearest the formation point stands beyond
+    /// heal reach of the Warrior, so the repair takes the rim where it crosses
+    /// heal reach instead.
+    #[test]
+    fn the_repair_keeps_heal_reach_of_the_teammates() {
+        let f = fixture(&[WARRIOR_AT]);
+        let mut field = fear_from(-28.0);
+        field.threats[0].reach = 8.0;
+        let point = Vec2::new(-34.0, 0.0);
+        let mut kept = None;
+        let fixed = f.reach_from(&field, point, &mut kept);
+        assert!(fixed.distance(Vec2::new(-28.0, 0.0)) > 11.0, "{fixed}");
+        assert!(
+            fixed.distance(Vec2::ZERO) <= HEAL_REACH - REACH_SLACK + 1e-3,
+            "{fixed} is out of heal reach"
+        );
+    }
+
+    /// The repair composes with the sight repair: a rim spot the pillar hides
+    /// the Mage from is no repair. The Mage at (16, 0) stands behind the
+    /// fixture pillar at (8, 0) from the west; the point (0, 5) sees past the
+    /// pillar's edge, and the only spots out of the disc above it lie in the
+    /// pillar's shadow, so the point stands rather than go blind.
+    #[test]
+    fn the_repair_never_gives_up_sight_of_a_teammate() {
+        let f = fixture(&[MAGE]);
+        let mut field = fear_from(0.0);
+        field.threats[0].center = Vec2::new(0.0, 10.0);
+        field.threats[0].reach = 4.0;
+        field.threats[0].needs_sight = false;
+        let point = Vec2::new(0.0, 5.0);
+        assert!(sees(&pillar(), point, MAGE_XZ));
+        assert!(
+            !sees(&pillar(), Vec2::new(0.0, 2.75), MAGE_XZ),
+            "the rim is blind"
+        );
+        let mut kept = None;
+        let fixed = xz(reach_repaired_point(
+            &f.ctx(&pillar()),
+            f.healer,
+            Vec3::new(-10.0, 1.0, 0.0),
+            Vec3::new(point.x, 1.0, point.y),
+            &field,
+            HEAL_REACH,
+            &mut kept,
+        ));
+        assert!(sees(&pillar(), fixed, MAGE_XZ), "{fixed} lost the Mage");
+    }
+
+    /// The repair never carries the point across the arena: a disc whose
+    /// nearest spot out lies beyond `REACH_REPAIR_LIMIT` of the point leaves
+    /// the point where it stands.
+    #[test]
+    fn a_spot_beyond_the_repair_limit_is_not_taken() {
+        let f = fixture(&[(-2.0, 5.0, 1.0)]);
+        let point = Vec2::new(-2.0, 0.0);
+        let mut kept = None;
+        assert_eq!(f.reach_from(&fear_from(0.0), point, &mut kept), point);
+        assert_eq!(kept, None);
+    }
+
+    /// The repair at `point` for a healer standing at `me`.
+    fn repair_for(f: &Fixture, field: &CcField, point: Vec2, me: Vec2) -> Vec2 {
+        xz(reach_repaired_point(
+            &f.ctx(&[]),
+            f.healer,
+            Vec3::new(me.x, 1.0, me.y),
+            Vec3::new(point.x, 1.0, point.y),
+            field,
+            HEAL_REACH,
+            &mut None,
+        ))
+    }
+
+    /// A spot the healer would walk through the disc to reach comes after one
+    /// it would not: with a Scream-sized disc between the healer and its
+    /// formation point, the near rim wins though the far rim is nearer the
+    /// point.
+    #[test]
+    fn the_repair_does_not_walk_the_healer_through_the_disc() {
+        let f = fixture(&[(12.0, 0.0, 1.0)]);
+        let mut field = fear_from(0.0);
+        field.threats[0].reach = 8.0;
+        // A healer beyond heal reach of the Warrior, so it cannot simply stay.
+        let fixed = repair_for(&f, &field, Vec2::new(2.0, 0.0), Vec2::new(-30.0, 0.0));
+        assert!(fixed.x < 0.0, "sent through the disc to {fixed}");
+        assert!(fixed.distance(Vec2::ZERO) > 11.0, "{fixed}");
+    }
+
+    /// With no spot it can reach without walking through the disc, a healer
+    /// already out of reach and in heal reach of its teammate stays where it
+    /// stands — the caster at its Warrior's feet, AS-249's standoff shape.
+    #[test]
+    fn a_healer_out_of_reach_stays_rather_than_walk_through_it() {
+        let f = fixture(&[WARRIOR_AT]);
+        let me = Vec2::new(-34.0, 0.0);
+        let fixed = repair_for(&f, &fear_from(1.0), Vec2::new(6.0, 0.0), me);
+        assert_eq!(fixed, me);
+        // The control: the same healer inside the disc is not held there.
+        let inside = Vec2::new(-20.0, 0.0);
+        assert_ne!(
+            repair_for(&f, &fear_from(1.0), Vec2::new(6.0, 0.0), inside),
+            inside
+        );
+    }
+
+    /// Feasibility's hysteresis: a repair STARTS only where a spot has
+    /// `REACH_SLACK` of heal reach to spare, and a live one keeps a spot with
+    /// less. With a 20yd heal reach the disc leaves a sliver 19.5yd from the
+    /// Warrior: inside heal reach, not inside it less the slack.
+    #[test]
+    fn a_repair_starts_only_with_heal_reach_to_spare() {
+        let f = fixture(&[WARRIOR_AT]);
+        let mut field = fear_from(5.0);
+        field.threats[0].reach = 21.25;
+        let point = Vec2::new(-10.0, 0.0);
+        let repair = |kept: &mut Option<Vec2>| {
+            xz(reach_repaired_point(
+                &f.ctx(&[]),
+                f.healer,
+                Vec3::new(-10.0, 1.0, 0.0),
+                Vec3::new(point.x, 1.0, point.y),
+                &field,
+                20.0,
+                kept,
+            ))
+        };
+        let mut idle = None;
+        assert_eq!(repair(&mut idle), point);
+        assert_eq!(idle, None);
+        let mut live = Some(Vec2::new(-19.0, 0.0));
+        let moved = repair(&mut live);
+        assert!(moved.distance(Vec2::new(5.0, 0.0)) > 24.25, "{moved}");
+        assert!(moved.distance(Vec2::ZERO) <= 20.0 + 1e-3, "{moved}");
+    }
+
+    /// The repaired spot holds while it is still a repair: a caster stepping
+    /// back does not pull the point back in after it, and one stepping in
+    /// moves it out. (Following the caster both ways reversed the healer's
+    /// heading with every step the caster took.)
+    #[test]
+    fn the_repaired_point_holds_while_the_caster_steps_back() {
+        let f = fixture(&[WARRIOR_AT]);
+        let point = Vec2::new(-8.0, 0.0);
+        let mut kept = None;
+        let first = f.reach_from(&fear_from(15.0), point, &mut kept);
+        assert!(first.distance(Vec2::new(15.0, 0.0)) > 33.0, "{first}");
+        // Back 2yd: the old spot is still out of reach, so it stands.
+        assert_eq!(f.reach_from(&fear_from(17.0), point, &mut kept), first);
+        // In 2yd from the start: the old spot is in reach again, so it moves.
+        let moved = f.reach_from(&fear_from(13.0), point, &mut kept);
+        assert!(moved.distance(Vec2::new(13.0, 0.0)) > 33.0, "{moved}");
+        assert!(
+            moved.x < first.x,
+            "{moved} did not give ground from {first}"
+        );
+    }
+
+    /// No strobe: a caster walking in, a step a frame, moves the repaired
+    /// point a step a frame — never a jump — and the point stays out of reach.
+    #[test]
+    fn a_closing_caster_slides_the_point_without_a_jump() {
+        let f = fixture(&[WARRIOR_AT]);
+        let point = Vec2::new(-8.0, 0.0);
+        let mut kept = None;
+        let mut last: Option<Vec2> = None;
+        let mut largest = 0.0f32;
+        let mut x = 40.0;
+        while x > 10.0 {
+            let fixed = f.reach_from(&fear_from(x), point, &mut kept);
+            if let Some(l) = last {
+                largest = largest.max(l.distance(fixed));
+            }
+            // Out of reach while the rim is taken in full (beyond, the repair fades).
+            if kept.is_some() && 33.25 - (x + 8.0) <= REACH_REPAIR_FULL {
+                assert!(fixed.distance(Vec2::new(x, 0.0)) > 33.0, "{fixed} at {x}");
+            }
+            last = Some(fixed);
+            x -= 0.1;
+        }
+        assert!(
+            kept.is_some(),
+            "the caster never reached the point: vacuous"
+        );
+        // The entry step: from inside the inner disc to the outer rim.
+        assert!(largest < 2.0, "the point jumped {largest}yd");
     }
 }

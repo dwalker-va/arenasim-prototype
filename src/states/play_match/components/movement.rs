@@ -170,6 +170,11 @@ pub struct HealerPosture {
     /// leaving FREE, and whenever another walk (the medic chase, a dispel hold)
     /// takes the healer off its formation point.
     pub formation: FormationMemory,
+    /// `TeamPlan` only: the PRESSURED healer is being walked out of the reach
+    /// of an enemy crowd control (AS-362) — by the team solve's `C_CC_REACH`,
+    /// or the Paladin's band-hold stepping to the edge of a disc. Its onset is
+    /// what emits the `OutOfCcReach` trace event, once per walk.
+    pub cc_walk: bool,
 }
 
 /// The FREE formation point's memory ([`HealerPosture::formation`]).
@@ -190,6 +195,12 @@ pub struct FormationMemory {
     /// when the last formation point needed no repair; always `None` under
     /// `Legacy`.
     pub exit: Option<Vec2>,
+    /// `TeamPlan` only: the spot the point was last moved to out of enemy
+    /// crowd-control reach (AS-362, `formation::reach_repaired_point`). While
+    /// set, the repair is live: the point is judged by the outer disc and the
+    /// spot nearest it counts `formation::KEEP_MARGIN` nearer. `None` when the
+    /// last point needed no reach repair; always `None` under `Legacy`.
+    pub reach: Option<Vec2>,
 }
 
 impl FormationMemory {
@@ -237,6 +248,7 @@ impl HealerPosture {
             dispel_walk: DispelWalkPhase::Off,
             cover_spot: None,
             formation: FormationMemory::default(),
+            cc_walk: false,
         }
     }
 }

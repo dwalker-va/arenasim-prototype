@@ -362,6 +362,7 @@ mod scenes {
                         &combatant,
                         pos,
                         &ctx,
+                        &abilities,
                         Some(state),
                         directive,
                         &movement,

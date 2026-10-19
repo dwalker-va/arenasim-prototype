@@ -672,6 +672,7 @@ fractions in 0..1; values below are the shipped defaults):
 - `wand_range: 30.0` — wand-range pull target distance (Priest)
 - `press_advantage_margin: 0.2` — tempo ONSET: team-HP-fraction lead at/above which a team "presses" (the same deficit makes it trail): its healers' `cover_pull` zeroes and the melee tempo reset stays disarmed (denial is reserved for the trailing side)
 - `press_release_margin: 0.1` — tempo RELEASE: a pressing (trailing) team keeps that tempo until its lead (deficit) falls below this, so a lead wobbling around the onset does not flip it with every hit and heal. `TeamPlan` only (`SituationConfig::under`): a `Legacy` team releases at the onset, unlatched as before, and stays byte-identical. At most `press_advantage_margin` (`validate()`); equal disables the band
+- `cc_ready_horizon: 1.5` / `cc_reach_margin: 3.0` — `TeamPlan` crowd-control reach (*Out of the enemy's crowd-control reach* below): an enemy hard CC is READY when its owner could start it within the horizon (seconds), and a healer keeps out of its reach plus the margin (yards)
 
 **Per-class scorer weights** (`priest.weights:` / `paladin.weights:` —
 `score_directions` term weights; `0.0` disables a term). All terms here are
@@ -870,6 +871,46 @@ such a teammate (`team_solve::dying_unreached`); out of reach, it steps aside
 for the solve, as it does for an owed dispel. The Priest's Psychic Scream dip
 needs no reach rule: it already aborts for any teammate at or below the
 threshold, reached or not.
+
+**Out of the enemy's crowd-control reach (`TeamPlan`).** `class_ai::cc_reach`
+is the one definition of which enemy crowd control can land on a healer, and
+where: every (enemy, ability) pair whose ability HOLDS (`holds`: stun, fear,
+polymorph, incapacitate, cyclone — never a root) and that its owner could start
+within `cc_ready_horizon` — the cast gate's own-state checks asked from the
+enemy's side (shapeshift, held, school lockout, silence, cooldown with its
+category, resource, stealth for an opener). Reach is the ability's `range`,
+plus `TRAP_TRIGGER_RADIUS` for one thrown at the ground; a spell aimed at a
+unit covers only what its caster can SEE, an area round the caster or a trap
+its whole disc (`cc_reach::aim`, an exhaustive match). A healer immune to the
+landing (DR-immune, damage-immune, fear-immune to a fear) is not threatened. A
+spot is covered inside `reach + cc_reach_margin`; the spot a healer stands on
+is judged by `reach + margin / 2`, so a healer on the rim is not moved by the
+caster's every step. Two consumers read it: the team solve's
+`team_solve::C_CC_REACH` on `OccupyCover` (PRESSURED Priest, Paladin, Shaman,
+Druid), ranked above occlusion from casters at any caster count (`W_CC` plus
+`W_OCCLUDED` per enemy caster) and below sight of the anchor at any caster
+count (a blind spot pays the CC ceiling plus `W_OCCLUDED` per enemy caster on
+top of `W_SIGHT`), below a dying teammate's reach and
+an owed dispel; a spot beyond heal range earns no credit for being out of
+reach. And the FREE formation point's reach
+repair (`formation::reach_repaired_point`, Priest, Shaman, Druid — never the
+Paladin, whose FREE is melee pursuit): the nearest spot out of every disc that
+still reaches every teammate the point reached and sees them no worse,
+composed after the sight repair on AS-370's turned heading; with no such spot,
+heal first and the point stands. The Paladin keeps out only of discs it can
+leave without leaving PRESSURED — none reaching past `threat_intent_radius`
+(a Warlock's Fear) and none of its own target's — and its band-hold parks at
+the nearest spot out of them (`CcField::nearest_exit`); otherwise PRESSURED
+walked it out and its FREE pursuit walked it back. Each walk out of reach is
+traced once as it begins, trigger `OutOfCcReach`. The solve's flat-field anti-statue key
+is judged without the crowd-control term, so a melee's small stun disc does
+not disarm it. Under `TeamPlan` a healer parked at its FREE formation point
+also keeps its walk alive (`formation::continuous`): a lapsed one handed the
+legs to target pursuit for a step and back every directive TTL, and healers
+kept FREE longer by the reach rule reversed heading about once a second.
+`Legacy` builds no field and is byte-identical. Pinned by
+`tests/healer_cc_avoidance.rs` (staged pairs, each against its CC on
+cooldown). Design: `docs/design/2026-10-18-healer-cc-avoidance.md`.
 
 **Target choice needs sight.** Every cast that CHOOSES its target from
 several candidates filters by reach before it ranks: `class_ai::cast_reach`,

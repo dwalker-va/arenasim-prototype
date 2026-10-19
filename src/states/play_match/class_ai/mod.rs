@@ -17,6 +17,7 @@
 pub mod burst;
 pub mod cast_guard;
 pub mod caster_healer_posture;
+pub mod cc_reach;
 pub mod chain;
 pub mod combat_snapshot;
 pub mod dps_postures;

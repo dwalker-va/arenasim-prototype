@@ -228,6 +228,7 @@ impl Scene {
                         &self.combatant,
                         HEALER_POS,
                         &ctx,
+                        &abilities,
                         state,
                         directive.as_ref(),
                         &movement,
