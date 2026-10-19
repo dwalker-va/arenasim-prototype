@@ -1355,33 +1355,19 @@ pub fn dying_unreached(world: &SolveWorld, entity: Entity) -> Option<Entity> {
 /// The candidates are `OccupyCover`'s: the healer's spot, every (obstacle,
 /// caster) shadow along its centre line ([`SHADOW_DEPTHS`]), and the local
 /// ring. No peek shoulders: peeking is for keeping an ally in sight, and there
-/// is none. Unlike [`solve_unit`], which projects every candidate onto
-/// standable ground before scoring it, this still scores candidates in place
-/// and projects only the winner, so an in-pillar ring step can win cover its
-/// landing spot lacks (AS-362 tracks the fix).
+/// is none.
+///
+/// Every candidate is scored WHERE IT WOULD BE STOOD ON, as in [`solve_unit`]
+/// (AS-201): a ring step or shadow inside a footprint is hidden from every
+/// caster, but the spot it lands on need not be, so it is moved out through
+/// the footprint's nearest face before it is scored, and one no projection
+/// frees (touching footprints) is dropped (AS-372).
 pub fn last_stand_cover(entity: Entity, world: &SolveWorld) -> Option<Vec2> {
     if world.obstacles.is_empty() {
         return None;
     }
     let unit = *world.unit(entity)?;
-    let mut candidates = vec![unit.pos];
-    for obstacle in &world.obstacles {
-        let (center, radius) = obstacle.footprint_disc();
-        let ring = radius + MOVER_RADIUS + COVER_STANDOFF;
-        for caster in world.enemy_casters_of(unit.team) {
-            let away = (center - caster.pos).normalize_or_zero();
-            if away == Vec2::ZERO {
-                continue;
-            }
-            for depth in SHADOW_DEPTHS {
-                candidates.push(center + away * (ring + depth));
-            }
-        }
-    }
-    for i in 0..SOLVE_DIRECTIONS {
-        let a = (i as f32) * std::f32::consts::TAU / SOLVE_DIRECTIONS as f32;
-        candidates.push(unit.pos + Vec2::from_angle(a) * SOLVE_LOOKAHEAD);
-    }
+    let candidates = last_stand_candidates(&unit, world);
     let usable = |c: &Vec2| {
         world
             .bounds
@@ -1400,16 +1386,41 @@ pub fn last_stand_cover(entity: Entity, world: &SolveWorld) -> Option<Vec2> {
         (seen, depth, c.distance(unit.pos))
     };
     let mut best: Option<((usize, f32, f32), Vec2)> = None;
-    for c in candidates.into_iter().filter(usable) {
+    for c in candidates
+        .into_iter()
+        .filter_map(|c| nearest_standable(&world.obstacles, c, unit.y))
+        .filter(usable)
+    {
         let k = key(c);
         if best.is_none_or(|(bk, _)| k < bk) {
             best = Some((k, c));
         }
     }
-    let spot = best.map_or(unit.pos, |(_, p)| {
-        nearest_standable(&world.obstacles, p, unit.y).unwrap_or(unit.pos)
-    });
-    Some(spot)
+    Some(best.map_or(unit.pos, |(_, p)| p))
+}
+
+/// [`last_stand_cover`]'s raw candidates, before projection: the unit's spot,
+/// every (obstacle, enemy caster) shadow, and the local ring.
+fn last_stand_candidates(unit: &SolveUnit, world: &SolveWorld) -> Vec<Vec2> {
+    let mut candidates = vec![unit.pos];
+    for obstacle in &world.obstacles {
+        let (center, radius) = obstacle.footprint_disc();
+        let ring = radius + MOVER_RADIUS + COVER_STANDOFF;
+        for caster in world.enemy_casters_of(unit.team) {
+            let away = (center - caster.pos).normalize_or_zero();
+            if away == Vec2::ZERO {
+                continue;
+            }
+            for depth in SHADOW_DEPTHS {
+                candidates.push(center + away * (ring + depth));
+            }
+        }
+    }
+    for i in 0..SOLVE_DIRECTIONS {
+        let a = (i as f32) * std::f32::consts::TAU / SOLVE_DIRECTIONS as f32;
+        candidates.push(unit.pos + Vec2::from_angle(a) * SOLVE_LOOKAHEAD);
+    }
+    candidates
 }
 
 #[cfg(test)]
@@ -1529,6 +1540,179 @@ mod tests {
         for caster in [Vec2::new(25.0, 0.0), Vec2::new(30.0, 0.0)] {
             assert!(!w.sees(spot, caster), "{spot:?} left cover from {caster:?}");
         }
+    }
+
+    /// AS-372 (AS-201's defect, in the last stand): a candidate is scored where
+    /// the healer would stand on it. A lone healer against the casters' side of
+    /// a pillar has local-ring steps INSIDE the pillar, hidden from both casters
+    /// — but each lands on the skin it already stands on, in the open. Scored
+    /// in place, such a step won (hidden, and nearer than any shadow); scored
+    /// where it lands, it loses to a spot really behind the pillar.
+    #[test]
+    fn a_last_stand_in_pillar_step_does_not_win_cover_its_landing_spot_lacks() {
+        use crate::states::play_match::map_geometry::position_blocked;
+        let casters = [Vec2::new(25.0, 3.0), Vec2::new(25.0, -3.0)];
+        let mut w = world(vec![
+            healer(1, 1, 0, 6.6, 0.0),
+            unit(2, 2, 0, casters[0].x, casters[0].y),
+            unit(3, 2, 1, casters[1].x, casters[1].y),
+        ]);
+        w.obstacles = vec![pillar_at(0.0, 0.0)];
+        let blocked = |p: Vec2| position_blocked(&w.obstacles, Vec3::new(p.x, 1.0, p.y));
+        let hidden = |p: Vec2| casters.iter().all(|&c| !w.sees(p, c));
+        assert!(!hidden(w.units[0].pos), "the healer starts in the open");
+
+        // The situation: raw candidates inside the pillar that no caster sees,
+        // whose landing spots a caster does see — and they are the NEAREST
+        // hidden raw candidates, so in-place scoring picks one of them.
+        let raw = last_stand_candidates(&w.units[0], &w);
+        let lying: Vec<Vec2> = raw
+            .iter()
+            .copied()
+            .filter(|&c| blocked(c) && hidden(c))
+            .filter(|&c| nearest_standable(&w.obstacles, c, 1.0).is_some_and(|l| !hidden(l)))
+            .collect();
+        assert!(
+            !lying.is_empty(),
+            "no in-pillar candidate hides a seen landing spot — the scene proves nothing"
+        );
+        let me = w.units[0].pos;
+        let nearest_hidden = raw
+            .iter()
+            .copied()
+            .filter(|&c| hidden(c))
+            .map(|c| c.distance(me))
+            .fold(f32::MAX, f32::min);
+        assert!(
+            lying.iter().any(|c| c.distance(me) <= nearest_hidden),
+            "an honest hidden candidate is nearer than every lying one — \
+             in-place scoring would not have picked a lying step"
+        );
+
+        let spot = last_stand_cover(e(1), &w).expect("a map with cover");
+        assert!(!blocked(spot), "{spot:?} lies inside the pillar");
+        assert!(
+            hidden(spot),
+            "{spot:?} is in a caster's sight: an in-pillar step won on cover its \
+             landing spot does not have"
+        );
+    }
+
+    /// The control: the same pillar and casters, the healer far enough off the
+    /// pillar's face that no candidate lies inside it — the projection moves
+    /// nothing, and the healer still reaches the shadow.
+    #[test]
+    fn a_last_stand_with_no_candidate_inside_a_pillar_takes_the_shadow() {
+        use crate::states::play_match::map_geometry::position_blocked;
+        let casters = [Vec2::new(25.0, 3.0), Vec2::new(25.0, -3.0)];
+        let mut w = world(vec![
+            healer(1, 1, 0, 12.0, 0.0),
+            unit(2, 2, 0, casters[0].x, casters[0].y),
+            unit(3, 2, 1, casters[1].x, casters[1].y),
+        ]);
+        w.obstacles = vec![pillar_at(0.0, 0.0)];
+        let blocked = |p: Vec2| position_blocked(&w.obstacles, Vec3::new(p.x, 1.0, p.y));
+        let hidden = |p: Vec2| casters.iter().all(|&c| !w.sees(p, c));
+        assert!(!hidden(w.units[0].pos), "the healer starts in the open");
+        let raw = last_stand_candidates(&w.units[0], &w);
+        assert!(
+            raw.iter().all(|&c| !blocked(c)),
+            "a candidate lies inside the pillar — this is not the control"
+        );
+        let spot = last_stand_cover(e(1), &w).expect("a map with cover");
+        assert!(
+            raw.contains(&spot),
+            "{spot:?} was moved, with nothing to move"
+        );
+        assert!(!blocked(spot) && hidden(spot), "{spot:?} is not in cover");
+    }
+
+    /// Two boxes with a gap narrower than a body: a point in the gap pushes out
+    /// of one footprint into the other and back, so no projection frees it.
+    fn touching_boxes() -> Vec<ObstacleVolume> {
+        vec![
+            ObstacleVolume::Aabb {
+                min: Vec3::new(-5.0, 0.0, -5.0),
+                max: Vec3::new(-0.1, 5.0, 5.0),
+            },
+            ObstacleVolume::Aabb {
+                min: Vec3::new(0.1, 0.0, -5.0),
+                max: Vec3::new(5.0, 5.0, 5.0),
+            },
+        ]
+    }
+
+    /// AS-372: a candidate no projection frees is DROPPED, not scored in
+    /// place. The healer stands at the mouth of a gap too narrow to stand in;
+    /// its ring steps into the gap are hidden from both casters and nearer than
+    /// any shadow, but nobody can stand there.
+    #[test]
+    fn a_last_stand_drops_a_candidate_no_projection_frees() {
+        use crate::states::play_match::map_geometry::position_blocked;
+        let casters = [Vec2::new(-10.0, 30.0), Vec2::new(10.0, 30.0)];
+        let mut w = world(vec![
+            healer(1, 1, 0, 0.0, 6.0),
+            unit(2, 2, 0, casters[0].x, casters[0].y),
+            unit(3, 2, 1, casters[1].x, casters[1].y),
+        ]);
+        w.obstacles = touching_boxes();
+        let blocked = |p: Vec2| position_blocked(&w.obstacles, Vec3::new(p.x, 1.0, p.y));
+        let hidden = |p: Vec2| casters.iter().all(|&c| !w.sees(p, c));
+        assert!(!blocked(w.units[0].pos), "the healer starts on open ground");
+        assert!(!hidden(w.units[0].pos), "the healer starts in the open");
+
+        let raw = last_stand_candidates(&w.units[0], &w);
+        let stuck: Vec<Vec2> = raw
+            .iter()
+            .copied()
+            .filter(|&c| nearest_standable(&w.obstacles, c, 1.0).is_none())
+            .collect();
+        assert!(
+            !stuck.is_empty(),
+            "no candidate is unprojectable — the drop is never exercised"
+        );
+        assert!(
+            stuck.iter().all(|&c| hidden(c)),
+            "an unprojectable candidate is seen — kept in place it could lose"
+        );
+
+        let spot = last_stand_cover(e(1), &w).expect("a map with cover");
+        assert!(!blocked(spot), "{spot:?} lies inside a box");
+        assert!(hidden(spot), "{spot:?} is in a caster's sight");
+    }
+
+    /// The control: the same boxes pulled apart to a gap a body fits in —
+    /// every candidate projects, and the answer is a standable hidden spot.
+    #[test]
+    fn a_last_stand_with_every_candidate_projectable_takes_cover() {
+        use crate::states::play_match::map_geometry::position_blocked;
+        let casters = [Vec2::new(-10.0, 30.0), Vec2::new(10.0, 30.0)];
+        let mut w = world(vec![
+            healer(1, 1, 0, 0.0, 6.0),
+            unit(2, 2, 0, casters[0].x, casters[0].y),
+            unit(3, 2, 1, casters[1].x, casters[1].y),
+        ]);
+        w.obstacles = vec![
+            ObstacleVolume::Aabb {
+                min: Vec3::new(-8.0, 0.0, -5.0),
+                max: Vec3::new(-3.0, 5.0, 5.0),
+            },
+            ObstacleVolume::Aabb {
+                min: Vec3::new(3.0, 0.0, -5.0),
+                max: Vec3::new(8.0, 5.0, 5.0),
+            },
+        ];
+        let blocked = |p: Vec2| position_blocked(&w.obstacles, Vec3::new(p.x, 1.0, p.y));
+        let hidden = |p: Vec2| casters.iter().all(|&c| !w.sees(p, c));
+        let raw = last_stand_candidates(&w.units[0], &w);
+        assert!(
+            raw.iter()
+                .all(|&c| nearest_standable(&w.obstacles, c, 1.0).is_some()),
+            "a candidate is unprojectable — this is not the control"
+        );
+        let spot = last_stand_cover(e(1), &w).expect("a map with cover");
+        assert!(!blocked(spot), "{spot:?} lies inside a box");
+        assert!(hidden(spot), "{spot:?} is in a caster's sight");
     }
 
     // --- focus ---
