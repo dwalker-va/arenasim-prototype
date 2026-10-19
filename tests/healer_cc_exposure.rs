@@ -19,7 +19,13 @@
 //!   a positioning rule could change; `cc_secs` is the cost;
 //! - heal delivered to teammates, distance kept from enemy casters, and heading
 //!   reversals per minute (AS-249's strobe metric), so a rule that buys CC time
-//!   by giving up heals or by bobbing shows up in the same row.
+//!   by giving up heals or by bobbing shows up in the same row;
+//! - `blind_secs` and `occluded_secs` (AS-381) — the two sides of the solve's
+//!   sight-against-cover trade: seconds the healer could not see the teammate
+//!   the `TeamPlan` solve anchors on, and seconds no living enemy caster could
+//!   see the healer, with `exposure` (caster-seconds of sight on the healer)
+//!   between them, and each again over the frames with five or more enemy
+//!   casters alive (`*_ge5_secs`), where a flat sight weight lost to cover.
 //!
 //! The observer is read-only (`observed_run_does_not_perturb_outcomes`), so a
 //! row's winner and duration are the batch runner's for the same config.
@@ -161,7 +167,27 @@ struct HealerRow {
     /// Frames out of `heal_range` (40yd) of every living teammate.
     out_of_heal_range_secs: f32,
     reversals: u32,
+    /// Seconds the healer could not see its anchor — the `TeamPlan` solve's
+    /// (`team_solve::anchor_ally_pos`): the most hurt living non-pet teammate
+    /// below `URGENCY_HP`, else the nearest. Only frames with a teammate alive.
+    blind_secs: f32,
+    /// Seconds no living enemy caster could see the healer, among frames with
+    /// one alive. Casters as `team_solve::enemy_casters_of` counts them: every
+    /// non-melee class, and every pet (this bank's are Felhunters and the
+    /// default Spider, both ranged there).
+    occluded_secs: f32,
+    /// Caster-seconds of sight on the healer: the count of living enemy
+    /// casters that see it, summed over frames.
+    exposure: f32,
+    /// Seconds with five or more enemy casters alive, and the two measures
+    /// above over those seconds only.
+    casters_ge5_secs: f32,
+    blind_ge5_secs: f32,
+    occluded_ge5_secs: f32,
 }
+
+/// `movement.ron`'s `urgency_hp_threshold`, the solve's dying-teammate bar.
+const URGENCY_HP: f32 = 0.5;
 
 #[derive(Clone, Copy)]
 struct Seen {
@@ -197,10 +223,12 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], log_path: String) -> Vec<
     cfg.output_path = Some(log_path.clone());
     let label = cfg.label.clone().unwrap_or_default();
     let map = cfg.map.clone();
-    let profile = cfg
-        .ai_profile
-        .clone()
-        .unwrap_or_else(|| "Legacy".to_string());
+    // Per team: a head-to-head config sets the two teams apart.
+    let profiles = [
+        cfg.team1_ai_profile.clone().or(cfg.ai_profile.clone()),
+        cfg.team2_ai_profile.clone().or(cfg.ai_profile.clone()),
+    ]
+    .map(|p| p.unwrap_or_else(|| "Legacy".to_string()));
     let teams = [cfg.team1.join("+"), cfg.team2.join("+")];
     let seed = cfg.random_seed.unwrap_or(0);
     let arena: ArenaMap = *ArenaMap::all()
@@ -251,7 +279,7 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], log_path: String) -> Vec<
             let row = rows.entry(*e).or_insert_with(|| HealerRow {
                 label: label.clone(),
                 map: map.clone(),
-                profile: profile.clone(),
+                profile: profiles[(c.team - 1) as usize].clone(),
                 team: teams[(c.team - 1) as usize].clone(),
                 enemy: teams[(2 - c.team) as usize].clone(),
                 class: format!("{:?}", c.class),
@@ -301,6 +329,53 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], log_path: String) -> Vec<
             }
             if any_hard {
                 row.exposed_any_hard_secs += FRAME;
+            }
+
+            // Sight against cover (AS-381).
+            let casters: Vec<Vec2> = frame
+                .combatants
+                .values()
+                .filter(|o| o.team != c.team && o.alive && (o.is_pet || !o.class.is_melee()))
+                .map(|o| Vec2::new(o.position.x, o.position.z))
+                .collect();
+            let watching = casters.iter().filter(|p| sees(me, **p)).count();
+            let ge5 = casters.len() >= 5;
+            row.exposure += watching as f32 * FRAME;
+            if ge5 {
+                row.casters_ge5_secs += FRAME;
+            }
+            if !casters.is_empty() && watching == 0 {
+                row.occluded_secs += FRAME;
+                if ge5 {
+                    row.occluded_ge5_secs += FRAME;
+                }
+            }
+            let mates = || {
+                frame
+                    .combatants
+                    .iter()
+                    .filter(|(oe, o)| **oe != *e && o.team == c.team && o.alive && !o.is_pet)
+                    .map(|(_, o)| {
+                        (
+                            Vec2::new(o.position.x, o.position.z),
+                            o.current_health / o.max_health,
+                        )
+                    })
+            };
+            let dying = mates()
+                .filter(|(_, hp)| *hp < URGENCY_HP)
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(p, _)| p);
+            let anchor = dying.or_else(|| {
+                mates()
+                    .map(|(p, _)| p)
+                    .min_by(|a, b| me.distance(*a).total_cmp(&me.distance(*b)))
+            });
+            if anchor.is_some_and(|a| !sees(me, a)) {
+                row.blind_secs += FRAME;
+                if ge5 {
+                    row.blind_ge5_secs += FRAME;
+                }
             }
 
             // Distances kept.
