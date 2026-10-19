@@ -134,7 +134,7 @@ pub fn evaluate_caster_healer_posture(
         state.since = now;
         state.last_direction = None;
         state.last_point = None;
-        state.formation_repair = None;
+        state.formation.forget();
         match next {
             Posture::Pressured => {
                 state.hold_until = now + shared.pressured_hold;
@@ -377,7 +377,8 @@ fn caster_healer_free_tick(
         ctx,
         movement,
         block,
-        &mut state.formation_repair,
+        &mut state.formation,
+        now,
     ) else {
         if transitioned {
             if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
@@ -399,6 +400,8 @@ fn caster_healer_free_tick(
         .last_point
         .is_none_or(|lp| lp.distance(point_xz) > block.formation_shift_threshold);
     let near = my_xz.distance(point_xz) <= block.formation_deadzone;
+    let stale = super::formation::continuous(ctx)
+        && super::formation::walk_is_stale(directive, point_xz, block.formation_shift_threshold);
 
     let issue = |commands: &mut Commands| {
         commands.entity(entity).try_insert(MovementDirective {
@@ -420,7 +423,7 @@ fn caster_healer_free_tick(
             );
             builder.finish();
         }
-    } else if moved && !near {
+    } else if (moved && !near) || stale {
         issue(commands);
         state.last_point = Some(point_xz);
         if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
@@ -447,7 +450,8 @@ fn compute_formation_point(
     ctx: &CombatContext,
     movement: &MovementConfig,
     block: &CasterHealerMovementConfig,
-    kept: &mut Option<Vec2>,
+    memory: &mut FormationMemory,
+    now: f32,
 ) -> Option<Vec3> {
     let shared = &movement.shared;
     let mut all_sum = Vec3::ZERO;
@@ -495,6 +499,20 @@ fn compute_formation_point(
     if dir == Vec2::ZERO {
         dir = away;
     }
+    // Under `TeamPlan`, turned from the last heading at no more than the
+    // healer's walk round the centroid (AS-370): the nearest enemy crossing
+    // the centroid swings the point round instead of flipping it to the far
+    // side.
+    let dir = if super::formation::continuous(ctx) {
+        super::formation::turn_limited(
+            dir,
+            &mut memory.heading,
+            now,
+            combatant.base_movement_speed / shared.formation_offset,
+        )
+    } else {
+        dir
+    };
     let mut point = Vec3::new(
         centroid.x + dir.x * shared.formation_offset,
         my_pos.y,
@@ -521,7 +539,7 @@ fn compute_formation_point(
 
     let point = clamp_to_arena(&ctx.bounds, point);
     Some(if super::formation::sight_constrained(ctx) {
-        super::formation::sighted_formation_point(ctx, entity, point, kept)
+        super::formation::sighted_formation_point(ctx, entity, point, &mut memory.exit)
     } else {
         super::healer_postures::standable_formation_point(ctx, point)
     })

@@ -399,3 +399,21 @@ Rows: `-legacy-main` and `-teamplan-main` at `main` @ `5e13a22a`;
 `2026-10-18-as362-reduce.py <rows...>`; the AS-292 comparison:
 `2026-10-18-as362-compare.py <teamplan-main> <teamplan-as292>` (both read the
 rows after `gunzip`).
+
+## `2026-10-18-as370-teamplan-{pillaredarena,basicarena}*`
+
+Behind `../2026-10-18-as370-formation-continuity.md` (card AS-370). Two paired
+directional sweeps, 6,830 configs each (683 cells x seeds 0-9), both teams
+`TeamPlan`, one on Nagrand and one on BasicArena (the heading change reaches an
+obstacle-free map). Regenerate with:
+
+```bash
+scripts/gen_sweep.py --full 2 --exclude-double-healer \
+  --affects Priest,Druid,Shaman --n 10 \
+  --extra '{"ai_profile":"TeamPlan","map":"PillaredArena"}'   # and "BasicArena"
+```
+
+Run by `main` @ `5e13a22a` (`-before.csv.gz`) and the branch
+(`-after.csv.gz`) with `--jobs 6 --trace-mode off`, analysed with
+`scripts/paired_sweep.py before.csv after.csv --affects Priest,Druid,Shaman
+--tier directional --expect nothing`.

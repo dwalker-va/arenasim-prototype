@@ -763,14 +763,16 @@ unconstrained machine returns it. Distances are measured from the raw point,
 not its standable projection (which jumps between a pillar's faces). An exit up
 to `REPAIR_FULL` (10yd) from the raw point is taken in full, one up to
 `REPAIR_LIMIT` (16yd) part of the way, a farther one not at all. The exit nearest
-the one last chosen (`HealerPosture::formation_repair`, cleared on leaving FREE)
+the one last chosen (`HealerPosture::formation`, forgotten on leaving FREE)
 counts `KEEP_MARGIN` (6yd) nearer, so the point keeps to its exit until another
 is better by that band or its own loses the anchor. Every exit is continuous in
 the raw point across every edge of its region (`EDGE_FADE` fades the move out at
 the shadow's near end and the near-obstacle limit), so the repair starts and
 lets go where the point stands; a change of exit still moves the point the whole
-gap at once (four such steps of 9.8-16.2yd per 100 Warrior+Mage+Priest v
-Rogue+Warlock+Druid matches, three of them over 10yd; AS-370 smooths them).
+gap at once, and is left a step: the exits stand either side of a shadow, so any
+path between them crosses blind ground or detours round the pillar, and easing
+the goal across blind ground was ruled out (about six such steps over 5yd per
+100 Warrior+Mage+Priest v Rogue+Warlock+Druid matches).
 The Paladin has no formation point. `Legacy` is untouched (byte-identical), and
 BasicArena with it under both profiles. Pinned by `tests/formation_sight.rs` (a
 staged pillar edge where the `TeamPlan` Druid and Priest each regain sight of
@@ -778,6 +780,23 @@ their Mage within 1s while the `Legacy` pair stays blind; a seed bank over three
 comps bounding the healers' formation goals; leaving FREE drops the kept exit)
 and the tests in `formation.rs`. A new FREE goal (AS-328's standoff) belongs
 behind the same constraint.
+
+**The FREE formation point turns instead of flipping (`TeamPlan`)** —
+`formation::turn_limited` (AS-370; no RON knob). "Behind the line" flips
+whenever the enemy nearest the engaged-ally centroid crosses it, and the point
+used to flip with it, 5-16yd in a frame. The heading now turns from the last
+one at no more than the healer's walking speed over `formation_offset`, so the
+point swings round the centroid instead; and the free tick re-issues a walk
+that aims more than `formation_shift_threshold` off the point even while the
+healer stands in its dead zone (`formation::walk_is_stale`). Both are asked
+through `formation::continuous`; the heading is remembered on
+`HealerPosture::formation` with the kept exit. Over the five comps of `measure_formation_goal_jumps` (100
+matches each) the goal's jumps over 5yd fall from 193 to 25 in all; the
+measure attributes each jump to its cause. BasicArena moves under `TeamPlan`
+(the heading needs no obstacle); `Legacy` keeps the flip and stays
+byte-identical. Pinned by `tests/formation_continuity.rs` (a staged crossing
+on BasicArena paired with `Legacy`, and one-tick scenes of each formation
+machine) and the tests in `formation.rs`.
 
 **Dispel walk (Paladin, Priest)** — `healer_postures::dispel_chase_override`,
 choosing its ally with `class_ai::dispel_chase_target` (no RON knob). Cleanse and

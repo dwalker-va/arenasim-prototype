@@ -43,18 +43,30 @@
 //! [`EDGE_FADE`] — so the repair starts and lets go where the point stands. A
 //! change of exit (the kept one lost the anchor, or another became better by
 //! the band) still moves the point the whole gap between the two exits at
-//! once: on Nagrand, four changes of exit per 100 Warrior+Mage+Priest v
-//! Rogue+Warlock+Druid matches step the goal 9.8-16.2yd (three more jumps over
-//! 10yd than the unconstrained point makes). Smoothing those is AS-370. The raw
-//! point's own jumps, which the unconstrained machine makes too, pass through.
+//! once. That step is left a step: the two exits stand either side of a
+//! teammate's shadow (or of two teammates' shadows behind one pillar), so any
+//! continuous path between them crosses ground out of that teammate's sight or
+//! detours round the pillar's near side, and easing the goal across blind
+//! ground was ruled out (AS-206). With the heading continuous they are rare:
+//! about six per 100 Warrior+Mage+Priest v Rogue+Warlock+Druid matches on
+//! Nagrand move the goal over 5yd, much as before AS-370.
+//!
+//! **The heading (AS-370).** The raw point stands `formation_offset` off the
+//! engaged-ally centroid along "behind the line", away from the enemy nearest
+//! it. That direction flips whenever the enemy crosses the centroid, and the
+//! point flipped with it — 5-16yd in a frame, the bulk of the formation goal's
+//! jumps. [`turn_limited`] turns the heading from the last one no faster than
+//! the healer can walk round the centroid, so the point swings round instead;
+//! and [`walk_is_stale`] re-issues a walk that a moving point has left behind.
 //!
 //! **Profile.** `TeamPlan` only (the AI-profile rule: every new AI behaviour
-//! lands gated). The callers ask [`sight_constrained`]; `Legacy` keeps the
-//! unconstrained point and stays byte-identical.
+//! lands gated). The callers ask [`sight_constrained`] and [`continuous`];
+//! `Legacy` keeps the unconstrained point and stays byte-identical.
 
 use bevy::prelude::*;
 
 use crate::states::play_match::combat_core::clamp_to_arena;
+use crate::states::play_match::components::{FormationHeading, MovementDirective, MovementGoal};
 use crate::states::play_match::map_geometry::{
     has_line_of_sight, nearest_standable, ObstacleVolume, EYE_HEIGHT,
 };
@@ -131,6 +143,84 @@ pub const EDGE_FADE: f32 = 3.0;
 /// [`REPAIR_LIMIT`], linear between.
 pub fn repair_weight(dist: f32) -> f32 {
     ((REPAIR_LIMIT - dist) / (REPAIR_LIMIT - REPAIR_FULL)).clamp(0.0, 1.0)
+}
+
+/// The formation point's heading off the engaged-ally centroid, turned from
+/// the last one toward `target` by at most `rate` radians a second (AS-370).
+///
+/// `target` is the "behind the line" direction as the formation machine
+/// derives it: away from the enemy nearest the centroid, blended toward the
+/// arena centre. That direction is discontinuous wherever the nearest enemy
+/// crosses the centroid — a melee fighting at its teammate's feet swaps sides
+/// of it constantly — and each crossing turned it half way round, so the point
+/// `formation_offset` out along it jumped up to twice that, 5-16yd in one
+/// frame, under both AI profiles. Turned at a bounded rate, the point swings
+/// round the centroid instead, and a target that flickers back and forth turns
+/// it by no more than the flicker lasts.
+///
+/// The callers pass `rate` as the healer's walking speed over
+/// `formation_offset`, so the point never circles the centroid faster than the
+/// healer can follow it round. The rate is per second of sim time between
+/// evaluations, not per evaluation, so a healer that was casting (and not
+/// evaluated) finds the point turned by what the cast lasted.
+///
+/// A heading within reach of `target` takes `target` exactly, so a formation
+/// whose direction never turns faster than `rate` is the unconstrained one.
+/// With nothing remembered (the first evaluation, or after
+/// [`FormationMemory::forget`](crate::states::play_match::FormationMemory::forget))
+/// the heading is `target`. A zero `target` (enemy and centroid at the arena
+/// centre) keeps the last heading.
+pub fn turn_limited(
+    target: Vec2,
+    heading: &mut Option<FormationHeading>,
+    now: f32,
+    rate: f32,
+) -> Vec2 {
+    let dir = match *heading {
+        None => target,
+        Some(last) if target == Vec2::ZERO => last.dir,
+        Some(last) => {
+            let reach = rate * (now - last.at).max(0.0);
+            let angle = last.dir.angle_to(target);
+            if angle.abs() <= reach {
+                target
+            } else {
+                Vec2::from_angle(reach.copysign(angle))
+                    .rotate(last.dir)
+                    .normalize_or(last.dir)
+            }
+        }
+    };
+    if dir != Vec2::ZERO {
+        *heading = Some(FormationHeading { dir, at: now });
+    }
+    dir
+}
+
+/// Whether the formation point moves continuously under this unit's AI
+/// profile (AS-370): its heading turns at a bounded rate ([`turn_limited`]) and
+/// a walk gone stale is re-issued ([`walk_is_stale`]). `TeamPlan` only, like
+/// the sight repair ([`sight_constrained`]); `Legacy` keeps the point as it
+/// was and stays byte-identical.
+pub fn continuous(ctx: &CombatContext) -> bool {
+    ctx.ai_profile.is_team_plan()
+}
+
+/// Whether the healer's live walk (`directive`) aims at a point more than
+/// `threshold` (the machine's `formation_shift_threshold`) from the formation
+/// point it would issue now, `point`.
+///
+/// The free tick re-commits when the point has moved past the threshold since
+/// it last committed — but not while the healer stands within the dead zone of
+/// the new point, and a walk kept alive by a refresh aims at the point as it
+/// stood then. So a healer standing at a moving formation point could be left
+/// walking toward a point well away from it (AS-370). This asks the walk
+/// itself. A directive that is not a `Point` walk, or none, is not stale.
+pub fn walk_is_stale(directive: Option<&MovementDirective>, point: Vec2, threshold: f32) -> bool {
+    directive.is_some_and(|d| match d.goal {
+        MovementGoal::Point(p) => xz(p).distance(point) > threshold,
+        _ => false,
+    })
 }
 
 /// Whether the formation point is held to sight of the teammates under this
@@ -881,5 +971,105 @@ mod tests {
             f.repair(&pillar(), near).distance(near) > 1.0,
             "near: repaired"
         );
+    }
+
+    // ------------------------------------------------------------------
+    // The heading turns at a bounded rate (AS-370)
+    // ------------------------------------------------------------------
+
+    const RATE: f32 = 0.625; // 5yd/s walk over the 8yd offset
+
+    /// Evaluate `turn_limited` every frame for `secs`, toward `target(t)`,
+    /// from `start`; returns every heading.
+    fn turn_track(start: Vec2, secs: f32, target: impl Fn(f32) -> Vec2) -> Vec<Vec2> {
+        let mut heading = Some(FormationHeading {
+            dir: start,
+            at: 0.0,
+        });
+        (1..=(secs * 60.0) as usize)
+            .map(|k| {
+                let t = k as f32 / 60.0;
+                turn_limited(target(t), &mut heading, t, RATE)
+            })
+            .collect()
+    }
+
+    /// A target that turns no faster than the rate is taken exactly: the
+    /// heading is the unconstrained direction whenever that direction is
+    /// continuous.
+    #[test]
+    fn a_slow_target_is_taken_exactly() {
+        let slow = |t: f32| Vec2::from_angle(0.5 * RATE * t);
+        let track = turn_track(Vec2::X, 3.0, slow);
+        for (k, h) in track.iter().enumerate() {
+            assert_eq!(*h, slow((k + 1) as f32 / 60.0), "frame {k}");
+        }
+    }
+
+    /// The defect: the nearest enemy crosses the centroid and the target flips
+    /// half way round in one frame. The heading swings round at the rate — the
+    /// point 8yd out along it moves at most the healer's walk a second, never
+    /// 16yd at once — and arrives once the turn has had its time.
+    #[test]
+    fn a_flipped_target_is_swung_round_at_the_rate() {
+        let track = turn_track(Vec2::X, 6.0, |_| -Vec2::X);
+        let offset = 8.0;
+        for pair in track.windows(2) {
+            let step = (pair[1] - pair[0]).length() * offset;
+            assert!(step <= RATE * offset / 60.0 + 1e-3, "stepped {step}yd");
+        }
+        let turned_by = |k: usize| track[k].angle_to(Vec2::X).abs();
+        assert!(
+            (turned_by(59) - RATE).abs() < 0.02,
+            "after 1s the heading should have turned {RATE} rad, not {}",
+            turned_by(59)
+        );
+        let arrive = (std::f32::consts::PI / RATE * 60.0).ceil() as usize;
+        assert_eq!(track[arrive], -Vec2::X, "arrived by frame {arrive}");
+        assert!(track.iter().all(|h| (h.length() - 1.0).abs() < 1e-4));
+    }
+
+    /// A target flickering across the centroid every frame (a melee at its
+    /// teammate's feet) moves the heading by no more than one frame's turn
+    /// either way: it does not wander off, and it cannot bob.
+    #[test]
+    fn a_flickering_target_holds_the_heading() {
+        let flicker = |t: f32| {
+            if ((t * 60.0).round() as i32) % 2 == 0 {
+                Vec2::Y
+            } else {
+                -Vec2::Y
+            }
+        };
+        let track = turn_track(Vec2::X, 3.0, flicker);
+        for h in &track {
+            assert!(
+                h.angle_to(Vec2::X).abs() <= RATE / 60.0 + 1e-4,
+                "the heading wandered to {h}"
+            );
+        }
+    }
+
+    /// The heading is per second of sim time: an evaluation after a gap (a
+    /// cast) turns by what the gap lasted; with nothing remembered the target
+    /// is taken at once; a zero target keeps the last heading.
+    #[test]
+    fn the_turn_is_per_second_and_starts_afresh() {
+        let mut heading = Some(FormationHeading {
+            dir: Vec2::X,
+            at: 0.0,
+        });
+        let after_cast = turn_limited(Vec2::Y, &mut heading, 2.0, RATE);
+        assert!((after_cast.angle_to(Vec2::X).abs() - 2.0 * RATE).abs() < 1e-4);
+        assert!(after_cast.angle_to(Vec2::X).abs() <= std::f32::consts::FRAC_PI_2);
+
+        assert_eq!(
+            turn_limited(Vec2::ZERO, &mut heading, 2.5, RATE),
+            after_cast
+        );
+
+        let mut fresh = None;
+        assert_eq!(turn_limited(-Vec2::Y, &mut fresh, 2.5, RATE), -Vec2::Y);
+        assert_eq!(fresh.map(|h| h.dir), Some(-Vec2::Y));
     }
 }
