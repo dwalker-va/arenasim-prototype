@@ -1054,6 +1054,12 @@ pub(super) struct HealerDispel<'a> {
 ///   the PRESSURED healer walks until the dispel reaches, the one positioning
 ///   authority doing what the `Legacy` dispel walk does there.
 ///
+/// - `abilities` — read only under `TeamPlan`, for the enemy crowd control
+///   that can reach the healer (`cc_reach::CcField`, AS-362): the solve keeps
+///   it out of that reach ([`C_CC_REACH`](crate::states::play_match::team_solve::C_CC_REACH)),
+///   and the Paladin's band-hold steps aside for the solve while the spot it
+///   would park on is covered.
+///
 /// Returns whether that walk drives the position this tick — the caller defers
 /// non-critical casts for it, as for the `Legacy` walk. Always `false` under
 /// `Legacy`.
@@ -1068,6 +1074,7 @@ pub(super) fn healer_pressured_tick_shared(
     ctx: &CombatContext,
     state: &mut HealerPosture,
     directive: Option<&MovementDirective>,
+    abilities: &AbilityDefinitions,
     shared: &SharedMovementConfig,
     weights: &MovementWeights,
     wand_kill_target: Option<Entity>,
@@ -1134,6 +1141,13 @@ pub(super) fn healer_pressured_tick_shared(
         )
         .with_urgency_hp_threshold(shared.urgency_hp_threshold)
         .with_dispel_goal(entity, dispel_goal)
+        .with_cc_field(super::cc_reach::CcField::for_healer(
+            ctx,
+            abilities,
+            entity,
+            shared.cc_ready_horizon,
+            shared.cc_reach_margin,
+        ))
     });
     // TeamPlan: a dying teammate the healer does not reach from where it
     // stands (AS-209). The solve walks into reach of it (`C_DYING`); the
@@ -1141,6 +1155,20 @@ pub(super) fn healer_pressured_tick_shared(
     let dying_unreached = world
         .as_ref()
         .and_then(|w| crate::states::play_match::team_solve::dying_unreached(w, entity));
+    // TeamPlan: the spot the healer stands on is in reach of an enemy crowd
+    // control ready to land on it (AS-362), judged by the inner disc so a
+    // healer the solve walked to the rim is not handed back and forth. The
+    // solve walks it out; the band-hold below must not park the Paladin in
+    // reach first.
+    let cc_covered = world.as_ref().is_some_and(|w| {
+        w.cc.covering(
+            &w.obstacles,
+            Vec2::new(my_pos.x, my_pos.z),
+            super::cc_reach::Disc::Inner,
+        )
+        .next()
+        .is_some()
+    });
 
     // Band-hold (Paladin only): once every threat is at/beyond fallback_range,
     // STOP — a Point directive at the current position parks the Paladin at the
@@ -1154,7 +1182,7 @@ pub(super) fn healer_pressured_tick_shared(
     // while one is out of reach from here, or a dispel is owed, the solve
     // walks the Paladin instead, and the hold resumes once the walk arrives.
     if let Some(band) =
-        fallback_range.filter(|_| dispel_goal.is_none() && dying_unreached.is_none())
+        fallback_range.filter(|_| dispel_goal.is_none() && dying_unreached.is_none() && !cc_covered)
     {
         let nearest = threat_positions
             .values()

@@ -8,6 +8,8 @@
 
 use bevy::prelude::*;
 
+use crate::states::play_match::ability_config::AbilityDefinitions;
+
 use crate::states::play_match::combat_core::clamp_to_arena;
 use crate::states::play_match::components::*;
 use crate::states::play_match::decision_trace::{
@@ -77,6 +79,7 @@ pub fn evaluate_caster_healer_posture(
     combatant: &Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
     posture: Option<&mut HealerPosture>,
     directive: Option<&MovementDirective>,
     movement: &MovementConfig,
@@ -245,6 +248,7 @@ pub fn evaluate_caster_healer_posture(
                 combatant,
                 my_pos,
                 ctx,
+                abilities,
                 state,
                 directive,
                 movement,
@@ -260,6 +264,7 @@ pub fn evaluate_caster_healer_posture(
                 combatant,
                 my_pos,
                 ctx,
+                abilities,
                 state,
                 directive,
                 movement,
@@ -311,6 +316,7 @@ fn caster_healer_pressured_tick(
     combatant: &Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
     state: &mut HealerPosture,
     directive: Option<&MovementDirective>,
     movement: &MovementConfig,
@@ -327,6 +333,7 @@ fn caster_healer_pressured_tick(
         ctx,
         state,
         directive,
+        abilities,
         &movement.shared,
         &block.weights,
         combatant.target,
@@ -349,6 +356,7 @@ fn caster_healer_free_tick(
     combatant: &Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
     state: &mut HealerPosture,
     directive: Option<&MovementDirective>,
     movement: &MovementConfig,
@@ -375,6 +383,7 @@ fn caster_healer_free_tick(
         combatant,
         my_pos,
         ctx,
+        abilities,
         movement,
         block,
         &mut state.formation,
@@ -434,7 +443,11 @@ fn caster_healer_free_tick(
             );
             builder.finish();
         }
-    } else if !near && directive.is_none_or(|d| d.expires - now < block.directive_refresh_margin) {
+    } else if (!near || super::formation::continuous(ctx))
+        && directive.is_none_or(|d| d.expires - now < block.directive_refresh_margin)
+    {
+        // Keep the walk alive, and under `TeamPlan` the parked one too
+        // (`formation::continuous`).
         issue(commands);
     }
 }
@@ -448,6 +461,7 @@ fn compute_formation_point(
     combatant: &Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
     movement: &MovementConfig,
     block: &CasterHealerMovementConfig,
     memory: &mut FormationMemory,
@@ -538,9 +552,32 @@ fn compute_formation_point(
     }
 
     let point = clamp_to_arena(&ctx.bounds, point);
-    Some(if super::formation::sight_constrained(ctx) {
+    let point = if super::formation::sight_constrained(ctx) {
         super::formation::sighted_formation_point(ctx, entity, point, &mut memory.exit)
     } else {
         super::healer_postures::standable_formation_point(ctx, point)
+    };
+    // Under `TeamPlan`, held out of the reach of the enemy crowd control
+    // ready to land on the healer (AS-362), on whatever point the heading and
+    // the sight repair produced.
+    Some(if super::formation::reach_constrained(ctx) {
+        let field = super::cc_reach::CcField::for_healer(
+            ctx,
+            abilities,
+            entity,
+            shared.cc_ready_horizon,
+            shared.cc_reach_margin,
+        );
+        super::formation::reach_repaired_point(
+            ctx,
+            entity,
+            my_pos,
+            point,
+            &field,
+            shared.heal_range - crate::states::play_match::team_solve::HEAL_REACH_MARGIN,
+            &mut memory.reach,
+        )
+    } else {
+        point
     })
 }

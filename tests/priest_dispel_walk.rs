@@ -863,6 +863,9 @@ fn a_pressured_teamplan_priest_keeps_a_dying_teammate_over_cover() {
         s.posture = Some(held(Posture::Pressured));
         s.obstacles.push(pillar.clone());
         s.roster.get_mut(&s.hunter).unwrap().position = hunter_pos;
+        // Out of mana for its Freezing Trap: a ready trap reaches every spot
+        // here, cover or not (AS-362), which is not the condition this pairs.
+        s.roster.get_mut(&s.hunter).unwrap().current_mana = 0.0;
         let rogue = s.world.spawn_empty().id();
         let rogue_pos = Vec3::new(-30.0, 1.0, 0.0);
         let mut r = info(rogue, 1, CharacterClass::Rogue, rogue_pos);
@@ -1114,12 +1117,15 @@ fn a_priest_walks_to_a_feared_teammate_and_dispels_it() {
     }
 }
 
-/// The walk end to end under `TeamPlan`, both sides: `Rogue+Priest vs
-/// Mage+Warlock`, where the Warlock's Death Coil sends the Rogue 30-40yd off
-/// while the Priest is PRESSURED. A walk traced from PRESSURED, begun beyond
-/// Dispel Magic's range, ends in a Dispel Magic on the Rogue; on `main` before
-/// this card the Priest never freed it in either seed. Asserted over seeds with
-/// a floor of one, found by scanning both sides `TeamPlan`.
+/// The walk end to end under `TeamPlan`, both sides, STAGED (tier 3):
+/// `Rogue+Priest vs Warlock+Warrior`, the Rogue feared by the Warlock 36yd
+/// from its Priest — beyond Dispel Magic's 30yd — while the enemy Warrior
+/// stands on the Priest and holds it PRESSURED. A walk traced from PRESSURED,
+/// begun beyond range, ends in a Dispel Magic on the Rogue.
+///
+/// Migrated from a seed-pinned probe (seeds 10 and 12 of `Rogue+Priest vs
+/// Mage+Warlock`, found by scanning) when AS-362's crowd-control reach moved
+/// the `TeamPlan` stream and those seeds stopped containing the situation.
 ///
 /// What this cannot isolate is WHICH half moved the Priest: a pressured healer
 /// that relaxes to FREE mid-walk is carried the rest of the way by the
@@ -1127,24 +1133,48 @@ fn a_priest_walks_to_a_feared_teammate_and_dispels_it() {
 /// above, which holds the Priest PRESSURED throughout.
 #[test]
 fn a_pressured_teamplan_priest_is_solved_to_an_out_of_range_teammate_and_dispels_it() {
-    use arenasim::headless::HeadlessMatchConfig;
+    use arenasim::headless::{HeadlessMatchConfig, Stage, Unit};
+    const ROGUE: Unit = Unit::new(1, 0);
+    const PRIEST: Unit = Unit::new(1, 1);
+    const WARLOCK: Unit = Unit::new(2, 0);
+    const ENEMY_WARRIOR: Unit = Unit::new(2, 1);
     let range = f64::from(dispel_range());
-    let mut out_of_range_walks_ending_in_a_dispel = 0;
-    for seed in [10, 12] {
-        out_of_range_walks_ending_in_a_dispel += priest_walks(HeadlessMatchConfig {
-            team1: vec!["Rogue".into(), "Priest".into()],
-            team2: vec!["Mage".into(), "Warlock".into()],
-            ai_profile: Some("TeamPlan".into()),
-            max_duration_secs: 60.0,
-            random_seed: Some(seed),
-            ..Default::default()
-        })
-        .iter()
-        .filter(|w| w.posture == "pressured" && w.from > range && w.ended_in_a_dispel)
-        .count();
+    for seed in [1, 2] {
+        let stage = Stage::new()
+            .place(PRIEST, -20.0, 0.0)
+            .place(ROGUE, 16.0, 0.0)
+            .combatant(ROGUE, |c| c.stealthed = false)
+            .land(ROGUE, AbilityType::Fear, WARLOCK)
+            .place(WARLOCK, 30.0, 12.0)
+            .place(ENEMY_WARRIOR, -18.0, 1.5)
+            .target(ENEMY_WARRIOR, PRIEST);
+        let walks = priest_walks_staged(
+            HeadlessMatchConfig {
+                team1: vec!["Rogue".into(), "Priest".into()],
+                team2: vec!["Warlock".into(), "Warrior".into()],
+                ai_profile: Some("TeamPlan".into()),
+                team2_kill_target: Some(1),
+                max_duration_secs: 15.0,
+                random_seed: Some(seed),
+                ..Default::default()
+            },
+            Some(stage),
+        );
+        assert!(
+            walks
+                .iter()
+                .any(|w| w.posture == "pressured" && w.from > range),
+            "seed {seed}: no PRESSURED walk begun beyond range: {:?}",
+            walks
+                .iter()
+                .map(|w| (w.posture.clone(), w.from, w.ended_in_a_dispel))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            walks
+                .iter()
+                .any(|w| w.posture == "pressured" && w.from > range && w.ended_in_a_dispel),
+            "seed {seed}: no PRESSURED TeamPlan walk begun beyond range ended in a Dispel Magic"
+        );
     }
-    assert!(
-        out_of_range_walks_ending_in_a_dispel >= 1,
-        "no PRESSURED TeamPlan walk begun beyond range ended in a Dispel Magic"
-    );
 }

@@ -57,6 +57,12 @@
         // press_advantage_margin is tempo's hysteresis. TeamPlan only; Legacy
         // releases at press_advantage_margin.
         press_release_margin: 0.1,
+        // Crowd-control reach (TeamPlan only; AS-362). An enemy hard CC is
+        // READY when its owner could start it within cc_ready_horizon
+        // seconds; a healer keeps out of its reach + cc_reach_margin yards,
+        // and is not moved while outside reach + cc_reach_margin / 2.
+        cc_ready_horizon: 1.5,
+        cc_reach_margin: 3.0,
         // ally_in_danger debounce. A teammate pressured only from within
         // danger_edge_margin (yards) of a pressure boundary must be dying and
         // pressured for danger_dwell (seconds) before its window opens; one

@@ -202,6 +202,19 @@ pub struct SharedMovementConfig {
     /// heal in the book, Flash of Light, costs 20), and so opens no defence of
     /// a kill window's enemy.
     pub kill_oom_mana: f32,
+    /// Seconds: an enemy crowd control counts as READY to reach a healer
+    /// (`class_ai::cc_reach`) when the enemy could start it within this long —
+    /// its cooldown, its category's included, has at most this left. So a
+    /// cooldown about to end is answered before it ends, and the healer does
+    /// not walk back into reach just before it comes off. `TeamPlan` only.
+    pub cc_ready_horizon: f32,
+    /// Yards added to an enemy crowd control's reach to make the disc a
+    /// `TeamPlan` healer keeps out of (`class_ai::cc_reach`): about one commit
+    /// window of a caster walking in, so the healer is not caught between
+    /// re-evaluations. A spot counts as covered inside `reach + margin`; a
+    /// healer already outside `reach + margin / 2` is not moved (the Schmitt
+    /// pair that keeps it off the rim). `TeamPlan` only.
+    pub cc_reach_margin: f32,
 }
 
 impl Default for SharedMovementConfig {
@@ -227,6 +240,8 @@ impl Default for SharedMovementConfig {
             kill_hp_threshold: 0.35,
             kill_hp_release: 0.45,
             kill_oom_mana: 20.0,
+            cc_ready_horizon: 1.5,
+            cc_reach_margin: 3.0,
         }
     }
 }
@@ -598,6 +613,8 @@ impl MovementConfig {
             ("shared.danger_release", s.danger_release),
             ("shared.danger_edge_margin", s.danger_edge_margin),
             ("shared.kill_oom_mana", s.kill_oom_mana),
+            ("shared.cc_ready_horizon", s.cc_ready_horizon),
+            ("shared.cc_reach_margin", s.cc_reach_margin),
             (
                 "priest.formation_shift_threshold",
                 self.priest.formation_shift_threshold,

@@ -489,6 +489,7 @@ fn paladin_pressured_tick(
         ctx,
         state,
         directive,
+        abilities,
         &movement.shared,
         &movement.paladin.weights,
         // No wand — the Paladin's wand_pull weight is 0 in config.

@@ -29,6 +29,9 @@
 //! CCX_IN=bank.jsonl CCX_OUT=rows.jsonl CCX_LOGS=/tmp/logs CCX_JOBS=6 \
 //!   cargo test --release --test healer_cc_exposure -- --ignored --nocapture
 //! ```
+//!
+//! With `CCX_KEEP_LOGS=1` every match log stays in `CCX_LOGS` (named by the
+//! config's line), so two binaries' runs of one bank diff log for log.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
@@ -189,11 +192,7 @@ fn parse_time(line: &str) -> Option<f32> {
     line[open + 1..close].trim().parse().ok()
 }
 
-fn run_one(
-    cfg: HeadlessMatchConfig,
-    tools: &[CcTool],
-    log_path: String,
-) -> Vec<HealerRow> {
+fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], log_path: String) -> Vec<HealerRow> {
     let mut cfg = cfg;
     cfg.output_path = Some(log_path.clone());
     let label = cfg.label.clone().unwrap_or_default();
@@ -399,7 +398,9 @@ fn run_one(
             .next()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0);
-        let Some((healer, _)) = names.iter().find(|(e, n)| n.as_str() == target && rows.contains_key(e))
+        let Some((healer, _)) = names
+            .iter()
+            .find(|(e, n)| n.as_str() == target && rows.contains_key(e))
         else {
             continue;
         };
@@ -448,7 +449,11 @@ fn run_one(
         }
         rows.get_mut(&healer).unwrap().cc_events.push(ev);
     }
-    let _ = std::fs::remove_file(&log_path);
+    // `CCX_KEEP_LOGS` keeps every match log, so two binaries' runs of one
+    // bank can be diffed log for log (AS-362's `Legacy` byte-identity check).
+    if std::env::var_os("CCX_KEEP_LOGS").is_none() {
+        let _ = std::fs::remove_file(&log_path);
+    }
     rows.into_values().collect()
 }
 
@@ -481,7 +486,10 @@ fn healer_cc_exposure() {
     let defs = Arc::new(AbilityDefinitions::default());
     let tools = Arc::new(cc_tools(&defs));
     for t in tools.iter() {
-        println!("tool {:?} {} {:.1}yd {:?}", t.class, t.name, t.range, t.aura);
+        println!(
+            "tool {:?} {} {:.1}yd {:?}",
+            t.class, t.name, t.range, t.aura
+        );
     }
     let cursor = Arc::new(AtomicUsize::new(0));
     let rows: Arc<Mutex<Vec<Option<String>>>> = Arc::new(Mutex::new(vec![None; total]));

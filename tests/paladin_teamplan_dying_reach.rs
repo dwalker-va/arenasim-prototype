@@ -16,6 +16,7 @@
 //! park.
 
 use arenasim::states::match_config::CharacterClass::{Mage, Paladin, Warrior};
+use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::{HealerPosture, MovementGoal, Posture};
@@ -80,7 +81,9 @@ fn pressured() -> HealerPosture {
 /// A PRESSURED Paladin at the origin on team 1 under `profile`, its teammate
 /// Warrior at `warrior` and `warrior_hp`, and an enemy Mage 20yd west —
 /// beyond the 15yd `fallback_range`, so the band-hold's own condition holds —
-/// targeting the Paladin.
+/// targeting the Paladin. The Mage's Polymorph is on cooldown: a ready one
+/// would reach the Paladin's spot and lift the park on its own (AS-362), which
+/// is not the condition these scenes pair.
 fn scene(
     profile: AiProfile,
     warrior: (f32, f32),
@@ -97,6 +100,7 @@ fn scene(
         .unit(ENEMY, 2, Mage)
         .at(-20.0, 0.0)
         .targeting(PALADIN)
+        .cooldown(ENEMY, AbilityType::Polymorph, 30.0)
         .healer_posture(PALADIN, pressured())
         .obstacles(obstacles)
 }

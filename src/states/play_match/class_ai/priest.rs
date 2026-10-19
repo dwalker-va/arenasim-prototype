@@ -2110,6 +2110,7 @@ fn pressured_tick(
         ctx,
         state,
         directive,
+        abilities,
         &movement.shared,
         &movement.priest.weights,
         combatant.target,
@@ -2249,11 +2250,12 @@ fn free_tick(
             );
             builder.finish();
         }
-    } else if !near
+    } else if (!near || super::formation::continuous(ctx))
         && directive.is_none_or(|d| d.expires - now < movement.priest.directive_refresh_margin)
     {
         // Keep the standing walk alive (post-cast gaps, TTL expiry) without
-        // re-scoring or emitting — refreshes are not decisions.
+        // re-scoring or emitting — refreshes are not decisions. Under
+        // `TeamPlan`, the parked one too (`formation::continuous`).
         issue(commands);
     }
     // `near` with no meaningful point move: the executor's Point-arrival
@@ -2400,10 +2402,33 @@ fn compute_formation_point(
     }
 
     let point = clamp_to_arena(&ctx.bounds, point);
-    Some(if super::formation::sight_constrained(ctx) {
+    let point = if super::formation::sight_constrained(ctx) {
         super::formation::sighted_formation_point(ctx, entity, point, &mut memory.exit)
     } else {
         super::healer_postures::standable_formation_point(ctx, point)
+    };
+    // Under `TeamPlan`, held out of the reach of the enemy crowd control
+    // ready to land on the healer (AS-362), on whatever point the heading and
+    // the sight repair produced.
+    Some(if super::formation::reach_constrained(ctx) {
+        let field = super::cc_reach::CcField::for_healer(
+            ctx,
+            abilities,
+            entity,
+            shared.cc_ready_horizon,
+            shared.cc_reach_margin,
+        );
+        super::formation::reach_repaired_point(
+            ctx,
+            entity,
+            my_pos,
+            point,
+            &field,
+            shared.heal_range - crate::states::play_match::team_solve::HEAL_REACH_MARGIN,
+            &mut memory.reach,
+        )
+    } else {
+        point
     })
 }
 
