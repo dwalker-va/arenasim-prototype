@@ -1015,8 +1015,10 @@ fn infeasibility_parts(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) 
     (cost, cc)
 }
 
-/// The cost of a spot covered by enemy crowd control ([`C_CC_REACH`]): between
-/// `W_OCCLUDED` (100 per caster that sees the spot) and `W_SIGHT` (400).
+/// The cost of a spot covered by enemy crowd control ([`C_CC_REACH`]): above
+/// `W_OCCLUDED` (100 per caster that sees the spot), so out of reach outranks
+/// one caster's cover. Sight outranks it however it is set: a blind spot pays
+/// the crowd-control ceiling on top of `W_SIGHT` while a field is in play.
 const W_CC: f32 = 200.0;
 /// Per control-second a landing would cost — the grade among covered spots.
 const W_CC_SECOND: f32 = 2.0;
@@ -3073,6 +3075,26 @@ mod tests {
         }
     }
 
+    /// The rim candidate: with the Warrior standing between the healer and
+    /// the caster, no step toward the Warrior leaves the disc and the local
+    /// ring only inches out of it, so the one solve that reaches the rim is
+    /// the rim candidate's.
+    #[test]
+    fn the_rim_candidate_takes_the_healer_out_in_one_solve() {
+        let w = world(vec![
+            healer(1, 1, 1, 0.0, 0.0),
+            melee(2, 1, 0, 10.0, 0.0),
+            unit(3, 2, 0, 20.0, 0.0),
+        ])
+        .with_cc_field(field(vec![threat(3, 20.0, 0.0, 30.0, true)]));
+        let spot = solved(&w);
+        assert!(
+            spot.distance(Vec2::new(20.0, 0.0)) >= 33.0,
+            "still in the disc at {spot}"
+        );
+        assert!(spot.distance(Vec2::new(10.0, 0.0)) <= 40.0, "{spot}");
+    }
+
     /// Heal reach first: a disc centred on the Warrior covers exactly the
     /// spots in heal range of it, and the solve does not buy its way out of
     /// the disc by leaving heal range.
@@ -3230,7 +3252,9 @@ mod tests {
             let (b, c) = infeasibility_parts(RoleIntent::OccupyCover, p, &ctx2);
             b + c
         };
-        let hidden_covered = Vec2::new(14.0, 15.0);
+        // Just inside the area's disc (22.5 of 23yd), so the grade is small
+        // and the comparison is the base weight against one caster's cover.
+        let hidden_covered = Vec2::new(12.0, 21.0);
         assert_ne!(
             violations(RoleIntent::OccupyCover, hidden_covered, &ctx2) & C_CC_REACH,
             0

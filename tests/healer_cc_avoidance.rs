@@ -218,14 +218,14 @@ fn polymorph_stage(arm: Arm) -> Stage {
     planted(stage, ENEMY)
 }
 
-/// Our Paladin held PRESSURED with nothing within its 15yd retreat band —
+/// Our Paladin held PRESSURED with no enemy within its 15yd retreat band —
 /// so its band-hold would park it where it stands — and an enemy Warlock
 /// planted 24yd off on our Warrior, Death Coil spent; Fear ready, or on
 /// cooldown. The Paladin's FREE is its melee pursuit, which the rule leaves
 /// alone: it reaches the Paladin only in PRESSURED.
 fn paladin_stage(arm: Arm) -> Stage {
     let stage = lineup()
-        .place(HEALER, -16.0, 0.0)
+        .place(HEALER, -6.0, 0.0)
         .healer_posture(
             HEALER,
             HealerPosture {
@@ -234,7 +234,7 @@ fn paladin_stage(arm: Arm) -> Stage {
                 ..HealerPosture::new(0.0)
             },
         )
-        .place(ENEMY, 8.0, 0.0)
+        .place(ENEMY, 18.0, 0.0)
         .target(ENEMY, WARRIOR)
         .cooldown(ENEMY, AbilityType::DeathCoil, 60.0)
         .cooldown(ENEMY, AbilityType::Fear, cooldown(arm));

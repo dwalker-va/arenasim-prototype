@@ -1,7 +1,11 @@
 # Healer crowd-control avoidance (AS-362): design
 
-Status: **PROPOSED, awaiting sign-off.** Nothing here is built. Measurements are on
-`main` @ `5e13a22a`. AS-328, the `Legacy` caster standoff, is folded in.
+Status: **SIGNED OFF (team AI only) and BUILT** — see §10 for what was built
+and measured. §§1-9 are the proposal as signed off; their measurements are on
+`main` @ `5e13a22a`. The user's ruling (2026-10-18): `TeamPlan` only, `Legacy`
+stays byte-identical, hard CC only, out-of-reach above cover and below anchor
+sight, the Paladin reached only in PRESSURED; the `Legacy` Priest dip abort and
+`last_stand_cover`'s projection are their own cards.
 
 ## 1. The problem in one paragraph
 
@@ -419,3 +423,107 @@ as its own arm:
    is otherwise unrelated, so it rides with the `Legacy` arm.
 6. **AS-201's `last_stand_cover` projection.** *Recommended: a separate small
    card.* TakeCover's solver is untouched by this design.
+
+## 10. As built (2026-10-19)
+
+`TeamPlan` only, as ruled. `Legacy` builds no field.
+
+### 10.1 What differs from the proposal
+
+- **The threat set** is §3 as written: `class_ai::cc_reach` (`CcField`), with
+  `holds` (stun, fear, polymorph, incapacitate, cyclone) as the hard-CC
+  predicate and `cc_reach::aim`, an exhaustive match, deciding sight (a unit
+  target) against an area round the caster or a thrown trap.
+- **The solve.** `C_CC_REACH` as §4.1, plus one rule measurement forced: sight
+  outranks cover and CC *together*. With 200 for CC beside 100 per caster, a
+  spot that saw the Warrior but was seen by two casters and covered cost more
+  than a blind, hidden one, and a Priest stood 8s blind behind Nagrand's camp
+  pillar. While a field is in play a blind spot pays the CC ceiling on top of
+  `W_SIGHT`. The anti-statue key is armed on the flatness of everything but the
+  CC term, so a melee's 5.5yd stun disc does not disarm it.
+- **The FREE repair** (Priest, Shaman, Druid; never the Paladin) is §4.2's
+  nearest feasible spot, composed after the sight repair (sight no worse than
+  the sight-repaired point is part of feasibility), with three additions the
+  strobe stage needed:
+  - a spot the healer would walk *through* a disc to reach ranks after every
+    spot it would not (the far rim of a caster at the teammate's feet);
+  - with no other spot, a healer already out of reach, in heal reach and sight,
+    stays where it stands;
+  - the spot last chosen stands while it is still a repair (sticky), instead of
+    following the caster's every step.
+  The repair's spot is taken in full to 24yd and fades out by 30yd
+  (`REACH_REPAIR_FULL` / `REACH_REPAIR_LIMIT`), wider than the sight repair's
+  10/16: with the teammate fighting near the caster the nearest spot out of a
+  30yd reach is 20-25yd off.
+- **A parked `TeamPlan` healer keeps its formation walk alive.** It used to
+  lapse every directive TTL, hand the legs to target pursuit for a step, and
+  come back: about a heading reversal a second. Healers the rule keeps FREE
+  longer (a closing caster held out of reach no longer pressures them) showed
+  it most; it was the whole of the reversal rise the first build measured.
+- **The Paladin's band-hold** steps aside while the spot it would park on is
+  covered (inner disc).
+
+### 10.2 Measured
+
+`TeamPlan` CC-exposure bank (§2's bank, 6,000 healer-matches per arm; base =
+`main` @ `55849194`, rows `balance/sweeps/2026-10-19-as362-teamplan-*`), per
+healer-match:
+
+| map | healer | hard CC | reach-type nominal | heal to teammates | reversals/min | wins |
+|---|---|---|---|---|---|---|
+| BasicArena | Priest | 3.93 → 2.78s | 3.38 → 2.10 | 201 → 259 | 7.8 → 6.8 | 356 → 386 |
+| BasicArena | Paladin | 3.26 → 3.09 | 4.05 → 3.78 | 436 → 425 | 8.7 → 8.3 | 475 → 461 |
+| BasicArena | Shaman | 3.28 → 2.17 | 3.12 → 1.69 | 135 → 217 | 3.4 → 3.1 | 318 → 346 |
+| BasicArena | Druid | 2.60 → 1.85 | 1.96 → 1.27 | 506 → 560 | 10.8 → 4.4 | 397 → 353 |
+| BasicArena | all | 3.27 → 2.47 | 3.13 → 2.21 | 320 → 365 | 8.2 → 5.8 | 1546 → 1546 |
+| PillaredArena | Priest | 3.44 → 2.19 | 3.05 → 1.44 | 234 → 298 | 5.3 → 4.4 | 384 → 385 |
+| PillaredArena | Paladin | 3.02 → 3.03 | 2.78 → 2.92 | 367 → 361 | 6.1 → 6.9 | 478 → 474 |
+| PillaredArena | Shaman | 3.62 → 2.18 | 3.45 → 1.72 | 189 → 268 | 4.7 → 4.3 | 330 → 344 |
+| PillaredArena | Druid | 2.84 → 2.44 | 2.34 → 1.93 | 484 → 545 | 10.4 → 5.6 | 369 → 365 |
+| PillaredArena | all | 3.23 → 2.46 | 2.90 → 2.00 | 319 → 368 | 6.8 → 5.4 | 1561 → 1568 |
+
+The Paladin is the one cell whose reversals rose (Nagrand 6.1 → 6.9). In the
+matches that rose most, a Paladin left alone runs the TakeCover play and
+`last_stand_cover` flips its goal between two projected spots on one pillar
+face: the `last_stand_cover` projection defect split out of this card, which a
+Paladin living longer shows more.
+
+DIRECTIONAL head-to-head, `TeamPlan` against `Legacy`, both seat assignments,
+16,160 configs per map, scored from the `TeamPlan` side where it fields a
+healer (n = 12,000 per map; `2026-10-18-as362-h2h.py`):
+
+| map | all | Priest | Paladin | Shaman | Druid |
+|---|---|---|---|---|---|
+| BasicArena | 52.1 → 53.8% (+1.8pt, z = +4.5) | +1.0 (+1.2) | +0.2 (+0.3) | +5.4 (+6.5) | +0.5 (+0.6) |
+| PillaredArena | 54.0 → 55.1% (+1.1pt, z = +3.0) | +2.5 (+2.9) | -0.8 (-1.5) | +0.7 (+0.8) | +2.1 (+3.3) |
+
+The 4,160 matches per map whose `TeamPlan` side fields no healer are identical
+in winner and duration. Directional: which way, roughly how much; not a
+class's standing.
+
+`camp_sweep` (Warrior+Priest v Warlock+Priest, Nagrand, seeds 1-12), `TeamPlan`
+Priest: hard CC 5.7 → 3.6s per match, heal to the Warrior 181 → 241, Warlock
+denied after contact 12.1 → 14.3s, heal line occluded 25 → 23%. `Legacy`
+unchanged (8.1s, 243).
+
+`Legacy`: 4,848 match logs (1,616 per map on BasicArena, TwinPillars and
+PillaredArena, 2v2s a healer change reaches plus controls) byte-identical to
+the base, carrying 370k damage lines, 30k crits, 85k CC lines, 13.7k deaths and
+2,595 distinct durations.
+
+### 10.3 AS-292's three probes
+
+On this card's base AS-292 is not merged, and its probes keep their original
+thresholds. On this card alone all three pass: the statue floor (minimum 0.92
+u/s, median 1.86; base 0.92 / 2.09), the heal-line ceiling (pinned seeds 7, 2,
+12 at 3, 25, 15%; seeds 1-12 at 3-33%, median 18%; base median 22%) and the
+juke bound. Solve-level statue mutants (the flat-field key disarmed, the
+PRESSURED solve held in place) both fail the original 0.75 floor on this base,
+so it still guards the key and no new measurement was needed for it.
+
+With AS-292's situation rule applied on top, the statue floor and the juke
+bound pass at their original thresholds (statue minimum 1.16 u/s against
+AS-292's own 0.22-0.40). The heal-line ceiling does not: seed 7 runs 44%
+against 35%, and seeds 1-12 run 16-49% (median ~32%, AS-292 alone 8-43%, median
+25%). AS-292 needs that ceiling re-examined when it lands.
+

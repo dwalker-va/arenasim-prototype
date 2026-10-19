@@ -400,6 +400,34 @@ Rows: `-legacy-main` and `-teamplan-main` at `main` @ `5e13a22a`;
 `2026-10-18-as362-compare.py <teamplan-main> <teamplan-as292>` (both read the
 rows after `gunzip`).
 
+## `2026-10-19-as362-*`
+
+Behind §10 of `../../2026-10-18-healer-cc-avoidance.md` (card AS-362, the
+build). The base arm is `main` @ `55849194` with the design commit merged
+(no code change); the build arm is the card's branch.
+
+- `-teamplan-{base,build}.jsonl.gz`: the `TeamPlan` CC-exposure bank above
+  (`2026-10-18-as362-gen.py TeamPlan 3`) through `tests/healer_cc_exposure.rs`
+  on each arm. Compare with `2026-10-18-as362-compare.py base build`.
+- `-h2h-{BasicArena,PillaredArena}-{before,after}.csv.gz`: a DIRECTIONAL
+  head-to-head, `TeamPlan` against `Legacy` in both seat assignments, 16,160
+  configs per map:
+
+  ```bash
+  for seat in '"team1_ai_profile":"TeamPlan","team2_ai_profile":"Legacy"' \
+              '"team1_ai_profile":"Legacy","team2_ai_profile":"TeamPlan"'; do
+    scripts/gen_sweep.py --full 2 --exclude-double-healer \
+      --affects Priest,Paladin,Shaman,Druid --control-cells 8 --n 10 \
+      --extra "{$seat,\"map\":\"BasicArena\"}" --label-suffix T1   # T2 for the second
+  done > h2h-BasicArena.jsonl
+  target/release/arenasim --batch h2h-BasicArena.jsonl --out after.csv --jobs 3 --trace-mode off
+  ```
+
+  Scored from the healer side by `2026-10-18-as362-h2h.py before.csv
+  after.csv`: the `TeamPlan` side's wins where it fields a healer, McNemar on
+  the paired flips, by seat and by healer class, and the matches whose
+  `TeamPlan` side fields no healer as the control.
+
 ## `2026-10-18-as370-teamplan-{pillaredarena,basicarena}*`
 
 Behind `../2026-10-18-as370-formation-continuity.md` (card AS-370). Two paired

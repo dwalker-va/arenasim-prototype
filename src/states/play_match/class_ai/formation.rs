@@ -1454,18 +1454,23 @@ mod tests {
     }
 
     /// The repair composes with the sight repair: a rim spot the pillar hides
-    /// the Mage from is no repair, so the point goes to one that sees it.
+    /// the Mage from is no repair. The Mage at (16, 0) stands behind the
+    /// fixture pillar at (8, 0) from the west; the point (0, 5) sees past the
+    /// pillar's edge, and the only spots out of the disc above it lie in the
+    /// pillar's shadow, so the point stands rather than go blind.
     #[test]
     fn the_repair_never_gives_up_sight_of_a_teammate() {
         let f = fixture(&[MAGE]);
-        // The Mage at (16, 0) behind the pillar at (8, 0) from the west; a
-        // Scream-sized disc east of the point, whose nearest rim spot (due
-        // west) is in the pillar's shadow.
-        let mut field = fear_from(4.0);
-        field.threats[0].reach = 6.0;
+        let mut field = fear_from(0.0);
+        field.threats[0].center = Vec2::new(0.0, 10.0);
+        field.threats[0].reach = 4.0;
         field.threats[0].needs_sight = false;
-        let point = Vec2::new(0.0, 6.0);
+        let point = Vec2::new(0.0, 5.0);
         assert!(sees(&pillar(), point, MAGE_XZ));
+        assert!(
+            !sees(&pillar(), Vec2::new(0.0, 2.75), MAGE_XZ),
+            "the rim is blind"
+        );
         let mut kept = None;
         let fixed = xz(reach_repaired_point(
             &f.ctx(&pillar()),
@@ -1476,8 +1481,19 @@ mod tests {
             HEAL_REACH,
             &mut kept,
         ));
-        assert!(fixed.distance(Vec2::new(4.0, 0.0)) > 9.0, "{fixed}");
         assert!(sees(&pillar(), fixed, MAGE_XZ), "{fixed} lost the Mage");
+    }
+
+    /// The repair never carries the point across the arena: a disc whose
+    /// nearest spot out lies beyond `REACH_REPAIR_LIMIT` of the point leaves
+    /// the point where it stands.
+    #[test]
+    fn a_spot_beyond_the_repair_limit_is_not_taken() {
+        let f = fixture(&[(-2.0, 5.0, 1.0)]);
+        let point = Vec2::new(-2.0, 0.0);
+        let mut kept = None;
+        assert_eq!(f.reach_from(&fear_from(0.0), point, &mut kept), point);
+        assert_eq!(kept, None);
     }
 
     /// The repair at `point` for a healer standing at `me`.
@@ -1502,7 +1518,8 @@ mod tests {
         let f = fixture(&[(12.0, 0.0, 1.0)]);
         let mut field = fear_from(0.0);
         field.threats[0].reach = 8.0;
-        let fixed = repair_for(&f, &field, Vec2::new(2.0, 0.0), Vec2::new(-12.0, 0.0));
+        // A healer beyond heal reach of the Warrior, so it cannot simply stay.
+        let fixed = repair_for(&f, &field, Vec2::new(2.0, 0.0), Vec2::new(-30.0, 0.0));
         assert!(fixed.x < 0.0, "sent through the disc to {fixed}");
         assert!(fixed.distance(Vec2::ZERO) > 11.0, "{fixed}");
     }
