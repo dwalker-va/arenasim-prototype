@@ -322,6 +322,9 @@ pub struct TeamSituation {
     /// The enemy whose hold by this team ends soonest — the lock a chain
     /// hands off from (the module docs' `lock_ending`).
     pub lock_ending: Option<Window>,
+    /// Whether this team's healers play the pillar modes (AS-373,
+    /// [`SituationConfig::pillar_modes`]).
+    pub pillar_modes: bool,
 }
 
 /// What a unit does about a situation: a named reordering of its own priority
@@ -729,6 +732,10 @@ pub struct SituationConfig {
     /// The gated plays each team is denied, and its exceptions overrides
     /// ([`WithheldPlays`]), applied by [`Self::for_team`].
     pub withheld: WithheldPlays,
+    /// Whether the team's healers play the pillar modes (AS-373,
+    /// `class_ai::pillar_mode`): `true` under `TeamPlan` ([`Self::under`])
+    /// unless a measurement turns them off ([`WithheldPlays::no_pillar_modes`]).
+    pub pillar_modes: bool,
 }
 
 impl Default for SituationConfig {
@@ -756,6 +763,7 @@ impl SituationConfig {
             runs: PlaySet::default(),
             exceptions: ExceptionOverrides::default(),
             withheld: WithheldPlays::default(),
+            pillar_modes: false,
         }
     }
 
@@ -770,12 +778,14 @@ impl SituationConfig {
         match profile {
             AiProfile::TeamPlan => Self {
                 runs: PlaySet::all(),
+                pillar_modes: true,
                 ..self
             },
             AiProfile::Legacy => Self {
                 press_release_margin: self.press_advantage_margin,
                 healers_close: true,
                 runs: PlaySet::default(),
+                pillar_modes: false,
                 ..self
             },
         }
@@ -789,6 +799,7 @@ impl SituationConfig {
         Self {
             runs: cfg.runs.without(self.withheld.for_team(team)),
             exceptions: self.withheld.exceptions_for_team(team),
+            pillar_modes: cfg.pillar_modes && !self.withheld.no_pillar_modes(team),
             ..cfg
         }
     }
@@ -889,9 +900,25 @@ pub struct WithheldPlays {
     pub team1_exceptions: ExceptionOverrides,
     /// Team 2's replacement exceptions tables.
     pub team2_exceptions: ExceptionOverrides,
+    /// Team 1 plays without the healer pillar modes (AS-373,
+    /// `class_ai::pillar_mode`): a measurement control, as the withheld plays
+    /// are (`team1_pillar_modes: false` in a headless config).
+    pub team1_no_pillar_modes: bool,
+    /// Team 2's, as [`Self::team1_no_pillar_modes`].
+    pub team2_no_pillar_modes: bool,
 }
 
 impl WithheldPlays {
+    /// Whether team `team` plays without the healer pillar modes; team 1's
+    /// for a team id outside 1..=2.
+    pub fn no_pillar_modes(&self, team: u8) -> bool {
+        if team == 2 {
+            self.team2_no_pillar_modes
+        } else {
+            self.team1_no_pillar_modes
+        }
+    }
+
     /// Team `team`'s withheld plays; team 1's for a team id outside 1..=2,
     /// matching `AiProfiles::for_team`.
     pub fn for_team(&self, team: u8) -> PlaySet {
@@ -1019,6 +1046,7 @@ pub fn classify_roster(
         ally_in_danger,
         danger_attackers,
         runs: cfg.runs,
+        pillar_modes: cfg.pillar_modes,
         exceptions: PlayExceptions::resolve(&cfg.exceptions),
         allies,
         in_danger: danger.in_danger,

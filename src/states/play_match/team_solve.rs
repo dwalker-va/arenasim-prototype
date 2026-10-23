@@ -133,6 +133,55 @@ pub struct SolveWorld {
     /// The enemy crowd control that can reach the unit being solved
     /// ([`C_CC_REACH`], AS-362). Empty — the default — covers nothing.
     pub cc: CcField,
+    /// The pillar ring the unit being solved hugs (AS-373,
+    /// `class_ai::pillar_mode`): its ring-arc candidates, the soft leash to
+    /// the ring ([`C_RING`]) and the sight margin ([`C_MARGIN`]). `None` — the
+    /// default — when it plays the open.
+    pub hug: Option<HugRing>,
+}
+
+/// The pillar ring an `OccupyCover` healer hugs ([`SolveWorld::hug`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HugRing {
+    pub center: Vec2,
+    /// The ring's radius.
+    pub rho: f32,
+    /// How far outside the ring the healer still counts as on it
+    /// (`pillar_mode::HUG_SLACK`).
+    pub slack: f32,
+    /// Per ring sample (`pillar_mode::RING_SAMPLES`, in angle order): whether
+    /// it sees the anchor in heal range — the arc's ring points are
+    /// candidates.
+    pub arc: Vec<bool>,
+    /// Per ring sample: whether it is in the arc's CORE, the arc less the
+    /// sight margin (`pillar_mode::core_of`). A spot whose bearing about the
+    /// pillar falls outside it violates [`C_MARGIN`].
+    pub core: Vec<bool>,
+}
+
+impl HugRing {
+    fn sample(&self, p: Vec2) -> usize {
+        let n = self.core.len().max(1);
+        let step = std::f32::consts::TAU / n as f32;
+        (((p - self.center).to_angle().rem_euclid(std::f32::consts::TAU) / step).round() as usize)
+            % n
+    }
+
+    /// Whether `p`'s bearing about the pillar is in the core.
+    fn in_core(&self, p: Vec2) -> bool {
+        self.core.get(self.sample(p)).copied().unwrap_or(true)
+    }
+
+    /// The ring points of the arc.
+    fn arc_points(&self) -> impl Iterator<Item = Vec2> + '_ {
+        let n = self.arc.len().max(1);
+        let step = std::f32::consts::TAU / n as f32;
+        self.arc
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| **f)
+            .map(move |(i, _)| self.center + Vec2::from_angle(i as f32 * step) * self.rho)
+    }
 }
 
 impl SolveWorld {
@@ -155,6 +204,13 @@ impl SolveWorld {
     /// being solved ([`C_CC_REACH`]).
     pub fn with_cc_field(mut self, cc: CcField) -> Self {
         self.cc = cc;
+        self
+    }
+
+    /// This world with `hug` as the pillar ring the unit being solved hugs
+    /// ([`SolveWorld::hug`]).
+    pub fn with_hug(mut self, hug: Option<HugRing>) -> Self {
+        self.hug = hug;
         self
     }
 
@@ -488,6 +544,19 @@ pub const C_DYING: u16 = 1 << 7;
 /// the rim as the caster moves.
 pub const C_CC_REACH: u16 = 1 << 8;
 
+/// A hugging `OccupyCover` healer ([`SolveWorld::hug`], AS-373) must stand at
+/// a bearing about its pillar inside the core of the ring's sighted arc: at
+/// least `pillar_mode::HUG_SIGHT_MARGIN` of arc inside the edge the anchor's
+/// motion sweeps toward it. Ranked between sight of the anchor and crowd
+/// control ([`infeasibility`]): the healer sits where its teammate is going.
+pub const C_MARGIN: u16 = 1 << 9;
+
+/// A hugging `OccupyCover` healer stays within `HugRing::slack` of its ring:
+/// the soft leash, a continuous cost per yard beyond it — below every binary
+/// term, so a deep shadow or a spot out of crowd-control reach still wins
+/// when it is worth the walk.
+pub const C_RING: u16 = 1 << 10;
+
 /// Yards inside `heal_range` a spot must be to count as reaching a dying
 /// teammate, for the reason [`DISPEL_REACH_MARGIN`] gives: the solve measures
 /// on the ground plane, the heal in 3D, and a spot held exactly at the edge
@@ -598,6 +667,14 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
                     .any(|e| candidate.distance(e.pos) < world.threat_radius)
             {
                 v |= C_STANDOFF;
+            }
+            if let Some(hug) = &world.hug {
+                if !hug.in_core(candidate) {
+                    v |= C_MARGIN;
+                }
+                if candidate.distance(hug.center) > hug.rho + hug.slack {
+                    v |= C_RING;
+                }
             }
             if !world.cc.is_empty()
                 && (v & C_LEASH != 0
@@ -836,6 +913,13 @@ pub fn candidates_for(ctx: &SolveContext) -> Vec<Vec2> {
         }
     }
 
+    // The hugged pillar's sighted arc (AS-373): its ring points, anchored to
+    // the pillar, so they slide with the anchor instead of moving with the
+    // mover. Absent while the healer plays the open.
+    if let Some(hug) = &world.hug {
+        out.extend(hug.arc_points());
+    }
+
     // Local ring: the fine adjustment, and the fallback gradient when no
     // geometric candidate is an improvement.
     for i in 0..SOLVE_DIRECTIONS {
@@ -1024,6 +1108,20 @@ fn infeasibility_parts(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) 
     if v & C_SIGHT != 0 && !world.cc.is_empty() {
         cc += ceiling;
     }
+    // The hug's sight margin (AS-373): above crowd control and cover together
+    // — the most the two can cost a spot, plus a step — so a spot inside the
+    // margin wins over one outside it whatever their exposure; below sight,
+    // which a blind spot pays on top of this (its bearing is off the arc, so
+    // it misses the margin too). The ring's soft leash is a per-yard cost,
+    // under every binary term.
+    if v & C_MARGIN != 0 {
+        cost += W_MARGIN + W_OCCLUDED * casters + ceiling;
+    }
+    if v & C_RING != 0 {
+        if let Some(hug) = &world.hug {
+            cost += W_RING * (candidate.distance(hug.center) - hug.rho - hug.slack).max(0.0);
+        }
+    }
     (cost, cc)
 }
 
@@ -1060,6 +1158,13 @@ const W_CC_GRADE_CAP: f32 = 190.0;
 /// Yards past a disc's outer rim the rim candidate stands, so it is out of the
 /// disc after the projection onto standable ground.
 const CC_RIM_CLEARANCE: f32 = 0.25;
+
+/// The step by which a spot outside the hug's sight margin ([`C_MARGIN`])
+/// costs more than the most crowd control and cover can cost one inside it.
+const W_MARGIN: f32 = 10.0;
+/// Per yard a hugging healer stands beyond its ring's slack ([`C_RING`]): the
+/// leash's own scale.
+const W_RING: f32 = 10.0;
 
 /// The cost of a spot that does not reach the teammate owed a dispel (a
 /// reaching one costs zero).
@@ -1268,6 +1373,17 @@ pub fn solve_team(
 ///   nothing. Melee.
 /// - Bird — Master's Call (40yd) targets an ALLY; it has no ranged offence.
 ///   Melee.
+/// Whether `c` hurts from range — a caster, or a pet whose abilities reach
+/// ([`pet_is_melee`]) — so that cover is a defence against it. The solve's
+/// [`SolveUnit::is_melee`] is its negation.
+pub fn is_ranged_threat(c: &super::class_ai::CombatantInfo) -> bool {
+    if c.is_pet {
+        !c.pet_type.is_none_or(pet_is_melee)
+    } else {
+        !c.class.is_melee()
+    }
+}
+
 fn pet_is_melee(pet_type: super::components::PetType) -> bool {
     use super::components::PetType as P;
     match pet_type {
@@ -1401,11 +1517,7 @@ pub fn world_from_context(
             is_healer: c.class.is_healer(),
             // Pets: by ability reach, not by inherited class — see
             // `enemy_casters_of`.
-            is_melee: if c.is_pet {
-                c.pet_type.is_none_or(pet_is_melee)
-            } else {
-                c.class.is_melee()
-            },
+            is_melee: !is_ranged_threat(c),
             is_pet: c.slot >= super::constants::PET_SLOT_BASE,
             ability_range: c.class.preferred_range(),
             can_cast_heal: can_cast_heal(ctx, c),
@@ -1422,6 +1534,7 @@ pub fn world_from_context(
         kill_target,
         urgency_hp_threshold: 0.0,
         cc: CcField::default(),
+        hug: None,
     }
 }
 
@@ -1637,6 +1750,7 @@ mod tests {
             kill_target: None,
             urgency_hp_threshold: 0.5,
             cc: CcField::default(),
+            hug: None,
         }
     }
 

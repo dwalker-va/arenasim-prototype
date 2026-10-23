@@ -160,6 +160,8 @@ struct Blind {
     mate_min_hp: f32,
     posture: String,
     healer_hard_cc_secs: f32,
+    /// The healer's traced pillar mode as sight was lost: "hug" or "open".
+    mode: String,
 }
 
 #[derive(Serialize)]
@@ -190,6 +192,14 @@ struct Row {
     result: String,
     duration: f32,
     occ: BTreeMap<String, Occ>,
+    /// Post-contact occupancy keyed `posture|mode` by the healer's TRACED
+    /// pillar mode (`PillarModeEnter` / `PillarModeLeave`, AS-373): `hug` or
+    /// `open`. Every frame is `open` on a build without the modes.
+    modes: BTreeMap<String, Occ>,
+    /// The traced pillar-mode changes, and the seconds each mode was held
+    /// before it changed (the dwell distribution).
+    mode_changes: u32,
+    mode_dwells: Vec<f32>,
     cc: Vec<CcOnset>,
     orbits: Vec<Orbit>,
     blind: Vec<Blind>,
@@ -264,6 +274,8 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> V
 
     // Posture timeline per healer, from the trace's movement decisions.
     let mut postures: BTreeMap<u32, Vec<(usize, String)>> = BTreeMap::new();
+    // Pillar-mode timeline per healer: (frame, hugging from then on).
+    let mut modes: BTreeMap<u32, Vec<(usize, bool)>> = BTreeMap::new();
     if let Ok(f) = std::fs::File::open(&trace_path) {
         for line in std::io::BufReader::new(f).lines().map_while(Result::ok) {
             if !line.contains("\"movement_decision\"") {
@@ -283,8 +295,20 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> V
                 .entry(id as u32)
                 .or_default()
                 .push((fr as usize, p.to_string()));
+            match v["trigger"].as_str() {
+                Some("PillarModeEnter") => modes.entry(id as u32).or_default().push((fr as usize, true)),
+                Some("PillarModeLeave") => modes.entry(id as u32).or_default().push((fr as usize, false)),
+                _ => {}
+            }
         }
     }
+    let mode_at = |e: Entity, i: usize| -> bool {
+        let Some(v) = modes.get(&e.index()) else {
+            return false;
+        };
+        let k = v.partition_point(|d| d.0 <= i);
+        k > 0 && v[k - 1].1
+    };
     let _ = std::fs::remove_file(&trace_path);
     let _ = std::fs::remove_file(format!("{tmp}/match_{i:06}.txt"));
     let posture_at = |e: Entity, i: usize| -> String {
@@ -340,6 +364,13 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> V
             },
             ..Default::default()
         };
+        if let Some(v) = modes.get(&h.index()) {
+            row.mode_changes = v.len() as u32;
+            row.mode_dwells = v
+                .windows(2)
+                .map(|w| (w[1].0 - w[0].0) as f32 * FRAME)
+                .collect();
+        }
         // Per-frame sight of each teammate (both alive), and the orbit state.
         let mut sight: BTreeMap<Entity, Vec<Option<bool>>> =
             mates.iter().map(|m| (*m, vec![None; frames.len()])).collect();
@@ -405,6 +436,19 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> V
             }
             if mate_near {
                 acc.mate_near += FRAME;
+            }
+            if i >= contact {
+                let mode = if mode_at(h, i) { "hug" } else { "open" };
+                let m = row.modes.entry(format!("{posture}|{mode}")).or_default();
+                m.secs += FRAME;
+                m.hard_cc += if me.hard { FRAME } else { 0.0 };
+                m.exposed += if exposed { FRAME } else { 0.0 };
+                m.blind_anchor += if blind_anchor { FRAME } else { 0.0 };
+                if !dying.is_empty() {
+                    m.dying += FRAME;
+                    m.blind_dying += if blind_dying { FRAME } else { 0.0 };
+                }
+                m.mate_near += if mate_near { FRAME } else { 0.0 };
             }
             if me.hard && !was_hard {
                 row.cc.push(CcOnset {
@@ -512,6 +556,7 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> V
                         mate_min_hp,
                         posture: posture_at(h, start),
                         healer_hard_cc_secs: cc,
+                        mode: if mode_at(h, start) { "hug" } else { "open" }.into(),
                     });
                     episodes.push((start, j, broke));
                     i = j + 1;

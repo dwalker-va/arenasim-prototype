@@ -198,6 +198,26 @@ pub fn turn_limited(
     dir
 }
 
+/// Start the heading from the healer's bearing off the centroid when the last
+/// hug has just ended (`FormationMemory::seed_from_healer`, AS-373), so the
+/// open point takes over where the healer stands and turns from there rather
+/// than jumping to the "behind the line" side. A no-op otherwise.
+pub fn seed_heading(
+    memory: &mut crate::states::play_match::components::FormationMemory,
+    centroid: Vec3,
+    my_pos: Vec3,
+    now: f32,
+) {
+    if !memory.seed_from_healer {
+        return;
+    }
+    memory.seed_from_healer = false;
+    let dir = (xz(my_pos) - xz(centroid)).normalize_or_zero();
+    if memory.heading.is_none() && dir != Vec2::ZERO {
+        memory.heading = Some(FormationHeading { dir, at: now });
+    }
+}
+
 /// Whether the formation point moves continuously under this unit's AI
 /// profile (AS-370): its heading turns at a bounded rate ([`turn_limited`]) and
 /// a walk gone stale is re-issued ([`walk_is_stale`]). `TeamPlan` only, like
@@ -233,9 +253,207 @@ pub fn walk_is_stale(directive: Option<&MovementDirective>, point: Vec2, thresho
 }
 
 /// Whether the formation point is held to sight of the teammates under this
-/// unit's AI profile: `TeamPlan` only.
+/// unit's AI profile: `TeamPlan` only. With the pillar modes on
+/// ([`open_constrained`]) the HEADING is held instead, and this repair of the
+/// point is not run.
 pub fn sight_constrained(ctx: &CombatContext) -> bool {
     ctx.ai_profile.is_team_plan()
+}
+
+/// Whether the open mode's sight constraint holds the formation HEADING
+/// (AS-373, [`open_heading`]): `TeamPlan` with the pillar modes on, on a map
+/// with obstacles. It replaces the point's sight repair
+/// ([`sighted_formation_point`]); with the modes off a `TeamPlan` healer keeps
+/// the repair.
+pub fn open_constrained(ctx: &CombatContext) -> bool {
+    ctx.pillar_modes() && !ctx.obstacles.is_empty()
+}
+
+/// Heading samples round the centroid the open constraint is judged on: one
+/// every 2 degrees, about a quarter yard of the point's travel at the
+/// formation offset.
+pub const HEADING_SAMPLES: usize = 180;
+
+/// The headings, as sample indices, whose point would stand in a teammate's
+/// shadow: per sample, a bit per teammate (bit 0 the anchor) whose widened
+/// shadow near its obstacle holds the point ([`shadow_exits`] non-empty —
+/// AS-206's wedge and near-obstacle limit).
+fn heading_shadows(
+    ctx: &CombatContext,
+    allies: &[&CombatantInfo],
+    point_at: &impl Fn(Vec2) -> Vec2,
+) -> Vec<u8> {
+    let step = std::f32::consts::TAU / HEADING_SAMPLES as f32;
+    (0..HEADING_SAMPLES)
+        .map(|i| {
+            let p = point_at(Vec2::from_angle(i as f32 * step));
+            let mut mask = 0u8;
+            for (k, ally) in allies.iter().enumerate().take(8) {
+                let viewer = xz(ally.position);
+                // A shadow the repair would not have left (its nearest exit
+                // `REPAIR_LIMIT` or more away) is not forbidden either:
+                // turning round it would carry the point as far.
+                if ctx.obstacles.iter().any(|o| {
+                    shadow_exits(viewer, o, p, SIGHT_MARGIN)
+                        .iter()
+                        .any(|(_, e)| e.distance(p) < REPAIR_LIMIT)
+                }) {
+                    mask |= 1 << k;
+                }
+            }
+            mask
+        })
+        .collect()
+}
+
+/// The open mode's formation heading (AS-373, `TeamPlan` with the pillar modes
+/// on): [`turn_limited`] with the sight constraint moved from the point to the
+/// heading.
+///
+/// `point_at` maps a heading to the raw formation point it gives (the offset
+/// off the centroid, the wand and burn pulls, the arena clamp). A heading
+/// whose point stands in a near teammate's widened shadow is FORBIDDEN — the
+/// same wedge and near-obstacle limit as AS-206's repair ([`shadow_exits`]),
+/// every teammate's while some heading avoids them all, else the anchor's
+/// alone, else none (the unconstrained [`turn_limited`]). Then:
+///
+/// - a remembered heading the forbidden set has grown over is pushed to the
+///   nearest allowed one: the interval's edge moves with the geometry, so the
+///   heading is pushed, not flipped;
+/// - an allowed target is reached the shorter way round when that way is
+///   allowed, else the OTHER way round the centroid — through the open, in
+///   sight at every step — else the heading goes as far toward it as it can
+///   and holds at the boundary;
+/// - a forbidden target holds the heading at the boundary of the forbidden
+///   interval it lies in, on the side the heading is already on.
+///
+/// The turn is limited to `rate` radians a second, as [`turn_limited`]'s. With
+/// nothing forbidden it IS [`turn_limited`], bit for bit. `allow_through` is
+/// a mutation switch: `true` lets the heading turn through the forbidden set.
+#[allow(clippy::too_many_arguments)]
+pub fn open_heading(
+    ctx: &CombatContext,
+    healer: Entity,
+    target: Vec2,
+    heading: &mut Option<FormationHeading>,
+    now: f32,
+    rate: f32,
+    point_at: impl Fn(Vec2) -> Vec2,
+    allow_through: bool,
+) -> Vec2 {
+    let allies = teammates(ctx, healer);
+    let shadows = heading_shadows(ctx, &allies, &point_at);
+    let mut allowed: Vec<bool> = shadows.iter().map(|m| *m == 0).collect();
+    if !allowed.iter().any(|a| *a) {
+        allowed = shadows.iter().map(|m| m & 1 == 0).collect();
+    }
+    let a0 = heading.map(|h| h.dir).unwrap_or(target);
+    let n = HEADING_SAMPLES;
+    let step = std::f32::consts::TAU / n as f32;
+    let index = |angle: f32| ((angle.rem_euclid(std::f32::consts::TAU) / step).round() as usize) % n;
+    if allow_through || allowed.iter().all(|a| *a) || !allowed.iter().any(|a| *a) || a0 == Vec2::ZERO
+    {
+        return turn_limited(target, heading, now, rate);
+    }
+    let ok = |i: usize| allowed[i % n];
+
+    // Push a heading the forbidden set has grown over to the nearest allowed
+    // sample (the nearer side; the side of increasing angle on a tie).
+    let mut from = a0.to_angle();
+    let i0 = index(from);
+    if !ok(i0) {
+        let pushed = (1..n).find_map(|k| {
+            if ok(i0 + k) {
+                Some((i0 + k) % n)
+            } else if ok(i0 + n - k) {
+                Some((i0 + n - k) % n)
+            } else {
+                None
+            }
+        });
+        if let Some(p) = pushed {
+            from = p as f32 * step;
+        }
+    }
+    let i_from = index(from);
+    // How many samples one may walk from `i_from` in `sense` before the next
+    // is forbidden (n when the whole circle is allowed that way).
+    let reach_in = |sense: i32| -> usize {
+        (1..n)
+            .take_while(|&k| ok(((i_from as i32 + sense * k as i32).rem_euclid(n as i32)) as usize))
+            .count()
+    };
+    let wrap = |a: f32| {
+        let t = a.rem_euclid(std::f32::consts::TAU);
+        if t > std::f32::consts::PI {
+            t - std::f32::consts::TAU
+        } else {
+            t
+        }
+    };
+    let to = if target == Vec2::ZERO {
+        from
+    } else {
+        target.to_angle()
+    };
+    let i_to = index(to);
+    let short = wrap(to - from);
+    let sense_short: i32 = if short >= 0.0 { 1 } else { -1 };
+    let steps = |delta: f32| (delta.abs() / step).round() as usize;
+    let delta: f32 = if ok(i_to) {
+        if steps(short) <= reach_in(sense_short) {
+            short
+        } else {
+            let long = short - sense_short as f32 * std::f32::consts::TAU;
+            if steps(long) <= reach_in(-sense_short) {
+                long
+            } else {
+                // Held at the boundary on the short side.
+                sense_short as f32 * reach_in(sense_short) as f32 * step
+                    + wrap(i_from as f32 * step - from)
+            }
+        }
+    } else {
+        // The target lies in a forbidden interval: the boundary of the
+        // allowed run the heading is in that borders it, the nearer one when
+        // both do (the side the heading is already on).
+        let borders = |sense: i32| -> Option<usize> {
+            let r = reach_in(sense);
+            // Past the boundary, through forbidden samples only, to the target?
+            let mut k = r + 1;
+            while k < n {
+                let i = ((i_from as i32 + sense * k as i32).rem_euclid(n as i32)) as usize;
+                if i == i_to {
+                    return Some(r);
+                }
+                if ok(i) {
+                    return None;
+                }
+                k += 1;
+            }
+            None
+        };
+        let pick = match (borders(1), borders(-1)) {
+            (Some(a), Some(b)) if a <= b => Some((1, a)),
+            (Some(_), Some(b)) => Some((-1, b)),
+            (Some(a), None) => Some((1, a)),
+            (None, Some(b)) => Some((-1, b)),
+            (None, None) => None,
+        };
+        match pick {
+            Some((sense, r)) => sense as f32 * r as f32 * step + wrap(i_from as f32 * step - from),
+            None => 0.0,
+        }
+    };
+    let dir = match *heading {
+        None => Vec2::from_angle(from + delta),
+        Some(last) => {
+            let reach = rate * (now - last.at).max(0.0);
+            Vec2::from_angle(from + delta.clamp(-reach, reach))
+        }
+    };
+    *heading = Some(FormationHeading { dir, at: now });
+    dir
 }
 
 /// How well a spot sees the teammates: the anchor first, then how many.
@@ -259,7 +477,7 @@ fn xz(p: Vec3) -> Vec2 {
 /// The teammates the formation point answers to: every living non-pet ally but
 /// the healer itself, the anchor (the most injured; the lowest entity on a tie)
 /// first.
-fn teammates<'c>(ctx: &'c CombatContext, healer: Entity) -> Vec<&'c CombatantInfo> {
+pub(super) fn teammates<'c>(ctx: &'c CombatContext, healer: Entity) -> Vec<&'c CombatantInfo> {
     let mut allies: Vec<&CombatantInfo> = ctx
         .alive_allies()
         .into_iter()
@@ -1003,6 +1221,73 @@ mod tests {
         let fixed = f.repair(&two, BLIND);
         let sight = sight_of_teammates(&f.ctx(&two), f.healer, fixed);
         assert!(sight.anchor, "{fixed}: {sight:?}");
+    }
+
+    /// The open mode (AS-373): the heading turns round the centroid at the
+    /// Mage, from the +z side of it to the -z side, and the shorter way
+    /// crosses the Mage's shadow behind the pillar (headings near -x). Every
+    /// heading on the way stands its point out of the shadow, and the turn
+    /// arrives the other way round, through the open. The pair: allowed
+    /// through, the same turn crosses the shadow.
+    #[test]
+    fn the_open_heading_turns_round_the_sighted_side() {
+        use std::f32::consts::PI;
+        let f = fixture(&[MAGE]);
+        let obstacles = pillar();
+        let ctx = f.ctx(&obstacles);
+        let point_at = |d: Vec2| MAGE_XZ + d * 8.0;
+        let in_shadow = |d: Vec2| !shadow_exits(MAGE_XZ, &obstacles[0], point_at(d), SIGHT_MARGIN).is_empty();
+        let start = Vec2::from_angle(PI * 100.0 / 180.0);
+        let target = Vec2::from_angle(PI * 260.0 / 180.0);
+        assert!(
+            in_shadow(Vec2::from_angle(PI)),
+            "the scene puts the shorter way through the shadow"
+        );
+        for through in [false, true] {
+            let mut heading = Some(FormationHeading { dir: start, at: 0.0 });
+            let mut crossed = 0;
+            let mut last = start;
+            for k in 1..=80 {
+                last = open_heading(
+                    &ctx,
+                    f.healer,
+                    target,
+                    &mut heading,
+                    k as f32 * 0.1,
+                    1.0,
+                    point_at,
+                    through,
+                );
+                if in_shadow(last) {
+                    crossed += 1;
+                }
+            }
+            if through {
+                assert!(crossed > 0, "allowed through, the turn should cross the shadow");
+            } else {
+                assert_eq!(crossed, 0, "a heading stood its point in the shadow");
+                assert!(last.angle_to(target).abs() < 1e-3, "arrived at {last}");
+            }
+        }
+    }
+
+    /// With nothing forbidden the open heading IS `turn_limited`, bit for bit.
+    #[test]
+    fn the_open_heading_is_turn_limited_in_the_open() {
+        let f = fixture(&[(0.0, 16.0, 0.7)]);
+        let ctx = f.ctx(&[]);
+        let mut a = Some(FormationHeading {
+            dir: Vec2::X,
+            at: 0.0,
+        });
+        let mut b = a;
+        let target = Vec2::from_angle(2.5);
+        for k in 1..=30 {
+            let now = k as f32 * 0.05;
+            let x = open_heading(&ctx, f.healer, target, &mut a, now, 1.3, |d| d * 8.0, false);
+            let y = turn_limited(target, &mut b, now, 1.3);
+            assert_eq!(x, y);
+        }
     }
 
     #[test]

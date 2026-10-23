@@ -2116,6 +2116,7 @@ fn pressured_tick(
         state,
         directive,
         abilities,
+        combatant.base_movement_speed,
         &movement.shared,
         &movement.priest.weights,
         combatant.target,
@@ -2174,16 +2175,33 @@ fn free_tick(
     }
 
     let repairing = state.formation.reach.is_some();
-    let Some(point) = compute_formation_point(
+    // Hugging a pillar (AS-373): the ring point replaces the formation point.
+    let hug = super::pillar_mode::update(
+        ctx,
         abilities,
         entity,
-        combatant,
+        combatant.base_movement_speed,
         my_pos,
-        ctx,
-        movement,
-        &mut state.formation,
+        state,
+        shared,
         now,
-    ) else {
+        decision_trace,
+        TracePosture::Free,
+    );
+    let point = match hug {
+        Some(h) => Some(h.goal),
+        None => compute_formation_point(
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            ctx,
+            movement,
+            &mut state.formation,
+            now,
+        ),
+    };
+    let Some(point) = point else {
         // DEGENERATE (R5/AE4): no formation directive; fall through to the
         // legacy ladder. Exit transitions still emit — goal_kind
         // Entity records "legacy target pursuit governs".
@@ -2353,55 +2371,49 @@ fn compute_formation_point(
     if dir == Vec2::ZERO {
         dir = away;
     }
-    // Under `TeamPlan`, turned from the last heading at no more than the
-    // healer's walk round the centroid (AS-370): the nearest enemy crossing
-    // the centroid swings the point round instead of flipping it to the far
-    // side.
-    let dir = if super::formation::continuous(ctx) {
-        super::formation::turn_limited(
-            dir,
-            &mut memory.heading,
-            now,
-            combatant.base_movement_speed / shared.formation_offset,
-        )
-    } else {
-        dir
-    };
-    let mut point = Vec3::new(
-        centroid.x + dir.x * shared.formation_offset,
-        my_pos.y,
-        centroid.z + dir.y * shared.formation_offset,
-    );
+    let wand_target = (movement.priest.weights.wand_pull > 0.0)
+        .then(|| {
+            combatant
+                .target
+                .and_then(|t| ctx.combatants.get(&t))
+                .filter(|i| i.is_alive)
+                .map(|i| i.position)
+        })
+        .flatten();
+    let burn_target = (movement.priest.weights.burn_pull > 0.0)
+        .then(|| mana_burn_pull_target(entity, combatant, ctx))
+        .flatten();
+    // The raw point for a heading: the offset off the centroid, the pulls,
+    // the arena clamp.
+    let point_at = |dir: Vec2| -> Vec3 {
+        let mut point = Vec3::new(
+            centroid.x + dir.x * shared.formation_offset,
+            my_pos.y,
+            centroid.z + dir.y * shared.formation_offset,
+        );
 
-    // Wand-range pull: clamp the point to the wand-range boundary of the
-    // kill target when it would sit outside it (weight 0 disables — the
-    // Paladin has no wand).
-    if movement.priest.weights.wand_pull > 0.0 {
-        if let Some(target) = combatant
-            .target
-            .and_then(|t| ctx.combatants.get(&t))
-            .filter(|i| i.is_alive)
-        {
-            let offset = Vec2::new(point.x - target.position.x, point.z - target.position.z);
+        // Wand-range pull: clamp the point to the wand-range boundary of the
+        // kill target when it would sit outside it (weight 0 disables — the
+        // Paladin has no wand).
+        if let Some(target) = wand_target {
+            let offset = Vec2::new(point.x - target.x, point.z - target.z);
             let dist = offset.length();
             if dist > shared.wand_range {
                 let clamped = offset / dist * shared.wand_range;
-                point.x = target.position.x + clamped.x;
-                point.z = target.position.z + clamped.y;
+                point.x = target.x + clamped.x;
+                point.z = target.z + clamped.y;
             }
         }
-    }
 
-    // Burn-range pull: while the Mana Burn window is open (see
-    // `mana_burn_pull_target`), spending the FREE window in cast range is
-    // worth more than the backline point — the enemy healer typically sits
-    // ~70yd away and no static cast range reaches it from formation. Clamp
-    // the point toward the healer's burn range, but never beyond heal range
-    // of the ally centroid (healer duty anchors the excursion). Applied
-    // after the wand clamp: when the burn window is open, burning outranks
-    // wanding.
-    if movement.priest.weights.burn_pull > 0.0 {
-        if let Some(healer_pos) = mana_burn_pull_target(entity, combatant, ctx) {
+        // Burn-range pull: while the Mana Burn window is open (see
+        // `mana_burn_pull_target`), spending the FREE window in cast range is
+        // worth more than the backline point — the enemy healer typically sits
+        // ~70yd away and no static cast range reaches it from formation. Clamp
+        // the point toward the healer's burn range, but never beyond heal range
+        // of the ally centroid (healer duty anchors the excursion). Applied
+        // after the wand clamp: when the burn window is open, burning outranks
+        // wanding.
+        if let Some(healer_pos) = burn_target {
             let burn_range =
                 abilities.get_unchecked(&AbilityType::ManaBurn).range - MANA_BURN_RANGE_BUFFER;
             let offset = Vec2::new(point.x - healer_pos.x, point.z - healer_pos.z);
@@ -2417,9 +2429,42 @@ fn compute_formation_point(
                 }
             }
         }
-    }
+        clamp_to_arena(&ctx.bounds, point)
+    };
 
-    let point = clamp_to_arena(&ctx.bounds, point);
+    // Under `TeamPlan`, turned from the last heading at no more than the
+    // healer's walk round the centroid (AS-370): the nearest enemy crossing
+    // the centroid swings the point round instead of flipping it to the far
+    // side. With the pillar modes on, the turn also keeps out of the headings
+    // whose point a teammate's shadow holds (AS-373, the open mode).
+    let dir = if super::formation::continuous(ctx) {
+        super::formation::seed_heading(memory, centroid, my_pos, now);
+        let rate = combatant.base_movement_speed / shared.formation_offset;
+        if super::formation::open_constrained(ctx) {
+            super::formation::open_heading(
+                ctx,
+                entity,
+                dir,
+                &mut memory.heading,
+                now,
+                rate,
+                |d| {
+                    let p = point_at(d);
+                    Vec2::new(p.x, p.z)
+                },
+                false,
+            )
+        } else {
+            super::formation::turn_limited(dir, &mut memory.heading, now, rate)
+        }
+    } else {
+        dir
+    };
+    let point = point_at(dir);
+    // Under the open heading (AS-373) the point already stands out of every
+    // near shadow its heading could avoid, and the repair leaves it as it
+    // is; it still repairs the point when no heading could (the anchor-only
+    // and unconstrained fallbacks of `open_heading`).
     let point = if super::formation::sight_constrained(ctx) {
         super::formation::sighted_formation_point(ctx, entity, point, &mut memory.exit)
     } else {

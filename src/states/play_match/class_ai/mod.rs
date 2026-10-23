@@ -32,6 +32,7 @@ pub mod mage;
 pub mod paladin;
 pub(crate) mod paladin_postures;
 pub mod peel;
+pub mod pillar_mode;
 pub mod pet_ai;
 pub mod plays;
 pub mod priest;
@@ -409,6 +410,13 @@ impl<'a> CombatContext<'a> {
     pub fn lock_window(&self) -> bool {
         let situation = self.situation();
         !self.self_bursts() && situation.enemy_healer_locked.is_some()
+    }
+
+    /// Whether this unit's healers play the pillar modes (AS-373,
+    /// [`pillar_mode`]): its team runs `TeamPlan` and no measurement turned
+    /// them off. `false` on a context nobody classified.
+    pub fn pillar_modes(&self) -> bool {
+        self.ai_profile.is_team_plan() && self.situation.as_ref().is_some_and(|s| s.pillar_modes)
     }
 
     /// The clock this unit's situation was classified at (the trace's
