@@ -1,6 +1,7 @@
 #!/bin/bash
 # AS-383 directional arms: one `--batch` run of the AS-292 reachable-cell
-# generator (`2026-10-19-as292-gen.py 10 2`, 9,900 matches) per AS383_EXP
+# generator (`2026-10-19-as292-gen.py 10 2`, 9,900 matches, for the screen;
+# `25 4`, 24,300, for the committed `2026-10-22-as383-h2h25-*.csv.gz`) per AS383_EXP
 # knob, on ONE binary built from main cd0cdf3d with
 # `2026-10-22-as383-instrument-and-knobs.patch` applied. The unset arm is the
 # baseline; every arm is scored against it with `2026-10-19-as292-h2h.py`.
