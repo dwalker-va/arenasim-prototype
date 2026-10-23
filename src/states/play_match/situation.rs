@@ -113,7 +113,7 @@
 //! | fact | threshold | sites that read it |
 //! |---|---|---|
 //! | dying | `health_pct < urgency_hp_threshold` | healer cover denial (`teammate_needs_saving`), the dispel walk's dying-first rule (`another_teammate_dying`) |
-//! | pressured | `danger_radius`, `threat_intent_radius` | the healers' PRESSURED trigger (its hold) |
+//! | pressured | `danger_radius`, `threat_intent_radius`; an enemy healer never closing (`TeamPlan` only) | the healers' PRESSURED trigger (its hold) |
 //! | pressure onset | the same, a closing threat `danger_edge_margin` inside both its edges | the healers' PRESSURED onset |
 //! | tempo | onset `press_advantage_margin`, release `press_release_margin` (`TeamPlan` only) | healer cover denial, the Warrior tempo reset |
 //! | danger window | dwell `danger_dwell` at a `danger_edge_margin` edge, release `danger_release` | the Peel play (`TeamPlan` only) |
@@ -256,9 +256,10 @@ pub struct AllyStanding {
     pub dying: bool,
     /// An enemy it can see targets it from within `danger_radius` — or from
     /// within `threat_intent_radius` when that enemy is a melee class, a pet,
-    /// or still closing to its preferred range. A distant caster holding
-    /// position does not pressure, and neither does a melee targeting from
-    /// across the arena.
+    /// or a ranged enemy still closing to its preferred range. A distant
+    /// caster holding position does not pressure, and neither does a melee
+    /// targeting from across the arena. Under `TeamPlan` an enemy healer is
+    /// never closing ([`closes`]): it pressures from `danger_radius` only.
     pub pressured: bool,
     /// Pressured with the CLOSING branch given width ([`pressure_onset`]): a
     /// caster or ranged enemy counts as closing only `danger_edge_margin`
@@ -712,6 +713,12 @@ pub struct SituationConfig {
     /// `shared.heal_range`: an enemy healer farther than this from a unit
     /// cannot heal it.
     pub heal_range: f32,
+    /// Whether an enemy HEALER counts as closing ([`closes`]). `false` under
+    /// `TeamPlan` and with the bare thresholds: a healer's position is its
+    /// posture machine's, not a walk to its target, so it pressures only from
+    /// `danger_radius`. `true` under `Legacy` ([`Self::under`]), the rule it
+    /// has always run.
+    pub healers_close: bool,
     /// The gated plays the team runs. None until [`Self::under`] puts the
     /// team under `TeamPlan`, so a context classified with the bare
     /// thresholds (a test's) runs no play.
@@ -745,6 +752,7 @@ impl SituationConfig {
             kill_hp_release: config.shared.kill_hp_release,
             kill_oom_mana: config.shared.kill_oom_mana,
             heal_range: config.shared.heal_range,
+            healers_close: false,
             runs: PlaySet::default(),
             exceptions: ExceptionOverrides::default(),
             withheld: WithheldPlays::default(),
@@ -755,8 +763,9 @@ impl SituationConfig {
     /// hysteresis band is a behaviour change, so it is gated: `TeamPlan` keeps
     /// the configured release, and `Legacy` releases at the onset — no band,
     /// which is exactly the unlatched `>=` test it has always run. The plays
-    /// are gated the same way: `TeamPlan` runs every one, `Legacy` none.
-    /// Every other threshold is the same under both.
+    /// are gated the same way: `TeamPlan` runs every one, `Legacy` none. So is
+    /// the closing rule ([`closes`]): only under `Legacy` does an enemy healer
+    /// still count as closing. Every other threshold is the same under both.
     pub fn under(self, profile: AiProfile) -> Self {
         match profile {
             AiProfile::TeamPlan => Self {
@@ -765,6 +774,7 @@ impl SituationConfig {
             },
             AiProfile::Legacy => Self {
                 press_release_margin: self.press_advantage_margin,
+                healers_close: true,
                 runs: PlaySet::default(),
                 ..self
             },
@@ -1247,14 +1257,32 @@ fn pressure_threats<'r>(
             let distance = subject.position.distance(threat.position);
             distance <= cfg.danger_radius
                 || (distance <= cfg.threat_intent_radius
-                    && (threat.is_pet || threat.class.is_melee() || closing(threat, subject)))
+                    && (threat.is_pet
+                        || threat.class.is_melee()
+                        || (closes(threat, cfg) && closing(threat, subject))))
         })
 }
 
 /// `threat`, targeting `subject`, is still beyond its own preferred range of
-/// it: coming in, not holding position.
+/// it: coming in, not holding position. Counts only for a threat that
+/// [`closes`].
 fn closing(threat: &CombatantInfo, subject: &CombatantInfo) -> bool {
     threat.distance_to(subject.position) > preferred_range(threat)
+}
+
+/// Whether `threat` (a ranged enemy, not a pet) can pressure by CLOSING: it
+/// moves by pursuing its target to its preferred range, so being beyond that
+/// range of its target means it is walking in to attack from it. A ranged
+/// DPS does (the Warlock, the Hunter; the Mage's 38yd preferred range lies
+/// beyond `threat_intent_radius`). An enemy HEALER does not: it moves by its
+/// posture machine — formation, cover, its own teammates — so its distance to
+/// the unit it targets says nothing about where it is heading, and it holds
+/// in the band between its 28yd preferred range and the 30yd intent radius
+/// as often as it passes through. It pressures from `danger_radius` like any
+/// enemy (and a Paladin, a melee class, by the melee branch). Gated by
+/// [`SituationConfig::healers_close`]: `Legacy` still counts the healer.
+fn closes(threat: &CombatantInfo, cfg: &SituationConfig) -> bool {
+    cfg.healers_close || !threat.class.is_healer()
 }
 
 fn preferred_range(threat: &CombatantInfo) -> f32 {
@@ -1846,10 +1874,11 @@ mod tests {
             legacy,
             SituationConfig {
                 press_release_margin: teamplan.press_advantage_margin,
+                healers_close: true,
                 runs: PlaySet::default(),
                 ..teamplan
             },
-            "only the release and the gated plays differ"
+            "only the release, the closing rule and the gated plays differ"
         );
         // With no band the latch is the plain test from each side, whatever
         // the previous tempo.
@@ -2567,7 +2596,7 @@ mod tests {
         );
         assert_eq!(at(&f), (true, false), "closing, at the intent-radius edge");
         // A 28yd caster's band is 2yd wide: it never onsets by closing.
-        f.roster.get_mut(&mage).unwrap().class = CharacterClass::Shaman;
+        f.roster.get_mut(&mage).unwrap().class = CharacterClass::Warlock;
         for d in [28.5, 29.0, 29.5, 30.0] {
             place(&mut f, mage, d, 0.0, Some(warrior));
             assert_eq!(at(&f), (true, false), "a 28yd caster closing at {d}");
@@ -2580,6 +2609,53 @@ mod tests {
         f.roster.get_mut(&healer).unwrap().class = CharacterClass::Rogue;
         place(&mut f, healer, cfg.threat_intent_radius, 0.0, Some(warrior));
         assert_eq!(at(&f), (true, true), "melee");
+    }
+
+    /// An enemy healer in its closing band — beyond its 28yd preferred range,
+    /// inside the 30yd intent radius — is not closing under `TeamPlan`, and
+    /// so pressures nothing; a Warlock in the same spot is, and does. Under
+    /// `Legacy` the healer still counts, as it always has. Inside
+    /// `danger_radius` the healer pressures under both.
+    #[test]
+    fn an_enemy_healer_never_closes_except_under_legacy() {
+        let mut f = fixture();
+        let warrior = f.warrior;
+        let healer = f.healer;
+        let at = |f: &Fixture, profile: AiProfile| {
+            let s = classify_roster(
+                &f.roster,
+                &f.auras,
+                &[],
+                1,
+                &TeamSituation::default(),
+                &MatchClock::after_gates(30.0),
+                &SituationConfig::default().under(profile),
+            );
+            (s.is_pressured(warrior), s.is_pressure_onset(warrior))
+        };
+        let band = CharacterClass::Priest.preferred_range() + 1.0;
+        let cfg = SituationConfig::default();
+        assert!(band < cfg.threat_intent_radius);
+        for class in [
+            CharacterClass::Priest,
+            CharacterClass::Shaman,
+            CharacterClass::Druid,
+        ] {
+            f.roster.get_mut(&healer).unwrap().class = class;
+            place(&mut f, healer, band, 0.0, Some(warrior));
+            assert_eq!(at(&f, AiProfile::TeamPlan), (false, false), "{class:?}");
+            assert!(at(&f, AiProfile::Legacy).0, "{class:?} under Legacy");
+            place(&mut f, healer, cfg.danger_radius, 0.0, Some(warrior));
+            assert_eq!(
+                at(&f, AiProfile::TeamPlan),
+                (true, true),
+                "{class:?} close in"
+            );
+        }
+        // The control: a ranged DPS in the same spot is closing.
+        f.roster.get_mut(&healer).unwrap().class = CharacterClass::Warlock;
+        place(&mut f, healer, band, 0.0, Some(warrior));
+        assert!(at(&f, AiProfile::TeamPlan).0, "a Warlock closing");
     }
 
     /// `last_stand`: a team's only living non-pet unit, against two or more
@@ -2774,13 +2850,16 @@ mod tests {
         }
     }
 
-    /// The fixture's enemy Priest 29.5yd from `whom`, targeting it: still
-    /// closing (beyond its 28yd preferred range) inside the 30yd intent
-    /// radius, so it pressures — but from within `danger_edge_margin` of both
-    /// boundaries, so only from the EDGE.
+    /// The fixture's enemy Priest, made a Warlock, 29.5yd from `whom`,
+    /// targeting it: still closing (beyond its 28yd preferred range) inside
+    /// the 30yd intent radius, so it pressures — but from within
+    /// `danger_edge_margin` of both boundaries, so only from the EDGE. (A
+    /// Warlock and not the Priest: an enemy healer never closes,
+    /// [`closes`].)
     fn edge_threat(f: &mut Fixture, whom: Entity) {
         let at = f.roster[&whom].position;
         let healer = f.healer;
+        f.roster.get_mut(&healer).unwrap().class = CharacterClass::Warlock;
         place(f, healer, at.x + 29.5, at.z, Some(whom));
     }
 

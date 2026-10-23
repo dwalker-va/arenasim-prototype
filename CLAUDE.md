@@ -256,13 +256,13 @@ For deeper context, see these focused references:
   2026-08-04 amendments before building any of it — the design's shape held up
   but several specifics were wrong in ways only measurement exposed, and step 4's
   retirement goal is not achievable as written. Steps 2, 3 and the healer half of
-  4 have shipped: Nagrand occlusion `Legacy` 0.0s -> `TeamPlan` 19.2s per match
-  (15.1s before contact, 4.1s after; `tests/camp_sweep.rs`, 2026-09-30, after
-  AS-181's steering fix — the robust result, per-frame, thousands of samples).
-  The earlier 28.1s (29.6s just before AS-181) is superseded: the fix changed
-  the Priest's path round its camp pillar, and after contact it now takes less
-  cover. At most about 20-45% of the old after-contact figure overlapped the
-  Priest pinned against the pillar or vibrating there. The DPS half was reverted:
+  4 have shipped: Nagrand occlusion `Legacy` 0.0s -> `TeamPlan` 27.4s per match
+  (15.1s before contact, 12.3s after; `tests/camp_sweep.rs`, 2026-10-19, with
+  AS-362's crowd-control avoidance and AS-292's closing rule — the robust
+  result, per-frame, thousands of samples). Its Priest heals its Warrior 307
+  per match (241 without AS-292), but its heal line is blocked on 33% of frames
+  (23%): `docs/design/balance/2026-10-17-as292-closing-clause.md`.
+  The DPS half was reverted:
   constraint satisfaction cannot express a kiter's distance-maximisation.
   `Legacy` is byte-identical throughout.
   **Head-to-head, n=300 per arm** (2026-10-10 at `ea63f4f`, PillaredArena;

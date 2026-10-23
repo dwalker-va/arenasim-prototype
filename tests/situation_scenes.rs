@@ -9,7 +9,7 @@
 //! when it is deleted. Each pair below kills exactly that deletion.
 
 use arenasim::states::match_config::CharacterClass::{
-    Druid, Hunter, Mage, Paladin, Priest, Warlock, Warrior,
+    self, Druid, Hunter, Mage, Paladin, Priest, Shaman, Warlock, Warrior,
 };
 use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::druid::mana_reserve;
@@ -430,6 +430,109 @@ fn a_dying_teammate_under_attack_is_in_danger() {
         "{}",
         describe(&unpressed)
     );
+}
+
+// ---------------------------------------------------------------------------
+// What counts as closing (AS-292): under `TeamPlan` an enemy HEALER between
+// its 28yd preferred range and the 30yd intent radius is not closing — it
+// moves by its posture, not toward its target — so it is no pressure; a
+// ranged DPS in the same spot, and a melee, still are. `Legacy` keeps the old
+// rule.
+// ---------------------------------------------------------------------------
+
+const ENEMY: &str = "enemy";
+
+/// A Priest under `profile`, its Warrior teammate 10yd off, and one enemy of
+/// `class` targeting `whom` from `distance` yards straight out from it.
+fn banded_scene(
+    profile: AiProfile,
+    class: CharacterClass,
+    whom: &'static str,
+    distance: f32,
+) -> Scene {
+    let at_z = if whom == ALLY { -10.0 } else { 0.0 };
+    Scene::new()
+        .ai_profile(1, profile)
+        .unit(PRIEST, 1, Priest)
+        .aura(PRIEST, AuraType::MaxHealthIncrease, 600.0)
+        .unit(ALLY, 1, Warrior)
+        .at(0.0, -10.0)
+        .aura(ALLY, AuraType::MaxHealthIncrease, 600.0)
+        .unit(ENEMY, 2, class)
+        .at(-distance, at_z)
+        .targeting(whom)
+}
+
+fn pressured_enter(view: &DecisionView) -> bool {
+    view.movement
+        .iter()
+        .any(|m| m.trigger == MovementTrigger::PressuredEnter)
+}
+
+fn is_pressured(scene: &mut Scene, who: &'static str) -> bool {
+    let entity = scene.entity(who);
+    scene.reclassify().for_team(1).is_pressured(entity)
+}
+
+#[test]
+fn an_enemy_healer_in_its_closing_band_does_not_pressure_a_teamplan_healer() {
+    let band = Priest.preferred_range() + 1.0;
+    for class in [Priest, Shaman, Druid] {
+        let mut scene = banded_scene(AiProfile::TeamPlan, class, PRIEST, band);
+        let view = scene.decide(PRIEST);
+        assert!(!pressured_enter(&view), "{class:?}: {}", describe(&view));
+        assert!(!is_pressured(&mut scene, PRIEST), "{class:?}");
+    }
+    // Controls, the same spot: a ranged DPS still closing to its own 28yd...
+    let mut warlock = banded_scene(AiProfile::TeamPlan, Warlock, PRIEST, band);
+    let view = warlock.decide(PRIEST);
+    assert!(
+        pressured_enter(&view),
+        "a Warlock closing: {}",
+        describe(&view)
+    );
+    assert!(is_pressured(&mut warlock, PRIEST));
+    // ...a melee inside the intent radius...
+    let view = banded_scene(AiProfile::TeamPlan, Warrior, PRIEST, band).decide(PRIEST);
+    assert!(pressured_enter(&view), "a Warrior: {}", describe(&view));
+    // ...and the enemy healer itself, once inside the danger radius.
+    let view = banded_scene(AiProfile::TeamPlan, Priest, PRIEST, 10.0).decide(PRIEST);
+    assert!(
+        pressured_enter(&view),
+        "a Priest at 10yd: {}",
+        describe(&view)
+    );
+}
+
+#[test]
+fn an_enemy_healer_in_its_closing_band_still_pressures_under_legacy() {
+    let band = Priest.preferred_range() + 1.0;
+    let mut legacy = banded_scene(AiProfile::Legacy, Priest, PRIEST, band);
+    assert!(is_pressured(&mut legacy, PRIEST));
+    let mut teamplan = banded_scene(AiProfile::TeamPlan, Priest, PRIEST, band);
+    assert!(!is_pressured(&mut teamplan, PRIEST));
+}
+
+#[test]
+fn an_enemy_healer_in_its_closing_band_puts_no_teamplan_teammate_in_danger() {
+    let band = Priest.preferred_range() + 1.0;
+    let danger = |class| {
+        let mut scene = banded_scene(AiProfile::TeamPlan, class, ALLY, band);
+        scene.set_health(ALLY, 0.3);
+        let view = scene.decide(PRIEST);
+        (
+            view.situation
+                .and_then(|s| s.ally_in_danger)
+                .map(|w| w.subject),
+            scene.entity(ALLY).index(),
+            describe(&view),
+        )
+    };
+    let (window, _, why) = danger(Priest);
+    assert_eq!(window, None, "{why}");
+    // Control: a Warlock in the same spot puts the teammate in danger.
+    let (window, ally, why) = danger(Warlock);
+    assert_eq!(window, Some(ally), "{why}");
 }
 
 // ---------------------------------------------------------------------------

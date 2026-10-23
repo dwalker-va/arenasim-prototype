@@ -1,0 +1,160 @@
+diff --git a/src/states/play_match/situation.rs b/src/states/play_match/situation.rs
+index 71e59eb9..c7ef9764 100644
+--- a/src/states/play_match/situation.rs
++++ b/src/states/play_match/situation.rs
+@@ -995,6 +995,7 @@ pub fn classify_roster(
+     cfg: &SituationConfig,
+ ) -> TeamSituation {
+     let allies = allies(roster, auras, team, cfg);
++    as292_instrument(roster, auras, &allies, team, clock.now, cfg);
+     let danger = ally_in_danger(roster, auras, &allies, prev, clock.now, cfg);
+     let ally_in_danger = danger.window;
+     let danger_attackers = ally_in_danger
+@@ -1193,6 +1194,80 @@ fn allies(
+         .collect()
+ }
+ 
++/// AS-292 measurement instrument (throwaway). For every ally the old rule
++/// pressures (hold or onset), one line to `$AS292_LOG`: which branches of the
++/// test hold it. `prox` within danger_radius; `mp` a melee or pet within the
++/// intent radius; `ch`/`cd` closing within the intent radius by a healer /
++/// a non-healer; `och`/`ocd` the same for the onset's widened band.
++fn as292_instrument(
++    roster: &BTreeMap<Entity, CombatantInfo>,
++    auras: &BTreeMap<Entity, Vec<Aura>>,
++    allies: &[AllyStanding],
++    team: u8,
++    now: f32,
++    cfg: &SituationConfig,
++) {
++    let Ok(path) = std::env::var("AS292_LOG") else {
++        return;
++    };
++    use std::io::Write;
++    let mut out = String::new();
++    for a in allies.iter().filter(|a| a.pressured || a.pressure_onset) {
++        let Some(subject) = roster.get(&a.entity) else {
++            continue;
++        };
++        let m = cfg.danger_edge_margin;
++        let (mut prox, mut mp, mut ch, mut cd, mut och, mut ocd) =
++            (false, false, false, false, false, false);
++        for t in pressure_threats(roster, auras, subject, cfg) {
++            let d = subject.position.distance(t.position);
++            let healer = t.pet_type.is_none() && t.class.is_healer();
++            if d <= cfg.danger_radius {
++                prox = true;
++            }
++            if d <= cfg.threat_intent_radius && (t.is_pet || t.class.is_melee()) {
++                mp = true;
++            }
++            if d <= cfg.threat_intent_radius
++                && !t.is_pet
++                && !t.class.is_melee()
++                && closing(t, subject)
++            {
++                if healer {
++                    ch = true;
++                } else {
++                    cd = true;
++                }
++            }
++            if d <= cfg.threat_intent_radius - m
++                && !t.is_pet
++                && !t.class.is_melee()
++                && t.distance_to(subject.position) > preferred_range(t) + m
++            {
++                if healer {
++                    och = true;
++                } else {
++                    ocd = true;
++                }
++            }
++        }
++        out.push_str(&format!(
++            "{now:.4} {team} {} {:?} dying={} p={} on={} prox={prox} mp={mp} ch={ch} cd={cd} och={och} ocd={ocd} prof={}\n",
++            a.entity.index(),
++            subject.class,
++            a.dying as u8,
++            a.pressured as u8,
++            a.pressure_onset as u8,
++            if cfg.runs == PlaySet::default() { "L" } else { "T" },
++        ));
++    }
++    if !out.is_empty() {
++        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
++            let _ = f.write_all(out.as_bytes());
++        }
++    }
++}
++
+ /// [`AllyStanding::pressured`], judged from `subject`'s own view: the enemies
+ /// [`stealth_visible`] lets IT see, its own Shadow Sight included. Enemy pets
+ /// count as threats.
+diff --git a/tests/as292_bank.rs b/tests/as292_bank.rs
+new file mode 100644
+index 00000000..55eadc8d
+--- /dev/null
++++ b/tests/as292_bank.rs
+@@ -0,0 +1,61 @@
++//! AS-292 measurement arm (throwaway): plays a seed bank with the
++//! `as292_instrument` hook on, writing each match's decision trace and the
++//! instrument's pressure lines under `$AS292_DIR`. Reduced by
++//! `docs/design/balance/sweeps/2026-10-17-as292-reduce.py`.
++
++mod common;
++
++use arenasim::headless::HeadlessMatchConfig;
++use common::staged::play_seeded;
++
++const COMPS: &[(&[&str], &[&str])] = &[
++    (&["Mage", "Priest"], &["Warrior", "Druid"]),
++    (&["Warlock", "Shaman"], &["Rogue", "Priest"]),
++    (&["Hunter", "Paladin"], &["Warrior", "Mage"]),
++    (&["Rogue", "Druid"], &["Hunter", "Priest"]),
++    (&["Warrior", "Shaman"], &["Rogue", "Warlock"]),
++    (&["Paladin", "Mage"], &["Warrior", "Hunter"]),
++    (&["Warrior", "Druid"], &["Hunter", "Shaman"]),
++    (&["Warlock", "Priest"], &["Mage", "Shaman"]),
++    (&["Hunter", "Druid"], &["Warlock", "Priest"]),
++];
++const MAPS: &[&str] = &["PillaredArena", "BasicArena"];
++const PROFILES: &[&str] = &["Legacy", "TeamPlan"];
++
++#[test]
++#[ignore = "measurement arm"]
++fn as292_bank() {
++    let dir = std::env::var("AS292_DIR").expect("AS292_DIR");
++    let seeds: u64 = std::env::var("AS292_SEEDS").map_or(12, |s| s.parse().unwrap());
++    std::fs::create_dir_all(&dir).unwrap();
++    for profile in PROFILES {
++        for map in MAPS {
++            for (ci, (team1, team2)) in COMPS.iter().enumerate() {
++                for seed in 1..=seeds {
++                    let stem = format!("{dir}/{profile}_{map}_{ci}_{seed}");
++                    let press = format!("{stem}.press.log");
++                    let _ = std::fs::remove_file(&press);
++                    std::env::set_var("AS292_LOG", &press);
++                    let played = play_seeded(HeadlessMatchConfig {
++                        team1: team1.iter().map(|s| s.to_string()).collect(),
++                        team2: team2.iter().map(|s| s.to_string()).collect(),
++                        map: map.to_string(),
++                        random_seed: Some(seed),
++                        ai_profile: Some(profile.to_string()),
++                        ..Default::default()
++                    });
++                    std::fs::write(format!("{stem}.trace.jsonl"), &played.trace_raw).unwrap();
++                    std::fs::write(
++                        format!("{stem}.result"),
++                        format!(
++                            "{:?} {:?} {:.3}\n",
++                            played.result.winner, played.result.end_reason, played.result.match_time
++                        ),
++                    )
++                    .unwrap();
++                }
++            }
++        }
++    }
++    std::env::remove_var("AS292_LOG");
++}

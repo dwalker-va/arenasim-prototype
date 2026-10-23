@@ -7560,18 +7560,158 @@ mod nagrand_teamplan {
     /// `docs/design/balance/2026-09-28-as167-weapon-speed.md` in case it is
     /// the start of something. Seed 2 (17%, 3613 paired frames) replaces it;
     /// the ceiling is unchanged.
+    ///
+    /// # What it measures since AS-292: the solve's own heal line
+    ///
+    /// The share of ALL frames with the line blocked stopped measuring the
+    /// solve once AS-292 took the enemy Priest at 28-30yd out of `pressured`:
+    /// seeds 1-24 run 3-33% on `main` (pooled 20.7%) and 12-49% with AS-292
+    /// (pooled 29.5%), and with `OccupyCover`'s sight constraint removed
+    /// 24-63% (pooled 37.4%). The two overlap seed for seed — at the pinned
+    /// seeds AS-292 is 44 / 33 / 22% and the mutant 46 / 35 / 46% — so no
+    /// ceiling on that share fails the mutant and passes AS-292. The frames
+    /// AS-292 adds are ones the line does not matter on: blocked while the
+    /// Warrior is below 80% and the Priest can cast is 46.3% of such frames
+    /// on `main` and 47.0% with AS-292 (63.1% for the mutant), and the camp's
+    /// wins are 21 of 24 on both.
+    ///
+    /// So the probe measures the thing `C_SIGHT` decides: on frames the Priest
+    /// is PRESSURED (the team solve's posture) and free to cast, the share
+    /// whose movement goal — the spot the solve picked — has no line to the
+    /// Warrior ([`solve_goal_blind_share`]). Seeds 1-24:
+    ///
+    /// ```text
+    /// main         4-30%, pooled 13.6%   (pinned 7 / 2 / 12:  7 / 16 / 11%)
+    /// AS-292       5-42%, pooled 21.5%   (pinned:            31 / 21 / 12%)
+    /// no C_SIGHT  52-94%, pooled 78.6%   (pinned:            68 / 63 / 81%)
+    /// ```
+    ///
+    /// The ceiling is 50%: above every seed with the constraint in place,
+    /// below every seed without it. AS-292 raises it (the Priest now hides
+    /// from a Warlock fighting its Warrior where it used to stand off the
+    /// enemy Priest); that is the cost the ceiling leaves room for. The seeds
+    /// are unchanged.
     #[test]
     fn teamplan_healer_keeps_its_heal_line_on_nagrand() {
         for seed in [7u64, 2, 12] {
-            let s = measure_pillar(seed);
-            assert!(s.paired_frames > 500, "seed {seed}: probe went vacuous");
+            let (frames, share) = solve_goal_blind_share(seed);
+            assert_min_occurrences(&format!("seed {seed} pressured solve frames"), frames, 300);
             assert!(
-                s.blocked_share <= 0.35,
-                "seed {seed}: heal line blocked {:.0}% of frames — regressing toward the \
-                 40-55% self-blocking pathology (healthy is 12-18%)",
-                100.0 * s.blocked_share
+                share <= 0.50,
+                "seed {seed}: the PRESSURED solve's goal had no line to the Warrior on \
+                 {:.0}% of the frames the Priest could heal — the solve has stopped asking \
+                 for sight of its ally (healthy is 5-42%; without C_SIGHT 52-94%)",
+                100.0 * share
             );
         }
+    }
+
+    /// The heal-line probe's measurement at one seed (the Nagrand camp,
+    /// `TeamPlan`): over the frames the team-1 Priest is PRESSURED — read off
+    /// its `movement_decision` posture — with a `Point` goal, both it and its
+    /// Warrior alive, and no hard CC, silence or school lockout on it (the
+    /// solve asks for sight only while the healer can cast,
+    /// `team_solve::can_cast_heal`), the count of such frames and the share
+    /// whose goal point has no line of sight to the Warrior.
+    fn solve_goal_blind_share(seed: u64) -> (usize, f32) {
+        use arenasim::headless::runner::TraceConfig;
+        use arenasim::states::play_match::components::AuraType;
+
+        let mut cfg = create_config(
+            vec!["Warrior", "Priest"],
+            vec!["Warlock", "Priest"],
+            Some(seed),
+        );
+        cfg.map = "PillaredArena".to_string();
+        cfg.ai_profile = Some("TeamPlan".to_string());
+        cfg.max_duration_secs = 300.0;
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        drop(tmp);
+
+        // (combat time, goal, Warrior position) on each frame the Priest could heal.
+        let mut frames: Vec<(f32, Vec3, Vec3)> = Vec::new();
+        let mut gate: Option<f32> = None;
+        let mut priest_slot = None;
+        run_headless_match_observed(
+            cfg,
+            true,
+            Some(TraceConfig {
+                output_path: path.clone(),
+            }),
+            |f| {
+                if !f.gates_open {
+                    return;
+                }
+                let gate = *gate.get_or_insert(f.sim_time);
+                let find = |class| {
+                    f.combatants
+                        .values()
+                        .find(|c| c.team == 1 && c.class == class && !c.is_pet)
+                };
+                let (Some(p), Some(w)) =
+                    (find(CharacterClass::Priest), find(CharacterClass::Warrior))
+                else {
+                    return;
+                };
+                priest_slot = Some(p.slot);
+                let held = p.aura_types.iter().any(|a| {
+                    matches!(
+                        a,
+                        AuraType::Stun
+                            | AuraType::Fear
+                            | AuraType::Polymorph
+                            | AuraType::Incapacitate
+                            | AuraType::Silence
+                            | AuraType::SpellSchoolLockout
+                    )
+                });
+                if p.alive && w.alive && !held {
+                    if let Some(goal) = p.point_goal {
+                        frames.push((f.sim_time - gate, goal, w.position));
+                    }
+                }
+            },
+        )
+        .expect("observed traced headless match failed");
+
+        let slot = priest_slot.expect("no team-1 Priest");
+        let postures: Vec<(f32, String)> = std::fs::read_to_string(&path)
+            .expect("read trace file")
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|v| {
+                v["kind"] == "movement_decision"
+                    && v["actor"]["team"].as_u64() == Some(1)
+                    && v["actor"]["slot"].as_u64() == Some(slot as u64)
+            })
+            .map(|v| {
+                (
+                    v["sim_time"].as_f64().unwrap() as f32,
+                    v["posture"].as_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect();
+        let _ = std::fs::remove_file(path);
+
+        let vols = volumes();
+        let (mut pressured, mut blind) = (0usize, 0usize);
+        let mut next = 0usize;
+        let mut posture = "";
+        for (t, goal, warrior) in frames {
+            while next < postures.len() && postures[next].0 <= t {
+                posture = &postures[next].1;
+                next += 1;
+            }
+            if posture != "pressured" {
+                continue;
+            }
+            pressured += 1;
+            if !has_line_of_sight(&vols, eye(xz(goal)), eye(xz(warrior))) {
+                blind += 1;
+            }
+        }
+        (pressured, blind as f32 / pressured.max(1) as f32)
     }
 
     /// THE KITER LEASH. A `TeamPlan` Hunter must stay healable: `flee` is
@@ -7801,11 +7941,14 @@ mod nagrand_teamplan {
     fn scan_nagrand_teamplan() {
         for seed in 1u64..=12 {
             let s = measure_pillar(seed);
+            let (solve_frames, goal_blind) = solve_goal_blind_share(seed);
             println!(
-                "pillar seed {seed:2}: occl {:.1}s | blocked {:.0}% | frames {}",
+                "pillar seed {seed:2}: occl {:.1}s | blocked {:.0}% | frames {} | solve goal \
+                 blind {:.0}% of {solve_frames}",
                 s.occlusion_secs,
                 100.0 * s.blocked_share,
-                s.paired_frames
+                s.paired_frames,
+                100.0 * goal_blind,
             );
         }
         for profile in ["TeamPlan", "Legacy"] {
