@@ -764,8 +764,10 @@ whose scorer terms name the `pillar` and the three `key_*` values.
   other way round the centroid, through the open. With nothing forbidden it is
   `turn_limited` bit for bit; AS-206's point repair still runs after it and is
   a no-op unless every heading was forbidden.
-- Not the Paladin or the Shaman (`HUG_EXCEPTIONS`, each with its
-  measurement); both still play the open heading. Medic chase, dispel walk,
+- Never the Paladin or the Shaman in hug (`HUG_EXCEPTIONS`, each with its
+  measurement). The Shaman still plays the open heading; the Paladin is
+  untouched by both modes (its FREE is melee pursuit, with no formation
+  point). Medic chase, dispel walk,
   TakeCover, ESCAPE and DIP outrank it and leave the mode as it was.
   Obstacle-free maps are untouched; `Legacy` is byte-identical.
 

@@ -107,8 +107,10 @@ pub const HUG_SIGHT_MARGIN: f32 = 3.0;
 /// wider than the positioning horizon (`cc_ready_horizon`), because the mode
 /// is a stance, not a step.
 pub const CC_MODE_HORIZON: f32 = 5.0;
-/// The healers that never hug, each with the measurement behind it. They
-/// still play the open mode's heading (`formation::open_heading`).
+/// The healers that never hug, each with the measurement behind it. The
+/// Shaman still plays the open mode's heading (`formation::open_heading`);
+/// the Paladin is untouched by both modes, since its FREE is melee pursuit and
+/// never builds a formation point.
 pub const HUG_EXCEPTIONS: &[(CharacterClass, &str)] = &[
     (
         CharacterClass::Paladin,

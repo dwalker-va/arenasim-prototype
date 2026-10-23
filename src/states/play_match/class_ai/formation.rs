@@ -254,17 +254,19 @@ pub fn walk_is_stale(directive: Option<&MovementDirective>, point: Vec2, thresho
 
 /// Whether the formation point is held to sight of the teammates under this
 /// unit's AI profile: `TeamPlan` only. With the pillar modes on
-/// ([`open_constrained`]) the HEADING is held instead, and this repair of the
-/// point is not run.
+/// ([`open_constrained`]) the HEADING is held first, and this repair still runs
+/// on the point it gives: a no-op wherever some heading kept the point out of
+/// every near shadow, a repair only in `open_heading`'s anchor-only and
+/// unconstrained fallbacks.
 pub fn sight_constrained(ctx: &CombatContext) -> bool {
     ctx.ai_profile.is_team_plan()
 }
 
 /// Whether the open mode's sight constraint holds the formation HEADING
 /// (AS-373, [`open_heading`]): `TeamPlan` with the pillar modes on, on a map
-/// with obstacles. It replaces the point's sight repair
-/// ([`sighted_formation_point`]); with the modes off a `TeamPlan` healer keeps
-/// the repair.
+/// with obstacles. It holds the heading ahead of the point's sight repair
+/// ([`sighted_formation_point`]), which still runs after it; with the modes off
+/// a `TeamPlan` healer has the repair alone.
 pub fn open_constrained(ctx: &CombatContext) -> bool {
     ctx.pillar_modes() && !ctx.obstacles.is_empty()
 }

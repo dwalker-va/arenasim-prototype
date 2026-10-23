@@ -11,6 +11,9 @@
 //! - a Rogue alone gives open: its stuns are a melee's, and a pillar is no
 //!   defence against a unit that walks round it;
 //! - a wall between the teammate and every point of the ring gives open;
+//! - a Fear whose reach covers the whole sighted ring gives open (no ground
+//!   there is defended), against the same Fear ready but off the ring;
+//! - a hug changing side turns through the sighted arc, never the shadow;
 //! - the hug holds across the Schmitt band (entered at 12yd from the skin,
 //!   left beyond 20yd) and through its dwell (left only after 2s).
 
@@ -24,7 +27,7 @@ use arenasim::states::play_match::class_ai::pillar_mode::{
 };
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::{
-    HealerPosture, MovementGoal, PillarMemory, PillarMode, Posture,
+    HealerPosture, MovementGoal, PillarMemory, PillarMode, Posture, RingAngle,
 };
 use arenasim::states::play_match::decision_trace::MovementTrigger;
 use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
@@ -50,6 +53,16 @@ fn pillar() -> Vec<ObstacleVolume> {
 /// of it (`mate_skin` yards from its skin), and an enemy `caster` standing off
 /// east of it. Nobody targets the healer, so it is FREE.
 fn scene(healer: CharacterClass, caster: CharacterClass, mate_skin: f32) -> Scene {
+    scene_with(healer, caster, mate_skin, (18.0, 2.0))
+}
+
+/// [`scene`] with the enemy caster at `caster_at`.
+fn scene_with(
+    healer: CharacterClass,
+    caster: CharacterClass,
+    mate_skin: f32,
+    caster_at: (f32, f32),
+) -> Scene {
     let z = 6.0 + mate_skin;
     Scene::new()
         .obstacles(pillar())
@@ -64,7 +77,7 @@ fn scene(healer: CharacterClass, caster: CharacterClass, mate_skin: f32) -> Scen
         .at(1.5, z)
         .targeting(MATE)
         .unit(CASTER, 2, caster)
-        .at(18.0, 2.0)
+        .at(caster_at.0, caster_at.1)
         .targeting(MATE)
 }
 
@@ -121,6 +134,70 @@ fn a_ready_fear_at_a_pillar_fight_gives_hug() {
         assert!(!entered(&off.decide(HEALER)), "{healer:?}: modes off");
         let legacy = scene(healer, Warlock, 6.0).ai_profile(1, AiProfile::Legacy);
         assert!(!entered(&legacy.decide(HEALER)), "{healer:?}: Legacy");
+    }
+}
+
+/// The defended arc: a hug is only worth ground the pillar hides from the
+/// crowd control the hug is for. A Warlock north of the fight, its Fear ready,
+/// sees the whole ring arc that sees the Warrior from within Fear's reach: no
+/// ground there is defended, so the healer plays the open. The control moves
+/// the same Warlock north beyond Fear's reach of any of that ring — its Fear
+/// is still ready, so the crowd-control key still holds — and the healer hugs.
+#[test]
+fn a_ring_the_fear_covers_gives_open() {
+    for healer in HEALERS {
+        let covered = scene_with(healer, Warlock, 6.0, (0.0, 26.0)).decide(HEALER);
+        assert!(!entered(&covered), "{healer:?}: {:?}", covered.movement);
+        let off_ring = scene_with(healer, Warlock, 6.0, (0.0, 46.0)).decide(HEALER);
+        assert!(entered(&off_ring), "{healer:?}: {:?}", off_ring.movement);
+    }
+}
+
+/// The hug's turn goes only through the sighted arc. The Warrior stands 25yd
+/// north of the pillar, so the ring's sighted arc runs from about -27 to 207
+/// degrees and the shadow is the south side. A Warlock far to the north-east,
+/// beyond Fear's reach of the ring, sees all of that arc but its far west end,
+/// so the hug's target is there (about 175 degrees). The healer's ring angle
+/// stands at -20 degrees: the shorter way to the target (south, 165 degrees)
+/// crosses the shadow, the way through the arc (north, 195 degrees) does not.
+/// After 0.6s of turning the goal must still see the Warrior, and must have
+/// turned north.
+#[test]
+fn the_hug_turns_through_the_arc_not_the_shadow() {
+    let now = 30.0;
+    for healer in HEALERS {
+        let posture = HealerPosture {
+            pillar: PillarMemory {
+                mode: PillarMode::Hug { pillar: 0 },
+                since: Some(now - 10.0),
+                angle: Some(RingAngle {
+                    theta: (-20.0f32).to_radians(),
+                    at: now - 0.6,
+                }),
+                ..Default::default()
+            },
+            ..HealerPosture::new(0.0)
+        };
+        let view = scene_with(healer, Warlock, 19.0, (31.8, 31.8))
+            .now(now)
+            .healer_posture(HEALER, posture)
+            .decide(HEALER);
+        assert!(
+            !left(&view),
+            "{healer:?}: the hug ended: {:?}",
+            view.movement
+        );
+        let at = goal(&view).expect("a point walk");
+        let mate = Vec3::new(0.0, 1.0, 25.0);
+        let deg = Vec2::new(at.x, at.z).to_angle().to_degrees();
+        assert!(
+            has_line_of_sight(&pillar(), eye(at), eye(mate)),
+            "{healer:?}: the goal {at} ({deg:.0} degrees) is in the Warrior's shadow"
+        );
+        assert!(
+            deg > -20.0 && deg < 90.0,
+            "{healer:?}: the goal turned the wrong way, to {deg:.0} degrees"
+        );
     }
 }
 

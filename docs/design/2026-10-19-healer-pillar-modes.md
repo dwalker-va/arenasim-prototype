@@ -586,6 +586,9 @@ reading of a choice the design left open.
   entry). Over the first head-to-head (seeds 1-4, n=2,080 Shaman matches) hug
   and open together cost it 3.2pt (z=-3.0), the open alone 1.2pt (z=-1.7). The
   exception was then checked on fresh seeds (§11.4): Shaman -0.5pt (z=-0.7).
+  AS-373-test's re-check (Shaman hugging and open against neither) reads
+  -1.1 (ns) overall, -1.6 (z=-2.34) in 2v2 and +12.5 in 3v3 (n=160): the
+  exception is for the user to rule on.
   Re-check it at the milestone sweep, as the play exceptions are.
 - **The PRESSURED margin** is a cost above crowd control and cover together
   (`W_MARGIN` plus their ceilings), below sight; the soft leash is 10 a yard
@@ -655,6 +658,23 @@ time in a mode 6.0s and 4.1s (the floor is `MODE_DWELL`, 2s).
 | pillar deaths down | Nagrand 12 → 8; TwinPillars 18 → 24. Small counts. |
 | AS-370 formation-goal changes over 5yd at 0 | **Not met.** `measure_formation_goal_jumps` (10 seeds, both orders): Warrior+Mage+Priest v Rogue+Warlock+Druid 17 → 29; Warlock+Priest v Rogue+Druid 36 → 17; Mage+Druid v Hunter+Paladin 13 → 0; the other two 0 → 0. What steps now is a change of mode (the goal moves between the open point and the ring) and the 3v3 anchor-only fallback. |
 | reversal cells not up | Not measured cell by cell; `tests/healer_positioning.rs`'s pinned reversal rate passes. |
+| no healer × map cell gains hard CC | **Not met.** Five of eight cells gain (table below). |
+| AS-370's three chosen-exit situations staged (3v3, seeds 20, 36, 49) | **Dropped, not built.** They exist to show those exit changes go to zero, and the target they serve is missed (the row above on exit changes): staging them would pin a property the build does not have. The open traverse (`tests/pillar_mode_staged.rs`) stages the open mode's own crossing instead, with its modes-off pair. |
+
+Hard-CC'd share of post-contact time per healer class and map (the §2 bank,
+`docs/design/balance/sweeps/2026-10-23-as373-cc-cells.py`), `main` → this build:
+
+| healer | Nagrand | TwinPillars |
+|---|---|---|
+| Priest | 4.15% → **4.68%** | 6.19% → 6.03% |
+| Druid | 3.64% → 3.36% | 3.41% → **4.04%** |
+| Shaman | 3.66% → **3.81%** | 4.22% → **4.78%** |
+| Paladin | 4.51% → 4.19% | 4.34% → **4.91%** |
+
+The Shaman and the Paladin do not hug; their change comes from the open
+heading (the Shaman), and from teammates and opponents that do (both). The
+traced PRESSURED hug is also hard-CC'd more than PRESSURED open (Nagrand 6.6%
+against 5.0%; 3v3 Nagrand 14.7% against 6.5%, small samples).
 
 The camp (`tests/camp_sweep.rs`, Warrior+Priest v Warlock+Priest, 12 seeds,
 both teams `TeamPlan` with the modes): 12/12 → 11/12, heal to the Warrior 307 →
@@ -689,13 +709,16 @@ TwinPillars +0.4 (z=+0.73). 3v3 +1.7 (z=+0.69, n=480). **No significant loss
 overall or in any healer class**, the success condition; no gain either.
 
 **`TeamPlan` against `Legacy`, before and after** (the `TeamPlan` side scored;
-before is `main`): overall 51.5% → 51.2% (-0.3pt, z=-0.91); Nagrand -0.9pt
-(z=-2.55); TwinPillars +0.4 (z=+0.87); 3v3 **-5.0pt (z=-2.25, n=480)**. The 3v3
-figure is mostly the open heading: with hug disabled the open mode alone is
--5.4pt (z=-2.84), and with the heading held out of the ANCHOR's shadow only
-(other teammates left to AS-206's repair) -2.3pt (z=-1.36). Against a
-`TeamPlan` opponent the same 3v3 cells did not move (+1.7, ns). Read with the
-counts: 114 flips in the 3v3 cells.
+before is `main`), on **fresh seeds 9-48** (AS-373-test's replication, n=4,800
+in the 3v3 cells): overall +0.1pt (ns), 2v2 +0.3 (ns), Nagrand +0.2 (ns); 3v3
+**-2.1pt (z=-2.95, about [-3.5, -0.7])**, the Shaman's 3v3 cells -5.8 (z=-3.16).
+About 1.5pt of the 3v3 loss is D7's all-teammates rule: with the heading held
+out of the ANCHOR's shadow only (other teammates left to AS-206's repair), 3v3
+is -0.6 (ns) against `main` and +1.6pt (z=+3.69) against this build. The first
+run of this comparison, on seeds 1-4, read 3v3 -5.0pt (n=480) and Nagrand
+-0.9pt (z=-2.55); neither replicates on seeds 9-48, so they are not the
+figures to decide on. Against a `TeamPlan` opponent the same 3v3 cells did not
+move (+1.7, ns, seeds 5-8).
 
 ### 11.5 Reproducing
 
