@@ -350,8 +350,12 @@ pub fn open_heading(
     let a0 = heading.map(|h| h.dir).unwrap_or(target);
     let n = HEADING_SAMPLES;
     let step = std::f32::consts::TAU / n as f32;
-    let index = |angle: f32| ((angle.rem_euclid(std::f32::consts::TAU) / step).round() as usize) % n;
-    if allow_through || allowed.iter().all(|a| *a) || !allowed.iter().any(|a| *a) || a0 == Vec2::ZERO
+    let index =
+        |angle: f32| ((angle.rem_euclid(std::f32::consts::TAU) / step).round() as usize) % n;
+    if allow_through
+        || allowed.iter().all(|a| *a)
+        || !allowed.iter().any(|a| *a)
+        || a0 == Vec2::ZERO
     {
         return turn_limited(target, heading, now, rate);
     }
@@ -1236,7 +1240,8 @@ mod tests {
         let obstacles = pillar();
         let ctx = f.ctx(&obstacles);
         let point_at = |d: Vec2| MAGE_XZ + d * 8.0;
-        let in_shadow = |d: Vec2| !shadow_exits(MAGE_XZ, &obstacles[0], point_at(d), SIGHT_MARGIN).is_empty();
+        let in_shadow =
+            |d: Vec2| !shadow_exits(MAGE_XZ, &obstacles[0], point_at(d), SIGHT_MARGIN).is_empty();
         let start = Vec2::from_angle(PI * 100.0 / 180.0);
         let target = Vec2::from_angle(PI * 260.0 / 180.0);
         assert!(
@@ -1244,7 +1249,10 @@ mod tests {
             "the scene puts the shorter way through the shadow"
         );
         for through in [false, true] {
-            let mut heading = Some(FormationHeading { dir: start, at: 0.0 });
+            let mut heading = Some(FormationHeading {
+                dir: start,
+                at: 0.0,
+            });
             let mut crossed = 0;
             let mut last = start;
             for k in 1..=80 {
@@ -1263,7 +1271,10 @@ mod tests {
                 }
             }
             if through {
-                assert!(crossed > 0, "allowed through, the turn should cross the shadow");
+                assert!(
+                    crossed > 0,
+                    "allowed through, the turn should cross the shadow"
+                );
             } else {
                 assert_eq!(crossed, 0, "a heading stood its point in the shadow");
                 assert!(last.angle_to(target).abs() < 1e-3, "arrived at {last}");

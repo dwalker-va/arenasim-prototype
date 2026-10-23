@@ -630,7 +630,7 @@ fn paladin_dip_tick(
         completed.last_point = None;
         HojPlan::DipCast {
             target,
-            completed_state: completed,
+            completed_state: Box::new(completed),
         }
     } else {
         HojPlan::Reserved

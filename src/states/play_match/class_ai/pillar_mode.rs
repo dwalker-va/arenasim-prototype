@@ -13,19 +13,25 @@
 //!    [`HUG_ENTER`] of a pillar's skin;
 //! 2. an enemy crowd control that needs sight — a Fear, a Polymorph, a
 //!    Cyclone, a Hammer of Justice, a Death Coil — is ready for the healer
-//!    within [`CC_MODE_HORIZON`], and the healer is not immune to it
-//!    (`cc_reach::CcField`, read with a stance's horizon rather than a
-//!    step's): a pillar is a defence against a cast that needs sight, and
-//!    against nothing else;
-//! 3. the pillar's ring has ground that sees the anchor within heal range
-//!    ([`feasible_arc`]).
+//!    within [`CC_MODE_HORIZON`], cast from beyond [`MELEE_CC_REACH`] by a
+//!    unit that is not a pet, and the healer is not immune to it
+//!    ([`pillar_threats`]; `cc_reach::CcField` read with a stance's horizon
+//!    rather than a step's): a pillar is a defence against a cast that needs
+//!    sight, and against nothing else — not a Rogue's stun, landed by walking
+//!    round it;
+//! 3. the pillar's ring has ground that sees the anchor within heal range and
+//!    that no such crowd control covers ([`defended_arc`]), in a run wide
+//!    enough to stand the sight margin inside both its edges
+//!    ([`holds_margin`]): a hug is worth its exposure only where the pillar
+//!    hides the healer from what the hug is for, and a sliver of sight is a
+//!    grazing line, not a hug.
 //!
 //! Otherwise the healer plays the open. The key does not strobe: the pillar
 //! distance is a Schmitt pair ([`HUG_ENTER`] in, [`HUG_LEAVE`] out), the crowd
 //! control key releases only after [`HUG_RELEASE`] false, each mode is held
 //! at least [`MODE_DWELL`], and the hugged pillar changes only for one the
-//! anchor stands [`PILLAR_SWITCH`] nearer. An empty ring arc ends a hug at
-//! once: it is feasibility, not preference. Every change is traced as a
+//! anchor stands [`PILLAR_SWITCH`] nearer. An arc that no longer holds the
+//! margin ends a hug at once: it is feasibility, not preference. Every change is traced as a
 //! `PillarModeEnter` / `PillarModeLeave` movement decision.
 //!
 //! **What hug does.** The goal is an ANGLE on a ring round the pillar, at
@@ -35,9 +41,10 @@
 //! order ([`target_angle`]):
 //!
 //! 1. sight of the anchor with a margin: at least [`HUG_SIGHT_MARGIN`] yards
-//!    of arc inside the edge the anchor's motion sweeps toward the healer (both
-//!    edges while the anchor stands still), so the healer sits where the
-//!    teammate is going rather than where it was;
+//!    of arc, and the arc the anchor's own motion round the pillar sweeps in
+//!    [`HUG_LEAD_SECS`], inside the edge that motion sweeps toward the healer
+//!    (both edges, the plain margin, while the anchor stands still), so the
+//!    healer sits where the teammate is going rather than where it was;
 //! 2. out of the reach of the crowd control ready to land on the healer;
 //! 3. hidden from the enemy casters;
 //! 4. nearest the current angle, each other teammate in sight counting
@@ -50,18 +57,18 @@
 //! its own candidates and gains the arc's ring points, a soft leash to the
 //! ring and the margin (`team_solve::HugRing`).
 //!
-//! **Who.** `TeamPlan` only (`CombatContext::pillar_modes`); not the Paladin,
-//! whose FREE is melee pursuit; never while a medic chase, a dispel walk,
+//! **Who.** `TeamPlan` only (`CombatContext::pillar_modes`); never a healer
+//! [`HUG_EXCEPTIONS`] names — the Paladin, whose FREE is melee pursuit, and
+//! the Shaman, which measured negative hugging; never while a medic chase, a dispel walk,
 //! TakeCover, ESCAPE or a dip holds the healer's legs — those run instead of
 //! the FREE and PRESSURED ticks that read the mode, and leave it as it was.
 
 use bevy::prelude::*;
 
+use crate::states::match_config::CharacterClass;
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::combat_core::clamp_to_arena;
-use crate::states::play_match::components::{
-    HealerPosture, PillarMode, RingAngle,
-};
+use crate::states::play_match::components::{HealerPosture, PillarMode, RingAngle};
 use crate::states::play_match::decision_trace::{
     DecisionTrace, MovementGoalKind, MovementTrigger, Posture as TracePosture,
 };
@@ -100,6 +107,21 @@ pub const HUG_SIGHT_MARGIN: f32 = 3.0;
 /// wider than the positioning horizon (`cc_ready_horizon`), because the mode
 /// is a stance, not a step.
 pub const CC_MODE_HORIZON: f32 = 5.0;
+/// The healers that never hug, each with the measurement behind it. They
+/// still play the open mode's heading (`formation::open_heading`).
+pub const HUG_EXCEPTIONS: &[(CharacterClass, &str)] = &[
+    (
+        CharacterClass::Paladin,
+        "design D5: its FREE is melee pursuit, so it would hug only in PRESSURED",
+    ),
+    (
+        CharacterClass::Shaman,
+        "AS-373 head-to-head (n=2,080 Shaman matches, both seats, Nagrand and \
+         TwinPillars): hug and open together -3.2pt (z=-3.0), the open heading \
+         alone -1.2pt (z=-1.7)",
+    ),
+];
+
 /// Ring samples: one every 5 degrees, 0.7yd of arc on Nagrand.
 pub const RING_SAMPLES: usize = 72;
 /// Yards a second of the anchor's motion round the pillar below which it
@@ -243,8 +265,7 @@ fn position_in(run: (usize, usize), theta: f32) -> Option<f32> {
     if len == RING_SAMPLES {
         return Some((theta.rem_euclid(std::f32::consts::TAU) - sample_angle(start)) / ring_step());
     }
-    let from_start =
-        (theta - sample_angle(start)).rem_euclid(std::f32::consts::TAU) / ring_step();
+    let from_start = (theta - sample_angle(start)).rem_euclid(std::f32::consts::TAU) / ring_step();
     // Half a sample of slack either side: a sample stands for its neighbourhood.
     if from_start <= (len - 1) as f32 + 0.5 {
         Some(from_start)
@@ -261,9 +282,9 @@ fn run_for(runs: &[(usize, usize)], theta: f32) -> Option<(usize, usize)> {
     if let Some(r) = runs.iter().find(|r| position_in(**r, theta).is_some()) {
         return Some(*r);
     }
-    runs.iter().copied().min_by(|a, b| {
-        end_gap(*a, theta).total_cmp(&end_gap(*b, theta))
-    })
+    runs.iter()
+        .copied()
+        .min_by(|a, b| end_gap(*a, theta).total_cmp(&end_gap(*b, theta)))
 }
 
 /// The angular gap from `theta` to the nearer end of `run`.
@@ -309,18 +330,35 @@ pub fn margin_samples(ring: &Ring, spin: f32) -> usize {
     ((HUG_SIGHT_MARGIN / ring.rho + spin * HUG_LEAD_SECS) / ring_step()).ceil() as usize
 }
 
+/// Whether `arc` has a run wide enough to stand [`HUG_SIGHT_MARGIN`] inside
+/// both its edges: the arc key. A sliver of sighted ring puts the healer on a
+/// grazing line, in sight one step and out the next, so it is no hug.
+pub fn holds_margin(ring: &Ring, arc: &[bool]) -> bool {
+    let k = margin_samples(ring, 0.0);
+    runs(arc).iter().any(|r| r.1 > 2 * k)
+}
+
 /// Which samples of the ring are in the CORE of `run`: the run less the
 /// margin off the edge the anchor's motion (`sense`) sweeps toward the healer
 /// — the trailing edge, the low end for `1` — or off both edges while it
 /// stands still. A whole ring has no edge, so all of it is core. A run too
 /// short for its margin keeps its middle sample.
-pub fn core_of(ring: &Ring, run: (usize, usize), (sense, spin): (i8, f32), margin: bool) -> Vec<bool> {
+pub fn core_of(
+    ring: &Ring,
+    run: (usize, usize),
+    (sense, spin): (i8, f32),
+    margin: bool,
+) -> Vec<bool> {
     let (start, len) = run;
     let mut core = vec![false; RING_SAMPLES];
     if len == RING_SAMPLES {
         return vec![true; RING_SAMPLES];
     }
-    let k = if margin { margin_samples(ring, spin) } else { 0 };
+    let k = if margin {
+        margin_samples(ring, spin)
+    } else {
+        0
+    };
     let (lo, hi) = match sense {
         1 => (k, len),
         -1 => (0, len.saturating_sub(k)),
@@ -383,7 +421,11 @@ pub fn target_angle(
             continue;
         }
         let p = ring.point(sample_angle(i));
-        let covered = rank.field.covering(obstacles, p, Disc::Outer).next().is_some();
+        let covered = rank
+            .field
+            .covering(obstacles, p, Disc::Outer)
+            .next()
+            .is_some();
         let seen_by = rank
             .casters
             .iter()
@@ -408,8 +450,9 @@ pub fn target_angle(
 
 /// The signed angle from `theta0` toward `target` the goal may turn through:
 /// along `run` — through the sighted arc, never through the anchor's shadow —
-/// when `theta0` lies in it (`through_arc`); otherwise the shorter way to
-/// the run's nearer end, back into sight. A whole ring turns the shorter way.
+/// when `theta0` lies in it (`through_arc`). A whole ring turns the shorter
+/// way. From outside the run (blind
+/// already) it takes the shorter way to the run's nearer end, back into sight.
 pub fn turn_toward(run: (usize, usize), theta0: f32, target: f32, through_arc: bool) -> f32 {
     if !through_arc || run.1 == RING_SAMPLES {
         return wrap(target - theta0);
@@ -430,30 +473,6 @@ pub fn turn_toward(run: (usize, usize), theta0: f32, target: f32, through_arc: b
             }
         }
     }
-}
-
-/// Mutation switches the paired tests prove are load-bearing. Every one is
-/// `true` in the shipped game; a test turns one off to show the test it pairs
-/// with fails without it.
-#[derive(Clone, Copy, Debug)]
-pub struct Rules {
-    /// The target angle keeps [`HUG_SIGHT_MARGIN`] off the arc's edge.
-    pub sight_margin: bool,
-    /// The angle turns only through the sighted arc.
-    pub through_arc: bool,
-    /// Each mode is held [`MODE_DWELL`].
-    pub dwell: bool,
-    /// The key reads whether the crowd control is READY.
-    pub cc_key: bool,
-}
-
-impl Rules {
-    pub const SHIPPED: Rules = Rules {
-        sight_margin: true,
-        through_arc: true,
-        dwell: true,
-        cc_key: true,
-    };
 }
 
 /// Crowd control that reaches no farther than this is a melee's (a Kidney
@@ -507,7 +526,10 @@ pub fn defended_arc(
     for (i, a) in arc.iter_mut().enumerate() {
         if *a {
             let p = ring.point(sample_angle(i));
-            *a = threats.covering(ctx.obstacles, p, Disc::Outer).next().is_none();
+            *a = threats
+                .covering(ctx.obstacles, p, Disc::Outer)
+                .next()
+                .is_none();
         }
     }
     arc
@@ -523,9 +545,10 @@ pub struct Keys {
 
 /// Evaluate the healer's pillar mode and, while it hugs, its ring goal.
 ///
-/// Called from the FREE tick and the PRESSURED solve of every healer but the
-/// Paladin, under `TeamPlan` with the modes on ([`CombatContext::pillar_modes`]);
-/// a no-op returning `None` otherwise. A change of mode forgets the formation
+/// Called from the FREE tick and the PRESSURED solve of every healer; a no-op
+/// returning `None` unless the healer's team runs `TeamPlan` with the modes on
+/// ([`CombatContext::pillar_modes`]), the map has obstacles, and
+/// [`HUG_EXCEPTIONS`] does not name its class. A change of mode forgets the formation
 /// point's memory; leaving a hug seeds the open heading from where the healer
 /// stands (`FormationMemory::seed_from_healer`), so the open point takes over
 /// there.
@@ -542,37 +565,12 @@ pub fn update(
     decision_trace: &mut DecisionTrace,
     posture: TracePosture,
 ) -> Option<HugGoal> {
-    update_with(
-        ctx,
-        abilities,
-        entity,
-        speed,
-        my_pos,
-        state,
-        shared,
-        now,
-        decision_trace,
-        posture,
-        Rules::SHIPPED,
-    )
-}
-
-/// [`update`] under `rules` (the mutation tests' entry point).
-#[allow(clippy::too_many_arguments)]
-pub fn update_with(
-    ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
-    entity: Entity,
-    speed: f32,
-    my_pos: Vec3,
-    state: &mut HealerPosture,
-    shared: &SharedMovementConfig,
-    now: f32,
-    decision_trace: &mut DecisionTrace,
-    posture: TracePosture,
-    rules: Rules,
-) -> Option<HugGoal> {
-    if !ctx.pillar_modes() || ctx.obstacles.is_empty() {
+    if !ctx.pillar_modes()
+        || ctx.obstacles.is_empty()
+        || ctx
+            .self_info()
+            .is_some_and(|me| HUG_EXCEPTIONS.iter().any(|(c, _)| *c == me.class))
+    {
         return None;
     }
     let mates = super::formation::teammates(ctx, entity);
@@ -586,7 +584,17 @@ pub fn update_with(
     };
     let Some(anchor) = anchor else {
         if let Some(ring) = hugged {
-            leave(state, now, ring, Keys::default(), decision_trace, ctx, None, my_pos, posture);
+            leave(
+                state,
+                now,
+                ring,
+                Keys::default(),
+                decision_trace,
+                ctx,
+                None,
+                my_pos,
+                posture,
+            );
         }
         return None;
     };
@@ -603,12 +611,10 @@ pub fn update_with(
         (Some(h), _) => Some(h),
         (None, n) => n,
     };
-    let Some(ring) = candidate else {
-        return None;
-    };
+    let ring = candidate?;
 
     let threats = pillar_threats(ctx, abilities, entity, shared.cc_reach_margin);
-    let cc_now = !rules.cc_key || !threats.is_empty();
+    let cc_now = !threats.is_empty();
     if cc_now {
         state.pillar.cc_lost_at = None;
     } else if state.pillar.cc_lost_at.is_none() {
@@ -622,13 +628,17 @@ pub fn update_with(
             ring.skin(anchor_xz) <= HUG_ENTER
         },
         cc_ready: if hugged.is_some() {
-            cc_now || state.pillar.cc_lost_at.is_some_and(|t| now - t < HUG_RELEASE)
+            cc_now
+                || state
+                    .pillar
+                    .cc_lost_at
+                    .is_some_and(|t| now - t < HUG_RELEASE)
         } else {
             cc_now
         },
-        arc: arc.iter().any(|f| *f),
+        arc: holds_margin(&ring, &arc),
     };
-    let dwelt = !rules.dwell || state.pillar.since.is_none_or(|t| now - t >= MODE_DWELL);
+    let dwelt = state.pillar.since.is_none_or(|t| now - t >= MODE_DWELL);
 
     let (ring, arc) = match hugged {
         None => {
@@ -652,7 +662,7 @@ pub fn update_with(
         // hug on this one is still within its dwell: keep hugging this one.
         Some(h) if ring.pillar != h.pillar && !dwelt => {
             let arc = defended_arc(ctx, &h, anchor_xz, heal_reach, my_pos.y, &threats);
-            if !arc.iter().any(|f| *f) {
+            if !holds_margin(&h, &arc) {
                 leave(
                     state,
                     now,
@@ -700,8 +710,42 @@ pub fn update_with(
         }
     };
     hug_goal(
-        ctx, speed, my_pos, state, ring, arc, anchor, &mates, abilities, shared, now, rules,
+        ctx, speed, my_pos, state, ring, arc, anchor, &mates, abilities, shared, now,
     )
+}
+
+/// Seconds over which the anchor's velocity is measured from its displacement.
+const VELOCITY_WINDOW: f32 = 0.25;
+
+/// The anchor's velocity on the ground plane, measured from where it was
+/// sampled at least [`VELOCITY_WINDOW`] ago (`PillarMemory::anchor_seen`);
+/// zero for a new anchor or a sample more than a second old. The snapshot's
+/// own velocity is the unit's facing times its speed, which a unit standing
+/// still and hitting keeps, so it would lead the margin round a pillar the
+/// anchor is not walking round.
+fn anchor_velocity(state: &mut HealerPosture, entity: Entity, pos: Vec2, now: f32) -> Vec2 {
+    use crate::states::play_match::components::AnchorSample;
+    let fresh = AnchorSample {
+        entity,
+        pos,
+        at: now,
+        velocity: Vec2::ZERO,
+    };
+    match state.pillar.anchor_seen {
+        Some(s) if s.entity == entity && now - s.at < 1.0 => {
+            if now - s.at >= VELOCITY_WINDOW {
+                let velocity = (pos - s.pos) / (now - s.at);
+                state.pillar.anchor_seen = Some(AnchorSample { velocity, ..fresh });
+                velocity
+            } else {
+                s.velocity
+            }
+        }
+        _ => {
+            state.pillar.anchor_seen = Some(fresh);
+            Vec2::ZERO
+        }
+    }
 }
 
 /// The ring goal for a hug of `ring`, whose sighted arc is `arc`.
@@ -718,7 +762,6 @@ fn hug_goal(
     abilities: &AbilityDefinitions,
     shared: &SharedMovementConfig,
     now: f32,
-    rules: Rules,
 ) -> Option<HugGoal> {
     let me = xz(my_pos);
     let anchor_xz = xz(anchor.position);
@@ -726,8 +769,9 @@ fn hug_goal(
     let last = state.pillar.angle;
     let theta0 = last.map_or_else(|| ring.bearing(me), |a| a.theta);
     let run = run_for(&all, theta0)?;
-    let spin = anchor_spin(&ring, anchor_xz, xz(anchor.velocity));
-    let core = core_of(&ring, run, spin, rules.sight_margin);
+    let velocity = anchor_velocity(state, anchor.entity, anchor_xz, now);
+    let spin = anchor_spin(&ring, anchor_xz, velocity);
+    let core = core_of(&ring, run, spin, true);
     let field = CcField::for_healer(
         ctx,
         abilities,
@@ -755,14 +799,15 @@ fn hug_goal(
             others: &others,
         },
     );
-    let delta = turn_toward(run, theta0, target, rules.through_arc);
+    let rate = speed / ring.rho;
+    let delta = turn_toward(run, theta0, target, true);
     let theta = match last {
         // The first evaluation of a hug starts at the healer's own bearing,
         // or the nearer end of the sighted arc when that bearing is not in it.
         None if position_in(run, theta0).is_some() => theta0,
-        None => theta0 + turn_toward(run, theta0, target, true),
+        None => theta0 + delta,
         Some(a) => {
-            let reach = speed / ring.rho * (now - a.at).max(0.0);
+            let reach = rate * (now - a.at).max(0.0);
             theta0 + delta.clamp(-reach, reach)
         }
     };
@@ -938,7 +983,10 @@ mod tests {
     fn the_core_keeps_the_margin_off_the_trailing_edge() {
         let ring = ring_of(&pillar(), 0).unwrap();
         let k = margin_samples(&ring, 0.0);
-        assert!(k >= 4, "3yd on an 8yd ring is about 21 degrees: {k} samples");
+        assert!(
+            k >= 4,
+            "3yd on an 8yd ring is about 21 degrees: {k} samples"
+        );
         let run = (10, 30);
         let core = core_of(&ring, run, (1, 0.0), true);
         assert!(!core[10] && !core[10 + k - 1] && core[10 + k] && core[39]);
@@ -953,6 +1001,18 @@ mod tests {
         let core = core_of(&ring, (10, 3), (1, 0.0), true);
         assert_eq!(core.iter().filter(|c| **c).count(), 1);
         assert!(core[11]);
+    }
+
+    /// The arc key wants a run wide enough to stand the margin inside both
+    /// edges; a sliver no wider than the two margins is no hug.
+    #[test]
+    fn a_sliver_of_arc_holds_no_hug() {
+        let ring = ring_of(&pillar(), 0).unwrap();
+        let k = margin_samples(&ring, 0.0);
+        let sliver: Vec<usize> = (10..10 + 2 * k).collect();
+        assert!(!holds_margin(&ring, &mask(&sliver)));
+        let wide: Vec<usize> = (10..11 + 2 * k).collect();
+        assert!(holds_margin(&ring, &mask(&wide)));
     }
 
     /// Changing side turns through the sighted arc — the near side — never

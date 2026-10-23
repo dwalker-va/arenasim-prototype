@@ -163,7 +163,11 @@ impl HugRing {
     fn sample(&self, p: Vec2) -> usize {
         let n = self.core.len().max(1);
         let step = std::f32::consts::TAU / n as f32;
-        (((p - self.center).to_angle().rem_euclid(std::f32::consts::TAU) / step).round() as usize)
+        (((p - self.center)
+            .to_angle()
+            .rem_euclid(std::f32::consts::TAU)
+            / step)
+            .round() as usize)
             % n
     }
 
@@ -1362,17 +1366,6 @@ pub fn solve_team(
     placed
 }
 
-/// Does this pet only threaten in melee, so cover does nothing against it?
-///
-/// Judged on reach, from `abilities.ron`:
-/// - Felhunter — Spell Lock and Devour Magic both 30yd. NOT melee: breaking its
-///   line is what stops it interrupting a heal.
-/// - Spider — Web 20yd, a ranged root. NOT melee.
-/// - Boar — Charge 25yd, but that is a GAP CLOSER; once it arrives cover is
-///   worthless, so treating it as a caster just drags a healer around for
-///   nothing. Melee.
-/// - Bird — Master's Call (40yd) targets an ALLY; it has no ranged offence.
-///   Melee.
 /// Whether `c` hurts from range — a caster, or a pet whose abilities reach
 /// ([`pet_is_melee`]) — so that cover is a defence against it. The solve's
 /// [`SolveUnit::is_melee`] is its negation.
@@ -1384,6 +1377,17 @@ pub fn is_ranged_threat(c: &super::class_ai::CombatantInfo) -> bool {
     }
 }
 
+/// Does this pet only threaten in melee, so cover does nothing against it?
+///
+/// Judged on reach, from `abilities.ron`:
+/// - Felhunter — Spell Lock and Devour Magic both 30yd. NOT melee: breaking its
+///   line is what stops it interrupting a heal.
+/// - Spider — Web 20yd, a ranged root. NOT melee.
+/// - Boar — Charge 25yd, but that is a GAP CLOSER; once it arrives cover is
+///   worthless, so treating it as a caster just drags a healer around for
+///   nothing. Melee.
+/// - Bird — Master's Call (40yd) targets an ALLY; it has no ranged offence.
+///   Melee.
 fn pet_is_melee(pet_type: super::components::PetType) -> bool {
     use super::components::PetType as P;
     match pet_type {

@@ -90,7 +90,7 @@ mod follow {
 
     pub const WARRIOR: Unit = Unit::new(1, 0);
     pub const HEALER: Unit = Unit::new(1, 1);
-    pub const MAGE: Unit = Unit::new(2, 0);
+    pub const TARGET: Unit = Unit::new(2, 0);
     pub const WARLOCK: Unit = Unit::new(2, 1);
 
     pub fn config(seed: u64, modes: bool) -> HeadlessMatchConfig {
@@ -108,17 +108,19 @@ mod follow {
         }
     }
 
-    /// The pillar at (-40, -20). The Mage stunned on its west side; our
-    /// Warrior east of it, so its walk to the Mage rounds the pillar; the
-    /// Warlock planted far to the north-west, out of Fear range of the ring,
+    /// The pillar at (-40, -20). The enemy Paladin, the Warrior's target,
+    /// stunned on its west side (a Paladin, so both teams would camp and
+    /// neither does); our Warrior north-east of it with its Charge held, so it
+    /// walks to the Paladin round the pillar's north side; the Warlock planted
+    /// far to the south-west, out of Fear range of the ring,
     /// its Fear coming off cooldown inside the mode's horizon; our Priest
     /// east, held PRESSURED, with no mana (nothing it casts holds it still).
     pub fn stage() -> Stage {
         Stage::new()
-            .place(MAGE, -53.0, -23.0)
-            .land(MAGE, AbilityType::HammerOfJustice, WARLOCK)
+            .place(TARGET, -53.0, -23.0)
+            .land(TARGET, AbilityType::HammerOfJustice, WARLOCK)
             .place(WARRIOR, -27.0, -15.0)
-            .target(WARRIOR, MAGE)
+            .target(WARRIOR, TARGET)
             .cooldown(WARRIOR, AbilityType::Charge, 60.0)
             .place(WARLOCK, -70.0, -42.0)
             .target(WARLOCK, WARRIOR)
@@ -139,9 +141,8 @@ mod follow {
 }
 
 /// The window the follow is read over: the Warrior's walk round the pillar,
-/// inside the Mage's stun.
+/// inside the enemy Paladin's stun.
 const FOLLOW: f32 = 4.5;
-
 
 /// One arm of the follow: the longest and total blind spell, and where the
 /// Warrior ended the window.
@@ -157,29 +158,118 @@ fn follow_arm(seed: u64, on: bool) -> (Played, f32, f32, Vec3) {
     (played, longest, total, end)
 }
 
+// ---------------------------------------------------------------------------
+// The open traverse
+// ---------------------------------------------------------------------------
+
+mod traverse {
+    use super::*;
+
+    pub const WARRIOR: Unit = Unit::new(1, 0);
+    pub const HEALER: Unit = Unit::new(1, 1);
+    pub const ROGUE: Unit = Unit::new(2, 0);
+    pub const FAR: Unit = Unit::new(2, 1);
+
+    pub fn config(seed: u64, modes: bool) -> HeadlessMatchConfig {
+        HeadlessMatchConfig {
+            team1: vec!["Warrior".into(), "Druid".into()],
+            team2: vec!["Rogue".into(), "Warrior".into()],
+            map: "TwinPillars".to_string(),
+            ai_profile: Some("TeamPlan".into()),
+            team1_kill_target: Some(1),
+            team2_kill_target: Some(0),
+            team1_pillar_modes: Some(modes),
+            random_seed: Some(seed),
+            max_duration_secs: 8.0,
+            ..Default::default()
+        }
+    }
+
+    /// TwinPillars. Our Warrior walks west along z = -4, 1.5yd off the skin of
+    /// the pillar at (9, 0), to the stunned enemy Warrior at (-14, -4), past a
+    /// stunned Rogue at (9, -11). As it passes the Rogue the formation
+    /// heading's "behind the line" target turns from east to west, and the
+    /// shorter way round turns the point north — behind the pillar, in its
+    /// shadow from the Warrior. No enemy has a crowd control a pillar
+    /// defends against, so the Druid plays the open. It has no mana, so
+    /// nothing it casts holds it still.
+    pub fn stage() -> Stage {
+        Stage::new()
+            .place(WARRIOR, 22.0, -4.0)
+            .target(WARRIOR, FAR)
+            .cooldown(WARRIOR, AbilityType::Charge, 60.0)
+            .place(ROGUE, 9.0, -11.0)
+            .land(ROGUE, AbilityType::HammerOfJustice, FAR)
+            .target(ROGUE, WARRIOR)
+            .combatant(ROGUE, |c| c.stealthed = false)
+            .place(FAR, -14.0, -4.0)
+            .land(FAR, AbilityType::HammerOfJustice, ROGUE)
+            .target(FAR, WARRIOR)
+            .place(HEALER, 29.0, -2.0)
+            .mana(HEALER, 0.0)
+    }
+}
+
+/// The window the traverse is read over: the Warrior walks past the Rogue
+/// and on, the enemies still stunned.
+const TRAVERSE: f32 = 4.5;
+
+/// The healer's formation goal over the traverse: the largest step between
+/// consecutive goals, and how many frames the goal stood out of the
+/// Warrior's sight.
+fn traverse_arm(seed: u64, on: bool) -> (Played, f32, usize) {
+    use traverse::*;
+    let played = play(config(seed, on), stage());
+    let obstacles = load_map_geometry_config()
+        .expect("maps.ron loads")
+        .active_for(ArenaMap::TwinPillars)
+        .volumes;
+    let (mut last, mut step, mut blind) = (None::<Vec3>, 0.0f32, 0usize);
+    for f in played.staged_frames().take((TRAVERSE / FRAME) as usize) {
+        let (w, h) = (unit_in(f, WARRIOR), unit_in(f, HEALER));
+        let Some(goal) = h.point_goal else { continue };
+        if !has_line_of_sight(&obstacles, eye(goal), eye(w.position)) {
+            blind += 1;
+        }
+        if let Some(l) = last {
+            step = step.max(Vec2::new(l.x - goal.x, l.z - goal.z).length());
+        }
+        last = Some(goal);
+    }
+    (played, step, blind)
+}
+
+#[test]
+fn the_open_heading_goes_round_the_sighted_side() {
+    for seed in [1, 2, 3] {
+        let (on, step, blind) = traverse_arm(seed, true);
+        let (_, off_step, off_blind) = traverse_arm(seed, false);
+        println!(
+            "seed {seed}: open step {step:.2}yd blind goal frames {blind}; \
+             off step {off_step:.2}yd blind {off_blind}"
+        );
+        assert!(
+            modes(&on, 1, 1).is_empty(),
+            "seed {seed}: the healer hugged — the stage should keep it open"
+        );
+        assert_eq!(
+            blind, 0,
+            "seed {seed}: a goal stood in the Warrior's shadow"
+        );
+        assert!(step <= 4.0, "seed {seed}: the goal stepped {step:.2}yd");
+        assert!(
+            off_step > 5.0 || off_blind > 0,
+            "seed {seed}: with the modes off the goal neither stepped nor went blind \
+             (step {off_step:.2}yd) — the stage no longer crosses the shadow"
+        );
+    }
+}
+
 #[test]
 fn a_hugging_healer_follows_its_teammate_round_the_pillar() {
     for seed in [1, 2, 3] {
         let (on, longest, total, warrior) = follow_arm(seed, true);
         let (_, off_longest, off_total, _) = follow_arm(seed, false);
-        if std::env::var("PMS_DEBUG").is_ok() {
-            let c = Vec2::new(-40.0, -20.0);
-            let ang = |p: Vec3| (Vec2::new(p.x, p.z) - c).to_angle().to_degrees();
-            let obstacles = nagrand();
-            for (k, f) in on.staged_frames().enumerate().step_by(10).take(30) {
-                let (w, h) = (unit_in(f, follow::WARRIOR), unit_in(f, follow::HEALER));
-                println!(
-                    "t {:.2} w {:.0}deg r{:.1} h {:.0}deg r{:.1} goal {:?} sees {}",
-                    k as f32 * FRAME,
-                    ang(w.position),
-                    Vec2::new(w.position.x, w.position.z).distance(c),
-                    ang(h.position),
-                    Vec2::new(h.position.x, h.position.z).distance(c),
-                    h.point_goal.map(|g| (ang(g).round(), Vec2::new(g.x, g.z).distance(c))),
-                    has_line_of_sight(&obstacles, eye(h.position), eye(w.position))
-                );
-            }
-        }
         println!(
             "seed {seed}: hug longest {longest:.2}s total {total:.2}s; \
              off longest {off_longest:.2}s total {off_total:.2}s"

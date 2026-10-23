@@ -199,6 +199,20 @@ pub struct PillarMemory {
     /// control that needs sight (`None` while it has one). Hug releases on
     /// this key only once it has been false for `pillar_mode::HUG_RELEASE`.
     pub cc_lost_at: Option<f32>,
+    /// While hugging: where the anchor was last sampled, and the velocity
+    /// measured from its displacement since the sample before (the sight
+    /// margin leads by the anchor's real motion round the pillar, not by its
+    /// facing, which a unit standing still keeps).
+    pub anchor_seen: Option<AnchorSample>,
+}
+
+/// One sample of the hug's anchor ([`PillarMemory::anchor_seen`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AnchorSample {
+    pub entity: Entity,
+    pub pos: Vec2,
+    pub at: f32,
+    pub velocity: Vec2,
 }
 
 /// A healer's pillar mode ([`PillarMemory::mode`]).

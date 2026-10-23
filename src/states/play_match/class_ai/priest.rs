@@ -81,7 +81,7 @@ pub enum ScreamDipPlan {
     /// (posture back to FREE — DipComplete) and removes the walk directive.
     DipCast {
         target: Entity,
-        completed_state: HealerPosture,
+        completed_state: Box<HealerPosture>,
     },
 }
 
@@ -216,7 +216,7 @@ pub fn decide_priest_action(
             // `builder` exclusively borrows the trace; finish it before
             // emitting the DipComplete movement event.
             builder.finish();
-            commands.entity(entity).try_insert(*completed_state);
+            commands.entity(entity).try_insert(**completed_state);
             commands.entity(entity).remove::<MovementDirective>();
             if let Some(mut mbuilder) =
                 start_movement_event_with_target(decision_trace, ctx, *target, my_pos)
@@ -1742,7 +1742,7 @@ fn priest_dip_tick(
         completed.formation.forget();
         ScreamDipPlan::DipCast {
             target,
-            completed_state: completed,
+            completed_state: Box::new(completed),
         }
     } else {
         ScreamDipPlan::Rotation

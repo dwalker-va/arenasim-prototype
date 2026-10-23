@@ -1894,6 +1894,7 @@ mod tests {
             teamplan,
             SituationConfig {
                 runs: PlaySet::all(),
+                pillar_modes: true,
                 ..SituationConfig::default()
             }
         );
@@ -1904,9 +1905,10 @@ mod tests {
                 press_release_margin: teamplan.press_advantage_margin,
                 healers_close: true,
                 runs: PlaySet::default(),
+                pillar_modes: false,
                 ..teamplan
             },
-            "only the release, the closing rule and the gated plays differ"
+            "only the release, the closing rule, the gated plays and the pillar modes differ"
         );
         // With no band the latch is the plain test from each side, whatever
         // the previous tempo.

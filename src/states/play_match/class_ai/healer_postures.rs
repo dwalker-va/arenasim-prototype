@@ -1151,32 +1151,28 @@ pub(super) fn healer_pressured_tick_shared(
         None
     };
 
-    // Hugging a pillar (AS-373, `TeamPlan` with the modes on; not the
-    // Paladin, the one healer with a retreat band): the solve gains the ring's
-    // arc, a soft leash to the ring and the sight margin.
-    let hug = if fallback_range.is_none() {
-        super::pillar_mode::update(
-            ctx,
-            abilities,
-            entity,
-            base_speed,
-            my_pos,
-            state,
-            shared,
-            now,
-            decision_trace,
-            TracePosture::Pressured,
-        )
-        .map(|h| crate::states::play_match::team_solve::HugRing {
-            center: h.ring.center,
-            rho: h.ring.rho,
-            slack: super::pillar_mode::HUG_SLACK,
-            arc: h.arc,
-            core: h.core,
-        })
-    } else {
-        None
-    };
+    // Hugging a pillar (AS-373, `TeamPlan` with the modes on; never a healer
+    // `pillar_mode::HUG_EXCEPTIONS` names, the Paladin among them): the solve
+    // gains the ring's arc, a soft leash to the ring and the sight margin.
+    let hug = super::pillar_mode::update(
+        ctx,
+        abilities,
+        entity,
+        base_speed,
+        my_pos,
+        state,
+        shared,
+        now,
+        decision_trace,
+        TracePosture::Pressured,
+    )
+    .map(|h| crate::states::play_match::team_solve::HugRing {
+        center: h.ring.center,
+        rho: h.ring.rho,
+        slack: super::pillar_mode::HUG_SLACK,
+        arc: h.arc,
+        core: h.core,
+    });
 
     // The team solve's world (`TeamPlan` only), built before the band-hold
     // because the band-hold asks it whether a dying teammate is reached from

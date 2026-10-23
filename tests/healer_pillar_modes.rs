@@ -23,7 +23,12 @@
 //! - `blind` — each episode in which a pillar hid a teammate from the healer,
 //!   both alive: how long, how far each walked, who broke sight, how it ended;
 //! - `deaths` — each teammate death with the healer alive, and how much of the
-//!   last 5s the teammate spent hidden from its healer.
+//!   last 5s the teammate spent hidden from its healer;
+//! - `modes` — the post-contact occupancy again, keyed `posture|mode` by the
+//!   healer's TRACED pillar mode (`hug` / `open`, from its `PillarModeEnter` /
+//!   `PillarModeLeave` decisions; every frame `open` on a build without the
+//!   modes), with `mode_changes` and `mode_dwells` (seconds each mode was held),
+//!   and each blind episode's `mode` as sight was lost (AS-373's build).
 //!
 //! The observer is read-only (`observed_run_does_not_perturb_outcomes`).
 //! Aggregation: `docs/design/balance/sweeps/2026-10-19-as373-reduce.py`.
@@ -95,7 +100,10 @@ fn cc_tools(defs: &AbilityDefinitions) -> Vec<CcTool> {
     for class in CharacterClass::all() {
         for a in defs.own_abilities_for_class(*class) {
             let c = defs.get_unchecked(&a);
-            if c.applies_aura.as_ref().is_some_and(|x| is_hard(x.aura_type)) {
+            if c.applies_aura
+                .as_ref()
+                .is_some_and(|x| is_hard(x.aura_type))
+            {
                 out.push(CcTool {
                     class: *class,
                     range: c.range,
@@ -296,8 +304,14 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> V
                 .or_default()
                 .push((fr as usize, p.to_string()));
             match v["trigger"].as_str() {
-                Some("PillarModeEnter") => modes.entry(id as u32).or_default().push((fr as usize, true)),
-                Some("PillarModeLeave") => modes.entry(id as u32).or_default().push((fr as usize, false)),
+                Some("PillarModeEnter") => modes
+                    .entry(id as u32)
+                    .or_default()
+                    .push((fr as usize, true)),
+                Some("PillarModeLeave") => modes
+                    .entry(id as u32)
+                    .or_default()
+                    .push((fr as usize, false)),
                 _ => {}
             }
         }
@@ -372,8 +386,10 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> V
                 .collect();
         }
         // Per-frame sight of each teammate (both alive), and the orbit state.
-        let mut sight: BTreeMap<Entity, Vec<Option<bool>>> =
-            mates.iter().map(|m| (*m, vec![None; frames.len()])).collect();
+        let mut sight: BTreeMap<Entity, Vec<Option<bool>>> = mates
+            .iter()
+            .map(|m| (*m, vec![None; frames.len()]))
+            .collect();
         let mut was_hard = false;
         let mut orbit: Option<(usize, f32, f32, f32, f32, usize, Vec2)> = None; // pillar, last bearing, accum, path, skin_sum, start frame, last pos
         let mut orbit_n = 0u32;
@@ -412,9 +428,9 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> V
                 o.team != me.team
                     && o.alive
                     && !o.hard
-                    && tools.iter().any(|t| {
-                        t.class == o.class && me.pos.distance(o.pos) <= t.range
-                    })
+                    && tools
+                        .iter()
+                        .any(|t| t.class == o.class && me.pos.distance(o.pos) <= t.range)
                     && sees(me.pos, o.pos)
             });
             let acc = row.occ.entry(key).or_default();

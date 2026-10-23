@@ -14,10 +14,14 @@
 //! - the hug holds across the Schmitt band (entered at 12yd from the skin,
 //!   left beyond 20yd) and through its dwell (left only after 2s).
 
-use arenasim::states::match_config::CharacterClass::{Druid, Paladin, Priest, Rogue, Warlock, Warrior};
 use arenasim::states::match_config::CharacterClass;
+use arenasim::states::match_config::CharacterClass::{
+    Druid, Paladin, Priest, Rogue, Shaman, Warlock, Warrior,
+};
 use arenasim::states::play_match::ai_profile::AiProfile;
-use arenasim::states::play_match::class_ai::pillar_mode::{HUG_ENTER, HUG_LEAVE, MODE_DWELL};
+use arenasim::states::play_match::class_ai::pillar_mode::{
+    HUG_ENTER, HUG_EXCEPTIONS, HUG_LEAVE, MODE_DWELL,
+};
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::{
     HealerPosture, MovementGoal, PillarMemory, PillarMode, Posture,
@@ -109,7 +113,10 @@ fn a_ready_fear_at_a_pillar_fight_gives_hug() {
 
         // The controls, each with one condition removed.
         let silenced = scene(healer, Warlock, 6.0).aura(CASTER, AuraType::Silence, 10.0);
-        assert!(!entered(&silenced.decide(HEALER)), "{healer:?}: silenced Warlock");
+        assert!(
+            !entered(&silenced.decide(HEALER)),
+            "{healer:?}: silenced Warlock"
+        );
         let off = scene(healer, Warlock, 6.0).without_pillar_modes(1);
         assert!(!entered(&off.decide(HEALER)), "{healer:?}: modes off");
         let legacy = scene(healer, Warlock, 6.0).ai_profile(1, AiProfile::Legacy);
@@ -117,10 +124,17 @@ fn a_ready_fear_at_a_pillar_fight_gives_hug() {
     }
 }
 
-/// The Paladin's FREE is melee pursuit (design D5): it never hugs.
+/// The healers `HUG_EXCEPTIONS` names never hug — the Paladin, whose FREE is
+/// melee pursuit (design D5), and the Shaman, on measurement — in FREE or
+/// PRESSURED. The list is pinned: an entry added or removed fails here.
 #[test]
-fn the_paladin_does_not_hug() {
-    for posture in [Posture::Free, Posture::Pressured] {
+fn the_excepted_healers_do_not_hug() {
+    let excepted: Vec<CharacterClass> = HUG_EXCEPTIONS.iter().map(|(c, _)| *c).collect();
+    assert_eq!(excepted, vec![Paladin, Shaman]);
+    for (class, posture) in [Paladin, Shaman]
+        .into_iter()
+        .flat_map(|c| [(c, Posture::Free), (c, Posture::Pressured)])
+    {
         let held = |class| {
             scene(class, Warlock, 6.0).healer_posture(
                 HEALER,
@@ -131,8 +145,12 @@ fn the_paladin_does_not_hug() {
                 },
             )
         };
-        let view = held(Paladin).decide(HEALER);
-        assert!(!entered(&view), "{posture:?}: {:?}", view.movement);
+        let view = held(class).decide(HEALER);
+        assert!(
+            !entered(&view),
+            "{class:?} {posture:?}: {:?}",
+            view.movement
+        );
         // The pair: the same scene hugs for a Priest.
         let priest = held(Priest).decide(HEALER);
         assert!(entered(&priest), "{posture:?}: {:?}", priest.movement);
@@ -161,7 +179,9 @@ fn an_empty_ring_arc_gives_open() {
         max: Vec3::new(30.0, 6.0, 10.5),
     });
     for healer in HEALERS {
-        let view = scene(healer, Warlock, 6.0).obstacles(walled.clone()).decide(HEALER);
+        let view = scene(healer, Warlock, 6.0)
+            .obstacles(walled.clone())
+            .decide(HEALER);
         assert!(!entered(&view), "{healer:?}: {:?}", view.movement);
     }
 }
@@ -183,12 +203,22 @@ fn hugging(since: f32) -> HealerPosture {
 fn the_pillar_distance_is_a_schmitt_pair() {
     let between = (HUG_ENTER + HUG_LEAVE) / 2.0;
     for healer in HEALERS {
-        assert!(entered(&scene(healer, Warlock, HUG_ENTER - 0.5).decide(HEALER)));
-        assert!(!entered(&scene(healer, Warlock, HUG_ENTER + 0.5).decide(HEALER)));
+        assert!(entered(
+            &scene(healer, Warlock, HUG_ENTER - 0.5).decide(HEALER)
+        ));
+        assert!(!entered(
+            &scene(healer, Warlock, HUG_ENTER + 0.5).decide(HEALER)
+        ));
         let held = scene(healer, Warlock, between).healer_posture(HEALER, hugging(0.0));
-        assert!(!left(&held.decide(HEALER)), "{healer:?}: left inside the band");
+        assert!(
+            !left(&held.decide(HEALER)),
+            "{healer:?}: left inside the band"
+        );
         let gone = scene(healer, Warlock, HUG_LEAVE + 1.0).healer_posture(HEALER, hugging(0.0));
-        assert!(left(&gone.decide(HEALER)), "{healer:?}: held beyond the band");
+        assert!(
+            left(&gone.decide(HEALER)),
+            "{healer:?}: held beyond the band"
+        );
     }
 }
 
@@ -200,10 +230,16 @@ fn a_hug_is_held_through_its_dwell() {
         let fresh = scene(healer, Warlock, HUG_LEAVE + 1.0)
             .now(30.0)
             .healer_posture(HEALER, hugging(30.0 - MODE_DWELL / 2.0));
-        assert!(!left(&fresh.decide(HEALER)), "{healer:?}: left inside its dwell");
+        assert!(
+            !left(&fresh.decide(HEALER)),
+            "{healer:?}: left inside its dwell"
+        );
         let dwelt = scene(healer, Warlock, HUG_LEAVE + 1.0)
             .now(30.0)
             .healer_posture(HEALER, hugging(30.0 - MODE_DWELL - 0.1));
-        assert!(left(&dwelt.decide(HEALER)), "{healer:?}: held past its dwell");
+        assert!(
+            left(&dwelt.decide(HEALER)),
+            "{healer:?}: held past its dwell"
+        );
     }
 }
