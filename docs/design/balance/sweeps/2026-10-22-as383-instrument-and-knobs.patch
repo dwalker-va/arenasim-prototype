@@ -1,0 +1,374 @@
+diff --git a/src/states/play_match/class_ai/cc_reach.rs b/src/states/play_match/class_ai/cc_reach.rs
+index ed47d2f4..535d4010 100644
+--- a/src/states/play_match/class_ai/cc_reach.rs
++++ b/src/states/play_match/class_ai/cc_reach.rs
+@@ -297,7 +297,10 @@ pub fn threats(
+             let Some(def) = abilities.get(&ability) else {
+                 continue;
+             };
+-            if held_by(def).is_none() || !could_cast(ctx, enemy, ability, def, horizon) {
++            let as383_fs = ability == AbilityType::FrostShock && super::priest::as383_exp("fs");
++            if (held_by(def).is_none() && !as383_fs)
++                || !could_cast(ctx, enemy, ability, def, horizon)
++            {
+                 continue;
+             }
+             let Some(weight) = landing_weight(ctx, healer, def) else {
+diff --git a/src/states/play_match/class_ai/formation.rs b/src/states/play_match/class_ai/formation.rs
+index 9e677e49..f6cf150b 100644
+--- a/src/states/play_match/class_ai/formation.rs
++++ b/src/states/play_match/class_ai/formation.rs
+@@ -588,6 +588,7 @@ pub fn reach_repaired_point(
+     let covering: Vec<&CcThreat> = field.covering(ctx.obstacles, origin, judged).collect();
+     if covering.is_empty() {
+         *kept = None;
++        as383_note(format!("clear live={live}"));
+         return point;
+     }
+     let allies = teammates(ctx, healer);
+@@ -632,6 +633,27 @@ pub fn reach_repaired_point(
+         }
+     }
+ 
++    let n_raw = raw.len();
++    let as383_counts = {
++        let st: Vec<Vec2> = raw
++            .iter()
++            .filter_map(|&c| {
++                let clamped = clamp_to_arena(&ctx.bounds, Vec3::new(c.x, point.y, c.y));
++                nearest_standable(ctx.obstacles, xz(clamped), point.y)
++            })
++            .collect();
++        let od: Vec<Vec2> = st
++            .iter()
++            .copied()
++            .filter(|&c| field.covering(ctx.obstacles, c, Disc::Outer).next().is_none())
++            .collect();
++        let hr: Vec<Vec2> = od
++            .iter()
++            .copied()
++            .filter(|&c| held.iter().all(|a| a.distance(c) <= reach + 1e-3))
++            .collect();
++        (st.len(), od.len(), hr.len())
++    };
+     let feasible: Vec<Vec2> = raw
+         .into_iter()
+         .filter_map(|c| {
+@@ -681,9 +703,11 @@ pub fn reach_repaired_point(
+             && origin_sight.is_none_or(|at| sight_from(ctx.obstacles, k, &allies) >= at)
+             && !through(k);
+         if still {
++            as383_note(format!("kept d={:.1}", k.distance(origin)));
+             return Vec3::new(k.x, point.y, k.y);
+         }
+     }
++    let feasible_len = feasible.len();
+     let best = feasible
+         .into_iter()
+         .filter(|c| c.distance(origin) < REACH_REPAIR_LIMIT)
+@@ -707,14 +731,26 @@ pub fn reach_repaired_point(
+             .is_none()
+         && held.iter().all(|a| a.distance(me) <= heal_reach)
+         && origin_sight.is_none_or(|at| sight_from(ctx.obstacles, me, &allies) >= at);
++    let n_feasible = feasible_len;
+     if stays {
+         *kept = Some(me);
++        as383_note(format!("stays"));
+         return Vec3::new(me.x, point.y, me.y);
+     }
+     *kept = best;
+     let Some(spot) = best else {
++        as383_note(format!(
++            "none live={live} raw={n_raw} stand={} outdisc={} heal={} sight={n_feasible} held={} covering={}",
++            as383_counts.0, as383_counts.1, as383_counts.2, held.len(), covering.len()
++        ));
+         return point;
+     };
++    as383_note(format!(
++        "best d={:.1} w={:.2} through={}",
++        spot.distance(origin),
++        reach_repair_weight(spot.distance(origin)),
++        through(spot)
++    ));
+     // As far as the sight repair goes, and no further: in full to
+     // `REPAIR_FULL`, fading to nothing at `REPAIR_LIMIT`, so the repair never
+     // carries the point across the arena and lets go without a step as its
+@@ -1626,3 +1662,17 @@ mod tests {
+         assert!(largest < 2.0, "the point jumped {largest}yd");
+     }
+ }
++
++thread_local! {
++    static AS383_REPAIR: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
++}
++
++/// AS-383 measurement instrument (throwaway): the reach repair's outcome.
++fn as383_note(s: String) {
++    AS383_REPAIR.with(|r| *r.borrow_mut() = Some(s));
++}
++
++/// AS-383 measurement instrument (throwaway): take the last repair outcome.
++pub fn as383_last_repair() -> Option<String> {
++    AS383_REPAIR.with(|r| r.borrow_mut().take())
++}
+diff --git a/src/states/play_match/class_ai/priest.rs b/src/states/play_match/class_ai/priest.rs
+index 1a9b374e..2e6cfece 100644
+--- a/src/states/play_match/class_ai/priest.rs
++++ b/src/states/play_match/class_ai/priest.rs
+@@ -1840,6 +1840,10 @@ pub fn evaluate_priest_posture(
+     } else {
+         None
+     };
++    let dip_entry = dip_entry.filter(|&target| {
++        !ctx.ai_profile.is_team_plan()
++            || as383_dip_allowed(entity, my_pos, target, ctx, abilities, shared)
++    });
+ 
+     let next = match prev {
+         // ESCAPE is committed for the whole window (no re-evaluation churn
+@@ -1858,6 +1862,12 @@ pub fn evaluate_priest_posture(
+         // never DipAbort — the defensive self-peel takes over). Otherwise the
+         // abort conditions apply; else hold the dip.
+         Posture::Dip if onset => Posture::Pressured,
++        Posture::Dip
++            if ctx.ai_profile.is_team_plan()
++                && as383_dip_cut(entity, my_pos, state.dip_target, ctx, abilities, shared) =>
++        {
++            Posture::Pressured
++        }
+         Posture::Dip if dip_aborts => Posture::Free,
+         Posture::Dip => Posture::Dip,
+         // FREE: pressure first, then the offensive dip opportunity.
+@@ -2066,6 +2076,10 @@ pub fn evaluate_priest_posture(
+         }
+     }
+ 
++    as383_instrument(
++        entity, my_pos, ctx, abilities, state, directive, shared, now, trigger, onset,
++    );
++
+     if needs_insert {
+         commands.entity(entity).try_insert(*state);
+     }
+@@ -2877,3 +2891,221 @@ mod reach_tests {
+         assert!(!screamed(&trace) && held_for_a_heal(&trace));
+     }
+ }
++
++/// AS-383 measurement instrument (throwaway, measurement only). Under
++/// `TeamPlan`, one JSON line per posture evaluation to `$AS383_LOG`: the
++/// posture, the pressure test, the Priest's position and standing goal, its
++/// crowd-control field (ready threats, and whether each covers it), the reach
++/// repair's last outcome, and every living enemy's position and target.
++#[allow(clippy::too_many_arguments)]
++fn as383_instrument(
++    entity: Entity,
++    my_pos: Vec3,
++    ctx: &CombatContext,
++    abilities: &AbilityDefinitions,
++    state: &HealerPosture,
++    directive: Option<&MovementDirective>,
++    shared: &SharedMovementConfig,
++    now: f32,
++    trigger: bool,
++    onset: bool,
++) {
++    let Ok(path) = std::env::var("AS383_LOG") else {
++        return;
++    };
++    if !ctx.ai_profile.is_team_plan() {
++        return;
++    }
++    use std::io::Write;
++    let me = Vec2::new(my_pos.x, my_pos.z);
++    let field = super::cc_reach::CcField::for_healer(
++        ctx,
++        abilities,
++        entity,
++        shared.cc_ready_horizon,
++        shared.cc_reach_margin,
++    );
++    let threats: Vec<serde_json::Value> = field
++        .threats
++        .iter()
++        .map(|t| {
++            serde_json::json!({
++                "ab": format!("{:?}", t.ability),
++                "src": t.source.index(),
++                "c": [t.center.x, t.center.y],
++                "reach": t.reach,
++                "d": t.center.distance(me),
++                "inner": field.covering(ctx.obstacles, me, super::cc_reach::Disc::Inner).any(|c| c.source == t.source && c.ability == t.ability),
++                "outer": field.covering(ctx.obstacles, me, super::cc_reach::Disc::Outer).any(|c| c.source == t.source && c.ability == t.ability),
++            })
++        })
++        .collect();
++    let my_team = ctx.combatants.get(&entity).map(|c| c.team).unwrap_or(0);
++    let units: Vec<serde_json::Value> = ctx
++        .combatants
++        .values()
++        .filter(|c| c.is_alive && c.entity != entity)
++        .map(|c| {
++            serde_json::json!({
++                "e": c.entity.index(),
++                "cls": format!("{:?}", c.class),
++                "ally": c.team == my_team,
++                "pet": c.is_pet,
++                "p": [c.position.x, c.position.z],
++                "hp": c.current_health / c.max_health.max(1.0),
++                "tme": c.target == Some(entity),
++                "cast": c.casting_ability.map(|a| format!("{a:?}")),
++            })
++        })
++        .collect();
++    let goal = directive.map(|d| match d.goal {
++        MovementGoal::Point(p) => serde_json::json!(["pt", p.x, p.z]),
++        MovementGoal::Direction(v) => serde_json::json!(["dir", v.x, v.y]),
++        MovementGoal::Entity(e) => serde_json::json!(["ent", e.index()]),
++    });
++    let line = serde_json::json!({
++        "t": now,
++        "e": entity.index(),
++        "post": format!("{:?}", state.posture),
++        "trig": trigger,
++        "onset": onset,
++        "p": [me.x, me.y],
++        "goal": goal,
++        "kept": state.formation.reach.map(|k| [k.x, k.y]),
++        "repair": super::formation::as383_last_repair(),
++        "thr": threats,
++        "u": units,
++    });
++    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
++        let _ = writeln!(f, "{line}");
++    }
++}
++
++/// AS-383 EXPERIMENT knob (throwaway, never shipped): `$AS383_EXP` names the
++/// variants to run, comma-separated.
++pub fn as383_exp(name: &str) -> bool {
++    static EXP: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
++    EXP.get_or_init(|| {
++        std::env::var("AS383_EXP")
++            .map(|v| v.split(',').map(str::to_owned).collect())
++            .unwrap_or_default()
++    })
++    .iter()
++    .any(|v| v == name)
++}
++
++/// AS-383 EXPERIMENT (throwaway): whether a live `TeamPlan` scream dip is cut
++/// to PRESSURED. `dipcut_tgt`: the dip target targets the Priest from within
++/// `threat_intent_radius` (the old false pressure's onset, for the dip only).
++/// `dipcut_cc`: the Priest stands inside the outer disc of a ready hard CC
++/// whose source is not the dip target.
++fn as383_dip_cut(
++    entity: Entity,
++    my_pos: Vec3,
++    target: Option<Entity>,
++    ctx: &CombatContext,
++    abilities: &AbilityDefinitions,
++    shared: &SharedMovementConfig,
++) -> bool {
++    let t = target.and_then(|t| ctx.combatants.get(&t));
++    if as383_exp("dipcut_tgt")
++        && t.is_some_and(|t| {
++            t.target == Some(entity) && t.position.distance(my_pos) <= shared.threat_intent_radius
++        })
++    {
++        return true;
++    }
++    if as383_exp("dipcut_cc") {
++        let field = super::cc_reach::CcField::for_healer(
++            ctx,
++            abilities,
++            entity,
++            shared.cc_ready_horizon,
++            shared.cc_reach_margin,
++        )
++        .without_source(target);
++        let me = Vec2::new(my_pos.x, my_pos.z);
++        if field
++            .covering(ctx.obstacles, me, super::cc_reach::Disc::Outer)
++            .next()
++            .is_some()
++        {
++            return true;
++        }
++    }
++    false
++}
++
++/// AS-383 EXPERIMENT (throwaway): whether a `TeamPlan` scream dip on `target`
++/// may start. `nodip`: never. `dipgate_tgt`: not while the dip target targets
++/// the Priest from within `threat_intent_radius` (what the old false pressure
++/// blocked). `dipgate_cc`: not when the arrival spot (scream radius short of
++/// the target, on the line from it) is inside a ready hard-CC disc.
++fn as383_dip_allowed(
++    entity: Entity,
++    my_pos: Vec3,
++    target: Entity,
++    ctx: &CombatContext,
++    abilities: &AbilityDefinitions,
++    shared: &SharedMovementConfig,
++) -> bool {
++    if as383_exp("nodip") {
++        return false;
++    }
++    let Some(t) = ctx.combatants.get(&target) else {
++        return true;
++    };
++    if as383_exp("dipgate_tgt")
++        && t.target == Some(entity)
++        && t.position.distance(my_pos) <= shared.threat_intent_radius
++    {
++        return false;
++    }
++    if as383_exp("dipgate_cc") {
++        let field = super::cc_reach::CcField::for_healer(
++            ctx,
++            abilities,
++            entity,
++            shared.cc_ready_horizon,
++            shared.cc_reach_margin,
++        )
++        .without_source(Some(target));
++        let tp = Vec2::new(t.position.x, t.position.z);
++        let me = Vec2::new(my_pos.x, my_pos.z);
++        let radius = abilities.get_unchecked(&AbilityType::PsychicScream).range;
++        let arrive = tp + (me - tp).normalize_or_zero() * (radius - 1.0);
++        if field
++            .covering(ctx.obstacles, arrive, super::cc_reach::Disc::Outer)
++            .next()
++            .is_some()
++        {
++            return false;
++        }
++    }
++    if as383_exp("dipgate_path") {
++        let field = super::cc_reach::CcField::for_healer(
++            ctx,
++            abilities,
++            entity,
++            shared.cc_ready_horizon,
++            shared.cc_reach_margin,
++        )
++        .without_source(Some(target));
++        let tp = Vec2::new(t.position.x, t.position.z);
++        let me = Vec2::new(my_pos.x, my_pos.z);
++        let radius = abilities.get_unchecked(&AbilityType::PsychicScream).range;
++        let arrive = tp + (me - tp).normalize_or_zero() * (radius - 1.0);
++        let steps = (me.distance(arrive) / 2.0).ceil().max(1.0) as usize;
++        for i in 0..=steps {
++            let p = me.lerp(arrive, i as f32 / steps as f32);
++            if field
++                .covering(ctx.obstacles, p, super::cc_reach::Disc::Outer)
++                .next()
++                .is_some()
++            {
++                return false;
++            }
++        }
++    }
++    true
++}
