@@ -933,7 +933,7 @@ its whole disc (`cc_reach::aim`, an exhaustive match). A healer immune to the
 landing (DR-immune, damage-immune, fear-immune to a fear) is not threatened. A
 spot is covered inside `reach + cc_reach_margin`; the spot a healer stands on
 is judged by `reach + margin / 2`, so a healer on the rim is not moved by the
-caster's every step. Three consumers read it. The team solve's
+caster's every step. Two consumers read it. The team solve's
 `team_solve::C_CC_REACH` on `OccupyCover` (PRESSURED Priest, Paladin, Shaman,
 Druid), ranked above occlusion from casters at any caster count (`W_CC` plus
 `W_OCCLUDED` per enemy caster) and below sight of the anchor at any caster
@@ -949,10 +949,7 @@ heal first and the point stands. The Paladin keeps out only of discs it can
 leave without leaving PRESSURED — none reaching past `threat_intent_radius`
 (a Warlock's Fear) and none of its own target's — and its band-hold parks at
 the nearest spot out of them (`CcField::nearest_exit`); otherwise PRESSURED
-walked it out and its FREE pursuit walked it back. The third,
-`priest::dip_hold` (AS-383), gated the Priest's offensive Psychic Scream dip,
-which `TeamPlan` no longer runs (*Psychic Scream under `TeamPlan`* below), so
-it holds nothing back today. Each walk out of reach is
+walked it out and its FREE pursuit walked it back. Each walk out of reach is
 traced once as it begins, trigger `OutOfCcReach`. The solve's flat-field anti-statue key
 is judged without the crowd-control term, so a melee's small stun disc does
 not disarm it. Under `TeamPlan` a healer parked at its FREE formation point

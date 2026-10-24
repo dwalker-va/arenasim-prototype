@@ -3,6 +3,9 @@
 **Tier: DIRECTIONAL.** Reachable-cell head-to-head, scored from the `TeamPlan`
 side, on fresh seeds. Not a class standing.
 
+**Superseded by AS-388:** `TeamPlan` no longer runs the dip, and the gate
+was deleted with it (`2026-10-24-as388-scream-dip-retired.md`).
+
 ## The change
 
 Under `TeamPlan`, the Priest's offensive Psychic Scream dip does not start in
