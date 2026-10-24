@@ -1,0 +1,91 @@
+--- a/src/states/play_match/class_ai/priest.rs	2026-10-24 15:00:05
++++ b/src/states/play_match/class_ai/priest.rs	2026-10-24 15:00:07
+@@ -156,9 +156,26 @@
+         shared.cc_ready_horizon,
+         shared.cc_reach_margin,
+     )
+-    .without_source(Some(target));
++    ;
+     let radius = abilities.get_unchecked(&AbilityType::PsychicScream).range;
++    let mut field = field;
++    if as388_diag() == "rangedcc" {
++        field
++            .threats
++            .retain(|th| th.source != target || th.reach > radius);
++    } else {
++        field = field.without_source(Some(target));
++    }
+     let arrival = scream_arrival(my_pos, t.position, radius);
++    if as388_diag() == "exempt" {
++        for e in ctx.alive_enemies() {
++            if e.class.is_healer()
++                && Vec2::new(e.position.x, e.position.z).distance(arrival) <= radius
++            {
++                field = field.without_source(Some(e.entity));
++            }
++        }
++    }
+     let covering = field
+         .covering(ctx.obstacles, arrival, super::cc_reach::Disc::Outer)
+         .next()
+@@ -166,6 +183,12 @@
+             ability: threat.ability,
+         });
+     covering
++}
++
++/// AS-388 diagnosis switch (measurement only): `AS388_DIAG` in the env.
++pub fn as388_diag() -> &'static str {
++    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
++    V.get_or_init(|| std::env::var("AS388_DIAG").unwrap_or_default())
+ }
+ 
+ /// Where a walk to Psychic Scream an enemy at `target` ends (XZ): scream range
+@@ -222,6 +245,9 @@
+     if next != Posture::Free || pressured || ctx.is_ccd(entity) {
+         return None;
+     }
++    if as388_diag() == "nowalk" {
++        return None;
++    }
+     let call = super::peel::peel_call(ctx, Role::Healer)?;
+     let def = abilities.get_unchecked(&AbilityType::PsychicScream);
+     if !pre_cast_ok(
+@@ -236,8 +262,13 @@
+     ) {
+         return None;
+     }
++    let budget = match as388_diag() {
++        // "short": one global cooldown of travel
++        "short" | "melee_short" => 1.5,
++        _ => movement.priest.dip_budget,
++    };
+     let reach = def.range
+-        + movement.priest.dip_budget
++        + budget
+             * combatant.base_movement_speed
+             * ctx.movement_slow_multiplier(entity);
+     let healers: Vec<Vec2> = ctx
+@@ -254,6 +285,13 @@
+         .iter()
+         .copied()
+         .filter(|&a| scream_dip_target_eligible(ctx, combatant.team, a))
++        .filter(|&a| {
++            !matches!(as388_diag(), "melee" | "melee_short")
++                || ctx
++                    .combatants
++                    .get(&a)
++                    .is_some_and(|i| i.is_pet || i.class.is_melee())
++        })
+         .filter_map(|a| {
+             let pos = ctx.combatants.get(&a)?.position;
+             let dist = my_pos.distance(pos);
+@@ -2288,7 +2326,7 @@
+             ctx,
+         );
+         peel_ran = true;
+-        cast_defer = true;
++        cast_defer = as388_diag() != "nodefer";
+     } else {
+         // Sight regained / ally in Dispel Magic's reach and dispelled (or the
+         // ally recovered, was freed, or died): drop the walk so the normal

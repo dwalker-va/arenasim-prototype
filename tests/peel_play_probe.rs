@@ -143,12 +143,20 @@ fn windows(played: &Played) -> Vec<Window> {
         // The classifier's dying test, on the observation of the onset's
         // update or the one before it (a heal can land after the decision in
         // the same update): the trace's frames and the observations line up.
+        // An update in which the unit's health moved can have crossed the line
+        // and back inside itself — a tick before the decision, a heal after
+        // it — which no end-of-update observation shows; it is accepted too.
         let dying_at = |f: usize| {
             let s = &frames[f].combatants[&subject];
             s.current_health < s.max_health * 0.5
         };
+        let moved_in = |f: usize| {
+            f > 0
+                && frames[f].combatants[&subject].current_health
+                    != frames[f - 1].combatants[&subject].current_health
+        };
         assert!(
-            dying_at(f0) || (f0 > 0 && dying_at(f0 - 1)),
+            dying_at(f0) || (f0 > 0 && dying_at(f0 - 1)) || moved_in(f0),
             "frame {f0}: the unit in danger is not dying in the observation — the trace \
              frame and the frame observations are out of step"
         );

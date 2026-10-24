@@ -73,6 +73,9 @@ impl Default for PriestMovementPlan {
 /// no `Reserved` state: Psychic Scream has no rotational use, so the defensive
 /// self-peel (PRESSURED) and the offensive dip (FREE / not pressured) are
 /// mutually exclusive by posture — the pressured gate IS the reservation (R14).
+///
+/// The offensive dip is `Legacy`'s: `TeamPlan` retired it (AS-388), so under
+/// `TeamPlan` the plan is always `Rotation`.
 pub enum ScreamDipPlan {
     /// No dip this tick — the defensive self-peel governs (gated on pressure).
     Rotation,
@@ -83,83 +86,6 @@ pub enum ScreamDipPlan {
         target: Entity,
         completed_state: Box<HealerPosture>,
     },
-    /// No dip this tick, though one was on offer: the `TeamPlan` gate held it
-    /// back ([`dip_hold`]). The defensive self-peel governs as under
-    /// `Rotation`; the ability pass records why the dip did not start.
-    Held(DipHold),
-}
-
-/// Why the `TeamPlan` dip gate ([`dip_hold`]) held a scream dip back (AS-383).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DipHold {
-    /// The dip target already targets the Priest from within
-    /// `threat_intent_radius`: walking the last stretch to scream range
-    /// crosses the 12yd pressure onset first, which ends the dip unscreamed
-    /// with the Priest standing in front of its target.
-    TargetEngaged,
-    /// The spot the dip ends on — scream range short of the target, on the
-    /// line from it — lies in the reach of `ability`, an enemy crowd control
-    /// ready to land on the Priest (`cc_reach::CcField`, the target's own
-    /// excluded: reaching the target is the point of the dip).
-    ArrivalInReach { ability: AbilityType },
-}
-
-impl DipHold {
-    /// The trace note: what held the dip back.
-    pub fn note(self) -> String {
-        match self {
-            DipHold::TargetEngaged => {
-                "scream dip held: the dip target already targets the Priest".to_owned()
-            }
-            DipHold::ArrivalInReach { ability } => {
-                format!("scream dip held: its arrival is in reach of a ready {ability:?}")
-            }
-        }
-    }
-}
-
-/// The `TeamPlan` scream-dip gate (AS-383): whether a dip on `target`, which
-/// [`evaluate_scream_dip_entry`] offers, is held back, and why. `None` under
-/// `Legacy`, and wherever the dip may start.
-///
-/// The dip is a walk into the enemy team, and nothing else in it reads where
-/// the enemy crowd control reaches. Measured on BasicArena (AS-383), a dip
-/// let run to its budget left the Priest feared or polymorphed four times as
-/// often, and in the 20yd reach of an enemy Shaman's Frost Shock.
-pub fn dip_hold(
-    entity: Entity,
-    my_pos: Vec3,
-    target: Entity,
-    ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
-    shared: &SharedMovementConfig,
-) -> Option<DipHold> {
-    if !ctx.ai_profile.is_team_plan() {
-        return None;
-    }
-    let t = ctx.combatants.get(&target)?;
-    if t.target == Some(entity) && t.position.distance(my_pos) <= shared.threat_intent_radius {
-        return Some(DipHold::TargetEngaged);
-    }
-    let field = super::cc_reach::CcField::for_healer(
-        ctx,
-        abilities,
-        entity,
-        shared.cc_ready_horizon,
-        shared.cc_reach_margin,
-    )
-    .without_source(Some(target));
-    let to = Vec2::new(t.position.x, t.position.z);
-    let me = Vec2::new(my_pos.x, my_pos.z);
-    let radius = abilities.get_unchecked(&AbilityType::PsychicScream).range;
-    let arrival = to + (me - to).normalize_or_zero() * radius;
-    let covering = field
-        .covering(ctx.obstacles, arrival, super::cc_reach::Disc::Outer)
-        .next()
-        .map(|threat| DipHold::ArrivalInReach {
-            ability: threat.ability,
-        });
-    covering
 }
 
 /// Priest AI: Decides and executes abilities for a Priest combatant.
@@ -203,15 +129,6 @@ pub fn decide_priest_action(
     else {
         return false;
     };
-
-    // A dip the `TeamPlan` gate held back this tick (AS-383): say why,
-    // whatever the chain below then chooses.
-    if let ScreamDipPlan::Held(hold) = &plan.scream_dip {
-        builder.reject(
-            AbilityType::PsychicScream,
-            RejectionReason::PreconditionUnmet { note: hold.note() },
-        );
-    }
 
     // The Peel play (TeamPlan): a teammate is in danger, so Psychic Scream
     // heads the chain when one of its attackers stands inside the scream.
@@ -1921,14 +1838,14 @@ pub fn evaluate_priest_posture(
         prev == Posture::Dip && scream_dip_should_abort(state, combatant, ctx, shared, now);
 
     // --- DIP entry (FREE only, no pressure): the offensive scream dip ---
-    let dip_entry = if prev == Posture::Free && !trigger {
+    // `Legacy` only: under `TeamPlan` the dip is retired (AS-388). The
+    // offensive Scream is the Peel play's step, on an attacker already in
+    // range; the defensive Scream and the dip's abort are unchanged.
+    let dip_entry = if prev == Posture::Free && !trigger && !ctx.ai_profile.is_team_plan() {
         evaluate_scream_dip_entry(entity, combatant, my_pos, auras, ctx, movement, abilities)
     } else {
         None
     };
-    // Under `TeamPlan`, the dip gate may hold an offered dip back (AS-383).
-    let held = dip_entry.and_then(|t| dip_hold(entity, my_pos, t, ctx, abilities, shared));
-    let dip_entry = dip_entry.filter(|_| held.is_none());
 
     let next = match prev {
         // ESCAPE is committed for the whole window (no re-evaluation churn
@@ -2009,7 +1926,7 @@ pub fn evaluate_priest_posture(
         }
     }
 
-    let mut scream_dip = held.map_or(ScreamDipPlan::Rotation, ScreamDipPlan::Held);
+    let mut scream_dip = ScreamDipPlan::Rotation;
     // Set by a movement that a movement-locking cast would stall: the dispel
     // walk, or a team-solve walk to a teammate owed a dispel.
     let mut cast_defer = false;
