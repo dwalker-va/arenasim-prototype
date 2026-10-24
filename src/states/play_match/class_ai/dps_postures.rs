@@ -23,8 +23,8 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::combat_core::{
-    compass_directions_16, mask_and_los_bitmask, score_directions, trap_setup_term, RangeBand,
-    ScorerInputs,
+    compass_directions_16, mask_and_los_bitmask, score_directions, trap_setup_term,
+    AnchorConstraint, RangeBand, ScorerInputs,
 };
 use crate::states::play_match::components::{
     AuraType, Combatant, DpsPosture, KitePosture, MatchCountdown, MovementDirective, MovementGoal,
@@ -459,6 +459,37 @@ pub struct TrapSetup {
     pub range: f32,
 }
 
+/// The team sight yield's hold on a kiter (AS-386): while the kiter yields its
+/// healer's sight (`CombatContext::sight_yield_healer`), the scorer's existing
+/// ally-anchor mask is pointed at that healer, for SIGHT only — heal range
+/// stays the soft `healer_leash` term, so the reach is unbounded. It is a MASK
+/// on the kiter's objective, never a replacement for it: `flee`,
+/// `range_band`, `los_seek`, the kite hysteresis and the wand fallback are
+/// untouched, and when no step keeps sight the fallback ladder lifts the mask,
+/// so a kiter fleeing round a pillar is never pinned.
+///
+/// - **Sighted:** a step that would put the healer behind cover is masked.
+/// - **Already blind:** the mask keeps only the steps that regain sight; with
+///   none, `close_when_out` keeps the steps that end nearer the healer before
+///   the ladder lets it go.
+///
+/// `None` — the scorer bit for bit — while no yield is set, and always under
+/// `Legacy`, which classifies none.
+fn sight_yield_anchor(ctx: &CombatContext, my_pos: Vec3) -> Option<AnchorConstraint> {
+    let healer = ctx.sight_yield_healer()?;
+    let info = ctx.combatants.get(&healer).filter(|i| i.is_alive)?;
+    let sighted = has_line_of_sight(
+        ctx.obstacles,
+        Vec3::new(my_pos.x, EYE_HEIGHT, my_pos.z),
+        Vec3::new(info.position.x, EYE_HEIGHT, info.position.z),
+    );
+    Some(AnchorConstraint {
+        pos: info.position,
+        heal_range: f32::INFINITY,
+        close_when_out: !sighted,
+    })
+}
+
 /// Build the kiter's `ScorerInputs` for one scoring pass — shared by the KITE
 /// orbit and the ENGAGE seek-LoS repositioning so both see identical
 /// threat / range-band / `los_target` wiring. The caller supplies the committed
@@ -527,7 +558,7 @@ fn build_kiter_inputs(
         my_pos,
         lookahead: SCORER_LOOKAHEAD,
         threats,
-        anchor: None,
+        anchor: sight_yield_anchor(ctx, my_pos),
         formation_point: None,
         wand_target: None,
         wand_range: 0.0,

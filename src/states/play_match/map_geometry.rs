@@ -914,6 +914,173 @@ pub fn steer_toward_goal(
     })
 }
 
+/// Which way round an obstacle a mover goes, as seen from the mover: `Left`
+/// is counter-clockwise of the direction to the obstacle's centre (the
+/// greater signed angle), `Right` clockwise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TangentSide {
+    Left,
+    Right,
+}
+
+/// How far ahead along a peel-off heading a hugging mover's side is probed
+/// ([`Rounding::waypoint`]): the scorers' 2yd lookahead.
+const SIDE_PROBE: f32 = 2.0;
+
+/// The two ways round the obstacle that blocks a goal-directed mover — what
+/// [`steer_toward_goal`] chooses between — so a caller with its own reason to
+/// prefer a side (the team sight yield's pursuit, `combat_core::movement`) can
+/// take the other one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rounding {
+    /// The blocking obstacle's index in the slice.
+    pub obstacle: usize,
+    /// Unit heading round the left side, and round the right.
+    pub left: Vec2,
+    pub right: Vec2,
+    /// Where each heading meets the obstacle's skin: the tangent point (a
+    /// cylinder) or tangent vertex (a prism), or [`SIDE_PROBE`] along the
+    /// peel-off heading for a mover already hugging the skin.
+    pub left_waypoint: Vec2,
+    pub right_waypoint: Vec2,
+    /// The side [`steer_toward_goal`] takes: its heading is exactly what
+    /// `steer_toward_goal` returns.
+    pub default: TangentSide,
+}
+
+impl Rounding {
+    pub fn heading(&self, side: TangentSide) -> Vec2 {
+        match side {
+            TangentSide::Left => self.left,
+            TangentSide::Right => self.right,
+        }
+    }
+
+    pub fn waypoint(&self, side: TangentSide) -> Vec2 {
+        match side {
+            TangentSide::Left => self.left_waypoint,
+            TangentSide::Right => self.right_waypoint,
+        }
+    }
+}
+
+/// The two ways round the nearest obstacle blocking `from → goal`
+/// ([`Rounding`]), found as [`steer_toward_goal`] finds them. `None` when the
+/// path is clear (or there are no obstacles), and wherever `steer_toward_goal`
+/// does not choose between two sides: a goal inside a prism's footprint, a
+/// mover on a prism's centre, and a box (the stub maps' primitive, rounded by
+/// its silhouette corner).
+pub fn rounding(
+    obstacles: &[ObstacleVolume],
+    from: Vec2,
+    goal: Vec2,
+    mover_y: f32,
+) -> Option<Rounding> {
+    if obstacles.is_empty() || (goal - from).length_squared() <= 1e-12 {
+        return None;
+    }
+    let mut best: Option<(f32, usize)> = None;
+    for (i, v) in obstacles.iter().enumerate() {
+        if let Some(t) = footprint_sweep_entry(v, from, goal, mover_y) {
+            match best {
+                Some((bt, _)) if t >= bt => {}
+                _ => best = Some((t, i)),
+            }
+        }
+    }
+    let (_, obstacle) = best?;
+    let goal_dir = (goal - from).normalize_or_zero();
+    // A hugging mover peels off along ± the perpendicular of the centre
+    // direction, `perp` (counter-clockwise) being the left side.
+    let hugging = |center: Vec2, left_default: bool| {
+        let d = center - from;
+        let dist = d.length();
+        let dn = if dist > 1e-6 { d / dist } else { goal_dir };
+        let dn = dn.normalize_or(Vec2::X);
+        let perp = Vec2::new(-dn.y, dn.x);
+        Rounding {
+            obstacle,
+            left: perp,
+            right: -perp,
+            left_waypoint: from + perp * SIDE_PROBE,
+            right_waypoint: from - perp * SIDE_PROBE,
+            default: if left_default {
+                TangentSide::Left
+            } else {
+                TangentSide::Right
+            },
+        }
+    };
+    match obstacles[obstacle] {
+        ObstacleVolume::Cylinder {
+            center_xz, radius, ..
+        } => {
+            let eff = radius + MOVER_RADIUS;
+            let d = center_xz - from;
+            let dist = d.length();
+            if dist <= eff {
+                let dn = if dist > 1e-6 { d / dist } else { goal_dir };
+                let dn = dn.normalize_or(Vec2::X);
+                let perp = Vec2::new(-dn.y, dn.x);
+                return Some(hugging(center_xz, goal_dir.dot(perp) >= 0.0));
+            }
+            let dn = d / dist;
+            let alpha = (eff / dist).clamp(-1.0, 1.0).asin();
+            let (sin_a, cos_a) = alpha.sin_cos();
+            let t_left = Vec2::new(dn.x * cos_a - dn.y * sin_a, dn.x * sin_a + dn.y * cos_a);
+            let t_right = Vec2::new(dn.x * cos_a + dn.y * sin_a, -dn.x * sin_a + dn.y * cos_a);
+            let (dot_l, dot_r) = (t_left.dot(goal_dir), t_right.dot(goal_dir));
+            let left_default = (dot_l - dot_r).abs() < STEER_TIE_EPS || dot_l >= dot_r;
+            let reach = (dist * dist - eff * eff).max(0.0).sqrt();
+            Some(Rounding {
+                obstacle,
+                left: t_left,
+                right: t_right,
+                left_waypoint: from + t_left * reach,
+                right_waypoint: from + t_right * reach,
+                default: if left_default {
+                    TangentSide::Left
+                } else {
+                    TangentSide::Right
+                },
+            })
+        }
+        ObstacleVolume::Aabb { .. } => None,
+        ObstacleVolume::Prism {
+            center_xz,
+            circumradius,
+            sides,
+            rotation,
+            ..
+        } => {
+            let hull = PrismHull::new(center_xz, circumradius, sides, rotation)?;
+            if hull.push_out(goal) != goal {
+                return None;
+            }
+            if prism_half_planes_contain(from - center_xz, hull.skin, sides, rotation, false) {
+                let shell = hull.push_out(from);
+                let left = hull
+                    .tangents(shell)
+                    .is_none_or(|(l, r)| hull.left_is_shorter(shell, goal, l, r));
+                return Some(hugging(center_xz, left));
+            }
+            let (left, right) = hull.tangents(from)?;
+            Some(Rounding {
+                obstacle,
+                left: left.1,
+                right: right.1,
+                left_waypoint: hull.vertex(left.0),
+                right_waypoint: hull.vertex(right.0),
+                default: if hull.left_is_shorter(from, goal, left, right) {
+                    TangentSide::Left
+                } else {
+                    TangentSide::Right
+                },
+            })
+        }
+    }
+}
+
 /// Unit direction toward the better-progress tangent point of a cylinder (radius
 /// inflated by [`MOVER_RADIUS`]). See [`steer_toward_goal`].
 fn steer_around_cylinder(center: Vec2, radius: f32, from: Vec2, goal: Vec2) -> Vec2 {
@@ -2183,5 +2350,56 @@ mod tests {
             // Inclusive boundary policy: a vertex counts as inside.
             assert!(contains_point(&pillar, Vec3::new(v.x, 1.0, v.y)));
         }
+    }
+
+    /// `rounding`'s default side is exactly the heading `steer_toward_goal`
+    /// takes, from every start round a cylinder and a Nagrand-sized prism,
+    /// hugging the skin included, and its two headings are the two ways round
+    /// (one each side of the centre direction).
+    #[test]
+    fn rounding_default_is_steer_toward_goal() {
+        let shapes = [
+            cylinder(0.0, 0.0, 3.0, 0.0, 10.0),
+            ObstacleVolume::Prism {
+                center_xz: Vec2::ZERO,
+                circumradius: 4.0,
+                sides: 8,
+                rotation: 0.3,
+                base_y: 0.0,
+                height: 10.0,
+            },
+        ];
+        let mut checked = 0;
+        for shape in shapes {
+            let obstacles = [shape];
+            for i in 0..48 {
+                let a = i as f32 * std::f32::consts::TAU / 48.0;
+                for r in [3.6_f32, 4.6, 6.0, 12.0] {
+                    let from = Vec2::new(a.cos(), a.sin()) * r;
+                    for j in 0..12 {
+                        let b = a + std::f32::consts::PI + (j as f32 - 6.0) * 0.12;
+                        let goal = Vec2::new(b.cos(), b.sin()) * 14.0;
+                        let steer = steer_toward_goal(&obstacles, from, goal, 1.0);
+                        let Some(round) = rounding(&obstacles, from, goal, 1.0) else {
+                            continue;
+                        };
+                        checked += 1;
+                        assert_eq!(
+                            steer,
+                            Some(round.heading(round.default)),
+                            "from {from} to {goal}"
+                        );
+                        let centre = -from;
+                        assert!(
+                            centre.perp_dot(round.left) > 0.0 && centre.perp_dot(round.right) < 0.0,
+                            "from {from}: left {} right {}",
+                            round.left,
+                            round.right
+                        );
+                    }
+                }
+            }
+        }
+        assert!(checked > 500, "only {checked} blocked starts");
     }
 }

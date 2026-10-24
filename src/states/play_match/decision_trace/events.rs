@@ -67,7 +67,9 @@ use serde::{Deserialize, Serialize};
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::components::{AuraType, DRCategory};
-use crate::states::play_match::situation::{MatchPhase, Play, TeamSituation, Tempo, Window};
+use crate::states::play_match::situation::{
+    MatchPhase, Play, TeamSituation, Tempo, Window, YieldRule,
+};
 
 /// One AI decision event. Serializes to a single JSONL line.
 #[derive(Serialize, Clone, Debug)]
@@ -217,6 +219,9 @@ pub enum SituationName {
     LastStand,
     Tempo,
     Phase,
+    /// A DPS began, ended or changed the rule of its healer-sight yield
+    /// (`TeamSituation::sight_yield`, AS-386).
+    SightYield,
 }
 
 /// What happened to the situation. Adding a variant requires updating
@@ -230,8 +235,10 @@ pub enum SituationChangeKind {
     End,
     /// A new CC pushed an open window's `until` later.
     Extended,
-    /// The team's tempo or the match phase moved (`tempo` /
-    /// `previous_tempo`, or `phase` / `previous_phase`, carry both ends).
+    /// The team's tempo or the match phase moved (`tempo` / `previous_tempo`,
+    /// or `phase` / `previous_phase`, carry both ends), or a DPS still
+    /// yielding its healer's sight does so under a new `rule`
+    /// (`sight_yield`).
     Shift,
 }
 
@@ -372,6 +379,12 @@ pub enum EventPayload {
         phase: Option<MatchPhase>,
         #[serde(skip_serializing_if = "Option::is_none")]
         previous_phase: Option<MatchPhase>,
+        /// `sight_yield` changes: the pair's healer (its DPS is `subject`)
+        /// and the rule that now leads the pair.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        healer: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rule: Option<YieldRule>,
     },
 }
 

@@ -67,6 +67,17 @@
 //!   on a tie. Its `until` is when the longest hold on that enemy runs out.
 //!   The lock the Chain play hands off from; nothing else reads it, and it
 //!   is traced only under that play (`situation.lock_ending`).
+//! - **`sight_yield`** — per DPS–healer pair, which of the two must not break
+//!   the pair's line of sight ([`SightPair`], AS-386; the design is
+//!   `docs/design/2026-10-24-team-sight-cohesion.md` §3.1). The first rule
+//!   that holds decides ([`YieldRule`]): a unit that cannot move leads; a
+//!   pressured healer leads; the team's pillar stance leads; a hurt DPS
+//!   (below [`SIGHT_YIELD_HP`], held until [`SIGHT_YIELD_RELEASE_HP`])
+//!   yields; otherwise the DPS leads and the healer follows. A yield, once
+//!   set, holds [`SIGHT_YIELD_DWELL`] unless rule 1 ends it. `TeamPlan` only
+//!   ([`SituationConfig::sight_yield`]); a DPS's movement reads it (the kiter
+//!   scorer's anchor mask, `CombatContext::sight_yield_healer`, and the
+//!   pursuit's held tangent side, `combat_core::movement`).
 //!
 //! ## Plays
 //!
@@ -325,6 +336,10 @@ pub struct TeamSituation {
     /// Whether this team's healers play the pillar modes (AS-373,
     /// [`SituationConfig::pillar_modes`]).
     pub pillar_modes: bool,
+    /// Each DPS–healer pair's sight yield: which of the two must not break
+    /// the pair's line of sight (the module docs' `sight_yield`). Empty
+    /// unless the team runs it ([`SituationConfig::sight_yield`]).
+    pub sight_yield: SmallVec<[SightPair; 2]>,
 }
 
 /// What a unit does about a situation: a named reordering of its own priority
@@ -736,6 +751,10 @@ pub struct SituationConfig {
     /// `class_ai::pillar_mode`): `true` under `TeamPlan` ([`Self::under`])
     /// unless a measurement turns them off ([`WithheldPlays::no_pillar_modes`]).
     pub pillar_modes: bool,
+    /// Whether the team classifies its `sight_yield` (AS-386): `true` under
+    /// `TeamPlan` ([`Self::under`]) unless a measurement turns it off
+    /// ([`WithheldPlays::no_sight_yield`]).
+    pub sight_yield: bool,
 }
 
 impl Default for SituationConfig {
@@ -764,6 +783,7 @@ impl SituationConfig {
             exceptions: ExceptionOverrides::default(),
             withheld: WithheldPlays::default(),
             pillar_modes: false,
+            sight_yield: false,
         }
     }
 
@@ -779,6 +799,7 @@ impl SituationConfig {
             AiProfile::TeamPlan => Self {
                 runs: PlaySet::all(),
                 pillar_modes: true,
+                sight_yield: true,
                 ..self
             },
             AiProfile::Legacy => Self {
@@ -786,6 +807,7 @@ impl SituationConfig {
                 healers_close: true,
                 runs: PlaySet::default(),
                 pillar_modes: false,
+                sight_yield: false,
                 ..self
             },
         }
@@ -800,6 +822,7 @@ impl SituationConfig {
             runs: cfg.runs.without(self.withheld.for_team(team)),
             exceptions: self.withheld.exceptions_for_team(team),
             pillar_modes: cfg.pillar_modes && !self.withheld.no_pillar_modes(team),
+            sight_yield: cfg.sight_yield && !self.withheld.no_sight_yield(team),
             ..cfg
         }
     }
@@ -906,9 +929,25 @@ pub struct WithheldPlays {
     pub team1_no_pillar_modes: bool,
     /// Team 2's, as [`Self::team1_no_pillar_modes`].
     pub team2_no_pillar_modes: bool,
+    /// Team 1 plays without the sight yield (AS-386, `sight_yield`): a
+    /// measurement control, as the pillar modes are (`team1_sight_yield:
+    /// false` in a headless config).
+    pub team1_no_sight_yield: bool,
+    /// Team 2's, as [`Self::team1_no_sight_yield`].
+    pub team2_no_sight_yield: bool,
 }
 
 impl WithheldPlays {
+    /// Whether team `team` plays without the sight yield; team 1's for a team
+    /// id outside 1..=2.
+    pub fn no_sight_yield(&self, team: u8) -> bool {
+        if team == 2 {
+            self.team2_no_sight_yield
+        } else {
+            self.team1_no_sight_yield
+        }
+    }
+
     /// Whether team `team` plays without the healer pillar modes; team 1's
     /// for a team id outside 1..=2.
     pub fn no_pillar_modes(&self, team: u8) -> bool {
@@ -1038,6 +1077,17 @@ pub fn classify_roster(
         .and_then(|w| roster.get(&w.subject))
         .map(|subject| pressuring(roster, auras, subject, cfg))
         .unwrap_or_default();
+    let sight_yield = classify_sight_yield(
+        roster,
+        auras,
+        &allies,
+        ally_in_danger,
+        stance_leads_sight(),
+        team,
+        prev,
+        clock.now,
+        cfg,
+    );
     TeamSituation {
         phase: phase(clock),
         since_gates: clock.since_gates,
@@ -1056,6 +1106,7 @@ pub fn classify_roster(
         now: clock.now,
         last_stand: last_stand(roster, auras, team, prev, clock.now),
         lock_ending: lock_ending(roster, auras, team, prev, clock.now),
+        sight_yield,
     }
 }
 
@@ -1663,6 +1714,7 @@ fn record_transitions(
     if let Some((kind, window)) = window_change(prev.last_stand, next.last_stand) {
         trace.record_window_change(team, SituationName::LastStand, kind, &window);
     }
+    record_sight_yield_changes(team, prev, next, trace);
 }
 
 /// How a window moved between two classifications, if it did: opened, closed,
@@ -1684,6 +1736,242 @@ fn window_change(
             }
             _ => None,
         },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// sight_yield (AS-386): who keeps a DPS–healer pair in sight of each other.
+// ---------------------------------------------------------------------------
+
+/// A DPS below this health fraction yields its healer's sight (the design's
+/// `SIGHT_YIELD_HP`, rule 4).
+pub const SIGHT_YIELD_HP: f32 = 0.8;
+
+/// A DPS yielding for its health keeps yielding until it is back above this
+/// fraction: the release half of [`SIGHT_YIELD_HP`]'s Schmitt pair.
+pub const SIGHT_YIELD_RELEASE_HP: f32 = 0.9;
+
+/// Seconds a DPS's yield holds once set, whatever rule set it, unless rule 1
+/// (a unit that cannot move) ends it sooner — the pillar modes' `MODE_DWELL`.
+pub const SIGHT_YIELD_DWELL: f32 = 2.0;
+
+/// Why a DPS–healer pair is led the way it is: the first rule of the yield
+/// rule that held (the design's §3.1). Serializes snake_case.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum YieldRule {
+    /// Rule 1: the healer cannot move — hard crowd control, a root, or a cast
+    /// in progress — so it cannot follow, and the DPS yields.
+    HealerCannotMove,
+    /// Rule 1: the DPS cannot move — hard crowd control or a root — so the
+    /// healer follows it. A DPS's own cast does not count: it plants the DPS
+    /// where it already stands, and flipping the pair's leader for every cast
+    /// would only strobe the trace.
+    DpsCannotMove,
+    /// Rule 2: the healer is pressured, or is the teammate in danger: its DPS
+    /// yields (walking round a pillar away from a trained healer is the
+    /// opposite of a peel).
+    HealerPressured,
+    /// Rule 3: the team holds a pillar stance, and every DPS yields to it
+    /// ([`stance_leads_sight`]).
+    Stance,
+    /// Rule 4: the DPS is hurt (below [`SIGHT_YIELD_HP`], held until
+    /// [`SIGHT_YIELD_RELEASE_HP`]) or is the teammate in danger: it yields.
+    DpsHurt,
+    /// Rule 5: otherwise the DPS leads and the healer follows.
+    DpsLeads,
+}
+
+impl YieldRule {
+    /// Whether, under this rule, the DPS must not break its healer's sight.
+    pub fn dps_yields(self) -> bool {
+        match self {
+            YieldRule::HealerCannotMove
+            | YieldRule::HealerPressured
+            | YieldRule::Stance
+            | YieldRule::DpsHurt => true,
+            YieldRule::DpsCannotMove | YieldRule::DpsLeads => false,
+        }
+    }
+
+    /// Rule 1, which alone may cut a held yield short.
+    fn cannot_move(self) -> bool {
+        matches!(self, YieldRule::HealerCannotMove | YieldRule::DpsCannotMove)
+    }
+}
+
+/// One DPS–healer pair's sight yield: whether the DPS must keep its healer
+/// in sight, by which rule, and since when.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SightPair {
+    /// The DPS: a living non-pet teammate that is not a healer.
+    pub dps: Entity,
+    /// Its healer: the team's first living non-pet healer, in entity order —
+    /// the healer the kiter leash already follows.
+    pub healer: Entity,
+    pub rule: YieldRule,
+    /// When the DPS last began yielding (or leading): carried while
+    /// [`YieldRule::dps_yields`] gives the same answer, so a yield's dwell is
+    /// counted from its onset.
+    pub since: f32,
+    /// The DPS's health latch ([`SIGHT_YIELD_HP`] / [`SIGHT_YIELD_RELEASE_HP`]).
+    pub hurt: bool,
+}
+
+impl SightPair {
+    /// Whether the DPS must not break its healer's sight.
+    pub fn dps_yields(&self) -> bool {
+        self.rule.dps_yields()
+    }
+}
+
+impl TeamSituation {
+    /// The pair whose DPS is `dps`, while that DPS yields its healer's sight.
+    pub fn sight_yield_of(&self, dps: Entity) -> Option<&SightPair> {
+        self.sight_yield
+            .iter()
+            .find(|p| p.dps == dps && p.dps_yields())
+    }
+}
+
+/// Rule 3's input: whether the team holds a pillar stance. The seam with
+/// AS-387, which owns the `pillar_stance` situation and sets this from it;
+/// until it does, no team holds one, so rule 3 never fires in a match.
+fn stance_leads_sight() -> bool {
+    false
+}
+
+/// Whether `info` cannot move this frame: hard crowd control
+/// ([`locks_healer`]'s set) or a root — and, when `cast_counts`, a cast in
+/// progress.
+fn cannot_move(
+    info: &CombatantInfo,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    cast_counts: bool,
+) -> bool {
+    (cast_counts && info.casting_ability.is_some())
+        || auras.get(&info.entity).is_some_and(|list| {
+            list.iter()
+                .any(|a| locks_healer(a.effect_type) || a.effect_type == AuraType::Root)
+        })
+}
+
+/// The `sight_yield` classification: one [`SightPair`] per living non-pet
+/// DPS on `team`, with the team's first living non-pet healer. Empty when
+/// the team does not run it ([`SituationConfig::sight_yield`]) or has no
+/// healer. `stance` is rule 3's input ([`stance_leads_sight`]).
+#[allow(clippy::too_many_arguments)]
+fn classify_sight_yield(
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    allies: &[AllyStanding],
+    ally_in_danger: Option<Window>,
+    stance: bool,
+    team: u8,
+    prev: &TeamSituation,
+    now: f32,
+    cfg: &SituationConfig,
+) -> SmallVec<[SightPair; 2]> {
+    if !cfg.sight_yield {
+        return SmallVec::new();
+    }
+    let living = || {
+        roster
+            .values()
+            .filter(move |i| i.team == team && i.is_alive && !i.is_pet)
+    };
+    let Some(healer) = living().find(|i| i.class.is_healer()) else {
+        return SmallVec::new();
+    };
+    let in_danger = |e: Entity| ally_in_danger.is_some_and(|w| w.subject == e);
+    let healer_pressured = allies
+        .iter()
+        .any(|a| a.entity == healer.entity && a.pressured)
+        || in_danger(healer.entity);
+    living()
+        .filter(|d| !d.class.is_healer())
+        .map(|dps| {
+            let held = prev
+                .sight_yield
+                .iter()
+                .find(|p| p.dps == dps.entity && p.healer == healer.entity);
+            let hp = dps.health_pct();
+            let hurt = hp < SIGHT_YIELD_HP
+                || (held.is_some_and(|p| p.hurt) && hp < SIGHT_YIELD_RELEASE_HP);
+            let raw = if cannot_move(healer, auras, true) {
+                YieldRule::HealerCannotMove
+            } else if cannot_move(dps, auras, false) {
+                YieldRule::DpsCannotMove
+            } else if healer_pressured {
+                YieldRule::HealerPressured
+            } else if stance {
+                YieldRule::Stance
+            } else if hurt || in_danger(dps.entity) {
+                YieldRule::DpsHurt
+            } else {
+                YieldRule::DpsLeads
+            };
+            // The dwell: a yield, once set, holds SIGHT_YIELD_DWELL unless
+            // rule 1 ends it.
+            let rule = match held {
+                Some(p)
+                    if p.dps_yields()
+                        && !raw.dps_yields()
+                        && !raw.cannot_move()
+                        && now - p.since < SIGHT_YIELD_DWELL =>
+                {
+                    p.rule
+                }
+                _ => raw,
+            };
+            let since = held
+                .filter(|p| p.dps_yields() == rule.dps_yields())
+                .map_or(now, |p| p.since);
+            SightPair {
+                dps: dps.entity,
+                healer: healer.entity,
+                rule,
+                since,
+                hurt,
+            }
+        })
+        .collect()
+}
+
+/// Record a `sight_yield` `situation_change` for each pair whose DPS began
+/// yielding (`onset`), stopped (`end`, its pair gone included), or yields
+/// under a new rule (`shift`). A leading DPS whose leading rule changes is
+/// not recorded: nothing it does changes.
+fn record_sight_yield_changes(
+    team: u8,
+    prev: &TeamSituation,
+    next: &TeamSituation,
+    trace: &mut DecisionTrace,
+) {
+    for pair in &next.sight_yield {
+        let before = prev
+            .sight_yield
+            .iter()
+            .find(|p| p.dps == pair.dps && p.healer == pair.healer);
+        let was = before.is_some_and(|p| p.dps_yields());
+        let kind = match (was, pair.dps_yields()) {
+            (false, true) => SituationChangeKind::Onset,
+            (true, false) => SituationChangeKind::End,
+            (true, true) if before.is_some_and(|p| p.rule != pair.rule) => {
+                SituationChangeKind::Shift
+            }
+            _ => continue,
+        };
+        trace.record_sight_yield_change(team, kind, pair);
+    }
+    for gone in prev.sight_yield.iter().filter(|p| {
+        p.dps_yields()
+            && !next
+                .sight_yield
+                .iter()
+                .any(|n| n.dps == p.dps && n.healer == p.healer)
+    }) {
+        trace.record_sight_yield_change(team, SituationChangeKind::End, gone);
     }
 }
 
@@ -3153,6 +3441,166 @@ mod tests {
                 ("\"tempo\"".to_string(), "\"shift\"".to_string()),
                 ("\"ally_in_danger\"".to_string(), "\"onset\"".to_string()),
             ]
+        );
+    }
+}
+
+/// AS-386's `sight_yield`: what the scenes (`tests/sight_yield_scenes.rs`)
+/// cannot reach — rule 3, whose input no team sets until AS-387, and the
+/// trace's transitions.
+#[cfg(test)]
+mod sight_yield_tests {
+    use super::*;
+    use crate::states::match_config::CharacterClass;
+    use crate::states::play_match::decision_trace::EventPayload;
+
+    struct Team {
+        roster: BTreeMap<Entity, CombatantInfo>,
+        auras: BTreeMap<Entity, Vec<Aura>>,
+        dps: Entity,
+        healer: Entity,
+    }
+
+    fn info(entity: Entity, class: CharacterClass, hp: f32) -> CombatantInfo {
+        CombatantInfo {
+            entity,
+            team: 1,
+            slot: 0,
+            class,
+            current_health: hp,
+            max_health: 100.0,
+            current_mana: 100.0,
+            max_mana: 100.0,
+            position: Vec3::ZERO,
+            velocity: Vec3::ZERO,
+            is_alive: true,
+            stealthed: false,
+            target: None,
+            is_pet: false,
+            casting_ability: None,
+            pet_type: None,
+            pet: None,
+        }
+    }
+
+    fn team(dps_hp: f32) -> Team {
+        let mut world = World::new();
+        let dps = world.spawn_empty().id();
+        let healer = world.spawn_empty().id();
+        Team {
+            roster: [
+                info(dps, CharacterClass::Warrior, dps_hp),
+                info(healer, CharacterClass::Priest, 100.0),
+            ]
+            .into_iter()
+            .map(|u| (u.entity, u))
+            .collect(),
+            auras: BTreeMap::new(),
+            dps,
+            healer,
+        }
+    }
+
+    fn cfg() -> SituationConfig {
+        SituationConfig::default().for_team(1, AiProfile::TeamPlan)
+    }
+
+    fn yield_of(t: &Team, stance: bool, prev: &TeamSituation, now: f32) -> SightPair {
+        let cfg = cfg();
+        let allies = allies(&t.roster, &t.auras, 1, &cfg);
+        classify_sight_yield(
+            &t.roster, &t.auras, &allies, None, stance, 1, prev, now, &cfg,
+        )[0]
+    }
+
+    /// Rule 3: while the team holds a stance, a healthy DPS yields. The
+    /// control: no stance, it leads. Rule 2 still comes first (a pressured
+    /// healer's yield names rule 2), and rule 3 before rule 4 (a hurt DPS in
+    /// a stance yields to the stance).
+    #[test]
+    fn the_stance_makes_a_healthy_dps_yield() {
+        let t = team(100.0);
+        let none = TeamSituation::default();
+        assert_eq!(yield_of(&t, true, &none, 30.0).rule, YieldRule::Stance);
+        assert_eq!(yield_of(&t, false, &none, 30.0).rule, YieldRule::DpsLeads);
+        let hurt = team(50.0);
+        assert_eq!(yield_of(&hurt, true, &none, 30.0).rule, YieldRule::Stance);
+        let mut stunned = team(100.0);
+        stunned.auras.insert(
+            stunned.healer,
+            vec![Aura {
+                effect_type: AuraType::Stun,
+                duration: 3.0,
+                ..Default::default()
+            }],
+        );
+        assert_eq!(
+            yield_of(&stunned, true, &none, 30.0).rule,
+            YieldRule::HealerCannotMove
+        );
+        // And no team holds one until AS-387 sets the seam.
+        assert!(!stance_leads_sight());
+    }
+
+    fn changes(
+        prev: &TeamSituation,
+        next: &TeamSituation,
+    ) -> Vec<(SituationChangeKind, YieldRule)> {
+        let mut trace = DecisionTrace::default();
+        record_sight_yield_changes(1, prev, next, &mut trace);
+        trace
+            .pending_events
+            .iter()
+            .map(|e| match &e.payload {
+                EventPayload::SituationChange {
+                    name: SituationName::SightYield,
+                    change,
+                    rule: Some(rule),
+                    ..
+                } => (*change, *rule),
+                other => panic!("not a sight_yield change: {other:?}"),
+            })
+            .collect()
+    }
+
+    fn situation(pairs: &[SightPair]) -> TeamSituation {
+        TeamSituation {
+            sight_yield: pairs.iter().copied().collect(),
+            ..Default::default()
+        }
+    }
+
+    /// Every change is traced, and only a change: a yield's onset, a rule
+    /// shift while it yields, its end, and its pair gone with its DPS; a
+    /// leading DPS whose leading rule changes, and a frame with nothing new,
+    /// record nothing.
+    #[test]
+    fn each_change_is_traced_once() {
+        let t = team(100.0);
+        let pair = |rule| SightPair {
+            dps: t.dps,
+            healer: t.healer,
+            rule,
+            since: 30.0,
+            hurt: false,
+        };
+        use SituationChangeKind::*;
+        use YieldRule::*;
+        let leads = situation(&[pair(DpsLeads)]);
+        let hurt = situation(&[pair(DpsHurt)]);
+        let pressed = situation(&[pair(HealerPressured)]);
+        assert_eq!(changes(&leads, &hurt), vec![(Onset, DpsHurt)]);
+        assert_eq!(changes(&hurt, &hurt), vec![]);
+        assert_eq!(changes(&hurt, &pressed), vec![(Shift, HealerPressured)]);
+        assert_eq!(changes(&pressed, &leads), vec![(End, DpsLeads)]);
+        assert_eq!(changes(&leads, &situation(&[pair(DpsCannotMove)])), vec![]);
+        assert_eq!(
+            changes(&pressed, &situation(&[])),
+            vec![(End, HealerPressured)]
+        );
+        assert_eq!(
+            changes(&TeamSituation::default(), &hurt),
+            vec![(Onset, DpsHurt)]
         );
     }
 }
