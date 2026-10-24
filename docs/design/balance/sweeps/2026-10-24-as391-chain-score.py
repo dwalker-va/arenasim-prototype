@@ -19,6 +19,7 @@ A rate difference's standard error is a paired bootstrap over matches (2,000
 resamples, fixed seed), so it carries the correlation between twins; the
 RESOLUTION printed is 1.96 of it.
 """
+import gzip
 import json
 import math
 import random
@@ -30,7 +31,8 @@ slices = "--slices" in sys.argv
 
 def load(path):
     out = {}
-    with open(path) as f:
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt") as f:
         for line in f:
             r = json.loads(line)
             out[r["label"]] = r
