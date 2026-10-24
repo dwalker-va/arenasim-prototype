@@ -86,6 +86,13 @@ pub struct MovementWeights {
     /// `0.0` disables. Hunter only — the one kiter with a trap.
     #[serde(default)]
     pub trap_setup: f32,
+    /// Pull toward the side of the pillar the team holds its pillar stance
+    /// on (AS-385, `class_ai::pillar_stance`), the shape of
+    /// `formation_pull`. Absent while the team holds no stance and under
+    /// `Legacy`. `0.0` disables. Kiters only (Mage, Hunter) — the healer's
+    /// half of the stance is its hug.
+    #[serde(default)]
+    pub stance_pull: f32,
 }
 
 impl Default for MovementWeights {
@@ -106,6 +113,7 @@ impl Default for MovementWeights {
             cover_pull: 0.0,
             healer_leash: 0.0,
             trap_setup: 0.0,
+            stance_pull: 0.0,
         }
     }
 }
@@ -524,6 +532,7 @@ impl Default for DpsMovementConfig {
                 cover_pull: 0.0,
                 healer_leash: 0.0,
                 trap_setup: 0.0,
+                stance_pull: 0.0,
             },
             range_band_min: 8.0,  // SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE
             range_band_max: 30.0, // within AUTO_SHOT_RANGE
@@ -689,6 +698,17 @@ impl MovementConfig {
                 s.press_release_margin, s.press_advantage_margin
             ));
         }
+        // The sight yield (AS-386) reads a teammate in danger as a hurt DPS:
+        // dying means below `urgency_hp_threshold`, so that threshold must sit
+        // at or below the yield's own (rule 4 is then never skipped for one).
+        if s.urgency_hp_threshold > super::situation::SIGHT_YIELD_HP {
+            issues.push(format!(
+                "shared.urgency_hp_threshold ({}) must not exceed the sight yield's \
+                 SIGHT_YIELD_HP ({}) — a dying DPS must also count as hurt",
+                s.urgency_hp_threshold,
+                super::situation::SIGHT_YIELD_HP
+            ));
+        }
         if s.directive_ttl < s.commit_window {
             issues.push(format!(
                 "shared.directive_ttl ({}) must cover shared.commit_window ({}) — otherwise \
@@ -772,6 +792,7 @@ impl MovementConfig {
                 ("commitment_bonus", weights.commitment_bonus),
                 ("los_seek", weights.los_seek),
                 ("cover_pull", weights.cover_pull),
+                ("stance_pull", weights.stance_pull),
             ];
             for (name, value) in terms {
                 if value < 0.0 || !value.is_finite() {
@@ -1059,6 +1080,30 @@ mod tests {
         config
             .validate()
             .expect("release == onset is no band, not an error");
+    }
+
+    /// AS-386: the teammate in danger is dying (below `urgency_hp_threshold`)
+    /// and the sight yield counts it hurt (below `SIGHT_YIELD_HP`); a dying
+    /// threshold above the yield's would break that. Equal is allowed.
+    #[test]
+    fn validate_rejects_an_urgency_threshold_above_the_sight_yield() {
+        use crate::states::play_match::situation::SIGHT_YIELD_HP;
+        let mut config = MovementConfig::default();
+        assert!(config.shared.urgency_hp_threshold <= SIGHT_YIELD_HP);
+        config.shared.urgency_hp_threshold = SIGHT_YIELD_HP + 0.05;
+        let issues = config
+            .validate()
+            .expect_err("a dying threshold above the yield's");
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("shared.urgency_hp_threshold")),
+            "{issues:?}"
+        );
+        config.shared.urgency_hp_threshold = SIGHT_YIELD_HP;
+        config
+            .validate()
+            .expect("urgency == SIGHT_YIELD_HP is allowed");
     }
 
     #[test]

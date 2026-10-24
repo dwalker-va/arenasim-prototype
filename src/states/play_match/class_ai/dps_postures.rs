@@ -23,8 +23,8 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::combat_core::{
-    compass_directions_16, mask_and_los_bitmask, score_directions, trap_setup_term, RangeBand,
-    ScorerInputs,
+    compass_directions_16, mask_and_los_bitmask, score_directions, stance_pull_term,
+    trap_setup_term, AnchorConstraint, RangeBand, ScorerInputs,
 };
 use crate::states::play_match::components::{
     AuraType, Combatant, DpsPosture, KitePosture, MatchCountdown, MovementDirective, MovementGoal,
@@ -459,6 +459,37 @@ pub struct TrapSetup {
     pub range: f32,
 }
 
+/// The team sight yield's hold on a kiter (AS-386): while the kiter yields its
+/// healer's sight (`CombatContext::sight_yield_healer`), the scorer's existing
+/// ally-anchor mask is pointed at that healer, for SIGHT only — heal range
+/// stays the soft `healer_leash` term, so the reach is unbounded. It is a MASK
+/// on the kiter's objective, never a replacement for it: `flee`,
+/// `range_band`, `los_seek`, the kite hysteresis and the wand fallback are
+/// untouched, and when no step keeps sight the fallback ladder lifts the mask,
+/// so a kiter fleeing round a pillar is never pinned.
+///
+/// - **Sighted:** a step that would put the healer behind cover is masked.
+/// - **Already blind:** the mask keeps only the steps that regain sight; with
+///   none, `close_when_out` keeps the steps that end nearer the healer before
+///   the ladder lets it go.
+///
+/// `None` — the scorer bit for bit — while no yield is set, and always under
+/// `Legacy`, which classifies none.
+fn sight_yield_anchor(ctx: &CombatContext, my_pos: Vec3) -> Option<AnchorConstraint> {
+    let healer = ctx.sight_yield_healer()?;
+    let info = ctx.combatants.get(&healer).filter(|i| i.is_alive)?;
+    let sighted = has_line_of_sight(
+        ctx.obstacles,
+        Vec3::new(my_pos.x, EYE_HEIGHT, my_pos.z),
+        Vec3::new(info.position.x, EYE_HEIGHT, info.position.z),
+    );
+    Some(AnchorConstraint {
+        pos: info.position,
+        heal_range: f32::INFINITY,
+        close_when_out: !sighted,
+    })
+}
+
 /// Build the kiter's `ScorerInputs` for one scoring pass — shared by the KITE
 /// orbit and the ENGAGE seek-LoS repositioning so both see identical
 /// threat / range-band / `los_target` wiring. The caller supplies the committed
@@ -527,7 +558,7 @@ fn build_kiter_inputs(
         my_pos,
         lookahead: SCORER_LOOKAHEAD,
         threats,
-        anchor: None,
+        anchor: sight_yield_anchor(ctx, my_pos),
         formation_point: None,
         wand_target: None,
         wand_range: 0.0,
@@ -542,6 +573,13 @@ fn build_kiter_inputs(
         healer_leash_range: heal_range,
         trap_setup_point: trap_setup.map(|t| t.healer),
         trap_setup_range: trap_setup.map_or(0.0, |t| t.range),
+        // The side of the pillar the team holds its stance on, while this
+        // kiter runs the Pillar play (AS-385; `TeamPlan` only, so `None`
+        // under `Legacy` and the scorer is unchanged there).
+        stance_point: ctx.pillar_stance().and_then(|stance| {
+            super::pillar_stance::side_point(ctx.obstacles, &stance)
+                .map(|p| Vec3::new(p.x, my_pos.y, p.y))
+        }),
     }
 }
 
@@ -757,6 +795,12 @@ pub fn evaluate_dps_posture(
                         "los_seek",
                         los_seek_term(chosen, &inputs, config.weights.los_seek),
                     );
+                    if inputs.stance_point.is_some() {
+                        builder.scorer_term(
+                            "stance_pull",
+                            stance_pull_term(chosen, &inputs, config.weights.stance_pull),
+                        );
+                    }
                     builder.finish();
                 }
             }
@@ -843,6 +887,12 @@ pub fn evaluate_dps_posture(
                 builder.scorer_term(
                     "trap_setup",
                     trap_setup_term(chosen, &inputs, config.weights.trap_setup),
+                );
+            }
+            if inputs.stance_point.is_some() {
+                builder.scorer_term(
+                    "stance_pull",
+                    stance_pull_term(chosen, &inputs, config.weights.stance_pull),
                 );
             }
             builder.finish();

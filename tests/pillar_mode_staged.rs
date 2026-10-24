@@ -102,6 +102,11 @@ mod follow {
             team1_kill_target: Some(0),
             team2_kill_target: Some(0),
             team1_pillar_modes: Some(modes),
+            // The healer's half alone, in both arms: the Warrior's own half
+            // (the sight yield, AS-386 — here rule 2, its Priest held
+            // PRESSURED) keeps it in sight by itself, and would leave the
+            // control nothing to show.
+            team1_sight_yield: Some(false),
             random_seed: Some(seed),
             max_duration_secs: 8.0,
             ..Default::default()

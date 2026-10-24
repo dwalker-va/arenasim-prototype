@@ -226,6 +226,20 @@ impl Scene {
         self
     }
 
+    /// `who`'s health, as a fraction of its maximum — [`Scene::health`] for
+    /// a unit other than the last.
+    pub fn health_of(mut self, who: Who, fraction: f32) -> Self {
+        self.set_health(who, fraction);
+        self
+    }
+
+    /// `who`'s position on the ground plane — [`Scene::at`] for a unit
+    /// other than the last.
+    pub fn place(mut self, who: Who, x: f32, z: f32) -> Self {
+        self.unit_mut(who).position = Vec3::new(x, UNIT_Y, z);
+        self
+    }
+
     /// The last unit's mana (or energy), as a fraction of its maximum.
     pub fn mana(mut self, fraction: f32) -> Self {
         let c = &mut self.last().combatant;
@@ -310,6 +324,28 @@ impl Scene {
         match team {
             1 => self.withheld.team1_no_pillar_modes = true,
             _ => self.withheld.team2_no_pillar_modes = true,
+        }
+        self
+    }
+
+    /// Turn the team sight yield off for `team`
+    /// (`situation::WithheldPlays::team1_no_sight_yield`): the paired control
+    /// of a scene that tests it.
+    pub fn without_sight_yield(mut self, team: u8) -> Self {
+        match team {
+            1 => self.withheld.team1_no_sight_yield = true,
+            _ => self.withheld.team2_no_sight_yield = true,
+        }
+        self
+    }
+
+    /// Leave `team`'s healer's cast out of the sight yield's rule 1
+    /// (`situation::WithheldPlays::team1_yield_cast_moves`): the AS-385
+    /// package measurement's variant arm.
+    pub fn yield_cast_moves(mut self, team: u8) -> Self {
+        match team {
+            1 => self.withheld.team1_yield_cast_moves = true,
+            _ => self.withheld.team2_yield_cast_moves = true,
         }
         self
     }
@@ -400,6 +436,19 @@ impl Scene {
     pub fn set_health(&mut self, who: Who, fraction: f32) {
         let c = &mut self.unit_mut(who).combatant;
         c.current_health = c.max_health * fraction;
+    }
+
+    /// Move `who` to `(x, z)` on the ground plane: a unit that walked, for a
+    /// scene that classifies a frame, moves its units and classifies the next
+    /// ([`Scene::reclassify`]).
+    pub fn set_position(&mut self, who: Who, x: f32, z: f32) {
+        self.unit_mut(who).position = Vec3::new(x, UNIT_Y, z);
+    }
+
+    /// Set the sim clock (as [`Scene::now`]), for a scene that classifies
+    /// frame after frame.
+    pub fn set_now(&mut self, secs: f32) {
+        self.now = secs;
     }
 
     /// `who`'s `Combatant`, to change anything the builder does not name.
@@ -510,6 +559,7 @@ impl Scene {
                 withheld: self.withheld,
                 ..SituationConfig::from_movement(&self.movement)
             },
+            &self.abilities,
             &mut trace,
         );
         &self.situations
@@ -731,6 +781,7 @@ impl Scene {
                 withheld: self.withheld,
                 ..SituationConfig::from_movement(&self.movement)
             },
+            &self.abilities,
             trace,
         );
         trace.pending_events.clear();

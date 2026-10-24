@@ -296,9 +296,6 @@ fn the_walk_runs_only_between_the_scream_and_its_reach() {
     assert_ne!(view.chose(), Some((AbilityType::PsychicScream, None)));
 }
 
-/// The standalone dip is retired under `TeamPlan`: a healthy Warrior teammate
-/// attacking nobody, an enemy Shaman 35yd east that nothing holds — the
-/// `Legacy` Priest dips at it, the `TeamPlan` Priest neither dips nor walks.
 /// The walk is FREE's: a pressured Priest does not walk into the enemy. An
 /// enemy Warrior 10yd north of the Priest targets it — inside the 12yd danger
 /// radius, so the Priest is PRESSURED, and beyond the 8yd Scream, so the
@@ -371,6 +368,9 @@ fn the_peel_plays_exceptions_govern_the_walk() {
     );
 }
 
+/// The standalone dip is retired under `TeamPlan`: a healthy Warrior teammate
+/// attacking nobody, an enemy Shaman 35yd east that nothing holds — the
+/// `Legacy` Priest dips at it, the `TeamPlan` Priest neither dips nor walks.
 #[test]
 fn the_dip_is_retired_under_team_plan() {
     let dip_scene = |profile: AiProfile| {

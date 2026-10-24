@@ -70,11 +70,13 @@ pub trait PlayStage: Sync {
 
 /// The order the plays are tried in. A teammate in danger is answered before
 /// anything else; a last-stand healer hides rather than holding a global
-/// cooldown for a hand-off; a lock about to end is extended before a burst is
-/// spent into it.
+/// cooldown for a hand-off; a team that takes a pillar together takes it
+/// before a hand-off (AS-385 §3.0); a lock about to end is extended before a
+/// burst is spent into it.
 pub static PLAY_ORDER: &[&dyn PlayStage] = &[
     &super::peel::PeelStage,
     &super::take_cover::TakeCoverStage,
+    &super::pillar_stance::PillarStage,
     &super::chain::ChainStage,
     &super::burst::BurstStage,
 ];
@@ -178,16 +180,18 @@ pub(crate) fn own_class(ctx: &CombatContext) -> Option<CharacterClass> {
 mod tests {
     use super::*;
 
-    /// The pipeline's order, pinned: Peel, TakeCover, Chain, Burst. A change
-    /// to it is a change to every unit's play, and must be made here too.
+    /// The pipeline's order, pinned: Peel, TakeCover, Pillar, Chain, Burst.
+    /// A change to it is a change to every unit's play, and must be made here
+    /// too.
     #[test]
-    fn the_order_table_is_peel_take_cover_chain_burst() {
+    fn the_order_table_is_peel_take_cover_pillar_chain_burst() {
         let order: Vec<PlayId> = PLAY_ORDER.iter().map(|s| s.id()).collect();
         assert_eq!(
             order,
             vec![
                 PlayId::Peel,
                 PlayId::TakeCover,
+                PlayId::Pillar,
                 PlayId::Chain,
                 PlayId::Burst
             ]
@@ -235,6 +239,13 @@ mod tests {
             last_stand: Some(window(me)),
             lock_ending: Some(window(subject)),
             kill_window: Some(window(subject)),
+            pillar_stance: Some(super::super::pillar_stance::StanceWindow {
+                healer: me,
+                pillar: 0,
+                side: 0.0,
+                reason: super::super::pillar_stance::StanceReason::AvoidCc,
+                since: 0.0,
+            }),
             now: 30.0,
             runs: PlaySet::all(),
             ..Default::default()
@@ -250,12 +261,38 @@ mod tests {
             .collect();
         assert_eq!(
             healer,
-            vec![peel, Play::TakeCover, chain, Play::Default, Play::Default]
+            vec![
+                peel,
+                Play::TakeCover,
+                Play::Pillar,
+                chain,
+                Play::Default,
+                Play::Default
+            ]
         );
+        // A melee is never called to the Pillar play (its half of the stance
+        // is the sight yield); a ranged DPS is.
         let dps: Vec<Play> = (0..=PlayId::COUNT)
             .map(|n| refusing(&every, Role::MeleeDps, &PLAY_ORDER_IDS[..n]))
             .collect();
-        assert_eq!(dps, vec![peel, chain, chain, Play::Burst, Play::Default]);
+        assert_eq!(
+            dps,
+            vec![peel, chain, chain, chain, Play::Burst, Play::Default]
+        );
+        let ranged: Vec<Play> = (0..=PlayId::COUNT)
+            .map(|n| refusing(&every, Role::RangedDps, &PLAY_ORDER_IDS[..n]))
+            .collect();
+        assert_eq!(
+            ranged,
+            vec![
+                peel,
+                Play::Pillar,
+                Play::Pillar,
+                chain,
+                Play::Burst,
+                Play::Default
+            ]
+        );
         // A refused stage alone passes to the one after it, not the fallback.
         assert_eq!(
             refusing(&every, Role::Healer, &[PlayId::Peel]),
@@ -277,7 +314,11 @@ mod tests {
             every.play_after(PlayId::Peel, Role::Healer, me),
             Play::TakeCover
         );
-        assert_eq!(every.play_after(PlayId::TakeCover, Role::Healer, me), chain);
+        assert_eq!(
+            every.play_after(PlayId::TakeCover, Role::Healer, me),
+            Play::Pillar
+        );
+        assert_eq!(every.play_after(PlayId::Pillar, Role::Healer, me), chain);
         assert_eq!(
             every.play_after(PlayId::Chain, Role::MeleeDps, me),
             Play::Burst
@@ -349,9 +390,10 @@ mod tests {
     }
 
     /// [`PLAY_ORDER`]'s ids, for the walk test.
-    const PLAY_ORDER_IDS: [PlayId; 4] = [
+    const PLAY_ORDER_IDS: [PlayId; 5] = [
         PlayId::Peel,
         PlayId::TakeCover,
+        PlayId::Pillar,
         PlayId::Chain,
         PlayId::Burst,
     ];

@@ -4,9 +4,12 @@ use super::super::arena_bounds::ArenaBounds;
 use super::super::components::*;
 use super::super::map_config::ActiveMapGeometry;
 use super::super::map_geometry::{
-    has_line_of_sight, resolve_movement, steer_toward_goal, ObstacleVolume,
+    has_line_of_sight, resolve_movement, rounding, steer_toward_goal, ObstacleVolume, TangentSide,
+    EYE_HEIGHT,
 };
 use super::super::match_config::CharacterClass;
+use super::super::movement_config::MovementConfig;
+use super::super::situation::Situations;
 use super::super::team_plan::{
     hold_position, should_break_cover, should_hold, Stance, TeamPlans, CAMP_ARRIVAL_EPSILON,
     CAMP_ENGAGE_RADIUS,
@@ -51,6 +54,127 @@ pub fn effective_movement_speed(base: f32, auras: Option<&ActiveAuras>) -> f32 {
         }
     }
     movement_speed
+}
+
+/// The tangent side a yielding DPS's pursuit holds round an obstacle (AS-386,
+/// the team sight yield): which way round, picked for its healer's sight, and
+/// until when it holds. Renewed every frame the same obstacle still blocks
+/// the pursuit, so it holds for the whole rounding and lapses
+/// [`shared.commit_window`](crate::states::play_match::movement_config) after
+/// the obstacle stops being in the way.
+///
+/// It is STORED because a sight preference is not self-reinforcing the way
+/// `steer_toward_goal`'s own side scores are (AS-181): the waypoint that keeps
+/// the healer in sight moves round the pillar as the mover does, so a side
+/// re-picked every frame would flip.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct PursuitSide {
+    /// The obstacle's index in the map's volumes.
+    pub obstacle: usize,
+    pub side: TangentSide,
+    /// The side lapses after this sim time.
+    pub until: f32,
+    /// A DPS in danger with no sighted side holds at the pillar's edge, where
+    /// its healer still sees it, until this time, then chases on `side`.
+    pub hold_until: Option<f32>,
+}
+
+/// What a yielding DPS's pursuit keeps in sight: its healer, and whether the
+/// DPS is the teammate in danger (which buys the hold at the pillar's edge).
+#[derive(Clone, Copy, Debug)]
+pub struct SightKeep {
+    pub healer: Vec3,
+    pub in_danger: bool,
+}
+
+/// The pursuit heading of a DPS that yields its healer's sight (AS-386),
+/// and the side it holds afterwards. Pure.
+///
+/// Returns `(heading, held)`. A `None` heading leaves the pursuit to
+/// `steer_toward_goal` exactly as before: the path is clear, or both ways
+/// round keep the healer in sight (today's self-reinforcing side score
+/// decides, and nothing is stored). Otherwise:
+///
+/// - **A held side** for the same obstacle, not lapsed, is taken again.
+/// - **One side keeps sight** (its waypoint, `map_geometry::Rounding::waypoint`, is in
+///   the healer's sight at eye height): that side, stored.
+/// - **Neither does:** the side whose waypoint is nearer the healer, stored —
+///   except that a DPS in danger that its healer still sees holds where it
+///   stands for at most `commit` seconds first (the zero heading), then
+///   chases on that side.
+pub fn sight_kept_heading(
+    obstacles: &[ObstacleVolume],
+    from: Vec3,
+    goal: Vec2,
+    keep: SightKeep,
+    held: Option<PursuitSide>,
+    now: f32,
+    commit: f32,
+) -> (Option<Vec2>, Option<PursuitSide>) {
+    let from_xz = Vec2::new(from.x, from.z);
+    let Some(round) = rounding(obstacles, from_xz, goal, from.y) else {
+        return (None, held);
+    };
+    let renewed = |side: TangentSide, hold_until: Option<f32>| PursuitSide {
+        obstacle: round.obstacle,
+        side,
+        until: now + commit,
+        hold_until,
+    };
+    if let Some(h) = held.filter(|h| h.obstacle == round.obstacle && now <= h.until) {
+        let heading = match h.hold_until {
+            Some(until) if now < until => Vec2::ZERO,
+            _ => round.heading(h.side),
+        };
+        return (Some(heading), Some(renewed(h.side, h.hold_until)));
+    }
+    let eye = |p: Vec2| Vec3::new(p.x, EYE_HEIGHT, p.y);
+    let healer_eye = Vec3::new(keep.healer.x, EYE_HEIGHT, keep.healer.z);
+    let sees = |p: Vec2| has_line_of_sight(obstacles, eye(p), healer_eye);
+    let side = match (sees(round.left_waypoint), sees(round.right_waypoint)) {
+        (true, false) => TangentSide::Left,
+        (false, true) => TangentSide::Right,
+        (true, true) => return (None, held),
+        (false, false) => {
+            let healer = Vec2::new(keep.healer.x, keep.healer.z);
+            let side =
+                if round.left_waypoint.distance(healer) <= round.right_waypoint.distance(healer) {
+                    TangentSide::Left
+                } else {
+                    TangentSide::Right
+                };
+            if keep.in_danger && sees(from_xz) {
+                return (Some(Vec2::ZERO), Some(renewed(side, Some(now + commit))));
+            }
+            side
+        }
+    };
+    (Some(round.heading(side)), Some(renewed(side, None)))
+}
+
+/// How long a [`PursuitSide`] holds past the last frame its obstacle blocked
+/// the pursuit, when no `movement.ron` is loaded: `shared.commit_window`'s
+/// shipped value.
+const PURSUIT_SIDE_COMMIT: f32 = 0.6;
+
+/// What `entity`'s pursuit must keep in sight: its healer, while its team's
+/// `sight_yield` says it yields to that healer. `None` with no
+/// classification, and always under `Legacy`, which classifies no yield.
+fn sight_keep(
+    situations: Option<&Situations>,
+    positions: &std::collections::BTreeMap<Entity, (Vec3, u8)>,
+    entity: Entity,
+    team: u8,
+) -> Option<SightKeep> {
+    let situation = situations?.teams.get(team.checked_sub(1)? as usize)?;
+    let pair = situation.sight_yield_of(entity)?;
+    let &(healer, _) = positions.get(&pair.healer)?;
+    Some(SightKeep {
+        healer,
+        in_danger: situation
+            .ally_in_danger
+            .is_some_and(|w| w.subject == entity),
+    })
 }
 
 /// Whether normal pursuit keeps closing on its target this frame.
@@ -109,6 +233,12 @@ pub fn move_to_target(
     // Team-level plan. `Option` so a scene that never inserted it simply behaves
     // as it always has, rather than panicking.
     team_plans: Option<Res<TeamPlans>>,
+    // The team sight yield (AS-386): a yielding DPS's pursuit takes, and
+    // holds, the tangent side that keeps its healer in sight. `Option` as
+    // `team_plans` is: no classification, no yield.
+    situations: Option<Res<Situations>>,
+    movement_config: Option<Res<MovementConfig>>,
+    pursuit_sides: Query<&PursuitSide>,
 ) {
     // Don't allow movement until gates open
     if !countdown.gates_opened {
@@ -670,21 +800,47 @@ pub fn move_to_target(
             // Tangent-steer around any obstacle between here and the target so a
             // pursuer rounds a pillar in a clean arc instead of oozing along its
             // surface; direct pursuit otherwise (and on obstacle-free maps).
-            let direction = steer_toward_goal(
-                &map_geometry.volumes,
-                Vec2::new(my_pos.x, my_pos.z),
-                Vec2::new(target_pos.x, target_pos.z),
-                my_pos.y,
-            )
-            .map(|s| Vec3::new(s.x, 0.0, s.y))
-            .unwrap_or_else(|| {
-                Vec3::new(
-                    target_pos.x - my_pos.x,
-                    0.0, // Don't move vertically
-                    target_pos.z - my_pos.z,
-                )
-                .normalize_or_zero()
-            });
+            // A DPS that yields its healer's sight (AS-386) takes the side
+            // that keeps it, and holds that side ([`sight_kept_heading`]).
+            let goal = Vec2::new(target_pos.x, target_pos.z);
+            let sight_kept = sight_keep(situations.as_deref(), &positions, entity, combatant.team)
+                .and_then(|keep| {
+                    let commit = movement_config
+                        .as_deref()
+                        .map_or(PURSUIT_SIDE_COMMIT, |c| c.shared.commit_window);
+                    let held = pursuit_sides.get(entity).ok().copied();
+                    let (heading, side) = sight_kept_heading(
+                        &map_geometry.volumes,
+                        my_pos,
+                        goal,
+                        keep,
+                        held,
+                        now,
+                        commit,
+                    );
+                    if let Some(side) = side.filter(|s| Some(*s) != held) {
+                        commands.entity(entity).try_insert(side);
+                    }
+                    heading
+                });
+            let direction = sight_kept
+                .or_else(|| {
+                    steer_toward_goal(
+                        &map_geometry.volumes,
+                        Vec2::new(my_pos.x, my_pos.z),
+                        goal,
+                        my_pos.y,
+                    )
+                })
+                .map(|s| Vec3::new(s.x, 0.0, s.y))
+                .unwrap_or_else(|| {
+                    Vec3::new(
+                        target_pos.x - my_pos.x,
+                        0.0, // Don't move vertically
+                        target_pos.z - my_pos.z,
+                    )
+                    .normalize_or_zero()
+                });
 
             if direction != Vec3::ZERO {
                 // Calculate effective movement speed (base * aura modifiers)
@@ -702,6 +858,196 @@ pub fn move_to_target(
                 transform.rotation = target_rotation;
             }
         }
+    }
+}
+
+/// The team sight yield's pursuit side (AS-386, [`sight_kept_heading`]), on
+/// one cylinder at the origin, radius 3. A mover 10yd south of it chases a
+/// goal 10yd north: the pillar blocks the path, the two ways round are equal,
+/// and `steer_toward_goal`'s default is the left (west) side.
+#[cfg(test)]
+mod sight_side_tests {
+    use super::*;
+
+    const NOW: f32 = 10.0;
+    const COMMIT: f32 = 0.6;
+
+    fn pillar() -> Vec<ObstacleVolume> {
+        vec![ObstacleVolume::Cylinder {
+            center_xz: Vec2::ZERO,
+            radius: 3.0,
+            base_y: 0.0,
+            height: 5.0,
+        }]
+    }
+
+    const FROM: Vec3 = Vec3::new(0.0, 1.0, -10.0);
+    const GOAL: Vec2 = Vec2::new(0.0, 10.0);
+
+    fn keep(x: f32, z: f32) -> SightKeep {
+        SightKeep {
+            healer: Vec3::new(x, 1.0, z),
+            in_danger: false,
+        }
+    }
+
+    fn round() -> crate::states::play_match::map_geometry::Rounding {
+        rounding(&pillar(), Vec2::new(FROM.x, FROM.z), GOAL, FROM.y).expect("blocked")
+    }
+
+    /// The pair: a healer east sees only the right (east) way round, and the
+    /// pursuit takes it — against the default, west — and stores it; a
+    /// healer west sees only the left, and gets the left.
+    #[test]
+    fn a_yielding_pursuit_takes_the_side_its_healer_sees() {
+        let r = round();
+        assert_eq!(r.default, TangentSide::Left, "the stage's default side");
+        let (heading, held) =
+            sight_kept_heading(&pillar(), FROM, GOAL, keep(12.0, 0.0), None, NOW, COMMIT);
+        assert_eq!(heading, Some(r.right));
+        assert_eq!(held.map(|h| h.side), Some(TangentSide::Right));
+        let (heading, held) =
+            sight_kept_heading(&pillar(), FROM, GOAL, keep(-12.0, 0.0), None, NOW, COMMIT);
+        assert_eq!(heading, Some(r.left));
+        assert_eq!(held.map(|h| h.side), Some(TangentSide::Left));
+    }
+
+    /// Both ways round keep a healer behind the mover in sight: today's side
+    /// score decides (no heading of its own), and nothing is stored.
+    #[test]
+    fn both_sides_sighted_leaves_the_default() {
+        let (heading, held) =
+            sight_kept_heading(&pillar(), FROM, GOAL, keep(0.0, -25.0), None, NOW, COMMIT);
+        assert_eq!(heading, None);
+        assert_eq!(held, None);
+    }
+
+    /// The held side: picked east for an east healer, it is taken again a
+    /// frame later when the healer stands west, where re-picking would flip
+    /// it. The control: the same side lapsed (past its `until`) is re-picked
+    /// for the west healer.
+    #[test]
+    fn the_side_holds_once_picked() {
+        let r = round();
+        let (_, held) =
+            sight_kept_heading(&pillar(), FROM, GOAL, keep(12.0, 0.0), None, NOW, COMMIT);
+        let held = held.expect("stored");
+        let next = NOW + 1.0 / 60.0;
+        let (heading, renewed) = sight_kept_heading(
+            &pillar(),
+            FROM,
+            GOAL,
+            keep(-12.0, 0.0),
+            Some(held),
+            next,
+            COMMIT,
+        );
+        assert_eq!(heading, Some(r.right), "the held side flipped");
+        assert_eq!(renewed.map(|h| h.until), Some(next + COMMIT), "not renewed");
+        let lapsed = held.until + 0.01;
+        let (heading, _) = sight_kept_heading(
+            &pillar(),
+            FROM,
+            GOAL,
+            keep(-12.0, 0.0),
+            Some(held),
+            lapsed,
+            COMMIT,
+        );
+        assert_eq!(heading, Some(r.left), "a lapsed side still held");
+    }
+
+    /// Neither way round is in a healer's sight (it stands just behind the
+    /// pillar's far side): the side whose waypoint is nearer it, stored. The
+    /// control mirrors the healer, and the side with it.
+    #[test]
+    fn neither_side_sighted_takes_the_side_nearer_the_healer() {
+        let r = round();
+        let (heading, held) =
+            sight_kept_heading(&pillar(), FROM, GOAL, keep(0.3, 5.0), None, NOW, COMMIT);
+        assert_eq!(heading, Some(r.right));
+        assert_eq!(
+            held.map(|h| (h.side, h.hold_until)),
+            Some((TangentSide::Right, None))
+        );
+        let (heading, _) =
+            sight_kept_heading(&pillar(), FROM, GOAL, keep(-0.3, 5.0), None, NOW, COMMIT);
+        assert_eq!(heading, Some(r.left));
+    }
+
+    /// A DPS in danger that its healer still sees, with neither way round in
+    /// that healer's sight, holds where it stands for the commit window, then
+    /// chases on the side it stored. Its healer stands east, behind two posts
+    /// that hide both peel-off waypoints of a mover hugging the pillar's east
+    /// skin, but not the mover. The control: not in danger, it goes at once.
+    #[test]
+    fn a_dps_in_danger_holds_at_the_edge_then_chases() {
+        let post = |z: f32| ObstacleVolume::Cylinder {
+            center_xz: Vec2::new(8.0, z),
+            radius: 0.5,
+            base_y: 0.0,
+            height: 5.0,
+        };
+        let obstacles = vec![
+            ObstacleVolume::Cylinder {
+                center_xz: Vec2::ZERO,
+                radius: 3.0,
+                base_y: 0.0,
+                height: 5.0,
+            },
+            post(1.3),
+            post(-1.3),
+        ];
+        let from = Vec3::new(3.4, 1.0, 0.0);
+        let goal = Vec2::new(-10.0, 0.0);
+        let healer = SightKeep {
+            healer: Vec3::new(12.0, 1.0, 0.0),
+            in_danger: true,
+        };
+        let (heading, held) = sight_kept_heading(&obstacles, from, goal, healer, None, NOW, COMMIT);
+        assert_eq!(heading, Some(Vec2::ZERO), "did not hold");
+        let held = held.expect("stored");
+        assert_eq!(held.hold_until, Some(NOW + COMMIT));
+        let r = rounding(&obstacles, Vec2::new(from.x, from.z), goal, from.y).unwrap();
+        // Still holding a frame before the window ends (the side renewed)...
+        let late = NOW + COMMIT - 0.05;
+        let (heading, held) =
+            sight_kept_heading(&obstacles, from, goal, healer, Some(held), late, COMMIT);
+        assert_eq!(heading, Some(Vec2::ZERO), "the hold ended early");
+        let held = held.expect("renewed");
+        // ...and chasing on the stored side once it has.
+        let after = NOW + COMMIT + 0.01;
+        let (heading, _) =
+            sight_kept_heading(&obstacles, from, goal, healer, Some(held), after, COMMIT);
+        assert_eq!(
+            heading,
+            Some(r.heading(held.side)),
+            "did not chase after the hold"
+        );
+        let calm = SightKeep {
+            in_danger: false,
+            ..healer
+        };
+        let (heading, held) = sight_kept_heading(&obstacles, from, goal, calm, None, NOW, COMMIT);
+        assert_eq!(heading.map(|h| h != Vec2::ZERO), Some(true));
+        assert_eq!(held.and_then(|h| h.hold_until), None);
+    }
+
+    /// An open path is not the pursuit side's: no heading, the held side
+    /// passed through untouched.
+    #[test]
+    fn a_clear_path_leaves_the_pursuit_alone() {
+        let goal = Vec2::new(10.0, -10.0);
+        let held = Some(PursuitSide {
+            obstacle: 0,
+            side: TangentSide::Right,
+            until: NOW,
+            hold_until: None,
+        });
+        assert_eq!(
+            sight_kept_heading(&pillar(), FROM, goal, keep(12.0, 0.0), held, NOW, COMMIT),
+            (None, held)
+        );
     }
 }
 
