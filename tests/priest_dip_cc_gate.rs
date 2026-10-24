@@ -18,6 +18,7 @@ use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::decision_trace::{MovementTrigger, RejectionReason};
+use arenasim::states::play_match::AuraType;
 
 const PRIEST: &str = "priest";
 const WARRIOR: &str = "warrior";
@@ -152,4 +153,28 @@ fn legacy_dips_as_before() {
         .at(30.0, 0.0)
         .decide(PRIEST);
     assert_dips(&fear, "Legacy, arrival in a ready Fear's reach");
+}
+
+/// The gate holds only the dip: a `TeamPlan` Priest pressured by a Warrior on
+/// it still screams in its own defence, with the enemy Shaman targeting it
+/// from 25yd and an enemy Warlock's Fear in reach — the two things that hold
+/// a dip.
+#[test]
+fn the_defensive_scream_is_not_held() {
+    let view = scene(AiProfile::TeamPlan, Shaman, (5.0, 0.0))
+        .target(HEALER, PRIEST)
+        .unit(WARLOCK, 2, Warlock)
+        .at(5.0, 5.0)
+        .unit("enemy warrior", 2, Warrior)
+        .at(-18.0, 0.0)
+        .targeting(PRIEST)
+        .aura(PRIEST, AuraType::MaxHealthIncrease, 60.0)
+        .aura(WARRIOR, AuraType::MaxHealthIncrease, 60.0)
+        .decide(PRIEST);
+    assert_eq!(
+        view.chose(),
+        Some((AbilityType::PsychicScream, None)),
+        "{}",
+        describe(&view)
+    );
 }

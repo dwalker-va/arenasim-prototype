@@ -83,13 +83,25 @@ teams under `TeamPlan`.
   That is below what this file treats as conclusive.
 - The head-to-head points the same way for this comp on Nagrand: 39 of 40 wins
   become 34 of 40 across both seats.
-- **Mechanism.** On main, the camp Priest's dip Scream often catches the enemy
-  Warlock standing by its healer, which takes the Fear off the board. The gate
-  holds that dip, because the same Warlock's Fear covers the arrival.
-- **Variant tried, not shipped.** I also exempted any CC source standing inside
-  scream range of the arrival, since the Scream would fear it. It did not
-  recover the camp: 9/12, heal 120. The head-to-head was otherwise the same:
-  +0.81pt overall, P -0.27pt.
+- **Mechanism.** These figures are from AS-383-test's traces of all 12 seeds
+  on both binaries.
+  - On `main` the camp dip never completes: 72 `DipEnter`, 0 `DipComplete`.
+    Every dip is cut to PRESSURED within 0.5-1.5s; on seed 4, for example,
+    `DipEnter` is at 23.42s and PRESSURED is entered at 23.95s.
+  - So on Nagrand the dip is a walk toward the enemy Priest that tips the
+    healer into PRESSURED, where the team solve positions it.
+  - The gate removes that path and leaves the Priest in FREE. Per-match
+    posture time goes from FREE 24.4s / DIP 8.5s / PRESSURED 24.2s on `main`
+    to FREE 41.1s / PRESSURED 23.5s on the branch.
+  - Of the branch's 40 held dips, 26 are held because the target is already
+    on the Priest and 14 because of the Fear.
+  - The Warlock fears on `main` come from the DEFENSIVE Scream cast in
+    PRESSURED: 2 casts across the 12 seeds, in seeds 4 and 11. The branch
+    screams more, with 9 fear landings against 4.
+- **Variant tried, not shipped.** I also exempted any CC source standing
+  inside scream range of the arrival. It held only the Fear-held dips, not the
+  26 held for the targeting rule, and recovered nothing: 9/12, heal 120. The
+  head-to-head was otherwise the same: +0.81pt overall, P -0.27pt.
 
 ## Heal-line probe migrated
 
