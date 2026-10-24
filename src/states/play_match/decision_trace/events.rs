@@ -66,6 +66,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
+use crate::states::play_match::class_ai::pillar_stance::{StanceReason, StanceWindow};
 use crate::states::play_match::components::{AuraType, DRCategory};
 use crate::states::play_match::situation::{
     MatchPhase, Play, TeamSituation, Tempo, Window, YieldRule,
@@ -120,6 +121,10 @@ pub struct SituationTag {
     /// within its horizon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lock_ending: Option<WindowTag>,
+    /// The pillar the team takes together (`TeamSituation::pillar_stance`,
+    /// AS-385): present only while the team holds a stance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pillar_stance: Option<StanceTag>,
     /// The deciding unit's play, when it is not `Default`
     /// (`situation::Play`): `{"name": "burst"}` or
     /// `{"name": "peel", "ally": <entity id>}`.
@@ -140,6 +145,7 @@ pub enum PlayTag {
     Burst,
     Peel { ally: u32 },
     TakeCover,
+    Pillar,
     Chain { subject: u32 },
 }
 
@@ -151,6 +157,7 @@ impl PlayTag {
             Play::Burst => Some(PlayTag::Burst),
             Play::Peel { ally } => Some(PlayTag::Peel { ally: ally.index() }),
             Play::TakeCover => Some(PlayTag::TakeCover),
+            Play::Pillar => Some(PlayTag::Pillar),
             Play::Chain { subject } => Some(PlayTag::Chain {
                 subject: subject.index(),
             }),
@@ -191,6 +198,30 @@ impl From<&Window> for WindowTag {
     }
 }
 
+/// A team's pillar stance as the trace records it: the healer whose ring it is
+/// judged from, the pillar's index, the side (a ring angle, radians) and the
+/// reason, and when it began on the `sim_time` clock.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct StanceTag {
+    pub healer: u32,
+    pub pillar: usize,
+    pub side: f32,
+    pub reason: StanceReason,
+    pub since: f32,
+}
+
+impl From<&StanceWindow> for StanceTag {
+    fn from(s: &StanceWindow) -> Self {
+        Self {
+            healer: s.healer.index(),
+            pillar: s.pillar,
+            side: s.side,
+            reason: s.reason,
+            since: s.since,
+        }
+    }
+}
+
 impl From<&TeamSituation> for SituationTag {
     fn from(situation: &TeamSituation) -> Self {
         Self {
@@ -201,6 +232,7 @@ impl From<&TeamSituation> for SituationTag {
             kill_window: situation.kill_window.as_ref().map(WindowTag::from),
             last_stand: situation.last_stand.as_ref().map(WindowTag::from),
             lock_ending: situation.chain_window().as_ref().map(WindowTag::from),
+            pillar_stance: situation.pillar_stance.as_ref().map(StanceTag::from),
             play: None,
             play_step: None,
         }
@@ -217,6 +249,10 @@ pub enum SituationName {
     /// A team's last living unit faces two or more enemies
     /// (`TeamSituation::last_stand`).
     LastStand,
+    /// A team takes a pillar together (`TeamSituation::pillar_stance`,
+    /// AS-385). Its `subject` is the stance's healer; `pillar` and `reason`
+    /// ride along.
+    PillarStance,
     Tempo,
     Phase,
     /// A DPS began, ended or changed the rule of its healer-sight yield
@@ -385,6 +421,11 @@ pub enum EventPayload {
         healer: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rule: Option<YieldRule>,
+        /// `pillar_stance` changes: the stance's pillar and reason.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pillar: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StanceReason>,
     },
 }
 
@@ -523,11 +564,12 @@ pub enum MovementTrigger {
     /// as each such walk begins, not per re-solve.
     OutOfCcReach,
     /// `TeamPlan` (AS-373, `class_ai::pillar_mode`): the healer starts to HUG
-    /// a pillar — its anchor teammate fights at the pillar, an enemy crowd
-    /// control that needs sight is ready for it, and the pillar's ring has
-    /// ground that sees the teammate in heal range — or moves its hug to
-    /// another pillar. The scorer terms name the pillar (`pillar`) and the
-    /// three keys (`key_at_pillar`, `key_cc_ready`, `key_arc`) as they stood.
+    /// a pillar — its team holds a pillar stance on it (AS-385,
+    /// `situation_change` `pillar_stance`) and the pillar's ring has ground
+    /// that sees every teammate in heal range out of the crowd control the
+    /// stance avoids — or moves its hug to the stance's new pillar. The scorer
+    /// terms name the pillar (`pillar`) and the two keys (`key_stance`,
+    /// `key_arc`) as they stood.
     PillarModeEnter,
     /// `TeamPlan` (AS-373): the healer stops hugging and plays the open. The
     /// scorer terms name the pillar it left and the keys as they stood.

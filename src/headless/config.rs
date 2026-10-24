@@ -94,6 +94,13 @@ pub struct HeadlessMatchConfig {
     pub team1_sight_yield: Option<bool>,
     #[serde(default)]
     pub team2_sight_yield: Option<bool>,
+    /// `false` makes that team's sight yield leave its healer's cast in
+    /// progress out of rule 1's "cannot move" (AS-385's package
+    /// measurement, the variant arm). Omitted — the default — counts it.
+    #[serde(default)]
+    pub team1_yield_healer_cast: Option<bool>,
+    #[serde(default)]
+    pub team2_yield_healer_cast: Option<bool>,
     /// Per gated play, the exceptions table to run IN PLACE of the shipped
     /// one for each team, for measurement: `{"Peel": []}` lifts every Peel
     /// context gate, `{"Burst": ["Hunter"]}` stops the Hunter bursting. An
@@ -213,6 +220,8 @@ impl Default for HeadlessMatchConfig {
             team2_pillar_modes: None,
             team1_sight_yield: None,
             team2_sight_yield: None,
+            team1_yield_healer_cast: None,
+            team2_yield_healer_cast: None,
             team1_exceptions: BTreeMap::new(),
             team2_exceptions: BTreeMap::new(),
             burst_exceptions: None,
@@ -290,6 +299,8 @@ impl HeadlessMatchConfig {
             team2_no_pillar_modes: self.team2_pillar_modes == Some(false),
             team1_no_sight_yield: self.team1_sight_yield == Some(false),
             team2_no_sight_yield: self.team2_sight_yield == Some(false),
+            team1_yield_cast_moves: self.team1_yield_healer_cast == Some(false),
+            team2_yield_cast_moves: self.team2_yield_healer_cast == Some(false),
             ..Default::default()
         };
         let mut set_once = |team: u8, id: PlayId, set: ExceptionSet| -> Result<(), String> {

@@ -206,6 +206,35 @@ impl DecisionTrace {
             previous_phase: None,
             healer: None,
             rule: None,
+            pillar: None,
+            reason: None,
+        });
+    }
+
+    /// Record a `situation_change` event for a team's pillar stance
+    /// (`situation.rs`, AS-385): its healer as the subject, its onset, its
+    /// pillar and its reason.
+    pub fn record_stance_change(
+        &mut self,
+        team: u8,
+        change: SituationChangeKind,
+        stance: &crate::states::play_match::class_ai::pillar_stance::StanceWindow,
+    ) {
+        self.push_situation_change(EventPayload::SituationChange {
+            team,
+            name: SituationName::PillarStance,
+            change,
+            subject: Some(stance.healer.index()),
+            since: Some(stance.since),
+            until: None,
+            tempo: None,
+            previous_tempo: None,
+            phase: None,
+            previous_phase: None,
+            healer: None,
+            rule: None,
+            pillar: Some(stance.pillar),
+            reason: Some(stance.reason),
         });
     }
 
@@ -224,6 +253,8 @@ impl DecisionTrace {
             previous_phase: None,
             healer: None,
             rule: None,
+            pillar: None,
+            reason: None,
         });
     }
 
@@ -242,6 +273,8 @@ impl DecisionTrace {
             previous_phase: Some(previous),
             healer: None,
             rule: None,
+            pillar: None,
+            reason: None,
         });
     }
 
@@ -267,6 +300,8 @@ impl DecisionTrace {
             previous_phase: None,
             healer: Some(pair.healer.index()),
             rule: Some(pair.rule),
+            pillar: None,
+            reason: None,
         });
     }
 

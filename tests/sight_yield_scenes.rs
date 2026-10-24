@@ -6,8 +6,8 @@
 //! 1. a unit that cannot move leads (the healer: its DPS yields; the DPS: its
 //!    healer follows);
 //! 2. a pressured healer leads (its DPS yields);
-//! 3. the team stance leads (AS-387's seam; a unit test in `situation.rs`
-//!    sets it, since no team holds a stance until AS-387 lands);
+//! 3. the team stance leads (read off `TeamSituation::pillar_stance`, AS-387;
+//!    its scene is `pillar_stance_scenes::the_stance_makes_a_healthy_dps_yield_in_the_same_classification`);
 //! 4. a hurt DPS (below 80%, held until 90%) yields;
 //! 5. otherwise the DPS leads and the healer follows.
 //!
@@ -327,5 +327,86 @@ fn a_blind_yielding_kiter_closes_on_its_healer() {
     assert!(
         dist(leading) > dist(at),
         "the leading Hunter closed anyway: the stage no longer tests the rung ({leading:?})"
+    );
+}
+
+/// The mask's reach is unbounded: it holds SIGHT only, and heal range stays
+/// the soft `healer_leash` term. A hurt Hunter 41yd from its Priest, in its
+/// sight, a Warrior on it from the Priest's side: it flees straight away,
+/// out past 40yd, exactly as with the yield off — every step it had free
+/// stays free. A finite reach (40yd, the healers' anchor) would keep only the
+/// steps that end inside it, toward the Priest and the Warrior. The pillar
+/// stands well off the line, so nothing is occluded.
+#[test]
+fn a_yielding_kiter_out_of_heal_range_keeps_its_free_steps() {
+    let far = |yield_on: bool| {
+        let s = Scene::new()
+            .obstacles(vec![ObstacleVolume::Cylinder {
+                center_xz: Vec2::new(0.0, 25.0),
+                radius: 3.0,
+                base_y: 0.0,
+                height: 5.0,
+            }])
+            .ai_profile(1, AiProfile::TeamPlan)
+            .ai_profile(2, AiProfile::TeamPlan)
+            .unit(HUNTER, 1, Hunter)
+            .at(21.0, 0.0)
+            .health(0.6)
+            .targeting(ROGUE)
+            .unit(PRIEST, 1, Priest)
+            .at(-20.0, 0.0)
+            .unit(ROGUE, 2, Warrior)
+            .at(18.0, 0.0)
+            .targeting(HUNTER);
+        if yield_on {
+            s
+        } else {
+            s.without_sight_yield(1)
+        }
+    };
+    let at = (21.0, 0.0);
+    let healer = Vec2::new(-20.0, 0.0);
+    let dist = |p: (f32, f32)| Vec2::new(p.0, p.1).distance(healer);
+    assert!(dist(at) > 40.0);
+
+    let mut yielding = far(true);
+    let pairs = yielding.reclassify().teams[0].sight_yield.clone();
+    assert_eq!(pairs[0].rule, YieldRule::DpsHurt, "the Hunter must yield");
+    let mut off = far(false);
+    assert!(off.reclassify().teams[0].sight_yield.is_empty());
+
+    let with_mask = kite_step(&yielding, at);
+    let without = kite_step(&off, at);
+    println!("yielding step {with_mask:?}, unmasked step {without:?}");
+    assert!(
+        dist(without) > dist(at),
+        "the unmasked Hunter did not flee outward: the stage no longer tests the reach ({without:?})"
+    );
+    assert!(
+        dist(with_mask) > 40.0 && dist(with_mask) > dist(at),
+        "the yielding Hunter was held inside 40yd of its Priest: {with_mask:?}"
+    );
+    assert!(
+        (with_mask.0 - without.0).abs() < 1e-4 && (with_mask.1 - without.1).abs() < 1e-4,
+        "the mask took a free step: {with_mask:?} against {without:?}"
+    );
+}
+
+/// The measurement variant (AS-385 package): with the healer's cast left out
+/// of rule 1, a casting healer no longer makes its healthy DPS yield; a
+/// stunned one still does. The control is the shipped rule, which counts the
+/// cast.
+#[test]
+fn the_variant_leaves_the_healers_cast_out_of_rule_one() {
+    let casting = || scene().casting(HEALER, AbilityType::FlashHeal);
+    assert_eq!(rule(casting()), YieldRule::HealerCannotMove);
+    assert_eq!(rule(casting().yield_cast_moves(1)), YieldRule::DpsLeads);
+    assert_eq!(
+        rule(
+            scene()
+                .aura(HEALER, AuraType::Stun, 4.0)
+                .yield_cast_moves(1)
+        ),
+        YieldRule::HealerCannotMove
     );
 }

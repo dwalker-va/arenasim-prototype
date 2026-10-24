@@ -61,6 +61,15 @@
 //!   more living non-pet enemies it can see stand against it. Its [`Window`]
 //!   names that unit; its onset is when its last teammate fell (or the second
 //!   enemy came into view). Pets count on neither side.
+//! - **`pillar_stance`** — the team takes a pillar together (AS-385,
+//!   `class_ai::pillar_stance`): `TeamPlan` only, on a team that runs the
+//!   Pillar play, on a map with obstacles. It enters for `AvoidCc` when a
+//!   crowd control a pillar defends against is ready for a teammate, the
+//!   fight stands at a pillar, the pillar's ring has a TEAM arc (ground from
+//!   which the healer sees every teammate, out of that crowd control's
+//!   reach), and no kill is on. Its [`StanceWindow`] names the healer, the
+//!   pillar, the side and the reason. Schmitt pair, release and dwell as the
+//!   AS-373 hug's; the arc and the kill are feasibility and end it at once.
 //! - **`lock_ending`** — of the visible enemies the team holds
 //!   ([`locks_healer`]'s set: a stun, a fear or horror, a polymorph, an
 //!   incapacitate, a cyclone), the one whose hold ends SOONEST, the healer
@@ -84,7 +93,7 @@
 //! A [`Play`] is what a unit does about the situation: a named reordering of
 //! its own priority chain ([`TeamSituation::play_for`]). Each gated play is a
 //! STAGE of one pipeline, `class_ai::plays::PLAY_ORDER` — Peel, TakeCover,
-//! Chain, Burst — and a unit runs the first stage its team runs, the
+//! Pillar, Chain, Burst — and a unit runs the first stage its team runs, the
 //! situation calls, and the unit admits; a stage that does not apply passes
 //! it to the next (the walk is `class_ai::plays`'s). Every play is a NEW
 //! behaviour, gated under `AiProfile::TeamPlan` ([`SituationConfig::under`])
@@ -102,6 +111,11 @@
 //!   from the healers' posture machines; `class_ai::take_cover`). A MOVEMENT
 //!   play: the chain is the ordinary one. Inert on a map with nothing to
 //!   hide behind.
+//! - **`Pillar`** — the team holds a `pillar_stance`, so its healer hugs the
+//!   stance's pillar on the team arc (`class_ai::pillar_mode`) and its kiting
+//!   ranged DPS bend toward the stance's side (`class_ai::pillar_stance`). A
+//!   MOVEMENT play: the chain is the ordinary one. A melee is not called: its
+//!   half of the stance is the yield (AS-386), read from the situation.
 //! - **`Chain`** — a lock the team holds is about to end (`lock_ending`
 //!   within [`CHAIN_HORIZON_SECS`]), so a unit with a hand-off puts its
 //!   CHAIN step between a peel and a burst: its own crowd control on the
@@ -174,8 +188,10 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
+use super::ability_config::AbilityDefinitions;
 use super::ai_profile::AiProfile;
 use super::class_ai::combat_snapshot::CombatSnapshot;
+use super::class_ai::pillar_stance::{self, StanceMemory, StanceWindow};
 use super::class_ai::plays;
 use super::class_ai::{pressing_when_ahead, stealth_visible, team_hp_sums, CombatantInfo};
 use super::components::{Aura, AuraType};
@@ -340,6 +356,12 @@ pub struct TeamSituation {
     /// the pair's line of sight (the module docs' `sight_yield`). Empty
     /// unless the team runs it ([`SituationConfig::sight_yield`]).
     pub sight_yield: SmallVec<[SightPair; 2]>,
+    /// The pillar the team takes together, while it holds one (the module
+    /// docs' `pillar_stance`). Classified only by [`update_situations`],
+    /// which has the ability data its crowd-control key reads.
+    pub pillar_stance: Option<StanceWindow>,
+    /// What the stance's keys remember from one classification to the next.
+    pub stance_memory: StanceMemory,
 }
 
 /// What a unit does about a situation: a named reordering of its own priority
@@ -367,6 +389,12 @@ pub enum Play {
     /// MOVEMENT play — the healer's chain is its ordinary one. Gated under
     /// `AiProfile::TeamPlan`.
     TakeCover,
+    /// The team holds a [`pillar_stance`](TeamSituation::pillar_stance): the
+    /// healer hugs the stance's pillar on the team arc, and a kiting ranged
+    /// DPS bends toward the stance's side (`class_ai::pillar_stance`). A
+    /// MOVEMENT play — the chain is the ordinary one. Gated under
+    /// `AiProfile::TeamPlan`.
+    Pillar,
     /// The team's lock on the enemy `subject` ([`TeamSituation::lock_ending`])
     /// ends within [`CHAIN_HORIZON_SECS`]: the CHAIN step — a hand-off of the
     /// class's own crowd control onto the subject, landing in the lock's last
@@ -388,6 +416,7 @@ impl Play {
             Play::Burst => Some(PlayId::Burst),
             Play::Peel { .. } => Some(PlayId::Peel),
             Play::TakeCover => Some(PlayId::TakeCover),
+            Play::Pillar => Some(PlayId::Pillar),
             Play::Chain { .. } => Some(PlayId::Chain),
         }
     }
@@ -400,15 +429,17 @@ impl Play {
 pub enum PlayId {
     Peel,
     TakeCover,
+    Pillar,
     Chain,
     Burst,
 }
 
 impl PlayId {
     /// Every gated play, in declaration order.
-    pub const ALL: [PlayId; 4] = [
+    pub const ALL: [PlayId; 5] = [
         PlayId::Peel,
         PlayId::TakeCover,
+        PlayId::Pillar,
         PlayId::Chain,
         PlayId::Burst,
     ];
@@ -471,7 +502,7 @@ impl TeamSituation {
 
     /// The play the unit `me`, playing `role`, runs in this situation, as
     /// its TEAM sees it: the first stage of the pipeline
-    /// (`class_ai::plays::PLAY_ORDER` — Peel, TakeCover, Chain, Burst) that
+    /// (`class_ai::plays::PLAY_ORDER` — Peel, TakeCover, Pillar, Chain, Burst) that
     /// the team runs ([`Self::runs`]) and that the situation calls for `me`;
     /// else [`Play::Default`]. The unit's own admission — its tools and each
     /// stage's exceptions — is `CombatContext::play`'s, over the same walk.
@@ -755,6 +786,13 @@ pub struct SituationConfig {
     /// `TeamPlan` ([`Self::under`]) unless a measurement turns it off
     /// ([`WithheldPlays::no_sight_yield`]).
     pub sight_yield: bool,
+    /// Whether the yield's rule 1 counts the healer's cast in progress as
+    /// "cannot move" (AS-386): `true`, except in the measurement variant that
+    /// turns it off ([`WithheldPlays::yield_cast_moves`]).
+    pub yield_counts_healer_cast: bool,
+    /// `shared.cc_reach_margin`: the margin of the crowd-control discs the
+    /// pillar stance's team arc keeps out of.
+    pub cc_reach_margin: f32,
 }
 
 impl Default for SituationConfig {
@@ -784,6 +822,8 @@ impl SituationConfig {
             withheld: WithheldPlays::default(),
             pillar_modes: false,
             sight_yield: false,
+            yield_counts_healer_cast: true,
+            cc_reach_margin: config.shared.cc_reach_margin,
         }
     }
 
@@ -823,6 +863,8 @@ impl SituationConfig {
             exceptions: self.withheld.exceptions_for_team(team),
             pillar_modes: cfg.pillar_modes && !self.withheld.no_pillar_modes(team),
             sight_yield: cfg.sight_yield && !self.withheld.no_sight_yield(team),
+            yield_counts_healer_cast: cfg.yield_counts_healer_cast
+                && !self.withheld.yield_cast_moves(team),
             ..cfg
         }
     }
@@ -935,9 +977,26 @@ pub struct WithheldPlays {
     pub team1_no_sight_yield: bool,
     /// Team 2's, as [`Self::team1_no_sight_yield`].
     pub team2_no_sight_yield: bool,
+    /// Team 1's sight yield does NOT count its healer's cast in progress as
+    /// "cannot move" in rule 1 (AS-385 package measurement, the variant arm:
+    /// `team1_yield_healer_cast: false` in a headless config). A measurement
+    /// control only; the shipped rule counts the cast.
+    pub team1_yield_cast_moves: bool,
+    /// Team 2's, as [`Self::team1_yield_cast_moves`].
+    pub team2_yield_cast_moves: bool,
 }
 
 impl WithheldPlays {
+    /// Whether team `team`'s yield leaves its healer's cast out of rule 1;
+    /// team 1's for a team id outside 1..=2.
+    pub fn yield_cast_moves(&self, team: u8) -> bool {
+        if team == 2 {
+            self.team2_yield_cast_moves
+        } else {
+            self.team1_yield_cast_moves
+        }
+    }
+
     /// Whether team `team` plays without the sight yield; team 1's for a team
     /// id outside 1..=2.
     pub fn no_sight_yield(&self, team: u8) -> bool {
@@ -1058,10 +1117,74 @@ pub fn classify(
     )
 }
 
+/// [`classify`] short of `sight_yield`, which reads the pillar stance
+/// (rule 3, [`stance_leads_sight`]): [`update_situations`] classifies the
+/// stance on this, then the yield ([`yield_sight`]).
+fn classify_before_yield(
+    snapshot: &CombatSnapshot,
+    team: u8,
+    prev: &TeamSituation,
+    clock: &MatchClock,
+    cfg: &SituationConfig,
+) -> TeamSituation {
+    classify_roster_before_yield(
+        &snapshot.combatants,
+        &snapshot.active_auras,
+        &snapshot.obstacles,
+        team,
+        prev,
+        clock,
+        cfg,
+    )
+}
+
 /// [`classify`] over what it reads — the roster, its auras and the map's
 /// obstacles — so a context built without a snapshot
-/// (`CombatContext::classified`) can classify its own roster.
+/// (`CombatContext::classified`) can classify its own roster. It classifies
+/// no pillar stance (that needs the enemies' kits, which only
+/// [`update_situations`] has), so its `sight_yield` sees none.
 pub fn classify_roster(
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    obstacles: &[ObstacleVolume],
+    team: u8,
+    prev: &TeamSituation,
+    clock: &MatchClock,
+    cfg: &SituationConfig,
+) -> TeamSituation {
+    let mut situation =
+        classify_roster_before_yield(roster, auras, obstacles, team, prev, clock, cfg);
+    yield_sight(&mut situation, roster, auras, team, prev, clock.now, cfg);
+    situation
+}
+
+/// The team's `sight_yield`, classified last onto `situation`: its rule 3
+/// reads the situation's pillar stance ([`stance_leads_sight`]), and its
+/// rules 1-2 the allies and the teammate in danger classified before it.
+fn yield_sight(
+    situation: &mut TeamSituation,
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    team: u8,
+    prev: &TeamSituation,
+    now: f32,
+    cfg: &SituationConfig,
+) {
+    situation.sight_yield = classify_sight_yield(
+        roster,
+        auras,
+        &situation.allies,
+        situation.ally_in_danger,
+        stance_leads_sight(situation),
+        team,
+        prev,
+        now,
+        cfg,
+    );
+}
+
+/// Everything [`classify_roster`] classifies but `sight_yield`.
+fn classify_roster_before_yield(
     roster: &BTreeMap<Entity, CombatantInfo>,
     auras: &BTreeMap<Entity, Vec<Aura>>,
     obstacles: &[ObstacleVolume],
@@ -1077,17 +1200,6 @@ pub fn classify_roster(
         .and_then(|w| roster.get(&w.subject))
         .map(|subject| pressuring(roster, auras, subject, cfg))
         .unwrap_or_default();
-    let sight_yield = classify_sight_yield(
-        roster,
-        auras,
-        &allies,
-        ally_in_danger,
-        stance_leads_sight(),
-        team,
-        prev,
-        clock.now,
-        cfg,
-    );
     TeamSituation {
         phase: phase(clock),
         since_gates: clock.since_gates,
@@ -1097,6 +1209,8 @@ pub fn classify_roster(
         danger_attackers,
         runs: cfg.runs,
         pillar_modes: cfg.pillar_modes,
+        pillar_stance: None,
+        stance_memory: StanceMemory::default(),
         exceptions: PlayExceptions::resolve(&cfg.exceptions),
         allies,
         in_danger: danger.in_danger,
@@ -1106,7 +1220,7 @@ pub fn classify_roster(
         now: clock.now,
         last_stand: last_stand(roster, auras, team, prev, clock.now),
         lock_ending: lock_ending(roster, auras, team, prev, clock.now),
-        sight_yield,
+        sight_yield: SmallVec::new(),
     }
 }
 
@@ -1670,17 +1784,34 @@ const UNTIL_EPSILON: f32 = 0.05;
 ///
 /// `decide_abilities` calls it once on the snapshot it builds, and again after
 /// each same-frame instant CC that snapshot reflects (see the module docs).
+/// The pillar stance is classified here, after the rest, from the stance
+/// healer's own view of the snapshot (`pillar_stance::classify`): its
+/// crowd-control key reads the enemies' kits, which only `abilities` has.
 pub fn update_situations(
     situations: &mut Situations,
     snapshot: &CombatSnapshot,
     clock: &MatchClock,
     cfg: &SituationConfig,
+    abilities: &AbilityDefinitions,
     trace: &mut DecisionTrace,
 ) {
     for (index, team) in [1u8, 2].into_iter().enumerate() {
         let prev = std::mem::take(&mut situations.teams[index]);
         let cfg = cfg.for_team(team, snapshot.ai_profile.for_team(team));
-        let next = classify(snapshot, team, &prev, clock, &cfg);
+        let mut next = classify_before_yield(snapshot, team, &prev, clock, &cfg);
+        let (stance, memory) =
+            pillar_stance::classify(snapshot, team, &prev, &next, clock, &cfg, abilities);
+        next.pillar_stance = stance;
+        next.stance_memory = memory;
+        yield_sight(
+            &mut next,
+            &snapshot.combatants,
+            &snapshot.active_auras,
+            team,
+            &prev,
+            clock.now,
+            &cfg,
+        );
         record_transitions(team, &prev, &next, trace);
         situations.teams[index] = next;
     }
@@ -1715,6 +1846,9 @@ fn record_transitions(
         trace.record_window_change(team, SituationName::LastStand, kind, &window);
     }
     record_sight_yield_changes(team, prev, next, trace);
+    if let Some((kind, stance)) = pillar_stance::change(prev.pillar_stance, next.pillar_stance) {
+        trace.record_stance_change(team, kind, &stance);
+    }
 }
 
 /// How a window moved between two classifications, if it did: opened, closed,
@@ -1835,11 +1969,12 @@ impl TeamSituation {
     }
 }
 
-/// Rule 3's input: whether the team holds a pillar stance. The seam with
-/// AS-387, which owns the `pillar_stance` situation and sets this from it;
-/// until it does, no team holds one, so rule 3 never fires in a match.
-fn stance_leads_sight() -> bool {
-    false
+/// Rule 3's input: whether the team holds a pillar stance
+/// ([`TeamSituation::pillar_stance`], AS-387) — the stance leads, so every
+/// DPS keeps its healer in sight. Read off the situation being classified,
+/// so the yield follows the stance in the same classification.
+fn stance_leads_sight(situation: &TeamSituation) -> bool {
+    situation.pillar_stance.is_some()
 }
 
 /// Whether `info` cannot move this frame: hard crowd control
@@ -1899,7 +2034,7 @@ fn classify_sight_yield(
             let hp = dps.health_pct();
             let hurt = hp < SIGHT_YIELD_HP
                 || (held.is_some_and(|p| p.hurt) && hp < SIGHT_YIELD_RELEASE_HP);
-            let raw = if cannot_move(healer, auras, true) {
+            let raw = if cannot_move(healer, auras, cfg.yield_counts_healer_cast) {
                 YieldRule::HealerCannotMove
             } else if cannot_move(dps, auras, false) {
                 YieldRule::DpsCannotMove
@@ -3450,8 +3585,8 @@ mod tests {
 }
 
 /// AS-386's `sight_yield`: what the scenes (`tests/sight_yield_scenes.rs`)
-/// cannot reach — rule 3, whose input no team sets until AS-387, and the
-/// trace's transitions.
+/// do not pin one rule at a time — rule 3 against its neighbours, through the
+/// seam that reads the stance off the situation — and the trace's transitions.
 #[cfg(test)]
 mod sight_yield_tests {
     use super::*;
@@ -3509,12 +3644,24 @@ mod sight_yield_tests {
         SituationConfig::default().for_team(1, AiProfile::TeamPlan)
     }
 
+    /// The team's one pair, classified through [`yield_sight`] onto a
+    /// situation that holds a pillar stance when `stance` — the seam
+    /// `update_situations` runs, the stance read off the situation.
     fn yield_of(t: &Team, stance: bool, prev: &TeamSituation, now: f32) -> SightPair {
         let cfg = cfg();
-        let allies = allies(&t.roster, &t.auras, 1, &cfg);
-        classify_sight_yield(
-            &t.roster, &t.auras, &allies, None, stance, 1, prev, now, &cfg,
-        )[0]
+        let mut situation = TeamSituation {
+            allies: allies(&t.roster, &t.auras, 1, &cfg),
+            pillar_stance: stance.then_some(StanceWindow {
+                healer: t.healer,
+                pillar: 0,
+                side: 0.0,
+                reason: pillar_stance::StanceReason::AvoidCc,
+                since: now,
+            }),
+            ..Default::default()
+        };
+        yield_sight(&mut situation, &t.roster, &t.auras, 1, prev, now, &cfg);
+        situation.sight_yield[0]
     }
 
     /// Rule 3: while the team holds a stance, a healthy DPS yields. The
@@ -3542,8 +3689,6 @@ mod sight_yield_tests {
             yield_of(&stunned, true, &none, 30.0).rule,
             YieldRule::HealerCannotMove
         );
-        // And no team holds one until AS-387 sets the seam.
-        assert!(!stance_leads_sight());
     }
 
     fn changes(

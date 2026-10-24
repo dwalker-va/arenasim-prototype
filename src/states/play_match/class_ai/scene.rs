@@ -339,6 +339,17 @@ impl Scene {
         self
     }
 
+    /// Leave `team`'s healer's cast out of the sight yield's rule 1
+    /// (`situation::WithheldPlays::team1_yield_cast_moves`): the AS-385
+    /// package measurement's variant arm.
+    pub fn yield_cast_moves(mut self, team: u8) -> Self {
+        match team {
+            1 => self.withheld.team1_yield_cast_moves = true,
+            _ => self.withheld.team2_yield_cast_moves = true,
+        }
+        self
+    }
+
     /// Lift every exception of each gated play in `plays` for `team`
     /// (`situation::WithheldPlays::team1_exceptions`): the paired control of
     /// a scene that tests an exception or a context gate.
@@ -425,6 +436,19 @@ impl Scene {
     pub fn set_health(&mut self, who: Who, fraction: f32) {
         let c = &mut self.unit_mut(who).combatant;
         c.current_health = c.max_health * fraction;
+    }
+
+    /// Move `who` to `(x, z)` on the ground plane: a unit that walked, for a
+    /// scene that classifies a frame, moves its units and classifies the next
+    /// ([`Scene::reclassify`]).
+    pub fn set_position(&mut self, who: Who, x: f32, z: f32) {
+        self.unit_mut(who).position = Vec3::new(x, UNIT_Y, z);
+    }
+
+    /// Set the sim clock (as [`Scene::now`]), for a scene that classifies
+    /// frame after frame.
+    pub fn set_now(&mut self, secs: f32) {
+        self.now = secs;
     }
 
     /// `who`'s `Combatant`, to change anything the builder does not name.
@@ -535,6 +559,7 @@ impl Scene {
                 withheld: self.withheld,
                 ..SituationConfig::from_movement(&self.movement)
             },
+            &self.abilities,
             &mut trace,
         );
         &self.situations
@@ -756,6 +781,7 @@ impl Scene {
                 withheld: self.withheld,
                 ..SituationConfig::from_movement(&self.movement)
             },
+            &self.abilities,
             trace,
         );
         trace.pending_events.clear();

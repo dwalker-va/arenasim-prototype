@@ -195,6 +195,11 @@ pub struct ScorerInputs {
     /// Distance beyond which `trap_setup` starts pulling toward
     /// `trap_setup_point` — the throw range with room for the lead.
     pub trap_setup_range: f32,
+    /// The point on the team's pillar stance ring at its side, for the
+    /// `stance_pull` term (a kiting ranged DPS whose team holds a pillar
+    /// stance, AS-385). `None` disables it: no stance, `Legacy`, or a scorer
+    /// that is not a kiter's.
+    pub stance_point: Option<Vec3>,
 }
 
 /// Yards past `trap_setup_range` over which the `trap_setup` pull ramps to its
@@ -222,6 +227,26 @@ pub fn trap_setup_term(candidate: Vec2, inputs: &ScorerInputs, weight: f32) -> f
     }
     let ramp = (overshoot / TRAP_SETUP_RAMP).min(1.0);
     weight * candidate.dot(to_healer.normalize()) * ramp
+}
+
+/// The `stance_pull` term for one candidate: a pull toward `stance_point`,
+/// the shape of `formation_pull` — toward the point, fading out over the last
+/// `lookahead` yards so it does not thrash about the point on arrival. Shared
+/// by the scorer and the trace so the traced value is the scored one.
+pub fn stance_pull_term(candidate: Vec2, inputs: &ScorerInputs, weight: f32) -> f32 {
+    let Some(point) = inputs.stance_point else {
+        return 0.0;
+    };
+    if weight <= 0.0 {
+        return 0.0;
+    }
+    let to_point = xz(point) - xz(inputs.my_pos);
+    let distance = to_point.length();
+    if distance <= f32::EPSILON {
+        return 0.0;
+    }
+    let arrival_fade = (distance / inputs.lookahead.max(f32::EPSILON)).min(1.0);
+    weight * candidate.dot(to_point / distance) * arrival_fade
 }
 
 fn xz(v: Vec3) -> Vec2 {
@@ -314,6 +339,7 @@ pub fn score_direction(candidate: Vec2, inputs: &ScorerInputs, weights: &Movemen
     }
 
     score += trap_setup_term(candidate, inputs, weights.trap_setup);
+    score += stance_pull_term(candidate, inputs, weights.stance_pull);
 
     let corner_closeness = inputs.bounds.edge_closeness(next.x, next.z);
     if corner_closeness > 0.0 {
@@ -766,6 +792,7 @@ mod tests {
             cover_pull: 0.0,
             healer_leash: 0.0,
             trap_setup: 3.0,
+            stance_pull: 0.0,
         };
         let dirs = compass_directions_16();
         // Chaser at +X; healer 40yd off on +Z — well beyond a 25yd setup range.
@@ -858,6 +885,7 @@ mod tests {
             cover_pull: 0.0,
             healer_leash: 0.0,
             trap_setup: 0.0,
+            stance_pull: 0.0,
         };
         let dirs = compass_directions_16();
         let ideal_away = dirs[8]; // ~(-1, 0): exactly away from a +X threat
@@ -1217,6 +1245,7 @@ mod tests {
             cover_pull: 0.0,
             healer_leash: 0.0,
             trap_setup: 0.0,
+            stance_pull: 0.0,
         };
         let dirs = compass_directions_16();
         // Near the +X/+Z corner (|x|+|z| = 48, just inside ARENA_CORNER_SUM),
@@ -1324,6 +1353,7 @@ mod tests {
             cover_pull: 0.0,
             healer_leash: 0.0,
             trap_setup: 0.0,
+            stance_pull: 0.0,
         }
     }
 

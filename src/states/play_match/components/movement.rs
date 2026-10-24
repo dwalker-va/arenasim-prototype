@@ -176,7 +176,8 @@ pub struct HealerPosture {
     /// what emits the `OutOfCcReach` trace event, once per walk.
     pub cc_walk: bool,
     /// `TeamPlan` only: whether the healer hugs a pillar or plays the open
-    /// (AS-373, `class_ai::pillar_mode`). Kept across posture changes — the
+    /// (AS-373, `class_ai::pillar_mode`; it hugs only under its team's pillar
+    /// stance, AS-385). Kept across posture changes — the
     /// mode is a stance, not a step — and only the FREE and PRESSURED ticks
     /// read or change it, so a medic chase, a dispel walk, TakeCover, ESCAPE
     /// or a dip suspends it without resetting it.
@@ -195,10 +196,6 @@ pub struct PillarMemory {
     /// taken. It turns toward its target no faster than the healer walks the
     /// ring. `None` until the first hug evaluation of a hug.
     pub angle: Option<RingAngle>,
-    /// While hugging: when the enemy last stopped having a ready crowd
-    /// control that needs sight (`None` while it has one). Hug releases on
-    /// this key only once it has been false for `pillar_mode::HUG_RELEASE`.
-    pub cc_lost_at: Option<f32>,
     /// While hugging: where the anchor was last sampled, and the velocity
     /// measured from its displacement since the sample before (the sight
     /// margin leads by the anchor's real motion round the pillar, not by its
