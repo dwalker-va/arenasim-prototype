@@ -13,6 +13,8 @@
 //! - the gate: an arrival in a ready Fear's reach holds the walk, and is
 //!   traced; with the Fear down it walks;
 //! - an attacker already inside the Scream needs no walk;
+//! - a pressured Priest does not walk; unpressured, it does;
+//! - the Peel play's exceptions table governs the walk;
 //! - the dip is retired under `TeamPlan` and kept under `Legacy`;
 //! - the defensive Scream is untouched.
 //!
@@ -297,6 +299,78 @@ fn the_walk_runs_only_between_the_scream_and_its_reach() {
 /// The standalone dip is retired under `TeamPlan`: a healthy Warrior teammate
 /// attacking nobody, an enemy Shaman 35yd east that nothing holds — the
 /// `Legacy` Priest dips at it, the `TeamPlan` Priest neither dips nor walks.
+/// The walk is FREE's: a pressured Priest does not walk into the enemy. An
+/// enemy Warrior 10yd north of the Priest targets it — inside the 12yd danger
+/// radius, so the Priest is PRESSURED, and beyond the 8yd Scream, so the
+/// defensive Scream cannot fire either; its Charge is down, so it holds no
+/// crowd control that would gate the walk on its own. The Priest neither
+/// begins a Peel walk nor holds an `Entity` goal on the attacker. With that
+/// Warrior on the dying Warrior instead (31.6yd from it, so not one of its
+/// attackers), the Priest is FREE and walks.
+#[test]
+fn a_pressured_priest_does_not_walk() {
+    const BRUISER: &str = "enemy bruiser";
+    let with_bruiser = |on: &'static str| {
+        scene(AiProfile::TeamPlan, Priest)
+            .unit(BRUISER, 2, Warrior)
+            .at(-20.0, 10.0)
+            .targeting(on)
+            .cooldown(BRUISER, AbilityType::Charge, 30.0)
+    };
+    let s = with_bruiser(PRIEST);
+    let view = s.decide(PRIEST);
+    assert_eq!(walks_at(&s, &view), None, "pressured: {}", describe(&view));
+    assert_ne!(
+        view.directive.map(|d| d.goal),
+        Some(MovementGoal::Entity(s.entity(ATTACKER))),
+        "pressured: {}",
+        describe(&view)
+    );
+    assert_ne!(
+        view.chose(),
+        Some((AbilityType::PsychicScream, None)),
+        "pressured: {}",
+        describe(&view)
+    );
+
+    let s = with_bruiser(WARRIOR);
+    let view = s.decide(PRIEST);
+    assert_eq!(
+        walks_at(&s, &view),
+        Some(ATTACKER),
+        "unpressured: {}",
+        describe(&view)
+    );
+}
+
+/// The walk is the Peel play's, so the play's exceptions govern it: with the
+/// Peel play's table replaced by one naming the Priest peeling for a Warrior,
+/// the Priest does not walk for its dying Warrior; with a table naming another
+/// context (a Priest peeling for a Mage), it does.
+#[test]
+fn the_peel_plays_exceptions_govern_the_walk() {
+    use arenasim::states::play_match::situation::{ExceptionKey, ExceptionSet};
+    let peel = PEEL;
+    let s = scene(AiProfile::TeamPlan, Priest).exceptions(
+        peel,
+        ExceptionSet::of(&[ExceptionKey::in_context(Priest, Warrior)]),
+    );
+    let view = s.decide(PRIEST);
+    assert_eq!(walks_at(&s, &view), None, "excepted: {}", describe(&view));
+
+    let s = scene(AiProfile::TeamPlan, Priest).exceptions(
+        peel,
+        ExceptionSet::of(&[ExceptionKey::in_context(Priest, Mage)]),
+    );
+    let view = s.decide(PRIEST);
+    assert_eq!(
+        walks_at(&s, &view),
+        Some(ATTACKER),
+        "another context: {}",
+        describe(&view)
+    );
+}
+
 #[test]
 fn the_dip_is_retired_under_team_plan() {
     let dip_scene = |profile: AiProfile| {
