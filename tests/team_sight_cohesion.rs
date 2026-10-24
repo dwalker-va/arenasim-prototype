@@ -286,6 +286,11 @@ struct Row {
     lulls: Vec<Lull>,
     mana: Vec<HealerMana>,
     deaths: Vec<Death>,
+    /// Per deciding class, its ability decisions while its team held a lock
+    /// ending soon (`situation.lock_ending`, the Chain play's window):
+    /// `[all, under the Pillar play, under the Chain play]` — whether the
+    /// stance displaces a hand-off (AS-385 package).
+    chain_window: BTreeMap<String, [u32; 3]>,
 }
 
 fn broke_kind(a_moved_breaks: bool, b_moved_breaks: bool, a: &str, b: &str) -> String {
@@ -373,8 +378,23 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> R
     // Healers' posture and traced pillar mode, from the trace.
     let mut postures: BTreeMap<u32, Vec<(usize, String)>> = BTreeMap::new();
     let mut modes: BTreeMap<u32, Vec<(usize, bool)>> = BTreeMap::new();
+    let mut chain_window: BTreeMap<String, [u32; 3]> = BTreeMap::new();
     if let Ok(f) = std::fs::File::open(&trace_path) {
         for line in std::io::BufReader::new(f).lines().map_while(Result::ok) {
+            if line.contains("\"ability_decision\"") && line.contains("\"lock_ending\"") {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                    let situation = &v["situation"];
+                    if !situation["lock_ending"].is_null() {
+                        let class = v["actor"]["class"].as_str().unwrap_or("?").to_string();
+                        let play = situation["play"]["name"].as_str().unwrap_or("");
+                        let c = chain_window.entry(class).or_default();
+                        c[0] += 1;
+                        c[1] += (play == "pillar") as u32;
+                        c[2] += (play == "chain") as u32;
+                    }
+                }
+                continue;
+            }
             if !line.contains("\"movement_decision\"") {
                 continue;
             }
@@ -435,6 +455,7 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> R
         seed,
         winner: result.winner.unwrap_or(0),
         duration: result.match_time,
+        chain_window,
         ..Default::default()
     };
     let Some(gates) = frames.iter().position(|f| f.0) else {

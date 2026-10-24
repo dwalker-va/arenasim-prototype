@@ -5723,6 +5723,10 @@ mod chase_los {
         winner: Option<u8>,
         duration: f32,
         warrior_death: Option<f32>,
+        /// Whether the Warrior died FIRST: the Priest still alive when it fell,
+        /// so what follows is the 2v1 this probe judges (a Priest that died
+        /// first leaves a 1v1 the Mage may lose on its merits).
+        two_v_one: bool,
         /// Longest continuous window (sim-seconds) the Mage was occluded from
         /// the Shaman AFTER the Warrior's death. This is the pillar-rounding
         /// TRAVERSE TIME: the span from the Mage first losing sight behind a
@@ -5770,6 +5774,14 @@ mod chase_los {
             .last()
             .map(|(t, _)| *t)
             .filter(|t| *t < mage_end - 0.5);
+        let priest = timeline.find(1, CharacterClass::Priest, false);
+        let priest_end = timeline
+            .samples
+            .get(&priest)
+            .and_then(|s| s.last())
+            .map(|(t, _)| *t)
+            .unwrap_or(gate);
+        let two_v_one = warrior_death.is_some_and(|t| priest_end > t);
 
         // After the Warrior dies the Shaman is the lone enemy = Mage's kill
         // target. Match Mage/Shaman samples on identical frame stamps and walk
@@ -5828,6 +5840,7 @@ mod chase_los {
             winner: result.winner,
             duration: result.match_time,
             warrior_death,
+            two_v_one,
             max_occluded_window: max_window,
             total_occluded,
             lone_samples,
@@ -5876,7 +5889,7 @@ mod chase_los {
 
     /// Whether the lone-Shaman pillar-hug happened in `s`.
     fn hugged(s: &ChaseStats) -> bool {
-        s.warrior_death.is_some() && s.lone_samples >= 300 && s.total_occluded >= 2.0
+        s.two_v_one && s.lone_samples >= 300 && s.total_occluded >= 2.0
     }
 
     /// The occlusion-timeout chase bounds the lone-Shaman endgame. In every
@@ -6018,6 +6031,10 @@ mod juke_chase {
         duration: f32,
         /// Warrior death time (`None` if it survived) — the 2v1 opens here.
         warrior_death: Option<f32>,
+        /// Whether the Warrior died FIRST: the Priest still alive when it fell,
+        /// so what follows is the 2v1 this probe judges (a Priest that died
+        /// first leaves a 1v1 the Mage may lose on its merits).
+        two_v_one: bool,
         /// Matched (Mage, Shaman) samples during the 2v1 (Warrior dead, both
         /// still alive) — vacuity for "the lone-Shaman dance occurred".
         lone_samples: usize,
@@ -6059,6 +6076,14 @@ mod juke_chase {
             .last()
             .map(|(t, _)| *t)
             .filter(|t| *t < mage_end - 0.5);
+        let priest = timeline.find(1, CharacterClass::Priest, false);
+        let priest_end = timeline
+            .samples
+            .get(&priest)
+            .and_then(|s| s.last())
+            .map(|(t, _)| *t)
+            .unwrap_or(gate);
+        let two_v_one = warrior_death.is_some_and(|t| priest_end > t);
         let death_t = warrior_death.unwrap_or(f32::INFINITY);
 
         // Walk the post-death Mage/Shaman slice on identical frame stamps,
@@ -6106,6 +6131,7 @@ mod juke_chase {
             winner: result.winner,
             duration: result.match_time,
             warrior_death,
+            two_v_one,
             lone_samples,
             lone_secs: lone_span.map_or(0.0, |(first, last)| last - first),
             total_occluded,
@@ -6173,7 +6199,7 @@ mod juke_chase {
 
     /// Whether the lone-Shaman dance happened in `s`.
     fn danced(s: &JukeStats) -> bool {
-        s.warrior_death.is_some() && s.lone_samples >= 200 && s.total_occluded >= 1.0
+        s.two_v_one && s.lone_samples >= 200 && s.total_occluded >= 1.0
     }
 
     /// The leaky-bucket chase bounds the mid-cast juke dance: in every match of
@@ -7430,19 +7456,16 @@ mod nagrand_teamplan {
     };
     use bevy::prelude::Vec2;
 
-    /// Nagrand's four pillars (`assets/config/maps.ron`), as LoS volumes.
+    /// Nagrand's four pillars, as LoS volumes, loaded from
+    /// `assets/config/maps.ron` — the geometry the match plays on. (A hand-
+    /// copied list here once lost the pillars' 22.5-degree turn, which put a
+    /// vertex where the map has a face: a line grazing the pillar's top read
+    /// as blocked that the match saw clear. AS-385.)
     fn volumes() -> Vec<ObstacleVolume> {
-        [(-40.0, -20.0), (-40.0, 20.0), (40.0, -20.0), (40.0, 20.0)]
-            .into_iter()
-            .map(|(x, z)| ObstacleVolume::Prism {
-                center_xz: Vec2::new(x, z),
-                circumradius: 6.0,
-                sides: 8,
-                rotation: 0.0,
-                base_y: 0.0,
-                height: 5.0,
-            })
-            .collect()
+        arenasim::states::play_match::map_config::load_map_geometry_config()
+            .expect("maps.ron loads")
+            .active_for(arenasim::ArenaMap::PillaredArena)
+            .volumes
     }
 
     fn eye(p: Vec2) -> Vec3 {
@@ -7557,7 +7580,13 @@ mod nagrand_teamplan {
     /// AS-383           19.2% of 4815        27 4 1 3 25 27%
     /// no C_SIGHT       44.7% of 5019        74 80 27 6 35 18%
     /// (before AS-383: AS-292 pooled 21.5%, main 13.6%, no C_SIGHT 78.6%)
+    /// AS-385 package   10.9% of 18635       (maps.ron's geometry, below)
     /// ```
+    ///
+    /// The rows above AS-385 read sight through a hand-copied pillar list
+    /// that had lost the 22.5-degree turn; the package's seed 7 put the
+    /// Priest's goal on a line grazing a pillar top that the copy read as
+    /// blocked (80%) and the match read as clear (2%).
     ///
     /// The pooled ceiling is 30%, between the two. A seed with enough frames
     /// to read on its own (300, five seconds) is held to 50%, the old per-seed
