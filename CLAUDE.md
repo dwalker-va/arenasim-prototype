@@ -733,22 +733,24 @@ on Nagrand (`docs/design/balance/2026-10-13-as249-healer-positioning.md`).
 **Healer pillar modes: hug or open (`TeamPlan`, AS-373)** —
 `class_ai::pillar_mode`; design and measurements in
 `docs/design/2026-10-19-healer-pillar-modes.md`. Constants in the module, no
-RON knob. A healer HUGS a pillar when all three keys hold: its anchor (the most
-injured living teammate) fights within `HUG_ENTER` (12yd) of the pillar's skin;
-an enemy crowd control a pillar defends against is ready within
-`CC_MODE_HORIZON` (5s) — one that needs sight, reaches past `MELEE_CC_REACH`
-(8yd, so no melee stun) and is not a pet's, and that the healer is not immune
-to (`pillar_threats`, AS-362's `CcField`); and the pillar's ring has ground in
-heal range that sees the anchor and that no such crowd control covers
-(`defended_arc`), in a run wide enough to stand the sight margin inside both
-edges (`holds_margin`). Otherwise it plays the OPEN. Anti-strobe: leave beyond
-`HUG_LEAVE` (20yd), the crowd-control key releases after `HUG_RELEASE` (3s),
-each mode held `MODE_DWELL` (2s), the hugged pillar changes only for one the
-anchor stands `PILLAR_SWITCH` (8yd) nearer; a defended arc too thin to hold
-the margin ends a hug at once. Every change is a `PillarModeEnter` / `PillarModeLeave` movement decision
-whose scorer terms name the `pillar` and the three `key_*` values.
+RON knob. The hug is the healer's half of its team's pillar stance (AS-387,
+`Pillar` under *Plays* below): a healer hugs ONLY while its team holds a
+`pillar_stance` and it runs the Pillar play, on the stance's pillar, and only
+while that pillar's ring has ground that sees every living teammate in heal
+range and that no crowd control a pillar defends against covers (`team_arc`
+over `team_threats`: one that needs sight, reaches past `MELEE_CC_REACH`, 8yd,
+and is not a pet's — AS-362's `CcField`), in a run wide enough to stand the
+sight margin inside both edges (`holds_margin`). It never hugs alone (design
+D3). Otherwise it plays the OPEN. Anti-strobe: the stance owns the Schmitt
+pair (`HUG_ENTER` 12yd in, `HUG_LEAVE` 20yd out), the crowd-control release
+(`HUG_RELEASE`, 3s), the dwell (`MODE_DWELL`, 2s) and the pillar switch
+(`PILLAR_SWITCH`, 8yd); the healer's mode is held `MODE_DWELL` and its hugged
+pillar changes only when the stance's does; a team arc too thin to hold the
+margin ends a hug at once. Every change is a `PillarModeEnter` /
+`PillarModeLeave` movement decision whose scorer terms name the `pillar` and
+the two keys (`key_stance`, `key_arc`).
 - **Hug** is a ring ANGLE round the pillar at `ρ = disc + MOVER_RADIUS +
-  COVER_STANDOFF` (8yd on Nagrand). The target angle is chosen in the defended
+  COVER_STANDOFF` (8yd on Nagrand). The target angle is chosen in the team
   arc's core — the arc less `HUG_SIGHT_MARGIN` (3yd) plus the arc the anchor's
   own motion round the pillar sweeps in `HUG_LEAD_SECS` (1.5s), off the edge
   that motion sweeps toward the healer — then out of the positioning

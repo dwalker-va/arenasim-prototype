@@ -358,24 +358,51 @@ fn the_healer_hugs_only_under_the_stance() {
 #[test]
 fn the_stance_makes_a_healthy_dps_yield_in_the_same_classification() {
     use arenasim::states::play_match::situation::YieldRule;
-    let yield_of = |mut s: Scene| {
+    let yield_of = |mut s: Scene, team: u8| {
         let mate = s.entity(MATE);
-        let team = s.reclassify().teams[0].clone();
-        let pair = team
+        let situation = s.reclassify().teams[team as usize - 1].clone();
+        let pair = situation
             .sight_yield
             .iter()
             .find(|p| p.dps == mate)
             .copied()
             .expect("the Warrior's pair");
-        (team.pillar_stance.is_some(), pair.rule)
+        (situation.pillar_stance.is_some(), pair.rule)
     };
     // Full health, so rule 4 cannot be what decides.
     let s = scene(Priest, Warlock, 6.0).health_of(MATE, 1.0);
-    assert_eq!(yield_of(s), (true, YieldRule::Stance));
+    assert_eq!(yield_of(s, 1), (true, YieldRule::Stance));
     let withheld = scene(Priest, Warlock, 6.0)
         .health_of(MATE, 1.0)
         .withhold(1, PlaySet::of(&[Play::Pillar]));
-    assert_eq!(yield_of(withheld), (false, YieldRule::DpsLeads));
+    assert_eq!(yield_of(withheld, 1), (false, YieldRule::DpsLeads));
+
+    // The same scene with the sides swapped: team 2 reads its own stance.
+    let mirrored = |withhold: bool| {
+        let s = Scene::new()
+            .obstacles(pillar())
+            .ai_profile(1, AiProfile::TeamPlan)
+            .ai_profile(2, AiProfile::TeamPlan)
+            .unit(BRUISER, 1, Warrior)
+            .at(1.5, 12.0)
+            .targeting(MATE)
+            .unit(CASTER, 1, Warlock)
+            .at(18.0, 2.0)
+            .targeting(MATE)
+            .unit(HEALER, 2, Priest)
+            .at(-14.0, 0.0)
+            .unit(MATE, 2, Warrior)
+            .at(0.0, 12.0)
+            .targeting(BRUISER)
+            .health_of(MATE, 1.0);
+        if withhold {
+            s.withhold(2, PlaySet::of(&[Play::Pillar]))
+        } else {
+            s
+        }
+    };
+    assert_eq!(yield_of(mirrored(false), 2), (true, YieldRule::Stance));
+    assert_eq!(yield_of(mirrored(true), 2), (false, YieldRule::DpsLeads));
 }
 
 /// The Paladin — the one healer `HUG_EXCEPTIONS` names — has no executor for

@@ -7594,7 +7594,7 @@ mod nagrand_teamplan {
     ///                        pooled           worst seed (>= 300 frames)
     /// main @ 43a8ee54        10.2% of 10617   15%
     /// AS-385 (yield+stance)  10.9% of 34172   28%
-    /// AS-385, no C_SIGHT     49.8% of 32800   78%; 14 of 34 seeds over 50%
+    /// AS-385, no C_SIGHT     49.8% of 32800   78%; 15 of 33 seeds over 50%
     /// ```
     ///
     /// The pooled ceiling, 30%, sits about 19 points from both sides. A seed
