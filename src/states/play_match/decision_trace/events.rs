@@ -509,6 +509,16 @@ pub enum MovementTrigger {
     /// a disc's edge, or the FREE formation point's reach repair. Fires once
     /// as each such walk begins, not per re-solve.
     OutOfCcReach,
+    /// `TeamPlan` (AS-373, `class_ai::pillar_mode`): the healer starts to HUG
+    /// a pillar — its anchor teammate fights at the pillar, an enemy crowd
+    /// control that needs sight is ready for it, and the pillar's ring has
+    /// ground that sees the teammate in heal range — or moves its hug to
+    /// another pillar. The scorer terms name the pillar (`pillar`) and the
+    /// three keys (`key_at_pillar`, `key_cc_ready`, `key_arc`) as they stood.
+    PillarModeEnter,
+    /// `TeamPlan` (AS-373): the healer stops hugging and plays the open. The
+    /// scorer terms name the pillar it left and the keys as they stood.
+    PillarModeLeave,
 }
 
 /// Shape of the movement goal carried by the directive this decision issued.

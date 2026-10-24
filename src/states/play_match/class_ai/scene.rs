@@ -303,6 +303,17 @@ impl Scene {
         self
     }
 
+    /// Turn the healer pillar modes off for `team`
+    /// (`situation::WithheldPlays::team1_no_pillar_modes`): the paired control
+    /// of a scene that tests them.
+    pub fn without_pillar_modes(mut self, team: u8) -> Self {
+        match team {
+            1 => self.withheld.team1_no_pillar_modes = true,
+            _ => self.withheld.team2_no_pillar_modes = true,
+        }
+        self
+    }
+
     /// Lift every exception of each gated play in `plays` for `team`
     /// (`situation::WithheldPlays::team1_exceptions`): the paired control of
     /// a scene that tests an exception or a context gate.

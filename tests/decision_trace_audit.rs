@@ -136,6 +136,8 @@ const EXPECTED_MOVEMENT_TRIGGERS: &[&str] = &[
     "FlareCommit",
     "ShiftEscape",
     "TakeCover",
+    "PillarModeEnter",
+    "PillarModeLeave",
 ];
 
 /// `situation_change` names (`SituationName`) and change kinds

@@ -337,6 +337,7 @@ fn caster_healer_pressured_tick(
         state,
         directive,
         abilities,
+        combatant.base_movement_speed,
         &movement.shared,
         &block.weights,
         combatant.target,
@@ -382,17 +383,34 @@ fn caster_healer_free_tick(
     }
 
     let repairing = state.formation.reach.is_some();
-    let Some(point) = compute_formation_point(
-        entity,
-        combatant,
-        my_pos,
+    // Hugging a pillar (AS-373): the ring point replaces the formation point.
+    let hug = super::pillar_mode::update(
         ctx,
         abilities,
-        movement,
-        block,
-        &mut state.formation,
+        entity,
+        combatant.base_movement_speed,
+        my_pos,
+        state,
+        shared,
         now,
-    ) else {
+        decision_trace,
+        TracePosture::Free,
+    );
+    let point = match hug {
+        Some(h) => Some(h.goal),
+        None => compute_formation_point(
+            entity,
+            combatant,
+            my_pos,
+            ctx,
+            abilities,
+            movement,
+            block,
+            &mut state.formation,
+            now,
+        ),
+    };
+    let Some(point) = point else {
         if transitioned {
             if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
                 builder.transition(
@@ -533,41 +551,65 @@ fn compute_formation_point(
     // healer's walk round the centroid (AS-370): the nearest enemy crossing
     // the centroid swings the point round instead of flipping it to the far
     // side.
-    let dir = if super::formation::continuous(ctx) {
-        super::formation::turn_limited(
-            dir,
-            &mut memory.heading,
-            now,
-            combatant.base_movement_speed / shared.formation_offset,
-        )
-    } else {
-        dir
-    };
-    let mut point = Vec3::new(
-        centroid.x + dir.x * shared.formation_offset,
-        my_pos.y,
-        centroid.z + dir.y * shared.formation_offset,
-    );
-
-    // Wand-range pull: clamp the point into spell range of the kill
-    // target when it would sit outside it (weight 0 disables).
-    if block.weights.wand_pull > 0.0 {
-        if let Some(target) = combatant
-            .target
-            .and_then(|t| ctx.combatants.get(&t))
-            .filter(|i| i.is_alive)
-        {
-            let offset = Vec2::new(point.x - target.position.x, point.z - target.position.z);
+    let wand_target = (block.weights.wand_pull > 0.0)
+        .then(|| {
+            combatant
+                .target
+                .and_then(|t| ctx.combatants.get(&t))
+                .filter(|i| i.is_alive)
+                .map(|i| i.position)
+        })
+        .flatten();
+    // The raw point for a heading: the offset off the centroid, the wand
+    // pull, the arena clamp.
+    let point_at = |dir: Vec2| -> Vec3 {
+        let mut point = Vec3::new(
+            centroid.x + dir.x * shared.formation_offset,
+            my_pos.y,
+            centroid.z + dir.y * shared.formation_offset,
+        );
+        // Wand-range pull: clamp the point into spell range of the kill
+        // target when it would sit outside it (weight 0 disables).
+        if let Some(target) = wand_target {
+            let offset = Vec2::new(point.x - target.x, point.z - target.z);
             let dist = offset.length();
             if dist > shared.wand_range {
                 let clamped = offset / dist * shared.wand_range;
-                point.x = target.position.x + clamped.x;
-                point.z = target.position.z + clamped.y;
+                point.x = target.x + clamped.x;
+                point.z = target.z + clamped.y;
             }
         }
-    }
-
-    let point = clamp_to_arena(&ctx.bounds, point);
+        clamp_to_arena(&ctx.bounds, point)
+    };
+    // With the pillar modes on, the turn also keeps out of the headings whose
+    // point the anchor's shadow holds (AS-373, the open mode).
+    let dir = if super::formation::continuous(ctx) {
+        super::formation::seed_heading(memory, centroid, my_pos, now);
+        let rate = combatant.base_movement_speed / shared.formation_offset;
+        if super::formation::open_constrained(ctx) {
+            super::formation::open_heading(
+                ctx,
+                entity,
+                dir,
+                &mut memory.heading,
+                now,
+                rate,
+                |d| {
+                    let p = point_at(d);
+                    Vec2::new(p.x, p.z)
+                },
+                false,
+            )
+        } else {
+            super::formation::turn_limited(dir, &mut memory.heading, now, rate)
+        }
+    } else {
+        dir
+    };
+    let point = point_at(dir);
+    // Under the open heading (AS-373) the heading keeps the point out of the
+    // anchor's shadow; this repair still answers for the other teammates'
+    // shadows, and for the point when every heading was forbidden.
     let point = if super::formation::sight_constrained(ctx) {
         super::formation::sighted_formation_point(ctx, entity, point, &mut memory.exit)
     } else {

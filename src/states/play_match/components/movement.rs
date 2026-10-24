@@ -175,6 +175,62 @@ pub struct HealerPosture {
     /// or the Paladin's band-hold stepping to the edge of a disc. Its onset is
     /// what emits the `OutOfCcReach` trace event, once per walk.
     pub cc_walk: bool,
+    /// `TeamPlan` only: whether the healer hugs a pillar or plays the open
+    /// (AS-373, `class_ai::pillar_mode`). Kept across posture changes — the
+    /// mode is a stance, not a step — and only the FREE and PRESSURED ticks
+    /// read or change it, so a medic chase, a dispel walk, TakeCover, ESCAPE
+    /// or a dip suspends it without resetting it.
+    pub pillar: PillarMemory,
+}
+
+/// The healer's pillar mode and what it remembers from one evaluation to the
+/// next ([`HealerPosture::pillar`], `class_ai::pillar_mode`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PillarMemory {
+    pub mode: PillarMode,
+    /// Sim time of the last change of mode or of hugged pillar: the dwell
+    /// (`pillar_mode::MODE_DWELL`) runs from it. `None` before the first.
+    pub since: Option<f32>,
+    /// While hugging: the ring angle the goal stands at, and when it was
+    /// taken. It turns toward its target no faster than the healer walks the
+    /// ring. `None` until the first hug evaluation of a hug.
+    pub angle: Option<RingAngle>,
+    /// While hugging: when the enemy last stopped having a ready crowd
+    /// control that needs sight (`None` while it has one). Hug releases on
+    /// this key only once it has been false for `pillar_mode::HUG_RELEASE`.
+    pub cc_lost_at: Option<f32>,
+    /// While hugging: where the anchor was last sampled, and the velocity
+    /// measured from its displacement since the sample before (the sight
+    /// margin leads by the anchor's real motion round the pillar, not by its
+    /// facing, which a unit standing still keeps).
+    pub anchor_seen: Option<AnchorSample>,
+}
+
+/// One sample of the hug's anchor ([`PillarMemory::anchor_seen`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AnchorSample {
+    pub entity: Entity,
+    pub pos: Vec2,
+    pub at: f32,
+    pub velocity: Vec2,
+}
+
+/// A healer's pillar mode ([`PillarMemory::mode`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PillarMode {
+    /// Follow the teammates in the open: the FREE formation point.
+    #[default]
+    Open,
+    /// Strapped to the pillar at index `pillar` of the map's obstacles.
+    Hug { pillar: usize },
+}
+
+/// A ring angle ([`PillarMemory::angle`]): radians about the hugged pillar's
+/// centre (from +x toward +z), and the sim time it was taken.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RingAngle {
+    pub theta: f32,
+    pub at: f32,
 }
 
 /// The FREE formation point's memory ([`HealerPosture::formation`]).
@@ -201,6 +257,11 @@ pub struct FormationMemory {
     /// spot nearest it counts `formation::KEEP_MARGIN` nearer. `None` when the
     /// last point needed no reach repair; always `None` under `Legacy`.
     pub reach: Option<Vec2>,
+    /// `TeamPlan` only: the next heading starts from the bearing of the
+    /// healer off the centroid instead of the "behind the line" target. Set
+    /// when the healer stops hugging a pillar (AS-373), so the open point
+    /// takes over from where the healer stands and turns from there.
+    pub seed_from_healer: bool,
 }
 
 impl FormationMemory {
@@ -249,6 +310,7 @@ impl HealerPosture {
             cover_spot: None,
             formation: FormationMemory::default(),
             cc_walk: false,
+            pillar: PillarMemory::default(),
         }
     }
 }

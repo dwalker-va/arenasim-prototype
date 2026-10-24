@@ -34,6 +34,11 @@ cargo run --release -- --headless /tmp/test.json
   `team2_ai_profile` override it PER TEAM — required for head-to-head
   measurement (a uniform A/B compares two internally consistent worlds and
   cannot answer "is the new AI better"; see `scripts/headtohead_sweep.py`).
+- `team1_pillar_modes`, `team2_pillar_modes`: `false` turns that team's
+  healer pillar modes off (AS-373, *Healer pillar modes* below) — a
+  measurement control like `team{1,2}_withheld_plays`. A `TeamPlan` team
+  without them plays exactly as `TeamPlan` did before them (byte-identical),
+  so one side on and one off is the modes' head-to-head.
 - `map`: "BasicArena", "TwinPillars", "PillaredArena", or "TestVerticality"
   ("PillaredArena" is the Nagrand Arena replica — a ~120yd circular bowl with four
   octagonal pillars and 10yd starting rooms; "TwinPillars" is the original
@@ -723,6 +728,47 @@ inside `danger_radius`. Overrides FREE and PRESSURED (not ESCAPE or a dip);
 movement-locking casts defer while it walks; withheld per team as `"TakeCover"`.
 Inert with no obstacles. Measured: it moves no wins and adds ~0.7pt of draws
 on Nagrand (`docs/design/balance/2026-10-13-as249-healer-positioning.md`).
+
+**Healer pillar modes: hug or open (`TeamPlan`, AS-373)** —
+`class_ai::pillar_mode`; design and measurements in
+`docs/design/2026-10-19-healer-pillar-modes.md`. Constants in the module, no
+RON knob. A healer HUGS a pillar when all three keys hold: its anchor (the most
+injured living teammate) fights within `HUG_ENTER` (12yd) of the pillar's skin;
+an enemy crowd control a pillar defends against is ready within
+`CC_MODE_HORIZON` (5s) — one that needs sight, reaches past `MELEE_CC_REACH`
+(8yd, so no melee stun) and is not a pet's, and that the healer is not immune
+to (`pillar_threats`, AS-362's `CcField`); and the pillar's ring has ground in
+heal range that sees the anchor and that no such crowd control covers
+(`defended_arc`), in a run wide enough to stand the sight margin inside both
+edges (`holds_margin`). Otherwise it plays the OPEN. Anti-strobe: leave beyond
+`HUG_LEAVE` (20yd), the crowd-control key releases after `HUG_RELEASE` (3s),
+each mode held `MODE_DWELL` (2s), the hugged pillar changes only for one the
+anchor stands `PILLAR_SWITCH` (8yd) nearer; a defended arc too thin to hold
+the margin ends a hug at once. Every change is a `PillarModeEnter` / `PillarModeLeave` movement decision
+whose scorer terms name the `pillar` and the three `key_*` values.
+- **Hug** is a ring ANGLE round the pillar at `ρ = disc + MOVER_RADIUS +
+  COVER_STANDOFF` (8yd on Nagrand). The target angle is chosen in the defended
+  arc's core — the arc less `HUG_SIGHT_MARGIN` (3yd) plus the arc the anchor's
+  own motion round the pillar sweeps in `HUG_LEAD_SECS` (1.5s), off the edge
+  that motion sweeps toward the healer — then out of the positioning
+  `CcField`, then fewest casters in sight, then nearest. It turns at most `v/ρ`
+  and only through the arc, so a change of side is a walk round the near side.
+  In FREE the ring point replaces the formation point; in PRESSURED the
+  `OccupyCover` solve gains the arc's ring points, a soft leash beyond
+  `HUG_SLACK` (3yd, `team_solve::C_RING`) and the margin (`C_MARGIN`, above
+  crowd control and cover, below sight); its deep-shadow samples stay.
+- **Open** is the FREE formation point with the sight constraint on the
+  HEADING (`formation::open_heading`): a heading whose point stands in the
+  ANCHOR's widened shadow (AS-206's wedge, near-obstacle limit and
+  `REPAIR_LIMIT`) is forbidden; the turn holds its side and crosses only the
+  other way round the centroid, through the open. Another teammate's shadow
+  does not bind the heading; AS-206's point repair, which still runs after
+  it, keeps the point in that teammate's sight where it can. With nothing
+  forbidden the heading is `turn_limited` bit for bit.
+- The Paladin (`HUG_EXCEPTIONS`, design D5) is untouched by both modes: its
+  FREE is melee pursuit, with no formation point. Medic chase, dispel walk,
+  TakeCover, ESCAPE and DIP outrank it and leave the mode as it was.
+  Obstacle-free maps are untouched; `Legacy` is byte-identical.
 
 **Medic chase (heal-seeking movement)** — shared across Priest/Paladin/Shaman
 (`healer_postures::medic_chase_override` / `medic_chase_tick`; no RON knob,

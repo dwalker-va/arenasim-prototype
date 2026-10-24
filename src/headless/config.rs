@@ -77,6 +77,15 @@ pub struct HeadlessMatchConfig {
     pub team1_withheld_plays: Vec<String>,
     #[serde(default)]
     pub team2_withheld_plays: Vec<String>,
+    /// `false` turns the healer pillar modes off for that team, for
+    /// measurement (AS-373, `class_ai::pillar_mode`): a `TeamPlan` team
+    /// without them plays as `TeamPlan` did before them, so a head-to-head
+    /// with one side on and one off measures the modes alone. Omitted — the
+    /// default — leaves them on (they run only under `TeamPlan`).
+    #[serde(default)]
+    pub team1_pillar_modes: Option<bool>,
+    #[serde(default)]
+    pub team2_pillar_modes: Option<bool>,
     /// Per gated play, the exceptions table to run IN PLACE of the shipped
     /// one for each team, for measurement: `{"Peel": []}` lifts every Peel
     /// context gate, `{"Burst": ["Hunter"]}` stops the Hunter bursting. An
@@ -192,6 +201,8 @@ impl Default for HeadlessMatchConfig {
             team2_ai_profile: None,
             team1_withheld_plays: Vec::new(),
             team2_withheld_plays: Vec::new(),
+            team1_pillar_modes: None,
+            team2_pillar_modes: None,
             team1_exceptions: BTreeMap::new(),
             team2_exceptions: BTreeMap::new(),
             burst_exceptions: None,
@@ -265,6 +276,8 @@ impl HeadlessMatchConfig {
         let mut out = WithheldPlays {
             team1: WithheldPlays::parse_set(&self.team1_withheld_plays)?,
             team2: WithheldPlays::parse_set(&self.team2_withheld_plays)?,
+            team1_no_pillar_modes: self.team1_pillar_modes == Some(false),
+            team2_no_pillar_modes: self.team2_pillar_modes == Some(false),
             ..Default::default()
         };
         let mut set_once = |team: u8, id: PlayId, set: ExceptionSet| -> Result<(), String> {

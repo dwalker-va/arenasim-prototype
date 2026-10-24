@@ -496,6 +496,7 @@ fn paladin_pressured_tick(
         state,
         directive,
         abilities,
+        combatant.base_movement_speed,
         &movement.shared,
         &movement.paladin.weights,
         // No wand — the Paladin's wand_pull weight is 0 in config.
@@ -629,7 +630,7 @@ fn paladin_dip_tick(
         completed.last_point = None;
         HojPlan::DipCast {
             target,
-            completed_state: completed,
+            completed_state: Box::new(completed),
         }
     } else {
         HojPlan::Reserved
