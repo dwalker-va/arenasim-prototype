@@ -901,7 +901,12 @@ heal first and the point stands. The Paladin keeps out only of discs it can
 leave without leaving PRESSURED — none reaching past `threat_intent_radius`
 (a Warlock's Fear) and none of its own target's — and its band-hold parks at
 the nearest spot out of them (`CcField::nearest_exit`); otherwise PRESSURED
-walked it out and its FREE pursuit walked it back. Each walk out of reach is
+walked it out and its FREE pursuit walked it back. A third consumer gates
+the Priest's offensive Psychic Scream dip (`priest::dip_hold`, AS-383): no
+dip starts while the spot it would end on (scream range short of the target)
+is covered by any disc but the target's own, or while the target already
+targets the Priest from within `threat_intent_radius`; the Psychic Scream
+candidate is traced `PreconditionUnmet`, "scream dip held: ...". Each walk out of reach is
 traced once as it begins, trigger `OutOfCcReach`. The solve's flat-field anti-statue key
 is judged without the crowd-control term, so a melee's small stun disc does
 not disarm it. Under `TeamPlan` a healer parked at its FREE formation point

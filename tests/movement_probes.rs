@@ -7536,75 +7536,77 @@ mod nagrand_teamplan {
 
     /// THE HEAL-LINE CEILING — the inverse of `pillar_self_block`'s pathology
     /// pins. The step-3 camp measured 40-55% of frames with the healer blind
-    /// to its own Warrior; the solve brought these seeds to 13.8/18.1/12.3%.
-    /// Bounding from ABOVE at roughly double the healthy worst catches a
-    /// regression toward the old pathology while leaving room for drift.
+    /// to its own Warrior. The probe measures what `C_SIGHT` decides: on frames
+    /// the Priest is PRESSURED (the team solve's posture) and free to cast, the
+    /// share whose movement goal — the spot the solve picked — has no line to
+    /// the Warrior ([`solve_goal_blind_share`]). (The share of ALL frames with
+    /// the line blocked stopped measuring the solve at AS-292, which moved
+    /// frames the line does not matter on; see that card's note.)
     ///
-    /// Re-pinned for AS-167, weapon speed from item data (11 -> 2). This probe
-    /// FAILED at its pinned seed 11, which now blocks the heal line on 47% of
-    /// frames against this 35% ceiling. The first line that differs from
-    /// `main` @ 17cb9f0 is the Warlock's first Wand Shot into a shield, 7 -> 9
-    /// absorbed (the Wand of Shadows fires every 1.8s for the same DPS).
-    /// `scan_nagrand_teamplan` on both builds, blocked share over seeds 1-12:
+    /// # A seed bank, not pinned seeds (AS-383)
     ///
-    /// ```text
-    /// main   25 26 14 13 23  4 30 16 16  4 27  4   (median 16%)
-    /// AS-167 25 17  4 10 19 15 12  4 29  4 47 17   (median 16%)
-    /// ```
-    ///
-    /// Seed 11 is the one seed in the pathology band, and the rest of the
-    /// distribution is where `main`'s is. Its occlusion is normal (26.3s, 3384
-    /// paired frames), and it stays pinned in
-    /// `teamplan_healer_buys_occlusion_on_nagrand`. So this reads as one
-    /// seed's trajectory, not the solve regressing, and is recorded in
-    /// `docs/design/balance/2026-09-28-as167-weapon-speed.md` in case it is
-    /// the start of something. Seed 2 (17%, 3613 paired frames) replaces it;
-    /// the ceiling is unchanged.
-    ///
-    /// # What it measures since AS-292: the solve's own heal line
-    ///
-    /// The share of ALL frames with the line blocked stopped measuring the
-    /// solve once AS-292 took the enemy Priest at 28-30yd out of `pressured`:
-    /// seeds 1-24 run 3-33% on `main` (pooled 20.7%) and 12-49% with AS-292
-    /// (pooled 29.5%), and with `OccupyCover`'s sight constraint removed
-    /// 24-63% (pooled 37.4%). The two overlap seed for seed — at the pinned
-    /// seeds AS-292 is 44 / 33 / 22% and the mutant 46 / 35 / 46% — so no
-    /// ceiling on that share fails the mutant and passes AS-292. The frames
-    /// AS-292 adds are ones the line does not matter on: blocked while the
-    /// Warrior is below 80% and the Priest can cast is 46.3% of such frames
-    /// on `main` and 47.0% with AS-292 (63.1% for the mutant), and the camp's
-    /// wins are 21 of 24 on both.
-    ///
-    /// So the probe measures the thing `C_SIGHT` decides: on frames the Priest
-    /// is PRESSURED (the team solve's posture) and free to cast, the share
-    /// whose movement goal — the spot the solve picked — has no line to the
-    /// Warrior ([`solve_goal_blind_share`]). Seeds 1-24:
+    /// The probe pinned seeds 7 / 2 / 12 until AS-383 held back the
+    /// `TeamPlan` Priest's scream dip, which had been ending in PRESSURED:
+    /// seed 2 then had no PRESSURED frame at all. Migrated, not re-pinned
+    /// (CLAUDE.md, *Test an AI decision*): it now reads the PRESSURED frames
+    /// over seeds 1-24, wherever they fall. Two ceilings, with `C_SIGHT`'s
+    /// constraint removed as the mutant:
     ///
     /// ```text
-    /// main         4-30%, pooled 13.6%   (pinned 7 / 2 / 12:  7 / 16 / 11%)
-    /// AS-292       5-42%, pooled 21.5%   (pinned:            31 / 21 / 12%)
-    /// no C_SIGHT  52-94%, pooled 78.6%   (pinned:            68 / 63 / 81%)
+    ///                  pooled over 1-24     seeds with >= 300 frames
+    /// AS-383           19.2% of 4815        27 4 1 3 25 27%
+    /// no C_SIGHT       44.7% of 5019        74 80 27 6 35 18%
+    /// (before AS-383: AS-292 pooled 21.5%, main 13.6%, no C_SIGHT 78.6%)
     /// ```
     ///
-    /// The ceiling is 50%: above every seed with the constraint in place,
-    /// below every seed without it. AS-292 raises it (the Priest now hides
-    /// from a Warlock fighting its Warrior where it used to stand off the
-    /// enemy Priest); that is the cost the ceiling leaves room for. The seeds
-    /// are unchanged.
+    /// The pooled ceiling is 30%, between the two. A seed with enough frames
+    /// to read on its own (300, five seconds) is held to 50%, the old per-seed
+    /// ceiling, which catches the mutant's worst seeds. The bank must hold
+    /// 3000 such frames, or the probe has gone vacuous.
     #[test]
     fn teamplan_healer_keeps_its_heal_line_on_nagrand() {
-        for seed in [7u64, 2, 12] {
-            let (frames, share) = solve_goal_blind_share(seed);
-            assert_min_occurrences(&format!("seed {seed} pressured solve frames"), frames, 300);
-            assert!(
-                share <= 0.50,
-                "seed {seed}: the PRESSURED solve's goal had no line to the Warrior on \
-                 {:.0}% of the frames the Priest could heal — the solve has stopped asking \
-                 for sight of its ally (healthy is 5-42%; without C_SIGHT 52-94%)",
+        let (mut frames, mut blind) = (0usize, 0.0f32);
+        for seed in HEAL_LINE_BANK {
+            let (n, share) = solve_goal_blind_share(seed);
+            println!(
+                "seed {seed:2}: {n} pressured solve frames, goal blind {:.0}%",
                 100.0 * share
             );
+            frames += n;
+            blind += share * n as f32;
+            if n >= HEAL_LINE_SEED_FRAMES {
+                assert!(
+                    share <= HEAL_LINE_CEILING,
+                    "seed {seed}: the PRESSURED solve's goal had no line to the Warrior on \
+                     {:.0}% of {n} frames the Priest could heal — the solve has stopped \
+                     asking for sight of its ally",
+                    100.0 * share
+                );
+            }
         }
+        assert_min_occurrences(
+            "pressured solve frames over the bank",
+            frames,
+            HEAL_LINE_BANK_FRAMES,
+        );
+        let pooled = blind / frames as f32;
+        println!("bank: {frames} frames, goal blind {:.1}%", 100.0 * pooled);
+        assert!(
+            pooled <= HEAL_LINE_POOLED_CEILING,
+            "over the bank the PRESSURED solve's goal had no line to the Warrior on {:.0}% of \
+             {frames} frames — the solve has stopped asking for sight of its ally",
+            100.0 * pooled
+        );
     }
+
+    /// The heal-line probe's seed bank, its two ceilings (one seed's, the
+    /// bank's), and its two frame floors (see
+    /// [`teamplan_healer_keeps_its_heal_line_on_nagrand`]).
+    const HEAL_LINE_BANK: std::ops::RangeInclusive<u64> = 1..=24;
+    const HEAL_LINE_CEILING: f32 = 0.50;
+    const HEAL_LINE_POOLED_CEILING: f32 = 0.30;
+    const HEAL_LINE_SEED_FRAMES: usize = 300;
+    const HEAL_LINE_BANK_FRAMES: usize = 3000;
 
     /// The heal-line probe's measurement at one seed (the Nagrand camp,
     /// `TeamPlan`): over the frames the team-1 Priest is PRESSURED — read off
