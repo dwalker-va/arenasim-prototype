@@ -36,7 +36,11 @@
 //!   its seconds below 10%;
 //! - `deaths` — every non-pet death with its team's healer alive: how long it
 //!   had been hidden from that healer, who broke the final sight, the healer's
-//!   hard-CC share of the last 5s, and the dead unit's own target-blind share.
+//!   hard-CC share of the last 5s, and the dead unit's own target-blind share;
+//! - `ranged` — per Mage, Hunter and Warlock, its lining time split by what
+//!   held it there (`RangedBlind`, AS-389): pressed by a melee, another enemy
+//!   in reach and sight, its own sight yield, the seek-chase bucket's phase,
+//!   the endgame, and the nearest spot that would see the target.
 //!
 //! The observer is read-only (`observed_run_does_not_perturb_outcomes`).
 //! Aggregation: `docs/design/balance/sweeps/2026-10-24-as385-reduce.py`.
@@ -130,6 +134,9 @@ struct Unit {
     hard: bool,
     stealthed: bool,
     target: Option<Entity>,
+    /// A live `MovementGoal::Point` directive: for a kiter in ENGAGE, the
+    /// seek-chase is walking it at its target (AS-389).
+    point_goal: bool,
 }
 
 #[derive(Serialize, Default, Clone)]
@@ -222,6 +229,61 @@ struct LineEp {
     alt_share: f32,
 }
 
+/// A ranged DPS's lining time (blind to its own target within reach, free to
+/// act), split by what held it there (AS-389). Seconds, post-contact.
+///
+/// `cause` is an exclusive partition, first rule that holds:
+/// - `pressed`: an enemy melee or pet within `PRESSED` yards — the DPS is
+///   kiting or tanking, and its target's sight is not its first duty;
+/// - `switchable`: another living non-pet enemy stands in reach and in sight
+///   (target choice, cause i);
+/// - `yield_blocked`: the DPS yields its healer's sight, and no regain spot
+///   within `REGAIN_NEAR` yards keeps that healer in sight (its own yield,
+///   cause iii);
+/// - `filling`: a kiter with its target inside preferred range, its
+///   seek-chase bucket below the timeout (seek-chase timing, cause ii);
+/// - `beyond_pref`: a kiter blind with its target beyond its preferred range
+///   (pursuit, not the bucket, moves it);
+/// - `chasing`: a kiter whose chase is armed (cause ii's second half: armed
+///   and still blind — the target circles);
+/// - `pursuing`: the Warlock (no bucket; pursuit walks for sight at once).
+///
+/// A cause key is prefixed `last:` when the target is the enemy's last
+/// living non-pet unit (the lone-healer endgame). The other fields are
+/// overlapping tallies of the same lining seconds. Reducer:
+/// `docs/design/balance/sweeps/2026-10-25-as389-reduce.py`.
+#[derive(Serialize, Default, Clone)]
+struct RangedBlind {
+    class: String,
+    team: u8,
+    /// Whether the DPS's team, and its enemy, ran the AS-385 package.
+    own_pkg: bool,
+    enemy_pkg: bool,
+    secs: f32,
+    lining: f32,
+    cause: BTreeMap<String, f32>,
+    tgt_healer: f32,
+    alt: f32,
+    own_yield: f32,
+    own_stance: f32,
+    enemy_stance: f32,
+    moving: f32,
+    point_goal: f32,
+    /// The nearest spot (rings of 2/4/6/8/12/16yd, 16 headings, off a
+    /// pillar's footprint) that sees the target: lining seconds by its
+    /// distance, and whether that spot also keeps the DPS's healer in sight.
+    regain: BTreeMap<String, f32>,
+    regain_keeps_healer: f32,
+    regain_near_keeps_healer: f32,
+    /// Lining seconds with the target the enemy's last living non-pet unit
+    /// (the endgame: nobody else to switch to), and with this DPS's team
+    /// outnumbering the enemy's living non-pets.
+    last_enemy: f32,
+    outnumber: f32,
+    /// Lining seconds by the length of the episode they belong to.
+    episode: BTreeMap<String, f32>,
+}
+
 #[derive(Serialize)]
 struct Lull {
     t0: f32,
@@ -291,6 +353,32 @@ struct Row {
     /// `[all, under the Pillar play, under the Chain play]` — whether the
     /// stance displaces a hand-off (AS-385 package).
     chain_window: BTreeMap<String, [u32; 3]>,
+    /// Per ranged DPS (Mage, Hunter, Warlock), its lining split (AS-389).
+    ranged: Vec<RangedBlind>,
+}
+
+fn arena_of(map: &str) -> ArenaMap {
+    *ArenaMap::all()
+        .iter()
+        .find(|m| format!("{m:?}") == map)
+        .expect("a map name")
+}
+
+/// An enemy melee or pet this close presses a ranged DPS (AS-389).
+const PRESSED: f32 = 10.0;
+/// A regain spot this near is a step or two away (AS-389).
+const REGAIN_NEAR: f32 = 8.0;
+const REGAIN_RINGS: [f32; 6] = [2.0, 4.0, 6.0, 8.0, 12.0, 16.0];
+/// `movement.ron`'s kiter `seek_chase_timeout` / `seek_chase_decay`.
+const CHASE_TIMEOUT: f32 = 3.5;
+const CHASE_DECAY: f32 = 0.5;
+
+fn on_at(v: Option<&Vec<(usize, bool)>>, i: usize) -> bool {
+    let Some(v) = v else {
+        return false;
+    };
+    let k = v.partition_point(|d| d.0 <= i);
+    k > 0 && v[k - 1].1
 }
 
 fn broke_kind(a_moved_breaks: bool, b_moved_breaks: bool, a: &str, b: &str) -> String {
@@ -314,6 +402,34 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> R
     };
     let team_names = [cfg.team1.join("+"), cfg.team2.join("+")];
     let seed = cfg.random_seed.unwrap_or(0);
+    // Whether each team runs the AS-385 package (the sight yield and the
+    // Pillar play): `TeamPlan`, with neither switched off.
+    let pkg = {
+        let tp = |p: &Option<String>| {
+            p.as_deref()
+                .or(cfg.ai_profile.as_deref())
+                .is_some_and(|s| s == "TeamPlan")
+        };
+        let has = |profile: &Option<String>, yield_on: Option<bool>, withheld: &[String]| {
+            tp(profile) && yield_on != Some(false) && !withheld.iter().any(|w| w == "Pillar")
+        };
+        [
+            has(
+                &cfg.team1_ai_profile,
+                cfg.team1_sight_yield,
+                &cfg.team1_withheld_plays,
+            ),
+            has(
+                &cfg.team2_ai_profile,
+                cfg.team2_sight_yield,
+                &cfg.team2_withheld_plays,
+            ),
+        ]
+    };
+    let bounds = load_map_geometry_config()
+        .expect("maps.ron loads")
+        .active_for(arena_of(&cfg.map))
+        .bounds;
     let arena: ArenaMap = *ArenaMap::all()
         .iter()
         .find(|m| format!("{m:?}") == map)
@@ -366,6 +482,7 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> R
                             hard: c.aura_types.iter().any(|a| is_hard(*a)),
                             stealthed: c.stealthed,
                             target: c.target,
+                            point_goal: c.point_goal.is_some(),
                         },
                     )
                 })
@@ -379,8 +496,42 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> R
     let mut postures: BTreeMap<u32, Vec<(usize, String)>> = BTreeMap::new();
     let mut modes: BTreeMap<u32, Vec<(usize, bool)>> = BTreeMap::new();
     let mut chain_window: BTreeMap<String, [u32; 3]> = BTreeMap::new();
+    // AS-389: each DPS's sight yield (by entity index) and each team's pillar
+    // stance, as (frame, on) transitions.
+    let mut yields: BTreeMap<u32, Vec<(usize, bool)>> = BTreeMap::new();
+    let mut stances: BTreeMap<u8, Vec<(usize, bool)>> = BTreeMap::new();
     if let Ok(f) = std::fs::File::open(&trace_path) {
         for line in std::io::BufReader::new(f).lines().map_while(Result::ok) {
+            if line.contains("\"situation_change\"")
+                && (line.contains("\"sight_yield\"") || line.contains("\"pillar_stance\""))
+            {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                    let fr = v["frame"].as_u64().unwrap_or(0) as usize;
+                    let end = v["change"].as_str() == Some("end");
+                    match v["name"].as_str() {
+                        Some("sight_yield") => {
+                            let on = !end
+                                && matches!(
+                                    v["rule"].as_str(),
+                                    Some("healer_cannot_move")
+                                        | Some("healer_pressured")
+                                        | Some("stance")
+                                        | Some("dps_hurt")
+                                );
+                            if let Some(d) = v["subject"].as_u64() {
+                                yields.entry(d as u32).or_default().push((fr, on));
+                            }
+                        }
+                        Some("pillar_stance") => {
+                            if let Some(t) = v["team"].as_u64() {
+                                stances.entry(t as u8).or_default().push((fr, !end));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                continue;
+            }
             if line.contains("\"ability_decision\"") && line.contains("\"lock_ending\"") {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                     let situation = &v["situation"];
@@ -867,6 +1018,199 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> R
                 i += 1;
             }
         }
+    }
+
+    // AS-389: a ranged DPS's lining time, split by what held it there.
+    for d in &people {
+        let class = class_of(d);
+        if !matches!(
+            class,
+            CharacterClass::Mage | CharacterClass::Hunter | CharacterClass::Warlock
+        ) {
+            continue;
+        }
+        let team = team_of(d);
+        let kiter = class != CharacterClass::Warlock;
+        let pref = class.preferred_range();
+        let healer = healer_of.get(&team).filter(|h| *h != d).copied();
+        let mut rb = RangedBlind {
+            class: format!("{class:?}"),
+            team,
+            own_pkg: pkg[(team - 1) as usize],
+            enemy_pkg: pkg[(2 - team) as usize],
+            ..Default::default()
+        };
+        // The kiter's seek-chase bucket, replicated (`tick_kite_occlusion`).
+        let mut accum = 0.0f32;
+        let mut bound: Option<Entity> = None;
+        let mut lining_run: Vec<usize> = Vec::new();
+        let flush = |run: &mut Vec<usize>, rb: &mut RangedBlind| {
+            if run.is_empty() {
+                return;
+            }
+            let secs = run.len() as f32 * FRAME;
+            let key = if secs < 1.5 {
+                "a<1.5s"
+            } else if secs < 3.5 {
+                "b1.5-3.5s"
+            } else if secs < 7.0 {
+                "c3.5-7s"
+            } else {
+                "d>=7s"
+            };
+            *rb.episode.entry(key.into()).or_default() += secs;
+            run.clear();
+        };
+        for i in gates..n {
+            let units = &frames[i].1;
+            let me = units[d];
+            if !me.alive {
+                flush(&mut lining_run, &mut rb);
+                continue;
+            }
+            let tgt = me
+                .target
+                .and_then(|t| units.get(&t).map(|u| (t, *u)))
+                .filter(|(_, u)| u.alive && u.team != me.team);
+            if kiter {
+                let living = tgt.map(|(t, _)| t);
+                let occluded = tgt
+                    .is_some_and(|(_, u)| u.pos.distance(me.pos) <= pref && !sees(me.pos, u.pos));
+                let base = if living.is_some() && living == bound {
+                    accum
+                } else {
+                    0.0
+                };
+                accum = if living.is_none() {
+                    0.0
+                } else if occluded {
+                    base + FRAME
+                } else {
+                    (base - CHASE_DECAY * FRAME).max(0.0)
+                };
+                bound = living;
+            }
+            if i < contact {
+                continue;
+            }
+            rb.secs += FRAME;
+            let f = facts[d][i];
+            let lining = f.blind_target == Some(true) && f.reach && !me.hard;
+            if !lining {
+                flush(&mut lining_run, &mut rb);
+                continue;
+            }
+            lining_run.push(i);
+            let (tg, tu) = tgt.expect("lining has a target");
+            let add =
+                |m: &mut BTreeMap<String, f32>, k: &str| *m.entry(k.into()).or_default() += FRAME;
+            rb.lining += FRAME;
+            let living = |t: u8| {
+                people
+                    .iter()
+                    .filter(|e| team_of(e) == t && units[*e].alive)
+                    .count()
+            };
+            let last = living(tu.team) == 1;
+            rb.last_enemy += if last { FRAME } else { 0.0 };
+            rb.outnumber += if living(team) > living(tu.team) {
+                FRAME
+            } else {
+                0.0
+            };
+            if tu.class.is_healer() && !tu.pet {
+                rb.tgt_healer += FRAME;
+            }
+            let pressed = units.values().any(|o| {
+                o.alive
+                    && o.team != me.team
+                    && (o.pet || o.class.is_melee())
+                    && !o.stealthed
+                    && o.pos.distance(me.pos) <= PRESSED
+            });
+            let alt = units.iter().any(|(e, o)| {
+                *e != tg
+                    && !o.pet
+                    && o.alive
+                    && !o.stealthed
+                    && o.team != me.team
+                    && o.pos.distance(me.pos) <= RANGED_REACH
+                    && sees(me.pos, o.pos)
+            });
+            let own_yield = on_at(yields.get(&d.index()), i);
+            let own_stance = on_at(stances.get(&team), i);
+            let enemy_stance = on_at(stances.get(&tu.team), i);
+            let hpos = healer.map(|h| units[&h]).filter(|h| h.alive).map(|h| h.pos);
+            // The nearest spot that sees the target.
+            let mut regain: Option<(f32, bool)> = None;
+            let mut near_keeps = false;
+            'rings: for r in REGAIN_RINGS {
+                for k in 0..16 {
+                    let a = k as f32 * std::f32::consts::TAU / 16.0;
+                    let p = me.pos + Vec2::new(a.cos(), a.sin()) * r;
+                    if skin(p) < 0.5 || !bounds.contains(Vec3::new(p.x, 0.0, p.y)) {
+                        continue;
+                    }
+                    if !sees(p, tu.pos) {
+                        continue;
+                    }
+                    let keeps = hpos.is_none_or(|h| sees(p, h));
+                    if regain.is_none() {
+                        regain = Some((r, keeps));
+                    }
+                    if r <= REGAIN_NEAR && keeps {
+                        near_keeps = true;
+                    }
+                    if regain.is_some() && (near_keeps || r > REGAIN_NEAR) {
+                        break 'rings;
+                    }
+                }
+                if regain.is_some() && r >= REGAIN_NEAR {
+                    break;
+                }
+            }
+            match regain {
+                Some((r, keeps)) => {
+                    add(&mut rb.regain, &format!("{r:02}"));
+                    if keeps {
+                        rb.regain_keeps_healer += FRAME;
+                    }
+                }
+                None => add(&mut rb.regain, "none"),
+            }
+            if near_keeps {
+                rb.regain_near_keeps_healer += FRAME;
+            }
+            rb.alt += if alt { FRAME } else { 0.0 };
+            rb.own_yield += if own_yield { FRAME } else { 0.0 };
+            rb.own_stance += if own_stance { FRAME } else { 0.0 };
+            rb.enemy_stance += if enemy_stance { FRAME } else { 0.0 };
+            rb.point_goal += if me.point_goal { FRAME } else { 0.0 };
+            let moved = i > gates && frames[i - 1].1[d].pos.distance(me.pos) > 0.02;
+            rb.moving += if moved { FRAME } else { 0.0 };
+            let dist = tu.pos.distance(me.pos);
+            let cause = if pressed {
+                "pressed"
+            } else if alt {
+                "switchable"
+            } else if own_yield && !near_keeps {
+                "yield_blocked"
+            } else if !kiter {
+                "pursuing"
+            } else if dist > pref {
+                "beyond_pref"
+            } else if accum < CHASE_TIMEOUT {
+                "filling"
+            } else {
+                "chasing"
+            };
+            add(
+                &mut rb.cause,
+                &format!("{}{cause}", if last { "last:" } else { "" }),
+            );
+        }
+        flush(&mut lining_run, &mut rb);
+        row.ranged.push(rb);
     }
 
     // Lulls: spans with no non-pet health lost on either side.

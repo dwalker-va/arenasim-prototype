@@ -1,0 +1,359 @@
+diff -ruN a/src/states/play_match/class_ai/as389.rs b/src/states/play_match/class_ai/as389.rs
+--- a/src/states/play_match/class_ai/as389.rs	1969-12-31 18:00:00
++++ b/src/states/play_match/class_ai/as389.rs	2026-10-24 13:50:31
+@@ -0,0 +1,155 @@
++//! AS-389 PROTOTYPES (scratch, never shipped). Gated by env vars so one
++//! binary runs every arm: `AS389_P` (comma list of prototype names) and
++//! `AS389_TEAMS` (comma list of team numbers, default "1,2").
++use std::sync::OnceLock;
++
++use bevy::prelude::*;
++
++use crate::states::play_match::arena_bounds::ArenaBounds;
++use crate::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
++
++fn cfg() -> &'static (Vec<String>, Vec<u8>) {
++    static C: OnceLock<(Vec<String>, Vec<u8>)> = OnceLock::new();
++    C.get_or_init(|| {
++        let p = std::env::var("AS389_P").unwrap_or_default();
++        let t = std::env::var("AS389_TEAMS").unwrap_or_else(|_| "1,2".into());
++        (
++            p.split(',').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect(),
++            t.split(',').filter_map(|s| s.trim().parse().ok()).collect(),
++        )
++    })
++}
++
++pub fn on(name: &str, team: u8) -> bool {
++    let (p, t) = cfg();
++    p.iter().any(|x| x == name) && t.contains(&team)
++}
++
++pub fn param(name: &str, default: f32) -> f32 {
++    std::env::var(name).ok().and_then(|s| s.parse().ok()).unwrap_or(default)
++}
++
++fn eye(p: Vec3) -> Vec3 {
++    Vec3::new(p.x, EYE_HEIGHT, p.z)
++}
++
++pub fn sees(obstacles: &[ObstacleVolume], a: Vec3, b: Vec3) -> bool {
++    has_line_of_sight(obstacles, eye(a), eye(b))
++}
++
++/// PINCER: in the lone-healer endgame, our healer takes the far side of the
++/// hider's pillar from our DPS, so the hider cannot hide from both.
++pub fn pincer(
++    commands: &mut Commands,
++    entity: Entity,
++    my_pos: Vec3,
++    free_or_pressured: bool,
++    ctx: &super::CombatContext,
++    now: f32,
++) -> Option<bool> {
++    use crate::states::play_match::components::{MovementDirective, MovementGoal};
++    let me = ctx.combatants.get(&entity)?;
++    if !on("pincer", me.team) || ctx.obstacles.is_empty() || !free_or_pressured {
++        return None;
++    }
++    let enemies: Vec<_> = ctx
++        .combatants
++        .values()
++        .filter(|i| i.team != me.team && i.is_alive && !i.is_pet)
++        .collect();
++    if enemies.len() != 1 || !enemies[0].class.is_healer() {
++        return None;
++    }
++    let hider = enemies[0];
++    let dps: Vec<Vec3> = ctx
++        .combatants
++        .values()
++        .filter(|i| i.team == me.team && i.is_alive && !i.is_pet && i.entity != entity)
++        .map(|i| i.position)
++        .collect();
++    if dps.is_empty() {
++        return None;
++    }
++    // A teammate below half: heal first, the posture decides.
++    if ctx.combatants.values().any(|i| {
++        i.team == me.team && i.is_alive && !i.is_pet && i.current_health < 0.5 * i.max_health
++    }) {
++        return None;
++    }
++    let t = Vec2::new(hider.position.x, hider.position.z);
++    let (c, rad) = ctx
++        .obstacles
++        .iter()
++        .map(|v| v.footprint_disc())
++        .min_by(|a, b| (a.0.distance(t) - a.1).total_cmp(&(b.0.distance(t) - b.1)))?;
++    if c.distance(t) - rad > 8.0 {
++        return None;
++    }
++    let mean = dps.iter().fold(Vec2::ZERO, |a, p| a + Vec2::new(p.x, p.z)) / dps.len() as f32;
++    let u = (mean - c).normalize_or_zero();
++    if u == Vec2::ZERO {
++        return None;
++    }
++    let r = param("AS389_PINCER_R", rad + 12.0);
++    let p = c - u * r;
++    let me_xz = Vec2::new(my_pos.x, my_pos.z);
++    if sees(ctx.obstacles, my_pos, hider.position) && me_xz.distance(t) <= 28.0 {
++        commands.entity(entity).remove::<MovementDirective>();
++        return Some(false);
++    }
++    commands.entity(entity).try_insert(MovementDirective {
++        goal: MovementGoal::Point(Vec3::new(p.x, my_pos.y, p.y)),
++        expires: now + 1.0,
++        committed_until: now + 0.6,
++    });
++    Some(false)
++}
++
++/// The nearest standable spot (rings of 2..16yd, 16 headings) that sees
++/// `target` from within `[min_range, max_range]`, and `keep` too when given.
++pub fn vantage_point(
++    obstacles: &[ObstacleVolume],
++    bounds: &ArenaBounds,
++    me: Vec3,
++    target: Vec3,
++    min_range: f32,
++    max_range: f32,
++    keep: Option<Vec3>,
++) -> Option<Vec3> {
++    for r in [2.0f32, 4.0, 6.0, 8.0, 10.0, 12.0, 16.0] {
++        let mut best: Option<(f32, Vec3)> = None;
++        for k in 0..16 {
++            let a = k as f32 * std::f32::consts::TAU / 16.0;
++            let p = me + Vec3::new(a.cos(), 0.0, a.sin()) * r;
++            if !bounds.contains(p) {
++                continue;
++            }
++            if obstacles.iter().any(|v| {
++                let (c, rad) = v.footprint_disc();
++                Vec2::new(p.x, p.z).distance(c) < rad + 0.8
++            }) {
++                continue;
++            }
++            let d = p.distance(target);
++            if d > max_range || d < min_range {
++                continue;
++            }
++            if !sees(obstacles, p, target) {
++                continue;
++            }
++            if keep.is_some_and(|h| !sees(obstacles, p, h)) {
++                continue;
++            }
++            // Among this ring's hits, the one nearest the target's range
++            // middle keeps the DPS from walking into it.
++            let score = (d - (min_range + max_range) * 0.5).abs();
++            if best.is_none_or(|(s, _)| score < s) {
++                best = Some((score, p));
++            }
++        }
++        if let Some((_, p)) = best {
++            return Some(p);
++        }
++    }
++    None
++}
+diff -ruN a/src/states/play_match/class_ai/dps_postures.rs b/src/states/play_match/class_ai/dps_postures.rs
+--- a/src/states/play_match/class_ai/dps_postures.rs	2026-10-24 13:17:28
++++ b/src/states/play_match/class_ai/dps_postures.rs	2026-10-24 13:42:51
+@@ -689,8 +689,13 @@
+         // down, so the kiter casts from progressively closer as sight returns.
+         // The bucket itself is the hysteresis; no extra latch. This branch does
+         // NOT mutate the accumulator — `tick_kite_occlusion` owns it.
+-        let armed =
+-            config.seek_chase_timeout > 0.0 && state.occlusion_accum >= config.seek_chase_timeout;
++        let team389 = ctx.combatants.get(&entity).map_or(0, |i| i.team);
++        let timeout = if super::as389::on("chase1", team389) {
++            super::as389::param("AS389_TIMEOUT", 1.0)
++        } else {
++            config.seek_chase_timeout
++        };
++        let armed = timeout > 0.0 && state.occlusion_accum >= timeout;
+         let chase = armed && seeking;
+ 
+         if !seeking {
+@@ -715,6 +720,43 @@
+             return;
+         }
+ 
++        // AS-389 prototype: walk to the nearest spot that sees the target.
++        if super::as389::on("vantage", team389) || super::as389::on("vfree", team389) {
++            let target_pos = kill_target
++                .and_then(|t| ctx.combatants.get(&t))
++                .map(|i| i.position);
++            let keep = ctx
++                .sight_yield_healer()
++                .and_then(|h| ctx.combatants.get(&h))
++                .filter(|i| i.is_alive)
++                .map(|i| i.position)
++                .filter(|_| !super::as389::on("vfree", team389));
++            let my_class = ctx.combatants.get(&entity).map(|i| i.class);
++            if let (Some(tp), Some(cls)) = (target_pos, my_class) {
++                let v = super::as389::vantage_point(
++                    ctx.obstacles,
++                    &ctx.bounds,
++                    my_pos,
++                    tp,
++                    config.range_band_min,
++                    cls.preferred_range(),
++                    keep,
++                );
++                if let Some(v) = v {
++                    commands.entity(entity).try_insert(MovementDirective {
++                        goal: MovementGoal::Point(v),
++                        expires: now + config.directive_ttl,
++                        committed_until: now + config.commit_window,
++                    });
++                    state.last_direction = None;
++                    if needs_insert {
++                        commands.entity(entity).try_insert(*state);
++                    }
++                    return;
++                }
++            }
++        }
++
+         // Direct-chase branch: issue a Point directive toward the target's live
+         // position (re-targeted each recommit as the target moves). The commit
+         // window handles anti-zigzag; `directive_ttl` keeps the walk alive
+@@ -755,7 +797,7 @@
+         let committed_direction = directive
+             .filter(|d| now < d.committed_until)
+             .and(state.last_direction);
+-        let inputs = build_kiter_inputs(
++        let mut inputs = build_kiter_inputs(
+             ctx,
+             entity,
+             my_pos,
+@@ -765,6 +807,9 @@
+             committed_direction,
+             None,
+         );
++        if super::as389::on("unmask", team389) {
++            inputs.anchor = None;
++        }
+         let chosen = score_directions(&compass_directions_16(), &inputs, &config.weights);
+         if chosen != Vec2::ZERO {
+             commands.entity(entity).try_insert(MovementDirective {
+diff -ruN a/src/states/play_match/class_ai/healer_postures.rs b/src/states/play_match/class_ai/healer_postures.rs
+--- a/src/states/play_match/class_ai/healer_postures.rs	2026-10-24 13:17:28
++++ b/src/states/play_match/class_ai/healer_postures.rs	2026-10-24 13:50:17
+@@ -707,6 +707,9 @@
+     now: f32,
+     decision_trace: &mut DecisionTrace,
+ ) -> Option<bool> {
++    if let Some(r) = super::as389::pincer(commands, entity, my_pos, matches!(next, Posture::Free | Posture::Pressured), ctx, now) {
++        return Some(r);
++    }
+     let live = !ctx.obstacles.is_empty()
+         && matches!(next, Posture::Free | Posture::Pressured)
+         && ctx.play(Role::Healer) == Play::TakeCover;
+diff -ruN a/src/states/play_match/class_ai/mod.rs b/src/states/play_match/class_ai/mod.rs
+--- a/src/states/play_match/class_ai/mod.rs	2026-10-24 13:17:28
++++ b/src/states/play_match/class_ai/mod.rs	2026-10-24 13:36:36
+@@ -14,6 +14,7 @@
+ //! Shared helpers like `CombatContext`, `CombatantInfo`, and healer utilities
+ //! live in this module and are used by all class AI files.
+ 
++pub mod as389;
+ pub mod burst;
+ pub mod cast_guard;
+ pub mod caster_healer_posture;
+diff -ruN a/src/states/play_match/combat_ai.rs b/src/states/play_match/combat_ai.rs
+--- a/src/states/play_match/combat_ai.rs	2026-10-24 13:17:28
++++ b/src/states/play_match/combat_ai.rs	2026-10-24 13:36:48
+@@ -61,6 +61,8 @@
+     mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&ActiveAuras>)>,
+     pet_query: Query<&Pet>,
+     mut decision_trace: ResMut<crate::states::play_match::decision_trace::DecisionTrace>,
++    as389_geo: Option<Res<super::map_config::ActiveMapGeometry>>,
++    mut as389_blind: Local<std::collections::HashMap<Entity, f32>>,
+ ) {
+     // Don't acquire targets until gates open
+     if !countdown.gates_opened {
+@@ -408,6 +410,49 @@
+             };
+             if let Some((next, ..)) = melee.or_else(nearest) {
+                 combatant.target = Some(*next);
++            }
++        }
++
++        // ===== AS-389 prototype: switch off a hidden target =====
++        if class_ai::as389::on("switch", combatant.team)
++            && !combatant.class.is_melee()
++            && !combatant.class.is_healer()
++        {
++            if let (Some(geo), Some(cur)) = (as389_geo.as_deref(), combatant.target) {
++                let my_pos = transform.translation;
++                let now = decision_trace.current_sim_time;
++                let cur_pos = enemy_combatants
++                    .iter()
++                    .find(|(e, ..)| *e == cur)
++                    .map(|(_, p, ..)| *p);
++                let blind = cur_pos.is_some_and(|p| {
++                    !class_ai::as389::sees(&geo.volumes, my_pos, p)
++                });
++                if !blind {
++                    as389_blind.remove(&entity);
++                } else {
++                    let since = *as389_blind.entry(entity).or_insert(now);
++                    if now - since >= class_ai::as389::param("AS389_SWITCH_DELAY", 0.5) {
++                        let reach = class_ai::as389::param("AS389_SWITCH_REACH", 36.0);
++                        let alt = enemy_combatants
++                            .iter()
++                            .filter(|(e, p, stealthed, enemy_ss, _, _, immune, is_pet)| {
++                                *e != cur
++                                    && !is_pet
++                                    && !immune
++                                    && can_see(*stealthed, *enemy_ss)
++                                    && p.distance(my_pos) <= reach
++                                    && class_ai::as389::sees(&geo.volumes, my_pos, *p)
++                            })
++                            .min_by(|(_, a, ..), (_, b, ..)| {
++                                my_pos.distance(*a).total_cmp(&my_pos.distance(*b))
++                            });
++                        if let Some((next, ..)) = alt {
++                            combatant.target = Some(*next);
++                            as389_blind.remove(&entity);
++                        }
++                    }
++                }
+             }
+         }
+ 
+diff -ruN a/src/states/play_match/combat_core/movement.rs b/src/states/play_match/combat_core/movement.rs
+--- a/src/states/play_match/combat_core/movement.rs	2026-10-24 13:17:28
++++ b/src/states/play_match/combat_core/movement.rs	2026-10-24 13:42:51
+@@ -802,7 +802,27 @@
+             // surface; direct pursuit otherwise (and on obstacle-free maps).
+             // A DPS that yields its healer's sight (AS-386) takes the side
+             // that keeps it, and holds that side ([`sight_kept_heading`]).
+-            let goal = Vec2::new(target_pos.x, target_pos.z);
++            let mut goal = Vec2::new(target_pos.x, target_pos.z);
++            if combatant.class == CharacterClass::Warlock
++                && distance <= stop_distance
++                && (crate::states::play_match::class_ai::as389::on("vantage", combatant.team)
++                    || crate::states::play_match::class_ai::as389::on("vfree", combatant.team))
++            {
++                let keep = sight_keep(situations.as_deref(), &positions, entity, combatant.team)
++                    .map(|k| k.healer)
++                    .filter(|_| !crate::states::play_match::class_ai::as389::on("vfree", combatant.team));
++                if let Some(v) = crate::states::play_match::class_ai::as389::vantage_point(
++                    &map_geometry.volumes,
++                    &map_geometry.bounds,
++                    my_pos,
++                    target_pos,
++                    0.0,
++                    stop_distance,
++                    keep,
++                ) {
++                    goal = Vec2::new(v.x, v.z);
++                }
++            }
+             let sight_kept = sight_keep(situations.as_deref(), &positions, entity, combatant.team)
+                 .and_then(|keep| {
+                     let commit = movement_config
