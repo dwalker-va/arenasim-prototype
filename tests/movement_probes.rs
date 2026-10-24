@@ -7571,8 +7571,8 @@ mod nagrand_teamplan {
     /// The probe pinned seeds 7 / 2 / 12 until AS-383 held back the
     /// `TeamPlan` Priest's scream dip, which had been ending in PRESSURED:
     /// seed 2 then had no PRESSURED frame at all. Migrated, not re-pinned
-    /// (CLAUDE.md, *Test an AI decision*): it now reads the PRESSURED frames
-    /// over seeds 1-24, wherever they fall. Two ceilings, with `C_SIGHT`'s
+    /// (CLAUDE.md, *Test an AI decision*): it reads the PRESSURED frames over
+    /// a seed bank, wherever they fall, against two ceilings, with `C_SIGHT`'s
     /// constraint removed as the mutant:
     ///
     /// ```text
@@ -7580,18 +7580,27 @@ mod nagrand_teamplan {
     /// AS-383           19.2% of 4815        27 4 1 3 25 27%
     /// no C_SIGHT       44.7% of 5019        74 80 27 6 35 18%
     /// (before AS-383: AS-292 pooled 21.5%, main 13.6%, no C_SIGHT 78.6%)
-    /// AS-385 package   10.9% of 18635       (maps.ron's geometry, below)
     /// ```
     ///
-    /// The rows above AS-385 read sight through a hand-copied pillar list
-    /// that had lost the 22.5-degree turn; the package's seed 7 put the
-    /// Priest's goal on a line grazing a pillar top that the copy read as
-    /// blocked (80%) and the match read as clear (2%).
+    /// # 48 seeds, on maps.ron's geometry (AS-385)
     ///
-    /// The pooled ceiling is 30%, between the two. A seed with enough frames
-    /// to read on its own (300, five seconds) is held to 50%, the old per-seed
-    /// ceiling, which catches the mutant's worst seeds. The bank must hold
-    /// 3000 such frames, or the probe has gone vacuous.
+    /// The rows above read sight through a hand-copied pillar list that had
+    /// lost the pillars' 22.5-degree turn, which put a vertex where the map
+    /// has a face: a goal on a line grazing a pillar top read as blocked
+    /// (seed 7: 80%) that the match saw clear (2%). The probe now loads the
+    /// map's own volumes, and its bank is seeds 1-48:
+    ///
+    /// ```text
+    ///                        pooled           worst seed (>= 300 frames)
+    /// main @ 43a8ee54        10.2% of 10617   15%
+    /// AS-385 (yield+stance)  10.9% of 34172   28%
+    /// AS-385, no C_SIGHT     49.8% of 32800   78%; 14 of 34 seeds over 50%
+    /// ```
+    ///
+    /// The pooled ceiling, 30%, sits about 19 points from both sides. A seed
+    /// with enough frames to read on its own (300, five seconds) is held to
+    /// 50%, which the mutant's worst seeds cross. The bank must hold 3000 such
+    /// frames, or the probe has gone vacuous.
     #[test]
     fn teamplan_healer_keeps_its_heal_line_on_nagrand() {
         let (mut frames, mut blind) = (0usize, 0.0f32);
@@ -7631,7 +7640,7 @@ mod nagrand_teamplan {
     /// The heal-line probe's seed bank, its two ceilings (one seed's, the
     /// bank's), and its two frame floors (see
     /// [`teamplan_healer_keeps_its_heal_line_on_nagrand`]).
-    const HEAL_LINE_BANK: std::ops::RangeInclusive<u64> = 1..=24;
+    const HEAL_LINE_BANK: std::ops::RangeInclusive<u64> = 1..=48;
     const HEAL_LINE_CEILING: f32 = 0.50;
     const HEAL_LINE_POOLED_CEILING: f32 = 0.30;
     const HEAL_LINE_SEED_FRAMES: usize = 300;
