@@ -1489,6 +1489,7 @@ pub fn decide_abilities(
         &snapshot,
         &clock,
         &situation_cfg,
+        &abilities,
         &mut decision_trace,
     );
 
@@ -1531,6 +1532,7 @@ pub fn decide_abilities(
                 &snapshot,
                 &clock,
                 &situation_cfg,
+                &abilities,
                 &mut decision_trace,
             );
         }

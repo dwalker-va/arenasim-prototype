@@ -147,8 +147,10 @@ const EXPECTED_SITUATION_NAMES: &[&str] = &[
     "ally_in_danger",
     "kill_window",
     "last_stand",
+    "pillar_stance",
     "tempo",
     "phase",
+    "sight_yield",
 ];
 const EXPECTED_SITUATION_CHANGES: &[&str] = &["onset", "end", "extended", "shift"];
 

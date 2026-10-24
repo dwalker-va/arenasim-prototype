@@ -695,6 +695,7 @@ with the context-steering mask refactor.
 - `los_seek` (0.0 for healers; Mage 2.0 / Hunter 1.0) — reward for candidate steps that have/restore line of sight to the kill target; drives occluded-in-range casters to orbit to a sighted angle instead of idling
 - `cover_pull` (Priest/Shaman 1.5, Paladin 1.0, 0.0 for DPS) — reward for candidate steps occluded from threats; drives pressured-healer pillar denial. Kept below `threat_repulsion` so denial shapes retreat direction without overriding escape; zeroed when a healable teammate is below `urgency_hp_threshold` or the team is pressing (tempo, `press_advantage_margin` / `press_release_margin`)
 - `trap_setup` (Hunter 3.0, 0.0 for everyone else) — while Freezing Trap is ready and an enemy healer would be caught by it (`hunter_dip::trap_setup_healer`), pull toward that healer once a KITE step would leave it beyond throw range (the trap's `range` less its trigger radius); zero inside that range, absent while the trap is on cooldown. Kept below `flee` so the kite still escapes the melee, bent toward the healer. Disengage bends its leap by the same two weights (`hunter_dip::trap_setup_disengage`) and names the healer as the Disengage's `target_id` in the trace when it did; KITE decisions carry the term as a `trap_setup` scorer term
+- `stance_pull` (Mage/Hunter 1.0, 0.0 for everyone else; `TeamPlan`) — while the kiter runs the Pillar play, a `formation_pull`-shaped pull toward the ring point at its team's pillar stance side (`pillar_stance::side_point`); absent otherwise. Below `range_band`/`los_seek` and far below `flee`, so it bends a kite, never overrides it; traced as a `stance_pull` scorer term
 
 **PRESSURED onset (`Legacy`)** — no RON knob; reuses `danger_edge_margin`. A
 caster targeting a healer pressures it only while CLOSING: between its own
@@ -732,22 +733,24 @@ on Nagrand (`docs/design/balance/2026-10-13-as249-healer-positioning.md`).
 **Healer pillar modes: hug or open (`TeamPlan`, AS-373)** —
 `class_ai::pillar_mode`; design and measurements in
 `docs/design/2026-10-19-healer-pillar-modes.md`. Constants in the module, no
-RON knob. A healer HUGS a pillar when all three keys hold: its anchor (the most
-injured living teammate) fights within `HUG_ENTER` (12yd) of the pillar's skin;
-an enemy crowd control a pillar defends against is ready within
-`CC_MODE_HORIZON` (5s) — one that needs sight, reaches past `MELEE_CC_REACH`
-(8yd, so no melee stun) and is not a pet's, and that the healer is not immune
-to (`pillar_threats`, AS-362's `CcField`); and the pillar's ring has ground in
-heal range that sees the anchor and that no such crowd control covers
-(`defended_arc`), in a run wide enough to stand the sight margin inside both
-edges (`holds_margin`). Otherwise it plays the OPEN. Anti-strobe: leave beyond
-`HUG_LEAVE` (20yd), the crowd-control key releases after `HUG_RELEASE` (3s),
-each mode held `MODE_DWELL` (2s), the hugged pillar changes only for one the
-anchor stands `PILLAR_SWITCH` (8yd) nearer; a defended arc too thin to hold
-the margin ends a hug at once. Every change is a `PillarModeEnter` / `PillarModeLeave` movement decision
-whose scorer terms name the `pillar` and the three `key_*` values.
+RON knob. The hug is the healer's half of its team's pillar stance (AS-387,
+`Pillar` under *Plays* below): a healer hugs ONLY while its team holds a
+`pillar_stance` and it runs the Pillar play, on the stance's pillar, and only
+while that pillar's ring has ground that sees every living teammate in heal
+range and that no crowd control a pillar defends against covers (`team_arc`
+over `team_threats`: one that needs sight, reaches past `MELEE_CC_REACH`, 8yd,
+and is not a pet's — AS-362's `CcField`), in a run wide enough to stand the
+sight margin inside both edges (`holds_margin`). It never hugs alone (design
+D3). Otherwise it plays the OPEN. Anti-strobe: the stance owns the Schmitt
+pair (`HUG_ENTER` 12yd in, `HUG_LEAVE` 20yd out), the crowd-control release
+(`HUG_RELEASE`, 3s), the dwell (`MODE_DWELL`, 2s) and the pillar switch
+(`PILLAR_SWITCH`, 8yd); the healer's mode is held `MODE_DWELL` and its hugged
+pillar changes only when the stance's does; a team arc too thin to hold the
+margin ends a hug at once. Every change is a `PillarModeEnter` /
+`PillarModeLeave` movement decision whose scorer terms name the `pillar` and
+the two keys (`key_stance`, `key_arc`).
 - **Hug** is a ring ANGLE round the pillar at `ρ = disc + MOVER_RADIUS +
-  COVER_STANDOFF` (8yd on Nagrand). The target angle is chosen in the defended
+  COVER_STANDOFF` (8yd on Nagrand). The target angle is chosen in the team
   arc's core — the arc less `HUG_SIGHT_MARGIN` (3yd) plus the arc the anchor's
   own motion round the pillar sweeps in `HUG_LEAD_SECS` (1.5s), off the edge
   that motion sweeps toward the healer — then out of the positioning
@@ -1141,6 +1144,32 @@ purpose. Both AI profiles; a no-op on obstacle-free maps (BasicArena stays
 byte-identical). The Warlock is the class it moves — the Mage and Hunter
 answer occlusion with their ENGAGE machine first. Staged guard:
 `tests/pursuit_sight_walk.rs`.
+
+**Team sight yield (`TeamPlan`)** — no RON knob; AS-386, design
+`docs/design/2026-10-24-team-sight-cohesion.md` §3.1/§3.4. The `sight_yield`
+situation names, per DPS–healer pair, whether the DPS must not break its
+healer's sight (`situation::SightPair`, `YieldRule`). First rule that holds: a
+unit that cannot move leads (a healer hard-CC'd, rooted or casting: its DPS
+yields; a DPS hard-CC'd or rooted: its healer follows); a pressured healer
+leads; the team's pillar stance leads (`TeamSituation::pillar_stance`, read in
+the same classification: `update_situations` classifies the stance, then the
+yield); a hurt DPS (below `SIGHT_YIELD_HP` 80%, held until 90%) yields;
+otherwise the DPS leads. A yield holds `SIGHT_YIELD_DWELL` (2s) unless rule 1
+ends it, and every onset / end / rule shift is a `situation_change` named
+`sight_yield` (`subject` the DPS, `healer`, `rule`). A yielding DPS: the
+kiter scorer's ally-anchor mask points at its healer for SIGHT only (a MASK on
+the kite objective, never a replacement — `flee`, `range_band`, hysteresis and
+the wand fallback are untouched; a kiter already blind gets `close_when_out`);
+its pursuit takes the tangent side round a pillar whose waypoint its healer
+sees, and HOLDS it (`PursuitSide`, `combat_core::movement::sight_kept_heading`
+— a sight preference is not self-reinforcing). `team{1,2}_sight_yield: false`
+is the measurement switch, and `team{1,2}_yield_healer_cast: false` leaves the
+healer's cast out of rule 1 (measured to change almost nothing); `Legacy`
+classifies no pair and is byte-identical. `validate()` keeps
+`urgency_hp_threshold` at or below `SIGHT_YIELD_HP`, so a dying DPS is a hurt
+one. Scenes `tests/sight_yield_scenes.rs`, staged `tests/sight_yield_staged.rs`;
+measured with the stance as one change in
+`docs/design/balance/2026-10-24-as385-package-measurement.md`.
 
 **DPS kiter blocks** (`mage:` / `hunter:` — the shared ENGAGE/KITE machine, `DpsMovementConfig`):
 - `weights:` (above) plus `range_band_min`/`max` (orbit ring; min = SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE 8), `kite_hold` (anti-strobe hysteresis), `directive_ttl` (must cover the longest cast), `commit_window`.
@@ -1574,7 +1603,7 @@ deleted at a milestone sweep. Each play is a STAGE (`class_ai::plays::PlayStage`
 its id, `calls` (the team situation asks for it, for this unit and role),
 `admits` (this unit has a tool for it), its own named exceptions table with
 the measurement behind each entry, and its config key. ONE table orders them,
-`plays::PLAY_ORDER`: **Peel, TakeCover, Chain, Burst**, then the class's
+`plays::PLAY_ORDER`: **Peel, TakeCover, Pillar, Chain, Burst**, then the class's
 default chain. `plays::walk` is the only composition rule, and both
 `TeamSituation::play_for` and `CombatContext::play` take it: a unit runs the
 first stage its team runs, the situation calls and the unit admits (its
@@ -1625,6 +1654,25 @@ contexts where it is enabled.
 
 `TakeCover`: a last-stand healer hides (`class_ai::take_cover`; the movement
 is *Last stand: take cover* above).
+
+`Pillar` (AS-387): the team takes a pillar TOGETHER (`pillar_stance`,
+`class_ai::pillar_stance`; design
+`docs/design/2026-10-24-team-sight-cohesion.md` §3.3). The stance enters for
+`AvoidCc` when a crowd control a pillar defends against (`pillar_mode::team_threats`:
+sight-needing, from beyond 8yd, not a pet's) is ready for a teammate, the
+fight (the healer's teammates' centroid or its anchor) stands within
+`HUG_ENTER` of a pillar's skin, the ring has a TEAM arc (`pillar_mode::team_arc`:
+ground seeing every teammate in heal range, out of those discs, holding the
+margin) and no kill is on; Schmitt pair, release and dwell as AS-373's, the arc
+and the kill end it at once. Under it the healer runs AS-373's hug on the team
+arc — and ONLY under it (design D3: no healer pillars alone; the AS-373 mode
+key's preference keys are the stance) — and a kiter (Mage, Hunter) gains the
+`stance_pull` scorer term toward the stance's side. A melee is not called (its
+half is AS-386's sight yield, rule 3, which reads the situation), so it keeps
+Chain and Burst; a unit that runs Pillar does not run Chain while the stance
+holds. `Stall` (D4) is stubbed: `STALL_COMPS` ships empty for AS-390. Traced
+as `situation_change` `pillar_stance` (subject: the healer; `pillar`,
+`reason`) and in every decision's `situation.pillar_stance`.
 
 `Chain`: while the team's hold on an enemy (`lock_ending`: the soonest-ending
 stun, fear, polymorph, incapacitate or cyclone on a visible enemy) ends within

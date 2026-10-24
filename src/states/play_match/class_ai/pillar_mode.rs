@@ -1,44 +1,38 @@
-//! Healer pillar modes: hug the pillar, or play the open (AS-373).
+//! Healer pillar modes: hug the pillar, or play the open (AS-373), as the
+//! healer's half of the team's pillar stance (AS-385, `class_ai::pillar_stance`).
 //!
 //! A healer stands in one of two relations to a pillar. It **hugs** it —
-//! stays loosely strapped to the pillar and follows its teammate round it, so
+//! stays loosely strapped to the pillar and follows its teammates round it, so
 //! a change of side is a short walk round the pillar's skin — or it plays the
 //! **open**: away from the pillar, following the teammate in sight, nearer the
 //! enemy and exposed to its crowd control. The design and the measurements
-//! behind every number here are `docs/design/2026-10-19-healer-pillar-modes.md`.
+//! behind every number here are `docs/design/2026-10-19-healer-pillar-modes.md`
+//! and, for the stance, `docs/design/2026-10-24-team-sight-cohesion.md`.
 //!
-//! **The mode key** ([`update`]). Hug only when all three hold:
+//! **The mode key** ([`update`]). A healer hugs only while its TEAM holds a
+//! pillar stance and it runs the Pillar play (`TeamSituation::pillar_stance`,
+//! `CombatContext::pillar_stance`; design D3: no healer pillars alone), on the
+//! stance's pillar, and only while that pillar's ring has ground that sees
+//! every living teammate within heal range and that no crowd control a pillar
+//! defends against covers ([`team_arc`] over [`team_threats`]), in a run wide
+//! enough to stand the sight margin inside both its edges ([`holds_margin`]):
+//! a hug is worth its exposure only where the pillar hides the healer from
+//! what the hug is for, and a sliver of sight is a grazing line, not a hug.
+//! The stance's own keys — the threat, the fight at the pillar, the arc —
+//! are classified once for the team (`pillar_stance::classify`), from the
+//! same two functions, so the stance and its healer agree on the arc.
 //!
-//! 1. the anchor (the most injured living teammate) fights within
-//!    [`HUG_ENTER`] of a pillar's skin;
-//! 2. an enemy crowd control that needs sight — a Fear, a Polymorph, a
-//!    Cyclone, a Hammer of Justice, a Death Coil — is ready for the healer
-//!    within [`CC_MODE_HORIZON`], cast from beyond [`MELEE_CC_REACH`] by a
-//!    unit that is not a pet, and the healer is not immune to it
-//!    ([`pillar_threats`]; `cc_reach::CcField` read with a stance's horizon
-//!    rather than a step's): a pillar is a defence against a cast that needs
-//!    sight, and against nothing else — not a Rogue's stun, landed by walking
-//!    round it;
-//! 3. the pillar's ring has ground that sees the anchor within heal range and
-//!    that no such crowd control covers ([`defended_arc`]), in a run wide
-//!    enough to stand the sight margin inside both its edges
-//!    ([`holds_margin`]): a hug is worth its exposure only where the pillar
-//!    hides the healer from what the hug is for, and a sliver of sight is a
-//!    grazing line, not a hug.
-//!
-//! Otherwise the healer plays the open. The key does not strobe: the pillar
-//! distance is a Schmitt pair ([`HUG_ENTER`] in, [`HUG_LEAVE`] out), the crowd
-//! control key releases only after [`HUG_RELEASE`] false, each mode is held
-//! at least [`MODE_DWELL`], and the hugged pillar changes only for one the
-//! anchor stands [`PILLAR_SWITCH`] nearer. An arc that no longer holds the
-//! margin ends a hug at once: it is feasibility, not preference. Every change is traced as a
+//! Otherwise the healer plays the open. The key does not strobe: the stance
+//! carries its own Schmitt pair, release and dwell, each mode is held at least
+//! [`MODE_DWELL`], and the hugged pillar changes only when the stance's does.
+//! An arc that no longer holds the margin ends a hug at once: it is
+//! feasibility, not preference. Every change is traced as a
 //! `PillarModeEnter` / `PillarModeLeave` movement decision.
 //!
 //! **What hug does.** The goal is an ANGLE on a ring round the pillar, at
 //! `ρ = disc radius + MOVER_RADIUS + COVER_STANDOFF` (8yd on Nagrand, 4.5 on
-//! TwinPillars), not a free point. Within the ring's arc that sees the anchor
-//! — one connected arc for one teammate — the target angle is chosen in the
-//! order ([`target_angle`]):
+//! TwinPillars), not a free point. Within the ring's team arc the target
+//! angle is chosen in the order ([`target_angle`]):
 //!
 //! 1. sight of the anchor with a margin: at least [`HUG_SIGHT_MARGIN`] yards
 //!    of arc, and the arc the anchor's own motion round the pillar sweeps in
@@ -56,13 +50,6 @@
 //! replaces the formation point; in PRESSURED the `OccupyCover` solve keeps
 //! its own candidates and gains the arc's ring points, a soft leash to the
 //! ring and the margin (`team_solve::HugRing`).
-//!
-//! **The seam for a team stance (AS-385).** The mode key is [`update`]'s
-//! [`Keys`]: two preference keys (`at_pillar`, `cc_ready`) and one
-//! feasibility key (`arc`). A team-level pillar stance that picks the pillar
-//! and whether to hold it replaces the preference keys and the candidate
-//! pillar there; the feasibility key, the dwell, the trace and everything
-//! below [`update`] (the ring goal, the PRESSURED terms) stay as they are.
 //!
 //! **Who.** `TeamPlan` only (`CombatContext::pillar_modes`); never a healer
 //! [`HUG_EXCEPTIONS`] names — the Paladin, whose FREE is melee pursuit and
@@ -90,19 +77,20 @@ use super::formation::TEAMMATE_YARDS;
 use super::healer_postures::start_movement_event_with_target;
 use super::CombatContext;
 
-/// The anchor within this many yards of a pillar's skin is fighting at it:
-/// the hug's entry edge.
+/// The fight — the healer's teammates' centroid, or its anchor — within this
+/// many yards of a pillar's skin is at it: the pillar stance's entry edge.
 pub const HUG_ENTER: f32 = 12.0;
-/// A hug lets go once the anchor stands farther than this from the hugged
+/// A pillar stance lets go once the fight stands farther than this from its
 /// pillar's skin: the Schmitt pair's exit edge.
 pub const HUG_LEAVE: f32 = 20.0;
-/// Seconds the crowd-control key must be false before it ends a hug.
+/// Seconds the stance's crowd-control key must be false before it ends the
+/// stance.
 pub const HUG_RELEASE: f32 = 3.0;
 /// The least time, in seconds, a mode (or a hugged pillar) is held before the
 /// preference keys may change it. As `COVER_HOLD_SECS`.
 pub const MODE_DWELL: f32 = 2.0;
-/// Yards nearer another pillar's skin the anchor must stand before a hug moves
-/// to that pillar.
+/// Yards nearer another pillar's skin the fight must stand before a stance
+/// moves to that pillar.
 pub const PILLAR_SWITCH: f32 = 8.0;
 /// How far outside the ring, in yards, a hugging healer still counts as
 /// strapped to it: the PRESSURED solve's soft leash starts here.
@@ -110,7 +98,7 @@ pub const HUG_SLACK: f32 = 3.0;
 /// Yards of ring arc the target angle keeps inside the edge of the sighted
 /// arc that the anchor's motion sweeps toward it.
 pub const HUG_SIGHT_MARGIN: f32 = 3.0;
-/// The readiness horizon, in seconds, of the crowd control the mode key reads:
+/// The readiness horizon, in seconds, of the crowd control the stance reads:
 /// wider than the positioning horizon (`cc_ready_horizon`), because the mode
 /// is a stance, not a step.
 pub const CC_MODE_HORIZON: f32 = 5.0;
@@ -379,7 +367,8 @@ pub fn core_of(
 #[derive(Clone, Debug, PartialEq)]
 pub struct HugGoal {
     pub ring: Ring,
-    /// The ring samples that see the anchor in heal range ([`feasible_arc`]).
+    /// The ring samples that see every teammate in heal range and that no
+    /// crowd control a pillar defends against covers ([`team_arc`]).
     pub arc: Vec<bool>,
     /// The samples of the arc the healer may stand at: the run it is in, less
     /// the sight margin ([`core_of`]).
@@ -480,21 +469,11 @@ pub fn turn_toward(run: (usize, usize), theta0: f32, target: f32, through_arc: b
 /// pillar is no defence against it.
 pub const MELEE_CC_REACH: f32 = 8.0;
 
-/// Whether the healer's mode key reads an enemy crowd control a pillar
-/// defends against: one that needs its caster's sight, cast from beyond
-/// [`MELEE_CC_REACH`] by a unit that is not a pet (a pet closes), ready within
-/// [`CC_MODE_HORIZON`] and not one the healer is immune to.
-pub fn sight_cc_ready(
-    ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
-    healer: Entity,
-    margin: f32,
-) -> bool {
-    !pillar_threats(ctx, abilities, healer, margin).is_empty()
-}
-
-/// The crowd control a pillar defends the healer against ([`sight_cc_ready`]'s
-/// threats), as a field: its discs are where a hug would NOT be defended.
+/// The crowd control a pillar defends `healer` against, as a field: a crowd
+/// control that needs its caster's sight, cast from beyond [`MELEE_CC_REACH`]
+/// by a unit that is not a pet (a pet closes), ready within
+/// [`CC_MODE_HORIZON`] and not one `healer` is immune to. Its discs are where
+/// a hug would NOT be defended.
 pub fn pillar_threats(
     ctx: &CombatContext,
     abilities: &AbilityDefinitions,
@@ -535,11 +514,79 @@ pub fn defended_arc(
     arc
 }
 
-/// The three keys as they stood at an evaluation, for the trace.
+/// The crowd control a pillar defends the TEAM against: [`pillar_threats`]
+/// for each unit of `members`, as one field, each (caster, ability) once. The
+/// pillar stance's threat key reads it, and its discs are what the team arc
+/// ([`team_arc`]) keeps the healer out of. Built from one context, so the
+/// stance and the healer that plays it read the same field.
+pub fn team_threats(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    members: &[Entity],
+    margin: f32,
+) -> CcField {
+    let mut field = CcField {
+        threats: Vec::new(),
+        margin,
+    };
+    for member in members {
+        for t in pillar_threats(ctx, abilities, *member, margin).threats {
+            if !field
+                .threats
+                .iter()
+                .any(|x| x.source == t.source && x.ability == t.ability)
+            {
+                field.threats.push(t);
+            }
+        }
+    }
+    field
+}
+
+/// The TEAM arc of `ring`: the samples from which the healer sees every one of
+/// `mates` within `heal_reach`, on standable ground inside the arena, and that
+/// no disc of `threats` covers. [`defended_arc`] with "the anchor" widened to
+/// every teammate: it is what makes the pillar stance a team position and not
+/// a healer's hide (AS-385 §3.3). With one teammate it is that teammate's
+/// defended arc.
+pub fn team_arc(
+    ctx: &CombatContext,
+    ring: &Ring,
+    mates: &[Vec2],
+    heal_reach: f32,
+    y: f32,
+    threats: &CcField,
+) -> Vec<bool> {
+    (0..RING_SAMPLES)
+        .map(|i| {
+            let p = ring.point(sample_angle(i));
+            !mates.is_empty()
+                && ctx.bounds.contains(Vec3::new(p.x, 0.0, p.y))
+                && nearest_standable(ctx.obstacles, p, y).is_some_and(|q| q.distance(p) < 1e-3)
+                && mates.iter().all(|m| {
+                    p.distance(*m) <= heal_reach
+                        && has_line_of_sight(ctx.obstacles, eye(p), eye(*m))
+                })
+                && threats
+                    .covering(ctx.obstacles, p, Disc::Outer)
+                    .next()
+                    .is_none()
+        })
+        .collect()
+}
+
+/// The units whose crowd control the stance reads: the healer and its living
+/// non-pet teammates, in entity order.
+pub fn stance_members(ctx: &CombatContext) -> Vec<Entity> {
+    ctx.alive_allies().iter().map(|a| a.entity).collect()
+}
+
+/// The two keys as they stood at an evaluation, for the trace: the
+/// preference key (the team holds a pillar stance this healer plays) and the
+/// feasibility key (the stance pillar's team arc holds the margin).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Keys {
-    pub at_pillar: bool,
-    pub cc_ready: bool,
+    pub stance: bool,
     pub arc: bool,
 }
 
@@ -548,10 +595,11 @@ pub struct Keys {
 /// Called from the FREE tick and the PRESSURED solve of every healer; a no-op
 /// returning `None` unless the healer's team runs `TeamPlan` with the modes on
 /// ([`CombatContext::pillar_modes`]), the map has obstacles, and
-/// [`HUG_EXCEPTIONS`] does not name its class. A change of mode forgets the formation
-/// point's memory; leaving a hug seeds the open heading from where the healer
-/// stands (`FormationMemory::seed_from_healer`), so the open point takes over
-/// there.
+/// [`HUG_EXCEPTIONS`] does not name its class. The healer hugs only under its
+/// team's pillar stance (`CombatContext::pillar_stance`), on the stance's
+/// pillar. A change of mode forgets the formation point's memory; leaving a
+/// hug seeds the open heading from where the healer stands
+/// (`FormationMemory::seed_from_healer`), so the open point takes over there.
 #[allow(clippy::too_many_arguments)]
 pub fn update(
     ctx: &CombatContext,
@@ -577,6 +625,7 @@ pub fn update(
     let anchor = mates.first().copied();
     let rings = rings(ctx.obstacles);
     let heal_reach = shared.heal_range - HEAL_REACH_MARGIN;
+    let stance = ctx.pillar_stance();
 
     let hugged = match state.pillar.mode {
         PillarMode::Hug { pillar } => rings.iter().find(|r| r.pillar == pillar).copied(),
@@ -598,51 +647,27 @@ pub fn update(
         }
         return None;
     };
-    let anchor_xz = xz(anchor.position);
 
-    // The candidate pillar: the one the anchor stands nearest the skin of,
-    // the hugged one kept unless another is `PILLAR_SWITCH` nearer.
-    let nearest = rings
-        .iter()
-        .copied()
-        .min_by(|a, b| a.skin(anchor_xz).total_cmp(&b.skin(anchor_xz)));
-    let candidate = match (hugged, nearest) {
-        (Some(h), Some(n)) if n.skin(anchor_xz) + PILLAR_SWITCH < h.skin(anchor_xz) => Some(n),
-        (Some(h), _) => Some(h),
-        (None, n) => n,
-    };
+    // The candidate pillar is the stance's; with no stance, the hugged one,
+    // held only through its dwell.
+    let candidate = stance
+        .and_then(|s| rings.iter().find(|r| r.pillar == s.pillar).copied())
+        .or(hugged);
     let ring = candidate?;
 
-    let threats = pillar_threats(ctx, abilities, entity, shared.cc_reach_margin);
-    let cc_now = !threats.is_empty();
-    if cc_now {
-        state.pillar.cc_lost_at = None;
-    } else if state.pillar.cc_lost_at.is_none() {
-        state.pillar.cc_lost_at = Some(now);
-    }
-    let arc = defended_arc(ctx, &ring, anchor_xz, heal_reach, my_pos.y, &threats);
+    let threats = team_threats(ctx, abilities, &stance_members(ctx), shared.cc_reach_margin);
+    let mate_points: Vec<Vec2> = mates.iter().map(|m| xz(m.position)).collect();
+    let arc_of = |r: &Ring| team_arc(ctx, r, &mate_points, heal_reach, my_pos.y, &threats);
+    let arc = arc_of(&ring);
     let keys = Keys {
-        at_pillar: if hugged.is_some() {
-            ring.skin(anchor_xz) <= HUG_LEAVE
-        } else {
-            ring.skin(anchor_xz) <= HUG_ENTER
-        },
-        cc_ready: if hugged.is_some() {
-            cc_now
-                || state
-                    .pillar
-                    .cc_lost_at
-                    .is_some_and(|t| now - t < HUG_RELEASE)
-        } else {
-            cc_now
-        },
+        stance: stance.is_some(),
         arc: holds_margin(&ring, &arc),
     };
     let dwelt = state.pillar.since.is_none_or(|t| now - t >= MODE_DWELL);
 
     let (ring, arc) = match hugged {
         None => {
-            if !(keys.at_pillar && keys.cc_ready && keys.arc && dwelt) {
+            if !(keys.stance && keys.arc && dwelt) {
                 return None;
             }
             enter(
@@ -658,10 +683,10 @@ pub fn update(
             );
             (ring, arc)
         }
-        // The anchor stands `PILLAR_SWITCH` nearer another pillar, but the
-        // hug on this one is still within its dwell: keep hugging this one.
+        // The stance has moved to another pillar, but the hug on this one is
+        // still within its dwell: keep hugging this one.
         Some(h) if ring.pillar != h.pillar && !dwelt => {
-            let arc = defended_arc(ctx, &h, anchor_xz, heal_reach, my_pos.y, &threats);
+            let arc = arc_of(&h);
             if !holds_margin(&h, &arc) {
                 leave(
                     state,
@@ -679,7 +704,7 @@ pub fn update(
             (h, arc)
         }
         Some(h) => {
-            if !keys.arc || (dwelt && !(keys.at_pillar && keys.cc_ready)) {
+            if !keys.arc || (dwelt && !keys.stance) {
                 leave(
                     state,
                     now,
@@ -871,7 +896,6 @@ fn leave(
     state.pillar.mode = PillarMode::Open;
     state.pillar.since = Some(now);
     state.pillar.angle = None;
-    state.pillar.cc_lost_at = None;
     state.formation.forget();
     state.formation.seed_from_healer = true;
     trace(
@@ -904,8 +928,7 @@ fn trace(
     if let Some(mut builder) = builder {
         builder.direction_change(posture, trigger, MovementGoalKind::Point);
         builder.scorer_term("pillar", ring.pillar as f32);
-        builder.scorer_term("key_at_pillar", f32::from(u8::from(keys.at_pillar)));
-        builder.scorer_term("key_cc_ready", f32::from(u8::from(keys.cc_ready)));
+        builder.scorer_term("key_stance", f32::from(u8::from(keys.stance)));
         builder.scorer_term("key_arc", f32::from(u8::from(keys.arc)));
         builder.finish();
     }

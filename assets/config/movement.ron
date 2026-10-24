@@ -182,6 +182,7 @@
             los_seek: 2.0,         // Orbit to a sighted angle when occluded in cast range (matches range_band so LoS and distance trade evenly); obstacle maps only
             cover_pull: 0.0,       // bonus per threat a step is occluded from (kiters flee, they don't hide; obstacle maps only)
             healer_leash: 4.0,     // pull back toward own healer once BEYOND heal range; zero inside, so it never opposes flee where fleeing is right
+            stance_pull: 1.0,      // TeamPlan: pull toward the side of the pillar the team holds its pillar stance on (AS-385); absent with no stance. Below range_band and los_seek (2.0): it bends the orbit, never overrides it
         ),
         range_band_min: 8.0,       // SAFE_KITING_DISTANCE — stay out of melee of the kill target
         range_band_max: 30.0,      // within AUTO_SHOT_RANGE — keep the kill target in cast range
@@ -211,6 +212,7 @@
             cover_pull: 0.0,        // bonus per threat a step is occluded from (kiters flee, they don't hide; obstacle maps only)
         healer_leash: 4.0,      // pull back toward own healer once BEYOND heal range; zero inside, so it never opposes flee where fleeing is right. Below flee (6.0) deliberately: escaping still wins, this only bends the escape back toward support.
             trap_setup: 3.0,        // while Freezing Trap is ready and an enemy healer would be caught cleanly, pull toward it once BEYOND throw range (the trap's range less its trigger radius); zero inside, absent on cooldown. Below flee (6.0): the kite and the Disengage leap still carry the Hunter away from the melee, bent toward the healer.
+            stance_pull: 1.0,       // TeamPlan: pull toward the side of the pillar the team holds its pillar stance on (AS-385); absent with no stance. Far below flee (6.0): the escape still wins
         ),
         range_band_min: 8.0,       // HUNTER_DEAD_ZONE — can't shoot inside this
         range_band_max: 34.0,      // ~AUTO_SHOT_RANGE — only pull in near the shot-range edge

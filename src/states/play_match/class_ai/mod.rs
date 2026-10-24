@@ -34,6 +34,7 @@ pub(crate) mod paladin_postures;
 pub mod peel;
 pub mod pet_ai;
 pub mod pillar_mode;
+pub mod pillar_stance;
 pub mod plays;
 pub mod priest;
 pub mod rogue;
@@ -417,6 +418,17 @@ impl<'a> CombatContext<'a> {
     /// them off. `false` on a context nobody classified.
     pub fn pillar_modes(&self) -> bool {
         self.ai_profile.is_team_plan() && self.situation.as_ref().is_some_and(|s| s.pillar_modes)
+    }
+
+    /// The healer this unit must keep in sight: `Some` while it is a DPS whose
+    /// team's `sight_yield` says it yields to that healer (AS-386,
+    /// `situation::SightPair`). `None` on a context nobody classified, and
+    /// always under `Legacy`, where the team classifies no yield.
+    pub fn sight_yield_healer(&self) -> Option<Entity> {
+        self.situation
+            .as_ref()?
+            .sight_yield_of(self.self_entity)
+            .map(|pair| pair.healer)
     }
 
     /// The clock this unit's situation was classified at (the trace's
