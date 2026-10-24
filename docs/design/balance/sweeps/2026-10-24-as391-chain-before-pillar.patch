@@ -1,0 +1,12 @@
+--- a/src/states/play_match/class_ai/plays.rs
++++ b/src/states/play_match/class_ai/plays.rs
+@@ -76,8 +76,8 @@
+ pub static PLAY_ORDER: &[&dyn PlayStage] = &[
+     &super::peel::PeelStage,
+     &super::take_cover::TakeCoverStage,
+-    &super::pillar_stance::PillarStage,
+     &super::chain::ChainStage,
++    &super::pillar_stance::PillarStage,
+     &super::burst::BurstStage,
+ ];
+ 
