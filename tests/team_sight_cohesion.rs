@@ -393,12 +393,14 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> R
                 .or_default()
                 .push((fr as usize, p.to_string()));
             match v["trigger"].as_str() {
-                Some("PillarModeEnter") => {
-                    modes.entry(id as u32).or_default().push((fr as usize, true))
-                }
-                Some("PillarModeLeave") => {
-                    modes.entry(id as u32).or_default().push((fr as usize, false))
-                }
+                Some("PillarModeEnter") => modes
+                    .entry(id as u32)
+                    .or_default()
+                    .push((fr as usize, true)),
+                Some("PillarModeLeave") => modes
+                    .entry(id as u32)
+                    .or_default()
+                    .push((fr as usize, false)),
                 _ => {}
             }
         }
@@ -440,12 +442,7 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> R
     };
     let n = frames.len();
     let contact = (gates..n)
-        .find(|&i| {
-            frames[i]
-                .1
-                .values()
-                .any(|u| !u.pet && u.hp < 0.999)
-        })
+        .find(|&i| frames[i].1.values().any(|u| !u.pet && u.hp < 0.999))
         .unwrap_or(n);
     row.contact = (contact.min(n) - gates) as f32 * FRAME;
     let t_of = |i: usize| (i - gates) as f32 * FRAME;
@@ -473,8 +470,10 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> R
         blind_healer: Option<bool>,
         reach: bool,
     }
-    let mut facts: BTreeMap<Entity, Vec<Fact>> =
-        people.iter().map(|e| (*e, vec![Fact::default(); n])).collect();
+    let mut facts: BTreeMap<Entity, Vec<Fact>> = people
+        .iter()
+        .map(|e| (*e, vec![Fact::default(); n]))
+        .collect();
     let mut occ: BTreeMap<Entity, UnitOcc> = people
         .iter()
         .map(|e| {
@@ -611,9 +610,9 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> R
             }
             if !me.class.is_healer() {
                 if let Some(b) = blind_healer {
-                    let targeted = units.iter().any(|(_, x)| {
-                        x.alive && x.team != me.team && x.target == Some(*e)
-                    });
+                    let targeted = units
+                        .iter()
+                        .any(|(_, x)| x.alive && x.team != me.team && x.target == Some(*e));
                     let dying = me.hp < DYING;
                     let danger = dying && targeted;
                     o.healer_secs += FRAME;
@@ -737,13 +736,17 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> R
                 let (h0, d0) = (frames[back].1[h].pos, frames[back].1[d].pos);
                 let (h1, d1) = (frames[start].1[h].pos, frames[start].1[d].pos);
                 let broke = broke_kind(!sees(d1, h0), !sees(d0, h1), "dps", "healer");
-                pair_eps.entry(*d).or_default().push((start, j, broke.clone()));
+                pair_eps
+                    .entry(*d)
+                    .or_default()
+                    .push((start, j, broke.clone()));
                 let secs = (j + 1 - start) as f32 * FRAME;
                 if secs >= EPISODE_MIN {
                     let u = frames[start].1[d];
-                    let targeted = frames[start].1.iter().any(|(_, x)| {
-                        x.alive && x.team != u.team && x.target == Some(*d)
-                    });
+                    let targeted = frames[start]
+                        .1
+                        .iter()
+                        .any(|(_, x)| x.alive && x.team != u.team && x.target == Some(*d));
                     row.pairs.push(PairEp {
                         t: t_of(start),
                         team: t,
@@ -755,9 +758,7 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], tmp: &str, i: usize) -> R
                         dps_hp: u.hp,
                         dps_dying: u.hp < DYING,
                         dps_danger: u.hp < DYING && targeted,
-                        dps_min_hp: (start..=j)
-                            .map(|k| frames[k].1[d].hp)
-                            .fold(1.0, f32::min),
+                        dps_min_hp: (start..=j).map(|k| frames[k].1[d].hp).fold(1.0, f32::min),
                         healer_hard_secs: (start..=j).filter(|&k| frames[k].1[h].hard).count()
                             as f32
                             * FRAME,
