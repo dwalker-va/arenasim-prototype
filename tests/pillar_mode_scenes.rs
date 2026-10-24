@@ -287,6 +287,10 @@ fn the_repair_answers_for_a_teammate_the_heading_does_not() {
             .ai_profile(2, profile)
             .unit(HEALER, 1, healer)
             .at(-4.0, -14.0)
+            // The Warrior is in danger, so a Priest with its Scream ready
+            // would walk at the Bruiser to peel it (AS-388) instead of taking
+            // its formation point, which is what this scene reads.
+            .cooldown(HEALER, AbilityType::PsychicScream, 30.0)
             .unit(MATE, 1, Warrior)
             .at(anchor.x, anchor.z)
             .health(0.4)

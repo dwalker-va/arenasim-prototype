@@ -164,6 +164,12 @@ pub struct HealerPosture {
     /// `Some` while the play drives the healer's position, `None` otherwise; a
     /// new spot (or `None` → `Some`) is what emits its `TakeCover` trace event.
     pub cover_spot: Option<Vec2>,
+    /// `TeamPlan` only: the attacker of a teammate in danger the Priest is
+    /// walking at to Psychic Scream it (the Peel play's walk, AS-388,
+    /// `class_ai::priest::peel_walk`). `Some` while the walk drives the
+    /// Priest's position; a new attacker (or `None` → `Some`) is what emits
+    /// its `PeelWalk` trace event. Always `None` for every other healer.
+    pub peel_walk: Option<Entity>,
     /// What the FREE formation point remembers from one evaluation to the next
     /// (`class_ai::formation`, `TeamPlan` only): the heading it stands off the
     /// centroid along, and the exit it was last repaired to. Forgotten on
@@ -305,6 +311,7 @@ impl HealerPosture {
             solve_dying: None,
             dispel_walk: DispelWalkPhase::Off,
             cover_spot: None,
+            peel_walk: None,
             formation: FormationMemory::default(),
             cc_walk: false,
             pillar: PillarMemory::default(),
