@@ -136,6 +136,7 @@ const EXPECTED_MOVEMENT_TRIGGERS: &[&str] = &[
     "FlareCommit",
     "ShiftEscape",
     "TakeCover",
+    "PeelWalk",
     "PillarModeEnter",
     "PillarModeLeave",
 ];

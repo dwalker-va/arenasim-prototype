@@ -73,58 +73,66 @@ impl Default for PriestMovementPlan {
 /// no `Reserved` state: Psychic Scream has no rotational use, so the defensive
 /// self-peel (PRESSURED) and the offensive dip (FREE / not pressured) are
 /// mutually exclusive by posture — the pressured gate IS the reservation (R14).
+///
+/// The offensive dip is `Legacy`'s. Under `TeamPlan` it is retired (AS-388):
+/// the offensive Scream is the Peel play's, cast by the peel step once the
+/// Peel walk ([`peel_walk`]) has brought an attacker of the teammate in danger
+/// inside it.
 pub enum ScreamDipPlan {
     /// No dip this tick — the defensive self-peel governs (gated on pressure).
     Rotation,
     /// Mid-dip and within scream radius of the dip target: cast Psychic
     /// Scream now. On a successful cast the caller installs `completed_state`
     /// (posture back to FREE — DipComplete) and removes the walk directive.
+    /// `Legacy` only.
     DipCast {
         target: Entity,
         completed_state: Box<HealerPosture>,
     },
-    /// No dip this tick, though one was on offer: the `TeamPlan` gate held it
-    /// back ([`dip_hold`]). The defensive self-peel governs as under
-    /// `Rotation`; the ability pass records why the dip did not start.
+    /// No Peel walk this tick, though one was on offer: the `TeamPlan` gate
+    /// held it back ([`dip_hold`]). The rotation governs as under `Rotation`;
+    /// the ability pass records why the walk did not start.
     Held(DipHold),
 }
 
-/// Why the `TeamPlan` dip gate ([`dip_hold`]) held a scream dip back (AS-383).
+/// Why the `TeamPlan` scream gate ([`dip_hold`]) held a walk to Psychic
+/// Scream back (AS-383; since AS-388 it gates the Peel walk).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DipHold {
-    /// The dip target already targets the Priest from within
+    /// The walk's target already targets the Priest from within
     /// `threat_intent_radius`: walking the last stretch to scream range
-    /// crosses the 12yd pressure onset first, which ends the dip unscreamed
+    /// crosses the 12yd pressure onset first, which ends the walk unscreamed
     /// with the Priest standing in front of its target.
     TargetEngaged,
-    /// The spot the dip ends on — scream range short of the target, on the
+    /// The spot the walk ends on — scream range short of the target, on the
     /// line from it — lies in the reach of `ability`, an enemy crowd control
     /// ready to land on the Priest (`cc_reach::CcField`, the target's own
-    /// excluded: reaching the target is the point of the dip).
+    /// excluded: the Scream answers it).
     ArrivalInReach { ability: AbilityType },
 }
 
 impl DipHold {
-    /// The trace note: what held the dip back.
+    /// The trace note: what held the walk back.
     pub fn note(self) -> String {
         match self {
             DipHold::TargetEngaged => {
-                "scream dip held: the dip target already targets the Priest".to_owned()
+                "scream walk held: its target already targets the Priest".to_owned()
             }
             DipHold::ArrivalInReach { ability } => {
-                format!("scream dip held: its arrival is in reach of a ready {ability:?}")
+                format!("scream walk held: its arrival is in reach of a ready {ability:?}")
             }
         }
     }
 }
 
-/// The `TeamPlan` scream-dip gate (AS-383): whether a dip on `target`, which
-/// [`evaluate_scream_dip_entry`] offers, is held back, and why. `None` under
-/// `Legacy`, and wherever the dip may start.
+/// The `TeamPlan` scream gate (AS-383): whether a walk to Psychic Scream
+/// `target` is held back, and why. `None` under `Legacy`, and wherever the
+/// walk may start. It gated the offensive dip until AS-388 retired the dip
+/// under `TeamPlan`; it now gates the Peel walk ([`peel_walk`]).
 ///
-/// The dip is a walk into the enemy team, and nothing else in it reads where
-/// the enemy crowd control reaches. Measured on BasicArena (AS-383), a dip
-/// let run to its budget left the Priest feared or polymorphed four times as
+/// The walk goes into the enemy team, and nothing else in it reads where the
+/// enemy crowd control reaches. Measured on BasicArena (AS-383), a dip let
+/// run to its budget left the Priest feared or polymorphed four times as
 /// often, and in the 20yd reach of an enemy Shaman's Frost Shock.
 pub fn dip_hold(
     entity: Entity,
@@ -149,10 +157,8 @@ pub fn dip_hold(
         shared.cc_reach_margin,
     )
     .without_source(Some(target));
-    let to = Vec2::new(t.position.x, t.position.z);
-    let me = Vec2::new(my_pos.x, my_pos.z);
     let radius = abilities.get_unchecked(&AbilityType::PsychicScream).range;
-    let arrival = to + (me - to).normalize_or_zero() * radius;
+    let arrival = scream_arrival(my_pos, t.position, radius);
     let covering = field
         .covering(ctx.obstacles, arrival, super::cc_reach::Disc::Outer)
         .next()
@@ -160,6 +166,161 @@ pub fn dip_hold(
             ability: threat.ability,
         });
     covering
+}
+
+/// Where a walk to Psychic Scream an enemy at `target` ends (XZ): scream range
+/// short of it, on the line from it to `my_pos`.
+fn scream_arrival(my_pos: Vec3, target: Vec3, radius: f32) -> Vec2 {
+    let to = Vec2::new(target.x, target.z);
+    let me = Vec2::new(my_pos.x, my_pos.z);
+    to + (me - to).normalize_or_zero() * radius
+}
+
+/// What the Peel play's walk does this tick ([`peel_walk`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PeelWalk {
+    /// Walk at this attacker of the teammate in danger.
+    Walk(Entity),
+    /// An attacker was in the walk's reach, but the scream gate
+    /// ([`dip_hold`]) held a walk to every one of them back.
+    Held(DipHold),
+}
+
+/// The Peel play's walk (AS-388, `TeamPlan`): the retired dip's walk, given a
+/// team purpose. While the team's Peel play names a teammate in danger
+/// ([`peel_call`](super::peel::peel_call) — so only under `TeamPlan`, with the
+/// play neither withheld nor gated, and never for the Priest itself), the
+/// Priest is FREE, unpressured and on its feet, and Psychic Scream is ready,
+/// it walks at one of that teammate's attackers until the peel step's Scream
+/// reaches it:
+///
+/// - the attacker is one the Scream could fear, outside scream range (an
+///   attacker already inside it is the peel step's now, with no walk) and
+///   within `scream range + dip_budget × speed`, the dip's reach;
+/// - the walk's arrival is out of the reach of the enemy's ready crowd
+///   control, and the attacker is not already on the Priest ([`dip_hold`],
+///   AS-383's gate, kept);
+/// - of those, one whose arrival also puts an enemy healer inside the Scream
+///   comes first, then the nearest.
+///
+/// A live walk (`walking`) carries on while its attacker is inside scream
+/// range, until the Scream goes: the GCD may hold it a moment. `None` when no
+/// walk is on offer; [`PeelWalk::Held`] when one was and the gate held it.
+#[allow(clippy::too_many_arguments)]
+pub fn peel_walk(
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    movement: &MovementConfig,
+    abilities: &AbilityDefinitions,
+    next: Posture,
+    pressured: bool,
+    walking: Option<Entity>,
+) -> Option<PeelWalk> {
+    if next != Posture::Free || pressured || ctx.is_ccd(entity) {
+        return None;
+    }
+    let call = super::peel::peel_call(ctx, Role::Healer)?;
+    let def = abilities.get_unchecked(&AbilityType::PsychicScream);
+    if !pre_cast_ok(
+        AbilityType::PsychicScream,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        return None;
+    }
+    let reach = def.range
+        + movement.priest.dip_budget
+            * combatant.base_movement_speed
+            * ctx.movement_slow_multiplier(entity);
+    let healers: Vec<Vec2> = ctx
+        .alive_enemies()
+        .into_iter()
+        .filter(|e| e.class.is_healer())
+        .filter(|e| scream_dip_target_eligible(ctx, combatant.team, e.entity))
+        .map(|e| Vec2::new(e.position.x, e.position.z))
+        .collect();
+    // (misses the healer, distance, attacker): the healer-catching walk sorts
+    // first, then the nearest, then entity order.
+    let mut candidates: Vec<(bool, f32, Entity)> = call
+        .attackers
+        .iter()
+        .copied()
+        .filter(|&a| scream_dip_target_eligible(ctx, combatant.team, a))
+        .filter_map(|a| {
+            let pos = ctx.combatants.get(&a)?.position;
+            let dist = my_pos.distance(pos);
+            let reachable = dist <= reach && (dist > def.range || walking == Some(a));
+            reachable.then(|| {
+                let arrival = scream_arrival(my_pos, pos, def.range);
+                let catches_healer = healers.iter().any(|h| h.distance(arrival) <= def.range);
+                (!catches_healer, dist, a)
+            })
+        })
+        .collect();
+    candidates.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
+    let mut first_hold = None;
+    for &(_, _, attacker) in &candidates {
+        match dip_hold(entity, my_pos, attacker, ctx, abilities, &movement.shared) {
+            None => return Some(PeelWalk::Walk(attacker)),
+            Some(hold) => {
+                first_hold.get_or_insert(hold);
+            }
+        }
+    }
+    first_hold.map(PeelWalk::Held)
+}
+
+/// Run the Peel walk at `attacker` ([`peel_walk`]): an `Entity` goal on it,
+/// re-issued as its directive runs out, traced `PeelWalk` when the walk
+/// begins or changes attacker. While it runs it is the Priest's one
+/// positioning authority, so the formation point is forgotten.
+#[allow(clippy::too_many_arguments)]
+fn peel_walk_tick(
+    commands: &mut Commands,
+    entity: Entity,
+    my_pos: Vec3,
+    attacker: Entity,
+    state: &mut HealerPosture,
+    directive: Option<&MovementDirective>,
+    shared: &SharedMovementConfig,
+    now: f32,
+    decision_trace: &mut DecisionTrace,
+    ctx: &CombatContext,
+) {
+    let begins = state.peel_walk != Some(attacker);
+    let stale =
+        directive.is_none_or(|d| d.goal != MovementGoal::Entity(attacker) || now >= d.expires);
+    if begins || stale {
+        commands.entity(entity).try_insert(MovementDirective {
+            goal: MovementGoal::Entity(attacker),
+            expires: now + shared.directive_ttl,
+            committed_until: now + shared.commit_window,
+        });
+    }
+    if begins {
+        if let Some(mut builder) =
+            start_movement_event_with_target(decision_trace, ctx, attacker, my_pos)
+        {
+            builder.direction_change(
+                state.posture.into(),
+                MovementTrigger::PeelWalk,
+                MovementGoalKind::Entity,
+            );
+            builder.finish();
+        }
+    }
+    state.peel_walk = Some(attacker);
+    state.last_direction = None;
+    state.last_point = None;
+    state.formation.forget();
 }
 
 /// Priest AI: Decides and executes abilities for a Priest combatant.
@@ -204,8 +365,8 @@ pub fn decide_priest_action(
         return false;
     };
 
-    // A dip the `TeamPlan` gate held back this tick (AS-383): say why,
-    // whatever the chain below then chooses.
+    // A Peel walk the `TeamPlan` scream gate held back this tick (AS-383,
+    // AS-388): say why, whatever the chain below then chooses.
     if let ScreamDipPlan::Held(hold) = &plan.scream_dip {
         builder.reject(
             AbilityType::PsychicScream,
@@ -1921,14 +2082,13 @@ pub fn evaluate_priest_posture(
         prev == Posture::Dip && scream_dip_should_abort(state, combatant, ctx, shared, now);
 
     // --- DIP entry (FREE only, no pressure): the offensive scream dip ---
-    let dip_entry = if prev == Posture::Free && !trigger {
+    // `Legacy` only: under `TeamPlan` the standalone dip is retired (AS-388),
+    // and the offensive Scream is the Peel play's walk (`peel_walk`, below).
+    let dip_entry = if prev == Posture::Free && !trigger && !ctx.ai_profile.is_team_plan() {
         evaluate_scream_dip_entry(entity, combatant, my_pos, auras, ctx, movement, abilities)
     } else {
         None
     };
-    // Under `TeamPlan`, the dip gate may hold an offered dip back (AS-383).
-    let held = dip_entry.and_then(|t| dip_hold(entity, my_pos, t, ctx, abilities, shared));
-    let dip_entry = dip_entry.filter(|_| held.is_none());
 
     let next = match prev {
         // ESCAPE is committed for the whole window (no re-evaluation churn
@@ -2009,7 +2169,34 @@ pub fn evaluate_priest_posture(
         }
     }
 
-    let mut scream_dip = held.map_or(ScreamDipPlan::Rotation, ScreamDipPlan::Held);
+    // The Peel play's walk (`TeamPlan`, AS-388): at an attacker of the
+    // teammate in danger, to Psychic Scream it. Always `None` under `Legacy`.
+    let peel = peel_walk(
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        movement,
+        abilities,
+        next,
+        trigger,
+        state.peel_walk,
+    );
+    let mut scream_dip = match peel {
+        Some(PeelWalk::Held(hold)) => ScreamDipPlan::Held(hold),
+        _ => ScreamDipPlan::Rotation,
+    };
+    let peel_attacker = match peel {
+        Some(PeelWalk::Walk(attacker)) => Some(attacker),
+        _ => None,
+    };
+    if peel_attacker.is_none() && state.peel_walk.take().is_some() {
+        // The walk is over (the Scream went, or its teammate is safe): hand
+        // the legs back, and the posture's own tick re-issues its goal.
+        commands.entity(entity).remove::<MovementDirective>();
+    }
+    let mut peel_ran = false;
     // Set by a movement that a movement-locking cast would stall: the dispel
     // walk, or a team-solve walk to a teammate owed a dispel.
     let mut cast_defer = false;
@@ -2083,6 +2270,25 @@ pub fn evaluate_priest_posture(
             ctx,
         );
         cast_defer = true;
+    } else if let Some(attacker) = peel_attacker {
+        // The Peel walk (`TeamPlan`): the Priest's legs until the peel step's
+        // Scream reaches the attacker. Casts that would root it short of the
+        // Scream wait, as during a dip; a heal on a dying ally still fires.
+        release_ally_walk(commands, entity, state);
+        peel_walk_tick(
+            commands,
+            entity,
+            my_pos,
+            attacker,
+            state,
+            directive,
+            shared,
+            now,
+            decision_trace,
+            ctx,
+        );
+        peel_ran = true;
+        cast_defer = true;
     } else {
         // Sight regained / ally in Dispel Magic's reach and dispelled (or the
         // ally recovered, was freed, or died): drop the walk so the normal
@@ -2153,6 +2359,12 @@ pub fn evaluate_priest_posture(
                 prev,
             ),
         }
+    }
+
+    if !peel_ran {
+        // A walk a higher-ranked one (TakeCover, the medic chase, a dispel
+        // walk) took the legs from is over: a later one is traced afresh.
+        state.peel_walk = None;
     }
 
     if needs_insert {
