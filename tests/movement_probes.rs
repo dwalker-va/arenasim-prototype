@@ -7595,14 +7595,13 @@ mod nagrand_teamplan {
     /// main @ 43a8ee54        10.2% of 10617   15%
     /// AS-385 (yield+stance)  10.9% of 34172   28%
     /// AS-385, no C_SIGHT     49.8% of 32800   78%; 15 of 33 seeds over 50%
-    /// AS-388 (dip retired)   20.8% of 12286   26%
+    /// AS-388 (dip retired)   20.7% of 13300   30%
     /// ```
     ///
     /// AS-388's rise is in the denominator, not the solve: retiring the
     /// `TeamPlan` scream dip removed the PRESSURED frames its path ended in
-    /// (34172 to 12286), most of them sighted, while the blind frames fell
-    /// (3725 to 2560). With the Peel walk switched off as well the bank reads
-    /// 20.7% of 13300.
+    /// (34172 to 13300), most of them sighted, while the blind frames fell
+    /// (about 3720 to 2750).
     ///
     /// The pooled ceiling, 30%, sat about 19 points from both sides. A seed
     /// with enough frames to read on its own (300, five seconds) is held to

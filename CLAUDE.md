@@ -918,7 +918,7 @@ parking blind. A silenced or school-locked healer owes no reach and keeps to
 cover and distance. The Paladin's band-hold parks it only where it reaches
 such a teammate (`team_solve::dying_unreached`); out of reach, it steps aside
 for the solve, as it does for an owed dispel. The Priest has no offensive
-Scream dip under `TeamPlan` (AS-388 retired it for the Peel walk).
+Psychic Scream dip under `TeamPlan` to need a reach rule.
 
 **Out of the enemy's crowd-control reach (`TeamPlan`).** `class_ai::cc_reach`
 is the one definition of which enemy crowd control can land on a healer, and
@@ -949,13 +949,10 @@ heal first and the point stands. The Paladin keeps out only of discs it can
 leave without leaving PRESSURED — none reaching past `threat_intent_radius`
 (a Warlock's Fear) and none of its own target's — and its band-hold parks at
 the nearest spot out of them (`CcField::nearest_exit`); otherwise PRESSURED
-walked it out and its FREE pursuit walked it back. The third gates
-the Priest's Peel walk (`priest::dip_hold`, AS-383, kept by AS-388 when the
-dip it first gated was retired under `TeamPlan`): no walk starts while the
-spot it would end on (scream range short of the target) is covered by any
-disc but the target's own, or while the target already targets the Priest
-from within `threat_intent_radius`; the Psychic Scream candidate is traced
-`PreconditionUnmet`, "scream walk held: ...". Each walk out of reach is
+walked it out and its FREE pursuit walked it back. The third,
+`priest::dip_hold` (AS-383), gated the Priest's offensive Psychic Scream dip,
+which `TeamPlan` no longer runs (*Psychic Scream under `TeamPlan`* below), so
+it holds nothing back today. Each walk out of reach is
 traced once as it begins, trigger `OutOfCcReach`. The solve's flat-field anti-statue key
 is judged without the crowd-control term, so a melee's small stun disc does
 not disarm it. Under `TeamPlan` a healer parked at its FREE formation point
@@ -1648,20 +1645,25 @@ teammate's `danger_attackers` (`class_ai::peel`; the tools per class are
 `peel::peel_tools`, and the Warrior has none). Every peel goes through the
 cast gate, skips an attacker the team already holds, and a movement peel
 (root, snare) answers only a melee or pet. The Hunter's Spider and Boar peel
-too, through its pet dispatch (`peel::pet_peel_tool`). The Priest WALKS to
-peel (`priest::peel_walk`, AS-388): FREE, unpressured and with Psychic Scream
-ready, it walks at an attacker beyond the Scream but within the old dip's
-reach (`dip_budget` of walking), preferring one whose arrival also puts an
-enemy healer in the Scream, behind the scream gate (`priest::dip_hold`);
-traced `PeelWalk`, and the peel step Screams on arrival. A heal on the dying
-teammate still fires through the walk's cast deferral, so a Priest that can
-heal heals first. Under `TeamPlan` this replaces the standalone offensive
-dip, which only `Legacy` keeps. Judged at the 0.8
+too, through its pet dispatch (`peel::pet_peel_tool`). The Priest's peel is
+Psychic Scream on an attacker already inside it; it never walks to bring one
+into range (*Psychic Scream under `TeamPlan`* below). Judged at the 0.8
 milestone sweep (`docs/design/balance/2026-10-12-as274-peel-play.md`) in the
 contexts where it is enabled.
 
 `TakeCover`: a last-stand healer hides (`class_ai::take_cover`; the movement
 is *Last stand: take cover* above).
+
+**Psychic Scream under `TeamPlan` (AS-388).** The Priest has no offensive
+scream dip: `evaluate_priest_posture` offers it only under `Legacy`, which keeps
+the dip, its budget and its dying-teammate abort (AS-371) unchanged. Its
+offensive Scream is the Peel step alone, on an attacker of the teammate in
+danger already inside the Scream; the defensive Scream is unchanged. Measured
+against `Legacy` over seeds 501-512, Priest cells on Nagrand and TwinPillars:
+a walk to Scream an attacker beyond range cost the Priest against no walk in
+every form tried, so there is none
+(`docs/design/balance/2026-10-24-as388-scream-dip-retired.md`). Scenes:
+`tests/priest_dip_retired.rs`.
 
 `Pillar` (AS-387): the team takes a pillar TOGETHER (`pillar_stance`,
 `class_ai::pillar_stance`; design

@@ -557,12 +557,6 @@ pub enum MovementTrigger {
     /// `point` goal). Fires when the play takes the healer's movement and
     /// whenever the spot it chose moves.
     TakeCover,
-    /// `TeamPlan`'s Peel play (AS-388): a Priest walks at an attacker of its
-    /// teammate in danger (an `entity` goal, the attacker in the target view)
-    /// to Psychic Scream it, from a spot out of the reach of the enemy's
-    /// ready crowd control. Fires when the walk begins and whenever it changes
-    /// attacker.
-    PeelWalk,
     /// `TeamPlan` (AS-362): the healer's goal was chosen to take it out of
     /// the reach of an enemy crowd control ready to land on it — the team
     /// solve's `C_CC_REACH` (PRESSURED), the Paladin's band-hold stepping to
