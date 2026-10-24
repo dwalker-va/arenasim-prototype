@@ -86,6 +86,14 @@ pub struct HeadlessMatchConfig {
     pub team1_pillar_modes: Option<bool>,
     #[serde(default)]
     pub team2_pillar_modes: Option<bool>,
+    /// `false` turns the team sight yield off for that team, for measurement
+    /// (AS-386, `situation::SightPair`): a `TeamPlan` team without it plays
+    /// as `TeamPlan` did before it. Omitted — the default — leaves it on (it
+    /// runs only under `TeamPlan`).
+    #[serde(default)]
+    pub team1_sight_yield: Option<bool>,
+    #[serde(default)]
+    pub team2_sight_yield: Option<bool>,
     /// Per gated play, the exceptions table to run IN PLACE of the shipped
     /// one for each team, for measurement: `{"Peel": []}` lifts every Peel
     /// context gate, `{"Burst": ["Hunter"]}` stops the Hunter bursting. An
@@ -203,6 +211,8 @@ impl Default for HeadlessMatchConfig {
             team2_withheld_plays: Vec::new(),
             team1_pillar_modes: None,
             team2_pillar_modes: None,
+            team1_sight_yield: None,
+            team2_sight_yield: None,
             team1_exceptions: BTreeMap::new(),
             team2_exceptions: BTreeMap::new(),
             burst_exceptions: None,
@@ -278,6 +288,8 @@ impl HeadlessMatchConfig {
             team2: WithheldPlays::parse_set(&self.team2_withheld_plays)?,
             team1_no_pillar_modes: self.team1_pillar_modes == Some(false),
             team2_no_pillar_modes: self.team2_pillar_modes == Some(false),
+            team1_no_sight_yield: self.team1_sight_yield == Some(false),
+            team2_no_sight_yield: self.team2_sight_yield == Some(false),
             ..Default::default()
         };
         let mut set_once = |team: u8, id: PlayId, set: ExceptionSet| -> Result<(), String> {

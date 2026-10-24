@@ -149,6 +149,7 @@ const EXPECTED_SITUATION_NAMES: &[&str] = &[
     "last_stand",
     "tempo",
     "phase",
+    "sight_yield",
 ];
 const EXPECTED_SITUATION_CHANGES: &[&str] = &["onset", "end", "extended", "shift"];
 

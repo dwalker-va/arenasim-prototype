@@ -1142,6 +1142,26 @@ byte-identical). The Warlock is the class it moves — the Mage and Hunter
 answer occlusion with their ENGAGE machine first. Staged guard:
 `tests/pursuit_sight_walk.rs`.
 
+**Team sight yield (`TeamPlan`)** — no RON knob; AS-386, design
+`docs/design/2026-10-24-team-sight-cohesion.md` §3.1/§3.4. The `sight_yield`
+situation names, per DPS–healer pair, whether the DPS must not break its
+healer's sight (`situation::SightPair`, `YieldRule`). First rule that holds: a
+unit that cannot move leads (a healer hard-CC'd, rooted or casting: its DPS
+yields; a DPS hard-CC'd or rooted: its healer follows); a pressured healer
+leads; the team's pillar stance leads (`stance_leads_sight`, the seam AS-387
+sets); a hurt DPS (below `SIGHT_YIELD_HP` 80%, held until 90%) yields;
+otherwise the DPS leads. A yield holds `SIGHT_YIELD_DWELL` (2s) unless rule 1
+ends it, and every onset / end / rule shift is a `situation_change` named
+`sight_yield` (`subject` the DPS, `healer`, `rule`). A yielding DPS: the
+kiter scorer's ally-anchor mask points at its healer for SIGHT only (a MASK on
+the kite objective, never a replacement — `flee`, `range_band`, hysteresis and
+the wand fallback are untouched; a kiter already blind gets `close_when_out`);
+its pursuit takes the tangent side round a pillar whose waypoint its healer
+sees, and HOLDS it (`PursuitSide`, `combat_core::movement::sight_kept_heading`
+— a sight preference is not self-reinforcing). `team{1,2}_sight_yield: false`
+is the measurement switch; `Legacy` classifies no pair and is byte-identical.
+Scenes `tests/sight_yield_scenes.rs`, staged `tests/sight_yield_staged.rs`.
+
 **DPS kiter blocks** (`mage:` / `hunter:` — the shared ENGAGE/KITE machine, `DpsMovementConfig`):
 - `weights:` (above) plus `range_band_min`/`max` (orbit ring; min = SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE 8), `kite_hold` (anti-strobe hysteresis), `directive_ttl` (must cover the longest cast), `commit_window`.
 - `kite_entry_radius`/`kite_sustain_radius` — proximity-gated kiters only (Hunter: KITE when a melee is within entry, exit when kited past sustain). The Mage is aura-gated (KITE keys off its own root/slow), so it ignores these.
