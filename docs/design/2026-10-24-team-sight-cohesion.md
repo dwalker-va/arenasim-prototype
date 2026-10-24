@@ -546,17 +546,12 @@ two plays:**
    posture. A walk toward the enemy healer to trigger PRESSURED is then
    neither needed nor wanted.
 2. **The offensive Scream belongs to the Peel play.** Psychic Scream is
-   already the Priest's peel tool (`peel::peel_tools`). The team-called case
-   the card names is "a DPS in danger whose attacker stands beside the enemy
-   healer". That becomes a **peel walk**:
-   - while `ally_in_danger` names a teammate, and one of its
-     `danger_attackers` stands within scream range of a spot the Priest can
-     reach within `dip_budget`, out of `CcField` reach (AS-383's gate, kept),
-     the Priest walks there and screams;
-   - the Scream catches the attacker, and the enemy healer with it when it
-     stands near.
-   - This is the dip's walk with a team purpose. It is gated like every play,
-     and measured by the Peel probe's window response.
+   already the Priest's peel tool (`peel::peel_tools`): while
+   `ally_in_danger` names a teammate, the peel step Screams one of its
+   `danger_attackers` already inside the Scream. The Priest does not walk to
+   bring one into range. A walk at an attacker beyond the Scream measured at
+   or below no walk in every form (§9, D5): a ranged attacker crowd-controls
+   the Priest on the way in, and a short walk trades a heal for the Scream.
 3. **The standalone dip is retired under `TeamPlan`.** `Legacy` keeps its dip
    byte-identically.
 
@@ -570,7 +565,7 @@ Everything is **`TeamPlan` only. `Legacy` stays byte-identical**:
 
 - the yield situation, and the stance situation and play;
 - the kiter's mask and the pursuit's sight side;
-- the peel walk, and the dip's retirement.
+- the dip's retirement.
 
 Every new branch is reached only through `CombatContext::pillar_modes`, the
 play set (`SituationConfig::runs`) or `ai_profile.is_team_plan()`, as AS-373's
@@ -647,8 +642,8 @@ removed):
   - *The stance:* Warrior+Priest against Warlock+Priest, staged at contact by
     the camp pillar. The whole team ends on the far side, mutually sighted,
     within 5s. Pair: `Pillar` withheld.
-  - *The peel walk:* a dying Warrior whose Rogue attacker stands beside the
-    enemy Druid. The Priest walks and screams both. Pair: Peel withheld.
+  - *The dip:* `Legacy` dips at an unheld enemy healer; `TeamPlan` does not.
+    The Peel step still Screams an attacker in range, and not one beyond it.
 - **Mutation-checked:** no held pursuit side, no yield dwell, no team arc
   (the anchor arc instead), and the kiter mask on a blind DPS. Each must fail
   a named test.
@@ -669,7 +664,6 @@ after, `TeamPlan`, per map:
 | stance | pillar deaths, by cause | 35 (4 / 5 / 10 / 1 / 15) / 55 | down overall; DPS-step and joint causes down |
 | stance | stance changes per minute, dwell distribution | new | dwell ≥ 2s by construction; report |
 | stall | lull net health per comp in the table | §2.4 | in-stance lulls at or above the table's |
-| peel walk | Peel probe window response (Priest) | `peel_play_probe` | up, z ≥ 2 |
 | all | `camp_sweep` | 10/12, heal 157 | heal up; occlusion not down |
 
 **The package (win rate).** DIRECTIONAL tier, paired McNemar on flips, both
@@ -695,7 +689,7 @@ Three cards, with one ordering constraint:
 |---|---|---|
 | **A. Sight yield** | `sight_yield` situation, kiter mask, melee sight side with held `PursuitSide`, switch `team{1,2}_sight_yield` | none |
 | **B. Team pillar stance** | `pillar_stance` situation, `Pillar` play, `AvoidCc` keys, team arc, AS-373's preference keys moved under it, the ranged pull to the side; `Stall` behind its own exceptions table, shipped empty (D4) | A's rule 3 reads the stance; B can be built in parallel and integrated after A |
-| **C. Priest peel walk; retire the dip under `TeamPlan`** | the peel walk, the dip's retirement, the camp re-measure | none in code; measured with B, because the camp's value moves to the stance |
+| **C. Retire the Priest's dip under `TeamPlan`** | the dip's retirement, the camp re-measure | none in code; measured with B, because the camp's value moves to the stance |
 
 - **A and C can be built in parallel. B can start in parallel.**
 - **One package measurement covers all three**, run once A, B and C are
@@ -738,16 +732,22 @@ dampening. That is too narrow to justify its gates (dampening, DoTs, trailing
 tempo) until `AvoidCc` has shown the stance mechanism works. The alternative
 is to build both now, with the comp table as the `Stall` key.
 
-**D5. The Priest's dip (§3.5).** *Recommended:* retire the standalone dip
-under `TeamPlan`. Give its walk a team purpose as the Priest's peel walk (a
-Scream on our dying DPS's attacker, catching the enemy healer when it stands
-near), behind AS-383's CC gate. The camp's PRESSURED-solve value moves to the
-stance. The alternative is a team-called "go forward" that enters PRESSURED on
-purpose. That makes a threat response into a plan, which is the accident the
-camp ran on.
+**D5. The Priest's dip (§3.5).** *Ruled 2026-10-24: the standalone dip is
+retired under `TeamPlan`, with no walk in its place.* The offensive Scream is
+the Peel step's, on an attacker already inside it. The camp's PRESSURED-solve
+value moves to the stance. The rejected alternatives are a team-called "go
+forward" that enters PRESSURED on purpose (a threat response made into a
+plan, the accident the camp ran on), and a walk at the dying DPS's attacker.
+The walk was measured against no walk, Priest cells against `Legacy`, seeds
+501-512: -0.5pt (z -3.6), and -0.15 to -0.2pt for every narrowed form (melee
+attackers only, one global cooldown of travel, the target's ranged crowd
+control gated); `docs/design/balance/2026-10-24-as388-scream-dip-retired.md`.
+The walk's open questions are closed as measured: deferring non-critical heals
+during it made no difference, and exempting the caught enemy healer's crowd
+control was worse.
 
-**D6. Sequencing (§8).** *Recommended:* three cards (yield, stance, peel
-walk), built in parallel where possible and merged together after one package
+**D6. Sequencing (§8).** *Recommended:* three cards (yield, stance, dip
+retirement), built in parallel where possible and merged together after one package
 measurement. The alternative is serial merges, each judged on its own win
 rate. That is what the user's measurement rule declines.
 

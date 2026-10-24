@@ -7,9 +7,8 @@ may be cited as a class's standing.
 **What ships:** AS-386 (the sight yield) and AS-387 (the team pillar stance) as
 one change on `main` @ 43a8ee54, with the yield's rule 3 reading the stance.
 
-**What is held:** AS-388 (the Priest's scream peel walk). It is a separate
-follow-up: the Priest's loss and the heal-line rise in the last section are
-diagnosed there before it merges. Chain order against Pillar waits on a
+**What is held:** AS-388 (the Priest's scream dip), measured on its own in
+`2026-10-24-as388-scream-dip-retired.md`. Chain order against Pillar waits on a
 hand-off count (AS-391).
 
 ## Banks
@@ -184,7 +183,5 @@ over 29.5MB of logs. The bank is not vacuous:
 
 ## The held piece: AS-388
 
-AS-388 (the Priest's scream peel walk) was measured on the same banks, on top
-of this package. It turns arm (a)'s Priest from -0.9 (ns) into **-2.1
-(z -2.40)**. It also doubles the heal-line probe's goal-blind share, from
-10.9% to 20.8% over the same 48 seeds. It merges after a diagnosis of both.
+AS-388 (the Priest's scream dip under `TeamPlan`) was measured separately, on
+top of this package: `2026-10-24-as388-scream-dip-retired.md`.
