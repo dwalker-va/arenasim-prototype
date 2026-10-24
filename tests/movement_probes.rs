@@ -7572,8 +7572,9 @@ mod nagrand_teamplan {
     /// `TeamPlan` Priest's scream dip, which had been ending in PRESSURED:
     /// seed 2 then had no PRESSURED frame at all. Migrated, not re-pinned
     /// (CLAUDE.md, *Test an AI decision*): it now reads the PRESSURED frames
-    /// over seeds 1-24, wherever they fall. Two ceilings, with `C_SIGHT`'s
-    /// constraint removed as the mutant:
+    /// over seeds 1-24, wherever they fall. It held them to two ceilings, one
+    /// per seed and one pooled, with `C_SIGHT`'s constraint removed as the
+    /// mutant (the per-seed one is gone since AS-388, below):
     ///
     /// ```text
     ///                  pooled over 1-24     seeds with >= 300 frames
@@ -7588,54 +7589,125 @@ mod nagrand_teamplan {
     /// Priest's goal on a line grazing a pillar top that the copy read as
     /// blocked (80%) and the match read as clear (2%).
     ///
-    /// The pooled ceiling is 30%, between the two. A seed with enough frames
-    /// to read on its own (300, five seconds) is held to 50%, the old per-seed
-    /// ceiling, which catches the mutant's worst seeds. The bank must hold
-    /// 3000 such frames, or the probe has gone vacuous.
+    /// The pooled ceiling was 30%, between the two (40% since AS-385, below).
+    /// The bank must hold 3000 such frames, or the probe has gone vacuous.
+    ///
+    /// Since AS-388 the bound is on the interval, not the point: a bank whose
+    /// seeds disagree must sit clearly under the ceiling, not just on average.
+    ///
+    /// # A seed-clustered bootstrap, not a per-seed ceiling (AS-388)
+    ///
+    /// AS-388 retired the scream dip, which moved the RNG stream, and seed 18
+    /// read 53% over 320 frames against the old 50% per-seed ceiling. It reads
+    /// the same 53% with `C_SIGHT` removed: one seed's frames are too few, and
+    /// too correlated, to say anything about `C_SIGHT` on their own. So the
+    /// per-seed ceiling is dropped, and the pooled share is judged by its
+    /// sampling noise over SEEDS — the unit the frames cluster in. Whole seeds
+    /// are resampled with replacement ([`HEAL_LINE_BOOTSTRAP`] times, from a
+    /// fixed RNG seed, [`HEAL_LINE_BOOTSTRAP_SEED`], so the bound is the same
+    /// number on every run of the same build), and the upper end of the 95%
+    /// interval of the pooled share must sit at or under the ceiling:
+    ///
+    /// ```text
+    ///                   pooled    95% interval (seed-clustered)
+    /// main @ 43a8ee54    8.9%     2.5-16.6%
+    /// AS-388            15.6%     8.2-26.4%
+    /// no C_SIGHT        43.5%    24.6-58.9%   fails: 58.9% > 30%
+    /// ```
+    ///
+    /// # 48 seeds and maps.ron's geometry (AS-385)
+    ///
+    /// AS-388's branch sat one seed's drift under the 30% ceiling, so the
+    /// bank widened from 24 seeds to 48 (the interval narrows by about
+    /// root 2; nothing else about the setup changed) and the ceiling was
+    /// re-derived from the mutant, on the corrected geometry:
+    ///
+    /// ```text
+    ///                        pooled    95% interval    frames
+    /// main @ 43a8ee54        10.2%     7.0-13.0%       10617
+    /// AS-385 package         20.8%    15.9-26.9%       12286
+    /// package, no C_SIGHT    64.4%    52.8-76.3%       13218   fails
+    /// ```
+    ///
+    /// The ceiling, 40%, sits midway between the package's upper end (26.9%)
+    /// and the mutant's lower end (52.8%): about 13 points of headroom
+    /// either way.
     #[test]
     fn teamplan_healer_keeps_its_heal_line_on_nagrand() {
-        let (mut frames, mut blind) = (0usize, 0.0f32);
+        // (frames, blind frames) per seed of the bank, empty seeds included:
+        // a resample draws them as often as any other.
+        let mut per_seed: Vec<(usize, usize)> = Vec::new();
         for seed in HEAL_LINE_BANK {
             let (n, share) = solve_goal_blind_share(seed);
             println!(
                 "seed {seed:2}: {n} pressured solve frames, goal blind {:.0}%",
                 100.0 * share
             );
-            frames += n;
-            blind += share * n as f32;
-            if n >= HEAL_LINE_SEED_FRAMES {
-                assert!(
-                    share <= HEAL_LINE_CEILING,
-                    "seed {seed}: the PRESSURED solve's goal had no line to the Warrior on \
-                     {:.0}% of {n} frames the Priest could heal — the solve has stopped \
-                     asking for sight of its ally",
-                    100.0 * share
-                );
-            }
+            per_seed.push((n, (share * n as f32).round() as usize));
         }
+        let frames: usize = per_seed.iter().map(|s| s.0).sum();
         assert_min_occurrences(
             "pressured solve frames over the bank",
             frames,
             HEAL_LINE_BANK_FRAMES,
         );
-        let pooled = blind / frames as f32;
-        println!("bank: {frames} frames, goal blind {:.1}%", 100.0 * pooled);
+        let pooled = |sample: &mut dyn Iterator<Item = (usize, usize)>| {
+            let (n, b) = sample.fold((0usize, 0usize), |(n, b), s| (n + s.0, b + s.1));
+            b as f32 / n.max(1) as f32
+        };
+        let point = pooled(&mut per_seed.iter().copied());
+        let (lo, hi) = seed_bootstrap_interval(&per_seed, |s| pooled(s));
+        println!(
+            "bank: {frames} frames, goal blind {:.1}% (95% seed-clustered interval {:.1}-{:.1}%)",
+            100.0 * point,
+            100.0 * lo,
+            100.0 * hi
+        );
         assert!(
-            pooled <= HEAL_LINE_POOLED_CEILING,
+            hi <= HEAL_LINE_POOLED_CEILING,
             "over the bank the PRESSURED solve's goal had no line to the Warrior on {:.0}% of \
-             {frames} frames — the solve has stopped asking for sight of its ally",
-            100.0 * pooled
+             {frames} frames, and the upper end of its 95% seed-clustered interval is {:.0}% — \
+             the solve has stopped asking for sight of its ally",
+            100.0 * point,
+            100.0 * hi
         );
     }
 
-    /// The heal-line probe's seed bank, its two ceilings (one seed's, the
-    /// bank's), and its two frame floors (see
+    /// The 2.5th and 97.5th percentiles of `stat` over [`HEAL_LINE_BOOTSTRAP`]
+    /// resamples of `seeds`, each drawn whole and with replacement, from a
+    /// fixed xorshift64* stream seeded with [`HEAL_LINE_BOOTSTRAP_SEED`].
+    fn seed_bootstrap_interval(
+        seeds: &[(usize, usize)],
+        stat: impl Fn(&mut dyn Iterator<Item = (usize, usize)>) -> f32,
+    ) -> (f32, f32) {
+        let mut state = HEAL_LINE_BOOTSTRAP_SEED;
+        let mut next = move || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            state.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        };
+        let k = seeds.len() as u64;
+        let mut stats: Vec<f32> = (0..HEAL_LINE_BOOTSTRAP)
+            .map(|_| {
+                let draws: Vec<(usize, usize)> =
+                    (0..k).map(|_| seeds[(next() % k) as usize]).collect();
+                stat(&mut draws.into_iter())
+            })
+            .collect();
+        stats.sort_by(f32::total_cmp);
+        let at = |q: f32| stats[((stats.len() - 1) as f32 * q).round() as usize];
+        (at(0.025), at(0.975))
+    }
+
+    /// The heal-line probe's seed bank, its ceiling on the upper end of the
+    /// pooled share's interval, its frame floor and its bootstrap (see
     /// [`teamplan_healer_keeps_its_heal_line_on_nagrand`]).
-    const HEAL_LINE_BANK: std::ops::RangeInclusive<u64> = 1..=24;
-    const HEAL_LINE_CEILING: f32 = 0.50;
-    const HEAL_LINE_POOLED_CEILING: f32 = 0.30;
-    const HEAL_LINE_SEED_FRAMES: usize = 300;
+    const HEAL_LINE_BANK: std::ops::RangeInclusive<u64> = 1..=48;
+    const HEAL_LINE_POOLED_CEILING: f32 = 0.40;
     const HEAL_LINE_BANK_FRAMES: usize = 3000;
+    const HEAL_LINE_BOOTSTRAP: usize = 4000;
+    const HEAL_LINE_BOOTSTRAP_SEED: u64 = 0x5EED_A538;
 
     /// The heal-line probe's measurement at one seed (the Nagrand camp,
     /// `TeamPlan`): over the frames the team-1 Priest is PRESSURED — read off
@@ -7867,49 +7939,98 @@ mod nagrand_teamplan {
     /// 1724 pressured frames at 2.97 u/s. With 13 in the set the minimum is
     /// 1.23 u/s (seed 4) and the median 2.12. The floor and the median
     /// thresholds are unchanged.
+    ///
+    /// # Migrated to a situation over a seed bank (AS-388)
+    ///
+    /// AS-388 retired the `TeamPlan` Priest's scream dip, which moved the RNG
+    /// stream, and seed 10 read 0.74 u/s against the 0.75 floor. Its trace
+    /// showed the pin had drifted, not the key: the Priest was FREE, healing
+    /// beside a Rogue that was on its Warrior, and the probe counted any frame
+    /// with the Rogue inside 12yd. Migrated, not re-pinned (CLAUDE.md, *Test
+    /// an AI decision*): the probe now reads only the frames the key governs —
+    /// the Priest PRESSURED (the posture the team solve runs in), free to move
+    /// (no stun, fear, polymorph, incapacitate or root on it: a held Priest is
+    /// not a statue), with the Rogue inside 12yd — wherever they fall over
+    /// seeds 1-24, and asserts on each bar below. Measured, with two mutants:
+    /// the key disarmed (`field_is_flat = false`), and the solve's answer held
+    /// to where the healer stands (`solve_unit` returning `ctx.unit.pos`):
+    ///
+    /// ```text
+    ///                   pooled     counted   lowest seed with >= 5s counted
+    /// main @ 43a8ee54   2.67 u/s    94.0s    1.83 (6 such seeds)
+    /// AS-388            2.34 u/s   111.2s    1.17 (11 such seeds)
+    /// key disarmed      0.06 u/s   112.9s    0.00 (10 of 11 below 0.75)
+    /// solve held        0.00 u/s   118.1s    0.00 (12 of 12 below 0.75)
+    /// ```
+    ///
+    /// Three bars, each failed by both mutants:
+    ///
+    /// - a seed with five seconds counted is held to 0.75 u/s, the statue
+    ///   band's edge (~0.65);
+    /// - the pooled rate is held to 1.2 u/s, the old median guard: a centre
+    ///   below which the healer as a whole is sagging toward the band while
+    ///   every seed still clears its floor (the branch sits at about half
+    ///   again of it, main at more than twice);
+    /// - the bank must hold a minute of counted pressure, or it has gone
+    ///   vacuous.
     #[test]
     fn teamplan_healer_is_not_a_statue_on_basicarena() {
-        let mut rates: Vec<f32> = Vec::new();
+        let (mut total_frames, mut total_path) = (0usize, 0.0f32);
         for seed in STATUE_SEEDS {
             let (pressured_frames, pressured_path) = pressured_movement(seed);
+            total_frames += pressured_frames;
+            total_path += pressured_path;
+            if pressured_frames == 0 {
+                println!("seed {seed:2}: no pressure");
+                continue;
+            }
             let secs = pressured_frames as f32 / 60.0;
-            assert_min_occurrences(
-                &format!("seed {seed} pressured frames"),
-                pressured_frames,
-                120, // >= 2s of real melee pressure, or the probe is vacuous
-            );
             let rate = pressured_path / secs;
             println!(
                 "seed {seed:2}: {pressured_path:.1}u over {secs:.1}s of melee pressure \
                  = {rate:.2} u/s"
             );
-            assert!(
-                rate >= 0.75,
-                "seed {seed}: {rate:.2} u/s while a Rogue stands on the healer — that \
-                 is into the ~0.65 statue band, so the flat-field anti-statue key has \
-                 regressed. Measured floor is 0.78 (empty off hand) / 0.90 (armed).",
-            );
-            rates.push(rate);
+            if pressured_frames >= STATUE_SEED_FRAMES {
+                assert!(
+                    rate >= STATUE_SEED_FLOOR,
+                    "seed {seed}: {rate:.2} u/s over {secs:.1}s while a PRESSURED healer, \
+                     free to move, has a Rogue on it — into the ~0.65 statue band; the \
+                     flat-field anti-statue key has regressed",
+                );
+            }
         }
-        rates.sort_by(|a, b| a.partial_cmp(b).expect("no NaN rates"));
-        let median = (rates[5] + rates[6]) / 2.0;
-        println!("median: {median:.2} u/s over {} seeds", rates.len());
+        assert_min_occurrences(
+            "pressured frames with a Rogue in 12yd over the bank",
+            total_frames,
+            STATUE_BANK_FRAMES,
+        );
+        let secs = total_frames as f32 / 60.0;
+        let pooled = total_path / secs;
+        println!("bank: {pooled:.2} u/s over {secs:.1}s of melee pressure");
         assert!(
-            median >= 1.2,
-            "median pressured movement {median:.2} u/s across 12 seeds — every seed \
-             may still clear the statue floor while the healer as a whole sags \
-             toward it. Measured median is 1.73 (empty off hand) / 1.57 (armed).",
+            pooled >= STATUE_POOLED_FLOOR,
+            "pooled pressured movement {pooled:.2} u/s over the bank — the healer as a \
+             whole is sagging toward the statue band (measured 2.34, main 2.67; with the \
+             key disarmed 0.06)",
         );
     }
 
-    /// The twelve seeds the anti-statue probe sweeps. See its doc for why 13
-    /// stands in for 7.
-    const STATUE_SEEDS: [u64; 12] = [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13];
+    /// The anti-statue probe's seed bank, floors and vacuity bound (see
+    /// [`teamplan_healer_is_not_a_statue_on_basicarena`]).
+    const STATUE_SEEDS: std::ops::RangeInclusive<u64> = 1..=24;
+    const STATUE_POOLED_FLOOR: f32 = 1.2;
+    const STATUE_SEED_FLOOR: f32 = 0.75;
+    const STATUE_SEED_FRAMES: usize = 300;
+    const STATUE_BANK_FRAMES: usize = 3600;
 
-    /// The anti-statue probe's measurement at one seed: frames the enemy Rogue
-    /// spent within the 12yd danger radius of the TeamPlan Priest after the
-    /// gates, and the path the Priest covered over those frames.
+    /// The anti-statue probe's measurement at one seed: the frames after the
+    /// gates on which the TeamPlan Priest was PRESSURED, free to move (no
+    /// stun, fear, polymorph, incapacitate or root on it) and had the enemy
+    /// Rogue within the 12yd danger radius, and the path it covered over them.
     fn pressured_movement(seed: u64) -> (usize, f32) {
+        use arenasim::headless::runner::TraceConfig;
+        use arenasim::states::play_match::components::AuraType;
+
         let mut cfg = create_config(
             vec!["Warrior", "Priest"],
             vec!["Rogue", "Priest"],
@@ -7918,25 +8039,86 @@ mod nagrand_teamplan {
         cfg.map = "BasicArena".to_string();
         cfg.ai_profile = Some("TeamPlan".to_string());
         cfg.max_duration_secs = 300.0;
-        let (_result, timeline) = run_observed_collecting(cfg);
-        let gate = timeline.gates_open_time.expect("gates never opened");
-        let priest = timeline.find(1, CharacterClass::Priest, false);
-        let rogue = timeline.find(2, CharacterClass::Rogue, false);
-        let rg: BTreeMap<u32, Vec3> = timeline
-            .samples_from(rogue, gate)
-            .into_iter()
-            .map(|(t, p)| (t.to_bits(), p))
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        drop(tmp);
+
+        // (combat time, Priest position, Rogue within 12yd, Priest held) per
+        // frame after the gates, the Priest alive.
+        let mut frames: Vec<(f32, Vec3, bool, bool)> = Vec::new();
+        let mut gate: Option<f32> = None;
+        run_headless_match_observed(
+            cfg,
+            true,
+            Some(TraceConfig {
+                output_path: path.clone(),
+            }),
+            |f| {
+                if !f.gates_open {
+                    return;
+                }
+                let gate = *gate.get_or_insert(f.sim_time);
+                let find = |team, class| {
+                    f.combatants
+                        .values()
+                        .find(|c| c.team == team && c.class == class && !c.is_pet)
+                };
+                let Some(p) = find(1, CharacterClass::Priest).filter(|p| p.alive) else {
+                    return;
+                };
+                let near = find(2, CharacterClass::Rogue)
+                    .is_some_and(|r| r.alive && xz(r.position).distance(xz(p.position)) <= 12.0);
+                let held = p.aura_types.iter().any(|a| {
+                    matches!(
+                        a,
+                        AuraType::Stun
+                            | AuraType::Fear
+                            | AuraType::Polymorph
+                            | AuraType::Incapacitate
+                            | AuraType::Root
+                    )
+                });
+                frames.push((f.sim_time - gate, p.position, near, held));
+            },
+        )
+        .expect("observed traced headless match failed");
+
+        // The team-1 Priest's posture transitions, on the combat clock.
+        let transitions: Vec<(f32, String)> = std::fs::read_to_string(&path)
+            .expect("read trace file")
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|v| {
+                v["kind"] == "movement_decision"
+                    && v["actor"]["team"] == 1
+                    && v["actor"]["class"] == "Priest"
+                    && !v["previous_posture"].is_null()
+            })
+            .map(|v| {
+                (
+                    v["sim_time"].as_f64().unwrap() as f32,
+                    v["posture"].as_str().unwrap_or_default().to_string(),
+                )
+            })
             .collect();
-        // Path length accumulated only while the Rogue is within the
-        // 12yd danger radius of the Priest, over the seconds that held.
+        let _ = std::fs::remove_file(path);
+
+        // Path length accumulated only while the Priest is PRESSURED — the
+        // posture the team solve, and its anti-statue key, run in — free to
+        // move, with the Rogue within the 12yd danger radius of it. (Until
+        // AS-388 this read the Rogue's distance alone, which also counted a
+        // FREE Priest healing beside a Rogue that was on its Warrior, and a
+        // Priest the Rogue held in a stun: frames the key has no say over.)
         let mut pressured_path = 0.0f32;
         let mut pressured_frames = 0usize;
         let mut prev: Option<Vec3> = None;
-        for (t, ppos) in timeline.samples_from(priest, gate) {
-            let near = rg
-                .get(&t.to_bits())
-                .is_some_and(|r| xz(*r).distance(xz(ppos)) <= 12.0);
-            if near {
+        let (mut next, mut posture) = (0usize, "free");
+        for (t, ppos, near, held) in frames {
+            while next < transitions.len() && transitions[next].0 <= t {
+                posture = &transitions[next].1;
+                next += 1;
+            }
+            if posture == "pressured" && near && !held {
                 pressured_frames += 1;
                 if let Some(prev) = prev {
                     pressured_path += xz(prev).distance(xz(ppos));
