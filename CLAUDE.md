@@ -1161,8 +1161,13 @@ the wand fallback are untouched; a kiter already blind gets `close_when_out`);
 its pursuit takes the tangent side round a pillar whose waypoint its healer
 sees, and HOLDS it (`PursuitSide`, `combat_core::movement::sight_kept_heading`
 — a sight preference is not self-reinforcing). `team{1,2}_sight_yield: false`
-is the measurement switch; `Legacy` classifies no pair and is byte-identical.
-Scenes `tests/sight_yield_scenes.rs`, staged `tests/sight_yield_staged.rs`.
+is the measurement switch, and `team{1,2}_yield_healer_cast: false` leaves the
+healer's cast out of rule 1 (measured to change almost nothing); `Legacy`
+classifies no pair and is byte-identical. `validate()` keeps
+`urgency_hp_threshold` at or below `SIGHT_YIELD_HP`, so a dying DPS is a hurt
+one. Scenes `tests/sight_yield_scenes.rs`, staged `tests/sight_yield_staged.rs`;
+measured with the stance as one change in
+`docs/design/balance/2026-10-24-as385-package-measurement.md`.
 
 **DPS kiter blocks** (`mage:` / `hunter:` — the shared ENGAGE/KITE machine, `DpsMovementConfig`):
 - `weights:` (above) plus `range_band_min`/`max` (orbit ring; min = SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE 8), `kite_hold` (anti-strobe hysteresis), `directive_ttl` (must cover the longest cast), `commit_window`.
