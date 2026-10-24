@@ -1,9 +1,9 @@
 # Ranged DPS against hidden targets (AS-389, with AS-392): design
 
-Status: **PROPOSED, awaiting the user's decisions (§7).** Nothing here changes
-behaviour. Every measurement is on `main` @ `03f77e9e` (AS-385 merged: the
-sight yield, AS-386, and the pillar stance, AS-387). `TeamPlan` only
-throughout; `Legacy` is not touched by anything proposed.
+Status: **BUILT (AS-389), as §6.1 describes; the user's rulings are §7.**
+The diagnosis (§1-§5) is on `main` @ `03f77e9e` (AS-385 merged: the sight
+yield, AS-386, and the pillar stance, AS-387); the build's measurement is §8.
+`TeamPlan` only throughout; `Legacy` is byte-identical.
 
 ## 1. The answer, short
 
@@ -28,10 +28,9 @@ throughout; `Legacy` is not touched by anything proposed.
    that survives switching both pieces off (-3.2, z -2.47): design D3, which
    retired AS-373's lone-healer hug. Under the target switch, the TwinPillars
    Mage gains +8.2 in a uniform world.
-4. **Recommendation:** build the **target switch as a team focus rule**
-   (§5.1). Merge AS-392 into AS-389 (§6). Hold the endgame pincer (§5.2) as
-   an optional second card: it shortens endgames by about 14% and moves no
-   wins.
+4. **Built:** the **target switch as a team focus situation** (§6.1),
+   +4.4pt head-to-head (z +25.5) over three seed blocks (§8). AS-392 is merged
+   into this card and closed. The endgame pincer (§6.2) is AS-394.
 
 ## 2. Instrument and banks
 
@@ -256,40 +255,66 @@ tunnels a healer it cannot see. Melee already has a swap (bucket A,
 
 ## 6. Proposal
 
-### 6.1 Build: a team focus that leaves a hidden target
+### 6.1 Built: a team focus that leaves a hidden target
 
-**Where it lives.** A team situation, as the yield is: `focus`, classified in
-`situation.rs` from the shared snapshot, traced as a `situation_change`, and
-read by `acquire_targets` for the team's ranged DPS. The team decides; the
-unit acts. It is not a per-unit predicate in the targeting loop.
+**Where it lives.** The `target_focus` team situation
+(`class_ai::target_focus`, classified in `situation.rs` with the rest of the
+team's situation, from the shared snapshot). The team decides; target
+acquisition (`combat_ai::acquire_targets`) acts on it through
+`target_focus::retarget`, reading the previous frame's classification.
 
-**The rule.** `TeamPlan` only. A ranged DPS (Mage, Hunter, Warlock) leaves its
-target when:
+**The situation.** `TeamPlan` only, on a map with obstacles. Per ranged DPS
+(Mage, Hunter, Warlock) the team keeps how long its target has been out of its
+sight (`TargetSight`, the cast's own sight test). When one has been blind for
+`FOCUS_HIDDEN_SECS` and another living, visible, non-immune, non-pet enemy
+stands within `FOCUS_REACH` of it and in its sight, the focus moves to the
+nearest such enemy: `Focus { subject, from, since }`.
 
-1. the target has been out of its sight for `FOCUS_HIDDEN_SECS`;
-   - the prototype used 0.5s and 2.0s, which measure the same;
-   - proposed: 1.5s, one global cooldown;
-2. **and** another living, visible, non-immune, non-pet enemy stands in its
-   reach and sight. It takes the nearest such enemy, and the team's other
-   ranged DPS converge on the same one if they can reach it: one focus, not
-   two.
+- `FOCUS_HIDDEN_SECS` = 1.5s. The prototype measured 0.5s and 2.0s within
+  half a point of each other (§5); 1.5s, one global cooldown, lets a target
+  that steps out between two casts come back without a switch (24% of the
+  blind time is in episodes shorter than 1.5s, §3.1).
+- `FOCUS_REACH` = 35yd, Auto Shot's range: the shortest of the three ranged
+  classes' main attacks.
 
-It returns to the old target only by the same rule, when the new target hides
-in turn. There is no sticky "home" target, which the prototype did not need.
+**Anti-strobe.**
 
-**Anti-strobe.** The focus holds for at least `FOCUS_DWELL` (2s). A lone
-viewer cannot flicker the rule, because the hidden clock resets on sight.
+- **Dwell:** a focus holds `FOCUS_DWELL` (2s) before it can move again.
+- **The return's hysteresis:** there is no separate return rule. The focus
+  goes back to its old target by the rule that left it: the focus itself out
+  of sight for `FOCUS_HIDDEN_SECS`, and the old target in reach and sight. A
+  target that juked out once is not returned to the moment it steps back.
+- A focus ends only when its subject can no longer be taken (dead, stealthed,
+  immune).
 
-**Interactions:**
+**Who takes it.** A ranged DPS takes the focus in acquisition when the focus
+stands in its reach and sight, or when its own target is out of its sight
+too; a second ranged DPS shooting a target it can see, with the focus out of
+its reach, keeps its own. **Melee DPS do not follow it:** their target-blind
+time is under 1% of their life (AS-385 §2.2: Warrior 0.9%, Rogue 0.5%), they
+have their own swap (bucket A), and a team focus across the arena would cost
+them swing time. The Hunter's pet follows its Hunter's target, as always.
 
-- Burst's `kill_window` outranks: a DPS does not leave a kill-window target.
-- The Hunter's `trap_retarget` keeps priority as today.
-- A configured `team{n}_kill_target` is a measurement override and wins.
+**Interactions.**
 
-**Tests.** A scene pair: a hidden healer and an exposed DPS in reach switches;
-remove the exposed DPS and it does not. A staged match on TwinPillars shows
-the switch and the return. `Legacy` stays byte-identical by construction,
-because the situation is never classified there.
+- A DPS on the team's kill window subject (the Burst play's) does not leave it.
+- The player's kill call (`team{n}_kill_target`) wins over the focus.
+- The Hunter's trap retarget runs after it, so it still moves the Hunter off a
+  healer its own trap holds.
+
+**Trace and switch.** Each onset (or move) and end is a `situation_change`
+named `target_focus` (`subject` the focus, `from` the target it left);
+`ability_decision`s carry it as `situation.target_focus`.
+`team{1,2}_target_focus: false` is the measurement switch.
+
+**Tests.** Scenes (`tests/target_focus_scenes.rs`), each a pair: hidden versus
+in sight; an alternative in reach and sight versus none (behind cover, out of
+reach, immune); the nearest of two; `Legacy`, withheld and melee; the kill
+window; the dwell; the return's hysteresis; a dead focus; taking the focus
+(ranged versus melee, a second ranged DPS by reach or by its own blindness,
+an immune focus). A staged TwinPillars match (`tests/target_focus_staged.rs`)
+plays the switch with the focus on, withheld, and under a kill call. Every
+condition was mutation-proved (§8).
 
 ### 6.2 Optional second card: the endgame pincer ("Hunt")
 
@@ -320,38 +345,99 @@ grow.
 - **Revisiting D3 here.** Whether the lone-healer hug should come back,
   outside the stance, is AS-385's question (D4 below).
 
-## 7. Decisions for the user
+## 7. Rulings (user, 2026-10-24)
 
-**D1. Build the target switch as a team focus situation (§6.1)?**
-*Recommended: yes.* It is the one lever that measured: +4.3pt head-to-head,
-z +14.7, robust to its delay. The alternative is a per-unit rule in
-`acquire_targets`. That is cheaper, and it is what the prototype measured,
-but it is not a team decision.
+- **D1.** Build the target switch as a `TeamPlan` team focus situation (§6.1).
+- **D2.** Accept the balance shift (the Rogue down, the ranged DPS up), with
+  no Rogue exception; the 0.8 milestone sweep re-baselines.
+- **D3.** AS-392 is merged into this card and closed: its own mask measures
+  zero, its stance pull positive, and the enemy's stance (-2.5) is answered by
+  the switch (§8: the TwinPillars Mage +6.9 in a uniform world).
+- **D4.** No measurement card for the lone-hug retirement (AS-385 D3).
+- **D5.** The endgame pincer is AS-394, low priority.
 
-**D2. Accept the balance shift?** In a uniform `TeamPlan` world the switch
-moves the Rogue -10pt and the ranged DPS +4 to +6pt, compressing the DPS
-spread. *Recommended: yes, and re-baseline at the 0.8 milestone sweep.* The
-alternative is to gate the switch to non-Rogue targets. That would be a named
-exception without a measurement behind it, which the plays rule declines.
+## 8. The build, measured
 
-**D3. Merge AS-392 into AS-389?** *Recommended: yes.* AS-392's three suspects
-measure as follows:
+**Tier: DIRECTIONAL**, replicated. Banks: `2026-10-25-as389-focus-gen.py`
+(AS-385's package cells, both teams `TeamPlan`, the AS-385 package on) at
+fresh seeds in three blocks, 601-604, 605-608 and 609-612: 5,040 matches per
+arm per block, four arms (`off`, `t1`, `t2`, `uni`), 60,480 matches. Scorer:
+`2026-10-25-as389-focus-score.py`, paired at identical seeds, McNemar on the
+flips per block and pooled. A slice counts as an effect only when its sign
+agrees in all three blocks and its pooled |z| is at least 2. Block 601-604 ran
+on a build that differs from the shipped one only by formatting and tests;
+its `uni` arm reproduces the shipped binary's byte for byte.
 
-- its own mask: 0;
-- its stance pull: positive;
-- the enemy's stance: -2.5. That is the stance working, and its answer is
-  this card's switch, which lifts the TwinPillars Mage +8.2.
+**Head-to-head** (the side running the focus, against the same side without
+it; the other team without it; both seats; 30,240 sides pooled):
 
-The residual of AS-385's -3.3 is D3's retirement of the lone hug, which is not
-a ranged-DPS mechanism. Close AS-392 as diagnosed, with this doc as its
-record.
+| slice | 601-604 | 605-608 | 609-612 | pooled |
+|---|---|---|---|---|
+| all | +4.3 | +4.4 | +4.4 | **+4.4 (z +25.5)** |
+| Nagrand / TwinPillars | +2.4 / +6.1 | +2.6 / +6.3 | +2.7 / +6.1 | +2.6 (z +13.1) / +6.2 (z +21.9) |
+| Hunter | +9.0 | +10.0 | +8.8 | +9.3 (z +19.1) |
+| Mage | +6.9 | +8.0 | +7.5 | +7.5 (z +17.8) |
+| Warlock | +5.4 | +4.6 | +6.2 | +5.4 (z +12.0) |
+| Warrior | +4.6 | +4.3 | +4.6 | +4.5 (z +14.9) |
+| Rogue | +0.1 | +0.6 | +0.8 | +0.5 (z +2.0), at the bar |
+| TwinPillars Mage | +9.8 | +11.2 | +11.7 | **+10.9 (z +15.2)** |
+| 3v3 | -0.4 | +1.9 | +3.5 | +1.7 (z +1.5), not an effect |
 
-**D4. The lone hug (AS-385 design D3).** On TwinPillars, switching both
-package pieces off costs the Mage -3.2 (z -2.47) against pre-package `main`.
-The only unconditional change in that arm is D3. *Recommended: a measurement
-card, not a revert.* Run D3 alone, both ways round, before reopening it.
-Decide whether to file it.
+Every healer class gains (Druid +1.3, Paladin +3.1, Priest +3.5, Shaman
++3.1, all z ≥ 4).
 
-**D5. The endgame pincer (§6.2) as a second card?** *Recommended: file it
-behind D1, at low priority.* It is for match length and readability, and it
-moves no wins.
+**Uniform** (both teams run it, against neither; every side):
+
+| class | 601-604 | 605-608 | 609-612 | pooled |
+|---|---|---|---|---|
+| Hunter | +7.5 | +8.3 | +7.2 | +7.7 (z +14.6) |
+| Mage | +6.2 | +6.2 | +5.9 | +6.1 (z +12.3) |
+| Warlock | +3.5 | +2.8 | +4.5 | +3.6 (z +7.3) |
+| Warrior | +1.5 | +1.1 | +1.4 | +1.3 (z +3.0) |
+| **Rogue** | -10.6 | -10.1 | -10.2 | **-10.3 (z -19.3)** |
+| TwinPillars Mage | +6.8 | +6.8 | +7.2 | +6.9 (z +8.5) |
+| Druid / Priest / Shaman | | | | -2.0 / -3.5 / -2.9 (each z ≤ -4.3) |
+| Paladin | | | | -0.8 (not an effect) |
+
+The Rogue's loss is the ruled balance shift (D2): when a ranged DPS's target
+hides, the enemy it can see is usually the Rogue on it.
+
+**Blind to its target** (the AS-385 harness, `tests/team_sight_cohesion.rs`,
+seeds 601-602, 2,520 matches per arm, ranged DPS, share of post-contact
+life):
+
+| class | focus off | focus on |
+|---|---|---|
+| all ranged | 26.4% | 23.1% |
+| Hunter | 24.8% | 20.3% |
+| Mage | 28.0% | 27.2% |
+| Warlock | 26.2% | 21.7% |
+| TwinPillars Mage | 27.8% | 25.9% |
+
+The share of lining spent with another enemy in reach and sight (the
+`switchable` cause, §3.2) falls from 7.4% to 1.1%. The Mage moves least: its
+blind time is the lone-healer endgame (§3.1), where there is nobody else to
+shoot.
+
+**Identity.**
+
+- `Legacy`: all 1,260 cells of the bank at seed 601, both teams `Legacy`, as
+  full `--headless` match logs on `main` and on the build: `diff -r` clean
+  over 31MB. Non-vacuous: 2,872 eliminations, 8,708 crit lines, 1,011
+  distinct durations; winners team 1 671, team 2 576, 13 draws.
+- `TeamPlan` with the focus withheld from both teams reproduces `main`'s
+  `TeamPlan` CSV byte for byte over the 5,040 matches of 601-604.
+
+**`camp_sweep`** (seeds 1-12, n=12): `TeamPlan` 11/12 → 10/12, heal to the
+Warrior 323 → 267, occlusion after contact 20.8 → 22.1s (not down). One
+discordant match; the Warlock now leaves the hidden Priest for the Warrior.
+At n=12 this is not evidence either way.
+
+**Mutation proof.** Each of 19 mutants failed a named test: the hidden
+threshold, the dwell, the carried clock, the alternative's reach, its sight,
+its immunity, the nearest choice, the kill window, melee following,
+retarget's two clauses and its validity check, a dead focus held, the
+`TeamPlan` gate (both ways), the withholding switch, the trace event, the kill
+call, and the acquisition wiring.
+
+**Rows and CSVs:** `sweeps/2026-10-25-as389-final-*`.

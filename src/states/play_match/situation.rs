@@ -87,6 +87,13 @@
 //!   ([`SituationConfig::sight_yield`]); a DPS's movement reads it (the kiter
 //!   scorer's anchor mask, `CombatContext::sight_yield_healer`, and the
 //!   pursuit's held tangent side, `combat_core::movement`).
+//! - **`target_focus`** — the enemy the team's ranged DPS shoot, moved off a
+//!   target one of them has not seen for `target_focus::FOCUS_HIDDEN_SECS`
+//!   onto the nearest enemy that DPS can reach and see (AS-389,
+//!   `class_ai::target_focus`). A focus holds `FOCUS_DWELL`; it returns to
+//!   its old target only by the same rule. `TeamPlan` only
+//!   ([`SituationConfig::target_focus`]), on a map with obstacles; target
+//!   acquisition reads it (`combat_ai::acquire_targets`), one frame on.
 //!
 //! ## Plays
 //!
@@ -193,6 +200,7 @@ use super::ai_profile::AiProfile;
 use super::class_ai::combat_snapshot::CombatSnapshot;
 use super::class_ai::pillar_stance::{self, StanceMemory, StanceWindow};
 use super::class_ai::plays;
+use super::class_ai::target_focus::{self, Focus, TargetSight};
 use super::class_ai::{pressing_when_ahead, stealth_visible, team_hp_sums, CombatantInfo};
 use super::components::{Aura, AuraType};
 use super::constants::{DAMPENING_RAMP_SECS, DAMPENING_START_SECS};
@@ -362,6 +370,14 @@ pub struct TeamSituation {
     pub pillar_stance: Option<StanceWindow>,
     /// What the stance's keys remember from one classification to the next.
     pub stance_memory: StanceMemory,
+    /// The enemy the team's ranged DPS shoot, once one of them has been blind
+    /// to its own target for `target_focus::FOCUS_HIDDEN_SECS` (the module
+    /// docs' `target_focus`). `None` unless the team runs it
+    /// ([`SituationConfig::target_focus`]).
+    pub target_focus: Option<Focus>,
+    /// Each ranged DPS's sight of its own target, with when it went blind:
+    /// the clock under `target_focus`.
+    pub target_sight: SmallVec<[TargetSight; 3]>,
 }
 
 /// What a unit does about a situation: a named reordering of its own priority
@@ -793,6 +809,10 @@ pub struct SituationConfig {
     /// `shared.cc_reach_margin`: the margin of the crowd-control discs the
     /// pillar stance's team arc keeps out of.
     pub cc_reach_margin: f32,
+    /// Whether the team classifies its `target_focus` (AS-389): `true` under
+    /// `TeamPlan` ([`Self::under`]) unless a measurement turns it off
+    /// ([`WithheldPlays::no_target_focus`]).
+    pub target_focus: bool,
 }
 
 impl Default for SituationConfig {
@@ -824,6 +844,7 @@ impl SituationConfig {
             sight_yield: false,
             yield_counts_healer_cast: true,
             cc_reach_margin: config.shared.cc_reach_margin,
+            target_focus: false,
         }
     }
 
@@ -840,6 +861,7 @@ impl SituationConfig {
                 runs: PlaySet::all(),
                 pillar_modes: true,
                 sight_yield: true,
+                target_focus: true,
                 ..self
             },
             AiProfile::Legacy => Self {
@@ -848,6 +870,7 @@ impl SituationConfig {
                 runs: PlaySet::default(),
                 pillar_modes: false,
                 sight_yield: false,
+                target_focus: false,
                 ..self
             },
         }
@@ -863,6 +886,7 @@ impl SituationConfig {
             exceptions: self.withheld.exceptions_for_team(team),
             pillar_modes: cfg.pillar_modes && !self.withheld.no_pillar_modes(team),
             sight_yield: cfg.sight_yield && !self.withheld.no_sight_yield(team),
+            target_focus: cfg.target_focus && !self.withheld.no_target_focus(team),
             yield_counts_healer_cast: cfg.yield_counts_healer_cast
                 && !self.withheld.yield_cast_moves(team),
             ..cfg
@@ -984,6 +1008,12 @@ pub struct WithheldPlays {
     pub team1_yield_cast_moves: bool,
     /// Team 2's, as [`Self::team1_yield_cast_moves`].
     pub team2_yield_cast_moves: bool,
+    /// Team 1 plays without the target focus (AS-389, `target_focus`): a
+    /// measurement control, as the sight yield is (`team1_target_focus:
+    /// false` in a headless config).
+    pub team1_no_target_focus: bool,
+    /// Team 2's, as [`Self::team1_no_target_focus`].
+    pub team2_no_target_focus: bool,
 }
 
 impl WithheldPlays {
@@ -994,6 +1024,16 @@ impl WithheldPlays {
             self.team2_yield_cast_moves
         } else {
             self.team1_yield_cast_moves
+        }
+    }
+
+    /// Whether team `team` plays without the target focus; team 1's for a
+    /// team id outside 1..=2.
+    pub fn no_target_focus(&self, team: u8) -> bool {
+        if team == 2 {
+            self.team2_no_target_focus
+        } else {
+            self.team1_no_target_focus
         }
     }
 
@@ -1200,6 +1240,18 @@ fn classify_roster_before_yield(
         .and_then(|w| roster.get(&w.subject))
         .map(|subject| pressuring(roster, auras, subject, cfg))
         .unwrap_or_default();
+    let kill_window = kill_window(roster, auras, obstacles, team, prev, clock.now, cfg);
+    let (target_focus, target_sight) = target_focus::classify(
+        roster,
+        auras,
+        obstacles,
+        team,
+        prev.target_focus,
+        &prev.target_sight,
+        kill_window.map(|w| w.subject),
+        clock.now,
+        cfg.target_focus,
+    );
     TeamSituation {
         phase: phase(clock),
         since_gates: clock.since_gates,
@@ -1216,7 +1268,9 @@ fn classify_roster_before_yield(
         in_danger: danger.in_danger,
         danger_cleared_at: danger.cleared_at,
         classified: true,
-        kill_window: kill_window(roster, auras, obstacles, team, prev, clock.now, cfg),
+        kill_window,
+        target_focus,
+        target_sight,
         now: clock.now,
         last_stand: last_stand(roster, auras, team, prev, clock.now),
         lock_ending: lock_ending(roster, auras, team, prev, clock.now),
@@ -1849,6 +1903,9 @@ fn record_transitions(
     if let Some((kind, stance)) = pillar_stance::change(prev.pillar_stance, next.pillar_stance) {
         trace.record_stance_change(team, kind, &stance);
     }
+    if let Some((kind, focus)) = target_focus::change(prev.target_focus, next.target_focus) {
+        trace.record_focus_change(team, kind, &focus);
+    }
 }
 
 /// How a window moved between two classifications, if it did: opened, closed,
@@ -2320,6 +2377,7 @@ mod tests {
                 runs: PlaySet::all(),
                 pillar_modes: true,
                 sight_yield: true,
+                target_focus: true,
                 ..SituationConfig::default()
             }
         );
@@ -2332,10 +2390,11 @@ mod tests {
                 runs: PlaySet::default(),
                 pillar_modes: false,
                 sight_yield: false,
+                target_focus: false,
                 ..teamplan
             },
-            "only the release, the closing rule, the gated plays, the pillar modes and the \
-             sight yield differ"
+            "only the release, the closing rule, the gated plays, the pillar modes, the \
+             sight yield and the target focus differ"
         );
         // With no band the latch is the plain test from each side, whatever
         // the previous tempo.

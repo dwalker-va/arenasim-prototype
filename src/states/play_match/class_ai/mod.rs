@@ -43,6 +43,7 @@ pub mod rogue_flare;
 pub mod scene;
 pub mod shaman;
 pub mod take_cover;
+pub mod target_focus;
 pub mod warlock;
 pub mod warrior;
 

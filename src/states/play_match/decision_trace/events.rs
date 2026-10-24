@@ -67,6 +67,7 @@ use serde::{Deserialize, Serialize};
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::class_ai::pillar_stance::{StanceReason, StanceWindow};
+use crate::states::play_match::class_ai::target_focus::Focus;
 use crate::states::play_match::components::{AuraType, DRCategory};
 use crate::states::play_match::situation::{
     MatchPhase, Play, TeamSituation, Tempo, Window, YieldRule,
@@ -125,6 +126,10 @@ pub struct SituationTag {
     /// AS-385): present only while the team holds a stance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pillar_stance: Option<StanceTag>,
+    /// The team's target focus (`TeamSituation::target_focus`, AS-389):
+    /// present only while one is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_focus: Option<FocusTag>,
     /// The deciding unit's play, when it is not `Default`
     /// (`situation::Play`): `{"name": "burst"}` or
     /// `{"name": "peel", "ally": <entity id>}`.
@@ -222,6 +227,25 @@ impl From<&StanceWindow> for StanceTag {
     }
 }
 
+/// A team's target focus as the trace records it: the enemy it shoots, the
+/// target it moved off, and when.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct FocusTag {
+    pub subject: u32,
+    pub from: u32,
+    pub since: f32,
+}
+
+impl From<&Focus> for FocusTag {
+    fn from(f: &Focus) -> Self {
+        Self {
+            subject: f.subject.index(),
+            from: f.from.index(),
+            since: f.since,
+        }
+    }
+}
+
 impl From<&TeamSituation> for SituationTag {
     fn from(situation: &TeamSituation) -> Self {
         Self {
@@ -233,6 +257,7 @@ impl From<&TeamSituation> for SituationTag {
             last_stand: situation.last_stand.as_ref().map(WindowTag::from),
             lock_ending: situation.chain_window().as_ref().map(WindowTag::from),
             pillar_stance: situation.pillar_stance.as_ref().map(StanceTag::from),
+            target_focus: situation.target_focus.as_ref().map(FocusTag::from),
             play: None,
             play_step: None,
         }
@@ -258,6 +283,10 @@ pub enum SituationName {
     /// A DPS began, ended or changed the rule of its healer-sight yield
     /// (`TeamSituation::sight_yield`, AS-386).
     SightYield,
+    /// The team's ranged DPS moved their focus off a target they could not
+    /// see (`TeamSituation::target_focus`, AS-389). Its `subject` is the new
+    /// focus, `from` the target it moved off.
+    TargetFocus,
 }
 
 /// What happened to the situation. Adding a variant requires updating
@@ -426,6 +455,9 @@ pub enum EventPayload {
         pillar: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<StanceReason>,
+        /// `target_focus` changes: the target the focus moved off.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<u32>,
     },
 }
 
