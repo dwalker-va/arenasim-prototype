@@ -758,16 +758,15 @@ whose scorer terms name the `pillar` and the three `key_*` values.
   `HUG_SLACK` (3yd, `team_solve::C_RING`) and the margin (`C_MARGIN`, above
   crowd control and cover, below sight); its deep-shadow samples stay.
 - **Open** is the FREE formation point with the sight constraint on the
-  HEADING (`formation::open_heading`): a heading whose point stands in a near
-  teammate's widened shadow (AS-206's wedge, near-obstacle limit and
+  HEADING (`formation::open_heading`): a heading whose point stands in the
+  ANCHOR's widened shadow (AS-206's wedge, near-obstacle limit and
   `REPAIR_LIMIT`) is forbidden; the turn holds its side and crosses only the
-  other way round the centroid, through the open. With nothing forbidden it is
-  `turn_limited` bit for bit; AS-206's point repair still runs after it and is
-  a no-op unless every heading was forbidden.
-- Never the Paladin or the Shaman in hug (`HUG_EXCEPTIONS`, each with its
-  measurement). The Shaman still plays the open heading; the Paladin is
-  untouched by both modes (its FREE is melee pursuit, with no formation
-  point). Medic chase, dispel walk,
+  other way round the centroid, through the open. Another teammate's shadow
+  does not bind the heading; AS-206's point repair, which still runs after
+  it, keeps the point in that teammate's sight where it can. With nothing
+  forbidden the heading is `turn_limited` bit for bit.
+- The Paladin (`HUG_EXCEPTIONS`, design D5) is untouched by both modes: its
+  FREE is melee pursuit, with no formation point. Medic chase, dispel walk,
   TakeCover, ESCAPE and DIP outrank it and leave the mode as it was.
   Obstacle-free maps are untouched; `Legacy` is byte-identical.
 

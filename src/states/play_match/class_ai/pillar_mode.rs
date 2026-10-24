@@ -57,9 +57,16 @@
 //! its own candidates and gains the arc's ring points, a soft leash to the
 //! ring and the margin (`team_solve::HugRing`).
 //!
+//! **The seam for a team stance (AS-385).** The mode key is [`update`]'s
+//! [`Keys`]: two preference keys (`at_pillar`, `cc_ready`) and one
+//! feasibility key (`arc`). A team-level pillar stance that picks the pillar
+//! and whether to hold it replaces the preference keys and the candidate
+//! pillar there; the feasibility key, the dwell, the trace and everything
+//! below [`update`] (the ring goal, the PRESSURED terms) stay as they are.
+//!
 //! **Who.** `TeamPlan` only (`CombatContext::pillar_modes`); never a healer
-//! [`HUG_EXCEPTIONS`] names — the Paladin, whose FREE is melee pursuit, and
-//! the Shaman, which measured negative hugging; never while a medic chase, a dispel walk,
+//! [`HUG_EXCEPTIONS`] names — the Paladin, whose FREE is melee pursuit and
+//! which neither mode touches; never while a medic chase, a dispel walk,
 //! TakeCover, ESCAPE or a dip holds the healer's legs — those run instead of
 //! the FREE and PRESSURED ticks that read the mode, and leave it as it was.
 
@@ -107,22 +114,13 @@ pub const HUG_SIGHT_MARGIN: f32 = 3.0;
 /// wider than the positioning horizon (`cc_ready_horizon`), because the mode
 /// is a stance, not a step.
 pub const CC_MODE_HORIZON: f32 = 5.0;
-/// The healers that never hug, each with the measurement behind it. The
-/// Shaman still plays the open mode's heading (`formation::open_heading`);
-/// the Paladin is untouched by both modes, since its FREE is melee pursuit and
-/// never builds a formation point.
-pub const HUG_EXCEPTIONS: &[(CharacterClass, &str)] = &[
-    (
-        CharacterClass::Paladin,
-        "design D5: its FREE is melee pursuit, so it would hug only in PRESSURED",
-    ),
-    (
-        CharacterClass::Shaman,
-        "AS-373 head-to-head (n=2,080 Shaman matches, both seats, Nagrand and \
-         TwinPillars): hug and open together -3.2pt (z=-3.0), the open heading \
-         alone -1.2pt (z=-1.7)",
-    ),
-];
+/// The healers that never hug, each with the reason. The Paladin (design
+/// D5) is untouched by both modes: its FREE is melee pursuit and never builds
+/// a formation point, so it would hug only in PRESSURED.
+pub const HUG_EXCEPTIONS: &[(CharacterClass, &str)] = &[(
+    CharacterClass::Paladin,
+    "design D5: its FREE is melee pursuit, so it would hug only in PRESSURED",
+)];
 
 /// Ring samples: one every 5 degrees, 0.7yd of arc on Nagrand.
 pub const RING_SAMPLES: usize = 72;

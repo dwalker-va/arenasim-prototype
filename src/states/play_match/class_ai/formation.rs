@@ -254,10 +254,9 @@ pub fn walk_is_stale(directive: Option<&MovementDirective>, point: Vec2, thresho
 
 /// Whether the formation point is held to sight of the teammates under this
 /// unit's AI profile: `TeamPlan` only. With the pillar modes on
-/// ([`open_constrained`]) the HEADING is held first, and this repair still runs
-/// on the point it gives: a no-op wherever some heading kept the point out of
-/// every near shadow, a repair only in `open_heading`'s anchor-only and
-/// unconstrained fallbacks.
+/// ([`open_constrained`]) the HEADING is first held out of the anchor's
+/// shadow, and this repair still runs on the point it gives: for the other
+/// teammates' shadows, and wherever every heading was forbidden.
 pub fn sight_constrained(ctx: &CombatContext) -> bool {
     ctx.ai_profile.is_team_plan()
 }
@@ -276,34 +275,28 @@ pub fn open_constrained(ctx: &CombatContext) -> bool {
 /// formation offset.
 pub const HEADING_SAMPLES: usize = 180;
 
-/// The headings, as sample indices, whose point would stand in a teammate's
-/// shadow: per sample, a bit per teammate (bit 0 the anchor) whose widened
-/// shadow near its obstacle holds the point ([`shadow_exits`] non-empty —
-/// AS-206's wedge and near-obstacle limit).
+/// Per heading sample, whether its point would stand in the shadow of one of
+/// `viewers`: a widened shadow near its obstacle holds the point
+/// ([`shadow_exits`] non-empty — AS-206's wedge and near-obstacle limit).
 fn heading_shadows(
     ctx: &CombatContext,
-    allies: &[&CombatantInfo],
+    viewers: &[Vec2],
     point_at: &impl Fn(Vec2) -> Vec2,
-) -> Vec<u8> {
+) -> Vec<bool> {
     let step = std::f32::consts::TAU / HEADING_SAMPLES as f32;
     (0..HEADING_SAMPLES)
         .map(|i| {
             let p = point_at(Vec2::from_angle(i as f32 * step));
-            let mut mask = 0u8;
-            for (k, ally) in allies.iter().enumerate().take(8) {
-                let viewer = xz(ally.position);
+            viewers.iter().any(|&viewer| {
                 // A shadow the repair would not have left (its nearest exit
                 // `REPAIR_LIMIT` or more away) is not forbidden either:
                 // turning round it would carry the point as far.
-                if ctx.obstacles.iter().any(|o| {
+                ctx.obstacles.iter().any(|o| {
                     shadow_exits(viewer, o, p, SIGHT_MARGIN)
                         .iter()
                         .any(|(_, e)| e.distance(p) < REPAIR_LIMIT)
-                }) {
-                    mask |= 1 << k;
-                }
-            }
-            mask
+                })
+            })
         })
         .collect()
 }
@@ -314,10 +307,12 @@ fn heading_shadows(
 ///
 /// `point_at` maps a heading to the raw formation point it gives (the offset
 /// off the centroid, the wand and burn pulls, the arena clamp). A heading
-/// whose point stands in a near teammate's widened shadow is FORBIDDEN — the
-/// same wedge and near-obstacle limit as AS-206's repair ([`shadow_exits`]),
-/// every teammate's while some heading avoids them all, else the anchor's
-/// alone, else none (the unconstrained [`turn_limited`]). Then:
+/// whose point stands in the ANCHOR's widened shadow (the most injured
+/// teammate's) is FORBIDDEN — the same wedge, near-obstacle limit and
+/// [`REPAIR_LIMIT`] as AS-206's repair ([`shadow_exits`]); when every heading
+/// is, none is (the unconstrained [`turn_limited`]). Another teammate's shadow
+/// does not bind the heading: AS-206's repair, run on the point after, keeps
+/// it in sight of the rest where it can. Then:
 ///
 /// - a remembered heading the forbidden set has grown over is pushed to the
 ///   nearest allowed one: the interval's edge moves with the geometry, so the
@@ -343,12 +338,17 @@ pub fn open_heading(
     point_at: impl Fn(Vec2) -> Vec2,
     allow_through: bool,
 ) -> Vec2 {
-    let allies = teammates(ctx, healer);
-    let shadows = heading_shadows(ctx, &allies, &point_at);
-    let mut allowed: Vec<bool> = shadows.iter().map(|m| *m == 0).collect();
-    if !allowed.iter().any(|a| *a) {
-        allowed = shadows.iter().map(|m| m & 1 == 0).collect();
-    }
+    // The ANCHOR's shadow (the most injured teammate) only: another
+    // teammate's is left to AS-206's repair, which runs on the point after.
+    let anchor: Vec<Vec2> = teammates(ctx, healer)
+        .first()
+        .map(|a| xz(a.position))
+        .into_iter()
+        .collect();
+    let allowed: Vec<bool> = heading_shadows(ctx, &anchor, &point_at)
+        .into_iter()
+        .map(|shadowed| !shadowed)
+        .collect();
     let a0 = heading.map(|h| h.dir).unwrap_or(target);
     let n = HEADING_SAMPLES;
     let step = std::f32::consts::TAU / n as f32;
@@ -1282,6 +1282,68 @@ mod tests {
                 assert!(last.angle_to(target).abs() < 1e-3, "arrived at {last}");
             }
         }
+    }
+
+    /// Only the ANCHOR's shadow binds the open heading. A 3v3: the Mage behind
+    /// the pillar, a Warrior far to the north whose shadow misses the headings,
+    /// and the formation centroid at (0, 8). With the Warrior the anchor (the
+    /// more hurt), the turn from 200 to 350 degrees takes the shorter way, south
+    /// through the Mage's shadow — AS-206's repair answers for the Mage. The
+    /// control makes the Mage the anchor: the same turn never enters its
+    /// shadow.
+    #[test]
+    fn only_the_anchors_shadow_binds_the_open_heading() {
+        use std::f32::consts::PI;
+        let obstacles = pillar();
+        let warrior = (8.0, 40.0);
+        let point_at = |d: Vec2| Vec2::new(0.0, 8.0) + d * 8.0;
+        let in_shadow =
+            |d: Vec2| !shadow_exits(MAGE_XZ, &obstacles[0], point_at(d), SIGHT_MARGIN).is_empty();
+        let start = Vec2::from_angle(PI * 200.0 / 180.0);
+        let target = Vec2::from_angle(PI * 350.0 / 180.0);
+        assert!(
+            !in_shadow(start) && !in_shadow(target) && in_shadow(Vec2::from_angle(PI * 1.5)),
+            "the scene puts the Mage's shadow on the shorter way only: shadowed {:?}",
+            (0..36)
+                .filter(|k| in_shadow(Vec2::from_angle(*k as f32 * PI / 18.0)))
+                .map(|k| k * 10)
+                .collect::<Vec<_>>()
+        );
+        let crossings = |mage_hp: f32, warrior_hp: f32| {
+            let f = fixture(&[
+                (MAGE.0, MAGE.1, mage_hp),
+                (warrior.0, warrior.1, warrior_hp),
+            ]);
+            let ctx = f.ctx(&obstacles);
+            let mut heading = Some(FormationHeading {
+                dir: start,
+                at: 0.0,
+            });
+            (1..=80)
+                .filter(|&k| {
+                    let dir = open_heading(
+                        &ctx,
+                        f.healer,
+                        target,
+                        &mut heading,
+                        k as f32 * 0.1,
+                        1.0,
+                        point_at,
+                        false,
+                    );
+                    in_shadow(dir)
+                })
+                .count()
+        };
+        assert!(
+            crossings(0.7, 0.4) > 0,
+            "the Warrior the anchor: the turn should pass through the Mage's shadow"
+        );
+        assert_eq!(
+            crossings(0.4, 0.7),
+            0,
+            "the Mage the anchor: the turn entered its shadow"
+        );
     }
 
     /// With nothing forbidden the open heading IS `turn_limited`, bit for bit.

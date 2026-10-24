@@ -1,9 +1,11 @@
 # Healer pillar modes: hug the pillar or play in the open (AS-373): design
 
-Status: **BUILT (AS-373), `TeamPlan` only.** The user signed off D1-D7 on
-2026-10-19 (§10). §1-§9 are the design as proposed, with the measurements of
-§2 on `main` @ `ca41a9f1`; **§11 is the shape as built and its measurement**,
-and where the two differ §11 is the authority. The code is
+Status: **BUILT (AS-373), `TeamPlan` only, a building block for AS-385's
+team pillar stance.** The user signed off D1-D7 on 2026-10-19 (§10) and
+amended D7 and the hug exceptions on 2026-10-23 (§11.0). §1-§9 are the design
+as proposed, with the measurements of §2 on `main` @ `ca41a9f1`; **§11 is the
+shape as built and its measurement**, and where the two differ §11 is the
+authority. The code is
 `class_ai::pillar_mode` (the mode key and hug) and `formation::open_heading`
 (the open mode).
 
@@ -540,61 +542,64 @@ per team.
 the A→B jump. The alternative is to keep the exits and resolve the jump only
 when hug is chosen, which leaves it in melee-only comps.
 
-## 11. As built, and what it measured (AS-373 build, 2026-10-23)
+## 11. As built, and what it measured (AS-373, 2026-10-23)
+
+### 11.0 Decisions
+
+- D1-D6 as §10 recommends (user, 2026-10-19).
+- **D7, amended (user, 2026-10-23):** the open heading is held out of the
+  ANCHOR's shadow only. Another teammate's shadow is AS-206's point repair's,
+  which runs after the heading.
+- **Hug exceptions (user, 2026-10-23):** the Paladin only (D5). Every other
+  healer hugs.
+- **Scope (user, 2026-10-23):** AS-373 ships as a building block. Its
+  win-rate judgement belongs to the combined team package (AS-385, team sight
+  cohesion and the team pillar stance), where hug becomes an input to the team
+  stance rather than the healer's own choice. The head-to-heads below are
+  directional evidence for the block, not its ship criterion. The §9 targets
+  missed below are accepted as reported.
 
 ### 11.1 The shape
 
-As §3-§5, with these differences. Each was a measured correction, or the
-reading of a choice the design left open.
+As §3-§5, with these specifics.
 
 - **The crowd-control key counts only what a pillar defends against**
   (`pillar_mode::pillar_threats`): a ready (5s) crowd control that needs
-  sight, reaches past `MELEE_CC_REACH` (8yd) and is not a pet's. AS-362's
-  `needs_sight` is true of a Kidney Shot too, and a Rogue walks round the
-  pillar to land it, so a melee stun alone keeps the healer open (§3 item 2's
-  "chaser CC").
+  sight, reaches past `MELEE_CC_REACH` (8yd) and is not a pet's. A Rogue's
+  stun needs sight too, but a Rogue walks round the pillar to land it, so a
+  melee stun alone keeps the healer open (§3 item 2's "chaser CC").
 - **The arc key is the DEFENDED arc** (`defended_arc`): ring ground in heal
   range that sees the anchor AND that no such crowd control covers (in range
-  and in the caster's sight). Built on §4's arc alone, a hug walked the healer
-  into the very discs it was for: hard-CC'd 10.5% of hug time against 3.5% in
-  the open, and 4.76% of all time on Nagrand against 3.81% before. On the
-  defended arc it fell back to 4.0%, and with the next rule to 3.91% (§11.2).
+  and in the caster's sight). On the undefended arc a hug walks the healer
+  into the very discs it is for: measured, hard-CC'd 10.5% of hug time against
+  3.5% in the open.
 - **The arc must hold the margin** (`holds_margin`): a run of the defended arc
-  wider than the margin on both edges. On a sliver the healer stood on a
+  wider than the margin on both edges. On a sliver the healer stands on a
   grazing line, in sight one step and out the next; in the camp a Priest held
-  such a spot for 10s while its Warrior died unhealed. With the rule the camp's
-  zero-heal losses went 3 → 1 of 12 and the traced hug's blindness 11.4% →
-  4.8% of hug time (Nagrand).
-- **The sight margin leads by the anchor's motion.** It is
-  `HUG_SIGHT_MARGIN` (3yd) plus the arc the anchor's own turn round the pillar
-  sweeps in `HUG_LEAD_SECS` (1.5s, a GCD), off the trailing edge; 3yd alone on
-  both edges while the anchor stands still. A Warrior at the skin turns about
-  1.1 rad/s and a healer on the 8yd ring walks 0.9: with the bare 3yd margin
-  the staged follow lost its Warrior for 2.3s; with the lead, for no longer
-  than a global cooldown. The motion is
-  MEASURED from the anchor's displacement over 0.25s (`anchor_velocity`), not
-  read off the snapshot's velocity, which is the facing times the speed and
-  stays non-zero for a unit standing still and hitting.
-- **The open heading's forbidden set has AS-206's `REPAIR_LIMIT` as well as
-  its wedge and near-obstacle limit**, and AS-206's point repair still runs
-  after the heading. With nothing forbidden the heading is `turn_limited` bit
-  for bit, and the repair is a no-op wherever a heading avoided every near
-  shadow; it acts only in the anchor-only and unconstrained fallbacks. Without
-  the two, the Shaman lost 2.0pt (z=-2.7) on TwinPillars with the open mode
-  alone; with them, 1.2pt (z=-1.7).
-- **The Shaman does not hug** (`HUG_EXCEPTIONS`, beside the Paladin's D5
-  entry). Over the first head-to-head (seeds 1-4, n=2,080 Shaman matches) hug
-  and open together cost it 3.2pt (z=-3.0), the open alone 1.2pt (z=-1.7). The
-  exception was then checked on fresh seeds (§11.4): Shaman -0.5pt (z=-0.7).
-  AS-373-test's re-check (Shaman hugging and open against neither) reads
-  -1.1 (ns) overall, -1.6 (z=-2.34) in 2v2 and +12.5 in 3v3 (n=160): the
-  exception is for the user to rule on.
-  Re-check it at the milestone sweep, as the play exceptions are.
+  such a spot for 10s while its Warrior died unhealed.
+- **The sight margin leads by the anchor's motion:** `HUG_SIGHT_MARGIN` (3yd)
+  plus the arc the anchor's own turn round the pillar sweeps in
+  `HUG_LEAD_SECS` (1.5s, a GCD), off the trailing edge; 3yd on both edges while
+  the anchor stands still. A Warrior at the skin turns about 1.1 rad/s and a
+  healer on the 8yd ring walks 0.9: with the bare 3yd margin the staged follow
+  lost its Warrior for 2.3s. The motion is MEASURED from the anchor's
+  displacement over 0.25s (`anchor_velocity`); the snapshot's velocity is the
+  facing times the speed, non-zero for a unit standing still and hitting.
+- **The open heading** is held out of the anchor's widened shadow, with
+  AS-206's wedge, near-obstacle limit and `REPAIR_LIMIT` (a shadow whose exit
+  is 16yd or more away does not forbid). AS-206's point repair runs after the
+  heading and keeps the point in the other teammates' sight where it can. With
+  nothing forbidden the heading is `turn_limited` bit for bit.
 - **The PRESSURED margin** is a cost above crowd control and cover together
   (`W_MARGIN` plus their ceilings), below sight; the soft leash is 10 a yard
-  beyond the ring's 3yd slack. A bearing is judged against the core by its
-  angle about the pillar, so the solve's deep-shadow samples are judged too.
-- **Where the FREE point is composed now**, for a later change to it (AS-383
+  beyond the ring's 3yd slack. A spot is judged against the core by its
+  bearing about the pillar, so the solve's deep-shadow samples are judged too.
+- **The seam for a team stance (AS-385):** the mode key is `update`'s `Keys`,
+  two preference keys (`at_pillar`, `cc_ready`) and one feasibility key
+  (`arc`). A team pillar stance replaces the preference keys and the candidate
+  pillar; the feasibility key, the dwell, the trace, the ring goal and the
+  PRESSURED terms stay.
+- **Where the FREE point is composed**, for a later change to it (AS-383
   works on the open-field Priest's crowd control): `compute_formation_point`
   (the Priest's and the caster-healer machine's) builds the raw point per
   heading (`point_at`), turns the heading (`open_heading`), runs AS-206's
@@ -605,141 +610,130 @@ reading of a choice the design left open.
   field. Hug replaces the whole chain in `free_tick` before it runs.
 - **Measurement switch:** `team{1,2}_pillar_modes: false`
   (`WithheldPlays::team1_no_pillar_modes`). With both false a `TeamPlan` match
-  plays byte-identically to `main` @ `cd0cdf3d` (860 of 860 bank matches).
+  plays byte-identically to `main` @ `cd0cdf3d`.
 
-### 11.2 The baseline, re-run on current main, and after
+### 11.2 Mechanism: the §2 bank, before and after
 
-`main` @ `cd0cdf3d` (AS-362, AS-381 and AS-292 merged), the §2 bank (2,580
-matches per profile), Paladin excluded throughout (D5). "Hug" in this table is
-§2's GEOMETRIC hug (within 4yd of the skin), which counts the PRESSURED solve's
-own cover too. Before → after:
+`main` @ `cd0cdf3d` (AS-362, AS-381 and AS-292 merged) against this build, the
+§2 bank (2,580 matches), both teams `TeamPlan`, Paladin excluded (D5: neither
+mode reaches it). "Hug" in this table is §2's GEOMETRIC hug (within 4yd of the
+skin), which counts the PRESSURED solve's own cover too.
 
 | map | fmt | hug share | blind to anchor, hug / open | blind to a dying teammate, hug / open | PRESSURED hard CC, hug / open | blind episodes ≥1s per healer-match | pillar deaths per 100 healer-matches (count) |
 |---|---|---|---|---|---|---|---|
-| Nagrand | 2v2 | 27.7% → 31.0% | 15.0 / 2.8 → 15.2 / 2.9 | 26.8 / 1.3 → 19.5 / 1.4 | 3.0 / 6.7 → 3.2 / 6.5 | 0.92 → 1.02 | 0.5 (8) → 0.4 (6) |
-| Nagrand | 3v3 | 21.4% → 22.9% | 16.7 / 3.5 → 9.8 / 2.5 | 23.6 / 2.3 → 16.1 / 3.2 | 3.6 / 5.7 → 2.8 / 9.8 | 0.89 → 0.67 | 2.7 (4) → 1.3 (2) |
-| TwinPillars | 2v2 | 34.7% → 38.2% | 8.9 / 3.8 → 8.1 / 4.8 | 12.9 / 3.7 → 13.5 / 6.8 | 4.9 / 5.4 → 5.1 / 6.8 | 1.05 → 1.09 | 0.7 (11) → 0.9 (13) |
-| TwinPillars | 3v3 | 41.4% → 45.1% | 20.1 / 12.4 → 18.4 / 12.6 | 16.7 / 10.9 → 20.4 / 14.0 | 5.3 / 7.9 → 4.4 / 10.1 | 3.10 → 3.17 | 4.7 (7) → 7.3 (11) |
+| Nagrand | 2v2 | 27.7% → 32.1% | 15.0 / 2.8 → 15.3 / 3.1 | 26.8 / 1.3 → 18.8 / 2.0 | 3.0 / 6.7 → 3.3 / 6.3 | 0.92 → 1.09 | 0.5 (8) → 0.8 (12) |
+| Nagrand | 3v3 | 21.4% → 20.7% | 16.7 / 3.5 → 12.3 / 2.6 | 23.6 / 2.3 → 17.0 / 3.2 | 3.6 / 5.7 → 3.7 / 10.8 | 0.89 → 0.62 | 2.7 (4) → 1.3 (2) |
+| TwinPillars | 2v2 | 34.7% → 40.3% | 8.9 / 3.8 → 7.6 / 4.9 | 12.9 / 3.7 → 12.2 / 7.2 | 4.9 / 5.4 → 5.5 / 6.5 | 1.05 → 1.11 | 0.7 (11) → 0.9 (13) |
+| TwinPillars | 3v3 | 41.4% → 48.6% | 20.1 / 12.4 → 20.5 / 11.3 | 16.7 / 10.9 → 21.1 / 15.8 | 5.3 / 7.9 → 5.0 / 8.1 | 3.10 → 3.27 | 4.7 (7) → 8.0 (12) |
 
-Over all post-contact time (Paladin excluded):
+Over all post-contact time:
 
 | map | hard CC'd | in CC reach | blind to the anchor | blind to a dying teammate |
 |---|---|---|---|---|
-| Nagrand | 3.81% → 3.91% | 23.4% → 22.8% | 6.23% → 6.57% | 5.31% → 4.87% |
-| TwinPillars | 4.51% → 4.87% | 27.6% → 29.8% | 6.23% → 6.60% | 8.60% → 10.80% |
+| Nagrand | 3.81% → 4.10% | 23.4% → 22.6% | 6.23% → 6.86% | 5.31% → 5.45% |
+| TwinPillars | 4.51% → 4.71% | 27.6% → 28.8% | 6.23% → 6.62% | 8.60% → 10.83% |
 
-By the TRACED mode (`PillarModeEnter` / `PillarModeLeave`; the harness's
-`modes`; FREE and PRESSURED rows leave out DIP and ESCAPE frames, which belong
-to those walks): Nagrand healers hug 6.1% of post-contact time, TwinPillars
-16.0%.
+By the TRACED mode (`PillarModeEnter` / `PillarModeLeave`, the harness's
+`modes`; DIP and ESCAPE frames belong to those walks and are in neither row):
 
 | map | posture | mode | share | hard CC'd | in CC reach | blind to anchor | blind to a dying teammate |
 |---|---|---|---|---|---|---|---|
-| Nagrand | FREE | hug | 5.1% | 1.1% | 6.1% | 4.2% | 0.6% |
-| Nagrand | FREE | open | 94.9% | 3.1% | 12.9% | 6.0% | 4.1% |
-| Nagrand | PRESSURED | hug | 6.8% | 6.6% | 25.7% | 4.4% | 7.5% |
-| Nagrand | PRESSURED | open | 93.2% | 5.0% | 34.6% | 7.4% | 7.0% |
-| TwinPillars | FREE | hug | 10.6% | 3.1% | 17.2% | 3.6% | 5.6% |
-| TwinPillars | FREE | open | 89.4% | 3.6% | 17.4% | 4.3% | 7.9% |
-| TwinPillars | PRESSURED | hug | 20.2% | 6.2% | 43.8% | 5.1% | 10.4% |
-| TwinPillars | PRESSURED | open | 79.8% | 6.1% | 42.2% | 10.2% | 18.1% |
+| Nagrand | FREE | hug | 6.7% | 2.0% | 8.0% | 4.1% | 2.0% |
+| Nagrand | FREE | open | 93.3% | 3.3% | 12.7% | 6.8% | 4.6% |
+| Nagrand | PRESSURED | hug | 10.2% | 5.3% | 26.7% | 3.8% | 6.8% |
+| Nagrand | PRESSURED | open | 89.8% | 5.1% | 34.0% | 7.3% | 7.8% |
+| TwinPillars | FREE | hug | 17.0% | 3.4% | 23.7% | 3.0% | 5.8% |
+| TwinPillars | FREE | open | 83.0% | 3.3% | 14.6% | 4.2% | 7.9% |
+| TwinPillars | PRESSURED | hug | 29.4% | 7.8% | 46.0% | 4.6% | 9.1% |
+| TwinPillars | PRESSURED | open | 70.6% | 5.4% | 40.6% | 11.5% | 19.9% |
 
-Mode changes: 1.72 per healer-match on Nagrand, 1.76 on TwinPillars; median
+Mode changes: 2.41 per healer-match on Nagrand, 2.53 on TwinPillars; median
 time in a mode 6.0s and 4.1s (the floor is `MODE_DWELL`, 2s).
+
+Hard-CC'd share of post-contact time per healer and map
+(`docs/design/balance/sweeps/2026-10-23-as373-cc-cells.py`), `main` → this
+build:
+
+| healer | Nagrand | TwinPillars |
+|---|---|---|
+| Priest | 4.15% → **4.91%** | 6.19% → 5.84% |
+| Druid | 3.64% → 3.38% | 3.41% → **3.98%** |
+| Shaman | 3.66% → **4.16%** | 4.22% → **4.48%** |
+| Paladin | 4.51% → 4.13% | 4.34% → **5.05%** |
+
+The Paladin's change comes from its teammates and opponents, which do play
+the modes.
+
+The camp (`tests/camp_sweep.rs`, Warrior+Priest v Warlock+Priest, 12 seeds):
+12/12 → 11/12, heal to the Warrior 307 → 296, heal line occluded 33% → 28%
+(50% → 43% after contact), the Priest hard-CC'd 6.0s → 4.5s, zero-heal losses
+0 → 1.
 
 ### 11.3 Against the targets (§9)
 
 | target | result |
 |---|---|
-| blind to the anchor while hugging at most open's | **Met for the traced hug**: 4.8% against 6.7% (Nagrand), 4.9% against 6.9% (TwinPillars). The geometric hug, which is mostly the PRESSURED solve's own cover, is unchanged (Nagrand 2v2 15.2% against 15.0%). |
-| blind to a dying teammate while hugging at most 2x open's | **Met for the traced hug** (Nagrand 3.3% against 5.0%); geometric 19.5% against 1.4%, down from 26.8%. |
-| PRESSURED hard CC, hug at most 3.5% with the gap kept | Geometric: **met** on Nagrand (3.2% / 6.5% in 2v2, 2.8% / 9.8% in 3v3). Traced: 6.6% against 5.0%. |
-| blind episodes ≥1s halved | **Not met.** 0.92 → 1.02 (Nagrand 2v2), 0.89 → 0.67 (3v3). |
-| pillar deaths down | Nagrand 12 → 8; TwinPillars 18 → 24. Small counts. |
-| AS-370 formation-goal changes over 5yd at 0 | **Not met.** `measure_formation_goal_jumps` (10 seeds, both orders): Warrior+Mage+Priest v Rogue+Warlock+Druid 17 → 29; Warlock+Priest v Rogue+Druid 36 → 17; Mage+Druid v Hunter+Paladin 13 → 0; the other two 0 → 0. What steps now is a change of mode (the goal moves between the open point and the ring) and the 3v3 anchor-only fallback. |
-| reversal cells not up | Not measured cell by cell; `tests/healer_positioning.rs`'s pinned reversal rate passes. |
-| no healer × map cell gains hard CC | **Not met.** Five of eight cells gain (table below). |
-| AS-370's three chosen-exit situations staged (3v3, seeds 20, 36, 49) | **Dropped, not built.** They exist to show those exit changes go to zero, and the target they serve is missed (the row above on exit changes): staging them would pin a property the build does not have. The open traverse (`tests/pillar_mode_staged.rs`) stages the open mode's own crossing instead, with its modes-off pair. |
+| blind to the anchor while hugging at most open's | **Met for the traced hug**: 4.3% against 7.1% (Nagrand), 4.3% against 7.3% (TwinPillars). The geometric hug, mostly the PRESSURED solve's own cover, is unchanged (Nagrand 2v2 15.3% against 15.0%). |
+| blind to a dying teammate while hugging at most 2x open's | **Met for the traced hug** (Nagrand 3.7% against 5.6%); geometric 18.8% against 2.0%, down from 26.8%. |
+| PRESSURED hard CC, hug at most 3.5% with the gap kept | Geometric Nagrand 2v2: **met** (3.3% / 6.3%); 3v3 3.7% / 10.8%. Traced: 5.3% against 5.1%. |
+| blind episodes ≥1s halved | **Not met.** 0.92 → 1.09 (Nagrand 2v2), 0.89 → 0.62 (3v3). |
+| pillar deaths down | **Not met.** Nagrand 12 → 14, TwinPillars 18 → 25. Small counts. |
+| AS-370 formation-goal changes over 5yd at 0 | **Not met.** `measure_formation_goal_jumps` (10 seeds, both orders): Warrior+Mage+Priest v Rogue+Warlock+Druid 17 → 25; Warlock+Priest v Rogue+Druid 36 → 17; Mage+Druid v Hunter+Paladin 13 → 0; the other two 0 → 0. What steps is a change of mode (the goal moves between the open point and the ring) and AS-206's repair for a non-anchor teammate. |
+| AS-370's three chosen-exit situations staged (3v3, seeds 20, 36, 49) | **Not built.** They exist to show those exit changes go to zero, and that target is missed; staging them would pin a property the build does not have. The open traverse (`tests/pillar_mode_staged.rs`) stages the open mode's crossing instead, with its modes-off pair. |
+| no healer × map cell gains hard CC | **Not met.** Five of eight cells gain, by up to 0.8pt (§11.2). |
+| heading reversals per minute, no cell up | Not measured cell by cell; `tests/healer_positioning.rs`'s pinned reversal rate passes. |
 
-Hard-CC'd share of post-contact time per healer class and map (the §2 bank,
-`docs/design/balance/sweeps/2026-10-23-as373-cc-cells.py`), `main` → this build:
+**Where the hug still loses sight.** Where it engages, the hug sees the anchor
+better than the open does. What it cannot do is keep up with a teammate
+circling at the skin: the sighted arc of a teammate 0.5yd off a Nagrand pillar
+is about ±50 degrees of the 8yd ring, and the teammate turns faster than a
+healer walks the ring. Of the 164 hug blind episodes of 1s or more on Nagrand
+(median 3.0s), the teammate broke sight in 57% and stood within 1yd of the
+skin in 78%. That is the DPS share, AS-382. A key that also required the
+teammate to turn slowly enough to follow (at most 0.8 of the healer's ring
+speed) was measured and not taken: blind to the anchor rose overall.
 
-| healer | Nagrand | TwinPillars |
-|---|---|---|
-| Priest | 4.15% → **4.68%** | 6.19% → 6.03% |
-| Druid | 3.64% → 3.36% | 3.41% → **4.04%** |
-| Shaman | 3.66% → **3.81%** | 4.22% → **4.78%** |
-| Paladin | 4.51% → 4.19% | 4.34% → **4.91%** |
+### 11.4 Head-to-head (DIRECTIONAL)
 
-The Shaman and the Paladin do not hug; their change comes from the open
-heading (the Shaman), and from teammates and opponents that do (both). The
-traced PRESSURED hug is also hard-CC'd more than PRESSURED open (Nagrand 6.6%
-against 5.0%; 3v3 Nagrand 14.7% against 6.5%, small samples).
+Paired, McNemar on flips, the scored side's healer class, both seat
+assignments, every 2v2 healer cell and the six one-healer 3v3 teams on Nagrand
+and TwinPillars. Directional evidence for the building block (§11.0), not a
+ship criterion; no per-cell figures.
 
-The camp (`tests/camp_sweep.rs`, Warrior+Priest v Warlock+Priest, 12 seeds,
-both teams `TeamPlan` with the modes): 12/12 → 11/12, heal to the Warrior 307 →
-296, heal line occluded 33% → 28% (50% → 43% after contact), the Priest
-hard-CC'd 6.0s → 4.5s.
+**`TeamPlan` against `Legacy`, `main` → this build**, fresh seeds 49-68
+(n=50,400; 2,400 in 3v3): overall 51.3% → 51.5% (+0.2pt, z=+1.56); 2v2 +0.2
+(z=+1.47); **3v3 +0.6 (z=+0.53)**; Nagrand +0.4 (z=+1.80), TwinPillars +0.1
+(z=+0.46). By healer: Druid +0.9 (z=+2.27), Priest +0.3 (z=+0.79), Shaman -0.1
+(z=-0.31), Paladin 0 flips.
 
-**Why the hug engages so little, and where it still loses sight.** Two
-corrections made the hug a follow rather than a hide (the defended arc, and
-the margin-width rule below); both narrow when it may be used, so Nagrand
-healers hug 6% of the time against today's 31% (geometric). Where it does,
-it sees the anchor better than the open does. What it cannot do is keep up
-with a teammate circling at the skin: the sighted arc of a teammate 0.5yd off
-a Nagrand pillar is about ±50 degrees of the 8yd ring, and the teammate turns
-faster than a healer can walk the ring. Of the 134 hug blind episodes of 1s or
-more on Nagrand (median 3.8s), the teammate broke sight in half and stood
-within 1yd of the skin in 78%. That is the DPS share, AS-382. A key that also
-required the teammate to turn slowly enough to follow (at most 0.8 of the
-healer's ring speed) was measured and dropped: blind to the anchor 6.57% →
-6.83% overall, more mode changes.
-
-### 11.4 Head-to-head
-
-Paired, McNemar on flips, the side with the modes scored, both seat
-assignments, every 2v2 healer cell and the six 3v3 teams on Nagrand and
-TwinPillars (n=10,080 per run).
-
-**Modes on against modes off, both `TeamPlan`**, fresh seeds 5-8 (the Shaman
-exception was chosen on seeds 1-4): overall 49.5% → 49.6% (+0.1pt, 535 / 523
-flips, z=+0.37). By healer: Druid +0.9 (z=+1.02), Priest +0.1 (z=+0.10),
-Shaman -0.5 (z=-0.66), Paladin 0 flips. By map: Nagrand -0.1 (z=-0.36),
-TwinPillars +0.4 (z=+0.73). 3v3 +1.7 (z=+0.69, n=480). **No significant loss
-overall or in any healer class**, the success condition; no gain either.
-
-**`TeamPlan` against `Legacy`, before and after** (the `TeamPlan` side scored;
-before is `main`), on **fresh seeds 9-48** (AS-373-test's replication, n=4,800
-in the 3v3 cells): overall +0.1pt (ns), 2v2 +0.3 (ns), Nagrand +0.2 (ns); 3v3
-**-2.1pt (z=-2.95, about [-3.5, -0.7])**, the Shaman's 3v3 cells -5.8 (z=-3.16).
-About 1.5pt of the 3v3 loss is D7's all-teammates rule: with the heading held
-out of the ANCHOR's shadow only (other teammates left to AS-206's repair), 3v3
-is -0.6 (ns) against `main` and +1.6pt (z=+3.69) against this build. The first
-run of this comparison, on seeds 1-4, read 3v3 -5.0pt (n=480) and Nagrand
--0.9pt (z=-2.55); neither replicates on seeds 9-48, so they are not the
-figures to decide on. Against a `TeamPlan` opponent the same 3v3 cells did not
-move (+1.7, ns, seeds 5-8).
+**Modes on against modes off, both `TeamPlan`**, fresh seeds 49-58
+(n=25,200): overall -0.2pt (z=-0.73); Nagrand +0.5 (z=+1.61), **TwinPillars
+-0.8 (z=-2.37)**; 3v3 +0.8 (z=+0.50, n=1,200). By healer: Druid +0.4
+(z=+0.68), Priest +0.1 (z=+0.12), **Shaman (hug and open) -1.3 (z=-2.00)**,
+Paladin 0 flips. Read with AS-385: the TwinPillars and Shaman figures are the
+ones a team stance should be checked against.
 
 ### 11.5 Reproducing
 
-The bank and harness are §2's (the harness now also records the traced mode).
-The tables come from `docs/design/balance/sweeps/2026-10-23-as373-targets.py
---no-paladin rows.jsonl` and `...-overall.py rows.jsonl`. The head-to-heads:
+The bank and harness are §2's (the harness also records the traced mode). The
+tables come from `docs/design/balance/sweeps/2026-10-23-as373-targets.py
+--no-paladin rows.jsonl`, `...-overall.py rows.jsonl` and `...-cc-cells.py
+before.jsonl after.jsonl`. The head-to-heads:
 
 ```bash
 S=docs/design/balance/sweeps
-# modes on against off, fresh seeds 5-8; arm is off | t1 | t2
-$S/2026-10-23-as373-h2h-gen.py modes t1 8 | jq -c 'select(.random_seed > 4)' > t1.jsonl
+# modes on against off, seeds 49-58; arm is off | t1 | t2
+$S/2026-10-23-as373-h2h-gen.py modes t1 58 | jq -c 'select(.random_seed > 48)' > t1.jsonl
 target/release/arenasim --batch t1.jsonl --out t1.csv --jobs 6 --trace-mode off
 # ...and off.jsonl, t2.jsonl the same way, then:
 $S/2026-10-23-as373-h2h-score.py off.csv t1.csv off.csv t2.csv
-# TeamPlan against Legacy: seats t1 / t2, the main binary for the base arm
-$S/2026-10-23-as373-h2h-gen.py legacy t1 4 > leg-t1.jsonl
+# TeamPlan against Legacy, seeds 49-68: seats t1 / t2, main's binary for the base arm
+$S/2026-10-23-as373-h2h-gen.py legacy t1 68 | jq -c 'select(.random_seed > 48)' > leg-t1.jsonl
 ```
 
 ### 11.6 Unchanged
 
-`Legacy` (1,290 matches on all three maps), `TeamPlan` with the modes off
-(860), and `TeamPlan` on BasicArena (430) match `main` @ `cd0cdf3d` row for
-row (winner, end reason, duration). BasicArena has no obstacle, so neither
-mode does anything there.
+`Legacy` (1,290 matches on Nagrand, TwinPillars and BasicArena), `TeamPlan`
+with the modes off (860), and `TeamPlan` on BasicArena (430) match `main` @
+`cd0cdf3d` row for row (winner, end reason, duration). BasicArena has no
+obstacle, so neither mode does anything there.

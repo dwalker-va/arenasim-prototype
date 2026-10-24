@@ -8,6 +8,8 @@
 //!
 //! - a Warlock with Fear ready gives hug (against the Warlock silenced, the
 //!   modes turned off, `Legacy`, and the Paladin);
+//! - the Shaman hugs (against the Warlock silenced); the Paladin, the one
+//!   healer `HUG_EXCEPTIONS` names, never does;
 //! - a Rogue alone gives open: its stuns are a melee's, and a pillar is no
 //!   defence against a unit that walks round it;
 //! - a wall between the teammate and every point of the ring gives open;
@@ -201,14 +203,15 @@ fn the_hug_turns_through_the_arc_not_the_shadow() {
     }
 }
 
-/// The healers `HUG_EXCEPTIONS` names never hug — the Paladin, whose FREE is
-/// melee pursuit (design D5), and the Shaman, on measurement — in FREE or
-/// PRESSURED. The list is pinned: an entry added or removed fails here.
+/// The one healer `HUG_EXCEPTIONS` names, the Paladin (its FREE is melee
+/// pursuit, design D5), never hugs, in FREE or PRESSURED; every other healer
+/// does in the same scene. The list is pinned: an entry added or removed
+/// fails here.
 #[test]
 fn the_excepted_healers_do_not_hug() {
     let excepted: Vec<CharacterClass> = HUG_EXCEPTIONS.iter().map(|(c, _)| *c).collect();
-    assert_eq!(excepted, vec![Paladin, Shaman]);
-    for (class, posture) in [Paladin, Shaman]
+    assert_eq!(excepted, vec![Paladin]);
+    for (class, posture) in [Paladin]
         .into_iter()
         .flat_map(|c| [(c, Posture::Free), (c, Posture::Pressured)])
     {
@@ -231,7 +234,25 @@ fn the_excepted_healers_do_not_hug() {
         // The pair: the same scene hugs for a Priest.
         let priest = held(Priest).decide(HEALER);
         assert!(entered(&priest), "{posture:?}: {:?}", priest.movement);
+        // ...and for a Shaman: the caster-healer machine's other healer hugs
+        // too (the Druid is in `HEALERS`).
+        let shaman = held(Shaman).decide(HEALER);
+        assert!(
+            entered(&shaman),
+            "Shaman {posture:?}: {:?}",
+            shaman.movement
+        );
     }
+}
+
+/// The Shaman hugs (user ruling, 2026-10-23: only the Paladin is excepted).
+/// The control silences the Warlock, so no crowd control is ready.
+#[test]
+fn the_shaman_hugs() {
+    let view = scene(Shaman, Warlock, 6.0).decide(HEALER);
+    assert!(entered(&view), "{:?}", view.movement);
+    let silenced = scene(Shaman, Warlock, 6.0).aura(CASTER, AuraType::Silence, 10.0);
+    assert!(!entered(&silenced.decide(HEALER)));
 }
 
 /// A Rogue's stuns need sight, but a Rogue walks round the pillar to land
