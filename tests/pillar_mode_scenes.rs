@@ -8,6 +8,9 @@
 //!
 //! - a Warlock with Fear ready gives hug (against the Warlock silenced, the
 //!   modes turned off, `Legacy`, and the Paladin);
+//! - in the open, AS-206's repair still keeps the composed FREE goal in a
+//!   NON-anchor teammate's sight (against `Legacy`, whose goal stands in that
+//!   teammate's shadow);
 //! - the Shaman hugs (against the Warlock silenced); the Paladin, the one
 //!   healer `HUG_EXCEPTIONS` names, never does;
 //! - a Rogue alone gives open: its stuns are a melee's, and a pillar is no
@@ -241,6 +244,71 @@ fn the_excepted_healers_do_not_hug() {
             entered(&shaman),
             "Shaman {posture:?}: {:?}",
             shaman.movement
+        );
+    }
+}
+
+/// The open mode holds the HEADING out of the anchor's shadow only; another
+/// teammate's shadow is AS-206's point repair's, which still runs on the
+/// composed FREE goal (D7 as amended). A 3v3 round a small pillar at the
+/// origin: the anchor (a Warrior at 40%) far to the west, a healthy Mage to
+/// the north-east, and the engaged-ally centroid between them, so the
+/// formation point behind the line falls behind the pillar from the Mage —
+/// out of the anchor's shadow. No enemy has a crowd control a pillar defends
+/// against (the Warriors' Charges are down), so the healer plays the open.
+/// The goal it is sent to must see the Mage. The control is `Legacy`, which
+/// runs neither the heading nor the repair: its goal stands in the Mage's
+/// shadow, so the scene does put the point there.
+#[test]
+fn the_repair_answers_for_a_teammate_the_heading_does_not() {
+    use arenasim::states::play_match::AbilityType;
+    let small = vec![ObstacleVolume::Cylinder {
+        center_xz: Vec2::ZERO,
+        radius: 2.0,
+        base_y: 0.0,
+        height: 10.0,
+    }];
+    let mage = Vec3::new(10.0, 1.0, 6.0);
+    let anchor = Vec3::new(-18.0, 1.0, 5.2);
+    let three_v_three = |healer: CharacterClass, profile: AiProfile| {
+        Scene::new()
+            .obstacles(small.clone())
+            .ai_profile(1, profile)
+            .ai_profile(2, profile)
+            .unit(HEALER, 1, healer)
+            .at(-4.0, -14.0)
+            .unit(MATE, 1, Warrior)
+            .at(anchor.x, anchor.z)
+            .health(0.4)
+            .targeting(BRUISER)
+            .unit("mage", 1, CharacterClass::Mage)
+            .at(mage.x, mage.z)
+            .targeting(BRUISER)
+            .unit(BRUISER, 2, Warrior)
+            .at(-2.8, 10.5)
+            .targeting(MATE)
+            .cooldown(BRUISER, AbilityType::Charge, 60.0)
+            .unit("far1", 2, Warrior)
+            .at(30.0, -15.0)
+            .cooldown("far1", AbilityType::Charge, 60.0)
+            .unit("far2", 2, Warrior)
+            .at(30.0, 15.0)
+            .cooldown("far2", AbilityType::Charge, 60.0)
+    };
+    for healer in [Priest, Druid] {
+        let sees_mage = |profile| {
+            let view = three_v_three(healer, profile).decide(HEALER);
+            assert!(!entered(&view), "{healer:?}: the scene hugged");
+            let at = goal(&view).expect("a point walk");
+            (has_line_of_sight(&small, eye(at), eye(mage)), at)
+        };
+        let (on, at) = sees_mage(AiProfile::TeamPlan);
+        assert!(on, "{healer:?}: the open goal {at} is in the Mage's shadow");
+        let (legacy, at) = sees_mage(AiProfile::Legacy);
+        assert!(
+            !legacy,
+            "{healer:?}: the Legacy goal {at} sees the Mage — the scene no longer \
+             puts the formation point in its shadow"
         );
     }
 }

@@ -2525,7 +2525,7 @@ fn compute_formation_point(
     // healer's walk round the centroid (AS-370): the nearest enemy crossing
     // the centroid swings the point round instead of flipping it to the far
     // side. With the pillar modes on, the turn also keeps out of the headings
-    // whose point a teammate's shadow holds (AS-373, the open mode).
+    // whose point the anchor's shadow holds (AS-373, the open mode).
     let dir = if super::formation::continuous(ctx) {
         super::formation::seed_heading(memory, centroid, my_pos, now);
         let rate = combatant.base_movement_speed / shared.formation_offset;
@@ -2550,10 +2550,9 @@ fn compute_formation_point(
         dir
     };
     let point = point_at(dir);
-    // Under the open heading (AS-373) the point already stands out of every
-    // near shadow its heading could avoid, and the repair leaves it as it
-    // is; it still repairs the point when no heading could (the anchor-only
-    // and unconstrained fallbacks of `open_heading`).
+    // Under the open heading (AS-373) the heading keeps the point out of the
+    // anchor's shadow; this repair still answers for the other teammates'
+    // shadows, and for the point when every heading was forbidden.
     let point = if super::formation::sight_constrained(ctx) {
         super::formation::sighted_formation_point(ctx, entity, point, &mut memory.exit)
     } else {

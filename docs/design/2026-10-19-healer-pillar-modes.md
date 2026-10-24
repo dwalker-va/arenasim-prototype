@@ -358,8 +358,10 @@ POINT to the HEADING.
 The raw point stands `formation_offset` out from the engaged-ally centroid
 along a heading that AS-370 already turns continuously. The change:
 
-- Headings whose point would stand in a near teammate's shadow are forbidden,
-  with the same shadow wedge and near-obstacle limit AS-206 uses.
+- Headings whose point would stand in the anchor's (the most injured
+  teammate's) shadow are forbidden, with the same shadow wedge and
+  near-obstacle limit AS-206 uses. Another teammate's shadow is handled by
+  AS-206's repair, which runs on the point after (D7 as amended, §11.0).
 - The turn-limited heading may not enter the forbidden interval. A target
   inside it holds the heading at the boundary on the side it is already on,
   which is AS-206's kept exit, now in sight by construction with no part-way
@@ -437,10 +439,12 @@ wants rather than against today's hide.
 - **What is left** is a change of feasibility: a forbidden interval that grows
   over the heading, or a 3v3 whose allowed arcs split so that the healer's arc
   vanishes. These are the AS-370 "forced" cases. The interval's edge moves
-  with the geometry, so the heading is pushed rather than flipped. When an
-  allowed arc truly vanishes, the fallback is anchor-only sight (the other
-  teammate's shadow stops being forbidden), so the remaining step is limited
-  to a 3v3 losing sight of its anchor.
+  with the geometry, so the heading is pushed rather than flipped. *(Superseded
+  by §11.1: the heading is held out of the anchor's shadow only, and AS-206's
+  repair answers for the other teammates.)* ~~When an allowed arc truly
+  vanishes, the fallback is anchor-only sight (the other teammate's shadow
+  stops being forbidden), so the remaining step is limited to a 3v3 losing
+  sight of its anchor.~~
 - **The probe** is AS-370's own: `measure_formation_goal_jumps` changes of exit
   over 5yd go to zero, and AS-370's three chosen-exit cases (3v3, seeds 20, 36
   and 49) are staged so the goal never steps more than a re-commit (4yd).
@@ -610,12 +614,12 @@ As §3-§5, with these specifics.
   field. Hug replaces the whole chain in `free_tick` before it runs.
 - **Measurement switch:** `team{1,2}_pillar_modes: false`
   (`WithheldPlays::team1_no_pillar_modes`). With both false a `TeamPlan` match
-  plays byte-identically to `main` @ `cd0cdf3d`.
+  plays byte-identically to `main` (§11.6).
 
 ### 11.2 Mechanism: the §2 bank, before and after
 
-`main` @ `cd0cdf3d` (AS-362, AS-381 and AS-292 merged) against this build, the
-§2 bank (2,580 matches), both teams `TeamPlan`, Paladin excluded (D5: neither
+`main` @ `cd0cdf3d` (AS-362, AS-381 and AS-292 merged) against this build on
+that base, the §2 bank (2,580 matches), both teams `TeamPlan`, Paladin excluded (D5: neither
 mode reaches it). "Hug" in this table is §2's GEOMETRIC hug (within 4yd of the
 skin), which counts the PRESSURED solve's own cover too.
 
@@ -664,10 +668,15 @@ build:
 The Paladin's change comes from its teammates and opponents, which do play
 the modes.
 
-The camp (`tests/camp_sweep.rs`, Warrior+Priest v Warlock+Priest, 12 seeds):
-12/12 → 11/12, heal to the Warrior 307 → 296, heal line occluded 33% → 28%
-(50% → 43% after contact), the Priest hard-CC'd 6.0s → 4.5s, zero-heal losses
-0 → 1.
+The camp (`tests/camp_sweep.rs`, Warrior+Priest v Warlock+Priest, 12 seeds),
+`main` @ `491985ee` (AS-383 merged) → this build merged with it: 9/12 → 10/12,
+heal to the Warrior 137 → 157, heal line occluded 20% → 19% (33% → 31% after
+contact), the Priest hard-CC'd 8.1s → 9.8s, zero-heal losses 2 → 2, Warrior
+deaths 3 → 2. Twelve seeds: read with the counts.
+
+The §2 bank above and the head-to-heads of §11.4 were measured on the
+`cd0cdf3d` base, before AS-383 (the Priest's scream-dip gate) merged; the camp
+line and §11.6 are on `491985ee`.
 
 ### 11.3 Against the targets (§9)
 
@@ -733,7 +742,10 @@ $S/2026-10-23-as373-h2h-gen.py legacy t1 68 | jq -c 'select(.random_seed > 48)' 
 
 ### 11.6 Unchanged
 
-`Legacy` (1,290 matches on Nagrand, TwinPillars and BasicArena), `TeamPlan`
-with the modes off (860), and `TeamPlan` on BasicArena (430) match `main` @
-`cd0cdf3d` row for row (winner, end reason, duration). BasicArena has no
-obstacle, so neither mode does anything there.
+Against `main` @ `491985ee`, compared on the FULL match logs: `Legacy` (65
+matches on Nagrand, TwinPillars and BasicArena; 172 deaths) and `TeamPlan` with
+the modes off (58 matches on Nagrand and TwinPillars; 157 deaths) are
+byte-identical. On the `cd0cdf3d` base, `Legacy` (1,290 matches), `TeamPlan`
+with the modes off (860) and `TeamPlan` on BasicArena (430) matched row for
+row (winner, end reason, duration). BasicArena has no obstacle, so neither
+mode does anything there.

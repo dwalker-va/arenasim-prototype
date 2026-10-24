@@ -1151,8 +1151,8 @@ pub(super) fn healer_pressured_tick_shared(
         None
     };
 
-    // Hugging a pillar (AS-373, `TeamPlan` with the modes on; never a healer
-    // `pillar_mode::HUG_EXCEPTIONS` names, the Paladin among them): the solve
+    // Hugging a pillar (AS-373, `TeamPlan` with the modes on; never the
+    // Paladin, the one healer `pillar_mode::HUG_EXCEPTIONS` names): the solve
     // gains the ring's arc, a soft leash to the ring and the sight margin.
     let hug = super::pillar_mode::update(
         ctx,
