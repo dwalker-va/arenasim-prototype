@@ -1776,7 +1776,8 @@ pub enum YieldRule {
     /// ([`stance_leads_sight`]).
     Stance,
     /// Rule 4: the DPS is hurt (below [`SIGHT_YIELD_HP`], held until
-    /// [`SIGHT_YIELD_RELEASE_HP`]) or is the teammate in danger: it yields.
+    /// [`SIGHT_YIELD_RELEASE_HP`]): it yields. (The teammate in danger is
+    /// always hurt: it is dying, below `urgency_hp_threshold`.)
     DpsHurt,
     /// Rule 5: otherwise the DPS leads and the healer follows.
     DpsLeads,
@@ -1906,7 +1907,7 @@ fn classify_sight_yield(
                 YieldRule::HealerPressured
             } else if stance {
                 YieldRule::Stance
-            } else if hurt || in_danger(dps.entity) {
+            } else if hurt {
                 YieldRule::DpsHurt
             } else {
                 YieldRule::DpsLeads
@@ -2183,6 +2184,7 @@ mod tests {
             SituationConfig {
                 runs: PlaySet::all(),
                 pillar_modes: true,
+                sight_yield: true,
                 ..SituationConfig::default()
             }
         );
@@ -2194,9 +2196,11 @@ mod tests {
                 healers_close: true,
                 runs: PlaySet::default(),
                 pillar_modes: false,
+                sight_yield: false,
                 ..teamplan
             },
-            "only the release, the closing rule, the gated plays and the pillar modes differ"
+            "only the release, the closing rule, the gated plays, the pillar modes and the \
+             sight yield differ"
         );
         // With no band the latch is the plain test from each side, whatever
         // the previous tempo.

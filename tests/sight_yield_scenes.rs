@@ -207,19 +207,6 @@ fn rule_one_cuts_the_dwell_short() {
     assert_eq!(pair(&mut s).rule, YieldRule::DpsCannotMove);
 }
 
-/// A DPS in danger yields whatever its health latch says: the teammate in
-/// danger is rule 4 too. (`ally_in_danger` needs it dying, below 50%, which
-/// the latch also catches — so the pair here is the window's subject against
-/// a DPS just as hurt whose Warrior is gone.)
-#[test]
-fn the_teammate_in_danger_yields() {
-    let s = scene()
-        .health_of(DPS, 0.4)
-        .target(ENEMY, DPS)
-        .place(ENEMY, 2.0, 0.0);
-    assert_eq!(rule(s), YieldRule::DpsHurt);
-}
-
 /// Three-a-side: each DPS has its own pair with the one healer, decided
 /// apart — the hurt one yields, the healthy one leads.
 #[test]
