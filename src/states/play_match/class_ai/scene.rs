@@ -358,11 +358,9 @@ impl Scene {
         let unit = self.find(who);
         let snapshot = self.snapshot();
         let me = snapshot.combatants.get(&unit.entity)?;
-        let focus = self
-            .situations
-            .teams
-            .get(me.team.wrapping_sub(1) as usize)
-            .and_then(|t| t.target_focus);
+        let team = self.situations.teams.get(me.team.wrapping_sub(1) as usize);
+        let focus = team.and_then(|t| t.target_focus);
+        let kill_subject = team.and_then(|t| t.kill_window.map(|w| w.subject));
         let shadow_sight = |e: Entity| {
             snapshot.active_auras.get(&e).is_some_and(|list| {
                 list.iter().any(|a| {
@@ -376,6 +374,7 @@ impl Scene {
             me.class,
             me.position,
             me.target,
+            kill_subject,
             &self.obstacles,
             |e| {
                 snapshot.combatants.get(&e).is_some_and(|o| {

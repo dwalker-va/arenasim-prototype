@@ -11,7 +11,9 @@
 //! target — the enemy Priest — east of it, out of the Mage's sight; the enemy
 //! Warrior stands north-west, in the Mage's reach and sight.
 
-use arenasim::states::match_config::CharacterClass::{Hunter, Mage, Priest, Warlock, Warrior};
+use arenasim::states::match_config::CharacterClass::{
+    Hunter, Mage, Priest, Rogue, Warlock, Warrior,
+};
 use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::scene::Scene;
 use arenasim::states::play_match::class_ai::target_focus::{
@@ -265,9 +267,108 @@ fn a_dead_focus_ends() {
     assert_eq!(focus_after(&mut s, &[onset + 0.2]), None);
 }
 
+/// The focus ends when its subject goes where the team cannot take it:
+/// into stealth, or immune to damage. The control: the same frame with the
+/// subject still visible and open, and the focus holds. (The held focus is
+/// judged by acquisition's own validity, not by alive-and-not-immune alone.)
+#[test]
+fn a_focus_ends_when_its_subject_stealths_or_turns_immune() {
+    let build = || {
+        let mut s = Scene::new()
+            .ai_profile(1, AiProfile::TeamPlan)
+            .ai_profile(2, AiProfile::TeamPlan)
+            .obstacles(vec![pillar()])
+            .now(T0)
+            .unit(MAGE, 1, Mage)
+            .at(-20.0, 0.0)
+            .targeting(TARGET)
+            .unit(HEALER, 1, Priest)
+            .at(-25.0, 6.0)
+            .unit(TARGET, 2, Priest)
+            .at(5.0, 0.0)
+            .unit("enemy_rogue", 2, Rogue)
+            .at(-12.0, 10.0);
+        // Out of stealth to begin with: it opened on someone.
+        s.combatant_mut("enemy_rogue").stealthed = false;
+        let focus = past_threshold(&mut s).expect("the focus moves");
+        assert_eq!(focus.subject, s.entity("enemy_rogue"));
+        s.set_target(MAGE, "enemy_rogue");
+        s
+    };
+    let after = T0 + FOCUS_HIDDEN_SECS + EPS + 0.1;
+
+    let mut control = build();
+    assert!(
+        focus_after(&mut control, &[after]).is_some(),
+        "the control holds"
+    );
+
+    let mut stealthed = build();
+    stealthed.combatant_mut("enemy_rogue").stealthed = true;
+    assert_eq!(focus_after(&mut stealthed, &[after]), None, "stealthed");
+
+    let mut immune = build().aura("enemy_rogue", AuraType::DamageImmunity, 8.0);
+    assert_eq!(focus_after(&mut immune, &[after]), None, "immune");
+}
+
 // ---------------------------------------------------------------------------
 // Taking the focus (target acquisition)
 // ---------------------------------------------------------------------------
+
+/// A second ranged DPS on the team's kill window subject keeps it, though
+/// the focus moved and stands in its reach and sight. The Mage's hidden
+/// target (a stunned enemy Priest) moves the focus to the enemy Warrior; the
+/// Hunter is on an enemy Warlock at 20%, which the stunned Priest cannot
+/// heal. Control: the Warlock at full health opens no kill window, and the
+/// Hunter converges on the focus.
+#[test]
+fn a_second_dps_on_the_kill_window_subject_keeps_it() {
+    let build = |hp: f32| {
+        Scene::new()
+            .ai_profile(1, AiProfile::TeamPlan)
+            .ai_profile(2, AiProfile::TeamPlan)
+            .obstacles(vec![pillar()])
+            .now(T0)
+            .unit(MAGE, 1, Mage)
+            .at(-20.0, 0.0)
+            .targeting(TARGET)
+            .unit("hunter", 1, Hunter)
+            .at(-25.0, -5.0)
+            .targeting("enemy_warlock")
+            .unit(HEALER, 1, Priest)
+            .at(-25.0, 6.0)
+            .unit(TARGET, 2, Priest)
+            .at(5.0, 0.0)
+            .aura(TARGET, AuraType::Stun, 6.0)
+            .unit("enemy_warlock", 2, Warlock)
+            .at(-30.0, -15.0)
+            .health(hp)
+            .unit(EXPOSED, 2, Warrior)
+            .at(-12.0, 10.0)
+    };
+    let mut low = build(0.2);
+    let focus = past_threshold(&mut low).expect("the Mage moves the focus");
+    assert_eq!(focus.subject, low.entity(EXPOSED));
+    assert_eq!(
+        low.reclassify().teams[0].kill_window.map(|w| w.subject),
+        Some(low.entity("enemy_warlock"))
+    );
+    assert_eq!(
+        low.acquire("hunter"),
+        None,
+        "the kill window's subject is kept"
+    );
+    assert_eq!(low.acquire(MAGE), Some(EXPOSED), "the Mage still takes it");
+
+    let mut full = build(1.0);
+    past_threshold(&mut full).expect("the focus moves");
+    assert!(full.reclassify().teams[0].kill_window.is_none());
+    assert_eq!(
+        full.acquire("hunter"),
+        Some(EXPOSED),
+        "no window: it converges"
+    );
+}
 
 /// The Mage takes the team's focus; without one (no classification yet, or
 /// the target in sight) it keeps its target.

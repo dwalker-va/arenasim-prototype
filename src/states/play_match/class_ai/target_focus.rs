@@ -24,7 +24,8 @@
 //! faster than the hidden clock and the dwell allow.
 //!
 //! **What it does not move.** A DPS on the team's kill window subject (the
-//! Burst play's) does not leave it; a configured kill target (the player's
+//! Burst play's) does not leave it — neither to move the focus ([`classify`])
+//! nor to take one ([`retarget`]); a configured kill target (the player's
 //! kill call) wins over the focus; the Hunter's Freezing Trap retarget still
 //! runs after it. Melee DPS do not take the focus: their target-blind time is
 //! under 1% of their life (AS-385 §2.2), they have their own swap (the melee
@@ -235,8 +236,10 @@ pub fn change(prev: Option<Focus>, next: Option<Focus>) -> Option<(SituationChan
 /// The target a ranged DPS takes from its team's focus, if it should switch
 /// to it now: the focus names an enemy other than its target, the DPS can
 /// take it, and either it stands within [`FOCUS_REACH`] and in the DPS's
-/// sight or the DPS cannot see its own target either. `None` leaves the
-/// target as acquisition left it. `targetable` is acquisition's own
+/// sight or the DPS cannot see its own target either — unless its target is
+/// the team's kill window subject (`kill_subject`), which no DPS leaves.
+/// `None` leaves the target as acquisition left it. `targetable` is
+/// acquisition's own
 /// validity (alive, visible through stealth, not immune, not a pet) and
 /// `position` each unit's position.
 #[allow(clippy::too_many_arguments)]
@@ -246,12 +249,16 @@ pub fn retarget(
     class: CharacterClass,
     my_pos: Vec3,
     current: Option<Entity>,
+    kill_subject: Option<Entity>,
     obstacles: &[ObstacleVolume],
     targetable: impl Fn(Entity) -> bool,
     position: impl Fn(Entity) -> Option<Vec3>,
 ) -> Option<Entity> {
     let focus = focus?;
     if !follows_focus(class) || current == Some(focus.subject) || focus.subject == me {
+        return None;
+    }
+    if current.is_some() && current == kill_subject {
         return None;
     }
     if !targetable(focus.subject) {

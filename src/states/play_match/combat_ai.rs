@@ -349,10 +349,11 @@ pub fn acquire_targets(
         // ever classified. Before the Hunter's trap retarget, which still
         // moves it off a healer its own trap holds.
         if kill_target_index.is_none() {
-            let focus = situations
+            let team_situation = situations
                 .as_deref()
-                .and_then(|s| s.teams.get(combatant.team.wrapping_sub(1) as usize))
-                .and_then(|t| t.target_focus);
+                .and_then(|s| s.teams.get(combatant.team.wrapping_sub(1) as usize));
+            let focus = team_situation.and_then(|t| t.target_focus);
+            let kill_subject = team_situation.and_then(|t| t.kill_window.map(|w| w.subject));
             let obstacles = map_geometry
                 .as_deref()
                 .map_or(&[][..], |g| g.volumes.as_slice());
@@ -363,6 +364,7 @@ pub fn acquire_targets(
                 combatant.class,
                 transform.translation,
                 combatant.target,
+                kill_subject,
                 obstacles,
                 |e| {
                     find(e).is_some_and(|(_, _, stealthed, enemy_ss, _, _, immune, is_pet)| {

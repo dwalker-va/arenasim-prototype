@@ -297,7 +297,8 @@ them swing time. The Hunter's pet follows its Hunter's target, as always.
 
 **Interactions.**
 
-- A DPS on the team's kill window subject (the Burst play's) does not leave it.
+- A DPS on the team's kill window subject (the Burst play's) never leaves it:
+  its own blindness moves no focus, and it takes none another DPS moved.
 - The player's kill call (`team{n}_kill_target`) wins over the focus.
 - The Hunter's trap retarget runs after it, so it still moves the Hunter off a
   healer its own trap holds.
@@ -310,7 +311,9 @@ named `target_focus` (`subject` the focus, `from` the target it left);
 **Tests.** Scenes (`tests/target_focus_scenes.rs`), each a pair: hidden versus
 in sight; an alternative in reach and sight versus none (behind cover, out of
 reach, immune); the nearest of two; `Legacy`, withheld and melee; the kill
-window; the dwell; the return's hysteresis; a dead focus; taking the focus
+window, for the DPS that moves the focus and for a second one on the kill
+window's subject; the dwell; the return's hysteresis; a focus that dies,
+stealths or turns immune; taking the focus
 (ranged versus melee, a second ranged DPS by reach or by its own blindness,
 an immune focus). A staged TwinPillars match (`tests/target_focus_staged.rs`)
 plays the switch with the focus on, withheld, and under a kill call. Every
@@ -433,11 +436,35 @@ Warrior 323 → 267, occlusion after contact 20.8 → 22.1s (not down). One
 discordant match; the Warlock now leaves the hidden Priest for the Warrior.
 At n=12 this is not evidence either way.
 
-**Mutation proof.** Each of 19 mutants failed a named test: the hidden
+**Mutation proof.** Each of 22 mutants failed a named test (the last three
+added in review: the held focus judged by alive-and-not-immune, or by
+alive-and-not-stealthed, instead of acquisition's validity; and `retarget`
+ignoring the kill window): the hidden
 threshold, the dwell, the carried clock, the alternative's reach, its sight,
 its immunity, the nearest choice, the kill window, melee following,
 retarget's two clauses and its validity check, a dead focus held, the
 `TeamPlan` gate (both ways), the withholding switch, the trace event, the kill
 call, and the acquisition wiring.
 
-**Rows and CSVs:** `sweeps/2026-10-25-as389-final-*`.
+**The kill-window fix, re-measured** (review round 1 found `retarget` pulling
+a second ranged DPS off the kill window's subject; it now keeps it). On `main`
+@ `6eb17472` (AS-388 merged), block 609-612 was played twice, by the fixed
+build and by the same build without the fix:
+
+- the fix changes 1 match of 5,040 in the head-to-head `t1` arm, 1 in the
+  `uni` arm, and none in `t2` or `off`;
+- head-to-head +4.6 (z +15.5) both ways, Hunter +9.3, Mage +7.2, Warlock +7.3,
+  TwinPillars Mage +11.1;
+- uniform: Rogue -10.6, Hunter +7.6, Mage +5.7, Warlock +5.2, Druid -3.2,
+  Priest -2.5, Shaman -2.9; Paladin -1.1 and Warrior +0.8, not effects in this
+  block.
+
+The three-block tables above are on `03f77e9e`; this block agrees with them
+in every effect's sign and size. Identity re-checked on the merged build:
+`Legacy` full logs `diff -r` clean (the same 2,872 eliminations, 8,708 crit
+lines, 671 / 576 / 13), and `TeamPlan` with the focus withheld reproduces
+`main`'s CSV byte for byte over 609-612. `camp_sweep` on the merged build:
+`TeamPlan` 12/12, heal to the Warrior 306.
+
+**Rows and CSVs:** `sweeps/2026-10-25-as389-final-*` (`03f77e9e`) and
+`sweeps/2026-10-25-as389-r2-*` (`6eb17472`, block 609-612).
