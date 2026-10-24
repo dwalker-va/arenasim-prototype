@@ -34,6 +34,7 @@ pub(crate) mod paladin_postures;
 pub mod peel;
 pub mod pet_ai;
 pub mod pillar_mode;
+pub mod pillar_stance;
 pub mod plays;
 pub mod priest;
 pub mod rogue;

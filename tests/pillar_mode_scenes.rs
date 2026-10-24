@@ -1,9 +1,11 @@
 //! AS-373 — the healer pillar modes' key, one tick at a time (tier 1).
 //!
-//! A `TeamPlan` healer HUGS a pillar when its teammate fights at the pillar,
-//! an enemy crowd control that needs sight is ready for it, and the pillar's
-//! ring has ground that sees the teammate (`class_ai::pillar_mode`); it plays
-//! the open otherwise. Each scene is a pair — the situation, and its control
+//! A `TeamPlan` healer HUGS a pillar when its TEAM takes the pillar (AS-385,
+//! `class_ai::pillar_stance`: its teammate fights at the pillar, an enemy
+//! crowd control that needs sight is ready, and the pillar's ring has ground
+//! that sees the teammate) and the ring's arc holds (`class_ai::pillar_mode`);
+//! it plays the open otherwise. The stance's own keys and the no-lone-hug rule
+//! are `tests/pillar_stance_scenes.rs`. Each scene is a pair — the situation, and its control
 //! with one condition removed — so none can pass vacuously:
 //!
 //! - a Warlock with Fear ready gives hug (against the Warlock silenced, the
@@ -166,7 +168,8 @@ fn a_ring_the_fear_covers_gives_open() {
 /// stands at -20 degrees: the shorter way to the target (south, 165 degrees)
 /// crosses the shadow, the way through the arc (north, 195 degrees) does not.
 /// After 0.6s of turning the goal must still see the Warrior, and must have
-/// turned north.
+/// turned north. The team took the pillar while the Warrior fought nearer it
+/// (the stance enters at `HUG_ENTER`), and still holds it at 19yd.
 #[test]
 fn the_hug_turns_through_the_arc_not_the_shadow() {
     let now = 30.0;
@@ -183,10 +186,17 @@ fn the_hug_turns_through_the_arc_not_the_shadow() {
             },
             ..HealerPosture::new(0.0)
         };
-        let view = scene_with(healer, Warlock, 19.0, (31.8, 31.8))
-            .now(now)
-            .healer_posture(HEALER, posture)
-            .decide(HEALER);
+        let mut s = scene_with(healer, Warlock, HUG_ENTER - 1.0, (31.8, 31.8))
+            .now(now - 1.0)
+            .healer_posture(HEALER, posture);
+        assert!(
+            s.reclassify().teams[0].pillar_stance.is_some(),
+            "{healer:?}: the team never took the pillar"
+        );
+        s.set_now(now);
+        s.set_position(MATE, 0.0, 25.0);
+        s.set_position(BRUISER, 1.5, 25.0);
+        let view = s.decide(HEALER);
         assert!(
             !left(&view),
             "{healer:?}: the hug ended: {:?}",
@@ -363,11 +373,13 @@ fn hugging(since: f32) -> HealerPosture {
     }
 }
 
-/// The Schmitt pair: open enters at `HUG_ENTER` from the skin and no
-/// farther; a hug holds out to `HUG_LEAVE` and lets go beyond it.
+/// The Schmitt pair, now the team stance's (AS-385): the hug enters with a
+/// stance taken at `HUG_ENTER` from the skin and no farther; a stance held
+/// keeps the hug out to `HUG_LEAVE`, and lets it go beyond it once the
+/// stance's dwell has run.
 #[test]
 fn the_pillar_distance_is_a_schmitt_pair() {
-    let between = (HUG_ENTER + HUG_LEAVE) / 2.0;
+    let between = 6.0 + (HUG_ENTER + HUG_LEAVE) / 2.0;
     for healer in HEALERS {
         assert!(entered(
             &scene(healer, Warlock, HUG_ENTER - 0.5).decide(HEALER)
@@ -375,14 +387,20 @@ fn the_pillar_distance_is_a_schmitt_pair() {
         assert!(!entered(
             &scene(healer, Warlock, HUG_ENTER + 0.5).decide(HEALER)
         ));
-        let held = scene(healer, Warlock, between).healer_posture(HEALER, hugging(0.0));
+        // The team took the pillar at 6yd; the fight then moves.
+        let taken = |to: f32| {
+            let mut s = scene(healer, Warlock, 6.0)
+                .now(30.0)
+                .healer_posture(HEALER, hugging(0.0));
+            assert!(s.reclassify().teams[0].pillar_stance.is_some());
+            s.set_now(30.0 + MODE_DWELL + 0.1);
+            s.set_position(MATE, 0.0, to);
+            s.set_position(BRUISER, 1.5, to);
+            s.decide(HEALER)
+        };
+        assert!(!left(&taken(between)), "{healer:?}: left inside the band");
         assert!(
-            !left(&held.decide(HEALER)),
-            "{healer:?}: left inside the band"
-        );
-        let gone = scene(healer, Warlock, HUG_LEAVE + 1.0).healer_posture(HEALER, hugging(0.0));
-        assert!(
-            left(&gone.decide(HEALER)),
+            left(&taken(6.0 + HUG_LEAVE + 1.0)),
             "{healer:?}: held beyond the band"
         );
     }

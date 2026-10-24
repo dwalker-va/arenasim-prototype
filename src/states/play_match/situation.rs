@@ -61,6 +61,15 @@
 //!   more living non-pet enemies it can see stand against it. Its [`Window`]
 //!   names that unit; its onset is when its last teammate fell (or the second
 //!   enemy came into view). Pets count on neither side.
+//! - **`pillar_stance`** — the team takes a pillar together (AS-385,
+//!   `class_ai::pillar_stance`): `TeamPlan` only, on a team that runs the
+//!   Pillar play, on a map with obstacles. It enters for `AvoidCc` when a
+//!   crowd control a pillar defends against is ready for a teammate, the
+//!   fight stands at a pillar, the pillar's ring has a TEAM arc (ground from
+//!   which the healer sees every teammate, out of that crowd control's
+//!   reach), and no kill is on. Its [`StanceWindow`] names the healer, the
+//!   pillar, the side and the reason. Schmitt pair, release and dwell as the
+//!   AS-373 hug's; the arc and the kill are feasibility and end it at once.
 //! - **`lock_ending`** — of the visible enemies the team holds
 //!   ([`locks_healer`]'s set: a stun, a fear or horror, a polymorph, an
 //!   incapacitate, a cyclone), the one whose hold ends SOONEST, the healer
@@ -73,7 +82,7 @@
 //! A [`Play`] is what a unit does about the situation: a named reordering of
 //! its own priority chain ([`TeamSituation::play_for`]). Each gated play is a
 //! STAGE of one pipeline, `class_ai::plays::PLAY_ORDER` — Peel, TakeCover,
-//! Chain, Burst — and a unit runs the first stage its team runs, the
+//! Pillar, Chain, Burst — and a unit runs the first stage its team runs, the
 //! situation calls, and the unit admits; a stage that does not apply passes
 //! it to the next (the walk is `class_ai::plays`'s). Every play is a NEW
 //! behaviour, gated under `AiProfile::TeamPlan` ([`SituationConfig::under`])
@@ -91,6 +100,11 @@
 //!   from the healers' posture machines; `class_ai::take_cover`). A MOVEMENT
 //!   play: the chain is the ordinary one. Inert on a map with nothing to
 //!   hide behind.
+//! - **`Pillar`** — the team holds a `pillar_stance`, so its healer hugs the
+//!   stance's pillar on the team arc (`class_ai::pillar_mode`) and its kiting
+//!   ranged DPS bend toward the stance's side (`class_ai::pillar_stance`). A
+//!   MOVEMENT play: the chain is the ordinary one. A melee is not called: its
+//!   half of the stance is the yield (AS-386), read from the situation.
 //! - **`Chain`** — a lock the team holds is about to end (`lock_ending`
 //!   within [`CHAIN_HORIZON_SECS`]), so a unit with a hand-off puts its
 //!   CHAIN step between a peel and a burst: its own crowd control on the
@@ -163,8 +177,10 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
+use super::ability_config::AbilityDefinitions;
 use super::ai_profile::AiProfile;
 use super::class_ai::combat_snapshot::CombatSnapshot;
+use super::class_ai::pillar_stance::{self, StanceMemory, StanceWindow};
 use super::class_ai::plays;
 use super::class_ai::{pressing_when_ahead, stealth_visible, team_hp_sums, CombatantInfo};
 use super::components::{Aura, AuraType};
@@ -325,6 +341,12 @@ pub struct TeamSituation {
     /// Whether this team's healers play the pillar modes (AS-373,
     /// [`SituationConfig::pillar_modes`]).
     pub pillar_modes: bool,
+    /// The pillar the team takes together, while it holds one (the module
+    /// docs' `pillar_stance`). Classified only by [`update_situations`],
+    /// which has the ability data its crowd-control key reads.
+    pub pillar_stance: Option<StanceWindow>,
+    /// What the stance's keys remember from one classification to the next.
+    pub stance_memory: StanceMemory,
 }
 
 /// What a unit does about a situation: a named reordering of its own priority
@@ -352,6 +374,12 @@ pub enum Play {
     /// MOVEMENT play — the healer's chain is its ordinary one. Gated under
     /// `AiProfile::TeamPlan`.
     TakeCover,
+    /// The team holds a [`pillar_stance`](TeamSituation::pillar_stance): the
+    /// healer hugs the stance's pillar on the team arc, and a kiting ranged
+    /// DPS bends toward the stance's side (`class_ai::pillar_stance`). A
+    /// MOVEMENT play — the chain is the ordinary one. Gated under
+    /// `AiProfile::TeamPlan`.
+    Pillar,
     /// The team's lock on the enemy `subject` ([`TeamSituation::lock_ending`])
     /// ends within [`CHAIN_HORIZON_SECS`]: the CHAIN step — a hand-off of the
     /// class's own crowd control onto the subject, landing in the lock's last
@@ -373,6 +401,7 @@ impl Play {
             Play::Burst => Some(PlayId::Burst),
             Play::Peel { .. } => Some(PlayId::Peel),
             Play::TakeCover => Some(PlayId::TakeCover),
+            Play::Pillar => Some(PlayId::Pillar),
             Play::Chain { .. } => Some(PlayId::Chain),
         }
     }
@@ -385,15 +414,17 @@ impl Play {
 pub enum PlayId {
     Peel,
     TakeCover,
+    Pillar,
     Chain,
     Burst,
 }
 
 impl PlayId {
     /// Every gated play, in declaration order.
-    pub const ALL: [PlayId; 4] = [
+    pub const ALL: [PlayId; 5] = [
         PlayId::Peel,
         PlayId::TakeCover,
+        PlayId::Pillar,
         PlayId::Chain,
         PlayId::Burst,
     ];
@@ -456,7 +487,7 @@ impl TeamSituation {
 
     /// The play the unit `me`, playing `role`, runs in this situation, as
     /// its TEAM sees it: the first stage of the pipeline
-    /// (`class_ai::plays::PLAY_ORDER` — Peel, TakeCover, Chain, Burst) that
+    /// (`class_ai::plays::PLAY_ORDER` — Peel, TakeCover, Pillar, Chain, Burst) that
     /// the team runs ([`Self::runs`]) and that the situation calls for `me`;
     /// else [`Play::Default`]. The unit's own admission — its tools and each
     /// stage's exceptions — is `CombatContext::play`'s, over the same walk.
@@ -736,6 +767,9 @@ pub struct SituationConfig {
     /// `class_ai::pillar_mode`): `true` under `TeamPlan` ([`Self::under`])
     /// unless a measurement turns them off ([`WithheldPlays::no_pillar_modes`]).
     pub pillar_modes: bool,
+    /// `shared.cc_reach_margin`: the margin of the crowd-control discs the
+    /// pillar stance's team arc keeps out of.
+    pub cc_reach_margin: f32,
 }
 
 impl Default for SituationConfig {
@@ -764,6 +798,7 @@ impl SituationConfig {
             exceptions: ExceptionOverrides::default(),
             withheld: WithheldPlays::default(),
             pillar_modes: false,
+            cc_reach_margin: config.shared.cc_reach_margin,
         }
     }
 
@@ -1047,6 +1082,8 @@ pub fn classify_roster(
         danger_attackers,
         runs: cfg.runs,
         pillar_modes: cfg.pillar_modes,
+        pillar_stance: None,
+        stance_memory: StanceMemory::default(),
         exceptions: PlayExceptions::resolve(&cfg.exceptions),
         allies,
         in_danger: danger.in_danger,
@@ -1619,17 +1656,25 @@ const UNTIL_EPSILON: f32 = 0.05;
 ///
 /// `decide_abilities` calls it once on the snapshot it builds, and again after
 /// each same-frame instant CC that snapshot reflects (see the module docs).
+/// The pillar stance is classified here, after the rest, from the stance
+/// healer's own view of the snapshot (`pillar_stance::classify`): its
+/// crowd-control key reads the enemies' kits, which only `abilities` has.
 pub fn update_situations(
     situations: &mut Situations,
     snapshot: &CombatSnapshot,
     clock: &MatchClock,
     cfg: &SituationConfig,
+    abilities: &AbilityDefinitions,
     trace: &mut DecisionTrace,
 ) {
     for (index, team) in [1u8, 2].into_iter().enumerate() {
         let prev = std::mem::take(&mut situations.teams[index]);
         let cfg = cfg.for_team(team, snapshot.ai_profile.for_team(team));
-        let next = classify(snapshot, team, &prev, clock, &cfg);
+        let mut next = classify(snapshot, team, &prev, clock, &cfg);
+        let (stance, memory) =
+            pillar_stance::classify(snapshot, team, &prev, &next, clock, &cfg, abilities);
+        next.pillar_stance = stance;
+        next.stance_memory = memory;
         record_transitions(team, &prev, &next, trace);
         situations.teams[index] = next;
     }
@@ -1662,6 +1707,9 @@ fn record_transitions(
     }
     if let Some((kind, window)) = window_change(prev.last_stand, next.last_stand) {
         trace.record_window_change(team, SituationName::LastStand, kind, &window);
+    }
+    if let Some((kind, stance)) = pillar_stance::change(prev.pillar_stance, next.pillar_stance) {
+        trace.record_stance_change(team, kind, &stance);
     }
 }
 

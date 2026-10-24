@@ -23,8 +23,8 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::combat_core::{
-    compass_directions_16, mask_and_los_bitmask, score_directions, trap_setup_term, RangeBand,
-    ScorerInputs,
+    compass_directions_16, mask_and_los_bitmask, score_directions, stance_pull_term,
+    trap_setup_term, RangeBand, ScorerInputs,
 };
 use crate::states::play_match::components::{
     AuraType, Combatant, DpsPosture, KitePosture, MatchCountdown, MovementDirective, MovementGoal,
@@ -542,6 +542,13 @@ fn build_kiter_inputs(
         healer_leash_range: heal_range,
         trap_setup_point: trap_setup.map(|t| t.healer),
         trap_setup_range: trap_setup.map_or(0.0, |t| t.range),
+        // The side of the pillar the team holds its stance on, while this
+        // kiter runs the Pillar play (AS-385; `TeamPlan` only, so `None`
+        // under `Legacy` and the scorer is unchanged there).
+        stance_point: ctx.pillar_stance().and_then(|stance| {
+            super::pillar_stance::side_point(ctx.obstacles, &stance)
+                .map(|p| Vec3::new(p.x, my_pos.y, p.y))
+        }),
     }
 }
 
@@ -757,6 +764,12 @@ pub fn evaluate_dps_posture(
                         "los_seek",
                         los_seek_term(chosen, &inputs, config.weights.los_seek),
                     );
+                    if inputs.stance_point.is_some() {
+                        builder.scorer_term(
+                            "stance_pull",
+                            stance_pull_term(chosen, &inputs, config.weights.stance_pull),
+                        );
+                    }
                     builder.finish();
                 }
             }
@@ -843,6 +856,12 @@ pub fn evaluate_dps_posture(
                 builder.scorer_term(
                     "trap_setup",
                     trap_setup_term(chosen, &inputs, config.weights.trap_setup),
+                );
+            }
+            if inputs.stance_point.is_some() {
+                builder.scorer_term(
+                    "stance_pull",
+                    stance_pull_term(chosen, &inputs, config.weights.stance_pull),
                 );
             }
             builder.finish();

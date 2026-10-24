@@ -86,6 +86,13 @@ pub struct MovementWeights {
     /// `0.0` disables. Hunter only — the one kiter with a trap.
     #[serde(default)]
     pub trap_setup: f32,
+    /// Pull toward the side of the pillar the team holds its pillar stance
+    /// on (AS-385, `class_ai::pillar_stance`), the shape of
+    /// `formation_pull`. Absent while the team holds no stance and under
+    /// `Legacy`. `0.0` disables. Kiters only (Mage, Hunter) — the healer's
+    /// half of the stance is its hug.
+    #[serde(default)]
+    pub stance_pull: f32,
 }
 
 impl Default for MovementWeights {
@@ -106,6 +113,7 @@ impl Default for MovementWeights {
             cover_pull: 0.0,
             healer_leash: 0.0,
             trap_setup: 0.0,
+            stance_pull: 0.0,
         }
     }
 }
@@ -524,6 +532,7 @@ impl Default for DpsMovementConfig {
                 cover_pull: 0.0,
                 healer_leash: 0.0,
                 trap_setup: 0.0,
+                stance_pull: 0.0,
             },
             range_band_min: 8.0,  // SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE
             range_band_max: 30.0, // within AUTO_SHOT_RANGE
@@ -772,6 +781,7 @@ impl MovementConfig {
                 ("commitment_bonus", weights.commitment_bonus),
                 ("los_seek", weights.los_seek),
                 ("cover_pull", weights.cover_pull),
+                ("stance_pull", weights.stance_pull),
             ];
             for (name, value) in terms {
                 if value < 0.0 || !value.is_finite() {

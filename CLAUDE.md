@@ -695,6 +695,7 @@ with the context-steering mask refactor.
 - `los_seek` (0.0 for healers; Mage 2.0 / Hunter 1.0) — reward for candidate steps that have/restore line of sight to the kill target; drives occluded-in-range casters to orbit to a sighted angle instead of idling
 - `cover_pull` (Priest/Shaman 1.5, Paladin 1.0, 0.0 for DPS) — reward for candidate steps occluded from threats; drives pressured-healer pillar denial. Kept below `threat_repulsion` so denial shapes retreat direction without overriding escape; zeroed when a healable teammate is below `urgency_hp_threshold` or the team is pressing (tempo, `press_advantage_margin` / `press_release_margin`)
 - `trap_setup` (Hunter 3.0, 0.0 for everyone else) — while Freezing Trap is ready and an enemy healer would be caught by it (`hunter_dip::trap_setup_healer`), pull toward that healer once a KITE step would leave it beyond throw range (the trap's `range` less its trigger radius); zero inside that range, absent while the trap is on cooldown. Kept below `flee` so the kite still escapes the melee, bent toward the healer. Disengage bends its leap by the same two weights (`hunter_dip::trap_setup_disengage`) and names the healer as the Disengage's `target_id` in the trace when it did; KITE decisions carry the term as a `trap_setup` scorer term
+- `stance_pull` (Mage/Hunter 1.0, 0.0 for everyone else; `TeamPlan`) — while the kiter runs the Pillar play, a `formation_pull`-shaped pull toward the ring point at its team's pillar stance side (`pillar_stance::side_point`); absent otherwise. Below `range_band`/`los_seek` and far below `flee`, so it bends a kite, never overrides it; traced as a `stance_pull` scorer term
 
 **PRESSURED onset (`Legacy`)** — no RON knob; reuses `danger_edge_margin`. A
 caster targeting a healer pressures it only while CLOSING: between its own
@@ -1574,7 +1575,7 @@ deleted at a milestone sweep. Each play is a STAGE (`class_ai::plays::PlayStage`
 its id, `calls` (the team situation asks for it, for this unit and role),
 `admits` (this unit has a tool for it), its own named exceptions table with
 the measurement behind each entry, and its config key. ONE table orders them,
-`plays::PLAY_ORDER`: **Peel, TakeCover, Chain, Burst**, then the class's
+`plays::PLAY_ORDER`: **Peel, TakeCover, Pillar, Chain, Burst**, then the class's
 default chain. `plays::walk` is the only composition rule, and both
 `TeamSituation::play_for` and `CombatContext::play` take it: a unit runs the
 first stage its team runs, the situation calls and the unit admits (its
@@ -1625,6 +1626,25 @@ contexts where it is enabled.
 
 `TakeCover`: a last-stand healer hides (`class_ai::take_cover`; the movement
 is *Last stand: take cover* above).
+
+`Pillar` (AS-387): the team takes a pillar TOGETHER (`pillar_stance`,
+`class_ai::pillar_stance`; design
+`docs/design/2026-10-24-team-sight-cohesion.md` §3.3). The stance enters for
+`AvoidCc` when a crowd control a pillar defends against (`pillar_mode::team_threats`:
+sight-needing, from beyond 8yd, not a pet's) is ready for a teammate, the
+fight (the healer's teammates' centroid or its anchor) stands within
+`HUG_ENTER` of a pillar's skin, the ring has a TEAM arc (`pillar_mode::team_arc`:
+ground seeing every teammate in heal range, out of those discs, holding the
+margin) and no kill is on; Schmitt pair, release and dwell as AS-373's, the arc
+and the kill end it at once. Under it the healer runs AS-373's hug on the team
+arc — and ONLY under it (design D3: no healer pillars alone; the AS-373 mode
+key's preference keys are the stance) — and a kiter (Mage, Hunter) gains the
+`stance_pull` scorer term toward the stance's side. A melee is not called (its
+half is AS-386's sight yield, rule 3, which reads the situation), so it keeps
+Chain and Burst; a unit that runs Pillar does not run Chain while the stance
+holds. `Stall` (D4) is stubbed: `STALL_COMPS` ships empty for AS-390. Traced
+as `situation_change` `pillar_stance` (subject: the healer; `pillar`,
+`reason`) and in every decision's `situation.pillar_stance`.
 
 `Chain`: while the team's hold on an enemy (`lock_ending`: the soonest-ending
 stun, fear, polymorph, incapacitate or cyclone on a visible enemy) ends within

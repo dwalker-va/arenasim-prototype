@@ -16,14 +16,16 @@
 //! the wrong play or the wrong team, fails here — for TakeCover too, whose
 //! shipped table is empty and which no other test excepts.
 
-use arenasim::states::match_config::CharacterClass::{self, Mage, Priest, Rogue, Warrior};
+use arenasim::states::match_config::CharacterClass::{self, Mage, Priest, Rogue, Warlock, Warrior};
 use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::decision_trace::PlayTag;
+use arenasim::states::play_match::map_geometry::ObstacleVolume;
 use arenasim::states::play_match::situation::{
     ClassSet, ExceptionKey, ExceptionSet, Play, PlayId, PlaySet, CHAIN, PEEL,
 };
 use arenasim::states::play_match::AuraType;
+use bevy::prelude::Vec2;
 
 const ME: &str = "me";
 const ALLY: &str = "ally";
@@ -94,6 +96,36 @@ fn cases() -> Vec<Case> {
                 s
             },
         },
+        // A Priest, its Warrior fighting at a pillar with an enemy Warlock's
+        // Fear ready: the team takes the pillar.
+        Case {
+            id: PlayId::Pillar,
+            play: Play::Pillar,
+            class: Priest,
+            me: ExceptionKey::class(Priest),
+            other: ExceptionKey::class(Mage),
+            build: || {
+                Scene::new()
+                    .obstacles(vec![ObstacleVolume::Cylinder {
+                        center_xz: Vec2::ZERO,
+                        radius: 6.0,
+                        base_y: 0.0,
+                        height: 10.0,
+                    }])
+                    .ai_profile(1, AiProfile::TeamPlan)
+                    .unit(ME, 1, Priest)
+                    .at(-14.0, 0.0)
+                    .unit(ALLY, 1, Warrior)
+                    .at(0.0, 12.0)
+                    .targeting(ENEMY)
+                    .unit(ENEMY, 2, Warrior)
+                    .at(1.5, 12.0)
+                    .targeting(ALLY)
+                    .unit(ENEMY_HEALER, 2, Warlock)
+                    .at(18.0, 2.0)
+                    .targeting(ALLY)
+            },
+        },
         // A Mage, the enemy Priest's stun ending within the horizon.
         Case {
             id: PlayId::Chain,
@@ -158,6 +190,7 @@ fn played(view: &DecisionView) -> Option<PlayId> {
     situation.play.map(|tag| match tag {
         PlayTag::Peel { .. } => PlayId::Peel,
         PlayTag::TakeCover => PlayId::TakeCover,
+        PlayTag::Pillar => PlayId::Pillar,
         PlayTag::Chain { .. } => PlayId::Chain,
         PlayTag::Burst => PlayId::Burst,
     })
