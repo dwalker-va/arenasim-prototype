@@ -1,8 +1,9 @@
-//! The plays as a pipeline: each gated play is a [`PlayStage`], and
-//! [`PLAY_ORDER`] is the one table that orders them.
+//! The plays as a pipeline: each play is a [`PlayStage`], and [`PLAY_ORDER`]
+//! is the one table that orders them.
 //!
 //! A unit's play is the first stage in [`PLAY_ORDER`] that its team RUNS
-//! (`AiProfile::TeamPlan`, less the plays withheld from it for measurement),
+//! (`AiProfile::TeamPlan`, less the gated plays withheld from it for
+//! measurement),
 //! that the team situation CALLS for this unit ([`PlayStage::calls`]), and
 //! that the unit itself ADMITS ([`PlayStage::admits`], then the stage's own
 //! exceptions). A stage that does not apply passes the unit to the NEXT stage,
@@ -18,8 +19,9 @@
 //! **Adding a play.** A new play is: a new module holding its stage — its
 //! `calls`, its `admits`, its own exceptions table with the measurement for
 //! each entry, its config key; its step in each class's chain that runs it;
-//! its enum arms (`Play`, `PlayId`, `PlayId::ALL`, `Play::id`, and the
-//! trace's `PlayTag`, which the compiler asks for); usually a window accessor
+//! its enum arms (`Play`, `PlayId`, `PlayId::ALL`, `Play::id`,
+//! `PlayId::is_gated` — a new play starts gated — and the trace's `PlayTag`,
+//! which the compiler asks for); usually a window accessor
 //! on `CombatContext` for its step to read (as `burst_window` and
 //! `chain_window` are); the pinned order tests in `tests` below; and ONE line
 //! in [`PLAY_ORDER`]. The walk, the withhold and exception controls
@@ -35,7 +37,7 @@ use crate::states::play_match::situation::{
     ExceptionKey, ExceptionSet, Play, PlayId, Role, TeamSituation,
 };
 
-/// One gated play, as a stage of the pipeline.
+/// One play, as a stage of the pipeline.
 pub trait PlayStage: Sync {
     /// Which play this stage is.
     fn id(&self) -> PlayId;
@@ -67,23 +69,35 @@ pub trait PlayStage: Sync {
     /// exception entry must have the same shape.
     fn exceptions_have_context(&self) -> bool;
 
+    /// The FORMAT key the deciding unit running `play` is looked up under as
+    /// well ([`ExceptionKey::in_format`]: its class and its team's size), for
+    /// a play whose table also switches it off by format. `None` — the
+    /// default — for a play that has none.
+    fn format_exception_key(&self, _ctx: &CombatContext, _play: &Play) -> Option<ExceptionKey> {
+        None
+    }
+
+    /// Whether this play's table may hold format keys
+    /// ([`Self::format_exception_key`]); a config's `"Mage@3v3"` entry is
+    /// refused for a play that may not. Default `false`.
+    fn exceptions_by_format(&self) -> bool {
+        false
+    }
+
     /// The shipped exceptions: where the play measured negative and is not
     /// run (the stage's own named table, each entry with its measurement).
     fn exceptions(&self) -> ExceptionSet;
 }
 
 /// The order the plays are tried in. A teammate in danger is answered before
-/// anything else; a last-stand healer hides rather than holding a global
-/// cooldown for a hand-off; a team hunting a lone healer round its pillar
-/// hunts rather than hiding from that healer's crowd control, which is all
-/// the enemy has left (Hunt and TakeCover never meet: one needs two units on
-/// the team, the other one; and Hunt stands down itself while the healer is
-/// locked, so the Chain play below it extends the lock); a team that takes a
-/// pillar together takes it before a hand-off (AS-385 §3.0); a lock about to
-/// end is extended before a burst is spent into it.
+/// anything else; a team hunting a lone healer round its pillar hunts rather
+/// than hiding from that healer's crowd control, which is all the enemy has
+/// left (and Hunt stands down itself while the healer is locked, so the Chain
+/// play below it extends the lock); a team that takes a pillar together takes
+/// it before a hand-off (AS-385 §3.0); a lock about to end is extended before
+/// a burst is spent into it.
 pub static PLAY_ORDER: &[&dyn PlayStage] = &[
     &super::peel::PeelStage,
-    &super::take_cover::TakeCoverStage,
     &super::hunt::HuntStage,
     &super::pillar_stance::PillarStage,
     &super::chain::ChainStage,
@@ -108,10 +122,7 @@ pub fn parse_play(name: &str) -> Result<PlayId, String> {
         .map(|s| s.id())
         .ok_or_else(|| {
             let keys: Vec<&str> = PLAY_ORDER.iter().map(|s| s.config_key()).collect();
-            format!(
-                "Unknown gated play: '{name}'. Gated plays: {}",
-                keys.join(", ")
-            )
+            format!("Unknown play: '{name}'. Plays: {}", keys.join(", "))
         })
 }
 
@@ -170,14 +181,66 @@ pub fn called(
 }
 
 /// Whether the deciding unit runs `play` as `stage`: its team runs the play,
-/// the stage admits it, and the stage's exceptions do not name it.
+/// the stage admits it, and the stage's exceptions name neither its key nor
+/// its format key.
 pub fn admitted(ctx: &CombatContext, stage: &dyn PlayStage, play: &Play) -> bool {
     let situation = ctx.situation();
+    let table = situation.exceptions.of(stage.id());
     situation.runs.contains(stage.id())
         && stage.admits(ctx, play)
-        && stage
-            .exception_key(ctx, play)
-            .is_none_or(|key| !situation.exceptions.of(stage.id()).contains(key))
+        && [
+            stage.exception_key(ctx, play),
+            stage.format_exception_key(ctx, play),
+        ]
+        .into_iter()
+        .flatten()
+        .all(|key| !table.contains(key))
+}
+
+/// The size of the deciding unit's team: its non-pet units, living or dead
+/// (a 3v3 that has lost a unit is still a 3v3). Its own team is never hidden
+/// from its view.
+pub(crate) fn own_team_size(ctx: &CombatContext) -> Option<u8> {
+    let team = ctx.self_info()?.team;
+    let n = ctx
+        .combatants
+        .values()
+        .filter(|c| c.team == team && !c.is_pet)
+        .count();
+    u8::try_from(n).ok()
+}
+
+/// Every exception `id`'s table can hold, in a config's spelling: each class
+/// (`"Mage"`), or for a play switched off by context each class in each
+/// context (`"Mage/Hunter"`). As a team's exceptions override it names every
+/// unit the play could call, so the play is admitted for none of them: the
+/// paired control of a GRADUATED play, which cannot be withheld
+/// ([`PlayId::is_gated`]). The play's situation is still classified and
+/// traced; only what the units do about it is the control's.
+pub fn every_exception_entry(id: PlayId) -> Vec<String> {
+    let classes = CharacterClass::all();
+    if stage(id).exceptions_have_context() {
+        classes
+            .iter()
+            .flat_map(|c| classes.iter().map(move |x| format!("{c:?}/{x:?}")))
+            .collect()
+    } else {
+        classes.iter().map(|c| format!("{c:?}")).collect()
+    }
+}
+
+/// [`every_exception_entry`] as a set: every key `id`'s table can hold.
+pub fn every_exception(id: PlayId) -> ExceptionSet {
+    let classes = CharacterClass::all();
+    let keys: Vec<ExceptionKey> = if stage(id).exceptions_have_context() {
+        classes
+            .iter()
+            .flat_map(|c| classes.iter().map(|x| ExceptionKey::in_context(*c, *x)))
+            .collect()
+    } else {
+        classes.iter().map(|c| ExceptionKey::class(*c)).collect()
+    };
+    ExceptionSet::of(&keys)
 }
 
 /// The deciding unit's class, as its own view has it.
@@ -189,17 +252,16 @@ pub(crate) fn own_class(ctx: &CombatContext) -> Option<CharacterClass> {
 mod tests {
     use super::*;
 
-    /// The pipeline's order, pinned: Peel, TakeCover, Hunt, Pillar, Chain,
-    /// Burst. A change to it is a change to every unit's play, and must be
-    /// made here too.
+    /// The pipeline's order, pinned: Peel, Hunt, Pillar, Chain, Burst. A
+    /// change to it is a change to every unit's play, and must be made here
+    /// too.
     #[test]
-    fn the_order_table_is_peel_take_cover_hunt_pillar_chain_burst() {
+    fn the_order_table_is_peel_hunt_pillar_chain_burst() {
         let order: Vec<PlayId> = PLAY_ORDER.iter().map(|s| s.id()).collect();
         assert_eq!(
             order,
             vec![
                 PlayId::Peel,
-                PlayId::TakeCover,
                 PlayId::Hunt,
                 PlayId::Pillar,
                 PlayId::Chain,
@@ -222,9 +284,50 @@ mod tests {
             assert_eq!(parse_play(&snake_case(stage(id).config_key())), Ok(id));
         }
         assert_eq!(PLAY_ORDER.len(), PlayId::ALL.len());
-        assert_eq!(parse_play("TakeCover"), Ok(PlayId::TakeCover));
-        assert_eq!(parse_play("take_cover"), Ok(PlayId::TakeCover));
         assert!(parse_play("Default").is_err());
+        // Deleted at the 0.8 sweep: no stage answers to it.
+        assert!(parse_play("TakeCover").is_err());
+        assert!(parse_play("take_cover").is_err());
+    }
+
+    /// The every-exception table names every key the play's exceptions can
+    /// hold, in the shape the stage keys them by, and the config spelling
+    /// parses back to the same set.
+    #[test]
+    fn every_exception_names_every_key_in_the_stages_shape() {
+        use crate::states::play_match::situation::WithheldPlays;
+        let parse = |s: &str| {
+            CharacterClass::all()
+                .iter()
+                .copied()
+                .find(|c| format!("{c:?}") == s)
+                .ok_or_else(|| s.to_string())
+        };
+        let n = CharacterClass::all().len();
+        for id in PlayId::ALL {
+            let entries = every_exception_entry(id);
+            let set = every_exception(id);
+            let with_context = stage(id).exceptions_have_context();
+            assert_eq!(
+                entries.len(),
+                if with_context { n * n } else { n },
+                "{id:?}"
+            );
+            assert_eq!(
+                WithheldPlays::parse_exceptions(id, &entries, parse),
+                Ok(set),
+                "{id:?}"
+            );
+            for c in CharacterClass::all() {
+                if with_context {
+                    for x in CharacterClass::all() {
+                        assert!(set.contains(ExceptionKey::in_context(*c, *x)));
+                    }
+                } else {
+                    assert!(set.contains(ExceptionKey::class(*c)));
+                }
+            }
+        }
     }
 
     /// The walk's composition, with every play called at once: the first
@@ -246,7 +349,6 @@ mod tests {
         let every = TeamSituation {
             ally_in_danger: Some(window(ally)),
             danger_attackers: [subject].into_iter().collect(),
-            last_stand: Some(window(me)),
             lock_ending: Some(window(subject)),
             kill_window: Some(window(subject)),
             pillar_stance: Some(super::super::pillar_stance::StanceWindow {
@@ -289,7 +391,6 @@ mod tests {
             healer,
             vec![
                 peel,
-                Play::TakeCover,
                 Play::Hunt,
                 Play::Pillar,
                 chain,
@@ -305,15 +406,7 @@ mod tests {
             .collect();
         assert_eq!(
             dps,
-            vec![
-                peel,
-                Play::Hunt,
-                Play::Hunt,
-                chain,
-                chain,
-                Play::Burst,
-                Play::Default
-            ]
+            vec![peel, Play::Hunt, chain, chain, Play::Burst, Play::Default]
         );
         let ranged: Vec<Play> = (0..=PlayId::COUNT)
             .map(|n| refusing(&every, Role::RangedDps, &PLAY_ORDER_IDS[..n]))
@@ -323,7 +416,6 @@ mod tests {
             vec![
                 peel,
                 Play::Hunt,
-                Play::Hunt,
                 Play::Pillar,
                 chain,
                 Play::Burst,
@@ -331,10 +423,7 @@ mod tests {
             ]
         );
         // A refused stage alone passes to the one after it, not the fallback.
-        assert_eq!(
-            refusing(&every, Role::Healer, &[PlayId::Peel]),
-            Play::TakeCover
-        );
+        assert_eq!(refusing(&every, Role::Healer, &[PlayId::Peel]), Play::Hunt);
         assert_eq!(refusing(&every, Role::MeleeDps, &[PlayId::Chain]), peel);
         assert_eq!(
             refusing(&every, Role::MeleeDps, &[PlayId::Peel, PlayId::Chain]),
@@ -351,18 +440,11 @@ mod tests {
         // Not running a play is skipping its stage; `after` starts the walk
         // past a stage.
         let no_peel = TeamSituation {
-            runs: PlaySet::of(&[Play::TakeCover, chain, Play::Burst]),
+            runs: PlaySet::of(&[Play::Hunt, chain, Play::Burst]),
             ..every.clone()
         };
-        assert_eq!(no_peel.play_for(Role::Healer, me), Play::TakeCover);
-        assert_eq!(
-            every.play_after(PlayId::Peel, Role::Healer, me),
-            Play::TakeCover
-        );
-        assert_eq!(
-            every.play_after(PlayId::TakeCover, Role::Healer, me),
-            Play::Hunt
-        );
+        assert_eq!(no_peel.play_for(Role::Healer, me), Play::Hunt);
+        assert_eq!(every.play_after(PlayId::Peel, Role::Healer, me), Play::Hunt);
         assert_eq!(
             every.play_after(PlayId::Hunt, Role::Healer, me),
             Play::Pillar
@@ -439,9 +521,8 @@ mod tests {
     }
 
     /// [`PLAY_ORDER`]'s ids, for the walk test.
-    const PLAY_ORDER_IDS: [PlayId; 6] = [
+    const PLAY_ORDER_IDS: [PlayId; 5] = [
         PlayId::Peel,
-        PlayId::TakeCover,
         PlayId::Hunt,
         PlayId::Pillar,
         PlayId::Chain,

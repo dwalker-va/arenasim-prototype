@@ -22,7 +22,8 @@
 //!   cooldowns HELD for one (the same step with no cast).
 //!
 //! It plays a bank of matches under `TeamPlan` in three arms per seed — the
-//! play withheld from both teams (NN), team 1 chaining (CN), team 2 chaining
+//! play excepted everywhere on both teams (NN; it graduated and cannot be
+//! withheld), team 1 chaining (CN), team 2 chaining
 //! (NC) — and scores each chaining match against its NN twin from the
 //! CHAINING side: what it inflicted on the other team with the play, less
 //! what the same team inflicted without it. No rate is pooled across the two
@@ -39,6 +40,8 @@ mod common;
 use std::collections::BTreeMap;
 
 use arenasim::headless::HeadlessMatchConfig;
+use arenasim::states::play_match::class_ai::plays::every_exception_entry;
+use arenasim::states::play_match::situation::PlayId;
 use arenasim::states::play_match::utils::is_incapacitating;
 use common::staged::{play_seeded, Played};
 
@@ -75,12 +78,15 @@ enum Arm {
 }
 
 impl Arm {
-    fn withheld(self, team: u8) -> Vec<String> {
+    /// Team `team`'s exceptions override: none when it chains; otherwise the
+    /// Chain play excepted everywhere — the graduated play's control, which
+    /// cannot be withheld.
+    fn withheld(self, team: u8) -> BTreeMap<String, Vec<String>> {
         let chains = matches!((self, team), (Arm::Cn, 1) | (Arm::Nc, 2));
         if chains {
-            Vec::new()
+            BTreeMap::new()
         } else {
-            vec!["Chain".to_string()]
+            BTreeMap::from([("Chain".to_string(), every_exception_entry(PlayId::Chain))])
         }
     }
 }
@@ -92,8 +98,8 @@ fn config(team1: &[&str], team2: &[&str], map: &str, seed: u64, arm: Arm) -> Hea
         map: map.to_string(),
         random_seed: Some(seed),
         ai_profile: Some("TeamPlan".to_string()),
-        team1_withheld_plays: arm.withheld(1),
-        team2_withheld_plays: arm.withheld(2),
+        team1_exceptions: arm.withheld(1),
+        team2_exceptions: arm.withheld(2),
         ..Default::default()
     }
 }

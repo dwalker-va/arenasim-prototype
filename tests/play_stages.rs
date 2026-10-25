@@ -1,11 +1,14 @@
 //! The play pipeline's controls, stage by stage (`class_ai::plays`).
 //!
-//! For each gated play, a scene in which that play — and no other — is the
-//! deciding unit's, under `TeamPlan`. Then every measurement control, keyed by
-//! play id, is shown reaching THAT play and only it, on its own team only:
+//! For each play, a scene in which that play — and no other — is the deciding
+//! unit's, under `TeamPlan`. Then every measurement control, keyed by play
+//! id, is shown reaching THAT play and only it, on its own team only:
 //!
-//! - withholding the play from the unit's team takes it away; withholding it
-//!   from the other team, or withholding any other play, does not;
+//! - withholding a GATED play from the unit's team takes it away; withholding
+//!   it from the other team, or withholding any other gated play, does not. A
+//!   graduated play cannot be withheld: excepting it everywhere for the unit's
+//!   team (its control) takes it away, and doing so for the other team, or
+//!   for any other play, does not;
 //! - an exceptions table naming the unit (its class, and for Peel the class
 //!   of the teammate it peels for) takes it away; one naming another class,
 //!   or set on another play, does not;
@@ -13,8 +16,7 @@
 //!   them for the other team, or lifting another play's, does not.
 //!
 //! So a stage whose exceptions the walk ignores, a withhold or a lift keyed to
-//! the wrong play or the wrong team, fails here — for TakeCover too, whose
-//! shipped table is empty and which no other test excepts.
+//! the wrong play or the wrong team, fails here.
 
 use arenasim::states::match_config::CharacterClass::{self, Mage, Priest, Rogue, Warlock, Warrior};
 use arenasim::states::play_match::ai_profile::AiProfile;
@@ -70,28 +72,6 @@ fn cases() -> Vec<Case> {
                     .targeting(ALLY)
                     .unit(ENEMY_HEALER, 2, Priest)
                     .at(0.0, 30.0);
-                s.combatant_mut(ME).stealthed = false;
-                s
-            },
-        },
-        // A Priest, alone against two.
-        Case {
-            id: PlayId::TakeCover,
-            play: Play::TakeCover,
-            class: Priest,
-            me: ExceptionKey::class(Priest),
-            other: ExceptionKey::class(Mage),
-            build: || {
-                let mut s = Scene::new()
-                    .ai_profile(1, AiProfile::TeamPlan)
-                    .unit(ME, 1, Priest)
-                    .at(0.0, 0.0)
-                    .targeting(ENEMY)
-                    .unit(ENEMY, 2, Warrior)
-                    .at(0.0, 25.0)
-                    .targeting(ME)
-                    .unit(ENEMY_HEALER, 2, Priest)
-                    .at(10.0, 30.0);
                 s.combatant_mut(ME).stealthed = false;
                 s
             },
@@ -216,7 +196,6 @@ fn played(view: &DecisionView) -> Option<PlayId> {
     let situation = view.situation.as_ref().expect("a situation");
     situation.play.map(|tag| match tag {
         PlayTag::Peel { .. } => PlayId::Peel,
-        PlayTag::TakeCover => PlayId::TakeCover,
         PlayTag::Hunt => PlayId::Hunt,
         PlayTag::Pillar => PlayId::Pillar,
         PlayTag::Chain { .. } => PlayId::Chain,
@@ -238,29 +217,51 @@ fn every_control_reaches_its_own_play_on_its_own_team() {
     assert_eq!(
         all.iter().map(|c| c.id).collect::<Vec<_>>(),
         PlayId::ALL.to_vec(),
-        "a case per gated play"
+        "a case per play"
     );
     for case in &all {
         let id = case.id;
         let decide = |s: Scene| played(&s.decide(ME));
         assert_eq!(decide((case.build)()), Some(id), "{id:?}: the scene's play");
 
-        // Withholding.
-        assert_ne!(
-            decide((case.build)().withhold(1, PlaySet::of(&[case.play]))),
-            Some(id),
-            "{id:?} withheld from its team"
-        );
-        assert_eq!(
-            decide((case.build)().withhold(2, PlaySet::of(&[case.play]))),
-            Some(id),
-            "{id:?} withheld from the other team"
-        );
-        for other in PlayId::ALL.into_iter().filter(|o| *o != id) {
-            assert_eq!(
-                decide((case.build)().withhold(1, PlaySet::of(&[kind(other)]))),
+        // Withholding: a GATED play only. A graduated play cannot be
+        // withheld; its control is every exception, on its own team.
+        if id.is_gated() {
+            assert_ne!(
+                decide((case.build)().withhold(1, PlaySet::of(&[case.play]))),
                 Some(id),
-                "{id:?} with {other:?} withheld"
+                "{id:?} withheld from its team"
+            );
+            assert_eq!(
+                decide((case.build)().withhold(2, PlaySet::of(&[case.play]))),
+                Some(id),
+                "{id:?} withheld from the other team"
+            );
+        } else {
+            assert_ne!(
+                decide((case.build)().except_everywhere(1, PlaySet::of(&[case.play]))),
+                Some(id),
+                "{id:?} excepted everywhere on its team"
+            );
+            assert_eq!(
+                decide((case.build)().except_everywhere(2, PlaySet::of(&[case.play]))),
+                Some(id),
+                "{id:?} excepted everywhere on the other team"
+            );
+        }
+        for other in PlayId::ALL.into_iter().filter(|o| *o != id) {
+            let others = PlaySet::of(&[kind(other)]);
+            if other.is_gated() {
+                assert_eq!(
+                    decide((case.build)().withhold(1, others)),
+                    Some(id),
+                    "{id:?} with {other:?} withheld"
+                );
+            }
+            assert_eq!(
+                decide((case.build)().except_everywhere(1, others)),
+                Some(id),
+                "{id:?} with {other:?} excepted everywhere"
             );
         }
 

@@ -270,15 +270,17 @@ For deeper context, see these focused references:
   The DPS half was reverted:
   constraint satisfaction cannot express a kiter's distance-maximisation.
   `Legacy` is byte-identical throughout.
-  **Head-to-head, n=300 per arm** (2026-10-10 at `ea63f4f`, PillaredArena;
-  `docs/design/balance/2026-10-10-as164-milestone-sweep.md` §6): the healer
-  solve + kiter leash is worth +25pt to Warlock+Priest (z=6.7), +3pt to
-  Warrior+Priest (ns), +2pt to Hunter+Priest, -45pt to Rogue+Priest (z=-13.1)
-  and -9pt to Warrior+Mage+Priest vs Rogue+Warlock+Paladin (z=-2.8). Each
-  effect is measured against the `Legacy` baseline of the same comps, so a
-  change to `Legacy` moves it too. The Rogue+Priest effect is about half each:
-  `Legacy` Rogue+Priest is stronger (100% against Hunter+Priest, after AS-44's
-  dispel fix) and `TeamPlan` Rogue+Priest is weaker (55%).
+  **Head-to-head** (2026-10-25 at `40c75048`, AS-395;
+  `docs/design/balance/2026-10-25-0.8-milestone-sweep.md` §2): the TeamPlan
+  side against the same side in the all-Legacy twin, both seats, every 2v2
+  cell on all three maps (93,312 sides) and a 600-cell 3v3 sample (10,800).
+  2v2 competitive **+5.5pt** (z=27; BasicArena +1.2, Nagrand +4.8,
+  TwinPillars +10.5); 3v3 competitive **+4.8pt** (z=8.3; BasicArena −0.2,
+  Nagrand +2.9, TwinPillars +11.5). Every class gains in 2v2 competitive play
+  on pillar maps, from the Druid (+2.1) to the Warlock (+12.0); a double-healer
+  TeamPlan team loses (−4.7pt on Nagrand). Each effect replicates over three
+  seed blocks and is measured against the `Legacy` baseline of the same comps,
+  so a change to `Legacy` moves it too.
   **Sample-size warning stands:** an n=12 win-rate figure is noise around
   these values. Prefer per-frame mechanism metrics
   (`tests/camp_sweep.rs`); for win rate use `scripts/headtohead_sweep.py`
@@ -722,17 +724,6 @@ the enemy is targeting it now first keeps the steps that end NEARER it
 between the healer and its focused teammate is walked round, not fled from.
 ESCAPE windows keep the plain ladder.
 
-**Last stand: take cover (`TeamPlan` play)** — a healer that is its team's last
-living non-pet unit against two or more enemies it can see (the `last_stand`
-situation) runs the `TakeCover` play: it walks to the spot
-`team_solve::last_stand_cover` picks — the fewest enemy casters in sight, then
-furthest out of the nearest closer's reach, then nearest — and, once there,
-holds it `COVER_HOLD_SECS` (2s, longer than a Frostbolt) unless an enemy is
-inside `danger_radius`. Overrides FREE and PRESSURED (not ESCAPE or a dip);
-movement-locking casts defer while it walks; withheld per team as `"TakeCover"`.
-Inert with no obstacles. Measured: it moves no wins and adds ~0.7pt of draws
-on Nagrand (`docs/design/balance/2026-10-13-as249-healer-positioning.md`).
-
 **Healer pillar modes: hug or open (`TeamPlan`, AS-373)** —
 `class_ai::pillar_mode`; design and measurements in
 `docs/design/2026-10-19-healer-pillar-modes.md`. Constants in the module, no
@@ -773,7 +764,7 @@ the two keys (`key_stance`, `key_arc`).
   forbidden the heading is `turn_limited` bit for bit.
 - The Paladin (`HUG_EXCEPTIONS`, design D5) is untouched by both modes: its
   FREE is melee pursuit, with no formation point. Medic chase, dispel walk,
-  TakeCover, ESCAPE and DIP outrank it and leave the mode as it was.
+  a hunt station, ESCAPE and DIP outrank it and leave the mode as it was.
   Obstacle-free maps are untouched; `Legacy` is byte-identical.
 
 **Medic chase (heal-seeking movement)** — shared across Priest/Paladin/Shaman
@@ -1624,17 +1615,28 @@ constructed:
   `docs/design/proposals/2026-10-11-ai-architecture.md` §3.2.
   `tests/peel_play_probe.rs` is the first situation-conditional probe: it
   reads its windows off the trace's `situation_change` events, plays the same
-  bank with the play withheld (`team{1,2}_withheld_plays`, a measurement-only
-  config field — `situation::WithheldPlays`), and asserts in units of the
-  bank's own noise (a z), never against a fitted number.
+  bank with the play excepted in every context (`team{1,2}_exceptions`
+  naming `plays::every_exception_entry`, the control of a graduated play),
+  and asserts in units of the bank's own noise (a z), never against a fitted
+  number.
 
 **Plays.** A play is a named reordering of a class's own chain
-(`situation::Play`). Every play is gated under `TeamPlan` and graduates or is
-deleted at a milestone sweep. Each play is a STAGE (`class_ai::plays::PlayStage`):
+(`situation::Play`). Every play runs only under `TeamPlan`. A new play is
+GATED until a milestone sweep graduates or deletes it: a gated play can be
+withheld from one team (`team{1,2}_withheld_plays`), the paired control it is
+measured against. A GRADUATED play is permanent under `TeamPlan` and cannot be
+withheld (the config refuses it, `PlayId::is_gated`); `Legacy` stays frozen
+as the reference, so graduating deletes no `Legacy` rule. Its paired control
+is its exceptions table naming every context (`team{1,2}_exceptions` set to
+`plays::every_exception_entry`, `Scene::except_everywhere`). At the 0.8 sweep
+(`docs/design/balance/2026-10-25-0.8-milestone-sweep.md` §3; user rulings
+2026-10-25, applied by AS-398) Peel, Hunt, Chain and Burst graduated,
+TakeCover was deleted (−0.2pt in both formats, −1.7pt to Paladin teams), and
+Pillar stays gated. Each play is a STAGE (`class_ai::plays::PlayStage`):
 its id, `calls` (the team situation asks for it, for this unit and role),
 `admits` (this unit has a tool for it), its own named exceptions table with
 the measurement behind each entry, and its config key. ONE table orders them,
-`plays::PLAY_ORDER`: **Peel, TakeCover, Hunt, Pillar, Chain, Burst**, then the class's
+`plays::PLAY_ORDER`: **Peel, Hunt, Pillar, Chain, Burst**, then the class's
 default chain. `plays::walk` is the only composition rule, and both
 `TeamSituation::play_for` and `CombatContext::play` take it: a unit runs the
 first stage its team runs, the situation calls and the unit admits (its
@@ -1644,14 +1646,17 @@ still bursts. `plays::tests` pins the order and the walk.
 
 **Adding a play.** A new play is: a new module holding its stage and its
 exceptions table; its step in each class's chain that runs it; its enum arms
-(`Play`, `PlayId`, `PlayId::ALL`, `Play::id`, and the trace's `PlayTag`, which
-the compiler asks for); usually a window accessor on `CombatContext` for its
-step to read (as `burst_window` and `chain_window` are); the pinned order
-tests (`plays::tests`); and ONE line in `PLAY_ORDER`. What needs no change:
+(`Play`, `PlayId`, `PlayId::ALL`, `Play::id`, `PlayId::is_gated` — a new play
+starts gated — and the trace's `PlayTag`, which the compiler asks for);
+usually a window accessor on `CombatContext` for its step to read (as
+`burst_window` and `chain_window` are); the pinned order tests
+(`plays::tests`); and ONE line in `PLAY_ORDER`. What needs no change:
 withholding (`team{1,2}_withheld_plays`), exceptions overrides
 (`team{1,2}_exceptions`), `situation::WithheldPlays`, the scene builder
-(`Scene::withhold` / `lift` / `exceptions`) and the walk, all keyed by the
-play's id. A play card that edits another play's stage, or the walk, is a
+(`Scene::withhold` / `except_everywhere` / `lift` / `exceptions`) and the
+walk, all keyed by the play's id. Graduating a play is one arm of
+`PlayId::is_gated`, and its probes' controls moving from the withhold to
+`every_exception_entry`. A play card that edits another play's stage, or the walk, is a
 composition change, not an addition.
 
 **Exceptions (user ruling, 2026-10-12).** A play that measures negative in a
@@ -1659,8 +1664,16 @@ context is not used there: not every behaviour suits every composition. An
 exception is a NAMED entry in the play's own table — never a scattered `if` —
 with a one-line justification citing its measurement: for Peel,
 `peel::PEEL_GATES`, a (peeler class, class of the teammate in danger) pair;
-for Chain and Burst, `chain::CHAIN_EXCEPTIONS` and `burst::BURST_EXCEPTIONS`,
-by class. `tests/peel_gates.rs` lists the Peel gates by set equality and
+for Hunt, Pillar, Chain and Burst, `hunt::HUNT_EXCEPTIONS`,
+`pillar_stance::PILLAR_EXCEPTIONS`, `chain::CHAIN_EXCEPTIONS` and
+`burst::BURST_EXCEPTIONS`, by class. At the 0.8
+sweep Burst and Chain keep empty tables, Hunt keeps the Paladin, Druid and
+Shaman, and Peel keeps AS-290's nine gates and adds Paladin@Hunter and
+Hunter@Priest. Peel also has FORMAT gates (`peel::PEEL_FORMAT_GATES`, keyed
+`ExceptionKey::in_format`, spelled `"Mage@3v3"` in a config): the Mage and
+the Druid do not peel at all on a team of three
+(`docs/design/balance/2026-10-25-as398-play-graduation.md` §1); the rest of
+the 3v3 context selection is AS-327's. `tests/peel_gates.rs` lists the Peel gates by set equality and
 plays every peeler for every teammate class, so adding or removing one fails
 a default test until the list is edited too. Every exception is re-checked at
 each milestone sweep with it lifted for the side under test
@@ -1681,14 +1694,11 @@ cast gate, skips an attacker the team already holds, and a movement peel
 (root, snare) answers only a melee or pet. The Hunter's Spider and Boar peel
 too, through its pet dispatch (`peel::pet_peel_tool`). The Priest's peel is
 Psychic Scream on an attacker already inside it; it never walks to bring one
-into range (*Psychic Scream under `TeamPlan`* below). Judged at the 0.8
-milestone sweep (`docs/design/balance/2026-10-12-as274-peel-play.md`) in the
-contexts where it is enabled.
+into range (*Psychic Scream under `TeamPlan`* below). Graduated at the 0.8
+milestone sweep (+0.3pt in 2v2; `docs/design/balance/2026-10-12-as274-peel-play.md`
+is its design) with eleven context gates and two 3v3 format gates.
 
-`TakeCover`: a last-stand healer hides (`class_ai::take_cover`; the movement
-is *Last stand: take cover* above).
-
-`Hunt` (AS-394), TakeCover's counterpart: the enemy is down to a lone healer
+`Hunt` (AS-394): the enemy is down to a lone healer
 at a pillar (`hunt`, `class_ai::hunt`; within `HUNT_ENTER` of its skin, held
 to `HUNT_LEAVE`, hidden from one of the team at onset) and the team has two or
 more units, so two of them take STATIONS half a turn apart round that pillar,
@@ -1708,7 +1718,7 @@ the healer (`hold = !arrived || covered`), so an arrived unit gives its station
 up for its ordinary walk for sight whenever nobody sees the healer, even while
 its partner is still walking, and takes it back once one of them does. A MOVEMENT play, walked by `hunt::walk_to_station` (a `Point`
 directive) from the kiter's ENGAGE, the Warlock's dispatch and the healers'
-`take_cover_tick`; Burst still leads the chain, and the play stands down while
+`hunt_station_tick`; Burst still leads the chain, and the play stands down while
 the healer is locked so Chain extends the lock. It sits before Pillar: a team
 hunting the last enemy does not hide from its crowd control. Traced as
 `situation_change` `hunt` (subject: the healer; `pillar`) and the
@@ -1768,9 +1778,9 @@ and beyond every enemy healer's help — locked, out of mana, or out of reach),
 every DPS puts its burst step at the head of its chain — its
 `burst::burst_tools` on that enemy — and the cast gate refuses any cast on it
 that would land after the window's `until` (`cast_guard::fits_window`, traced
-`OutlastsWindow`). Under `Legacy` (or with the play withheld) the old
-lock-window reorder runs instead (`CombatContext::lock_window`), because
-deleting it moves `Legacy`. Findings and the graduate criterion:
+`OutlastsWindow`). Under `Legacy` (or for a class the play's exceptions name)
+the old lock-window reorder runs instead (`CombatContext::lock_window`):
+graduating Burst kept it, because deleting it moves `Legacy`. Findings and the graduate criterion:
 `docs/design/balance/2026-10-12-as275-burst-play.md`.
 
 **The migrate-not-re-pin rule (user decision, 2026-10-12).** When a

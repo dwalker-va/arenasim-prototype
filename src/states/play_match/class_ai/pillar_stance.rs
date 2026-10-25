@@ -10,8 +10,9 @@
 //!   with obstacles, with the gates open, on a team whose healer can hug (not
 //!   one `pillar_mode::HUG_EXCEPTIONS` names).
 //! - **The play** ([`PillarStage`], `situation::Play::Pillar`), in
-//!   `plays::PLAY_ORDER` after TakeCover and before Chain. A MOVEMENT play,
-//!   like TakeCover: what the unit casts is its ordinary chain.
+//!   `plays::PLAY_ORDER` after Hunt and before Chain. A MOVEMENT play, like
+//!   Hunt: what the unit casts is its ordinary chain. Still GATED after the
+//!   0.8 sweep (`PlayId::is_gated`): `team{1,2}_withheld_plays` can deny it.
 //!
 //! **Entering for `AvoidCc`** — all of ([`StanceKeys`]):
 //!

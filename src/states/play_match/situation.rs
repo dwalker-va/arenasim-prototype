@@ -57,10 +57,6 @@
 //!   [`Window`] names the most injured such enemy; its `until` is when the
 //!   first healer that is only LOCKED comes free — `None` when no healer's
 //!   return is known (out of mana, out of reach, or none at all).
-//! - **`last_stand`** — the team's last living non-pet unit, while two or
-//!   more living non-pet enemies it can see stand against it. Its [`Window`]
-//!   names that unit; its onset is when its last teammate fell (or the second
-//!   enemy came into view). Pets count on neither side.
 //! - **`hunt`** — the enemy is down to a lone healer hiding at a pillar,
 //!   and the team still has two or more units (AS-394, `class_ai::hunt`):
 //!   `TeamPlan` only, on a team that runs the Hunt play. Its
@@ -106,26 +102,24 @@
 //! ## Plays
 //!
 //! A [`Play`] is what a unit does about the situation: a named reordering of
-//! its own priority chain ([`TeamSituation::play_for`]). Each gated play is a
-//! STAGE of one pipeline, `class_ai::plays::PLAY_ORDER` — Peel, TakeCover,
-//! Hunt, Pillar, Chain, Burst — and a unit runs the first stage its team runs, the
+//! its own priority chain ([`TeamSituation::play_for`]). Each play is a STAGE
+//! of one pipeline, `class_ai::plays::PLAY_ORDER` — Peel, Hunt, Pillar,
+//! Chain, Burst — and a unit runs the first stage its team runs, the
 //! situation calls, and the unit admits; a stage that does not apply passes
-//! it to the next (the walk is `class_ai::plays`'s). Every play is a NEW
-//! behaviour, gated under `AiProfile::TeamPlan` ([`SituationConfig::under`])
-//! and graduated or deleted at a milestone sweep (the architecture's §4.5);
-//! [`WithheldPlays`] denies a play to one team — the paired control its probe
-//! and its head-to-head measure it against — or replaces its exceptions.
+//! it to the next (the walk is `class_ai::plays`'s). Every play runs only
+//! under `AiProfile::TeamPlan` ([`SituationConfig::under`]); `Legacy` runs
+//! none. A NEW play is GATED until a milestone sweep graduates or deletes it
+//! (the architecture's §4.5): [`WithheldPlays`] can deny a gated play to one
+//! team — the paired control its probe and its head-to-head measure it
+//! against. A GRADUATED play ([`PlayId::is_gated`] false; Peel, Hunt, Chain
+//! and Burst, at the 0.8 sweep) is permanent under `TeamPlan` and cannot be
+//! withheld. Every play's exceptions table can still be replaced for one
+//! team, which is how a milestone sweep re-checks an exception.
 //!
 //! - **`Peel`** — a teammate is in danger, so a unit other than that teammate
 //!   puts its PEEL step at the head of its chain: crowd control on one of the
 //!   teammate's [`danger_attackers`](TeamSituation::danger_attackers)
 //!   (`class_ai::peel`), except in the contexts `peel::PEEL_GATES` names.
-//! - **`TakeCover`** — the team is in its `last_stand` and the unit is a
-//!   healer, so it breaks the enemy casters' line of sight behind cover
-//!   instead of standing in the open (`team_solve::last_stand_cover`, driven
-//!   from the healers' posture machines; `class_ai::take_cover`). A MOVEMENT
-//!   play: the chain is the ordinary one. Inert on a map with nothing to
-//!   hide behind.
 //! - **`Hunt`** — the team hunts a lone enemy healer at a pillar and the
 //!   unit holds one of the hunt's two stations, so it walks to its station
 //!   and holds it (`class_ai::hunt`). A MOVEMENT play: the chain is the
@@ -335,8 +329,9 @@ pub struct TeamSituation {
     /// nearest to it first (entity order on a tie). Empty while no teammate is
     /// in danger.
     pub danger_attackers: SmallVec<[Entity; 4]>,
-    /// The gated plays this team runs ([`SituationConfig::runs`]): under
-    /// `AiProfile::TeamPlan`, every one not withheld from it.
+    /// The plays this team runs ([`SituationConfig::runs`]): under
+    /// `AiProfile::TeamPlan`, every graduated play and every gated one not
+    /// withheld from it; under `Legacy`, none.
     pub runs: PlaySet,
     /// Each play's exceptions for this team: the stage's shipped table
     /// (`PlayStage::exceptions`), unless a measurement override replaces it
@@ -363,9 +358,6 @@ pub struct TeamSituation {
     /// The trace's `sim_time` this was classified at: the clock a window's
     /// `until` is on, which a cast is fitted against.
     pub now: f32,
-    /// The team's last living non-pet unit, while it faces two or more living
-    /// non-pet enemies it can see (the module docs' `last_stand`).
-    pub last_stand: Option<Window>,
     /// The enemy whose hold by this team ends soonest — the lock a chain
     /// hands off from (the module docs' `lock_ending`).
     pub lock_ending: Option<Window>,
@@ -405,26 +397,22 @@ pub enum Play {
     Default,
     /// A kill window is open: the BURST step — the class's hard hitters on
     /// the window's subject, each only if it lands before the window's
-    /// `until` — heads the chain. Gated under `AiProfile::TeamPlan`.
+    /// `until` — heads the chain. Under `AiProfile::TeamPlan` (graduated at
+    /// the 0.8 sweep).
     Burst,
     /// `ally` is in danger: the PEEL step — crowd control on one of its
     /// [`danger_attackers`](TeamSituation::danger_attackers) — heads the
     /// chain. When it does not fire, the class's own chain runs below it,
     /// led by a burst step when the Burst stage applies to the unit
     /// (`CombatContext::burst_window`); never by a chain step, which runs
-    /// only under the Chain play (`CombatContext::chain_window`). Gated under
-    /// `AiProfile::TeamPlan`.
+    /// only under the Chain play (`CombatContext::chain_window`). Under
+    /// `AiProfile::TeamPlan` (graduated at the 0.8 sweep).
     Peel { ally: Entity },
-    /// The unit is its team's [`last_stand`](TeamSituation::last_stand), and
-    /// a healer: it breaks the enemy casters' line of sight behind cover
-    /// instead of standing in the open (`team_solve::last_stand_cover`). A
-    /// MOVEMENT play — the healer's chain is its ordinary one. Gated under
-    /// `AiProfile::TeamPlan`.
-    TakeCover,
     /// The team hunts a lone enemy healer hiding at a pillar
     /// ([`hunt`](TeamSituation::hunt)), and the unit holds one of the hunt's
     /// two stations round that pillar (`class_ai::hunt`). A MOVEMENT play —
-    /// the chain is the ordinary one. Gated under `AiProfile::TeamPlan`.
+    /// the chain is the ordinary one. Under `AiProfile::TeamPlan` (graduated
+    /// at the 0.8 sweep).
     Hunt,
     /// The team holds a [`pillar_stance`](TeamSituation::pillar_stance): the
     /// healer hugs the stance's pillar on the team arc, and a kiting ranged
@@ -439,20 +427,18 @@ pub enum Play {
     /// (`class_ai::chain`) — heads the chain. When it does not fire, or
     /// holds the global cooldown for a hand-off still to come, the class's
     /// own chain runs below it, led by a burst step when the Burst stage
-    /// applies to the unit (`CombatContext::burst_window`). Gated under
-    /// `AiProfile::TeamPlan`.
+    /// applies to the unit (`CombatContext::burst_window`). Under
+    /// `AiProfile::TeamPlan` (graduated at the 0.8 sweep).
     Chain { subject: Entity },
 }
 
 impl Play {
-    /// The gated play this is; `None` for [`Play::Default`], which is no
-    /// stage and cannot be withheld.
+    /// The play this is; `None` for [`Play::Default`], which is no stage.
     pub fn id(&self) -> Option<PlayId> {
         match self {
             Play::Default => None,
             Play::Burst => Some(PlayId::Burst),
             Play::Peel { .. } => Some(PlayId::Peel),
-            Play::TakeCover => Some(PlayId::TakeCover),
             Play::Hunt => Some(PlayId::Hunt),
             Play::Pillar => Some(PlayId::Pillar),
             Play::Chain { .. } => Some(PlayId::Chain),
@@ -460,13 +446,12 @@ impl Play {
     }
 }
 
-/// A gated play's identity: a [`Play`] without its payload. Withholding a
+/// A play's identity: a [`Play`] without its payload. Withholding a gated
 /// play, overriding its exceptions and placing it in the pipeline
 /// (`class_ai::plays::PLAY_ORDER`) are all keyed by it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PlayId {
     Peel,
-    TakeCover,
     Hunt,
     Pillar,
     Chain,
@@ -474,21 +459,35 @@ pub enum PlayId {
 }
 
 impl PlayId {
-    /// Every gated play, in declaration order.
-    pub const ALL: [PlayId; 6] = [
+    /// Every play, in declaration order.
+    pub const ALL: [PlayId; 5] = [
         PlayId::Peel,
-        PlayId::TakeCover,
         PlayId::Hunt,
         PlayId::Pillar,
         PlayId::Chain,
         PlayId::Burst,
     ];
 
-    /// How many gated plays there are.
+    /// How many plays there are.
     pub const COUNT: usize = Self::ALL.len();
 
     fn index(self) -> usize {
         self as usize
+    }
+
+    /// Whether the play is still GATED: on probation under `TeamPlan` until a
+    /// milestone sweep graduates or deletes it, and so the one kind of play
+    /// [`WithheldPlays`] may deny a team. A GRADUATED play is permanent under
+    /// `TeamPlan`: nothing withholds it (the user's ruling on what graduating
+    /// means, 0.8 sweep, 2026-10-25). Exhaustive, so a new play answers here.
+    pub const fn is_gated(self) -> bool {
+        match self {
+            // AS-387; kept gated at the 0.8 sweep (its sign flips by map,
+            // 2026-10-25-0.8-milestone-sweep.md §3.5).
+            PlayId::Pillar => true,
+            // Graduated at the 0.8 sweep (AS-395's rulings, applied by AS-398).
+            PlayId::Peel | PlayId::Hunt | PlayId::Chain | PlayId::Burst => false,
+        }
     }
 }
 
@@ -542,7 +541,7 @@ impl TeamSituation {
 
     /// The play the unit `me`, playing `role`, runs in this situation, as
     /// its TEAM sees it: the first stage of the pipeline
-    /// (`class_ai::plays::PLAY_ORDER` — Peel, TakeCover, Hunt, Pillar, Chain, Burst) that
+    /// (`class_ai::plays::PLAY_ORDER` — Peel, Hunt, Pillar, Chain, Burst) that
     /// the team runs ([`Self::runs`]) and that the situation calls for `me`;
     /// else [`Play::Default`]. The unit's own admission — its tools and each
     /// stage's exceptions — is `CombatContext::play`'s, over the same walk.
@@ -612,14 +611,21 @@ pub const CHAIN_HORIZON_SECS: f32 = 4.0;
 
 /// The key an exceptions table is looked up under: the class of the unit
 /// deciding, and for a play switched off by CONTEXT (the Peel play, by the
-/// teammate it peels for) the class of that context. Every play's table is
-/// one shape of it, so one override type serves them all
-/// ([`ExceptionOverrides`]).
+/// teammate it peels for) the class of that context. A play switched off by
+/// FORMAT (the Peel play's 3v3 gates) is keyed by the deciding class and its
+/// team's size instead. Every play's table is a shape of it, so one override
+/// type serves them all ([`ExceptionOverrides`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExceptionKey {
     pub class: CharacterClass,
     pub context: Option<CharacterClass>,
+    /// The deciding unit's team size, for a key that switches a play off in
+    /// one format (`in_format`); `None` otherwise.
+    pub team_size: Option<u8>,
 }
+
+/// The team sizes a format key can name ([`ExceptionKey::in_format`]).
+pub const FORMAT_SIZES: std::ops::RangeInclusive<u8> = 2..=3;
 
 impl ExceptionKey {
     /// `class`, in any context.
@@ -627,6 +633,7 @@ impl ExceptionKey {
         Self {
             class,
             context: None,
+            team_size: None,
         }
     }
 
@@ -635,6 +642,21 @@ impl ExceptionKey {
         Self {
             class,
             context: Some(context),
+            team_size: None,
+        }
+    }
+
+    /// `class`, on a team of `team_size` (2 or 3: [`FORMAT_SIZES`]), in any
+    /// context. Panics on another size.
+    pub fn in_format(class: CharacterClass, team_size: u8) -> Self {
+        assert!(
+            FORMAT_SIZES.contains(&team_size),
+            "a format key names a team of 2 or 3, not {team_size}"
+        );
+        Self {
+            class,
+            context: None,
+            team_size: Some(team_size),
         }
     }
 
@@ -645,18 +667,32 @@ impl ExceptionKey {
                 .position(|x| *x == c)
                 .expect("every class is in CharacterClass::all")
         };
-        let stride = CharacterClass::all().len() + 1;
-        let slot = index(self.class) * stride + self.context.map_or(0, |c| index(c) + 1);
+        let n = CharacterClass::all().len();
+        let stride = n + 1;
+        let slot = match self.team_size {
+            // After every (class, context) slot: one run of classes per size.
+            Some(size) => n * stride + (size - FORMAT_SIZES.start()) as usize * n + index(self.class),
+            None => index(self.class) * stride + self.context.map_or(0, |c| index(c) + 1),
+        };
         assert!(slot < 128, "ExceptionSet holds {slot} keys: widen it");
         1 << slot
     }
 
-    /// Parse a config's exception entry: `"Mage"`, or `"Mage/Hunter"` (a
-    /// Mage, peeling for a Hunter), with `parse_class` naming each class.
+    /// Parse a config's exception entry: `"Mage"`, `"Mage/Hunter"` (a Mage,
+    /// peeling for a Hunter) or `"Mage@3v3"` (a Mage on a team of three),
+    /// with `parse_class` naming each class.
     pub fn parse(
         entry: &str,
         parse_class: impl Fn(&str) -> Result<CharacterClass, String>,
     ) -> Result<Self, String> {
+        if let Some((class, format)) = entry.split_once('@') {
+            let size = match format.trim() {
+                "2v2" => 2,
+                "3v3" => 3,
+                other => return Err(format!("Exception '{entry}': unknown format '{other}' (2v2, 3v3)")),
+            };
+            return Ok(Self::in_format(parse_class(class.trim())?, size));
+        }
         match entry.split_once('/') {
             Some((class, context)) => Ok(Self::in_context(
                 parse_class(class.trim())?,
@@ -808,7 +844,7 @@ pub struct SituationConfig {
     /// `danger_radius`. `true` under `Legacy` ([`Self::under`]), the rule it
     /// has always run.
     pub healers_close: bool,
-    /// The gated plays the team runs. None until [`Self::under`] puts the
+    /// The plays the team runs. None until [`Self::under`] puts the
     /// team under `TeamPlan`, so a context classified with the bare
     /// thresholds (a test's) runs no play.
     pub runs: PlaySet,
@@ -901,12 +937,21 @@ impl SituationConfig {
     }
 
     /// The configuration team `team`, under `profile`, is classified with:
-    /// [`Self::under`], less the plays [`Self::withheld`] denies the team,
-    /// and with the exceptions overrides it sets for the team.
+    /// [`Self::under`], less the gated plays [`Self::withheld`] denies the
+    /// team, and with the exceptions overrides it sets for the team.
+    ///
+    /// Panics if [`Self::withheld`] names a graduated play for the team: a
+    /// graduated play cannot be withheld ([`PlayId::is_gated`]), and a
+    /// headless config that asks is refused when it is read
+    /// ([`WithheldPlays::parse_set`]).
     pub fn for_team(self, team: u8, profile: AiProfile) -> Self {
         let cfg = self.under(profile);
+        let withheld = self.withheld.for_team(team);
+        if let Some(id) = withheld.ids().find(|id| !id.is_gated()) {
+            panic!("{id:?} graduated and cannot be withheld (team {team})");
+        }
         Self {
-            runs: cfg.runs.without(self.withheld.for_team(team)),
+            runs: cfg.runs.without(withheld),
             exceptions: self.withheld.exceptions_for_team(team),
             pillar_modes: cfg.pillar_modes && !self.withheld.no_pillar_modes(team),
             sight_yield: cfg.sight_yield && !self.withheld.no_sight_yield(team),
@@ -918,14 +963,14 @@ impl SituationConfig {
     }
 }
 
-/// A set of gated plays, a bit per [`PlayId`]: the plays a team runs, or the
+/// A set of plays, a bit per [`PlayId`]: the plays a team runs, or the gated
 /// plays withheld from it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PlaySet(u8);
 
 impl PlaySet {
-    /// The set of exactly `plays` ([`Play::Default`] is no gated play, and
-    /// adds nothing).
+    /// The set of exactly `plays` ([`Play::Default`] is no stage, and adds
+    /// nothing).
     pub fn of(plays: &[Play]) -> Self {
         let mut set = Self::default();
         for play in plays {
@@ -934,7 +979,7 @@ impl PlaySet {
         set
     }
 
-    /// Every gated play.
+    /// Every play.
     pub fn all() -> Self {
         let mut set = Self::default();
         for id in PlayId::ALL {
@@ -943,7 +988,7 @@ impl PlaySet {
         set
     }
 
-    /// Add `play` (a no-op for an ungated one: it cannot be withheld).
+    /// Add `play` (a no-op for [`Play::Default`], which is no stage).
     pub fn withhold(&mut self, play: &Play) {
         if let Some(id) = play.id() {
             self.insert(id);
@@ -958,7 +1003,7 @@ impl PlaySet {
         self.0 & (1 << id.index()) != 0
     }
 
-    /// Whether `play` is in the set. An ungated play never is.
+    /// Whether `play` is in the set. [`Play::Default`] never is.
     pub fn denies(&self, play: &Play) -> bool {
         play.id().is_some_and(|id| self.contains(id))
     }
@@ -986,15 +1031,16 @@ pub const CHAIN: Play = Play::Chain {
     subject: Entity::PLACEHOLDER,
 };
 
-/// The measurement controls on the gated plays, per team, keyed by play id:
+/// The measurement controls on the plays, per team, keyed by play id:
 ///
-/// - **Withheld** ([`Self::team1`], [`Self::team2`]): the plays each team is
-///   DENIED. A team under `TeamPlan` with a play withheld is the paired
-///   control the play is measured against — in a tier-4 probe (the same seed
-///   bank with the play off) and in a head-to-head (one side with it, one
-///   without, on one seed).
+/// - **Withheld** ([`Self::team1`], [`Self::team2`]): the GATED plays each
+///   team is DENIED ([`PlayId::is_gated`]). A team under `TeamPlan` with a
+///   play withheld is the paired control the play is measured against — in a
+///   tier-4 probe (the same seed bank with the play off) and in a head-to-head
+///   (one side with it, one without, on one seed). A graduated play cannot be
+///   withheld ([`SituationConfig::for_team`] panics on one).
 /// - **Exceptions** ([`Self::team1_exceptions`], [`Self::team2_exceptions`]):
-///   a play's exceptions table replaced for a team. An empty table LIFTS
+///   any play's exceptions table replaced for a team. An empty table LIFTS
 ///   every exception, so the play runs even where it measured negative: how
 ///   a milestone sweep re-checks an exception, the same side with it and
 ///   without, on one seed.
@@ -1002,9 +1048,10 @@ pub const CHAIN: Play = Play::Chain {
 /// A MEASUREMENT CONTROL, not a behaviour switch: nothing in the game sets it,
 /// but it is reachable from a headless match's JSON (`team1_withheld_plays`,
 /// `team1_exceptions` and team 2's) and so from `--replay`, which honours the
-/// same config. The default withholds and overrides nothing. It lives only as
-/// long as plays stay gated: when the last gated play graduates or is deleted
-/// (§4.5), this type and the config fields are deleted too.
+/// same config. The default withholds and overrides nothing. The withheld sets
+/// live only as long as a play stays gated: when the last gated play
+/// graduates or is deleted (§4.5), they and their config fields are deleted
+/// too. The exceptions overrides stay as long as any play keeps a table.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WithheldPlays {
     pub team1: PlaySet,
@@ -1111,12 +1158,21 @@ impl WithheldPlays {
         }
     }
 
-    /// Parse a config's list of gated play names (each stage's config key,
-    /// `class_ai::plays::parse_play`) into the set it names.
+    /// Parse a config's list of plays to withhold (each stage's config key,
+    /// `class_ai::plays::parse_play`) into the set it names. Only a GATED
+    /// play may be withheld ([`PlayId::is_gated`]): a graduated one is an
+    /// error, which names the exceptions override that is left.
     pub fn parse_set(names: &[String]) -> Result<PlaySet, String> {
         let mut set = PlaySet::default();
         for name in names {
-            set.insert(plays::parse_play(name)?);
+            let id = plays::parse_play(name)?;
+            if !id.is_gated() {
+                return Err(format!(
+                    "{name} graduated at the 0.8 milestone sweep and cannot be withheld; \
+                     its exceptions can still be replaced (team1_exceptions / team2_exceptions)"
+                ));
+            }
+            set.insert(id);
         }
         Ok(set)
     }
@@ -1134,14 +1190,24 @@ impl WithheldPlays {
         let mut keys = Vec::with_capacity(entries.len());
         for entry in entries {
             let key = ExceptionKey::parse(entry, &parse_class)?;
-            if key.context.is_some() != stage.exceptions_have_context() {
+            let fits = if key.team_size.is_some() {
+                stage.exceptions_by_format()
+            } else {
+                key.context.is_some() == stage.exceptions_have_context()
+            };
+            if !fits {
                 return Err(format!(
-                    "Exception '{entry}' for {}: its exceptions are {}",
+                    "Exception '{entry}' for {}: its exceptions are {}{}",
                     stage.config_key(),
                     if stage.exceptions_have_context() {
                         "a class in a context, as \"Mage/Hunter\""
                     } else {
                         "a class, as \"Mage\""
+                    },
+                    if stage.exceptions_by_format() {
+                        ", or a class in a format, as \"Mage@3v3\""
+                    } else {
+                        ""
                     }
                 ));
             }
@@ -1297,49 +1363,9 @@ fn classify_roster_before_yield(
         target_focus,
         target_sight,
         now: clock.now,
-        last_stand: last_stand(roster, auras, team, prev, clock.now),
         lock_ending: lock_ending(roster, auras, team, prev, clock.now),
         sight_yield: SmallVec::new(),
     }
-}
-
-/// The `last_stand` window: `team`'s only living non-pet unit, while two or
-/// more living non-pet enemies it can see ([`stealth_visible`], its own Shadow
-/// Sight included) stand against it. Pets do not count on either side: a
-/// Hunter and its pet are one enemy, and a lone Hunter with its pet is still
-/// alone. The onset carries while the subject holds.
-fn last_stand(
-    roster: &BTreeMap<Entity, CombatantInfo>,
-    auras: &BTreeMap<Entity, Vec<Aura>>,
-    team: u8,
-    prev: &TeamSituation,
-    now: f32,
-) -> Option<Window> {
-    let mut alive = roster
-        .values()
-        .filter(|i| i.team == team && i.is_alive && !i.is_pet);
-    let last = alive.next()?;
-    if alive.next().is_some() {
-        return None;
-    }
-    let sight = has_shadow_sight(auras, last.entity);
-    let enemies = roster
-        .values()
-        .filter(|c| {
-            c.team != team
-                && c.is_alive
-                && !c.is_pet
-                && stealth_visible(c.stealthed, sight, has_shadow_sight(auras, c.entity))
-        })
-        .count();
-    (enemies >= 2).then(|| Window {
-        subject: last.entity,
-        since: prev
-            .last_stand
-            .filter(|w| w.subject == last.entity)
-            .map_or(now, |w| w.since),
-        until: None,
-    })
 }
 
 /// When `healer` (an enemy healer, alive) can next heal `subject`:
@@ -1921,9 +1947,6 @@ fn record_transitions(
     }
     if let Some((kind, window)) = window_change(prev.kill_window, next.kill_window) {
         trace.record_window_change(team, SituationName::KillWindow, kind, &window);
-    }
-    if let Some((kind, window)) = window_change(prev.last_stand, next.last_stand) {
-        trace.record_window_change(team, SituationName::LastStand, kind, &window);
     }
     record_sight_yield_changes(team, prev, next, trace);
     if let Some((kind, hunt)) =
@@ -2628,37 +2651,55 @@ mod tests {
         assert!(s.danger_attackers.is_empty());
     }
 
+    /// The plays graduated at the 0.8 sweep, by name; the rest are gated.
+    /// A play that graduates (or is deleted) changes this list.
+    const GRADUATED: [PlayId; 4] = [PlayId::Peel, PlayId::Hunt, PlayId::Chain, PlayId::Burst];
+
+    /// A graduated play runs under `TeamPlan` for both teams, never under
+    /// `Legacy`, and no config can withhold it; the gated Pillar can be
+    /// withheld from one team only.
     #[test]
-    fn withheld_plays_deny_peel_to_one_team_only() {
-        let withheld = WithheldPlays {
-            team2: PlaySet::of(&[PEEL]),
-            ..Default::default()
-        };
-        let cfg = SituationConfig {
-            withheld,
-            ..SituationConfig::default()
-        };
-        assert!(cfg
-            .for_team(1, AiProfile::TeamPlan)
-            .runs
-            .contains(PlayId::Peel));
-        assert!(!cfg
-            .for_team(2, AiProfile::TeamPlan)
-            .runs
-            .contains(PlayId::Peel));
-        assert!(!cfg
-            .for_team(1, AiProfile::Legacy)
-            .runs
-            .contains(PlayId::Peel));
+    fn graduated_plays_cannot_be_withheld_and_a_gated_one_can() {
+        let gated: Vec<PlayId> = PlayId::ALL.into_iter().filter(|id| id.is_gated()).collect();
+        assert_eq!(gated, vec![PlayId::Pillar]);
+        let cfg = SituationConfig::default();
+        for id in GRADUATED {
+            assert!(!id.is_gated(), "{id:?}");
+            for team in [1, 2] {
+                assert!(cfg.for_team(team, AiProfile::TeamPlan).runs.contains(id));
+                assert!(!cfg.for_team(team, AiProfile::Legacy).runs.contains(id));
+            }
+            let name = plays::stage(id).config_key().to_string();
+            let refused = WithheldPlays::parse_set(std::slice::from_ref(&name)).unwrap_err();
+            assert!(refused.contains("graduated"), "{refused}");
+        }
         assert_eq!(
-            WithheldPlays::parse_set(&["Peel".to_string()]),
-            Ok(PlaySet::of(&[PEEL]))
+            WithheldPlays::parse_set(&["Pillar".to_string()]),
+            Ok(PlaySet::of(&[Play::Pillar]))
         );
         assert!(WithheldPlays::parse_set(&["Default".to_string()]).is_err());
+        assert!(WithheldPlays::parse_set(&["TakeCover".to_string()]).is_err());
+        let withheld = SituationConfig {
+            withheld: WithheldPlays {
+                team2: PlaySet::of(&[Play::Pillar]),
+                ..Default::default()
+            },
+            ..cfg
+        };
+        assert!(withheld
+            .for_team(1, AiProfile::TeamPlan)
+            .runs
+            .contains(PlayId::Pillar));
+        let team2 = withheld.for_team(2, AiProfile::TeamPlan).runs;
+        assert!(!team2.contains(PlayId::Pillar));
+        assert!(GRADUATED.iter().all(|id| team2.contains(*id)));
     }
 
+    /// A graduated play withheld in code, past the config's refusal, is a
+    /// panic, never a silent control.
     #[test]
-    fn withheld_plays_deny_burst_to_one_team_only() {
+    #[should_panic(expected = "graduated and cannot be withheld")]
+    fn withholding_a_graduated_play_in_code_panics() {
         let cfg = SituationConfig {
             withheld: WithheldPlays {
                 team1: PlaySet::of(&[Play::Burst]),
@@ -2666,28 +2707,7 @@ mod tests {
             },
             ..SituationConfig::default()
         };
-        assert!(!cfg
-            .for_team(1, AiProfile::TeamPlan)
-            .runs
-            .contains(PlayId::Burst));
-        assert!(
-            cfg.for_team(1, AiProfile::TeamPlan)
-                .runs
-                .contains(PlayId::Peel),
-            "Peel stays"
-        );
-        assert!(cfg
-            .for_team(2, AiProfile::TeamPlan)
-            .runs
-            .contains(PlayId::Burst));
-        assert!(!cfg
-            .for_team(2, AiProfile::Legacy)
-            .runs
-            .contains(PlayId::Burst));
-        assert_eq!(
-            WithheldPlays::parse_set(&["Burst".to_string(), "Peel".to_string()]),
-            Ok(PlaySet::of(&[Play::Burst, PEEL]))
-        );
+        let _ = cfg.for_team(1, AiProfile::TeamPlan);
     }
 
     // -----------------------------------------------------------------------
@@ -2801,43 +2821,6 @@ mod tests {
         assert_eq!(
             danger.play_for(Role::MeleeDps, me),
             Play::Peel { ally: subject }
-        );
-    }
-
-    #[test]
-    fn withheld_plays_deny_chain_to_one_team_only() {
-        let cfg = SituationConfig {
-            withheld: WithheldPlays {
-                team2: PlaySet::of(&[CHAIN]),
-                ..Default::default()
-            },
-            ..SituationConfig::default()
-        };
-        assert!(cfg
-            .for_team(1, AiProfile::TeamPlan)
-            .runs
-            .contains(PlayId::Chain));
-        assert!(!cfg
-            .for_team(2, AiProfile::TeamPlan)
-            .runs
-            .contains(PlayId::Chain));
-        assert!(
-            cfg.for_team(2, AiProfile::TeamPlan)
-                .runs
-                .contains(PlayId::Burst),
-            "Burst stays"
-        );
-        assert!(!cfg
-            .for_team(1, AiProfile::Legacy)
-            .runs
-            .contains(PlayId::Chain));
-        assert_eq!(
-            WithheldPlays::parse_set(&["Chain".to_string()]),
-            Ok(PlaySet::of(&[CHAIN]))
-        );
-        assert_eq!(
-            PlayExceptions::resolve(&ExceptionOverrides::default()).of(PlayId::Chain),
-            plays::stage(PlayId::Chain).exceptions()
         );
     }
 
@@ -3203,140 +3186,6 @@ mod tests {
         f.roster.get_mut(&healer).unwrap().class = CharacterClass::Warlock;
         place(&mut f, healer, band, 0.0, Some(warrior));
         assert!(at(&f, AiProfile::TeamPlan).0, "a Warlock closing");
-    }
-
-    /// `last_stand`: a team's only living non-pet unit, against two or more
-    /// living non-pet enemies it can see. The onset carries; pets count on
-    /// neither side; a teammate alive, one enemy, or an enemy it cannot see
-    /// end it.
-    #[test]
-    fn last_stand_is_the_last_unit_against_two_it_can_see() {
-        let mut f = fixture();
-        let (warrior, rogue, healer) = (f.warrior, f.rogue, f.healer);
-        let s = classify_now(&f, &TeamSituation::default(), 10.0);
-        assert_eq!(s.last_stand, None, "two a side");
-        f.roster.get_mut(&rogue).unwrap().is_alive = false;
-        let s = classify_now(&f, &TeamSituation::default(), 10.0);
-        let w = s.last_stand.expect("the Warrior is alone against two");
-        assert_eq!((w.subject, w.since, w.until), (warrior, 10.0, None));
-        let later = classify_now(&f, &s, 12.0);
-        assert_eq!(
-            later.last_stand.map(|w| w.since),
-            Some(10.0),
-            "the onset carries"
-        );
-        // A pet on the Warrior's side is not a teammate.
-        f.roster.get_mut(&rogue).unwrap().is_alive = true;
-        f.roster.get_mut(&rogue).unwrap().is_pet = true;
-        assert!(classify_now(&f, &s, 12.0).last_stand.is_some(), "a pet");
-        // An enemy it cannot see does not count, nor does one that is dead.
-        f.roster.get_mut(&healer).unwrap().stealthed = true;
-        assert_eq!(classify_now(&f, &s, 12.0).last_stand, None, "unseen");
-        f.roster.get_mut(&healer).unwrap().stealthed = false;
-        f.roster.get_mut(&healer).unwrap().is_alive = false;
-        assert_eq!(classify_now(&f, &s, 12.0).last_stand, None, "one enemy");
-    }
-
-    /// TakeCover is a healer's play, on a team that runs it, for its last
-    /// stand only.
-    #[test]
-    fn take_cover_is_the_last_healers_play_under_the_gate() {
-        let me = Entity::from_raw(1);
-        let other = Entity::from_raw(2);
-        let standing = TeamSituation {
-            last_stand: Some(Window {
-                subject: me,
-                since: 0.0,
-                until: None,
-            }),
-            runs: PlaySet::of(&[Play::TakeCover]),
-            ..Default::default()
-        };
-        assert_eq!(standing.play_for(Role::Healer, me), Play::TakeCover);
-        assert_eq!(standing.play_for(Role::RangedDps, me), Play::Default);
-        assert_eq!(standing.play_for(Role::Healer, other), Play::Default);
-        let ungated = TeamSituation {
-            runs: PlaySet::default(),
-            ..standing.clone()
-        };
-        assert_eq!(ungated.play_for(Role::Healer, me), Play::Default);
-        // The gate: TeamPlan runs it, Legacy never does, and a withheld team
-        // does not.
-        let cfg = SituationConfig::default();
-        assert!(cfg
-            .under(AiProfile::TeamPlan)
-            .runs
-            .contains(PlayId::TakeCover));
-        assert!(!cfg
-            .under(AiProfile::Legacy)
-            .runs
-            .contains(PlayId::TakeCover));
-        let withheld = SituationConfig {
-            withheld: WithheldPlays {
-                team1: PlaySet::of(&[Play::TakeCover]),
-                ..Default::default()
-            },
-            ..cfg
-        };
-        assert!(!withheld
-            .for_team(1, AiProfile::TeamPlan)
-            .runs
-            .contains(PlayId::TakeCover));
-        assert!(withheld
-            .for_team(2, AiProfile::TeamPlan)
-            .runs
-            .contains(PlayId::TakeCover));
-        assert_eq!(
-            WithheldPlays::parse_set(&["TakeCover".to_string()]),
-            Ok(PlaySet::of(&[Play::TakeCover]))
-        );
-    }
-
-    /// TakeCover and Chain: a last-stand healer with a lock ending takes
-    /// cover rather than chaining — in `play_for` and in `play_after(PlayId::Peel, ..)`,
-    /// the path a gated peeler takes — and chains once the cover play is
-    /// gated off. Any other unit chains.
-    #[test]
-    fn a_last_stand_healer_takes_cover_ahead_of_a_chain() {
-        let me = Entity::from_raw(1);
-        let other = Entity::from_raw(2);
-        let subject = Entity::from_raw(3);
-        let standing = TeamSituation {
-            last_stand: Some(Window {
-                subject: me,
-                since: 0.0,
-                until: None,
-            }),
-            runs: PlaySet::of(&[Play::TakeCover, CHAIN]),
-            lock_ending: Some(Window {
-                subject,
-                since: 0.0,
-                until: Some(31.0),
-            }),
-            now: 30.0,
-            ..Default::default()
-        };
-        assert_eq!(standing.play_for(Role::Healer, me), Play::TakeCover);
-        assert_eq!(
-            standing.play_after(PlayId::Peel, Role::Healer, me),
-            Play::TakeCover
-        );
-        assert_eq!(
-            standing.play_for(Role::Healer, other),
-            Play::Chain { subject }
-        );
-        assert_eq!(
-            standing.play_for(Role::MeleeDps, me),
-            Play::Chain { subject }
-        );
-        let uncovered = TeamSituation {
-            runs: PlaySet::of(&[CHAIN]),
-            ..standing.clone()
-        };
-        assert_eq!(
-            uncovered.play_for(Role::Healer, me),
-            Play::Chain { subject }
-        );
     }
 
     #[test]

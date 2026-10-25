@@ -159,11 +159,6 @@ pub struct HealerPosture {
     /// owed, rather than handing movement back to a posture that can step it
     /// out of range while the GCD runs. `Off` otherwise.
     pub dispel_walk: DispelWalkPhase,
-    /// `TeamPlan` only: the cover spot a healer standing alone against two or
-    /// more enemies is walking to or holding (the TakeCover play, AS-249).
-    /// `Some` while the play drives the healer's position, `None` otherwise; a
-    /// new spot (or `None` → `Some`) is what emits its `TakeCover` trace event.
-    pub cover_spot: Option<Vec2>,
     /// `TeamPlan` only: the station round a lone enemy healer's pillar this
     /// healer holds for its team's hunt (the Hunt play, AS-394). `Some` while
     /// the play drives the healer's position, so its end hands the legs back.
@@ -183,7 +178,7 @@ pub struct HealerPosture {
     /// (AS-373, `class_ai::pillar_mode`; it hugs only under its team's pillar
     /// stance, AS-385). Kept across posture changes — the
     /// mode is a stance, not a step — and only the FREE and PRESSURED ticks
-    /// read or change it, so a medic chase, a dispel walk, TakeCover, ESCAPE
+    /// read or change it, so a medic chase, a dispel walk, a hunt station, ESCAPE
     /// or a dip suspends it without resetting it.
     pub pillar: PillarMemory,
 }
@@ -308,7 +303,6 @@ impl HealerPosture {
             solve_dispel: None,
             solve_dying: None,
             dispel_walk: DispelWalkPhase::Off,
-            cover_spot: None,
             hunt_station: None,
             formation: FormationMemory::default(),
             cc_walk: false,

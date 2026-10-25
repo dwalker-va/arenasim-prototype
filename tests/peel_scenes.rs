@@ -1,7 +1,8 @@
 //! Scene tests for the Peel play (`situation::Play::Peel`,
 //! `class_ai::peel`): one per class with a peel tool, each paired with its
-//! control — the same scene with the play withheld from the team
-//! (`Scene::withhold`), the one condition removed.
+//! control — the same scene with the play excepted everywhere on the team
+//! (`Scene::except_everywhere`: the play graduated and cannot be withheld),
+//! the one condition removed.
 //!
 //! The scene: the deciding unit's teammate is dying (30% health) with an
 //! enemy Warrior on it, so the team's `ally_in_danger` names the teammate and
@@ -94,7 +95,7 @@ fn peels_in(
 
     // Control: the play withheld from the team, nothing else changed.
     let without = build(AiProfile::TeamPlan)
-        .withhold(1, PlaySet::of(&[PEEL]))
+        .except_everywhere(1, PlaySet::of(&[PEEL]))
         .decide(ME);
     let situation = without.situation.expect("a situation");
     assert!(situation.ally_in_danger.is_some());
@@ -144,7 +145,7 @@ fn a_hunter_concusses_the_warrior_on_its_dying_ally_not_the_nearer_melee() {
         s.combatant_mut(ROGUE).stealthed = false;
         s
     };
-    let control = build(AiProfile::TeamPlan).withhold(1, PlaySet::of(&[PEEL]));
+    let control = build(AiProfile::TeamPlan).except_everywhere(1, PlaySet::of(&[PEEL]));
     assert_eq!(
         control.decide(ME).chose(),
         Some((AbilityType::ConcussiveShot, Some(ROGUE))),
@@ -228,7 +229,7 @@ fn a_warrior_has_no_peel() {
     assert!(peel_tools(Warrior).is_empty());
     let with = scene(Warrior, 6.0, AiProfile::TeamPlan).decide(ME);
     let without = scene(Warrior, 6.0, AiProfile::TeamPlan)
-        .withhold(1, PlaySet::of(&[PEEL]))
+        .except_everywhere(1, PlaySet::of(&[PEEL]))
         .decide(ME);
     assert_eq!(with.chose(), without.chose(), "{}", describe(&with));
     assert_eq!(with.situation.and_then(|s| s.play_step), None);

@@ -1,8 +1,8 @@
 //! The Peel play's shared half (`situation::Play::Peel`).
 //!
 //! While a teammate is in danger (`ally_in_danger`: dying AND pressured), a
-//! unit on a team that runs the play — `AiProfile::TeamPlan`, unless the
-//! play is withheld for measurement — puts its PEEL step at the head of its
+//! unit on a team that runs the play — `AiProfile::TeamPlan` (the play
+//! graduated at the 0.8 sweep) — puts its PEEL step at the head of its
 //! own chain: crowd control on one of the teammate's attackers
 //! (`TeamSituation::danger_attackers`). The teammate itself does not peel;
 //! its own defence is its chain's.
@@ -40,13 +40,13 @@
 use bevy::prelude::*;
 use smallvec::SmallVec;
 
-use super::plays::{own_class, PlayStage};
+use super::plays::{own_class, own_team_size, PlayStage};
 use super::{CombatContext, Incoming};
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::{AuraType, PetType};
 use crate::states::play_match::situation::{
-    ExceptionKey, ExceptionSet, Play, PlayId, Role, TeamSituation,
+    ExceptionKey, ExceptionSet, Play, PlayId, Role, TeamSituation, FORMAT_SIZES,
 };
 
 /// The peel a unit owes this tick: the teammate in danger, and the attackers
@@ -168,7 +168,9 @@ pub const PEEL_GATES_FINDINGS: &str = "docs/design/balance/2026-10-12-as290-peel
 /// of the head-to-head, and with the same sign on the 4 seeds that picked it
 /// and the 12 that confirmed it. Two gates came later, once the Burst play
 /// ran in every arm: picked on the 4 validation seeds and confirmed
-/// significant on the 12 confirmation seeds alone. A gate is a whole
+/// significant on the 12 confirmation seeds alone. Two more came at the 0.8
+/// milestone sweep ([`MILESTONE_08_FINDINGS`] §3.1), the AS-290 bar met on
+/// the sweep's seeds and fresh ones pooled. A gate is a whole
 /// peeler-for-ally context:
 /// within each, no single tool measured positive. Every gate is re-checked at
 /// the milestone sweep with the gates lifted (`"team1_exceptions": {"Peel":
@@ -222,6 +224,54 @@ pub const PEEL_GATES: &[PeelGate] = &[
         CharacterClass::Priest,
         "-1.0pt over 1,440 pairs with Burst on (1 for, 15 against, z=-3.3); Kidney Shot contested with Burst",
     ),
+    // The 0.8 milestone sweep (`MILESTONE_08_FINDINGS` §3.1): each picked on
+    // the sweep's seeds and confirmed on fresh seeds 871-876, pooled.
+    gate(
+        CharacterClass::Paladin,
+        CharacterClass::Hunter,
+        "0.8 sweep: -0.8pt on its play seeds (0 for, 9 against), -0.2pt on 871-876; pooled 1 for, 12 against, z=-3.1",
+    ),
+    gate(
+        CharacterClass::Hunter,
+        CharacterClass::Priest,
+        "0.8 sweep: -0.7pt on its play seeds (7 for, 15 against), -0.6pt on 871-876; pooled 16 for, 30 against, z=-2.1",
+    ),
+];
+
+/// Where the two gates the 0.8 milestone sweep added are recorded.
+pub const MILESTONE_08_FINDINGS: &str = "docs/design/balance/2026-10-25-0.8-milestone-sweep.md";
+
+/// One FORMAT gate: a peeling class that does not peel at all on a team of
+/// `team_size` (in any context), and the measurement that put it there.
+#[derive(Clone, Copy, Debug)]
+pub struct PeelFormatGate {
+    pub peeler: CharacterClass,
+    pub team_size: u8,
+    /// One line: what the measurement read, and where it is recorded.
+    pub measured: &'static str,
+}
+
+/// Where the format gates are recorded.
+pub const PEEL_FORMAT_GATES_FINDINGS: &str =
+    "docs/design/balance/2026-10-25-as398-play-graduation.md";
+
+/// The formats a peeling class does not peel in at all. AS-290 picked the
+/// context gates in 2v2 only; the 0.8 sweep found the Mage's and the Druid's
+/// 3v3 teams losing to the play, and AS-398 confirmed each class's own peel
+/// as the cost, by the AS-290 bar: picked on the 0.8 sweep's 3v3 seeds,
+/// confirmed on fresh ones (871-876), every block negative. The full 3v3
+/// context selection, healer allies included, is AS-327's.
+pub const PEEL_FORMAT_GATES: &[PeelFormatGate] = &[
+    PeelFormatGate {
+        peeler: CharacterClass::Mage,
+        team_size: 3,
+        measured: "AS-398: -1.0pt on the 0.8 sweep's 3v3 seeds (31 for, 70 against), -0.6pt on 871-876 (98 for, 141 against); pooled 129 for, 211 against, z=-4.4",
+    },
+    PeelFormatGate {
+        peeler: CharacterClass::Druid,
+        team_size: 3,
+        measured: "AS-398: -1.0pt on the 0.8 sweep's 3v3 seeds (92 for, 131 against), -1.3pt on 871-876 (186 for, 286 against); pooled 278 for, 417 against, z=-5.3",
+    },
 ];
 
 /// Whether [`PEEL_GATES`] switches the play off for a `peeler` peeling for an
@@ -276,11 +326,27 @@ impl PlayStage for PeelStage {
         true
     }
 
+    /// The peeler's class on its team's size: the format
+    /// [`PEEL_FORMAT_GATES`] switches off.
+    fn format_exception_key(&self, ctx: &CombatContext, _play: &Play) -> Option<ExceptionKey> {
+        let size = own_team_size(ctx).filter(|s| FORMAT_SIZES.contains(s))?;
+        Some(ExceptionKey::in_format(own_class(ctx)?, size))
+    }
+
+    fn exceptions_by_format(&self) -> bool {
+        true
+    }
+
     fn exceptions(&self) -> ExceptionSet {
         ExceptionSet::of(
             &PEEL_GATES
                 .iter()
                 .map(|g| ExceptionKey::in_context(g.context.peeler, g.context.ally))
+                .chain(
+                    PEEL_FORMAT_GATES
+                        .iter()
+                        .map(|g| ExceptionKey::in_format(g.peeler, g.team_size)),
+                )
                 .collect::<Vec<_>>(),
         )
     }

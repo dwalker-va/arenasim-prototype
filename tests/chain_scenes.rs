@@ -1,7 +1,8 @@
 //! Scene tests for the Chain play (`situation::Play::Chain`,
 //! `class_ai::chain`): every class's every hand-off, each paired with its
-//! control — the same scene with the play withheld from the team
-//! (`Scene::withhold`), the one condition removed — and under `Legacy`, where
+//! control — the same scene with the play excepted everywhere on the team
+//! (`Scene::except_everywhere`: the play graduated and cannot be withheld),
+//! the one condition removed — and under `Legacy`, where
 //! the play does not exist.
 //!
 //! The scene: the deciding unit and its Priest fight an enemy Warrior (their
@@ -138,7 +139,7 @@ fn describe(view: &DecisionView) -> String {
 }
 
 fn withheld(s: Scene) -> Scene {
-    s.withhold(1, PlaySet::of(&[CHAIN]))
+    s.except_everywhere(1, PlaySet::of(&[CHAIN]))
 }
 
 /// `build` under `TeamPlan` hands `tool` off onto the enemy Priest, traced as

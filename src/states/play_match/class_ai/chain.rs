@@ -4,8 +4,8 @@
 //! `situation::CHAIN_HORIZON_SECS` (`TeamSituation::lock_ending`: of the
 //! enemies the team holds in a stun, a fear or horror, a polymorph, an
 //! incapacitate or a cyclone, the one whose hold ends SOONEST — the healer on
-//! a tie), a unit on a team that runs the play — `AiProfile::TeamPlan`,
-//! unless the play is withheld for measurement, and not a class
+//! a tie), a unit on a team that runs the play — `AiProfile::TeamPlan` (the
+//! play graduated at the 0.8 sweep), and not a class
 //! [`CHAIN_EXCEPTIONS`] names — puts its CHAIN step at the head of
 //! its chain, below a peel step and above a burst step: a HAND-OFF of its own
 //! crowd control ([`chain_tools`]) onto that enemy, timed to land in the

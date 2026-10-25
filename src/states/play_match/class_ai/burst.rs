@@ -2,8 +2,8 @@
 //!
 //! While a kill window is open (`TeamSituation::kill_window`: an enemy low and
 //! beyond its healers' help), a DPS on a team that runs the play —
-//! `AiProfile::TeamPlan`, unless the play is withheld for measurement, and not
-//! a class [`BURST_EXCEPTIONS`] names — puts its BURST step at the
+//! `AiProfile::TeamPlan` (the play graduated at the 0.8 sweep), and not a
+//! class [`BURST_EXCEPTIONS`] names — puts its BURST step at the
 //! head of its chain, below a peel step: its [`burst_tools`], in order, on the
 //! window's subject.
 //!

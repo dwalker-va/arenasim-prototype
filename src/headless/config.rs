@@ -68,11 +68,13 @@ pub struct HeadlessMatchConfig {
     pub team1_ai_profile: Option<String>,
     #[serde(default)]
     pub team2_ai_profile: Option<String>,
-    /// Gated plays (`"Peel"`, `"TakeCover"`, `"Chain"`, `"Burst"` — each
-    /// play stage's config key) to DENY each team, for measurement: a team
-    /// under `TeamPlan` with a play withheld is the paired control the play
-    /// is measured against (`situation::WithheldPlays`). Empty — the default
-    /// — withholds nothing.
+    /// GATED plays (`"Pillar"` — each play stage's config key;
+    /// `PlayId::is_gated`) to DENY each team, for measurement: a team under
+    /// `TeamPlan` with a play withheld is the paired control the play is
+    /// measured against (`situation::WithheldPlays`). A graduated play (Peel,
+    /// Hunt, Chain, Burst) is refused: it cannot be withheld, though its
+    /// exceptions can still be replaced (`team1_exceptions`). Empty — the
+    /// default — withholds nothing.
     #[serde(default)]
     pub team1_withheld_plays: Vec<String>,
     #[serde(default)]
@@ -338,8 +340,8 @@ impl HeadlessMatchConfig {
         }
         // The deprecated keys.
         for (team, plays) in [(1, &self.team1_lifted_gates), (2, &self.team2_lifted_gates)] {
-            for id in WithheldPlays::parse_set(plays)?.ids() {
-                set_once(team, id, ExceptionSet::default())?;
+            for play in plays {
+                set_once(team, parse_play(play)?, ExceptionSet::default())?;
             }
         }
         for (id, classes) in [
@@ -900,6 +902,27 @@ mod tests {
         withheld_err(
             r#"{"team1":["Mage"],"team2":["Warrior"],"team1_exceptions":{"Burst":["Mage/Hunter"]}}"#,
         );
+        // A format key (Peel's 3v3 gates): only for a play keyed by format,
+        // and only a team of two or three.
+        let format = parse_withheld(
+            r#"{"team1":["Mage"],"team2":["Warrior"],
+                "team1_exceptions":{"Peel":["Mage@3v3","Druid/Hunter"]}}"#,
+        );
+        assert_eq!(
+            format.exceptions_for_team(1).get(PlayId::Peel),
+            Some(ExceptionSet::of(&[
+                ExceptionKey::in_format(Mage, 3),
+                ExceptionKey::in_context(Druid, Hunter)
+            ]))
+        );
+        assert!(!ExceptionSet::of(&[ExceptionKey::in_format(Mage, 3)])
+            .contains(ExceptionKey::in_format(Mage, 2)));
+        withheld_err(
+            r#"{"team1":["Mage"],"team2":["Warrior"],"team1_exceptions":{"Burst":["Mage@3v3"]}}"#,
+        );
+        withheld_err(
+            r#"{"team1":["Mage"],"team2":["Warrior"],"team1_exceptions":{"Peel":["Mage@4v4"]}}"#,
+        );
     }
 
     /// The deprecated keys still parse, into the same overrides the generic
@@ -909,7 +932,7 @@ mod tests {
     /// is an error.
     #[test]
     fn deprecated_exception_keys_are_the_generic_overrides() {
-        use crate::states::play_match::situation::{PlaySet, PEEL};
+        use crate::states::play_match::situation::{Play, PlaySet};
         let lifted = |team: u8| {
             parse_withheld(&format!(
                 r#"{{"team1":["Mage"],"team2":["Warrior"],"team{team}_lifted_gates":["Peel"]}}"#
@@ -948,12 +971,41 @@ mod tests {
         withheld_err(r#"{"team1":["Mage"],"team2":["Warrior"],"team1_lifted_gates":["Pell"]}"#);
         // Withholding stays its own key.
         let withheld = parse_withheld(
-            r#"{"team1":["Mage"],"team2":["Warrior"],"team2_withheld_plays":["Peel"]}"#,
+            r#"{"team1":["Mage"],"team2":["Warrior"],"team2_withheld_plays":["Pillar"]}"#,
         );
         assert_eq!(
             (withheld.for_team(1), withheld.for_team(2)),
-            (PlaySet::default(), PlaySet::of(&[PEEL]))
+            (PlaySet::default(), PlaySet::of(&[Play::Pillar]))
         );
+    }
+
+    /// Only a GATED play can be withheld: a graduated one (Peel, Hunt, Chain,
+    /// Burst) is refused by name with the override that is left, and so is a
+    /// deleted one (TakeCover). Its exceptions can still be lifted.
+    #[test]
+    fn a_graduated_play_cannot_be_withheld() {
+        for play in ["Peel", "Hunt", "Chain", "Burst"] {
+            for team in [1, 2] {
+                let err = withheld_err(&format!(
+                    r#"{{"team1":["Mage"],"team2":["Warrior"],"team{team}_withheld_plays":["{play}"]}}"#
+                ));
+                assert!(err.contains("graduated"), "{play}: {err}");
+                assert!(err.contains("team1_exceptions"), "{play}: {err}");
+            }
+            parse_withheld(&format!(
+                r#"{{"team1":["Mage"],"team2":["Warrior"],"team1_exceptions":{{"{play}":[]}}}}"#
+            ));
+        }
+        let err = withheld_err(
+            r#"{"team1":["Mage"],"team2":["Warrior"],"team1_withheld_plays":["TakeCover"]}"#,
+        );
+        assert!(err.contains("Unknown play"), "{err}");
+        // `validate` refuses the config, so a batch fails fast on it.
+        let cfg: HeadlessMatchConfig = serde_json::from_str(
+            r#"{"team1":["Mage"],"team2":["Warrior"],"team1_withheld_plays":["Burst"]}"#,
+        )
+        .unwrap();
+        assert!(cfg.validate().is_err());
     }
 
     /// Scenario 5: the headless map-name parser accepts "TestVerticality".

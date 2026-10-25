@@ -115,8 +115,6 @@ pub struct SituationTag {
     pub ally_in_danger: Option<WindowTag>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kill_window: Option<WindowTag>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_stand: Option<WindowTag>,
     /// The lock a chain hands off from (`TeamSituation::chain_window`):
     /// present only while the team runs the Chain play and the lock ends
     /// within its horizon.
@@ -149,7 +147,6 @@ pub struct SituationTag {
 pub enum PlayTag {
     Burst,
     Peel { ally: u32 },
-    TakeCover,
     Hunt,
     Pillar,
     Chain { subject: u32 },
@@ -162,7 +159,6 @@ impl PlayTag {
             Play::Default => None,
             Play::Burst => Some(PlayTag::Burst),
             Play::Peel { ally } => Some(PlayTag::Peel { ally: ally.index() }),
-            Play::TakeCover => Some(PlayTag::TakeCover),
             Play::Hunt => Some(PlayTag::Hunt),
             Play::Pillar => Some(PlayTag::Pillar),
             Play::Chain { subject } => Some(PlayTag::Chain {
@@ -256,7 +252,6 @@ impl From<&TeamSituation> for SituationTag {
             enemy_healer_locked: situation.enemy_healer_locked.as_ref().map(WindowTag::from),
             ally_in_danger: situation.ally_in_danger.as_ref().map(WindowTag::from),
             kill_window: situation.kill_window.as_ref().map(WindowTag::from),
-            last_stand: situation.last_stand.as_ref().map(WindowTag::from),
             lock_ending: situation.chain_window().as_ref().map(WindowTag::from),
             pillar_stance: situation.pillar_stance.as_ref().map(StanceTag::from),
             target_focus: situation.target_focus.as_ref().map(FocusTag::from),
@@ -273,9 +268,6 @@ pub enum SituationName {
     EnemyHealerLocked,
     AllyInDanger,
     KillWindow,
-    /// A team's last living unit faces two or more enemies
-    /// (`TeamSituation::last_stand`).
-    LastStand,
     /// A team takes a pillar together (`TeamSituation::pillar_stance`,
     /// AS-385). Its `subject` is the stance's healer; `pillar` and `reason`
     /// ride along.
@@ -589,11 +581,6 @@ pub enum MovementTrigger {
     /// stays shifted, re-committing its direction each commit window (traced
     /// as `CommitExpired`).
     ShiftEscape,
-    /// `TeamPlan`'s TakeCover play (AS-249): a healer left alone against two
-    /// or more enemies walks to a spot behind cover from their casters (a
-    /// `point` goal). Fires when the play takes the healer's movement and
-    /// whenever the spot it chose moves.
-    TakeCover,
     /// `TeamPlan`'s Hunt play (AS-394): a unit walks to its station round
     /// the pillar a lone enemy healer hides at (a `point` goal). Fires when
     /// the play takes the unit's movement and whenever its station moves.

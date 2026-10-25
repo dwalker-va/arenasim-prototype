@@ -1749,7 +1749,8 @@ mod tests {
     mod pet_peel {
         use super::*;
         use crate::states::play_match::ai_profile::AiProfile;
-        use crate::states::play_match::situation::{MatchClock, PlaySet, SituationConfig, PEEL};
+        use crate::states::play_match::class_ai::plays::every_exception;
+        use crate::states::play_match::situation::{MatchClock, PlayId, SituationConfig};
 
         const HUNTER: u32 = 1;
         const PET: u32 = 2;
@@ -1867,7 +1868,11 @@ mod tests {
             let (dr, cds) = (BTreeMap::new(), BTreeMap::new());
             let mut cfg = SituationConfig::default();
             if withheld {
-                cfg.withheld.team1 = PlaySet::of(&[PEEL]);
+                // Peel graduated and cannot be withheld: the control excepts
+                // it in every context instead.
+                cfg.withheld
+                    .exceptions_mut(1)
+                    .set(PlayId::Peel, every_exception(PlayId::Peel));
             }
             let ctx = CombatContext::new(
                 e(HUNTER),

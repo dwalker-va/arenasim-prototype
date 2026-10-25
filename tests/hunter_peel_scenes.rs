@@ -15,7 +15,9 @@
 //! range (8yd) sends the Hunter into its dead-zone or closing block before the
 //! rotation reaches it.
 
-use arenasim::states::match_config::CharacterClass::{Hunter, Mage, Priest, Warlock, Warrior};
+use arenasim::states::match_config::CharacterClass::{
+    Hunter, Mage, Priest, Shaman, Warlock, Warrior,
+};
 use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::{DRCategory, DRTracker, KitePosture, TrapType};
@@ -177,12 +179,13 @@ fn frost_trap_peels_the_melee_that_is_not_shielded() {
 }
 
 /// The Peel play (TeamPlan) on a dying ally's attackers: the shielded Warrior
-/// is passed over and the other one is slowed.
+/// is passed over and the other one is slowed. The ally is a Shaman: a Hunter
+/// peeling for a Priest is a Peel gate (0.8 sweep).
 #[test]
 fn the_peel_play_snares_the_attacker_that_is_not_shielded() {
     let view = two_warriors()
         .ai_profile(1, AiProfile::TeamPlan)
-        .unit(ALLY, 1, Priest)
+        .unit(ALLY, 1, Shaman)
         .at(12.0, 2.0)
         .health(0.3)
         .targeting(PRIEST)
@@ -199,6 +202,12 @@ fn the_peel_play_snares_the_attacker_that_is_not_shielded() {
         view.chose(),
         Some((AbilityType::ConcussiveShot, Some(SECOND))),
         "{}",
+        describe(&view)
+    );
+    assert_eq!(
+        view.situation.and_then(|s| s.play_step),
+        Some(PlayStep::Peel),
+        "the peel step chose it: {}",
         describe(&view)
     );
 }
@@ -479,11 +488,12 @@ fn no_dip_trap_is_thrown_behind_a_pillar() {
 
 /// The Peel play's Frost Trap (TeamPlan): thrown onto the Warrior on the
 /// dying ally — unless a pillar hides where it would land. The pillar also
-/// covers the Legacy peel's midpoint, so no Frost Trap goes down at all.
+/// covers the Legacy peel's midpoint, so no Frost Trap goes down at all. The
+/// ally is a Shaman: a Hunter peeling for a Priest is a Peel gate (0.8 sweep).
 fn peel_frost() -> Scene {
     scene()
         .ai_profile(1, AiProfile::TeamPlan)
-        .unit(ALLY, 1, Priest)
+        .unit(ALLY, 1, Shaman)
         .at(12.0, 2.0)
         .health(0.3)
         .targeting(PRIEST)

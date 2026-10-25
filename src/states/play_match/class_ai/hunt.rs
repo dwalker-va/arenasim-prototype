@@ -1,8 +1,8 @@
 //! The endgame Hunt play (AS-394): a team that outnumbers a lone enemy healer
 //! hiding at a pillar surrounds the pillar from two sides.
 //!
-//! `TakeCover`'s counterpart. A healer left alone hugs a pillar
-//! (`team_solve::last_stand_cover`), and a lone chaser cannot out-angle a
+//! A healer left alone hides at a pillar (its cover denial, its team solve
+//! or its pillar mode put it there), and a lone chaser cannot out-angle a
 //! pillar hugger: closing on it shrinks the arc it must stay out of, and it
 //! turns round the pillar faster in angle than the chaser can
 //! (`docs/design/2026-10-25-ranged-dps-vs-hidden-targets.md` §3.2). Two
@@ -68,7 +68,7 @@
 //! ranged DPS the team takes none.
 //!
 //! **The play** ([`HuntStage`], `situation::Play::Hunt`) is a MOVEMENT play,
-//! like TakeCover and Pillar: what the unit casts is its ordinary chain, and
+//! like Pillar: what the unit casts is its ordinary chain, and
 //! the Burst step still leads it inside a kill window (the Burst stage
 //! applies whatever the unit's play). A stationed unit walks to its station
 //! and holds it ([`walk_to_station`]) — a kiter in place of its ENGAGE seek
@@ -106,7 +106,7 @@ use crate::states::play_match::situation::{
 
 /// A lone healer within this many yards of a pillar's skin is at it: the
 /// hunt may begin. `pillar_mode`'s cover ring stands 1.5yd off the skin, and
-/// `last_stand_cover` picks spots up to a few yards out.
+/// the team solve's cover spots stand up to a few yards out.
 pub const HUNT_ENTER: f32 = 6.0;
 
 /// A hunt ends once its healer stands farther than this from the pillar's
