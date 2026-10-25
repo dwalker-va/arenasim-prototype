@@ -34,9 +34,9 @@ use crate::states::play_match::utils::{combatant_id, log_ability_use};
 use super::cast_guard::{cast_gate, pre_cast_ok, unreached_reason, Cleared, PreCastOpts};
 use super::healer_postures::{
     compound_pressure_onset, compound_pressure_trigger, dispel_chase_override, dispel_walk_tick,
-    escape_tick, escape_window_from, healer_pressured_tick_shared, medic_chase_override,
-    medic_chase_tick, release_ally_walk, start_movement_event, start_movement_event_with_target,
-    take_cover_tick, HealerDispel,
+    escape_tick, escape_window_from, healer_pressured_tick_shared, hunt_station_tick,
+    medic_chase_override, medic_chase_tick, release_ally_walk, start_movement_event,
+    start_movement_event_with_target, HealerDispel,
 };
 
 use super::{CombatContext, CombatantInfo};
@@ -1935,7 +1935,7 @@ pub fn evaluate_priest_posture(
     // The walk wins over a movement-locking cast that is not itself critical:
     // a Flash Heal on a less-hurt ally in sight would root the Priest short of
     // the dying one, so it defers, while a heal on a dying ally in sight fires.
-    if let Some(walking) = take_cover_tick(
+    if let Some(walking) = hunt_station_tick(
         commands,
         entity,
         my_pos,
@@ -1947,9 +1947,9 @@ pub fn evaluate_priest_posture(
         now,
         decision_trace,
     ) {
-        // A healer left alone against two or more enemies takes cover
-        // (`TeamPlan`'s TakeCover play): the one positioning authority while it
-        // lasts, and casts that would root it in the open wait until it is in.
+        // A healer holding a station in its team's hunt (`TeamPlan`'s Hunt
+        // play): the one positioning authority while it lasts, and casts that
+        // would root it short of the station wait until it is there.
         if walking {
             cast_defer = true;
         }

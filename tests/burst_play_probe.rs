@@ -3,7 +3,9 @@
 //! §5 step 6).
 //!
 //! It plays a SEED BANK of 2v2 matches under `TeamPlan` twice: with the Burst
-//! play, and with it withheld from both teams (`team{1,2}_withheld_plays`).
+//! play, and with it excepted everywhere on both teams (`team{1,2}_exceptions`
+//! naming `plays::every_exception_entry`: the play graduated and cannot be
+//! withheld).
 //! In each it finds every `kill_window` with the classifier the AI itself
 //! uses — read off the decision trace's `situation_change` events (onset,
 //! extended, end). A burst LANDS inside a window when one of the class's
@@ -44,6 +46,8 @@ use arenasim::headless::HeadlessMatchConfig;
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
 use arenasim::states::play_match::class_ai::burst::burst_tools;
+use arenasim::states::play_match::class_ai::plays::every_exception_entry;
+use arenasim::states::play_match::situation::PlayId;
 use arenasim::states::play_match::{AbilityType, AuraType};
 use common::staged::{play_seeded, Played};
 
@@ -77,10 +81,11 @@ fn config(
     seed: u64,
     burst: bool,
 ) -> HeadlessMatchConfig {
+    // Burst graduated: its control excepts it everywhere, on both teams.
     let withheld = if burst {
-        Vec::new()
+        BTreeMap::new()
     } else {
-        vec!["Burst".to_string()]
+        BTreeMap::from([("Burst".to_string(), every_exception_entry(PlayId::Burst))])
     };
     HeadlessMatchConfig {
         team1: team1.iter().map(|s| s.to_string()).collect(),
@@ -88,8 +93,8 @@ fn config(
         map: map.to_string(),
         random_seed: Some(seed),
         ai_profile: Some("TeamPlan".to_string()),
-        team1_withheld_plays: withheld.clone(),
-        team2_withheld_plays: withheld,
+        team1_exceptions: withheld.clone(),
+        team2_exceptions: withheld,
         ..Default::default()
     }
 }

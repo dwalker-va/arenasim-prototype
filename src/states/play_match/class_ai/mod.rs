@@ -43,7 +43,6 @@ pub mod rogue_flare;
 #[doc(hidden)]
 pub mod scene;
 pub mod shaman;
-pub mod take_cover;
 pub mod target_focus;
 pub mod warlock;
 pub mod warrior;
@@ -406,10 +405,11 @@ impl<'a> CombatContext<'a> {
     /// hard hitter (the Warrior's Mortal Strike ahead of Rend, the Hunter's
     /// Aimed Shot ahead of its rotation). The Burst play REPLACES it: a unit
     /// the Burst stage admits ([`plays::admitted`]) never runs this, so it
-    /// runs only under `Legacy`, with the play withheld, or for a class the
-    /// play's exceptions name. Kept rather than deleted because deleting it
-    /// moves `Legacy` (22 of 3,600 matches of the AS-275 byte-identity
-    /// batch). Panics where [`Self::situation`] does.
+    /// runs only under `Legacy`, or for a class the play's exceptions name.
+    /// Kept when Burst graduated because deleting it moves `Legacy` (22 of
+    /// 3,600 matches of the AS-275 byte-identity batch), and `Legacy` is
+    /// frozen as the reference every head-to-head is measured against.
+    /// Panics where [`Self::situation`] does.
     pub fn lock_window(&self) -> bool {
         let situation = self.situation();
         !self.self_bursts() && situation.enemy_healer_locked.is_some()

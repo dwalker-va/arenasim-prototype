@@ -3,7 +3,9 @@
 //! §5 step 5).
 //!
 //! It plays a SEED BANK of 2v2 matches under `TeamPlan` twice: with the Peel
-//! play, and with it withheld from both teams (`team{1,2}_withheld_plays`).
+//! play, and with it excepted everywhere on both teams (`team{1,2}_exceptions`
+//! naming `plays::every_exception_entry`: the play graduated and cannot be
+//! withheld).
 //! In each it finds every `ally_in_danger` window with the classifier the AI
 //! itself uses — read off the decision trace's `situation_change` onsets — and
 //! measures two things per window:
@@ -49,6 +51,8 @@ use arenasim::headless::{FrameObservation, HeadlessMatchConfig};
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::ability_config::load_ability_definitions;
 use arenasim::states::play_match::class_ai::peel::{gated, peel_tools};
+use arenasim::states::play_match::class_ai::plays::every_exception_entry;
+use arenasim::states::play_match::situation::PlayId;
 use arenasim::states::play_match::AbilityType;
 use common::staged::{play_seeded, Played};
 
@@ -77,10 +81,11 @@ const MAPS: &[&str] = &["PillaredArena", "BasicArena"];
 const SEEDS: std::ops::Range<u64> = 1..17;
 
 fn config(team1: &[&str], team2: &[&str], map: &str, seed: u64, peel: bool) -> HeadlessMatchConfig {
+    // Peel graduated: its control excepts it everywhere, on both teams.
     let withheld = if peel {
-        Vec::new()
+        BTreeMap::new()
     } else {
-        vec!["Peel".to_string()]
+        BTreeMap::from([("Peel".to_string(), every_exception_entry(PlayId::Peel))])
     };
     HeadlessMatchConfig {
         team1: team1.iter().map(|s| s.to_string()).collect(),
@@ -88,8 +93,8 @@ fn config(team1: &[&str], team2: &[&str], map: &str, seed: u64, peel: bool) -> H
         map: map.to_string(),
         random_seed: Some(seed),
         ai_profile: Some("TeamPlan".to_string()),
-        team1_withheld_plays: withheld.clone(),
-        team2_withheld_plays: withheld,
+        team1_exceptions: withheld.clone(),
+        team2_exceptions: withheld,
         ..Default::default()
     }
 }

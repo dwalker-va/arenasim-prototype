@@ -307,8 +307,10 @@ impl Scene {
         self
     }
 
-    /// Deny `team` the gated plays in `plays` (`situation::WithheldPlays`):
-    /// the paired control of a scene that tests a play.
+    /// Deny `team` the GATED plays in `plays` (`situation::WithheldPlays`):
+    /// the paired control of a scene that tests a gated play. A graduated
+    /// play cannot be withheld (the scene panics when it decides); its
+    /// control is [`Scene::except_everywhere`].
     pub fn withhold(mut self, team: u8, plays: PlaySet) -> Self {
         match team {
             1 => self.withheld.team1 = plays,
@@ -414,6 +416,20 @@ impl Scene {
     pub fn lift(mut self, team: u8, plays: PlaySet) -> Self {
         for id in plays.ids() {
             self.withheld.exceptions_mut(team).lift(id);
+        }
+        self
+    }
+
+    /// Except every unit of `team` from each play in `plays`, in every
+    /// context (`plays::every_exception`, as `team`'s exceptions override):
+    /// the paired control of a scene that tests a GRADUATED play, which
+    /// cannot be withheld. The play's situation is still classified; no unit
+    /// of `team` runs it.
+    pub fn except_everywhere(mut self, team: u8, plays: PlaySet) -> Self {
+        for id in plays.ids() {
+            self.withheld
+                .exceptions_mut(team)
+                .set(id, super::plays::every_exception(id));
         }
         self
     }

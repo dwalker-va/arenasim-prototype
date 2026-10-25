@@ -175,15 +175,19 @@ fn a_team_of_one_does_not_hunt() {
 }
 
 #[test]
-fn legacy_and_a_withheld_hunt_classify_none() {
+fn legacy_classifies_no_hunt_and_an_excepted_team_stations_nobody() {
     let mut legacy = scene().ai_profile(1, AiProfile::Legacy);
     assert_eq!(hunt(&mut legacy), None, "Legacy");
-    let mut withheld = scene().withhold(1, PlaySet::of(&[Play::Hunt]));
-    assert_eq!(hunt(&mut withheld), None, "withheld");
-    let mut other = scene().withhold(2, PlaySet::of(&[Play::Hunt]));
-    assert!(
-        hunt(&mut other).is_some(),
-        "withheld from the other team only"
+    // The graduated play's control: every class excepted. The hunt is still
+    // classified (and traced); nobody on the team takes a station.
+    let mut excepted = scene().except_everywhere(1, PlaySet::of(&[Play::Hunt]));
+    let h = hunt(&mut excepted).expect("still classified");
+    assert!(h.stations.is_empty(), "excepted everywhere: {h:?}");
+    let mut other = scene().except_everywhere(2, PlaySet::of(&[Play::Hunt]));
+    assert_eq!(
+        hunt(&mut other).map(|h| h.stations.len()),
+        Some(2),
+        "excepted on the other team only"
     );
     let mut bare = scene().obstacles(Vec::new());
     assert_eq!(hunt(&mut bare), None, "no pillar");
@@ -417,7 +421,7 @@ fn the_mage_walks_to_its_station() {
         .iter()
         .any(|m| m.trigger == MovementTrigger::Hunt));
     // Control: withheld, the Mage seeks its own angle instead.
-    let mut s = scene().withhold(1, PlaySet::of(&[Play::Hunt]));
+    let mut s = scene().except_everywhere(1, PlaySet::of(&[Play::Hunt]));
     s.reclassify();
     let view = s.decide(MAGE);
     assert_eq!(play_of(&view), None);
@@ -439,7 +443,7 @@ fn the_priest_walks_to_its_station() {
         "{:?}",
         view.directive
     );
-    let mut s = scene().withhold(1, PlaySet::of(&[Play::Hunt]));
+    let mut s = scene().except_everywhere(1, PlaySet::of(&[Play::Hunt]));
     s.reclassify();
     let view = s.decide(PRIEST);
     assert!(!point_goal(&view).is_some_and(|p| near(p, SOUTH)));
@@ -467,7 +471,7 @@ fn the_warlock_walks_to_its_station() {
         "{:?}",
         view.directive
     );
-    let mut s = warlock().withhold(1, PlaySet::of(&[Play::Hunt]));
+    let mut s = warlock().except_everywhere(1, PlaySet::of(&[Play::Hunt]));
     s.reclassify();
     assert!(s.decide(WARLOCK).directive.is_none());
 }
@@ -530,7 +534,7 @@ fn a_healer_whose_hunt_ends_gives_its_station_walk_back() {
     };
     let pressed = |station: Option<Vec2>| {
         let mut s = scene()
-            .withhold(1, PlaySet::of(&[Play::Hunt]))
+            .except_everywhere(1, PlaySet::of(&[Play::Hunt]))
             .healer_posture(PRIEST, posture(station))
             .directive(PRIEST, walk);
         s.set_position(PRIEST, 12.0, -2.0);

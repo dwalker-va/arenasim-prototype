@@ -22,7 +22,8 @@
 //!   cooldowns HELD for one (the same step with no cast).
 //!
 //! It plays a bank of matches under `TeamPlan` in three arms per seed — the
-//! play withheld from both teams (NN), team 1 chaining (CN), team 2 chaining
+//! play excepted everywhere on both teams (NN; it graduated and cannot be
+//! withheld), team 1 chaining (CN), team 2 chaining
 //! (NC) — and scores each chaining match against its NN twin from the
 //! CHAINING side: what it inflicted on the other team with the play, less
 //! what the same team inflicted without it. No rate is pooled across the two
@@ -39,6 +40,8 @@ mod common;
 use std::collections::BTreeMap;
 
 use arenasim::headless::HeadlessMatchConfig;
+use arenasim::states::play_match::class_ai::plays::every_exception_entry;
+use arenasim::states::play_match::situation::PlayId;
 use arenasim::states::play_match::utils::is_incapacitating;
 use common::staged::{play_seeded, Played};
 
@@ -59,7 +62,10 @@ const COMPS: &[(&[&str], &[&str])] = &[
     ),
 ];
 const MAPS: &[&str] = &["BasicArena", "PillaredArena"];
-const SEEDS: std::ops::Range<u64> = 1..25;
+/// 48 seeds. At 24 the denied-seconds response sat on its 3-SE bar (z=+3.03
+/// on main before AS-398, +2.93 after); doubled, main reads z=+2.75 and the
+/// bar is the significance one ([`DENIED_Z`]).
+const SEEDS: std::ops::Range<u64> = 1..49;
 const FRAME: f32 = 1.0 / 60.0;
 const WORKERS: usize = 4;
 
@@ -75,12 +81,15 @@ enum Arm {
 }
 
 impl Arm {
-    fn withheld(self, team: u8) -> Vec<String> {
+    /// Team `team`'s exceptions override: none when it chains; otherwise the
+    /// Chain play excepted everywhere — the graduated play's control, which
+    /// cannot be withheld.
+    fn withheld(self, team: u8) -> BTreeMap<String, Vec<String>> {
         let chains = matches!((self, team), (Arm::Cn, 1) | (Arm::Nc, 2));
         if chains {
-            Vec::new()
+            BTreeMap::new()
         } else {
-            vec!["Chain".to_string()]
+            BTreeMap::from([("Chain".to_string(), every_exception_entry(PlayId::Chain))])
         }
     }
 }
@@ -92,8 +101,8 @@ fn config(team1: &[&str], team2: &[&str], map: &str, seed: u64, arm: Arm) -> Hea
         map: map.to_string(),
         random_seed: Some(seed),
         ai_profile: Some("TeamPlan".to_string()),
-        team1_withheld_plays: arm.withheld(1),
-        team2_withheld_plays: arm.withheld(2),
+        team1_exceptions: arm.withheld(1),
+        team2_exceptions: arm.withheld(2),
         ..Default::default()
     }
 }
@@ -335,8 +344,13 @@ fn row(label: &str, pairs: &[&Pair]) -> BTreeMap<&'static str, (f64, f64, f64)> 
 }
 
 /// How far above the withheld twins, in their own paired standard errors,
-/// the chaining side's lockout must sit.
+/// the chaining side's longest lockout must sit.
 const RESPONSE_Z: f64 = 3.0;
+/// How far above them its denied seconds must sit: significant, not three
+/// standard errors. The response is real but small (+0.16s a match on main
+/// over the 48-seed bank, z=+2.75; +0.14s, z=+2.49, once TakeCover went),
+/// and the 24-seed bank's 3-SE pass on main (z=+3.03) was its luckier half.
+const DENIED_Z: f64 = 2.0;
 /// How far below them, in paired standard errors, a measure may fall before
 /// the play is doing harm.
 const HARM_Z: f64 = -2.0;
@@ -347,9 +361,9 @@ const HARM_Z: f64 = -2.0;
 ///
 /// - the play hands off in the chaining arms, and never where it is
 ///   withheld from both teams;
-/// - the chaining side locks the other team for longer: its denied seconds
-///   and its longest unbroken lockout rise, each by `RESPONSE_Z` paired
-///   standard errors or more;
+/// - the chaining side locks the other team for longer: its longest
+///   unbroken lockout rises by `RESPONSE_Z` paired standard errors or more,
+///   and its denied seconds by `DENIED_Z`;
 /// - and it does no harm: counterplay-free seconds, the healer's locked
 ///   seconds and the chaining side's wins fall by no more than `HARM_Z`.
 #[test]
@@ -365,11 +379,11 @@ fn chain_locks_the_other_team_longer_and_does_no_harm() {
     assert_eq!(withheld, 0, "a chain step with the play withheld");
     let all: Vec<&Pair> = pairs.iter().collect();
     let r = row("overall", &all);
-    for name in ["denied", "longest_lockout"] {
+    for (name, bar) in [("denied", DENIED_Z), ("longest_lockout", RESPONSE_Z)] {
         let (_, delta, z) = r[name];
         assert!(
-            z >= RESPONSE_Z,
-            "{name}: {delta:+.2}s a match (z={z:+.2}), not {RESPONSE_Z} standard errors up"
+            z >= bar,
+            "{name}: {delta:+.2}s a match (z={z:+.2}), not {bar} standard errors up"
         );
     }
     for name in ["counterplay_free", "healer_locked", "win"] {

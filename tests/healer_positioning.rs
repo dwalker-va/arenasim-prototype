@@ -15,39 +15,16 @@
 //!   out of heal range of a teammate the enemy is focusing closes on it
 //!   instead of fleeing freely (the scorer ladder's closing rung). Pinned in a
 //!   staged match: a melee on the Druid between it and its Warrior.
-//! - **Losing alone means take cover.** Under `TeamPlan`, a healer left alone
-//!   against two or more enemies breaks their casters' sight behind a pillar
-//!   (the TakeCover play). Pinned against the paired control — the same seed
-//!   with the play withheld — and shown inert where there is nothing to hide
-//!   behind.
 
 mod common;
 
 use arenasim::headless::{HeadlessMatchConfig, Stage, Unit};
 use arenasim::states::play_match::abilities::AbilityType;
-use arenasim::states::play_match::map_config::load_map_geometry_config;
-use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
-use arenasim::{ArenaMap, CharacterClass};
 use bevy::prelude::{Entity, Vec2, Vec3};
 use common::staged::{play, play_seeded, Played};
 
-fn volumes(map: ArenaMap) -> Vec<ObstacleVolume> {
-    load_map_geometry_config()
-        .expect("assets/config/maps.ron must load")
-        .active_for(map)
-        .volumes
-}
-
 fn xz(p: Vec3) -> Vec2 {
     Vec2::new(p.x, p.z)
-}
-
-fn sees(volumes: &[ObstacleVolume], a: Vec3, b: Vec3) -> bool {
-    has_line_of_sight(
-        volumes,
-        Vec3::new(a.x, EYE_HEIGHT, a.z),
-        Vec3::new(b.x, EYE_HEIGHT, b.z),
-    )
 }
 
 /// One frame's step on the app clock (the observer is called every frame).
@@ -299,152 +276,5 @@ fn a_pressured_druid_closes_on_its_focused_warrior_instead_of_fleeing_out_of_rea
             "seed {seed}: still out of heal range of its focused Warrior after {BOXED_WINDOW}s: \
              {end:.1}yd"
         );
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 3. Losing alone means take cover (TeamPlan)
-// ---------------------------------------------------------------------------
-
-/// Warrior+Druid against Hunter+Shaman, the Warrior one hit from death under
-/// the Hunter, the Druid in the open with the Shaman on it.
-fn last_stand(map: &str, seed: u64, play_on: bool) -> (HeadlessMatchConfig, Stage) {
-    const HUNTER: Unit = Unit::new(2, 0);
-    const SHAMAN: Unit = Unit::new(2, 1);
-    let config = HeadlessMatchConfig {
-        team1: vec!["Warrior".into(), "Druid".into()],
-        team2: vec!["Hunter".into(), "Shaman".into()],
-        map: map.into(),
-        ai_profile: Some("TeamPlan".into()),
-        team1_withheld_plays: if play_on {
-            Vec::new()
-        } else {
-            vec!["TakeCover".into()]
-        },
-        random_seed: Some(seed),
-        max_duration_secs: 60.0,
-        ..Default::default()
-    };
-    let stage = Stage::new()
-        .place(DRUID, -25.0, 0.0)
-        .place(WARRIOR, -5.0, 0.0)
-        .health(WARRIOR, 0.01)
-        .place(HUNTER, 18.0, 0.0)
-        .target(HUNTER, WARRIOR)
-        .place(SHAMAN, 12.0, 10.0)
-        .target(SHAMAN, DRUID);
-    (config, stage)
-}
-
-/// After the Warrior dies: the share of the Druid's living frames on which
-/// NEITHER living enemy can see it, over `secs`, and the seconds from the
-/// death to the first such frame.
-fn hidden_after_death(
-    played: &Played,
-    volumes: &[ObstacleVolume],
-    secs: f32,
-) -> (f32, Option<f32>) {
-    let frames: Vec<_> = played.staged_frames().collect();
-    let death = frames
-        .iter()
-        .find(|f| {
-            f.combatants
-                .values()
-                .any(|c| c.team == 1 && c.slot == 0 && !c.is_pet && !c.alive)
-        })
-        .map(|f| f.sim_time)
-        .expect("the staged Warrior dies");
-    let mut hidden = 0u32;
-    let mut total = 0u32;
-    let mut first = None;
-    for f in frames
-        .iter()
-        .filter(|f| f.sim_time >= death && f.sim_time < death + secs)
-    {
-        let Some(druid) = f
-            .combatants
-            .values()
-            .find(|c| c.team == 1 && c.class == CharacterClass::Druid && c.alive)
-        else {
-            break;
-        };
-        total += 1;
-        let seen = f
-            .combatants
-            .values()
-            .filter(|c| c.team == 2 && !c.is_pet && c.alive)
-            .any(|c| sees(volumes, c.position, druid.position));
-        if !seen {
-            hidden += 1;
-            first.get_or_insert(f.sim_time - death);
-        }
-    }
-    (hidden as f32 / total.max(1) as f32, first)
-}
-
-/// Seconds after the Warrior's death the cover is measured over.
-const COVER_WINDOW: f32 = 15.0;
-
-/// The first hidden frame comes within this many seconds of the death: the
-/// walk starts on the death, and the nearest shadow is ~25yd off.
-const COVER_ONSET_SECS: f32 = 6.0;
-
-#[test]
-fn a_druid_left_alone_against_two_takes_a_pillar() {
-    let nagrand = volumes(ArenaMap::PillaredArena);
-    for seed in 1..=4u64 {
-        let (config, stage) = last_stand("PillaredArena", seed, true);
-        let (with, first) = hidden_after_death(&play(config, stage), &nagrand, COVER_WINDOW);
-        let (config, stage) = last_stand("PillaredArena", seed, false);
-        let (without, _) = hidden_after_death(&play(config, stage), &nagrand, COVER_WINDOW);
-        eprintln!(
-            "seed {seed}: hidden {:.0}% (first at {first:?}) vs withheld {:.0}%",
-            with * 100.0,
-            without * 100.0
-        );
-        let first = first.unwrap_or_else(|| panic!("seed {seed}: the Druid never broke sight"));
-        assert!(
-            first <= COVER_ONSET_SECS,
-            "seed {seed}: first out of sight {first:.2}s after its Warrior died"
-        );
-        assert!(
-            with >= 0.5,
-            "seed {seed}: out of both enemies' sight only {:.0}% of the {COVER_WINDOW}s after",
-            with * 100.0
-        );
-        assert!(
-            without <= 0.1,
-            "seed {seed}: the control (play withheld) hid {:.0}%, so the stage no longer \
-             separates the play from what the Druid does anyway",
-            without * 100.0
-        );
-    }
-}
-
-/// Where there is nothing to hide behind the play does nothing: the same
-/// stage on BasicArena plays frame for frame the same with it withheld.
-#[test]
-fn the_last_stand_is_inert_with_nothing_to_hide_behind() {
-    for seed in 1..=2u64 {
-        let (config, stage) = last_stand("BasicArena", seed, true);
-        let with = play(config, stage);
-        let (config, stage) = last_stand("BasicArena", seed, false);
-        let without = play(config, stage);
-        assert!(
-            with.log.contains("Warrior #1 has been eliminated"),
-            "seed {seed}: the staged Warrior must die, or the last stand never opens"
-        );
-        let combat = |p: &Played| {
-            let at = p.log.find("COMBAT LOG").expect("a combat log");
-            p.log[at..].to_string()
-        };
-        assert_eq!(combat(&with), combat(&without), "seed {seed}");
-        let positions = |p: &Played| -> Vec<Vec3> {
-            p.frames
-                .iter()
-                .flat_map(|f| f.combatants.values().map(|c| c.position))
-                .collect()
-        };
-        assert_eq!(positions(&with), positions(&without), "seed {seed}");
     }
 }

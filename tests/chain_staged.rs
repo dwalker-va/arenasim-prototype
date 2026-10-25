@@ -12,9 +12,13 @@
 
 mod common;
 
+use std::collections::BTreeMap;
+
 use arenasim::headless::{HeadlessMatchConfig, Stage, Unit};
 use arenasim::states::play_match::class_ai::chain::HANDOFF_LEAD;
+use arenasim::states::play_match::class_ai::plays::every_exception_entry;
 use arenasim::states::play_match::components::Combatant;
+use arenasim::states::play_match::situation::PlayId;
 use arenasim::states::play_match::utils::is_incapacitating;
 use arenasim::states::play_match::{Aura, AuraType};
 use common::staged::{entity_id, of_class, play, sim_time, Played};
@@ -32,17 +36,18 @@ const WATCH: f32 = 3.0;
 const POLYMORPH_CAST: f32 = 1.5;
 
 fn config(seed: u64, chain: bool) -> HeadlessMatchConfig {
+    // Chain graduated: its control excepts it everywhere on team 1.
     let withheld = if chain {
-        Vec::new()
+        BTreeMap::new()
     } else {
-        vec!["Chain".to_string()]
+        BTreeMap::from([("Chain".to_string(), every_exception_entry(PlayId::Chain))])
     };
     HeadlessMatchConfig {
         team1: vec!["Mage".into(), "Priest".into()],
         team2: vec!["Warrior".into(), "Priest".into()],
         map: "BasicArena".into(),
         ai_profile: Some("TeamPlan".into()),
-        team1_withheld_plays: withheld,
+        team1_exceptions: withheld,
         random_seed: Some(seed),
         max_duration_secs: 15.0,
         ..Default::default()

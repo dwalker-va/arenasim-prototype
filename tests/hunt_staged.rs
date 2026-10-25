@@ -2,23 +2,28 @@
 //!
 //! Nagrand (PillaredArena). The enemy is a lone Priest, staged on the east
 //! face of the south-east pillar at (40, -20); our Mage and Priest stand
-//! west of that pillar, out of its sight. The match then plays on: the lone
-//! Priest takes cover (`TakeCover`), and our team hunts it.
+//! west of that pillar, out of its sight, and a root holds it there. The
+//! match then plays on, and our team hunts it.
 //!
 //! - With the play, the team puts its Mage and Priest on opposite sides of
-//!   the pillar: their bearings round its centre come 150° or more apart, and
-//!   from then on the lone Priest is in a hunter's sight far more of the time
-//!   than with the play withheld.
-//! - Withheld, the Priest keeps its formation behind the Mage, so the two
-//!   never split round the pillar.
+//!   the pillar: each walks to a station, and their bearings round its centre
+//!   come 150° or more apart.
+//! - With the play excepted everywhere (its control: it graduated and cannot
+//!   be withheld), the hunt is still classified but nobody takes a station,
+//!   and the two never split round the pillar.
 //!
-//! The situation holds by construction (a 2v1 from the gates); the seed
-//! governs only the rolls.
+//! The play's sight gain needs a healer that moves round its pillar away from
+//! its hunters. That was the TakeCover play's lone healer, deleted at the 0.8
+//! sweep; no AI does it now, and a rooted healer cannot, so this test pins
+//! the stations and not the sight. The situation holds by construction (a 2v1
+//! from the gates); the seed governs only the rolls.
 
 mod common;
 
 use arenasim::headless::{FrameObservation, HeadlessMatchConfig, Stage, Unit};
-use arenasim::states::play_match::map_geometry::has_line_of_sight;
+use arenasim::states::play_match::class_ai::plays::every_exception_entry;
+use arenasim::states::play_match::situation::PlayId;
+use arenasim::states::play_match::{Aura, AuraType};
 use bevy::prelude::*;
 use common::staged::{play, Played};
 
@@ -32,22 +37,61 @@ const PILLAR: Vec2 = Vec2::new(40.0, -20.0);
 /// How long after the stage the endgame is read.
 const WINDOW: f32 = 20.0;
 
+/// The hunters must split within this many seconds of the stage: the walk to
+/// the far station is about 30yd, a few seconds at base speed once the hunt
+/// has begun.
+const SPLIT_BY: f32 = 8.0;
+
 fn config(seed: u64, hunt: bool) -> HeadlessMatchConfig {
     HeadlessMatchConfig {
         team1: vec!["Mage".into(), "Priest".into()],
         team2: vec!["Priest".into()],
         map: "PillaredArena".to_string(),
         ai_profile: Some("TeamPlan".into()),
-        team1_withheld_plays: if hunt { vec![] } else { vec!["Hunt".into()] },
+        // Hunt graduated: its control excepts it everywhere on team 1.
+        team1_exceptions: if hunt {
+            Default::default()
+        } else {
+            [("Hunt".into(), every_exception_entry(PlayId::Hunt))].into()
+        },
         random_seed: Some(seed),
         max_duration_secs: 40.0,
         ..Default::default()
     }
 }
 
+/// The lone Priest is held on the pillar's east face by a root that nothing
+/// breaks: it hides there by construction. (No AI hides a lone healer at a
+/// pillar since TakeCover was deleted at the 0.8 sweep; the hunt answers any
+/// healer that stands there, and a root holds no healer from healing, so the
+/// Hunt play still runs on it.)
+/// The lone Priest is held on the pillar's east face by a root that nothing
+/// breaks: it stands at the pillar by construction. (No AI hides a lone
+/// healer at a pillar since TakeCover was deleted at the 0.8 sweep. A root
+/// stops no heal, so the Hunt play still runs on it.)
 fn stage() -> Stage {
     Stage::new()
         .place(HIDER, 47.0, -20.0)
+        .aura(
+            HIDER,
+            Aura {
+                effect_type: AuraType::Root,
+                duration: 60.0,
+                break_on_damage_threshold: -1.0,
+                ability_name: "Entangling Roots".into(),
+                ..Default::default()
+            },
+        )
+        .aura(
+            HIDER,
+            Aura {
+                effect_type: AuraType::Root,
+                duration: 60.0,
+                break_on_damage_threshold: -1.0,
+                ability_name: "Entangling Roots".into(),
+                ..Default::default()
+            },
+        )
         .place(MAGE, 16.0, -18.0)
         .target(MAGE, HIDER)
         .place(PRIEST, 12.0, -23.0)
@@ -76,20 +120,14 @@ struct Read {
     /// When the Mage and the Priest first stood 150° apart round the pillar
     /// (seconds after the stage), if they did.
     split_at: Option<f32>,
-    /// The share of frames, from 6s after the stage, in which a hunter saw
-    /// the lone Priest.
-    seen: f32,
     hunt_onsets: usize,
+    /// Team 1's walks to a station (`MovementTrigger::Hunt` decisions).
+    station_walks: usize,
 }
 
 fn read(played: &Played) -> Read {
-    let obstacles = arenasim::states::play_match::map_config::load_map_geometry_config()
-        .expect("maps.ron")
-        .active_for(arenasim::ArenaMap::PillaredArena)
-        .volumes;
     let start = played.landed().app;
     let mut split_at = None;
-    let (mut frames, mut seen) = (0u32, 0u32);
     for f in played.staged_frames() {
         let t = f.sim_time - start;
         if t > WINDOW {
@@ -106,19 +144,10 @@ fn read(played: &Played) -> Read {
         {
             split_at = Some(t);
         }
-        if t >= 6.0 {
-            frames += 1;
-            if [mage, priest]
-                .iter()
-                .any(|u| u.alive && has_line_of_sight(&obstacles, u.position, hider.position))
-            {
-                seen += 1;
-            }
-        }
     }
+    let team1 = |e: &serde_json::Value| e["actor"]["team"] == 1 || e["team"] == 1;
     Read {
         split_at,
-        seen: seen as f32 / frames.max(1) as f32,
         hunt_onsets: played
             .staged_trace()
             .filter(|e| {
@@ -127,6 +156,10 @@ fn read(played: &Played) -> Read {
                     && e["change"] == "onset"
                     && e["team"] == 1
             })
+            .count(),
+        station_walks: played
+            .staged_trace()
+            .filter(|e| e["kind"] == "movement_decision" && e["trigger"] == "Hunt" && team1(e))
             .count(),
     }
 }
@@ -137,21 +170,34 @@ fn the_hunters_split_round_the_hiders_pillar() {
         let on = read(&play(config(seed, true), stage()));
         let off = read(&play(config(seed, false), stage()));
         println!(
-            "seed {seed}: hunt split at {:?}, seen {:.2}, onsets {}; withheld split at {:?}, seen {:.2}, onsets {}",
-            on.split_at, on.seen, on.hunt_onsets, off.split_at, off.seen, off.hunt_onsets
+            "seed {seed}: hunt split at {:?}, onsets {}, station walks {}; excepted split at {:?}, \
+             onsets {}, station walks {}",
+            on.split_at,
+            on.hunt_onsets,
+            on.station_walks,
+            off.split_at,
+            off.hunt_onsets,
+            off.station_walks
         );
         assert!(on.hunt_onsets >= 1, "seed {seed}: the team never hunted");
+        assert!(
+            on.station_walks >= 2,
+            "seed {seed}: the two never walked to stations"
+        );
         let at = on
             .split_at
             .unwrap_or_else(|| panic!("seed {seed}: the hunters never split"));
-        assert!(at < 8.0, "seed {seed}: split only at {at:.1}s");
-        assert_eq!(off.hunt_onsets, 0, "seed {seed}: withheld, yet hunted");
-        assert_eq!(off.split_at, None, "seed {seed}: withheld, yet split");
+        assert!(at < SPLIT_BY, "seed {seed}: split only at {at:.1}s");
+        // The control: the hunt is still classified (the team runs the play),
+        // but every class is excepted, so nobody takes a station.
         assert!(
-            on.seen > off.seen + 0.1,
-            "seed {seed}: seen {:.2} hunting against {:.2} withheld",
-            on.seen,
-            off.seen
+            off.hunt_onsets >= 1,
+            "seed {seed}: excepted, the hunt never began"
         );
+        assert_eq!(
+            off.station_walks, 0,
+            "seed {seed}: excepted, yet walked a station"
+        );
+        assert_eq!(off.split_at, None, "seed {seed}: excepted, yet split");
     }
 }

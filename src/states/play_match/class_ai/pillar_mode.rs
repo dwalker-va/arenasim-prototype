@@ -54,7 +54,7 @@
 //! **Who.** `TeamPlan` only (`CombatContext::pillar_modes`); never a healer
 //! [`HUG_EXCEPTIONS`] names — the Paladin, whose FREE is melee pursuit and
 //! which neither mode touches; never while a medic chase, a dispel walk,
-//! TakeCover, ESCAPE or a dip holds the healer's legs — those run instead of
+//! a hunt station, ESCAPE or a dip holds the healer's legs — those run instead of
 //! the FREE and PRESSURED ticks that read the mode, and leave it as it was.
 
 use bevy::prelude::*;
