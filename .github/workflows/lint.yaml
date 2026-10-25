@@ -83,12 +83,12 @@ jobs:
       - name: Format
         run: cargo fmt --check
 
-      # Default target set (lib + bins), which is what the repo's shipping code
-      # is. The tree is also clean under `--all-targets`, but adding it here
-      # would compile every integration-test target and is the slow half of the
-      # job it exists to avoid.
+      # `--all-targets`: tests, benches and examples are linted along with the
+      # lib and bins, so a lint regression in test code fails here too rather
+      # than accumulating until someone runs it by hand. It compiles every
+      # integration-test target, which is the slower half of this job.
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
 # ---------------------------------------------------------------------------
 # IF THIS JOB GOES RED RIGHT AFTER A TOOLCHAIN BUMP, SUSPECT THE BUMP.
