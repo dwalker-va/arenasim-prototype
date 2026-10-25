@@ -205,6 +205,8 @@ fn a_melee_takes_no_station_and_one_viewer_is_no_hunt() {
     let h = hunt(&mut s).unwrap();
     assert_eq!(station(&h, &s, WARRIOR), None);
     assert!(station(&h, &s, MAGE).is_some() && station(&h, &s, PRIEST).is_some());
+    assert_ne!(play_of(&s.decide(WARRIOR)), Some(PlayTag::Hunt));
+    assert_eq!(play_of(&s.decide(MAGE)), Some(PlayTag::Hunt));
 }
 
 #[test]
@@ -230,6 +232,68 @@ fn the_healer_stations_only_while_no_teammate_is_dying() {
 }
 
 #[test]
+fn the_shipped_table_excepts_every_healer_but_the_priest() {
+    use arenasim::states::match_config::CharacterClass::{Druid, Shaman};
+    for healer in [Paladin, Druid, Shaman] {
+        let team = || {
+            Scene::new()
+                .obstacles(vec![pillar()])
+                .ai_profile(1, AiProfile::TeamPlan)
+                .unit(MAGE, 1, Mage)
+                .at(-20.0, 2.0)
+                .unit(PRIEST, 1, healer)
+                .at(-22.0, -4.0)
+                .unit(HIDER, 2, Priest)
+                .at(7.0, 0.0)
+        };
+        let mut s = team();
+        assert!(hunt(&mut s).unwrap().stations.is_empty(), "{healer:?}");
+        // Control: the table lifted, the same healer stations.
+        let mut s = team().lift(1, PlaySet::of(&[Play::Hunt]));
+        assert_eq!(hunt(&mut s).unwrap().stations.len(), 2, "{healer:?} lifted");
+    }
+}
+
+#[test]
+fn a_station_is_kept_by_the_unit_that_took_it() {
+    let mut s = scene();
+    let first = hunt(&mut s).unwrap();
+    // Swap the two units' sides: the crossed pairing is now the shorter walk,
+    // but each keeps the station it took.
+    s.set_position(MAGE, -10.0, -22.0);
+    s.set_position(PRIEST, -10.0, 22.0);
+    let held = hunt(&mut s).unwrap();
+    assert_eq!(station(&held, &s, MAGE), station(&first, &s, MAGE));
+    // Control: a fresh hunt from those positions pairs them the other way.
+    let mut fresh = scene();
+    fresh.set_position(MAGE, -10.0, -22.0);
+    fresh.set_position(PRIEST, -10.0, 22.0);
+    let other = hunt(&mut fresh).unwrap();
+    assert!(near(station(&other, &fresh, MAGE).unwrap(), SOUTH));
+}
+
+#[test]
+fn no_hunt_before_the_gates() {
+    let mut s = scene().before_gates();
+    assert_eq!(hunt(&mut s), None);
+}
+
+#[test]
+fn a_hunt_with_one_station_left_holds_neither() {
+    // A wall across the north half takes every spot the north station could
+    // be pulled in or turned to.
+    let wall = ObstacleVolume::Aabb {
+        min: bevy::prelude::Vec3::new(-30.0, 0.0, 8.0),
+        max: bevy::prelude::Vec3::new(30.0, 5.0, 23.0),
+    };
+    let mut s = scene().obstacles(vec![pillar(), wall]);
+    let h = hunt(&mut s).expect("the hunt is classified");
+    assert!(h.stations.is_empty(), "{:?}", h.stations);
+    let mut s = scene();
+    assert_eq!(hunt(&mut s).unwrap().stations.len(), 2);
+}
+
+#[test]
 fn an_excepted_class_takes_no_station() {
     // The Mage excepted: only the Priest is left, so no stations.
     let mut s = scene().exceptions(Play::Hunt, ClassSet::of(&[Mage]));
@@ -244,8 +308,10 @@ fn the_axis_carries_while_the_healer_runs_round_its_pillar() {
     let mut s = scene();
     let first = hunt(&mut s).unwrap();
     s.set_position(HIDER, 5.0, 5.0);
+    s.set_now(31.0);
     let held = hunt(&mut s).unwrap();
     assert_eq!(held.axis, first.axis);
+    assert_eq!(held.since, first.since, "the onset carries");
     assert_eq!(held.stations, first.stations);
     // Control: a hunt that begins with the healer on the north-east face takes
     // its axis there.
@@ -395,4 +461,64 @@ fn the_hunt_stands_down_while_the_healer_is_locked() {
     let mut s = scene().aura(HIDER, AuraType::Root, 4.0);
     s.reclassify();
     assert_eq!(play_of(&s.decide(MAGE)), Some(PlayTag::Hunt));
+}
+
+#[test]
+fn a_stale_station_walk_is_renewed_and_a_live_one_is_left_alone() {
+    use arenasim::states::play_match::components::MovementDirective;
+    let walk = |expires: f32| MovementDirective {
+        goal: MovementGoal::Point(bevy::prelude::Vec3::new(NORTH.x, 1.0, NORTH.y)),
+        expires,
+        committed_until: expires,
+    };
+    // Expired: renewed past now.
+    let mut s = scene().directive(MAGE, walk(29.0));
+    s.reclassify();
+    let view = s.decide(MAGE);
+    assert!(view.directive.is_some_and(|d| d.expires > 30.0));
+    assert!(
+        view.movement
+            .iter()
+            .all(|m| m.trigger != MovementTrigger::Hunt),
+        "same station: no new walk traced"
+    );
+    // Live: left as it is.
+    let mut s = scene().directive(MAGE, walk(30.4));
+    s.reclassify();
+    let view = s.decide(MAGE);
+    assert!(view.directive.is_some_and(|d| d.expires == 30.4));
+}
+
+#[test]
+fn a_healer_whose_hunt_ends_gives_its_station_walk_back() {
+    use arenasim::states::play_match::components::{HealerPosture, MovementDirective, Posture};
+    let walk = MovementDirective {
+        goal: MovementGoal::Point(bevy::prelude::Vec3::new(SOUTH.x, 1.0, SOUTH.y)),
+        expires: 60.0,
+        committed_until: 60.0,
+    };
+    // Our Priest PRESSURED by the enemy Priest beside it: a posture that
+    // keeps a committed walk until its window runs out.
+    let posture = |station: Option<Vec2>| {
+        let mut p = HealerPosture::new(0.0);
+        p.posture = Posture::Pressured;
+        p.hold_until = 60.0;
+        p.hunt_station = station;
+        p
+    };
+    let pressed = |station: Option<Vec2>| {
+        let mut s = scene()
+            .withhold(1, PlaySet::of(&[Play::Hunt]))
+            .healer_posture(PRIEST, posture(station))
+            .directive(PRIEST, walk);
+        s.set_position(PRIEST, 12.0, -2.0);
+        s.set_target(HIDER, PRIEST);
+        s.reclassify();
+        point_goal(&s.decide(PRIEST)).is_some_and(|p| near(p, SOUTH))
+    };
+    // The hunt over (withheld): a Priest that remembers its station drops
+    // the walk.
+    assert!(!pressed(Some(SOUTH)));
+    // Control: a walk the hunt never gave is the posture's own, and is kept.
+    assert!(pressed(None));
 }

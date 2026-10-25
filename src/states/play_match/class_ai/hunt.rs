@@ -177,9 +177,10 @@ pub struct HuntException {
 }
 
 /// The classes the Hunt play is not used for (see [`HuntException`]).
-/// Both are healers with no attack that costs no mana: on a station they
-/// hold the healer's sight for a partner that does the damage, and when that
-/// partner is out of mana or out of sight nobody hurts it.
+/// All three are healers with no attack that costs no mana (the Priest has
+/// its wand): a station takes the healer's sight off its partner, and once
+/// the partner is out of mana or out of sight nobody hurts the lone healer —
+/// the endgame lengthens and draws.
 pub const HUNT_EXCEPTIONS: &[HuntException] = &[
     HuntException {
         class: CharacterClass::Paladin,
@@ -190,6 +191,12 @@ pub const HUNT_EXCEPTIONS: &[HuntException] = &[
         class: CharacterClass::Druid,
         finding: "AS-394 pilot (seeds 701-702, uniform): endgames with a stationed Druid +2.8s, \
                   Warlock+Druid +22.1s, draws 11 -> 30 (ranged-dps-vs-hidden-targets §9)",
+    },
+    HuntException {
+        class: CharacterClass::Shaman,
+        finding: "AS-394 seeds 711-714 (uniform, Paladin and Druid excepted): endgames with a \
+                  stationed Shaman +1.2s, Mage+Shaman +5.6s, Hunter+Shaman +6.7s; every one of \
+                  the 23 new draws had one, draws 12 -> 35 (ranged-dps-vs-hidden-targets §9)",
     },
 ];
 
@@ -220,9 +227,11 @@ impl PlayStage for HuntStage {
         (!locked && hunt.station_of(me).is_some()).then_some(Play::Hunt)
     }
 
-    /// A unit with an executor for a station: a healer or a ranged DPS.
-    fn admits(&self, ctx: &CombatContext, _play: &Play) -> bool {
-        own_class(ctx).is_some_and(can_station)
+    /// Every unit the stage calls: the classification gives a station only
+    /// to a unit that can hold one ([`can_station`]), so the call is the
+    /// admission.
+    fn admits(&self, _ctx: &CombatContext, _play: &Play) -> bool {
+        true
     }
 
     fn exception_key(&self, ctx: &CombatContext, _play: &Play) -> Option<ExceptionKey> {
@@ -418,7 +427,7 @@ pub fn classify(
     clock: &MatchClock,
     cfg: &SituationConfig,
 ) -> Option<HuntWindow> {
-    if !cfg.runs.contains(PlayId::Hunt) || snapshot.obstacles.is_empty() || !clock.gates_opened {
+    if !cfg.runs.contains(PlayId::Hunt) || !clock.gates_opened {
         return None;
     }
     let roster = &snapshot.combatants;
@@ -438,15 +447,11 @@ pub fn classify(
     }
     let all = rings(&snapshot.obstacles);
     let at = xz(healer.position);
-    let held = prev
-        .hunt
-        .as_ref()
-        .filter(|h| h.subject == healer.entity)
-        .and_then(|h| {
-            all.iter()
-                .find(|r| r.pillar == h.pillar && r.skin(at) <= HUNT_LEAVE)
-                .map(|r| (h, *r))
-        });
+    let held = prev.hunt.as_ref().and_then(|h| {
+        all.iter()
+            .find(|r| r.pillar == h.pillar && r.skin(at) <= HUNT_LEAVE)
+            .map(|r| (h, *r))
+    });
     let (ring, axis, since) = match held {
         Some((h, ring)) => (ring, h.axis, h.since),
         None => {
@@ -601,6 +606,99 @@ mod tests {
     use crate::states::play_match::map_config::load_map_geometry_config;
     use crate::states::play_match::map_geometry::EYE_HEIGHT;
     use crate::ArenaMap;
+
+    fn cylinder(x: f32, z: f32, radius: f32) -> ObstacleVolume {
+        ObstacleVolume::Cylinder {
+            center_xz: Vec2::new(x, z),
+            radius,
+            base_y: 0.0,
+            height: 10.0,
+        }
+    }
+
+    fn ring() -> Ring {
+        rings(&[cylinder(0.0, 0.0, 6.0)])[0]
+    }
+
+    const NORTH: f32 = std::f32::consts::FRAC_PI_2;
+
+    /// A free spot is [`HUNT_STANDOFF`] off the skin at its own bearing.
+    #[test]
+    fn a_free_station_stands_at_the_full_standoff() {
+        let p = station_point(
+            &[cylinder(0.0, 0.0, 6.0)],
+            &ArenaBounds::default(),
+            &ring(),
+            NORTH,
+            0.0,
+            1.0,
+        )
+        .unwrap();
+        assert!(p.distance(Vec2::new(0.0, 20.0)) < 1e-3, "{p}");
+    }
+
+    /// A wall over the far ring pulls the station in toward the pillar
+    /// before it turns it.
+    #[test]
+    fn a_taken_station_is_pulled_in_first() {
+        let wall = ObstacleVolume::Aabb {
+            min: Vec3::new(-30.0, 0.0, 18.0),
+            max: Vec3::new(30.0, 5.0, 23.0),
+        };
+        let obstacles = [cylinder(0.0, 0.0, 6.0), wall];
+        let p = station_point(
+            &obstacles,
+            &ArenaBounds::default(),
+            &ring(),
+            NORTH,
+            0.0,
+            1.0,
+        )
+        .unwrap();
+        assert!(p.distance(Vec2::new(0.0, 16.0)) < 1e-3, "{p}");
+    }
+
+    /// A column over every pulled-in spot turns the station, toward the
+    /// axis (east here), by the least step that frees it with the pillar's
+    /// face in sight: 20° clears the column's footprint, but the column
+    /// still hides the face from there, so 30°.
+    #[test]
+    fn a_column_turns_the_station_toward_the_axis() {
+        let column = ObstacleVolume::Aabb {
+            min: Vec3::new(-3.0, 0.0, 8.0),
+            max: Vec3::new(3.0, 5.0, 23.0),
+        };
+        let obstacles = [cylinder(0.0, 0.0, 6.0), column];
+        let p = station_point(
+            &obstacles,
+            &ArenaBounds::default(),
+            &ring(),
+            NORTH,
+            0.0,
+            1.0,
+        )
+        .unwrap();
+        let bearing = p.to_angle().to_degrees();
+        assert!((bearing - 60.0).abs() < 0.1, "{p}: {bearing}");
+        assert!((p.length() - 20.0).abs() < 1e-3, "at the full standoff");
+    }
+
+    /// A station that cannot see the face it guards is no station: a post
+    /// between it and the pillar pulls it in past the post.
+    #[test]
+    fn a_station_sees_the_face_it_guards() {
+        let obstacles = [cylinder(0.0, 0.0, 6.0), cylinder(0.0, 13.0, 1.0)];
+        let p = station_point(
+            &obstacles,
+            &ArenaBounds::default(),
+            &ring(),
+            NORTH,
+            0.0,
+            1.0,
+        )
+        .unwrap();
+        assert!(p.distance(Vec2::new(0.0, 10.0)) < 1e-3, "{p}");
+    }
 
     /// The design's claim, measured on the shipped maps: with the two
     /// stations of a hunt about any axis, a healer hugging the pillar at
