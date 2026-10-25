@@ -1083,10 +1083,12 @@ mod tests {
             // ~38 motes a death at 94.6/s over 400 ms.
             assert!((d.count_between(0.0, 2.0) - 94.6 * 0.4).abs() < 1e-3);
         }
-        assert!(
-            !SMOKE_EMITTER.additive,
-            "the client's smoke is alpha-blended"
-        );
+        const {
+            assert!(
+                !SMOKE_EMITTER.additive,
+                "the client's smoke is alpha-blended"
+            )
+        };
         assert_eq!(flame_emitter(TotemElement::Fire).size, FIRE_FLAME_SIZE);
     }
 }

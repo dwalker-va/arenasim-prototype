@@ -1826,10 +1826,12 @@ mod tests {
         assert!(crosses_interrupt_lead(0.98, 1.01));
         assert!(!crosses_interrupt_lead(1.01, 1.03));
         assert!(!crosses_interrupt_lead(0.5, 0.9));
-        assert!(
-            INTERRUPT_LEAD_SECS < INTERRUPT_VICTIM_CAST_SECS,
-            "the victim's cast would complete before it is interrupted"
-        );
+        const {
+            assert!(
+                INTERRUPT_LEAD_SECS < INTERRUPT_VICTIM_CAST_SECS,
+                "the victim's cast would complete before it is interrupted"
+            )
+        };
     }
 
     #[test]

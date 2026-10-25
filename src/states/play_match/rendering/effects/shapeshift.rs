@@ -527,6 +527,6 @@ mod tests {
         let out = head_radius * EAR_SIDE_SHARE;
         let rise = TRAVEL_EAR_HEIGHT;
         let len = Vec3::new(out * (EAR_SPLAY - 1.0), rise, -EAR_LEAN_BACK).length();
-        assert!(len >= TRAVEL_EAR_HEIGHT && len < TRAVEL_EAR_HEIGHT * 1.05);
+        assert!((TRAVEL_EAR_HEIGHT..TRAVEL_EAR_HEIGHT * 1.05).contains(&len));
     }
 }

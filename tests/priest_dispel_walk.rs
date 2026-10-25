@@ -861,7 +861,7 @@ fn a_pressured_teamplan_priest_keeps_a_dying_teammate_over_cover() {
         let mut s = scene(dispel_range() + 15.0, warrior_auras);
         s.profile = AiProfile::TeamPlan;
         s.posture = Some(held(Posture::Pressured));
-        s.obstacles.push(pillar.clone());
+        s.obstacles.push(pillar);
         s.roster.get_mut(&s.hunter).unwrap().position = hunter_pos;
         // Out of mana for its Freezing Trap: a ready trap reaches every spot
         // here, cover or not (AS-362), which is not the condition this pairs.
@@ -1019,12 +1019,8 @@ struct Walk {
     ended_in_a_dispel: bool,
 }
 
-/// Every `DispelChase` a team-1 Priest traced in `config`'s match.
-fn priest_walks(config: arenasim::headless::HeadlessMatchConfig) -> Vec<Walk> {
-    priest_walks_staged(config, None)
-}
-
-/// [`priest_walks`], with `stage` landed on the match when one is given.
+/// Every `DispelChase` a team-1 Priest traced in `config`'s match, with
+/// `stage` landed on the match when one is given.
 fn priest_walks_staged(
     config: arenasim::headless::HeadlessMatchConfig,
     stage: Option<arenasim::headless::Stage>,

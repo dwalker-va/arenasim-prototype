@@ -777,14 +777,14 @@ fn mana_burn_overrides_the_shadow_row_without_leaving_its_colour() {
     // (The Hunter shots override theirs — `tests/hunter_shot_visual_probes.rs`.)
     // (Mind Blast and Holy Shock play their client models' emitters —
     // `tests/client_landing_visual_probes.rs`.)
-    for (ability, school) in [
-        // Its impact kit (214) resolves to the SAME model Frostbolt's does
-        // (`ice_impactdd_med_chest.m2`) — the generic frost hit, so the stock
-        // Frost row IS the faithful rendition and no override may exist.
-        (AbilityType::FrostShock, SpellSchool::Frost),
-    ] {
-        assert_eq!(landing_style(ability, school), impact_style(school));
-    }
+    //
+    // Frost Shock: its impact kit (214) resolves to the SAME model Frostbolt's
+    // does (`ice_impactdd_med_chest.m2`) — the generic frost hit, so the stock
+    // Frost row IS the faithful rendition and no override may exist.
+    assert_eq!(
+        landing_style(AbilityType::FrostShock, SpellSchool::Frost),
+        impact_style(SpellSchool::Frost)
+    );
 
     // And in world space: the sparks leave the CHEST going UP.
     let mut h = Harness::new();

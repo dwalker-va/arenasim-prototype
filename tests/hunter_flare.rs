@@ -76,8 +76,10 @@ fn decide_at(since_gates: f32) -> Decision {
     let movement = MovementConfig::default();
     let mut combat_log = CombatLog::default();
     let mut game_rng = GameRng::from_seed(7);
-    let mut trace = DecisionTrace::default();
-    trace.current_sim_time = since_gates;
+    let mut trace = DecisionTrace {
+        current_sim_time: since_gates,
+        ..Default::default()
+    };
 
     let my_pos = Vec3::new(-30.0, 0.0, 0.0);
     let mut combatant = Combatant::new(1, 0, CharacterClass::Hunter);

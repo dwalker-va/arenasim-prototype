@@ -1047,7 +1047,7 @@ mod reach_tests {
         let units: Vec<_> = at.iter().map(|&p| (2, Rogue, p, 1.0)).collect();
         let mut s = ReachScene::new(Shaman, &units);
         let me = s.units[0];
-        for rogue in s.units[1..].to_vec() {
+        for &rogue in &s.units[1..] {
             s.roster.get_mut(&rogue).unwrap().target = Some(me);
         }
         s
