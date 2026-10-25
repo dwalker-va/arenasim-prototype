@@ -9,7 +9,7 @@ use super::ice_barrier::{
     IB_HAND_RING_RGB, IB_HAND_SECS, IB_HAND_SPARKS, IB_HAND_SPARK_ALPHA, IB_HAND_SPARK_RGB,
     IB_HAND_SPARK_SIZE,
 };
-use super::pw_shield::PWS_CLIENT_TO_RIG;
+use super::shield::PWS_CLIENT_TO_RIG;
 use super::spell_bolts::{soft_dot_texture, star_flash_texture};
 use crate::states::play_match::components::*;
 

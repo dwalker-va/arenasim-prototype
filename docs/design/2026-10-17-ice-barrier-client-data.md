@@ -230,7 +230,7 @@ The user signed off on the bench at its defaults: artifact
   single swell-and-fade. The mist stops spawning 767 ms into it, and the puffs already
   falling outlive the cards and then clear.
 - **One rig, three kinds.** Ice Barrier is the third `ShieldKind` on the shield rig in
-  `rendering/effects/pw_shield.rs`, beside Power Word: Shield and Divine Shield. It
+  `rendering/effects/shield.rs`, beside Power Word: Shield and Divine Shield. It
   shares their lifecycle, billboard, `VisualBody` anchor and draw-order proof (re-run
   here for all five cards).
   - Its knobs are `IB_TUNING`, plus its own weight tracks and colours. The `IB_*`

@@ -674,7 +674,7 @@ impl Plugin for StatesPlugin {
                 // The client shields (Power Word: Shield, Divine Shield, Ice
                 // Barrier): their lifecycle and emitters; the cards are placed
                 // in PostUpdate.
-                play_match::update_pw_shield_visuals,
+                play_match::update_shield_visuals,
                 // Polymorph BEFORE Fear, chained so a sync point flushes
                 // PolymorphedVisual before Fear evaluates its
                 // `Without<PolymorphedVisual>` filter. A unit hit by both on the
@@ -839,10 +839,10 @@ impl Plugin for StatesPlugin {
         // Power Word: Shield's cards stand on the bearer's RENDERED body, so
         // they are placed after every writer of it — the cyclone lift
         // included — and before propagation. Riding the body is what keeps
-        // their draw order fixed against the blended capsule (`pw_shield.rs`).
+        // their draw order fixed against the blended capsule (`shield.rs`).
         .add_systems(
             PostUpdate,
-            play_match::place_pw_shield_cards
+            play_match::place_shield_cards
                 .after(play_match::apply_cyclone_lift)
                 .before(TransformSystem::TransformPropagate)
                 .run_if(in_combat_scene),

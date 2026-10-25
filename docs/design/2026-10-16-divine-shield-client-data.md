@@ -137,7 +137,7 @@ overlay* layer.
 with base colour `(1.0, 0.85, 0.3, 0.4)` and emissive `(3.0, 2.5, 0.8)`, `AlphaMode::Add`,
 at the capsule centre. `follow_shield_bubbles` pulses it ±5% at 3 rad/s (a 2.1 s period).
 Immunity takes priority over absorb in that system, so Ice Barrier's sphere never doubles
-it. PW:S is drawn separately (`pw_shield.rs`), so a shielded Paladin already shows both.
+it. PW:S is drawn separately (`shield.rs`), so a shielded Paladin already shows both.
 Divine Shield has no caster gesture: it is spawned as `DivineShieldPending` and is not in
 `InstantAbilityFired::is_spawned_for`.
 
@@ -190,12 +190,12 @@ multiplier at 1.0 (not the *Harder read* preset). All layers are kept: rim, blue
 cyan streak A, gold streak B, the star sparkles, the birth pop, the death swell and the
 caster's hands. The halo fall takes the literal reading, `DS_HALO_MODE = DeathOnly`.
 
-- **One machine, two models.** `rendering/effects/pw_shield.rs` now draws both shields.
+- **One machine, two models.** `rendering/effects/shield.rs` now draws both shields.
   A rig carries its `ShieldKind`, and each kind has a `ShieldTuning`: `PWS_TUNING` for the
   AS-344 constants and `DS_TUNING` for the bench's `DS_*` constants, under the same names
   the bench emits. The layer toggles have no constant, as for PW:S, because every layer is
   kept. The timelines, cards, anchor, billboard and lifecycle are AS-344's, unchanged.
-  Divine Shield adds its two fill cards (`PwsLayer::FillOuter` and `FillInner`, on the
+  Divine Shield adds its two fill cards (`ShieldLayer::FillOuter` and `FillInner`, on the
   rim's weight track) and its own two colours.
 - **Both shields at once.** Rigs are keyed by bearer and kind, so a Priest's shield on a
   bubbled Paladin draws both, and each one lives and ends on its own clock.

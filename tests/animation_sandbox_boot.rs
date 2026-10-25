@@ -362,7 +362,7 @@ fn ice_barrier_previews_its_cards_mist_and_both_hands() {
     use arenasim::states::match_config::CharacterClass;
     use arenasim::states::play_match::abilities::AbilityType;
     use arenasim::states::play_match::components::{
-        ClientParticle, HealCastHand, HealCastKind, PwShieldCard, PwShieldVisual, ShieldKind,
+        ClientParticle, HealCastHand, HealCastKind, ShieldCard, ShieldKind, ShieldVisual,
     };
     use bevy::time::TimeUpdateStrategy;
     use std::time::Duration;
@@ -407,7 +407,7 @@ fn ice_barrier_previews_its_cards_mist_and_both_hands() {
             caster = Some(*c);
         }
         most_hands = most_hands.max(now.len());
-        let mut cards = app.world_mut().query::<(&PwShieldCard, &Transform)>();
+        let mut cards = app.world_mut().query::<(&ShieldCard, &Transform)>();
         let scales: Vec<f32> = cards.iter(app.world()).map(|(_, t)| t.scale.y).collect();
         cards_seen = cards_seen.max(scales.len());
         placed |= scales.iter().any(|s| *s > 1.0);
@@ -421,7 +421,7 @@ fn ice_barrier_previews_its_cards_mist_and_both_hands() {
     assert_eq!(cards_seen, 5, "the Mage must wear the five cards");
     assert!(placed, "the cards were spawned but never placed");
     assert!(mist > 5, "the barrier shed no frost mist ({mist} puffs)");
-    let mut rigs = app.world_mut().query::<&PwShieldVisual>();
+    let mut rigs = app.world_mut().query::<&ShieldVisual>();
     let rig = *rigs.iter(app.world()).next().expect("no barrier");
     assert_eq!(rig.kind, ShieldKind::IceBarrier);
     let bearer = rig.bearer;
@@ -445,7 +445,7 @@ fn power_word_shield_previews_its_cards_and_both_hands() {
     use arenasim::states::animation_sandbox::SandboxConfig;
     use arenasim::states::match_config::CharacterClass;
     use arenasim::states::play_match::abilities::AbilityType;
-    use arenasim::states::play_match::components::{HealCastHand, HealCastKind, PwShieldCard};
+    use arenasim::states::play_match::components::{HealCastHand, HealCastKind, ShieldCard};
     use bevy::time::TimeUpdateStrategy;
     use std::time::Duration;
 
@@ -479,7 +479,7 @@ fn power_word_shield_previews_its_cards_and_both_hands() {
         let kinds: Vec<HealCastKind> = hands.iter(app.world()).map(|h| h.kind).collect();
         assert!(kinds.iter().all(|k| *k == HealCastKind::Holy), "{kinds:?}");
         most_hands = most_hands.max(kinds.len());
-        let mut cards = app.world_mut().query::<(&PwShieldCard, &Transform)>();
+        let mut cards = app.world_mut().query::<(&ShieldCard, &Transform)>();
         let now: Vec<f32> = cards.iter(app.world()).map(|(_, t)| t.scale.y).collect();
         cards_seen = cards_seen.max(now.len());
         placed |= now.iter().any(|s| *s > 1.0);
@@ -512,7 +512,7 @@ fn divine_shield_previews_its_cards_and_both_hands() {
     use arenasim::states::match_config::CharacterClass;
     use arenasim::states::play_match::abilities::AbilityType;
     use arenasim::states::play_match::components::{
-        Combatant, HealCastHand, HealCastKind, PwShieldCard, PwShieldVisual, ShieldKind,
+        Combatant, HealCastHand, HealCastKind, ShieldCard, ShieldKind, ShieldVisual,
     };
     use bevy::time::TimeUpdateStrategy;
     use std::time::Duration;
@@ -548,9 +548,9 @@ fn divine_shield_previews_its_cards_and_both_hands() {
         let kinds: Vec<HealCastKind> = hands.iter(app.world()).map(|h| h.kind).collect();
         assert!(kinds.iter().all(|k| *k == HealCastKind::Holy), "{kinds:?}");
         most_hands = most_hands.max(kinds.len());
-        let mut cards = app.world_mut().query::<&PwShieldCard>();
+        let mut cards = app.world_mut().query::<&ShieldCard>();
         cards_seen = cards_seen.max(cards.iter(app.world()).count());
-        let mut rigs = app.world_mut().query::<&PwShieldVisual>();
+        let mut rigs = app.world_mut().query::<&ShieldVisual>();
         let bearers: Vec<_> = rigs
             .iter(app.world())
             .filter(|r| r.kind == ShieldKind::DivineShield)
@@ -578,7 +578,7 @@ fn divine_shield_previews_its_cards_and_both_hands() {
 /// and its rim rises with it, centred just above the body centre on every
 /// frame. Placed before the lift, the rim would sit at the unlifted height and
 /// fall below the body centre — the order the leg-crossing arc's draw order
-/// rests on (`pw_shield.rs`).
+/// rests on (`shield.rs`).
 #[test]
 fn the_shield_rides_a_cyclone_lift() {
     use arenasim::states::animation_sandbox::playback::{
@@ -588,7 +588,7 @@ fn the_shield_rides_a_cyclone_lift() {
     use arenasim::states::match_config::CharacterClass;
     use arenasim::states::play_match::abilities::AbilityType;
     use arenasim::states::play_match::components::{
-        ActiveAuras, Aura, AuraType, PwShieldCard, PwShieldVisual, PwsLayer, VisualBody,
+        ActiveAuras, Aura, AuraType, ShieldCard, ShieldLayer, ShieldVisual, VisualBody,
     };
     use bevy::time::TimeUpdateStrategy;
     use std::time::Duration;
@@ -619,7 +619,7 @@ fn the_shield_rides_a_cyclone_lift() {
     for _ in 0..50 {
         app.update();
     }
-    let mut rigs = app.world_mut().query::<&PwShieldVisual>();
+    let mut rigs = app.world_mut().query::<&ShieldVisual>();
     let bearer = rigs
         .iter(app.world())
         .next()
@@ -653,9 +653,9 @@ fn the_shield_rides_a_cyclone_lift() {
         let lifted = app.world().get::<Transform>(body).unwrap().translation;
         let body_at = root.transform_point(lifted);
         highest = highest.max(body_at.y - root.translation.y);
-        let mut cards = app.world_mut().query::<(&PwShieldCard, &Transform)>();
+        let mut cards = app.world_mut().query::<(&ShieldCard, &Transform)>();
         for (card, t) in cards.iter(app.world()) {
-            if card.layer != PwsLayer::Rim {
+            if card.layer != ShieldLayer::Rim {
                 continue;
             }
             let rise = t.translation.y - body_at.y;

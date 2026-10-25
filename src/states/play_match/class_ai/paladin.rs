@@ -568,7 +568,7 @@ pub fn try_divine_shield(
         combatant.team,
         combatant.slot,
         combatant.class,
-        "Divine Shield",
+        &abilities.get_unchecked(&ability).name,
         None,
         "casts",
     );
@@ -724,7 +724,7 @@ pub fn try_divine_shield_while_cc(
         combatant.team,
         combatant.slot,
         combatant.class,
-        "Divine Shield",
+        &abilities.get_unchecked(&ability).name,
         None,
         "casts",
     );

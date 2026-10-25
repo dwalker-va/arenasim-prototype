@@ -2,7 +2,7 @@
 //! `iceshield_state.m2` adds to the shared shield cards, and the Mage's cast
 //! hands.
 //!
-//! The barrier is the third [`ShieldKind`] on the shield rig in `pw_shield.rs`,
+//! The barrier is the third [`ShieldKind`] on the shield rig in `shield.rs`,
 //! which owns its lifecycle, its cards, their placement and its tuning
 //! (`IB_TUNING`). This module holds only what no other shield has:
 //!
@@ -27,7 +27,7 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use std::f32::consts::TAU;
 
-use super::pw_shield::{disc_texture, keys, pws_hash, PWS_CLIENT_TO_RIG, PWS_STREAK_QUAD};
+use super::shield::{disc_texture, keys, pws_hash, PWS_CLIENT_TO_RIG, PWS_STREAK_QUAD};
 
 // --- The icicles ---------------------------------------------------------------
 
