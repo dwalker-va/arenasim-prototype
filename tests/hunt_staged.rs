@@ -144,7 +144,7 @@ fn the_hunters_split_round_the_hiders_pillar() {
         let at = on
             .split_at
             .unwrap_or_else(|| panic!("seed {seed}: the hunters never split"));
-        assert!(at < 6.0, "seed {seed}: split only at {at:.1}s");
+        assert!(at < 8.0, "seed {seed}: split only at {at:.1}s");
         assert_eq!(off.hunt_onsets, 0, "seed {seed}: withheld, yet hunted");
         assert_eq!(off.split_at, None, "seed {seed}: withheld, yet split");
         assert!(

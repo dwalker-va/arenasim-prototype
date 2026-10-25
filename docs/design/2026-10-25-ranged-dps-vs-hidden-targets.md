@@ -1,6 +1,7 @@
 # Ranged DPS against hidden targets (AS-389, with AS-392): design
 
-Status: **BUILT (AS-389), as §6.1 describes; the user's rulings are §7.**
+Status: **BUILT (AS-389), as §6.1 describes; the user's rulings are §7. The
+endgame pincer is BUILT as the `Hunt` play (AS-394, §6.2 and §9).**
 The diagnosis (§1-§5) is on `main` @ `03f77e9e` (AS-385 merged: the sight
 yield, AS-386, and the pillar stance, AS-387); the build's measurement is §8.
 `TeamPlan` only throughout; `Legacy` is byte-identical.
@@ -30,7 +31,8 @@ yield, AS-386, and the pillar stance, AS-387); the build's measurement is §8.
    Mage gains +8.2 in a uniform world.
 4. **Built:** the **target switch as a team focus situation** (§6.1),
    +4.4pt head-to-head (z +25.5) over three seed blocks (§8). AS-392 is merged
-   into this card and closed. The endgame pincer (§6.2) is AS-394.
+   into this card and closed. The endgame pincer (§6.2) is AS-394's `Hunt`
+   play (§9): endgames about 2.5s shorter, wins and draws unchanged.
 
 ## 2. Instrument and banks
 
@@ -319,7 +321,7 @@ an immune focus). A staged TwinPillars match (`tests/target_focus_staged.rs`)
 plays the switch with the focus on, withheld, and under a kill call. Every
 condition was mutation-proved (§8).
 
-### 6.2 Optional second card: the endgame pincer ("Hunt")
+### 6.2 The endgame pincer ("Hunt"; built by AS-394, §9)
 
 `TakeCover`'s counterpart, a play for the team that outnumbers a lone hidden
 healer:
@@ -468,3 +470,156 @@ lines, 671 / 576 / 13), and `TeamPlan` with the focus withheld reproduces
 
 **Rows and CSVs:** `sweeps/2026-10-25-as389-final-*` (`03f77e9e`) and
 `sweeps/2026-10-25-as389-r2-*` (`6eb17472`, block 609-612).
+
+## 9. AS-394: the `Hunt` play, built and measured
+
+### 9.1 The shape
+
+`class_ai::hunt`, a `TeamPlan` play; the module docs and CLAUDE.md (*Plays*)
+carry the rules. In short:
+
+- **The situation** `hunt`: the enemy's only living non-pet unit is a healer
+  within `HUNT_ENTER` (6yd) of a pillar's skin, held to `HUNT_LEAVE` (10yd);
+  the team has two or more units; at onset the healer is hidden from one of
+  them. The axis is the healer's bearing round the pillar at onset, and
+  carries while it stays at that pillar.
+- **The stations**: two points `HUNT_STANDOFF` (14yd) off the skin, at the
+  axis ±90°. **180°, not 160°**: from 14yd off a Nagrand pillar, two viewers
+  160° apart leave a sliver of the far side in neither's sight, and 180°
+  leaves none (`two_stations_leave_a_hugger_nowhere_to_hide` sweeps every
+  pillar of both maps, every axis in 15° steps, and every hugging bearing in
+  2° steps at the skin and at the cover ring). A station the wall or another
+  pillar takes is pulled in, then turned toward the axis.
+- **Who**: two units or none (one viewer is §3.2's lone chaser). Ranged DPS
+  first; the healer takes the second station when only one ranged DPS does.
+  Melee take none: a melee on the healer already sees it.
+- **The healer's sight of its team (AS-385 D2)**. A healer on the far station
+  cannot see the DPS on the near one. D2 orders sight of an OWED duty before
+  everything else, so the healer stations only while no teammate is dying
+  (below `urgency_hp_threshold`, where the medic chase and the team solve
+  already walk it back into sight), and once one is, not again until all are
+  back to `SIGHT_YIELD_HP`. A healthy teammate is owed nothing.
+- **Holding**: a unit holds its station until it first reaches it, then while
+  a stationed unit sees the healer. Two units on station that both lose it
+  return to their ordinary walk for sight, so a bad station cannot park the
+  team blind.
+- **The play** is MOVEMENT only (a `Point` directive from the kiter's ENGAGE,
+  the Warlock's dispatch and the healers' `take_cover_tick`); Burst still
+  leads the chain. It stands down while the healer is locked, so the Chain
+  play extends the lock.
+- **`PLAY_ORDER`: Peel, TakeCover, Hunt, Pillar, Chain, Burst.** After Peel
+  (a teammate in danger first); beside TakeCover, its counterpart (the two
+  never meet: one needs two units, the other one); before Pillar, because a
+  team hunting the last enemy does not hide from that enemy's crowd control.
+
+### 9.2 The exceptions, and how they were chosen
+
+Chosen on two selection blocks, then measured on two fresh ones (§9.3).
+
+| block | build | endgame mean | draws | finding |
+|---|---|---|---|---|
+| 701-702 (2,520) | every healer stations | 47.8 → 48.3 (+0.4, ns) | 23 → 71 | a stationed Paladin: Mage+Paladin +64.4s, Warlock+Paladin +14.4s; a stationed Druid: Warlock+Druid +22.1s, draws 11 → 30. Priest comps -13 to -18s |
+| 711-714 (5,040) | Paladin, Druid excepted | 48.6 → 46.3 (-2.4, t -6.0) | 49 → 67 | all 23 new draws had a stationed Shaman (Mage+Shaman +5.6s, Hunter+Shaman +6.7s) |
+
+The common cause: a healer with no attack that costs no mana. On the far
+station it takes its sight off its partner, and once that partner is out of
+mana or out of sight nobody hurts the lone healer. The Priest has its wand.
+So `HUNT_EXCEPTIONS` names the Paladin, the Druid and the Shaman, and the
+healer that stations is a Priest.
+
+Rows: `sweeps/2026-10-25-as394-rows-pilot-*-701-702` and `-rows-*-711-714`,
+from the two selection builds (this card's history; the `off` arms do not
+depend on the build).
+
+### 9.3 Measured
+
+**Tier: DIRECTIONAL**, replicated over two fresh seed blocks, 721-724 and
+725-728. Banks: `sweeps/2026-10-25-as394-gen.py`, AS-385's package cells (all
+2v2 healer teams against every 2v2 team, the six one-healer 3v3 teams; Nagrand
+and TwinPillars; both teams `TeamPlan`, the AS-385 package and the AS-389
+focus on): 5,040 matches per arm per block, four arms (`off`, `t1`, `t2`,
+`uni`). Endgames read per frame by `tests/hunt_endgame_sweep.rs`; scored by
+`sweeps/2026-10-25-as394-score.py` (endgames, paired by seed) and AS-385's
+`package-score.py` (wins). Rows: `sweeps/2026-10-25-as394-rows-*`.
+
+**Endgame length** (the lone-healer endgame, onset to match end; paired: the
+same matches reach it in both arms):
+
+| | 721-724 | 725-728 |
+|---|---|---|
+| uniform, mean | 47.2 → 44.9s (-2.3, t -11.7) | 48.9 → 46.3s (-2.6, t -11.3) |
+| uniform, median | 31.3 → 30.1s | 32.0 → 30.9s |
+| head-to-head, seat 1 hunts | -2.6s (t -7.6) | -2.6s (t -7.8) |
+| head-to-head, seat 2 hunts | -2.1s (t -9.1) | -2.6s (t -8.3) |
+| Nagrand / TwinPillars (uniform) | -2.5 / -2.1s | -2.8 / -2.4s |
+| a team that can staff two stations | 65.5 → 61.5s (-4.0) | 67.5 → 63.0s (-4.5) |
+| ... with a Priest | -8.9s | -9.1s |
+| ... with a Mage | -4.9s | -6.0s |
+
+About 43% of endgames are hunted by a team that cannot staff two stations (a
+melee and a healer, or an excepted healer); those are unchanged, which is why
+the whole-bank figure is about half the staffed one and below the prototype's
+-7.0s (that prototype stationed every healer, and paid for it in draws).
+
+**Mechanism**: the share of endgame frames the healer is in a hunter's sight
+rises 0.77 → 0.80 (staffed teams 0.67 → 0.72), and the share with two hunters
+120° or more apart round its pillar 0.09 → 0.14 (staffed 0.04-0.05 → 0.13).
+
+**Win rate** (must not regress; McNemar on the flips):
+
+| | 721-724 | 725-728 |
+|---|---|---|
+| head-to-head, both seats (10,080 sides) | +0.0 (5 / 1 flips, z +1.63) | +0.1 (9 / 1, z +2.53) |
+| uniform | +0.0 (6 / 6) | +0.0 (10 / 6) |
+
+No class or map slice moves by more than 0.6pt in either block (the largest, Nagrand teams with no healer, +0.6 at 725-728, is a gain).
+
+**Draws**: head-to-head 104 → 104 and 130 → 126 matches; draws inside the
+endgame 29 → 29 and 48 → 44.
+
+**With the target focus** (AS-389). In the endgame there is one enemy, so the
+focus has nobody to move to; it matters to the hunt only through which
+endgames happen (the focus changes the kill order: 3,244 endgames without it,
+3,506 with, block 721-724). Paired 2x2 at 721-724:
+
+| | focus off | focus on |
+|---|---|---|
+| hunt's effect on the endgame | -2.0s (t -9.9) | -2.3s (t -11.7) |
+
+The two are additive; no rule couples them.
+
+**Identity.**
+
+- `Legacy`: all 1,260 cells at seed 721, both teams `Legacy`, as full
+  `--headless` match logs from `main` (`ad30df3e`) and the build: `diff -r`
+  clean over 31MB. Non-vacuous: 2,832 eliminations, 1,009 distinct durations;
+  winners team 1 677, team 2 563, 20 draws.
+- `TeamPlan` with the Hunt withheld from both teams reproduces `main`'s
+  `TeamPlan` `--batch` CSV over the 5,040 matches of 721-724: 0 differ
+  (winners 2,570 / 2,418 / 52 draws, 3,311 distinct durations).
+
+**`camp_sweep`** (seeds 1-12): identical to `main` (`TeamPlan` 12/12, heal to
+the Warrior 306). Its Warrior+Priest cannot staff two stations, and its
+Warlock+Priest never meets a lone Priest.
+
+### 9.4 Tests
+
+- **Scenes** (`tests/hunt_scenes.rs`), each a pair: hidden versus in sight;
+  at the pillar, the leave radius, a new pillar; a lone healer versus a second
+  enemy, a lone non-healer, a team of one; `Legacy`, withheld, before the
+  gates; who stations (two ranged DPS, a melee, the shipped exceptions and an
+  override); the healer's owed sight and its release, and its own health;
+  the axis and onset carrying; a station kept; one station left; holding and
+  giving up; each executor (Mage, Priest, Warlock) against the play withheld;
+  a stale walk renewed; the healer's hand-back; the lock stand-down.
+- **Unit tests** (`class_ai::hunt`): the coverage sweep above with its 160°
+  control; a station pulled in, turned toward the axis, and required to see
+  the face it guards; the trace's transitions. `plays::tests` pins the order.
+- **A staged endgame** (`tests/hunt_staged.rs`): a lone Priest on the far
+  face of a Nagrand pillar from a Mage and a Priest. With the play the two
+  stand 150° or more apart round it within 8s, and the lone Priest is in a
+  hunter's sight 69% of the following frames against 22% with it withheld.
+- **Mutation proof**: 42 mutants, one per condition, each killed by a named
+  test. One mutant survived first (the "two units" guard before assignment):
+  it duplicated the "two stations or none" guard after it, and was removed.
+

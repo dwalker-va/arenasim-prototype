@@ -114,6 +114,23 @@ fn a_hunt_is_held_out_to_the_leave_radius_and_ends_beyond_it() {
 }
 
 #[test]
+fn a_healer_that_runs_to_another_pillar_is_hunted_there() {
+    let second = ObstacleVolume::Cylinder {
+        center_xz: Vec2::new(30.0, 0.0),
+        radius: 6.0,
+        base_y: 0.0,
+        height: 10.0,
+    };
+    let mut s = scene().obstacles(vec![pillar(), second]);
+    assert_eq!(hunt(&mut s).unwrap().pillar, 0);
+    // On the far face of the second pillar, out of every hunter's sight.
+    s.set_position(HIDER, 37.0, 0.0);
+    let h = hunt(&mut s).expect("a new hunt");
+    assert_eq!(h.pillar, 1);
+    assert_eq!(h.stations.len(), 2);
+}
+
+#[test]
 fn only_a_lone_healer_is_hunted() {
     // A second enemy alive: not an endgame.
     let mut s = scene()
@@ -229,6 +246,11 @@ fn the_healer_stations_only_while_no_teammate_is_dying() {
     assert!(hunt(&mut s).unwrap().owed, "the release bar is higher");
     s.set_health(MAGE, 0.85);
     assert!(!hunt(&mut s).unwrap().owed, "released");
+    // The healer's own health owes nothing: it heals itself from anywhere.
+    let mut s = scene().health_of(PRIEST, 0.4);
+    let h = hunt(&mut s).unwrap();
+    assert!(!h.owed);
+    assert_eq!(h.stations.len(), 2);
 }
 
 #[test]

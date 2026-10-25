@@ -9,8 +9,8 @@
 //! viewers on opposite sides of the pillar leave it nowhere to hide.
 //!
 //! **The situation** ([`classify`], `TeamSituation::hunt`). `TeamPlan` only
-//! (a team that runs [`PlayId::Hunt`]), on a map with obstacles, with the
-//! gates open. All of:
+//! (a team that runs [`PlayId::Hunt`]), with the gates open, at a pillar (a
+//! map with none has nothing to hunt round). All of:
 //!
 //! 1. **lone healer**: the enemy's only living non-pet unit is a healer;
 //! 2. **outnumbered**: the team has two or more living non-pet units;
@@ -31,22 +31,34 @@
 //! A station the arena wall or another pillar takes is pulled in toward the
 //! pillar, then turned toward the axis ([`station_point`]).
 //!
-//! **Who takes a station** — at most two units, in this order:
+//! **Who takes a station** — exactly two units, or none: one viewer cannot
+//! out-angle a hugger. In this order:
 //!
 //! | role | in the hunt |
 //! |---|---|
 //! | ranged DPS (Mage, Hunter, Warlock) | a station, first |
-//! | healer | a station when fewer than two ranged DPS take one, and only while no teammate is owed a heal |
+//! | healer (the Priest: [`HUNT_EXCEPTIONS`] names the others) | the second station when only one ranged DPS takes one, and only while no teammate is dying |
 //! | melee DPS | no station: its pursuit already walks round the pillar onto the healer, and a melee on it sees it |
+//!
+//! Each unit keeps the station it took for as long as the hunt lasts; the
+//! first assignment is the shorter total walk.
+//!
+//! **Holding.** A unit holds its station until it first reaches it, and
+//! after that while one of the two stationed units sees the healer. When
+//! both have reached their stations and both lose it — a station the wall
+//! pulled in, a healer that stepped off the ring — they give the stations up
+//! for their ordinary walk for sight, and take them back once one of them
+//! sees it again. A station never parks a unit blind with nobody shooting.
 //!
 //! **The healer and its team's sight** (AS-385 D2: sight of an OWED duty
 //! comes before hiding). A healer on the far station cannot see a DPS on the
 //! near one: the pillar stands between them. It takes the station only while
-//! every living teammate is at or above [`SIGHT_YIELD_HP`] — the health below
-//! which a DPS is owed its healer's sight (the sight yield's rule 4) — and
-//! gives it up until they are all back above [`SIGHT_YIELD_RELEASE_HP`]. A
-//! healthy teammate is owed nothing; a hurt one gets a healer that walks back
-//! into sight on its ordinary solve. The DPS keeps its own station meanwhile.
+//! no living teammate is dying (below `urgency_hp_threshold`, the health at
+//! which the medic chase and the team solve already walk a healer back into
+//! sight), and once one is, not again until every one is back to
+//! [`SIGHT_YIELD_HP`] — the healer tops them up first. While it is owed, the
+//! healer is on its ordinary solve and takes no station, and with only one
+//! ranged DPS the team takes none.
 //!
 //! **The play** ([`HuntStage`], `situation::Play::Hunt`) is a MOVEMENT play,
 //! like TakeCover and Pillar: what the unit casts is its ordinary chain, and
@@ -54,9 +66,11 @@
 //! applies whatever the unit's play). A stationed unit walks to its station
 //! and holds it ([`walk_to_station`]) — a kiter in place of its ENGAGE seek
 //! and chase, a Warlock in place of its pursuit, a healer in place of its
-//! formation or cover. The play stands down while the healer is locked (the
-//! team's `enemy_healer_locked` is on it): a locked healer cannot run round
-//! its pillar, and the Chain play below it extends the lock.
+//! formation or cover. A stationed DPS ignores its sight yield while it
+//! walks: the team's hunt leads, as the team's stance does. The play stands
+//! down while the healer is locked (the team's `enemy_healer_locked` is on
+//! it): a locked healer cannot run round its pillar, and the Chain play below
+//! it extends the lock.
 //!
 //! **The target focus** (AS-389) needs no rule here: with one enemy left
 //! there is nobody else in reach to move the focus to, and a stationed DPS
@@ -496,12 +510,9 @@ pub fn classify(
         .collect();
     let y = healer.position.y;
     let slots = stations(&snapshot.obstacles, &snapshot.bounds, &ring, axis, y);
-    // Two viewers or none: one alone cannot out-angle a hugger (§3.2).
-    let mut assigned = if units.len() == 2 {
-        assign(slots, &units, prev_window)
-    } else {
-        SmallVec::new()
-    };
+    // Two viewers or none: one alone cannot out-angle a hugger (§3.2) — one
+    // unit to station, or one station the geometry leaves.
+    let mut assigned = assign(slots, &units, prev_window);
     if assigned.len() < 2 {
         assigned.clear();
     }
@@ -621,6 +632,35 @@ mod tests {
     }
 
     const NORTH: f32 = std::f32::consts::FRAC_PI_2;
+
+    /// The trace's transitions: a hunt begins, moves to another pillar (a
+    /// new hunt), or ends; one that holds its pillar changes nothing.
+    #[test]
+    fn a_hunt_changes_on_onset_a_new_pillar_and_its_end() {
+        let window = |pillar: usize| HuntWindow {
+            subject: Entity::from_raw(7),
+            pillar,
+            axis: 0.0,
+            since: 1.0,
+            owed: false,
+            stations: SmallVec::new(),
+        };
+        let (a, b) = (window(0), window(1));
+        assert_eq!(change(None, None), None);
+        assert_eq!(
+            change(None, Some(&a)).map(|c| c.0),
+            Some(SituationChangeKind::Onset)
+        );
+        assert_eq!(
+            change(Some(&a), None).map(|c| c.0),
+            Some(SituationChangeKind::End)
+        );
+        assert_eq!(
+            change(Some(&a), Some(&b)).map(|c| (c.0, c.1.pillar)),
+            Some((SituationChangeKind::Onset, 1))
+        );
+        assert_eq!(change(Some(&a), Some(&a.clone())), None);
+    }
 
     /// A free spot is [`HUNT_STANDOFF`] off the skin at its own bearing.
     #[test]
