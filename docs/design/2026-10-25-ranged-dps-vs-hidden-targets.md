@@ -32,7 +32,9 @@ yield, AS-386, and the pillar stance, AS-387); the build's measurement is §8.
 4. **Built:** the **target switch as a team focus situation** (§6.1),
    +4.4pt head-to-head (z +25.5) over three seed blocks (§8). AS-392 is merged
    into this card and closed. The endgame pincer (§6.2) is AS-394's `Hunt`
-   play (§9): endgames about 2.5s shorter, wins and draws unchanged.
+   play (§9): endgames about 19% shorter (about 11s) where the team can
+   staff both stations, about 2.5s over all endgames; wins and draws
+   unchanged.
 
 ## 2. Instrument and banks
 
@@ -492,17 +494,23 @@ carry the rules. In short:
   pillar takes is pulled in, then turned toward the axis.
 - **Who**: two units or none (one viewer is §3.2's lone chaser). Ranged DPS
   first; the healer takes the second station when only one ranged DPS does.
-  Melee take none: a melee on the healer already sees it.
+  Melee take none: a melee on the healer already sees it. The two are the
+  first that qualify in Entity order, not the nearest: a 3v3 with two ranged
+  DPS stations the lower-numbered pair.
 - **The healer's sight of its team (AS-385 D2)**. A healer on the far station
   cannot see the DPS on the near one. D2 orders sight of an OWED duty before
   everything else, so the healer stations only while no teammate is dying
   (below `urgency_hp_threshold`, where the medic chase and the team solve
   already walk it back into sight), and once one is, not again until all are
   back to `SIGHT_YIELD_HP`. A healthy teammate is owed nothing.
-- **Holding**: a unit holds its station until it first reaches it, then while
-  a stationed unit sees the healer. Two units on station that both lose it
-  return to their ordinary walk for sight, so a bad station cannot park the
-  team blind.
+- **Holding** (`hold = !arrived || covered`, per unit): a unit holds its
+  station until it first reaches it; after that, only while one of the two
+  stationed units sees the healer. An arrived unit therefore gives its station
+  up for its ordinary walk for sight as soon as nobody sees the healer, even
+  while its partner is still walking to the other station, and takes it back
+  once one of them sees it again. In the seed-723 replay the Mage, on its
+  station, gives it up at 64.9s while our Priest is feared short of its own.
+  A bad station cannot park the team blind.
 - **The play** is MOVEMENT only (a `Point` directive from the kiter's ENGAGE,
   the Warlock's dispatch and the healers' `take_cover_tick`); Burst still
   leads the chain. It stands down while the healer is locked, so the Chain
@@ -552,18 +560,24 @@ same matches reach it in both arms):
 | head-to-head, seat 1 hunts | -2.6s (t -7.6) | -2.6s (t -7.8) |
 | head-to-head, seat 2 hunts | -2.1s (t -9.1) | -2.6s (t -8.3) |
 | Nagrand / TwinPillars (uniform) | -2.5 / -2.1s | -2.8 / -2.4s |
-| a team that can staff two stations | 65.5 → 61.5s (-4.0) | 67.5 → 63.0s (-4.5) |
-| ... with a Priest | -8.9s | -9.1s |
-| ... with a Mage | -4.9s | -6.0s |
+| **a team that can staff two stations**, uniform (744 / 762 endgames) | **57.3 → 46.5s (-10.8, t -12.7)** | **58.8 → 46.9s (-11.8, t -12.1)** |
+| ... its median | 45.6 → 36.2s | 49.7 → 38.2s |
+| ... head-to-head, seat 1 / seat 2 hunts | -14.9s (t -8.4) / -8.6s (t -9.7) | -14.1s (t -8.6) / -10.7s (t -8.8) |
+| a team that cannot | 0.0s | 0.0s |
+| any team with a Priest / with a Mage | -8.9 / -4.9s | -9.1 / -6.0s |
 
-About 43% of endgames are hunted by a team that cannot staff two stations (a
-melee and a healer, or an excepted healer); those are unchanged, which is why
-the whole-bank figure is about half the staffed one and below the prototype's
--7.0s (that prototype stationed every healer, and paid for it in draws).
+A team can staff two stations when it fields two of the Mage, Hunter, Warlock
+and Priest (the classes `HUNT_EXCEPTIONS` leaves). About 21-22% of endgames
+are hunted by such a team, and those shorten by about 19% (-10.8s of 57.3s,
+-11.8s of 58.8s): more than the prototype's 14% where the play can run. The
+other 78-79% (a melee and a healer, an excepted healer, two melee) are
+untouched, byte for byte, so the same effect spread over every endgame is the
+-2.3 to -2.6s above.
 
 **Mechanism**: the share of endgame frames the healer is in a hunter's sight
-rises 0.77 → 0.80 (staffed teams 0.67 → 0.72), and the share with two hunters
-120° or more apart round its pillar 0.09 → 0.14 (staffed 0.04-0.05 → 0.13).
+rises 0.77 → 0.80 (staffed teams 0.66 → 0.78-0.79), and the share with two
+hunters 120° or more apart round its pillar 0.09 → 0.14 (staffed 0.03-0.04 →
+0.26-0.27).
 
 **Win rate** (must not regress; McNemar on the flips):
 
@@ -585,6 +599,7 @@ endgames happen (the focus changes the kill order: 3,244 endgames without it,
 | | focus off | focus on |
 |---|---|---|
 | hunt's effect on the endgame | -2.0s (t -9.9) | -2.3s (t -11.7) |
+| ... on staffed teams | -11.4s (t -10.6) | -10.8s (t -12.7) |
 
 The two are additive; no rule couples them.
 

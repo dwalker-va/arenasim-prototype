@@ -31,7 +31,10 @@ import math
 import statistics
 import sys
 
-STATIONABLE = {"Mage", "Hunter", "Warlock", "Priest", "Paladin", "Shaman", "Druid"}
+# The classes that can hold a Hunt station: the ranged DPS, and the healers
+# `hunt::HUNT_EXCEPTIONS` does not name (the Paladin, Druid and Shaman are
+# excepted).
+STATIONABLE = {"Mage", "Hunter", "Warlock", "Priest"}
 
 
 def rows(path):
@@ -48,7 +51,7 @@ def slices(r):
     staffed = sum(1 for c in hunters if c in STATIONABLE) >= 2
     keys = ["all", f"map={mp}", f"fmt={fmt}", f"hider={eg['hider_class']}",
             f"map={mp} hider={eg['hider_class']}",
-            "hunters staffed (2+ ranged/healer)" if staffed else "hunters unstaffed"]
+            "hunters staffed (2+ stationable)" if staffed else "hunters unstaffed"]
     for c in set(hunters):
         keys.append(f"hunter has {c}")
     return keys

@@ -40,15 +40,22 @@
 //! | healer (the Priest: [`HUNT_EXCEPTIONS`] names the others) | the second station when only one ranged DPS takes one, and only while no teammate is dying |
 //! | melee DPS | no station: its pursuit already walks round the pillar onto the healer, and a melee on it sees it |
 //!
-//! Each unit keeps the station it took for as long as the hunt lasts; the
-//! first assignment is the shorter total walk.
+//! The two units are the first two that qualify in Entity order (ranged DPS
+//! before the healer), not the two nearest the pillar: in a 3v3 with two
+//! ranged DPS the stations go to the lower-numbered pair. Each unit keeps the
+//! station it took for as long as the hunt lasts; the first assignment of
+//! the two to the two stations is the shorter total walk.
 //!
-//! **Holding.** A unit holds its station until it first reaches it, and
-//! after that while one of the two stationed units sees the healer. When
-//! both have reached their stations and both lose it — a station the wall
-//! pulled in, a healer that stepped off the ring — they give the stations up
-//! for their ordinary walk for sight, and take them back once one of them
-//! sees it again. A station never parks a unit blind with nobody shooting.
+//! **Holding** (`hold = !arrived || covered`, per unit). A unit holds its
+//! station until it first reaches it; after that it holds only while one of
+//! the two stationed units sees the healer. So a unit that has arrived gives
+//! its station up as soon as nobody sees the healer — even while its partner
+//! is still walking to the other one (the partner keeps walking: it has not
+//! arrived) — and goes back to its ordinary walk for sight, taking the
+//! station back once one of them sees the healer again. In the seed-723
+//! endgame (Mage+Priest against a lone Priest, Nagrand) the Mage, on its
+//! station, gives it up at 64.9s while our Priest is feared short of its own.
+//! A station never parks a unit blind with nobody shooting.
 //!
 //! **The healer and its team's sight** (AS-385 D2: sight of an OWED duty
 //! comes before hiding). A healer on the far station cannot see a DPS on the
@@ -141,12 +148,13 @@ pub struct Station {
     /// Which side of the axis: 0 (the axis plus half the split) or 1.
     pub slot: u8,
     pub point: Vec2,
-    /// Whether the unit holds its station this frame: until it first
-    /// reaches it, and after that while a stationed unit sees the healer.
-    /// Two units that have reached their stations and BOTH lose the healer
-    /// give them up for their ordinary walk for sight, so a station the
-    /// geometry failed never parks a unit blind; they come back once one of
-    /// them sees it again.
+    /// Whether the unit holds its station this frame: `!arrived || covered`.
+    /// Until it first reaches the station it holds it; after that, only
+    /// while one of the two stationed units sees the healer. An arrived unit
+    /// gives its station up whenever nobody sees the healer, whether or not
+    /// its partner has reached its own, and walks for sight on its ordinary
+    /// movement until one of them sees it again — so a station never parks a
+    /// unit blind with nobody shooting.
     pub hold: bool,
     /// Whether the unit has reached this station since it took it (within
     /// [`STATION_ARRIVED`]), latched.

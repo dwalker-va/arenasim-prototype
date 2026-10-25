@@ -1698,17 +1698,21 @@ does, and only while no teammate is dying (D2: a dying teammate is owed its
 sight; once owed, not again until all are back to `SIGHT_YIELD_HP`); melee
 take none; one viewer is no hunt. `HUNT_EXCEPTIONS` names the Paladin, Druid
 and Shaman — healers with no attack that costs no mana, whose stations
-lengthened endgames and drew matches — so only a Priest stations. A unit holds
-its station until it first reaches it, then while a stationed unit sees the
-healer; both on station and both blind give them up for their ordinary walk
-for sight. A MOVEMENT play, walked by `hunt::walk_to_station` (a `Point`
+lengthened endgames and drew matches — so only a Priest stations. The two
+stationed units are the first that qualify in Entity order, not the nearest
+(a 3v3 with two ranged DPS stations the lower-numbered pair). A unit holds its
+station until it first reaches it; after that only while one of the two sees
+the healer (`hold = !arrived || covered`), so an arrived unit gives its station
+up for its ordinary walk for sight whenever nobody sees the healer, even while
+its partner is still walking, and takes it back once one of them does. A MOVEMENT play, walked by `hunt::walk_to_station` (a `Point`
 directive) from the kiter's ENGAGE, the Warlock's dispatch and the healers'
 `take_cover_tick`; Burst still leads the chain, and the play stands down while
 the healer is locked so Chain extends the lock. It sits before Pillar: a team
 hunting the last enemy does not hide from its crowd control. Traced as
 `situation_change` `hunt` (subject: the healer; `pillar`) and the
 `MovementTrigger::Hunt` walk. Measured (`docs/design/2026-10-25-ranged-dps-vs-hidden-targets.md`
-§9): endgames shorter, wins and draws unchanged. Endgame lengths per match:
+§9): endgames about 19% shorter where a team can staff both stations (about
+21% of endgames), about 2.5s over all endgames; wins and draws unchanged. Endgame lengths per match:
 `tests/hunt_endgame_sweep.rs` (ignored, a measurement).
 
 **Psychic Scream under `TeamPlan` (AS-388).** The Priest has no offensive
