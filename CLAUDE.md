@@ -1738,7 +1738,7 @@ every form tried, so there is none
 (`docs/design/balance/2026-10-24-as388-scream-dip-retired.md`). Scenes:
 `tests/priest_dip_retired.rs`.
 
-`Pillar` (AS-387): the team takes a pillar TOGETHER (`pillar_stance`,
+`Pillar` (AS-387; still gated): the team takes a pillar TOGETHER (`pillar_stance`,
 `class_ai::pillar_stance`; design
 `docs/design/2026-10-24-team-sight-cohesion.md` §3.3). The stance enters for
 `AvoidCc` when a crowd control a pillar defends against (`pillar_mode::team_threats`:

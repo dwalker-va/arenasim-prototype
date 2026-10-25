@@ -32,23 +32,25 @@ NEW_GATES = ["Paladin/Hunter", "Hunter/Priest"]
 
 def main():
     arm = sys.argv[1]
-    assert arm in ("plain", "sim")
+    # `sim1` / `sim2`: AS-398's behaviour for team 1 / team 2 only, main's for
+    # the other -- the head-to-head, run on main, scored against `plain`.
+    assert arm in ("plain", "sim", "sim1", "sim2")
     peel3 = sys.argv[2].split(",") if len(sys.argv) > 2 and sys.argv[2] else []
+    teams = {"plain": (), "sim": (1, 2), "sim1": (1,), "sim2": (2,)}[arm]
     rows = []
     for size, seeds in ((2, [901, 902, 911, 912, 921, 922]), (3, [901, 911, 921])):
         for a, b in g.play_cells(size):
             for s in seeds:
                 for m in g.MAPS:
                     extra = {"ai_profile": "TeamPlan"}
-                    if arm == "sim":
-                        table = g.PEEL_SHIPPED + NEW_GATES
-                        if size == 3:
-                            for c in peel3:
-                                table += [f"{c}/{x}" for x in CLASSES if f"{c}/{x}" not in table]
-                        extra["team1_withheld_plays"] = ["TakeCover"]
-                        extra["team2_withheld_plays"] = ["TakeCover"]
-                        extra["team1_exceptions"] = {"Peel": table}
-                        extra["team2_exceptions"] = {"Peel": table}
+                    table = g.PEEL_SHIPPED + NEW_GATES
+                    if size == 3:
+                        for c in peel3:
+                            table += [f"{c}/{x}" for x in CLASSES if f"{c}/{x}" not in table]
+                    for t in teams:
+                        extra[f"team{t}_withheld_plays"] = ["TakeCover"]
+                    for t in teams:
+                        extra[f"team{t}_exceptions"] = {"Peel": table}
                     rows.append(g.row("as398", m, a, b, s, **extra))
     g.emit(rows)
 
