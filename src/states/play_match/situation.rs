@@ -364,6 +364,10 @@ pub struct TeamSituation {
     /// the pair's line of sight (the module docs' `sight_yield`). Empty
     /// unless the team runs it ([`SituationConfig::sight_yield`]).
     pub sight_yield: SmallVec<[SightPair; 2]>,
+    /// The lone enemy healer the team hunts round its pillar, and who holds
+    /// which station (the module docs' `hunt`). Classified only by
+    /// [`update_situations`], which has the map's bounds its stations need.
+    pub hunt: Option<super::class_ai::hunt::HuntWindow>,
     /// The pillar the team takes together, while it holds one (the module
     /// docs' `pillar_stance`). Classified only by [`update_situations`],
     /// which has the ability data its crowd-control key reads.
@@ -405,6 +409,11 @@ pub enum Play {
     /// MOVEMENT play — the healer's chain is its ordinary one. Gated under
     /// `AiProfile::TeamPlan`.
     TakeCover,
+    /// The team hunts a lone enemy healer hiding at a pillar
+    /// ([`hunt`](TeamSituation::hunt)), and the unit holds one of the hunt's
+    /// two stations round that pillar (`class_ai::hunt`). A MOVEMENT play —
+    /// the chain is the ordinary one. Gated under `AiProfile::TeamPlan`.
+    Hunt,
     /// The team holds a [`pillar_stance`](TeamSituation::pillar_stance): the
     /// healer hugs the stance's pillar on the team arc, and a kiting ranged
     /// DPS bends toward the stance's side (`class_ai::pillar_stance`). A
@@ -432,6 +441,7 @@ impl Play {
             Play::Burst => Some(PlayId::Burst),
             Play::Peel { .. } => Some(PlayId::Peel),
             Play::TakeCover => Some(PlayId::TakeCover),
+            Play::Hunt => Some(PlayId::Hunt),
             Play::Pillar => Some(PlayId::Pillar),
             Play::Chain { .. } => Some(PlayId::Chain),
         }
@@ -445,6 +455,7 @@ impl Play {
 pub enum PlayId {
     Peel,
     TakeCover,
+    Hunt,
     Pillar,
     Chain,
     Burst,
@@ -452,9 +463,10 @@ pub enum PlayId {
 
 impl PlayId {
     /// Every gated play, in declaration order.
-    pub const ALL: [PlayId; 5] = [
+    pub const ALL: [PlayId; 6] = [
         PlayId::Peel,
         PlayId::TakeCover,
+        PlayId::Hunt,
         PlayId::Pillar,
         PlayId::Chain,
         PlayId::Burst,
@@ -1263,6 +1275,7 @@ fn classify_roster_before_yield(
         pillar_modes: cfg.pillar_modes,
         pillar_stance: None,
         stance_memory: StanceMemory::default(),
+        hunt: None,
         exceptions: PlayExceptions::resolve(&cfg.exceptions),
         allies,
         in_danger: danger.in_danger,
@@ -1853,6 +1866,7 @@ pub fn update_situations(
         let prev = std::mem::take(&mut situations.teams[index]);
         let cfg = cfg.for_team(team, snapshot.ai_profile.for_team(team));
         let mut next = classify_before_yield(snapshot, team, &prev, clock, &cfg);
+        next.hunt = super::class_ai::hunt::classify(snapshot, team, &prev, &next, clock, &cfg);
         let (stance, memory) =
             pillar_stance::classify(snapshot, team, &prev, &next, clock, &cfg, abilities);
         next.pillar_stance = stance;
@@ -1900,6 +1914,11 @@ fn record_transitions(
         trace.record_window_change(team, SituationName::LastStand, kind, &window);
     }
     record_sight_yield_changes(team, prev, next, trace);
+    if let Some((kind, hunt)) =
+        super::class_ai::hunt::change(prev.hunt.as_ref(), next.hunt.as_ref())
+    {
+        trace.record_hunt_change(team, kind, &hunt);
+    }
     if let Some((kind, stance)) = pillar_stance::change(prev.pillar_stance, next.pillar_stance) {
         trace.record_stance_change(team, kind, &stance);
     }

@@ -671,6 +671,31 @@ pub fn evaluate_dps_posture(
             }
         }
 
+        // The Hunt play (AS-394): a kiter holding a station round a lone
+        // enemy healer's pillar walks to it and holds it, in place of the
+        // seek and the chase below — from the station it sees the healer
+        // whenever the other station does not.
+        if let Some(station) = ctx.hunt_station() {
+            super::hunt::walk_to_station(
+                commands,
+                entity,
+                my_pos,
+                station,
+                directive,
+                TracePosture::Engage,
+                config.commit_window,
+                config.directive_ttl,
+                now,
+                ctx,
+                decision_trace,
+            );
+            state.last_direction = None;
+            if needs_insert {
+                commands.entity(entity).try_insert(*state);
+            }
+            return;
+        }
+
         // Seek-LoS: a kiter idle in shot range but OCCLUDED from the kill
         // target can't fire — without this it stalls behind a pillar forever
         // (R10). Run the scorer (los_seek steers toward a sighted angle while

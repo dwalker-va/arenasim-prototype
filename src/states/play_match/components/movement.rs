@@ -164,6 +164,10 @@ pub struct HealerPosture {
     /// `Some` while the play drives the healer's position, `None` otherwise; a
     /// new spot (or `None` → `Some`) is what emits its `TakeCover` trace event.
     pub cover_spot: Option<Vec2>,
+    /// `TeamPlan` only: the station round a lone enemy healer's pillar this
+    /// healer holds for its team's hunt (the Hunt play, AS-394). `Some` while
+    /// the play drives the healer's position, so its end hands the legs back.
+    pub hunt_station: Option<Vec2>,
     /// What the FREE formation point remembers from one evaluation to the next
     /// (`class_ai::formation`, `TeamPlan` only): the heading it stands off the
     /// centroid along, and the exit it was last repaired to. Forgotten on
@@ -305,6 +309,7 @@ impl HealerPosture {
             solve_dying: None,
             dispel_walk: DispelWalkPhase::Off,
             cover_spot: None,
+            hunt_station: None,
             formation: FormationMemory::default(),
             cc_walk: false,
             pillar: PillarMemory::default(),

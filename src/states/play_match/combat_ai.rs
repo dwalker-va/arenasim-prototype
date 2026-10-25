@@ -1057,17 +1057,41 @@ pub fn dispatch_class_decision(
                 decision_trace,
             )
         }
-        match_config::CharacterClass::Warlock => class_ai::warlock::decide_warlock_action(
-            commands,
-            combat_log,
-            abilities,
-            entity,
-            combatant,
-            my_pos,
-            auras,
-            ctx,
-            decision_trace,
-        ),
+        match_config::CharacterClass::Warlock => {
+            // The Hunt play (AS-394): a Warlock holding a station round a
+            // lone enemy healer's pillar walks to it and holds it, in place of
+            // its pursuit. Gated on gates_opened, as every posture is.
+            if gates_opened {
+                if let (Some((_healer, _kite, directive, _reset, _flare)), Some(station)) =
+                    (posture, ctx.hunt_station())
+                {
+                    class_ai::hunt::walk_to_station(
+                        commands,
+                        entity,
+                        my_pos,
+                        station,
+                        directive,
+                        crate::states::play_match::decision_trace::Posture::Engage,
+                        movement_config.shared.commit_window,
+                        movement_config.shared.directive_ttl,
+                        now,
+                        ctx,
+                        decision_trace,
+                    );
+                }
+            }
+            class_ai::warlock::decide_warlock_action(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                decision_trace,
+            )
+        }
         // Shaman: full healer-posture dispatch (U6). Mirrors the Priest arm
         // — posture evaluation (FREE/PRESSURED/ESCAPE) runs BEFORE the
         // ability pass and OUTSIDE the GCD short-circuit so directives

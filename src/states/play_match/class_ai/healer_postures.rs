@@ -707,9 +707,36 @@ pub(super) fn take_cover_tick(
     now: f32,
     decision_trace: &mut DecisionTrace,
 ) -> Option<bool> {
-    let live = !ctx.obstacles.is_empty()
-        && matches!(next, Posture::Free | Posture::Pressured)
-        && ctx.play(Role::Healer) == Play::TakeCover;
+    let posture_live =
+        !ctx.obstacles.is_empty() && matches!(next, Posture::Free | Posture::Pressured);
+    // The Hunt play (AS-394): a healer holding a station round a lone enemy
+    // healer's pillar walks to it and holds it. Never with TakeCover: one
+    // needs a teammate, the other none.
+    match posture_live.then(|| ctx.hunt_station()).flatten() {
+        Some(station) => {
+            state.hunt_station = Some(station);
+            return Some(super::hunt::walk_to_station(
+                commands,
+                entity,
+                my_pos,
+                station,
+                directive,
+                next.into(),
+                shared.commit_window,
+                shared.directive_ttl,
+                now,
+                ctx,
+                decision_trace,
+            ));
+        }
+        None => {
+            if state.hunt_station.take().is_some() {
+                // Hand the legs back, as TakeCover does below.
+                commands.entity(entity).remove::<MovementDirective>();
+            }
+        }
+    }
+    let live = posture_live && ctx.play(Role::Healer) == Play::TakeCover;
     if !live {
         if state.cover_spot.take().is_some() {
             // Hand the legs back: the posture's own tick re-issues its goal.

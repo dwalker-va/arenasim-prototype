@@ -240,6 +240,33 @@ impl DecisionTrace {
         });
     }
 
+    /// Record a `situation_change` event for a team's hunt (AS-394): the
+    /// lone enemy healer as the subject, its onset and its pillar.
+    pub fn record_hunt_change(
+        &mut self,
+        team: u8,
+        change: SituationChangeKind,
+        hunt: &crate::states::play_match::class_ai::hunt::HuntWindow,
+    ) {
+        self.push_situation_change(EventPayload::SituationChange {
+            team,
+            name: SituationName::Hunt,
+            change,
+            subject: Some(hunt.subject.index()),
+            since: Some(hunt.since),
+            until: None,
+            tempo: None,
+            previous_tempo: None,
+            phase: None,
+            previous_phase: None,
+            healer: None,
+            rule: None,
+            pillar: Some(hunt.pillar),
+            reason: None,
+            from: None,
+        });
+    }
+
     /// Record a `situation_change` event for a tempo shift.
     pub fn record_tempo_change(&mut self, team: u8, previous: Tempo, tempo: Tempo) {
         self.push_situation_change(EventPayload::SituationChange {
