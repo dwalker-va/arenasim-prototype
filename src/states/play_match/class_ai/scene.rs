@@ -339,6 +339,64 @@ impl Scene {
         self
     }
 
+    /// Turn the team target focus off for `team`
+    /// (`situation::WithheldPlays::team1_no_target_focus`): the paired
+    /// control of a scene that tests it.
+    pub fn without_target_focus(mut self, team: u8) -> Self {
+        match team {
+            1 => self.withheld.team1_no_target_focus = true,
+            _ => self.withheld.team2_no_target_focus = true,
+        }
+        self
+    }
+
+    /// The target `who` takes from its team's focus in target acquisition
+    /// (`target_focus::retarget`, as `combat_ai::acquire_targets` runs it),
+    /// reading the scene's last classification ([`Scene::reclassify`]) — as
+    /// acquisition reads the previous frame's. `None`: it keeps its target.
+    pub fn acquire(&self, who: Who) -> Option<Who> {
+        let unit = self.find(who);
+        let snapshot = self.snapshot();
+        let me = snapshot.combatants.get(&unit.entity)?;
+        let team = self.situations.teams.get(me.team.wrapping_sub(1) as usize);
+        let focus = team.and_then(|t| t.target_focus);
+        let kill_subject = team.and_then(|t| t.kill_window.map(|w| w.subject));
+        let shadow_sight = |e: Entity| {
+            snapshot.active_auras.get(&e).is_some_and(|list| {
+                list.iter().any(|a| {
+                    a.effect_type == crate::states::play_match::components::AuraType::ShadowSight
+                })
+            })
+        };
+        let next = super::target_focus::retarget(
+            focus,
+            me.entity,
+            me.class,
+            me.position,
+            me.target,
+            kill_subject,
+            &self.obstacles,
+            |e| {
+                snapshot.combatants.get(&e).is_some_and(|o| {
+                    o.is_alive
+                        && !o.is_pet
+                        && o.team != me.team
+                        && super::stealth_visible(
+                            o.stealthed,
+                            shadow_sight(me.entity),
+                            shadow_sight(e),
+                        )
+                        && !snapshot.active_auras.get(&e).is_some_and(|list| {
+                            list.iter()
+                                .any(|a| super::grants_damage_immunity(a.effect_type))
+                        })
+                })
+            },
+            |e| snapshot.combatants.get(&e).map(|o| o.position),
+        )?;
+        Some(self.who(next.index()))
+    }
+
     /// Leave `team`'s healer's cast out of the sight yield's rule 1
     /// (`situation::WithheldPlays::team1_yield_cast_moves`): the AS-385
     /// package measurement's variant arm.
@@ -443,6 +501,12 @@ impl Scene {
     /// ([`Scene::reclassify`]).
     pub fn set_position(&mut self, who: Who, x: f32, z: f32) {
         self.unit_mut(who).position = Vec3::new(x, UNIT_Y, z);
+    }
+
+    /// Point `who` at `whom` (as [`Scene::target`]): a unit that retargeted,
+    /// for a scene that classifies frame after frame.
+    pub fn set_target(&mut self, who: Who, whom: Who) {
+        self.unit_mut(who).target = Some(whom);
     }
 
     /// Set the sim clock (as [`Scene::now`]), for a scene that classifies

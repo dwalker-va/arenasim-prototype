@@ -208,6 +208,7 @@ impl DecisionTrace {
             rule: None,
             pillar: None,
             reason: None,
+            from: None,
         });
     }
 
@@ -235,6 +236,7 @@ impl DecisionTrace {
             rule: None,
             pillar: Some(stance.pillar),
             reason: Some(stance.reason),
+            from: None,
         });
     }
 
@@ -255,6 +257,7 @@ impl DecisionTrace {
             rule: None,
             pillar: None,
             reason: None,
+            from: None,
         });
     }
 
@@ -275,6 +278,7 @@ impl DecisionTrace {
             rule: None,
             pillar: None,
             reason: None,
+            from: None,
         });
     }
 
@@ -302,6 +306,35 @@ impl DecisionTrace {
             rule: Some(pair.rule),
             pillar: None,
             reason: None,
+            from: None,
+        });
+    }
+
+    /// Record a `situation_change` event for the team's target focus
+    /// (AS-389): `subject` the enemy its ranged DPS now shoot, `from` the
+    /// target the focus moved off, `since` when it moved.
+    pub fn record_focus_change(
+        &mut self,
+        team: u8,
+        change: SituationChangeKind,
+        focus: &crate::states::play_match::class_ai::target_focus::Focus,
+    ) {
+        self.push_situation_change(EventPayload::SituationChange {
+            team,
+            name: SituationName::TargetFocus,
+            change,
+            subject: Some(focus.subject.index()),
+            since: Some(focus.since),
+            until: None,
+            tempo: None,
+            previous_tempo: None,
+            phase: None,
+            previous_phase: None,
+            healer: None,
+            rule: None,
+            pillar: None,
+            reason: None,
+            from: Some(focus.from.index()),
         });
     }
 

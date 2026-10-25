@@ -94,6 +94,14 @@ pub struct HeadlessMatchConfig {
     pub team1_sight_yield: Option<bool>,
     #[serde(default)]
     pub team2_sight_yield: Option<bool>,
+    /// `false` turns the team target focus off for that team, for measurement
+    /// (AS-389, `class_ai::target_focus`): a `TeamPlan` team without it keeps
+    /// a target it cannot see, as `TeamPlan` did before it. Omitted — the
+    /// default — leaves it on (it runs only under `TeamPlan`).
+    #[serde(default)]
+    pub team1_target_focus: Option<bool>,
+    #[serde(default)]
+    pub team2_target_focus: Option<bool>,
     /// `false` makes that team's sight yield leave its healer's cast in
     /// progress out of rule 1's "cannot move" (AS-385's package
     /// measurement, the variant arm). Omitted — the default — counts it.
@@ -220,6 +228,8 @@ impl Default for HeadlessMatchConfig {
             team2_pillar_modes: None,
             team1_sight_yield: None,
             team2_sight_yield: None,
+            team1_target_focus: None,
+            team2_target_focus: None,
             team1_yield_healer_cast: None,
             team2_yield_healer_cast: None,
             team1_exceptions: BTreeMap::new(),
@@ -299,6 +309,8 @@ impl HeadlessMatchConfig {
             team2_no_pillar_modes: self.team2_pillar_modes == Some(false),
             team1_no_sight_yield: self.team1_sight_yield == Some(false),
             team2_no_sight_yield: self.team2_sight_yield == Some(false),
+            team1_no_target_focus: self.team1_target_focus == Some(false),
+            team2_no_target_focus: self.team2_target_focus == Some(false),
             team1_yield_cast_moves: self.team1_yield_healer_cast == Some(false),
             team2_yield_cast_moves: self.team2_yield_healer_cast == Some(false),
             ..Default::default()

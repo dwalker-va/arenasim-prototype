@@ -272,6 +272,8 @@ fn build_config(
         team2_pillar_modes: None,
         team1_sight_yield: None,
         team2_sight_yield: None,
+        team1_target_focus: None,
+        team2_target_focus: None,
         team1_yield_healer_cast: None,
         team2_yield_healer_cast: None,
         team1_exceptions: Default::default(),

@@ -61,6 +61,11 @@ pub fn acquire_targets(
     mut combatants: Query<(Entity, &mut Combatant, &Transform, Option<&ActiveAuras>)>,
     pet_query: Query<&Pet>,
     mut decision_trace: ResMut<crate::states::play_match::decision_trace::DecisionTrace>,
+    // The team's target focus (AS-389), as `decide_abilities` classified it
+    // last frame, and the map it is judged on. `Option`: absent (a test app)
+    // follows no focus.
+    situations: Option<Res<Situations>>,
+    map_geometry: Option<Res<super::map_config::ActiveMapGeometry>>,
 ) {
     // Don't acquire targets until gates open
     if !countdown.gates_opened {
@@ -334,6 +339,41 @@ pub fn acquire_targets(
                         combatant.target = Some(*kt_entity);
                     }
                 }
+            }
+        }
+
+        // ===== Ranged DPS: the team's target focus (AS-389) =====
+        // A ranged DPS whose team has moved its focus off a target it could
+        // not see takes the focus, unless the player's kill call names a
+        // target (which wins). `TeamPlan` only: under `Legacy` no focus is
+        // ever classified. Before the Hunter's trap retarget, which still
+        // moves it off a healer its own trap holds.
+        if kill_target_index.is_none() {
+            let team_situation = situations
+                .as_deref()
+                .and_then(|s| s.teams.get(combatant.team.wrapping_sub(1) as usize));
+            let focus = team_situation.and_then(|t| t.target_focus);
+            let kill_subject = team_situation.and_then(|t| t.kill_window.map(|w| w.subject));
+            let obstacles = map_geometry
+                .as_deref()
+                .map_or(&[][..], |g| g.volumes.as_slice());
+            let find = |e: Entity| enemy_combatants.iter().find(|(x, ..)| *x == e);
+            if let Some(next) = class_ai::target_focus::retarget(
+                focus,
+                entity,
+                combatant.class,
+                transform.translation,
+                combatant.target,
+                kill_subject,
+                obstacles,
+                |e| {
+                    find(e).is_some_and(|(_, _, stealthed, enemy_ss, _, _, immune, is_pet)| {
+                        can_see(*stealthed, *enemy_ss) && !immune && !is_pet
+                    })
+                },
+                |e| find(e).map(|(_, pos, ..)| *pos),
+            ) {
+                combatant.target = Some(next);
             }
         }
 

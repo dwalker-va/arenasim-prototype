@@ -405,7 +405,10 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
      `ctx.situation()`: `.phase` / `.attrition_remaining()`, `.tempo`,
      `.enemy_healer_locked`, `.ally_in_danger`, `.dying_allies()`,
      `.is_pressured(unit)`, or pick an order with `ctx.play(role)`
-     (the play pipeline, *Plays* below; an exhaustive match). Every
+     (the play pipeline, *Plays* below; an exhaustive match). A situation
+     a non-decision system acts on is read from the `Situations` resource
+     instead, one frame on: target acquisition reads the team's
+     `target_focus` that way (*Team target focus* below). Every
      `ability_decision` in the trace carries the `situation` it saw. Its
      thresholds are `movement.ron`'s `shared:` block, and the table in the
      module docs names which neighbouring constants were deliberately NOT
@@ -1164,6 +1167,38 @@ classifies no pair and is byte-identical. `validate()` keeps
 one. Scenes `tests/sight_yield_scenes.rs`, staged `tests/sight_yield_staged.rs`;
 measured with the stance as one change in
 `docs/design/balance/2026-10-24-as385-package-measurement.md`.
+
+**Team target focus (`TeamPlan`)** — no RON knob; AS-389, design
+`docs/design/2026-10-25-ranged-dps-vs-hidden-targets.md`. Target acquisition
+never counted sight as part of a target's validity, so a ranged DPS tunnelled
+an enemy healer hiding behind a pillar while the DPS it had left exposed stood
+in reach. The `target_focus` situation (`class_ai::target_focus`) keeps, per
+ranged DPS (Mage, Hunter, Warlock), how long its target has been out of its
+sight (`TargetSight`, the cast's own sight test). Once one has been blind for
+`FOCUS_HIDDEN_SECS` (1.5s) and another living, visible, non-immune, non-pet
+enemy stands within `FOCUS_REACH` (35yd, Auto Shot) and in its sight, the
+team's focus moves to the nearest such enemy (`Focus { subject, from, since }`).
+A focus holds `FOCUS_DWELL` (2s); it returns to its old target only by the same
+rule (the focus itself hidden 1.5s, the old target in sight), and ends when its
+subject can no longer be taken (dead, stealthed, immune). `combat_ai::acquire_targets`
+is its only reader: it reads the focus from the `Situations` resource (last
+frame's classification) through `target_focus::retarget`. A ranged DPS takes it
+when it stands in its reach and sight, or when its own target is out of its
+sight too. A DPS on the team's kill window subject never leaves it: its blindness
+moves no focus (`classify`), and it takes none another DPS moved (`retarget`);
+the player's kill call (`team{1,2}_kill_target`) wins over it, and the Hunter's
+trap retarget runs after it. Melee DPS do not follow it (their target-blind time
+is under 1% of their life, and they have their own swap). Traced as a
+`situation_change` named `target_focus` (`subject` the focus, `from` the target
+it left) and on every `ability_decision` as `situation.target_focus`.
+`team{1,2}_target_focus: false` is the measurement switch; `Legacy` classifies
+no focus and is byte-identical, as is a map with no obstacles. Scenes
+`tests/target_focus_scenes.rs`, staged `tests/target_focus_staged.rs` (`Scene::acquire`
+reads the retarget). Measured head-to-head over three seed blocks: +4.4pt (z +25.5) for the side
+that runs it; in a world where both do, the ranged DPS gain 4-8pt, the Rogue
+loses 10.3pt and the healers lose too (Druid -2.0, Priest -3.5, Shaman -2.9;
+Paladin -0.8, not an effect), pooled over three blocks: the ruled balance shift
+(§8 of the design).
 
 **DPS kiter blocks** (`mage:` / `hunter:` — the shared ENGAGE/KITE machine, `DpsMovementConfig`):
 - `weights:` (above) plus `range_band_min`/`max` (orbit ring; min = SAFE_KITING_DISTANCE / HUNTER_DEAD_ZONE 8), `kite_hold` (anti-strobe hysteresis), `directive_ttl` (must cover the longest cast), `commit_window`.
