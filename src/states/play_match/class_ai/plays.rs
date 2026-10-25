@@ -70,12 +70,17 @@ pub trait PlayStage: Sync {
 
 /// The order the plays are tried in. A teammate in danger is answered before
 /// anything else; a last-stand healer hides rather than holding a global
-/// cooldown for a hand-off; a team that takes a pillar together takes it
-/// before a hand-off (AS-385 §3.0); a lock about to end is extended before a
-/// burst is spent into it.
+/// cooldown for a hand-off; a team hunting a lone healer round its pillar
+/// hunts rather than hiding from that healer's crowd control, which is all
+/// the enemy has left (Hunt and TakeCover never meet: one needs two units on
+/// the team, the other one; and Hunt stands down itself while the healer is
+/// locked, so the Chain play below it extends the lock); a team that takes a
+/// pillar together takes it before a hand-off (AS-385 §3.0); a lock about to
+/// end is extended before a burst is spent into it.
 pub static PLAY_ORDER: &[&dyn PlayStage] = &[
     &super::peel::PeelStage,
     &super::take_cover::TakeCoverStage,
+    &super::hunt::HuntStage,
     &super::pillar_stance::PillarStage,
     &super::chain::ChainStage,
     &super::burst::BurstStage,
@@ -180,17 +185,18 @@ pub(crate) fn own_class(ctx: &CombatContext) -> Option<CharacterClass> {
 mod tests {
     use super::*;
 
-    /// The pipeline's order, pinned: Peel, TakeCover, Pillar, Chain, Burst.
-    /// A change to it is a change to every unit's play, and must be made here
-    /// too.
+    /// The pipeline's order, pinned: Peel, TakeCover, Hunt, Pillar, Chain,
+    /// Burst. A change to it is a change to every unit's play, and must be
+    /// made here too.
     #[test]
-    fn the_order_table_is_peel_take_cover_pillar_chain_burst() {
+    fn the_order_table_is_peel_take_cover_hunt_pillar_chain_burst() {
         let order: Vec<PlayId> = PLAY_ORDER.iter().map(|s| s.id()).collect();
         assert_eq!(
             order,
             vec![
                 PlayId::Peel,
                 PlayId::TakeCover,
+                PlayId::Hunt,
                 PlayId::Pillar,
                 PlayId::Chain,
                 PlayId::Burst
@@ -246,6 +252,22 @@ mod tests {
                 reason: super::super::pillar_stance::StanceReason::AvoidCc,
                 since: 0.0,
             }),
+            hunt: Some(super::super::hunt::HuntWindow {
+                subject,
+                pillar: 0,
+                axis: 0.0,
+                since: 0.0,
+                owed: false,
+                stations: [super::super::hunt::Station {
+                    unit: me,
+                    slot: 0,
+                    point: Vec2::ZERO,
+                    hold: true,
+                    arrived: false,
+                }]
+                .into_iter()
+                .collect(),
+            }),
             now: 30.0,
             runs: PlaySet::all(),
             ..Default::default()
@@ -264,6 +286,7 @@ mod tests {
             vec![
                 peel,
                 Play::TakeCover,
+                Play::Hunt,
                 Play::Pillar,
                 chain,
                 Play::Default,
@@ -271,13 +294,22 @@ mod tests {
             ]
         );
         // A melee is never called to the Pillar play (its half of the stance
-        // is the sight yield); a ranged DPS is.
+        // is the sight yield); a ranged DPS is. The Hunt calls whoever holds
+        // a station (the classification gives a melee none).
         let dps: Vec<Play> = (0..=PlayId::COUNT)
             .map(|n| refusing(&every, Role::MeleeDps, &PLAY_ORDER_IDS[..n]))
             .collect();
         assert_eq!(
             dps,
-            vec![peel, chain, chain, chain, Play::Burst, Play::Default]
+            vec![
+                peel,
+                Play::Hunt,
+                Play::Hunt,
+                chain,
+                chain,
+                Play::Burst,
+                Play::Default
+            ]
         );
         let ranged: Vec<Play> = (0..=PlayId::COUNT)
             .map(|n| refusing(&every, Role::RangedDps, &PLAY_ORDER_IDS[..n]))
@@ -286,7 +318,8 @@ mod tests {
             ranged,
             vec![
                 peel,
-                Play::Pillar,
+                Play::Hunt,
+                Play::Hunt,
                 Play::Pillar,
                 chain,
                 Play::Burst,
@@ -301,6 +334,14 @@ mod tests {
         assert_eq!(refusing(&every, Role::MeleeDps, &[PlayId::Chain]), peel);
         assert_eq!(
             refusing(&every, Role::MeleeDps, &[PlayId::Peel, PlayId::Chain]),
+            Play::Hunt
+        );
+        assert_eq!(
+            refusing(
+                &every,
+                Role::MeleeDps,
+                &[PlayId::Peel, PlayId::Hunt, PlayId::Chain]
+            ),
             Play::Burst
         );
         // Not running a play is skipping its stage; `after` starts the walk
@@ -316,6 +357,10 @@ mod tests {
         );
         assert_eq!(
             every.play_after(PlayId::TakeCover, Role::Healer, me),
+            Play::Hunt
+        );
+        assert_eq!(
+            every.play_after(PlayId::Hunt, Role::Healer, me),
             Play::Pillar
         );
         assert_eq!(every.play_after(PlayId::Pillar, Role::Healer, me), chain);
@@ -390,9 +435,10 @@ mod tests {
     }
 
     /// [`PLAY_ORDER`]'s ids, for the walk test.
-    const PLAY_ORDER_IDS: [PlayId; 5] = [
+    const PLAY_ORDER_IDS: [PlayId; 6] = [
         PlayId::Peel,
         PlayId::TakeCover,
+        PlayId::Hunt,
         PlayId::Pillar,
         PlayId::Chain,
         PlayId::Burst,

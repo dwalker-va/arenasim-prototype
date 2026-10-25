@@ -136,6 +136,7 @@ const EXPECTED_MOVEMENT_TRIGGERS: &[&str] = &[
     "FlareCommit",
     "ShiftEscape",
     "TakeCover",
+    "Hunt",
     "PillarModeEnter",
     "PillarModeLeave",
 ];
@@ -148,6 +149,7 @@ const EXPECTED_SITUATION_NAMES: &[&str] = &[
     "kill_window",
     "last_stand",
     "pillar_stance",
+    "hunt",
     "tempo",
     "phase",
     "sight_yield",

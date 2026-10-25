@@ -150,6 +150,7 @@ pub enum PlayTag {
     Burst,
     Peel { ally: u32 },
     TakeCover,
+    Hunt,
     Pillar,
     Chain { subject: u32 },
 }
@@ -162,6 +163,7 @@ impl PlayTag {
             Play::Burst => Some(PlayTag::Burst),
             Play::Peel { ally } => Some(PlayTag::Peel { ally: ally.index() }),
             Play::TakeCover => Some(PlayTag::TakeCover),
+            Play::Hunt => Some(PlayTag::Hunt),
             Play::Pillar => Some(PlayTag::Pillar),
             Play::Chain { subject } => Some(PlayTag::Chain {
                 subject: subject.index(),
@@ -278,6 +280,9 @@ pub enum SituationName {
     /// AS-385). Its `subject` is the stance's healer; `pillar` and `reason`
     /// ride along.
     PillarStance,
+    /// A team hunts a lone enemy healer at a pillar (`TeamSituation::hunt`,
+    /// AS-394). Its `subject` is the healer; `pillar` rides along.
+    Hunt,
     Tempo,
     Phase,
     /// A DPS began, ended or changed the rule of its healer-sight yield
@@ -589,6 +594,10 @@ pub enum MovementTrigger {
     /// `point` goal). Fires when the play takes the healer's movement and
     /// whenever the spot it chose moves.
     TakeCover,
+    /// `TeamPlan`'s Hunt play (AS-394): a unit walks to its station round
+    /// the pillar a lone enemy healer hides at (a `point` goal). Fires when
+    /// the play takes the unit's movement and whenever its station moves.
+    Hunt,
     /// `TeamPlan` (AS-362): the healer's goal was chosen to take it out of
     /// the reach of an enemy crowd control ready to land on it — the team
     /// solve's `C_CC_REACH` (PRESSURED), the Paladin's band-hold stepping to

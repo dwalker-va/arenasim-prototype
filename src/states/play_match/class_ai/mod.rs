@@ -24,6 +24,7 @@ pub mod dps_postures;
 pub mod druid;
 pub mod formation;
 pub(crate) mod healer_postures;
+pub mod hunt;
 pub mod hunter;
 pub mod hunter_dip;
 pub mod hunter_lane;

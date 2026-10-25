@@ -689,11 +689,16 @@ const COVER_HOLD_SECS: f32 = 2.0;
 /// and no dispel to walk to. An ESCAPE window or a dip is a committed script
 /// and keeps the legs until it ends.
 ///
-/// Returns `Some(walking)` while the play drives the position — `walking` is
-/// `true` until the healer reaches its spot, and its rotation defers the casts
-/// that would root it short of cover meanwhile — and `None` when it does not:
-/// `Legacy`, a healer with a teammate, fewer than two enemies, or a map with
-/// nothing to hide behind (so BasicArena is untouched under both profiles).
+/// The same seam drives the Hunt play's healer (AS-394, `class_ai::hunt`):
+/// a healer holding a station round a lone enemy healer's pillar walks to it
+/// and holds it, and gives the walk back when the hunt ends.
+///
+/// Returns `Some(walking)` while either play drives the position — `walking`
+/// is `true` until the healer reaches its spot, and its rotation defers the
+/// casts that would root it short of it meanwhile — and `None` when neither
+/// does: `Legacy`, a healer with neither a last stand nor a station, or a map
+/// with nothing to hide behind (so BasicArena is untouched under both
+/// profiles).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn take_cover_tick(
     commands: &mut Commands,
@@ -707,9 +712,36 @@ pub(super) fn take_cover_tick(
     now: f32,
     decision_trace: &mut DecisionTrace,
 ) -> Option<bool> {
-    let live = !ctx.obstacles.is_empty()
-        && matches!(next, Posture::Free | Posture::Pressured)
-        && ctx.play(Role::Healer) == Play::TakeCover;
+    let posture_live =
+        !ctx.obstacles.is_empty() && matches!(next, Posture::Free | Posture::Pressured);
+    // The Hunt play (AS-394): a healer holding a station round a lone enemy
+    // healer's pillar walks to it and holds it. Never with TakeCover: one
+    // needs a teammate, the other none.
+    match posture_live.then(|| ctx.hunt_station()).flatten() {
+        Some(station) => {
+            state.hunt_station = Some(station);
+            return Some(super::hunt::walk_to_station(
+                commands,
+                entity,
+                my_pos,
+                station,
+                directive,
+                next.into(),
+                shared.commit_window,
+                shared.directive_ttl,
+                now,
+                ctx,
+                decision_trace,
+            ));
+        }
+        None => {
+            if state.hunt_station.take().is_some() {
+                // Hand the legs back, as TakeCover does below.
+                commands.entity(entity).remove::<MovementDirective>();
+            }
+        }
+    }
+    let live = posture_live && ctx.play(Role::Healer) == Play::TakeCover;
     if !live {
         if state.cover_spot.take().is_some() {
             // Hand the legs back: the posture's own tick re-issues its goal.

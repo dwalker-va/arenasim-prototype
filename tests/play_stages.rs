@@ -96,6 +96,33 @@ fn cases() -> Vec<Case> {
                 s
             },
         },
+        // A Mage and its Priest, the enemy Priest alone and hidden behind a
+        // pillar: the team hunts it, and the Mage takes a station.
+        Case {
+            id: PlayId::Hunt,
+            play: Play::Hunt,
+            class: Mage,
+            me: ExceptionKey::class(Mage),
+            other: ExceptionKey::class(Warlock),
+            build: || {
+                Scene::new()
+                    .obstacles(vec![ObstacleVolume::Cylinder {
+                        center_xz: Vec2::ZERO,
+                        radius: 6.0,
+                        base_y: 0.0,
+                        height: 10.0,
+                    }])
+                    .ai_profile(1, AiProfile::TeamPlan)
+                    .unit(ME, 1, Mage)
+                    .at(-20.0, 0.0)
+                    .targeting(ENEMY_HEALER)
+                    .unit(ALLY, 1, Priest)
+                    .at(-22.0, 4.0)
+                    .unit(ENEMY_HEALER, 2, Priest)
+                    .at(7.0, 0.0)
+                    .targeting(ME)
+            },
+        },
         // A Priest, its Warrior fighting at a pillar with an enemy Warlock's
         // Fear ready: the team takes the pillar.
         Case {
@@ -190,6 +217,7 @@ fn played(view: &DecisionView) -> Option<PlayId> {
     situation.play.map(|tag| match tag {
         PlayTag::Peel { .. } => PlayId::Peel,
         PlayTag::TakeCover => PlayId::TakeCover,
+        PlayTag::Hunt => PlayId::Hunt,
         PlayTag::Pillar => PlayId::Pillar,
         PlayTag::Chain { .. } => PlayId::Chain,
         PlayTag::Burst => PlayId::Burst,

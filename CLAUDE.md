@@ -1632,7 +1632,7 @@ deleted at a milestone sweep. Each play is a STAGE (`class_ai::plays::PlayStage`
 its id, `calls` (the team situation asks for it, for this unit and role),
 `admits` (this unit has a tool for it), its own named exceptions table with
 the measurement behind each entry, and its config key. ONE table orders them,
-`plays::PLAY_ORDER`: **Peel, TakeCover, Pillar, Chain, Burst**, then the class's
+`plays::PLAY_ORDER`: **Peel, TakeCover, Hunt, Pillar, Chain, Burst**, then the class's
 default chain. `plays::walk` is the only composition rule, and both
 `TeamSituation::play_for` and `CombatContext::play` take it: a unit runs the
 first stage its team runs, the situation calls and the unit admits (its
@@ -1685,6 +1685,35 @@ contexts where it is enabled.
 
 `TakeCover`: a last-stand healer hides (`class_ai::take_cover`; the movement
 is *Last stand: take cover* above).
+
+`Hunt` (AS-394), TakeCover's counterpart: the enemy is down to a lone healer
+at a pillar (`hunt`, `class_ai::hunt`; within `HUNT_ENTER` of its skin, held
+to `HUNT_LEAVE`, hidden from one of the team at onset) and the team has two or
+more units, so two of them take STATIONS half a turn apart round that pillar,
+`HUNT_STANDOFF` off its skin, about the healer's bearing at onset — from there
+a hugger is in one station's sight at every bearing (the unit test
+`two_stations_leave_a_hugger_nowhere_to_hide`; 160° leaves a sliver). Ranged
+DPS take stations first; the healer takes the second when only one ranged DPS
+does, and only while no teammate is dying (D2: a dying teammate is owed its
+sight; once owed, not again until all are back to `SIGHT_YIELD_HP`); melee
+take none; one viewer is no hunt. `HUNT_EXCEPTIONS` names the Paladin, Druid
+and Shaman — healers with no attack that costs no mana, whose stations
+lengthened endgames and drew matches — so only a Priest stations. The two
+stationed units are the first that qualify in Entity order, not the nearest
+(a 3v3 with two ranged DPS stations the lower-numbered pair). A unit holds its
+station until it first reaches it; after that only while one of the two sees
+the healer (`hold = !arrived || covered`), so an arrived unit gives its station
+up for its ordinary walk for sight whenever nobody sees the healer, even while
+its partner is still walking, and takes it back once one of them does. A MOVEMENT play, walked by `hunt::walk_to_station` (a `Point`
+directive) from the kiter's ENGAGE, the Warlock's dispatch and the healers'
+`take_cover_tick`; Burst still leads the chain, and the play stands down while
+the healer is locked so Chain extends the lock. It sits before Pillar: a team
+hunting the last enemy does not hide from its crowd control. Traced as
+`situation_change` `hunt` (subject: the healer; `pillar`) and the
+`MovementTrigger::Hunt` walk. Measured (`docs/design/2026-10-25-ranged-dps-vs-hidden-targets.md`
+§9): endgames about 19% shorter where a team can staff both stations (about
+21% of endgames), about 2.5s over all endgames; wins and draws unchanged. Endgame lengths per match:
+`tests/hunt_endgame_sweep.rs` (ignored, a measurement).
 
 **Psychic Scream under `TeamPlan` (AS-388).** The Priest has no offensive
 scream dip: `evaluate_priest_posture` offers it only under `Legacy`, which keeps
