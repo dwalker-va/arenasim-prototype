@@ -43,6 +43,39 @@ pub fn match_log_dir() -> PathBuf {
     match_log_dir_from(user_data_dir())
 }
 
+/// The defaulted path of a single headless match's report: in the match log
+/// directory, named [`run_stem`] for this process at this second.
+///
+/// Its trace sits beside it ([`trace_path_for`]). The process id is part of
+/// the name because seconds alone are shared by concurrent runs, which then
+/// overwrote each other's log and trace.
+pub fn default_headless_log_path() -> PathBuf {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    match_log_dir().join(format!("{}.txt", run_stem(secs, std::process::id())))
+}
+
+/// The file stem of one run's outputs: `match_<unix seconds>_<pid>`. Two
+/// processes alive at once never share a pid, so concurrent runs never share
+/// a stem.
+pub fn run_stem(secs: u64, pid: u32) -> String {
+    format!("match_{secs}_{pid}")
+}
+
+/// Where a match's decision trace goes: beside its report, with the report's
+/// stem and a `_trace.jsonl` suffix (`a/match_1_2.txt` traces to
+/// `a/match_1_2_trace.jsonl`). So a run given its own `--output` keeps its
+/// trace with it, and two runs with different reports never share a trace.
+pub fn trace_path_for(log_path: &Path) -> PathBuf {
+    let stem = log_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "match".to_string());
+    log_path.with_file_name(format!("{stem}_trace.jsonl"))
+}
+
 /// Whether the binary at `exe_path` is running from a development checkout,
 /// determined by looking for a Cargo manifest in any ancestor directory.
 ///
@@ -506,5 +539,34 @@ mod tests {
         let none: Option<&Path> = None;
         assert_eq!(settings_path_from(none), PathBuf::from("settings.ron"));
         assert_eq!(match_log_dir_from(none), PathBuf::from("match_logs"));
+    }
+
+    /// Two runs in the same second, in different processes, never share a
+    /// stem; one process at one second has one.
+    #[test]
+    fn concurrent_runs_get_distinct_stems() {
+        assert_ne!(run_stem(1_700_000_000, 41), run_stem(1_700_000_000, 42));
+        assert_ne!(run_stem(1_700_000_000, 41), run_stem(1_700_000_001, 41));
+        assert_eq!(run_stem(1_700_000_000, 41), run_stem(1_700_000_000, 41));
+        assert_eq!(run_stem(1_700_000_000, 41), "match_1700000000_41");
+    }
+
+    /// A trace follows its report: same directory, same stem, so distinct
+    /// reports (an explicit `--output` each, or two defaulted stems) mean
+    /// distinct traces.
+    #[test]
+    fn a_trace_sits_beside_its_report() {
+        assert_eq!(
+            trace_path_for(Path::new("match_logs/match_1_2.txt")),
+            PathBuf::from("match_logs/match_1_2_trace.jsonl")
+        );
+        assert_eq!(
+            trace_path_for(Path::new("/tmp/runs/a.txt")),
+            PathBuf::from("/tmp/runs/a_trace.jsonl")
+        );
+        assert_ne!(
+            trace_path_for(Path::new("/tmp/runs/a.txt")),
+            trace_path_for(Path::new("/tmp/runs/b.txt"))
+        );
     }
 }
