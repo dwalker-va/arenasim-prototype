@@ -6,6 +6,7 @@
 //! Scenes (tier 1), each paired with its one condition removed:
 //!
 //! - the dip: `Legacy` dips at an unheld enemy healer, `TeamPlan` does not;
+//! - `Legacy` dip entry, against each of its conditions;
 //! - the Peel step: an attacker inside the Scream is screamed where the
 //!   Priest stands; beyond it, the Priest neither screams nor walks at it;
 //! - the defensive Scream fires under `TeamPlan` for a Priest with a melee
@@ -52,23 +53,32 @@ fn dipped(view: &DecisionView) -> bool {
         .any(|m| m.trigger == MovementTrigger::DipEnter)
 }
 
+/// The Priest at (-20, 0) on team 1 with a healthy Warrior teammate beside it
+/// that attacks nobody, and an enemy Shaman at (`healer_x`, 0) that nothing
+/// holds.
+fn dip_scene(profile: AiProfile, healer_x: f32) -> Scene {
+    Scene::new()
+        .now(NOW)
+        .ai_profile(1, profile)
+        .unit(PRIEST, 1, Priest)
+        .at(-20.0, 0.0)
+        .unit(WARRIOR, 1, Warrior)
+        .at(-24.0, 0.0)
+        .unit(HEALER, 2, Shaman)
+        .at(healer_x, 0.0)
+}
+
 /// The standalone dip is retired under `TeamPlan`: a healthy Warrior teammate
 /// attacking nobody, an enemy Shaman 35yd east that nothing holds — the
 /// `Legacy` Priest dips at it, the `TeamPlan` Priest does not.
+///
+/// `Legacy` also dips in the two setups AS-383's `TeamPlan` dip hold used to
+/// hold (its scenes went with that hold): the Shaman already targeting the
+/// Priest from 25yd, and the dip's arrival spot inside an enemy Warlock's
+/// ready Fear. A hold that came back for `Legacy` fails here.
 #[test]
 fn the_dip_is_retired_under_team_plan() {
-    let dip_scene = |profile: AiProfile| {
-        Scene::new()
-            .now(NOW)
-            .ai_profile(1, profile)
-            .unit(PRIEST, 1, Priest)
-            .at(-20.0, 0.0)
-            .unit(WARRIOR, 1, Warrior)
-            .at(-24.0, 0.0)
-            .unit(HEALER, 2, Shaman)
-            .at(15.0, 0.0)
-    };
-    let s = dip_scene(AiProfile::TeamPlan);
+    let s = dip_scene(AiProfile::TeamPlan, 15.0);
     let view = s.decide(PRIEST);
     assert!(!dipped(&view), "TeamPlan: {}", describe(&view));
     assert_ne!(
@@ -78,8 +88,70 @@ fn the_dip_is_retired_under_team_plan() {
         describe(&view)
     );
 
-    let view = dip_scene(AiProfile::Legacy).decide(PRIEST);
+    let view = dip_scene(AiProfile::Legacy, 15.0).decide(PRIEST);
     assert!(dipped(&view), "Legacy: {}", describe(&view));
+
+    let on_priest = dip_scene(AiProfile::Legacy, 5.0)
+        .target(HEALER, PRIEST)
+        .decide(PRIEST);
+    assert!(
+        dipped(&on_priest),
+        "Legacy, the target on the Priest at 25yd: {}",
+        describe(&on_priest)
+    );
+
+    let fear = dip_scene(AiProfile::Legacy, 15.0)
+        .unit(WARLOCK, 2, Warlock)
+        .at(30.0, 0.0)
+        .decide(PRIEST);
+    assert!(
+        dipped(&fear),
+        "Legacy, the arrival in a ready Fear's reach: {}",
+        describe(&fear)
+    );
+}
+
+/// `Legacy` dip ENTRY, against each of its conditions (`priest.rs`,
+/// `evaluate_scream_dip_entry`). The other `Legacy` dip tests begin the
+/// Priest already in DIP. From [`dip_scene`] the FREE Priest dips at the
+/// Shaman 35yd off; it does not with any one condition removed — Psychic
+/// Scream on cooldown, a teammate in trouble (below `healing_heavy_hp`, 0.6),
+/// that teammate held in crowd control, or the Shaman the team's own target.
+#[test]
+fn a_legacy_dip_enters_only_on_its_conditions() {
+    let view = dip_scene(AiProfile::Legacy, 15.0).decide(PRIEST);
+    assert!(dipped(&view), "the dip: {}", describe(&view));
+    assert_eq!(
+        view.directive.map(|d| d.goal),
+        Some(MovementGoal::Entity(
+            dip_scene(AiProfile::Legacy, 15.0).entity(HEALER)
+        )),
+        "the dip walks at the Shaman: {}",
+        describe(&view)
+    );
+
+    let controls: [(&str, Scene); 4] = [
+        (
+            "Scream on cooldown",
+            dip_scene(AiProfile::Legacy, 15.0).cooldown(PRIEST, AbilityType::PsychicScream, 20.0),
+        ),
+        (
+            "a teammate in trouble",
+            dip_scene(AiProfile::Legacy, 15.0).health_of(WARRIOR, 0.55),
+        ),
+        (
+            "the teammate held",
+            dip_scene(AiProfile::Legacy, 15.0).aura(WARRIOR, AuraType::Stun, 4.0),
+        ),
+        (
+            "the Shaman the team's target",
+            dip_scene(AiProfile::Legacy, 15.0).target(WARRIOR, HEALER),
+        ),
+    ];
+    for (case, scene) in controls {
+        let view = scene.decide(PRIEST);
+        assert!(!dipped(&view), "{case}: dipped: {}", describe(&view));
+    }
 }
 
 /// The Priest at `priest`; its Warrior teammate at (10, 0), dying, with an

@@ -2315,18 +2315,10 @@ mod directive_executor {
 //   after which FREE legacy pursuit walks it back to its kill target
 //   (measured min distance to the kill-target Warrior drops to ~1.9 within
 //   15s of DipComplete). Seed 1 pinned.
-// - Dip-abort comp (b): the teammate-HP-dive abort (AE3) is hard to stage
-//   naturally — a teammate dropping below the urgency threshold (0.5) WHILE
-//   the Paladin is mid-dip needs the dip to still be in flight (the walk is
-//   only ~3.8s). In the scanned comps the enemy burst either lands before
-//   the dip (so no dip) or after it completes. The honest assertion here is
-//   the BUDGET abort (also a DipAbort with no HoJ cast): Paladin+Mage vs
-//   Priest+Rogue at seed 1 — the enemy Priest kites just out of the dip
-//   reach, so the walk runs the full 6s budget and aborts without casting.
-//   This exercises the same DipAbort-without-HoJ code path AE3 asserts; the
-//   teammate-HP-dive branch is covered by the unit test
-//   `dip_should_abort` analog via the integration scan plus the (f)
-//   chip-damage probe's negative (chip damage does NOT abort).
+// - Dip-abort (b): no longer a seeded comp. Both aborts — the budget and the
+//   teammate-HP dive (AE3) — and the abort that casts nothing are STAGED in
+//   `tests/paladin_dip_abort_band.rs`, which carries the Paladin into the
+//   stage mid-dip, so neither waits on a seed to put a dip in flight.
 // - Preempt comp (c): Paladin+Warrior vs Priest+Warrior, enemy forced onto
 //   the Paladin (team2_kill_target 0). The enemy Warrior reaches the Paladin
 //   mid-dip (~3.9s) and the dip is preempted by PressuredEnter with no
@@ -2507,35 +2499,10 @@ mod paladin_postures {
         );
     }
 
-    /// (b) DIP ABORT PROBE (AE3 code path) — a dip that aborts WITHOUT
-    /// casting HoJ in that dip. Staged as the BUDGET abort (the enemy healer
-    /// kites just out of reach), which shares AE3's
-    /// DipAbort-without-cast path; see the module seed notes for why the
-    /// teammate-HP-dive flavor is not naturally stageable here.
-    #[test]
-    fn dip_aborts_without_casting() {
-        let mut cfg = create_config(vec!["Paladin", "Mage"], vec!["Priest", "Rogue"], Some(1));
-        cfg.team1_kill_target = Some(1);
-        cfg.team2_kill_target = Some(1);
-        let (result, _timeline, trace) = run_observed_traced(cfg);
-
-        let events = movement_events(&trace);
-        let spans = dip_spans(&events, result.match_time);
-        let aborts: Vec<_> = spans.iter().filter(|(_, _, k)| *k == "abort").collect();
-        eprintln!("dip-abort probe: spans={:?}", spans);
-        assert_min_occurrences("aborted Paladin dips", aborts.len(), 1);
-
-        // No HoJ cast inside any aborted span.
-        let hojs = paladin_hoj_casts(&trace);
-        for (s, e, _) in &aborts {
-            let cast_in_abort = hojs.iter().any(|(t, _)| *t >= *s - 1e-3 && *t <= *e + 1e-3);
-            assert!(
-                !cast_in_abort,
-                "HoJ was cast inside an aborted dip span [{:.1},{:.1}] — abort must not cast",
-                s, e
-            );
-        }
-    }
+    // (b) DIP ABORT PROBE — migrated off its pinned seed to staged matches:
+    // `tests/paladin_dip_abort_band.rs`, the plain aborts (budget and dying
+    // teammate) with no caster in the band, and `an_abort_in_hammer_reach_
+    // casts_nothing`, an abort that has arrived in Hammer of Justice's reach.
 
     /// (c) PREEMPT PROBE — the Paladin becomes the kill target mid-dip and
     /// PressuredEnter replaces the dip with no intervening DipComplete.
@@ -7906,10 +7873,32 @@ mod nagrand_teamplan {
     /// solve held        0.00 u/s   118.1s    0.00 (12 of 12 below 0.75)
     /// ```
     ///
-    /// Three bars, each failed by both mutants:
+    /// # The per-seed bar reads the directive, not the speed (AS-396)
     ///
-    /// - a seed with five seconds counted is held to 0.75 u/s, the statue
-    ///   band's edge (~0.65);
+    /// A speed floor asks the key's question at one remove: it is a property
+    /// of the walk the executor made of the goal, so a change anywhere in
+    /// that chain moves it, and AS-292's round 2 saw it stop failing the
+    /// disarmed key (1.24-2.30 u/s) before AS-388's migration put it back.
+    /// The per-seed bar now asks the key itself: on a counted frame, does the
+    /// healer's `Point` directive aim at least 0.5yd from where it stands? A
+    /// solve answering "here" is a statue whatever the healer's speed. It
+    /// counts casting frames too — the frame observation does not carry the
+    /// cast — and a casting healer keeps the directive it had before the cast,
+    /// which for a statue is its own spot: those frames can only lower a
+    /// healthy seed's share, which is why the bar sits well under it.
+    ///
+    /// ```text
+    ///                   aim 0.5yd+ off   lowest seed with >= 5s counted
+    /// AS-396            70% pooled       42% (seed 1; 11 such seeds)
+    /// key disarmed       2%              14% (every seed at or under it)
+    /// solve held         0%               0%
+    /// ```
+    ///
+    /// Four bars, each failed by both mutants:
+    ///
+    /// - a seed with five seconds counted has its directive aim 0.5yd or more
+    ///   off the healer on a quarter of them;
+    /// - pooled over the bank, on three tenths;
     /// - the pooled rate is held to 1.2 u/s, the old median guard: a centre
     ///   below which the healer as a whole is sagging toward the band while
     ///   every seed still clears its floor (the branch sits at about half
@@ -7918,38 +7907,61 @@ mod nagrand_teamplan {
     ///   vacuous.
     #[test]
     fn teamplan_healer_is_not_a_statue_on_basicarena() {
-        let (mut total_frames, mut total_path) = (0usize, 0.0f32);
-        for seed in STATUE_SEEDS {
-            let (pressured_frames, pressured_path) = pressured_movement(seed);
-            total_frames += pressured_frames;
-            total_path += pressured_path;
-            if pressured_frames == 0 {
+        let bank: Vec<(u64, usize, f32, usize)> = STATUE_SEEDS
+            .map(|seed| {
+                let (frames, path, aiming) = pressured_movement(seed);
+                (seed, frames, path, aiming)
+            })
+            .collect();
+        let (mut total_frames, mut total_path, mut total_aiming) = (0usize, 0.0f32, 0usize);
+        for &(seed, frames, path, aiming) in &bank {
+            total_frames += frames;
+            total_path += path;
+            total_aiming += aiming;
+            if frames == 0 {
                 println!("seed {seed:2}: no pressure");
                 continue;
             }
-            let secs = pressured_frames as f32 / 60.0;
-            let rate = pressured_path / secs;
+            let secs = frames as f32 / 60.0;
             println!(
-                "seed {seed:2}: {pressured_path:.1}u over {secs:.1}s of melee pressure \
-                 = {rate:.2} u/s"
+                "seed {seed:2}: {path:.1}u over {secs:.1}s of melee pressure = {:.2} u/s; \
+                 directive aims {STATUE_AIM_YARDS}yd+ off on {:.0}% of it",
+                path / secs,
+                100.0 * aiming as f32 / frames as f32
             );
-            if pressured_frames >= STATUE_SEED_FRAMES {
-                assert!(
-                    rate >= STATUE_SEED_FLOOR,
-                    "seed {seed}: {rate:.2} u/s over {secs:.1}s while a PRESSURED healer, \
-                     free to move, has a Rogue on it — into the ~0.65 statue band; the \
-                     flat-field anti-statue key has regressed",
-                );
-            }
         }
+        let secs = total_frames as f32 / 60.0;
+        let pooled = total_path / secs;
+        let aiming = total_aiming as f32 / total_frames.max(1) as f32;
+        println!(
+            "bank: {pooled:.2} u/s over {secs:.1}s of melee pressure; directive aims \
+             {STATUE_AIM_YARDS}yd+ off on {:.0}% of it",
+            100.0 * aiming
+        );
         assert_min_occurrences(
             "pressured frames with a Rogue in 12yd over the bank",
             total_frames,
             STATUE_BANK_FRAMES,
         );
-        let secs = total_frames as f32 / 60.0;
-        let pooled = total_path / secs;
-        println!("bank: {pooled:.2} u/s over {secs:.1}s of melee pressure");
+        for &(seed, frames, _, aiming) in &bank {
+            if frames >= STATUE_SEED_FRAMES {
+                let share = aiming as f32 / frames as f32;
+                assert!(
+                    share >= STATUE_SEED_AIM_FLOOR,
+                    "seed {seed}: the directive aimed {STATUE_AIM_YARDS}yd+ off the PRESSURED \
+                     healer on only {:.0}% of the {frames} frames a Rogue was on it — the \
+                     solve is answering where it stands; the flat-field anti-statue key has \
+                     regressed (main's lowest seed 42%, both statue mutants at most 14%)",
+                    100.0 * share
+                );
+            }
+        }
+        assert!(
+            aiming >= STATUE_POOLED_AIM_FLOOR,
+            "the directive aimed {STATUE_AIM_YARDS}yd+ off the PRESSURED healer on only \
+             {:.0}% of the bank's counted frames (measured 70%; key disarmed 2%, solve held 0%)",
+            100.0 * aiming
+        );
         assert!(
             pooled >= STATUE_POOLED_FLOOR,
             "pooled pressured movement {pooled:.2} u/s over the bank — the healer as a \
@@ -7962,15 +7974,17 @@ mod nagrand_teamplan {
     /// [`teamplan_healer_is_not_a_statue_on_basicarena`]).
     const STATUE_SEEDS: std::ops::RangeInclusive<u64> = 1..=24;
     const STATUE_POOLED_FLOOR: f32 = 1.2;
-    const STATUE_SEED_FLOOR: f32 = 0.75;
+    const STATUE_SEED_AIM_FLOOR: f32 = 0.25;
+    const STATUE_POOLED_AIM_FLOOR: f32 = 0.3;
     const STATUE_SEED_FRAMES: usize = 300;
     const STATUE_BANK_FRAMES: usize = 3600;
+    const STATUE_AIM_YARDS: f32 = 0.5;
 
     /// The anti-statue probe's measurement at one seed: the frames after the
     /// gates on which the TeamPlan Priest was PRESSURED, free to move (no
     /// stun, fear, polymorph, incapacitate or root on it) and had the enemy
     /// Rogue within the 12yd danger radius, and the path it covered over them.
-    fn pressured_movement(seed: u64) -> (usize, f32) {
+    fn pressured_movement(seed: u64) -> (usize, f32, usize) {
         use arenasim::headless::runner::TraceConfig;
         use arenasim::states::play_match::components::AuraType;
 
@@ -7986,9 +8000,10 @@ mod nagrand_teamplan {
         let path = tmp.path().to_path_buf();
         drop(tmp);
 
-        // (combat time, Priest position, Rogue within 12yd, Priest held) per
-        // frame after the gates, the Priest alive.
-        let mut frames: Vec<(f32, Vec3, bool, bool)> = Vec::new();
+        // (combat time, Priest position, Rogue within 12yd, Priest held, how
+        // far off its directive's `Point` goal aims) per frame after the
+        // gates, the Priest alive.
+        let mut frames: Vec<(f32, Vec3, bool, bool, f32)> = Vec::new();
         let mut gate: Option<f32> = None;
         run_headless_match_observed(
             cfg,
@@ -8021,7 +8036,8 @@ mod nagrand_teamplan {
                             | AuraType::Root
                     )
                 });
-                frames.push((f.sim_time - gate, p.position, near, held));
+                let aim = p.point_goal.map_or(0.0, |g| xz(g).distance(xz(p.position)));
+                frames.push((f.sim_time - gate, p.position, near, held, aim));
             },
         )
         .expect("observed traced headless match failed");
@@ -8054,22 +8070,26 @@ mod nagrand_teamplan {
         // Priest the Rogue held in a stun: frames the key has no say over.)
         let mut pressured_path = 0.0f32;
         let mut pressured_frames = 0usize;
+        let mut aiming_frames = 0usize;
         let mut prev: Option<Vec3> = None;
         let (mut next, mut posture) = (0usize, "free");
-        for (t, ppos, near, held) in frames {
+        for (t, ppos, near, held, aim) in frames {
             while next < transitions.len() && transitions[next].0 <= t {
                 posture = &transitions[next].1;
                 next += 1;
             }
             if posture == "pressured" && near && !held {
                 pressured_frames += 1;
+                if aim >= STATUE_AIM_YARDS {
+                    aiming_frames += 1;
+                }
                 if let Some(prev) = prev {
                     pressured_path += xz(prev).distance(xz(ppos));
                 }
             }
             prev = Some(ppos);
         }
-        (pressured_frames, pressured_path)
+        (pressured_frames, pressured_path, aiming_frames)
     }
 
     /// Exploratory scan for [`STATUE_SEEDS`]: pressured frames and movement
@@ -8079,7 +8099,7 @@ mod nagrand_teamplan {
     #[ignore]
     fn scan_statue_seeds() {
         for seed in 1u64..=20 {
-            let (frames, path) = pressured_movement(seed);
+            let (frames, path, _) = pressured_movement(seed);
             let secs = frames as f32 / 60.0;
             eprintln!(
                 "statue seed {seed:2}: pressured_frames={frames:4} rate={:5.2} u/s{}",

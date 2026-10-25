@@ -431,6 +431,57 @@ fn a_walk_after_a_free_interlude_is_traced_again() {
     );
 }
 
+/// [`a_walk_after_a_free_interlude_is_traced_again`] for the other two posture
+/// machines, each of which resets the mark on its own transitions: the
+/// Paladin's, and the caster-healer machine the Druid and the Shaman share.
+/// The same pair, with an enemy Druid's ready Cyclone in place of the Fear:
+/// the Paladin keeps out of no disc reaching past the pressure test's intent
+/// radius, and the Fear's does.
+#[test]
+fn a_walk_after_a_free_interlude_is_traced_again_by_every_posture_machine() {
+    use arenasim::states::match_config::CharacterClass::{Druid, Paladin, Shaman, Warrior};
+    use arenasim::states::play_match::ai_profile::AiProfile;
+    use arenasim::states::play_match::class_ai::scene::Scene;
+    use arenasim::states::play_match::decision_trace::MovementTrigger;
+    let walks = |class, posture: Posture| {
+        Scene::new()
+            .now(30.0)
+            .ai_profile(1, AiProfile::TeamPlan)
+            .unit("healer", 1, class)
+            .unit("warrior", 1, Warrior)
+            .at(-10.0, 0.0)
+            .unit("enemy druid", 2, Druid)
+            .at(10.0, 0.0)
+            .targeting("healer")
+            .healer_posture(
+                "healer",
+                HealerPosture {
+                    posture,
+                    hold_until: 40.0,
+                    cc_walk: true,
+                    ..HealerPosture::new(20.0)
+                },
+            )
+            .decide("healer")
+            .movement
+            .iter()
+            .filter(|m| m.trigger == MovementTrigger::OutOfCcReach)
+            .count()
+    };
+    for class in [Paladin, Druid, Shaman] {
+        assert_eq!(
+            walks(class, Posture::Free),
+            1,
+            "{class:?}: the new walk was not traced"
+        );
+        assert_eq!(
+            walks(class, Posture::Pressured),
+            0,
+            "{class:?}: the walk under way was re-traced"
+        );
+    }
+}
+
 /// The rule, and its control. With the CC ready the `TeamPlan` healer stands
 /// out of its reach for (nearly) the whole window, without leaving heal range
 /// of its Warrior; with it on cooldown the same healer on the same stage stays
