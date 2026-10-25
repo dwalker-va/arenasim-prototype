@@ -44,11 +44,12 @@ use std::io::{BufRead, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use arenasim::headless::{run_headless_match_observed, HeadlessMatchConfig};
+use arenasim::headless::{run_headless_match_observed, HeadlessMatchConfig, ObservedCombatant};
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
-use arenasim::states::play_match::components::AuraType;
+use arenasim::states::play_match::components::{AuraType, PetType};
 use arenasim::states::play_match::map_config::load_map_geometry_config;
 use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
+use arenasim::states::play_match::team_solve::pet_is_melee;
 use arenasim::{ArenaMap, CharacterClass};
 use bevy::prelude::{Entity, Vec2, Vec3};
 use serde::Serialize;
@@ -172,9 +173,10 @@ struct HealerRow {
     /// below `URGENCY_HP`, else the nearest. Only frames with a teammate alive.
     blind_secs: f32,
     /// Seconds no living enemy caster could see the healer, among frames with
-    /// one alive. Casters as `team_solve::enemy_casters_of` counts them: every
-    /// non-melee class, and every pet (this bank's are Felhunters and the
-    /// default Spider, both ranged there).
+    /// one alive. Casters as `team_solve::enemy_casters_of` counts them
+    /// (`team_solve::is_ranged_threat`): every non-melee class, and every pet
+    /// whose abilities reach — the Felhunter and the Spider, not the Boar or
+    /// the Bird.
     occluded_secs: f32,
     /// Caster-seconds of sight on the healer: the count of living enemy
     /// casters that see it, summed over frames.
@@ -206,6 +208,47 @@ struct Track {
     caster_n: u32,
     ally_sum: f32,
     ally_n: u32,
+}
+
+/// Whether `o` is a caster for the sight measures, as
+/// `team_solve::is_ranged_threat` judges one: a non-melee class, or a pet
+/// whose abilities reach (`team_solve::pet_is_melee`).
+fn counts_as_caster(o: &ObservedCombatant) -> bool {
+    if o.is_pet {
+        !o.pet_type.is_none_or(pet_is_melee)
+    } else {
+        !o.class.is_melee()
+    }
+}
+
+/// The caster filter counts the Felhunter and the Spider, as the solve does,
+/// and not the Boar or the Bird, which report their Hunter's class.
+#[test]
+fn the_caster_filter_counts_only_pets_that_reach() {
+    let unit = |class: CharacterClass, pet_type: Option<PetType>| ObservedCombatant {
+        position: Vec3::ZERO,
+        team: 2,
+        slot: 0,
+        class,
+        is_pet: pet_type.is_some(),
+        pet_type,
+        alive: true,
+        current_health: 1.0,
+        max_health: 1.0,
+        current_mana: 0.0,
+        max_mana: 0.0,
+        aura_types: Vec::new(),
+        target: None,
+        stealthed: false,
+        point_goal: None,
+    };
+    use CharacterClass::{Hunter, Mage, Warlock, Warrior};
+    assert!(counts_as_caster(&unit(Mage, None)));
+    assert!(!counts_as_caster(&unit(Warrior, None)));
+    assert!(counts_as_caster(&unit(Warlock, Some(PetType::Felhunter))));
+    assert!(counts_as_caster(&unit(Hunter, Some(PetType::Spider))));
+    assert!(!counts_as_caster(&unit(Hunter, Some(PetType::Boar))));
+    assert!(!counts_as_caster(&unit(Hunter, Some(PetType::Bird))));
 }
 
 fn log_name(team: u8, slot: u8, class: CharacterClass) -> String {
@@ -335,7 +378,7 @@ fn run_one(cfg: HeadlessMatchConfig, tools: &[CcTool], log_path: String) -> Vec<
             let casters: Vec<Vec2> = frame
                 .combatants
                 .values()
-                .filter(|o| o.team != c.team && o.alive && (o.is_pet || !o.class.is_melee()))
+                .filter(|o| o.team != c.team && o.alive && counts_as_caster(o))
                 .map(|o| Vec2::new(o.position.x, o.position.z))
                 .collect();
             let watching = casters.iter().filter(|p| sees(me, **p)).count();

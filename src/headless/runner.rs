@@ -57,6 +57,8 @@ pub struct ObservedCombatant {
     pub class: CharacterClass,
     /// True for pet entities (Felhunter / Spider / Boar / Bird)
     pub is_pet: bool,
+    /// Which pet, for a pet entity; `None` for everyone else.
+    pub pet_type: Option<PetType>,
     /// False once current_health hits 0. Dead combatants stay in the
     /// snapshot (their entities are not despawned) with frozen positions.
     pub alive: bool,
@@ -1037,6 +1039,7 @@ fn observe_frame(world: &World) -> FrameObservation {
                 slot: combatant.slot,
                 class: combatant.class,
                 is_pet: entity_ref.contains::<Pet>(),
+                pet_type: entity_ref.get::<Pet>().map(|p| p.pet_type),
                 alive: combatant.is_alive(),
                 current_health: combatant.current_health,
                 max_health: combatant.max_health,
