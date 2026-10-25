@@ -15,6 +15,9 @@
 //! Each abort is paired with the same stage minus its one condition, in which
 //! the dip holds. The seeds govern only the rolls; the situation holds by
 //! construction.
+//!
+//! The same aborts with no caster in the band close the file, with an abort
+//! that has already arrived in Hammer of Justice's reach and casts nothing.
 
 mod common;
 
@@ -259,6 +262,208 @@ fn under_teamplan_the_band_preempts_the_dip() {
             Some("PressuredEnter"),
             "{case}: expected a preemption into PRESSURED on the first evaluation; transitions {:?}",
             transitions(&played)
+        );
+    }
+}
+
+// --- With no caster in the band (AS-116, from AS-380) -----------------------
+//
+// The plain aborts, staged: the Warlock is on our Warrior, so nothing focuses
+// the Paladin and neither the trigger nor the onset holds. These are the
+// aborts every dip outside the band takes; until now only a seed-pinned probe
+// (`movement_probes::paladin_postures::dip_aborts_without_casting`, migrated
+// here) covered them.
+
+/// The Warlock is after our Warrior.
+fn plain_config(seed: u64) -> HeadlessMatchConfig {
+    HeadlessMatchConfig {
+        team2_kill_target: Some(1),
+        ..config(seed, "Legacy")
+    }
+}
+
+/// [`stage`]'s dip with the enemy Priest `priest_at` yards east of the
+/// Paladin, and the Warlock 35yd off, beyond the intent radius, targeting our
+/// Warrior.
+fn plain_stage(dip: Dip, priest_at: f32) -> Stage {
+    stage(dip)
+        .place(ENEMY_PRIEST, priest_at, 0.0)
+        .place(WARLOCK, -30.0, 18.0)
+        .target(WARLOCK, WARRIOR)
+}
+
+/// The stage held: on the frame it landed the Warlock was targeting our
+/// Warrior, more than the intent radius from the Paladin.
+fn assert_no_caster_on_the_paladin(played: &Played, case: &str) {
+    let landed = played.landed().app;
+    let frame = played
+        .frames
+        .iter()
+        .find(|f| f.sim_time >= landed)
+        .expect("the landing frame");
+    let unit = |team: u8, slot: u8| {
+        frame
+            .combatants
+            .iter()
+            .find(|(_, c)| c.team == team && c.slot == slot && !c.is_pet)
+            .expect("the unit")
+    };
+    let (_, p) = unit(1, 0);
+    let (warrior, _) = unit(1, 1);
+    let (_, warlock) = unit(2, 0);
+    let d = warlock.position.distance(p.position);
+    assert!(
+        d > BAND.1,
+        "{case}: the Warlock stood {d:.2}yd from the Paladin, inside the intent radius"
+    );
+    assert_eq!(
+        warlock.target,
+        Some(*warrior),
+        "{case}: the Warlock was not targeting the Warrior"
+    );
+}
+
+/// The Paladin's Hammer of Justice casts, on the combat clock.
+fn hammers(played: &Played) -> Vec<f32> {
+    of_class(played.staged_trace(), "Paladin")
+        .filter(|e| {
+            e["kind"] == "ability_decision"
+                && e["outcome"]["type"] == "action_taken"
+                && e["outcome"]["ability"] == "HammerOfJustice"
+        })
+        .map(sim_time)
+        .collect()
+}
+
+/// A dying Warrior and a spent budget each abort the dip on its first
+/// evaluation with no caster anywhere near the band; the same stage with
+/// neither holds the dip.
+#[test]
+fn the_plain_aborts_with_no_caster_in_the_band() {
+    for seed in SEEDS {
+        for (case, dip) in [
+            (
+                "dying",
+                Dip {
+                    warrior: DYING,
+                    budget_left: 4.0,
+                },
+            ),
+            (
+                "spent",
+                Dip {
+                    warrior: 1.0,
+                    budget_left: 0.0,
+                },
+            ),
+        ] {
+            let case = format!("{case}, no caster, seed {seed}");
+            let played = play(plain_config(seed), plain_stage(dip, 20.0));
+            assert_no_caster_on_the_paladin(&played, &case);
+            assert_eq!(
+                first_exit(&played).as_deref(),
+                Some("DipAbort"),
+                "{case}: the dip did not abort on its first evaluation; transitions {:?}",
+                transitions(&played)
+            );
+        }
+
+        let case = format!("control, no caster, seed {seed}");
+        let played = play(
+            plain_config(seed),
+            plain_stage(
+                Dip {
+                    warrior: 1.0,
+                    budget_left: 4.0,
+                },
+                20.0,
+            ),
+        );
+        assert_no_caster_on_the_paladin(&played, &case);
+        let landed = played.landed().combat;
+        let early: Vec<_> = transitions(&played)
+            .into_iter()
+            .filter(|(t, _)| *t < landed + 0.5)
+            .collect();
+        assert!(
+            early.is_empty(),
+            "{case}: the dip left DIP with nothing asking it to: {early:?}"
+        );
+    }
+}
+
+/// An abort casts nothing (migrated from the seed-pinned
+/// `movement_probes::paladin_postures::dip_aborts_without_casting`). The enemy
+/// Priest stands 9yd off, inside Hammer of Justice's 10yd reach, so the dip
+/// has ARRIVED: with the Warrior dying it aborts on its first evaluation, its
+/// first action is on the Warrior, and no Hammer goes out for the next
+/// second; with the Warrior healthy, the
+/// control, the same arrival completes the dip and casts it.
+#[test]
+fn an_abort_in_hammer_reach_casts_nothing() {
+    for seed in SEEDS {
+        let case = format!("dying, in reach, seed {seed}");
+        let played = play(
+            plain_config(seed),
+            plain_stage(
+                Dip {
+                    warrior: DYING,
+                    budget_left: 4.0,
+                },
+                9.0,
+            ),
+        );
+        assert_no_caster_on_the_paladin(&played, &case);
+        assert_eq!(
+            first_exit(&played).as_deref(),
+            Some("DipAbort"),
+            "{case}: the dip did not abort on its first evaluation; transitions {:?}",
+            transitions(&played)
+        );
+        let landed = played.landed().combat;
+        let cast: Vec<f32> = hammers(&played)
+            .into_iter()
+            .filter(|t| *t < landed + 1.0)
+            .collect();
+        assert!(
+            cast.is_empty(),
+            "{case}: an aborted dip cast Hammer of Justice at {cast:?}"
+        );
+        // What the abort frees the global cooldown for: the heal on the dying
+        // Warrior, on the abort's own evaluation.
+        let warrior = entity_id(&played, 1, 1);
+        let first = of_class(played.staged_trace(), "Paladin")
+            .find(|e| e["kind"] == "ability_decision" && e["outcome"]["type"] == "action_taken")
+            .unwrap_or_else(|| panic!("{case}: the Paladin did nothing"));
+        assert!(
+            sim_time(first) <= first_evaluation(&played)
+                && first["outcome"]["target_id"].as_u64() == Some(warrior),
+            "{case}: the abort's first action was not on the dying Warrior: {first}"
+        );
+
+        let case = format!("control, in reach, seed {seed}");
+        let played = play(
+            plain_config(seed),
+            plain_stage(
+                Dip {
+                    warrior: 1.0,
+                    budget_left: 4.0,
+                },
+                9.0,
+            ),
+        );
+        assert_no_caster_on_the_paladin(&played, &case);
+        assert_eq!(
+            first_exit(&played).as_deref(),
+            Some("DipComplete"),
+            "{case}: the arrival did not complete the dip; transitions {:?}",
+            transitions(&played)
+        );
+        let by = first_evaluation(&played);
+        assert!(
+            hammers(&played).iter().any(|t| *t <= by),
+            "{case}: the completed dip cast no Hammer of Justice: {:?}",
+            hammers(&played)
         );
     }
 }

@@ -1676,6 +1676,11 @@ pub fn last_stand_cover(entity: Entity, world: &SolveWorld) -> Option<Vec2> {
             best = Some((k, c));
         }
     }
+    // Reached with no usable candidate only when the unit's own spot (candidate
+    // 0) projects nowhere or out of bounds. In a match it never does: the
+    // collision resolver keeps every unit standing on standable ground in
+    // bounds, where candidate 0 projects to itself and survives. A stage or a
+    // scene can break that; such a unit holds where it is.
     Some(best.map_or(unit.pos, |(_, p)| p))
 }
 
@@ -1995,6 +2000,49 @@ mod tests {
         let spot = last_stand_cover(e(1), &w).expect("a map with cover");
         assert!(!blocked(spot), "{spot:?} lies inside a box");
         assert!(hidden(spot), "{spot:?} is in a caster's sight");
+    }
+
+    /// A healer a stage or scene puts INSIDE a footprint, where production's
+    /// collision resolver never leaves one (AS-116, from AS-372): its own spot
+    /// is candidate 0, and it is scored where it projects to, like any other.
+    /// In the gap between [`touching_boxes`] the healer's own spot projects
+    /// nowhere and is dropped, so it is never the answer — though, inside the
+    /// boxes, no caster sees it and it is the nearest spot there is. Its pair
+    /// stands it inside one lone box, where its spot projects onto the box's
+    /// skin: the answer is a real spot either way.
+    #[test]
+    fn a_last_stand_begun_inside_a_footprint_answers_a_standable_spot() {
+        use crate::states::play_match::map_geometry::position_blocked;
+        let casters = [Vec2::new(-10.0, 30.0), Vec2::new(10.0, 30.0)];
+        let lone_box = vec![ObstacleVolume::Aabb {
+            min: Vec3::new(-5.0, 0.0, -5.0),
+            max: Vec3::new(5.0, 5.0, 5.0),
+        }];
+        for (case, obstacles, at) in [
+            ("in the gap", touching_boxes(), Vec2::new(0.0, 0.0)),
+            ("in one box", lone_box, Vec2::new(0.0, 4.0)),
+        ] {
+            let mut w = world(vec![
+                healer(1, 1, 0, at.x, at.y),
+                unit(2, 2, 0, casters[0].x, casters[0].y),
+                unit(3, 2, 1, casters[1].x, casters[1].y),
+            ]);
+            w.obstacles = obstacles;
+            let blocked = |p: Vec2| position_blocked(&w.obstacles, Vec3::new(p.x, 1.0, p.y));
+            let hidden = |p: Vec2| casters.iter().all(|&c| !w.sees(p, c));
+            assert!(blocked(at), "{case}: the healer does not start inside");
+            assert!(
+                hidden(at),
+                "{case}: the healer's own spot is seen — kept in place it could lose"
+            );
+
+            let spot = last_stand_cover(e(1), &w).expect("a map with cover");
+            assert!(!blocked(spot), "{case}: {spot:?} lies inside a footprint");
+            assert_ne!(
+                spot, at,
+                "{case}: the healer's own spot came back unprojected"
+            );
+        }
     }
 
     // --- focus ---
