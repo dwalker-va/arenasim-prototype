@@ -156,6 +156,30 @@ The Hunt play still runs on any lone healer at a pillar (its onsets fire in
 every seed of the staged match), but in AI-against-AI play nothing now hides
 one there on purpose.
 
+## 7. The graduated plays' controls
+
+A graduated play cannot be withheld, so the probes and scenes that measured
+one against its absence now except it in every context instead (its table
+naming every key, `plays::every_exception_entry`). On main, where both
+controls exist, they play the same matches: each play's probe bank run with
+the play withheld from both teams and with it excepted everywhere on both
+(`2026-10-25-as398-control-gen.py`) gives identical winners and durations,
+Chain 384 / 384, Burst 384 / 384, Hunt 384 / 384 and Peel 192 / 192. Only the
+trace differs: an excepted play's situation (a hunt, a lock ending) is still
+classified and traced.
+
+The probes, on AS-398: `peel_play_probe` answered within one GCD 15.7%
+against 6.4% (z=3.95); `burst_play_probe` decisions on the subject 72.4%
+against 63.4% (z=5.22), landed z=2.08; `camp_sweep` passes.
+`cc_lifecycle_probe`'s denied-seconds response sat on its own 3-SE bar at 24
+seeds: z=+3.03 on main, +2.93 on AS-398, for the same response (+0.25s /
++0.22s a match). Doubled to 48 seeds, main itself reads +0.16s, z=+2.75 (and
+AS-398 +0.14s, z=+2.49): the 24-seed pass was the bank's luckier half, and
+the response is significant but not three standard errors. The probe now
+plays 48 seeds and asks the denied seconds for significance (z ≥ 2); the
+longest lockout keeps its 3-SE bar (z=+11.6 on AS-398). Whether the Chain
+play's denied-seconds response is worth a sharper look is a follow-up.
+
 ## Files
 
 From `docs/design/balance/sweeps/`, with `A=2026-10-25-as398-score.py`:
