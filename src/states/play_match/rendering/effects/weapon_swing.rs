@@ -1907,7 +1907,7 @@ mod swing_tests {
         for interval in [0.5_f32, 1.7, 3.8, 10.0, 100.0] {
             assert!(weapon_stroke_profile(interval).release_secs <= SWING_RELEASE_MAX_SECS);
         }
-        assert!(SWING_RELEASE_MAX_SECS <= 0.16);
+        const { assert!(SWING_RELEASE_MAX_SECS <= 0.16) };
     }
 
     #[test]

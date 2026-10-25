@@ -165,19 +165,23 @@ fn run_headless_mode(
         config.max_duration_secs = duration;
     }
 
-    // Build trace config when enabled. Single-match writes alongside the .txt
-    // log with the same timestamp suffix.
-    let trace_config = if trace_mode.is_enabled() {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        Some(headless::runner::TraceConfig {
-            output_path: arenasim::paths::match_log_dir().join(format!("match_{}_trace.jsonl", ts)),
-        })
-    } else {
-        None
-    };
+    // The report's path, defaulted to a name unique to this process, and the
+    // trace beside it with the same stem: concurrent runs never share either.
+    let log_path = std::path::PathBuf::from(
+        config
+            .output_path
+            .get_or_insert_with(|| {
+                arenasim::paths::default_headless_log_path()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .as_str(),
+    );
+    let trace_config = trace_mode
+        .is_enabled()
+        .then(|| headless::runner::TraceConfig {
+            output_path: arenasim::paths::trace_path_for(&log_path),
+        });
 
     match headless::run_headless_match_with(config, false, trace_config) {
         Ok(result) => {

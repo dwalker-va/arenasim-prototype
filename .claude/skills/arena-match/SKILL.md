@@ -85,7 +85,7 @@ Run the full regression test suite to verify combat system changes:
 
 ## Match Log Format
 
-Logs are saved to `match_logs/match_<timestamp>.txt` and include:
+Logs are saved to `match_logs/match_<secs>_<pid>.txt` and include:
 
 **Header:**
 ```

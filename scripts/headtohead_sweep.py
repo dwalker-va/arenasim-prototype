@@ -17,8 +17,10 @@ This is the measurement methodology from `docs/design/team-level-positioning-ai.
 - Wilson 95% intervals and a two-proportion z-test, so "one extra win" cannot
   be mistaken for a result.
 
-Runs via the parallel batch runner (~2 matches/sec on an M-class laptop, so a
-3-cell sweep at n=100 is ~3 minutes). Win rate is the CONFIRMATION metric;
+Runs via the parallel batch runner (about 20 matches/sec per `--jobs` worker,
+half that for PillaredArena or `TeamPlan`, so a 3-cell sweep at n=100 takes
+seconds; see "What a sweep actually costs" in
+docs/design/balance/sweep-tiers.md). Win rate is the CONFIRMATION metric;
 for diagnosis prefer the per-frame mechanism metrics in `tests/camp_sweep.rs`
 (occlusion-seconds, blocked share), which aggregate thousands of samples per
 match instead of one bit.

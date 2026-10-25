@@ -222,7 +222,7 @@ fn after_onset() -> (Scene, f32) {
 /// before the dwell does, and the focus holds until the dwell is out.
 #[test]
 fn a_focus_holds_its_dwell() {
-    assert!(FOCUS_DWELL > FOCUS_HIDDEN_SECS + 0.2);
+    const { assert!(FOCUS_DWELL > FOCUS_HIDDEN_SECS + 0.2) };
     let (mut s, onset) = after_onset();
     let warrior = s.entity(EXPOSED);
     let held = focus_after(

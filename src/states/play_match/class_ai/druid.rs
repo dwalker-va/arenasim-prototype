@@ -2175,7 +2175,7 @@ mod reach_tests {
         let mut s = ReachScene::new(Druid, &units);
         let victim = s.units[if ally.is_some() { 1 } else { 0 }];
         let first = if ally.is_some() { 2 } else { 1 };
-        for rogue in s.units[first..].to_vec() {
+        for &rogue in &s.units[first..] {
             s.roster.get_mut(&rogue).unwrap().target = Some(victim);
         }
         s

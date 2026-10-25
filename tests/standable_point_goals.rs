@@ -27,9 +27,10 @@
 //!
 //! A third producer is the stealthed Rogue's walk round a lit Flare
 //! (`rogue_flare::plan_flare_path`, AS-207), whose spot beside a target is
-//! offset from the target with no regard for cover. No seeded match was found
-//! sending it there, so its case is STAGED: the situation is built, not
-//! searched for (`flare_spot_beside_a_target_against_a_pillar_is_standable`).
+//! offset from the target with no regard for cover. It has a seeded
+//! TwinPillars row like the rest, and a STAGED case too, whose situation is
+//! built rather than searched for, so it guards whatever the seeds do
+//! (`flare_spot_beside_a_target_against_a_pillar_is_standable`).
 
 use arenasim::headless::{
     run_headless_match_observed, run_headless_match_staged, HeadlessMatchConfig, Stage, Unit,

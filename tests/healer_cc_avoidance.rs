@@ -109,10 +109,7 @@ fn cooldown(arm: Arm) -> f32 {
     }
 }
 
-fn unit_in<'a>(
-    frame: &'a FrameObservation,
-    who: Unit,
-) -> &'a arenasim::headless::ObservedCombatant {
+fn unit_in(frame: &FrameObservation, who: Unit) -> &arenasim::headless::ObservedCombatant {
     frame
         .combatants
         .values()
@@ -517,7 +514,7 @@ fn the_legacy_healer_does_not_move_for_crowd_control() {
 fn a_parked_teamplan_healer_stays_parked() {
     for case in CASES
         .iter()
-        .filter(|c| c.stage == polymorph_stage as fn(Arm) -> Stage)
+        .filter(|c| std::ptr::fn_addr_eq(c.stage, polymorph_stage as fn(Arm) -> Stage))
     {
         let walked = |profile: &str| {
             let stage = polymorph_stage(Arm::Control)

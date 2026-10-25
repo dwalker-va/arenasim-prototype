@@ -287,8 +287,8 @@ pub fn shield_tuning(kind: ShieldKind) -> &'static ShieldTuning {
 /// the two together).
 pub const PW_SHIELD_AURA_NAME: &str = "Power Word: Shield";
 /// The aura name Divine Shield is keyed on (`effects/divine_shield.rs` names
-/// the aura; `the_divine_shield_aura_carries_the_ability_name` pins it to
-/// `abilities.ron`).
+/// the aura from `abilities.ron`'s `name`;
+/// `the_divine_shield_aura_carries_the_ability_name` pins the two together).
 pub const DIVINE_SHIELD_AURA_NAME: &str = "Divine Shield";
 /// The aura name Ice Barrier is keyed on (`abilities.ron`'s `name`;
 /// `the_aura_name_is_the_ability_name` in its probes pins the two together).
@@ -682,11 +682,11 @@ fn spread(v: f32, spread: f32) -> f32 {
 }
 
 /// One phase's length in seconds, for one kind of shield.
-pub fn shield_phase_secs(kind: ShieldKind, phase: PwsPhase) -> f32 {
+pub fn shield_phase_secs(kind: ShieldKind, phase: ShieldPhase) -> f32 {
     let ms = match phase {
-        PwsPhase::Birth => PWS_BIRTH_MS,
-        PwsPhase::Loop => PWS_LOOP_MS,
-        PwsPhase::Death => PWS_DEATH_MS,
+        ShieldPhase::Birth => PWS_BIRTH_MS,
+        ShieldPhase::Loop => PWS_LOOP_MS,
+        ShieldPhase::Death => PWS_DEATH_MS,
     };
     ms / 1000.0 * shield_tuning(kind).time_scale
 }
@@ -695,27 +695,27 @@ pub fn shield_phase_secs(kind: ShieldKind, phase: PwsPhase) -> f32 {
 /// weights — rim, streak A, streak B, fill, icicles, glint — gains applied. A
 /// layer a kind does not wear has a zero gain, so it stays dark.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PwsSample {
+pub struct ShieldSample {
     pub scale: Vec2,
     pub weights: [f32; 6],
 }
 
-impl PwsSample {
-    pub fn weight(&self, layer: PwsLayer) -> f32 {
+impl ShieldSample {
+    pub fn weight(&self, layer: ShieldLayer) -> f32 {
         self.weights[match layer {
-            PwsLayer::Rim => 0,
-            PwsLayer::StreakA => 1,
-            PwsLayer::StreakB => 2,
+            ShieldLayer::Rim => 0,
+            ShieldLayer::StreakA => 1,
+            ShieldLayer::StreakB => 2,
             // Both fill cards ride the rim's track (texture weight 0).
-            PwsLayer::FillOuter | PwsLayer::FillInner => 3,
-            PwsLayer::Icicles => 4,
-            PwsLayer::Glint => 5,
+            ShieldLayer::FillOuter | ShieldLayer::FillInner => 3,
+            ShieldLayer::Icicles => 4,
+            ShieldLayer::Glint => 5,
         }]
     }
 }
 
 /// Samples a shield. `t` is seconds into `phase`; the loop wraps on its own.
-pub fn pws_sample(shield: &PwShieldVisual) -> PwsSample {
+pub fn shield_sample(shield: &ShieldVisual) -> ShieldSample {
     let k = shield_tuning(shield.kind);
     let tr = weight_tracks(shield.kind);
     let ms = shield.t / k.time_scale * 1000.0;
@@ -729,7 +729,7 @@ pub fn pws_sample(shield: &PwShieldVisual) -> PwsSample {
     ];
     let sp = |v: Vec2| Vec2::new(spread(v.x, k.spread), spread(v.y, k.spread));
     match shield.phase {
-        PwsPhase::Birth => {
+        ShieldPhase::Birth => {
             let s = keys2(SCALE_BIRTH, ms);
             // The cards' spike carries the birth gain, settling to each layer's
             // gain by 700 ms; Ice Barrier's icicles hold their own weight and
@@ -744,7 +744,7 @@ pub fn pws_sample(shield: &PwShieldVisual) -> PwsSample {
                 IB_ICE_HELD,
                 IB_GLINT_HELD,
             ];
-            PwsSample {
+            ShieldSample {
                 scale: sp(s),
                 weights: std::array::from_fn(|i| {
                     // A layer the shield does not wear stays dark, birth spike
@@ -759,7 +759,7 @@ pub fn pws_sample(shield: &PwShieldVisual) -> PwsSample {
                 }),
             }
         }
-        PwsPhase::Loop => {
+        ShieldPhase::Loop => {
             let m = ms.rem_euclid(PWS_LOOP_MS);
             let rim = keys(tr.rim_loop, m);
             let w = [
@@ -770,19 +770,19 @@ pub fn pws_sample(shield: &PwShieldVisual) -> PwsSample {
                 IB_ICE_HELD,
                 IB_GLINT_HELD,
             ];
-            PwsSample {
+            ShieldSample {
                 scale: sp(keys2(SCALE_LOOP, m)),
                 weights: std::array::from_fn(|i| w[i] * gains[i]),
             }
         }
-        PwsPhase::Death => {
+        ShieldPhase::Death => {
             let mut track: Vec<(f32, [f32; 2])> = SCALE_DEATH
                 .iter()
                 .map(|&(t, v)| (t, [spread(v[0], k.spread), spread(v[1], k.spread)]))
                 .collect();
             track[0].1 = shield.from_scale.to_array();
             let fade = (1.0 - ms / PWS_RIM_FADE_MS).max(0.0);
-            PwsSample {
+            ShieldSample {
                 scale: keys2(&track, ms),
                 weights: [
                     shield.from_rim * fade,
@@ -800,16 +800,16 @@ pub fn pws_sample(shield: &PwShieldVisual) -> PwsSample {
 /// A card's centre above the FEET and its half-size, both in yards, at `scale`,
 /// for one kind of shield. Every bone scales about the shared pivot, so a
 /// taller card also rises.
-pub fn shield_card_extent(kind: ShieldKind, layer: PwsLayer, scale: Vec2) -> (f32, Vec2) {
+pub fn shield_card_extent(kind: ShieldKind, layer: ShieldLayer, scale: Vec2) -> (f32, Vec2) {
     let quad = match layer {
-        PwsLayer::Rim | PwsLayer::FillOuter => PWS_RIM_QUAD,
+        ShieldLayer::Rim | ShieldLayer::FillOuter => PWS_RIM_QUAD,
         // Ice Barrier's icicles ride bone 3, as streak B does: their card
         // stands at the streak card's centre.
-        PwsLayer::StreakA
-        | PwsLayer::StreakB
-        | PwsLayer::FillInner
-        | PwsLayer::Icicles
-        | PwsLayer::Glint => PWS_STREAK_QUAD,
+        ShieldLayer::StreakA
+        | ShieldLayer::StreakB
+        | ShieldLayer::FillInner
+        | ShieldLayer::Icicles
+        | ShieldLayer::Glint => PWS_STREAK_QUAD,
     };
     let r = PWS_CLIENT_TO_RIG * shield_tuning(kind).size;
     let centre = (quad[2] + quad[3]) / 2.0 * r;
@@ -824,16 +824,16 @@ pub fn shield_card_extent(kind: ShieldKind, layer: PwsLayer, scale: Vec2) -> (f3
 /// so their scale is their half-size; Ice Barrier's icicle and glint meshes
 /// are built in yards about the streak card's centre, so theirs is the bone
 /// scale itself.
-pub fn shield_card_scale(kind: ShieldKind, layer: PwsLayer, scale: Vec2) -> Vec3 {
+pub fn shield_card_scale(kind: ShieldKind, layer: ShieldLayer, scale: Vec2) -> Vec3 {
     let v = match layer {
-        PwsLayer::Icicles | PwsLayer::Glint => scale,
+        ShieldLayer::Icicles | ShieldLayer::Glint => scale,
         _ => shield_card_extent(kind, layer, scale).1,
     };
     Vec3::new(v.x.max(PWS_MIN_SCALE), v.y.max(PWS_MIN_SCALE), 1.0)
 }
 
 /// [`shield_card_extent`] for Power Word: Shield.
-pub fn pws_card_extent(layer: PwsLayer, scale: Vec2) -> (f32, Vec2) {
+pub fn pws_card_extent(layer: ShieldLayer, scale: Vec2) -> (f32, Vec2) {
     shield_card_extent(ShieldKind::PowerWordShield, layer, scale)
 }
 
@@ -841,7 +841,7 @@ pub fn pws_card_extent(layer: PwsLayer, scale: Vec2) -> (f32, Vec2) {
 pub fn pws_card_translation(
     kind: ShieldKind,
     body_centre: Vec3,
-    layer: PwsLayer,
+    layer: ShieldLayer,
     scale: Vec2,
     camera: Vec3,
 ) -> Vec3 {
@@ -892,10 +892,10 @@ pub fn is_live_shield(kind: ShieldKind, aura: &Aura) -> bool {
 
 /// Whether an Ice Barrier rig is shedding mist: from the cast, through the
 /// held barrier, and into the first 767 ms of its death.
-pub fn ib_mist_spawning(rig: &PwShieldVisual) -> bool {
+pub fn ib_mist_spawning(rig: &ShieldVisual) -> bool {
     match rig.phase {
-        PwsPhase::Birth | PwsPhase::Loop => true,
-        PwsPhase::Death => rig.t / IB_TIME_SCALE * 1000.0 < IB_MIST_STOP_MS,
+        ShieldPhase::Birth | ShieldPhase::Loop => true,
+        ShieldPhase::Death => rig.t / IB_TIME_SCALE * 1000.0 < IB_MIST_STOP_MS,
     }
 }
 
@@ -903,20 +903,20 @@ pub fn ib_mist_spawning(rig: &PwShieldVisual) -> bool {
 
 /// Sparkles per second across both emitters, `ms` into `phase` (time-scaled
 /// client ms), before `DS_SPARKLE_RATE`.
-pub fn ds_sparkle_rate(phase: PwsPhase, ms: f32) -> f32 {
+pub fn ds_sparkle_rate(phase: ShieldPhase, ms: f32) -> f32 {
     let each = match phase {
-        PwsPhase::Birth => keys(SPARKLE_RATE_BIRTH, ms),
-        PwsPhase::Loop => SPARKLE_RATE_LOOP,
-        PwsPhase::Death => keys(SPARKLE_RATE_DEATH, ms),
+        ShieldPhase::Birth => keys(SPARKLE_RATE_BIRTH, ms),
+        ShieldPhase::Loop => SPARKLE_RATE_LOOP,
+        ShieldPhase::Death => keys(SPARKLE_RATE_DEATH, ms),
     };
     2.0 * each
 }
 
 /// Whether the halo is falling, `ms` into `phase`, under `mode`.
-pub fn ds_halo_on(mode: HaloMode, phase: PwsPhase, ms: f32) -> bool {
+pub fn ds_halo_on(mode: HaloMode, phase: ShieldPhase, ms: f32) -> bool {
     match (mode, phase) {
         (HaloMode::Off, _) => false,
-        (_, PwsPhase::Death) => ms < DS_HALO_DEATH_OFF_MS,
+        (_, ShieldPhase::Death) => ms < DS_HALO_DEATH_OFF_MS,
         (HaloMode::WholeShield, _) => true,
         (HaloMode::DeathOnly, _) => false,
     }
@@ -1020,7 +1020,7 @@ pub(super) fn disc_texture(size: u32, alpha: impl Fn(f32, f32) -> f32) -> Image 
 /// Shared by every shield: one card quad and four textures (rim, the two
 /// streak rings, fill), Divine Shield's particle quad and two palettes, and
 /// Ice Barrier's icicle mesh and mist palettes (one per puff shape).
-pub struct PwsAssets {
+pub struct ShieldAssets {
     quad: Handle<Mesh>,
     textures: [Handle<Image>; 4],
     particle_quad: Handle<Mesh>,
@@ -1030,7 +1030,7 @@ pub struct PwsAssets {
     mist_palettes: Vec<Arc<[Handle<StandardMaterial>]>>,
 }
 
-impl PwsAssets {
+impl ShieldAssets {
     fn build(
         meshes: &mut Assets<Mesh>,
         images: &mut Assets<Image>,
@@ -1112,15 +1112,15 @@ fn particle_palette(
 /// meshes wear none (their colour is in their vertices). Slot 1 is
 /// `shockwave10d` and slot 2 `shockwave10b`: Ice Barrier's streak A is the
 /// `10b` ring and its B the `10d`, the other way round from PW:S's.
-fn texture_slot(kind: ShieldKind, layer: PwsLayer) -> Option<usize> {
+fn texture_slot(kind: ShieldKind, layer: ShieldLayer) -> Option<usize> {
     match (kind, layer) {
-        (_, PwsLayer::Rim) => Some(0),
-        (ShieldKind::IceBarrier, PwsLayer::StreakA) => Some(2),
-        (ShieldKind::IceBarrier, PwsLayer::StreakB) => Some(1),
-        (_, PwsLayer::StreakA) => Some(1),
-        (_, PwsLayer::StreakB) => Some(2),
-        (_, PwsLayer::FillOuter | PwsLayer::FillInner) => Some(3),
-        (_, PwsLayer::Icicles | PwsLayer::Glint) => None,
+        (_, ShieldLayer::Rim) => Some(0),
+        (ShieldKind::IceBarrier, ShieldLayer::StreakA) => Some(2),
+        (ShieldKind::IceBarrier, ShieldLayer::StreakB) => Some(1),
+        (_, ShieldLayer::StreakA) => Some(1),
+        (_, ShieldLayer::StreakB) => Some(2),
+        (_, ShieldLayer::FillOuter | ShieldLayer::FillInner) => Some(3),
+        (_, ShieldLayer::Icicles | ShieldLayer::Glint) => None,
     }
 }
 
@@ -1129,22 +1129,22 @@ fn keys_fn(track: &'static [(f32, f32)]) -> impl Fn(f32) -> f32 {
 }
 
 /// A card's colour, sRGB: the client's per-batch colour track.
-pub fn shield_layer_rgb(kind: ShieldKind, layer: PwsLayer) -> [f32; 3] {
+pub fn shield_layer_rgb(kind: ShieldKind, layer: ShieldLayer) -> [f32; 3] {
     match (kind, layer) {
-        (ShieldKind::IceBarrier, PwsLayer::Rim) => IB_RIM_RGB,
-        (ShieldKind::IceBarrier, PwsLayer::StreakA) => IB_STREAK_A_RGB,
-        (ShieldKind::IceBarrier, PwsLayer::StreakB) => IB_STREAK_B_RGB,
+        (ShieldKind::IceBarrier, ShieldLayer::Rim) => IB_RIM_RGB,
+        (ShieldKind::IceBarrier, ShieldLayer::StreakA) => IB_STREAK_A_RGB,
+        (ShieldKind::IceBarrier, ShieldLayer::StreakB) => IB_STREAK_B_RGB,
         // The icicles carry their colour in their vertices.
-        (_, PwsLayer::Icicles | PwsLayer::Glint) => [1.0, 1.0, 1.0],
-        (_, PwsLayer::Rim) => RIM_RGB,
-        (ShieldKind::PowerWordShield, PwsLayer::StreakA) => STREAK_A_RGB,
-        (ShieldKind::DivineShield, PwsLayer::StreakA) => DS_STREAK_A_RGB,
-        (_, PwsLayer::StreakB) => STREAK_B_RGB,
-        (_, PwsLayer::FillOuter | PwsLayer::FillInner) => DS_FILL_RGB,
+        (_, ShieldLayer::Icicles | ShieldLayer::Glint) => [1.0, 1.0, 1.0],
+        (_, ShieldLayer::Rim) => RIM_RGB,
+        (ShieldKind::PowerWordShield, ShieldLayer::StreakA) => STREAK_A_RGB,
+        (ShieldKind::DivineShield, ShieldLayer::StreakA) => DS_STREAK_A_RGB,
+        (_, ShieldLayer::StreakB) => STREAK_B_RGB,
+        (_, ShieldLayer::FillOuter | ShieldLayer::FillInner) => DS_FILL_RGB,
     }
 }
 
-fn layer_rgb(kind: ShieldKind, layer: PwsLayer) -> Color {
+fn layer_rgb(kind: ShieldKind, layer: ShieldLayer) -> Color {
     let c = shield_layer_rgb(kind, layer);
     Color::srgb(c[0], c[1], c[2])
 }
@@ -1156,7 +1156,7 @@ fn layer_rgb(kind: ShieldKind, layer: PwsLayer) -> Color {
 fn pws_material(
     texture: Option<Handle<Image>>,
     kind: ShieldKind,
-    layer: PwsLayer,
+    layer: ShieldLayer,
 ) -> StandardMaterial {
     StandardMaterial {
         base_color: layer_rgb(kind, layer).with_alpha(0.0),
@@ -1181,20 +1181,20 @@ fn pws_material(
 /// (auras stay on a corpse, so death ends the shield here, as it ends the aura
 /// band). A rig whose bearer entity is gone despawns at once.
 #[allow(clippy::too_many_arguments)]
-pub fn update_pw_shield_visuals(
+pub fn update_shield_visuals(
     mut commands: Commands,
     time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    mut assets: Local<Option<PwsAssets>>,
+    mut assets: Local<Option<ShieldAssets>>,
     camera: Query<&Transform, (With<Camera3d>, Without<Combatant>, Without<VisualBody>)>,
     bearers: Query<(Entity, &Combatant, &ActiveAuras)>,
     placed: Query<(&Transform, Option<&Children>), With<Combatant>>,
     bodies: Query<&Transform, (With<VisualBody>, Without<Combatant>)>,
     mut rigs: Query<(
         Entity,
-        &mut PwShieldVisual,
+        &mut ShieldVisual,
         Option<&mut DivineShieldEmitters>,
         Option<&mut IceBarrierEmitters>,
     )>,
@@ -1220,21 +1220,21 @@ pub fn update_pw_shield_visuals(
         };
         let kind = rig.kind;
         rig.t += dt;
-        if rig.phase == PwsPhase::Birth && rig.t >= shield_phase_secs(kind, PwsPhase::Birth) {
-            rig.t -= shield_phase_secs(kind, PwsPhase::Birth);
-            rig.phase = PwsPhase::Loop;
+        if rig.phase == ShieldPhase::Birth && rig.t >= shield_phase_secs(kind, ShieldPhase::Birth) {
+            rig.t -= shield_phase_secs(kind, ShieldPhase::Birth);
+            rig.phase = ShieldPhase::Loop;
         }
         let up = shielded.contains(&(rig.bearer, kind));
-        if rig.phase != PwsPhase::Death && !up {
-            let now = pws_sample(&rig);
+        if rig.phase != ShieldPhase::Death && !up {
+            let now = shield_sample(&rig);
             rig.from_scale = now.scale;
-            rig.from_rim = now.weight(PwsLayer::Rim);
-            rig.from_fill = now.weight(PwsLayer::FillOuter);
-            rig.phase = PwsPhase::Death;
+            rig.from_rim = now.weight(ShieldLayer::Rim);
+            rig.from_fill = now.weight(ShieldLayer::FillOuter);
+            rig.phase = ShieldPhase::Death;
             rig.t = 0.0;
         }
         let ended =
-            rig.phase == PwsPhase::Death && rig.t >= shield_phase_secs(kind, PwsPhase::Death);
+            rig.phase == ShieldPhase::Death && rig.t >= shield_phase_secs(kind, ShieldPhase::Death);
         let body = bearer_children
             .and_then(|kids| kids.iter().find_map(|k| bodies.get(k).ok()))
             .map(|body| body.translation)
@@ -1242,17 +1242,19 @@ pub fn update_pw_shield_visuals(
         let body_centre = bearer_tf.transform_point(body);
         if let (Some(mut emitters), false) = (emitters, ended) {
             let feet = body_centre + Vec3::Y * (DS_LIFT - BODY_HALF_HEIGHT);
-            let assets = assets
-                .get_or_insert_with(|| PwsAssets::build(&mut meshes, &mut images, &mut materials));
+            let assets = assets.get_or_insert_with(|| {
+                ShieldAssets::build(&mut meshes, &mut images, &mut materials)
+            });
             emit_divine_shield_particles(&mut commands, assets, &rig, &mut emitters, feet, dt);
         }
         if let (Some(mut mist), Some(cam), true) = (mist, cam, ib_mist_spawning(&rig)) {
             let feet = body_centre + Vec3::Y * (IB_LIFT - BODY_HALF_HEIGHT);
-            let assets = assets
-                .get_or_insert_with(|| PwsAssets::build(&mut meshes, &mut images, &mut materials));
+            let assets = assets.get_or_insert_with(|| {
+                ShieldAssets::build(&mut meshes, &mut images, &mut materials)
+            });
             emit_ice_barrier_mist(&mut commands, assets, &rig, &mut mist, feet, cam, dt);
         }
-        if rig.phase == PwsPhase::Death {
+        if rig.phase == ShieldPhase::Death {
             if ended {
                 commands.entity(rig_entity).despawn();
             }
@@ -1266,12 +1268,12 @@ pub fn update_pw_shield_visuals(
             continue;
         }
         let assets = assets
-            .get_or_insert_with(|| PwsAssets::build(&mut meshes, &mut images, &mut materials));
+            .get_or_insert_with(|| ShieldAssets::build(&mut meshes, &mut images, &mut materials));
         let mut rig = commands.spawn((
-            PwShieldVisual {
+            ShieldVisual {
                 bearer,
                 kind,
-                phase: PwsPhase::Birth,
+                phase: ShieldPhase::Birth,
                 t: 0.0,
                 from_scale: Vec2::ZERO,
                 from_rim: 0.0,
@@ -1294,21 +1296,23 @@ pub fn update_pw_shield_visuals(
         rig.with_children(|rig| {
             for &layer in kind.layers() {
                 let mesh = match layer {
-                    PwsLayer::Icicles => assets.icicles.clone(),
+                    ShieldLayer::Icicles => assets.icicles.clone(),
                     // Each glint owns its mesh: its sheen follows its own view.
-                    PwsLayer::Glint => meshes.add(ib_glint_mesh(PWS_CLIENT_TO_RIG * IB_SIZE, 0.0)),
+                    ShieldLayer::Glint => {
+                        meshes.add(ib_glint_mesh(PWS_CLIENT_TO_RIG * IB_SIZE, 0.0))
+                    }
                     _ => assets.quad.clone(),
                 };
                 let texture = texture_slot(kind, layer).map(|i| assets.textures[i].clone());
                 let mut card = rig.spawn((
-                    PwShieldCard { layer },
+                    ShieldCard { layer },
                     Mesh3d(mesh),
                     MeshMaterial3d(materials.add(pws_material(texture, kind, layer))),
                     // Zero-sized until the first placement: the birth's first 200 ms are empty.
                     Transform::from_scale(Vec3::splat(PWS_MIN_SCALE)),
                     NotShadowCaster,
                 ));
-                if layer == PwsLayer::Glint {
+                if layer == ShieldLayer::Glint {
                     card.insert(GlintSheen::default());
                 }
             }
@@ -1322,15 +1326,15 @@ pub fn update_pw_shield_visuals(
 /// bearer's rendered feet, where the client's Base attachment sits.
 fn emit_divine_shield_particles(
     commands: &mut Commands,
-    assets: &PwsAssets,
-    rig: &PwShieldVisual,
+    assets: &ShieldAssets,
+    rig: &ShieldVisual,
     emitters: &mut DivineShieldEmitters,
     feet: Vec3,
     dt: f32,
 ) {
     let r = PWS_CLIENT_TO_RIG * DS_SIZE;
     let ms = rig.t / DS_TIME_SCALE * 1000.0;
-    let ms = if rig.phase == PwsPhase::Loop {
+    let ms = if rig.phase == ShieldPhase::Loop {
         ms.rem_euclid(PWS_LOOP_MS)
     } else {
         ms
@@ -1411,8 +1415,8 @@ fn emit_divine_shield_particles(
 /// fall. `feet` is the bearer's rendered feet, `cam` the camera's position.
 fn emit_ice_barrier_mist(
     commands: &mut Commands,
-    assets: &PwsAssets,
-    rig: &PwShieldVisual,
+    assets: &ShieldAssets,
+    rig: &ShieldVisual,
     mist: &mut IceBarrierEmitters,
     feet: Vec3,
     cam: Vec3,
@@ -1456,7 +1460,7 @@ fn emit_ice_barrier_mist(
 
 fn spawn_shield_particle(
     commands: &mut Commands,
-    assets: &PwsAssets,
+    assets: &ShieldAssets,
     palette: &Arc<[Handle<StandardMaterial>]>,
     particle: ClientParticle,
     at: Vec3,
@@ -1478,14 +1482,14 @@ const PWS_MIN_SCALE: f32 = 1e-4;
 /// PostUpdate (graphical-only), after every writer of a body's transform and
 /// before propagation: stand each card on its bearer's rendered body, turn it
 /// to the camera, and set its weight.
-pub fn place_pw_shield_cards(
-    camera: Query<&Transform, (With<Camera3d>, Without<PwShieldCard>)>,
-    rigs: Query<(&PwShieldVisual, &Children)>,
-    bearers: Query<(&Transform, Option<&Children>), (With<Combatant>, Without<PwShieldCard>)>,
-    bodies: Query<&Transform, (With<VisualBody>, Without<PwShieldCard>, Without<Combatant>)>,
+pub fn place_shield_cards(
+    camera: Query<&Transform, (With<Camera3d>, Without<ShieldCard>)>,
+    rigs: Query<(&ShieldVisual, &Children)>,
+    bearers: Query<(&Transform, Option<&Children>), (With<Combatant>, Without<ShieldCard>)>,
+    bodies: Query<&Transform, (With<VisualBody>, Without<ShieldCard>, Without<Combatant>)>,
     mut cards: Query<
         (
-            &PwShieldCard,
+            &ShieldCard,
             &mut Transform,
             &Mesh3d,
             &MeshMaterial3d<StandardMaterial>,
@@ -1508,7 +1512,7 @@ pub fn place_pw_shield_cards(
             .map(|body| body.translation)
             .unwrap_or(Vec3::ZERO);
         let body_centre = bearer_tf.transform_point(body_local);
-        let sample = pws_sample(rig);
+        let sample = shield_sample(rig);
         for child in children.iter() {
             let Ok((card, mut tf, mesh, material, sheen)) = cards.get_mut(child) else {
                 continue;

@@ -1388,7 +1388,7 @@ pub fn is_ranged_threat(c: &super::class_ai::CombatantInfo) -> bool {
 ///   nothing. Melee.
 /// - Bird — Master's Call (40yd) targets an ALLY; it has no ranged offence.
 ///   Melee.
-fn pet_is_melee(pet_type: super::components::PetType) -> bool {
+pub fn pet_is_melee(pet_type: super::components::PetType) -> bool {
     use super::components::PetType as P;
     match pet_type {
         P::Felhunter | P::Spider => false,

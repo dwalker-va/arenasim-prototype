@@ -526,12 +526,12 @@ Results:
 | BasicArena h2h, 2,200 | 0 (2,191 kills) | | |
 | Legacy, 1,800 | 0 rows, 0 log lines of 557,617 | | |
 
-Per frame, 16 of 6,000 `TeamPlan` healer-matches moved (14 Nagrand, 2
+Per frame, 18 of 6,000 `TeamPlan` healer-matches moved (16 Nagrand, 2
 TwinPillars), every one against Warlock+Hunter and a fifth caster. On
 TwinPillars the two traded as the rule says: blind 6.9s -> 4.4s, all of it in
 frames with five or more casters alive, occluded 18.6s -> 17.8s. On Nagrand the
-14 diverged into different matches (blind 8.0s -> 12.0s, occluded 154.7s ->
-167.4s in total, while blind with five or more casters alive held at 6.4s), so
+16 diverged into different matches (blind 8.0s -> 12.0s, occluded 170.8s ->
+183.6s in total, while blind with five or more casters alive held at 6.4s), so
 a whole-match figure there measures the divergence, not the rule. Over the
 whole bank every mean is unchanged to 0.01s. `tests/camp_sweep.rs` (three
 casters) is identical before and after.

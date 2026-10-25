@@ -668,13 +668,13 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             // Each client shield wears its model's cards, keyed on the aura's
             // name. An absorb with no model of its own draws nothing.
             AuraType::Absorb if c.name == PW_SHIELD_AURA_NAME => {
-                Some("client shield cards (pw_shield.rs)")
+                Some("client shield cards (shield.rs)")
             }
             AuraType::DamageImmunity if c.name == DIVINE_SHIELD_AURA_NAME => {
-                Some("client Divine Shield cards and sparkles (pw_shield.rs)")
+                Some("client Divine Shield cards and sparkles (shield.rs)")
             }
             AuraType::Absorb if c.name == ICE_BARRIER_AURA_NAME => {
-                Some("client Ice Barrier cards, icicles and mist (pw_shield.rs)")
+                Some("client Ice Barrier cards, icicles and mist (shield.rs)")
             }
             AuraType::HealingReduction => Some("heal-refused tell (mortal_wounds.rs)"),
             // A heal over time routes by its name: a per-tick pulse (Healing

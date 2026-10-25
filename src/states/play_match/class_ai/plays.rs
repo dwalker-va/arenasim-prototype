@@ -15,13 +15,17 @@
 //! cannot see the unit's class), and `CombatContext::play` with the unit's own
 //! admission.
 //!
-//! **Adding a play.** A new play is a new module holding its stage — its
+//! **Adding a play.** A new play is: a new module holding its stage — its
 //! `calls`, its `admits`, its own exceptions table with the measurement for
-//! each entry, its config key — its variant in `Play` and `PlayId` (the
-//! compiler then asks for its trace tag), and ONE line in [`PLAY_ORDER`]. The
-//! walk, the withhold and exception controls (`situation::WithheldPlays`), the
-//! headless config and the scene builder are keyed by the play's id, so none
-//! of them changes.
+//! each entry, its config key; its step in each class's chain that runs it;
+//! its enum arms (`Play`, `PlayId`, `PlayId::ALL`, `Play::id`, and the
+//! trace's `PlayTag`, which the compiler asks for); usually a window accessor
+//! on `CombatContext` for its step to read (as `burst_window` and
+//! `chain_window` are); the pinned order tests in `tests` below; and ONE line
+//! in [`PLAY_ORDER`]. The walk, the withhold and exception controls
+//! (`situation::WithheldPlays`), the headless config and the scene builder
+//! are keyed by the play's id, so none of them changes. CLAUDE.md's *Adding a
+//! play* is the same list.
 
 use bevy::prelude::*;
 

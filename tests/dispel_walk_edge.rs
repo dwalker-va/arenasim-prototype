@@ -188,12 +188,11 @@ impl Played {
     fn posture_at(&self, healer: u64, t: f64) -> String {
         self.events
             .iter()
-            .filter(|e| {
+            .rfind(|e| {
                 e["kind"] == "movement_decision"
                     && e["actor"]["entity_id"].as_u64() == Some(healer)
                     && e["sim_time"].as_f64().unwrap_or(f64::MAX) <= t
             })
-            .last()
             .and_then(|e| e["posture"].as_str())
             .unwrap_or("free")
             .to_string()

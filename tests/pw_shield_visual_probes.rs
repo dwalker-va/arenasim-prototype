@@ -1,4 +1,4 @@
-//! Probes for Power Word: Shield's client cards (`rendering/effects/pw_shield.rs`).
+//! Probes for Power Word: Shield's client cards (`rendering/effects/shield.rs`).
 //!
 //! World-space geometry and timing through `GlobalTransform` and the live
 //! material, never the rig's stored fields: the 200 ms delay and the tall pop,
@@ -22,11 +22,11 @@ use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::{
     ActiveAuras, Aura, AuraType, CastEnding, CastEndingKind, Combatant, HealCastHand, HealCastKind,
-    InstantAbilityFired, LandedCast, PwShieldCard, PwShieldVisual, PwsLayer, PwsPhase, ShieldKind,
-    VisualBody,
+    InstantAbilityFired, LandedCast, ShieldCard, ShieldKind, ShieldLayer, ShieldPhase,
+    ShieldVisual, VisualBody,
 };
 use arenasim::states::play_match::{
-    place_pw_shield_cards, pws_card_extent, spawn_instant_cast_hands, update_pw_shield_visuals,
+    place_shield_cards, pws_card_extent, spawn_instant_cast_hands, update_shield_visuals,
     PWS_CLIENT_TO_RIG, PWS_RIM_QUAD, PWS_STREAK_QUAD, PW_SHIELD_AURA_NAME,
 };
 use arenasim::CharacterClass;
@@ -52,10 +52,10 @@ impl Harness {
         app.init_asset::<Image>();
         app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
         app.insert_resource(AbilityDefinitions::default());
-        app.add_systems(Update, update_pw_shield_visuals);
+        app.add_systems(Update, update_shield_visuals);
         app.add_systems(
             PostUpdate,
-            place_pw_shield_cards.before(TransformSystem::TransformPropagate),
+            place_shield_cards.before(TransformSystem::TransformPropagate),
         );
         Harness { app }
     }
@@ -129,19 +129,19 @@ impl Harness {
         }
     }
 
-    fn rigs(&mut self) -> Vec<PwShieldVisual> {
-        let mut q = self.app.world_mut().query::<&PwShieldVisual>();
+    fn rigs(&mut self) -> Vec<ShieldVisual> {
+        let mut q = self.app.world_mut().query::<&ShieldVisual>();
         q.iter(self.app.world()).copied().collect()
     }
 
-    fn rig_of(&mut self, bearer: Entity) -> Option<PwShieldVisual> {
+    fn rig_of(&mut self, bearer: Entity) -> Option<ShieldVisual> {
         self.rigs().into_iter().find(|r| r.bearer == bearer)
     }
 
     /// Every card on screen for a bearer, as (layer, world centre, world
     /// half-size, world rotation, weight).
-    fn cards(&mut self, bearer: Entity) -> Vec<(PwsLayer, Vec3, Vec2, Quat, f32)> {
-        let mut rigs = self.app.world_mut().query::<(&PwShieldVisual, &Children)>();
+    fn cards(&mut self, bearer: Entity) -> Vec<(ShieldLayer, Vec3, Vec2, Quat, f32)> {
+        let mut rigs = self.app.world_mut().query::<(&ShieldVisual, &Children)>();
         let kids: Vec<Entity> = rigs
             .iter(self.app.world())
             .filter(|(r, _)| r.bearer == bearer)
@@ -151,7 +151,7 @@ impl Harness {
         let materials = world.resource::<Assets<StandardMaterial>>();
         kids.into_iter()
             .filter_map(|k| {
-                let card = world.get::<PwShieldCard>(k)?;
+                let card = world.get::<ShieldCard>(k)?;
                 let g = world.get::<GlobalTransform>(k)?.compute_transform();
                 let m = world.get::<MeshMaterial3d<StandardMaterial>>(k)?;
                 let alpha = materials.get(&m.0)?.base_color.alpha();
@@ -166,7 +166,7 @@ impl Harness {
             .collect()
     }
 
-    fn card(&mut self, bearer: Entity, layer: PwsLayer) -> (Vec3, Vec2, Quat, f32) {
+    fn card(&mut self, bearer: Entity, layer: ShieldLayer) -> (Vec3, Vec2, Quat, f32) {
         let c = self
             .cards(bearer)
             .into_iter()
@@ -176,7 +176,7 @@ impl Harness {
     }
 
     /// Ticks until the bearer's rig is `at` seconds into `phase`.
-    fn run_to(&mut self, bearer: Entity, phase: PwsPhase, at: f32) {
+    fn run_to(&mut self, bearer: Entity, phase: ShieldPhase, at: f32) {
         for _ in 0..2000 {
             if let Some(r) = self.rig_of(bearer) {
                 if r.phase == phase && r.t >= at {
@@ -200,8 +200,8 @@ fn absorb(name: &str) -> Aura {
 }
 
 /// The client's rest half-size of a card on our rig.
-fn rest_half(layer: PwsLayer) -> Vec2 {
-    let q = if layer == PwsLayer::Rim {
+fn rest_half(layer: ShieldLayer) -> Vec2 {
+    let q = if layer == ShieldLayer::Rim {
         PWS_RIM_QUAD
     } else {
         PWS_STREAK_QUAD
@@ -233,7 +233,7 @@ fn the_aura_name_is_the_ability_name() {
 fn the_shield_arrives_late_tall_and_bright() {
     let (mut h, bearer, _) = standard_harness();
     h.give(bearer, PW_SHIELD_AURA_NAME);
-    h.run_to(bearer, PwsPhase::Birth, 0.10);
+    h.run_to(bearer, ShieldPhase::Birth, 0.10);
     let cards = h.cards(bearer);
     assert_eq!(cards.len(), 3, "rim, streak A and streak B");
     for (layer, _, half, _, alpha) in &cards {
@@ -244,8 +244,8 @@ fn the_shield_arrives_late_tall_and_bright() {
         assert!(*alpha < 1e-3, "{layer:?} lit before 200 ms: {alpha}");
     }
 
-    h.run_to(bearer, PwsPhase::Birth, 0.296);
-    for layer in PwsLayer::ALL {
+    h.run_to(bearer, ShieldPhase::Birth, 0.296);
+    for layer in ShieldLayer::ALL {
         let (_, half, _, alpha) = h.card(bearer, layer);
         let rest = rest_half(layer);
         assert!(
@@ -269,14 +269,14 @@ fn the_shield_arrives_late_tall_and_bright() {
 fn the_held_shield_is_faint_hollow_and_shimmers() {
     let (mut h, bearer, _) = standard_harness();
     h.give(bearer, PW_SHIELD_AURA_NAME);
-    h.run_to(bearer, PwsPhase::Loop, 0.0);
+    h.run_to(bearer, ShieldPhase::Loop, 0.0);
     let (mut a_lit, mut b_lit, mut frames) = (0, 0, 0);
     for _ in 0..80 {
         h.tick(1);
         let body = Vec3::new(0.0, 1.0, 0.0);
-        let (rim_at, rim_half, _, rim) = h.card(bearer, PwsLayer::Rim);
-        let (_, _, _, a) = h.card(bearer, PwsLayer::StreakA);
-        let (_, _, _, b) = h.card(bearer, PwsLayer::StreakB);
+        let (rim_at, rim_half, _, rim) = h.card(bearer, ShieldLayer::Rim);
+        let (_, _, _, a) = h.card(bearer, ShieldLayer::StreakA);
+        let (_, _, _, b) = h.card(bearer, ShieldLayer::StreakB);
         assert!(
             (0.059..=0.151).contains(&rim),
             "rim weight {rim} outside the client's 0.06–0.15"
@@ -303,7 +303,7 @@ fn the_held_shield_is_faint_hollow_and_shimmers() {
         "the shimmer never flickered: A {a_lit}, B {b_lit}"
     );
     assert_eq!(frames, 80);
-    assert_eq!(h.rig_of(bearer).unwrap().phase, PwsPhase::Loop);
+    assert_eq!(h.rig_of(bearer).unwrap().phase, ShieldPhase::Loop);
 }
 
 /// What the shield does as it goes, sampled per frame: (rim width ×, rim weight).
@@ -314,8 +314,8 @@ fn ending(h: &mut Harness, bearer: Entity) -> Vec<(f32, f32)> {
         if h.rig_of(bearer).is_none() {
             return out;
         }
-        let (_, half, _, alpha) = h.card(bearer, PwsLayer::Rim);
-        out.push((half.x / rest_half(PwsLayer::Rim).x, alpha));
+        let (_, half, _, alpha) = h.card(bearer, ShieldLayer::Rim);
+        out.push((half.x / rest_half(ShieldLayer::Rim).x, alpha));
     }
     panic!("the shield never finished going");
 }
@@ -331,7 +331,7 @@ fn break_and_expiry_share_one_swell_and_fade() {
     let (expired, _) = h.bearer(Vec3::new(3.0, 1.0, 0.0));
     h.give(broken, PW_SHIELD_AURA_NAME);
     h.give(expired, PW_SHIELD_AURA_NAME);
-    h.run_to(broken, PwsPhase::Loop, 0.2);
+    h.run_to(broken, ShieldPhase::Loop, 0.2);
     h.break_shield(broken);
     h.expire(expired);
 
@@ -343,8 +343,8 @@ fn break_and_expiry_share_one_swell_and_fade() {
             break;
         }
         let sample = |h: &mut Harness, who| {
-            let (_, half, _, alpha) = h.card(who, PwsLayer::Rim);
-            (half.x / rest_half(PwsLayer::Rim).x, alpha)
+            let (_, half, _, alpha) = h.card(who, ShieldLayer::Rim);
+            (half.x / rest_half(ShieldLayer::Rim).x, alpha)
         };
         both.0.push(sample(&mut h, broken));
         both.1.push(sample(&mut h, expired));
@@ -370,7 +370,7 @@ fn break_and_expiry_share_one_swell_and_fade() {
     // A dispel (the aura simply gone) takes the same road as an expiry.
     let (dispelled, _) = h.bearer(Vec3::new(0.0, 1.0, 6.0));
     h.give(dispelled, PW_SHIELD_AURA_NAME);
-    h.run_to(dispelled, PwsPhase::Loop, 0.2);
+    h.run_to(dispelled, ShieldPhase::Loop, 0.2);
     h.expire(dispelled);
     let seq = ending(&mut h, dispelled);
     assert!(seq.iter().any(|s| s.0 > 1.2) && seq.last().unwrap().1 < 0.01);
@@ -385,7 +385,7 @@ fn the_cards_stand_upright_facing_the_camera() {
     h.camera(eye, Vec3::new(2.0, 1.0, 3.0));
     let (bearer, _) = h.bearer(Vec3::new(2.0, 1.0, 3.0));
     h.give(bearer, PW_SHIELD_AURA_NAME);
-    h.run_to(bearer, PwsPhase::Loop, 0.1);
+    h.run_to(bearer, ShieldPhase::Loop, 0.1);
     for (layer, at, _, rot, _) in h.cards(bearer) {
         let normal = rot * Vec3::Z;
         let want = (eye - at).with_y(0.0).normalize();
@@ -435,7 +435,7 @@ fn the_cards_sort_in_front_of_the_body_at_every_pitch() {
             .unwrap()
             .translation = offset;
         h.give(bearer, PW_SHIELD_AURA_NAME);
-        h.run_to(bearer, PwsPhase::Loop, 0.0);
+        h.run_to(bearer, ShieldPhase::Loop, 0.0);
         for pitch in [0.1_f32, 0.4, 0.675, 1.0, 1.3, 1.5] {
             for yaw in [0.0_f32, 1.3, 2.9, 4.4] {
                 let d = 40.0;
@@ -485,7 +485,7 @@ fn the_cards_sort_in_front_of_the_body_at_every_pitch() {
 #[test]
 fn every_card_centre_sits_above_the_body_centre() {
     let feet_to_centre = 1.25;
-    for layer in PwsLayer::ALL {
+    for layer in ShieldLayer::ALL {
         for (w, hgt) in [
             (0.0, 0.0),
             (0.522, 1.11),
@@ -743,12 +743,12 @@ fn the_priests_own_hands_flash_when_it_shields_an_ally() {
 fn a_despawned_bearer_takes_its_shield_within_a_frame() {
     let (mut h, bearer, _) = standard_harness();
     h.give(bearer, PW_SHIELD_AURA_NAME);
-    h.run_to(bearer, PwsPhase::Loop, 0.1);
+    h.run_to(bearer, ShieldPhase::Loop, 0.1);
     assert_eq!(h.cards(bearer).len(), 3);
     h.app.world_mut().entity_mut(bearer).despawn();
     h.tick(1);
     assert!(h.rigs().is_empty(), "the rig outlived its bearer");
-    let mut cards = h.app.world_mut().query::<&PwShieldCard>();
+    let mut cards = h.app.world_mut().query::<&ShieldCard>();
     assert_eq!(
         cards.iter(h.app.world()).count(),
         0,
@@ -762,7 +762,7 @@ fn a_despawned_bearer_takes_its_shield_within_a_frame() {
 fn a_dying_bearer_lets_its_shield_go() {
     let (mut h, bearer, _) = standard_harness();
     h.give(bearer, PW_SHIELD_AURA_NAME);
-    h.run_to(bearer, PwsPhase::Loop, 0.1);
+    h.run_to(bearer, ShieldPhase::Loop, 0.1);
     h.app
         .world_mut()
         .get_mut::<Combatant>(bearer)

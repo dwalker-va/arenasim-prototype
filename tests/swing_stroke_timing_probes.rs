@@ -386,7 +386,7 @@ fn heroic_strike_follows_the_heavy_weapons_stroke() {
     }
     let landed = first_particle.expect("the empowered swing never landed");
     assert!(
-        landed >= RELEASE_3_8 - DT && landed <= RELEASE_3_8 + 3.0 * DT,
+        (RELEASE_3_8 - DT..=RELEASE_3_8 + 3.0 * DT).contains(&landed),
         "the landing fired {landed}s in; the 3.8s blade arrives at {RELEASE_3_8}s \
          (the floor stroke's at {RELEASE_FLOOR}s)"
     );

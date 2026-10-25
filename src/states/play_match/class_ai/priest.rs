@@ -2167,6 +2167,10 @@ fn free_tick(
     } else {
         MovementTrigger::PressuredExit
     };
+    // DIP → FREE is always an abort, and the posture evaluation has already
+    // traced it as `DipAbort`: tracing the same transition again here would
+    // record it twice, the second time as a `PressuredExit` it is not.
+    let trace_exit = transitioned && prev != Posture::Dip;
 
     // Clear any directive committed under the prior posture on entry to FREE
     // (mirrors `paladin_free_tick`). A PRESSURED Direction walk carries a
@@ -2211,7 +2215,7 @@ fn free_tick(
         // DEGENERATE (R5/AE4): no formation directive; fall through to the
         // legacy ladder. Exit transitions still emit — goal_kind
         // Entity records "legacy target pursuit governs".
-        if transitioned {
+        if trace_exit {
             if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
                 builder.transition(
                     prev.into(),
@@ -2266,14 +2270,16 @@ fn free_tick(
         // legacy pursuit would drag the Priest forward into fresh pressure.
         issue(commands);
         state.last_point = Some(point_xz);
-        if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
-            builder.transition(
-                prev.into(),
-                TracePosture::Free,
-                exit_trigger,
-                MovementGoalKind::Point,
-            );
-            builder.finish();
+        if trace_exit {
+            if let Some(mut builder) = start_movement_event(decision_trace, ctx) {
+                builder.transition(
+                    prev.into(),
+                    TracePosture::Free,
+                    exit_trigger,
+                    MovementGoalKind::Point,
+                );
+                builder.finish();
+            }
         }
     } else if (moved && !near) || stale {
         // Formation goal moved enough to re-commit (engaged-ally centroid

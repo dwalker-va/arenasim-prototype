@@ -26,9 +26,11 @@ pub fn process_divine_shield(
     // The immunity aura is data-driven from `abilities.ron` (DivineShield's
     // `applies_aura`) so it can be tuned without a recompile, like every other
     // ability. Fallbacks preserve the historical values if the config is missing.
-    let ds_aura = abilities
-        .get(&AbilityType::DivineShield)
-        .and_then(|c| c.applies_aura.as_ref());
+    let ds_def = abilities.get_unchecked(&AbilityType::DivineShield);
+    // The aura, the log lines and the floating text all carry the ability's
+    // RON `name` — the name the renderer keys the bubble on.
+    let ds_name = ds_def.name.as_str();
+    let ds_aura = ds_def.applies_aura.as_ref();
     let immunity_duration = ds_aura.map(|a| a.duration).unwrap_or(12.0);
     let immunity_magnitude = ds_aura.map(|a| a.magnitude).unwrap_or(1.0);
     let immunity_break = ds_aura.map(|a| a.break_on_damage).unwrap_or(-1.0);
@@ -51,7 +53,7 @@ pub fn process_divine_shield(
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
                 caster: Some(pending.caster),
-                ability_name: "Divine Shield".to_string(),
+                ability_name: ds_name.to_string(),
                 spell_school: None,
                 applied_this_frame: false,
                 backlash_damage: None,
@@ -97,7 +99,7 @@ pub fn process_divine_shield(
             // Log activation
             combat_log.log(
                 CombatLogEventType::Buff,
-                format!("{} uses Divine Shield", caster_id),
+                format!("{} uses {}", caster_id, ds_name),
             );
 
             // Log debuff removal if any
@@ -105,8 +107,9 @@ pub fn process_divine_shield(
                 combat_log.log(
                     CombatLogEventType::Buff,
                     format!(
-                        "{}'s Divine Shield removes {} debuff{}",
+                        "{}'s {} removes {} debuff{}",
                         caster_id,
+                        ds_name,
                         debuffs_removed,
                         if debuffs_removed > 1 { "s" } else { "" }
                     ),
@@ -114,9 +117,10 @@ pub fn process_divine_shield(
             }
 
             info!(
-                "Team {} {} activates Divine Shield (removed {} debuffs)",
+                "Team {} {} activates {} (removed {} debuffs)",
                 pending.caster_team,
                 pending.caster_class.name(),
+                ds_name,
                 debuffs_removed
             );
 
@@ -132,7 +136,7 @@ pub fn process_divine_shield(
             commands.spawn((
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
-                    text: "Divine Shield".to_string(),
+                    text: ds_name.to_string(),
                     color: crate::ui::theme::fct::INVULNERABLE,
                     lifetime: 2.0,
                     vertical_offset: offset_y,

@@ -1400,7 +1400,9 @@ turns "why didn't X cast Y?" from a code-read into a `jq` query.
 ```bash
 # Single match — opt in via --trace-mode on
 cargo run --release -- --headless /tmp/test.json --trace-mode on
-# Trace lands at match_logs/match_<timestamp>_trace.jsonl
+# Trace lands beside the report, with its stem: match_logs/match_<secs>_<pid>.txt
+# and match_logs/match_<secs>_<pid>_trace.jsonl, or <out>_trace.jsonl beside an
+# --output <out>.txt — so concurrent runs never overwrite each other's
 
 # Matrix run — trace is on by default; opt out with --trace-mode off
 cargo run --release -- --matrix 100
@@ -2083,8 +2085,10 @@ requests: a run is 16-18 minutes cached and 39 cold, and many PRs are
 docs-only. Nothing blocks a merge — a red run on `main` is a signal to go and
 look, not a gate.
 
-**Covers:** the default `cargo test` set (1158 tests) plus a release build of
-the shipping binary — so `registration_audit`, `aura_catalog_audit`,
+**Covers:** the whole default `cargo test` set — every test not `#[ignore]`d,
+in every target — plus a release build of the shipping binary. (No count is
+quoted here: one goes stale with every suite added, and a stale count reads
+the same as a suite that stopped running.) So `registration_audit`, `aura_catalog_audit`,
 `loadout_order_audit`, the exhaustiveness tests, the movement probes,
 `determinism_pin` and the db2 fixture suite hold on every code push to `main`
 instead of only when someone remembers to run them.

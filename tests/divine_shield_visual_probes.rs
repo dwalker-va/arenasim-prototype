@@ -1,4 +1,4 @@
-//! Probes for Divine Shield's client model (`rendering/effects/pw_shield.rs`,
+//! Probes for Divine Shield's client model (`rendering/effects/shield.rs`,
 //! AS-359): `divineshield_low_base.m2` on our rig, beside Power Word: Shield.
 //!
 //! What tells the two apart in the client is not the outline, which they
@@ -26,15 +26,15 @@ use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
     ActiveAuras, Aura, AuraType, ClientParticle, Combatant, DivineShieldPending, HealCastHand,
-    HealCastKind, ParticleFacing, PwShieldCard, PwShieldVisual, PwsLayer, PwsPhase, ShieldKind,
+    HealCastKind, ParticleFacing, ShieldCard, ShieldKind, ShieldLayer, ShieldPhase, ShieldVisual,
     VisualBody,
 };
 use arenasim::states::play_match::systems::process_divine_shield;
 use arenasim::states::play_match::{
-    animate_client_particles, ds_halo_on, ds_sparkle_rate, particle_rotation,
-    place_pw_shield_cards, shield_card_extent, shield_layer_rgb, spawn_divine_shield_cast_hands,
-    update_pw_shield_visuals, HaloMode, DIVINE_SHIELD_AURA_NAME, DS_HALO_MODE, DS_SPARKLE_HEIGHT,
-    PWS_CLIENT_TO_RIG, PW_SHIELD_AURA_NAME,
+    animate_client_particles, ds_halo_on, ds_sparkle_rate, particle_rotation, place_shield_cards,
+    shield_card_extent, shield_layer_rgb, spawn_divine_shield_cast_hands, update_shield_visuals,
+    HaloMode, DIVINE_SHIELD_AURA_NAME, DS_HALO_MODE, DS_SPARKLE_HEIGHT, PWS_CLIENT_TO_RIG,
+    PW_SHIELD_AURA_NAME,
 };
 use arenasim::CharacterClass;
 
@@ -63,11 +63,11 @@ impl Harness {
         app.insert_resource(AbilityDefinitions::default());
         app.add_systems(
             Update,
-            (update_pw_shield_visuals, animate_client_particles).chain(),
+            (update_shield_visuals, animate_client_particles).chain(),
         );
         app.add_systems(
             PostUpdate,
-            place_pw_shield_cards.before(TransformSystem::TransformPropagate),
+            place_shield_cards.before(TransformSystem::TransformPropagate),
         );
         let mut h = Harness { app };
         h.app.world_mut().spawn((
@@ -122,19 +122,19 @@ impl Harness {
         }
     }
 
-    fn rigs(&mut self) -> Vec<PwShieldVisual> {
-        let mut q = self.app.world_mut().query::<&PwShieldVisual>();
+    fn rigs(&mut self) -> Vec<ShieldVisual> {
+        let mut q = self.app.world_mut().query::<&ShieldVisual>();
         q.iter(self.app.world()).copied().collect()
     }
 
-    fn rig(&mut self, bearer: Entity, kind: ShieldKind) -> Option<PwShieldVisual> {
+    fn rig(&mut self, bearer: Entity, kind: ShieldKind) -> Option<ShieldVisual> {
         self.rigs()
             .into_iter()
             .find(|r| r.bearer == bearer && r.kind == kind)
     }
 
     /// Ticks until the bearer's `kind` rig is `at` seconds into `phase`.
-    fn run_to(&mut self, bearer: Entity, kind: ShieldKind, phase: PwsPhase, at: f32) {
+    fn run_to(&mut self, bearer: Entity, kind: ShieldKind, phase: ShieldPhase, at: f32) {
         for _ in 0..2000 {
             if let Some(r) = self.rig(bearer, kind) {
                 if r.phase == phase && r.t >= at {
@@ -148,7 +148,7 @@ impl Harness {
 
     /// Every card of one rig on screen.
     fn cards(&mut self, bearer: Entity, kind: ShieldKind) -> Vec<Card> {
-        let mut rigs = self.app.world_mut().query::<(&PwShieldVisual, &Children)>();
+        let mut rigs = self.app.world_mut().query::<(&ShieldVisual, &Children)>();
         let kids: Vec<Entity> = rigs
             .iter(self.app.world())
             .filter(|(r, _)| r.bearer == bearer && r.kind == kind)
@@ -159,7 +159,7 @@ impl Harness {
         let images = world.resource::<Assets<Image>>();
         kids.into_iter()
             .filter_map(|k| {
-                let card = world.get::<PwShieldCard>(k)?;
+                let card = world.get::<ShieldCard>(k)?;
                 let g = world.get::<GlobalTransform>(k)?.compute_transform();
                 let m = materials.get(&world.get::<MeshMaterial3d<StandardMaterial>>(k)?.0)?;
                 let image = images.get(m.base_color_texture.as_ref()?)?;
@@ -175,7 +175,7 @@ impl Harness {
             .collect()
     }
 
-    fn card(&mut self, bearer: Entity, kind: ShieldKind, layer: PwsLayer) -> Card {
+    fn card(&mut self, bearer: Entity, kind: ShieldKind, layer: ShieldLayer) -> Card {
         self.cards(bearer, kind)
             .into_iter()
             .find(|c| c.layer == layer)
@@ -223,7 +223,7 @@ impl Harness {
 
 #[derive(Clone)]
 struct Card {
-    layer: PwsLayer,
+    layer: ShieldLayer,
     at: Vec3,
     half: Vec2,
     weight: f32,
@@ -325,8 +325,8 @@ fn divine_shield_wears_the_client_cards_not_the_sphere() {
     let mut h = Harness::new();
     let paladin = h.paladin(BODY);
     h.give(paladin, divine_shield());
-    h.run_to(paladin, ShieldKind::DivineShield, PwsPhase::Loop, 0.1);
-    let mut layers: Vec<PwsLayer> = h
+    h.run_to(paladin, ShieldKind::DivineShield, ShieldPhase::Loop, 0.1);
+    let mut layers: Vec<ShieldLayer> = h
         .cards(paladin, ShieldKind::DivineShield)
         .iter()
         .map(|c| c.layer)
@@ -335,11 +335,11 @@ fn divine_shield_wears_the_client_cards_not_the_sphere() {
     assert_eq!(
         layers,
         vec![
-            PwsLayer::Rim,
-            PwsLayer::StreakA,
-            PwsLayer::StreakB,
-            PwsLayer::FillOuter,
-            PwsLayer::FillInner
+            ShieldLayer::Rim,
+            ShieldLayer::StreakA,
+            ShieldLayer::StreakB,
+            ShieldLayer::FillOuter,
+            ShieldLayer::FillInner
         ]
     );
 }
@@ -352,7 +352,7 @@ fn the_bubble_arrives_late_as_a_blue_white_flash_over_the_body() {
     let mut h = Harness::new();
     let paladin = h.paladin(BODY);
     h.give(paladin, divine_shield());
-    h.run_to(paladin, ShieldKind::DivineShield, PwsPhase::Birth, 0.10);
+    h.run_to(paladin, ShieldKind::DivineShield, ShieldPhase::Birth, 0.10);
     for c in h.cards(paladin, ShieldKind::DivineShield) {
         assert!(
             c.weight < 1e-3 && c.half.max_element() < 1e-3,
@@ -361,8 +361,8 @@ fn the_bubble_arrives_late_as_a_blue_white_flash_over_the_body() {
         );
     }
     assert!(h.sparkles().is_empty(), "sparkles before the pop");
-    h.run_to(paladin, ShieldKind::DivineShield, PwsPhase::Birth, 0.296);
-    let flash: f32 = PwsLayer::FILL
+    h.run_to(paladin, ShieldKind::DivineShield, ShieldPhase::Birth, 0.296);
+    let flash: f32 = ShieldLayer::FILL
         .iter()
         .map(|&l| {
             h.card(paladin, ShieldKind::DivineShield, l)
@@ -370,7 +370,7 @@ fn the_bubble_arrives_late_as_a_blue_white_flash_over_the_body() {
         })
         .sum();
     assert!(flash > 1.0, "the body did not flash at the pop: {flash:.2}");
-    let rim = h.card(paladin, ShieldKind::DivineShield, PwsLayer::Rim);
+    let rim = h.card(paladin, ShieldKind::DivineShield, ShieldLayer::Rim);
     assert!(
         rim.half.y / rim.half.x > 2.0,
         "the pop is not tall and narrow"
@@ -389,13 +389,13 @@ fn the_bubble_fills_the_body_blue_where_pws_is_hollow() {
     let target_body = Vec3::new(5.0, 1.0, 0.0);
     h.give(paladin, divine_shield());
     h.give(priest_target, pw_shield());
-    h.run_to(paladin, ShieldKind::DivineShield, PwsPhase::Loop, 0.0);
+    h.run_to(paladin, ShieldKind::DivineShield, ShieldPhase::Loop, 0.0);
     for _ in 0..80 {
         h.tick(1);
         let ds = h.cards(paladin, ShieldKind::DivineShield);
         let glow: f32 = ds
             .iter()
-            .filter(|c| PwsLayer::FILL.contains(&c.layer))
+            .filter(|c| ShieldLayer::FILL.contains(&c.layer))
             .map(|c| c.light_over(BODY))
             .sum();
         assert!(
@@ -404,18 +404,22 @@ fn the_bubble_fills_the_body_blue_where_pws_is_hollow() {
         );
         for c in &ds {
             match c.layer {
-                PwsLayer::FillOuter | PwsLayer::FillInner => assert!(is_blue(c.rgb), "{:?}", c.rgb),
-                PwsLayer::StreakA => assert!(
+                ShieldLayer::FillOuter | ShieldLayer::FillInner => {
+                    assert!(is_blue(c.rgb), "{:?}", c.rgb)
+                }
+                ShieldLayer::StreakA => assert!(
                     c.rgb.blue > 0.9 && c.rgb.green > 0.8 && c.rgb.red < 0.5,
                     "streak A is not cyan: {:?}",
                     c.rgb
                 ),
-                PwsLayer::Rim | PwsLayer::StreakB => assert!(is_gold(c.rgb), "{:?}", c.rgb),
-                PwsLayer::Icicles | PwsLayer::Glint => panic!("Divine Shield wears no icicles"),
+                ShieldLayer::Rim | ShieldLayer::StreakB => assert!(is_gold(c.rgb), "{:?}", c.rgb),
+                ShieldLayer::Icicles | ShieldLayer::Glint => {
+                    panic!("Divine Shield wears no icicles")
+                }
             }
         }
         // The rim keeps PW:S's hollow and clears the body.
-        let rim = ds.iter().find(|c| c.layer == PwsLayer::Rim).unwrap();
+        let rim = ds.iter().find(|c| c.layer == ShieldLayer::Rim).unwrap();
         assert!(0.5 * rim.half.x >= BODY_RADIUS + 0.1);
         assert_eq!(rim.texel_at(BODY), 0.0, "the rim is not hollow");
 
@@ -443,7 +447,7 @@ fn gold_sparkles_pour_off_the_bubble_and_none_off_pws() {
     let mut h = Harness::new();
     let paladin = h.paladin(BODY);
     h.give(paladin, divine_shield());
-    h.run_to(paladin, ShieldKind::DivineShield, PwsPhase::Loop, 0.0);
+    h.run_to(paladin, ShieldKind::DivineShield, ShieldPhase::Loop, 0.0);
     h.tick(30);
     let waist = BODY + Vec3::Y * (DS_SPARKLE_HEIGHT * PWS_CLIENT_TO_RIG - 1.25);
     let mut counts = Vec::new();
@@ -503,7 +507,12 @@ fn gold_sparkles_pour_off_the_bubble_and_none_off_pws() {
     let mut control = Harness::new();
     let shielded = control.paladin(BODY);
     control.give(shielded, pw_shield());
-    control.run_to(shielded, ShieldKind::PowerWordShield, PwsPhase::Loop, 0.3);
+    control.run_to(
+        shielded,
+        ShieldKind::PowerWordShield,
+        ShieldPhase::Loop,
+        0.3,
+    );
     assert!(control.particles().is_empty(), "PW:S threw particles");
 }
 
@@ -518,7 +527,7 @@ fn the_death_thins_the_sparkles_and_drops_the_halo() {
     let mut h = Harness::new();
     let paladin = h.paladin(BODY);
     h.give(paladin, divine_shield());
-    h.run_to(paladin, ShieldKind::DivineShield, PwsPhase::Loop, 0.0);
+    h.run_to(paladin, ShieldKind::DivineShield, ShieldPhase::Loop, 0.0);
     for _ in 0..60 {
         h.tick(1);
         assert!(h.halos().is_empty(), "a halo fell while the bubble held");
@@ -584,7 +593,7 @@ fn the_death_thins_the_sparkles_and_drops_the_halo() {
 fn body_glow(h: &mut Harness, paladin: Entity) -> f32 {
     h.cards(paladin, ShieldKind::DivineShield)
         .iter()
-        .filter(|c| PwsLayer::FILL.contains(&c.layer))
+        .filter(|c| ShieldLayer::FILL.contains(&c.layer))
         .map(|c| c.light_over(BODY))
         .sum()
 }
@@ -594,24 +603,24 @@ fn body_glow(h: &mut Harness, paladin: Entity) -> f32 {
 /// halo under each reading.
 #[test]
 fn the_emitter_tracks_are_the_clients() {
-    assert_eq!(ds_sparkle_rate(PwsPhase::Birth, 250.0), 0.0);
-    assert_eq!(ds_sparkle_rate(PwsPhase::Birth, 600.0), 60.0);
-    assert_eq!(ds_sparkle_rate(PwsPhase::Loop, 100.0), 60.0);
-    assert!((ds_sparkle_rate(PwsPhase::Death, 550.0) - 30.0).abs() < 1e-3);
-    assert_eq!(ds_sparkle_rate(PwsPhase::Death, 1100.0), 0.0);
+    assert_eq!(ds_sparkle_rate(ShieldPhase::Birth, 250.0), 0.0);
+    assert_eq!(ds_sparkle_rate(ShieldPhase::Birth, 600.0), 60.0);
+    assert_eq!(ds_sparkle_rate(ShieldPhase::Loop, 100.0), 60.0);
+    assert!((ds_sparkle_rate(ShieldPhase::Death, 550.0) - 30.0).abs() < 1e-3);
+    assert_eq!(ds_sparkle_rate(ShieldPhase::Death, 1100.0), 0.0);
     for (mode, held, early_death, late_death) in [
         (HaloMode::Off, false, false, false),
         (HaloMode::DeathOnly, false, true, false),
         (HaloMode::WholeShield, true, true, false),
     ] {
-        assert_eq!(ds_halo_on(mode, PwsPhase::Loop, 100.0), held, "{mode:?}");
+        assert_eq!(ds_halo_on(mode, ShieldPhase::Loop, 100.0), held, "{mode:?}");
         assert_eq!(
-            ds_halo_on(mode, PwsPhase::Death, 200.0),
+            ds_halo_on(mode, ShieldPhase::Death, 200.0),
             early_death,
             "{mode:?}"
         );
         assert_eq!(
-            ds_halo_on(mode, PwsPhase::Death, 400.0),
+            ds_halo_on(mode, ShieldPhase::Death, 400.0),
             late_death,
             "{mode:?}"
         );
@@ -629,9 +638,9 @@ fn a_bubbled_paladin_wears_a_priests_shield_too() {
     let mut h = Harness::new();
     let paladin = h.paladin(BODY);
     h.give(paladin, divine_shield());
-    h.run_to(paladin, ShieldKind::DivineShield, PwsPhase::Loop, 0.2);
+    h.run_to(paladin, ShieldKind::DivineShield, ShieldPhase::Loop, 0.2);
     h.give(paladin, pw_shield());
-    h.run_to(paladin, ShieldKind::PowerWordShield, PwsPhase::Loop, 0.1);
+    h.run_to(paladin, ShieldKind::PowerWordShield, ShieldPhase::Loop, 0.1);
 
     let ds = h.cards(paladin, ShieldKind::DivineShield);
     let pws = h.cards(paladin, ShieldKind::PowerWordShield);
@@ -643,8 +652,8 @@ fn a_bubbled_paladin_wears_a_priests_shield_too() {
             c.layer
         );
     }
-    let ds_rim = ds.iter().find(|c| c.layer == PwsLayer::Rim).unwrap();
-    let pws_rim = pws.iter().find(|c| c.layer == PwsLayer::Rim).unwrap();
+    let ds_rim = ds.iter().find(|c| c.layer == ShieldLayer::Rim).unwrap();
+    let pws_rim = pws.iter().find(|c| c.layer == ShieldLayer::Rim).unwrap();
     assert!(
         (ds_rim.at.y - pws_rim.at.y).abs() < 0.2,
         "the two outlines do not coincide"
@@ -660,18 +669,18 @@ fn a_bubbled_paladin_wears_a_priests_shield_too() {
     assert!(h.rig(paladin, ShieldKind::DivineShield).is_none());
     assert_eq!(
         h.rig(paladin, ShieldKind::PowerWordShield).unwrap().phase,
-        PwsPhase::Loop
+        ShieldPhase::Loop
     );
 
     // Reverse: a fresh bubble under a shield that then breaks.
     h.give(paladin, divine_shield());
-    h.run_to(paladin, ShieldKind::DivineShield, PwsPhase::Loop, 0.1);
+    h.run_to(paladin, ShieldKind::DivineShield, ShieldPhase::Loop, 0.1);
     h.remove(paladin, PW_SHIELD_AURA_NAME);
     h.tick(75);
     assert!(h.rig(paladin, ShieldKind::PowerWordShield).is_none());
     assert_eq!(
         h.rig(paladin, ShieldKind::DivineShield).unwrap().phase,
-        PwsPhase::Loop
+        ShieldPhase::Loop
     );
 }
 
@@ -683,7 +692,7 @@ fn a_bubbled_paladin_wears_a_priests_shield_too() {
 /// `the_cards_sort_in_front_of_the_body_at_every_pitch` rests on the same).
 #[test]
 fn every_bubble_card_centre_sits_above_the_body_centre() {
-    for layer in PwsLayer::ALL.into_iter().chain(PwsLayer::FILL) {
+    for layer in ShieldLayer::ALL.into_iter().chain(ShieldLayer::FILL) {
         for (w, hgt) in [
             (0.0, 0.0),
             (0.522, 1.11),
@@ -704,15 +713,17 @@ fn every_bubble_card_centre_sits_above_the_body_centre() {
 /// The two colours of the bubble's own are blue, and the cards both shields
 /// wear keep PW:S's gold: the only hues spent are the client's.
 #[test]
+// 0.318 is a client colour channel, not an approximation of 1/pi.
+#[allow(clippy::approx_constant)]
 fn the_bubble_spends_only_its_client_blues() {
-    for layer in PwsLayer::ALL.into_iter().chain(PwsLayer::FILL) {
+    for layer in ShieldLayer::ALL.into_iter().chain(ShieldLayer::FILL) {
         let ds = shield_layer_rgb(ShieldKind::DivineShield, layer);
         let pws = shield_layer_rgb(ShieldKind::PowerWordShield, layer);
         match layer {
-            PwsLayer::Rim | PwsLayer::StreakB => assert_eq!(ds, pws, "{layer:?}"),
-            PwsLayer::StreakA => assert_eq!(ds, [0.318, 0.91, 1.0]),
-            PwsLayer::FillOuter | PwsLayer::FillInner => assert_eq!(ds, [0.318, 0.396, 1.0]),
-            PwsLayer::Icicles | PwsLayer::Glint => unreachable!("not a Divine Shield layer"),
+            ShieldLayer::Rim | ShieldLayer::StreakB => assert_eq!(ds, pws, "{layer:?}"),
+            ShieldLayer::StreakA => assert_eq!(ds, [0.318, 0.91, 1.0]),
+            ShieldLayer::FillOuter | ShieldLayer::FillInner => assert_eq!(ds, [0.318, 0.396, 1.0]),
+            ShieldLayer::Icicles | ShieldLayer::Glint => unreachable!("not a Divine Shield layer"),
         }
     }
 }
@@ -728,7 +739,7 @@ fn the_bubble_goes_with_its_bearer() {
     let gone = h.paladin(Vec3::new(6.0, 1.0, 0.0));
     h.give(dying, divine_shield());
     h.give(gone, divine_shield());
-    h.run_to(dying, ShieldKind::DivineShield, PwsPhase::Loop, 0.1);
+    h.run_to(dying, ShieldKind::DivineShield, ShieldPhase::Loop, 0.1);
     h.app
         .world_mut()
         .get_mut::<Combatant>(dying)
@@ -739,7 +750,7 @@ fn the_bubble_goes_with_its_bearer() {
     assert!(h.rig(gone, ShieldKind::DivineShield).is_none());
     assert_eq!(
         h.rig(dying, ShieldKind::DivineShield).unwrap().phase,
-        PwsPhase::Death
+        ShieldPhase::Death
     );
     h.tick(70);
     assert!(h.rigs().is_empty());

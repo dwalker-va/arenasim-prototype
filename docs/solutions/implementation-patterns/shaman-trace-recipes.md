@@ -21,7 +21,7 @@ Shaman behavior. Generate a trace with `--trace-mode on`:
 
 ```bash
 cargo run --release -- --headless /tmp/test.json --trace-mode on
-# Trace at match_logs/match_<timestamp>_trace.jsonl; combat log at match_logs/match_<timestamp>.txt
+# Trace at match_logs/match_<secs>_<pid>_trace.jsonl; combat log at match_logs/match_<secs>_<pid>.txt
 T=match_logs/match_*_trace.jsonl
 LOG=match_logs/match_*.txt
 ```

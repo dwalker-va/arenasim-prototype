@@ -964,13 +964,13 @@ mod tests {
 
     #[test]
     fn runs_follow_the_circle_round() {
-        assert_eq!(runs(&vec![true; RING_SAMPLES]), vec![(0, RING_SAMPLES)]);
+        assert_eq!(runs(&[true; RING_SAMPLES]), vec![(0, RING_SAMPLES)]);
         // A run across sample 0.
         let wrapped: Vec<usize> = (68..72).chain(0..5).collect();
         assert_eq!(runs(&mask(&wrapped)), vec![(68, 9)]);
         // Two runs, in angle order.
         assert_eq!(runs(&mask(&[3, 4, 10])), vec![(3, 2), (10, 1)]);
-        assert!(runs(&vec![false; RING_SAMPLES]).is_empty());
+        assert!(runs(&[false; RING_SAMPLES]).is_empty());
     }
 
     /// One teammate behind the pillar's ring: the samples that see it form one

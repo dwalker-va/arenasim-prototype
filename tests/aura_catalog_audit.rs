@@ -119,6 +119,12 @@ const ALLOWLIST: &[(&str, &str)] = &[
 /// below, the scan needs to get smarter rather than the list longer.
 const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
     (
+        "src/states/play_match/effects/divine_shield.rs",
+        "ability_name: ds_name.to_string()",
+        "Divine Shield's damage immunity, named after its own abilities.ron entry — which \
+         carries an `applies_aura` block, so the catalog's RON half already has the page.",
+    ),
+    (
         "src/states/play_match/class_ai/paladin.rs",
         "ability_name: def.name.to_string()",
         "Hammer of Justice's stun, named after its own abilities.ron entry — which carries an \
@@ -202,10 +208,6 @@ const MUST_CONTRIBUTE: &[(&str, &str)] = &[
     (
         "src/states/play_match/effects/berserker_rage.rs",
         "Berserker Rage's fear immunity",
-    ),
-    (
-        "src/states/play_match/effects/divine_shield.rs",
-        "Divine Shield's damage immunity",
     ),
     (
         "src/states/play_match/shadow_sight.rs",

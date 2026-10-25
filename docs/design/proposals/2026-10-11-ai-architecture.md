@@ -304,7 +304,8 @@ Never stand in a seed for it.
   over seconds. A one-tick scene cannot assert "the Druid walks round the
   pillar to its dying Mage".
 - **What it is.** `run_headless_match_staged(config, stage)` in
-  `src/headless/runner.rs`. It spawns as usual, skips the countdown, applies a
+  `src/headless/runner.rs`. It spawns as usual, plays the countdown (so the
+  pre-match buffs land; as built in AS-273), applies a
   `stage: impl FnOnce(&mut World)` that places units and sets health, auras and
   cooldowns, then runs the real `add_core_combat_systems` schedule under the
   existing frame observer.

@@ -201,7 +201,7 @@ Combat systems (in `systems.rs`) run in both modes. Visual systems (in `src/stat
 
 ### 7. Name Components After Their Visual Shape
 
-Convention: `DrainLifeBeam`, `DispelBurst`, `PwShieldCard` — not `HealingEffect` or `DispelAnimation`. The name should describe what the spectator sees.
+Convention: `DrainLifeBeam`, `DispelBurst`, `ShieldCard` — not `HealingEffect` or `DispelAnimation`. The name should describe what the spectator sees.
 
 ### 8. Emissive Values Need 2x+ Scaling
 

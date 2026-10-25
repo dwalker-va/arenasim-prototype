@@ -131,8 +131,10 @@ impl Harness {
         let movement = MovementConfig::default();
         let mut combat_log = CombatLog::default();
         let mut game_rng = GameRng::from_seed(7);
-        let mut trace = DecisionTrace::default();
-        trace.current_sim_time = 50.0 / 6.0 + 0.02;
+        let mut trace = DecisionTrace {
+            current_sim_time: 50.0 / 6.0 + 0.02,
+            ..Default::default()
+        };
 
         let my_pos = Vec3::new(-30.0, 0.0, 0.0);
         let mut combatant = Combatant::new(1, 0, CharacterClass::Hunter);

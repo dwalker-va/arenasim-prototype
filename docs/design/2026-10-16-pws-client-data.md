@@ -135,7 +135,7 @@ Not a gap: **colour.** Both are Holy gold, which is the existing Holy palette
 
 The user signed off on the bench at its default values: all three layers, the birth pop
 and the death swell, at the client's own numbers. The `PWS_*` constants in
-`rendering/effects/pw_shield.rs` carry the bench's numeric knobs under the same names.
+`rendering/effects/shield.rs` carry the bench's numeric knobs under the same names.
 The layer toggles have no constant because every layer is kept, and the bench's break
 burst was left out.
 

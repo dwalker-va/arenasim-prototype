@@ -18,7 +18,8 @@ pub struct Landed {
     /// The app's clock, countdown included: a frame's `sim_time` and the
     /// combat log's stamps.
     pub app: f32,
-    /// The combat clock: the trace's `sim_time` (and the AI's `now`).
+    /// The combat clock: the trace's `sim_time`. Not the posture machines'
+    /// `now`, which is the app clock above.
     pub combat: f32,
     /// The trace's `frame` counter on the frame the stage landed on.
     pub trace_frame: u64,

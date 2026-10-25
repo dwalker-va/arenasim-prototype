@@ -233,12 +233,12 @@ impl DeathAnimation {
     }
 }
 
-/// Lifecycle phase of a [`PwShieldVisual`]: the three sequences the client's
+/// Lifecycle phase of a [`ShieldVisual`]: the three sequences the client's
 /// three shield models share, `holydivineshield_state_base.m2` (Power Word:
 /// Shield), `divineshield_low_base.m2` (Divine Shield) and
-/// `iceshield_state.m2` (Ice Barrier) (`rendering/effects/pw_shield.rs`).
+/// `iceshield_state.m2` (Ice Barrier) (`rendering/effects/shield.rs`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum PwsPhase {
+pub enum ShieldPhase {
     /// Sequence 0, 700 ms: the 200 ms delay, then the tall full-strength pop.
     Birth,
     /// Sequence 158, 633 ms, repeating: the faint shimmer and wobble.
@@ -248,7 +248,7 @@ pub enum PwsPhase {
     Death,
 }
 
-/// Which client shield a [`PwShieldVisual`] draws. The three models share their
+/// Which client shield a [`ShieldVisual`] draws. The three models share their
 /// skeleton, cards and timing. Divine Shield adds a blue fill, recolours
 /// streak A cyan and throws off sparkles
 /// (`docs/design/2026-10-16-divine-shield-client-data.md`); Ice Barrier dresses
@@ -272,37 +272,37 @@ impl ShieldKind {
     ];
 
     /// The cards this shield wears, in draw order.
-    pub fn layers(self) -> &'static [PwsLayer] {
+    pub fn layers(self) -> &'static [ShieldLayer] {
         match self {
-            ShieldKind::PowerWordShield => &PwsLayer::ALL,
+            ShieldKind::PowerWordShield => &ShieldLayer::ALL,
             ShieldKind::DivineShield => &[
-                PwsLayer::FillOuter,
-                PwsLayer::FillInner,
-                PwsLayer::Rim,
-                PwsLayer::StreakA,
-                PwsLayer::StreakB,
+                ShieldLayer::FillOuter,
+                ShieldLayer::FillInner,
+                ShieldLayer::Rim,
+                ShieldLayer::StreakA,
+                ShieldLayer::StreakB,
             ],
             ShieldKind::IceBarrier => &[
-                PwsLayer::Rim,
-                PwsLayer::StreakA,
-                PwsLayer::StreakB,
-                PwsLayer::Icicles,
-                PwsLayer::Glint,
+                ShieldLayer::Rim,
+                ShieldLayer::StreakA,
+                ShieldLayer::StreakB,
+                ShieldLayer::Icicles,
+                ShieldLayer::Glint,
             ],
         }
     }
 }
 
-/// One client shield on one bearer: the rig whose [`PwShieldCard`] children
+/// One client shield on one bearer: the rig whose [`ShieldCard`] children
 /// draw it. A bearer may wear one of each [`ShieldKind`] at once (a Priest's
 /// shield on a bubbled Paladin). Graphical-only; spawned and advanced by
-/// `update_pw_shield_visuals`, placed by `place_pw_shield_cards`.
+/// `update_shield_visuals`, placed by `place_shield_cards`.
 #[derive(Component, Clone, Copy, Debug)]
-pub struct PwShieldVisual {
+pub struct ShieldVisual {
     /// The shielded combatant.
     pub bearer: Entity,
     pub kind: ShieldKind,
-    pub phase: PwsPhase,
+    pub phase: ShieldPhase,
     /// Seconds into `phase`.
     pub t: f32,
     /// Card scale (width, height) at the moment the shield went down: the
@@ -317,7 +317,7 @@ pub struct PwShieldVisual {
 
 /// The cards of the client shield models.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-pub enum PwsLayer {
+pub enum ShieldLayer {
     /// `genericglow2b1`: the gold outline with a hard inner edge.
     Rim,
     /// About 17 radial streaks, `shockwave10d` (yellow on PW:S, cyan on
@@ -338,17 +338,18 @@ pub enum PwsLayer {
     Glint,
 }
 
-impl PwsLayer {
+impl ShieldLayer {
     /// The three cards both shields wear.
-    pub const ALL: [PwsLayer; 3] = [PwsLayer::Rim, PwsLayer::StreakA, PwsLayer::StreakB];
+    pub const ALL: [ShieldLayer; 3] =
+        [ShieldLayer::Rim, ShieldLayer::StreakA, ShieldLayer::StreakB];
     /// The two fill cards only Divine Shield wears.
-    pub const FILL: [PwsLayer; 2] = [PwsLayer::FillOuter, PwsLayer::FillInner];
+    pub const FILL: [ShieldLayer; 2] = [ShieldLayer::FillOuter, ShieldLayer::FillInner];
 }
 
-/// One card of a [`PwShieldVisual`] (its child).
+/// One card of a [`ShieldVisual`] (its child).
 #[derive(Component, Clone, Copy, Debug)]
-pub struct PwShieldCard {
-    pub layer: PwsLayer,
+pub struct ShieldCard {
+    pub layer: ShieldLayer,
 }
 
 /// The particle emitters on a Divine Shield rig: the star sparkles and the
@@ -1413,7 +1414,7 @@ pub enum AuraApplyOwner {
     /// Freezing Trap's ice block (`ice_block.rs`).
     IceBlock,
     /// The shields: the client cards of Power Word: Shield, Divine Shield
-    /// and Ice Barrier (`pw_shield.rs`), and Weakened Soul, which only ever
+    /// and Ice Barrier (`shield.rs`), and Weakened Soul, which only ever
     /// lands WITH Power Word: Shield.
     Shields,
     /// Berserker Rage's mask (`berserk.rs`).
@@ -2292,9 +2293,8 @@ impl InstantAbilityFired {
 }
 
 /// One heal that a [`AuraType::HealingReduction`] debuff cut down, spawned in
-/// core at each of the three sites that already apply the reduction: healing
-/// another target and the self-heal path (`combat_core/casting.rs`) and Holy
-/// Shock (`effects/holy_shock.rs`). Consumed by the graphical
+/// core by `combat_core::apply_healing` — the one site every heal lands
+/// through, so every reduced heal sheds one. Consumed by the graphical
 /// `spawn_heal_fracture` (`rendering/effects/mortal_wounds.rs`).
 ///
 /// This is how Mortal Wounds is shown: the debuff has no body treatment at
