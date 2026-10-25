@@ -343,7 +343,11 @@ fn the_format_gates_are_exactly_these() {
         .map(|(p, n)| (format!("{p:?}"), *n))
         .collect();
     assert_eq!(shipped, named, "PEEL_FORMAT_GATES against this test's list");
-    assert_eq!(PEEL_FORMAT_GATES.len(), FORMAT_GATED.len(), "a format gated twice");
+    assert_eq!(
+        PEEL_FORMAT_GATES.len(),
+        FORMAT_GATED.len(),
+        "a format gated twice"
+    );
     let note = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(PEEL_FORMAT_GATES_FINDINGS);
     let text = std::fs::read_to_string(&note)
         .unwrap_or_else(|e| panic!("the format gates' findings note {}: {e}", note.display()));
@@ -399,7 +403,10 @@ fn a_format_gated_peeler_does_not_peel_on_a_team_of_three() {
         seen_gated += usize::from(gated);
         let two = scene(peeler, Paladin).decide(ME);
         if !peeled(peeler, &two) {
-            wrong.push(format!("{peeler:?}, a team of two: no peel: {}", describe(&two)));
+            wrong.push(format!(
+                "{peeler:?}, a team of two: no peel: {}",
+                describe(&two)
+            ));
         }
         let three = scene3(peeler, Paladin).decide(ME);
         if peeled(peeler, &three) == gated {
@@ -429,6 +436,10 @@ fn a_format_gated_peeler_does_not_peel_on_a_team_of_three() {
             ));
         }
     }
-    assert_eq!(seen_gated, FORMAT_GATED.len(), "every format gate is reached");
+    assert_eq!(
+        seen_gated,
+        FORMAT_GATED.len(),
+        "every format gate is reached"
+    );
     assert!(wrong.is_empty(), "{wrong:#?}");
 }

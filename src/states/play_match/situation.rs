@@ -671,7 +671,9 @@ impl ExceptionKey {
         let stride = n + 1;
         let slot = match self.team_size {
             // After every (class, context) slot: one run of classes per size.
-            Some(size) => n * stride + (size - FORMAT_SIZES.start()) as usize * n + index(self.class),
+            Some(size) => {
+                n * stride + (size - FORMAT_SIZES.start()) as usize * n + index(self.class)
+            }
             None => index(self.class) * stride + self.context.map_or(0, |c| index(c) + 1),
         };
         assert!(slot < 128, "ExceptionSet holds {slot} keys: widen it");
@@ -689,7 +691,11 @@ impl ExceptionKey {
             let size = match format.trim() {
                 "2v2" => 2,
                 "3v3" => 3,
-                other => return Err(format!("Exception '{entry}': unknown format '{other}' (2v2, 3v3)")),
+                other => {
+                    return Err(format!(
+                        "Exception '{entry}': unknown format '{other}' (2v2, 3v3)"
+                    ))
+                }
             };
             return Ok(Self::in_format(parse_class(class.trim())?, size));
         }
