@@ -1218,7 +1218,8 @@ fn auto_attack_name(has_bonus: bool, kind: AutoAttackKind) -> &'static str {
         AutoAttackKind::Melee => "Auto Attack",
         AutoAttackKind::Shot => "Auto Shot",
         AutoAttackKind::Wand => "Wand Shot",
-        // Unreachable: the range gate `continue`s on None.
+        // Unreachable: the range gate never puts a None socket in reach
+        // (`live_in_range` is false for it), so it never swings.
         AutoAttackKind::None => "Auto Attack",
     }
 }

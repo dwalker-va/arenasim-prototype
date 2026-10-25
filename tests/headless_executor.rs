@@ -64,8 +64,10 @@ fn every_headless_schedule_is_single_threaded() {
         "headless schedules not single-threaded after build: {at_build:?}"
     );
 
-    // Tick past the gates into combat, so any schedule created on first run
-    // (state transitions, fixed-step sub-schedules) is in `Schedules` too.
+    // Tick past the gates into combat and check again. The headless app
+    // creates no schedule at runtime today, so this guards a future change
+    // that would (a state transition, a fixed-step sub-schedule) rather than
+    // anything that happens now.
     for _ in 0..(60 * 15) {
         app.update();
     }

@@ -66,8 +66,8 @@ use std::collections::HashMap;
 // as `u32` where the bench writes `usize`), so check a constant against that
 // version, not against whatever the artifact shows today. The NAMES are part
 // of the spec. The bench's wand constants (`WAND_MISSILE_SPEED` ..
-// `WAND_FLICK_SECS`) live in `wand_attack.rs`. The one constant beside this
-// block that the bench did not emit is under its own heading below.
+// `WAND_FLICK_SECS`) live in `wand_attack.rs`. The one public constant beside
+// this block that the bench did not emit is under its own heading below.
 //
 // Two bench names do not ship as constants, because a `const bool` nothing
 // reads is dead code; a probe in `tests/hit_reaction_visual_probes.rs` pins
@@ -908,7 +908,7 @@ mod tests {
     }
 
     #[test]
-    fn only_physical_autos_throw_sparks() {
+    fn auto_throws_sparks_only_for_physical_kinds() {
         assert!(auto_throws_sparks(AutoAttackKind::Melee));
         assert!(auto_throws_sparks(AutoAttackKind::Shot));
         assert!(!auto_throws_sparks(AutoAttackKind::Wand));

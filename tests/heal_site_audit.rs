@@ -23,7 +23,10 @@
 //! Lexical, like the other audits built on `tests/common/source_audit.rs`: it
 //! reads comment-, string- and test-module-blanked source. It does not see a
 //! health raise spelled without `+` (`current_health = max_health`, the spawn
-//! and reset sites), which is why the reset sites are not heals to it.
+//! and reset sites), which is why the reset sites are not heals to it — nor
+//! one taken in two steps (`let r = c.current_health + x;` then
+//! `c.current_health = r.min(..)`), whose write carries no `+` on its
+//! right-hand side.
 
 mod common;
 
@@ -56,7 +59,7 @@ const HEALERS: &[(&str, &str)] = &[
         "src/states/play_match/combat_core/casting.rs",
         "process_channeling",
     ),
-    // Heal over time ticks (Renew, Rejuvenation, Lifebloom, Healing Stream).
+    // Heal over time ticks (Rejuvenation, Lifebloom, Healing Stream).
     ("src/states/play_match/auras.rs", "process_hot_ticks"),
     // The Lifebloom bloom.
     ("src/states/play_match/effects/bloom.rs", "process_blooms"),

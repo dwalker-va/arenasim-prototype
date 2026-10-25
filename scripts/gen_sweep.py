@@ -7,8 +7,9 @@ enumerated set of opposing teams, N seeds each. Output is fed to:
     arenasim --batch sweep.jsonl --out results.csv --jobs 6
 
 `--jobs` keys off how many agents are sweeping right now, not off the core
-count; 6 on a quiet box. See "Sizing `--jobs`" in
-docs/design/balance/sweep-tiers.md — 16 is too many.
+count or a number chosen at launch. See "Sizing `--jobs`" and "What a sweep
+actually costs" in docs/design/balance/sweep-tiers.md (about 20 matches/sec
+per worker).
 
 Examples
 --------

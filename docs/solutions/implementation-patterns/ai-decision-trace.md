@@ -145,6 +145,15 @@ appended to `kind_order` as 3 — `kind_order` is APPEND-ONLY (never renumber
 existing kinds; the canonical `(frame, entity_id, kind)` sort is what makes
 trace files byte-identical across runs).
 
+## `situation.play` is the unit's play, not the reorder it ran
+
+An `ability_decision`'s `situation.play` records `CombatContext::play` — the
+gated play the unit runs, which exists only under `TeamPlan`. A `Legacy` unit
+still runs the old lock-window burst reorder while the enemy healer is locked
+(`CombatContext::lock_window`), but its events carry no `play: burst` tag for
+it (they did before AS-275). Key a `Legacy` burst window on
+`situation.enemy_healer_locked`, never on the play tag.
+
 ## Determinism discipline (critical)
 
 The trace must not perturb gameplay. Two integration gates protect this in

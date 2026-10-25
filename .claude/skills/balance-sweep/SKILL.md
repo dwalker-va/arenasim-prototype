@@ -16,7 +16,9 @@ statistical and methodological guardrails.
 JSONL file (each line a `HeadlessMatchConfig`) across all cores, writing one CSV
 row per match: `label,team1,team2,seed,winner,end_reason,duration_secs`.
 
-It is **fast** (~100 matches/sec; a 2400-match 2v2 sweep takes ~25s) and
+It is **fast** (about 20 matches/sec per `--jobs` worker on 2v2 BasicArena,
+~87/sec at `--jobs 4`; half that for 3v3, PillaredArena or `TeamPlan` — see
+"What a sweep actually costs" in `docs/design/balance/sweep-tiers.md`) and
 **internally deterministic** (same input → same output, regardless of `--jobs`).
 Both `abilities.ron` and `items.ron` are runtime assets, so a balance change is
 just an edit to those files — **no rebuild** between baseline and variant runs.

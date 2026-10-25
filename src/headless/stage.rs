@@ -21,10 +21,11 @@
 //! one.
 //!
 //! **The clock.** [`Stage::clock`] sets the match's seconds since the gates:
-//! the AI's `now` and the trace's `sim_time`, the dampening ramp (and so the
-//! match phase the AI reads), the shadow-sight timer and the timeout. The
-//! combat log's timestamps and a frame's `sim_time` are the app's own clock,
-//! countdown included, and keep counting from where they were.
+//! the trace's `sim_time`, the dampening ramp (and so the match phase the AI
+//! reads), the shadow-sight timer and the timeout. The combat log's
+//! timestamps, a frame's `sim_time` and the posture machines' `now` are the
+//! app's own clock, countdown included, and keep counting from where they
+//! were.
 //!
 //! ```ignore
 //! let stage = Stage::new()
@@ -265,12 +266,16 @@ impl Stage {
     }
 
     /// The match clock: `secs` since the gates opened. Sets every combat
-    /// clock the simulation reads — the AI's `now` and the trace's `sim_time`
-    /// (`DecisionTrace::current_sim_time`), the dampening ramp (which the
-    /// match phase reads), the shadow-sight timer and the timeout — and the
-    /// dampening reduction follows on this frame's tick. A posture or
-    /// directive the stage carries in keeps its absolute times: stage them
-    /// against the new clock.
+    /// clock the simulation reads — the trace's and the situation layer's
+    /// `sim_time` (`DecisionTrace::current_sim_time`), the dampening ramp
+    /// (which the match phase reads), the shadow-sight timer and the timeout
+    /// — and the dampening reduction follows on this frame's tick.
+    ///
+    /// It does NOT set the posture machines' `now`: `decide_abilities` hands
+    /// them the app clock (`Time::elapsed_secs`, countdown included), which no
+    /// stage moves. A posture or directive the stage carries in keeps its
+    /// absolute times, so stage them against the app clock, read off `Time`
+    /// in a [`Stage::world`] step.
     pub fn clock(self, secs: f32) -> Self {
         self.step(move |world| {
             world.resource_mut::<DecisionTrace>().current_sim_time = secs;
