@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
+use bevy::render::render_phase::ViewRangefinder3d;
 use bevy::time::TimeUpdateStrategy;
 use bevy::transform::TransformSystem;
 
@@ -696,12 +697,124 @@ fn a_bubbled_paladin_wears_a_priests_shield_too() {
     );
 }
 
+/// Bevy's transparent pass draws in ascending order of view depth plus the
+/// material's `depth_bias`; this reads both off the live cards. At every pitch
+/// the camera allows (0.1–1.5 rad from vertical), every yaw and every body
+/// offset the animation layers write, every bubble card sorts in front of the
+/// blended capsule, and the blended pair sorts behind the light (AS-401): the
+/// outline first, then the blue tint, then every additive card, so neither
+/// blended card dims the client's light.
+#[test]
+fn the_cards_sort_in_front_of_the_body_at_every_pitch() {
+    let offsets = [
+        Vec3::new(0.0, 0.22, 0.0),
+        Vec3::new(0.0, 0.28, 0.0),
+        Vec3::new(0.18, 0.10, 0.0),
+        Vec3::new(-0.18, 0.10, 0.0),
+        Vec3::new(0.0, 0.10, 0.18),
+        Vec3::new(0.0, 0.10, -0.18),
+        Vec3::new(0.0, 1.2, 0.0),
+        Vec3::new(0.0, -0.10, 0.0),
+    ];
+    let additive = [
+        ShieldLayer::FillOuter,
+        ShieldLayer::FillInner,
+        ShieldLayer::Rim,
+        ShieldLayer::StreakA,
+        ShieldLayer::StreakB,
+    ];
+    let mut checked = 0;
+    for offset in offsets {
+        let mut h = Harness::new();
+        let paladin = h.paladin(BODY);
+        let body = h
+            .app
+            .world()
+            .get::<Children>(paladin)
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
+        h.app
+            .world_mut()
+            .get_mut::<Transform>(body)
+            .unwrap()
+            .translation = offset;
+        h.give(paladin, divine_shield());
+        h.run_to(paladin, ShieldKind::DivineShield, ShieldPhase::Loop, 0.0);
+        let cam = {
+            let mut q = h.app.world_mut().query_filtered::<Entity, With<Camera3d>>();
+            q.single(h.app.world()).unwrap()
+        };
+        for pitch in [0.1_f32, 0.4, 0.675, 1.0, 1.3, 1.5] {
+            for yaw in [0.0_f32, 1.3, 2.9, 4.4] {
+                let d = 40.0;
+                let eye = BODY
+                    + Vec3::new(
+                        d * pitch.sin() * yaw.sin(),
+                        d * pitch.cos(),
+                        d * pitch.sin() * yaw.cos(),
+                    );
+                *h.app.world_mut().get_mut::<Transform>(cam).unwrap() =
+                    Transform::from_translation(eye).looking_at(BODY, Vec3::Y);
+                h.tick(1);
+                let mut rigs = h.app.world_mut().query::<(&ShieldVisual, &Children)>();
+                let kids: Vec<Entity> = rigs
+                    .iter(h.app.world())
+                    .filter(|(r, _)| r.kind == ShieldKind::DivineShield)
+                    .flat_map(|(_, c)| c.iter().collect::<Vec<_>>())
+                    .collect();
+                let world = h.app.world();
+                let view = world.get::<GlobalTransform>(cam).unwrap().compute_matrix();
+                let range = ViewRangefinder3d::from_world_from_view(&view);
+                let body_depth = range.distance_translation(
+                    &world.get::<GlobalTransform>(body).unwrap().translation(),
+                );
+                // (layer, Bevy's sort key) per card.
+                let materials = world.resource::<Assets<StandardMaterial>>();
+                let keys: Vec<(ShieldLayer, f32)> = kids
+                    .into_iter()
+                    .map(|k| {
+                        let layer = world.get::<ShieldCard>(k).unwrap().layer;
+                        let at = world.get::<GlobalTransform>(k).unwrap().translation();
+                        let bias = materials
+                            .get(&world.get::<MeshMaterial3d<StandardMaterial>>(k).unwrap().0)
+                            .unwrap()
+                            .depth_bias;
+                        (layer, range.distance_translation(&at) + bias)
+                    })
+                    .collect();
+                assert_eq!(keys.len(), ShieldKind::DivineShield.layers().len());
+                let key = |l: ShieldLayer| keys.iter().find(|k| k.0 == l).unwrap().1;
+                for &(layer, k) in &keys {
+                    assert!(
+                        k > body_depth,
+                        "{layer:?} sorts behind the body at pitch {pitch}, yaw {yaw}, offset {offset}"
+                    );
+                    checked += 1;
+                }
+                assert!(
+                    key(ShieldLayer::Outline) < key(ShieldLayer::Tint),
+                    "the outline sorts over the tint at pitch {pitch}, yaw {yaw}"
+                );
+                for layer in additive {
+                    assert!(
+                        key(ShieldLayer::Tint) < key(layer),
+                        "the tint sorts over {layer:?} at pitch {pitch}, yaw {yaw}, offset {offset}"
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(checked, 8 * 6 * 4 * ShieldKind::DivineShield.layers().len());
+}
+
 /// The bubble's five cards ride the rendered body as PW:S's three do, with
 /// the client's 0 push, so what keeps PW:S's cards sorting in front of the
 /// blended capsule at every pitch holds for these too: every card centre,
 /// the two fill cards included, sits above the body centre at every frame of
-/// the bubble's life (`pw_shield_visual_probes.rs`
-/// `the_cards_sort_in_front_of_the_body_at_every_pitch` rests on the same).
+/// the bubble's life (`the_cards_sort_in_front_of_the_body_at_every_pitch`
+/// above rests on the same).
 #[test]
 fn every_bubble_card_centre_sits_above_the_body_centre() {
     for &layer in ShieldKind::DivineShield.layers() {
