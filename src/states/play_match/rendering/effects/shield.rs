@@ -80,6 +80,21 @@
 //! keeps for absorbs (`ui::theme::fct::ABSORB`), on purpose: the absorbed
 //! numbers off a Mage under Ice Barrier are this barrier's own, and the Frost
 //! palette already spends the same blue.
+//!
+//! **Legibility (AS-401).** All of the above is additive light, and on the
+//! bright arena sand, which sits on the tonemapper's shoulder, added light
+//! barely moves a pixel: at the client's values the held shields were all but
+//! invisible in a match. So each shield also wears an [`ShieldLayer::Outline`]:
+//! the rim's shape as an alpha-BLENDED line in one of its own client colours,
+//! sharp on the inner edge facing the combatant and glowing outward
+//! ([`shield_outline_alpha`]), following the rim's life. Divine Shield also
+//! wears a [`ShieldLayer::Tint`], its blue fill as a blended wash. Both draw
+//! behind every additive card ([`shield_layer_sort_bias`]). The rim gains
+//! (and Divine Shield's fill gain) rose with them. Every value is the Shield
+//! Legibility Bench's signed-off default
+//! (`docs/design/benches/2026-10-25-shield-legibility-bench.html`, artifact
+//! 7M3N5Lvgk5m5cPknaps354, version id 1792983198-a728), which composites
+//! through Bevy's own TonyMcMapface LUT over sand calibrated to a match.
 
 use std::f32::consts::TAU;
 use std::sync::Arc;
@@ -108,14 +123,43 @@ pub const PWS_SPREAD: f32 = 1.0;
 pub const PWS_LIFT: f32 = 0.0;
 /// Yards toward the camera (client 0: the cards stand on the body's centre plane).
 pub const PWS_PUSH: f32 = 0.0;
-/// × the client rim weight in the loop and death.
-pub const PWS_RIM_GAIN: f32 = 1.0;
+/// × the client rim weight in the loop and death (AS-401: 2.0).
+pub const PWS_RIM_GAIN: f32 = 2.0;
 /// × the client streak weights in the loop and death.
 pub const PWS_STREAK_GAIN: f32 = 1.0;
 /// × the 300 ms arrival spike (client weight 1.0).
 pub const PWS_BIRTH_GAIN: f32 = 1.0;
 /// × every sequence length.
 pub const PWS_TIME_SCALE: f32 = 1.0;
+
+// --- The outline and tint: the Shield Legibility Bench's signed-off values ----
+//
+// AS-401. The client's shields are additive light, and the arena sand sits on
+// the tonemapper's shoulder (HDR about (3.95, 2.76, 1.16), sRGB 241/226/193),
+// where added light barely moves a pixel: the held shields measured ΔL* 0.2
+// (PW:S), 0.6 (Divine Shield) and 1.2 (Ice Barrier) over it. So every shield
+// gains an alpha-BLENDED outline card, which can darken the sand, in one of its
+// own client colours: sharp on its inner edge (facing the combatant), a solid
+// core, then a glow fading outward as (1 - u)^falloff; Divine Shield also gains
+// a blended blue tint of its fill. Signed off at the bench's suggested values
+// (`docs/design/benches/2026-10-25-shield-legibility-bench.html`, artifact
+// 7M3N5Lvgk5m5cPknaps354, version id 1792983198-a728), measured there at
+// ΔL* 10.8 / 13.2 / 11.9. Widths are fractions of the rim card's half-size.
+
+/// The outline's peak opacity.
+pub const PWS_OUTLINE_ALPHA: f32 = 0.85;
+/// The solid core, from the rim's hard inner edge outward.
+pub const PWS_OUTLINE_WIDTH: f32 = 0.035;
+/// How far past the core the outline fades out.
+pub const PWS_OUTLINE_GLOW_WIDTH: f32 = 0.12;
+/// The glow's falloff exponent: alpha × (1 - u)^n across the glow.
+pub const PWS_OUTLINE_GLOW_FALLOFF: f32 = 1.6;
+/// The outline's colour: the client's rim gold (sRGB).
+pub const PWS_OUTLINE_RGB: [f32; 3] = RIM_RGB;
+/// × the colour in linear light; below about 2 the line is darker than the sand.
+pub const PWS_OUTLINE_LEVEL: f32 = 0.6;
+/// How much of the rim's 633 ms wobble the outline keeps.
+pub const PWS_OUTLINE_PULSE: f32 = 0.3;
 
 // --- Divine Shield: the bench's signed-off values (AS-359) --------------------
 //
@@ -131,10 +175,10 @@ pub const DS_SIZE: f32 = 1.0;
 pub const DS_SPREAD: f32 = 1.0;
 /// Yards added to the feet anchor (client 0).
 pub const DS_LIFT: f32 = 0.0;
-/// × the client rim weight in the loop and death.
-pub const DS_RIM_GAIN: f32 = 1.0;
-/// × the blue fill's weight (the rim's track) in the loop and death.
-pub const DS_FILL_GAIN: f32 = 1.0;
+/// × the client rim weight in the loop and death (AS-401: 1.5).
+pub const DS_RIM_GAIN: f32 = 1.5;
+/// × the blue fill's weight (the rim's track) in the loop and death (AS-401: 2.0).
+pub const DS_FILL_GAIN: f32 = 2.0;
 /// × the client streak weights in the loop and death.
 pub const DS_STREAK_GAIN: f32 = 1.0;
 /// × the 300 ms arrival spike (client weight 1.0).
@@ -154,6 +198,16 @@ pub const DS_TIME_SCALE: f32 = 1.0;
 /// When the halo falls. Its `enabled` track has keys only in the death (on,
 /// then off at 300 ms); the bench's default, signed off, reads it literally.
 pub const DS_HALO_MODE: HaloMode = HaloMode::DeathOnly;
+/// The outline (AS-401; see PW:S's block): the client's fill blue.
+pub const DS_OUTLINE_ALPHA: f32 = 0.8;
+pub const DS_OUTLINE_WIDTH: f32 = 0.035;
+pub const DS_OUTLINE_GLOW_WIDTH: f32 = 0.12;
+pub const DS_OUTLINE_GLOW_FALLOFF: f32 = 1.6;
+pub const DS_OUTLINE_RGB: [f32; 3] = DS_FILL_RGB;
+pub const DS_OUTLINE_LEVEL: f32 = 1.0;
+pub const DS_OUTLINE_PULSE: f32 = 0.2;
+/// The blue fill as an alpha-blended wash (AS-401): its peak opacity.
+pub const DS_FILL_TINT: f32 = 0.18;
 
 // --- Ice Barrier: the bench's signed-off values (AS-358) ----------------------
 //
@@ -172,8 +226,8 @@ pub const IB_SPREAD: f32 = 1.0;
 pub const IB_LIFT: f32 = 0.0;
 /// Yards toward the camera (client 0).
 pub const IB_PUSH: f32 = 0.0;
-/// × the client rim weight in the loop and death.
-pub const IB_RIM_GAIN: f32 = 1.0;
+/// × the client rim weight in the loop and death (AS-401: 1.5).
+pub const IB_RIM_GAIN: f32 = 1.5;
 /// × the client streak weights in the loop and death.
 pub const IB_STREAK_GAIN: f32 = 1.0;
 /// × the 300 ms arrival spike (client weight 1.0).
@@ -196,6 +250,15 @@ pub const IB_TIME_SCALE: f32 = 1.0;
 pub const IB_RIM_RGB: [f32; 3] = [0.584, 0.82, 1.0];
 pub const IB_STREAK_A_RGB: [f32; 3] = [0.514, 0.741, 1.0];
 pub const IB_STREAK_B_RGB: [f32; 3] = [0.478, 0.733, 0.992];
+/// The outline (AS-401; see PW:S's block), raised over the other two: the
+/// client's rim frost.
+pub const IB_OUTLINE_ALPHA: f32 = 0.9;
+pub const IB_OUTLINE_WIDTH: f32 = 0.04;
+pub const IB_OUTLINE_GLOW_WIDTH: f32 = 0.12;
+pub const IB_OUTLINE_GLOW_FALLOFF: f32 = 1.6;
+pub const IB_OUTLINE_RGB: [f32; 3] = IB_RIM_RGB;
+pub const IB_OUTLINE_LEVEL: f32 = 0.5;
+pub const IB_OUTLINE_PULSE: f32 = 0.3;
 
 /// The two readings of the halo emitter's `enabled` track.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -225,6 +288,24 @@ pub struct ShieldTuning {
     pub icicle_gain: f32,
     pub glint_gain: f32,
     pub time_scale: f32,
+    /// The blended outline (AS-401).
+    pub outline: OutlineTuning,
+    /// The blended fill tint's peak opacity; only Divine Shield has one.
+    pub fill_tint: f32,
+}
+
+/// The blended outline's shape, colour and life (AS-401).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OutlineTuning {
+    pub alpha: f32,
+    pub width: f32,
+    pub glow_width: f32,
+    pub glow_falloff: f32,
+    /// sRGB.
+    pub rgb: [f32; 3],
+    /// × the colour in linear light.
+    pub level: f32,
+    pub pulse: f32,
 }
 
 pub const PWS_TUNING: ShieldTuning = ShieldTuning {
@@ -239,6 +320,16 @@ pub const PWS_TUNING: ShieldTuning = ShieldTuning {
     icicle_gain: 0.0,
     glint_gain: 0.0,
     time_scale: PWS_TIME_SCALE,
+    outline: OutlineTuning {
+        alpha: PWS_OUTLINE_ALPHA,
+        width: PWS_OUTLINE_WIDTH,
+        glow_width: PWS_OUTLINE_GLOW_WIDTH,
+        glow_falloff: PWS_OUTLINE_GLOW_FALLOFF,
+        rgb: PWS_OUTLINE_RGB,
+        level: PWS_OUTLINE_LEVEL,
+        pulse: PWS_OUTLINE_PULSE,
+    },
+    fill_tint: 0.0,
 };
 
 pub const DS_TUNING: ShieldTuning = ShieldTuning {
@@ -255,6 +346,16 @@ pub const DS_TUNING: ShieldTuning = ShieldTuning {
     icicle_gain: 0.0,
     glint_gain: 0.0,
     time_scale: DS_TIME_SCALE,
+    outline: OutlineTuning {
+        alpha: DS_OUTLINE_ALPHA,
+        width: DS_OUTLINE_WIDTH,
+        glow_width: DS_OUTLINE_GLOW_WIDTH,
+        glow_falloff: DS_OUTLINE_GLOW_FALLOFF,
+        rgb: DS_OUTLINE_RGB,
+        level: DS_OUTLINE_LEVEL,
+        pulse: DS_OUTLINE_PULSE,
+    },
+    fill_tint: DS_FILL_TINT,
 };
 
 pub const IB_TUNING: ShieldTuning = ShieldTuning {
@@ -269,6 +370,16 @@ pub const IB_TUNING: ShieldTuning = ShieldTuning {
     icicle_gain: IB_ICICLE_GAIN,
     glint_gain: IB_GLINT_GAIN,
     time_scale: IB_TIME_SCALE,
+    outline: OutlineTuning {
+        alpha: IB_OUTLINE_ALPHA,
+        width: IB_OUTLINE_WIDTH,
+        glow_width: IB_OUTLINE_GLOW_WIDTH,
+        glow_falloff: IB_OUTLINE_GLOW_FALLOFF,
+        rgb: IB_OUTLINE_RGB,
+        level: IB_OUTLINE_LEVEL,
+        pulse: IB_OUTLINE_PULSE,
+    },
+    fill_tint: 0.0,
 };
 
 /// A shield kind's tuning.
@@ -461,6 +572,8 @@ struct WeightTracks {
     b_birth: &'static [(f32, f32)],
     b_loop: &'static [(f32, f32)],
     b_death: &'static [(f32, f32)],
+    /// The rim's held peak: the outline's envelope is the rim weight over it.
+    rim_peak: f32,
 }
 
 /// PW:S's tracks, which Divine Shield's model shares key for key.
@@ -473,6 +586,7 @@ const HOLY_TRACKS: WeightTracks = WeightTracks {
     b_birth: B_BIRTH,
     b_loop: B_LOOP,
     b_death: B_DEATH,
+    rim_peak: 0.15,
 };
 const IB_TRACKS: WeightTracks = WeightTracks {
     rim_birth: IB_RIM_BIRTH,
@@ -483,6 +597,7 @@ const IB_TRACKS: WeightTracks = WeightTracks {
     b_birth: IB_STREAK_BIRTH,
     b_loop: IB_B_LOOP,
     b_death: IB_B_DEATH,
+    rim_peak: 0.3,
 };
 
 fn weight_tracks(kind: ShieldKind) -> &'static WeightTracks {
@@ -691,13 +806,17 @@ pub fn shield_phase_secs(kind: ShieldKind, phase: ShieldPhase) -> f32 {
     ms / 1000.0 * shield_tuning(kind).time_scale
 }
 
-/// The shield's pose at one instant: card scale (width, height) and the six
-/// weights — rim, streak A, streak B, fill, icicles, glint — gains applied. A
-/// layer a kind does not wear has a zero gain, so it stays dark.
+/// The shield's pose at one instant: card scale (width, height) and the eight
+/// weights — rim, streak A, streak B, fill, icicles, glint, outline, tint —
+/// gains applied. A layer a kind does not wear has a zero gain, so it stays
+/// dark. The outline's and tint's weights are their opacities.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ShieldSample {
     pub scale: Vec2,
-    pub weights: [f32; 6],
+    pub weights: [f32; 8],
+    /// The outline's and tint's envelope, 0..1: the rim's own life (its birth
+    /// pop, `pulse` of its wobble, its death fade) over its held peak.
+    pub env: f32,
 }
 
 impl ShieldSample {
@@ -710,6 +829,8 @@ impl ShieldSample {
             ShieldLayer::FillOuter | ShieldLayer::FillInner => 3,
             ShieldLayer::Icicles => 4,
             ShieldLayer::Glint => 5,
+            ShieldLayer::Outline => 6,
+            ShieldLayer::Tint => 7,
         }]
     }
 }
@@ -728,7 +849,9 @@ pub fn shield_sample(shield: &ShieldVisual) -> ShieldSample {
         k.glint_gain,
     ];
     let sp = |v: Vec2| Vec2::new(spread(v.x, k.spread), spread(v.y, k.spread));
-    match shield.phase {
+    // The blended layers' opacities at envelope `env`.
+    let blended = |env: f32| [k.outline.alpha * env, k.fill_tint * env];
+    let (scale, w6, env) = match shield.phase {
         ShieldPhase::Birth => {
             let s = keys2(SCALE_BIRTH, ms);
             // The cards' spike carries the birth gain, settling to each layer's
@@ -744,20 +867,19 @@ pub fn shield_sample(shield: &ShieldVisual) -> ShieldSample {
                 IB_ICE_HELD,
                 IB_GLINT_HELD,
             ];
-            ShieldSample {
-                scale: sp(s),
-                weights: std::array::from_fn(|i| {
-                    // A layer the shield does not wear stays dark, birth spike
-                    // included.
-                    if gains[i] == 0.0 {
-                        0.0
-                    } else if i < 4 {
-                        w[i] * (k.birth_gain + (gains[i] - k.birth_gain) * blend)
-                    } else {
-                        w[i] * gains[i]
-                    }
-                }),
-            }
+            let w6: [f32; 6] = std::array::from_fn(|i| {
+                // A layer the shield does not wear stays dark, birth spike
+                // included.
+                if gains[i] == 0.0 {
+                    0.0
+                } else if i < 4 {
+                    w[i] * (k.birth_gain + (gains[i] - k.birth_gain) * blend)
+                } else {
+                    w[i] * gains[i]
+                }
+            });
+            // The outline pops in with the rim, capped at its held strength.
+            (sp(s), w6, (rim / tr.rim_peak).clamp(0.0, 1.0))
         }
         ShieldPhase::Loop => {
             let m = ms.rem_euclid(PWS_LOOP_MS);
@@ -770,10 +892,12 @@ pub fn shield_sample(shield: &ShieldVisual) -> ShieldSample {
                 IB_ICE_HELD,
                 IB_GLINT_HELD,
             ];
-            ShieldSample {
-                scale: sp(keys2(SCALE_LOOP, m)),
-                weights: std::array::from_fn(|i| w[i] * gains[i]),
-            }
+            let env = 1.0 - k.outline.pulse * (1.0 - (rim / tr.rim_peak).clamp(0.0, 1.0));
+            (
+                sp(keys2(SCALE_LOOP, m)),
+                std::array::from_fn(|i| w[i] * gains[i]),
+                env,
+            )
         }
         ShieldPhase::Death => {
             let mut track: Vec<(f32, [f32; 2])> = SCALE_DEATH
@@ -782,9 +906,9 @@ pub fn shield_sample(shield: &ShieldVisual) -> ShieldSample {
                 .collect();
             track[0].1 = shield.from_scale.to_array();
             let fade = (1.0 - ms / PWS_RIM_FADE_MS).max(0.0);
-            ShieldSample {
-                scale: keys2(&track, ms),
-                weights: [
+            (
+                keys2(&track, ms),
+                [
                     shield.from_rim * fade,
                     keys(tr.a_death, ms) * gains[1],
                     keys(tr.b_death, ms) * gains[2],
@@ -792,8 +916,15 @@ pub fn shield_sample(shield: &ShieldVisual) -> ShieldSample {
                     keys(IB_ICE_DEATH, ms).max(0.0) * gains[4],
                     keys(IB_GLINT_DEATH, ms).max(0.0) * gains[5],
                 ],
-            }
+                shield.from_env * fade,
+            )
         }
+    };
+    let [outline, tint] = blended(env);
+    ShieldSample {
+        scale,
+        weights: [w6[0], w6[1], w6[2], w6[3], w6[4], w6[5], outline, tint],
+        env,
     }
 }
 
@@ -802,7 +933,9 @@ pub fn shield_sample(shield: &ShieldVisual) -> ShieldSample {
 /// taller card also rises.
 pub fn shield_card_extent(kind: ShieldKind, layer: ShieldLayer, scale: Vec2) -> (f32, Vec2) {
     let quad = match layer {
-        ShieldLayer::Rim | ShieldLayer::FillOuter => PWS_RIM_QUAD,
+        ShieldLayer::Rim | ShieldLayer::FillOuter | ShieldLayer::Outline | ShieldLayer::Tint => {
+            PWS_RIM_QUAD
+        }
         // Ice Barrier's icicles ride bone 3, as streak B does: their card
         // stands at the streak card's centre.
         ShieldLayer::StreakA
@@ -936,6 +1069,34 @@ pub fn ds_sparkle_launch(seed: u32) -> (Vec3, Vec3) {
     (dir * radius, dir * speed)
 }
 
+// --- The outline's profile (AS-401) -------------------------------------------
+
+/// Where the client rim texture's hard inner edge sits, as a fraction of the
+/// card's half-size (`RIM_PROFILE` rises from 0 at 0.47 to 0.93 at 0.50).
+pub const OUTLINE_INNER: f32 = 0.475;
+
+fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
+    let u = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    u * u * (3.0 - 2.0 * u)
+}
+
+/// The outline's alpha at `r` (the fraction of the rim card's half-size from
+/// its centre), for one kind of shield: a crisp step at the rim's inner edge,
+/// facing the combatant; full through the core; then a glow falling to zero
+/// outward as (1 - u)^falloff. The bench's `outlineAt`, ported as is.
+pub fn shield_outline_alpha(kind: ShieldKind, r: f32) -> f32 {
+    let o = &shield_tuning(kind).outline;
+    let inner = smoothstep(OUTLINE_INNER - 0.006, OUTLINE_INNER + 0.002, r);
+    let d = r - (OUTLINE_INNER + o.width);
+    if d <= 0.0 {
+        inner
+    } else if d >= o.glow_width {
+        0.0
+    } else {
+        inner * (1.0 - d / o.glow_width).powf(o.glow_falloff)
+    }
+}
+
 // --- Textures ----------------------------------------------------------------
 
 /// The bench's hash, ported bit for bit (visual-only; never `game_rng`).
@@ -983,6 +1144,11 @@ fn streak_alpha(profile: &[(f32, f32)], n: u32, seed: u32) -> impl Fn(f32, f32) 
     }
 }
 
+/// One kind's outline texture: white texels, its profile in alpha.
+fn outline_texture(kind: ShieldKind) -> Image {
+    pws_texture(move |r, _| shield_outline_alpha(kind, r))
+}
+
 /// White texels, the shape in alpha: `alpha(r, theta)` over the unit disc.
 fn pws_texture(alpha: impl Fn(f32, f32) -> f32) -> Image {
     disc_texture(PWS_TEXTURE_PX, alpha)
@@ -1017,12 +1183,12 @@ pub(super) fn disc_texture(size: u32, alpha: impl Fn(f32, f32) -> f32) -> Image 
     )
 }
 
-/// Shared by every shield: one card quad and four textures (rim, the two
-/// streak rings, fill), Divine Shield's particle quad and two palettes, and
+/// Shared by every shield: one card quad and seven textures (rim, the two
+/// streak rings, fill, and each kind's outline), Divine Shield's particle quad and two palettes, and
 /// Ice Barrier's icicle mesh and mist palettes (one per puff shape).
 pub struct ShieldAssets {
     quad: Handle<Mesh>,
-    textures: [Handle<Image>; 4],
+    textures: [Handle<Image>; 7],
     particle_quad: Handle<Mesh>,
     sparkle_palette: Arc<[Handle<StandardMaterial>]>,
     halo_palette: Arc<[Handle<StandardMaterial>]>,
@@ -1049,6 +1215,9 @@ impl ShieldAssets {
                 images.add(pws_texture(streak_alpha(A_PROFILE, 17, 101))),
                 images.add(pws_texture(streak_alpha(B_PROFILE, 15, 577))),
                 images.add(pws_texture(move |r, _| fill(r))),
+                images.add(outline_texture(ShieldKind::PowerWordShield)),
+                images.add(outline_texture(ShieldKind::DivineShield)),
+                images.add(outline_texture(ShieldKind::IceBarrier)),
             ],
             // 1 × 1, so a particle's scale IS its diameter (`ClientParticle`).
             particle_quad: meshes.add(Rectangle::new(1.0, 1.0)),
@@ -1119,8 +1288,11 @@ fn texture_slot(kind: ShieldKind, layer: ShieldLayer) -> Option<usize> {
         (ShieldKind::IceBarrier, ShieldLayer::StreakB) => Some(1),
         (_, ShieldLayer::StreakA) => Some(1),
         (_, ShieldLayer::StreakB) => Some(2),
-        (_, ShieldLayer::FillOuter | ShieldLayer::FillInner) => Some(3),
+        (_, ShieldLayer::FillOuter | ShieldLayer::FillInner | ShieldLayer::Tint) => Some(3),
         (_, ShieldLayer::Icicles | ShieldLayer::Glint) => None,
+        (ShieldKind::PowerWordShield, ShieldLayer::Outline) => Some(4),
+        (ShieldKind::DivineShield, ShieldLayer::Outline) => Some(5),
+        (ShieldKind::IceBarrier, ShieldLayer::Outline) => Some(6),
     }
 }
 
@@ -1131,6 +1303,8 @@ fn keys_fn(track: &'static [(f32, f32)]) -> impl Fn(f32) -> f32 {
 /// A card's colour, sRGB: the client's per-batch colour track.
 pub fn shield_layer_rgb(kind: ShieldKind, layer: ShieldLayer) -> [f32; 3] {
     match (kind, layer) {
+        (_, ShieldLayer::Outline) => shield_tuning(kind).outline.rgb,
+        (_, ShieldLayer::Tint) => DS_FILL_RGB,
         (ShieldKind::IceBarrier, ShieldLayer::Rim) => IB_RIM_RGB,
         (ShieldKind::IceBarrier, ShieldLayer::StreakA) => IB_STREAK_A_RGB,
         (ShieldKind::IceBarrier, ShieldLayer::StreakB) => IB_STREAK_B_RGB,
@@ -1146,13 +1320,47 @@ pub fn shield_layer_rgb(kind: ShieldKind, layer: ShieldLayer) -> [f32; 3] {
 
 fn layer_rgb(kind: ShieldKind, layer: ShieldLayer) -> Color {
     let c = shield_layer_rgb(kind, layer);
-    Color::srgb(c[0], c[1], c[2])
+    let srgb = Color::srgb(c[0], c[1], c[2]);
+    match layer {
+        // The bench scales the outline's colour in linear light.
+        ShieldLayer::Outline => {
+            let l = srgb.to_linear() * shield_tuning(kind).outline.level;
+            Color::LinearRgba(l.with_alpha(1.0))
+        }
+        _ => srgb,
+    }
+}
+
+/// Whether a card is alpha-BLENDED (ours, AS-401) rather than the client's
+/// additive light.
+pub fn shield_layer_is_blended(layer: ShieldLayer) -> bool {
+    matches!(layer, ShieldLayer::Outline | ShieldLayer::Tint)
+}
+
+/// The transparent pass's sort bias for a card. Every card of a shield stands
+/// on one vertical, and the outline and tint share the rim card's centre, so
+/// view depth alone cannot order them; Bevy adds this to the sort distance
+/// (larger draws later, in front). The outline draws first, the tint over it,
+/// then every additive card, which is the bench's order: blending after the
+/// additive cards would dim their light. Small beside the rim's lead over the
+/// body (0.11 yd up, at least 0.0078 of view depth at the flattest pitch the
+/// camera allows), so every card still sorts in front of the body. Truncated
+/// to an i32 for the depth-bias state, so the depth test is untouched.
+pub fn shield_layer_sort_bias(layer: ShieldLayer) -> f32 {
+    match layer {
+        ShieldLayer::Outline => -0.002,
+        ShieldLayer::Tint => -0.001,
+        _ => 0.0,
+    }
 }
 
 /// The client material: unlit, additive, no depth write, both faces. The
 /// texture weight rides in the base colour's alpha (Add premultiplies by it).
 /// `unlit` is the faithful choice here: the client adds colour × texture ×
 /// weight and nothing else, which is exactly what the bench drew.
+///
+/// The outline and tint (AS-401) are the exception: alpha-blended, so they can
+/// darken the sand, with their opacity in the base colour's alpha.
 fn pws_material(
     texture: Option<Handle<Image>>,
     kind: ShieldKind,
@@ -1162,7 +1370,12 @@ fn pws_material(
         base_color: layer_rgb(kind, layer).with_alpha(0.0),
         base_color_texture: texture,
         unlit: true,
-        alpha_mode: AlphaMode::Add,
+        alpha_mode: if shield_layer_is_blended(layer) {
+            AlphaMode::Blend
+        } else {
+            AlphaMode::Add
+        },
+        depth_bias: shield_layer_sort_bias(layer),
         cull_mode: None,
         double_sided: true,
         ..default()
@@ -1230,6 +1443,7 @@ pub fn update_shield_visuals(
             rig.from_scale = now.scale;
             rig.from_rim = now.weight(ShieldLayer::Rim);
             rig.from_fill = now.weight(ShieldLayer::FillOuter);
+            rig.from_env = now.env;
             rig.phase = ShieldPhase::Death;
             rig.t = 0.0;
         }
@@ -1278,6 +1492,7 @@ pub fn update_shield_visuals(
                 from_scale: Vec2::ZERO,
                 from_rim: 0.0,
                 from_fill: 0.0,
+                from_env: 0.0,
             },
             // The rig stays at the origin, so each card's local pose is its world pose.
             Transform::IDENTITY,

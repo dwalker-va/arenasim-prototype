@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
+use bevy::render::render_phase::ViewRangefinder3d;
 use bevy::time::TimeUpdateStrategy;
 use bevy::transform::TransformSystem;
 
@@ -33,8 +34,8 @@ use arenasim::states::play_match::systems::process_divine_shield;
 use arenasim::states::play_match::{
     animate_client_particles, ds_halo_on, ds_sparkle_rate, particle_rotation, place_shield_cards,
     shield_card_extent, shield_layer_rgb, spawn_divine_shield_cast_hands, update_shield_visuals,
-    HaloMode, DIVINE_SHIELD_AURA_NAME, DS_HALO_MODE, DS_SPARKLE_HEIGHT, PWS_CLIENT_TO_RIG,
-    PW_SHIELD_AURA_NAME,
+    HaloMode, DIVINE_SHIELD_AURA_NAME, DS_FILL_GAIN, DS_HALO_MODE, DS_SPARKLE_HEIGHT,
+    PWS_CLIENT_TO_RIG, PW_SHIELD_AURA_NAME,
 };
 use arenasim::CharacterClass;
 
@@ -319,7 +320,8 @@ fn the_divine_shield_aura_carries_the_ability_name() {
     );
 }
 
-/// The bubble no longer draws the sphere; it wears five cards.
+/// The bubble no longer draws the sphere; it wears the client's five cards
+/// and our blended outline and tint (AS-401).
 #[test]
 fn divine_shield_wears_the_client_cards_not_the_sphere() {
     let mut h = Harness::new();
@@ -339,7 +341,9 @@ fn divine_shield_wears_the_client_cards_not_the_sphere() {
             ShieldLayer::StreakA,
             ShieldLayer::StreakB,
             ShieldLayer::FillOuter,
-            ShieldLayer::FillInner
+            ShieldLayer::FillInner,
+            ShieldLayer::Outline,
+            ShieldLayer::Tint,
         ]
     );
 }
@@ -377,8 +381,8 @@ fn the_bubble_arrives_late_as_a_blue_white_flash_over_the_body() {
     );
 }
 
-/// The held bubble: the body sits in a faint blue glow the whole time (the
-/// fill over the body centre, on the rim's 0.06–0.15 track), streak A is cyan,
+/// The held bubble: the body sits in a blue glow the whole time (the fill over
+/// the body centre, on the rim's 0.06–0.15 track × `DS_FILL_GAIN`), streak A is cyan,
 /// streak B and the rim are gold — where PW:S, at the same moment, lays
 /// NOTHING over the body: every one of its cards is hollow there.
 #[test]
@@ -399,13 +403,16 @@ fn the_bubble_fills_the_body_blue_where_pws_is_hollow() {
             .map(|c| c.light_over(BODY))
             .sum();
         assert!(
-            (0.06..=0.35).contains(&glow),
-            "the body's blue glow {glow:.3} is outside the faint sustained band"
+            (0.06 * DS_FILL_GAIN..=0.35 * DS_FILL_GAIN).contains(&glow),
+            "the body's blue glow {glow:.3} is outside the sustained band"
         );
         for c in &ds {
             match c.layer {
-                ShieldLayer::FillOuter | ShieldLayer::FillInner => {
-                    assert!(is_blue(c.rgb), "{:?}", c.rgb)
+                ShieldLayer::FillOuter
+                | ShieldLayer::FillInner
+                | ShieldLayer::Outline
+                | ShieldLayer::Tint => {
+                    assert!(is_blue(c.rgb), "{:?} {:?}", c.layer, c.rgb)
                 }
                 ShieldLayer::StreakA => assert!(
                     c.rgb.blue > 0.9 && c.rgb.green > 0.8 && c.rgb.red < 0.5,
@@ -424,7 +431,7 @@ fn the_bubble_fills_the_body_blue_where_pws_is_hollow() {
         assert_eq!(rim.texel_at(BODY), 0.0, "the rim is not hollow");
 
         let pws = h.cards(priest_target, ShieldKind::PowerWordShield);
-        assert_eq!(pws.len(), 3);
+        assert_eq!(pws.len(), 4);
         for c in &pws {
             assert_eq!(
                 c.texel_at(target_body),
@@ -644,7 +651,13 @@ fn a_bubbled_paladin_wears_a_priests_shield_too() {
 
     let ds = h.cards(paladin, ShieldKind::DivineShield);
     let pws = h.cards(paladin, ShieldKind::PowerWordShield);
-    assert_eq!((ds.len(), pws.len()), (5, 3));
+    assert_eq!(
+        (ds.len(), pws.len()),
+        (
+            ShieldKind::DivineShield.layers().len(),
+            ShieldKind::PowerWordShield.layers().len()
+        )
+    );
     for c in ds.iter().chain(&pws) {
         assert!(
             (c.at.xz() - BODY.xz()).length() < 1e-4,
@@ -684,15 +697,127 @@ fn a_bubbled_paladin_wears_a_priests_shield_too() {
     );
 }
 
+/// Bevy's transparent pass draws in ascending order of view depth plus the
+/// material's `depth_bias`; this reads both off the live cards. At every pitch
+/// the camera allows (0.1–1.5 rad from vertical), every yaw and every body
+/// offset the animation layers write, every bubble card sorts in front of the
+/// blended capsule, and the blended pair sorts behind the light (AS-401): the
+/// outline first, then the blue tint, then every additive card, so neither
+/// blended card dims the client's light.
+#[test]
+fn the_cards_sort_in_front_of_the_body_at_every_pitch() {
+    let offsets = [
+        Vec3::new(0.0, 0.22, 0.0),
+        Vec3::new(0.0, 0.28, 0.0),
+        Vec3::new(0.18, 0.10, 0.0),
+        Vec3::new(-0.18, 0.10, 0.0),
+        Vec3::new(0.0, 0.10, 0.18),
+        Vec3::new(0.0, 0.10, -0.18),
+        Vec3::new(0.0, 1.2, 0.0),
+        Vec3::new(0.0, -0.10, 0.0),
+    ];
+    let additive = [
+        ShieldLayer::FillOuter,
+        ShieldLayer::FillInner,
+        ShieldLayer::Rim,
+        ShieldLayer::StreakA,
+        ShieldLayer::StreakB,
+    ];
+    let mut checked = 0;
+    for offset in offsets {
+        let mut h = Harness::new();
+        let paladin = h.paladin(BODY);
+        let body = h
+            .app
+            .world()
+            .get::<Children>(paladin)
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
+        h.app
+            .world_mut()
+            .get_mut::<Transform>(body)
+            .unwrap()
+            .translation = offset;
+        h.give(paladin, divine_shield());
+        h.run_to(paladin, ShieldKind::DivineShield, ShieldPhase::Loop, 0.0);
+        let cam = {
+            let mut q = h.app.world_mut().query_filtered::<Entity, With<Camera3d>>();
+            q.single(h.app.world()).unwrap()
+        };
+        for pitch in [0.1_f32, 0.4, 0.675, 1.0, 1.3, 1.5] {
+            for yaw in [0.0_f32, 1.3, 2.9, 4.4] {
+                let d = 40.0;
+                let eye = BODY
+                    + Vec3::new(
+                        d * pitch.sin() * yaw.sin(),
+                        d * pitch.cos(),
+                        d * pitch.sin() * yaw.cos(),
+                    );
+                *h.app.world_mut().get_mut::<Transform>(cam).unwrap() =
+                    Transform::from_translation(eye).looking_at(BODY, Vec3::Y);
+                h.tick(1);
+                let mut rigs = h.app.world_mut().query::<(&ShieldVisual, &Children)>();
+                let kids: Vec<Entity> = rigs
+                    .iter(h.app.world())
+                    .filter(|(r, _)| r.kind == ShieldKind::DivineShield)
+                    .flat_map(|(_, c)| c.iter().collect::<Vec<_>>())
+                    .collect();
+                let world = h.app.world();
+                let view = world.get::<GlobalTransform>(cam).unwrap().compute_matrix();
+                let range = ViewRangefinder3d::from_world_from_view(&view);
+                let body_depth = range.distance_translation(
+                    &world.get::<GlobalTransform>(body).unwrap().translation(),
+                );
+                // (layer, Bevy's sort key) per card.
+                let materials = world.resource::<Assets<StandardMaterial>>();
+                let keys: Vec<(ShieldLayer, f32)> = kids
+                    .into_iter()
+                    .map(|k| {
+                        let layer = world.get::<ShieldCard>(k).unwrap().layer;
+                        let at = world.get::<GlobalTransform>(k).unwrap().translation();
+                        let bias = materials
+                            .get(&world.get::<MeshMaterial3d<StandardMaterial>>(k).unwrap().0)
+                            .unwrap()
+                            .depth_bias;
+                        (layer, range.distance_translation(&at) + bias)
+                    })
+                    .collect();
+                assert_eq!(keys.len(), ShieldKind::DivineShield.layers().len());
+                let key = |l: ShieldLayer| keys.iter().find(|k| k.0 == l).unwrap().1;
+                for &(layer, k) in &keys {
+                    assert!(
+                        k > body_depth,
+                        "{layer:?} sorts behind the body at pitch {pitch}, yaw {yaw}, offset {offset}"
+                    );
+                    checked += 1;
+                }
+                assert!(
+                    key(ShieldLayer::Outline) < key(ShieldLayer::Tint),
+                    "the outline sorts over the tint at pitch {pitch}, yaw {yaw}"
+                );
+                for layer in additive {
+                    assert!(
+                        key(ShieldLayer::Tint) < key(layer),
+                        "the tint sorts over {layer:?} at pitch {pitch}, yaw {yaw}, offset {offset}"
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(checked, 8 * 6 * 4 * ShieldKind::DivineShield.layers().len());
+}
+
 /// The bubble's five cards ride the rendered body as PW:S's three do, with
 /// the client's 0 push, so what keeps PW:S's cards sorting in front of the
 /// blended capsule at every pitch holds for these too: every card centre,
 /// the two fill cards included, sits above the body centre at every frame of
-/// the bubble's life (`pw_shield_visual_probes.rs`
-/// `the_cards_sort_in_front_of_the_body_at_every_pitch` rests on the same).
+/// the bubble's life (`the_cards_sort_in_front_of_the_body_at_every_pitch`
+/// above rests on the same).
 #[test]
 fn every_bubble_card_centre_sits_above_the_body_centre() {
-    for layer in ShieldLayer::ALL.into_iter().chain(ShieldLayer::FILL) {
+    for &layer in ShieldKind::DivineShield.layers() {
         for (w, hgt) in [
             (0.0, 0.0),
             (0.522, 1.11),
@@ -716,13 +841,16 @@ fn every_bubble_card_centre_sits_above_the_body_centre() {
 // 0.318 is a client colour channel, not an approximation of 1/pi.
 #[allow(clippy::approx_constant)]
 fn the_bubble_spends_only_its_client_blues() {
-    for layer in ShieldLayer::ALL.into_iter().chain(ShieldLayer::FILL) {
+    for &layer in ShieldKind::DivineShield.layers() {
         let ds = shield_layer_rgb(ShieldKind::DivineShield, layer);
         let pws = shield_layer_rgb(ShieldKind::PowerWordShield, layer);
         match layer {
             ShieldLayer::Rim | ShieldLayer::StreakB => assert_eq!(ds, pws, "{layer:?}"),
             ShieldLayer::StreakA => assert_eq!(ds, [0.318, 0.91, 1.0]),
-            ShieldLayer::FillOuter | ShieldLayer::FillInner => assert_eq!(ds, [0.318, 0.396, 1.0]),
+            ShieldLayer::FillOuter
+            | ShieldLayer::FillInner
+            | ShieldLayer::Outline
+            | ShieldLayer::Tint => assert_eq!(ds, [0.318, 0.396, 1.0], "{layer:?}"),
             ShieldLayer::Icicles | ShieldLayer::Glint => unreachable!("not a Divine Shield layer"),
         }
     }
