@@ -31,8 +31,8 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::{
     animate_client_particles, place_shield_cards, shield_card_extent, shield_layer_rgb,
-    spawn_instant_cast_hands, update_heal_cast_glows, update_shield_visuals, ICE_BARRIER_AURA_NAME,
-    PWS_CLIENT_TO_RIG, PWS_RIM_QUAD, PWS_STREAK_QUAD, PW_SHIELD_AURA_NAME,
+    spawn_instant_cast_hands, update_heal_cast_glows, update_shield_visuals, IB_RIM_GAIN,
+    ICE_BARRIER_AURA_NAME, PWS_CLIENT_TO_RIG, PWS_RIM_QUAD, PWS_STREAK_QUAD, PW_SHIELD_AURA_NAME,
 };
 use arenasim::CharacterClass;
 
@@ -178,6 +178,25 @@ impl Harness {
             .collect()
     }
 
+    /// Every card's transparent-pass sort bias, read off its live material.
+    fn sort_biases(&mut self, bearer: Entity) -> Vec<(ShieldLayer, f32)> {
+        let mut rigs = self.app.world_mut().query::<(&ShieldVisual, &Children)>();
+        let kids: Vec<Entity> = rigs
+            .iter(self.app.world())
+            .filter(|(r, _)| r.bearer == bearer && r.kind == ShieldKind::IceBarrier)
+            .flat_map(|(_, c)| c.iter().collect::<Vec<_>>())
+            .collect();
+        let world = self.app.world();
+        let materials = world.resource::<Assets<StandardMaterial>>();
+        kids.into_iter()
+            .filter_map(|k| {
+                let card = world.get::<ShieldCard>(k)?;
+                let m = materials.get(&world.get::<MeshMaterial3d<StandardMaterial>>(k)?.0)?;
+                Some((card.layer, m.depth_bias))
+            })
+            .collect()
+    }
+
     fn card(&mut self, bearer: Entity, layer: ShieldLayer) -> (Transform, f32) {
         let c = self
             .cards(bearer)
@@ -300,7 +319,11 @@ fn the_barrier_arrives_late_tall_and_bright() {
     h.give(bearer, ICE_BARRIER_AURA_NAME);
     h.run_to(bearer, ShieldPhase::Birth, 0.10);
     let cards = h.cards(bearer);
-    assert_eq!(cards.len(), 5, "rim, two streak rings, icicles and glint");
+    assert_eq!(
+        cards.len(),
+        ShieldKind::IceBarrier.layers().len(),
+        "rim, two streak rings, icicles, glint and the outline"
+    );
     for (layer, at, _) in &cards {
         assert!(
             at.scale.truncate().max_element() < 1e-3,
@@ -341,7 +364,7 @@ fn the_barrier_arrives_late_tall_and_bright() {
 }
 
 /// The held barrier is bright, unlike Power Word: Shield's faint one: the rim
-/// sits in the client's 0.12–0.30, streak A never drops below 0.6, streak B
+/// sits on the client's 0.12–0.30 × `IB_RIM_GAIN` (AS-401), streak A never drops below 0.6, streak B
 /// flickers between dark and 0.6 against it, and the rim's inner edge clears
 /// the body at every frame of the wobble.
 #[test]
@@ -357,8 +380,8 @@ fn the_held_barrier_is_bright_and_shimmers() {
         let (_, a) = h.card(bearer, ShieldLayer::StreakA);
         let (_, b) = h.card(bearer, ShieldLayer::StreakB);
         assert!(
-            (0.119..=0.301).contains(&rim),
-            "rim weight {rim} outside the client's 0.12–0.30"
+            (0.119 * IB_RIM_GAIN..=0.301 * IB_RIM_GAIN).contains(&rim),
+            "rim weight {rim} outside the client's 0.12–0.30 × {IB_RIM_GAIN}"
         );
         assert!((0.599..=1.0).contains(&a), "streak A left 0.6–1.0: {a}");
         assert!(b <= 0.601, "streak B too bright: {b}");
@@ -670,7 +693,7 @@ fn the_cards_stand_upright_facing_the_camera() {
     h.give(bearer, ICE_BARRIER_AURA_NAME);
     h.run_to(bearer, ShieldPhase::Loop, 0.1);
     let cards = h.cards(bearer);
-    assert_eq!(cards.len(), 5);
+    assert_eq!(cards.len(), ShieldKind::IceBarrier.layers().len());
     for (layer, at, _) in cards {
         let normal = at.rotation * Vec3::Z;
         let want = (eye - at.translation).with_y(0.0).normalize();
@@ -741,21 +764,45 @@ fn the_cards_sort_in_front_of_the_body_at_every_pitch() {
                     .unwrap()
                     .translation();
                 let body_depth = range.distance_translation(&body_at);
-                for (layer, at, _) in h.cards(bearer) {
+                // Bevy's transparent sort key: view depth plus the material's
+                // depth bias (larger draws later, in front).
+                let biases = h.sort_biases(bearer);
+                let key = |layer: ShieldLayer, at: Vec3| {
+                    range.distance_translation(&at)
+                        + biases.iter().find(|b| b.0 == layer).unwrap().1
+                };
+                let cards = h.cards(bearer);
+                for (layer, at, _) in &cards {
                     assert!(
                         (at.translation.xz() - body_at.xz()).length() < 1e-4,
                         "{layer:?} does not stand on the body (offset {offset})"
                     );
                     assert!(
-                        range.distance_translation(&at.translation) > body_depth,
+                        key(*layer, at.translation) > body_depth,
                         "{layer:?} sorts behind the body at pitch {pitch}, yaw {yaw}, offset {offset}"
                     );
                     checked += 1;
                 }
+                // The blended outline draws before (behind) every additive
+                // card, so it cannot dim their light (AS-401).
+                let outline = cards
+                    .iter()
+                    .find(|c| c.0 == ShieldLayer::Outline)
+                    .unwrap()
+                    .1;
+                for (layer, at, _) in &cards {
+                    if *layer != ShieldLayer::Outline {
+                        assert!(
+                            key(ShieldLayer::Outline, outline.translation)
+                                < key(*layer, at.translation),
+                            "the outline sorts over {layer:?} at pitch {pitch}, yaw {yaw}"
+                        );
+                    }
+                }
             }
         }
     }
-    assert_eq!(checked, 8 * 6 * 4 * 5);
+    assert_eq!(checked, 8 * 6 * 4 * ShieldKind::IceBarrier.layers().len());
 }
 
 /// The anchor, read off the same function the system calls: every card
@@ -867,13 +914,13 @@ fn the_streak_rings_wear_the_clients_textures() {
 // --- the bearer going away ---------------------------------------------------
 
 /// A bearer removed from the world takes its barrier with it on the next
-/// frame: the rig and all five cards.
+/// frame: the rig and all its cards.
 #[test]
 fn a_despawned_bearer_takes_its_barrier_within_a_frame() {
     let (mut h, bearer, _) = standard_harness();
     h.give(bearer, ICE_BARRIER_AURA_NAME);
     h.run_to(bearer, ShieldPhase::Loop, 0.1);
-    assert_eq!(h.cards(bearer).len(), 5);
+    assert_eq!(h.cards(bearer).len(), ShieldKind::IceBarrier.layers().len());
     h.app.world_mut().entity_mut(bearer).despawn();
     h.tick(1);
     assert!(h.rigs().is_empty(), "the rig outlived its bearer");

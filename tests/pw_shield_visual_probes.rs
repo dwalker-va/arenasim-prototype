@@ -27,7 +27,7 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::{
     place_shield_cards, pws_card_extent, spawn_instant_cast_hands, update_shield_visuals,
-    PWS_CLIENT_TO_RIG, PWS_RIM_QUAD, PWS_STREAK_QUAD, PW_SHIELD_AURA_NAME,
+    PWS_CLIENT_TO_RIG, PWS_RIM_GAIN, PWS_RIM_QUAD, PWS_STREAK_QUAD, PW_SHIELD_AURA_NAME,
 };
 use arenasim::CharacterClass;
 
@@ -166,6 +166,25 @@ impl Harness {
             .collect()
     }
 
+    /// Every card's transparent-pass sort bias, read off its live material.
+    fn sort_biases(&mut self, bearer: Entity) -> Vec<(ShieldLayer, f32)> {
+        let mut rigs = self.app.world_mut().query::<(&ShieldVisual, &Children)>();
+        let kids: Vec<Entity> = rigs
+            .iter(self.app.world())
+            .filter(|(r, _)| r.bearer == bearer)
+            .flat_map(|(_, c)| c.iter().collect::<Vec<_>>())
+            .collect();
+        let world = self.app.world();
+        let materials = world.resource::<Assets<StandardMaterial>>();
+        kids.into_iter()
+            .filter_map(|k| {
+                let card = world.get::<ShieldCard>(k)?;
+                let m = materials.get(&world.get::<MeshMaterial3d<StandardMaterial>>(k)?.0)?;
+                Some((card.layer, m.depth_bias))
+            })
+            .collect()
+    }
+
     fn card(&mut self, bearer: Entity, layer: ShieldLayer) -> (Vec3, Vec2, Quat, f32) {
         let c = self
             .cards(bearer)
@@ -228,14 +247,18 @@ fn the_aura_name_is_the_ability_name() {
 }
 
 /// The client's birth: nothing for 200 ms, then a TALL, NARROW pop at full
-/// strength at 300 ms, three cards together.
+/// strength at 300 ms, three cards together (and the outline, AS-401).
 #[test]
 fn the_shield_arrives_late_tall_and_bright() {
     let (mut h, bearer, _) = standard_harness();
     h.give(bearer, PW_SHIELD_AURA_NAME);
     h.run_to(bearer, ShieldPhase::Birth, 0.10);
     let cards = h.cards(bearer);
-    assert_eq!(cards.len(), 3, "rim, streak A and streak B");
+    assert_eq!(
+        cards.len(),
+        ShieldKind::PowerWordShield.layers().len(),
+        "rim, streak A, streak B and the outline"
+    );
     for (layer, _, half, _, alpha) in &cards {
         assert!(
             half.max_element() < 1e-3,
@@ -261,8 +284,8 @@ fn the_shield_arrives_late_tall_and_bright() {
     }
 }
 
-/// The sustained state is quiet and hollow: the rim stays at or under the
-/// client's 0.15, the streaks under 0.2 and never both lit at once (they
+/// The sustained state is quiet and hollow: the rim stays on the client's
+/// 0.06–0.15 track × `PWS_RIM_GAIN` (AS-401), the streaks under 0.2 and never both lit at once (they
 /// flicker against each other), and the rim's inner edge clears the body at
 /// every frame of the wobble.
 #[test]
@@ -278,8 +301,8 @@ fn the_held_shield_is_faint_hollow_and_shimmers() {
         let (_, _, _, a) = h.card(bearer, ShieldLayer::StreakA);
         let (_, _, _, b) = h.card(bearer, ShieldLayer::StreakB);
         assert!(
-            (0.059..=0.151).contains(&rim),
-            "rim weight {rim} outside the client's 0.06–0.15"
+            (0.059 * PWS_RIM_GAIN..=0.151 * PWS_RIM_GAIN).contains(&rim),
+            "rim weight {rim} outside the client's 0.06–0.15 × {PWS_RIM_GAIN}"
         );
         assert!(a <= 0.201 && b <= 0.201, "a streak is too bright: {a} {b}");
         assert!(!(a > 0.1 && b > 0.1), "both streaks lit at once: {a} {b}");
@@ -462,21 +485,44 @@ fn the_cards_sort_in_front_of_the_body_at_every_pitch() {
                     .unwrap()
                     .translation();
                 let body_depth = range.distance_translation(&body_at);
-                for (layer, at, _, _, _) in h.cards(bearer) {
+                // Bevy's transparent sort key: view depth plus the material's
+                // depth bias (larger draws later, in front).
+                let biases = h.sort_biases(bearer);
+                let key = |layer: ShieldLayer, at: Vec3| {
+                    range.distance_translation(&at)
+                        + biases.iter().find(|b| b.0 == layer).unwrap().1
+                };
+                let cards = h.cards(bearer);
+                for &(layer, at, _, _, _) in &cards {
                     assert!(
                         (at.xz() - body_at.xz()).length() < 1e-4,
                         "{layer:?} does not stand on the body (offset {offset})"
                     );
                     assert!(
-                        range.distance_translation(&at) > body_depth,
+                        key(layer, at) > body_depth,
                         "{layer:?} sorts behind the body at pitch {pitch}, yaw {yaw}, offset {offset}"
                     );
                     checked += 1;
                 }
+                // The blended outline draws before (behind) every additive
+                // card, so it cannot dim their light (AS-401).
+                let (_, outline_at, _, _, _) =
+                    *cards.iter().find(|c| c.0 == ShieldLayer::Outline).unwrap();
+                for &(layer, at, _, _, _) in &cards {
+                    if layer != ShieldLayer::Outline {
+                        assert!(
+                            key(ShieldLayer::Outline, outline_at) < key(layer, at),
+                            "the outline sorts over {layer:?} at pitch {pitch}, yaw {yaw}"
+                        );
+                    }
+                }
             }
         }
     }
-    assert_eq!(checked, 8 * 6 * 4 * 3);
+    assert_eq!(
+        checked,
+        8 * 6 * 4 * ShieldKind::PowerWordShield.layers().len()
+    );
 }
 
 /// The anchor, read off the same function the system calls: the card centres
@@ -738,13 +784,16 @@ fn the_priests_own_hands_flash_when_it_shields_an_ally() {
 // --- the bearer going away ---------------------------------------------------
 
 /// A bearer removed from the world (a pet unsummoned, the match torn down)
-/// takes its shield with it on the next frame: the rig and all three cards.
+/// takes its shield with it on the next frame: the rig and all its cards.
 #[test]
 fn a_despawned_bearer_takes_its_shield_within_a_frame() {
     let (mut h, bearer, _) = standard_harness();
     h.give(bearer, PW_SHIELD_AURA_NAME);
     h.run_to(bearer, ShieldPhase::Loop, 0.1);
-    assert_eq!(h.cards(bearer).len(), 3);
+    assert_eq!(
+        h.cards(bearer).len(),
+        ShieldKind::PowerWordShield.layers().len()
+    );
     h.app.world_mut().entity_mut(bearer).despawn();
     h.tick(1);
     assert!(h.rigs().is_empty(), "the rig outlived its bearer");

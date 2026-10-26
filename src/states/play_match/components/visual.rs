@@ -274,8 +274,15 @@ impl ShieldKind {
     /// The cards this shield wears, in draw order.
     pub fn layers(self) -> &'static [ShieldLayer] {
         match self {
-            ShieldKind::PowerWordShield => &ShieldLayer::ALL,
+            ShieldKind::PowerWordShield => &[
+                ShieldLayer::Outline,
+                ShieldLayer::Rim,
+                ShieldLayer::StreakA,
+                ShieldLayer::StreakB,
+            ],
             ShieldKind::DivineShield => &[
+                ShieldLayer::Outline,
+                ShieldLayer::Tint,
                 ShieldLayer::FillOuter,
                 ShieldLayer::FillInner,
                 ShieldLayer::Rim,
@@ -283,6 +290,7 @@ impl ShieldKind {
                 ShieldLayer::StreakB,
             ],
             ShieldKind::IceBarrier => &[
+                ShieldLayer::Outline,
                 ShieldLayer::Rim,
                 ShieldLayer::StreakA,
                 ShieldLayer::StreakB,
@@ -313,6 +321,9 @@ pub struct ShieldVisual {
     /// Fill weight at the moment the shield went down (Divine Shield only;
     /// the fill rides the rim's track, so it fades with it).
     pub from_fill: f32,
+    /// The outline's and tint's envelope at the moment the shield went down,
+    /// which the death fades as it fades the rim.
+    pub from_env: f32,
 }
 
 /// The cards of the client shield models.
@@ -336,10 +347,19 @@ pub enum ShieldLayer {
     Icicles,
     /// Ice Barrier only: the icicles' sphere-mapped second pass.
     Glint,
+    /// Every shield, ours (AS-401): the rim's shape as an alpha-BLENDED line in
+    /// one of the shield's client colours, sharp on the inside and glowing
+    /// outward. Additive light cannot be seen on the bright sand; a blended
+    /// line can darken it. Drawn behind every additive card.
+    Outline,
+    /// Divine Shield only, ours (AS-401): the blue fill as an alpha-blended
+    /// wash, so the bubble reads filled on the sand. Drawn over the outline
+    /// and behind every additive card.
+    Tint,
 }
 
 impl ShieldLayer {
-    /// The three cards both shields wear.
+    /// The client's three cards every shield wears.
     pub const ALL: [ShieldLayer; 3] =
         [ShieldLayer::Rim, ShieldLayer::StreakA, ShieldLayer::StreakB];
     /// The two fill cards only Divine Shield wears.

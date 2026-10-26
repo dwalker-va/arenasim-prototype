@@ -418,7 +418,11 @@ fn ice_barrier_previews_its_cards_mist_and_both_hands() {
         most_hands, 2,
         "the Frost launch must flash both hands, once"
     );
-    assert_eq!(cards_seen, 5, "the Mage must wear the five cards");
+    assert_eq!(
+        cards_seen,
+        ShieldKind::IceBarrier.layers().len(),
+        "the Mage must wear the barrier's cards and its outline"
+    );
     assert!(placed, "the cards were spawned but never placed");
     assert!(mist > 5, "the barrier shed no frost mist ({mist} puffs)");
     let mut rigs = app.world_mut().query::<&ShieldVisual>();
@@ -486,8 +490,11 @@ fn power_word_shield_previews_its_cards_and_both_hands() {
     }
     assert_eq!(most_hands, 2, "the Holy launch must flash both hands, once");
     assert_eq!(
-        cards_seen, 3,
-        "the shielded dummy must wear the three cards"
+        cards_seen,
+        arenasim::states::play_match::components::ShieldKind::PowerWordShield
+            .layers()
+            .len(),
+        "the shielded dummy must wear the three cards and the outline"
     );
     assert!(
         placed,
@@ -567,8 +574,9 @@ fn divine_shield_previews_its_cards_and_both_hands() {
         "the bubble's Holy launch must flash both of the Paladin's hands, once"
     );
     assert_eq!(
-        cards_seen, 5,
-        "the bubbled Paladin must wear the five cards"
+        cards_seen,
+        ShieldKind::DivineShield.layers().len(),
+        "the bubbled Paladin must wear the five cards, the outline and the tint"
     );
     assert!(on_paladin, "the bubble is not on the Paladin");
 }

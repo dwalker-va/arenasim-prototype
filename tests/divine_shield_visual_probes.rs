@@ -33,8 +33,8 @@ use arenasim::states::play_match::systems::process_divine_shield;
 use arenasim::states::play_match::{
     animate_client_particles, ds_halo_on, ds_sparkle_rate, particle_rotation, place_shield_cards,
     shield_card_extent, shield_layer_rgb, spawn_divine_shield_cast_hands, update_shield_visuals,
-    HaloMode, DIVINE_SHIELD_AURA_NAME, DS_HALO_MODE, DS_SPARKLE_HEIGHT, PWS_CLIENT_TO_RIG,
-    PW_SHIELD_AURA_NAME,
+    HaloMode, DIVINE_SHIELD_AURA_NAME, DS_FILL_GAIN, DS_HALO_MODE, DS_SPARKLE_HEIGHT,
+    PWS_CLIENT_TO_RIG, PW_SHIELD_AURA_NAME,
 };
 use arenasim::CharacterClass;
 
@@ -319,7 +319,8 @@ fn the_divine_shield_aura_carries_the_ability_name() {
     );
 }
 
-/// The bubble no longer draws the sphere; it wears five cards.
+/// The bubble no longer draws the sphere; it wears the client's five cards
+/// and our blended outline and tint (AS-401).
 #[test]
 fn divine_shield_wears_the_client_cards_not_the_sphere() {
     let mut h = Harness::new();
@@ -339,7 +340,9 @@ fn divine_shield_wears_the_client_cards_not_the_sphere() {
             ShieldLayer::StreakA,
             ShieldLayer::StreakB,
             ShieldLayer::FillOuter,
-            ShieldLayer::FillInner
+            ShieldLayer::FillInner,
+            ShieldLayer::Outline,
+            ShieldLayer::Tint,
         ]
     );
 }
@@ -377,8 +380,8 @@ fn the_bubble_arrives_late_as_a_blue_white_flash_over_the_body() {
     );
 }
 
-/// The held bubble: the body sits in a faint blue glow the whole time (the
-/// fill over the body centre, on the rim's 0.06–0.15 track), streak A is cyan,
+/// The held bubble: the body sits in a blue glow the whole time (the fill over
+/// the body centre, on the rim's 0.06–0.15 track × `DS_FILL_GAIN`), streak A is cyan,
 /// streak B and the rim are gold — where PW:S, at the same moment, lays
 /// NOTHING over the body: every one of its cards is hollow there.
 #[test]
@@ -399,13 +402,16 @@ fn the_bubble_fills_the_body_blue_where_pws_is_hollow() {
             .map(|c| c.light_over(BODY))
             .sum();
         assert!(
-            (0.06..=0.35).contains(&glow),
-            "the body's blue glow {glow:.3} is outside the faint sustained band"
+            (0.06 * DS_FILL_GAIN..=0.35 * DS_FILL_GAIN).contains(&glow),
+            "the body's blue glow {glow:.3} is outside the sustained band"
         );
         for c in &ds {
             match c.layer {
-                ShieldLayer::FillOuter | ShieldLayer::FillInner => {
-                    assert!(is_blue(c.rgb), "{:?}", c.rgb)
+                ShieldLayer::FillOuter
+                | ShieldLayer::FillInner
+                | ShieldLayer::Outline
+                | ShieldLayer::Tint => {
+                    assert!(is_blue(c.rgb), "{:?} {:?}", c.layer, c.rgb)
                 }
                 ShieldLayer::StreakA => assert!(
                     c.rgb.blue > 0.9 && c.rgb.green > 0.8 && c.rgb.red < 0.5,
@@ -424,7 +430,7 @@ fn the_bubble_fills_the_body_blue_where_pws_is_hollow() {
         assert_eq!(rim.texel_at(BODY), 0.0, "the rim is not hollow");
 
         let pws = h.cards(priest_target, ShieldKind::PowerWordShield);
-        assert_eq!(pws.len(), 3);
+        assert_eq!(pws.len(), 4);
         for c in &pws {
             assert_eq!(
                 c.texel_at(target_body),
@@ -644,7 +650,13 @@ fn a_bubbled_paladin_wears_a_priests_shield_too() {
 
     let ds = h.cards(paladin, ShieldKind::DivineShield);
     let pws = h.cards(paladin, ShieldKind::PowerWordShield);
-    assert_eq!((ds.len(), pws.len()), (5, 3));
+    assert_eq!(
+        (ds.len(), pws.len()),
+        (
+            ShieldKind::DivineShield.layers().len(),
+            ShieldKind::PowerWordShield.layers().len()
+        )
+    );
     for c in ds.iter().chain(&pws) {
         assert!(
             (c.at.xz() - BODY.xz()).length() < 1e-4,
@@ -692,7 +704,7 @@ fn a_bubbled_paladin_wears_a_priests_shield_too() {
 /// `the_cards_sort_in_front_of_the_body_at_every_pitch` rests on the same).
 #[test]
 fn every_bubble_card_centre_sits_above_the_body_centre() {
-    for layer in ShieldLayer::ALL.into_iter().chain(ShieldLayer::FILL) {
+    for &layer in ShieldKind::DivineShield.layers() {
         for (w, hgt) in [
             (0.0, 0.0),
             (0.522, 1.11),
@@ -716,13 +728,16 @@ fn every_bubble_card_centre_sits_above_the_body_centre() {
 // 0.318 is a client colour channel, not an approximation of 1/pi.
 #[allow(clippy::approx_constant)]
 fn the_bubble_spends_only_its_client_blues() {
-    for layer in ShieldLayer::ALL.into_iter().chain(ShieldLayer::FILL) {
+    for &layer in ShieldKind::DivineShield.layers() {
         let ds = shield_layer_rgb(ShieldKind::DivineShield, layer);
         let pws = shield_layer_rgb(ShieldKind::PowerWordShield, layer);
         match layer {
             ShieldLayer::Rim | ShieldLayer::StreakB => assert_eq!(ds, pws, "{layer:?}"),
             ShieldLayer::StreakA => assert_eq!(ds, [0.318, 0.91, 1.0]),
-            ShieldLayer::FillOuter | ShieldLayer::FillInner => assert_eq!(ds, [0.318, 0.396, 1.0]),
+            ShieldLayer::FillOuter
+            | ShieldLayer::FillInner
+            | ShieldLayer::Outline
+            | ShieldLayer::Tint => assert_eq!(ds, [0.318, 0.396, 1.0], "{layer:?}"),
             ShieldLayer::Icicles | ShieldLayer::Glint => unreachable!("not a Divine Shield layer"),
         }
     }
