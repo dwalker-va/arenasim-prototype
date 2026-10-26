@@ -105,7 +105,7 @@ table.meter{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-nu
       <ul class="notes">
         <li><b>Divine Shield is drawn.</b> In a real match (the review's Paladin vs Rogue, seed 1) the rig spawns on the cast at 26.0 s, its five cards are visible and placed on the Paladin every frame until the aura ends at 37.7 s, and then it plays its death. Their weights are the client's: 0.06–0.15 held.</li>
         <li><b>Why nothing shows.</b> All three shields are additive light. The sand sits at about (4.0, 2.8, 1.2) in HDR, where TonyMcMapface has almost no headroom left. PW:S's held rim lifts the sand by under 1 sRGB level; even the full-strength cast pop lifts it 4.6. Divine Shield's blue fill moves the Paladin's own body by 1.3 levels. The signed-off benches drew on a dark unlit floor, in sRGB, with no tonemap, where the same weights read.</li>
-        <li><b>The outline knobs</b> add one new card per shield: the rim's shape as an <b>alpha-blended</b> line in one of the shield's own client colours, drawn under the additive cards. Blending can darken the sand, which adding light cannot. It follows the rim's life: it pops in with the birth, fades with the death, and <i>pulse</i> sets how much of the rim's 633 ms wobble it keeps.</li>
+        <li><b>The outline knobs</b> add one new card per shield: the rim's shape as an <b>alpha-blended</b> line in one of the shield's own client colours, drawn under the additive cards. Blending can darken the sand, which adding light cannot. Its profile is asymmetric: a crisp edge on the inside, facing the combatant, then a solid <i>core</i>, then an outer <i>glow</i> that fades away from the body as (1 − u)<sup>softness</sup>. It follows the rim's life: it pops in with the birth, fades with the death, and <i>pulse</i> sets how much of the rim's 633 ms wobble it keeps.</li>
         <li><b>Divine Shield's tint</b> does the same for its blue fill: a blended blue wash inside the bubble, so it reads as a hard blue bubble beside PW:S's hollow gold ring.</li>
         <li><b>Bench limits.</b> No bloom (Bevy's <code>Bloom::NATURAL</code> softens edges a little). Capsule shading is fitted to the screenshot, not lit by Bevy's PBR. Ice Barrier's glint and frost mist and Divine Shield's halo are left out; the sparkles are simple dots. Cards draw over every capsule.</li>
       </ul>
@@ -221,7 +221,14 @@ function texAt(t,x,y){ // bilinear, x,y in [-1,1]
 }
 /** The new outline: a band starting at the rim's hard inner edge, `w` of the card half-size wide. */
 const RIM_INNER=0.475;
-function outlineAt(r,w){return smoothstep(RIM_INNER-0.012,RIM_INNER+0.004,r)*(1-smoothstep(RIM_INNER+w,RIM_INNER+w+0.02,r));}
+/** The outline's profile, asymmetric: a crisp step at the rim's inner edge (facing the combatant),
+ *  a solid core `w` wide, then a glow `g` wide falling off outward as (1-u)^soft. */
+function outlineAt(r,w,g,soft){
+  const inner=smoothstep(RIM_INNER-0.006,RIM_INNER+0.002,r);
+  const d=r-(RIM_INNER+w); if(d<=0)return inner;
+  if(d>=g)return 0;
+  return inner*Math.pow(1-d/g,soft);
+}
 // Ice Barrier's icicles, rasterised once over the streak card's extent (premultiplied rgb).
 const ICE=(()=>{
   const R=CLIENT_TO_RIG, cz=(STREAK_QUAD[2]+STREAK_QUAD[3])/2, hw=STREAK_QUAD[0]/2*R, hh=STREAK_QUAD[1]/2*R;
@@ -247,7 +254,9 @@ const COLOUR_CHOICES={pws:[['rim','rim gold'],['a','streak A gold'],['b','streak
 const KNOBS=[
   {g:'Outline (new, alpha-blended)'},
   {key:'outAlpha', label:'outline opacity', min:0,max:1,step:0.01, def:0, rust:'OUTLINE_ALPHA', note:'0 = no outline (shipped)'},
-  {key:'outWidth', label:'outline width',   min:0.01,max:0.2,step:0.005, def:0.06, rust:'OUTLINE_WIDTH', note:'fraction of the card half-size'},
+  {key:'outWidth', label:'sharp core width',min:0,max:0.15,step:0.005, def:0.03, rust:'OUTLINE_WIDTH', note:'the solid band from the crisp inner edge outward, fraction of the card half-size'},
+  {key:'outGlow',  label:'outer glow width',min:0,max:0.45,step:0.005, def:0.1, rust:'OUTLINE_GLOW_WIDTH', note:'how far past the core the outline fades out, fraction of the card half-size'},
+  {key:'outSoft',  label:'glow softness',   min:0.3,max:4,step:0.05, def:1.6, rust:'OUTLINE_GLOW_FALLOFF', note:'falloff exponent: (1-u)^n. 1 = linear ramp; higher = a softer, quicker-fading glow'},
   {key:'outColour',label:'outline colour',  choice:true, rust:'OUTLINE_RGB'},
   {key:'outLevel', label:'outline level',   min:0.2,max:3,step:0.05, def:1.0, rust:'OUTLINE_LEVEL', note:'× the colour, linear. Below ~2 it is darker than the sand.'},
   {key:'outPulse', label:'outline pulse',   min:0,max:1,step:0.05, def:0.3, rust:'OUTLINE_PULSE', note:'how much of the rim wobble the outline keeps'},
@@ -265,9 +274,9 @@ const DEFCOLOUR={pws:'rim',ds:'fill',ib:'rim'};
 function clientTuning(kind){const t={};for(const k of KNOBS)if(k.key&&!k.choice)t[k.key]=k.def;t.outColour=DEFCOLOUR[kind];
   if(kind!=='ds'){t.fill=0;t.tint=0;t.spark=0;} if(kind!=='ib')t.icicle=0; return t;}
 const SUGGEST={
-  pws:{outAlpha:0.85,outWidth:0.07,outLevel:0.6,outPulse:0.3,rim:2.0},
-  ds:{outAlpha:0.8,outWidth:0.07,outLevel:1.0,outPulse:0.2,rim:1.5,tint:0.18,fill:2.0},
-  ib:{outAlpha:0.85,outWidth:0.07,outLevel:0.6,outPulse:0.3,rim:1.5},
+  pws:{outAlpha:0.85,outWidth:0.035,outGlow:0.12,outSoft:1.6,outLevel:0.6,outPulse:0.3,rim:2.0},
+  ds:{outAlpha:0.8,outWidth:0.035,outGlow:0.12,outSoft:1.6,outLevel:1.0,outPulse:0.2,rim:1.5,tint:0.18,fill:2.0},
+  ib:{outAlpha:0.9,outWidth:0.04,outGlow:0.12,outSoft:1.6,outLevel:0.5,outPulse:0.3,rim:1.5},
 };
 const SHIPPED={pws:clientTuning('pws'),ds:clientTuning('ds'),ib:clientTuning('ib')};
 const TUNED={}; for(const [k] of KINDS){TUNED[k]=Object.assign(clientTuning(k),SUGGEST[k]);}
@@ -395,8 +404,8 @@ function drawShield(u){
   const cs=cardsOf(u,s), C=RGB[u.kind];
   // 1. the new blended layers, under the additive cards
   if(T.outAlpha>0&&s.env>0){
-    const col=lin(C[T.outColour]).map(v=>v*T.outLevel), a=T.outAlpha*s.env, w=T.outWidth;
-    drawCard(cs.rim,blendFn((x,y)=>a*outlineAt(Math.hypot(x,y),w),col));
+    const col=lin(C[T.outColour]).map(v=>v*T.outLevel), a=T.outAlpha*s.env;
+    drawCard(cs.rim,blendFn((x,y)=>a*outlineAt(Math.hypot(x,y),T.outWidth,T.outGlow,T.outSoft),col));
   }
   if(u.kind==='ds'&&T.tint>0&&s.env>0){const a=T.tint*s.env; drawCard(cs.rim,blendFn((x,y)=>a*texAt(TEX.fill,x,y),lin(C.fill)));}
   // 2. the client's additive cards
