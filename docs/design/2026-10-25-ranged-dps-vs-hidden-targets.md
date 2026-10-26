@@ -496,7 +496,9 @@ carry the rules. In short:
   first; the healer takes the second station when only one ranged DPS does.
   Melee take none: a melee on the healer already sees it. The two are the
   first that qualify in Entity order, not the nearest: a 3v3 with two ranged
-  DPS stations the lower-numbered pair.
+  DPS stations the lower-numbered pair. Which of the two takes which station
+  is the shorter total walk ROUND the pillar (`hunt::walk_round`, AS-403),
+  so two units on one side fan out, each to the station on its own hand.
 - **The healer's sight of its team (AS-385 D2)**. A healer on the far station
   cannot see the DPS on the near one. D2 orders sight of an OWED duty before
   everything else, so the healer stations only while no teammate is dying
@@ -638,3 +640,44 @@ Warlock+Priest never meets a lone Priest.
   test. One mutant survived first (the "two units" guard before assignment):
   it duplicated the "two stations or none" guard after it, and was removed.
 
+### 9.5 AS-403: the seed-723 replay, and the walk round the pillar
+
+The 0.8 review's replay (Mage+Priest against Rogue+Priest, Nagrand, seed
+723, `TeamPlan`), read per frame (log clock). The hunt begins at 67.58 with
+the lone Priest on the west face of the south-east pillar (bearing 158°
+round its centre); the stations stand at 68° and -112°. Our Mage and Priest
+both stand at 87-94°, beside the 68° station. The Mage takes that one and
+steps 25° onto it. Our Priest is feared by Psychic Scream from 68.37 to
+76.37; the fear carries it round to 157°, so its walk to the -112° station
+starts at 76.40 from 141°, and the short way round passes the hider's face.
+The two stand 150° apart only from 80.5, and the hunt ends at 81.45, when the
+hider steps out beyond `HUNT_LEAVE`. Both then walk round to the west face
+(the Mage from 69° to 150°, the Priest from -126° to 118°) on their ordinary
+movement, with no hunt running. That walk after the hunt is the "same side"
+the replay shows. The guide's "about 160° apart" is the gap in the hunt's
+last 0.4s.
+
+The hunt itself was right in that replay. Reading the same per-frame
+positions over a bank of staffed endgames found one fault: the assignment
+measured each walk as a straight line through the pillar. That undercounts a
+walk to the far side by the half-turn it skips. Two units on one side were
+sometimes crossed: the one beside a station was sent round the pillar, and
+the other walked onto that station. The walk is now the taut path round the
+pillar's disc plus a body (`hunt::walk_round`).
+
+Measured (DIRECTIONAL, this build against `main`, both teams `TeamPlan`,
+AS-394's bank, three blocks 731-734 / 735-738 / 739-742, 5,040 matches
+each): 4, 5 and 5 matches differ, and 2 winners flip, both to the hunting
+side. The paired endgame-length change is 0.0s in every block and slice (|t|
+1.9 at most). There is no per-class effect to replicate. `Legacy` full logs:
+144 configs on three maps identical (363 eliminations).
+`hunters_on_one_side_fan_out_each_to_its_own_hand` (`tests/hunt_staged.rs`)
+pins the geometry.
+
+A replay that shows the fan-out: Mage+Priest against Warrior+Shaman, Nagrand,
+seed 21, `TeamPlan`. The hunt begins at 56.4 (log clock) with both hunters
+on the north side of the south-east pillar (97° and 103°), the hider on its
+south-east face (-34°). The Mage steps east onto the 56° station by 59.2. The
+Priest walks the other way, round the west face, to the -124° station by
+66.6. From then on they stand about 176°
+apart.

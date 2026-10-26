@@ -44,7 +44,9 @@
 //! before the healer), not the two nearest the pillar: in a 3v3 with two
 //! ranged DPS the stations go to the lower-numbered pair. Each unit keeps the
 //! station it took for as long as the hunt lasts; the first assignment of
-//! the two to the two stations is the shorter total walk.
+//! the two to the two stations is the shorter total walk ROUND the pillar
+//! ([`walk_round`]), so two units on one side fan out, each to the station
+//! on its own hand, instead of one walking past the other to the far side.
 //!
 //! **Holding** (`hold = !arrived || covered`, per unit). A unit holds its
 //! station until it first reaches it; after that it holds only while one of
@@ -352,11 +354,35 @@ fn sight_owed(mates: &[&CombatantInfo], healer: Entity, was: bool, dying: f32) -
         .any(|m| m.health_pct() < bar)
 }
 
-/// Assign `units` (in priority order, at most two) to the available `slots`:
-/// a unit that held a slot in `prev` keeps it while it is available; the
-/// rest take the free slots by least total walk (the first such pairing on a
-/// tie).
+/// How far a unit walks from `from` to `to` round `ring`'s pillar: the
+/// straight line when it clears the pillar, otherwise the taut path —
+/// tangent, arc of the footprint disc plus a body, tangent — the way the
+/// tangent steering walks it, round the shorter side. A straight line
+/// through the pillar undercounts a walk to the far side by the half-turn
+/// it skips, and would send the unit beside one station round the pillar to
+/// the other while its partner walks onto the first.
+pub fn walk_round(ring: &Ring, from: Vec2, to: Vec2) -> f32 {
+    let (a, b) = (from - ring.center, to - ring.center);
+    let (da, db) = (a.length(), b.length());
+    // A point on (or, by a hair, inside) the disc plus a body stands on the
+    // path's arc itself.
+    let r = (ring.disc + MOVER_RADIUS).min(da).min(db);
+    if r <= 1e-4 {
+        return from.distance(to);
+    }
+    let wrap = a.angle_to(b).abs() - (r / da).acos() - (r / db).acos();
+    if wrap <= 0.0 {
+        return from.distance(to);
+    }
+    (da * da - r * r).max(0.0).sqrt() + (db * db - r * r).max(0.0).sqrt() + r * wrap
+}
+
+/// Assign `units` (in priority order, at most two) to the available `slots`
+/// of a hunt round `ring`: a unit that held a slot in `prev` keeps it while
+/// it is available; the rest take the free slots by least total walk round
+/// the pillar ([`walk_round`]; the first such pairing on a tie).
 fn assign(
+    ring: &Ring,
     slots: [Option<Vec2>; 2],
     units: &[(Entity, Vec2)],
     prev: Option<&HuntWindow>,
@@ -386,7 +412,7 @@ fn assign(
     let free: SmallVec<[usize; 2]> = (0..2)
         .filter(|&s| !taken[s] && slots[s].is_some())
         .collect();
-    let walk = |unit: &(Entity, Vec2), slot: usize| unit.1.distance(slots[slot].unwrap());
+    let walk = |unit: &(Entity, Vec2), slot: usize| walk_round(ring, unit.1, slots[slot].unwrap());
     match (rest.len(), free.len()) {
         (0, _) | (_, 0) => {}
         (1, _) => {
@@ -520,7 +546,7 @@ pub fn classify(
     let slots = stations(&snapshot.obstacles, &snapshot.bounds, &ring, axis, y);
     // Two viewers or none: one alone cannot out-angle a hugger (§3.2) — one
     // unit to station, or one station the geometry leaves.
-    let mut assigned = assign(slots, &units, prev_window);
+    let mut assigned = assign(&ring, slots, &units, prev_window);
     if assigned.len() < 2 {
         assigned.clear();
     }
@@ -668,6 +694,46 @@ mod tests {
             Some((SituationChangeKind::Onset, 1))
         );
         assert_eq!(change(Some(&a), Some(&a.clone())), None);
+    }
+
+    /// A walk that clears the pillar is the straight line; one through it is
+    /// the taut path round its disc plus a body, the shorter way.
+    #[test]
+    fn a_walk_round_the_pillar_is_the_taut_path() {
+        let ring = ring();
+        let clear = walk_round(&ring, Vec2::new(-20.0, 10.0), Vec2::new(20.0, 10.0));
+        assert!((clear - 40.0).abs() < 1e-4, "{clear}");
+        // North to south through the centre: two tangents to the 6.5 circle
+        // and the arc between their feet.
+        let r: f32 = 6.0 + MOVER_RADIUS;
+        let tangent = (20.0f32 * 20.0 - r * r).sqrt();
+        let arc = r * (std::f32::consts::PI - 2.0 * (r / 20.0).acos());
+        let round = walk_round(&ring, Vec2::new(0.0, 20.0), Vec2::new(0.0, -20.0));
+        assert!((round - (2.0 * tangent + arc)).abs() < 1e-3, "{round}");
+        assert!(round > 40.0 + 2.0, "longer than the line through: {round}");
+    }
+
+    /// Two units on one side of the pillar, one beside a station: it takes
+    /// that station, and the other walks round to the far one. Measured
+    /// through the pillar, the pairing crossed them (AS-403: Mage+Warlock
+    /// against Rogue+Druid, Nagrand, seed 3) — the control below shows the
+    /// straight lines still prefer that crossing, so the test is not won by
+    /// the positions alone.
+    #[test]
+    fn units_on_one_side_take_the_station_on_their_own_hand() {
+        let ring = ring();
+        let at = |deg: f32, r: f32| Vec2::from_angle(deg.to_radians()) * r;
+        // Station 0 west, station 1 east; the axis points north.
+        let slots = [Some(at(180.0, 20.0)), Some(at(0.0, 20.0))];
+        let mage = (Entity::from_raw(1), at(139.0, 9.2));
+        let warlock = (Entity::from_raw(2), at(-171.0, 6.3));
+        let assigned = assign(&ring, slots, &[mage, warlock], None);
+        let slot_of = |e: Entity| assigned.iter().find(|s| s.unit == e).map(|s| s.slot);
+        assert_eq!(slot_of(warlock.0), Some(0), "beside the west station");
+        assert_eq!(slot_of(mage.0), Some(1), "round to the east one");
+        // The control: through the pillar, the other pairing is shorter.
+        let line = |u: (Entity, Vec2), s: usize| u.1.distance(slots[s].unwrap());
+        assert!(line(mage, 0) + line(warlock, 1) < line(mage, 1) + line(warlock, 0));
     }
 
     /// A free spot is [`HUNT_STANDOFF`] off the skin at its own bearing.
