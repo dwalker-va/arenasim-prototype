@@ -1,0 +1,26 @@
+# A match the player sets up from Configure Match plays the team AI, TeamPlan,
+# on both sides, and the Results screen says so (AS-406). Headless and
+# --replay keep their own rule (Legacy unless the config names a profile), so
+# this is the only entrance that can show it.
+#
+# Run:  cargo run --release -- --ui-script tests/ui-scripts/client-plays-team-plan.script
+#
+# The match runs at real speed (the 10s gates, then the fight); the await's
+# bound covers the 300s match cap, which ends in Results too.
+
+assert-state MainMenu
+click menu:MATCH
+assert-state ConfigureMatch
+
+click slot:t1s0
+click class:Warrior
+click slot:t2s0
+click class:Mage
+assert-enabled configure:start true
+
+click configure:start
+assert-state PlayMatch
+
+await-note 360 results:ai_profile=TeamPlan
+assert-state Results
+assert-no-note results:ai_profile=Legacy

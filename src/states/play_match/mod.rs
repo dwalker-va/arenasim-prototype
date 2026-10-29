@@ -727,13 +727,14 @@ pub fn setup_play_match(
     // same volumes drive both the gameplay resource and the cosmetic obstacle
     // meshes spawned by `spawn_arena_environment` below, so they cannot drift.
     commands.insert_resource(active_map_geometry.clone());
-    // AI profile — inserted in BOTH modes (dual-registration rule). Defaults to
-    // Legacy, so experimental behaviour is never on by accident.
-    // Graphical mode has no profile selector yet, so it runs Legacy. When the
-    // TeamPlan work is playable this should read from GameSettings.
-    // Do not clobber a profile a replay launch already chose.
-    let profile = existing_profile.map(|p| *p).unwrap_or_default();
-    info!("AI profile: {:?}", profile);
+    // AI profile — inserted in BOTH modes (dual-registration rule). A match the
+    // player set up plays the team AI (`TeamPlan`) on both sides. This is NOT
+    // the headless default: a headless config that names no profile still
+    // plays `Legacy`, so every baseline, probe and sweep keeps its meaning
+    // (`ai_profile.rs`, "Which profile plays where"). A `--replay` launch has
+    // already inserted its config's own resolution, which is honoured as is.
+    let profile = ai_profile::AiProfiles::for_client_match(existing_profile.map(|p| *p));
+    info!("AI profile: {}", profile.trace_label());
     commands.insert_resource(profile);
     commands.insert_resource(team_plan::TeamPlans::default());
     commands.insert_resource(situation::Situations::default());

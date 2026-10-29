@@ -1,7 +1,8 @@
 //! Results Scene UI - Post-Match Statistics
 //!
 //! The Report template (design doc §2.4): the shared screen header — its exit,
-//! the title, the match duration in the trailing slot — then a `DISPLAY`
+//! the title, the AI profile that played and the match duration in the
+//! trailing slot — then a `DISPLAY`
 //! victory banner, then the data panels:
 //! - Two aligned, face-off team panels (loser panel dimmed)
 //! - Per-combatant rows with a linked class icon, aligned stat columns, a
@@ -47,7 +48,7 @@
 //! ## UI Structure
 //! ```text
 //! ┌────────────────────────────────────────────────────┐
-//! │ [◀ MAIN MENU]  MATCH RESULTS                 ⏱ 1:47 │
+//! │ [◀ MAIN MENU]  MATCH RESULTS    AI: TeamPlan ⏱ 1:47 │
 //! │────────────────────────────────────────────────────│
 //! │  ★ TEAM 1 VICTORY                                  │
 //! ├──────────────────────────┬─────────────────────────┤
@@ -288,6 +289,7 @@ pub fn draw_results_screen(
             // empty screen needs the same way out. Its exit is the screen's
             // only one; Esc takes the same path (in `results_ui`).
             let duration = results.map(|r| r.duration_secs);
+            let profiles = results.map(|r| r.ai_profiles);
             if screen_header(ui, TITLE, nav, |ui| {
                 if let Some(secs) = duration {
                     ui.label(
@@ -295,6 +297,18 @@ pub fn draw_results_screen(
                             .size(text::H3)
                             .color(color::TEXT_MUTED),
                     );
+                }
+                // Which AI played: the client plays `TeamPlan`, a replay what
+                // its config says, so a report can always be read for it.
+                if let Some(profiles) = profiles {
+                    let label = profiles.trace_label();
+                    ui.add_space(space::LG);
+                    ui.label(
+                        egui::RichText::new(format!("AI: {label}"))
+                            .size(text::H3)
+                            .color(color::TEXT_MUTED),
+                    );
+                    crate::ui::driver::note(ui, format_args!("results:ai_profile={label}"));
                 }
             })
             .is_some()

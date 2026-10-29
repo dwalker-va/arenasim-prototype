@@ -290,6 +290,10 @@ pub struct MatchResults {
     /// amounts), so they track together but are not guaranteed equal to the
     /// point. Empty when no pets fought.
     pub pet_damage_links: HashMap<String, (String, String)>,
+    /// The AI each team played under, shown in the Results header: the client
+    /// plays `TeamPlan` (`AiProfiles::client_default`), a replay plays what its
+    /// config says.
+    pub ai_profiles: crate::states::play_match::ai_profile::AiProfiles,
 }
 
 /// Statistics for a single combatant at the end of a match.

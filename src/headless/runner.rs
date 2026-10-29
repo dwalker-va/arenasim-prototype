@@ -813,6 +813,7 @@ fn save_headless_match_log(
         arena_name: config.map.name().to_string(),
         winner,
         random_seed: headless_state.random_seed,
+        ai_profiles: headless_state.ai_profile,
         team1: team1_metadata,
         team2: team2_metadata,
     };

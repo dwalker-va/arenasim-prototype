@@ -104,6 +104,7 @@ fn mock_results() -> MatchResults {
             survived: true,
         }],
         pet_damage_links: Default::default(),
+        ai_profiles: arenasim::states::play_match::ai_profile::AiProfiles::client_default(),
     }
 }
 

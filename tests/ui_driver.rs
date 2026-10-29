@@ -610,6 +610,7 @@ fn every_shipped_script_parses() {
         "replay-results-exit.script",
         "configure-to-results.script",
         "options-and-keybindings.script",
+        "client-plays-team-plan.script",
     ];
 
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui-scripts");
@@ -1077,6 +1078,8 @@ const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
     // not an ability), and the restore button registers through the kit's
     // `driver_id`.
     ("src/states/view_combatant_ui.rs", 11),
+    // The note of the AI profile that played, beside the duration.
+    ("src/states/results_ui.rs", 1),
     // The header exit's note: what its label says, for a script to read back.
     ("src/ui/widgets/header.rs", 1),
     // The linked icon's tooltip note, moved here from encyclopedia/widget.rs.

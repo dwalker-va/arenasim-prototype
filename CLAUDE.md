@@ -24,10 +24,18 @@ cargo run --release -- --headless /tmp/test.json
 
 **Config options:**
 - `team1`, `team2`: Arrays of class names (Warrior, Mage, Rogue, Priest, Warlock, Paladin, Hunter)
-- `ai_profile`: "Legacy" (default) or "TeamPlan" — which AI implementation to run.
-  `Legacy` is the reactive per-unit AI every balance baseline and movement probe is
-  calibrated against; `TeamPlan` is the opt-in team-level positioning layer (see
-  `docs/design/team-level-positioning-ai.md`). Because matches are deterministic,
+- `ai_profile`: "Legacy" (the headless default) or "TeamPlan" — which AI
+  implementation to run. `Legacy` is the reactive per-unit AI every balance
+  baseline and movement probe is calibrated against; `TeamPlan` is the team AI
+  (positioning, plays, sight and focus — see
+  `docs/design/team-level-positioning-ai.md`). **Players get `TeamPlan`; headless
+  defaults to `Legacy`.** A match set up in the graphical client plays `TeamPlan`
+  on both sides (`AiProfiles::client_default`), while `--headless`, `--batch` and
+  `--matrix` play `Legacy` unless the config names a profile, so every baseline,
+  probe and sweep keeps its meaning. `--replay` follows the headless rule, so a
+  replay config with no `ai_profile` plays `Legacy` and reproduces its headless
+  run. The match report header (`AI profile:`) and the Results screen name what
+  played. Because matches are deterministic,
   running the same seed under both profiles is a PAIRED comparison in which the AI
   is the only variable. Also available as `--ai-profile` for `--matrix`, which
   records it in the CSV header and the output filename. `team1_ai_profile` /
