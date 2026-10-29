@@ -26,6 +26,7 @@ use arenasim::combat::log::CombatLog;
 use arenasim::states::encyclopedia::EncyclopediaData;
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
+use arenasim::states::play_match::ai_profile::AiProfiles;
 use arenasim::states::play_match::equipment::{load_item_definitions, ItemDefinitions};
 use arenasim::states::play_match::{CombatantStats, MatchResults};
 use arenasim::states::results_ui::{class_link_id, draw_results_screen};
@@ -130,6 +131,7 @@ fn results_screen_value_combos() {
             cs(CharacterClass::Hunter, 2, 0.0, 0.0, 7.0, false),
         ],
         pet_damage_links: Default::default(),
+        ai_profiles: AiProfiles::client_default(),
     };
 
     // Vary killing-blow counts so the K column spans 1- and 2-digit widths.
@@ -277,6 +279,7 @@ fn mock_results() -> MatchResults {
         )]
         .into_iter()
         .collect(),
+        ai_profiles: AiProfiles::client_default(),
     }
 }
 

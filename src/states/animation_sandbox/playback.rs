@@ -1034,6 +1034,7 @@ fn start_entry(
                             team1_combatants: Vec::new(),
                             team2_combatants: Vec::new(),
                             pet_damage_links: Default::default(),
+                            ai_profiles: Default::default(),
                         },
                         match_metadata: Default::default(),
                         choreography: Default::default(),

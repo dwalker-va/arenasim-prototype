@@ -686,6 +686,11 @@ impl CombatLog {
                 None => "<unseeded>".to_string(),
             }
         )?;
+        writeln!(
+            file,
+            "AI profile: {}",
+            match_metadata.ai_profiles.trace_label()
+        )?;
         writeln!(file)?;
 
         // Write team compositions
@@ -768,6 +773,10 @@ pub struct MatchMetadata {
     /// Seed used for deterministic RNG (None = unseeded entropy).
     /// Embedded in the log header so a saved match can be reproduced.
     pub random_seed: Option<u64>,
+    /// The AI each team played under. Written in the header so a saved match
+    /// says which AI it shows: the graphical client plays `TeamPlan` and a
+    /// headless config that names no profile plays `Legacy`.
+    pub ai_profiles: crate::states::play_match::ai_profile::AiProfiles,
     pub team1: Vec<CombatantMetadata>,
     pub team2: Vec<CombatantMetadata>,
 }

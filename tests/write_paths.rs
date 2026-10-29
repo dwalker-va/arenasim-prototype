@@ -15,6 +15,7 @@ fn test_metadata() -> MatchMetadata {
         arena_name: "Test Arena".to_string(),
         winner: Some(1),
         random_seed: Some(42),
+        ai_profiles: Default::default(),
         team1: vec![],
         team2: vec![],
     }

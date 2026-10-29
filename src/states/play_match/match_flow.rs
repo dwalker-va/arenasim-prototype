@@ -210,6 +210,7 @@ pub fn check_match_end(
     combat_log: Res<CombatLog>,
     celebration: Option<Res<VictoryCelebration>>,
     game_rng: Option<Res<GameRng>>,
+    ai_profiles: Option<Res<super::ai_profile::AiProfiles>>,
     projectiles: Query<Entity, With<Projectile>>,
     spell_effects: Query<Entity, With<SchoolImpact>>,
     traps: Query<Entity, With<Trap>>,
@@ -384,6 +385,7 @@ pub fn check_match_end(
             arena_name: config.map.name().to_string(),
             winner,
             random_seed: game_rng.as_ref().and_then(|r| r.seed),
+            ai_profiles: ai_profiles.as_deref().copied().unwrap_or_default(),
             team1: team1_metadata,
             team2: team2_metadata,
         };
@@ -407,6 +409,7 @@ pub fn check_match_end(
                 team1_combatants: team1_stats,
                 team2_combatants: team2_stats,
                 pet_damage_links,
+                ai_profiles: ai_profiles.as_deref().copied().unwrap_or_default(),
             },
             match_metadata,
             choreography: CelebrationChoreography::ConvergeAndBounce,

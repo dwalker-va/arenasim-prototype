@@ -6,6 +6,21 @@
 //! layer described in `docs/design/team-level-positioning-ai.md`. Both live in the
 //! same build, selected per match, so the two can be A/B'd against identical seeds.
 //!
+//! ## Which profile plays where
+//!
+//! The two entry points default differently, on purpose:
+//!
+//! - **A match the player sets up in the graphical client plays `TeamPlan`**
+//!   on both sides ([`AiProfiles::client_default`]): the team AI is what the
+//!   game ships.
+//! - **A headless match (`--headless`, `--batch`, `--matrix`) plays what its
+//!   config says, and `Legacy` when it says nothing** ([`AiProfile::default`]).
+//!   Every recorded baseline, probe and sweep was run that way, and they stay
+//!   valid only while a config that names no profile keeps meaning `Legacy`.
+//! - **`--replay` plays exactly what its config resolves to**, by the same
+//!   rule as headless (`HeadlessMatchConfig::ai_profiles`), so a replay with no
+//!   `ai_profile` plays `Legacy` and reproduces its headless run.
+//!
 //! ## Why this exists
 //!
 //! `cover_seek` (healer navigation to distant cover) was first landed
@@ -44,11 +59,14 @@ use bevy::prelude::*;
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AiProfile {
     /// The reactive, per-unit AI. Every recorded balance baseline and every
-    /// movement probe is calibrated against this, so it is the default and must
-    /// stay byte-identical.
+    /// movement probe is calibrated against this, so it is the HEADLESS default
+    /// (a config that names no profile) and must stay byte-identical. The
+    /// graphical client does not use this default: see
+    /// [`AiProfiles::client_default`].
     #[default]
     Legacy,
-    /// The team-level positioning layer. Opt-in while it is built out.
+    /// The team-level AI: positioning, plays, sight and focus. What the player
+    /// gets in the graphical client; opt-in in a headless config.
     TeamPlan,
 }
 
@@ -207,6 +225,23 @@ impl AiProfiles {
             team1: profile,
             team2: profile,
         }
+    }
+
+    /// What a match set up in the graphical client (Configure Match, then
+    /// START MATCH) plays: `TeamPlan` on both sides, because the team AI is
+    /// the game. Deliberately NOT [`Default`], which stays `Legacy` for every
+    /// headless config that names no profile, so the measurement surface
+    /// (baselines, probes, sweeps) keeps its meaning. A `--replay` never reaches
+    /// this: it inserts its config's own resolution before the match starts.
+    pub fn client_default() -> Self {
+        Self::uniform(AiProfile::TeamPlan)
+    }
+
+    /// The profiles a graphical match plays: the ones a `--replay` launch
+    /// already inserted, else [`Self::client_default`]. The one decision
+    /// `setup_play_match` makes, kept here so it is tested where it is made.
+    pub fn for_client_match(preset: Option<AiProfiles>) -> Self {
+        preset.unwrap_or_else(Self::client_default)
     }
 
     /// The profile `team` runs under. Out-of-range team ids resolve to team 1

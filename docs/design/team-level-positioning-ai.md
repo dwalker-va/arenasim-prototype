@@ -4,6 +4,13 @@ Status: **PARTLY IMPLEMENTED** — steps 2, 3 and half of 4 have landed.
 Date: 2026-07-25, revised 2026-07-26 after review, amended 2026-08-04 from
 implementation.
 
+**Which profile plays where (AS-406, v0.8).** Players get `TeamPlan`: a match
+set up in the graphical client plays it on both sides. Headless (`--headless`,
+`--batch`, `--matrix`) still defaults to `Legacy` when a config names no
+profile, so every baseline, probe and sweep keeps its meaning, and `--replay`
+follows the headless rule so a replay reproduces its headless run. Where this
+document says `TeamPlan` is opt-in, read it as opt-in for a headless config.
+
 Open questions from the first draft are resolved and folded into the body below;
 see *Resolved during review* at the end for the list, and *Deferred* for the three
 items deliberately left open. Implementation order is in *Migration plan*.
