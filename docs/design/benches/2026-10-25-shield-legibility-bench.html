@@ -60,8 +60,8 @@ table.meter{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-nu
 </style>
 
 <header>
-  <h1>Shield Legibility Bench <span style="color:var(--muted);font-weight:400">· AS-401</span></h1>
-  <div class="sub">Power Word: Shield, Divine Shield and Ice Barrier over the arena sand, <b>composited the way the client does it</b>: in linear HDR, then through Bevy 0.16's own TonyMcMapface LUT (embedded here, 48³). The sand's radiance is calibrated off the review screenshot (it lands at sRGB 241 / 226 / 193, the screenshot's value). <b>Back row:</b> the shipped shields. <b>Front row:</b> your tuning. The canvas is the centre 960 × 540 of a 1080p game view at 1:1, so units are the size they are in a match. Playback is real time.</div>
+  <h1>Shield Legibility Bench <span style="color:var(--muted);font-weight:400">· AS-401 · AS-405</span></h1>
+  <div class="sub">Power Word: Shield, Divine Shield and Ice Barrier over the arena sand, <b>composited the way the client does it</b>: in linear HDR, then through Bevy 0.16's own TonyMcMapface LUT (embedded here, 48³). The sand's radiance is calibrated off the review screenshot (it lands at sRGB 241 / 226 / 193, the screenshot's value). <b>Back row:</b> the shipped shields (AS-401's blessed values). <b>Front row:</b> your tuning, opening on AS-405's proposal A. The canvas is the centre 960 × 540 of a 1080p game view at 1:1, so units are the size they are in a match. Playback is real time.</div>
 </header>
 
 <div class="grid">
@@ -97,16 +97,24 @@ table.meter{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-nu
   </div>
   <div class="side">
     <div class="card"><h2>Tuning (front row)</h2>
-      <div class="presets"><button class="btn" id="pre_client">Client values (shipped)</button><button class="btn" id="pre_suggest">Suggested</button></div>
+      <div class="presets"><button class="btn" id="pre_client">Client values</button><button class="btn" id="pre_suggest">AS-401 (shipped)</button><button class="btn" id="pre_a">A: gold outline</button><button class="btn" id="pre_b">B: gold outline + gold wash</button><button class="btn" id="pre_c">C: gold outline, no wash</button></div>
+      <div class="hint" style="margin:0 0 8px">A, B and C change only Divine Shield's outline and wash colours, plus one strength. The outline level drops from 1.0 to PW:S's 0.6, because a gold line at 1.0 is too close to the sand to read (ΔL* about 7.5, against 10 at 0.6). Every other strength is AS-401's.</div>
       <div class="tabs" role="tablist" id="tabs"></div>
       <div id="knobs"></div>
+    </div>
+    <div class="card"><h2>AS-405: is Divine Shield blue?</h2>
+      <ul class="notes">
+        <li><b>The client colours are right; the channel order is not the error.</b> <code>divineshield_low_base.m2</code> stores four colour tracks as float RGB: rim gold <code>(1.0, 0.91, 0.318)</code>, fill blue <code>(0.318, 0.396, 1.0)</code>, streak B gold, streak A cyan <code>(0.318, 0.91, 1.0)</code>. Its textures are all grey, and kit 252 has no colour override. Ice Barrier's model uses the same textures with the same field order and reads light blue <code>(0.584, 0.82, 1.0)</code>. Read B,G,R it would be peach, so the order is RGB.</li>
+        <li><b>What went blue is the outline.</b> The client's outline is the <b>gold rim</b>, the same rim as PW:S. The blue fill is a faint glow inside it, at 6–15% held. AS-401 drew Divine Shield's new outline in the fill's blue, and added a blue wash. Those two layers are the strongest on the bubble, so it reads blue. A 2006 in-game screenshot (<a href="https://wow.zamimg.com/uploads/screenshots/normal/32801-divine-shield.jpg" style="color:var(--accent)">Wowhead #32801</a>) shows the client's read: a gold oval with gold glints, and a faint cool cast inside. Inside the oval the background is lifted by about (17, 16, 23) sRGB levels, with blue the largest.</li>
+        <li><b>The trade-off.</b> With a gold outline, Divine Shield and PW:S share their outline colour, as they do in the client. Divine Shield is then told apart by its stronger outline, its sparkles, and whatever wash it keeps. <b>A</b> keeps the client's blue wash inside the gold outline. <b>B</b> makes the wash gold too, which is not a client colour. <b>C</b> drops the wash.</li>
+      </ul>
     </div>
     <div class="card"><h2>What this shows</h2>
       <ul class="notes">
         <li><b>Divine Shield is drawn.</b> In a real match (the review's Paladin vs Rogue, seed 1) the rig spawns on the cast at 26.0 s, its five cards are visible and placed on the Paladin every frame until the aura ends at 37.7 s, and then it plays its death. Their weights are the client's: 0.06–0.15 held.</li>
         <li><b>Why nothing shows.</b> All three shields are additive light. The sand sits at about (4.0, 2.8, 1.2) in HDR, where TonyMcMapface has almost no headroom left. PW:S's held rim lifts the sand by under 1 sRGB level; even the full-strength cast pop lifts it 4.6. Divine Shield's blue fill moves the Paladin's own body by 1.3 levels. The signed-off benches drew on a dark unlit floor, in sRGB, with no tonemap, where the same weights read.</li>
         <li><b>The outline knobs</b> add one new card per shield: the rim's shape as an <b>alpha-blended</b> line in one of the shield's own client colours, drawn under the additive cards. Blending can darken the sand, which adding light cannot. Its profile is asymmetric: a crisp edge on the inside, facing the combatant, then a solid <i>core</i>, then an outer <i>glow</i> that fades away from the body as (1 − u)<sup>softness</sup>. It follows the rim's life: it pops in with the birth, fades with the death, and <i>pulse</i> sets how much of the rim's 633 ms wobble it keeps.</li>
-        <li><b>Divine Shield's tint</b> does the same for its blue fill: a blended blue wash inside the bubble, so it reads as a hard blue bubble beside PW:S's hollow gold ring.</li>
+        <li><b>Divine Shield's tint</b> does the same for its fill: an alpha-blended wash in the fill's shape inside the bubble, so it reads as filled beside PW:S's hollow ring. <i>tint colour</i> picks its colour.</li>
         <li><b>Bench limits.</b> No bloom (Bevy's <code>Bloom::NATURAL</code> softens edges a little). Capsule shading is fitted to the screenshot, not lit by Bevy's PBR. Ice Barrier's glint and frost mist and Divine Shield's halo are left out; the sparkles are simple dots. Cards draw over every capsule.</li>
       </ul>
     </div>
@@ -257,7 +265,7 @@ const KNOBS=[
   {key:'outWidth', label:'sharp core width',min:0,max:0.15,step:0.005, def:0.03, rust:'OUTLINE_WIDTH', note:'the solid band from the crisp inner edge outward, fraction of the card half-size'},
   {key:'outGlow',  label:'outer glow width',min:0,max:0.45,step:0.005, def:0.1, rust:'OUTLINE_GLOW_WIDTH', note:'how far past the core the outline fades out, fraction of the card half-size'},
   {key:'outSoft',  label:'glow softness',   min:0.3,max:4,step:0.05, def:1.6, rust:'OUTLINE_GLOW_FALLOFF', note:'falloff exponent: (1-u)^n. 1 = linear ramp; higher = a softer, quicker-fading glow'},
-  {key:'outColour',label:'outline colour',  choice:true, rust:'OUTLINE_RGB'},
+  {key:'outColour',label:'outline colour',  choice:'outline', rust:'OUTLINE_RGB'},
   {key:'outLevel', label:'outline level',   min:0.2,max:3,step:0.05, def:1.0, rust:'OUTLINE_LEVEL', note:'× the colour, linear. Below ~2 it is darker than the sand.'},
   {key:'outPulse', label:'outline pulse',   min:0,max:1,step:0.05, def:0.3, rust:'OUTLINE_PULSE', note:'how much of the rim wobble the outline keeps'},
   {g:'Client layers (additive)'},
@@ -265,21 +273,33 @@ const KNOBS=[
   {key:'streak',   label:'streak gain',     min:0,max:4,step:0.05, def:1, rust:'STREAK_GAIN'},
   {key:'birth',    label:'birth gain',      min:0,max:2,step:0.05, def:1, rust:'BIRTH_GAIN'},
   {key:'fill',     label:'fill gain',       min:0,max:6,step:0.05, def:1, rust:'FILL_GAIN', only:'ds'},
-  {key:'tint',     label:'fill tint',       min:0,max:1,step:0.01, def:0, rust:'FILL_TINT', only:'ds', note:'new: the fill as an alpha-blended blue wash'},
+  {key:'tint',     label:'fill tint',       min:0,max:1,step:0.01, def:0, rust:'FILL_TINT', only:'ds', note:'new: the fill as an alpha-blended wash'},
+  {key:'tintColour',label:'tint colour',    choice:'tint', rust:'FILL_TINT_RGB', only:'ds'},
   {key:'spark',    label:'sparkle gain',    min:0,max:4,step:0.05, def:1, rust:'SPARKLE_GAIN', only:'ds'},
   {key:'icicle',   label:'icicle gain',     min:0,max:3,step:0.05, def:1, rust:'ICICLE_GAIN', only:'ib'},
 ];
-const KINDS=[['pws','Power Word: Shield','PWS','#ffe851'],['ds','Divine Shield','DS','#8fa4ff'],['ib','Ice Barrier','IB','#95d1ff']];
+const TINT_CHOICES=[['fill','fill blue'],['rim','rim gold'],['b','streak B gold']];
+const choicesFor=(knob,kind)=>knob.choice==='tint'?TINT_CHOICES:COLOUR_CHOICES[kind];
+const KINDS=[['pws','Power Word: Shield','PWS','#ffe851'],['ds','Divine Shield','DS','#ffd75a'],['ib','Ice Barrier','IB','#95d1ff']];
 const DEFCOLOUR={pws:'rim',ds:'fill',ib:'rim'};
-function clientTuning(kind){const t={};for(const k of KNOBS)if(k.key&&!k.choice)t[k.key]=k.def;t.outColour=DEFCOLOUR[kind];
+function clientTuning(kind){const t={};for(const k of KNOBS)if(k.key&&!k.choice)t[k.key]=k.def;t.outColour=DEFCOLOUR[kind];t.tintColour='fill';
   if(kind!=='ds'){t.fill=0;t.tint=0;t.spark=0;} if(kind!=='ib')t.icicle=0; return t;}
+// AS-401's blessed values (version 1792983198-a728), as shipped.
 const SUGGEST={
   pws:{outAlpha:0.85,outWidth:0.035,outGlow:0.12,outSoft:1.6,outLevel:0.6,outPulse:0.3,rim:2.0},
   ds:{outAlpha:0.8,outWidth:0.035,outGlow:0.12,outSoft:1.6,outLevel:1.0,outPulse:0.2,rim:1.5,tint:0.18,fill:2.0},
   ib:{outAlpha:0.9,outWidth:0.04,outGlow:0.12,outSoft:1.6,outLevel:0.5,outPulse:0.3,rim:1.5},
 };
-const SHIPPED={pws:clientTuning('pws'),ds:clientTuning('ds'),ib:clientTuning('ib')};
-const TUNED={}; for(const [k] of KINDS){TUNED[k]=Object.assign(clientTuning(k),SUGGEST[k]);}
+// AS-405's proposals: Divine Shield's colours, and the outline level a gold line needs on sand (PW:S's).
+const PROPOSALS={
+  a:{outColour:'rim',outLevel:0.6,tintColour:'fill'},
+  b:{outColour:'rim',outLevel:0.6,tintColour:'rim'},
+  c:{outColour:'rim',outLevel:0.6,tintColour:'fill',tint:0},
+};
+const tuningFor=(kind,which)=>{const t=clientTuning(kind);if(which==='client')return t;Object.assign(t,SUGGEST[kind]);
+  if(kind==='ds'&&PROPOSALS[which])Object.assign(t,PROPOSALS[which]);return t;};
+const SHIPPED={pws:tuningFor('pws','suggest'),ds:tuningFor('ds','suggest'),ib:tuningFor('ib','suggest')};
+const TUNED={}; for(const [k] of KINDS){TUNED[k]=tuningFor(k,'a');}
 
 // ---------- shield lifecycle (shield.rs shield_sample, plus the outline envelope) ----------
 const spreadKey=v=>v;
@@ -407,7 +427,7 @@ function drawShield(u){
     const col=lin(C[T.outColour]).map(v=>v*T.outLevel), a=T.outAlpha*s.env;
     drawCard(cs.rim,blendFn((x,y)=>a*outlineAt(Math.hypot(x,y),T.outWidth,T.outGlow,T.outSoft),col));
   }
-  if(u.kind==='ds'&&T.tint>0&&s.env>0){const a=T.tint*s.env; drawCard(cs.rim,blendFn((x,y)=>a*texAt(TEX.fill,x,y),lin(C.fill)));}
+  if(u.kind==='ds'&&T.tint>0&&s.env>0){const a=T.tint*s.env; drawCard(cs.rim,blendFn((x,y)=>a*texAt(TEX.fill,x,y),lin(C[T.tintColour])));}
   // 2. the client's additive cards
   if(u.kind==='ds'&&s.w[3]>0){drawCard(cs.rim,addTex(TEX.fill,lin(C.fill),s.w[3]));drawCard(cs.streak,addTex(TEX.fill,lin(C.fill),s.w[3]));}
   if(s.w[0]>0)drawCard(cs.rim,addTex(TEX.rim,lin(C.rim),s.w[0]));
@@ -497,8 +517,8 @@ function buildKnobs(){
     if(k.g){const h=document.createElement('div');h.className='knobgroup';h.textContent=k.g;K.appendChild(h);continue;}
     const d=document.createElement('div');
     if(k.choice){d.className='knob sel';
-      d.innerHTML=`<span>${k.label}</span><select id="K_${tab}_${k.key}" aria-label="${k.label}">${COLOUR_CHOICES[tab].map(([v,n])=>`<option value="${v}" ${v===T.outColour?'selected':''}>${n}</option>`).join('')}</select>`;
-      K.appendChild(d);d.querySelector('select').addEventListener('change',e=>{T.outColour=e.target.value;emit();});continue;}
+      d.innerHTML=`<span>${k.label}</span><select id="K_${tab}_${k.key}" aria-label="${k.label}">${choicesFor(k,tab).map(([v,n])=>`<option value="${v}" ${v===T[k.key]?'selected':''}>${n}</option>`).join('')}</select>`;
+      K.appendChild(d);d.querySelector('select').addEventListener('change',e=>{T[k.key]=e.target.value;emit();});continue;}
     d.className='knob';
     d.innerHTML=`<span title="${k.note||''}">${k.label}</span><input type="range" id="K_${tab}_${k.key}" min="${k.min}" max="${k.max}" step="${k.step}" value="${T[k.key]}" aria-label="${k.label}"><output>${T[k.key]}</output>`;
     K.appendChild(d);
@@ -515,14 +535,13 @@ function emit(){
   const lines=['// AS-401 Shield Legibility Bench: outline (alpha-blended, new) and client-layer gains, over the calibrated sand'];
   for(const [k,name,P] of KINDS){const T=TUNED[k];lines.push('',`// ${name}`);
     for(const kn of KNOBS){if(!kn.key||(kn.only&&kn.only!==k))continue;
-      if(kn.choice){const c=RGB[k][T.outColour];lines.push(`/// The outline's colour: the client's ${COLOUR_CHOICES[k].find(x=>x[0]===T.outColour)[1]}.`);
+      if(kn.choice){const c=RGB[k][T[kn.key]];lines.push(`/// The ${kn.choice}'s colour: the client's ${choicesFor(kn,k).find(x=>x[0]===T[kn.key])[1]}.`);
         lines.push(`pub const ${P}_${kn.rust}: [f32; 3] = [${c.map(f).join(', ')}];`);continue;}
       lines.push(`pub const ${P}_${kn.rust}: f32 = ${f(T[kn.key])};`);}}
   document.getElementById('out').textContent=lines.join('\n');
 }
-function preset(which){for(const [k] of KINDS){TUNED[k]=Object.assign(clientTuning(k),which==='suggest'?SUGGEST[k]:{});}buildKnobs();emit();}
-document.getElementById('pre_client').onclick=()=>preset('client');
-document.getElementById('pre_suggest').onclick=()=>preset('suggest');
+function preset(which){for(const [k] of KINDS){TUNED[k]=tuningFor(k,which);}buildKnobs();emit();}
+for(const w of ['client','suggest','a','b','c'])document.getElementById('pre_'+w).onclick=()=>preset(w);
 document.getElementById('cast').onclick=castAll;
 document.getElementById('end').onclick=endAll;
 document.getElementById('pause').onclick=e=>{paused=!paused;e.target.textContent=paused?'Play':'Pause';};
