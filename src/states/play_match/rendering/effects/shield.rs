@@ -87,8 +87,10 @@
 //! invisible in a match. So each shield also wears an [`ShieldLayer::Outline`]:
 //! the rim's shape as an alpha-BLENDED line in one of its own client colours,
 //! sharp on the inner edge facing the combatant and glowing outward
-//! ([`shield_outline_alpha`]), following the rim's life. Divine Shield also
-//! wears a [`ShieldLayer::Tint`], its blue fill as a blended wash. Both draw
+//! ([`shield_outline_alpha`]), following the rim's life. Divine Shield's
+//! outline is the client's rim gold at PW:S's level, like the rim it traces
+//! (AS-405, bench version id 1793241702-fe78). Divine Shield also wears a
+//! [`ShieldLayer::Tint`], its blue fill as a faint blended wash. Both draw
 //! behind every additive card ([`shield_layer_sort_bias`]). The rim gains
 //! (and Divine Shield's fill gain) rose with them. Every value is the Shield
 //! Legibility Bench's signed-off default
@@ -198,15 +200,20 @@ pub const DS_TIME_SCALE: f32 = 1.0;
 /// When the halo falls. Its `enabled` track has keys only in the death (on,
 /// then off at 300 ms); the bench's default, signed off, reads it literally.
 pub const DS_HALO_MODE: HaloMode = HaloMode::DeathOnly;
-/// The outline (AS-401; see PW:S's block): the client's fill blue.
+/// The outline (AS-401; see PW:S's block). AS-405: the client's rim gold, at
+/// PW:S's level, as the client draws the same gold rim on both shields
+/// (bench option A, artifact 7M3N5Lvgk5m5cPknaps354, version id
+/// 1793241702-fe78). A gold line at level 1.0 sits too close to the sand to
+/// read (ΔL* 7.5); at 0.6 it measures 10.1.
 pub const DS_OUTLINE_ALPHA: f32 = 0.8;
 pub const DS_OUTLINE_WIDTH: f32 = 0.035;
 pub const DS_OUTLINE_GLOW_WIDTH: f32 = 0.12;
 pub const DS_OUTLINE_GLOW_FALLOFF: f32 = 1.6;
-pub const DS_OUTLINE_RGB: [f32; 3] = DS_FILL_RGB;
-pub const DS_OUTLINE_LEVEL: f32 = 1.0;
+pub const DS_OUTLINE_RGB: [f32; 3] = RIM_RGB;
+pub const DS_OUTLINE_LEVEL: f32 = PWS_OUTLINE_LEVEL;
 pub const DS_OUTLINE_PULSE: f32 = 0.2;
-/// The blue fill as an alpha-blended wash (AS-401): its peak opacity.
+/// The blue fill as an alpha-blended wash (AS-401): its peak opacity. It
+/// stays the client's fill blue, a faint glow inside the gold outline (AS-405).
 pub const DS_FILL_TINT: f32 = 0.18;
 
 // --- Ice Barrier: the bench's signed-off values (AS-358) ----------------------
