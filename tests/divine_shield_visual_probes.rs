@@ -383,7 +383,7 @@ fn the_bubble_arrives_late_as_a_blue_white_flash_over_the_body() {
 
 /// The held bubble: the body sits in a blue glow the whole time (the fill over
 /// the body centre, on the rim's 0.06–0.15 track × `DS_FILL_GAIN`), streak A is cyan,
-/// streak B and the rim are gold — where PW:S, at the same moment, lays
+/// streak B, the rim and the outline are gold — where PW:S, at the same moment, lays
 /// NOTHING over the body: every one of its cards is hollow there.
 #[test]
 fn the_bubble_fills_the_body_blue_where_pws_is_hollow() {
@@ -408,12 +408,15 @@ fn the_bubble_fills_the_body_blue_where_pws_is_hollow() {
         );
         for c in &ds {
             match c.layer {
-                ShieldLayer::FillOuter
-                | ShieldLayer::FillInner
-                | ShieldLayer::Outline
-                | ShieldLayer::Tint => {
+                ShieldLayer::FillOuter | ShieldLayer::FillInner | ShieldLayer::Tint => {
                     assert!(is_blue(c.rgb), "{:?} {:?}", c.layer, c.rgb)
                 }
+                // The rim's gold, darkened to PW:S's level to read on sand (AS-405).
+                ShieldLayer::Outline => assert!(
+                    c.rgb.red > c.rgb.blue + 0.4 && c.rgb.green > c.rgb.blue + 0.4,
+                    "the outline is not gold: {:?}",
+                    c.rgb
+                ),
                 ShieldLayer::StreakA => assert!(
                     c.rgb.blue > 0.9 && c.rgb.green > 0.8 && c.rgb.red < 0.5,
                     "streak A is not cyan: {:?}",
@@ -836,7 +839,9 @@ fn every_bubble_card_centre_sits_above_the_body_centre() {
 }
 
 /// The two colours of the bubble's own are blue, and the cards both shields
-/// wear keep PW:S's gold: the only hues spent are the client's.
+/// wear keep PW:S's gold: the only hues spent are the client's. The outline
+/// traces the gold rim, so it is gold too (AS-405): the blue is the faint
+/// fill inside it, never the line around it.
 #[test]
 // 0.318 is a client colour channel, not an approximation of 1/pi.
 #[allow(clippy::approx_constant)]
@@ -846,11 +851,14 @@ fn the_bubble_spends_only_its_client_blues() {
         let pws = shield_layer_rgb(ShieldKind::PowerWordShield, layer);
         match layer {
             ShieldLayer::Rim | ShieldLayer::StreakB => assert_eq!(ds, pws, "{layer:?}"),
+            ShieldLayer::Outline => {
+                assert_eq!(ds, pws, "the outline is not PW:S's");
+                assert_eq!(ds, [1.0, 0.91, 0.318], "the outline is not the rim gold");
+            }
             ShieldLayer::StreakA => assert_eq!(ds, [0.318, 0.91, 1.0]),
-            ShieldLayer::FillOuter
-            | ShieldLayer::FillInner
-            | ShieldLayer::Outline
-            | ShieldLayer::Tint => assert_eq!(ds, [0.318, 0.396, 1.0], "{layer:?}"),
+            ShieldLayer::FillOuter | ShieldLayer::FillInner | ShieldLayer::Tint => {
+                assert_eq!(ds, [0.318, 0.396, 1.0], "{layer:?}")
+            }
             ShieldLayer::Icicles | ShieldLayer::Glint => unreachable!("not a Divine Shield layer"),
         }
     }

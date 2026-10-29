@@ -332,6 +332,55 @@ fn the_outline_and_tint_blend_and_the_client_cards_stay_additive() {
     }
 }
 
+/// Every outline is drawn in its own rim's colour, read off the live rim card;
+/// and Divine Shield's is PW:S's gold line at PW:S's level, because the client
+/// draws the same gold rim on both (AS-405). Its blue stays inside, in the
+/// tint and the fill.
+#[test]
+fn every_outline_wears_its_rim_colour_and_the_bubble_wears_the_shields_gold() {
+    let mut outlines = Vec::new();
+    for kind in ShieldKind::ALL {
+        let mut h = Harness::new(class_of(kind));
+        h.give(kind);
+        h.run_to(kind, ShieldPhase::Loop, 0.1);
+        let outline = h.card(kind, ShieldLayer::Outline).unwrap();
+        let rim = h.card(kind, ShieldLayer::Rim).unwrap();
+        let level = shield_tuning(kind).outline.level;
+        let got = outline.material.base_color.to_linear();
+        let want = rim.material.base_color.to_linear() * level;
+        for (g, w) in [
+            (got.red, want.red),
+            (got.green, want.green),
+            (got.blue, want.blue),
+        ] {
+            assert!(
+                (g - w).abs() < 1e-5,
+                "{kind:?} outline {got:?} is not its rim's colour {want:?}"
+            );
+        }
+        outlines.push((kind, got));
+    }
+    let of = |k: ShieldKind| outlines.iter().find(|(o, _)| *o == k).unwrap().1;
+    let (ds, pws) = (
+        of(ShieldKind::DivineShield),
+        of(ShieldKind::PowerWordShield),
+    );
+    for (d, p) in [
+        (ds.red, pws.red),
+        (ds.green, pws.green),
+        (ds.blue, pws.blue),
+    ] {
+        assert!(
+            (d - p).abs() < 1e-6,
+            "Divine Shield's outline {ds:?} vs PW:S's {pws:?}"
+        );
+    }
+    assert!(
+        ds.red > 2.0 * ds.blue,
+        "Divine Shield's outline is not gold: {ds:?}"
+    );
+}
+
 // --- the life ------------------------------------------------------------------------
 
 /// The outline follows the rim's life: dark for the client's 200 ms delay,

@@ -5,7 +5,7 @@ differed from the `ShieldBubble` sphere we drew for it. The bench is
 [`benches/2026-10-16-divine-shield-bench.html`](benches/2026-10-16-divine-shield-bench.html).
 **The blessed design is its published artifact,
 https://claude.ai/artifact/AehhwbuxGwuaDhttmDYqS2, version `1792216579-ec72`, at its
-defaults**, and §6 records what shipped.
+defaults**, and §6 records what shipped. §7 verifies the colours (AS-405).
 
 Sources: wago.tools DB2 tables and CASC files for Classic Era `1.15.9.69547` and TBC
 `2.5.6.69795`. The join is `scripts/db2_spell_sweep.py` over the three Paladin skill lines,
@@ -211,3 +211,44 @@ caster's hands. The halo fall takes the literal reading, `DS_HALO_MODE = DeathOn
   sandbox previews it through its pending component.
 - **The sphere** no longer draws Divine Shield. Ice Barrier is its last user.
 - **Textures** are generated from the measured profiles. No client art ships.
+
+## 7. The colours, verified (AS-405)
+
+The 0.8 review read the shipped bubble as blue, and asked whether the colours above were
+misread, for example with the channels in B,G,R order. They were not. The colours in §2
+are the client's, in RGB order. What read as blue was the AS-401 outline. Here is how the
+colours were checked:
+
+- **The model.** `divineshield_low_base.m2` has four colour tracks, each a single key of
+  three floats, with alpha 1.0. Its skin, 493436, maps them one per batch: track 0 to the rim
+  (`genericglow2b1`), 1 to both fill cards (`genericglow64`), 2 to streak B and 3 to streak A.
+  The values are the ones tabled in §2.
+- **No other colour source.** All six textures decode as grey: the four cards and the two
+  particle sprites. Kit 252 holds only the sound and the model attach, and the
+  `SpellVisualEffectName` rows for the model carry no colour. So each card's colour is its
+  track alone.
+- **The order is RGB.** Ice Barrier's `iceshield_state.m2` (166392) uses the same grey
+  rim and streak textures, through the same field and the same batch layout. It reads
+  `(0.584, 0.82, 1.0)`, which is light blue, as Ice Barrier is in game. Read as B,G,R it
+  would be peach `(1.0, 0.82, 0.584)`. PW:S's tracks, read the same way, are gold.
+- **An in-game screenshot.** Wowhead's screenshot #32801
+  (`https://wow.zamimg.com/uploads/screenshots/normal/32801-divine-shield.jpg`) was
+  uploaded in the original game's era. It shows a gold oval with gold glints. Against the
+  plain background above the head, the rim adds about (57, 58, 39) sRGB levels, which is
+  warm. The inside of the oval adds about (17, 16, 23), with blue the largest. That is a
+  faint cool cast, as a 6–15% blue fill over a gold rim predicts. The image is a JPEG, so
+  this check is weak. The Ice Barrier argument is the strong one.
+
+**What changed.** AS-401 drew the new blended outline in the fill's blue, and that line
+is the strongest layer on the bubble. The client's outline is the gold rim, the same as
+PW:S's. The outline is now the rim gold at PW:S's level of 0.6, because a gold line at
+1.0 is too close to the sand to read: ΔL* 7.5 at 1.0 against 10.1 at 0.6. The blue
+fill, its wash and the cyan streak keep the client's colours. This is option A on the
+Shield Legibility Bench (artifact 7M3N5Lvgk5m5cPknaps354, version id
+`1793241702-fe78`). So the two shields share their outline colour, as in the client.
+Divine Shield is told apart by its stronger rim, the faint blue inside it, and its
+sparkles. §3 holds as written.
+
+The same check finds nothing wrong in PW:S (AS-344) or Ice Barrier (AS-358). Their
+tracks and batch mapping match their code, and Ice Barrier's icicle texture `ice3b_b`
+(166365) decodes blue, matching `ICE_LIGHT` and `ICE_DEEP`.
