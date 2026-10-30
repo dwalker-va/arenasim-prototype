@@ -59,8 +59,8 @@
             slot: Legs,
             armor_type: Plate,
             armor: 300.0,
-            max_health: 18.0,
-            attack_power: 5.0,
+            max_health: 22.0,
+            attack_power: 6.0,
             crit_chance: 0.01,
         ),
 
@@ -94,8 +94,8 @@
             slot: Waist,
             armor_type: Plate,
             armor: 275.0,
-            max_health: 8.0,
-            attack_power: 4.0,
+            max_health: 10.0,
+            attack_power: 6.0,
         ),
 
         WristguardsOfStability: (
@@ -105,8 +105,8 @@
             slot: Wrists,
             armor_type: Plate,
             armor: 270.0,
-            max_health: 6.0,
-            attack_power: 3.0,
+            max_health: 7.0,
+            attack_power: 4.0,
         ),
 
         ShoulderplatesOfValor: (
@@ -167,9 +167,9 @@
             slot: Wrists,
             armor_type: Plate,
             armor: 270.0,
-            max_health: 8.0,
+            max_health: 9.0,
             max_mana: 6.0,
-            spell_power: 3.0,
+            spell_power: 4.0,
         ),
 
         LawbringerGauntlets: (
@@ -191,9 +191,9 @@
             slot: Waist,
             armor_type: Plate,
             armor: 275.0,
-            max_health: 8.0,
-            max_mana: 6.0,
-            spell_power: 4.0,
+            max_health: 10.0,
+            max_mana: 8.0,
+            spell_power: 5.0,
         ),
 
         LawbringerLegplates: (
@@ -203,9 +203,9 @@
             slot: Legs,
             armor_type: Plate,
             armor: 300.0,
-            max_health: 15.0,
-            max_mana: 12.0,
-            spell_power: 7.0,
+            max_health: 17.0,
+            max_mana: 14.0,
+            spell_power: 8.0,
         ),
 
         LawbringerBoots: (
@@ -257,9 +257,9 @@
             slot: Legs,
             armor_type: Mail,
             armor: 157.0,
-            max_health: 14.0,
-            max_mana: 9.0,
-            attack_power: 4.0,
+            max_health: 16.0,
+            max_mana: 11.0,
+            attack_power: 5.0,
             crit_chance: 0.01,
         ),
 
@@ -295,8 +295,8 @@
             slot: Waist,
             armor_type: Mail,
             armor: 146.0,
-            max_health: 6.0,
-            max_mana: 5.0,
+            max_health: 9.0,
+            max_mana: 7.0,
             attack_power: 3.0,
         ),
 
@@ -307,9 +307,9 @@
             slot: Wrists,
             armor_type: Mail,
             armor: 146.0,
-            max_health: 5.0,
+            max_health: 6.0,
             max_mana: 4.0,
-            attack_power: 2.0,
+            attack_power: 3.0,
         ),
 
         BeaststalkerMantle: (
@@ -365,9 +365,9 @@
             slot: Legs,
             armor_type: Mail,
             armor: 157.0,
-            max_health: 10.0,
-            max_mana: 14.0,
-            spell_power: 8.0,
+            max_health: 12.0,
+            max_mana: 16.0,
+            spell_power: 9.0,
         ),
 
         EarthfuryGauntlets: (
@@ -402,9 +402,9 @@
             slot: Waist,
             armor_type: Mail,
             armor: 146.0,
-            max_health: 6.0,
-            max_mana: 10.0,
-            spell_power: 5.0,
+            max_health: 7.0,
+            max_mana: 11.0,
+            spell_power: 7.0,
         ),
 
         EarthfuryBracers: (
@@ -415,8 +415,8 @@
             armor_type: Mail,
             armor: 146.0,
             max_health: 5.0,
-            max_mana: 8.0,
-            spell_power: 4.0,
+            max_mana: 9.0,
+            spell_power: 5.0,
         ),
 
         EarthfuryEpaulets: (
@@ -472,9 +472,9 @@
             slot: Legs,
             armor_type: Leather,
             armor: 99.0,
-            max_health: 10.0,
-            max_mana: 14.0,
-            spell_power: 8.0,
+            max_health: 12.0,
+            max_mana: 16.0,
+            spell_power: 9.0,
         ),
 
         CenarionGloves: (
@@ -509,9 +509,9 @@
             slot: Waist,
             armor_type: Leather,
             armor: 92.0,
-            max_health: 6.0,
-            max_mana: 10.0,
-            spell_power: 5.0,
+            max_health: 7.0,
+            max_mana: 11.0,
+            spell_power: 7.0,
         ),
 
         CenarionBracers: (
@@ -522,8 +522,8 @@
             armor_type: Leather,
             armor: 92.0,
             max_health: 5.0,
-            max_mana: 8.0,
-            spell_power: 4.0,
+            max_mana: 9.0,
+            spell_power: 5.0,
         ),
 
         CenarionSpaulders: (
@@ -572,8 +572,8 @@
             slot: Legs,
             armor_type: Leather,
             armor: 99.0,
-            max_health: 10.0,
-            attack_power: 5.0,
+            max_health: 14.0,
+            attack_power: 6.0,
             crit_chance: 0.01,
         ),
 
@@ -607,8 +607,8 @@
             slot: Waist,
             armor_type: Leather,
             armor: 92.0,
-            max_health: 5.0,
-            attack_power: 3.0,
+            max_health: 7.0,
+            attack_power: 5.0,
         ),
 
         NightstalkerBracers: (
@@ -618,8 +618,8 @@
             slot: Wrists,
             armor_type: Leather,
             armor: 92.0,
-            max_health: 4.0,
-            attack_power: 2.0,
+            max_health: 5.0,
+            attack_power: 3.0,
         ),
 
         NightstalkerMantle: (
@@ -669,9 +669,9 @@
             slot: Legs,
             armor_type: Cloth,
             armor: 46.0,
-            max_health: 8.0,
-            max_mana: 15.0,
-            spell_power: 7.0,
+            max_health: 9.0,
+            max_mana: 18.0,
+            spell_power: 8.0,
         ),
 
         MagistersGloves: (
@@ -706,9 +706,9 @@
             slot: Waist,
             armor_type: Cloth,
             armor: 43.0,
-            max_health: 4.0,
-            max_mana: 8.0,
-            spell_power: 4.0,
+            max_health: 5.0,
+            max_mana: 9.0,
+            spell_power: 6.0,
         ),
 
         MagistersBracers: (
@@ -719,8 +719,8 @@
             armor_type: Cloth,
             armor: 43.0,
             max_health: 3.0,
-            max_mana: 6.0,
-            spell_power: 3.0,
+            max_mana: 7.0,
+            spell_power: 4.0,
         ),
 
         MagistersMantle: (
@@ -848,8 +848,8 @@
             item_level: 55,
             icon: "icons/items/inv_misc_token_argentdawn2.jpg",
             slot: Trinket,
-            attack_power: 6.0,
-            spell_power: 4.0,
+            attack_power: 8.0,
+            spell_power: 6.0,
         ),
 
         EssenceOfEternalLife: (
@@ -857,8 +857,8 @@
             item_level: 55,
             icon: "icons/items/inv_misc_root_02.jpg",
             slot: Trinket,
-            max_health: 15.0,
-            mana_regen: 1.0,
+            max_health: 18.0,
+            mana_regen: 1.5,
         ),
 
         // ====================================================================
