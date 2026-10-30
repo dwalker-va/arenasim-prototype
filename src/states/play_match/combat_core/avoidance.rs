@@ -10,10 +10,15 @@
 //! spent on it stays spent: a swing's timer and its queued Heroic Strike, an
 //! ability's cost, cooldown and global cooldown.
 //!
+//! **A defender that cannot act cannot avoid** (TBC): one stunned,
+//! incapacitated, feared or polymorphed — whatever the engine's own "cannot
+//! act" test (`utils::is_incapacitating`) holds — takes the hit. Parry works
+//! from any side; the sim models no facing.
+//!
 //! **The zero guarantee.** [`roll_avoidance`] draws from `game_rng` only when
-//! the defender has a dodge or parry chance above 0. Every class's base value
-//! is 0, so a match without avoidance draws exactly the numbers it drew before
-//! avoidance existed, and plays byte-identically.
+//! the defender has a dodge or parry chance above 0 AND can act. Every class's
+//! base value is 0, so a match without avoidance draws exactly the numbers it
+//! drew before avoidance existed, and plays byte-identically.
 //!
 //! **One funnel.** Each roll site spawns a [`MeleeAvoided`] marker and nothing
 //! else; [`resolve_melee_avoidances`] is the one place an avoidance is logged
@@ -26,10 +31,10 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::super::components::{
-    Combatant, FloatingCombatText, FloatingTextState, GameRng, Pet, PlayMatchEntity,
+    Aura, Combatant, FloatingCombatText, FloatingTextState, GameRng, Pet, PlayMatchEntity,
 };
 use super::super::decision_trace::{ActorView, DecisionTrace, TargetView};
-use super::super::utils::{combat_log_id_for, get_next_fct_offset};
+use super::super::utils::{combat_log_id_for, get_next_fct_offset, is_incapacitating};
 use super::super::FCT_HEIGHT;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 
@@ -83,14 +88,27 @@ impl Combatant {
     }
 }
 
-/// Roll one incoming melee attack against `defense`: dodged, parried, or
-/// `None` (it connects).
+/// Roll one incoming melee attack against a defender with `defense`, wearing
+/// `defender_auras`: dodged, parried, or `None` (it connects).
 ///
 /// One draw on Classic's single-roll table — dodge first, then parry — and
-/// **no draw at all** while both chances are 0 ([`MeleeDefense::is_none`]):
-/// that is what keeps every match without avoidance byte-identical.
-pub fn roll_avoidance(defense: MeleeDefense, rng: &mut GameRng) -> Option<Avoidance> {
+/// **no draw at all** while both chances are 0 ([`MeleeDefense::is_none`]),
+/// or while the defender is held in crowd control that stops it acting
+/// (`utils::is_incapacitating`: stunned, incapacitated, feared, polymorphed,
+/// cycloned). That is what keeps every match without avoidance
+/// byte-identical, and what makes a CC'd defender take the hit.
+pub fn roll_avoidance(
+    defense: MeleeDefense,
+    defender_auras: &[Aura],
+    rng: &mut GameRng,
+) -> Option<Avoidance> {
     if defense.is_none() {
+        return None;
+    }
+    if defender_auras
+        .iter()
+        .any(|a| is_incapacitating(&a.effect_type))
+    {
         return None;
     }
     let roll = rng.random_f32();
@@ -117,18 +135,20 @@ pub struct MeleeAvoided {
     pub avoidance: Avoidance,
 }
 
-/// Roll `attacker`'s melee attack named `attack` against `defense`, and on an
-/// avoidance spawn its [`MeleeAvoided`]. Returns the avoidance, so the caller
+/// Roll `attacker`'s melee attack named `attack` against `defense` (the
+/// defender wearing `defender_auras`), and on an avoidance spawn its
+/// [`MeleeAvoided`]. Returns the avoidance, so the caller
 /// stops the attack there: no damage, no aura, no interrupt.
 pub fn avoid_melee_attack(
     commands: &mut Commands,
     rng: &mut GameRng,
     defense: MeleeDefense,
+    defender_auras: &[Aura],
     attacker: Entity,
     defender: Entity,
     attack: &str,
 ) -> Option<Avoidance> {
-    let avoidance = roll_avoidance(defense, rng)?;
+    let avoidance = roll_avoidance(defense, defender_auras, rng)?;
     commands.spawn(MeleeAvoided {
         attacker,
         defender,
@@ -234,7 +254,7 @@ mod tests {
     fn draws_left_alone(defense: MeleeDefense) -> bool {
         let mut rolled = GameRng::from_seed(7);
         let mut fresh = GameRng::from_seed(7);
-        let _ = roll_avoidance(defense, &mut rolled);
+        let _ = roll_avoidance(defense, &[], &mut rolled);
         rolled.random_f32() == fresh.random_f32()
     }
 
@@ -243,7 +263,7 @@ mod tests {
     #[test]
     fn zero_avoidance_draws_nothing() {
         let mut rng = GameRng::from_seed(7);
-        assert_eq!(roll_avoidance(MeleeDefense::default(), &mut rng), None);
+        assert_eq!(roll_avoidance(MeleeDefense::default(), &[], &mut rng), None);
         assert_eq!(rng.draws(), 0, "a defender with no avoidance draws nothing");
         assert!(draws_left_alone(MeleeDefense::default()));
 
@@ -253,6 +273,7 @@ mod tests {
                 dodge: 0.1,
                 parry: 0.0,
             },
+            &[],
             &mut rng,
         );
         assert_eq!(rng.draws(), 1);
@@ -262,6 +283,7 @@ mod tests {
                 dodge: 0.0,
                 parry: 0.1,
             },
+            &[],
             &mut rng,
         );
         assert_eq!(rng.draws(), 1);
@@ -277,6 +299,7 @@ mod tests {
                     dodge: 1.0,
                     parry: 0.0
                 },
+                &[],
                 &mut rng
             ),
             Some(Avoidance::Dodge)
@@ -287,6 +310,7 @@ mod tests {
                     dodge: 0.0,
                     parry: 1.0
                 },
+                &[],
                 &mut rng
             ),
             Some(Avoidance::Parry)
@@ -299,6 +323,7 @@ mod tests {
                     dodge: 0.2,
                     parry: 0.3,
                 },
+                &[],
                 &mut rng,
             ) {
                 Some(Avoidance::Dodge) => dodges += 1,
@@ -332,5 +357,51 @@ mod tests {
             ),
             "[AVOID] Team 2 Rogue #1 parries Team 1 Spider #1's Auto Attack"
         );
+    }
+}
+
+#[cfg(test)]
+mod cc_tests {
+    use super::*;
+    use crate::states::play_match::components::AuraType;
+
+    fn wearing(effect: AuraType) -> Vec<Aura> {
+        vec![Aura {
+            effect_type: effect,
+            duration: 4.0,
+            ..Default::default()
+        }]
+    }
+
+    /// A defender held in CC that stops it acting takes the hit — and the
+    /// roll draws nothing for it. A root holds nobody's hands: a rooted
+    /// defender still dodges.
+    #[test]
+    fn a_defender_that_cannot_act_cannot_avoid_and_draws_nothing() {
+        let certain = MeleeDefense {
+            dodge: 1.0,
+            parry: 0.0,
+        };
+        for held in [
+            AuraType::Stun,
+            AuraType::Fear,
+            AuraType::Polymorph,
+            AuraType::Incapacitate,
+        ] {
+            let mut rng = GameRng::from_seed(7);
+            assert_eq!(
+                roll_avoidance(certain, &wearing(held), &mut rng),
+                None,
+                "{held:?}"
+            );
+            assert_eq!(rng.draws(), 0, "{held:?}: no draw for a held defender");
+        }
+        let mut rng = GameRng::from_seed(7);
+        assert_eq!(
+            roll_avoidance(certain, &wearing(AuraType::Root), &mut rng),
+            Some(Avoidance::Dodge),
+            "a rooted defender still dodges"
+        );
+        assert_eq!(rng.draws(), 1);
     }
 }

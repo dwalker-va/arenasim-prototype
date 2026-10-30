@@ -144,6 +144,10 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
 - One roll on Classic's table, dodge first, then parry
   (`combat_core::avoidance::roll_avoidance`). A swing that misses (dual wield)
   is not rolled again.
+- **A defender that cannot act cannot avoid** (TBC): stunned, incapacitated,
+  feared, polymorphed or cycloned — the engine's own "cannot act" test,
+  `utils::is_incapacitating` — it takes the hit, and the roll draws nothing.
+  A root does not stop it. Parry works from any side; the sim has no facing.
 - **An avoided attack deals nothing and applies nothing** — no damage, rage,
   proc, Mortal Wounds, stun or interrupt — and what it cost stays spent: the
   swing's timer and its queued Heroic Strike, an ability's resource, cooldown

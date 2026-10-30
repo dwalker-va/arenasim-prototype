@@ -344,6 +344,9 @@ impl<'a> CombatContext<'a> {
             commands,
             game_rng,
             self.melee_defense(target),
+            self.active_auras
+                .get(&target)
+                .map_or(&[][..], Vec::as_slice),
             self.self_entity,
             target,
             attack,

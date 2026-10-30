@@ -226,13 +226,18 @@ pub fn combat_auto_attack(
     // Every combatant that can dodge or parry, and its chances. Empty in a
     // match without avoidance, and then no swing below rolls for it — so the
     // match draws exactly what it drew before avoidance existed.
-    let melee_defense: std::collections::BTreeMap<Entity, MeleeDefense> = combatants
+    // Its auras ride along, for the roll's crowd-control gate.
+    let melee_defense: std::collections::BTreeMap<Entity, (MeleeDefense, Vec<Aura>)> = combatants
         .iter()
-        .filter_map(|(entity, _, combatant, _, _, _)| {
+        .filter_map(|(entity, _, combatant, _, _, auras)| {
             let defense = combatant.melee_defense();
-            (!defense.is_none()).then_some((entity, defense))
+            (!defense.is_none()).then(|| {
+                let auras = auras.map(|a| a.auras.clone()).unwrap_or_default();
+                (entity, (defense, auras))
+            })
         })
         .collect();
+    let no_auras: Vec<Aura> = Vec::new();
 
     // Collect attacks that will happen this frame (attacker, target, damage,
     // Heroic Strike bonus, crit, the hand that swung, what the swing IS).
@@ -403,14 +408,14 @@ pub fn combat_auto_attack(
                     // swing below — but not against a swing the apply loop
                     // will drop for breaking this team's own Fear or
                     // Polymorph: an attack that never lands is not avoided.
-                    let defense = if friendly_cc_team.get(&target_entity) == Some(&combatant.team) {
-                        MeleeDefense::default()
-                    } else {
-                        melee_defense
-                            .get(&target_entity)
-                            .copied()
-                            .unwrap_or_default()
-                    };
+                    let (defense, defender_auras) =
+                        if friendly_cc_team.get(&target_entity) == Some(&combatant.team) {
+                            (MeleeDefense::default(), &no_auras)
+                        } else {
+                            melee_defense
+                                .get(&target_entity)
+                                .map_or((MeleeDefense::default(), &no_auras), |(d, a)| (*d, a))
+                        };
 
                     // The main-hand swings, in a fixed order: the live socket's
                     // (every attacker's), then a Hunter's melee main hand. The
@@ -458,6 +463,7 @@ pub fn combat_auto_attack(
                                 &mut commands,
                                 &mut game_rng,
                                 defense,
+                                defender_auras,
                                 attacker_entity,
                                 target_entity,
                                 auto_attack_name(bonus > 0.0, swing_kind),
@@ -522,6 +528,7 @@ pub fn combat_auto_attack(
                                         &mut commands,
                                         &mut game_rng,
                                         defense,
+                                        defender_auras,
                                         attacker_entity,
                                         target_entity,
                                         auto_attack_name(false, swing_kind),
@@ -611,6 +618,7 @@ pub fn combat_auto_attack(
                                 &mut commands,
                                 &mut game_rng,
                                 defense,
+                                defender_auras,
                                 attacker_entity,
                                 target_entity,
                                 auto_attack_name(false, AutoAttackKind::Melee),

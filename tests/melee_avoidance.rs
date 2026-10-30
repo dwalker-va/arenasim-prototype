@@ -133,6 +133,103 @@ fn mortal_strike_is_avoided_and_applies_nothing() {
     );
 }
 
+/// A defender that cannot act cannot dodge (TBC): stunned, with a certain
+/// dodge, it takes the Mortal Strike; the same defender un-stunned dodges it.
+#[test]
+fn a_stunned_defender_cannot_dodge() {
+    let scene = |stunned: bool| {
+        let scene = melee_scene(CharacterClass::Warrior, DODGE).aura(
+            DEFENDER,
+            AuraType::DamageOverTime,
+            10.0,
+        );
+        if stunned {
+            scene.aura(DEFENDER, AuraType::Stun, 4.0)
+        } else {
+            scene
+        }
+    };
+    let stunned = scene(true).decide(ATTACKER);
+    assert_eq!(
+        stunned.chose(),
+        Some((AbilityType::MortalStrike, Some(DEFENDER)))
+    );
+    assert!(
+        stunned.avoided.is_empty(),
+        "a stunned defender cannot dodge"
+    );
+    assert!(
+        stunned
+            .landed
+            .iter()
+            .any(|l| l.ability == AbilityType::MortalStrike),
+        "the Mortal Strike lands on the stunned defender"
+    );
+
+    let free = scene(false).decide(ATTACKER);
+    assert_eq!(
+        free.chose(),
+        Some((AbilityType::MortalStrike, Some(DEFENDER)))
+    );
+    assert_eq!(
+        free.avoided,
+        vec![avoided("Mortal Strike", Avoidance::Dodge)]
+    );
+    assert!(free.landed.is_empty());
+}
+
+/// The same rule on an auto-attack swing: a Warrior beats on a dodging
+/// Warrior it has stunned in place. While the stun holds no swing is dodged;
+/// with the stun lifted from the same match, the swings are dodged.
+#[test]
+fn a_stunned_defender_cannot_dodge_a_swing() {
+    use arenasim::states::play_match::components::Aura;
+    const STUN_SECS: f32 = 6.0;
+    let stage = |stunned: bool| {
+        let stage =
+            duel(1.0, 0.0)
+                .place(Unit::new(1, 0), 0.0, 0.0)
+                .place(Unit::new(2, 0), 1.5, 0.0);
+        if !stunned {
+            return stage;
+        }
+        stage.aura(
+            Unit::new(2, 0),
+            Aura {
+                effect_type: AuraType::Stun,
+                duration: STUN_SECS,
+                break_on_damage_threshold: -1.0,
+                ability_name: "Stun".into(),
+                ..Default::default()
+            },
+        )
+    };
+    let config = HeadlessMatchConfig {
+        max_duration_secs: 12.0,
+        ..warrior_v_warrior(6)
+    };
+    let free = play(config.clone(), stage(false));
+    let window = free.landed().app + STUN_SECS - 0.5;
+    assert!(
+        swings_avoided_before(&free.log, window) > 0,
+        "an un-stunned defender dodges the swings in the window"
+    );
+    let held = play(config, stage(true));
+    assert_eq!(
+        swings_avoided_before(&held.log, window),
+        0,
+        "no swing is dodged while the defender is stunned"
+    );
+    assert!(
+        held.log
+            .lines()
+            .any(|l| l.contains("Warrior #1's Auto Attack hits")
+                || l.contains("Warrior #1's Auto Attack CRITS")
+                || l.contains("Warrior #1's Heroic Strike hits")),
+        "the swings land on the stunned defender"
+    );
+}
+
 #[test]
 fn rend_is_avoided_and_applies_nothing() {
     assert_avoidable(
