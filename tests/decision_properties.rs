@@ -1438,6 +1438,14 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
             "Flash of Light: same range and school, cheaper, no cooldown, wider trigger (AS-286)",
         ),
     ),
+    (
+        AbilityType::ShadowWordPain,
+        Unreached::Shadowed(
+            "the idle slot under TeamPlan: below full upkeep a proactive Power Word: Shield \
+             or Mana Burn on the grid's enemy Priest goes first, and in full upkeep its own \
+             DoT is already up (tests/shadow_word_pain_scenes.rs pins the choice)",
+        ),
+    ),
 ];
 
 /// Every ability of every class's own kit is chosen somewhere in the grid, or

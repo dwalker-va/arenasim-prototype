@@ -459,8 +459,14 @@ const DOT_MEMBERS: &[AbilityType] = &[
     Moonfire,
     Rend,
     SerpentSting,
+    ShadowWordPain,
     UnstableAffliction,
 ];
+
+/// DoTs that land with nothing drawn yet. Shadow Word: Pain's state stays
+/// `None` by the Moonfire ruling; AS-342 builds its landing, and moves it to
+/// `DOT_SILENT_BY_DESIGN` when that landing is the whole visual.
+const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[(ShadowWordPain, "AS-342")];
 
 /// The DoT STATE a member's aura routes to. The aura carries the ability's
 /// RON `name:`, so this sweeps the config name through the very router every
@@ -491,7 +497,13 @@ const DOT_SILENT_BY_DESIGN: &[SilentByDesign] = &[SilentByDesign {
 
 #[test]
 fn dot_lands_nothing_silently() {
-    assert_judged_with_rulings("DoT", is_dot, dot_state, &[], DOT_SILENT_BY_DESIGN);
+    assert_judged_with_rulings(
+        "DoT",
+        is_dot,
+        dot_state,
+        DOT_KNOWN_SILENT,
+        DOT_SILENT_BY_DESIGN,
+    );
 }
 
 /// The router names each state it draws — a pin on the judge, so a wrong

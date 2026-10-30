@@ -232,6 +232,29 @@
             mana_burn_amount: 50.0,
         ),
 
+        // Shadow Word: Pain: Classic rank 8 (spell 10894) is 852 Shadow damage
+        // over 18s for an instant 30yd cast; at the ~0.073 damage scale
+        // (Corruption's 822 -> 60) that is 10 per 3s tick. A healing Priest
+        // keeps it on its kill target only when nothing else is owed
+        // (`priest::try_shadow_word_pain`, TeamPlan).
+        ShadowWordPain: (
+            name: "Shadow Word: Pain",
+            class: Priest,
+            prevention: Silence,
+            icon: "icons/abilities/spell_shadow_shadowwordpain.jpg",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 25.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: DamageOverTime,
+                duration: 18.0,
+                magnitude: 10.0,             // per 3s tick
+                tick_interval: 3.0,
+            )),
+            spell_school: Shadow,
+        ),
+
         // ============================================================================
         // WARRIOR ABILITIES
         // ============================================================================

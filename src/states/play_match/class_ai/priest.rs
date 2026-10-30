@@ -9,6 +9,8 @@
 //! 4. Flash Heal (heal injured allies)
 //! 5. Dispel Magic - Maintenance (Roots, DoTs when team HP is stable)
 //! 6. Mind Blast (damage when allies are healthy)
+//! 7. Shadow Word: Pain on the kill target, when no heal or dispel is owed
+//!    (`TeamPlan` only)
 #![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
@@ -324,7 +326,7 @@ pub fn decide_priest_action(
             my_pos,
             auras,
             ctx,
-            50,
+            MAINTENANCE_DISPEL_PRIORITY,
             &mut builder,
         )
     {
@@ -343,6 +345,23 @@ pub fn decide_priest_action(
         auras,
         ctx,
         escape_defer,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // Priority 8 (TeamPlan): Shadow Word: Pain on the kill target, in the
+    // idle slot the wand fills — only when no heal or dispel is owed.
+    if try_shadow_word_pain(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
         &mut builder,
     ) {
         builder.finish();
@@ -1262,6 +1281,148 @@ fn try_mind_blast(
         combatant.class.name(),
         def.name
     );
+
+    true
+}
+
+/// The bar for a maintenance Dispel Magic (roots, DoTs and the like) — the
+/// rung below Flash Heal. A debuff worth this much on a teammate is a dispel
+/// the Priest owes.
+const MAINTENANCE_DISPEL_PRIORITY: i32 = 50;
+
+/// What a healing Priest still owes its team before Shadow Word: Pain, if
+/// anything: the reason the DoT waits, or `None` when the Priest is idle.
+///
+/// - **A heal**: a living teammate (the Priest included) below Flash Heal's
+///   trigger, [`FLASH_HEAL_HP`], wherever it stands. One out of reach is owed
+///   all the same — the medic walk is rounding cover to reach it.
+/// - **A dispel**: a teammate carrying a debuff Dispel Magic takes at the
+///   maintenance bar or above, in reach or not (the dispel walk's).
+///
+/// Crowd control is not asked here: the defensive Scream and the Peel step sit
+/// above Shadow Word: Pain in the chain, so whenever one can go it has.
+fn shadow_word_pain_held(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    my_team: u8,
+    my_pos: Vec3,
+) -> Option<&'static str> {
+    if !ctx.is_team_healthy(FLASH_HEAL_HP, my_pos) {
+        return Some("a heal is owed: a teammate is below Flash Heal's trigger");
+    }
+    let dispel = AbilityType::DispelMagic;
+    let scan = super::scan_ally_dispel(
+        ctx,
+        dispel,
+        my_team,
+        my_pos,
+        abilities.get_unchecked(&dispel).range,
+        MAINTENANCE_DISPEL_PRIORITY,
+    );
+    if scan.target.is_some() || scan.nearest_out_of_range.is_some() || scan.los_blocked {
+        return Some("a dispel is owed: a teammate carries a debuff Dispel Magic takes");
+    }
+    None
+}
+
+/// Shadow Word: Pain on the kill target — a healing Priest's idle cast, the
+/// slot its wand fills (user ruling, 2026-10-29). It sits at the foot of the
+/// chain, so every heal, dispel and crowd control the Priest can cast goes
+/// first, and [`shadow_word_pain_held`] holds it while one is owed but cannot
+/// be cast yet. It keeps the DoT up: never recast while its own is ticking.
+///
+/// `TeamPlan` only: under `Legacy` it is not in the Priest's chain at all, not
+/// even as a rejected candidate, so `Legacy` matches and their traces are
+/// unchanged. (A Shadowform Priest's damage rotation, AS-413, uses it as a
+/// core DoT instead.)
+fn try_shadow_word_pain(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    if !ctx.ai_profile.is_team_plan() {
+        return false;
+    }
+    let ability = AbilityType::ShadowWordPain;
+    let def = abilities.get_unchecked(&ability);
+
+    if let Some(note) = shadow_word_pain_held(ctx, abilities, combatant.team, my_pos) {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: note.to_string(),
+            },
+        );
+        return false;
+    }
+
+    let Some((target, target_pos)) = combatant
+        .target
+        .and_then(|t| ctx.combatants.get(&t))
+        .filter(|info| info.is_alive)
+        .map(|info| (info.entity, info.position))
+    else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return false;
+    };
+
+    let own_ticking = ctx.active_auras.get(&target).is_some_and(|target_auras| {
+        target_auras
+            .iter()
+            .any(|a| a.ability_name == def.name && a.caster == Some(entity))
+    });
+    if own_ticking {
+        builder.reject(ability, RejectionReason::AlreadyApplied);
+        return false;
+    }
+
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        check_target_immune: true,
+        ..Default::default()
+    };
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target, target_pos)),
+        ctx,
+        opts,
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
+
+    builder.choose(cleared, Some(target), true);
+
+    combatant.current_mana -= def.mana_cost;
+    combatant.global_cooldown = GCD;
+
+    let target_tuple = ctx.combatants.get(&target).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        target_tuple,
+        "casts",
+    );
+
+    if let Some(pending) = AuraPending::from_ability(target, entity, def) {
+        commands.spawn(pending);
+    }
 
     true
 }
