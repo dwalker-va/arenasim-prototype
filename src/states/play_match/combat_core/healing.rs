@@ -68,13 +68,15 @@ pub fn apply_healing(
         return 0.0;
     }
 
-    // Healing reduction: each debuff's magnitude is a multiplier (0.65 = 35%
-    // reduction), and two of them compound.
+    // Healing reduction: each debuff leaves a multiplier (0.65 = 35%
+    // reduction; a stacking one, Wound Poison, cuts per stack —
+    // `Aura::healing_multiplier`), and two of them compound: Mortal Wound
+    // (0.65) under five stacks of Wound Poison (0.5) leaves 0.325.
     let mut healing = amount;
     if let Some(auras) = target_auras {
         for aura in &auras.auras {
             if aura.effect_type == AuraType::HealingReduction {
-                healing *= aura.magnitude;
+                healing *= aura.healing_multiplier();
             }
         }
     }

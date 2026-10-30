@@ -1936,6 +1936,9 @@ mod tests {
             [
                 "Berserker Rage",
                 "Crippling Poison (weapon coating)",
+                "Deadly Poison (weapon coating)",
+                "Mind-numbing Poison (weapon coating)",
+                "Wound Poison (weapon coating)",
                 "Divine Shield",
                 "Shadow Sight",
                 // No dispel type (TBC): no purge takes a Paladin aura, a

@@ -152,11 +152,14 @@ pub enum AbilityType {
     KidneyShot,
     PowerWordFortitude,
     Rend,
-    MortalStrike,    // Warrior damage + healing reduction
-    Pummel,          // Warrior interrupt
-    BerserkerRage,   // Warrior fear break + 10s fear immunity (horror bypasses it)
-    Kick,            // Rogue interrupt
-    CripplingPoison, // Rogue weapon poison: on-hit chance to slow (passive, not cast)
+    MortalStrike,      // Warrior damage + healing reduction
+    Pummel,            // Warrior interrupt
+    BerserkerRage,     // Warrior fear break + 10s fear immunity (horror bypasses it)
+    Kick,              // Rogue interrupt
+    CripplingPoison,   // Rogue weapon poison: on-hit chance to slow (passive, not cast)
+    DeadlyPoison,      // Rogue weapon poison: on-hit stacking Nature DoT (passive)
+    WoundPoison,       // Rogue weapon poison: on-hit stacking healing reduction (passive)
+    MindNumbingPoison, // Rogue weapon poison: on-hit cast-time increase (passive)
     // Warlock abilities
     Corruption,         // Shadow DoT
     Shadowbolt,         // Shadow projectile

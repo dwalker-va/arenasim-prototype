@@ -123,22 +123,20 @@ pub fn combat_auto_attack(
             })
             .collect();
 
-    // Weapon-poison proc table: Rogues coated with Crippling Poison and the
-    // per-swing application chance from the ability config. A successful roll on
-    // a landed swing applies/refreshes the Crippling slow on the target.
-    let crippling_chance: std::collections::HashMap<Entity, f32> = combatants
+    // Weapon-poison proc table: each Rogue, the ability of the poison it chose
+    // for the match, and that poison's per-hit application chance from the
+    // ability config. A successful roll on a landed swing applies the poison.
+    let poison_procs: std::collections::HashMap<Entity, (AbilityType, f32)> = combatants
         .iter()
         .filter_map(|(entity, _, combatant, _, _, _)| {
-            if combatant.class == match_config::CharacterClass::Rogue
-                && combatant.rogue_poison == match_config::RoguePoison::Crippling
-            {
-                abilities
-                    .get(&AbilityType::CripplingPoison)
-                    .and_then(|def| def.application_chance)
-                    .map(|chance| (entity, chance))
-            } else {
-                None
+            if combatant.class != match_config::CharacterClass::Rogue {
+                return None;
             }
+            let poison = combatant.rogue_poison.ability();
+            abilities
+                .get(&poison)
+                .and_then(|def| def.application_chance)
+                .map(|chance| (entity, (poison, chance)))
         })
         .collect();
 
@@ -699,11 +697,28 @@ pub fn combat_auto_attack(
                     melee_proc_hits.push(attacker_entity);
                 }
 
-                // Crippling Poison proc: a coated Rogue's landed swing has a
-                // chance to apply/refresh the slow. Refreshed in place so it
-                // never diminishes (poisons sidestep the slow DR category).
-                if let Some(&chance) = crippling_chance.get(&attacker_entity) {
-                    if game_rng.random_f32() < chance {
+                // Weapon-poison proc: a coated Rogue's landed swing has a
+                // chance to apply its poison. Crippling is refreshed in place
+                // so it never diminishes (poisons sidestep the slow DR
+                // category); the others land through `apply_pending_auras`,
+                // which stacks and refreshes them.
+                if let Some(&(poison, chance)) = poison_procs.get(&attacker_entity) {
+                    if poison != AbilityType::CripplingPoison {
+                        if game_rng.random_f32() < chance {
+                            apply_weapon_poison(
+                                &mut commands,
+                                &abilities,
+                                poison,
+                                attacker_entity,
+                                target_entity,
+                                target_auras.as_deref(),
+                                combatant_info.get(&target_entity).map(
+                                    |(team, name, _, slot, _)| combat_log_id(*team, *slot, name),
+                                ),
+                                &mut combat_log,
+                            );
+                        }
+                    } else if game_rng.random_f32() < chance {
                         let fresh = apply_or_refresh_crippling(
                             &mut commands,
                             &abilities,
@@ -1242,6 +1257,47 @@ pub(crate) fn windfury_bonus_chance(
             .find(|aura| aura.effect_type == AuraType::WindfuryBuff)
             .map(|aura| aura.magnitude)
     })
+}
+
+/// Apply a weapon poison other than Crippling — Deadly, Wound or Mind-numbing —
+/// to `target` after its proc roll succeeded.
+///
+/// The poison lands through `apply_pending_auras`, the one aura funnel: it
+/// stacks or refreshes there (each is a `stacking` aura, keyed on its source),
+/// is refused by an immunity there, and reveals a stealthed target there. A
+/// first application is logged here as a proc (the funnel may still refuse
+/// it to an immunity); a refresh is logged by
+/// the funnel with its stack count.
+#[allow(clippy::too_many_arguments)]
+fn apply_weapon_poison(
+    commands: &mut Commands,
+    abilities: &AbilityDefinitions,
+    poison: AbilityType,
+    attacker: Entity,
+    target: Entity,
+    target_auras: Option<&ActiveAuras>,
+    target_id: Option<String>,
+    combat_log: &mut CombatLog,
+) {
+    let def = abilities.get_unchecked(&poison);
+    let Some(pending) = AuraPending::from_ability(target, attacker, def) else {
+        return;
+    };
+    let fresh = !target_auras.is_some_and(|auras| {
+        auras
+            .auras
+            .iter()
+            .any(|aura| aura.stacks.is_some() && aura.same_source_as(&pending.aura))
+    });
+    if fresh {
+        if let Some(name) = target_id {
+            combat_log.log(
+                CombatLogEventType::CrowdControl,
+                format!("{} procs on {}", def.name, name),
+            );
+        }
+    }
+    commands.spawn(pending);
 }
 
 /// Apply or refresh the Crippling Poison slow on `target`. Returns true if it was

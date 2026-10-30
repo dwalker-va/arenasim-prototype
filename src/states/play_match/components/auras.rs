@@ -1012,6 +1012,20 @@ impl Aura {
         self.magnitude * f32::from(self.stack_count())
     }
 
+    /// The multiplier a [`AuraType::HealingReduction`] aura leaves on the
+    /// healing its bearer receives.
+    ///
+    /// `magnitude` is what ONE stack leaves (Mortal Wound's 0.65 cuts 35%), so
+    /// a non-stacking aura returns it exactly, bit for bit. A STACKING one
+    /// (Wound Poison, 0.9 a stack) cuts `1 - magnitude` per stack, linearly as
+    /// in TBC: five stacks of 0.9 leave 0.5. Never below zero.
+    pub fn healing_multiplier(&self) -> f32 {
+        match self.stacks {
+            None => self.magnitude,
+            Some(stacks) => (1.0 - (1.0 - self.magnitude) * f32::from(stacks.count)).max(0.0),
+        }
+    }
+
     /// The heal this aura lands on its bearer when it ends, or `None` when it
     /// does not bloom.
     ///
@@ -2222,6 +2236,32 @@ mod tests {
                 "{buff:?}"
             );
         }
+    }
+
+    /// A non-stacking healing reduction leaves exactly its magnitude (Mortal
+    /// Wound's 0.65, bit for bit); a stacking one cuts `1 - magnitude` a stack,
+    /// linearly, and never below zero.
+    #[test]
+    fn healing_multiplier_is_exact_unstacked_and_linear_per_stack() {
+        let reduction = |magnitude: f32, stacks: Option<u8>| Aura {
+            effect_type: AuraType::HealingReduction,
+            magnitude,
+            stacks: stacks.map(|count| AuraStacks {
+                count,
+                max: 20,
+                scope: StackScope::PerTarget,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            reduction(0.65, None).healing_multiplier().to_bits(),
+            0.65f32.to_bits()
+        );
+        let per_stack: Vec<f32> = (1..=5)
+            .map(|n| (reduction(0.9, Some(n)).healing_multiplier() * 100.0).round())
+            .collect();
+        assert_eq!(per_stack, [90.0, 80.0, 70.0, 60.0, 50.0]);
+        assert_eq!(reduction(0.9, Some(20)).healing_multiplier(), 0.0);
     }
 
     /// `stack_owner` is the caster for a per-caster stacking aura and `None`

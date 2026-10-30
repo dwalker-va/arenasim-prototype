@@ -104,6 +104,9 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::Pummel
         | A::Kick
         | A::CripplingPoison
+        | A::DeadlyPoison
+        | A::WoundPoison
+        | A::MindNumbingPoison
         | A::Corruption
         | A::Shadowbolt
         | A::Fear

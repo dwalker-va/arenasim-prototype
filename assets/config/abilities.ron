@@ -474,6 +474,81 @@
             spell_school: Nature,
         ),
 
+        // The other three weapon poisons (AS-330). Like Crippling, each is a
+        // passive per-match choice rolled once per LANDED weapon hit (not
+        // normalized for weapon speed), at TBC's chance; none is cast. TBC
+        // values at the ~0.073 damage scale (Classic Corruption 822 -> ours 60).
+
+        // Deadly Poison VII: 180 Nature damage over 12s, stacking to 5, 30%.
+        // 180 x 0.073 = 13.1 a stack: four 3s ticks of 3.3 a stack.
+        DeadlyPoison: (
+            name: "Deadly Poison",
+            class: Rogue,
+            prevention: None,
+            icon: "icons/abilities/ability_rogue_dualweild.jpg",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            application_chance: Some(0.3),
+            applies_aura: Some((
+                aura_type: DamageOverTime,
+                duration: 12.0,
+                magnitude: 3.3,              // per 3s tick PER STACK
+                tick_interval: 3.0,
+                dispel_type: Poison,
+                stacking: Some((max_stacks: 5)),
+            )),
+            spell_school: Nature,
+        ),
+
+        // Wound Poison V: healing received -10% a stack, stacking to 5, 15s,
+        // 50%. `magnitude` is the multiplier ONE stack leaves (0.9); N stacks
+        // leave 1 - 0.1 x N (`Aura::healing_multiplier`). Compounds with Mortal
+        // Strike's Mortal Wound like any two healing reductions.
+        WoundPoison: (
+            name: "Wound Poison",
+            class: Rogue,
+            prevention: None,
+            icon: "icons/abilities/inv_misc_herb_16.jpg",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            application_chance: Some(0.5),
+            applies_aura: Some((
+                aura_type: HealingReduction,
+                duration: 15.0,
+                magnitude: 0.9,
+                dispel_type: Poison,
+                stacking: Some((max_stacks: 5)),
+            )),
+            spell_school: Nature,
+        ),
+
+        // Mind-numbing Poison III: casting time +60% for 10s, 50%. Refresh-only
+        // (`max_stacks: 1`): a new proc renews it, never doubles it. Sums with
+        // Curse of Tongues like any two cast-time increases.
+        MindNumbingPoison: (
+            name: "Mind-numbing Poison",
+            class: Rogue,
+            prevention: None,
+            icon: "icons/abilities/spell_nature_nullifydisease.jpg",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            application_chance: Some(0.5),
+            applies_aura: Some((
+                aura_type: CastTimeIncrease,
+                duration: 10.0,
+                magnitude: 0.6,
+                dispel_type: Poison,
+                stacking: Some((max_stacks: 1)),
+            )),
+            spell_school: Nature,
+        ),
+
         // ============================================================================
         // WARLOCK ABILITIES
         // ============================================================================

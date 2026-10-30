@@ -336,7 +336,8 @@ fn every_pre_match_choice_is_on_screen_at_the_default_window_size() {
         // Named per class, so a choice that stops drawing — or a class whose
         // choice is never registered — fails here instead of passing vacuously.
         let per_row = match class {
-            CharacterClass::Rogue => 2,
+            // Two openers and four weapon poisons.
+            CharacterClass::Rogue => 6,
             CharacterClass::Warrior
             | CharacterClass::Mage
             | CharacterClass::Paladin

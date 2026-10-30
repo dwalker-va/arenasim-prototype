@@ -455,6 +455,7 @@ fn is_dot(a: AbilityType, c: &AbilityConfig) -> bool {
 const DOT_MEMBERS: &[AbilityType] = &[
     Corruption,
     CurseOfAgony,
+    DeadlyPoison,
     Immolate,
     Moonfire,
     Rend,
@@ -489,9 +490,19 @@ const DOT_SILENT_BY_DESIGN: &[SilentByDesign] = &[SilentByDesign {
              precedent) — the orb-and-beam landing is the whole visual",
 }];
 
+/// DoTs that land with no visual yet, each with the card that draws it.
+const DOT_KNOWN_SILENT: &[(AbilityType, &str)] =
+    &[(DeadlyPoison, "AS-341 (weapon poison landing)")];
+
 #[test]
 fn dot_lands_nothing_silently() {
-    assert_judged_with_rulings("DoT", is_dot, dot_state, &[], DOT_SILENT_BY_DESIGN);
+    assert_judged_with_rulings(
+        "DoT",
+        is_dot,
+        dot_state,
+        DOT_KNOWN_SILENT,
+        DOT_SILENT_BY_DESIGN,
+    );
 }
 
 /// The router names each state it draws — a pin on the judge, so a wrong
@@ -629,6 +640,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     Lifebloom,
     MageArmorSpell,
     MarkOfTheWild,
+    MindNumbingPoison,
     MoltenArmor,
     MortalStrike,
     PowerWordFortitude,
@@ -637,6 +649,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     ShadowResistanceAura,
     TravelForm,
     WaterTotem,
+    WoundPoison,
 ];
 
 /// The family-wide aura-application cue — what draws a status aura that no
@@ -733,6 +746,7 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (AirTotem, "AS-134 (aura application — totem pulse)"),
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
+    (MindNumbingPoison, "AS-341 (weapon poison landing)"),
 ];
 
 #[test]
