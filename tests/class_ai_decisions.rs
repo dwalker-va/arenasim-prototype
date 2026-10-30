@@ -93,6 +93,7 @@ fn snapshot_for(self_entity: Entity, team: u8, class: CharacterClass) -> CombatS
     let mut combatants = BTreeMap::new();
     combatants.insert(self_entity, info(self_entity, team, class));
     CombatSnapshot {
+        melee_defense: Default::default(),
         ai_profile: Default::default(),
         bounds: Default::default(),
         combatants,
@@ -1251,6 +1252,7 @@ fn snapshot_with(members: &[CombatantInfo]) -> CombatSnapshot {
         combatants.insert(m.entity, *m);
     }
     CombatSnapshot {
+        melee_defense: Default::default(),
         ai_profile: Default::default(),
         bounds: Default::default(),
         combatants,
@@ -2496,6 +2498,7 @@ mod druid_counterplay {
     fn interrupted_by(class: CharacterClass) -> (Entity, Entity, Option<Entity>) {
         let mut world = World::new();
         world.insert_resource(CombatLog::default());
+        world.insert_resource(arenasim::states::play_match::components::GameRng::from_seed(0));
         world.insert_resource(AbilityDefinitions::default());
         let teammate = world
             .spawn((

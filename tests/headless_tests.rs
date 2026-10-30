@@ -35,6 +35,7 @@ fn test_match_result_has_winner() {
         team1_combatants: vec![],
         team2_combatants: vec![],
         random_seed: Some(12345),
+        rng_draws: 0,
     };
 
     assert_eq!(result.winner, Some(1));

@@ -132,6 +132,38 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   and the default Hunter each hold a two-hander, so for those two
   dual wield stays a build a player opts into.
 
+### Melee Avoidance (Dodge and Parry)
+- `Combatant::dodge_chance` and `parry_chance` are rolled against **every
+  incoming melee attack**: an auto-attack swing of a melee weapon (either hand,
+  a Hunter's melee hand, a pet's bite, a Windfury bonus swing) and every melee
+  ability, which `AbilityType::is_melee_attack` names (an exhaustive match, so a
+  new ability must answer it): Heroic Strike, Mortal Strike, Rend, Pummel,
+  Ambush, Cheap Shot, Sinister Strike, Kidney Shot and Kick. Spells and ranged
+  attacks (Auto Shot, wands, Aimed Shot, Wind Shear) are never avoided; nor is a
+  charge (Charge, Boar Charge).
+- One roll on Classic's table, dodge first, then parry
+  (`combat_core::avoidance::roll_avoidance`). A swing that misses (dual wield)
+  is not rolled again.
+- **An avoided attack deals nothing and applies nothing** — no damage, rage,
+  proc, Mortal Wounds, stun or interrupt — and what it cost stays spent: the
+  swing's timer and its queued Heroic Strike, an ability's resource, cooldown
+  and global cooldown.
+- **No draw without avoidance.** The roll draws from `game_rng` only when the
+  defender's dodge or parry chance is above 0. Every class's base value is 0,
+  so every match without avoidance draws exactly what it drew before the stat
+  existed (`tests/melee_avoidance.rs` pins the counts).
+- One funnel shows it (`resolve_melee_avoidances`): the log line
+  `[AVOID] X dodges Y's Mortal Strike`, the floating word "Dodge" / "Parry"
+  over the defender (white, number-sized), and a `melee_avoided` trace event.
+- The stats carry no item-budget weight; whatever grants them prices them.
+
+### Attack Speed
+- `Combatant::attack_speed_bonus` is a permanent haste fraction: `0.10` divides
+  every swing interval (main hand, off hand, a Hunter's melee hand and bow) by
+  `1.10`, before any `AttackSpeedSlow` stretches it. It is 0 for every class,
+  and while it is 0 the interval is computed exactly as before it existed. No
+  item-budget weight here.
+
 ### Windfury Totem procs on the main hand only
 
 The Shaman's Air Totem grants `WindfuryBuff`, and a melee ally carrying it rolls

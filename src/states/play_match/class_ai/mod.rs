@@ -55,6 +55,7 @@ use super::abilities::AbilityType;
 use super::ability_config::AbilityDefinitions;
 use super::ai_profile::AiProfile;
 use super::arena_bounds::ArenaBounds;
+use super::combat_core::{avoid_melee_attack, MeleeDefense};
 use super::components::{
     class_base_stats, ActiveAuras, Aura, AuraType, CastingState, Combatant, DRCategory, DRTracker,
     DispelPending, DispelScope, PetType,
@@ -240,7 +241,15 @@ pub struct CombatContext<'a> {
     /// This unit's team situation — read it through [`Self::situation`].
     /// `None` until classified: see [`Self::situation`].
     situation: Option<TeamSituation>,
+    /// Every combatant with a dodge or parry chance, and what it is — read
+    /// through [`Self::melee_defense`]. A combatant absent from it has none.
+    /// Empty unless the context came from a snapshot
+    /// ([`CombatSnapshot::context_for`](combat_snapshot::CombatSnapshot::context_for)).
+    melee_defense: &'a BTreeMap<Entity, MeleeDefense>,
 }
+
+/// The `melee_defense` of a context built from no snapshot: nobody avoids.
+static NO_MELEE_DEFENSE: BTreeMap<Entity, MeleeDefense> = BTreeMap::new();
 
 impl<'a> CombatContext<'a> {
     /// Build the context `self_entity` decides from. `roster` is every
@@ -302,7 +311,44 @@ impl<'a> CombatContext<'a> {
             self_entity,
             observer_team,
             situation: None,
+            melee_defense: &NO_MELEE_DEFENSE,
         }
+    }
+
+    /// This context with the arena's melee avoidance (`CombatSnapshot`'s
+    /// `melee_defense`), which [`Self::melee_defense`] reads.
+    pub fn with_melee_defense(mut self, defense: &'a BTreeMap<Entity, MeleeDefense>) -> Self {
+        self.melee_defense = defense;
+        self
+    }
+
+    /// `entity`'s chance to dodge or parry a melee attack (none if it has
+    /// neither).
+    pub fn melee_defense(&self, entity: Entity) -> MeleeDefense {
+        self.melee_defense.get(&entity).copied().unwrap_or_default()
+    }
+
+    /// Roll this unit's melee attack `attack` (the ability's name) on
+    /// `target`: on a dodge or parry spawn the avoidance
+    /// ([`avoid_melee_attack`]) and return `true`, and the caller lands
+    /// nothing — no damage, aura or interrupt. What the attack cost is spent
+    /// already. Draws from `game_rng` only when `target` has avoidance.
+    pub fn melee_attack_avoided(
+        &self,
+        commands: &mut Commands,
+        game_rng: &mut super::components::GameRng,
+        target: Entity,
+        attack: &str,
+    ) -> bool {
+        avoid_melee_attack(
+            commands,
+            game_rng,
+            self.melee_defense(target),
+            self.self_entity,
+            target,
+            attack,
+        )
+        .is_some()
     }
 
     /// This context with its team's situation as `decide_abilities` classified

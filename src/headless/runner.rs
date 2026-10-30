@@ -160,6 +160,9 @@ pub struct MatchResult {
     pub team2_combatants: Vec<CombatantResult>,
     /// Random seed used (if deterministic mode)
     pub random_seed: Option<u64>,
+    /// How many values the match drew from `GameRng`, countdown included —
+    /// what a claim that a change draws nothing is checked against.
+    pub rng_draws: u64,
 }
 
 /// Why a match ended. Lets the batch runner distinguish a decisive result
@@ -656,6 +659,7 @@ fn headless_check_match_end(
     combat_log: Res<CombatLog>,
     mut headless_state: ResMut<HeadlessMatchState>,
     countdown: Res<MatchCountdown>,
+    game_rng: Option<Res<GameRng>>,
 ) {
     if headless_state.match_complete || !countdown.gates_opened {
         return;
@@ -673,6 +677,7 @@ fn headless_check_match_end(
             None,
             EndReason::CapDraw,
             &headless_state,
+            game_rng.as_deref().map_or(0, GameRng::draws),
         );
         if !headless_state.suppress_log {
             save_headless_match_log(
@@ -709,8 +714,14 @@ fn headless_check_match_end(
             Some(2)
         };
 
-        let result =
-            build_match_result(&combatants, &pets, winner, EndReason::Kill, &headless_state);
+        let result = build_match_result(
+            &combatants,
+            &pets,
+            winner,
+            EndReason::Kill,
+            &headless_state,
+            game_rng.as_deref().map_or(0, GameRng::draws),
+        );
         if !headless_state.suppress_log {
             save_headless_match_log(
                 &combatants,
@@ -733,6 +744,7 @@ fn build_match_result(
     winner: Option<u8>,
     end_reason: EndReason,
     headless_state: &HeadlessMatchState,
+    rng_draws: u64,
 ) -> MatchResult {
     let mut team1_combatants = Vec::new();
     let mut team2_combatants = Vec::new();
@@ -764,6 +776,7 @@ fn build_match_result(
         team1_combatants,
         team2_combatants,
         random_seed: headless_state.random_seed,
+        rng_draws,
     }
 }
 

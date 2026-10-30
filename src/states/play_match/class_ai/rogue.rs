@@ -78,6 +78,7 @@ pub fn decide_rogue_action(
     if combatant.stealthed {
         let acted = match combatant.rogue_opener {
             RogueOpener::Ambush => try_ambush(
+                commands,
                 combat_log,
                 game_rng,
                 abilities,
@@ -94,6 +95,7 @@ pub fn decide_rogue_action(
             RogueOpener::CheapShot => try_cheap_shot(
                 commands,
                 combat_log,
+                game_rng,
                 abilities,
                 entity,
                 combatant,
@@ -140,6 +142,7 @@ pub fn decide_rogue_action(
             try_kidney_shot(
                 commands,
                 combat_log,
+                game_rng,
                 abilities,
                 entity,
                 combatant,
@@ -181,6 +184,7 @@ pub fn decide_rogue_action(
                     try_kidney_shot(
                         commands,
                         combat_log,
+                        game_rng,
                         abilities,
                         entity,
                         combatant,
@@ -206,6 +210,7 @@ pub fn decide_rogue_action(
     if let Some(call) = super::burst::burst_call(ctx) {
         if let Some(pos) = ctx.combatants.get(&call.subject).map(|i| i.position) {
             if try_sinister_strike(
+                commands,
                 combat_log,
                 game_rng,
                 abilities,
@@ -271,6 +276,7 @@ pub fn decide_rogue_action(
             } else if try_kidney_shot(
                 commands,
                 combat_log,
+                game_rng,
                 abilities,
                 entity,
                 combatant,
@@ -328,6 +334,7 @@ pub fn decide_rogue_action(
 
     // Priority 2: Sinister Strike
     let acted = try_sinister_strike(
+        commands,
         combat_log,
         game_rng,
         abilities,
@@ -544,6 +551,7 @@ fn plan_kidney_shot(
 
 /// Try to use Ambush from stealth.
 fn try_ambush(
+    commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
     abilities: &AbilityDefinitions,
@@ -587,6 +595,23 @@ fn try_ambush(
     combatant.stealthed = false;
     combatant.global_cooldown = GCD;
 
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Ambush",
+        target_tuple,
+        "uses",
+    );
+
+    // A dodged or parried Ambush deals nothing; its energy is spent and the
+    // Rogue is out of stealth.
+    if ctx.melee_attack_avoided(commands, game_rng, target_entity, &def.name) {
+        return true;
+    }
+
     let self_auras = ctx
         .active_auras
         .get(&entity)
@@ -610,17 +635,6 @@ fn try_ambush(
         is_crit,
     });
 
-    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
-    log_ability_use(
-        combat_log,
-        combatant.team,
-        combatant.slot,
-        combatant.class,
-        "Ambush",
-        target_tuple,
-        "uses",
-    );
-
     info!(
         "Team {} {} uses {} from stealth!",
         combatant.team,
@@ -635,6 +649,7 @@ fn try_ambush(
 fn try_cheap_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    game_rng: &mut GameRng,
     abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
@@ -697,6 +712,11 @@ fn try_cheap_shot(
         "uses",
     );
 
+    // A dodged or parried Cheap Shot stuns nobody; what it cost is spent.
+    if ctx.melee_attack_avoided(commands, game_rng, target_entity, &def.name) {
+        return true;
+    }
+
     if let Some(aura) = def.applies_aura.as_ref() {
         if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, def) {
             same_frame_cc_queue.push((target_entity, aura_pending.aura.clone()));
@@ -732,6 +752,7 @@ fn try_cheap_shot(
 fn try_kidney_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    game_rng: &mut GameRng,
     abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
@@ -793,6 +814,11 @@ fn try_kidney_shot(
         "uses",
     );
 
+    // A dodged or parried Kidney Shot stuns nobody; what it cost is spent.
+    if ctx.melee_attack_avoided(commands, game_rng, target_entity, &def.name) {
+        return true;
+    }
+
     if let Some(aura) = def.applies_aura.as_ref() {
         if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, def) {
             same_frame_cc_queue.push((target_entity, aura_pending.aura.clone()));
@@ -826,6 +852,7 @@ fn try_kidney_shot(
 
 /// Try to use Sinister Strike.
 fn try_sinister_strike(
+    commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
     abilities: &AbilityDefinitions,
@@ -868,6 +895,22 @@ fn try_sinister_strike(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
 
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Sinister Strike",
+        target_tuple,
+        "uses",
+    );
+
+    // A dodged or parried Sinister Strike deals nothing; its energy is spent.
+    if ctx.melee_attack_avoided(commands, game_rng, target_entity, &def.name) {
+        return true;
+    }
+
     let self_auras = ctx
         .active_auras
         .get(&entity)
@@ -890,17 +933,6 @@ fn try_sinister_strike(
         ability,
         is_crit,
     });
-
-    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
-    log_ability_use(
-        combat_log,
-        combatant.team,
-        combatant.slot,
-        combatant.class,
-        "Sinister Strike",
-        target_tuple,
-        "uses",
-    );
 
     info!(
         "Team {} {} uses {}!",
