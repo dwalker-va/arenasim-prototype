@@ -518,6 +518,88 @@ fn a_defender_that_avoids_everything_takes_no_melee_damage() {
     );
 }
 
+/// The avoided SWINGS (auto-attacks, Heroic Strike included) stamped before
+/// `until` on the log's clock.
+fn swings_avoided_before(log: &str, until: f32) -> usize {
+    log.lines()
+        .filter(|l| {
+            l.contains("[AVOID] ")
+                && (l.ends_with("'s Auto Attack") || l.ends_with("'s Heroic Strike"))
+        })
+        .filter_map(|l| {
+            let stamp = l.trim_start().strip_prefix('[')?.split('s').next()?;
+            stamp.trim().parse::<f32>().ok()
+        })
+        .filter(|t| *t < until)
+        .count()
+}
+
+/// A swing the attacker's team would break its own Fear with is dropped
+/// unlanded, so it is not avoided either: no "Dodge" for an attack that never
+/// happens. The Priest stands rooted beside the Warrior, dodging everything;
+/// with a Fear from the Warrior's own side on it, no swing is avoided while
+/// the Fear holds, and without one the same Warrior's swings are dodged.
+#[test]
+fn a_swing_held_off_a_friendly_fear_is_not_avoided() {
+    use arenasim::states::play_match::components::Aura;
+    const FEAR_SECS: f32 = 8.0;
+    let stage = |feared: bool| {
+        let stage = defender(Unit::new(2, 0), 1.0, 0.0)
+            .place(Unit::new(1, 0), 0.0, 0.0)
+            .place(Unit::new(2, 0), 1.5, 0.0)
+            .aura(
+                Unit::new(2, 0),
+                Aura {
+                    effect_type: AuraType::Root,
+                    duration: 30.0,
+                    break_on_damage_threshold: -1.0,
+                    ability_name: "Root".into(),
+                    ..Default::default()
+                },
+            );
+        if !feared {
+            return stage;
+        }
+        stage.world(|world| {
+            let warrior = Unit::new(1, 0).entity(world);
+            let priest = Unit::new(2, 0).entity(world);
+            let fear = Aura {
+                effect_type: AuraType::Fear,
+                duration: FEAR_SECS,
+                break_on_damage_threshold: 100.0,
+                caster: Some(warrior),
+                ability_name: "Fear".into(),
+                ..Default::default()
+            };
+            world
+                .get_mut::<arenasim::states::play_match::components::ActiveAuras>(priest)
+                .expect("the Priest's auras")
+                .auras
+                .push(fear);
+        })
+    };
+    let config = HeadlessMatchConfig {
+        max_duration_secs: 15.0,
+        ..warrior_v_warrior(6)
+    };
+    let config = HeadlessMatchConfig {
+        team2: vec!["Priest".into()],
+        ..config
+    };
+    let open = play(config.clone(), stage(false));
+    let window = open.landed().app + FEAR_SECS - 0.5;
+    assert!(
+        swings_avoided_before(&open.log, window) > 0,
+        "without the Fear, the Warrior's swings are dodged in the window"
+    );
+    let feared = play(config, stage(true));
+    assert_eq!(
+        swings_avoided_before(&feared.log, window),
+        0,
+        "under its own side's Fear, no swing is rolled, so none is avoided"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The zero guarantee.
 // ---------------------------------------------------------------------------
