@@ -3,6 +3,9 @@
 //! Handles AI decision-making for the Warlock class.
 //!
 //! ## Priority Order
+//! After the plays and the Death Coil peel:
+//! 0. Life Tap (health into mana) — when mana-starved and safe: see
+//!    [`life_tap_hold`]
 //! 1. Corruption (instant Shadow DoT)
 //! 2. Spread curses to enemies (per-target preferences)
 //! 3. Immolate (2s cast Fire DoT) - skipped when being kited
@@ -28,9 +31,10 @@ use crate::states::play_match::components::{
 };
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::decision_trace::{
-    DecisionEventBuilder, DecisionTrace, PlayStep, RejectionReason,
+    DecisionEventBuilder, DecisionTrace, PlayStep, RejectionReason, TapHold,
 };
-use crate::states::play_match::situation::Role;
+use crate::states::play_match::movement_config::MovementConfig;
+use crate::states::play_match::situation::{healer_can_heal, Role, SituationConfig};
 
 use super::cast_guard::{cast_gate, PreCastOpts};
 
@@ -143,6 +147,7 @@ pub fn decide_warlock_action(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    movement: &MovementConfig,
     decision_trace: &mut DecisionTrace,
 ) -> bool {
     // No target — no decision (emission gate).
@@ -376,6 +381,23 @@ pub fn decide_warlock_action(
                 return true;
             }
         }
+    }
+
+    // Life Tap: short of mana and safe to spend health on it, the Warlock
+    // converts health into mana before its rotation asks for any.
+    if try_life_tap(
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        movement,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
     }
 
     let enemy_has_dispeller = ctx
@@ -622,6 +644,148 @@ pub fn decide_warlock_action(
     );
     builder.finish();
     acted
+}
+
+/// Below this fraction of its mana pool the Warlock is MANA-STARVED, and a
+/// Life Tap is worth its health. A tap at the shipped spell power gives back
+/// about two fifths of the pool, so a tap from here never overflows it.
+pub const LIFE_TAP_STARVED_FRACTION: f32 = 0.3;
+
+/// Whether the Warlock `me` should hold its Life Tap, which would convert
+/// `amount` of its health into mana: `Err` names the first gate that holds
+/// it, in this order.
+///
+/// 1. **Not starved** — mana at or above [`LIFE_TAP_STARVED_FRACTION`] of
+///    the pool.
+/// 2. **Focused** — an enemy it can see, pet or not, has it targeted. Health
+///    spent under attack is health the attacker no longer has to take.
+/// 3. **No healer** — no living teammate healer can heal it now
+///    ([`healer_can_heal`]: not locked, not out of mana, in reach and in
+///    sight). A team with no healer has none to give the health back.
+/// 4. **Death range** — the tap would leave it dying: below
+///    `urgency_hp_threshold` of its maximum health, the line the situation
+///    calls a teammate dying at.
+pub fn life_tap_hold(
+    me: Entity,
+    combatant: &Combatant,
+    amount: f32,
+    ctx: &CombatContext,
+    movement: &MovementConfig,
+) -> Result<(), TapHold> {
+    let starved_below = combatant.max_mana * LIFE_TAP_STARVED_FRACTION;
+    if combatant.current_mana >= starved_below {
+        return Err(TapHold::NotStarved {
+            mana: combatant.current_mana,
+            starved_below,
+        });
+    }
+    if let Some(by) = ctx
+        .combatants
+        .values()
+        .find(|e| e.team != combatant.team && e.is_alive && e.target == Some(me))
+    {
+        return Err(TapHold::Focused {
+            by: by.entity.index(),
+        });
+    }
+    let cfg = SituationConfig::from_movement(movement);
+    let healed = ctx.combatants.get(&me).is_some_and(|me_info| {
+        ctx.combatants.values().any(|ally| {
+            ally.team == combatant.team
+                && ally.is_alive
+                && ally.class.is_healer()
+                && healer_can_heal(ally, me_info, ctx.active_auras, ctx.obstacles, &cfg)
+        })
+    });
+    if !healed {
+        return Err(TapHold::NoHealer);
+    }
+    let floor = combatant.max_health * movement.shared.urgency_hp_threshold;
+    let health_after = combatant.current_health - amount;
+    if health_after < floor {
+        return Err(TapHold::DeathRange {
+            health_after,
+            floor,
+        });
+    }
+    Ok(())
+}
+
+/// Life Tap, when [`life_tap_hold`] lets it go and the cast gate clears it:
+/// instant, on the global cooldown, no target. The conversion is applied
+/// here, at its one site: the health is taken outright (not damage — nothing
+/// absorbs, breaks, reveals or enrages on it) and the mana given outright
+/// (not healing — arena dampening does not cut it), capped at the pool.
+fn try_life_tap(
+    combat_log: &mut CombatLog,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    movement: &MovementConfig,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let life_tap = AbilityType::LifeTap;
+    let def = abilities.get_unchecked(&life_tap);
+    let Some(conversion) = def.health_to_mana else {
+        return false;
+    };
+    let amount = conversion.amount(combatant.spell_power);
+
+    if let Err(hold) = life_tap_hold(entity, combatant, amount, ctx, movement) {
+        builder.reject(life_tap, RejectionReason::TapHeld { hold });
+        return false;
+    }
+    let cleared = match cast_gate(
+        life_tap,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(life_tap, reason);
+            return false;
+        }
+    };
+
+    builder.choose(cleared, None, true);
+
+    // Never kills its caster: the death-range gate keeps the AI well clear,
+    // and the floor is the backstop.
+    combatant.current_health = (combatant.current_health - amount).max(1.0);
+    combatant.current_mana = (combatant.current_mana + amount).min(combatant.max_mana);
+    combatant.global_cooldown = GCD;
+
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        "Life Tap",
+        None,
+        "casts",
+    );
+    let msg = format!(
+        "[LIFE TAP] {} converts {:.0} health into {:.0} mana ({:.0}/{:.0} health, {:.0}/{:.0} mana)",
+        combatant_id(combatant.team, combatant.slot, combatant.class),
+        amount,
+        amount,
+        combatant.current_health,
+        combatant.max_health,
+        combatant.current_mana,
+        combatant.max_mana,
+    );
+    combat_log.log(CombatLogEventType::Buff, msg.clone());
+    info!("{}", msg);
+
+    true
 }
 
 /// Try to apply Corruption DoT to target.

@@ -1089,6 +1089,7 @@ pub fn dispatch_class_decision(
                 my_pos,
                 auras,
                 ctx,
+                movement_config,
                 decision_trace,
             )
         }

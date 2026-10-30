@@ -181,6 +181,7 @@ fn a_silence_never_stops_a_free_ability() {
         AbilityType::SpellLock,
         AbilityType::DevourMagic,
         AbilityType::SpiderWeb,
+        AbilityType::LifeTap,
     ]
     .into_iter()
     .collect();

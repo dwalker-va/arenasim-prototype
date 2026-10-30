@@ -247,6 +247,14 @@ impl Scene {
         self
     }
 
+    /// `who`'s mana (or energy), as a fraction of its maximum —
+    /// [`Scene::mana`] for a unit other than the last.
+    pub fn mana_of(mut self, who: Who, fraction: f32) -> Self {
+        let c = &mut self.unit_mut(who).combatant;
+        c.current_mana = c.max_mana * fraction;
+        self
+    }
+
     /// The last unit's rage, in points (a Warrior's resource is its mana pool).
     pub fn rage(mut self, points: f32) -> Self {
         self.last().combatant.current_mana = points;

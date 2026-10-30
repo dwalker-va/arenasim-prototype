@@ -315,6 +315,32 @@ pub struct AbilityConfig {
     /// Shadow damage and receives a Silence aura. See `DispelBacklashConfig`.
     #[serde(default)]
     pub dispel_backlash: Option<DispelBacklashConfig>,
+
+    // === Health to mana ===
+    /// Converts the caster's own health into as much mana (Warlock Life
+    /// Tap). Neither damage nor a heal: the health it spends is not absorbed,
+    /// breaks no crowd control, reveals nothing and feeds no rage, and the
+    /// mana it gives is not healing, so arena dampening does not cut it. See
+    /// [`HealthToMana`].
+    #[serde(default)]
+    pub health_to_mana: Option<HealthToMana>,
+}
+
+/// A conversion of the caster's own health into mana, one for one (TBC Life
+/// Tap). The amount is `base + spell power × spell_power_coefficient`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct HealthToMana {
+    /// Health converted before spell-power scaling.
+    pub base: f32,
+    /// Coefficient applied to the caster's spell power.
+    pub spell_power_coefficient: f32,
+}
+
+impl HealthToMana {
+    /// The health a cast converts, and the mana it gives, at `spell_power`.
+    pub fn amount(&self, spell_power: f32) -> f32 {
+        self.base + spell_power * self.spell_power_coefficient
+    }
 }
 
 /// Dispel-backlash configuration for abilities whose aura punishes the enemy dispeller.
@@ -563,6 +589,7 @@ impl AbilityDefinitions {
             AbilityType::CurseOfTongues,
             AbilityType::UnstableAffliction,
             AbilityType::DeathCoil,
+            AbilityType::LifeTap,
             AbilityType::ArcaneIntellect,
             AbilityType::BattleShout,
             AbilityType::IceBarrier,
@@ -916,6 +943,7 @@ mod tests {
             is_dispel: false,
             mana_burn_amount: 0.0,
             dispel_backlash: None,
+            health_to_mana: None,
         }
     }
 
@@ -1068,6 +1096,7 @@ mod tests {
                     AbilityType::CurseOfAgony,
                     AbilityType::CurseOfWeakness,
                     AbilityType::CurseOfTongues,
+                    AbilityType::LifeTap,
                 ],
             ),
             (

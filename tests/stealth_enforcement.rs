@@ -476,6 +476,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     my_pos,
                     auras,
                     &ctx,
+                    &movement,
                     &mut trace,
                 );
             }
@@ -806,12 +807,12 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
         | Charge | KidneyShot | PowerWordFortitude | Rend | MortalStrike | Pummel
         | BerserkerRage | Kick | CripplingPoison | Corruption | Shadowbolt | Fear | Immolate
         | DrainLife | CurseOfAgony | CurseOfWeakness | CurseOfTongues | UnstableAffliction
-        | DeathCoil | ArcaneIntellect | BattleShout | IceBarrier | PowerWordShield | Polymorph
-        | DispelMagic | ManaBurn | FlashOfLight | HolyLight | HolyShock | HammerOfJustice
-        | PaladinCleanse | DevotionAura | DivineShield | SpellLock | DevourMagic | AimedShot
-        | ArcaneShot | ConcussiveShot | SerpentSting | Disengage | SpiderWeb | BoarCharge
-        | MastersCall | CommandingShout | FrostArmor | MageArmorSpell | MoltenArmor
-        | ShadowResistanceAura | ConcentrationAura | LightningBolt | FrostShock
+        | DeathCoil | LifeTap | ArcaneIntellect | BattleShout | IceBarrier | PowerWordShield
+        | Polymorph | DispelMagic | ManaBurn | FlashOfLight | HolyLight | HolyShock
+        | HammerOfJustice | PaladinCleanse | DevotionAura | DivineShield | SpellLock
+        | DevourMagic | AimedShot | ArcaneShot | ConcussiveShot | SerpentSting | Disengage
+        | SpiderWeb | BoarCharge | MastersCall | CommandingShout | FrostArmor | MageArmorSpell
+        | MoltenArmor | ShadowResistanceAura | ConcentrationAura | LightningBolt | FrostShock
         | LesserHealingWave | Purge | WindShear | AirTotem | WaterTotem | EarthTotem
         | FireTotem | Rejuvenation | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild
         | Innervate | EntanglingRoots | Cyclone | TravelForm => false,

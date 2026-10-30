@@ -168,6 +168,17 @@ produces it.
 | Warlock | 200      | 8         |
 | Paladin | 160      | 8         |
 
+### Life Tap (Warlock)
+Converts the Warlock's own health into as much mana, `30 + 0.8 × spell power`
+(TBC's coefficient on rank 1's base): instant, no cost, no cooldown, on the
+global cooldown, Shadow. The health is not damage — no absorb takes it, and it
+breaks no crowd control, reveals no stealth, feeds no rage — and the mana is
+not healing, so arena dampening does not cut it. The mana is capped at the
+pool. The AI taps only when mana-starved (below 30% of the pool) and safe: no
+enemy has it targeted, a teammate healer can heal it now, and the tap leaves
+it above `urgency_hp_threshold` (`class_ai::warlock::life_tap_hold`, each hold
+traced `TapHeld`). A Warlock with no healer on its team does not tap.
+
 ### Rage (Warrior)
 - Max: 100
 - Starts every match at 0: the pre-match countdown holds rage empty while it

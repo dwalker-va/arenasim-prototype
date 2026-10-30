@@ -234,6 +234,7 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::CurseOfTongues => config(S::Curse, T::Curse),
         AbilityType::UnstableAffliction => config(S::Magic, T::Magic),
         AbilityType::DeathCoil => config(S::Magic, T::Magic),
+        AbilityType::LifeTap => Row::NoAura,
         AbilityType::SpellLock => Row::NoAura,
         AbilityType::DevourMagic => Row::NoAura,
 
