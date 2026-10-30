@@ -22,8 +22,8 @@ CASC and parsed. No wiki or prose source was used as evidence. Where a reading r
 inference rather than a table, the row says so ("inferred").
 
 The bench is `benches/2026-10-29-trinket-effects-bench.html`, published at
-<https://claude.ai/artifact/1FRTwgEeJZWYK1iFcHPkY2>, **version 1793329044-312e** (opens on
-the Proposed preset). It is not signed off.
+<https://claude.ai/artifact/1FRTwgEeJZWYK1iFcHPkY2>, **blessed at version 1793333359-b46c**
+(opens on the signed-off preset). The rulings are at the end.
 
 ## Method
 
@@ -368,3 +368,27 @@ The client spends none. The proposal spends none:
 4. **Hand of Justice crescents**: the extra swing fires Cheap Shot's crescent spec on the
    wearer.
 5. Diamond Flask and Blue Dragon: no card (the band and the icon).
+
+## Rulings (user, 2026-10-29)
+
+The user signed off the bench at version **1793333359-b46c**
+(`benches/2026-10-29-trinket-effects-bench.html`, its "Signed off" preset): the proposal
+above, with one change to Aegis.
+
+- **Aegis**: the PW:S rig, with a **silver** alpha-blended outline `[0.80, 0.84, 0.92]` in
+  place of the gold, so it is told apart from PW:S (ΔL* 13.0). It is built in AS-429 itself,
+  so that card's human test can see it.
+- **Medallion**: the Holy launch hands, the dispel ribbon in **gold at level 0.3**, and the
+  authored scatter of the broken CC's own visual (12.8).
+- **Talisman, Earthstrike, Kiss of the Spider, Dragonspine**: as proposed, with the
+  alpha-blended legibility layers; Dragonspine's fire wall and glow column dropped.
+- **Hand of Justice**: Cheap Shot's crescents only, alpha-blended; no floor ripple, and never
+  `WindfuryTornado`.
+- **Diamond Flask**: the aura band only. **Blue Dragon**: icon only.
+- The stun whirl, the dispel ribbon and the aura band are faint on sand across the game: one
+  legibility card on the AS-401 pattern.
+
+Build cards: the Aegis visual is appended to **AS-429**. The rest are **AS-432** (the
+Medallion break), **AS-433** (the trinket one-shots), **AS-434** (the Hand of Justice
+crescents) and **AS-435** (sand legibility of the stun whirl, the dispel ribbon and the aura
+band).

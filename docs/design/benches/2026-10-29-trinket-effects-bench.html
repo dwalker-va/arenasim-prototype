@@ -68,7 +68,7 @@ table.meter{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-nu
 </style>
 
 <header>
-  <h1>Trinket Effects Bench <span style="color:var(--muted);font-weight:400">· AS-338 · for AS-305</span></h1>
+  <h1>Trinket Effects Bench <span style="color:var(--muted);font-weight:400">· AS-338 · signed off 2026-10-29</span></h1>
   <div class="sub">The eight 0.9 trinket effects with a visual, each built from its Classic or TBC client model, over the arena sand <b>the way the client composites it</b>: in linear HDR, then through Bevy 0.16's TonyMcMapface LUT, with the sand calibrated off the 0.8 review screenshot. The scene, LUT and calibration are AS-401's shield bench. The canvas is the centre 960 × 540 of a 1080p game view at 1:1, and playback is real time. Each effect fires on its own cycle. Click a unit, or a tab, to tune it.</div>
 </header>
 
@@ -104,7 +104,7 @@ table.meter{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-nu
   </div>
   <div class="side">
     <div class="card"><h2>Tuning</h2>
-      <div class="presets"><button class="btn" id="pre_client">Defaults</button><button class="btn primary" id="pre_prop">Proposed</button></div>
+      <div class="presets"><button class="btn" id="pre_client">Defaults</button><button class="btn primary" id="pre_prop">Signed off (AS-338)</button></div>
       <div class="hint" style="margin:0 0 10px">Tags: <span class="src client">client</span> the client's own layer · <span class="src today">today</span> what the engine draws now · <span class="src authored">authored</span> not in the client. <i>Alpha-blended</i> draws a layer in its own client colour at <i>level</i>, under the light, so it can darken the sand: AS-401's outline, generalised.</div>
       <div class="tabs" role="tablist" id="tabs"></div>
       <div id="knobs"></div>
@@ -613,7 +613,7 @@ const readOf=v=>v>=10?'clear':v>=4?'faint':'invisible';
 
 // ======================= AS-338 trinket bench: page =======================
 const PROPOSED={
-  aegis:{},
+  aegis:{opts:{outline:'silver'}},
   medallion:{opts:{ribbon:'gold'},layers:{ribbon:{level:0.3},scatter:{on:true}}},
   talisman:{layers:{floor:{mode:'blend',gain:0.5},column:{mode:'blend',gain:0.5},small:{on:false},motes:{on:false},band:{on:false}}},
   earthstrike:{layers:{wolf:{mode:'blend',gain:1.0},band:{on:false}}},
