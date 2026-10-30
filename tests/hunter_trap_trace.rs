@@ -16,7 +16,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use arenasim::headless::runner::TraceConfig;
-use arenasim::headless::{run_headless_match_with, HeadlessMatchConfig};
+use arenasim::headless::{
+    run_headless_match_staged, run_headless_match_with, HeadlessMatchConfig, Stage, Unit,
+};
+use arenasim::states::play_match::AbilityType;
 
 fn config(team1: &[&str], team2: &[&str], seed: u64) -> HeadlessMatchConfig {
     HeadlessMatchConfig {
@@ -162,6 +165,33 @@ fn run_trace_and_log(mut cfg: HeadlessMatchConfig) -> (Vec<serde_json::Value>, S
         }),
     )
     .expect("headless match");
+    let events = std::fs::read_to_string(&trace)
+        .expect("read trace")
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    (events, std::fs::read_to_string(&log).expect("read log"))
+}
+
+/// As [`run_trace_and_log`], with `stage` landed on the gate frame.
+fn run_staged_trace_and_log(
+    mut cfg: HeadlessMatchConfig,
+    stage: Stage,
+) -> (Vec<serde_json::Value>, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("match.txt");
+    let trace = dir.path().join("trace.jsonl");
+    cfg.output_path = Some(log.to_string_lossy().into_owned());
+    run_headless_match_staged(
+        cfg,
+        false,
+        Some(TraceConfig {
+            output_path: trace.clone(),
+        }),
+        stage,
+        |_| {},
+    )
+    .expect("staged match");
     let events = std::fs::read_to_string(&trace)
         .expect("read trace")
         .lines()
@@ -584,52 +614,99 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
 
 /// AS-179 — the Hunter's own shot does not break its own trap.
 ///
-/// Hunter+Priest vs Warlock+Rogue: once the Priest and the Warlock are dead the
-/// lane trap goes on the Rogue, the Hunter's own target — allowed, because a
-/// Hunter alone holds fire on a trapped enemy. But an Aimed Shot begun as the
-/// Rogue ran the lane used to land just after the trap sprang and break it
-/// (seeds 3, 8 and 11 before AS-166's Flare changed how those fights run: the
-/// trap broke from the Hunter's own Aimed Shot 1.6-2.5s in). The Hunter now
-/// holds a shot that would land after its own trap catches the target. Pinned
-/// seeds that reach that ending: in each the trap springs on the Rogue, is
-/// never broken, and the trace shows the hold firing. (Re-pinned from 17, 58
-/// and 61 when the default Hunter took up its polearm, AS-195, and from 61,
-/// 108 and 166 when the traps came onto one shared cooldown, AS-196: no trap
-/// that springs on the Rogue in the first 400 seeds breaks, but the hold fires
-/// in only these two.) The Hunter runs a Boar for the reason the lane-trap
-/// probe above gives: with the Spider, no seed of 800 reaches this ending once
-/// no dispel frees a Web (AS-240). With the Boar the hold fires in 44 and 97,
-/// the first two of seeds 0-97.
+/// A Freezing Trap breaks on any damage, so a shot begun as an enemy runs into
+/// the Hunter's own trap, landing just after it springs, frees the enemy it
+/// froze (seeds 3, 8 and 11 once did exactly that, 1.6-2.5s after the spring).
+/// The Hunter holds a shot that would land after its own trap catches the
+/// target (`hunter_dip::own_trap_catches_first`). A scene pair: a lone Hunter
+/// on a Rogue that runs at it through the Hunter's armed trap holds each of the
+/// three shots the hold guards — Serpent Sting, then (the sting cooling) Aimed
+/// Shot, then (both cooling) Arcane Shot; the same Rogue walking away from the
+/// trap is shot with each. (This was seed-pinned in played matches, and
+/// re-pinned three times as the AI moved, AS-195, AS-196 and AS-240, before
+/// AS-303's gear moved it again; the hold is one tick's decision, so it is
+/// tested where that tick is constructed.)
 #[test]
 fn the_hunters_own_shot_does_not_break_its_trap() {
+    use arenasim::states::match_config::CharacterClass;
     use arenasim::states::play_match::class_ai::hunter_dip::OWN_TRAP_WOULD_BREAK;
+    use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
+    use arenasim::states::play_match::decision_trace::RejectionReason;
 
-    for seed in [44u64, 97] {
-        let mut cfg = config(&["Hunter", "Priest"], &["Warlock", "Rogue"], seed);
-        cfg.team1_hunter_pet_types = vec!["Boar".to_string()];
-        cfg.max_duration_secs = 60.0;
-        let (events, log) = run_trace_and_log(cfg);
-        let sprung = log
-            .lines()
-            .filter(|l| l.contains("Freezing Trap triggers on Team 2 Rogue"))
-            .count();
-        assert!(sprung >= 1, "seed {seed}: no trap sprang on the Rogue");
-        let broke: Vec<&str> = log
-            .lines()
-            .filter(|l| l.contains("Freezing Trap broke from damage"))
-            .collect();
-        assert!(broke.is_empty(), "seed {seed}: the trap broke: {broke:?}");
-        let held = hunter_trap_events(&events)
-            .flat_map(|v| v["candidates"].as_array().cloned().unwrap_or_default())
-            .filter(|c| {
-                c.pointer("/reason/PreconditionUnmet/note")
-                    .and_then(|n| n.as_str())
-                    == Some(OWN_TRAP_WOULD_BREAK)
-            })
-            .count();
+    const ME: &str = "me";
+    const ROGUE: &str = "rogue";
+    // The Rogue 25yd off, walking along x toward (-1) or away from (+1) the
+    // Hunter; the Hunter's own Freezing Trap armed 7yd in front of it, so the
+    // Rogue reaches its 5yd trigger radius before even an Arcane Shot lands.
+    // `cooling`: the shots ahead of the one under test, held out of its way.
+    let scene = |toward: f32, cooling: &[AbilityType]| {
+        let mut s = Scene::new()
+            .unit(ME, 1, CharacterClass::Hunter)
+            .at(0.0, 0.0)
+            .targeting(ROGUE)
+            .unit(ROGUE, 2, CharacterClass::Rogue)
+            .at(25.0, 0.0)
+            .facing(toward, 0.0)
+            .targeting(ME)
+            .own_trap(ME, 18.0, 0.0, 0.0)
+            .cooldown(ME, AbilityType::ConcussiveShot, 10.0)
+            .cooldown(ME, AbilityType::FreezingTrap, 14.0)
+            .cooldown(ME, AbilityType::FrostTrap, 14.0);
+        for ability in cooling {
+            s = s.cooldown(ME, *ability, 6.0);
+        }
+        s.combatant_mut(ME).hunter_opened = true;
+        s.combatant_mut(ROGUE).stealthed = false;
+        s
+    };
+    let held = |view: &DecisionView, ability: AbilityType| {
+        matches!(
+            view.rejected(ability),
+            Some(RejectionReason::PreconditionUnmet { note }) if note == OWN_TRAP_WOULD_BREAK
+        )
+    };
+    let describe = |view: &DecisionView| {
+        format!(
+            "chose {:?}; candidates {:?}",
+            view.choices,
+            view.candidates
+                .iter()
+                .map(|c| (c.ability, c.status, c.reason.clone()))
+                .collect::<Vec<_>>()
+        )
+    };
+
+    let order = [
+        AbilityType::SerpentSting,
+        AbilityType::AimedShot,
+        AbilityType::ArcaneShot,
+    ];
+    for (i, ability) in order.into_iter().enumerate() {
+        let cooling = &order[..i];
+        let into_trap = scene(-1.0, cooling).decide(ME);
         assert!(
-            held > 0,
-            "seed {seed}: the own-trap hold never fired, so the pass says nothing"
+            held(&into_trap, ability),
+            "{ability:?} on a Rogue running into the Hunter's own trap is not held: {}",
+            describe(&into_trap)
+        );
+        assert_ne!(
+            into_trap.chosen.map(|(a, _)| a),
+            Some(ability),
+            "{}",
+            describe(&into_trap)
+        );
+
+        let away = scene(1.0, cooling).decide(ME);
+        assert!(
+            !held(&away, ability),
+            "control: {ability:?} held on a Rogue walking away from the trap: {}",
+            describe(&away)
+        );
+        assert_eq!(
+            away.chosen,
+            Some((ability, Some(ROGUE))),
+            "control: {}",
+            describe(&away)
         );
     }
 }
@@ -664,19 +741,20 @@ fn against_a_lone_priest_the_opener_is_serpent_sting() {
 /// Rogue closes on it. Freezing Trap is thrown at the Priest (the trace names
 /// it), springs on the Priest, and the Hunter moves its target to the Rogue —
 /// every shot holds fire on a trapped enemy, so staying on the Priest would
-/// idle it. Asserted on every match of a SEED BANK in which the Hunter's first
-/// Freezing Trap springs on the Priest, at least three of them. (It was pinned
-/// at three seeds and re-pinned twice — AS-196, AS-240 — before AS-249's
-/// healer positioning moved them again; in most seeds the Frost Trap peel on
-/// the Rogue takes the shared cooldown first and no Freezing Trap is thrown in
-/// the minute.)
+/// idle it. A STAGED match ([`pressure_stage`]) over a small seed bank, so
+/// the situation holds by construction and every match of the bank must show
+/// the rules. (It was pinned at three seeds, re-pinned twice — AS-196, AS-240 —
+/// then played as a seed bank in which the trap sprang on the Priest in a
+/// handful of 48 seeds after AS-249's healer positioning, and in two once
+/// AS-303's gear moved them again: in most seeds the Frost Trap peel on the
+/// Rogue took the shared cooldown first.)
 #[test]
 fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
     let mut caught = 0usize;
     for seed in PRESSURE_TRAP_BANK {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
         cfg.max_duration_secs = 60.0;
-        let (events, log) = run_trace_and_log(cfg);
+        let (events, log) = run_staged_trace_and_log(cfg, pressure_stage());
         let class_of: HashMap<u64, String> = events
             .iter()
             .filter_map(|v| {
@@ -714,15 +792,47 @@ fn a_pressured_hunter_traps_the_enemy_healer_and_turns_on_the_melee() {
         );
         caught += 1;
     }
-    assert!(
-        caught >= 3,
-        "the healer trap sprang on the Priest in only {caught} seeds of {PRESSURE_TRAP_BANK:?}"
+    assert_eq!(
+        caught,
+        PRESSURE_TRAP_BANK.count(),
+        "the staged healer trap sprang on the Priest in only {caught} seeds of {PRESSURE_TRAP_BANK:?}"
     );
 }
 
 /// The seeds the pressure-trap probes play: each asserts its rules on every
 /// match in which the Hunter's first Freezing Trap springs on the Priest.
-const PRESSURE_TRAP_BANK: std::ops::Range<u64> = 0..48;
+const PRESSURE_TRAP_BANK: std::ops::Range<u64> = 0..8;
+
+/// Hunter+Priest against Rogue+Priest, staged at the gates as the pressure
+/// trap's situation: the Hunter on the enemy Priest 20yd off, the Rogue
+/// (out of stealth) 5yd from the Hunter and on it, the Hunter's own Priest
+/// behind it. The Hunter and the enemy Priest are held in place — the Rogue
+/// has the Hunter pinned, and a Priest that stands where the trap is thrown
+/// springs it — and the Hunter's Frost Trap, Disengage and Concussive Shot
+/// are cooling, so neither its peel (which would take the shared trap
+/// cooldown) nor an escape comes first.
+fn pressure_stage() -> Stage {
+    let (hunter, ally, rogue, priest) = (
+        Unit::new(1, 0),
+        Unit::new(1, 1),
+        Unit::new(2, 0),
+        Unit::new(2, 1),
+    );
+    Stage::new()
+        .clear_auras(rogue)
+        .combatant(rogue, |c| c.stealthed = false)
+        .place(hunter, 0.0, 0.0)
+        .combatant(hunter, |c| c.base_movement_speed = 0.0)
+        .place(ally, -10.0, 5.0)
+        .place(rogue, 5.0, 0.0)
+        .place(priest, 20.0, 0.0)
+        .combatant(priest, |c| c.base_movement_speed = 0.0)
+        .target(hunter, priest)
+        .target(rogue, hunter)
+        .cooldown(hunter, AbilityType::FrostTrap, 15.0)
+        .cooldown(hunter, AbilityType::Disengage, 30.0)
+        .cooldown(hunter, AbilityType::ConcussiveShot, 12.0)
+}
 
 /// AS-125 — the healer trap survives a configured kill target.
 ///
@@ -733,16 +843,14 @@ const PRESSURE_TRAP_BANK: std::ops::Range<u64> = 0..48;
 /// The Hunter must leave it for the Rogue at the throw — traced as a target
 /// acquisition, so the `target switches` recipe in CLAUDE.md shows it — and
 /// stay off it while it is frozen, deciding on the Rogue instead of holding
-/// fire on its own trap. Since Flare reveals the Rogue before it opens, it
-/// reaches the Hunter unstunned and pins it inside 8 yards for the freeze, so
-/// what lands is the default Hunter's polearm (AS-195): its melee swing hits
-/// the Rogue in 227 of the 235 seeds of 320 where the trap springs on the
-/// Priest, where before it the Hunter dealt nothing in 243 of 246. Pinned
-/// seeds where the trap springs on the Priest and the polearm lands on the
-/// Rogue during the freeze. Asserted on every match of the seed bank in which
-/// the trap springs on the Priest, at least three; the polearm's landing as
-/// happening in at least one of them. (Its pinned seeds moved four times — the
-/// polearm, AS-196, AS-240 and AS-249.)
+/// fire on its own trap. With the Rogue pinning it inside 8 yards for the
+/// freeze, what lands is the default Hunter's polearm (AS-195): its melee
+/// swing hits the Rogue in 227 of the 235 seeds of 320 where the trap sprang
+/// on the Priest, where before it the Hunter dealt nothing in 243 of 246.
+/// The same staged match as the probe above, with the kill target configured;
+/// every match of the bank must show the rules, and the polearm landing in
+/// every one. (Its pinned seeds moved four times — the polearm, AS-196, AS-240
+/// and AS-249 — and its seed bank's scenario went rare with AS-303's gear.)
 #[test]
 fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
     const GATES_OPEN: f64 = 10.0;
@@ -752,7 +860,7 @@ fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
         let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Priest"], seed);
         cfg.team1_kill_target = Some(1);
         cfg.max_duration_secs = 60.0;
-        let (events, log) = run_trace_and_log(cfg);
+        let (events, log) = run_staged_trace_and_log(cfg, pressure_stage());
         // Target acquisition events come from primaries only: a pet's actor
         // view carries its owner's class.
         let id_of = |team: u64, class: &str| {
@@ -856,17 +964,14 @@ fn a_healer_trap_on_the_kill_target_turns_the_hunter_onto_the_melee() {
             .count();
         swung += usize::from(melee_on_rogue > 0);
     }
-    assert!(
-        caught >= 3,
-        "the healer trap sprang on the Priest in only {caught} seeds of {PRESSURE_TRAP_BANK:?}"
+    assert_eq!(
+        caught,
+        PRESSURE_TRAP_BANK.count(),
+        "the staged healer trap sprang on the Priest in only {caught} seeds of {PRESSURE_TRAP_BANK:?}"
     );
-    // The polearm landing was near-universal in this scenario (227 of 235)
-    // before AS-249's healer positioning made the scenario itself rare (the
-    // trap springs on the Priest in a handful of 48 seeds, not ~3 in 4); over
-    // so few it is pinned as happening, not as a share.
-    assert!(
-        swung >= 1,
-        "a Hunter melee swing landed on the Rogue during the freeze in none of {caught} matches"
+    assert_eq!(
+        swung, caught,
+        "a Hunter melee swing landed on the Rogue during the freeze in only {swung} of {caught} matches"
     );
 }
 

@@ -14,8 +14,8 @@
 //!   four interrupters interrupted a Druid instant, and assert from the match
 //!   log that none does now. Each counts its opportunities — a Druid instant
 //!   cast with that interrupter in its interrupt's range — and fails if a seed
-//!   shift empties them. A paired control plays the same interrupter against a
-//!   caster with a cast bar and asserts it still interrupts.
+//!   shift empties them. A paired control stages the same interrupter against
+//!   a caster with a cast bar and asserts it still interrupts.
 //! - **A resolution probe** queues an interrupt at a zero-length cast directly,
 //!   as any path other than the AI's might, and asserts it cuts nothing and
 //!   locks nothing, paired with the same interrupt at a cast with a cast bar.
@@ -24,7 +24,10 @@ use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 
 use arenasim::combat::log::CombatLog;
-use arenasim::headless::{run_headless_match_observed, FrameObservation, HeadlessMatchConfig};
+use arenasim::headless::{
+    run_headless_match_observed, run_headless_match_staged, FrameObservation, HeadlessMatchConfig,
+    Stage, Unit,
+};
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::components::{
     AuraPending, AuraType, CastingState, Combatant, InterruptPending,
@@ -211,9 +214,48 @@ fn no_interrupter_interrupts_a_druid_instant_in_play() {
     }
 }
 
+/// `team1` against `team2`, staged at the gates: the caster (team 2) stands
+/// 15yd in front of the interrupter, which targets it; the interrupter starts
+/// bare (the Rogue out of stealth); the caster's escapes are held — the
+/// Mage's Frost Nova, the Priest's Psychic Scream — so it stands and casts;
+/// and so is the Rogue's Kidney Shot, so it does not stunlock the Mage to
+/// death without ever facing a cast.
+fn play_staged(team1: &str, team2: &str, seed: u64) -> Played {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let log_path = dir.path().join("match.txt");
+    let config = HeadlessMatchConfig {
+        team1: vec![team1.to_string()],
+        team2: vec![team2.to_string()],
+        map: "BasicArena".to_string(),
+        max_duration_secs: 40.0,
+        random_seed: Some(seed),
+        output_path: Some(log_path.to_string_lossy().to_string()),
+        ..Default::default()
+    };
+    let (interrupter, caster) = (Unit::new(1, 0), Unit::new(2, 0));
+    let stage = Stage::new()
+        .clear_auras(interrupter)
+        .combatant(interrupter, |c| c.stealthed = false)
+        .place(interrupter, 0.0, 0.0)
+        .place(caster, 15.0, 0.0)
+        .target(interrupter, caster)
+        .target(caster, interrupter)
+        .cooldown(caster, AbilityType::FrostNova, 60.0)
+        .cooldown(caster, AbilityType::PsychicScream, 60.0)
+        .cooldown(interrupter, AbilityType::KidneyShot, 60.0);
+    let mut frames = Vec::new();
+    run_headless_match_staged(config, false, None, stage, |f| frames.push(f.clone()))
+        .expect("match runs");
+    let log = std::fs::read_to_string(&log_path).expect("match log written");
+    Played { frames, log }
+}
+
 /// The control: the same interrupters still interrupt a cast with a cast bar.
 /// Without it, an interrupter that stopped interrupting anything would pass
-/// the probe above.
+/// the probe above. Staged (tier 3), so a caster with a cast bar is in the
+/// interrupter's reach by construction rather than by a seed's luck: the
+/// seeded version went stale when AS-303's gear let the Rogue kill its Mage
+/// before the one Frostbolt it Kicked.
 #[test]
 fn interrupters_still_interrupt_a_cast_bar_in_play() {
     let defs = AbilityDefinitions::default();
@@ -223,7 +265,7 @@ fn interrupters_still_interrupt_a_cast_bar_in_play() {
         (CharacterClass::Shaman, "Priest"),
         (CharacterClass::Warlock, "Mage"),
     ] {
-        let played = play(class.name(), victim, 1);
+        let played = play_staged(class.name(), victim, 1);
         let cut = interrupted_spells(&played.log);
         assert!(
             !cut.is_empty(),

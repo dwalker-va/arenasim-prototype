@@ -116,10 +116,18 @@ fn seeded_2v2_matches_its_recorded_identity() {
     // `main` each Priest entered PRESSURED as the other closed into the
     // 28-30yd closing band, and both opened with Mind Blast; with the gap
     // neither enters PRESSURED there, and neither casts it.
+    //
+    // Re-recorded for AS-303, TBC's slot budget multipliers and the starting
+    // kit's legs, waists, wrists and trinkets re-spent to them. Took this cell
+    // to Some(1) @ 61.949226s from Some(2) @ 49.549416s. The first line that
+    // differs from `main` @ a8a30775 is at 15.37s (log clock): the Mage's
+    // first Frostbolt into the Warrior's shield, 15 (72 absorbed) -> 16 (73
+    // absorbed): its re-spent bracers, belt and legs add 4 spell power. Paired
+    // sweep: `docs/design/balance/2026-10-29-as303-tbc-slot-multipliers.md`.
     assert_pinned(
         &result,
-        Some(2),
-        1_111_896_730,
+        Some(1),
+        1_115_147_266,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }

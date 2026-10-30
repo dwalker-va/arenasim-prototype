@@ -4218,9 +4218,9 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     /// proc free, which is the defect this whole term exists to prevent — so
     /// plant an offender and require the shipped check to reject it.
     ///
-    /// The numbers are the card's worked example: +100 attack power at 20%
-    /// uptime is 1.5 * 100 * 0.20 = 30 points, against an ilvl-58 trinket's
-    /// 24.5 — over budget on the proc alone, with no stats at all.
+    /// +120 attack power at 20% uptime is 1.5 * 120 * 0.20 = 36 points,
+    /// against an ilvl-58 trinket's 30.45 (cap 32.0) — over budget on the proc
+    /// alone, with no stats at all.
     #[test]
     fn budget_rejects_a_proc_that_is_over_budget_on_its_own() {
         use super::super::components::AuraType;
@@ -4236,12 +4236,12 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             trigger: ProcTrigger::MeleeHit,
             chance: 0.15,
             effect: AuraType::AttackPowerIncrease,
-            magnitude: 100.0,
+            magnitude: 120.0,
             duration: 10.0,
             internal_cooldown: 40.0,
         });
         let err = validate_item_budget("Overbudget Proc", &item)
-            .expect_err("a 30-point proc on a 24.5-point trinket must be rejected");
+            .expect_err("a 36-point proc on a 30.45-point trinket must be rejected");
         assert!(err.contains("over budget"), "{}", err);
     }
 
@@ -4257,9 +4257,9 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             trigger: ProcTrigger::MeleeHit,
             chance: 0.15,
             effect: AuraType::AttackPowerIncrease,
-            magnitude: 100.0,
+            magnitude: 120.0,
             duration: 10.0,
-            // 10/110 uptime -> 1.5 * 100 * 0.0909 = 13.6 points.
+            // 10/110 uptime -> 1.5 * 120 * 0.0909 = 16.4 points.
             internal_cooldown: 100.0,
         });
         assert!(validate_item_budget("Priced Proc", &item).is_ok());
