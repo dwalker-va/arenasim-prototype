@@ -23,6 +23,7 @@ use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ai_profile::AiProfiles;
 use crate::states::play_match::arena_bounds::ArenaBounds;
 use crate::states::play_match::auras::reflect_instant_cc_in_snapshot;
+use crate::states::play_match::combat_core::MeleeDefense;
 use crate::states::play_match::components::{
     ActiveAuras, Aura, CastingState, ChannelingState, ChargingState, Combatant, DRTracker,
     DisengagingState, Pet,
@@ -113,6 +114,10 @@ pub struct CombatSnapshot {
     /// Per-TEAM, so a head-to-head match can run one implementation against
     /// the other. `context_for` resolves it to the acting unit's own team.
     pub ai_profile: AiProfiles,
+    /// Every combatant with a dodge or parry chance above 0, and its chances.
+    /// Empty in every match without avoidance: a melee attack on a combatant
+    /// absent from it rolls nothing.
+    pub melee_defense: BTreeMap<Entity, MeleeDefense>,
 }
 
 impl CombatSnapshot {
@@ -235,7 +240,12 @@ impl CombatSnapshot {
         let mut combatants: BTreeMap<Entity, CombatantInfo> = BTreeMap::new();
         let mut active_auras: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
         let mut ability_cooldowns: BTreeMap<Entity, BTreeMap<AbilityType, f32>> = BTreeMap::new();
+        let mut melee_defense: BTreeMap<Entity, MeleeDefense> = BTreeMap::new();
         for u in &units {
+            let defense = u.combatant.melee_defense();
+            if !defense.is_none() {
+                melee_defense.insert(u.entity, defense);
+            }
             combatants.insert(
                 u.entity,
                 CombatantInfo::from_combatant(
@@ -275,6 +285,7 @@ impl CombatSnapshot {
             obstacles: obstacles.to_vec(),
             bounds,
             ai_profile,
+            melee_defense,
         }
     }
 
@@ -299,6 +310,7 @@ impl CombatSnapshot {
             team.map(|t| self.ai_profile.for_team(t))
                 .unwrap_or_default(),
         )
+        .with_melee_defense(&self.melee_defense)
     }
 
     /// Mutate the snapshot to reflect an instant CC just landed by a class AI

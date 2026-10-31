@@ -313,6 +313,9 @@ pub enum EventKind {
     MovementDecision,
     /// A team's situation changed (`situation.rs`). Transitions only.
     SituationChange,
+    /// A melee attack was dodged or parried (`combat_core::avoidance`). The
+    /// `actor` is the attacker, the `target` the defender.
+    MeleeAvoided,
 }
 
 /// Payload varies by `kind`. Flattened into the parent event JSON object.
@@ -455,6 +458,14 @@ pub enum EventPayload {
         /// `target_focus` changes: the target the focus moved off.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from: Option<u32>,
+    },
+    /// One `melee_avoided` event: the attack the defender avoided (named as
+    /// the combat log names a landed one) and how. Disambiguated by its
+    /// REQUIRED `avoided` field, which no other variant has, while it lacks
+    /// the `candidates` / `posture` / `name` the others require.
+    MeleeAvoided {
+        attack: String,
+        avoided: crate::states::play_match::combat_core::Avoidance,
     },
 }
 

@@ -394,6 +394,26 @@ pub struct Combatant {
     /// Critical strike chance (0.0 = 0%, 1.0 = 100%). Determines probability of
     /// dealing bonus damage/healing on direct abilities and auto-attacks.
     pub crit_chance: f32,
+    /// Chance (0.0 = 0%, 1.0 = 100%) to DODGE an incoming melee attack — an
+    /// auto-attack swing or a melee ability ([`AbilityType::is_melee_attack`]).
+    /// Spells and ranged attacks are never avoided. Rolled by
+    /// `combat_core::avoidance::roll_avoidance`, which draws nothing while
+    /// both this and [`Self::parry_chance`] are 0 — every class's base value —
+    /// so a match without avoidance plays exactly the numbers it did before
+    /// avoidance existed. No item-budget weight: whatever grants it declares
+    /// its own price.
+    ///
+    /// [`AbilityType::is_melee_attack`]: crate::states::play_match::abilities::AbilityType::is_melee_attack
+    pub dodge_chance: f32,
+    /// Chance (0.0 = 0%, 1.0 = 100%) to PARRY an incoming melee attack. Same
+    /// roll, same rules and same zero guarantee as [`Self::dodge_chance`].
+    pub parry_chance: f32,
+    /// Permanent attack-speed bonus, as a fraction: `0.10` swings 10% faster,
+    /// so every weapon's swing interval is divided by `1.10`. Applies to every
+    /// auto-attack timer the combatant keeps (main hand, off hand, a Hunter's
+    /// melee hand and its bow). 0 for every class; while it is 0 the interval
+    /// is computed exactly as before it existed. No item-budget weight here.
+    pub attack_speed_bonus: f32,
     /// Armor rating - reduces incoming Physical spell school damage.
     /// Formula: Reduction % = armor / (armor + 5500)
     pub armor: f32,
@@ -623,6 +643,9 @@ impl Combatant {
             attack_power,
             spell_power,
             crit_chance,
+            dodge_chance: 0.0,
+            parry_chance: 0.0,
+            attack_speed_bonus: 0.0,
             armor,
             fire_resistance: 0.0,
             frost_resistance: 0.0,

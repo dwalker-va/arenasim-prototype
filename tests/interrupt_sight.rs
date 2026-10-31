@@ -262,6 +262,7 @@ fn spell_lock_passes_over_a_hidden_heal_for_a_cast_in_sight() {
 fn kick_pass(pillared: bool) -> (usize, bool, Option<RejectionReason>) {
     let mut world = World::new();
     world.insert_resource(CombatLog::default());
+    world.insert_resource(arenasim::states::play_match::components::GameRng::from_seed(0));
     world.insert_resource(DecisionTrace::default());
     let defs = AbilityDefinitions::default();
     let cast_time = defs.get_unchecked(&AbilityType::Frostbolt).cast_time;
@@ -339,6 +340,7 @@ fn check_interrupts_reads_the_map() {
 fn resolve_pummel(map: Option<Vec<ObstacleVolume>>) -> (bool, usize) {
     let mut world = World::new();
     world.insert_resource(CombatLog::default());
+    world.insert_resource(arenasim::states::play_match::components::GameRng::from_seed(0));
     let defs = AbilityDefinitions::default();
     let cast_time = defs.get_unchecked(&AbilityType::Frostbolt).cast_time;
     world.insert_resource(defs);

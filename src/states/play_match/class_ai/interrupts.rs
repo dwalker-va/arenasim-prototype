@@ -20,13 +20,16 @@ use bevy::prelude::*;
 
 use super::cast_guard::{cast_gate, Cleared, PreCastOpts};
 use super::{cast_reach, priority_interrupt_target, CastReach, CombatContext, InterruptCandidate};
+use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
 use crate::states::play_match::components::{
-    ActiveAuras, CastingState, ChannelingState, Combatant,
+    ActiveAuras, CastingState, ChannelingState, Combatant, GameRng, InstantAbilityFired,
+    InterruptPending, PlayMatchEntity,
 };
 use crate::states::play_match::decision_trace::{DecisionTrace, RejectionReason};
+use crate::states::play_match::utils::log_ability_use;
 
 /// The interrupt a class casts itself, or `None` for a class with none.
 /// Exhaustive, so a new class has to say whether it interrupts; the Warlock's
@@ -440,4 +443,90 @@ pub fn spell_lock_pick(
         (None, true) => RejectionReason::LosBlocked,
         (None, false) => RejectionReason::NoValidTarget,
     })
+}
+
+/// Use the interrupt [`interrupt_turn`] chose: `entity` spends
+/// `interrupt_ability` on `target`'s cast of `cast_ability`. The cost and
+/// cooldown are paid (an interrupt takes no global cooldown), the use is
+/// logged, and the interrupt is queued for `process_interrupts` — unless it is
+/// a melee attack ([`AbilityType::is_melee_attack`]: Pummel, Kick) the target
+/// dodges or parries, which queues nothing. `check_interrupts` runs it each
+/// frame; `Scene::interrupt` runs it on a scene.
+#[allow(clippy::too_many_arguments)]
+pub fn fire_interrupt(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    game_rng: &mut GameRng,
+    abilities: &AbilityDefinitions,
+    ctx: &CombatContext,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    interrupt_ability: AbilityType,
+    target: Entity,
+    target_pos: Vec3,
+    cast_ability: AbilityType,
+) {
+    let ability_def = abilities.get_unchecked(&interrupt_ability);
+    let target_ability_name = abilities.get_unchecked(&cast_ability).name.clone();
+    let distance = my_pos.distance(target_pos);
+
+    info!(
+        "[INTERRUPT] Team {} {} uses {} to interrupt {}'s {} (distance: {:.1})",
+        combatant.team,
+        combatant.class.name(),
+        ability_def.name,
+        target_ability_name,
+        distance,
+        distance
+    );
+
+    combatant.current_mana -= ability_def.mana_cost;
+    combatant.start_cooldown(interrupt_ability, abilities);
+    // Interrupts do NOT trigger GCD in WoW!
+
+    // Log ability cast for timeline
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &ability_def.name,
+        None,
+        "uses",
+    );
+
+    // A dodged or parried Pummel or Kick interrupts nothing; its cost and
+    // cooldown are spent. Wind Shear is a spell and is never avoided.
+    let avoided = interrupt_ability.is_melee_attack()
+        && ctx.melee_attack_avoided(commands, game_rng, target, &ability_def.name);
+
+    // Queue the interrupt for processing
+    // Note: The actual interrupt result (with school lockout info) is logged in process_interrupts
+    if !avoided {
+        commands.spawn(InterruptPending {
+            caster: entity,
+            target,
+            ability: interrupt_ability,
+            lockout_duration: ability_def.lockout_duration,
+        });
+    }
+
+    // Actor-side gesture marker (committed-use site: the caster performs
+    // the strike whether or not the victim's cast survives to be locked
+    // out). Melee interrupts only — Wind Shear's caster has no weapon
+    // sockets, and its answer is a victim-side effect (roadmap B), so
+    // spawning for it would list an ability the router never draws.
+    // Spawned in BOTH modes per cosmetic-marker-cross-mode-spawn-parity.
+    if matches!(interrupt_ability, AbilityType::Pummel | AbilityType::Kick) {
+        commands.spawn((
+            InstantAbilityFired {
+                caster: entity,
+                target: Some(target),
+                ability: interrupt_ability,
+                is_crit: false,
+            },
+            PlayMatchEntity,
+        ));
+    }
 }

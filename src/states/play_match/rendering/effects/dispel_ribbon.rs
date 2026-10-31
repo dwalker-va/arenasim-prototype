@@ -1,4 +1,5 @@
 use super::dispel_burst::dispel_burst_colors;
+use super::sand_legibility::{emissive_level, linear_level, SAND_RIBBON_LEVEL};
 use super::spell_bolts::soft_dot_texture;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::components::*;
@@ -28,6 +29,9 @@ use bevy::render::render_resource::PrimitiveTopology;
 // ribbon drawn through a ring, while sparks stream off the fixed top until the
 // bottom has caught up and nothing is left. An opaque ribbon cannot fade by
 // alpha anyway, and a fade was the wrong shape: the aura LEAVES the unit.
+//
+// The strip is drawn DARK, at a tenth of its colour, so it reads on the bright
+// arena sand (AS-435; see `dispel_ribbon_colors`). The sparks stay bright.
 
 /// Number of turns the ribbon helix coils through over its baked length. Fewer
 /// turns over the same height is a steeper, shorter strip — less ribbon to
@@ -130,17 +134,28 @@ const IGNITE_SECS: f32 = 0.28;
 /// with a moderated emissive so it reads as a *solid* ribbon (a colored surface
 /// with a sheen) rather than the wispy additive glow of the sphere bursts. Kept
 /// separate from `dispel_burst_colors` so the burst (Master's Call) is unaffected.
-fn dispel_ribbon_colors(class: CharacterClass) -> (Color, LinearRgba) {
+///
+/// **Sand legibility (AS-435).** A lit strip facing the same sun as the sand
+/// is about as bright as the sand at full level, so it read only by hue. The
+/// strip's WHOLE colour (lit base and emissive, and with it the ignition) is
+/// held at [`SAND_RIBBON_LEVEL`] (0.1) in linear light, one level for every
+/// dispeller: each keeps its hue, dark on the sand (Sand Legibility Bench,
+/// <https://claude.ai/artifact/8qLsKmuRQTVwa5Kzdimkgo>, version id
+/// 1793335026-f991). The sparks keep the burst's full colour, additive.
+pub fn dispel_ribbon_colors(class: CharacterClass) -> (Color, LinearRgba) {
     let (base, emissive) = dispel_burst_colors(class);
     (
-        // Opaque on screen; the alpha here is inert (see `FADE_TAPER`).
-        base.with_alpha(1.0),
+        // Opaque on screen; the alpha here is inert.
+        linear_level(base, SAND_RIBBON_LEVEL, 1.0),
         // Trim the emissive so it's a colored sheen + light bloom, not a pure glow.
-        LinearRgba::new(
-            emissive.red * 0.6,
-            emissive.green * 0.6,
-            emissive.blue * 0.6,
-            1.0,
+        emissive_level(
+            LinearRgba::new(
+                emissive.red * 0.6,
+                emissive.green * 0.6,
+                emissive.blue * 0.6,
+                1.0,
+            ),
+            SAND_RIBBON_LEVEL,
         ),
     )
 }
@@ -363,7 +378,7 @@ pub fn spawn_dispel_ribbon_visuals(
             RIBBON_SEGMENTS,
         ));
         let material = materials.add(StandardMaterial {
-            base_color: base_color.with_alpha(1.0),
+            base_color,
             emissive: LinearRgba::new(
                 emissive.red * ignite,
                 emissive.green * ignite,
