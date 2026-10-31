@@ -27,7 +27,7 @@
 //!
 //! ## Adding a shape
 //!
-//! Add a variant, then implement `contains`, `clamp`, `edge_closeness`,
+//! Add a variant, then implement `contains`, `clamp`, `edge_closeness`, `dead_end_depth`,
 //! `half_extents`, and `outline`. `edge_closeness` is the one with a behavioral
 //! contract worth reading twice: it feeds the movement scorer's `corner_penalty`
 //! term, so its 0..1 ramp must mean the same thing across shapes or healer
@@ -213,6 +213,31 @@ impl ArenaBounds {
                 // Normalized ellipse radius is already 1.0 at the wall.
                 let r = ellipse_radius(x, z, semi_x, semi_z);
                 (r - EDGE_PENALTY_ONSET_FRACTION) / (1.0 - EDGE_PENALTY_ONSET_FRACTION)
+            }
+        }
+    }
+
+    /// Yards `(x, z)` stands inside a DEAD END — a part of the walkable region
+    /// a unit can run into but not through — measured from its mouth; `0.0`
+    /// outside one. On [`ArenaBounds::Bowl`] the dead ends are the two
+    /// starting rooms, past the bowl's wall in the gate corridor; the octagon
+    /// has none. A point past a room's back wall reads deeper still, so a step
+    /// toward that wall always reads as going deeper. A chased unit's escape
+    /// never steps deeper into one (`movement_scoring::MASK_DEAD_END`): the
+    /// room's back wall is all it reaches there.
+    pub fn dead_end_depth(&self, x: f32, z: f32) -> f32 {
+        match *self {
+            ArenaBounds::Octagon { .. } => 0.0,
+            ArenaBounds::Bowl {
+                semi_x,
+                semi_z,
+                alcove_half_width,
+                ..
+            } => {
+                if z.abs() > alcove_half_width {
+                    return 0.0;
+                }
+                (x.abs() - ellipse_x_at(z, semi_x, semi_z)).max(0.0)
             }
         }
     }
@@ -526,6 +551,41 @@ mod tests {
         for i in 0..=70 {
             let x = i as f32;
             assert!(b.contains(Vec3::new(x, 1.0, 0.0)), "gap at x={x}");
+        }
+    }
+
+    /// The starting rooms are the bowl's dead ends: depth grows from the room
+    /// mouth to its back wall, and is zero in the bowl, beside a room and
+    /// everywhere on the octagon.
+    #[test]
+    fn the_starting_rooms_are_the_dead_ends() {
+        let b = ArenaBounds::Bowl {
+            semi_x: 60.0,
+            semi_z: 60.0,
+            alcove_depth: 10.0,
+            alcove_half_width: 8.0,
+        };
+        let mouth = ellipse_x_at(0.0, 60.0, 60.0);
+        assert_eq!(b.dead_end_depth(0.0, 0.0), 0.0, "the bowl's centre");
+        assert_eq!(b.dead_end_depth(55.0, 0.0), 0.0, "inside the bowl wall");
+        assert_eq!(b.dead_end_depth(0.0, 59.0), 0.0, "the bowl's far edge");
+        assert!((b.dead_end_depth(65.0, 0.0) - (65.0 - mouth)).abs() < 1e-4);
+        assert!(
+            (b.dead_end_depth(-69.0, 7.0) - (69.0 - ellipse_x_at(7.0, 60.0, 60.0))).abs() < 1e-4
+        );
+        assert!(b.dead_end_depth(68.0, 0.0) > b.dead_end_depth(64.0, 0.0));
+        assert!(
+            b.dead_end_depth(75.0, 0.0) > b.dead_end_depth(69.0, 0.0),
+            "past the back wall reads deeper still"
+        );
+        assert_eq!(
+            b.dead_end_depth(62.0, 20.0),
+            0.0,
+            "beside the room, outside it"
+        );
+        let o = ArenaBounds::default();
+        for (x, z) in [(0.0, 0.0), (35.0, 0.0), (36.0, 12.0)] {
+            assert_eq!(o.dead_end_depth(x, z), 0.0, "the octagon has no dead end");
         }
     }
 

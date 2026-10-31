@@ -27,19 +27,72 @@ use std::io::{BufRead, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use arenasim::headless::{run_headless_match_observed, HeadlessMatchConfig};
+use arenasim::headless::{run_headless_match_observed, HeadlessMatchConfig, ObservedCombatant};
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
+use arenasim::states::play_match::arena_bounds::ArenaBounds;
 use arenasim::states::play_match::components::AuraType;
 use arenasim::states::play_match::constants::{DAMPENING_RAMP_SECS, DAMPENING_START_SECS};
+use arenasim::states::play_match::map_config::{load_map_geometry_config, ActiveMapGeometry};
+use arenasim::states::play_match::map_geometry::position_blocked;
 use arenasim::CharacterClass;
-use bevy::prelude::Entity;
+use bevy::prelude::{Entity, Vec2, Vec3};
 use serde::Serialize;
 
 /// The countdown before the gates; `sim_time` includes it.
 const COUNTDOWN_SECS: f32 = 10.0;
 /// Mana is sampled every this many seconds after the gates.
 const MANA_SAMPLE_SECS: f32 = 5.0;
+/// How long after a shift its escape is measured (AS-162's outrun window).
+const ESCAPE_WINDOW_SECS: f32 = 1.5;
+/// A chaser is a melee or pet enemy this close at the shift: the danger radius.
+const ESCAPE_CHASER_YARDS: f32 = 12.0;
+/// Escape-side clearance is marched out to this far and no farther.
+const CLEARANCE_CAP_YARDS: f32 = 12.0;
+
+fn xz(v: Vec3) -> Vec2 {
+    Vec2::new(v.x, v.z)
+}
+
+/// Inside a starting room: on Nagrand, past the bowl's wall in the gate
+/// corridor — a dead end. A map without rooms has none.
+fn in_starting_room(bounds: &ArenaBounds, pos: Vec3) -> bool {
+    match *bounds {
+        ArenaBounds::Bowl { semi_x, semi_z, .. } => {
+            bounds.contains(pos) && (pos.x / semi_x).powi(2) + (pos.z / semi_z).powi(2) > 1.0
+        }
+        ArenaBounds::Octagon { .. } => false,
+    }
+}
+
+/// Yards from `pos` to the nearest wall (outside the bounds) and to the
+/// nearest pillar, along the 32 headings within 90 degrees of straight away
+/// from `chaser`, each capped at [`CLEARANCE_CAP_YARDS`].
+fn escape_clearance(geometry: &ActiveMapGeometry, pos: Vec3, chaser: Vec3) -> (f32, f32) {
+    let away = Vec3::new(pos.x - chaser.x, 0.0, pos.z - chaser.z).normalize_or_zero();
+    let march = |dir: Vec3, open: &dyn Fn(Vec3) -> bool| {
+        let mut d = 0.0;
+        while d < CLEARANCE_CAP_YARDS && open(pos + dir * d) {
+            d += 0.1;
+        }
+        d
+    };
+    (0..64)
+        .map(|i| {
+            let angle = i as f32 * std::f32::consts::TAU / 64.0;
+            Vec3::new(angle.cos(), 0.0, angle.sin())
+        })
+        .filter(|dir| dir.dot(away) >= 0.0)
+        .map(|dir| {
+            (
+                march(dir, &|p| geometry.bounds.contains(p)),
+                march(dir, &|p| !position_blocked(&geometry.volumes, p)),
+            )
+        })
+        .fold((CLEARANCE_CAP_YARDS, CLEARANCE_CAP_YARDS), |a, b| {
+            (a.0.min(b.0), a.1.min(b.1))
+        })
+}
 
 /// One root (any `AuraType::Root`) on one unit, from onset to its end.
 #[derive(Serialize, Default, Clone)]
@@ -102,6 +155,40 @@ struct UnitRow {
     alive_secs: f32,
     /// Damage dealt over the match, pet credit included (`CombatantResult`).
     damage_dealt: f32,
+    /// Seconds spent in Travel Form inside a starting room — on Nagrand, the
+    /// dead-end corridor past the bowl wall (zero on a map without rooms).
+    shifted_room_secs: f32,
+    /// Times the unit walked into a starting room while shifted.
+    shifted_room_entries: u32,
+    /// The unit died inside a starting room.
+    died_in_room: bool,
+    /// One per Travel Form onset with a chaser on the unit (AS-241).
+    escapes: Vec<EscapeWindow>,
+}
+
+/// The first [`ESCAPE_WINDOW_SECS`] of a Travel Form shift with a CHASER on
+/// the unit — the nearest living melee or pet enemy, inside
+/// [`ESCAPE_CHASER_YARDS`] at the shift. It ends early on a death, a root, a
+/// snare, crowd control or the form dropping.
+#[derive(Serialize, Default, Clone)]
+struct EscapeWindow {
+    /// Seconds after the gates.
+    start: f32,
+    /// Seconds the window ran.
+    secs: f32,
+    /// Yards to the chaser at the shift, and at the window's last frame.
+    gap_start: f32,
+    gap_end: f32,
+    /// Yards from the unit to the nearest wall on its ESCAPE side — within
+    /// 90 degrees of straight away from the chaser — at the shift, and the
+    /// least at any frame of the window. Capped at [`CLEARANCE_CAP_YARDS`].
+    wall_start: f32,
+    wall_min: f32,
+    /// The same for the nearest pillar.
+    pillar_start: f32,
+    pillar_min: f32,
+    /// The unit was inside a starting room at any frame of the window.
+    in_room: bool,
 }
 
 #[derive(Serialize)]
@@ -197,6 +284,25 @@ struct Track {
     lockout_prev: bool,
     root: Option<RootEpisode>,
     next_sample: f32,
+    in_room_prev: bool,
+    /// The open escape window, and the chaser it is measured against.
+    escape: Option<(EscapeWindow, Entity)>,
+}
+
+/// A root, a snare or crowd control: what ends an escape window.
+fn hindered(c: &ObservedCombatant) -> bool {
+    c.aura_types.iter().any(|t| {
+        matches!(
+            t,
+            AuraType::Root
+                | AuraType::MovementSpeedSlow
+                | AuraType::Stun
+                | AuraType::Fear
+                | AuraType::Polymorph
+                | AuraType::Incapacitate
+                | AuraType::Cyclone
+        )
+    })
 }
 
 fn run_one(cfg: HeadlessMatchConfig, defs: &AbilityDefinitions, log_path: String) -> MatchRow {
@@ -206,6 +312,9 @@ fn run_one(cfg: HeadlessMatchConfig, defs: &AbilityDefinitions, log_path: String
     let map = cfg.map.clone();
     let (team1, team2) = (cfg.team1.join("+"), cfg.team2.join("+"));
     let seed = cfg.random_seed.unwrap_or(0);
+    let geometry = load_map_geometry_config()
+        .expect("maps.ron loads")
+        .active_for(HeadlessMatchConfig::parse_map(&map).expect("a known map"));
 
     let mut units: BTreeMap<Entity, UnitRow> = BTreeMap::new();
     let mut tracks: BTreeMap<Entity, Track> = BTreeMap::new();
@@ -236,6 +345,10 @@ fn run_one(cfg: HeadlessMatchConfig, defs: &AbilityDefinitions, log_path: String
                 if tr.alive_prev {
                     u.death = Some(t);
                     u.died_shifted = tr.shifted_prev;
+                    u.died_in_room = tr.in_room_prev;
+                    if let Some((w, _)) = tr.escape.take() {
+                        u.escapes.push(w);
+                    }
                     if let Some(mut r) = tr.root.take() {
                         r.end = t;
                         u.roots.push(r);
@@ -305,6 +418,58 @@ fn run_one(cfg: HeadlessMatchConfig, defs: &AbilityDefinitions, log_path: String
                 }
                 (None, false) => {}
             }
+            let in_room = in_starting_room(&geometry.bounds, c.position);
+            if shifted && in_room {
+                u.shifted_room_secs += FRAME;
+                if !tr.in_room_prev {
+                    u.shifted_room_entries += 1;
+                }
+            }
+            // The open escape window runs on, or closes.
+            if let Some((mut w, chaser)) = tr.escape.take() {
+                let ch = frame.combatants.get(&chaser).filter(|ch| ch.alive);
+                if let Some(ch) =
+                    ch.filter(|_| shifted && !hindered(c) && t - w.start <= ESCAPE_WINDOW_SECS)
+                {
+                    w.secs = t - w.start;
+                    w.gap_end = xz(c.position).distance(xz(ch.position));
+                    let (wall, pillar) = escape_clearance(&geometry, c.position, ch.position);
+                    w.wall_min = w.wall_min.min(wall);
+                    w.pillar_min = w.pillar_min.min(pillar);
+                    w.in_room |= in_room;
+                    tr.escape = Some((w, chaser));
+                } else {
+                    u.escapes.push(w);
+                }
+            }
+            if shifted && !tr.shifted_prev {
+                let chaser = frame
+                    .combatants
+                    .iter()
+                    .filter(|(_, o)| {
+                        o.team != c.team && o.alive && (o.is_pet || o.class.is_melee())
+                    })
+                    .map(|(oe, o)| (*oe, xz(o.position).distance(xz(c.position)), o.position))
+                    .min_by(|a, b| a.1.total_cmp(&b.1));
+                if let Some((chaser, gap, at)) = chaser.filter(|ch| ch.1 <= ESCAPE_CHASER_YARDS) {
+                    let (wall, pillar) = escape_clearance(&geometry, c.position, at);
+                    tr.escape = Some((
+                        EscapeWindow {
+                            start: t,
+                            secs: 0.0,
+                            gap_start: gap,
+                            gap_end: gap,
+                            wall_start: wall,
+                            wall_min: wall,
+                            pillar_start: pillar,
+                            pillar_min: pillar,
+                            in_room,
+                        },
+                        chaser,
+                    ));
+                }
+            }
+            tr.in_room_prev = in_room;
             tr.shifted_prev = shifted;
             tr.cyclone_prev = cyclone;
             tr.alive_prev = true;
@@ -316,6 +481,9 @@ fn run_one(cfg: HeadlessMatchConfig, defs: &AbilityDefinitions, log_path: String
         if let Some(mut r) = tr.root.take() {
             r.end = result.match_time;
             units.get_mut(e).unwrap().roots.push(r);
+        }
+        if let Some((w, _)) = tr.escape.take() {
+            units.get_mut(e).unwrap().escapes.push(w);
         }
     }
     let mut units: Vec<UnitRow> = units.into_values().collect();

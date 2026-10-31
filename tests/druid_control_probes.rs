@@ -990,20 +990,6 @@ fn hindered(types: &[AuraType]) -> bool {
 /// How long after a shift the chase is measured.
 const OUTRUN_WINDOW_SECS: f32 = 1.5;
 
-/// How close to a wall or a pillar ON ITS ESCAPE SIDE a shift must start to
-/// count as the known PIN: a Druid with its back to the arena edge or a
-/// Nagrand pillar can only run along it while the chaser cuts the corner
-/// (AS-164). Since the shifted escape flees its chaser (AS-200) every shift in
-/// this set gains ground; across 300 Druid matches the misses left all start
-/// 0.1 to 4.7 yd from one. A miss farther out than this is a real outrun
-/// failure.
-const WALL_PIN_YARDS: f32 = 5.0;
-
-/// The same pin met mid-run: a shift that starts farther out but RUNS INTO a
-/// wall or a pillar on its escape side inside the window — its escape-side
-/// clearance falls to this — is pinned from then on.
-const WALL_REACHED_YARDS: f32 = 1.0;
-
 /// How many times a shifted Druid may turn its heading back on itself (more
 /// than 90 degrees, one commit window to the next) in one stay in the form.
 /// A Druid running from a chaser keeps running away from it; a run that
@@ -1012,58 +998,17 @@ const WALL_REACHED_YARDS: f32 = 1.0;
 /// reason to turn once.
 const MAX_HEADING_REVERSALS: usize = 1;
 
-/// Yards from `pos` to the nearest point a mover cannot stand on in `map` —
-/// outside the arena's walkable region, or inside a pillar's footprint —
-/// marched outward along 64 headings.
-///
-/// Only headings on the Druid's ESCAPE side count — within 90 degrees of
-/// straight away from `chaser` — so a wall behind the chaser, or beside the
-/// Druid, does not excuse a shift that failed to gain ground.
-fn wall_distance(map: &str, pos: Vec3, chaser: Vec3) -> f32 {
-    use arenasim::states::match_config::ArenaMap;
-    use arenasim::states::play_match::map_config::load_map_geometry_config;
-    use arenasim::states::play_match::map_geometry::position_blocked;
-    let arena = match map {
-        "BasicArena" => ArenaMap::BasicArena,
-        "PillaredArena" => ArenaMap::PillaredArena,
-        other => panic!("no wall distance for {other}"),
-    };
-    let geometry = load_map_geometry_config()
-        .expect("maps.ron loads")
-        .active_for(arena);
-    let away = Vec3::new(pos.x - chaser.x, 0.0, pos.z - chaser.z).normalize_or_zero();
-    (0..64)
-        .map(|i| {
-            let angle = i as f32 * std::f32::consts::TAU / 64.0;
-            Vec3::new(angle.cos(), 0.0, angle.sin())
-        })
-        .filter(|dir| dir.dot(away) >= 0.0)
-        .map(|dir| {
-            let mut d = 0.0;
-            while d < 200.0
-                && geometry.bounds.contains(pos + dir * d)
-                && !position_blocked(&geometry.volumes, pos + dir * d)
-            {
-                d += 0.1;
-            }
-            d
-        })
-        .fold(f32::MAX, f32::min)
-}
-
 /// A shift out of a root or snare frees the Druid and it pulls away: in the
-/// window after every shift the Druid's path is longer than its unshifted
+/// window after EVERY shift the Druid's path is longer than its unshifted
 /// speed could cover, and the gap to the nearest melee or pet chaser GROWS —
-/// unless the shift starts with the Druid's back to a wall or a pillar (within
-/// [`WALL_PIN_YARDS`]), the known pin AS-164 carries, where it can only run
-/// along the obstacle. Pins aside, a shift that gains no ground fails by
-/// name; nine in ten must gain overall as a backstop. And for the whole stay
-/// in the form the Druid holds its heading: it turns back on itself at most
-/// [`MAX_HEADING_REVERSALS`] times, one commit window to the next (AS-200).
+/// with its back to a wall or a pillar too, since the run counts the open
+/// ground a heading has and runs along the obstacle (AS-241; AS-164 found
+/// those shifts pinned). And for the whole stay in the form the Druid holds
+/// its heading: it turns back on itself at most [`MAX_HEADING_REVERSALS`]
+/// times, one commit window to the next (AS-200).
 #[test]
 fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
     let mut shifts = 0;
-    let mut gained = 0;
     let mut heading_turns = 0;
     let commit_window = load_movement_config()
         .expect("movement.ron loads")
@@ -1199,42 +1144,13 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
             let gap = |f: &FrameObservation| {
                 xz(f.combatants[&druid].position).distance(xz(f.combatants[&chaser].position))
             };
-            let wall = wall_distance(map, after.position, pair[1].combatants[&chaser].position);
-            if gap(end_frame) > gap(&pair[1]) {
-                gained += 1;
-            } else {
-                eprintln!(
-                    "no ground gained: {t1:?} v {t2:?} {map} #{seed} at {start:.2}s, gap \
-                     {:.1} -> {:.1}, {wall:.1} yd from a wall or pillar on its escape side",
-                    gap(&pair[1]),
-                    gap(end_frame)
-                );
-                // The one known miss: a Druid shifting with its back to a wall
-                // or a pillar — or running into one inside the window — can
-                // only run along it (AS-164). Anywhere else, a shift that does
-                // not gain ground on its chaser is a fault.
-                let met_wall = played
-                    .frames
-                    .iter()
-                    .filter(|f| f.sim_time >= start && f.sim_time <= end_frame.sim_time)
-                    .map(|f| {
-                        wall_distance(
-                            map,
-                            f.combatants[&druid].position,
-                            f.combatants[&chaser].position,
-                        )
-                    })
-                    .fold(f32::MAX, f32::min);
-                assert!(
-                    wall <= WALL_PIN_YARDS || met_wall <= WALL_REACHED_YARDS,
-                    "{t1:?} v {t2:?} {map} #{seed} at {start:.2}s: no ground gained on the \
-                     chaser ({:.1} -> {:.1} yd) {wall:.1} yd from any wall or pillar on its escape side, \
-                     and never within {WALL_REACHED_YARDS} yd of one in the window — in the \
-                     open, not the known wall-pin (within {WALL_PIN_YARDS} yd, AS-164)",
-                    gap(&pair[1]),
-                    gap(end_frame)
-                );
-            }
+            assert!(
+                gap(end_frame) > gap(&pair[1]),
+                "{t1:?} v {t2:?} {map} #{seed} at {start:.2}s: no ground gained on the chaser \
+                 ({:.1} -> {:.1} yd)",
+                gap(&pair[1]),
+                gap(end_frame)
+            );
             // Path length, frame by frame: a Druid sliding along a wall is
             // still moving at its full shifted speed.
             let travelled: f32 = played
@@ -1256,15 +1172,8 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
         }
     }
     eprintln!(
-        "{shifts} shifts out of a root or snare, each with a full window; ground \
-         gained on the chaser in {gained}; {heading_turns} window-to-window turns checked"
-    );
-    // Backstop: pins aside, every shift gains (all of them in this set today);
-    // at most one in ten may be a pin. The path-speed claim above holds for
-    // every one.
-    assert!(
-        gained * 10 >= shifts * 9,
-        "the Druid gained ground on its chaser in only {gained} of {shifts} shifts"
+        "{shifts} shifts out of a root or snare, each with a full window and each \
+         gaining ground on the chaser; {heading_turns} window-to-window turns checked"
     );
     assert!(
         heading_turns >= 50,
