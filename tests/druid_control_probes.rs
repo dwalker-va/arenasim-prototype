@@ -30,8 +30,8 @@ use arenasim::headless::{
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::auras::apply_pending_auras;
 use arenasim::states::play_match::class_ai::druid::{
-    decide_druid_action, DRUID_EMERGENCY_HP, DRUID_MAX_CHASE_SECS, DRUID_MIN_FORM_SECS,
-    DRUID_RESHIFT_HOLD_SECS,
+    decide_druid_action, DRUID_EMERGENCY_HP, DRUID_EMERGENCY_LEAVE_YARDS, DRUID_MAX_CHASE_SECS,
+    DRUID_MIN_FORM_SECS, DRUID_RESHIFT_HOLD_SECS,
 };
 use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo};
 use arenasim::states::play_match::combat_core::{apply_damage_with_absorb, apply_healing};
@@ -1333,7 +1333,9 @@ const LEAVE_SLACK_SECS: f32 = 0.5;
 
 /// The form is neither thrown straight back nor idled in:
 /// - a shift is not reversed inside [`DRUID_MIN_FORM_SECS`] unless the Druid
-///   was rooted again;
+///   was rooted again, or left for its emergency heal (AS-242) — dying, with
+///   no visible melee or pet enemy within [`DRUID_EMERGENCY_LEAVE_YARDS`] on
+///   the frame it decided;
 /// - a Druid rooted in the form is out of it within [`ROOTED_EXIT_SECS`]
 ///   (the re-shift through the root is
 ///   [`a_root_is_broken_on_the_next_global_cooldown`]'s);
@@ -1356,6 +1358,7 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
     let mut windows = 0;
     let mut safe_checks = 0;
     let mut rooted_exits = 0;
+    let mut emergency_leaves = 0;
     for (t1, t2, map, seed) in SHIFT_MATCHES.iter().chain(IDLE_MATCHES) {
         let played = play(t1, t2, map, *seed);
         let mut shifted_at: Option<f32> = None;
@@ -1363,6 +1366,9 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
         let mut rooted_since: Option<f32> = None;
         // When it last left the form of its own accord (unrooted).
         let mut voluntary_leave: Option<f32> = None;
+        // Dying, with no visible melee or pet enemy within the emergency
+        // clearance, on the previous frame.
+        let mut dying_and_clear = false;
         for f in &played.frames {
             let Some((_, d)) = f
                 .combatants
@@ -1384,6 +1390,19 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
                 )
             });
             let shifted = d.alive && d.aura_types.contains(&AuraType::TravelForm);
+            // The frame before: the one the Druid decided on.
+            let emergency_clear = std::mem::replace(&mut dying_and_clear, {
+                let dying = d.current_health < d.max_health * DRUID_EMERGENCY_HP;
+                dying
+                    && !f.combatants.values().any(|c| {
+                        c.team != 1
+                            && c.alive
+                            && !c.stealthed
+                            && (c.is_pet || c.class.is_melee())
+                            && xz(c.position).distance(xz(d.position))
+                                <= DRUID_EMERGENCY_LEAVE_YARDS
+                    })
+            });
             match (shifted_at, shifted) {
                 (None, true) => {
                     if let Some(left) = voluntary_leave {
@@ -1399,11 +1418,14 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
                 (Some(at), false) => {
                     if d.alive {
                         assert!(
-                            f.sim_time - at >= DRUID_MIN_FORM_SECS || rooted,
+                            f.sim_time - at >= DRUID_MIN_FORM_SECS || rooted || emergency_clear,
                             "{t1:?} v {t2:?} {map} #{seed}: shifted at {at:.2}s, back out at \
-                             {:.2}s, unrooted",
+                             {:.2}s, unrooted and not dying clear of its chasers",
                             f.sim_time
                         );
+                        if f.sim_time - at < DRUID_MIN_FORM_SECS && !rooted {
+                            emergency_leaves += 1;
+                        }
                         if rooted {
                             rooted_exits += 1;
                             voluntary_leave = None;
@@ -1480,7 +1502,7 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
     }
     eprintln!(
         "{windows} Travel Form windows, {safe_checks} safe-with-work frames checked, \
-         {rooted_exits} rooted exits"
+         {rooted_exits} rooted exits, {emergency_leaves} emergency leaves"
     );
     assert!(
         rooted_exits >= 2,

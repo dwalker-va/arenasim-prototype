@@ -56,7 +56,7 @@ use crate::states::play_match::combat_core::{Avoidance, MeleeAvoided};
 use crate::states::play_match::components::{
     ActiveAuras, Aura, AuraPending, AuraType, Combatant, DRTracker, GameRng, HealerPosture,
     InstantAbilityFired, InterruptPending, KitePosture, MeleeResetState, MovementDirective,
-    RogueFlareState, Trap, TrapLaunchProjectile, TrapType,
+    RogueFlareState, ShapeshiftPending, Shift, Trap, TrapLaunchProjectile, TrapType,
 };
 use crate::states::play_match::decision_trace::{
     AbilityCandidate, AbilityOutcome, CandidateStatus, DecisionTrace, EventKind, EventPayload,
@@ -855,6 +855,9 @@ impl Scene {
                 .iter(world)
                 .map(|i| (i.ability, self.who(i.target.index()))),
         );
+        let mut shifts = world.query::<&ShapeshiftPending>();
+        view.shifts_queued
+            .extend(shifts.iter(world).map(|s| s.shift));
         let mut avoided = world.query::<&MeleeAvoided>();
         view.avoided
             .extend(avoided.iter(world).map(|m| SceneAvoided {
@@ -1064,6 +1067,10 @@ pub struct DecisionView {
     /// Every interrupt the decision queued, with its target named
     /// ([`Scene::interrupt`] only).
     pub interrupts_queued: Vec<(AbilityType, Who)>,
+    /// Every shapeshift the decision queued (the Druid's Travel Form, in or
+    /// out). Leaving the form is not an ability decision, so this is where a
+    /// leave is seen.
+    pub shifts_queued: Vec<Shift>,
     /// Every melee attack of the decision's that its target dodged or parried.
     pub avoided: Vec<SceneAvoided>,
 }
@@ -1107,6 +1114,7 @@ impl DecisionView {
             landed: Vec::new(),
             auras_queued: Vec::new(),
             interrupts_queued: Vec::new(),
+            shifts_queued: Vec::new(),
             avoided: Vec::new(),
         };
         let mine = trace.pending_events.iter().filter(|e| {

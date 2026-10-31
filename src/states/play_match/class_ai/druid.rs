@@ -57,7 +57,9 @@
 //! shifted [`DRUID_MIN_FORM_SECS`], no chaser is within striking reach (nor
 //! within the danger radius, for the first [`DRUID_MAX_CHASE_SECS`]) and it
 //! has work (an ally to heal or an enemy in spell reach), or at once if it
-//! is rooted again ([`should_leave_form`]).
+//! is rooted again — or, dying itself, as soon as its emergency heal would go
+//! out on its first frame out of the form and no chaser is within
+//! [`DRUID_EMERGENCY_LEAVE_YARDS`] ([`should_leave_form`]).
 //!
 //! Steps 5-10 answer to the MANA GOVERNOR ([`mana_reserve`]): proactive heals,
 //! control and damage are paid for only out of mana above a reserve that
@@ -224,6 +226,13 @@ pub const DRUID_MAX_CHASE_SECS: f32 = 8.0;
 /// one global cooldown, as the cast it left to make would. A chaser that
 /// closes in that window is not answered with a shift straight back.
 pub const DRUID_RESHIFT_HOLD_SECS: f32 = GCD;
+/// A dying Druid leaves the form for its emergency heal only with no melee
+/// enemy or pet this close: striking reach (7.5yd) and a margin. Measured on
+/// the Nagrand Druid panel (AS-242): at striking reach itself the leave goes
+/// with the chaser on the Druid's heels, and a fifth to a quarter of those
+/// leaves were answered by a re-shift within 3s; at the danger radius (12yd) there is
+/// almost nothing left for it to answer.
+pub const DRUID_EMERGENCY_LEAVE_YARDS: f32 = 10.0;
 
 /// What a shifted Druid can see from inside the form, for [`should_leave_form`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -237,6 +246,8 @@ pub struct FormView {
     pub chaser_near: bool,
     /// A visible melee enemy or pet within striking reach of the Druid.
     pub chaser_striking: bool,
+    /// No visible melee enemy or pet within [`DRUID_EMERGENCY_LEAVE_YARDS`].
+    pub chaser_clear: bool,
     /// An ally in heal range below [`DRUID_TOP_UP_HP`].
     pub healing_needed: bool,
     /// A visible enemy within the Druid's spell reach (Moonfire's range):
@@ -245,6 +256,13 @@ pub struct FormView {
     /// [`shift_trigger`] would fire for the Druid as it stands: a leave now
     /// would be answered by a shift straight back.
     pub would_reshift: bool,
+    /// The Druid itself is below [`DRUID_EMERGENCY_HP`].
+    pub dying: bool,
+    /// The emergency heal (Swiftmend, or the Rejuvenation that arms it) would
+    /// go out on the Druid's first frame out of the form: its global cooldown
+    /// is ready and the cast gate clears it, the form aside
+    /// ([`emergency_heal_lands`]).
+    pub emergency_heal_ready: bool,
 }
 
 /// Whether a shifted Druid leaves Travel Form. Leaving is free and costs no
@@ -260,6 +278,12 @@ pub struct FormView {
 ///   Druid that leaves of its own accord holds the shift back for
 ///   [`DRUID_RESHIFT_HOLD_SECS`], so a chaser closing just after is not
 ///   answered with one either.
+/// - **Dying, with a heal to cast**: below [`DRUID_EMERGENCY_HP`], it leaves
+///   as soon as its emergency heal would go out on the first frame out of the
+///   form — whatever its time in the form, and with a chaser inside the danger
+///   radius — provided no chaser is within [`DRUID_EMERGENCY_LEAVE_YARDS`].
+///   The leave is never into the shift it just ran from: ranged damage
+///   killing a Druid its chaser has not caught is what this answers (AS-242).
 /// - Otherwise it leaves once it is **safe** — it has been shifted at least
 ///   [`DRUID_MIN_FORM_SECS`], and no chaser is within the danger radius
 ///   unless it has run for [`DRUID_MAX_CHASE_SECS`] without shaking it —
@@ -274,6 +298,9 @@ pub fn should_leave_form(view: FormView) -> bool {
     }
     if view.chaser_striking || view.would_reshift {
         return false;
+    }
+    if view.dying && view.emergency_heal_ready && view.chaser_clear {
+        return true;
     }
     view.in_form_secs >= DRUID_MIN_FORM_SECS
         && (!view.chaser_near || view.in_form_secs >= DRUID_MAX_CHASE_SECS)
@@ -432,6 +459,63 @@ fn own_aura<'c>(
     })
 }
 
+/// The emergency heal (steps 2-3) for a dying `ally`: Swiftmend when this
+/// Druid's Rejuvenation is on it to consume, else the Rejuvenation that arms
+/// it.
+fn emergency_heal(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    caster: Entity,
+    ally: Entity,
+) -> AbilityType {
+    if own_aura(ctx, abilities, caster, ally, AbilityType::Rejuvenation).is_some() {
+        AbilityType::Swiftmend
+    } else {
+        AbilityType::Rejuvenation
+    }
+}
+
+/// Whether a shifted Druid's emergency heal would go out on its first frame
+/// out of the form: its global cooldown is ready, steps 2-3 pick a dying ally
+/// in reach, and the cast gate clears the heal they would cast on it — asked
+/// of the Druid's auras without the form, since leaving is what removes it.
+/// What [`FormView::emergency_heal_ready`] reads.
+pub fn emergency_heal_lands(
+    ctx: &CombatContext,
+    abilities: &AbilityDefinitions,
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    heal_range: f32,
+) -> bool {
+    if combatant.global_cooldown > 0.0 {
+        return false;
+    }
+    let Ok(ally) = ctx.lowest_health_ally_in_reach(DRUID_EMERGENCY_HP, heal_range, my_pos) else {
+        return false;
+    };
+    let ability = emergency_heal(ctx, abilities, entity, ally.entity);
+    let unshifted = auras.map(|a| ActiveAuras {
+        auras: a
+            .auras
+            .iter()
+            .filter(|aura| aura.effect_type != AuraType::TravelForm)
+            .cloned()
+            .collect(),
+    });
+    pre_cast_ok(
+        ability,
+        abilities.get_unchecked(&ability),
+        combatant,
+        my_pos,
+        unshifted.as_ref(),
+        Some((ally.entity, ally.position)),
+        ctx,
+        DruidTurn::guard_opts(ability),
+    )
+}
+
 /// Druid AI: decides and executes one ability per global cooldown.
 ///
 /// `medic_walk` is the teammate a live medic walk is walking to (the posture
@@ -503,6 +587,10 @@ pub fn decide_druid_action(
                 .visible_enemies_within(entity, my_pos, MELEE_RANGE + DRUID_ATTACK_RANGE_SLACK)
                 .iter()
                 .any(|e| e.class.is_melee() || e.is_pet),
+            chaser_clear: !ctx
+                .visible_enemies_within(entity, my_pos, DRUID_EMERGENCY_LEAVE_YARDS)
+                .iter()
+                .any(|e| e.class.is_melee() || e.is_pet),
             healing_needed: ctx.alive_allies().into_iter().any(|a| {
                 a.health_pct() < DRUID_TOP_UP_HP
                     && my_pos.distance(a.position) <= movement.shared.heal_range
@@ -524,6 +612,16 @@ pub fn decide_druid_action(
                 combatant.current_health / combatant.max_health,
             ))
             .is_some(),
+            dying: combatant.current_health < combatant.max_health * DRUID_EMERGENCY_HP,
+            emergency_heal_ready: emergency_heal_lands(
+                ctx,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                movement.shared.heal_range,
+            ),
         };
         if gates_opened && should_leave_form(view) {
             commands.spawn(ShapeshiftPending {
@@ -688,7 +786,8 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             .lowest_health_ally_in_reach(DRUID_EMERGENCY_HP, self.heal_range, self.my_pos)
             .map(|a| (a.entity, a.position));
         if let Ok((ally, ally_pos)) = dying {
-            let healed = if self.has_own(ally, AbilityType::Rejuvenation) {
+            let heal = emergency_heal(self.ctx, self.abilities, self.entity, ally);
+            let healed = if heal == AbilityType::Swiftmend {
                 self.cast(combatant, AbilityType::Swiftmend, ally, ally_pos)
             } else {
                 self.builder.reject(
@@ -1834,9 +1933,12 @@ mod tests {
             rooted: false,
             chaser_near: false,
             chaser_striking: false,
+            chaser_clear: true,
             healing_needed: true,
             enemy_in_reach: false,
             would_reshift: false,
+            dying: false,
+            emergency_heal_ready: false,
         }
     }
 
@@ -1899,6 +2001,58 @@ mod tests {
             !should_leave_form(FormView {
                 would_reshift: true,
                 ..view()
+            }),
+            "never into a shift straight back"
+        );
+    }
+
+    /// A dying Druid with its emergency heal ready leaves on a fresh shift
+    /// with a chaser inside the danger radius — and never with the chaser in
+    /// striking reach, nor into a shift straight back. Each half alone is
+    /// not enough: dying without a heal to cast, or a heal to cast without
+    /// dying, keeps the ordinary rule.
+    #[test]
+    fn a_dying_druid_leaves_the_form_for_its_emergency_heal() {
+        let emergency = FormView {
+            in_form_secs: 0.5,
+            chaser_near: true,
+            dying: true,
+            emergency_heal_ready: true,
+            ..view()
+        };
+        assert!(should_leave_form(emergency), "dying, heal ready: out");
+        assert!(
+            !should_leave_form(FormView {
+                dying: false,
+                ..emergency
+            }),
+            "not dying: the ordinary rule keeps a fresh shift"
+        );
+        assert!(
+            !should_leave_form(FormView {
+                emergency_heal_ready: false,
+                ..emergency
+            }),
+            "no heal to cast on the way out: stay"
+        );
+        assert!(
+            !should_leave_form(FormView {
+                chaser_striking: true,
+                ..emergency
+            }),
+            "a chaser in striking reach: stay"
+        );
+        assert!(
+            !should_leave_form(FormView {
+                chaser_clear: false,
+                ..emergency
+            }),
+            "a chaser inside the clearance: stay"
+        );
+        assert!(
+            !should_leave_form(FormView {
+                would_reshift: true,
+                ..emergency
             }),
             "never into a shift straight back"
         );
