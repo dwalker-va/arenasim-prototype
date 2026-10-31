@@ -563,9 +563,9 @@ control still stops any cast, with no lockout. Nothing in the sim pacifies.
 ability in a cooldown category, after the Classic client's `SpellCategory`:
 using any member puts EVERY member on cooldown (Freezing Trap and Frost Trap are
 both `Trap`, Classic category 411, 15s). Members must declare the same
-`cooldown` (`validate()` panics otherwise), and a member already waiting longer
-keeps its time. Start a cooldown with `combatant.start_cooldown(ability,
-abilities)` — never by writing `ability_cooldowns` directly, which would skip
+`cooldown` and be cast by one unit, so they sit in one ability book
+(`validate()` panics otherwise), and a member already waiting longer
+keeps its time. Start a cooldown with `combatant.start_cooldown(ability)` — never by writing `ability_cooldowns` directly, which would skip
 the category; `tests/cooldown_site_audit.rs` fails on such a write. Readiness
 checks need nothing: a locked member is simply on cooldown, and is traced
 `OnCooldown`.

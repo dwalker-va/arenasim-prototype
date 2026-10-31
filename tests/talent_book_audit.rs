@@ -13,7 +13,10 @@
 //! type, and every way to get one names it — a `Res<AbilityDefinitions>`, a
 //! `&AbilityDefinitions` parameter or field, `AbilityDefinitions::shipped()`,
 //! `world.resource::<AbilityDefinitions>()` — or calls
-//! `load_ability_definitions()`. So the audit finds every (file, enclosing
+//! `load_ability_definitions()`. Two calls reach the shipped table without
+//! naming it, and count as reads too: `AbilityBook::shipped*` (a book built
+//! from it), and the bare `Combatant::new` (a combatant holding one). So the
+//! audit finds every (file, enclosing
 //! item) in non-test code under `src/states/play_match/` (less the graphical
 //! `rendering/`, and the table's and the book's own modules) and
 //! `src/headless/` that names either, and asserts the set
@@ -96,9 +99,10 @@ const GLOBAL_TABLE_READERS: &[(&str, &str, &str)] = &[
          read from the caster's book when it does, else from the table",
     ),
     (
-        "src/states/play_match/effects/mana_burn.rs",
-        "process_mana_burn",
-        "Mana Burn's school for its landing visual: the pending burn carries no caster",
+        "src/states/play_match/components/combatant.rs",
+        "new",
+        "the bare constructor unit tests build a combatant with (the shipped table's \
+         book); no sim path calls it, which this audit also pins — a spawn names its book",
     ),
     (
         "src/states/play_match/projectiles.rs",
@@ -110,7 +114,10 @@ const GLOBAL_TABLE_READERS: &[(&str, &str, &str)] = &[
 /// Every (file, enclosing item) in the sim's non-test source that names the
 /// global table.
 fn readers() -> BTreeSet<(String, String)> {
-    let names = Regex::new(r"\b(AbilityDefinitions|load_ability_definitions)\b").unwrap();
+    let names = Regex::new(
+        r"\b(AbilityDefinitions|load_ability_definitions|AbilityBook::shipped\w*|Combatant::new)\b",
+    )
+    .unwrap();
     let item = Regex::new(r"\b(?:fn|struct|enum|trait)\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap();
     let mut found = BTreeSet::new();
     for file in load_sources(&["src/states/play_match", "src/headless"]).expect("read src/") {

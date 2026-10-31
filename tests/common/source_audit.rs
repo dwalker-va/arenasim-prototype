@@ -356,7 +356,7 @@ fn is_ident_byte(byte: u8) -> bool {
 pub fn blank_test_modules(text: &str) -> String {
     let opener = pattern!(
         TEST_MOD,
-        r"(?m)#\[\s*cfg\s*\(\s*test\s*\)\s*\]\s*(?:#\[[^\]]*\]\s*)*(?:pub\s+)?mod\s+\w+\s*\{"
+        r"(?m)#\[\s*cfg\s*\(\s*test\s*\)\s*\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+\w+\s*\{"
     );
     let b = text.as_bytes();
     let mut out: Vec<u8> = text.as_bytes().to_vec();

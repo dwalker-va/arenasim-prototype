@@ -568,6 +568,7 @@ pub fn process_casting(
                 caster_slot,
                 caster_class,
                 impact_from: (caster_pos - target_pos).normalize_or_zero(),
+                school: def.spell_school,
             });
         }
 

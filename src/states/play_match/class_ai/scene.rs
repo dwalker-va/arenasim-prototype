@@ -191,8 +191,12 @@ impl Scene {
             who,
             entity,
             // The scene's own table, so `with_config` reaches the unit's book.
-            combatant: Combatant::new(team, slot, class)
-                .with_book(AbilityBook::for_class(&self.abilities, class)),
+            combatant: Combatant::new_with_book(
+                team,
+                slot,
+                class,
+                AbilityBook::for_class(&self.abilities, class),
+            ),
             target: None,
             position: Vec3::new(0.0, UNIT_Y, 0.0),
             auras: Vec::new(),

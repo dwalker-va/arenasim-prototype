@@ -123,7 +123,13 @@ fn a_silence_stops_every_mana_ability_but_the_pacify_shots_and_travel_form() {
 fn caster_of(def: &AbilityConfig) -> Combatant {
     let owner = Combatant::new(1, 0, def.class);
     match def.pet {
-        Some(pet) => Combatant::new_pet(1, PET_SLOT_BASE, pet, &owner),
+        Some(pet) => Combatant::new_pet(
+            1,
+            PET_SLOT_BASE,
+            pet,
+            &owner,
+            arenasim::states::play_match::ability_book::AbilityBook::shipped_pet(pet),
+        ),
         None => owner,
     }
 }

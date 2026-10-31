@@ -335,7 +335,8 @@ pub struct Combatant {
     pub class: match_config::CharacterClass,
     /// This combatant's own abilities, resolved once at spawn and never edited
     /// during the match (see [`AbilityBook`]). Private so it cannot be: read
-    /// it through [`Self::book`], set it only by [`Self::with_book`].
+    /// it through [`Self::book`]; it is set by the constructor, or by
+    /// [`Self::with_book`] before the combatant enters the world.
     book: AbilityBook,
     /// What this combatant's auto-attack IS — derived from the item actually
     /// sitting in its live weapon socket (`class.weapon_slot()`), never from
@@ -599,8 +600,23 @@ impl AutoAttackKind {
 }
 
 impl Combatant {
-    /// Create a new combatant with class-specific stats.
+    /// A bare combatant of `class` holding the shipped table's book
+    /// ([`AbilityBook::shipped`]): what a unit test builds. No sim path builds
+    /// one (`tests/talent_book_audit.rs`): a spawn names the book it resolved
+    /// ([`Self::new_with_book`], [`Self::new_with_curse_prefs`],
+    /// [`Self::new_pet`]), so it cannot forget it.
     pub fn new(team: u8, slot: u8, class: match_config::CharacterClass) -> Self {
+        Self::new_with_book(team, slot, class, AbilityBook::shipped(class))
+    }
+
+    /// Create a new combatant with class-specific stats and `book` as its
+    /// abilities.
+    pub fn new_with_book(
+        team: u8,
+        slot: u8,
+        class: match_config::CharacterClass,
+        book: AbilityBook,
+    ) -> Self {
         // Base stats come from `class_base_stats` — the single table the UI
         // reads too, so a display can never drift from the sim.
         let ClassBaseStats {
@@ -624,7 +640,7 @@ impl Combatant {
             team,
             slot,
             class,
-            book: AbilityBook::shipped(class),
+            book,
             // Pre-equipment default = the old class ladder verbatim, so a bare
             // combatant (unit tests, any spawn path that never equips) is
             // unchanged. `apply_equipment` overwrites it from the live socket.
@@ -689,15 +705,18 @@ impl Combatant {
     }
 
     /// Create a new combatant with specific preferences for Warlock curses and rogue opener.
+    /// `book` is the combatant's own abilities, resolved by its spawn.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_curse_prefs(
         team: u8,
         slot: u8,
         class: match_config::CharacterClass,
+        book: AbilityBook,
         rogue_opener: RogueOpener,
         rogue_poison: RoguePoison,
         warlock_curse_prefs: Vec<WarlockCurse>,
     ) -> Self {
-        let mut combatant = Self::new(team, slot, class);
+        let mut combatant = Self::new_with_book(team, slot, class, book);
         combatant.rogue_opener = rogue_opener;
         combatant.rogue_poison = rogue_poison;
         combatant.warlock_curse_prefs = warlock_curse_prefs;
@@ -717,12 +736,19 @@ impl Combatant {
 
     /// Create a new pet combatant with stats derived from the owner.
     /// The pet uses its owner's class (Warlock) for combat log identification,
-    /// but gets pet-specific stats scaled from the owner.
-    pub fn new_pet(team: u8, slot: u8, pet_type: PetType, owner: &Combatant) -> Self {
+    /// but gets pet-specific stats scaled from the owner. `book` is the pet's
+    /// own abilities, resolved by its spawn ([`AbilityBook::for_pet`]).
+    pub fn new_pet(
+        team: u8,
+        slot: u8,
+        pet_type: PetType,
+        owner: &Combatant,
+        book: AbilityBook,
+    ) -> Self {
         match pet_type {
             PetType::Felhunter => {
-                let mut pet = Self::new(team, slot, match_config::CharacterClass::Warlock)
-                    .with_book(AbilityBook::shipped_pet(pet_type));
+                let mut pet =
+                    Self::new_with_book(team, slot, match_config::CharacterClass::Warlock, book);
                 // Scale health to ~45% of owner's max health
                 pet.max_health = owner.max_health * 0.45;
                 pet.current_health = pet.max_health;
@@ -739,8 +765,8 @@ impl Combatant {
                 pet
             }
             PetType::Spider | PetType::Boar | PetType::Bird => {
-                let mut pet = Self::new(team, slot, match_config::CharacterClass::Hunter)
-                    .with_book(AbilityBook::shipped_pet(pet_type));
+                let mut pet =
+                    Self::new_with_book(team, slot, match_config::CharacterClass::Hunter, book);
                 // Scale health to ~45% of owner's max health (consistent with Felhunter)
                 pet.max_health = owner.max_health * 0.45;
                 pet.current_health = pet.max_health;
@@ -813,10 +839,10 @@ impl Combatant {
         &self.book
     }
 
-    /// This combatant with `book` as its abilities. A spawn path's one way to
-    /// set the book, before the combatant enters the world: `Combatant::new`
-    /// gives the shipped table's book, and a match's spawn replaces it with the
-    /// book resolved from its own `AbilityDefinitions`.
+    /// This combatant with `book` as its abilities, before it enters the
+    /// world: a staging step (a scene's or the sandbox's unit granted a cast
+    /// outside its class). A match's spawn passes its book to the constructor
+    /// instead.
     pub fn with_book(mut self, book: AbilityBook) -> Self {
         self.book = book;
         self
@@ -1298,6 +1324,9 @@ pub struct ManaBurnPending {
     /// Unit vector from the target back toward the caster at cast time, for
     /// the shared impact's splash direction. Cosmetic only.
     pub impact_from: Vec3,
+    /// The burn's school, from the caster's own book: the colour of its
+    /// landing.
+    pub school: SpellSchool,
 }
 
 /// Pending dispel to be processed by the aura system.

@@ -231,7 +231,13 @@ fn the_rogue_reads_its_targets_cast_from_the_targets_book() {
 #[test]
 fn a_snapshot_row_carries_its_combatants_book() {
     let hunter = Combatant::new(1, 0, CharacterClass::Hunter);
-    let spider = Combatant::new_pet(1, 10, PetType::Spider, &hunter);
+    let spider = Combatant::new_pet(
+        1,
+        10,
+        PetType::Spider,
+        &hunter,
+        AbilityBook::shipped_pet(PetType::Spider),
+    );
     let owner = Entity::from_raw(1);
     let row = CombatantInfo::from_combatant(
         Entity::from_raw(2),

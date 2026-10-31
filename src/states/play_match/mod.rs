@@ -1445,11 +1445,11 @@ pub(crate) fn spawn_combatant(
         team,
         slot,
         class,
+        ability_book::AbilityBook::for_class(abilities, class),
         rogue_opener,
         rogue_poison,
         warlock_curse_prefs,
-    )
-    .with_book(ability_book::AbilityBook::for_class(abilities, class));
+    );
     combatant.warrior_shout = warrior_shout;
     combatant.mage_armor = mage_armor;
     combatant.paladin_aura = paladin_aura;
@@ -1593,9 +1593,13 @@ pub(crate) fn spawn_pet(
     abilities: &ability_config::AbilityDefinitions,
 ) {
     let pet_slot = PET_SLOT_BASE + owner_combatant.slot;
-    let pet_combatant =
-        Combatant::new_pet(owner_combatant.team, pet_slot, pet_type, owner_combatant)
-            .with_book(ability_book::AbilityBook::for_pet(abilities, pet_type));
+    let pet_combatant = Combatant::new_pet(
+        owner_combatant.team,
+        pet_slot,
+        pet_type,
+        owner_combatant,
+        ability_book::AbilityBook::for_pet(abilities, pet_type),
+    );
     // MUST match the headless spawn offsets in `headless/runner.rs` exactly, or a
     // seed stops reproducing between the two modes.
     //
