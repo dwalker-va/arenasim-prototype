@@ -226,20 +226,14 @@ pub struct ScorerInputs {
 const OPEN_RUN_STEP: f32 = 0.5;
 
 /// Yards of open ground along `candidate` from the unit, up to `reach`: how far
-/// it can run that way before leaving the arena or meeting an obstacle — or,
-/// for a scorer that avoids dead ends, before it would go deeper into one.
+/// it can run that way before leaving the arena or meeting an obstacle.
 pub fn open_run(candidate: Vec2, inputs: &ScorerInputs, reach: f32) -> f32 {
     let dir = Vec3::new(candidate.x, 0.0, candidate.y);
-    let depth = |p: Vec3| inputs.bounds.dead_end_depth(p.x, p.z);
-    let from_depth = depth(inputs.my_pos);
     let mut run = 0.0;
     while run < reach {
         let next = (run + OPEN_RUN_STEP).min(reach);
         let p = inputs.my_pos + dir * next;
-        if !is_in_arena_bounds(&inputs.bounds, p)
-            || position_blocked(&inputs.obstacles, p)
-            || (inputs.avoid_dead_ends && depth(p) > from_depth)
-        {
+        if !is_in_arena_bounds(&inputs.bounds, p) || position_blocked(&inputs.obstacles, p) {
             break;
         }
         run = next;
@@ -1990,5 +1984,50 @@ mod tests {
                 "{dir:?}: {with} - {without} != {flee}"
             );
         }
+    }
+
+    /// The dead end outlasts the anchor on the fallback ladder: in a room with
+    /// its anchor deeper still and in reach only of the steps toward it, a
+    /// chased unit lets the anchor go before it goes deeper. The control (no
+    /// dead-end mask) walks deeper, to the anchor.
+    #[test]
+    fn the_dead_end_mask_outlasts_the_anchor_on_the_ladder() {
+        let weights = druid_weights();
+        let dirs = compass_directions_16();
+        let at = Vec3::new(-64.0, 1.0, 3.0);
+        let bounds = nagrand_bounds();
+        let depth = |p: Vec3| bounds.dead_end_depth(p.x, p.z);
+        let inputs = |avoid_dead_ends| ScorerInputs {
+            anchor: Some(AnchorConstraint {
+                pos: Vec3::new(-69.0, 1.0, 3.0),
+                heal_range: 4.0,
+                close_when_out: false,
+            }),
+            ..chased(at, Vec3::new(-60.0, 1.0, 0.0), avoid_dead_ends)
+        };
+        let step =
+            |inputs: &ScorerInputs, dir: Vec2| inputs.my_pos + Vec3::new(dir.x, 0.0, dir.y) * 2.0;
+
+        let free = inputs(false);
+        assert!(
+            dirs.iter().any(|d| candidate_mask(*d, &free) == 0),
+            "control: a step toward the anchor keeps it in reach"
+        );
+        let ran = score_directions(&dirs, &free, &weights);
+        assert!(
+            depth(step(&free, ran)) > depth(at),
+            "control: it goes deeper, to the anchor"
+        );
+
+        let masked = inputs(true);
+        assert!(
+            dirs.iter().all(|d| candidate_mask(*d, &masked) != 0),
+            "every step is masked: deeper, or out of the anchor's reach"
+        );
+        let ran = score_directions(&dirs, &masked, &weights);
+        assert!(
+            depth(step(&masked, ran)) <= depth(at),
+            "it lets the anchor go rather than go deeper ({ran:?})"
+        );
     }
 }

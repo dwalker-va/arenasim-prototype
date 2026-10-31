@@ -703,7 +703,7 @@ with the context-steering mask refactor.
 - `corner_penalty` (Priest 6.0 / Paladin 4.0) — graded penalty approaching arena corners
 - `wand_pull` (Priest 0.5 / Paladin 0.0 / Mage 0.0) — low-weight pull toward wand range of the kill target (`0.0` disables it for the wandless Paladin). The Mage keeps this at `0.0`: it HAS a wand and DOES fall back to it when out of mana, but via the pursuit stop distance (see the DPS kiter OOM wand fallback below), not this orbit-scorer term — the term's LoS-preserving lateral meander is slow to corner a juking target
 - `range_band` (0.0 for healers; Mage/Hunter 2.0 / 0.5) — ring-attraction toward the kill target's `[min, max]` band; disabled for healers
-- `flee` (0.0 for healers + Mage; Hunter 6.0; Druid 6.0, read only in Travel Form) — constant pull away from the nearest threat, NOT proximity-weighted (distance-maximization), so a chased ranged DPS outruns an un-impaired chaser at all ranges. Hunter's `corner_penalty` (8.0) must EXCEED `flee` or the kiter flees into corners.
+- `flee` (0.0 for healers + Mage; Hunter 6.0; Druid 6.0, read only in Travel Form) — constant pull away from the nearest threat, NOT proximity-weighted (distance-maximization), so a chased ranged DPS outruns an un-impaired chaser at all ranges. Wherever `flee` is on, `corner_penalty` must EXCEED it or the kiter flees into corners — Hunter and Druid both 8.0 over 6.0, and `validate()` refuses a block that breaks it.
 - `commitment_bonus` (1.5/1.5) — bonus toward the committed direction during the commit window
 - `los_seek` (0.0 for healers; Mage 2.0 / Hunter 1.0) — reward for candidate steps that have/restore line of sight to the kill target; drives occluded-in-range casters to orbit to a sighted angle instead of idling
 - `cover_pull` (Priest/Shaman 1.5, Paladin 1.0, 0.0 for DPS) — reward for candidate steps occluded from threats; drives pressured-healer pillar denial. Kept below `threat_repulsion` so denial shapes retreat direction without overriding escape; zeroed when a healable teammate is below `urgency_hp_threshold` or the team is pressing (tempo, `press_advantage_margin` / `press_release_margin`)
@@ -1067,7 +1067,16 @@ Proximity-faded `threat_repulsion` alone was worth a fraction of a point
 against a chaser 10yd off, so the edge and cover terms flipped the heading back
 toward the chaser every window (AS-200). `escape_tick` reads both only for a
 chaser escape, so the Priest's, Paladin's and Shaman's impairment windows are
-unchanged. The shift and the shift out
+unchanged. The run keeps room to run (AS-241): its `flee` scores a heading by
+the distance from the chaser it gains over the open ground it has, up to
+`SHIFT_FLEE_REACH` (8yd, `ScorerInputs::flee_reach`), so a Druid with a wall
+or a pillar at its back runs along it rather than into it; and it never steps
+deeper into a dead end (`MASK_DEAD_END`, `ArenaBounds::dead_end_depth` —
+Nagrand's starting rooms), a mask kept past the anchor's on the fallback
+ladder. On the AS-164 Nagrand Druid panel a shifted Druid entered a starting
+room in 2.1% of `Legacy` and 2.0% of `TeamPlan` matches, from 23.1% and 21.6%
+(`docs/design/balance/2026-10-31-as241-travel-form-escape.md`); staged in
+`tests/druid_escape_room_to_run.rs`. The shift and the shift out
 are the Druid AI's (`class_ai/druid.rs` — `shift_trigger`, `should_leave_form`);
 rules in `docs/design/wow-mechanics.md` (Travel Form). A shift that breaks a
 root or snare takes the Druid's next global cooldown: an emergency heal may
