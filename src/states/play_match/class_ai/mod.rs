@@ -52,7 +52,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use super::abilities::AbilityType;
-use super::ability_config::AbilityDefinitions;
+use super::ability_book::AbilityBook;
 use super::ai_profile::AiProfile;
 use super::arena_bounds::ArenaBounds;
 use super::combat_core::{avoid_melee_attack, MeleeDefense};
@@ -72,7 +72,7 @@ use super::utils::log_ability_use;
 use crate::combat::log::CombatLog;
 
 /// Per-frame snapshot of a single combatant, used for AI decision making.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct CombatantInfo {
     pub entity: Entity,
     pub team: u8,
@@ -99,7 +99,7 @@ pub struct CombatantInfo {
     pub is_pet: bool,
     /// The ability this combatant is currently casting or channeling, if any.
     /// `Some` iff the entity has a live `CastingState`/`ChannelingState` this
-    /// frame. Consumers map it to a `SpellSchool` (via `AbilityDefinitions`) to
+    /// frame. Consumers map it to a `SpellSchool` (via [`Self::book`]) to
     /// reason about interruptibility — e.g. the Rogue's Kidney Shot chain firing
     /// on a cast whose school is NOT covered by an active lockout.
     pub casting_ability: Option<AbilityType>,
@@ -108,6 +108,10 @@ pub struct CombatantInfo {
     /// this is `Some(pet_entity)`. For pets themselves and non-owners, `None`.
     /// Populated by `CombatSnapshot::build` and `pet_ai_system`'s local build.
     pub pet: Option<Entity>,
+    /// This combatant's own abilities (`Combatant::book`). A question about
+    /// what THIS unit can cast — its interrupt's reach, its dispel's scope, the
+    /// cast it is in — reads its configs here, never the global table.
+    pub book: AbilityBook,
 }
 
 /// Deferred instant melee attack (Mortal Strike, Ambush, Sinister Strike, etc.)
@@ -292,7 +296,7 @@ impl<'a> CombatContext<'a> {
                 roster
                     .iter()
                     .filter(|(_, info)| !hidden(info))
-                    .map(|(entity, info)| (*entity, *info))
+                    .map(|(entity, info)| (*entity, info.clone()))
                     .collect(),
             )
         } else {
@@ -1200,7 +1204,8 @@ pub const PURGE_BLOOM_COST: i32 = PURGE_MIN_PRIORITY;
 ///   **-[`PURGE_BLOOM_COST`]**: the stack a purge takes blooms, which HEALS its
 ///   bearer.
 /// - An aura whose source ability sets `purge_priority` in its RON
-///   `applies_aura` is worth that ([`AbilityDefinitions::source_effect`]):
+///   `applies_aura` is worth that, read from its CASTER's book
+///   ([`AbilityBook::source_effect`]; the caster is in `ctx`, alive or dead):
 ///   Innervate is [`PURGE_URGENT_PRIORITY`], where its type,
 ///   `ManaRegenIncrease`, is Mage Armor's 25.
 /// - Everything else is worth its type ([`purge_priority`]). Rejuvenation is
@@ -1211,12 +1216,13 @@ pub const PURGE_BLOOM_COST: i32 = PURGE_MIN_PRIORITY;
 /// never used to pick. Every AI that strips an ENEMY's buff asks this. Today
 /// that is the Shaman's Purge alone: Devour Magic and Master's Call free allies
 /// ([`ally_removal`]).
-pub fn purge_pick_value(aura: &Aura, abilities: &AbilityDefinitions) -> i32 {
+pub fn purge_pick_value(aura: &Aura, ctx: &CombatContext) -> i32 {
     if aura.bloom.is_some() {
         return -PURGE_BLOOM_COST;
     }
-    abilities
-        .source_effect(aura)
+    aura.caster
+        .and_then(|caster| ctx.combatants.get(&caster))
+        .and_then(|caster| caster.book.source_effect(aura))
         .and_then(|effect| effect.purge_priority)
         .unwrap_or_else(|| purge_priority(aura.effect_type))
 }
@@ -1242,16 +1248,13 @@ pub struct PurgeOdds {
 impl PurgeOdds {
     /// The odds over `auras` (one target's), or `None` when a purge would
     /// take nothing.
-    pub fn of<'a>(
-        auras: impl IntoIterator<Item = &'a Aura>,
-        abilities: &AbilityDefinitions,
-    ) -> Option<Self> {
+    pub fn of<'a>(auras: impl IntoIterator<Item = &'a Aura>, ctx: &CombatContext) -> Option<Self> {
         let mut candidates = 0usize;
         let mut blooming = 0usize;
         let mut best = i32::MIN;
         let mut total = 0i32;
         for aura in auras.into_iter().filter(|a| DispelScope::Purge.takes(a)) {
-            let value = purge_pick_value(aura, abilities);
+            let value = purge_pick_value(aura, ctx);
             candidates += 1;
             blooming += usize::from(aura.bloom.is_some());
             best = best.max(value);
@@ -1307,7 +1310,6 @@ pub struct PurgeChoice {
 /// the gamble; `NoValidTarget` otherwise.
 pub fn select_purge(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
     my_team: u8,
     my_pos: Vec3,
     range: f32,
@@ -1330,7 +1332,7 @@ pub fn select_purge(
         let Some(enemy_auras) = ctx.active_auras.get(e) else {
             continue;
         };
-        let Some(odds) = PurgeOdds::of(enemy_auras.iter(), abilities) else {
+        let Some(odds) = PurgeOdds::of(enemy_auras.iter(), ctx) else {
             continue;
         };
         if odds.best < min_priority {
@@ -1616,7 +1618,7 @@ pub fn is_priority_interrupt(ability: AbilityType) -> bool {
 /// none spends its interrupt on one, and `process_interrupts` asks again at
 /// resolution, where an interrupt that finds one does nothing — no cut, no
 /// lockout.
-pub fn cast_is_interruptible(cast: &CastingState, abilities: &AbilityDefinitions) -> bool {
+pub fn cast_is_interruptible(cast: &CastingState, abilities: &AbilityBook) -> bool {
     !cast.interrupted && abilities.get_unchecked(&cast.ability).can_be_interrupted()
 }
 
@@ -1626,10 +1628,7 @@ pub fn cast_is_interruptible(cast: &CastingState, abilities: &AbilityDefinitions
 /// instant routed through a zero-length cast (nothing to trace: no cast bar
 /// was ever up), or one already interrupted. Each interrupter traces a `Some`
 /// as [`RejectionReason::Uninterruptible`].
-pub fn uninterruptible_cast(
-    cast: &CastingState,
-    abilities: &AbilityDefinitions,
-) -> Option<AbilityType> {
+pub fn uninterruptible_cast(cast: &CastingState, abilities: &AbilityBook) -> Option<AbilityType> {
     let def = abilities.get_unchecked(&cast.ability);
     (!cast.interrupted && def.is_uninterruptible_cast()).then_some(cast.ability)
 }
@@ -1740,57 +1739,39 @@ pub fn ally_removal(ability: AbilityType) -> Option<AllyRemoval> {
 }
 
 /// Could `freer` lift `aura` off its teammate `victim`? Asked of the freer's own
-/// kit (a pet's by its pet type, anyone else's by class) through
-/// [`ally_removal`] and the removal scope `process_dispels` applies — the
-/// engine's rules, not a list of classes. A unit never frees itself: whatever
-/// `aura` is, the question is whether a THIRD party can.
-pub fn can_free_ally(
-    abilities: &AbilityDefinitions,
-    freer: &CombatantInfo,
-    victim: &CombatantInfo,
-    aura: &Aura,
-) -> bool {
+/// kit (its [`CombatantInfo::book`]) through [`ally_removal`] and the removal
+/// scope `process_dispels` applies — the engine's rules, not a list of
+/// classes. A unit never frees itself: whatever `aura` is, the question is
+/// whether a THIRD party can.
+pub fn can_free_ally(freer: &CombatantInfo, victim: &CombatantInfo, aura: &Aura) -> bool {
     if freer.entity == victim.entity || freer.team != victim.team || !freer.is_alive {
         return false;
     }
-    ally_removals_of(abilities, freer)
-        .any(|r| (r.reaches_pets || !victim.is_pet) && r.scope.takes(aura))
+    ally_removals_of(freer).any(|r| (r.reaches_pets || !victim.is_pet) && r.scope.takes(aura))
 }
 
 /// Could `freer` lift `aura` off a (non-pet) teammate at all — is it a
 /// dispeller for this aura, whoever its teammates turn out to be? The question
 /// to ask when the teammate may be one the asker cannot see: a stealthed Rogue
 /// is not in the Hunter's view, but its Priest still frees it.
-pub fn frees_teammates(abilities: &AbilityDefinitions, freer: &CombatantInfo, aura: &Aura) -> bool {
-    freer.is_alive && ally_removals_of(abilities, freer).any(|r| r.scope.takes(aura))
+pub fn frees_teammates(freer: &CombatantInfo, aura: &Aura) -> bool {
+    freer.is_alive && ally_removals_of(freer).any(|r| r.scope.takes(aura))
 }
 
-/// The ally removals in `unit`'s own kit: a pet's by its pet type, anyone
-/// else's by class.
-fn ally_removals_of<'a>(
-    abilities: &'a AbilityDefinitions,
-    unit: &'a CombatantInfo,
-) -> impl Iterator<Item = AllyRemoval> + 'a {
-    abilities
+/// The ally removals in `unit`'s own kit: the abilities in its book.
+fn ally_removals_of(unit: &CombatantInfo) -> impl Iterator<Item = AllyRemoval> + '_ {
+    unit.book
         .iter()
-        .filter(move |(_, def)| match unit.pet_type {
-            Some(pet) => def.pet == Some(pet),
-            None => def.class == unit.class && def.pet.is_none(),
-        })
         .filter_map(|(ability, _)| ally_removal(*ability))
 }
 
 /// How far `unit` can interrupt a cast from: the longest range among the
-/// `is_interrupt` abilities in its own kit (a pet's by its pet type, anyone
-/// else's by class), or `None` when it has no interrupt. Read from the config,
-/// so a new interrupt is counted without a code change.
-pub fn interrupt_reach(abilities: &AbilityDefinitions, unit: &CombatantInfo) -> Option<f32> {
-    abilities
+/// `is_interrupt` abilities in its own kit (its book), or `None` when it has
+/// no interrupt. Read from the config, so a new interrupt is counted without a
+/// code change.
+pub fn interrupt_reach(unit: &CombatantInfo) -> Option<f32> {
+    unit.book
         .iter()
-        .filter(|(_, def)| match unit.pet_type {
-            Some(pet) => def.pet == Some(pet),
-            None => def.class == unit.class && def.pet.is_none(),
-        })
         .filter(|(_, def)| def.is_interrupt)
         .map(|(_, def)| def.range)
         .reduce(f32::max)
@@ -1798,18 +1779,13 @@ pub fn interrupt_reach(abilities: &AbilityDefinitions, unit: &CombatantInfo) -> 
 
 /// Every living teammate of `victim` in this view that could free it from
 /// `aura` ([`can_free_ally`]), in deterministic entity order.
-pub fn ally_freers(
-    ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
-    victim: Entity,
-    aura: &Aura,
-) -> Vec<Entity> {
+pub fn ally_freers(ctx: &CombatContext, victim: Entity, aura: &Aura) -> Vec<Entity> {
     let Some(victim_info) = ctx.combatants.get(&victim) else {
         return Vec::new();
     };
     ctx.combatants
         .values()
-        .filter(|freer| can_free_ally(abilities, freer, victim_info, aura))
+        .filter(|freer| can_free_ally(freer, victim_info, aura))
         .map(|freer| freer.entity)
         .collect()
 }
@@ -1957,7 +1933,7 @@ pub fn sight_blocks(ctx: &CombatContext, range: f32, from: Vec3, to: Vec3) -> bo
 /// again, strobing at the range edge for the whole lockout.
 pub fn can_cast_dispel(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     dispel: AbilityType,
 ) -> bool {
@@ -1998,7 +1974,7 @@ pub fn can_cast_dispel(
 /// arrives. Nearest first, entity order breaking ties, so it is deterministic.
 pub fn dispel_chase_target(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     my_pos: Vec3,
     current_mana: f32,
@@ -2040,7 +2016,7 @@ pub enum OwedDispel {
 ///   a longer walk takes the healer off its post to arrive as it ends.
 pub fn owed_dispel(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     my_pos: Vec3,
     current_mana: f32,
@@ -2269,7 +2245,7 @@ pub fn scan_ally_dispel(
 pub fn try_dispel_ally(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -2388,7 +2364,7 @@ pub fn try_dispel_ally(
 pub fn try_purge_enemy(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -2417,14 +2393,7 @@ pub fn try_purge_enemy(
         target: target_entity,
         position: target_pos,
         ..
-    } = match select_purge(
-        ctx,
-        abilities,
-        combatant.team,
-        my_pos,
-        def.range,
-        min_priority,
-    ) {
+    } = match select_purge(ctx, combatant.team, my_pos, def.range, min_priority) {
         Ok(choice) => choice,
         Err(reason) => {
             trace.reject(
@@ -2460,7 +2429,7 @@ pub fn try_purge_enemy(
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
     if def.cooldown > 0.0 {
-        combatant.start_cooldown(ability, abilities);
+        combatant.start_cooldown(ability);
     }
 
     let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
@@ -2577,7 +2546,7 @@ mod dispel_reach_tests {
     /// whether it frees allies, and a renamed one cannot fall to the `_` arm.
     #[test]
     fn ally_removal_names_every_dispel() {
-        let defs = AbilityDefinitions::default();
+        let defs = crate::states::play_match::ability_config::AbilityDefinitions::default();
         let mut dispels: Vec<AbilityType> = defs
             .iter()
             .filter(|(_, def)| def.is_dispel)
@@ -2614,7 +2583,7 @@ mod dispel_reach_tests {
     /// dispel cannot quietly inherit `false` unnoticed.
     #[test]
     fn only_the_cleanse_removes_poison() {
-        let defs = AbilityDefinitions::default();
+        let defs = crate::states::play_match::ability_config::AbilityDefinitions::default();
         let mut reaching: Vec<AbilityType> = defs
             .iter()
             .map(|(ability, _)| *ability)
@@ -2667,6 +2636,7 @@ pub(crate) mod reach_fixture {
             casting_ability: None,
             pet_type: None,
             pet: None,
+            book: crate::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
         }
     }
 

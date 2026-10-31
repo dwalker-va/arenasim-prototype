@@ -6,7 +6,6 @@
 //! - Interrupt decisions (when to interrupt enemy casts)
 
 use super::abilities::AbilityType;
-use super::ability_config::AbilityDefinitions;
 use super::class_ai;
 use super::components::*;
 use super::constants::{TRAP_ARM_DELAY, TRAP_LAUNCH_SPEED};
@@ -759,7 +758,6 @@ pub fn select_cc_target_heuristic(
 /// `decide_abilities` (or by a [`Scene`](class_ai::scene::Scene)).
 #[derive(Clone, Copy)]
 pub struct DispatchFrame<'a> {
-    pub abilities: &'a AbilityDefinitions,
     pub movement_config: &'a crate::states::play_match::movement_config::MovementConfig,
     /// Movement pre-passes (postures, the tempo reset, the Flare walk) run
     /// only once the gates are open.
@@ -840,7 +838,6 @@ pub fn dispatch_class_decision(
         decision_trace,
     } = io;
     let DispatchFrame {
-        abilities,
         movement_config,
         gates_opened,
         now,
@@ -860,6 +857,10 @@ pub fn dispatch_class_decision(
         frost_nova_damage,
         same_frame_cc_queue,
     } = acc;
+    // The unit decides from its OWN book. Cloned (a shared handle) so the
+    // configs it reads stay borrowable while the unit itself is mutated.
+    let book = combatant.book().clone();
+    let abilities = &book;
     match combatant.class {
         match_config::CharacterClass::Mage => {
             // Posture evaluation (ENGAGE/KITE, U5) runs BEFORE the ability
@@ -1113,7 +1114,6 @@ pub fn dispatch_class_decision(
                         combatant,
                         my_pos,
                         ctx,
-                        abilities,
                         healer_posture.map(bevy::prelude::Mut::into_inner),
                         directive,
                         movement_config,
@@ -1157,7 +1157,6 @@ pub fn dispatch_class_decision(
                         combatant,
                         my_pos,
                         ctx,
-                        abilities,
                         healer_posture.map(bevy::prelude::Mut::into_inner),
                         directive,
                         movement_config,
@@ -1353,7 +1352,6 @@ pub fn decide_abilities(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut game_rng: ResMut<GameRng>,
-    abilities: Res<AbilityDefinitions>,
     countdown: Res<MatchCountdown>,
     time: Res<Time>,
     movement_config: Res<crate::states::play_match::movement_config::MovementConfig>,
@@ -1517,7 +1515,6 @@ pub fn decide_abilities(
     let mut acc = DispatchAccumulators::default();
 
     let frame = DispatchFrame {
-        abilities: &abilities,
         movement_config: &movement_config,
         gates_opened: countdown.gates_opened,
         now: time.elapsed_secs(),
@@ -1554,7 +1551,6 @@ pub fn decide_abilities(
         &snapshot,
         &clock,
         &situation_cfg,
-        &abilities,
         &mut decision_trace,
     );
 
@@ -1597,7 +1593,6 @@ pub fn decide_abilities(
                 &snapshot,
                 &clock,
                 &situation_cfg,
-                &abilities,
                 &mut decision_trace,
             );
         }
@@ -1651,10 +1646,11 @@ pub fn decide_abilities(
                 let mut builder = decision_trace
                     .start_ability_decision(av, None)
                     .with_situation(cc_ctx.situation());
+                let book = combatant.book().clone();
                 let result = class_ai::paladin::try_divine_shield_while_cc(
                     &mut commands,
                     &mut combat_log,
-                    &abilities,
+                    &book,
                     entity,
                     &mut combatant,
                     transform.translation,
@@ -1688,10 +1684,11 @@ pub fn decide_abilities(
                 let mut builder = decision_trace
                     .start_ability_decision(av, None)
                     .with_situation(cc_ctx.situation());
+                let book = combatant.book().clone();
                 let result = class_ai::warrior::try_berserker_rage_while_cc(
                     &mut commands,
                     &mut combat_log,
-                    &abilities,
+                    &book,
                     entity,
                     &mut combatant,
                     transform.translation,
@@ -1754,7 +1751,14 @@ pub fn decide_abilities(
             ability,
             is_crit,
         } = atk;
-        let ability_def = abilities.get_unchecked(&ability);
+        // The attacker's own book: it was in this frame's snapshot to queue
+        // the attack at all.
+        let ability_def = snapshot
+            .combatants
+            .get(&attacker_entity)
+            .expect("an attacker queued its attack from this frame's snapshot")
+            .book
+            .get_unchecked(&ability);
         let ability_name = ability_def.name.clone();
         let ability_spell_school = ability_def.spell_school;
         let mut actual_damage = 0.0;
@@ -2067,7 +2071,6 @@ pub fn check_interrupts(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut game_rng: ResMut<GameRng>,
-    abilities: Res<AbilityDefinitions>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform), Without<CastingState>>,
     channeling_targets: Query<&ChannelingState>,
     all_auras: Query<&ActiveAuras>,
@@ -2103,7 +2106,7 @@ pub fn check_interrupts(
     for (e, c, t, cast) in casting_combatants.iter() {
         casts.insert(
             e,
-            class_ai::interrupts::EnemyCast::casting(e, c, t.translation, cast, &abilities),
+            class_ai::interrupts::EnemyCast::casting(e, c, t.translation, cast),
         );
     }
     for (e, c, t) in combatants.iter() {
@@ -2161,7 +2164,6 @@ pub fn check_interrupts(
         let Some((interrupt_ability, target_entity, cast_ability)) =
             class_ai::interrupts::interrupt_turn(
                 &ctx,
-                &abilities,
                 &combatant,
                 my_pos,
                 all_auras.get(entity).ok(),
@@ -2176,7 +2178,6 @@ pub fn check_interrupts(
             &mut commands,
             &mut combat_log,
             &mut game_rng,
-            &abilities,
             &ctx,
             entity,
             &mut combatant,

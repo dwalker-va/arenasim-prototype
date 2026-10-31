@@ -614,8 +614,8 @@ mod kept_exit_reset {
     use arenasim::states::play_match::decision_trace::DecisionTrace;
     use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
     use arenasim::states::play_match::{
-        AbilityDefinitions, AbilityType, Combatant, DRTracker, FormationHeading, FormationMemory,
-        HealerPosture, MovementConfig, Posture,
+        AbilityType, Combatant, DRTracker, FormationHeading, FormationMemory, HealerPosture,
+        MovementConfig, Posture,
     };
     use bevy::ecs::world::CommandQueue;
     use bevy::prelude::*;
@@ -642,6 +642,7 @@ mod kept_exit_reset {
             casting_ability: None,
             pet_type: None,
             pet: None,
+            book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
         }
     }
 
@@ -685,7 +686,6 @@ mod kept_exit_reset {
         });
         let combatant = Combatant::new(1, 0, class);
         let movement = MovementConfig::default();
-        let abilities = AbilityDefinitions::default();
         let mut queue = CommandQueue::default();
         let mut commands = Commands::new(&mut queue, &world);
         let mut trace = DecisionTrace::default();
@@ -698,7 +698,7 @@ mod kept_exit_reset {
                     &combatant,
                     pos,
                     &ctx,
-                    &abilities,
+                    combatant.book(),
                     None,
                     Some(&mut state),
                     None,
@@ -714,7 +714,6 @@ mod kept_exit_reset {
                     &combatant,
                     pos,
                     &ctx,
-                    &abilities,
                     Some(&mut state),
                     None,
                     &movement,

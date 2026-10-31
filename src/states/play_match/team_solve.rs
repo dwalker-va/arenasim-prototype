@@ -1466,7 +1466,7 @@ fn can_cast_heal(
 /// pets.
 pub fn dispel_goal(
     ctx: &super::class_ai::CombatContext,
-    abilities: &super::ability_config::AbilityDefinitions,
+    abilities: &super::ability_book::AbilityBook,
     entity: Entity,
     my_pos: Vec3,
     current_mana: f32,

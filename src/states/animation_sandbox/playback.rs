@@ -501,6 +501,15 @@ pub fn drive_playback(
             if let (Some(SandboxEntry::Ability(ab)), Some(dummy)) = (playback.selected, stage.dummy)
             {
                 if defs.get(&ab).is_some_and(|c| c.is_interrupt) {
+                    // A unit casts only what is in its book: whatever the
+                    // dummy's class, the victim cast is granted to it.
+                    if let Ok(mut victim) = combatants.get_mut(dummy) {
+                        if !victim.book().contains(&INTERRUPT_VICTIM_CAST) {
+                            let book = victim.book().clone().granting(&defs, INTERRUPT_VICTIM_CAST);
+                            let staged = victim.clone().with_book(book);
+                            *victim = staged;
+                        }
+                    }
                     commands.entity(dummy).insert(CastingState::new(
                         INTERRUPT_VICTIM_CAST,
                         caster,
@@ -781,6 +790,9 @@ fn start_component_entry(
             if let Some(dummy) = dummy {
                 commands.spawn((
                     HolyShockDamagePending {
+                        caster_book: crate::states::play_match::ability_book::AbilityBook::shipped(
+                            info.class,
+                        ),
                         caster_spell_power: info.spell_power,
                         caster_crit_chance: info.crit_chance,
                         caster_team: info.team,
@@ -795,6 +807,9 @@ fn start_component_entry(
             } else {
                 commands.spawn((
                     HolyShockHealPending {
+                        caster_book: crate::states::play_match::ability_book::AbilityBook::shipped(
+                            info.class,
+                        ),
                         caster_spell_power: info.spell_power,
                         caster_crit_chance: info.crit_chance,
                         caster_team: info.team,
@@ -1547,7 +1562,6 @@ pub fn drive_sandbox_pet(
                     &mut commands,
                     &mut combat_log,
                     def,
-                    &defs,
                     pet,
                     &mut pet_combatant,
                     pet_pos,
@@ -1557,7 +1571,6 @@ pub fn drive_sandbox_pet(
                     &mut commands,
                     &mut combat_log,
                     def,
-                    &defs,
                     pet,
                     &mut pet_combatant,
                     target,
@@ -1566,7 +1579,6 @@ pub fn drive_sandbox_pet(
                     &mut commands,
                     &mut combat_log,
                     def,
-                    &defs,
                     pet,
                     &mut pet_combatant,
                     target,
@@ -1574,7 +1586,6 @@ pub fn drive_sandbox_pet(
                 AbilityType::SpellLock => execute_spell_lock(
                     &mut commands,
                     &mut combat_log,
-                    &defs,
                     pet,
                     &mut pet_combatant,
                     target,
@@ -1611,6 +1622,7 @@ pub fn drive_sandbox_pet(
             caster_combatant,
             stage.caster_home,
             pet_type,
+            &defs,
         );
     }
 }

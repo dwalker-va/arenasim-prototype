@@ -31,8 +31,8 @@ use arenasim::states::play_match::decision_trace::DecisionTrace;
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
 use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
 use arenasim::states::play_match::{
-    AbilityDefinitions, AbilityType, ActiveAuras, Aura, AuraType, Combatant, MovementConfig,
-    MovementDirective, MovementGoal,
+    AbilityType, ActiveAuras, Aura, AuraType, Combatant, MovementConfig, MovementDirective,
+    MovementGoal,
 };
 
 const HEALER_POS: Vec3 = Vec3::new(0.0, 1.0, 0.0);
@@ -64,6 +64,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3, hp: f32
         casting_ability: None,
         pet_type: None,
         pet: None,
+        book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
     }
 }
 
@@ -171,7 +172,6 @@ impl Scene {
 
     /// One Priest posture tick: its plan, the walk it issued and its triggers.
     fn priest_posture(&mut self) -> (PriestMovementPlan, Option<Vec3>, Vec<String>) {
-        let abilities = AbilityDefinitions::default();
         let movement = MovementConfig::default();
         let mut trace = DecisionTrace::default();
         let mut queue = CommandQueue::default();
@@ -184,7 +184,7 @@ impl Scene {
                 &self.combatant,
                 HEALER_POS,
                 &ctx,
-                &abilities,
+                self.combatant.book(),
                 None,
                 None,
                 None,
@@ -204,7 +204,6 @@ impl Scene {
         &mut self,
         plan: &PriestMovementPlan,
     ) -> (Option<(String, Option<u64>)>, serde_json::Value) {
-        let abilities = AbilityDefinitions::default();
         let movement = MovementConfig::default();
         let mut trace = DecisionTrace::default();
         let mut queue = CommandQueue::default();
@@ -242,7 +241,7 @@ impl Scene {
             decide_priest_action(
                 &mut commands,
                 &mut CombatLog::default(),
-                &abilities,
+                &self.combatant.book().clone(),
                 self.healer,
                 &mut self.combatant,
                 HEALER_POS,
@@ -335,7 +334,6 @@ fn mid_walk_a_dying_ally_in_sight_is_healed() {
 #[test]
 fn the_paladin_medic_walk_defers_non_critical_heals() {
     let mut s = scene(CharacterClass::Paladin, DYING, 0.7);
-    let abilities = AbilityDefinitions::default();
     let movement = MovementConfig::default();
     let mut trace = DecisionTrace::default();
     let mut queue = CommandQueue::default();
@@ -344,7 +342,7 @@ fn the_paladin_medic_walk_defers_non_critical_heals() {
         let mut commands = Commands::new(&mut queue, &s.world);
         evaluate_paladin_posture(
             &mut commands,
-            &abilities,
+            s.combatant.book(),
             s.healer,
             &s.combatant,
             HEALER_POS,
@@ -373,7 +371,6 @@ fn the_paladin_medic_walk_defers_non_critical_heals() {
 #[test]
 fn the_shaman_medic_walk_defers_non_critical_casts() {
     let mut s = scene(CharacterClass::Shaman, DYING, 0.7);
-    let abilities = AbilityDefinitions::default();
     let movement = MovementConfig::default();
     let mut trace = DecisionTrace::default();
     let mut queue = CommandQueue::default();
@@ -386,7 +383,6 @@ fn the_shaman_medic_walk_defers_non_critical_casts() {
             &s.combatant,
             HEALER_POS,
             &ctx,
-            &abilities,
             None,
             None,
             &movement,

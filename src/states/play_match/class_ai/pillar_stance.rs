@@ -69,7 +69,6 @@ use super::pillar_mode::{
 use super::plays::{own_class, PlayStage};
 use super::CombatContext;
 use crate::states::match_config::CharacterClass;
-use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::decision_trace::SituationChangeKind;
 use crate::states::play_match::situation::{
     ExceptionKey, ExceptionSet, MatchClock, Play, PlayId, Role, SituationConfig, TeamSituation,
@@ -287,7 +286,6 @@ pub fn classify(
     next: &TeamSituation,
     clock: &MatchClock,
     cfg: &SituationConfig,
-    abilities: &AbilityDefinitions,
 ) -> (Option<StanceWindow>, StanceMemory) {
     if !cfg.runs.contains(PlayId::Pillar) || snapshot.obstacles.is_empty() || !clock.gates_opened {
         return (None, StanceMemory::default());
@@ -333,7 +331,7 @@ pub fn classify(
         (None, None) => return end(memory),
     };
 
-    let threats = team_threats(&ctx, abilities, &stance_members(&ctx), cfg.cc_reach_margin);
+    let threats = team_threats(&ctx, &stance_members(&ctx), cfg.cc_reach_margin);
     let cc_now = !threats.is_empty();
     if cc_now {
         memory.cc_lost_at = None;

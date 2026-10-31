@@ -19,7 +19,7 @@ use std::collections::BTreeSet;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
-use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::*;
@@ -57,7 +57,7 @@ const SHAMAN_TOTEM_REFRESH_MANA_FLOOR: f32 = 60.0;
 pub fn decide_shaman_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -170,7 +170,6 @@ pub fn decide_shaman_action(
     // ordinary purge at P6 keeps the trace's one Purge entry.
     if super::select_purge(
         ctx,
-        abilities,
         combatant.team,
         my_pos,
         abilities.get_unchecked(&AbilityType::Purge).range,
@@ -264,7 +263,7 @@ pub fn decide_shaman_action(
 fn try_lesser_healing_wave(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -438,7 +437,7 @@ fn frost_shock_target(
 fn try_frost_shock(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -489,7 +488,7 @@ const FROST_SHOCK_OPTS: PreCastOpts = PreCastOpts {
 fn frost_shock_on(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -526,7 +525,7 @@ fn frost_shock_on(
 
     builder.choose(cleared, Some(target_entity), true);
 
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras); // 0.0 — completes immediately
     commands
@@ -561,7 +560,7 @@ fn frost_shock_on(
 fn try_lightning_bolt(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -653,7 +652,7 @@ fn try_lightning_bolt(
 pub(super) fn maintain_totems(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -769,7 +768,7 @@ pub(crate) fn totem_spacing_offset(element: TotemElement) -> Vec3 {
 fn try_totem(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -824,7 +823,7 @@ fn try_totem(
     ));
 
     combatant.current_mana -= def.mana_cost;
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;
 
     combat_log.log(
@@ -852,7 +851,7 @@ fn try_totem(
 fn try_air_totem(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -878,7 +877,7 @@ fn try_air_totem(
 fn try_water_totem(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -904,7 +903,7 @@ fn try_water_totem(
 fn try_earth_totem(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -930,7 +929,7 @@ fn try_earth_totem(
 fn try_fire_totem(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -974,7 +973,7 @@ mod reach_tests {
     }
 
     fn wave(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
-        let abilities = AbilityDefinitions::default();
+        let abilities = AbilityBook::shipped(crate::states::match_config::CharacterClass::Shaman);
         let movement = MovementConfig::default();
         let me = s.units[0];
         s.run(obstacles, |commands, ctx, combatant, builder| {
@@ -1054,7 +1053,7 @@ mod reach_tests {
     }
 
     fn frost_shock(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
-        let abilities = AbilityDefinitions::default();
+        let abilities = AbilityBook::shipped(crate::states::match_config::CharacterClass::Shaman);
         let me = s.units[0];
         s.run(obstacles, |commands, ctx, combatant, builder| {
             try_frost_shock(
@@ -1113,7 +1112,8 @@ mod reach_tests {
     #[test]
     fn an_occluded_peel_still_reports_frost_shock_on_cooldown() {
         let reason = |obstacles: &[ObstacleVolume]| {
-            let abilities = AbilityDefinitions::default();
+            let abilities =
+                AbilityBook::shipped(crate::states::match_config::CharacterClass::Shaman);
             let mut s = peel_scene(&[OCCLUDED_ATTACKER]);
             let me = s.units[0];
             let trace = s.run(obstacles, |commands, ctx, combatant, builder| {
@@ -1168,7 +1168,8 @@ mod reach_tests {
     #[test]
     fn an_occluded_purge_still_reports_the_shaman_out_of_mana() {
         let reason = |obstacles: &[ObstacleVolume]| {
-            let abilities = AbilityDefinitions::default();
+            let abilities =
+                AbilityBook::shipped(crate::states::match_config::CharacterClass::Shaman);
             let mut s = ReachScene::new(Shaman, &[(2, Warrior, BEHIND, 1.0)]);
             let (me, enemy) = (s.units[0], s.units[1]);
             s.auras.insert(
@@ -1218,14 +1219,15 @@ mod reach_tests {
         use crate::states::play_match::effects::process_dispels;
         use bevy::ecs::system::RunSystemOnce;
 
-        let abilities = AbilityDefinitions::default();
+        let abilities = AbilityBook::shipped(crate::states::match_config::CharacterClass::Shaman);
+        let druid_book = AbilityBook::shipped(Druid);
         for bar in [PURGE_URGENT_PRIORITY, PURGE_MIN_PRIORITY] {
             let mut taken: Vec<String> = Vec::new();
             for seed in 0..24u64 {
                 let mut s = ReachScene::new(Shaman, &[(2, Druid, IN_SIGHT, 1.0)]);
                 let (me, druid) = (s.units[0], s.units[1]);
                 let land = |ability| {
-                    AuraPending::from_ability(druid, druid, abilities.get_unchecked(&ability))
+                    AuraPending::from_ability(druid, druid, druid_book.get_unchecked(&ability))
                         .expect("the ability applies an aura")
                         .aura
                 };
@@ -1306,7 +1308,7 @@ mod reach_tests {
     /// One Lightning Bolt decision on the Warrior, with `mana` left (full when
     /// `None`).
     fn bolt(s: &mut ReachScene, obstacles: &[ObstacleVolume], mana: Option<f32>) -> DecisionTrace {
-        let abilities = AbilityDefinitions::default();
+        let abilities = AbilityBook::shipped(crate::states::match_config::CharacterClass::Shaman);
         let (me, kill) = (s.units[0], s.units[1]);
         s.run(obstacles, |commands, ctx, combatant, builder| {
             combatant.target = Some(kill);

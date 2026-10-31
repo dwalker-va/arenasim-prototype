@@ -3,6 +3,7 @@
 //! Handles spell projectiles that travel from caster to target.
 
 use super::abilities::AbilityType;
+use super::ability_book::AbilityBook;
 use super::ability_config::AbilityDefinitions;
 use super::combat_core::apply_healing;
 use super::components::*;
@@ -133,7 +134,6 @@ pub fn process_projectile_hits(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut game_rng: ResMut<GameRng>,
-    abilities: Res<AbilityDefinitions>,
     dampening: Res<ArenaDampening>,
     projectiles: Query<(Entity, &Projectile, &Transform)>,
     mut combatants: Query<(&Transform, &mut Combatant, Option<&mut ActiveAuras>)>,
@@ -151,7 +151,7 @@ pub fn process_projectile_hits(
     // Collect hits to process (to avoid borrow checker issues). `caster_id` is
     // the resolved, pet-aware combat-log id — a pet's projectile (Spider Web)
     // attributes to the pet, not its owner.
-    // Format: (projectile_entity, caster_entity, target_entity, ability, caster_id, caster_pos, target_pos, ability_damage, ability_healing, is_crit)
+    // Format: (projectile_entity, caster_entity, target_entity, ability, caster_id, caster_pos, target_pos, ability_damage, ability_healing, is_crit, the caster's book)
     let mut hits_to_process: Vec<(
         Entity,
         Entity,
@@ -163,6 +163,7 @@ pub fn process_projectile_hits(
         f32,
         f32,
         bool,
+        AbilityBook,
     )> = Vec::new();
 
     for (projectile_entity, projectile, projectile_transform) in projectiles.iter() {
@@ -197,7 +198,9 @@ pub fn process_projectile_hits(
             let caster_pos = caster_transform.translation;
             let target_world_pos = target_transform.translation;
 
-            let def = abilities.get_unchecked(&projectile.ability);
+            // The projectile's ability, read from its caster's own book.
+            let book = caster_combatant.book().clone();
+            let def = book.get_unchecked(&projectile.ability);
             let ap_bonus = super::combat_core::get_attack_power_bonus(caster_auras);
             let sp_bonus = super::combat_core::get_spell_power_bonus(caster_auras);
             let crit_bonus = super::combat_core::get_crit_chance_bonus(caster_auras);
@@ -246,6 +249,7 @@ pub fn process_projectile_hits(
                 ability_damage,
                 ability_healing,
                 is_crit,
+                book.clone(),
             ));
         }
     }
@@ -262,9 +266,10 @@ pub fn process_projectile_hits(
         ability_damage,
         _ability_healing,
         is_crit,
+        book,
     ) in hits_to_process
     {
-        let def = abilities.get_unchecked(&ability);
+        let def = book.get_unchecked(&ability);
         let text_position = target_pos + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
         let _ability_range = caster_pos.distance(target_pos);
         // Damage as a fraction of the victim's max health, for the shared

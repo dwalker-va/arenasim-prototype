@@ -1,7 +1,7 @@
 //! Auto-attack system: melee swings, wand shots, auto shots, Heroic Strike, rage generation.
 
 use super::super::abilities::{AbilityType, SpellSchool};
-use super::super::ability_config::AbilityDefinitions;
+use super::super::ability_book::AbilityBook;
 use super::super::components::*;
 use super::super::constants::{
     CRIT_DAMAGE_MULTIPLIER, DUAL_WIELD_MISS_CHANCE, OFFHAND_DAMAGE_MULTIPLIER,
@@ -37,7 +37,6 @@ pub fn combat_auto_attack(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut game_rng: ResMut<GameRng>,
-    abilities: Res<AbilityDefinitions>,
     mut combatants: Query<(
         Entity,
         &Transform,
@@ -126,20 +125,23 @@ pub fn combat_auto_attack(
 
     // Weapon-poison proc table: each Rogue, the ability of the poison it chose
     // for the match, and that poison's per-hit application chance from the
-    // ability config. A successful roll on a landed swing applies the poison.
-    let poison_procs: std::collections::HashMap<Entity, (AbilityType, f32)> = combatants
-        .iter()
-        .filter_map(|(entity, _, combatant, _, _, _)| {
-            if combatant.class != match_config::CharacterClass::Rogue {
-                return None;
-            }
-            let poison = combatant.rogue_poison.ability();
-            abilities
-                .get(&poison)
-                .and_then(|def| def.application_chance)
-                .map(|chance| (entity, (poison, chance)))
-        })
-        .collect();
+    // ability config — the Rogue's own book, carried with it so the proc
+    // lands the poison its book describes. A successful roll on a landed
+    // swing applies the poison.
+    let poison_procs: std::collections::HashMap<Entity, (AbilityType, f32, AbilityBook)> =
+        combatants
+            .iter()
+            .filter_map(|(entity, _, combatant, _, _, _)| {
+                if combatant.class != match_config::CharacterClass::Rogue {
+                    return None;
+                }
+                let poison = combatant.rogue_poison.ability();
+                let book = combatant.book();
+                book.get(&poison)
+                    .and_then(|def| def.application_chance)
+                    .map(|chance| (entity, (poison, chance, book.clone())))
+            })
+            .collect();
     // The poisons whose first application has been logged this frame.
     let mut poison_fresh_this_frame: std::collections::HashSet<(
         Entity,
@@ -781,12 +783,13 @@ pub fn combat_auto_attack(
                 // so it never diminishes (poisons sidestep the slow DR
                 // category); the others land through `apply_pending_auras`,
                 // which stacks and refreshes them.
-                if let Some(&(poison, chance)) = poison_procs.get(&attacker_entity) {
+                if let Some((poison, chance, book)) = poison_procs.get(&attacker_entity) {
+                    let (poison, chance) = (*poison, *chance);
                     if poison != AbilityType::CripplingPoison {
                         if game_rng.random_f32() < chance {
                             apply_weapon_poison(
                                 &mut commands,
-                                &abilities,
+                                book,
                                 poison,
                                 attacker_entity,
                                 target_entity,
@@ -797,14 +800,14 @@ pub fn combat_auto_attack(
                                 &mut combat_log,
                                 &mut poison_fresh_this_frame,
                             );
-                            if abilities.get_unchecked(&poison).damage_base_max > 0.0 {
+                            if book.get_unchecked(&poison).damage_base_max > 0.0 {
                                 poison_damage_hits.push((attacker_entity, target_entity, poison));
                             }
                         }
                     } else if game_rng.random_f32() < chance {
                         let fresh = apply_or_refresh_crippling(
                             &mut commands,
-                            &abilities,
+                            book,
                             attacker_entity,
                             target_entity,
                             target_auras.as_deref_mut(),
@@ -946,7 +949,9 @@ pub fn combat_auto_attack(
     // crit — TBC rolled it on spell crit, which a Rogue barely has; not
     // modelled — so it draws no RNG.
     for (attacker_entity, target_entity, poison) in poison_damage_hits {
-        let def = abilities.get_unchecked(&poison);
+        // Only a Rogue in the proc table queues a poison hit.
+        let (_, _, book) = &poison_procs[&attacker_entity];
+        let def = book.get_unchecked(&poison);
         let Ok((_, _, mut target, _, _, mut target_auras)) = combatants.get_mut(target_entity)
         else {
             continue;
@@ -1444,7 +1449,7 @@ pub(crate) fn windfury_bonus_chance(
 #[allow(clippy::too_many_arguments)]
 fn apply_weapon_poison(
     commands: &mut Commands,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     poison: AbilityType,
     attacker: Entity,
     target: Entity,
@@ -1486,7 +1491,7 @@ fn apply_weapon_poison(
 /// case, which respects immunity through the normal aura pipeline).
 fn apply_or_refresh_crippling(
     commands: &mut Commands,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     attacker: Entity,
     target: Entity,
     target_auras: Option<&mut ActiveAuras>,

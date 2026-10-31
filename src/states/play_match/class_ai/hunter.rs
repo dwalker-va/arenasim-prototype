@@ -25,7 +25,7 @@ use super::{CombatContext, CombatantInfo};
 use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::*;
@@ -47,7 +47,7 @@ pub fn decide_hunter_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -79,7 +79,6 @@ pub fn decide_hunter_action(
     // headline-ability path in pet_ai.rs has been removed for Spider/Boar/Bird.
     dispatch_pet_ability(
         commands,
-        abilities,
         decision_trace,
         entity,
         combatant.target,
@@ -359,7 +358,7 @@ pub fn decide_hunter_action(
                         });
 
                         combatant.current_mana -= def.mana_cost;
-                        combatant.start_cooldown(disengage, abilities);
+                        combatant.start_cooldown(disengage);
                         combatant.global_cooldown = GCD;
 
                         log_ability_use(
@@ -670,14 +669,8 @@ pub fn decide_hunter_action(
     // the enemy runs — when the enemy predicted to spring it is worth trapping
     // (`fallback_trap`).
     let focused = super::hunter_dip::trap_focus(ctx, entity, combatant.target);
-    let off_target = super::hunter_dip::opportunistic_off_target(
-        ctx,
-        abilities,
-        entity,
-        combatant.team,
-        &focused,
-        my_pos,
-    );
+    let off_target =
+        super::hunter_dip::opportunistic_off_target(ctx, entity, combatant.team, &focused, my_pos);
     // With an off-target the trap is held for the dip.
     let fallback = off_target.is_none().then(|| {
         fallback_trap(
@@ -865,7 +858,7 @@ struct FallbackThrow {
 /// reserved for a trap that never comes.
 fn fallback_trap(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     my_team: u8,
     my_pos: Vec3,
@@ -888,7 +881,7 @@ fn fallback_trap(
         if kill_target_hidden {
             return held(TRAP_HELD_UNSEEN_KILL_TARGET);
         }
-        if super::hunter_dip::unseen_victim_would_be_freed(ctx, abilities, entity, my_team) {
+        if super::hunter_dip::unseen_victim_would_be_freed(ctx, entity, my_team) {
             return held(TRAP_HELD_UNSEEN);
         }
         return Some(Ok(FallbackThrow { lane, victim: None }));
@@ -928,7 +921,7 @@ fn fallback_trap(
     if ctx.entity_is_immune(victim) {
         return Some(Err(RejectionReason::TargetImmune));
     }
-    if !super::hunter_dip::trap_victim_worth_it(ctx, abilities, entity, victim) {
+    if !super::hunter_dip::trap_victim_worth_it(ctx, entity, victim) {
         return held(TRAP_HELD_FREEABLE);
     }
     if super::hunter_dip::teammate_would_break_it(ctx, entity, Some(kill_target), victim) {
@@ -954,7 +947,7 @@ fn fallback_trap(
 fn try_pressure_trap(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -983,20 +976,19 @@ fn try_pressure_trap(
     ) {
         return false;
     }
-    let healer =
-        match super::hunter_dip::pressure_trap_healer(ctx, abilities, entity, combatant.team) {
-            None => return false,
-            Some(Err(note)) => {
-                builder.reject(
-                    ability,
-                    RejectionReason::PreconditionUnmet {
-                        note: note.to_string(),
-                    },
-                );
-                return false;
-            }
-            Some(Ok(healer)) => healer,
-        };
+    let healer = match super::hunter_dip::pressure_trap_healer(ctx, entity, combatant.team) {
+        None => return false,
+        Some(Err(note)) => {
+            builder.reject(
+                ability,
+                RejectionReason::PreconditionUnmet {
+                    note: note.to_string(),
+                },
+            );
+            return false;
+        }
+        Some(Ok(healer)) => healer,
+    };
     let landing = match super::hunter_dip::pressure_trap_landing(
         ctx,
         abilities,
@@ -1087,7 +1079,7 @@ pub enum FlarePlan {
 /// Only a Rogue stealths, so the unseen enemy's speed is the Rogue's base
 /// speed ([`class_base_stats`]).
 pub fn flare_plan(
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     combatant: &Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
@@ -1157,7 +1149,7 @@ pub fn flare_plan(
 fn apply_flare(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1213,7 +1205,7 @@ fn apply_flare(
         ),
     );
     combatant.current_mana -= def.mana_cost;
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;
     true
 }
@@ -1376,7 +1368,7 @@ fn sting_due(target: Entity, target_info: &super::CombatantInfo, ctx: &CombatCon
 /// dispel GCD before the cast rather than after it. With time for neither, the
 /// sting goes first too: an Aimed Shot that cannot finish is not the opener.
 pub fn aimed_shot_before_sting(
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
@@ -1408,7 +1400,7 @@ pub fn aimed_shot_before_sting(
 /// unknown until it opens, and it opens in melee range with Cheap Shot, which
 /// stops any cast.
 pub fn aimed_shot_has_time(
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
@@ -1431,7 +1423,7 @@ pub fn aimed_shot_has_time(
             let melee = (!e.is_pet && super::dps_postures::is_kite_threat(e.class))
                 .then_some(HUNTER_DEAD_ZONE);
             let Some(reach) = interruptible
-                .then(|| super::interrupt_reach(abilities, e))
+                .then(|| super::interrupt_reach(e))
                 .flatten()
                 .into_iter()
                 .chain(melee)
@@ -1585,7 +1577,7 @@ pub fn spawn_trap(
 fn try_place_trap_at(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1704,7 +1696,7 @@ fn try_place_trap_at(
     );
 
     combatant.current_mana -= def.mana_cost;
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;
 
     true
@@ -1720,7 +1712,7 @@ fn try_place_trap_at(
 fn try_peel_snare(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1775,7 +1767,7 @@ fn try_peel_snare(
 fn try_concussive_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1844,7 +1836,7 @@ fn try_concussive_shot(
     ));
 
     combatant.current_mana -= def.mana_cost;
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -1867,7 +1859,7 @@ pub const AIMED_SHOT_HELD_HIDDEN: &str = "an unseen enemy could stop the cast";
 fn try_aimed_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1937,7 +1929,7 @@ fn try_aimed_shot(
         .insert(CastingState::new(ability, target_entity, cast_time));
 
     combatant.current_mana -= def.mana_cost;
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -1958,7 +1950,7 @@ fn try_arcane_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     _game_rng: &mut GameRng,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -2025,7 +2017,7 @@ fn try_arcane_shot(
     ));
 
     combatant.current_mana -= def.mana_cost;
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -2052,7 +2044,7 @@ fn try_arcane_shot(
 fn try_serpent_sting(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -2141,7 +2133,7 @@ fn try_serpent_sting(
     // Hunter ([`try_pressure_trap`]): a sting on it would make it untrappable
     // at the moment that trap is thrown.
     let pressure_victim = super::dps_postures::nearest_melee_threat(ctx, entity, my_pos).is_some()
-        && super::hunter_dip::pressure_trap_healer(ctx, abilities, entity, combatant.team)
+        && super::hunter_dip::pressure_trap_healer(ctx, entity, combatant.team)
             == Some(Ok(target_entity));
     if trap_poised && (fallback.is_some_and(|f| f.victim == Some(target_entity)) || pressure_victim)
     {
@@ -2241,7 +2233,6 @@ fn try_serpent_sting(
 /// is not Hunter-dispatched.
 pub(super) fn dispatch_pet_ability(
     commands: &mut Commands,
-    abilities: &AbilityDefinitions,
     decision_trace: &mut DecisionTrace,
     hunter_entity: Entity,
     target_entity: Option<Entity>,
@@ -2263,7 +2254,6 @@ pub(super) fn dispatch_pet_ability(
 
     if try_pet_peel(
         commands,
-        abilities,
         decision_trace,
         hunter_entity,
         pet_entity,
@@ -2279,7 +2269,6 @@ pub(super) fn dispatch_pet_ability(
             if let Some(target) = target_entity {
                 try_dispatch_spider_web(
                     commands,
-                    abilities,
                     decision_trace,
                     hunter_entity,
                     pet_entity,
@@ -2294,7 +2283,6 @@ pub(super) fn dispatch_pet_ability(
             if let Some(target) = target_entity {
                 try_dispatch_boar_charge(
                     commands,
-                    abilities,
                     decision_trace,
                     hunter_entity,
                     pet_entity,
@@ -2308,7 +2296,6 @@ pub(super) fn dispatch_pet_ability(
         PetType::Bird => {
             try_dispatch_masters_call(
                 commands,
-                abilities,
                 decision_trace,
                 hunter_entity,
                 pet_entity,
@@ -2334,7 +2321,6 @@ pub(super) fn dispatch_pet_ability(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn try_pet_peel(
     commands: &mut Commands,
-    abilities: &AbilityDefinitions,
     decision_trace: &mut DecisionTrace,
     hunter_entity: Entity,
     pet_entity: Entity,
@@ -2357,7 +2343,6 @@ pub(super) fn try_pet_peel(
                 super::peel::movement_peel_target(ctx, attacker)
                     && try_dispatch_spider_web(
                         commands,
-                        abilities,
                         decision_trace,
                         hunter_entity,
                         pet_entity,
@@ -2369,7 +2354,6 @@ pub(super) fn try_pet_peel(
             }
             _ => try_dispatch_boar_charge(
                 commands,
-                abilities,
                 decision_trace,
                 hunter_entity,
                 pet_entity,
@@ -2414,7 +2398,6 @@ fn start_pet_dispatch<'t>(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn try_dispatch_spider_web(
     commands: &mut Commands,
-    abilities: &AbilityDefinitions,
     decision_trace: &mut DecisionTrace,
     hunter_entity: Entity,
     pet_entity: Entity,
@@ -2424,7 +2407,8 @@ pub(super) fn try_dispatch_spider_web(
     peel: bool,
 ) -> bool {
     let ability = AbilityType::SpiderWeb;
-    let Some(def) = abilities.get(&ability) else {
+    // The PET's ability, read from the pet's own book.
+    let Some(def) = pet_info.book.get(&ability) else {
         return false;
     };
     let Some(target_info) = ctx.combatants.get(&target_entity) else {
@@ -2485,7 +2469,6 @@ pub(super) fn try_dispatch_spider_web(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn try_dispatch_boar_charge(
     commands: &mut Commands,
-    abilities: &AbilityDefinitions,
     decision_trace: &mut DecisionTrace,
     hunter_entity: Entity,
     pet_entity: Entity,
@@ -2495,7 +2478,8 @@ pub(super) fn try_dispatch_boar_charge(
     peel: bool,
 ) -> bool {
     let ability = AbilityType::BoarCharge;
-    let Some(def) = abilities.get(&ability) else {
+    // The PET's ability, read from the pet's own book.
+    let Some(def) = pet_info.book.get(&ability) else {
         return false;
     };
     let Some(target_info) = ctx.combatants.get(&target_entity) else {
@@ -2544,7 +2528,6 @@ pub(super) fn try_dispatch_boar_charge(
 /// slowed; falls back to scanning allies on the Hunter's team.
 pub(super) fn try_dispatch_masters_call(
     commands: &mut Commands,
-    abilities: &AbilityDefinitions,
     decision_trace: &mut DecisionTrace,
     hunter_entity: Entity,
     pet_entity: Entity,
@@ -2554,7 +2537,8 @@ pub(super) fn try_dispatch_masters_call(
     ctx: &CombatContext,
 ) -> bool {
     let ability = AbilityType::MastersCall;
-    let Some(def) = abilities.get(&ability) else {
+    // The PET's ability, read from the pet's own book.
+    let Some(def) = pet_info.book.get(&ability) else {
         return false;
     };
 

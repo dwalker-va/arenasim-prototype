@@ -7,7 +7,6 @@ use bevy::prelude::*;
 
 use crate::combat::log::CombatLog;
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::combat_core::{apply_damage_with_absorb, apply_healing, roll_crit};
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
@@ -21,16 +20,15 @@ pub fn process_holy_shock_heals(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut game_rng: ResMut<GameRng>,
-    abilities: Res<AbilityDefinitions>,
     dampening: Res<ArenaDampening>,
     pending_heals: Query<(Entity, &HolyShockHealPending)>,
     mut combatants: Query<(&mut Combatant, &Transform, Option<&ActiveAuras>)>,
     pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
 ) {
-    let ability_def = abilities.get_unchecked(&AbilityType::HolyShock);
-
     for (pending_entity, pending) in pending_heals.iter() {
+        // The heal is read from the Paladin's own book.
+        let ability_def = pending.caster_book.get_unchecked(&AbilityType::HolyShock);
         // Get target combatant
         if let Ok((mut target, target_transform, target_auras)) = combatants.get_mut(pending.target)
         {
@@ -134,15 +132,14 @@ pub fn process_holy_shock_damage(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
     mut game_rng: ResMut<GameRng>,
-    abilities: Res<AbilityDefinitions>,
     pending_damage: Query<(Entity, &HolyShockDamagePending)>,
     mut combatants: Query<(&mut Combatant, &Transform, Option<&mut ActiveAuras>)>,
     pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
 ) {
-    let ability_def = abilities.get_unchecked(&AbilityType::HolyShock);
-
     for (pending_entity, pending) in pending_damage.iter() {
+        // The damage is read from the Paladin's own book.
+        let ability_def = pending.caster_book.get_unchecked(&AbilityType::HolyShock);
         // Get target combatant
         if let Ok((mut target, target_transform, mut target_auras)) =
             combatants.get_mut(pending.target)

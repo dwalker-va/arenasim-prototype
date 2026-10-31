@@ -25,7 +25,7 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::arena_bounds::ArenaBounds;
 use crate::states::play_match::combat_core::clamp_to_arena;
 use crate::states::play_match::components::AuraType;
@@ -241,7 +241,7 @@ fn first_on_track(track: &[Vec3], landing: Vec3, from: f32, window: f32) -> Opti
 /// with a seen point on it that someone would spring.
 pub fn route_lane(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     my_team: u8,
     my_pos: Vec3,
 ) -> Option<(Vec3, Entity)> {

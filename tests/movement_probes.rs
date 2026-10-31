@@ -2874,6 +2874,7 @@ mod paladin_unit {
             casting_ability: None,
             pet_type: None,
             pet: None,
+            book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
         }
     }
 
@@ -3157,6 +3158,7 @@ mod bucket_a_unit {
             casting_ability: None,
             pet_type: None,
             pet: None,
+            book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
         }
     }
 
@@ -4960,6 +4962,7 @@ mod u9_seek_reset {
             casting_ability: None,
             pet_type: None,
             pet: None,
+            book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
         }
     }
 

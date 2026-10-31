@@ -222,9 +222,21 @@ impl Stage {
     pub fn land(self, target: Unit, ability: AbilityType, caster: Unit) -> Self {
         self.step(move |world| {
             let (t, c) = (target.entity(world), caster.entity(world));
+            // Read from the caster's own book, as a cast that landed is. A
+            // stage may name any unit as the aura's source, though — a Hunter's
+            // trap "cast" by its Druid teammate — so an ability outside the
+            // caster's book is read from the table, as the table writes it.
             let pending = {
-                let defs = world.resource::<AbilityDefinitions>();
-                AuraPending::from_ability(t, c, defs.get_unchecked(&ability))
+                let from_book = world
+                    .get::<Combatant>(c)
+                    .and_then(|caster| caster.book().get(&ability).cloned());
+                let def = from_book.unwrap_or_else(|| {
+                    world
+                        .resource::<AbilityDefinitions>()
+                        .get_unchecked(&ability)
+                        .clone()
+                });
+                AuraPending::from_ability(t, c, &def)
                     .unwrap_or_else(|| panic!("{ability:?} applies no aura"))
             };
             world.spawn(pending);

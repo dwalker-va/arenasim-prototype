@@ -79,7 +79,7 @@ use bevy::prelude::*;
 
 use crate::combat::log::CombatLog;
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::*;
@@ -446,7 +446,7 @@ pub fn focused_ally<'c>(
 /// one's ([`StackScope::PerCaster`]).
 fn own_aura<'c>(
     ctx: &'c CombatContext,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     caster: Entity,
     target: Entity,
     ability: AbilityType,
@@ -532,7 +532,7 @@ pub fn emergency_heal_lands(
 pub fn decide_druid_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -710,7 +710,7 @@ struct CyclonePeel {
 struct DruidTurn<'a, 'b, 'w, 's, 'c> {
     commands: &'a mut Commands<'w, 's>,
     combat_log: &'a mut CombatLog,
-    abilities: &'a AbilityDefinitions,
+    abilities: &'a AbilityBook,
     entity: Entity,
     my_pos: Vec3,
     auras: Option<&'a ActiveAuras>,
@@ -1722,7 +1722,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         let def = self.abilities.get_unchecked(&ability);
         self.builder.choose(cleared, Some(target), true);
         if def.cooldown > 0.0 {
-            combatant.start_cooldown(ability, self.abilities);
+            combatant.start_cooldown(ability);
         }
         combatant.global_cooldown = GCD;
         let cast_time = calculate_cast_time(def.cast_time, self.auras);
@@ -2120,7 +2120,7 @@ mod reach_tests {
         medic_walk: Option<Entity>,
         step: impl FnOnce(&mut DruidTurn, &mut Combatant) -> bool,
     ) -> DecisionTrace {
-        let abilities = AbilityDefinitions::default();
+        let abilities = AbilityBook::shipped(crate::states::match_config::CharacterClass::Druid);
         let movement = MovementConfig::default();
         let me = s.units[0];
         let mut marked = HashSet::new();
