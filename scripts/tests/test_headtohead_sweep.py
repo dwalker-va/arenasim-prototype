@@ -34,7 +34,9 @@ Run directly, or via `cargo test --test script_fixture_suites`:
 from __future__ import annotations
 
 import csv
+import json
 import os
+import random
 import sys
 import unittest
 
@@ -59,9 +61,14 @@ class FakeBatchRunner:
     invent or lose matches behind the script's back.
     """
 
+    # The per-seed spelling of a plan: one character per seed, in seed order.
+    SEED_WINNERS = {"1": "team1", "2": "team2", "d": "draw", "e": "error"}
+
     def __init__(self, plan):
         # plan: label -> (team1 wins, team2 wins, draws, errors), consumed in
-        # the order the script wrote that label's configs.
+        # the order the script wrote that label's configs; or label -> a
+        # string with one character per seed ("1", "2", "d", "e"), for the
+        # paired cases that need to say which seed a result lands on.
         self.plan = plan
         self.calls = []
 
@@ -69,21 +76,23 @@ class FakeBatchRunner:
         self.calls.append(cmd)
         jsonl = cmd[cmd.index("--batch") + 1]
         out = cmd[cmd.index("--out") + 1]
-        remaining = {
-            label: list(counts) for label, counts in self.plan.items()
-        }
+        remaining = {label: list(counts) for label, counts in self.plan.items()}
         with open(out, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=BATCH_COLUMNS)
             w.writeheader()
             for cfg in read_batch_jsonl(jsonl):
                 label = cfg["label"]
                 counts = remaining.setdefault(label, [0, 0, 0, 0])
-                for idx, winner in enumerate(("team1", "team2", "draw", "error")):
-                    if counts[idx] > 0:
-                        counts[idx] -= 1
-                        break
-                else:  # plan exhausted: anything left is a draw
-                    winner = "draw"
+                if isinstance(self.plan.get(label), str):
+                    assert counts, "plan for %r ran out of seeds" % label
+                    winner = self.SEED_WINNERS[counts.pop(0)]
+                else:
+                    for idx, winner in enumerate(("team1", "team2", "draw", "error")):
+                        if counts[idx] > 0:
+                            counts[idx] -= 1
+                            break
+                    else:  # plan exhausted: anything left is a draw
+                        winner = "draw"
                 w.writerow(
                     {
                         "label": label,
@@ -96,7 +105,7 @@ class FakeBatchRunner:
                     }
                 )
         for label, counts in remaining.items():
-            assert counts == [0, 0, 0, 0], (
+            assert counts in ([0, 0, 0, 0], []), (
                 "plan for %r had %r outcomes left over -- more outcomes than "
                 "the script generated matches" % (label, counts)
             )
@@ -497,6 +506,319 @@ class ArtifactTests(SweepTestCase):
         self.assertErrHas(run, "artifacts in")
         for name in os.listdir(os.getcwd()):
             self.assertFalse(name.startswith("sweep."), "leaked %s into cwd" % name)
+
+
+# ---------------------------------------------------------------------------
+# McNemar and the cluster bootstrap
+# ---------------------------------------------------------------------------
+
+
+class McNemarTests(unittest.TestCase):
+    def test_known_values(self):
+        """Continuity-corrected, (|b - c| - 1)/sqrt(b + c).
+
+        12 vs 0: 11/sqrt(12) = 11/3.4641016 = 3.1754.
+        6 vs 0: 5/sqrt(6) = 5/2.4494897 = 2.0412.
+        30 vs 10: 19/sqrt(40) = 19/6.3245553 = 3.0042.
+        """
+        self.assertAlmostEqual(h2h.mcnemar(12, 0), 3.1754, places=4)
+        self.assertAlmostEqual(h2h.mcnemar(6, 0), 2.0412, places=4)
+        self.assertAlmostEqual(h2h.mcnemar(30, 10), 3.0042, places=4)
+
+    def test_unsigned_so_the_counts_carry_the_direction(self):
+        self.assertEqual(h2h.mcnemar(0, 12), h2h.mcnemar(12, 0))
+
+    def test_nothing_flipped_and_a_balanced_split_are_null(self):
+        self.assertEqual(h2h.mcnemar(0, 0), 0.0)
+        self.assertEqual(h2h.mcnemar(1, 1), 0.0)
+        self.assertEqual(h2h.mcnemar(1, 0), 0.0)
+
+
+class BootstrapTests(unittest.TestCase):
+    def test_a_constant_column_has_no_spread(self):
+        (lo, hi), = h2h.bootstrap_mean_ci([[0.5] * 30], 500, random.Random(0))
+        self.assertEqual((lo, hi), (0.5, 0.5))
+
+    def test_a_coin_matches_normal_theory(self):
+        """Half ones over n=100: SE = sqrt(0.25/100) = 0.05, so +/-0.098.
+
+        The percentile bootstrap of a mean converges on the normal interval
+        at this n; 20000 resamples put its Monte Carlo error near 0.002.
+        """
+        col = [1.0] * 50 + [0.0] * 50
+        (lo, hi), = h2h.bootstrap_mean_ci([col], 20000, random.Random(1))
+        self.assertAlmostEqual(lo, 0.5 - 0.098, delta=0.01)
+        self.assertAlmostEqual(hi, 0.5 + 0.098, delta=0.01)
+
+    def test_columns_share_each_draw(self):
+        """Identical columns get identical intervals: a cluster moves whole."""
+        col = [1.0] * 13 + [0.0] * 27
+        a, b = h2h.bootstrap_mean_ci([col, list(col)], 2000, random.Random(2))
+        self.assertEqual(a, b)
+
+    def test_the_resampling_seed_reproduces(self):
+        col = [1.0, 0.0, 0.5, -1.0, 0.0, 1.0] * 5
+        self.assertEqual(
+            h2h.bootstrap_mean_ci([col], 1000, random.Random(7)),
+            h2h.bootstrap_mean_ci([col], 1000, random.Random(7)),
+        )
+
+
+# ---------------------------------------------------------------------------
+# the paired report, through main(argv)
+# ---------------------------------------------------------------------------
+
+GEAR = '[{"Trinket2": "DragonspineTrophy"}]'
+OTHER_GEAR = '[{"Trinket2": "MarkOfTheChampion"}]'
+
+
+class GearSweepTestCase(SweepTestCase):
+    def gear(self, plan, *argv, seeds=10):
+        return self.sweep(
+            plan,
+            "--team1-equipment", GEAR,
+            "--team2-equipment", GEAR,
+            "--bootstrap", "2000",
+            *argv,
+            seeds=seeds,
+        )
+
+
+class PairedReportTests(GearSweepTestCase):
+    def test_the_worked_ten_seed_case(self):
+        """Seed by seed, worked by hand.
+
+        BB: team 1 wins seeds 1-5, team 2 seeds 6-10.
+        GB: team 1 wins seeds 1-8 -> team 1's seat flips to a win on 6, 7, 8.
+        BG: team 2 wins seeds 3-10 -> team 2's seat flips to a win on 3, 4, 5.
+        The gear wins 8 + 8 = 16 of its 20 seats; the baseline won 5 + 5 = 10
+        of the same seats. Effect (16 - 10)/20 = +30pt. Six seeds net for the
+        gear (3-8), none against, four even: McNemar 5/sqrt(6) = 2.04.
+        """
+        run = self.gear({"BB": "1111122222", "GB": "1111111122", "BG": "1122222222"})
+        self.assertOk(run)
+        self.assertHas(run, "the gear 16/20 = 80.0%")
+        self.assertHas(run, "baseline at the same seats 10/20 = 50.0%")
+        self.assertHas(run, "effect: +30.0pt")
+        self.assertUnderHeading(run, "PAIRED", "on team 1: +30.0pt")
+        self.assertUnderHeading(run, "PAIRED", "on team 2: +30.0pt")
+        self.assertHas(run, "discordant seeds 3 to a win, 0 to a loss; McNemar z=1.15")
+        self.assertHas(run, "net for the gear 6, against 0, even 4; McNemar z=2.04")
+
+    def test_opposite_flips_within_a_seed_cancel(self):
+        """The seed is the unit: a win on one seat and a loss on the other is even.
+
+        BB: team 1 wins both seeds. GB: team 2 wins (the gear's seat on team 1
+        LOSES). BG: team 2 wins (the gear's seat on team 2 WINS). Per seat the
+        flips are 0/2 and 2/0, but every seed nets to zero.
+        """
+        run = self.gear({"BB": "11", "GB": "22", "BG": "22"}, seeds=2)
+        self.assertOk(run)
+        self.assertHas(run, "effect: +0.0pt")
+        self.assertHas(run, "on team 1: -100.0pt")
+        self.assertHas(run, "on team 2: +100.0pt")
+        self.assertHas(run, "net for the gear 0, against 0, even 2; McNemar z=0.00")
+
+    def test_the_interval_is_clustered_by_seed(self):
+        """Seats that move together must not buy a narrower interval.
+
+        BB is all draws; on seeds 1-20 the gear wins from BOTH seats, on 21-40
+        from neither. Each seed's effect equals each seat's, so the combined
+        interval is each seat's interval exactly. Resampling the 80 seat
+        results as independent matches would narrow it by about sqrt(2) --
+        the understatement the card this option was written for warned of.
+        """
+        run = self.gear(
+            {"BB": "d" * 40, "GB": "1" * 20 + "2" * 20, "BG": "2" * 20 + "1" * 20},
+            seeds=40,
+        )
+        self.assertOk(run)
+        lines = run.out.splitlines()
+        effect = next(ln for ln in lines if ln.startswith("effect:"))
+        seat1 = next(ln for ln in lines if "on team 1:" in ln)
+        ci = effect[effect.index("95% CI") : effect.index("]") + 1]
+        self.assertIn("+50.0pt", effect)
+        self.assertIn(ci, seat1)
+        lo, hi = (float(x.strip().rstrip("pt")) for x in ci[len("95% CI [") : -1].split(","))
+        # The seed-level interval of 20/40 is about +/-15.5pt (SE 7.9pt); a
+        # match-level one would be about +/-11pt.
+        self.assertGreater(hi - lo, 27.0)
+
+    def test_draws_are_not_wins_for_either_seat(self):
+        run = self.gear({"BB": "dddd", "GB": "1ddd", "BG": "dd2d"}, seeds=4)
+        self.assertOk(run)
+        self.assertHas(run, "baseline at the same seats 0/8 = 0.0%")
+        self.assertHas(run, "the gear 2/8 = 25.0%")
+        self.assertHas(run, "effect: +25.0pt")
+
+    def test_a_seed_with_an_errored_match_leaves_the_pairing(self):
+        run = self.gear({"BB": "1111", "GB": "11e1", "BG": "2222"}, seeds=4)
+        self.assertOk(run)
+        self.assertHas(run, "PAIRED over the 3 seed(s)")
+        self.assertHas(run, "1 seed(s) dropped")
+        self.assertHas(run, "the gear 6/6 = 100.0%")
+
+    def test_the_single_arm_figures_are_labelled_as_such(self):
+        run = self.gear({"BB": "1111122222", "GB": "1111111122", "BG": "1122222222"})
+        self.assertHas(run, "single-arm win rates (comparison only")
+        self.assertHas(run, "single-arm (unpaired z; comparison only")
+
+    def test_a_small_run_says_its_interval_is_too_narrow(self):
+        small = self.gear({"BB": "1" * 19, "GB": "1" * 19, "BG": "1" * 19}, seeds=19)
+        self.assertHas(small, "fewer than 20 seeds")
+        enough = self.gear({"BB": "1" * 20, "GB": "1" * 20, "BG": "1" * 20}, seeds=20)
+        self.assertLacks(enough, "fewer than 20 seeds")
+
+    def test_the_report_reproduces(self):
+        plan = {"BB": "1212121212", "GB": "1112121221", "BG": "2212122112"}
+        self.assertEqual(self.gear(plan).out, self.gear(plan).out)
+
+    def test_a_profile_sweep_gets_the_paired_report_too(self):
+        run = self.sweep({"LL": "1111122222", "TL": "1111111122", "LT": "1122222222"})
+        self.assertOk(run)
+        self.assertHas(run, "TeamPlan's effect, PAIRED over the 10 seed(s)")
+        self.assertHas(run, "net for TeamPlan 6, against 0, even 4; McNemar z=2.04")
+
+
+# ---------------------------------------------------------------------------
+# the equipment head-to-head's cells
+# ---------------------------------------------------------------------------
+
+EVEN = {"BB": (5, 5, 0, 0), "GB": (5, 5, 0, 0), "BG": (5, 5, 0, 0)}
+
+
+class EquipmentCellTests(GearSweepTestCase):
+    def cells(self):
+        by_label = {}
+        for c in read_batch_jsonl(self.path("sweep.jsonl")):
+            by_label.setdefault(c["label"], []).append(c)
+        return by_label
+
+    def test_three_cells_with_gear_set_per_team(self):
+        self.assertOk(self.gear(EVEN))
+        gear = [{"Trinket2": "DragonspineTrophy"}]
+        seen = {
+            label: {
+                (json.dumps(c.get("team1_equipment")), json.dumps(c.get("team2_equipment")))
+                for c in cfgs
+            }
+            for label, cfgs in self.cells().items()
+        }
+        self.assertEqual(
+            seen,
+            {
+                "BB": {("null", "null")},
+                "GB": {(json.dumps(gear), "null")},
+                "BG": {("null", json.dumps(gear))},
+            },
+        )
+
+    def test_the_ai_is_not_a_variable(self):
+        """No per-team profile anywhere, and none at all unless one is named."""
+        self.gear(EVEN)
+        for cfgs in self.cells().values():
+            for c in cfgs:
+                self.assertNotIn("team1_ai_profile", c)
+                self.assertNotIn("team2_ai_profile", c)
+                self.assertNotIn("ai_profile", c)
+
+    def test_ai_profile_reaches_every_config_uniformly(self):
+        self.assertOk(self.gear(EVEN, "--ai-profile", "TeamPlan"))
+        for cfgs in self.cells().values():
+            for c in cfgs:
+                self.assertEqual(c["ai_profile"], "TeamPlan")
+                self.assertNotIn("team1_ai_profile", c)
+
+    def test_baseline_gear_sits_on_the_baseline_side_of_every_cell(self):
+        self.assertOk(
+            self.gear(
+                EVEN,
+                "--base-team1-equipment", OTHER_GEAR,
+                "--base-team2-equipment", OTHER_GEAR,
+            )
+        )
+        gear = [{"Trinket2": "DragonspineTrophy"}]
+        base = [{"Trinket2": "MarkOfTheChampion"}]
+        for label, (want1, want2) in {
+            "BB": (base, base),
+            "GB": (gear, base),
+            "BG": (base, gear),
+        }.items():
+            for c in self.cells()[label]:
+                self.assertEqual((c["team1_equipment"], c["team2_equipment"]), (want1, want2))
+
+    def test_every_cell_runs_the_same_seeds(self):
+        self.gear(EVEN)
+        seeds = {label: [c["random_seed"] for c in cfgs] for label, cfgs in self.cells().items()}
+        self.assertEqual(sorted(seeds), ["BB", "BG", "GB"])
+        self.assertEqual(seeds["BB"], list(range(1, 11)))
+        self.assertEqual(seeds["GB"], seeds["BB"])
+        self.assertEqual(seeds["BG"], seeds["BB"])
+
+    def test_the_report_names_the_gear_cells(self):
+        run = self.gear({"BB": (5, 3, 2, 0), "GB": (7, 2, 1, 0), "BG": (4, 4, 2, 0)})
+        self.assertOk(run)
+        rows = {ln.split()[0]: ln.split()[1:5] for ln in run.out.splitlines()
+                if ln.split() and ln.split()[0] in ("BB", "GB", "BG")}
+        self.assertEqual(rows["BB"], ["10", "5", "3", "2"])
+        self.assertEqual(rows["GB"], ["10", "7", "2", "1"])
+        self.assertEqual(rows["BG"], ["10", "4", "4", "2"])
+        self.assertHas(run, "the gear's effect")
+        self.assertErrHas(run, "gear vs default loadouts")
+
+    def test_a_profile_sweep_carries_no_equipment(self):
+        self.sweep({"LL": (5, 5, 0, 0), "TL": (5, 5, 0, 0), "LT": (5, 5, 0, 0)}, seeds=10)
+        for c in read_batch_jsonl(self.path("sweep.jsonl")):
+            self.assertNotIn("team1_equipment", c)
+            self.assertNotIn("team2_equipment", c)
+            self.assertNotIn("ai_profile", c)
+
+
+class EquipmentRefusalTests(SweepTestCase):
+    """Each refusal stops the run before a single match is launched."""
+
+    def refused(self, *argv):
+        run = self.sweep(EVEN, *argv)
+        self.assertIsInstance(run.code, str, "expected a refusal, got %r" % (run,))
+        self.assertEqual(run.runner.calls, [])
+        return run.code
+
+    def test_a_profile_under_test_and_gear_together(self):
+        msg = self.refused(
+            "--profile", "TeamPlan", "--team1-equipment", GEAR, "--team2-equipment", GEAR
+        )
+        self.assertIn("--ai-profile", msg)
+
+    def test_gear_on_one_seat_only(self):
+        self.assertIn("both --team1-equipment and --team2-equipment",
+                      self.refused("--team1-equipment", GEAR))
+        self.assertIn("both", self.refused("--base-team1-equipment", GEAR))
+
+    def test_gear_under_test_equal_to_the_baseline(self):
+        msg = self.refused(
+            "--team1-equipment", GEAR, "--team2-equipment", GEAR,
+            "--base-team2-equipment", GEAR,
+        )
+        self.assertIn("team 2's gear under test is its baseline", msg)
+        # An empty override is the default loadout, so it measures nothing too.
+        msg = self.refused("--team1-equipment", "[{}, {}]", "--team2-equipment", GEAR)
+        self.assertIn("team 1's gear under test is its baseline", msg)
+
+    def test_malformed_gear(self):
+        self.assertIn("not valid JSON",
+                      self.refused("--team1-equipment", "[{", "--team2-equipment", GEAR))
+        self.assertIn("expected a JSON list",
+                      self.refused("--team1-equipment", '{"Trinket2": "X"}',
+                                   "--team2-equipment", GEAR))
+        self.assertIn("slot 0 must be an object",
+                      self.refused("--team1-equipment", '[{"Trinket2": 3}]',
+                                   "--team2-equipment", GEAR))
+        self.assertIn("only 2 members",
+                      self.refused("--team1-equipment", "[{}, {}, {}]",
+                                   "--team2-equipment", GEAR))
+
+    def test_ai_profile_without_gear(self):
+        self.assertIn("--profile", self.refused("--ai-profile", "TeamPlan"))
 
 
 class InterpreterFloorTests(unittest.TestCase):

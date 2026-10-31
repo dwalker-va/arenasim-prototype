@@ -292,7 +292,8 @@ For deeper context, see these focused references:
   **Sample-size warning stands:** an n=12 win-rate figure is noise around
   these values. Prefer per-frame mechanism metrics
   (`tests/camp_sweep.rs`); for win rate use `scripts/headtohead_sweep.py`
-  (~100 matches/cell via the parallel `--batch` runner, Wilson CIs, z-tests).
+  (~100 matches/cell via the parallel `--batch` runner; a paired effect with a
+  seed-clustered bootstrap interval and McNemar, single-arm Wilson CIs beside it).
   **Measurement rule:** `AiProfiles` is PER-TEAM; a uniform-profile A/B cannot
   answer "is the new AI better", so set the sides differently and run both
   assignments — see *How to measure a step* in that doc, and `tests/camp_sweep.rs`.
