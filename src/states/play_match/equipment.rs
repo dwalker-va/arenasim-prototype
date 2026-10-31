@@ -3976,6 +3976,61 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         );
     }
 
+    /// Every class's default kit, as the budget prices it: the sum of
+    /// `calculate_budget_usage` over its default loadout. A re-spend of a
+    /// starting-kit item (AS-303's TBC slot multipliers re-spent the legs,
+    /// waists, wrists and trinkets) moves its class's total, and a reverted
+    /// or half-applied one is otherwise invisible: the budget check is only a
+    /// cap. So a change to any default kit item's budgeted stats fails here
+    /// until this table is edited with it. Every class is named, by set
+    /// equality, so a new class fails until it has a row.
+    #[test]
+    fn default_kit_budget_usage_per_class() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let loadouts = load_default_loadouts(&items).expect("loadouts.ron must load");
+        let expected: BTreeMap<&str, f32> = [
+            ("Warrior", 268.5),
+            ("Mage", 356.0),
+            ("Rogue", 226.0),
+            ("Priest", 367.0),
+            ("Warlock", 356.0),
+            ("Paladin", 384.5),
+            ("Hunter", 293.0),
+            ("Shaman", 388.5),
+            ("Druid", 393.0),
+        ]
+        .into_iter()
+        .collect();
+        let actual: BTreeMap<&str, f32> = CharacterClass::all()
+            .iter()
+            .map(|class| {
+                let kit = loadouts
+                    .get(*class)
+                    .unwrap_or_else(|| panic!("{class:?} has no default loadout"));
+                let usage: f32 = kit
+                    .values()
+                    .map(|id| calculate_budget_usage(items.get(id).expect("kit item is defined")))
+                    .sum();
+                (class.name(), (usage * 100.0).round() / 100.0)
+            })
+            .collect();
+        assert_eq!(
+            actual.keys().collect::<Vec<_>>(),
+            expected.keys().collect::<Vec<_>>(),
+            "every class has a row"
+        );
+        let off: Vec<String> = actual
+            .iter()
+            .filter(|(class, usage)| (*usage - expected[*class]).abs() > 0.01)
+            .map(|(class, usage)| format!("{class}: {usage} (pinned {})", expected[class]))
+            .collect();
+        assert!(
+            off.is_empty(),
+            "default kit budget moved:\n{}",
+            off.join("\n")
+        );
+    }
+
     /// No shipped one-hander spends more than a one-hander's 0.42 — with no
     /// tolerance, so the one-handers that predate the split were not merely
     /// let through by it. Walks every shipped one-hander; the non-empty check

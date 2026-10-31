@@ -354,6 +354,12 @@ fn the_flinch_reads_on_moving_victims_in_a_real_match() {
     // --- Visibility on the move: the Warrior under arrows -------------------
     let mut moving_shot_windows = 0;
     for arrival in &arrivals {
+        // The arrow that kills the Warrior is drawn under its death and the
+        // victory celebration, which own the body (the same exclusion as the
+        // melee blows below).
+        if seen.decided.is_some_and(|d| arrival.0 >= d) {
+            continue;
+        }
         let window = window_from(seen, m.warrior, arrival.0);
         if window[0].moved > MOVING_EPS {
             moving_shot_windows += 1;

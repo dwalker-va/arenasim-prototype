@@ -2,11 +2,14 @@
 
 **Card:** AS-303. **Tier: AUTHORITY** (`sweep-tiers.md`): this re-baselines every
 class, and the rest of 0.9 (E1, AS-399's target-focus tuning) measures against it.
-**Measured commits:** before `a8a30775` (main as 0.9 began); after
-`9544e24e` (that commit plus E0's multipliers and kit; the commits after it on the
-branch change tests and docs only). Main did not move during the sweep: none of
-the in-flight 0.9 cards (Life Tap, Holy Light, Rogue poisons, dodge/parry,
-Shadow Word: Pain) had merged when it finished.
+**Measured commits:** the authority sweep (§3, §4): before `a8a30775` (main as
+0.9 began); after `9544e24e` (that commit plus E0's multipliers and a kit re-spent
+in each class's own stat mix). Main did not move during it: none of the in-flight
+0.9 cards (Life Tap, Holy Light, Rogue poisons, dodge/parry, Shadow Word: Pain)
+had merged when it finished. The Hunter's attack-power re-spend (user ruling,
+2026-10-30) came after, and is measured on its own (§3.2, DIRECTIONAL): before
+`269e4f11` (`9544e24e` merged with main at `e824cb88`, Holy Light), after that
+commit with the re-spend.
 **Harness:** `arenasim --batch`, 300s cap, default loadouts. Maps: BasicArena
 (Basic), PillaredArena (Nagrand), TwinPillars (Twin).
 
@@ -24,13 +27,15 @@ tables below).
    shoulders, hands and feet, and the wrists with neck, back and ring. The
    proposal's "about 0.77" is 0.75. Trinket 0.70 and ranged 0.5625 are rulings
    the client cannot settle.
-2. **Every combatant's kit rises by 18.5-19.0 budget points**, in its own stat
-   mix (§2). Not byte-identical: 72% of the paired matches change winner, end
+2. **Every combatant's kit rises by 18.5-19.5 budget points**, in its own stat
+   mix, the Hunter's in attack power (§2). Not byte-identical: 72% of the paired matches change winner, end
    reason or duration.
 3. **E0 barely moves the standings.** Overall competitive win rate is unchanged
    by construction (2v2 +0.0, 3v3 +0.1). One class moves more than a point:
    **the Hunter loses −1.6pt in 2v2 and −2.3pt in 3v3** (z=−10.6 / −5.1, every
-   block, every 2v2 profile and map but Legacy Twin). The other replicated
+   block, every 2v2 profile and map but Legacy Twin) with its kit re-spent in its
+   own stat mix. Re-spent into attack power instead (the shipped kit, §3.2), it
+   wins back **+0.5pt** of the 2v2 loss (z=3.7, every block). The other replicated
    2v2 moves are within ±0.6pt: Warrior +0.6, Paladin +0.6, Mage +0.5,
    Shaman +0.5, Rogue +0.4, Druid −0.5. In 3v3 the Shaman gains +1.3.
 4. **TeamPlan still beats Legacy head-to-head by the 0.8 margins** (§4): 2v2
@@ -39,7 +44,8 @@ tables below).
    the head-to-head effect by −0.2pt (2v2 competitive, ns).
 5. **The Paladin is still the strongest class** (2v2 competitive 59.7-67.5%
    on every map and profile) and the Hunter and Warlock the weakest under
-   Legacy. E0 widens the Hunter's gap and leaves the Paladin on top (+0.6).
+   Legacy. E0 widens the Hunter's gap (by about 1.1pt in 2v2 once its kit
+   goes to attack power) and leaves the Paladin on top (+0.6).
 
 ## 1. TBC's slot modifiers, from the TBC client
 
@@ -117,16 +123,21 @@ loosely, hence the wide quartiles), but no median is nearer another group's colu
 | Hands held (two-hand / one-hand / off-hand) | 1.0 / 0.42 / 0.5625 | unchanged |
 
 **The starting kit re-spent.** Every starting-kit leg, waist, wrist and trinket
-spends its slot's budget RISE (ilvl × 0.75 × the multiplier's change) in its own
-stat mix: each budgeted stat grows by the same proportion, rounded to whole points
-(mana regen to 0.5), crit left as it was (one 0.01 step is 3 points). So each item
-keeps its design and its stat mix, and every combatant gains the same:
+spends its slot's budget RISE (ilvl × 0.75 × the multiplier's change). Every
+class but the Hunter spends it across the item's existing budgeted stats, close to
+their existing proportions: whole points (mana regen in 0.5 steps) chosen to land
+nearest the rise, so a small stat may not move (the Magister's Bracers keep 3
+health) and crit is left as it was (one 0.01 step is 3 points). The Hunter's legs,
+belt and bracers spend all of theirs on attack power (user ruling, 2026-10-30;
+§3.2), keeping their pre-E0 health and mana. Its trinket, Mark of the Champion,
+is shared with the Warrior and the Rogue and keeps the common re-spend (+2 attack
+power, +2 spell power). Every combatant gains about the same:
 
 | class | legs | waist | wrists | trinket | rise (budget points) |
 |---|---|---|---|---|---|
 | Warrior | +5.5 | +5.0 | +2.5 | +6.0 | **19.0** |
 | Paladin | +5.5 | +5.5 | +2.5 | +5.5 | **19.0** |
-| Hunter | +5.5 | +5.0 | +2.5 | +6.0 | **19.0** |
+| Hunter | +6.0 (+4 AP) | +4.5 (+3 AP) | +3.0 (+2 AP) | +6.0 | **19.5** |
 | Rogue | +5.5 | +5.0 | +2.5 | +6.0 | **19.0** |
 | Mage, Priest, Warlock | +5.5 | +5.0 | +2.5 | +5.5 | **18.5** |
 | Shaman, Druid | +5.5 | +5.0 | +2.5 | +5.5 | **18.5** |
@@ -165,10 +176,9 @@ format, so a lone |z| near 2 is what nine tries produce; the Hunter's is not.
 
 **The Hunter is the one class E0 moves by more than a point**, and it moves on
 every 2v2 profile and map but Legacy TwinPillars (§3.1), and in 3v3 under both
-profiles. A likely reason, not measured here: the Hunter's re-spend went mostly
-to health and mana (+6 / +4, against +4 attack power), and its Auto Shot does not
-scale with attack power at all, so its damage grew least while every opponent's
-health grew.
+profiles. These figures are for the Hunter kit re-spent in its own stat mix,
+mostly health and mana (+6 / +4, against +2 attack power); §3.2 measures the
+shipped kit, which puts the Hunter's whole rise into attack power.
 
 ### 3.1 The new baseline: class standings after E0
 
@@ -190,6 +200,12 @@ one sign, |z| ≥ 1.96). These are the standings 0.9's later sweeps cite.
 | Warrior | 46.8 (+0.2) | 46.8 (+1.0*) | 41.9 (+0.2) | 50.5 (+0.8*) | 49.4 (+0.8) | 46.6 (+0.5) |
 | Hunter | 44.9 (-1.8*) | 42.4 (-1.6*) | 41.4 (-0.5) | 44.9 (-1.9*) | 45.9 (-1.8*) | 48.8 (-1.8*) |
 | Warlock | 39.5 (-0.4) | 39.0 (-0.6) | 39.0 (-0.2) | 45.0 (+0.9*) | 46.7 (-0.6) | 47.0 (-0.0) |
+
+The Hunter rows above are for its stat-mix kit. With the shipped attack-power
+kit (§3.2) its 2v2 competitive standing is **46.0 / 42.9 / 41.8** (Legacy Basic /
+Nagrand / Twin) and **45.6 / 45.8 / 49.2** (TeamPlan), on main with Holy Light
+(`e824cb88`), which moves only TeamPlan cells with a Paladin. Its 3v3 rows were
+not re-measured.
 
 #### 3v3 competitive
 
@@ -225,6 +241,44 @@ draw 0.67-0.83%); 3v3 0.28-1.44% → 0.28-1.11%. Median durations move by at mos
 (74.0 / 73.8 / 78.1, Basic / Nagrand / Twin), and Mage+Warlock is still #2 on
 Nagrand (69.0, from 72.1). Legacy's tops are unchanged: Mage+Shaman on Basic
 (76.0), Rogue+Druid on the pillar maps (75.8 / 74.2).
+
+### 3.2 The Hunter's kit re-spent into attack power
+
+User ruling (2026-10-30): the Hunter's E0 rise goes to attack power. Its legs,
+belt and bracers keep their pre-E0 health and mana and spend the whole rise on
+attack power: +4, +3 and +2 (legs 4→8, belt 3→6, bracers 2→4), a rise of 13.5
+budget points against 13.0 in the stat-mix kit. Its trinket, Mark of the
+Champion, is shared with the Warrior and the Rogue and keeps the common
+re-spend.
+
+**DIRECTIONAL** (`sweep-tiers.md`), paired: the stat-mix kit (`269e4f11`) against
+the attack-power kit, the 2v2 cells of the authority bank that field a Hunter on
+either side (512 per map and profile) plus 11 control cells without one, on all
+three maps under both profiles, at the same 12 seeds in three blocks: 37,656
+matches per arm (`2026-10-30-as303-hunter-bank.py`).
+
+- **Control:** 792 matches without a Hunter, fielding every other class on both
+  sides, identical in winner, end reason and duration. 20,185 of the 36,864
+  Hunter matches (55%) change.
+- **Non-vacuity:** 37,220 of 37,656 decisive.
+
+| slice (competitive) | n | stat mix | attack power | delta | per block | z |
+|---|---|---|---|---|---|---|
+| **Hunter, all** | 34,560 | 44.7 | 45.2 | **+0.5** | +0.8 / +0.5 / +0.4 | +3.7 **R** |
+| Hunter, Legacy | 17,280 | 42.9 | 43.6 | **+0.7** | +1.2 / +0.5 / +0.3 | +3.4 **R** |
+| — Basic | 5,760 | 44.9 | 46.0 | **+1.0** | +1.0 / +1.0 / +1.1 | +3.0 **R** |
+| — Nagrand | 5,760 | 42.4 | 42.9 | +0.6 | +1.5 / +0.4 / −0.2 | +1.7 |
+| — Twin | 5,760 | 41.4 | 41.8 | +0.4 | +1.1 / +0.2 / −0.1 | +1.2 |
+| Hunter, TeamPlan | 17,280 | 46.5 | 46.9 | +0.4 | +0.4 / +0.4 / +0.4 | +1.9 |
+| — Basic | 5,760 | 45.0 | 45.6 | +0.6 | +0.1 / +0.7 / +0.9 | +1.5 |
+| — Nagrand | 5,760 | 45.6 | 45.8 | +0.2 | +0.5 / +0.4 / −0.2 | +0.6 |
+| — Twin | 5,760 | 48.8 | 49.2 | +0.5 | +0.6 / +0.2 / +0.6 | +1.2 |
+
+Floors 0.3pt (all), 0.4pt (per profile), 0.5-0.8pt (per map). The re-spend wins
+back about a third of E0's 2v2 Hunter loss (−1.6 → about −1.1 against main);
+every slice is positive, and the pooled one and Legacy's replicate. The 3v3 was
+not re-measured: the attack-power kit should recover a similar share there, but
+that is untested.
 
 ## 4. TeamPlan against Legacy, head-to-head, after E0
 
@@ -277,11 +331,12 @@ leaves the TeamPlan advantage where 0.8 measured it.**
 
 ## 5. Concerns
 
-1. **The Hunter falls further behind** (§3): 2v2 competitive Legacy 41.4-44.9%,
-   3v3 37.5-40.1% under Legacy and 38.3% on TeamPlan BasicArena. E0 spends every
-   class's budget rise in that class's own stat mix, which for the Hunter is
-   mostly health and mana. A Hunter-specific re-spend (more attack power, or a
-   bow budget) is a balance card, not E0's.
+1. **The Hunter falls further behind** (§3, §3.2): with its rise in attack power,
+   2v2 competitive 41.8-46.0% under Legacy and 45.6-49.2% under TeamPlan, about
+   1.1pt below main; 3v3 (stat-mix kit) 37.5-40.1% under Legacy and 38.3% on
+   TeamPlan BasicArena. The attack-power re-spend recovers a third of the loss;
+   the rest is a balance question (a bow budget, or the Hunter's kit beyond the
+   E0 slots).
 2. **The Paladin stays on top** (59.7-67.5% 2v2 competitive, +0.6 from E0), as in 0.8.
 3. **TeamPlan double-healer stalls** on the pillar maps are unchanged (23% of
    non-competitive Nagrand cells draw at the cap).
@@ -297,6 +352,7 @@ Every figure recomputes from the committed files, from
 | §3 paired effect | `2026-10-29-as303-score.py e0 2026-10-29-as303-before.csv.gz -- 2026-10-29-as303-after.csv.gz` |
 | §3.1 standings, draws, comps | `2026-10-25-0.8-score.py standings` (and `draws`, `comps 2 3`) `2026-10-29-as303-after.csv.gz` |
 | §4 head-to-head | `2026-10-29-as303-score.py h2h 2026-10-29-as303-after.csv.gz` |
+| §3.2 Hunter re-spend | `2026-10-29-as303-score.py e0 2026-10-30-as303-hunter-base.csv.gz -- 2026-10-30-as303-hunter-ap.csv.gz`; standings: `2026-10-25-0.8-score.py standings 2026-10-30-as303-hunter-ap.csv.gz` |
 | §4 E0's shift of it | `2026-10-29-as303-score.py h2h-shift 2026-10-29-as303-before.csv.gz -- 2026-10-29-as303-after.csv.gz` |
 
 The banks are `2026-10-29-as303-gen.py`: `uni <map> <Legacy|TeamPlan> 2

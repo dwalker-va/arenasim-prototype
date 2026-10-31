@@ -257,9 +257,9 @@
             slot: Legs,
             armor_type: Mail,
             armor: 157.0,
-            max_health: 16.0,
-            max_mana: 11.0,
-            attack_power: 5.0,
+            max_health: 14.0,
+            max_mana: 9.0,
+            attack_power: 8.0,
             crit_chance: 0.01,
         ),
 
@@ -295,9 +295,9 @@
             slot: Waist,
             armor_type: Mail,
             armor: 146.0,
-            max_health: 9.0,
-            max_mana: 7.0,
-            attack_power: 3.0,
+            max_health: 6.0,
+            max_mana: 5.0,
+            attack_power: 6.0,
         ),
 
         BeaststalkerBracers: (
@@ -307,9 +307,9 @@
             slot: Wrists,
             armor_type: Mail,
             armor: 146.0,
-            max_health: 6.0,
+            max_health: 5.0,
             max_mana: 4.0,
-            attack_power: 3.0,
+            attack_power: 4.0,
         ),
 
         BeaststalkerMantle: (
