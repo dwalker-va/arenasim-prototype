@@ -4121,15 +4121,22 @@ mod shaman_totems {
     /// `TOTEM_DURATION` (it spawns in Phase 2, after the Phase-1 pulse that
     /// would tick it, so its first observed frame is un-ticked). At that frame
     /// the Shaman is at the drop position: horizontal distance to it must be
-    /// within the spacing offset, and the totem must be strictly closer to its
-    /// own caster than to any enemy (i.e. dropped at the Shaman, not on the
-    /// target).
+    /// within the spacing offset.
+    ///
+    /// That alone says "at the caster, not at the enemy" only for a drop made
+    /// while every enemy is clear of the Shaman: with an enemy in melee, a
+    /// totem at the caster's feet can sit as near that enemy as the Shaman
+    /// (1.59yd against 1.6yd in this match after AS-303), and at-the-caster
+    /// and at-the-enemy are the same place. So the probe also requires such a
+    /// DISTINGUISHABLE drop: every enemy more than twice the tolerance from the
+    /// Shaman, where a totem dropped on an enemy would fail the bound.
     #[test]
     fn totem_placement_is_near_caster_not_in_melee() {
         let (_result, frames) = run_collecting_frames(placement_fixture());
         let shaman = find_combatant(&frames, 1, CharacterClass::Shaman);
 
         let mut placements = 0usize;
+        let mut distinguishable = 0usize;
         for f in &frames {
             let Some(sh) = f.combatants.get(&shaman) else {
                 continue;
@@ -4162,23 +4169,27 @@ mod shaman_totems {
                     d_caster,
                     TOTEM_SPACING_OFFSET
                 );
-                // "Not at the enemy": the totem is strictly nearer its caster
-                // than any enemy. Robust even when an enemy closes on the
-                // Shaman — the totem still sits at the caster, never on the
-                // target.
-                assert!(
-                    d_caster < enemy_to_totem,
-                    "{:?} totem ({:.2}yd from caster) is no closer to the Shaman \
-                     than to an enemy ({:.1}yd) — totems must spawn at the caster, \
-                     not the target",
-                    t.element,
-                    d_caster,
-                    enemy_to_totem
-                );
+                // "Not at the enemy": distinguishable only while every enemy
+                // is clear of the Shaman by twice the tolerance (a totem on
+                // such an enemy would then fail the bound above).
+                let enemy_to_shaman = f
+                    .combatants
+                    .values()
+                    .filter(|c| c.team == 2 && !c.is_pet && c.alive)
+                    .map(|c| horiz(c.position, sh.position))
+                    .fold(f32::INFINITY, f32::min);
+                if enemy_to_shaman > 2.0 * (TOTEM_SPACING_OFFSET + 0.5) {
+                    distinguishable += 1;
+                }
             }
         }
         // At least one drop per element across the match.
         assert_min_occurrences("fresh totem placements", placements, 4);
+        assert_min_occurrences(
+            "fresh totem placements with every enemy clear of the Shaman",
+            distinguishable,
+            1,
+        );
     }
 }
 
