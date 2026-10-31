@@ -162,6 +162,7 @@ pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) 
         AuraType::FearImmunity => "aura_max_health".to_string(), // Berserker Rage buff, reuse buff icon (real icon comes from the ability config)
         AuraType::Cyclone => "aura_stun".to_string(), // Reuse stun icon (real icon comes from the ability config)
         AuraType::TravelForm => "aura_max_health".to_string(), // Reuse buff icon (real icon comes from the ability config)
+        AuraType::AttackSpeedIncrease => "aura_max_health".to_string(), // Haste buff, reuse buff icon (a proc wears its trinket's icon)
     }
 }
 
@@ -197,6 +198,7 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         | AuraType::HealingOverTime
         | AuraType::FearImmunity
         | AuraType::WindfuryBuff
+        | AuraType::AttackSpeedIncrease
         | AuraType::TravelForm => true,
 
         // Harmful: crowd control, damage over time and stat/casting debuffs.
@@ -387,6 +389,24 @@ mod tests {
             procs,
             "a non-proc item is registered as aura art"
         );
+    }
+
+    /// The buff bar's gold-or-red border agrees with the sim's hostility
+    /// classifier for every aura type but one: Weakened Soul, the Power Word:
+    /// Shield cooldown marker, is neither hostile nor a buff.
+    #[test]
+    fn a_buff_is_exactly_what_is_not_hostile_save_weakened_soul() {
+        for aura in AuraType::ALL {
+            if aura == AuraType::WeakenedSoul {
+                assert!(!is_buff_aura(&aura) && !aura.is_hostile_effect());
+                continue;
+            }
+            assert_eq!(
+                is_buff_aura(&aura),
+                !aura.is_hostile_effect(),
+                "{aura:?}: buff border and hostility disagree"
+            );
+        }
     }
 
     /// An aura with no source item still resolves exactly as before: two

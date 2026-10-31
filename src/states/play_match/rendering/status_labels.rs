@@ -101,6 +101,7 @@ pub fn overhead_status_label(aura: &Aura) -> Option<OverheadLabel> {
         | AuraType::HealingOverTime
         | AuraType::WindfuryBuff
         | AuraType::ArmorIncrease
+        | AuraType::AttackSpeedIncrease
         | AuraType::TravelForm => None,
     }
 }

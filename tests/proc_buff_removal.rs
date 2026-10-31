@@ -4,9 +4,9 @@
 //!
 //! **Removal.** A trinket proc is not magic — an item's effect is not a spell,
 //! however it looks — so no purge or dispel may take it. The hazard is that a
-//! proc's buff shares its `AuraType` with a magic buff: a Dragonspine proc is
-//! the same `AttackPowerIncrease` as Battle Shout, and the Shaman's Purge is
-//! pinned to a TYPE. Eligibility therefore has to be asked per aura.
+//! proc's buff can share its `AuraType` with a magic buff: an attack-power
+//! proc is the same `AttackPowerIncrease` as Battle Shout, and the Shaman's
+//! Purge is pinned to a TYPE. Eligibility therefore has to be asked per aura.
 //!
 //! **Dedup.** A type-keyed buff (Battle Shout) and a source-keyed proc buff of
 //! the same type must coexist whichever arrives first. Only the shout-first
@@ -26,8 +26,10 @@ use arenasim::states::play_match::equipment::ItemId;
 use arenasim::states::play_match::proc_trinkets::{ProcConfig, ProcTrigger};
 use arenasim::CharacterClass;
 
-/// Dragonspine Trophy's buff, from the constructor the proc hook uses.
-fn dragonspine_buff() -> Aura {
+/// An attack-power proc's buff, from the constructor the proc hook uses. No
+/// shipped trinket procs attack power, so it borrows the Dragonspine Trophy's
+/// id and name; what these tests need is the type it shares with Battle Shout.
+fn ap_proc_buff() -> Aura {
     ProcConfig {
         trigger: ProcTrigger::MeleeHit,
         chance: 0.15,
@@ -104,7 +106,7 @@ fn queue(app: &mut App, target: Entity, scope: DispelScope) {
 #[test]
 fn a_purge_cannot_remove_a_proc_buff() {
     let mut app = dispel_app(1);
-    let target = wearer(&mut app, vec![dragonspine_buff()]);
+    let target = wearer(&mut app, vec![ap_proc_buff()]);
     queue(&mut app, target, DispelScope::Purge);
     app.update();
     assert_eq!(names(&app, target), vec!["Dragonspine Trophy"]);
@@ -118,7 +120,7 @@ fn a_purge_cannot_remove_a_proc_buff() {
 fn a_purge_beside_a_same_type_magic_buff_always_takes_the_magic_one() {
     for seed in 0..32 {
         let mut app = dispel_app(seed);
-        let target = wearer(&mut app, vec![dragonspine_buff(), battle_shout_buff()]);
+        let target = wearer(&mut app, vec![ap_proc_buff(), battle_shout_buff()]);
         queue(&mut app, target, DispelScope::Purge);
         app.update();
         assert_eq!(
@@ -132,7 +134,7 @@ fn a_purge_beside_a_same_type_magic_buff_always_takes_the_magic_one() {
 /// No other removal takes it either — every kind of removal the game has.
 #[test]
 fn no_removal_scope_takes_a_proc_buff() {
-    let proc = dragonspine_buff();
+    let proc = ap_proc_buff();
     let scopes = [
         DispelScope::Magic,
         DispelScope::MagicOrPoison,
@@ -179,7 +181,7 @@ fn land(app: &mut App, target: Entity, aura: Aura) {
 #[test]
 fn a_shout_lands_on_a_target_already_carrying_a_proc() {
     let mut app = apply_app();
-    let target = target_with(&mut app, vec![dragonspine_buff()]);
+    let target = target_with(&mut app, vec![ap_proc_buff()]);
     land(&mut app, target, battle_shout_buff());
     assert_eq!(
         names(&app, target),
@@ -192,7 +194,7 @@ fn a_shout_lands_on_a_target_already_carrying_a_proc() {
 fn a_proc_lands_on_a_target_already_carrying_a_shout() {
     let mut app = apply_app();
     let target = target_with(&mut app, vec![battle_shout_buff()]);
-    land(&mut app, target, dragonspine_buff());
+    land(&mut app, target, ap_proc_buff());
     assert_eq!(
         names(&app, target),
         vec!["Battle Shout", "Dragonspine Trophy"]

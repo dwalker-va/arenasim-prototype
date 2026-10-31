@@ -546,6 +546,7 @@ pub fn apply_pending_auras(
                 | AuraType::LockoutDurationReduction
                 | AuraType::SpellResistanceBuff
                 | AuraType::AttackSpeedSlow
+                | AuraType::AttackSpeedIncrease
                 | AuraType::SpellPowerIncrease
                 | AuraType::HealingOverTime
                 | AuraType::WindfuryBuff
@@ -768,6 +769,20 @@ pub fn apply_pending_auras(
                 CombatLogEventType::Buff,
                 format!(
                     "{} gains {} (+{:.0}% crit chance)",
+                    target_id,
+                    pending.aura.ability_name,
+                    pending.aura.magnitude * 100.0
+                ),
+            );
+        }
+
+        // Handle AttackSpeedIncrease aura (haste, a proc) - dynamic, no stat
+        // mutation: the swing timer reads it (`effective_attack_interval`).
+        if pending.aura.effect_type == AuraType::AttackSpeedIncrease {
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!(
+                    "{} gains {} (+{:.0}% attack speed)",
                     target_id,
                     pending.aura.ability_name,
                     pending.aura.magnitude * 100.0

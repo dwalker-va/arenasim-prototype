@@ -775,6 +775,7 @@ impl HealImpact {
             | AuraType::WindfuryBuff
             | AuraType::FearImmunity
             | AuraType::Cyclone
+            | AuraType::AttackSpeedIncrease
             | AuraType::TravelForm => None,
         }
     }
@@ -1511,7 +1512,8 @@ impl AuraApplyRoute {
             | AuraType::WeaponPoison
             | AuraType::SpellPowerIncrease
             | AuraType::HealingOverTime
-            | AuraType::WindfuryBuff => AuraApplyRoute::Band,
+            | AuraType::WindfuryBuff
+            | AuraType::AttackSpeedIncrease => AuraApplyRoute::Band,
 
             // Travel Form has no bespoke apply treatment of its own, so the
             // family cue draws it.

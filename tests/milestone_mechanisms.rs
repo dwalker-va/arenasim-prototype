@@ -47,6 +47,11 @@ const MANA_SAMPLE_SECS: f32 = 5.0;
 const ESCAPE_WINDOW_SECS: f32 = 1.5;
 /// A chaser is a melee or pet enemy this close at the shift: the danger radius.
 const ESCAPE_CHASER_YARDS: f32 = 12.0;
+/// Below this health fraction the Druid is dying: `DRUID_EMERGENCY_HP`.
+const DYING_HP: f32 = 0.45;
+/// A melee or pet enemy this close strikes: `MELEE_RANGE` plus the Druid AI's
+/// 5yd slack, the reach of the shift rule.
+const STRIKING_YARDS: f32 = 7.5;
 /// Escape-side clearance is marched out to this far and no farther.
 const CLEARANCE_CAP_YARDS: f32 = 12.0;
 
@@ -164,6 +169,38 @@ struct UnitRow {
     died_in_room: bool,
     /// One per Travel Form onset with a chaser on the unit (AS-241).
     escapes: Vec<EscapeWindow>,
+    /// One per time the unit left Travel Form alive (AS-242).
+    leaves: Vec<FormLeave>,
+    /// Seconds shifted below [`DYING_HP`] with no melee or pet enemy within
+    /// [`STRIKING_YARDS`]: the frames an emergency leave could use (AS-242).
+    dying_unstruck_shifted_secs: f32,
+    /// Seconds shifted below [`DYING_HP`], whatever was near.
+    dying_shifted_secs: f32,
+    /// Post-gate seconds of this unit's heal casts (Rejuvenation, Swiftmend,
+    /// Lifebloom), from the log; read into [`FormLeave::heal_after`].
+    #[serde(skip)]
+    heal_times: Vec<(f32, String)>,
+}
+
+/// The unit leaving Travel Form alive (AS-242).
+#[derive(Serialize, Default, Clone)]
+struct FormLeave {
+    /// Seconds after the gates.
+    t: f32,
+    /// Health fraction on the first frame out of the form.
+    hp: f32,
+    /// A root was on the unit as it left: the leave to re-shift through it.
+    rooted: bool,
+    /// Yards to the nearest living melee or pet enemy, if any.
+    chaser_gap: Option<f32>,
+    /// Seconds to the next Travel Form onset, if one came.
+    reshift_after: Option<f32>,
+    /// Seconds to the unit's next heal cast, if one came.
+    heal_after: Option<f32>,
+    /// That heal.
+    heal: Option<String>,
+    /// Seconds to the unit's death, if it died.
+    death_after: Option<f32>,
 }
 
 /// The first [`ESCAPE_WINDOW_SECS`] of a Travel Form shift with a CHASER on
@@ -251,6 +288,11 @@ fn parse_log(log: &str, units: &mut [UnitRow]) {
                     if let Some(rest) = body.strip_prefix(&prefix) {
                         let ability = rest.split(" on ").next().unwrap_or(rest).trim();
                         *u.casts.entry(ability.to_string()).or_default() += 1;
+                        if matches!(ability, "Rejuvenation" | "Swiftmend" | "Lifebloom") {
+                            if let Some(t) = parse_time(line) {
+                                u.heal_times.push((t - COUNTDOWN_SECS, ability.to_string()));
+                            }
+                        }
                         if ability.ends_with(" Trap") {
                             if let Some(t) = parse_time(line) {
                                 u.trap_uses.push((t - COUNTDOWN_SECS, ability.to_string()));
@@ -377,6 +419,31 @@ fn run_one(cfg: HeadlessMatchConfig, defs: &AbilityDefinitions, log_path: String
                 u.shifted_secs += FRAME;
                 if !tr.shifted_prev {
                     u.shifts += 1;
+                    if let Some(l) = u.leaves.last_mut().filter(|l| l.reshift_after.is_none()) {
+                        l.reshift_after = Some(t - l.t);
+                    }
+                }
+            }
+            let nearest_chaser = frame
+                .combatants
+                .values()
+                .filter(|o| o.team != c.team && o.alive && (o.is_pet || o.class.is_melee()))
+                .map(|o| xz(o.position).distance(xz(c.position)))
+                .min_by(|a, b| a.total_cmp(b));
+            let hp = c.current_health / c.max_health;
+            if !shifted && tr.shifted_prev {
+                u.leaves.push(FormLeave {
+                    t,
+                    hp,
+                    rooted: c.aura_types.contains(&AuraType::Root),
+                    chaser_gap: nearest_chaser,
+                    ..Default::default()
+                });
+            }
+            if shifted && hp < DYING_HP {
+                u.dying_shifted_secs += FRAME;
+                if nearest_chaser.is_none_or(|g| g > STRIKING_YARDS) {
+                    u.dying_unstruck_shifted_secs += FRAME;
                 }
             }
             let cyclone = c.aura_types.contains(&AuraType::Cyclone);
@@ -502,6 +569,15 @@ fn run_one(cfg: HeadlessMatchConfig, defs: &AbilityDefinitions, log_path: String
     }
     let log = std::fs::read_to_string(&log_path).unwrap_or_default();
     parse_log(&log, &mut units);
+    for u in units.iter_mut() {
+        let (heals, death) = (std::mem::take(&mut u.heal_times), u.death);
+        for l in u.leaves.iter_mut() {
+            let heal = heals.iter().find(|(h, _)| *h >= l.t - 0.05);
+            l.heal_after = heal.map(|(h, _)| h - l.t);
+            l.heal = heal.map(|(_, name)| name.clone());
+            l.death_after = death.map(|d| d - l.t);
+        }
+    }
     MatchRow {
         label,
         map,
