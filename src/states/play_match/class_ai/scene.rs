@@ -51,7 +51,7 @@ use crate::states::play_match::ability_config::{load_ability_definitions, Abilit
 use crate::states::play_match::ai_profile::{AiProfile, AiProfiles};
 use crate::states::play_match::arena_bounds::ArenaBounds;
 use crate::states::play_match::combat_ai::{
-    dispatch_class_decision, DispatchAccumulators, DispatchFrame, DispatchIo,
+    dispatch_class_decision, dispatch_while_held, DispatchAccumulators, DispatchFrame, DispatchIo,
 };
 use crate::states::play_match::combat_core::{Avoidance, MeleeAvoided};
 use crate::states::play_match::components::{
@@ -63,8 +63,10 @@ use crate::states::play_match::decision_trace::{
     AbilityCandidate, AbilityOutcome, CandidateStatus, DecisionTrace, EventKind, EventPayload,
     MovementTrigger, Posture, RejectionReason, SituationTag,
 };
+use crate::states::play_match::equipment::{load_item_definitions, ItemId};
 use crate::states::play_match::map_geometry::ObstacleVolume;
 use crate::states::play_match::movement_config::{load_movement_config, MovementConfig};
+use crate::states::play_match::on_use_items::{OnUsePending, OnUseSlot};
 use crate::states::play_match::situation::{
     update_situations, ExceptionSet, MatchClock, Play, PlaySet, SituationConfig, Situations,
     WithheldPlays,
@@ -320,6 +322,27 @@ impl Scene {
     }
 
     /// The map's obstacle volumes.
+    /// `who` carries `item`'s on-use (from the shipped `items.ron`), ready, as
+    /// `Combatant::apply_equipment` captures it. Only the on-use: the item's
+    /// stats are not added, so the scene's health fractions mean what they say.
+    pub fn on_use_item(mut self, who: Who, item: ItemId) -> Self {
+        let items = load_item_definitions().expect("items.ron loads");
+        let config = items.get(&item).expect("a shipped item");
+        let on_use = config
+            .on_use
+            .clone()
+            .unwrap_or_else(|| panic!("{item:?} has no on-use"));
+        let name = config.name.clone();
+        self.unit_mut(who).combatant.on_use_items.push(OnUseSlot {
+            item,
+            name,
+            config: on_use,
+            remaining: 0.0,
+            spent: false,
+        });
+        self
+    }
+
     pub fn obstacles(mut self, obstacles: Vec<ObstacleVolume>) -> Self {
         self.obstacles = obstacles;
         self
@@ -853,6 +876,67 @@ impl Scene {
         view
     }
 
+    /// Run a HELD unit's tick — what `decide_abilities` runs for a unit under
+    /// a stun, fear, polymorph or incapacitate: [`dispatch_while_held`], the
+    /// on-use break and the class's own break, with the enemy team's kill
+    /// window as the frame classifies it. The scene is not changed.
+    pub fn decide_held(&self, who: Who) -> DecisionView {
+        let unit = self.find(who);
+        assert!(
+            unit.auras.iter().any(|a| is_incapacitating(&a.effect_type)),
+            "{who} is not incapacitated: `decide_abilities` would dispatch it normally"
+        );
+        let snapshot = self.snapshot();
+        let mut trace = DecisionTrace {
+            current_sim_time: self.now,
+            ..Default::default()
+        };
+        let situations = self.classify(&snapshot, &mut trace);
+        let team = unit.combatant.team;
+        let ctx = snapshot
+            .context_for(unit.entity)
+            .with_situation(situations.for_team(team));
+        let enemy_kill_target = situations
+            .for_team(if team == 1 { 2 } else { 1 })
+            .kill_window
+            .map(|w| w.subject);
+        let mut exec_world = World::new();
+        for u in &self.units {
+            let e = exec_world.spawn_empty();
+            assert_eq!(e.id(), u.entity);
+        }
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &exec_world);
+        let mut combat_log = CombatLog::default();
+        let mut game_rng = GameRng::from_seed(0);
+        let mut combatant = self.combatant_of(unit);
+        let auras = ActiveAuras {
+            auras: unit.auras.clone(),
+        };
+        let acted = dispatch_while_held(
+            DispatchIo {
+                commands: &mut commands,
+                combat_log: &mut combat_log,
+                game_rng: &mut game_rng,
+                decision_trace: &mut trace,
+            },
+            unit.entity,
+            &mut combatant,
+            unit.position,
+            Some(&auras),
+            &ctx,
+            enemy_kill_target,
+        );
+        queue.apply(&mut exec_world);
+        let mut view = DecisionView::read(self, unit.entity, acted, &trace);
+        let mut used = exec_world.query::<&OnUsePending>();
+        view.items_used.extend(
+            used.iter(&exec_world)
+                .map(|p| (self.who(p.wearer.index()), p.item)),
+        );
+        view
+    }
+
     /// What a decision's commands left in `world` for an attack to land or
     /// be avoided: the auras it queued, the interrupts it queued, and the
     /// melee attacks the target dodged or parried.
@@ -1081,6 +1165,12 @@ pub struct DecisionView {
     pub interrupts_queued: Vec<(AbilityType, Who)>,
     /// Every melee attack of the decision's that its target dodged or parried.
     pub avoided: Vec<SceneAvoided>,
+    /// Every on-use item the decision considered (`item_decision`), in order:
+    /// the item, and the reason it was held (`None` when it was used).
+    pub item_decisions: Vec<(ItemId, Option<RejectionReason>)>,
+    /// Every on-use the decision fired ([`OnUsePending`]), its wearer named
+    /// ([`Scene::decide_held`] only).
+    pub items_used: Vec<(Who, ItemId)>,
 }
 
 /// An instant attack a scene decision queued, its target named.
@@ -1123,6 +1213,8 @@ impl DecisionView {
             auras_queued: Vec::new(),
             interrupts_queued: Vec::new(),
             avoided: Vec::new(),
+            item_decisions: Vec::new(),
+            items_used: Vec::new(),
         };
         let mine = trace.pending_events.iter().filter(|e| {
             e.actor
@@ -1169,6 +1261,9 @@ impl DecisionView {
                         .map(|(k, v)| (k.to_string(), *v))
                         .collect(),
                 }),
+                (EventKind::ItemDecision, EventPayload::Item { item, reason, .. }) => {
+                    view.item_decisions.push((*item, reason.clone()));
+                }
                 _ => {}
             }
         }

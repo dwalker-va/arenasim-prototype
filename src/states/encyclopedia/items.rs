@@ -18,6 +18,7 @@ use crate::states::match_config::CharacterClass;
 use crate::states::play_match::equipment::{
     can_equip, ArmorType, ItemConfig, ItemDefinitions, ItemId, ItemSlotType, WeaponType,
 };
+use crate::states::play_match::on_use_items::{on_use_description, on_use_sentence};
 use crate::states::play_match::proc_trinkets::proc_description;
 
 use super::search::SearchEntry;
@@ -346,6 +347,11 @@ pub fn render_detail(ui: &mut egui::Ui, id: ItemId, data: &EncyclopediaData) -> 
         widget::section_heading(ui, "PROC");
         widget::prose(ui, &proc_description(proc), text::BODY, color::TEXT);
     }
+    // An on-use is a sentence too, under its own heading.
+    if let Some(on_use) = &item.on_use {
+        widget::section_heading(ui, "USE");
+        widget::prose(ui, &on_use_sentence(on_use), text::BODY, color::TEXT);
+    }
 
     let usable: Vec<CharacterClass> = CharacterClass::all()
         .iter()
@@ -567,6 +573,19 @@ pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
             ui.set_max_width(size::PROC_TEXT_MAX_WIDTH);
             ui.label(
                 egui::RichText::new(proc_description(proc))
+                    .family(body_family(ui.ctx()))
+                    .size(text::SMALL)
+                    .color(color::TEXT_MUTED),
+            );
+        });
+    }
+    // The on-use, the same way and in the same sentence as its page.
+    if let Some(on_use) = &item.on_use {
+        ui.add_space(space::XS);
+        ui.scope(|ui| {
+            ui.set_max_width(size::PROC_TEXT_MAX_WIDTH);
+            ui.label(
+                egui::RichText::new(on_use_description(on_use))
                     .family(body_family(ui.ctx()))
                     .size(text::SMALL)
                     .color(color::TEXT_MUTED),

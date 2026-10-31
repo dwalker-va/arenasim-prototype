@@ -943,6 +943,31 @@
         ),
 
         // ====================================================================
+        // CHAMPION TRINKETS (2): an on-use effect. See the `on_use_items`
+        // module for the pricing rule.
+        // ====================================================================
+
+        // TBC's Medallion of the Alliance / Horde (Classic's Insignia, 18854):
+        // a once-a-match break of every loss of control and movement
+        // impairment. A Champion trinket's budget (92 x 0.75 x 0.70 = 48.3):
+        // the break's declared price is 18, what it measured worth in health,
+        // and the rest is health. Played against the whole budget as health it
+        // measures level (docs/design/balance/2026-10-31-as305-medallion.md).
+        MedallionOfTheAlliance: (
+            name: "Medallion of the Alliance",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_trinketpvp_01.jpg",
+            slot: Trinket,
+            max_health: 30.0,
+            on_use: Some((
+                effect: CcBreak,
+                cooldown: OncePerMatch,
+                price: Some(18.0),
+            )),
+        ),
+
+        // ====================================================================
         // MELEE WEAPONS
         // ====================================================================
 

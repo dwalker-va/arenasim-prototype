@@ -30,6 +30,7 @@ pub mod hunter_dip;
 pub mod hunter_lane;
 pub mod interrupts;
 pub mod mage;
+pub mod on_use;
 pub mod paladin;
 pub(crate) mod paladin_postures;
 pub mod peel;

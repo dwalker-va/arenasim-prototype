@@ -197,6 +197,12 @@ pub const DIVINE_SHIELD_HP_THRESHOLD: f32 = 0.3;
 /// 5-minute cooldown for a sliver of freed time.
 pub const DIVINE_SHIELD_MIN_CC_REMAINING: f32 = 2.0;
 
+/// Minimum remaining hold (seconds) for an on-use crowd-control break's
+/// teammate trigger (`class_ai::on_use`). The while-CC Divine Shield's shape
+/// and floor: a once-a-match break is spent only when it buys real acting
+/// time for a teammate who needs it.
+pub const CC_BREAK_MIN_HOLD_REMAINING: f32 = 2.0;
+
 // ============================================================================
 // Timing
 // ============================================================================

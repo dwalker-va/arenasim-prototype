@@ -809,6 +809,119 @@ pub struct DispatchIo<'r, 'w, 's> {
     pub decision_trace: &'r mut crate::states::play_match::decision_trace::DecisionTrace,
 }
 
+/// The other team of a two-team match.
+fn enemy_team_of(team: u8) -> u8 {
+    if team == 1 {
+        2
+    } else {
+        1
+    }
+}
+
+/// What an INCAPACITATED unit may still do this tick: break free. The ONE
+/// entry point for a held unit, as [`dispatch_class_decision`] is for a free
+/// one: `decide_abilities` calls it for every unit held by a stun, fear,
+/// polymorph or incapacitate (a Cyclone excepted), and a
+/// [`Scene`](class_ai::scene::Scene) calls it for a held unit under test.
+///
+/// In order: an on-use item's crowd-control break (any class wearing one,
+/// `class_ai::on_use`), then the class's own (the Paladin's Divine Shield,
+/// the Warrior's Berserker Rage). Each arm owns its trace event, because the
+/// class decision never runs this frame. `enemy_kill_target` is the enemy
+/// team's `kill_window` subject — the unit their burst is on. Returns whether
+/// the unit acted; the break lands next frame either way.
+#[allow(clippy::too_many_arguments)]
+pub fn dispatch_while_held(
+    io: DispatchIo<'_, '_, '_>,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &class_ai::CombatContext,
+    enemy_kill_target: Option<Entity>,
+) -> bool {
+    let DispatchIo {
+        commands,
+        combat_log,
+        game_rng: _,
+        decision_trace,
+    } = io;
+
+    if !combatant.on_use_items.is_empty()
+        && class_ai::on_use::try_cc_break_while_held(
+            commands,
+            decision_trace,
+            entity,
+            combatant,
+            ctx,
+            enemy_kill_target,
+        )
+    {
+        return true; // OnUsePending spawned — the hold breaks next frame
+    }
+
+    // Paladin-specific: Divine Shield can be used while incapacitated.
+    // Because the normal dispatch never runs this frame, we own a builder
+    // here so the Divine-Shield-while-CC decision still produces a trace
+    // event when the predicates fire.
+    if combatant.class == match_config::CharacterClass::Paladin {
+        let actor_view = ctx
+            .self_info()
+            .map(crate::states::play_match::decision_trace::ActorView::from_info);
+        let Some(av) = actor_view else {
+            return false;
+        };
+        let mut builder = decision_trace
+            .start_ability_decision(av, None)
+            .with_situation(ctx.situation());
+        let book = combatant.book().clone();
+        let result = class_ai::paladin::try_divine_shield_while_cc(
+            commands,
+            combat_log,
+            &book,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            &mut builder,
+        );
+        builder.finish();
+        return result; // DivineShieldPending spawned — CC will be purged next frame
+    }
+
+    // Warrior-specific: Berserker Rage can be used while feared (TBC rule —
+    // breaks the fear + grants fear immunity; horror/stun/poly stay locked).
+    // Same builder-ownership shape as the Paladin Divine Shield arm above.
+    if combatant.class == match_config::CharacterClass::Warrior {
+        let actor_view = ctx
+            .self_info()
+            .map(crate::states::play_match::decision_trace::ActorView::from_info);
+        let Some(av) = actor_view else {
+            return false;
+        };
+        let mut builder = decision_trace
+            .start_ability_decision(av, None)
+            .with_situation(ctx.situation());
+        let book = combatant.book().clone();
+        let result = class_ai::warrior::try_berserker_rage_while_cc(
+            commands,
+            combat_log,
+            &book,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            &mut builder,
+        );
+        builder.finish();
+        return result; // BerserkerRagePending spawned — fear breaks next frame
+    }
+
+    false
+}
+
 /// One unit's whole class decision for one tick: its movement pre-pass (once
 /// the gates are open), then its class's `decide_<class>_action`. The ONE
 /// entry point: `decide_abilities` calls it for every unit it dispatches, and
@@ -1630,85 +1743,38 @@ pub fn decide_abilities(
                     .any(|a| a.effect_type == AuraType::Cyclone)
             });
 
-        // Paladin-specific: Divine Shield can be used while incapacitated.
-        // Because the normal dispatch never runs this frame, we own a builder
-        // here so the Divine-Shield-while-CC decision still produces a trace
-        // event when the predicates fire.
-        if is_incapacitated
-            && !is_cycloned
-            && combatant.class == match_config::CharacterClass::Paladin
-        {
-            let cc_ctx = snapshot.context_for(entity).with_situation(situation);
-            let actor_view = cc_ctx
-                .self_info()
-                .map(crate::states::play_match::decision_trace::ActorView::from_info);
-            let acted = if let Some(av) = actor_view {
-                let mut builder = decision_trace
-                    .start_ability_decision(av, None)
-                    .with_situation(cc_ctx.situation());
-                let book = combatant.book().clone();
-                let result = class_ai::paladin::try_divine_shield_while_cc(
-                    &mut commands,
-                    &mut combat_log,
-                    &book,
-                    entity,
-                    &mut combatant,
-                    transform.translation,
-                    auras.as_deref(),
-                    &cc_ctx,
-                    &mut builder,
-                );
-                builder.finish();
-                result
-            } else {
-                false
-            };
-            if acted {
-                continue; // DivineShieldPending spawned — CC will be purged next frame
-            }
-            continue; // Still incapacitated, can't do anything else
-        }
-
-        // Warrior-specific: Berserker Rage can be used while feared (TBC rule —
-        // breaks the fear + grants fear immunity; horror/stun/poly stay locked).
-        // Same builder-ownership shape as the Paladin Divine Shield arm above.
-        if is_incapacitated
-            && !is_cycloned
-            && combatant.class == match_config::CharacterClass::Warrior
-        {
-            let cc_ctx = snapshot.context_for(entity).with_situation(situation);
-            let actor_view = cc_ctx
-                .self_info()
-                .map(crate::states::play_match::decision_trace::ActorView::from_info);
-            let acted = if let Some(av) = actor_view {
-                let mut builder = decision_trace
-                    .start_ability_decision(av, None)
-                    .with_situation(cc_ctx.situation());
-                let book = combatant.book().clone();
-                let result = class_ai::warrior::try_berserker_rage_while_cc(
-                    &mut commands,
-                    &mut combat_log,
-                    &book,
-                    entity,
-                    &mut combatant,
-                    transform.translation,
-                    auras.as_deref(),
-                    &cc_ctx,
-                    &mut builder,
-                );
-                builder.finish();
-                result
-            } else {
-                false
-            };
-            if acted {
-                continue; // BerserkerRagePending spawned — fear breaks next frame
-            }
-            continue; // Still incapacitated, can't do anything else
-        }
-
+        // An incapacitated unit runs only what may be used from inside the
+        // hold — never from inside a Cyclone, which is not a hold anything
+        // answers.
         if is_incapacitated {
-            continue;
+            if !is_cycloned {
+                let held_ctx = snapshot.context_for(entity).with_situation(situation);
+                // The enemy team's kill window, when this unit wears something
+                // that asks whether it is the one being burst.
+                let enemy_kill_target = if combatant.on_use_items.is_empty() {
+                    None
+                } else {
+                    situations
+                        .for_team(enemy_team_of(combatant.team))
+                        .kill_window
+                        .map(|w| w.subject)
+                };
+                dispatch_while_held(
+                    DispatchIo {
+                        commands: &mut commands,
+                        combat_log: &mut combat_log,
+                        game_rng: &mut game_rng,
+                        decision_trace: &mut decision_trace,
+                    },
+                    entity,
+                    &mut combatant,
+                    transform.translation,
+                    auras.as_deref(),
+                    &held_ctx,
+                    enemy_kill_target,
+                );
+            }
+            continue; // Still incapacitated, or the break lands next frame
         }
 
         let my_pos = transform.translation;

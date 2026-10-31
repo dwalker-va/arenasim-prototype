@@ -660,6 +660,38 @@ any ring fits either ring socket, and the same item may not occupy both
      frames and the encyclopedia — the buff carries `Aura::source_item`, and
      `item_aura_icons` registers the art in both aura icon loaders.
 
+   **An item may carry an `on_use:` block** — an effect its wearer's AI
+   chooses when to fire, on the item's own cooldown
+   (`src/states/play_match/on_use_items.rs`):
+   ```ron
+   on_use: Some((
+       effect: CcBreak,           // the Medallion's break
+       cooldown: OncePerMatch,    // or Seconds(60.0)
+       price: Some(18.0),         // declared, per use; only where no stat weight prices the effect
+   )),
+   ```
+   - **Pricing: uses in a median arena life**, not the proc's long-run bound.
+     An on-use starts ready, so it is charged per use times the uses it gets in
+     `MEDIAN_ARENA_LIFE_SECS` (43s): a 45s cooldown is one use. A stat burst
+     prices through `on_use_buff_cost` (15s of +40 SP on 45s is about 21). An
+     effect no stat weight prices (the CC break) DECLARES its per-use price,
+     sweep-checked against the same budget spent on stats; the loader refuses
+     one that declares none.
+   - **One AI rule per effect kind, never per item** (`class_ai/on_use.rs`).
+     The CC break is asked only while its wearer is HELD — stunned, feared,
+     polymorphed or incapacitated, through `combat_ai::dispatch_while_held`,
+     ahead of the class's own break (Divine Shield, Berserker Rage) — and
+     fires for a teammate below `LOW_HP_THRESHOLD` with
+     `CC_BREAK_MIN_HOLD_REMAINING` (2s) of the hold left, or when the enemy's
+     `kill_window` names the wearer. It breaks every stun, fear (horror
+     included), polymorph, incapacitate, root and slow (`cc_break_breaks`),
+     grants no immunity, and nothing is used from inside a Cyclone. Traced as
+     an `item_decision` event (`item`, `status`, `reason`); `Scene::on_use_item`
+     and `Scene::decide_held` test it.
+   - Its line ("Use: …") is `ItemConfig::effect_description`, shared by the
+     encyclopedia page, the tooltip and the equipment picker. Its landing is in
+     `tests/lands_silently_audit.rs`'s on-use family.
+
 3. **Add to a class loadout** in `loadouts.ron` if it should be default equipment
 
 4. **Add `ItemId` variant** in `equipment.rs` to the `ItemId` enum

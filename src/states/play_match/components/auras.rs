@@ -1327,10 +1327,17 @@ impl ActiveAuras {
     /// impairment, at random, as a dispel does); Travel Form is its caller,
     /// and anything else that frees its holder outright should be too.
     pub fn break_movement_impairments(&mut self) -> Vec<String> {
-        let impairing = |a: &Aura| {
-            matches!(a.effect_type, AuraType::Root | AuraType::MovementSpeedSlow)
-                && !a.is_compound_rider()
-        };
+        self.break_debuffs_where(|t| matches!(t, AuraType::Root | AuraType::MovementSpeedSlow))
+    }
+
+    /// Break every debuff whose face is of a type `breaks` names, each as a
+    /// whole DEBUFF (its compound riders go with it), whatever its removal
+    /// class. Returns the names of what broke, in aura order. The one shape
+    /// of an outright break: Travel Form's root-and-snare break and an
+    /// on-use crowd-control break (`on_use_items::cc_break_breaks`) are both
+    /// it.
+    pub fn break_debuffs_where(&mut self, breaks: impl Fn(AuraType) -> bool) -> Vec<String> {
+        let impairing = |a: &Aura| breaks(a.effect_type) && !a.is_compound_rider();
         let broken_compounds: Vec<CompoundDebuff> = self
             .auras
             .iter()
