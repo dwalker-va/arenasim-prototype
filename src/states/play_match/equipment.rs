@@ -753,6 +753,40 @@ item_ids! {
     // === Tier 1: Off Hand ===
     GrimoireOfShadows,
     BulwarkOfTheGuardian,
+
+    // ====================================================================
+    // CHAMPION TIER ITEMS (item_tier 2, Item Level 90-94)
+    // ====================================================================
+
+    // === Champion: Cloth Armor (Mage, Priest, Warlock) ===
+    FrostfireCirclet,
+    FrostfireRobe,
+    FrostfireLeggings,
+    FrostfireShoulderpads,
+    FrostfireGloves,
+    FrostfireSandals,
+    FrostfireBelt,
+    FrostfireBindings,
+
+    // === Champion: Leather Armor — Melee (Rogue) ===
+    BonescytheHelmet,
+    BonescytheBreastplate,
+    BonescytheLegplates,
+    BonescythePauldrons,
+    BonescytheGauntlets,
+    BonescytheSabatons,
+    BonescytheWaistguard,
+    BonescytheBracers,
+
+    // === Champion: Leather Armor — Restoration (Druid) ===
+    DreamwalkerHeadpiece,
+    DreamwalkerTunic,
+    DreamwalkerLegguards,
+    DreamwalkerSpaulders,
+    DreamwalkerHandguards,
+    DreamwalkerBoots,
+    DreamwalkerGirdle,
+    DreamwalkerWristguards,
 }
 
 // ============================================================================
@@ -4258,7 +4292,98 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         let named: std::collections::BTreeSet<String> =
             GAUNTLET_TIER.iter().map(|id| format!("{id:?}")).collect();
         assert_eq!(gauntlet, named, "the Gauntlet tier is this list");
+
+        let champion: std::collections::BTreeSet<String> = item_defs
+            .iter()
+            .filter(|(_, item)| item.tier() == Some(ItemTier::Champion))
+            .map(|(id, _)| format!("{id:?}"))
+            .collect();
+        let named: std::collections::BTreeSet<String> =
+            CHAMPION_TIER.iter().map(|id| format!("{id:?}")).collect();
+        assert_eq!(champion, named, "the Champion tier is this list");
     }
+
+    /// The Champion offer floor (talents-and-Gauntlet proposal §6.5): a
+    /// Champion armor piece spends at least [`CHAMPION_ARMOR_GAIN`] more of
+    /// the budget than the starting-kit item it would replace — the item of
+    /// the same armor type that a class holds in that slot by default (a
+    /// Paladin's plate chest is not what a cloth robe replaces). Armor only;
+    /// a weapon or accessory has its own measure. The floor is G2's to
+    /// enforce on offers; this holds the authored items to it. Every pairing
+    /// is counted, so the check cannot pass on none.
+    #[test]
+    fn champion_armor_clears_the_offer_floor_over_the_starting_kit() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let loadouts = load_default_loadouts(&items).expect("loadouts.ron must load");
+        let mut short = Vec::new();
+        let mut checked: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for (id, item) in items.iter() {
+            if item.tier() != Some(ItemTier::Champion) || item.armor_type == ArmorType::None {
+                continue;
+            }
+            let gain = calculate_budget_usage(item);
+            for class in CharacterClass::all() {
+                if !can_equip(*class, item) {
+                    continue;
+                }
+                let kit = loadouts.get(*class).expect("every class has a loadout");
+                for (socket, start_id) in kit {
+                    let start = items.get(start_id).expect("kit item is defined");
+                    if start.slot != item.slot || start.armor_type != item.armor_type {
+                        continue;
+                    }
+                    checked.insert(id.as_str());
+                    let floor = calculate_budget_usage(start) * (1.0 + CHAMPION_ARMOR_GAIN);
+                    if gain < floor {
+                        short.push(format!(
+                            "{id:?} spends {gain:.2}, under {floor:.2} over {class:?}'s {socket:?} {start_id:?}"
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(short.is_empty(), "{}", short.join("\n"));
+        let armor: std::collections::BTreeSet<&str> = CHAMPION_TIER
+            .iter()
+            .filter(|id| items.get(id).expect("shipped").armor_type != ArmorType::None)
+            .map(|id| id.as_str())
+            .collect();
+        assert_eq!(
+            checked, armor,
+            "every Champion armor piece met a starting item"
+        );
+    }
+
+    /// The Champion tier's gain over the starting item in its slot (§6.5).
+    const CHAMPION_ARMOR_GAIN: f32 = 0.55;
+
+    /// Every Champion-tier (item_tier 2) item.
+    const CHAMPION_TIER: [ItemId; 24] = [
+        ItemId::FrostfireCirclet,
+        ItemId::FrostfireRobe,
+        ItemId::FrostfireLeggings,
+        ItemId::FrostfireShoulderpads,
+        ItemId::FrostfireGloves,
+        ItemId::FrostfireSandals,
+        ItemId::FrostfireBelt,
+        ItemId::FrostfireBindings,
+        ItemId::BonescytheHelmet,
+        ItemId::BonescytheBreastplate,
+        ItemId::BonescytheLegplates,
+        ItemId::BonescythePauldrons,
+        ItemId::BonescytheGauntlets,
+        ItemId::BonescytheSabatons,
+        ItemId::BonescytheWaistguard,
+        ItemId::BonescytheBracers,
+        ItemId::DreamwalkerHeadpiece,
+        ItemId::DreamwalkerTunic,
+        ItemId::DreamwalkerLegguards,
+        ItemId::DreamwalkerSpaulders,
+        ItemId::DreamwalkerHandguards,
+        ItemId::DreamwalkerBoots,
+        ItemId::DreamwalkerGirdle,
+        ItemId::DreamwalkerWristguards,
+    ];
 
     /// Every Gauntlet-tier (item_tier 1) item.
     const GAUNTLET_TIER: [ItemId; 65] = [
