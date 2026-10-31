@@ -664,10 +664,13 @@ any ring fits either ring socket, and the same item may not occupy both
 
 4. **Add `ItemId` variant** in `equipment.rs` to the `ItemId` enum
 
-5. **Add item icon** (optional, for UI):
+5. **Add item icon**:
    - Download: `mcp__wowhead-classic__get_item_icon("New Item")`
    - Save to `assets/icons/items/<icon_name>.jpg`
-   - Add mapping to `ITEM_ICON_PATHS` in `rendering/mod.rs`
+   - Set `icon: "icons/items/<icon_name>.jpg"` on the item in `items.ron`. That
+     field is the only mapping: `load_item_icons` loads every item's `icon`, so
+     the item picker, tooltips and encyclopedia show it with no code change. Every
+     shipped item has one; the field defaults to empty, which draws no icon.
 
 6. **Run `cargo test`** to verify the item passes budget validation
 
