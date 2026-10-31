@@ -158,7 +158,7 @@ pub enum AbilityType {
     Kick,              // Rogue interrupt
     CripplingPoison,   // Rogue weapon poison: on-hit chance to slow (passive, not cast)
     DeadlyPoison,      // Rogue weapon poison: on-hit stacking Nature DoT (passive)
-    WoundPoison,       // Rogue weapon poison: on-hit stacking healing reduction (passive)
+    WoundPoison,       // Rogue weapon poison: on-hit healing reduction (passive)
     MindNumbingPoison, // Rogue weapon poison: on-hit cast-time increase (passive)
     // Warlock abilities
     Corruption,         // Shadow DoT

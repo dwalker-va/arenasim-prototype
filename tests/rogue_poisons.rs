@@ -6,11 +6,12 @@
 //! - the CHOICE reaches the proc: a played match coats the Rogue with the
 //!   poison its config names, and with no other;
 //! - each poison's aura behaves as its RON says when it lands through the one
-//!   aura funnel (`apply_pending_auras`): Deadly and Wound stack to five, and
-//!   Mind-numbing refreshes without doubling;
-//! - what each one DOES once it is up: Wound cuts healing per stack and
-//!   compounds with Mortal Strike's Mortal Wound; Mind-numbing sums with Curse
-//!   of Tongues; Deadly ticks per stack.
+//!   aura funnel (`apply_pending_auras`): Deadly stacks to five, and Wound and
+//!   Mind-numbing refresh without doubling (one application is the whole
+//!   effect — user ruling, 2026-10-30);
+//! - what each one DOES once it is up: Wound halves healing, and only the
+//!   strongest healing reduction applies; Mind-numbing slows casting, and only
+//!   the larger cast-time increase applies; Deadly ticks per stack.
 
 mod common;
 
@@ -102,9 +103,9 @@ fn healed(auras: Vec<Aura>, amount: f32) -> f32 {
 // ── the config: each poison is an ability with its own chance ──────────────
 
 /// Every poison names its own ability, every one of those carries a per-hit
-/// chance, and the chances are TBC's: Deadly 30%, the others 50%.
+/// chance: Deadly 30%, the others 50% (kept high by ruling; TBC's are lower).
 #[test]
-fn every_poison_is_an_ability_with_its_tbc_chance() {
+fn every_poison_is_an_ability_with_its_chance() {
     let defs = AbilityDefinitions::default();
     let chances: Vec<(RoguePoison, f32)> = RoguePoison::ALL
         .into_iter()
@@ -198,15 +199,75 @@ fn the_chosen_poison_is_the_one_the_rogue_applies() {
     }
 }
 
+/// The `[t] ... <Poison> procs on <target>` lines of a log, as (time, target).
+fn proc_lines(log: &str, poison: RoguePoison) -> Vec<(String, String)> {
+    let marker = format!("{} procs on ", poison.name());
+    log.lines()
+        .filter_map(|l| {
+            let (_, target) = l.split_once(&marker)?;
+            let time = l.split(']').next()?.to_string();
+            Some((time, target.to_string()))
+        })
+        .collect()
+}
+
+/// Both of a dual-wielding Rogue's hands can land, and proc, in one frame,
+/// before the first proc's aura has reached the funnel. The first application
+/// is still logged once. The situation — a first application in a frame where
+/// both hands landed on that target — is counted, so the test cannot pass on
+/// a bank where it never happened; with both hands proccing at 50%, about half
+/// of those frames carry two procs.
+#[test]
+fn a_first_application_from_both_hands_logs_once() {
+    let mut both_hands_frames = 0;
+    for poison in [RoguePoison::Wound, RoguePoison::MindNumbing] {
+        for seed in 0..8 {
+            let played = common::staged::play_seeded(HeadlessMatchConfig {
+                team1: vec!["Rogue".into(), "Paladin".into()],
+                team2: vec!["Warrior".into(), "Paladin".into()],
+                team1_rogue_poisons: vec![format!("{poison:?}")],
+                random_seed: Some(seed),
+                max_duration_secs: 90.0,
+                ..Default::default()
+            });
+            let procs = proc_lines(&played.log, poison);
+            let mut seen = std::collections::BTreeSet::new();
+            for (time, target) in &procs {
+                assert!(
+                    seen.insert((time.clone(), target.clone())),
+                    "{poison:?} seed {seed}: two first applications on {target} at {time}"
+                );
+                let hands = played
+                    .log
+                    .lines()
+                    .filter(|l| {
+                        l.starts_with(time.as_str())
+                            && l.contains("Team 1 Rogue #1's Auto Attack")
+                            && l.contains(target.as_str())
+                    })
+                    .count();
+                if hands >= 2 {
+                    both_hands_frames += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        both_hands_frames >= 10,
+        "only {both_hands_frames} first applications landed with both hands"
+    );
+}
+
 // ── each poison's aura, through the funnel ──────────────────────────────────
 
-/// Deadly and Wound gain a stack per application up to five, and stay there;
-/// Mind-numbing refreshes, never doubling. All three are one aura per target.
+/// Deadly gains a stack per application up to five, and stays there; Wound
+/// and Mind-numbing refresh, never doubling (one application is the whole
+/// effect). Each is one aura per target.
 #[test]
-fn deadly_and_wound_stack_to_five_and_mind_numbing_refreshes() {
+fn deadly_stacks_to_five_and_wound_and_mind_numbing_refresh() {
     for (ability, cap) in [
         (AbilityType::DeadlyPoison, 5),
-        (AbilityType::WoundPoison, 5),
+        (AbilityType::WoundPoison, 1),
         (AbilityType::MindNumbingPoison, 1),
     ] {
         let mut world = world();
@@ -245,65 +306,68 @@ fn deadly_poison_ticks_per_stack() {
 
 // ── what each one does ──────────────────────────────────────────────────────
 
-fn wound_poison(stacks: u8) -> Aura {
+/// The healing-reduction aura `ability` lands.
+fn reduction(ability: AbilityType) -> Aura {
     let mut world = world();
-    let rogue = unit(&mut world, 1, CharacterClass::Rogue);
-    let mage = unit(&mut world, 2, CharacterClass::Mage);
-    for _ in 0..stacks {
-        land(
-            &mut world,
-            mage,
-            aura_of(AbilityType::WoundPoison, mage, rogue),
-        );
-    }
-    named(&world, mage, "Wound Poison")[0].clone()
+    let caster = unit(&mut world, 1, CharacterClass::Rogue);
+    let target = unit(&mut world, 2, CharacterClass::Mage);
+    let aura = aura_of(ability, target, caster);
+    assert_eq!(aura.effect_type, AuraType::HealingReduction, "{ability:?}");
+    aura
 }
 
-/// Wound Poison cuts 10% of healing received a stack: a 200 heal lands as
-/// 180, 160, 140, 120 and 100 under one to five stacks, against 200 with none.
+/// One Wound Poison application halves healing received — TBC's five-stack
+/// maximum, all at once.
 #[test]
-fn wound_poison_cuts_healing_ten_percent_a_stack() {
+fn one_wound_poison_halves_healing() {
     assert_eq!(healed(vec![], 200.0), 200.0, "control: no poison");
-    let landed: Vec<f32> = (1..=5)
-        .map(|n| healed(vec![wound_poison(n)], 200.0).round())
-        .collect();
-    assert_eq!(landed, [180.0, 160.0, 140.0, 120.0, 100.0]);
+    assert_eq!(
+        healed(vec![reduction(AbilityType::WoundPoison)], 200.0),
+        100.0
+    );
 }
 
-/// Wound Poison and Mortal Strike's Mortal Wound compound, as every two
-/// healing reductions do: five stacks (x0.5) under Mortal Wound (x0.65) leave
-/// a 200 heal at 65. Mortal Wound alone still leaves exactly 130.
+/// Only the strongest healing reduction applies. Mortal Strike's and Aimed
+/// Shot's Mortal Wound (35% each) together still cut 35%, and Wound Poison
+/// (50%) under either cuts 50%, whichever order they sit in.
 #[test]
-fn wound_poison_compounds_with_mortal_wound() {
-    let mut world = world();
-    let warrior = unit(&mut world, 1, CharacterClass::Warrior);
-    let mage = unit(&mut world, 2, CharacterClass::Mage);
-    let mortal_wound = aura_of(AbilityType::MortalStrike, mage, warrior);
-    assert_eq!(mortal_wound.effect_type, AuraType::HealingReduction);
-    assert_eq!(healed(vec![mortal_wound.clone()], 200.0), 200.0 * 0.65);
-    let both = healed(vec![mortal_wound, wound_poison(5)], 200.0);
-    assert_eq!(both.round(), 65.0);
+fn only_the_strongest_healing_reduction_applies() {
+    let (ms, aimed, wound) = (
+        reduction(AbilityType::MortalStrike),
+        reduction(AbilityType::AimedShot),
+        reduction(AbilityType::WoundPoison),
+    );
+    assert_eq!(healed(vec![ms.clone()], 200.0), 200.0 * 0.65, "control");
+    assert_eq!(healed(vec![ms.clone(), aimed.clone()], 200.0), 200.0 * 0.65);
+    assert_eq!(healed(vec![ms.clone(), wound.clone()], 200.0), 100.0);
+    assert_eq!(healed(vec![wound, aimed, ms], 200.0), 100.0);
 }
 
-/// Mind-numbing Poison adds 60% to the bearer's cast times, and sums with
-/// Curse of Tongues (50%) to 110%, as any two cast-time increases do.
+/// Mind-numbing Poison adds 60% to the bearer's cast times. Only the larger
+/// cast-time increase applies: under Curse of Tongues (50%) it is still 60%,
+/// and Tongues alone is 50%.
 #[test]
-fn mind_numbing_poison_slows_casting_and_sums_with_tongues() {
+fn only_the_larger_cast_time_increase_applies() {
     let mut world = world();
     let rogue = unit(&mut world, 1, CharacterClass::Rogue);
     let warlock = unit(&mut world, 1, CharacterClass::Warlock);
     let mage = unit(&mut world, 2, CharacterClass::Mage);
+    let priest = unit(&mut world, 2, CharacterClass::Priest);
     assert_eq!(get_cast_time_increase(None), 0.0, "control");
     land(
         &mut world,
-        mage,
-        aura_of(AbilityType::MindNumbingPoison, mage, rogue),
+        priest,
+        aura_of(AbilityType::CurseOfTongues, priest, warlock),
     );
-    land(
-        &mut world,
-        mage,
-        aura_of(AbilityType::MindNumbingPoison, mage, rogue),
-    );
+    let tongues = get_cast_time_increase(world.entity(priest).get::<ActiveAuras>());
+    assert!((tongues - 0.5).abs() < 1e-6, "{tongues}");
+    for _ in 0..2 {
+        land(
+            &mut world,
+            mage,
+            aura_of(AbilityType::MindNumbingPoison, mage, rogue),
+        );
+    }
     let increase = || get_cast_time_increase(world.entity(mage).get::<ActiveAuras>());
     assert!((increase() - 0.6).abs() < 1e-6, "{}", increase());
     land(
@@ -311,29 +375,28 @@ fn mind_numbing_poison_slows_casting_and_sums_with_tongues() {
         mage,
         aura_of(AbilityType::CurseOfTongues, mage, warlock),
     );
-    let increase = get_cast_time_increase(world.entity(mage).get::<ActiveAuras>());
-    assert!((increase - 1.1).abs() < 1e-6, "{increase}");
+    let both = get_cast_time_increase(world.entity(mage).get::<ActiveAuras>());
+    assert!((both - 0.6).abs() < 1e-6, "{both}");
 }
 
 // ── what the encyclopedia and View Combatant say ───────────────────────────
 
-/// A poison whose numbers are per stack says so, and how deep it goes; an
-/// aura that does not stack (Mortal Wound) and a refresh-only one
-/// (Mind-numbing) say neither.
+/// Deadly Poison says it stacks, and how deep; an aura that does not stack
+/// (Mortal Wound) and the refresh-only poisons (Wound, Mind-numbing) do not.
 #[test]
-fn stacking_poisons_describe_their_stacks() {
+fn the_poison_texts_state_their_effect() {
     use arenasim::states::ability_text::build_aura_description;
     let defs = AbilityDefinitions::default();
     let text = |a: AbilityType| {
         build_aura_description(defs.get_unchecked(&a).applies_aura.as_ref().unwrap())
     };
     assert_eq!(
-        text(AbilityType::WoundPoison),
-        "Reduces healing received by 10% a stack for 15 sec. Stacks up to 5 times."
-    );
-    assert_eq!(
         text(AbilityType::DeadlyPoison),
         "Deals 13 damage over 12 sec. Stacks up to 5 times."
+    );
+    assert_eq!(
+        text(AbilityType::WoundPoison),
+        "Reduces healing received by 50% for 15 sec."
     );
     assert_eq!(
         text(AbilityType::MortalStrike),

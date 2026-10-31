@@ -64,7 +64,7 @@ pub enum RoguePoison {
     /// time that stacks up to five times.
     Deadly,
     /// Wound Poison — auto-attacks have a chance to cut the healing the target
-    /// receives, 10% a stack, up to five stacks.
+    /// receives by half.
     Wound,
     /// Mind-numbing Poison — auto-attacks have a chance to make the target's
     /// spells take 60% longer to cast.
@@ -74,7 +74,7 @@ pub enum RoguePoison {
 impl RoguePoison {
     /// Every weapon poison, in display order. Mirrors `TotemElement::ALL`:
     /// the encyclopedia expands this into one catalog entry per poison, and
-    /// the Prepare and View Combatant pickers offer each.
+    /// View Combatant's Weapon Poison picker offers each.
     pub const ALL: [RoguePoison; 4] = [
         RoguePoison::Crippling,
         RoguePoison::Deadly,

@@ -835,8 +835,8 @@ fn engine_entry(
                 persistence: Persistence::WholeMatch,
                 riders: EngineSpec::no_riders(),
                 provenance: "A Rogue carries this from the opening bell — it marks the coated \
-                             weapon. The slow itself comes from the coating's on-hit proc, not \
-                             from this mark."
+                             weapon. The poison's effect comes from the coating's on-hit proc, \
+                             not from this mark."
                     .to_string(),
             }
         }

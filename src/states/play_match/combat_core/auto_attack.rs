@@ -139,6 +139,12 @@ pub fn combat_auto_attack(
                 .map(|chance| (entity, (poison, chance)))
         })
         .collect();
+    // The poisons whose first application has been logged this frame.
+    let mut poison_fresh_this_frame: std::collections::HashSet<(
+        Entity,
+        AbilityType,
+        Option<Entity>,
+    )> = std::collections::HashSet::new();
 
     // Auto-attacks must not shatter friendly crowd control. The AI ability path
     // already guards casts via `pre_cast_ok(check_friendly_cc)`, but
@@ -716,6 +722,7 @@ pub fn combat_auto_attack(
                                     |(team, name, _, slot, _)| combat_log_id(*team, *slot, name),
                                 ),
                                 &mut combat_log,
+                                &mut poison_fresh_this_frame,
                             );
                         }
                     } else if game_rng.random_f32() < chance {
@@ -1266,8 +1273,8 @@ pub(crate) fn windfury_bonus_chance(
 /// stacks or refreshes there (each is a `stacking` aura, keyed on its source),
 /// is refused by an immunity there, and reveals a stealthed target there. A
 /// first application is logged here as a proc (the funnel may still refuse
-/// it to an immunity); a refresh is logged by
-/// the funnel with its stack count.
+/// it to an immunity) — once a frame, though both hands may proc before the
+/// first has landed (`fresh_this_frame`); a refresh is logged by the funnel.
 #[allow(clippy::too_many_arguments)]
 fn apply_weapon_poison(
     commands: &mut Commands,
@@ -1278,6 +1285,7 @@ fn apply_weapon_poison(
     target_auras: Option<&ActiveAuras>,
     target_id: Option<String>,
     combat_log: &mut CombatLog,
+    fresh_this_frame: &mut std::collections::HashSet<(Entity, AbilityType, Option<Entity>)>,
 ) {
     let def = abilities.get_unchecked(&poison);
     let Some(pending) = AuraPending::from_ability(target, attacker, def) else {
@@ -1289,7 +1297,10 @@ fn apply_weapon_poison(
             .iter()
             .any(|aura| aura.stacks.is_some() && aura.same_source_as(&pending.aura))
     });
-    if fresh {
+    // Keyed as the funnel keys the aura: target, source and, for a per-caster
+    // poison (Deadly), its caster. Insert-only, never iterated.
+    let key = (target, poison, pending.aura.stack_owner());
+    if fresh && fresh_this_frame.insert(key) {
         if let Some(name) = target_id {
             combat_log.log(
                 CombatLogEventType::CrowdControl,

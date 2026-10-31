@@ -97,23 +97,32 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   damage that buys back the off hand it gives up.
 - **Per-swing procs stay a flat chance per hit**, as Classic rolled them
   (Windfury Totem "each hit has a 20% chance", Crippling Poison "each strike
-  has a 30% chance"): the weapon poisons, Windfury Totem and `MeleeHit` proc
-  trinkets roll their chance on every landed swing, so a slower weapon procs
-  less often per second but each proc is a slower weapon's bigger hit.
+  has a 30% chance" — Classic's and TBC's rate; the sim's is 50%): the weapon
+  poisons, Windfury Totem and `MeleeHit` proc trinkets roll their chance on
+  every landed swing, so a slower weapon procs less often per second but each
+  proc is a slower weapon's bigger hit.
 - **Weapon poisons** are the Rogue's per-match choice (`RoguePoison`, picked in
   View Combatant or by a headless config's `team{1,2}_rogue_poisons`), all four
-  baseline, at TBC's numbers scaled like the rest of the kit. Each is an ability
-  in `abilities.ron` carrying its `application_chance`:
-  - **Crippling** (the default, 50%): a 70% slow for 8s, refreshed in place.
+  baseline. Each is an ability in `abilities.ron` carrying its
+  `application_chance`. **One application gives a poison's full effect** — TBC's
+  five-stack maximum — and the chances stay high (user ruling, 2026-10-30): the
+  stack build-up at TBC's low chances is what made Shiv necessary, and it is not
+  modelled. Deadly is the one exception that stacks.
+  - **Crippling** (the default, 50%): a 70% slow (TBC's rank II) for 8s,
+    refreshed in place.
   - **Deadly** (30%): Nature damage over time, 3.3 every 3s per stack for 12s,
     stacking to 5 per Rogue.
-  - **Wound** (50%): healing received -10% a stack for 15s, stacking to 5.
-    It compounds with Mortal Strike's Mortal Wound, as any two healing
-    reductions do here (0.65 x 0.5 at five stacks).
+  - **Wound** (50%): healing received -50% for 15s, refreshed by a new proc.
   - **Mind-numbing** (50%): cast times +60% for 10s, refreshed by a new proc.
-    It sums with Curse of Tongues, as any two cast-time increases do.
-  The three that stack or refresh land through `apply_pending_auras`. All four
-  are poisons: Cleanse removes them (a stack at a time), Dispel Magic does not.
+  The other three land through `apply_pending_auras`. All four are poisons:
+  Cleanse removes them (a stack at a time), Dispel Magic does not.
+- **Healing reductions and cast-time increases do not compound** (TBC): only
+  the strongest healing reduction on a target applies (`healing_multiplier` —
+  Mortal Strike's and Aimed Shot's 35% under Wound Poison's 50% is 50%), and only
+  the largest cast-time increase (`get_cast_time_increase` — Mind-numbing's 60%
+  under Curse of Tongues' 50% is 60%). This also stops one Warrior's
+  overlapping Mortal Wounds compounding: Mortal Strike recurs every ~6s and its
+  wound lasts 10s, and the two used to cut healing to 0.4225 between them.
 
 ### Dual Wield
 - **Who can**: Warrior, Rogue, Hunter — Classic's list, in

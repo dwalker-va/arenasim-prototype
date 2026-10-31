@@ -23,7 +23,10 @@ use bevy::ecs::world::CommandQueue;
 use bevy::prelude::*;
 
 use arenasim::combat::log::CombatLog;
-use arenasim::headless::{run_headless_match_observed, FrameObservation, HeadlessMatchConfig};
+use arenasim::headless::{
+    run_headless_match_observed, run_headless_match_staged, FrameObservation, HeadlessMatchConfig,
+    Stage, Unit,
+};
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::auras::apply_pending_auras;
 use arenasim::states::play_match::class_ai::druid::{
@@ -801,6 +804,17 @@ struct Played {
 }
 
 fn play(team1: &[&str], team2: &[&str], map: &str, seed: u64) -> Played {
+    play_staged(team1, team2, map, seed, None)
+}
+
+/// [`play`], with `stage` landed on the match when given.
+fn play_staged(
+    team1: &[&str],
+    team2: &[&str],
+    map: &str,
+    seed: u64,
+    stage: Option<Stage>,
+) -> Played {
     let dir = tempfile::tempdir().expect("tempdir");
     let log_path = dir.path().join("match.txt");
     let config = HeadlessMatchConfig {
@@ -813,8 +827,12 @@ fn play(team1: &[&str], team2: &[&str], map: &str, seed: u64) -> Played {
         ..Default::default()
     };
     let mut frames = Vec::new();
-    run_headless_match_observed(config, false, None, |f| frames.push(f.clone()))
-        .expect("match runs");
+    let observe = |f: &FrameObservation| frames.push(f.clone());
+    match stage {
+        Some(stage) => run_headless_match_staged(config, false, None, stage, observe),
+        None => run_headless_match_observed(config, false, None, observe),
+    }
+    .expect("match runs");
     let log = std::fs::read_to_string(&log_path).expect("match log written");
     Played { frames, log }
 }
@@ -1261,11 +1279,21 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
 
 /// A cycloned unit cannot act: it does not move, its health does not change
 /// — no damage, no healing — and it casts nothing for as long as it spins.
+///
+/// The Cyclones are STAGED: 4s after the gates the Druid (team 1, slot 1)
+/// lands one on each enemy, so every cell holds two windows by construction
+/// whatever its seed rolls (AS-330 moved the seeds that used to). Any Cyclone
+/// the Druid casts itself is checked too.
 #[test]
 fn a_cycloned_unit_is_frozen_out_of_the_fight() {
     let mut windows = 0;
     for (t1, t2, map, seed) in CYCLONE_MATCHES {
-        let played = play(t1, t2, map, *seed);
+        let druid = Unit::new(1, 1);
+        let stage = Stage::new()
+            .after_gates(4.0)
+            .land(Unit::new(2, 0), AbilityType::Cyclone, druid)
+            .land(Unit::new(2, 1), AbilityType::Cyclone, druid);
+        let played = play_staged(t1, t2, map, *seed, Some(stage));
         // Each unit's runs of consecutive cycloned frames.
         let mut runs: BTreeMap<Entity, Vec<Vec<usize>>> = BTreeMap::new();
         for (i, f) in played.frames.iter().enumerate() {
@@ -1317,8 +1345,8 @@ fn a_cycloned_unit_is_frozen_out_of_the_fight() {
     }
     eprintln!("{windows} Cyclone windows");
     assert!(
-        windows >= 3,
-        "only {windows} Cyclone windows — the seeds moved"
+        windows >= 2 * CYCLONE_MATCHES.len(),
+        "only {windows} Cyclone windows — a staged Cyclone did not land"
     );
 }
 
