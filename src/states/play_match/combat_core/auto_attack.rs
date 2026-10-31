@@ -943,7 +943,8 @@ pub fn combat_auto_attack(
     // Weapon-poison damage (Wound Poison): a fixed Nature hit through the one
     // damage funnel, so immunity, resistance, absorbs, the stealth reveal, rage
     // and crowd-control breaks all apply as to any Nature damage. It does not
-    // crit (poisons could not before Wrath of the Lich King), so it draws no RNG.
+    // crit — TBC rolled it on spell crit, which a Rogue barely has; not
+    // modelled — so it draws no RNG.
     for (attacker_entity, target_entity, poison) in poison_damage_hits {
         let def = abilities.get_unchecked(&poison);
         let Ok((_, _, mut target, _, _, mut target_auras)) = combatants.get_mut(target_entity)

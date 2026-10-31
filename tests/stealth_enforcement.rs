@@ -476,6 +476,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     my_pos,
                     auras,
                     &ctx,
+                    &movement,
                     &mut trace,
                 );
             }
@@ -807,7 +808,7 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
         | BerserkerRage | Kick | CripplingPoison | DeadlyPoison | WoundPoison
         | MindNumbingPoison | Corruption | Shadowbolt | Fear | Immolate | DrainLife
         | CurseOfAgony | CurseOfWeakness | CurseOfTongues | UnstableAffliction | DeathCoil
-        | ArcaneIntellect | BattleShout | IceBarrier | PowerWordShield | Polymorph
+        | LifeTap | ArcaneIntellect | BattleShout | IceBarrier | PowerWordShield | Polymorph
         | DispelMagic | ManaBurn | FlashOfLight | HolyLight | HolyShock | HammerOfJustice
         | PaladinCleanse | DevotionAura | DivineShield | SpellLock | DevourMagic | AimedShot
         | ArcaneShot | ConcussiveShot | SerpentSting | Disengage | SpiderWeb | BoarCharge

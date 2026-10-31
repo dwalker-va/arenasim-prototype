@@ -169,6 +169,16 @@ fn effect_parts(ability: AbilityType, config: &AbilityConfig, stats: &ClassBaseS
         ));
     }
 
+    // Health into mana (Life Tap), at the class's base spell power like the
+    // damage and healing ranges above.
+    if let Some(conversion) = config.health_to_mana {
+        let amount = conversion.amount(stats.spell_power);
+        parts.push(format!(
+            "Converts {:.0} health into {:.0} mana.",
+            amount, amount
+        ));
+    }
+
     // Interrupt
     if config.is_interrupt {
         if config.lockout_duration > 0.0 {
@@ -521,6 +531,7 @@ mod tests {
             let declares_an_effect = config.damage_base_max > 0.0
                 || config.healing_base_max > 0.0
                 || config.channel_healing_per_tick > 0.0
+                || config.health_to_mana.is_some()
                 || config.is_interrupt
                 || config.is_charge
                 || config.is_dispel;

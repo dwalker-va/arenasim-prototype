@@ -89,6 +89,9 @@ const EXPECTED_REJECTION_REASONS: &[&str] = &[
     // The Chain play's timing: a hand-off that would not land in the last
     // moments of the lock it chains onto (TeamPlan only).
     "MissesHandoff",
+    // A Warlock's Life Tap held: not mana-starved, or not safe to spend
+    // health on it (`class_ai::warlock::life_tap_hold`).
+    "TapHeld",
 ];
 
 /// Variants of `TargetRejectionReason` that production code currently emits.

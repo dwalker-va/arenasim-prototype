@@ -248,6 +248,14 @@ impl Scene {
         self
     }
 
+    /// `who`'s mana (or energy), as a fraction of its maximum —
+    /// [`Scene::mana`] for a unit other than the last.
+    pub fn mana_of(mut self, who: Who, fraction: f32) -> Self {
+        let c = &mut self.unit_mut(who).combatant;
+        c.current_mana = c.max_mana * fraction;
+        self
+    }
+
     /// The last unit's chances to dodge and to parry a melee attack.
     pub fn avoidance(mut self, dodge: f32, parry: f32) -> Self {
         let c = &mut self.last().combatant;

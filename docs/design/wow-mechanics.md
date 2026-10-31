@@ -115,8 +115,8 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   - **Wound** (50%): healing received -50% for 15s, refreshed by a new proc, and
     4.7 Nature damage on each application (TBC's 65 at the kit's scale). The hit
     goes through `apply_damage_with_absorb` like any Nature damage (resistance,
-    absorbs, immunity, the stealth reveal, rage) and does not crit: poisons
-    could not crit before Wrath of the Lich King.
+    absorbs, immunity, the stealth reveal, rage) and does not crit: TBC rolled
+    it on spell crit, which a Rogue barely has; not modelled.
   - **Mind-numbing** (50%): cast times +60% for 14s, refreshed by a new proc.
   The other three land through `apply_pending_auras`. All four are poisons:
   Cleanse removes them (a stack at a time), Dispel Magic does not.
@@ -230,6 +230,17 @@ produces it.
 | Priest  | 150      | 8         |
 | Warlock | 200      | 8         |
 | Paladin | 160      | 8         |
+
+### Life Tap (Warlock)
+Converts the Warlock's own health into as much mana, `30 + 0.8 × spell power`
+(TBC's coefficient on rank 1's base): instant, no cost, no cooldown, on the
+global cooldown, Shadow. The health is not damage — no absorb takes it, and it
+breaks no crowd control, reveals no stealth, feeds no rage — and the mana is
+not healing, so arena dampening does not cut it. The mana is capped at the
+pool. The AI taps when it needs the mana and is healthy enough to pay — below
+30% of the pool, and the tap leaves it at or above `urgency_hp_threshold` —
+under both AI profiles, with or without a healer on its team
+(`class_ai::warlock::life_tap_hold`, each hold traced `TapHeld`).
 
 ### Rage (Warrior)
 - Max: 100
