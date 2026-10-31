@@ -440,7 +440,7 @@ different picture from two rows of which two are positive.
 | `arenasim --batch f.jsonl --out x.csv --jobs N --trace-mode off` | run one arm |
 | `scripts/paired_sweep.py` | the paired analysis: control, four slices, McNemar, resolution floor, verdict |
 | `scripts/agg_sweep.py` | single-arm win-rate tables with Wilson intervals |
-| `scripts/headtohead_sweep.py` | per-team AI-profile comparisons (a different question) |
+| `scripts/headtohead_sweep.py` | per-team AI-profile or equipment head-to-heads (a different question): paired, seed-clustered bootstrap, McNemar |
 | `tests/camp_sweep.rs` | per-frame mechanism metrics — prefer these when the mechanism is the claim |
 
 Commit the JSONL a published finding rests on to
