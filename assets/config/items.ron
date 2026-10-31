@@ -10,6 +10,12 @@
 // one-hander it displaces — see docs/design/balance/2026-09-28-as167-weapon-speed.md.
 // Non-weapon items add their stats to the combatant's base stats.
 //
+// `item_tier` names the item's tier, and its `item_level` must sit in that
+// tier's band (`equipment::ItemTier`, checked at load): the starting kit (0,
+// the default) at 54-60, the Gauntlet tier (1) at 76-80, the Champion tier
+// (2) at 90-94. Gauntlet and Champion items spend at least 90% of their
+// budget, so a reward is felt; the starting kit is free to spend less.
+//
 // Changes here take effect on restart without recompiling.
 
 (
@@ -1272,729 +1278,729 @@
         ),
 
         // ====================================================================
-        // TIER 1: PLATE ARMOR — DPS (Warrior)
+        // GAUNTLET TIER (1): PLATE ARMOR — DPS (Warrior)
         // ====================================================================
 
         WarlordsCrown: (
             name: "Warlord's Crown",
-            item_level: 75,
+            item_level: 80,
             item_tier: 1,
             icon: "icons/items/inv_helmet_72.jpg",
             slot: Head,
             armor_type: Plate,
-            armor: 375.0,
-            max_health: 18.0,
-            attack_power: 12.0,
-            crit_chance: 0.04,
+            armor: 400.0,
+            max_health: 22.0,
+            attack_power: 15.0,
+            crit_chance: 0.05,
         ),
 
         WarlordsVizard: (
             name: "Warlord's Vizard",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_helmet_06.jpg",
             slot: Head,
             armor_type: Plate,
-            armor: 365.0,
-            max_health: 20.0,
-            spell_power: 10.0,
-            max_mana: 12.0,
+            armor: 395.0,
+            max_health: 24.0,
+            spell_power: 13.0,
+            max_mana: 15.0,
         ),
 
         WarlordsBreastplate: (
             name: "Warlord's Breastplate",
-            item_level: 75,
+            item_level: 80,
             item_tier: 1,
             icon: "icons/items/inv_chest_plate16.jpg",
             slot: Chest,
             armor_type: Plate,
-            armor: 375.0,
-            max_health: 24.0,
-            attack_power: 10.0,
-            crit_chance: 0.03,
+            armor: 400.0,
+            max_health: 30.0,
+            attack_power: 12.0,
+            crit_chance: 0.04,
         ),
 
         WarlordsLegguards: (
             name: "Warlord's Legguards",
-            item_level: 75,
+            item_level: 80,
             item_tier: 1,
             icon: "icons/items/inv_pants_plate_03.jpg",
             slot: Legs,
             armor_type: Plate,
-            armor: 375.0,
-            max_health: 20.0,
-            attack_power: 8.0,
-            crit_chance: 0.03,
+            armor: 400.0,
+            max_health: 30.0,
+            attack_power: 12.0,
+            crit_chance: 0.04,
         ),
 
         WarlordsGauntlets: (
             name: "Warlord's Gauntlets",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_gauntlets_10.jpg",
             slot: Hands,
             armor_type: Plate,
-            armor: 365.0,
-            max_health: 14.0,
-            attack_power: 10.0,
-            crit_chance: 0.02,
+            armor: 395.0,
+            max_health: 15.0,
+            attack_power: 13.0,
+            crit_chance: 0.03,
         ),
 
         WarlordsSpaulders: (
             name: "Warlord's Spaulders",
-            item_level: 71,
+            item_level: 78,
             item_tier: 1,
             icon: "icons/items/inv_shoulder_34.jpg",
             slot: Shoulders,
             armor_type: Plate,
-            armor: 355.0,
-            max_health: 14.0,
-            attack_power: 8.0,
-            crit_chance: 0.02,
+            armor: 390.0,
+            max_health: 18.0,
+            attack_power: 11.0,
+            crit_chance: 0.03,
         ),
 
         WarlordsGreaves: (
             name: "Warlord's Greaves",
-            item_level: 71,
+            item_level: 78,
             item_tier: 1,
             icon: "icons/items/inv_boots_plate_05.jpg",
             slot: Feet,
             armor_type: Plate,
-            armor: 355.0,
-            max_health: 16.0,
-            attack_power: 6.0,
+            armor: 390.0,
+            max_health: 24.0,
+            attack_power: 8.0,
             crit_chance: 0.01,
             movement_speed: 0.15,
         ),
 
         WarlordsGirdle: (
             name: "Warlord's Girdle",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_belt_09.jpg",
             slot: Waist,
             armor_type: Plate,
-            armor: 345.0,
-            max_health: 12.0,
-            attack_power: 6.0,
-            crit_chance: 0.01,
-            frost_resistance: 10.0,
+            armor: 380.0,
+            max_health: 17.0,
+            attack_power: 9.0,
+            crit_chance: 0.02,
+            frost_resistance: 15.0,
         ),
 
         WarlordsBracers: (
             name: "Warlord's Bracers",
-            item_level: 69,
+            item_level: 76,
             item_tier: 1,
             icon: "icons/items/inv_bracer_19.jpg",
             slot: Wrists,
             armor_type: Plate,
-            armor: 340.0,
-            max_health: 10.0,
-            attack_power: 5.0,
-            crit_chance: 0.01,
+            armor: 374.0,
+            max_health: 14.0,
+            attack_power: 8.0,
+            crit_chance: 0.02,
         ),
 
         // ====================================================================
-        // TIER 1: PLATE ARMOR — HOLY (Paladin)
+        // GAUNTLET TIER (1): PLATE ARMOR — HOLY (Paladin)
         // ====================================================================
 
         JudgementCrown: (
             name: "Judgement Crown",
-            item_level: 75,
+            item_level: 80,
             item_tier: 1,
             icon: "icons/items/inv_helmet_05.jpg",
             slot: Head,
             armor_type: Plate,
-            armor: 375.0,
-            max_health: 18.0,
-            spell_power: 12.0,
-            max_mana: 16.0,
+            armor: 400.0,
+            max_health: 21.0,
+            spell_power: 14.0,
+            max_mana: 18.0,
         ),
 
         JudgementBreastplate: (
             name: "Judgement Breastplate",
-            item_level: 75,
+            item_level: 80,
             item_tier: 1,
             icon: "icons/items/inv_chest_chain_11.jpg",
             slot: Chest,
             armor_type: Plate,
-            armor: 375.0,
-            max_health: 20.0,
-            spell_power: 10.0,
-            max_mana: 16.0,
+            armor: 400.0,
+            max_health: 23.0,
+            spell_power: 11.0,
+            max_mana: 18.0,
             mana_regen: 0.5,
         ),
 
         JudgementLegguards: (
             name: "Judgement Legguards",
-            item_level: 75,
+            item_level: 80,
             item_tier: 1,
             icon: "icons/items/inv_pants_04.jpg",
             slot: Legs,
             armor_type: Plate,
-            armor: 375.0,
-            max_health: 16.0,
-            spell_power: 10.0,
-            max_mana: 14.0,
+            armor: 400.0,
+            max_health: 21.0,
+            spell_power: 13.0,
+            max_mana: 19.0,
         ),
 
         JudgementSpaulders: (
             name: "Judgement Spaulders",
-            item_level: 71,
+            item_level: 78,
             item_tier: 1,
             icon: "icons/items/inv_shoulder_37.jpg",
             slot: Shoulders,
             armor_type: Plate,
-            armor: 355.0,
-            max_health: 12.0,
-            spell_power: 8.0,
-            max_mana: 10.0,
+            armor: 390.0,
+            max_health: 15.0,
+            spell_power: 9.0,
+            max_mana: 12.0,
             crit_chance: 0.01,
         ),
 
         JudgementGauntlets: (
             name: "Judgement Gauntlets",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_gauntlets_29.jpg",
             slot: Hands,
             armor_type: Plate,
-            armor: 365.0,
-            max_health: 12.0,
-            spell_power: 8.0,
-            max_mana: 10.0,
+            armor: 395.0,
+            max_health: 14.0,
+            spell_power: 10.0,
+            max_mana: 12.0,
             crit_chance: 0.01,
         ),
 
         JudgementBelt: (
             name: "Judgement Belt",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_belt_27.jpg",
             slot: Waist,
             armor_type: Plate,
-            armor: 345.0,
-            max_health: 10.0,
-            spell_power: 6.0,
-            max_mana: 8.0,
+            armor: 380.0,
+            max_health: 15.0,
+            spell_power: 9.0,
+            max_mana: 12.0,
             mana_regen: 0.5,
         ),
 
         JudgementSabatons: (
             name: "Judgement Sabatons",
-            item_level: 71,
+            item_level: 78,
             item_tier: 1,
             icon: "icons/items/inv_boots_plate_09.jpg",
             slot: Feet,
             armor_type: Plate,
-            armor: 355.0,
-            max_health: 12.0,
-            spell_power: 6.0,
-            max_mana: 8.0,
-            movement_speed: 0.1,
+            armor: 390.0,
+            max_health: 17.0,
+            spell_power: 8.0,
+            max_mana: 11.0,
+            movement_speed: 0.10,
         ),
 
         JudgementBracers: (
             name: "Judgement Bracers",
-            item_level: 69,
+            item_level: 76,
             item_tier: 1,
             icon: "icons/items/inv_bracer_18.jpg",
             slot: Wrists,
             armor_type: Plate,
-            armor: 340.0,
-            max_health: 8.0,
-            spell_power: 5.0,
-            max_mana: 6.0,
+            armor: 374.0,
+            max_health: 11.0,
+            spell_power: 7.0,
+            max_mana: 8.0,
             mana_regen: 0.5,
         ),
 
         // ====================================================================
-        // TIER 1: MAIL ARMOR (Hunter)
+        // GAUNTLET TIER (1): MAIL ARMOR (Hunter)
         // ====================================================================
 
         GiantstalkerHelm: (
             name: "Giantstalker Helm",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_helmet_05.jpg",
             slot: Head,
             armor_type: Mail,
-            armor: 195.0,
-            max_health: 18.0,
-            attack_power: 10.0,
-            crit_chance: 0.03,
+            armor: 211.0,
+            max_health: 26.0,
+            attack_power: 14.0,
+            crit_chance: 0.04,
         ),
 
         GiantstalkerTunic: (
             name: "Giantstalker Tunic",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_chest_chain_11.jpg",
             slot: Chest,
             armor_type: Mail,
-            armor: 195.0,
-            max_health: 22.0,
-            attack_power: 10.0,
-            crit_chance: 0.03,
+            armor: 211.0,
+            max_health: 27.0,
+            attack_power: 13.0,
+            crit_chance: 0.04,
         ),
 
         GiantstalkerLegs: (
             name: "Giantstalker Legs",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_pants_mail_03.jpg",
             slot: Legs,
             armor_type: Mail,
-            armor: 195.0,
-            max_health: 20.0,
-            attack_power: 8.0,
-            crit_chance: 0.03,
-        ),
-
-        GiantstalkerGloves: (
-            name: "Giantstalker Gloves",
-            item_level: 71,
-            item_tier: 1,
-            icon: "icons/items/inv_gauntlets_10.jpg",
-            slot: Hands,
-            armor_type: Mail,
-            armor: 188.0,
-            max_health: 14.0,
-            attack_power: 8.0,
-            crit_chance: 0.02,
-        ),
-
-        GiantstalkerEpaulets: (
-            name: "Giantstalker Epaulets",
-            item_level: 71,
-            item_tier: 1,
-            icon: "icons/items/inv_shoulder_10.jpg",
-            slot: Shoulders,
-            armor_type: Mail,
-            armor: 188.0,
-            max_health: 16.0,
-            attack_power: 6.0,
-            crit_chance: 0.02,
-        ),
-
-        GiantstalkerBoots: (
-            name: "Giantstalker Boots",
-            item_level: 71,
-            item_tier: 1,
-            icon: "icons/items/inv_boots_chain_13.jpg",
-            slot: Feet,
-            armor_type: Mail,
-            armor: 188.0,
-            max_health: 14.0,
-            attack_power: 6.0,
-            crit_chance: 0.01,
-            movement_speed: 0.1,
-        ),
-
-        GiantstalkerBelt: (
-            name: "Giantstalker Belt",
-            item_level: 69,
-            item_tier: 1,
-            icon: "icons/items/inv_belt_28.jpg",
-            slot: Waist,
-            armor_type: Mail,
-            armor: 182.0,
-            max_health: 12.0,
-            attack_power: 6.0,
-            crit_chance: 0.01,
-        ),
-
-        GiantstalkerBracers: (
-            name: "Giantstalker Bracers",
-            item_level: 69,
-            item_tier: 1,
-            icon: "icons/items/inv_bracer_17.jpg",
-            slot: Wrists,
-            armor_type: Mail,
-            armor: 182.0,
-            max_health: 10.0,
-            attack_power: 4.0,
-            crit_chance: 0.01,
-        ),
-
-        // ====================================================================
-        // TIER 1: LEATHER ARMOR (Rogue)
-        // ====================================================================
-
-        DeathdealerCowl: (
-            name: "Deathdealer Cowl",
-            item_level: 73,
-            item_tier: 1,
-            icon: "icons/items/inv_helmet_41.jpg",
-            slot: Head,
-            armor_type: Leather,
-            armor: 125.0,
-            max_health: 16.0,
+            armor: 211.0,
+            max_health: 29.0,
             attack_power: 12.0,
             crit_chance: 0.04,
         ),
 
+        GiantstalkerGloves: (
+            name: "Giantstalker Gloves",
+            item_level: 78,
+            item_tier: 1,
+            icon: "icons/items/inv_gauntlets_10.jpg",
+            slot: Hands,
+            armor_type: Mail,
+            armor: 207.0,
+            max_health: 18.0,
+            attack_power: 11.0,
+            crit_chance: 0.03,
+        ),
+
+        GiantstalkerEpaulets: (
+            name: "Giantstalker Epaulets",
+            item_level: 78,
+            item_tier: 1,
+            icon: "icons/items/inv_shoulder_10.jpg",
+            slot: Shoulders,
+            armor_type: Mail,
+            armor: 207.0,
+            max_health: 22.0,
+            attack_power: 8.0,
+            crit_chance: 0.03,
+        ),
+
+        GiantstalkerBoots: (
+            name: "Giantstalker Boots",
+            item_level: 78,
+            item_tier: 1,
+            icon: "icons/items/inv_boots_chain_13.jpg",
+            slot: Feet,
+            armor_type: Mail,
+            armor: 207.0,
+            max_health: 21.0,
+            attack_power: 9.0,
+            crit_chance: 0.02,
+            movement_speed: 0.10,
+        ),
+
+        GiantstalkerBelt: (
+            name: "Giantstalker Belt",
+            item_level: 76,
+            item_tier: 1,
+            icon: "icons/items/inv_belt_28.jpg",
+            slot: Waist,
+            armor_type: Mail,
+            armor: 200.0,
+            max_health: 20.0,
+            attack_power: 11.0,
+            crit_chance: 0.02,
+        ),
+
+        GiantstalkerBracers: (
+            name: "Giantstalker Bracers",
+            item_level: 76,
+            item_tier: 1,
+            icon: "icons/items/inv_bracer_17.jpg",
+            slot: Wrists,
+            armor_type: Mail,
+            armor: 200.0,
+            max_health: 15.0,
+            attack_power: 7.0,
+            crit_chance: 0.02,
+        ),
+
+        // ====================================================================
+        // GAUNTLET TIER (1): LEATHER ARMOR (Rogue)
+        // ====================================================================
+
+        DeathdealerCowl: (
+            name: "Deathdealer Cowl",
+            item_level: 79,
+            item_tier: 1,
+            icon: "icons/items/inv_helmet_41.jpg",
+            slot: Head,
+            armor_type: Leather,
+            armor: 135.0,
+            max_health: 21.0,
+            attack_power: 15.0,
+            crit_chance: 0.05,
+        ),
+
         DeathdealerTunic: (
             name: "Deathdealer Tunic",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_chest_cloth_07.jpg",
             slot: Chest,
             armor_type: Leather,
-            armor: 125.0,
-            max_health: 18.0,
-            attack_power: 10.0,
-            crit_chance: 0.04,
+            armor: 135.0,
+            max_health: 24.0,
+            attack_power: 13.0,
+            crit_chance: 0.05,
         ),
 
         DeathdealerLegs: (
             name: "Deathdealer Legs",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_pants_06.jpg",
             slot: Legs,
             armor_type: Leather,
-            armor: 125.0,
-            max_health: 16.0,
-            attack_power: 10.0,
-            crit_chance: 0.03,
+            armor: 135.0,
+            max_health: 24.0,
+            attack_power: 15.0,
+            crit_chance: 0.04,
         ),
 
         DeathdealerGloves: (
             name: "Deathdealer Gloves",
-            item_level: 71,
+            item_level: 78,
             item_tier: 1,
             icon: "icons/items/inv_gauntlets_21.jpg",
             slot: Hands,
             armor_type: Leather,
-            armor: 120.0,
-            max_health: 10.0,
-            attack_power: 8.0,
-            crit_chance: 0.03,
+            armor: 132.0,
+            max_health: 15.0,
+            attack_power: 11.0,
+            crit_chance: 0.04,
         ),
 
         DeathdealerMantle: (
             name: "Deathdealer Mantle",
-            item_level: 71,
+            item_level: 78,
             item_tier: 1,
             icon: "icons/items/inv_shoulder_23.jpg",
             slot: Shoulders,
             armor_type: Leather,
-            armor: 120.0,
-            max_health: 12.0,
-            attack_power: 8.0,
-            crit_chance: 0.02,
+            armor: 132.0,
+            max_health: 16.0,
+            attack_power: 12.0,
+            crit_chance: 0.03,
         ),
 
         DeathdealerBoots: (
             name: "Deathdealer Boots",
-            item_level: 71,
+            item_level: 78,
             item_tier: 1,
             icon: "icons/items/inv_boots_08.jpg",
             slot: Feet,
             armor_type: Leather,
-            armor: 120.0,
-            max_health: 10.0,
-            attack_power: 6.0,
-            crit_chance: 0.02,
+            armor: 132.0,
+            max_health: 16.0,
+            attack_power: 9.0,
+            crit_chance: 0.03,
             movement_speed: 0.15,
         ),
 
         DeathdealerBelt: (
             name: "Deathdealer Belt",
-            item_level: 69,
+            item_level: 76,
             item_tier: 1,
             icon: "icons/items/inv_belt_23.jpg",
             slot: Waist,
             armor_type: Leather,
-            armor: 115.0,
-            max_health: 8.0,
-            attack_power: 6.0,
-            crit_chance: 0.02,
+            armor: 127.0,
+            max_health: 14.0,
+            attack_power: 11.0,
+            crit_chance: 0.04,
         ),
 
         DeathdealerBracers: (
             name: "Deathdealer Bracers",
-            item_level: 69,
+            item_level: 76,
             item_tier: 1,
             icon: "icons/items/inv_bracer_02.jpg",
             slot: Wrists,
             armor_type: Leather,
-            armor: 115.0,
-            max_health: 6.0,
-            attack_power: 5.0,
-            crit_chance: 0.02,
+            armor: 127.0,
+            max_health: 11.0,
+            attack_power: 8.0,
+            crit_chance: 0.03,
         ),
 
         // ====================================================================
-        // TIER 1: CLOTH ARMOR (Mage, Priest, Warlock)
+        // GAUNTLET TIER (1): CLOTH ARMOR (Mage, Priest, Warlock)
         // ====================================================================
 
         ArcanistCrown: (
             name: "Arcanist Crown",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_helmet_53.jpg",
             slot: Head,
             armor_type: Cloth,
-            armor: 58.0,
-            max_health: 10.0,
-            max_mana: 20.0,
-            spell_power: 12.0,
+            armor: 63.0,
+            max_health: 12.0,
+            max_mana: 23.0,
+            spell_power: 14.0,
             crit_chance: 0.01,
         ),
 
         ArcanistRobes: (
             name: "Arcanist Robes",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_chest_cloth_03.jpg",
             slot: Chest,
             armor_type: Cloth,
-            armor: 58.0,
-            max_health: 12.0,
-            max_mana: 20.0,
-            spell_power: 14.0,
+            armor: 63.0,
+            max_health: 13.0,
+            max_mana: 22.0,
+            spell_power: 16.0,
         ),
 
         ArcanistLeggings: (
             name: "Arcanist Leggings",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_pants_08.jpg",
             slot: Legs,
             armor_type: Cloth,
-            armor: 58.0,
-            max_health: 10.0,
-            max_mana: 18.0,
-            spell_power: 10.0,
+            armor: 63.0,
+            max_health: 14.0,
+            max_mana: 23.0,
+            spell_power: 13.0,
             mana_regen: 0.5,
         ),
 
         ArcanistGloves: (
             name: "Arcanist Gloves",
-            item_level: 71,
+            item_level: 78,
             item_tier: 1,
             icon: "icons/items/inv_gauntlets_14.jpg",
             slot: Hands,
             armor_type: Cloth,
-            armor: 56.0,
-            max_health: 8.0,
-            max_mana: 12.0,
-            spell_power: 8.0,
+            armor: 62.0,
+            max_health: 10.0,
+            max_mana: 15.0,
+            spell_power: 10.0,
             crit_chance: 0.01,
         ),
 
         ArcanistMantle: (
             name: "Arcanist Mantle",
-            item_level: 71,
+            item_level: 78,
             item_tier: 1,
             icon: "icons/items/inv_shoulder_02.jpg",
             slot: Shoulders,
             armor_type: Cloth,
-            armor: 56.0,
-            max_health: 8.0,
-            max_mana: 14.0,
-            spell_power: 8.0,
+            armor: 62.0,
+            max_health: 10.0,
+            max_mana: 18.0,
+            spell_power: 10.0,
         ),
 
         ArcanistBoots: (
             name: "Arcanist Boots",
-            item_level: 71,
+            item_level: 78,
             item_tier: 1,
             icon: "icons/items/inv_boots_07.jpg",
             slot: Feet,
             armor_type: Cloth,
-            armor: 56.0,
-            max_health: 8.0,
-            max_mana: 10.0,
-            spell_power: 6.0,
-            movement_speed: 0.1,
+            armor: 62.0,
+            max_health: 12.0,
+            max_mana: 15.0,
+            spell_power: 9.0,
+            movement_speed: 0.10,
         ),
 
         ArcanistBelt: (
             name: "Arcanist Belt",
-            item_level: 69,
+            item_level: 76,
             item_tier: 1,
             icon: "icons/items/inv_belt_30.jpg",
             slot: Waist,
             armor_type: Cloth,
-            armor: 54.0,
-            max_health: 6.0,
-            max_mana: 10.0,
-            spell_power: 6.0,
-            mana_regen: 0.5,
+            armor: 59.0,
+            max_health: 8.0,
+            max_mana: 16.0,
+            spell_power: 9.0,
+            mana_regen: 1.0,
         ),
 
         ArcanistBracers: (
             name: "Arcanist Bracers",
-            item_level: 69,
+            item_level: 76,
             item_tier: 1,
             icon: "icons/items/inv_belt_29.jpg",
             slot: Wrists,
             armor_type: Cloth,
-            armor: 54.0,
-            max_health: 4.0,
-            max_mana: 8.0,
-            spell_power: 4.0,
-            mana_regen: 0.5,
+            armor: 59.0,
+            max_health: 5.0,
+            max_mana: 13.0,
+            spell_power: 6.0,
+            mana_regen: 1.0,
         ),
 
         // ====================================================================
-        // TIER 1: CLOAKS (all classes)
+        // GAUNTLET TIER (1): CLOAKS (all classes)
         // ====================================================================
 
         CloakOfConquest: (
             name: "Cloak of Conquest",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_misc_cape_17.jpg",
             slot: Back,
-            max_health: 12.0,
-            attack_power: 4.0,
-            crit_chance: 0.01,
+            max_health: 17.0,
+            attack_power: 6.0,
+            crit_chance: 0.02,
         ),
 
         CloakOfWisdom: (
             name: "Cloak of Wisdom",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_misc_cape_18.jpg",
             slot: Back,
-            max_health: 8.0,
-            max_mana: 10.0,
-            spell_power: 6.0,
+            max_health: 9.0,
+            max_mana: 12.0,
+            spell_power: 7.0,
         ),
 
         CloakOfNatureWarding: (
             name: "Cloak of Nature Warding",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_misc_cape_20.jpg",
             slot: Back,
-            max_health: 8.0,
-            nature_resistance: 25.0,
-            frost_resistance: 10.0,
+            max_health: 11.0,
+            nature_resistance: 37.0,
+            frost_resistance: 15.0,
         ),
 
         // ====================================================================
-        // TIER 1: NECKLACES (all classes)
+        // GAUNTLET TIER (1): NECKLACES (all classes)
         // ====================================================================
 
         PendantOfMight: (
             name: "Pendant of Might",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_jewelry_necklace_09.jpg",
             slot: Neck,
-            max_health: 4.0,
-            attack_power: 8.0,
-            crit_chance: 0.02,
+            max_health: 5.0,
+            attack_power: 12.0,
+            crit_chance: 0.03,
         ),
 
         PendantOfClarity: (
             name: "Pendant of Clarity",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_jewelry_talisman_07.jpg",
             slot: Neck,
-            max_mana: 12.0,
-            spell_power: 6.0,
+            max_mana: 17.0,
+            spell_power: 8.0,
             mana_regen: 0.5,
         ),
 
         PendantOfArcaneWarding: (
             name: "Pendant of Arcane Warding",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_jewelry_amulet_04.jpg",
             slot: Neck,
-            max_health: 10.0,
-            arcane_resistance: 25.0,
+            max_health: 16.0,
+            arcane_resistance: 41.0,
         ),
 
         // ====================================================================
-        // TIER 1: RINGS (all classes)
+        // GAUNTLET TIER (1): RINGS (all classes)
         // ====================================================================
 
         RingOfBruteForce: (
             name: "Ring of Brute Force",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_jewelry_ring_15.jpg",
             slot: Ring,
-            max_health: 4.0,
-            attack_power: 6.0,
-            crit_chance: 0.02,
+            max_health: 8.0,
+            attack_power: 10.0,
+            crit_chance: 0.03,
         ),
 
         RingOfArcaneInsight: (
             name: "Ring of Arcane Insight",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_jewelry_ring_40.jpg",
             slot: Ring,
-            spell_power: 8.0,
-            max_mana: 10.0,
+            spell_power: 12.0,
+            max_mana: 14.0,
         ),
 
         RingOfFortitude: (
             name: "Ring of Fortitude",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_jewelry_ring_05.jpg",
             slot: Ring,
-            max_health: 16.0,
+            max_health: 32.0,
         ),
 
         RingOfElementalMastery: (
             name: "Ring of Elemental Mastery",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_jewelry_ring_38.jpg",
             slot: Ring,
-            max_health: 6.0,
-            fire_resistance: 18.0,
-            frost_resistance: 18.0,
-            nature_resistance: 18.0,
+            max_health: 7.0,
+            fire_resistance: 21.0,
+            frost_resistance: 21.0,
+            nature_resistance: 21.0,
         ),
 
         // ====================================================================
-        // TIER 1: TRINKETS (all classes)
+        // GAUNTLET TIER (1): TRINKETS (all classes)
         // ====================================================================
 
         InsigniaOfTheAlliance: (
             name: "Insignia of the Alliance",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_misc_token_argentdawn2.jpg",
             slot: Trinket,
-            attack_power: 8.0,
-            spell_power: 6.0,
+            attack_power: 15.0,
+            spell_power: 11.0,
         ),
 
         TalismanOfEphemeralPower: (
             name: "Talisman of Ephemeral Power",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_misc_root_02.jpg",
             slot: Trinket,
-            max_health: 20.0,
-            mana_regen: 1.5,
+            max_health: 30.0,
+            mana_regen: 2.0,
         ),
 
         // ====================================================================
-        // TIER 1: MELEE WEAPONS
+        // GAUNTLET TIER (1): MELEE WEAPONS
         // ====================================================================
 
         // A two-hander is priced at what the one-hander + off-hand pair it
-        // displaces spends (Stormblade Edge + Bulwark of the Guardian, 39.0), not at its full-slot cap (56.25): the
+        // displaces spends (Stormblade Edge + Bulwark of the Guardian, 55.5), not at its full-slot cap (60.0): the
         // same points, spent on offense where the pair spends them on a shield.
         // Its weapon DPS is Stormblade Edge's x Classic's two-hander premium at
         // this tier, Draconic Avenger 68.13 / Brutality Blade 51.60 = 1.32.
         BloodlordsBattleaxe: (
             name: "Bloodlord's Battleaxe",
-            item_level: 75,
+            item_level: 80,
             item_tier: 1,
             icon: "icons/items/inv_axe_09.jpg",
             slot: MainHand,
@@ -2004,13 +2010,13 @@
             attack_damage_min: 59.75,
             attack_damage_max: 79.67,
             weapon_speed: 3.2, // Classic: Draconic Avenger (19354)
-            attack_power: 16.0,
-            crit_chance: 0.05,
+            attack_power: 23.0,
+            crit_chance: 0.07,
         ),
 
         StormbladeEdge: (
             name: "Stormblade Edge",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_sword_15.jpg",
             slot: MainHand,
@@ -2019,13 +2025,13 @@
             attack_damage_min: 33.0,
             attack_damage_max: 49.5,
             weapon_speed: 2.5, // Classic: Brutality Blade (18832)
-            attack_power: 6.0,
-            crit_chance: 0.02,
+            attack_power: 10.0,
+            crit_chance: 0.03,
         ),
 
         FangOfTheViper: (
             name: "Fang of the Viper",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_sword_48.jpg",
             slot: MainHand,
@@ -2034,13 +2040,13 @@
             attack_damage_min: 24.0,
             attack_damage_max: 38.4,
             weapon_speed: 1.6, // Classic: Core Hound Tooth (18805)
-            attack_power: 6.0,
-            crit_chance: 0.03,
+            attack_power: 8.0,
+            crit_chance: 0.04,
         ),
 
         MaceOfTheRedeemer: (
             name: "Mace of the Redeemer",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_mace_05.jpg",
             slot: MainHand,
@@ -2049,18 +2055,18 @@
             attack_damage_min: 32.4,
             attack_damage_max: 48.6,
             weapon_speed: 2.7, // Classic: Aurastone Hammer (17105)
-            spell_power: 10.0,
-            max_health: 4.0,
+            spell_power: 13.0,
+            max_health: 5.0,
         ),
 
         // A two-hander is priced at what the one-hander + off-hand pair it
-        // displaces spends (Claw of Chromaggus + Grimoire of Shadows, 47.0), not at its full-slot cap (54.75): more
+        // displaces spends (Claw of Chromaggus + Grimoire of Shadows, 54.5), not at its full-slot cap (59.25): more
         // spell power and a smaller pool than the pair, at the same price.
         // Its weapon DPS is Claw of Chromaggus's x Classic's two-hander premium,
         // Staff of Dominance 57.07 / Claw of Chromaggus 42.33 = 1.35.
         RunestaffOfElements: (
             name: "Runestaff of Elements",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_staff_06.jpg",
             slot: MainHand,
@@ -2070,13 +2076,14 @@
             attack_damage_min: 49.05,
             attack_damage_max: 85.83,
             weapon_speed: 2.9, // Classic: Staff of Dominance (18842)
-            spell_power: 20.0,
-            max_mana: 17.0,
+            spell_power: 23.0,
+            max_mana: 20.0,
         ),
 
         // --------------------------------------------------------------------
-        // TIER 1: CASTER ONE-HANDERS — see the base-tier block above for why
-        // these exist and why they are spent under budget. At this tier the
+        // GAUNTLET TIER (1): CASTER ONE-HANDERS — see the base-tier block above for why
+        // these exist. At this tier they spend their whole budget, like the
+        // rest of the Gauntlet tier. Here the
         // main-hand choice is a real one: the dagger leans on mana and regen,
         // the sword on raw spell power and crit, and Mace of the Redeemer is
         // the same slot again for the classes that train maces instead.
@@ -2084,7 +2091,7 @@
 
         ClawOfChromaggus: (
             name: "Claw of Chromaggus",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_weapon_shortblade_28.jpg",
             slot: MainHand,
@@ -2093,14 +2100,14 @@
             attack_damage_min: 20.25,
             attack_damage_max: 31.5,
             weapon_speed: 1.5, // Classic: Claw of Chromaggus (19347)
-            spell_power: 7.0,
-            max_mana: 8.0,
+            spell_power: 8.0,
+            max_mana: 10.0,
             mana_regen: 0.5,
         ),
 
         AzuresongMageblade: (
             name: "Azuresong Mageblade",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_sword_39.jpg",
             slot: MainHand,
@@ -2109,18 +2116,18 @@
             attack_damage_min: 29.04,
             attack_damage_max: 44.88,
             weapon_speed: 2.4, // Classic: Azuresong Mageblade (17103)
-            spell_power: 8.0,
-            max_health: 4.0,
+            spell_power: 10.0,
+            max_health: 6.0,
             crit_chance: 0.01,
         ),
 
         // ====================================================================
-        // TIER 1: RANGED WEAPONS
+        // GAUNTLET TIER (1): RANGED WEAPONS
         // ====================================================================
 
         WandOfTheInvoker: (
             name: "Wand of the Invoker",
-            item_level: 71,
+            item_level: 78,
             item_tier: 1,
             icon: "icons/items/inv_wand_1h_stratholme_d_01.jpg",
             slot: Ranged,
@@ -2129,13 +2136,13 @@
             attack_damage_min: 11.9,
             attack_damage_max: 19.04,
             weapon_speed: 1.7, // Classic: Cold Snap (19130)
-            spell_power: 8.0,
-            max_mana: 10.0,
+            spell_power: 12.0,
+            max_mana: 14.0,
         ),
 
         EaglestrikeBow: (
             name: "Eaglestrike Bow",
-            item_level: 73,
+            item_level: 79,
             item_tier: 1,
             icon: "icons/items/inv_weapon_bow_01.jpg",
             slot: Ranged,
@@ -2144,13 +2151,13 @@
             attack_damage_min: 27.84,
             attack_damage_max: 37.12,
             weapon_speed: 2.9, // Classic: Rhok'delar, Longbow of the Ancient Keepers (18713)
-            attack_power: 8.0,
-            crit_chance: 0.02,
+            attack_power: 14.0,
+            crit_chance: 0.04,
         ),
 
         DeadeyeCrossbow: (
             name: "Deadeye Crossbow",
-            item_level: 75,
+            item_level: 80,
             item_tier: 1,
             icon: "icons/items/inv_weapon_crossbow_04.jpg",
             slot: Ranged,
@@ -2159,35 +2166,35 @@
             attack_damage_min: 28.21,
             attack_damage_max: 36.89,
             weapon_speed: 3.1, // Classic: Crossbow of Imminent Doom (21459)
-            attack_power: 6.0,
-            crit_chance: 0.03,
+            attack_power: 10.0,
+            crit_chance: 0.06,
         ),
 
         // ====================================================================
-        // TIER 1: OFF HAND
+        // GAUNTLET TIER (1): OFF HAND
         // ====================================================================
 
         GrimoireOfShadows: (
             name: "Grimoire of Shadows",
-            item_level: 70,
+            item_level: 77,
             item_tier: 1,
             icon: "icons/items/inv_misc_armorkit_09.jpg",
             slot: OffHand,
             weapon_type: OffhandFrill,
-            spell_power: 8.0,
-            max_mana: 14.0,
+            spell_power: 10.0,
+            max_mana: 15.0,
         ),
 
         BulwarkOfTheGuardian: (
             name: "Bulwark of the Guardian",
-            item_level: 71,
+            item_level: 78,
             item_tier: 1,
             icon: "icons/items/inv_shield_17.jpg",
             slot: OffHand,
             weapon_type: Shield,
-            armor: 560.0,
-            max_health: 18.0,
-            attack_power: 4.0,
+            armor: 615.0,
+            max_health: 24.0,
+            attack_power: 5.0,
         ),
     }
 )

@@ -604,6 +604,10 @@ any ring fits either ring socket, and the same item may not occupy both
      premium over the one-hander it displaces (`two_handers_carry_the_classic_premium_over_the_one_hander_they_displace`)
    - Budget usage = sum of (stat_value × weight) across all non-free stats
    - Items may exceed the budget by up to 5% tolerance
+   - **`item_tier` sets the item-level band**, checked when `items.ron` loads
+     (`equipment::ItemTier`): starting kit (0, the default) 54-60, Gauntlet (1)
+     76-80, Champion (2) 90-94. A Gauntlet or Champion item also spends at least
+     90% of its budget (`reward_tiers_spend_their_budget`), so a reward is felt
 
    **A trinket may carry a `proc:` block** — a trigger and an effect on that
    trinket's OWN internal cooldown (`src/states/play_match/proc_trinkets.rs`):
