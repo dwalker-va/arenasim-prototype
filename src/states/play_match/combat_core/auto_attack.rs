@@ -12,6 +12,7 @@ use super::super::map_geometry::has_line_of_sight;
 use super::super::match_config;
 use super::super::utils::{combat_log_id, get_next_fct_offset};
 use super::super::{AUTO_SHOT_RANGE, FCT_HEIGHT, HUNTER_DEAD_ZONE, MELEE_RANGE, WAND_RANGE};
+use super::avoidance::{avoid_melee_attack, MeleeDefense};
 use super::damage::{
     apply_damage_with_absorb, get_divine_shield_damage_penalty, get_physical_damage_reduction,
     roll_crit,
@@ -196,6 +197,48 @@ pub fn combat_auto_attack(
         })
         .collect();
 
+    // Build a map of targets with breakable CC from friendly casters.
+    let mut friendly_cc_team: std::collections::BTreeMap<Entity, u8> =
+        std::collections::BTreeMap::new();
+    for (entity, _, combatant, _, _, auras) in combatants.iter() {
+        if let Some(auras) = auras {
+            for aura in &auras.auras {
+                // Only care about CC auras that break on damage
+                if aura.break_on_damage_threshold >= 0.0
+                    && matches!(aura.effect_type, AuraType::Polymorph | AuraType::Fear)
+                {
+                    // Look up the caster's team
+                    if let Some(caster_entity) = aura.caster {
+                        if let Some(&(caster_team, _, _, _, _)) = combatant_info.get(&caster_entity)
+                        {
+                            // Only track if the CC is from the opposing team of the target
+                            // (i.e., the CC caster is an enemy of the CC'd target)
+                            if caster_team != combatant.team {
+                                friendly_cc_team.insert(entity, caster_team);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Every combatant that can dodge or parry, and its chances. Empty in a
+    // match without avoidance, and then no swing below rolls for it — so the
+    // match draws exactly what it drew before avoidance existed.
+    // Its auras ride along, for the roll's crowd-control gate.
+    let melee_defense: std::collections::BTreeMap<Entity, (MeleeDefense, Vec<Aura>)> = combatants
+        .iter()
+        .filter_map(|(entity, _, combatant, _, _, auras)| {
+            let defense = combatant.melee_defense();
+            (!defense.is_none()).then(|| {
+                let auras = auras.map(|a| a.auras.clone()).unwrap_or_default();
+                (entity, (defense, auras))
+            })
+        })
+        .collect();
+    let no_auras: Vec<Aura> = Vec::new();
+
     // Collect attacks that will happen this frame (attacker, target, damage,
     // Heroic Strike bonus, crit, the hand that swung, what the swing IS).
     // The kind rides with each swing rather than being looked up per attacker:
@@ -361,6 +404,18 @@ pub fn combat_auto_attack(
                     let damage_reduction = get_physical_damage_reduction(auras.as_deref());
                     // Apply Divine Shield outgoing damage penalty (50%)
                     let ds_penalty = get_divine_shield_damage_penalty(auras.as_deref());
+                    // The target's dodge and parry, rolled against each melee
+                    // swing below — but not against a swing the apply loop
+                    // will drop for breaking this team's own Fear or
+                    // Polymorph: an attack that never lands is not avoided.
+                    let (defense, defender_auras) =
+                        if friendly_cc_team.get(&target_entity) == Some(&combatant.team) {
+                            (MeleeDefense::default(), &no_auras)
+                        } else {
+                            melee_defense
+                                .get(&target_entity)
+                                .map_or((MeleeDefense::default(), &no_auras), |(d, a)| (*d, a))
+                        };
 
                     // The main-hand swings, in a fixed order: the live socket's
                     // (every attacker's), then a Hunter's melee main hand. The
@@ -399,7 +454,22 @@ pub fn combat_auto_attack(
                         let missed = dual_wielding
                             && swing_kind == AutoAttackKind::Melee
                             && game_rng.random_f32() < DUAL_WIELD_MISS_CHANCE;
-                        if !missed {
+                        // A melee swing that connects may still be dodged or
+                        // parried. Ranged autos never are. An avoided swing
+                        // is spent like a miss: no damage, no rage, no proc.
+                        let avoided = !missed
+                            && swing_kind == AutoAttackKind::Melee
+                            && avoid_melee_attack(
+                                &mut commands,
+                                &mut game_rng,
+                                defense,
+                                defender_auras,
+                                attacker_entity,
+                                target_entity,
+                                auto_attack_name(bonus > 0.0, swing_kind),
+                            )
+                            .is_some();
+                        if !missed && !avoided {
                             // Calculate total damage (base + bonus from Heroic Strike, etc.)
                             let base_damage = weapon_damage + bonus;
                             // Windfury Totem: a MELEE attacker carrying its own WindfuryBuff
@@ -451,7 +521,20 @@ pub fn combat_auto_attack(
                             // is only reached when a WindfuryBuff aura is present, so existing
                             // (totem-free) matches draw zero extra RNG and stay byte-identical.
                             if let Some(wf_chance) = windfury_chance {
-                                if game_rng.random_f32() < wf_chance {
+                                // The bonus swing is a melee swing of its
+                                // own, and may itself be avoided.
+                                if game_rng.random_f32() < wf_chance
+                                    && avoid_melee_attack(
+                                        &mut commands,
+                                        &mut game_rng,
+                                        defense,
+                                        defender_auras,
+                                        attacker_entity,
+                                        target_entity,
+                                        auto_attack_name(false, swing_kind),
+                                    )
+                                    .is_none()
+                                {
                                     // Bonus swing uses base weapon damage (the Heroic Strike
                                     // bonus is consumed by the primary swing) and re-rolls crit.
                                     let wf_base = weapon_damage;
@@ -514,10 +597,10 @@ pub fn combat_auto_attack(
                             }
                         }
 
-                        // A missed swing is still a swing: it costs the timer
-                        // and it consumes the queued Heroic Strike bonus. Only
-                        // the damage, and the rage that damage would have
-                        // generated, are lost.
+                        // A missed or avoided swing is still a swing: it
+                        // costs the timer and it consumes the queued Heroic
+                        // Strike bonus. Only the damage, and the rage that
+                        // damage would have generated, are lost.
                         match arm {
                             MainArm::Live => {
                                 combatant.attack_timer = 0.0;
@@ -530,7 +613,18 @@ pub fn combat_auto_attack(
 
                     if off_hand_ready && off_in_reach {
                         let missed = game_rng.random_f32() < DUAL_WIELD_MISS_CHANCE;
-                        if !missed {
+                        let avoided = !missed
+                            && avoid_melee_attack(
+                                &mut commands,
+                                &mut game_rng,
+                                defense,
+                                defender_auras,
+                                attacker_entity,
+                                target_entity,
+                                auto_attack_name(false, AutoAttackKind::Melee),
+                            )
+                            .is_some();
+                        if !missed && !avoided {
                             // The off hand carries no Heroic Strike bonus:
                             // that ability buffs "your next swing", and the
                             // main hand is the one it was queued against.
@@ -594,32 +688,6 @@ pub fn combat_auto_attack(
     // Track Frost Armor procs: attacker entities to apply slows to after the loop.
     let mut frost_armor_procs: std::collections::BTreeSet<Entity> =
         std::collections::BTreeSet::new();
-
-    // Build a map of targets with breakable CC from friendly casters.
-    let mut friendly_cc_team: std::collections::BTreeMap<Entity, u8> =
-        std::collections::BTreeMap::new();
-    for (entity, _, combatant, _, _, auras) in combatants.iter() {
-        if let Some(auras) = auras {
-            for aura in &auras.auras {
-                // Only care about CC auras that break on damage
-                if aura.break_on_damage_threshold >= 0.0
-                    && matches!(aura.effect_type, AuraType::Polymorph | AuraType::Fear)
-                {
-                    // Look up the caster's team
-                    if let Some(caster_entity) = aura.caster {
-                        if let Some(&(caster_team, _, _, _, _)) = combatant_info.get(&caster_entity)
-                        {
-                            // Only track if the CC is from the opposing team of the target
-                            // (i.e., the CC caster is an enemy of the CC'd target)
-                            if caster_team != combatant.team {
-                                friendly_cc_team.insert(entity, caster_team);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     for (attacker_entity, target_entity, damage, has_bonus, is_crit, hand, swing_kind) in attacks {
         // If any attack to this target crits, mark the FCT as crit
@@ -1148,15 +1216,16 @@ pub fn frost_armor_attack_speed_aura() -> Aura {
 }
 
 /// Effective auto-attack interval for a combatant: its weapon's speed,
-/// stretched by each `AttackSpeedSlow` aura (magnitude clamped at 0.75 to
-/// prevent division by near-zero).
+/// shortened by its permanent attack-speed bonus
+/// ([`Combatant::attack_speed_bonus`]) and stretched by each `AttackSpeedSlow`
+/// aura (magnitude clamped at 0.75 to prevent division by near-zero).
 ///
 /// Shared by the swing timer in `combat_auto_attack` above AND the graphical
 /// windup animation (`rendering/effects.rs`), so the anticipation window can
 /// never drift from the sim's real cadence. Pure — safe to call from graphical
 /// systems without touching sim state.
 pub fn effective_attack_interval(combatant: &Combatant, auras: Option<&ActiveAuras>) -> f32 {
-    swing_interval(combatant.weapon_speed, auras)
+    swing_interval(combatant.weapon_speed, combatant.attack_speed_bonus, auras)
 }
 
 /// The same, for the OFF hand, off its own weapon's speed.
@@ -1164,14 +1233,22 @@ pub fn effective_attack_interval(combatant: &Combatant, auras: Option<&ActiveAur
 /// Only meaningful while [`Combatant::is_dual_wielding`] — that predicate is
 /// what guarantees there is an off-hand weapon, and so a non-zero speed.
 pub fn effective_offhand_interval(combatant: &Combatant, auras: Option<&ActiveAuras>) -> f32 {
-    swing_interval(combatant.offhand_weapon_speed, auras)
+    swing_interval(
+        combatant.offhand_weapon_speed,
+        combatant.attack_speed_bonus,
+        auras,
+    )
 }
 
 /// The same, for a Hunter's MELEE main hand, off that weapon's own speed.
 ///
 /// Only meaningful while [`Combatant::has_melee_main_hand`].
 pub fn effective_melee_interval(combatant: &Combatant, auras: Option<&ActiveAuras>) -> f32 {
-    swing_interval(combatant.melee_weapon_speed, auras)
+    swing_interval(
+        combatant.melee_weapon_speed,
+        combatant.attack_speed_bonus,
+        auras,
+    )
 }
 
 /// Which main-hand swing `combat_auto_attack` is resolving: the live weapon
@@ -1188,14 +1265,23 @@ enum MainArm {
 /// `weapon_speed` is already an interval — seconds per swing, the Classic
 /// tooltip's "Speed" — so an unslowed swing takes exactly that long.
 ///
+/// `attack_speed_bonus` is haste as Classic counts it: `0.10` makes 10% more
+/// swings in the same time, so the interval is divided by `1.10`. It is
+/// applied FIRST, and only when it is not 0 — so every combatant without one
+/// (all of them, until a talent or item grants it) computes its interval in
+/// exactly the operations it did before the stat existed.
+///
 /// The two hands share this rather than each spelling out the arithmetic,
 /// **and the operation order below is load-bearing**: it multiplies the
 /// interval by each slow in turn. Folding the slows together first and
 /// multiplying once is algebraically the same and is NOT the same in `f32`,
 /// which would shift the main hand's interval by an ULP and, through the
 /// timer comparison, potentially every match in the project's baselines.
-fn swing_interval(weapon_speed: f32, auras: Option<&ActiveAuras>) -> f32 {
+fn swing_interval(weapon_speed: f32, attack_speed_bonus: f32, auras: Option<&ActiveAuras>) -> f32 {
     let mut attack_interval = weapon_speed;
+    if attack_speed_bonus != 0.0 {
+        attack_interval /= 1.0 + attack_speed_bonus;
+    }
     if let Some(auras) = auras {
         for aura in auras.auras.iter() {
             if aura.effect_type == AuraType::AttackSpeedSlow {

@@ -78,6 +78,7 @@ pub use super::totems::totem_pulse_system;
 
 // === Phase 3: Combat Resolution ===
 pub use super::combat_core::combat_auto_attack;
+pub use super::combat_core::resolve_melee_avoidances;
 
 // === Decision Trace ===
 pub use super::decision_trace::flush_decision_trace_system;
@@ -303,6 +304,12 @@ pub fn add_core_combat_systems<M, N>(
         FixedUpdate,
         (
             combat_auto_attack,
+            // Every melee attack avoided this frame — by an auto-attack swing
+            // above, or by a melee ability or interrupt in Phase 2 — logged,
+            // shown and traced in one place. Before the trace flush, so its
+            // events go out on the frame they happened.
+            ApplyDeferred,
+            resolve_melee_avoidances,
             flush_decision_trace_system.run_if(decide),
         )
             .chain()

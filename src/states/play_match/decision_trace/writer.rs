@@ -125,6 +125,7 @@ fn kind_order(kind: EventKind) -> u8 {
         EventKind::PetDecision => 2,
         EventKind::MovementDecision => 3,
         EventKind::SituationChange => 4,
+        EventKind::MeleeAvoided => 5,
     }
 }
 

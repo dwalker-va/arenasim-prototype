@@ -452,6 +452,9 @@ pub mod fct {
     pub const IMMUNE: Color32 = DAMAGE;
     /// A named state the combatant entered: Travel Form, Berserker Rage.
     pub const STATE: Color32 = Color32::WHITE;
+    /// A melee attack the combatant avoided: "Dodge", "Parry". White, like
+    /// the auto-attack number it stands in for (AS-333).
+    pub const AVOID: Color32 = AUTO;
     /// Divine Shield, the one invulnerability: the HUD's gold.
     pub const INVULNERABLE: Color32 = super::hud::HUD_GOLD;
     /// The outline drawn around every floating number.

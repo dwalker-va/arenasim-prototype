@@ -72,6 +72,7 @@ fn empty_snapshot_with(caster: Entity, target: Entity) -> CombatSnapshot {
     combatants.insert(caster, target_info(caster, 1, CharacterClass::Mage));
     combatants.insert(target, target_info(target, 2, CharacterClass::Warrior));
     CombatSnapshot {
+        melee_defense: Default::default(),
         ai_profile: Default::default(),
         bounds: Default::default(),
         combatants,
