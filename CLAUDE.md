@@ -1098,7 +1098,13 @@ Druid is free), pinned by `a_root_is_broken_on_the_next_global_cooldown`.
 Mark of the Wild waits behind a shift owed to break a root or snare, as it
 waits behind a dying teammate's heals: a Mark purged off the Druid is not
 recast while it stands rooted under a chaser (`DruidTurn::take`, pinned by
-`a_root_is_shifted_out_of_before_a_lost_mark_is_recast`).
+`a_root_is_shifted_out_of_before_a_lost_mark_is_recast`). A Druid below
+`DRUID_EMERGENCY_HP` leaves the form early — no dwell, a chaser inside the
+danger radius — when its emergency heal would go out on its first frame out
+(`emergency_heal_lands`, the cast gate asked without the form) and no visible
+melee or pet is within `DRUID_EMERGENCY_LEAVE_YARDS` (10), so the chaser it ran
+from cannot force the shift straight back (AS-242; `tests/druid_emergency_leave.rs`,
+`docs/design/balance/2026-10-31-as242-emergency-leave.md`).
 
 **Tangent steering (goal-directed pillar rounding)** — `map_geometry::steer_toward_goal`
 (pure, unit-tested; no RON knob). When a mover with a DESTINATION has the

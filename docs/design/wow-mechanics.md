@@ -430,8 +430,11 @@ tests fail if a full-CC type or spell is left unlabelled.
   striking reach (nor within 12 yd, for its first 8s in form), the shift rule
   would not fire straight back, and it has work — an ally in range below 80%
   HP, or an enemy within Moonfire's range. With nothing to heal and nothing in
-  reach it stays shifted. After a leave of its own accord it holds the shift
-  back for one global cooldown, as the cast it left to make would
+  reach it stays shifted. Dying itself (below 45%), it leaves at once — no 3s
+  dwell, a chaser inside 12 yd — when its emergency heal (Swiftmend, or the
+  Rejuvenation that arms it) would go out on its first frame out of the form
+  and no melee or pet is within 10 yd. After a leave of its own accord it holds
+  the shift back for one global cooldown, as the cast it left to make would
 
 ### Future: Diminishing Returns
 - Not yet implemented
