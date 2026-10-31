@@ -21,6 +21,9 @@ pub struct GameRng {
     rng: StdRng,
     /// The seed used to initialize this RNG (if deterministic)
     pub seed: Option<u64>,
+    /// How many values have been drawn from the stream: the measure behind a
+    /// claim that a change draws nothing (`MatchResult::rng_draws`).
+    draws: u64,
 }
 
 impl GameRng {
@@ -29,6 +32,7 @@ impl GameRng {
         Self {
             rng: StdRng::seed_from_u64(seed),
             seed: Some(seed),
+            draws: 0,
         }
     }
 
@@ -57,12 +61,19 @@ impl GameRng {
         Self {
             rng: StdRng::seed_from_u64(seed),
             seed: Some(seed),
+            draws: 0,
         }
     }
 
     /// Generate a random f32 in the range [0.0, 1.0)
     pub fn random_f32(&mut self) -> f32 {
+        self.draws += 1;
         self.rng.random()
+    }
+
+    /// How many values have been drawn since the stream was seeded.
+    pub fn draws(&self) -> u64 {
+        self.draws
     }
 
     /// Generate a random f32 in the given range

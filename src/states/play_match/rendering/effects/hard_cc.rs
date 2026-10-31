@@ -1,4 +1,5 @@
 use bevy::color::LinearRgba;
+use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::mesh::ConeAnchor;
 use std::f32::consts::{FRAC_PI_2, TAU};
@@ -6,6 +7,7 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 use super::druid_control::{
     build_bark_roots, root_tendrils_retract_secs, RootTendrils, ENTANGLING_ROOTS_AURA,
 };
+use super::sand_legibility::linear_level;
 use crate::states::play_match::abilities::SpellSchool;
 use crate::states::play_match::components::*;
 
@@ -224,6 +226,36 @@ const STUN_RAY_REACH: f32 = 0.55;
 /// The quad spans this multiple of the bead's core size, because most of the
 /// sprite is the transparent falloff around the core.
 const STUN_SPARKLE_SPAN: f32 = 5.0;
+
+// --- The bead discs: sand legibility (AS-435) ----------------------------------
+//
+// The sparkle is additive light, and the arena sand sits on the tonemapper's
+// shoulder, so a whirl over a unit standing on sand measured 5.6 ΔL*, faint.
+// Under each sparkle sits an alpha-BLENDED disc in the bead's own near-white at
+// half level, which the sparkle's light then lands on: the whirl reads as bright
+// stars on a dark spinning chain. Shape, spin, height and hue are unchanged.
+// Every value is the Sand Legibility Bench's signed-off proposal
+// (`docs/design/benches/2026-10-29-sand-legibility-bench.html`, artifact
+// https://claude.ai/artifact/8qLsKmuRQTVwa5Kzdimkgo, version id
+// 1793335026-f991).
+
+/// The disc's opacity where it is flat.
+pub const STUN_DISC_OPACITY: f32 = 0.9;
+/// × the bead's colour in linear light.
+pub const STUN_DISC_LEVEL: f32 = 0.5;
+/// The disc is flat out to this fraction of the sparkle's half-size...
+pub const STUN_DISC_FLAT: f32 = 0.75;
+/// ...then fades to nothing over this much more of it.
+pub const STUN_DISC_SOFT: f32 = 0.2;
+/// Resolution of the disc texture.
+const STUN_DISC_PX: u32 = 64;
+/// The transparent pass's sort bias for a disc: every disc of a whirl draws
+/// before every sparkle of it, as the bench draws them, so no disc dims a
+/// nearer bead's light. The beads and discs share their centres, and a whirl is
+/// under two yards across (`STUN_R_OUTER` 0.92 a side), so view depth alone
+/// would interleave them. Truncated to an i32 (-2) for the depth-bias state:
+/// two units of depth precision, invisible.
+pub const STUN_DISC_SORT_BIAS: f32 = -2.0;
 
 // ==============================================================================
 // Pure seams
@@ -514,11 +546,79 @@ fn sparkle_texture() -> Image {
     )
 }
 
+/// The bead disc's opacity profile (before [`STUN_DISC_OPACITY`]) at `r`, the
+/// distance from the bead's centre in units of the SPARKLE's half-size: flat
+/// to [`STUN_DISC_FLAT`], a smoothstep to nothing over [`STUN_DISC_SOFT`].
+pub fn stun_disc_profile(r: f32) -> f32 {
+    let edge = STUN_DISC_FLAT + STUN_DISC_SOFT;
+    let u = ((r - STUN_DISC_FLAT) / (edge - STUN_DISC_FLAT)).clamp(0.0, 1.0);
+    1.0 - u * u * (3.0 - 2.0 * u)
+}
+
+/// The disc quad's size as a fraction of its sparkle quad: just as far as the
+/// profile reaches.
+pub fn stun_disc_extent() -> f32 {
+    STUN_DISC_FLAT + STUN_DISC_SOFT
+}
+
+/// The disc's texture: white, its shape in the alpha. The quad spans
+/// [`stun_disc_extent`] of the sparkle's, so texture radius 1 is the profile's
+/// outer edge.
+fn stun_disc_texture() -> Image {
+    use bevy::image::Image;
+    use bevy::render::render_asset::RenderAssetUsages;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+
+    let size = STUN_DISC_PX;
+    let mut data = vec![0u8; (size * size * 4) as usize];
+    let centre = (size as f32 - 1.0) / 2.0;
+    for y in 0..size {
+        for x in 0..size {
+            let dx = (x as f32 - centre) / centre;
+            let dy = (y as f32 - centre) / centre;
+            let r = (dx * dx + dy * dy).sqrt() * stun_disc_extent();
+            let i = ((y * size + x) * 4) as usize;
+            data[i] = 255;
+            data[i + 1] = 255;
+            data[i + 2] = 255;
+            data[i + 3] = (stun_disc_profile(r) * 255.0) as u8;
+        }
+    }
+    Image::new(
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+}
+
+/// The bead disc's material (AS-435): unlit and alpha-blended, the bead's
+/// near-white at [`STUN_DISC_LEVEL`] in linear light, at [`STUN_DISC_OPACITY`].
+fn stun_disc_material(disc: Handle<Image>) -> StandardMaterial {
+    StandardMaterial {
+        base_color: linear_level(STUN_BEAD_COLOR, STUN_DISC_LEVEL, STUN_DISC_OPACITY),
+        base_color_texture: Some(disc),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        depth_bias: STUN_DISC_SORT_BIAS,
+        cull_mode: None,
+        double_sided: true,
+        ..default()
+    }
+}
+
 fn build_stun_whirl(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     sparkle: Handle<Image>,
-) -> Vec<(Mesh3d, MeshMaterial3d<StandardMaterial>, Transform, CcBead)> {
+    disc: Handle<Image>,
+) -> Vec<impl Bundle> {
+    let disc_material = materials.add(stun_disc_material(disc));
     // The sparkle drives BOTH channels: base_color_texture supplies the alpha
     // that shapes the sprite, and emissive_texture keeps the rays from emitting
     // where the sprite is transparent. `unlit` stays false or the emissive is
@@ -553,6 +653,15 @@ fn build_stun_whirl(
                 MeshMaterial3d(material.clone()),
                 Transform::from_translation(at).with_scale(Vec3::splat(s * STUN_SPARKLE_SPAN)),
                 CcBead,
+                // The disc under the sparkle (AS-435): a child of the bead, so
+                // it billboards, spins and scales with it.
+                children![(
+                    Mesh3d(mesh.clone()),
+                    MeshMaterial3d(disc_material.clone()),
+                    Transform::from_scale(Vec3::splat(stun_disc_extent())),
+                    CcBeadDisc,
+                    NotShadowCaster,
+                )],
             ));
         }
     }
@@ -626,7 +735,9 @@ pub fn update_hard_cc_visuals(
     mut images: ResMut<Assets<Image>>,
     // The sparkle is identical for every bead of every stun, so it is built
     // once and the handle reused rather than regenerating 64KB per application.
+    // The same for the bead disc under it (AS-435).
     mut sparkle: Local<Option<Handle<Image>>>,
+    mut disc: Local<Option<Handle<Image>>>,
     combatants: Query<(
         Entity,
         &Combatant,
@@ -781,7 +892,10 @@ pub fn update_hard_cc_visuals(
                 let tex = sparkle
                     .get_or_insert_with(|| images.add(sparkle_texture()))
                     .clone();
-                let parts = build_stun_whirl(&mut meshes, &mut materials, tex);
+                let disc_tex = disc
+                    .get_or_insert_with(|| images.add(stun_disc_texture()))
+                    .clone();
+                let parts = build_stun_whirl(&mut meshes, &mut materials, tex, disc_tex);
                 let origin = transform.translation + Vec3::Y * stun_lift;
                 spawn_rig(
                     &mut commands,

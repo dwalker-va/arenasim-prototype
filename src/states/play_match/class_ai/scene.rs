@@ -52,10 +52,11 @@ use crate::states::play_match::arena_bounds::ArenaBounds;
 use crate::states::play_match::combat_ai::{
     dispatch_class_decision, DispatchAccumulators, DispatchFrame, DispatchIo,
 };
+use crate::states::play_match::combat_core::{Avoidance, MeleeAvoided};
 use crate::states::play_match::components::{
-    ActiveAuras, Aura, AuraType, Combatant, DRTracker, GameRng, HealerPosture, InstantAbilityFired,
-    KitePosture, MeleeResetState, MovementDirective, RogueFlareState, Trap, TrapLaunchProjectile,
-    TrapType,
+    ActiveAuras, Aura, AuraPending, AuraType, Combatant, DRTracker, GameRng, HealerPosture,
+    InstantAbilityFired, InterruptPending, KitePosture, MeleeResetState, MovementDirective,
+    RogueFlareState, Trap, TrapLaunchProjectile, TrapType,
 };
 use crate::states::play_match::decision_trace::{
     AbilityCandidate, AbilityOutcome, CandidateStatus, DecisionTrace, EventKind, EventPayload,
@@ -247,6 +248,14 @@ impl Scene {
     pub fn mana(mut self, fraction: f32) -> Self {
         let c = &mut self.last().combatant;
         c.current_mana = c.max_mana * fraction;
+        self
+    }
+
+    /// The last unit's chances to dodge and to parry a melee attack.
+    pub fn avoidance(mut self, dodge: f32, parry: f32) -> Self {
+        let c = &mut self.last().combatant;
+        c.dodge_chance = dodge;
+        c.parry_chance = parry;
         self
     }
 
@@ -608,7 +617,12 @@ impl Scene {
         let mut active_auras = BTreeMap::new();
         let mut dr_trackers = BTreeMap::new();
         let mut ability_cooldowns = BTreeMap::new();
+        let mut melee_defense = BTreeMap::new();
         for u in &self.units {
+            let defense = u.combatant.melee_defense();
+            if !defense.is_none() {
+                melee_defense.insert(u.entity, defense);
+            }
             let mut transform = Transform::from_translation(u.position);
             if let Some(f) = u.facing {
                 transform.rotation = Quat::from_rotation_y(f.x.atan2(f.z));
@@ -639,6 +653,7 @@ impl Scene {
             obstacles: self.obstacles.clone(),
             bounds: self.bounds,
             ai_profile: self.ai_profile,
+            melee_defense,
         }
     }
 
@@ -768,6 +783,7 @@ impl Scene {
         let mut commands = Commands::new(&mut queue, &exec_world);
         let mut combat_log = CombatLog::default();
         let mut game_rng = GameRng::from_seed(0);
+        let mut acc = DispatchAccumulators::default();
         let acted = dispatch_class_decision(
             DispatchIo {
                 commands: &mut commands,
@@ -776,7 +792,7 @@ impl Scene {
                 decision_trace: &mut trace,
             },
             &frame,
-            &mut DispatchAccumulators::default(),
+            &mut acc,
             unit.entity,
             &mut combatant,
             unit.position,
@@ -806,7 +822,39 @@ impl Scene {
                 target: m.target.map(|t| self.who(t.index())),
                 ability: m.ability,
             }));
+        view.landed
+            .extend(acc.instant_attacks.iter().map(|a| SceneLanded {
+                ability: a.ability,
+                target: self.who(a.target.index()),
+            }));
+        self.read_landings(&mut exec_world, &mut view);
         view
+    }
+
+    /// What a decision's commands left in `world` for an attack to land or
+    /// be avoided: the auras it queued, the interrupts it queued, and the
+    /// melee attacks the target dodged or parried.
+    fn read_landings(&self, world: &mut World, view: &mut DecisionView) {
+        let mut pending = world.query::<&AuraPending>();
+        view.auras_queued.extend(
+            pending
+                .iter(world)
+                .map(|p| (self.who(p.target.index()), p.aura.effect_type)),
+        );
+        let mut interrupts = world.query::<&InterruptPending>();
+        view.interrupts_queued.extend(
+            interrupts
+                .iter(world)
+                .map(|i| (i.ability, self.who(i.target.index()))),
+        );
+        let mut avoided = world.query::<&MeleeAvoided>();
+        view.avoided
+            .extend(avoided.iter(world).map(|m| SceneAvoided {
+                attacker: self.who(m.attacker.index()),
+                defender: self.who(m.defender.index()),
+                attack: m.attack.clone(),
+                avoidance: m.avoidance,
+            }));
     }
 }
 
@@ -823,7 +871,7 @@ impl Scene {
     /// and a unit that begins a cast in it is not asked to interrupt, so the
     /// two are judged each on the scene as built.
     pub fn interrupt(&self, who: Who) -> DecisionView {
-        use super::interrupts::interrupt_turn;
+        use super::interrupts::{fire_interrupt, interrupt_turn};
         let unit = self.find(who);
         let snapshot = self.snapshot();
         let mut trace = DecisionTrace {
@@ -835,11 +883,11 @@ impl Scene {
             .context_for(unit.entity)
             .with_situation(situations.for_team(unit.combatant.team));
         let casts = self.casts();
-        let combatant = self.combatant_of(unit);
+        let mut combatant = self.combatant_of(unit);
         let auras = ActiveAuras {
             auras: unit.auras.clone(),
         };
-        let acted = interrupt_turn(
+        let turn = interrupt_turn(
             &ctx,
             &self.abilities,
             &combatant,
@@ -847,9 +895,36 @@ impl Scene {
             Some(&auras),
             &casts,
             Some(&mut trace),
-        )
-        .is_some();
-        DecisionView::read(self, unit.entity, acted, &trace)
+        );
+        let mut view = DecisionView::read(self, unit.entity, turn.is_some(), &trace);
+        // The interrupt chosen is used, as `check_interrupts` uses it, in a
+        // throwaway world whose entity ids match the scene's.
+        if let Some((ability, target, cast)) = turn {
+            let mut exec_world = World::new();
+            for u in &self.units {
+                assert_eq!(exec_world.spawn_empty().id(), u.entity);
+            }
+            let mut queue = CommandQueue::default();
+            let mut commands = Commands::new(&mut queue, &exec_world);
+            let target_pos = casts.get(&target).map_or(unit.position, |c| c.position);
+            fire_interrupt(
+                &mut commands,
+                &mut CombatLog::default(),
+                &mut GameRng::from_seed(0),
+                &self.abilities,
+                &ctx,
+                unit.entity,
+                &mut combatant,
+                unit.position,
+                ability,
+                target,
+                target_pos,
+                cast,
+            );
+            queue.apply(&mut exec_world);
+            self.read_landings(&mut exec_world, &mut view);
+        }
+        view
     }
 
     /// Whom a Felhunter standing where `who` stands, on `who`'s team, would
@@ -973,6 +1048,32 @@ pub struct DecisionView {
     /// a graphical consumer turns into a caster gesture — with its units named,
     /// so a test can replay it against a rendered stand-in for the scene.
     pub instant_markers: Vec<SceneInstantMarker>,
+    /// Every instant attack the decision queued to land after the dispatch
+    /// (Mortal Strike, Sinister Strike, Ambush), with its target named.
+    pub landed: Vec<SceneLanded>,
+    /// Every aura the decision queued, with its target named and its type.
+    pub auras_queued: Vec<(Who, AuraType)>,
+    /// Every interrupt the decision queued, with its target named
+    /// ([`Scene::interrupt`] only).
+    pub interrupts_queued: Vec<(AbilityType, Who)>,
+    /// Every melee attack of the decision's that its target dodged or parried.
+    pub avoided: Vec<SceneAvoided>,
+}
+
+/// An instant attack a scene decision queued, its target named.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SceneLanded {
+    pub ability: AbilityType,
+    pub target: Who,
+}
+
+/// A melee attack a scene decision's target avoided, its units named.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SceneAvoided {
+    pub attacker: Who,
+    pub defender: Who,
+    pub attack: String,
+    pub avoidance: Avoidance,
 }
 
 /// An [`InstantAbilityFired`] a scene decision spawned, its units named.
@@ -995,6 +1096,10 @@ impl DecisionView {
             situation: None,
             directive: None,
             instant_markers: Vec::new(),
+            landed: Vec::new(),
+            auras_queued: Vec::new(),
+            interrupts_queued: Vec::new(),
+            avoided: Vec::new(),
         };
         let mine = trace.pending_events.iter().filter(|e| {
             e.actor

@@ -29,8 +29,9 @@ use arenasim::states::play_match::components::{
     AuraBandPolarity, AuraType, Combatant, DispelType, Pet, PetType, TotemElement,
 };
 use arenasim::states::play_match::{
-    cleanup_aura_bands, detect_aura_applications, update_aura_bands, AuraBandArc, AuraBandMaterial,
-    AURA_BAND_ARCS, AURA_BAND_SECS, AURA_BAND_WIDTH,
+    aura_band_alpha, aura_band_progress, cleanup_aura_bands, detect_aura_applications,
+    update_aura_bands, AuraBandArc, AuraBandMaterial, AURA_BAND_ARCS, AURA_BAND_SECS,
+    AURA_BAND_WIDTH,
 };
 use arenasim::CharacterClass;
 
@@ -703,23 +704,90 @@ fn a_pets_band_stays_on_the_pet_and_clears_its_body() {
 }
 
 #[test]
-fn the_band_is_additive_and_casts_no_shadow() {
+fn the_band_casts_no_shadow() {
     let mut h = Harness::new();
     let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
     h.set_auras(unit, vec![fortitude()]);
     h.tick(3);
-    let handle = {
-        let mut q = h.app.world_mut().query::<&AuraBandMaterial>();
-        q.single(h.app.world()).unwrap().0.clone()
-    };
-    let materials = h.app.world().resource::<Assets<StandardMaterial>>();
-    let mat = materials.get(&handle).unwrap();
-    assert!(matches!(mat.alpha_mode, AlphaMode::Add));
-    assert!(mat.base_color.alpha() > 0.0, "the band is visible mid-life");
-
     let mut q = h
         .app
         .world_mut()
         .query_filtered::<Has<NotShadowCaster>, With<AuraBandArc>>();
-    assert!(q.iter(h.app.world()).all(|has| has));
+    let flags: Vec<bool> = q.iter(h.app.world()).collect();
+    assert_eq!(flags.len(), AURA_BAND_ARCS as usize);
+    assert!(flags.iter().all(|has| *has));
+}
+
+/// One band's material, its band, and the frames it has lived.
+fn band_material(h: &mut Harness) -> (AuraBand, StandardMaterial) {
+    let (band, handle) = {
+        let mut q = h.app.world_mut().query::<(&AuraBand, &AuraBandMaterial)>();
+        let (b, m) = q.single(h.app.world()).unwrap();
+        (b.clone(), m.0.clone())
+    };
+    let materials = h.app.world().resource::<Assets<StandardMaterial>>();
+    (band, materials.get(&handle).unwrap().clone())
+}
+
+/// AS-435: the band is ONE alpha-blended band in its tint — no added light —
+/// at opacity 0.9 × its envelope, and at level 0.8 for a buff and 0.5 for a
+/// debuff in linear light (the Sand Legibility Bench's signed-off values), so a
+/// hostile aura reads darker. Checked through the whole life, both polarities.
+#[test]
+fn the_band_is_one_blended_band_at_its_polaritys_level() {
+    let cases = [
+        (fortitude(), AuraBandPolarity::Buff, 0.8),
+        (demoralizing(), AuraBandPolarity::Debuff, 0.5),
+    ];
+    for (aura, polarity, level) in cases {
+        let tint = aura
+            .spell_school
+            .map(SpellSchool::color)
+            .unwrap_or(SpellSchool::None.color())
+            .to_linear();
+        let mut h = Harness::new();
+        let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+        h.set_auras(unit, vec![aura]);
+        let mut held = 0;
+        for _ in 0..frames_for(AURA_BAND_SECS) - 1 {
+            h.tick(1);
+            if h.bands().is_empty() {
+                break;
+            }
+            let (band, mat) = band_material(&mut h);
+            assert_eq!(band.polarity, polarity);
+            assert_eq!(mat.alpha_mode, AlphaMode::Blend, "{polarity:?}");
+            assert!(mat.unlit, "an unlit layer, as the bench draws it");
+            assert_eq!(
+                mat.emissive,
+                LinearRgba::BLACK,
+                "{polarity:?}: no added light"
+            );
+            let c = mat.base_color.to_linear();
+            for (got, want, ch) in [
+                (c.red, tint.red * level, "red"),
+                (c.green, tint.green * level, "green"),
+                (c.blue, tint.blue * level, "blue"),
+            ] {
+                assert!(
+                    (got - want).abs() < 1e-5,
+                    "{polarity:?} {ch}: {got} vs {want}"
+                );
+            }
+            let envelope = aura_band_alpha(aura_band_progress(band.age));
+            assert!(
+                (c.alpha - 0.9 * envelope).abs() < 1e-5,
+                "{polarity:?} opacity {} vs {}",
+                c.alpha,
+                0.9 * envelope
+            );
+            if envelope == 1.0 {
+                held += 1;
+            }
+        }
+        assert!(
+            held > 0,
+            "{polarity:?}: the band never reached full opacity"
+        );
+    }
 }

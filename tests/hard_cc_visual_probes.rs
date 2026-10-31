@@ -22,12 +22,14 @@ use bevy::time::TimeUpdateStrategy;
 use arenasim::states::play_match::abilities::{AbilityType, SpellSchool};
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
-    ActiveAuras, Aura, AuraType, CcFlare, CcKind, CcRig, Combatant, NovaFreezeDelay, OriginalMesh,
-    Pet, PetType, RootStyle, RootedVisual, StunnedVisual, VisualBody, WalkAnim,
+    ActiveAuras, Aura, AuraType, CcBead, CcBeadDisc, CcFlare, CcKind, CcRig, Combatant,
+    NovaFreezeDelay, OriginalMesh, Pet, PetType, RootStyle, RootedVisual, StunnedVisual,
+    VisualBody, WalkAnim,
 };
 use arenasim::states::play_match::{
     billboard_cc_beads, cc_envelope, cleanup_cc_flares, cleanup_cc_rigs, nova_outer_radius,
-    root_style, update_cc_flares, update_cc_rigs, update_hard_cc_visuals,
+    root_style, stun_disc_extent, stun_disc_profile, update_cc_flares, update_cc_rigs,
+    update_hard_cc_visuals,
 };
 use arenasim::CharacterClass;
 
@@ -718,6 +720,122 @@ fn the_whirl_and_flare_actually_emit() {
     let m = materials.get(&handle).unwrap();
     assert!(!m.unlit, "an unlit flare silently loses its emissive");
     assert!(m.emissive.blue > 1.0, "the flare must be HDR-overbright");
+}
+
+/// AS-435: every sparkle keeps its additive light and sits on an alpha-BLENDED
+/// disc in the bead's own near-white at half level, opacity 0.9, flat out to
+/// 0.75 of the sparkle's half-size and soft for 0.2 beyond (the Sand
+/// Legibility Bench's signed-off values), drawn before every sparkle of the
+/// whirl.
+#[test]
+fn every_sparkle_sits_on_a_blended_disc_in_its_own_white() {
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(0, 0);
+    h.apply(unit, stun_aura());
+    h.tick(2);
+
+    let rig = h.rigs_of(unit, CcKind::Stun)[0].0;
+    let beads: Vec<Entity> = h.app.world().get::<Children>(rig).unwrap().iter().collect();
+    assert_eq!(beads.len(), 10);
+
+    let material_of = |h: &Harness, e: Entity| -> StandardMaterial {
+        let handle = h
+            .app
+            .world()
+            .get::<MeshMaterial3d<StandardMaterial>>(e)
+            .expect("a material")
+            .0
+            .clone();
+        h.app
+            .world()
+            .resource::<Assets<StandardMaterial>>()
+            .get(&handle)
+            .unwrap()
+            .clone()
+    };
+
+    let mut discs = 0;
+    for bead in &beads {
+        assert!(h.app.world().get::<CcBead>(*bead).is_some());
+        let children: Vec<Entity> = h
+            .app
+            .world()
+            .get::<Children>(*bead)
+            .map(|c| c.iter().collect())
+            .unwrap_or_default();
+        assert_eq!(children.len(), 1, "one disc under each sparkle");
+        let disc = children[0];
+        assert!(h.app.world().get::<CcBeadDisc>(disc).is_some());
+        discs += 1;
+
+        let sparkle = material_of(&h, *bead);
+        let d = material_of(&h, disc);
+        assert_eq!(
+            sparkle.alpha_mode,
+            AlphaMode::Add,
+            "the sparkle stays light"
+        );
+        assert_eq!(d.alpha_mode, AlphaMode::Blend, "the disc darkens");
+        assert!(d.unlit, "an unlit layer, as the bench draws it");
+        assert_eq!(d.emissive, LinearRgba::BLACK, "the disc adds no light");
+
+        // The bead's own colour at half level, in linear light, at 0.9.
+        let s = sparkle.base_color.to_linear();
+        let c = d.base_color.to_linear();
+        for (got, want, ch) in [
+            (c.red, s.red * 0.5, "red"),
+            (c.green, s.green * 0.5, "green"),
+            (c.blue, s.blue * 0.5, "blue"),
+        ] {
+            assert!((got - want).abs() < 1e-5, "disc {ch}: {got} vs {want}");
+        }
+        assert!((c.alpha - 0.9).abs() < 1e-6, "disc opacity {}", c.alpha);
+
+        // Every disc of the whirl sorts behind every sparkle of it: the bias
+        // clears the whirl's whole depth (two outer radii).
+        assert!(
+            d.depth_bias - sparkle.depth_bias <= -2.0 * 0.92,
+            "disc sort bias {} against the sparkle's {}",
+            d.depth_bias,
+            sparkle.depth_bias
+        );
+
+        // The disc quad reaches 0.95 of the sparkle's half-size, centred on it.
+        let t = h.app.world().get::<Transform>(disc).unwrap();
+        assert_eq!(t.translation, Vec3::ZERO);
+        assert!((t.scale.x - 0.95).abs() < 1e-6 && (t.scale.y - 0.95).abs() < 1e-6);
+
+        // Its shape: flat to 0.75 of the sparkle's half-size, gone by 0.95.
+        let tex = d.base_color_texture.clone().expect("the disc's texture");
+        let images = h.app.world().resource::<Assets<Image>>();
+        let img = images.get(&tex).expect("disc image");
+        let size = img.texture_descriptor.size.width as usize;
+        let alpha_at = |r_sparkle: f32| -> u8 {
+            // Along the quad's +X axis; texture radius 1 is 0.95 of the sparkle.
+            let c = (size as f32 - 1.0) / 2.0;
+            let x = (c + (r_sparkle / 0.95) * c).round().min((size - 1) as f32) as usize;
+            let y = c.round() as usize;
+            img.data.as_ref().unwrap()[(y * size + x) * 4 + 3]
+        };
+        assert!(alpha_at(0.0) >= 254, "solid at the centre");
+        assert!(alpha_at(0.72) >= 250, "still flat near 0.75");
+        assert!(alpha_at(0.85) > 40 && alpha_at(0.85) < 215, "the soft edge");
+        assert!(alpha_at(0.95) <= 3, "gone at 0.95");
+    }
+    assert_eq!(discs, 10);
+}
+
+#[test]
+fn the_disc_profile_is_flat_then_soft() {
+    assert_eq!(stun_disc_profile(0.0), 1.0);
+    assert_eq!(stun_disc_profile(0.75), 1.0);
+    assert!(
+        (stun_disc_profile(0.85) - 0.5).abs() < 1e-5,
+        "smoothstep midpoint"
+    );
+    assert_eq!(stun_disc_profile(0.95), 0.0);
+    assert_eq!(stun_disc_profile(2.0), 0.0);
+    assert!((stun_disc_extent() - 0.95).abs() < 1e-6);
 }
 
 // ==============================================================================

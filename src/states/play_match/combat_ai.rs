@@ -12,7 +12,7 @@ use super::components::*;
 use super::constants::{TRAP_ARM_DELAY, TRAP_LAUNCH_SPEED};
 use super::match_config;
 use super::situation::{update_situations, MatchClock, SituationConfig, Situations};
-use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset, log_ability_use};
+use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
 use crate::combat::log::CombatLog;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -2065,6 +2065,7 @@ pub fn decide_abilities(
 pub fn check_interrupts(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
+    mut game_rng: ResMut<GameRng>,
     abilities: Res<AbilityDefinitions>,
     mut combatants: Query<(Entity, &mut Combatant, &Transform), Without<CastingState>>,
     channeling_targets: Query<&ChannelingState>,
@@ -2169,66 +2170,20 @@ pub fn check_interrupts(
         else {
             continue;
         };
-        let ability_def = abilities.get_unchecked(&interrupt_ability);
-        let target_ability_name = abilities.get_unchecked(&cast_ability).name.clone();
         let target_pos = casts.get(&target_entity).map_or(my_pos, |c| c.position);
-        let distance = my_pos.distance(target_pos);
-
-        // Use the interrupt!
-        info!(
-            "[INTERRUPT] Team {} {} uses {} to interrupt {}'s {} (distance: {:.1})",
-            combatant.team,
-            combatant.class.name(),
-            ability_def.name,
-            target_ability_name,
-            distance,
-            distance
-        );
-
-        // Consume resources
-        combatant.current_mana -= ability_def.mana_cost;
-
-        // Put on cooldown
-        combatant.start_cooldown(interrupt_ability, &abilities);
-
-        // Interrupts do NOT trigger GCD in WoW!
-
-        // Log ability cast for timeline
-        log_ability_use(
+        class_ai::interrupts::fire_interrupt(
+            &mut commands,
             &mut combat_log,
-            combatant.team,
-            combatant.slot,
-            combatant.class,
-            &ability_def.name,
-            None,
-            "uses",
+            &mut game_rng,
+            &abilities,
+            &ctx,
+            entity,
+            &mut combatant,
+            my_pos,
+            interrupt_ability,
+            target_entity,
+            target_pos,
+            cast_ability,
         );
-
-        // Queue the interrupt for processing
-        // Note: The actual interrupt result (with school lockout info) is logged in process_interrupts
-        commands.spawn(InterruptPending {
-            caster: entity,
-            target: target_entity,
-            ability: interrupt_ability,
-            lockout_duration: ability_def.lockout_duration,
-        });
-
-        // Actor-side gesture marker (committed-use site: the caster performs
-        // the strike whether or not the victim's cast survives to be locked
-        // out). Melee interrupts only — Wind Shear's caster has no weapon
-        // sockets, and its answer is a victim-side effect (roadmap B), so
-        // spawning for it would list an ability the router never draws.
-        // Spawned in BOTH modes per cosmetic-marker-cross-mode-spawn-parity.
-        if matches!(interrupt_ability, AbilityType::Pummel | AbilityType::Kick) {
-            commands.spawn((
-                InstantAbilityFired {
-                    caster: entity,
-                    target: Some(target_entity),
-                    ability: interrupt_ability,
-                    is_crit: false,
-                },
-                PlayMatchEntity,
-            ));
-        }
     }
 }
