@@ -80,6 +80,8 @@ mod druid_control;
 pub use druid_control::*;
 mod rogue_crescents;
 pub use rogue_crescents::*;
+mod sand_legibility;
+pub use sand_legibility::*;
 mod holy_justice;
 pub use holy_justice::*;
 mod frost_nova;

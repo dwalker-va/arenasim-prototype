@@ -19,7 +19,9 @@ use arenasim::states::play_match::components::{
     WeaponSocket,
 };
 use arenasim::states::play_match::{
-    cleanup_crescent_flares, consume_instant_ability_signals, update_crescent_flares,
+    build_crescent_ladder, cleanup_crescent_flares, consume_instant_ability_signals,
+    crescent_blend_alpha, crescent_ladder_len, crescent_rung, crescent_rung_gain,
+    update_crescent_flares, SAND_CRESCENT_GAIN, SAND_CRESCENT_LEVEL,
 };
 use arenasim::CharacterClass;
 
@@ -537,4 +539,164 @@ fn a_caster_with_no_socket_still_gets_its_flourish() {
 
     assert_eq!(h.crescents(), 4, "the fan does not require a weapon");
     assert_eq!(h.markers(), 0);
+}
+
+// ==============================================================================
+// Sand legibility (AS-435)
+// ==============================================================================
+
+/// The bench's crescent colour at life fraction `k`: the three-stop track,
+/// lerped in sRGB, at level 1.0 in linear light.
+fn bench_track(f: &CrescentFlare, k: f32) -> LinearRgba {
+    const FLASH_AT: f32 = 0.22;
+    let (a, b, u) = if k < FLASH_AT {
+        (f.color, f.color_mid, k / FLASH_AT)
+    } else {
+        (f.color_mid, f.color_end, (k - FLASH_AT) / (1.0 - FLASH_AT))
+    };
+    let (a, b) = (a.to_srgba(), b.to_srgba());
+    Color::srgb(
+        a.red + (b.red - a.red) * u,
+        a.green + (b.green - a.green) * u,
+        a.blue + (b.blue - a.blue) * u,
+    )
+    .to_linear()
+}
+
+/// AS-435: each stroke is alpha-blended in its own colour track — no added
+/// light — at level 1.0, its opacity `min(1, 2.0 × fade × texture)` (the Sand
+/// Legibility Bench's signed-off gain), carried as a ladder rung's baked gain
+/// times a material alpha that never exceeds 1. Every live crescent of both
+/// rogue stuns, every frame of its life.
+#[test]
+fn the_strokes_are_blended_in_their_own_colour_at_gain_two() {
+    assert_eq!(SAND_CRESCENT_GAIN, 2.0, "the signed-off gain");
+    assert_eq!(SAND_CRESCENT_LEVEL, 1.0, "the signed-off level");
+    for ability in [AbilityType::CheapShot, AbilityType::KidneyShot] {
+        let mut h = Harness::new();
+        let rogue = h.spawn_rogue();
+        let victim = h.spawn_victim();
+        h.fire(rogue, victim, ability);
+        let (mut saturated, mut unsaturated) = (0, 0);
+        for _ in 0..24 {
+            h.tick(1);
+            let live: Vec<(CrescentFlare, Handle<StandardMaterial>)> = {
+                let mut q = h
+                    .app
+                    .world_mut()
+                    .query::<(&CrescentFlare, &MeshMaterial3d<StandardMaterial>)>();
+                q.iter(h.app.world())
+                    .map(|(f, m)| (f.clone(), m.0.clone()))
+                    .collect()
+            };
+            for (flare, handle) in live {
+                if flare.age < flare.delay {
+                    continue;
+                }
+                let k = ((flare.age - flare.delay) / flare.lifetime).clamp(0.0, 1.0);
+                let fade = (1.0 - k) * (1.0 - k);
+                let materials = h.app.world().resource::<Assets<StandardMaterial>>();
+                let m = materials.get(&handle).unwrap();
+                assert_eq!(m.alpha_mode, AlphaMode::Blend, "{ability:?}");
+                assert!(m.unlit, "{ability:?}: an unlit layer");
+                assert_eq!(m.emissive, LinearRgba::BLACK, "{ability:?}: no added light");
+
+                let c = m.base_color.to_linear();
+                let want = bench_track(&flare, k);
+                for (got, want, ch) in [
+                    (c.red, want.red, "red"),
+                    (c.green, want.green, "green"),
+                    (c.blue, want.blue, "blue"),
+                ] {
+                    assert!(
+                        (got - want).abs() < 1e-4,
+                        "{ability:?} {ch} {got} vs {want}"
+                    );
+                }
+
+                // The rung's baked gain times the material alpha is the bench's
+                // gain × fade, and the material alpha stays a real opacity.
+                let tex = m.base_color_texture.clone().expect("a rung");
+                let rung = flare
+                    .ladder
+                    .0
+                    .iter()
+                    .position(|r| *r == tex)
+                    .expect("the texture is a rung of the ladder");
+                let gain = crescent_rung_gain(rung);
+                assert!(c.alpha <= 1.0 && c.alpha >= 0.0, "alpha {}", c.alpha);
+                let want = 2.0 * fade;
+                assert!(
+                    (gain * c.alpha - want).abs() < 1e-4,
+                    "{ability:?}: rung gain {gain} × alpha {} vs {want}",
+                    c.alpha
+                );
+                assert!(gain >= want.max(1.0) - 1e-6, "the rung reaches the gain");
+                assert!(
+                    gain - want.max(1.0) <= 1.0 / 32.0 + 1e-6,
+                    "the nearest rung: {gain} for {want}"
+                );
+                if want > 1.0 {
+                    saturated += 1;
+                } else {
+                    unsaturated += 1;
+                }
+            }
+        }
+        assert!(
+            saturated > 0 && unsaturated > 0,
+            "{ability:?}: both halves of the fade seen ({saturated}, {unsaturated})"
+        );
+    }
+}
+
+/// Each rung bakes `min(1, gain × stroke)`: the top rung is the bench's gain,
+/// and drawn through `crescent_rung` the composite opacity is the bench's
+/// `min(1, 2 × fade × texel)` — exact where the rung is unsaturated, within one
+/// rung step where it saturates.
+#[test]
+fn the_ladder_draws_the_benchs_opacity() {
+    let mut images = Assets::<Image>::default();
+    let ladder = build_crescent_ladder(&mut images);
+    assert_eq!(ladder.0.len(), crescent_ladder_len());
+    assert_eq!(crescent_rung_gain(0), 1.0);
+    assert_eq!(crescent_rung_gain(ladder.0.len() - 1), 2.0, "the top rung");
+
+    let texels = |i: usize| -> Vec<u8> {
+        let img = images.get(&ladder.0[i]).unwrap();
+        img.data.as_ref().unwrap().chunks(4).map(|p| p[3]).collect()
+    };
+    let base = texels(0);
+    assert!(base.iter().any(|&a| a > 200) && base.iter().any(|&a| a > 0 && a < 100));
+    for i in [1, ladder.0.len() / 2, ladder.0.len() - 1] {
+        let g = crescent_rung_gain(i);
+        for (b, r) in base.iter().zip(texels(i)) {
+            let want = (g * *b as f32).min(255.0);
+            assert!(
+                (r as f32 - want).abs() <= g + 1.0,
+                "rung {i}: {r} vs min(255, {g} × {b})"
+            );
+        }
+    }
+
+    for f in 0..=40 {
+        let fade = f as f32 / 40.0;
+        let (rung, alpha) = crescent_rung(fade);
+        assert!((0.0..=1.0).contains(&alpha));
+        let g = crescent_rung_gain(rung);
+        for t in 0..=50 {
+            let texel = t as f32 / 50.0;
+            let drawn = alpha * (g * texel).min(1.0);
+            let bench = crescent_blend_alpha(texel, fade);
+            assert_eq!(bench, (2.0 * fade * texel).min(1.0));
+            if g * texel < 1.0 {
+                assert!((drawn - bench).abs() < 1e-5, "fade {fade} texel {texel}");
+            } else {
+                assert!(
+                    drawn <= bench + 1e-6 && bench - drawn <= 1.0 / 32.0 + 1e-6,
+                    "fade {fade} texel {texel}: {drawn} vs {bench}"
+                );
+            }
+        }
+    }
 }
