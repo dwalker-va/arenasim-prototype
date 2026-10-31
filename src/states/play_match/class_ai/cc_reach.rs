@@ -8,8 +8,8 @@
 //!
 //! **A CC threat** is a pair (enemy E, ability A), every part read from data:
 //!
-//! - A is in E's kit (`AbilityDefinitions`: the class's own abilities, or a
-//!   pet's by its `pet_type`), and applies an aura that HOLDS — stops its
+//! - A is in E's kit (E's own `AbilityBook`: its class's abilities, or a
+//!   pet's by its pet type), and applies an aura that HOLDS — stops its
 //!   victim acting ([`holds`]: stun, fear, polymorph, incapacitate, cyclone).
 //!   Roots are out: a rooted healer still heals.
 //! - **Reach** is A's `range`, plus the trap trigger radius for an ability
@@ -42,7 +42,7 @@ use bevy::prelude::*;
 
 use super::{holds, CombatContext, CombatantInfo};
 use crate::states::play_match::abilities::{silence_holds, AbilityType};
-use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
+use crate::states::play_match::ability_config::AbilityConfig;
 use crate::states::play_match::components::{ActiveAuras, AuraType, DRCategory};
 use crate::states::play_match::constants::{DR_MULTIPLIERS, TRAP_TRIGGER_RADIUS};
 use crate::states::play_match::is_spell_school_locked;
@@ -273,12 +273,7 @@ pub struct CcThreat {
 /// Every enemy crowd control READY to reach `healer`, as `healer`'s context
 /// perceives the arena: the threats a [`CcField`] is built from. In the
 /// deterministic order of `ctx.combatants`, then of each kit.
-pub fn threats(
-    ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
-    healer: Entity,
-    horizon: f32,
-) -> Vec<CcThreat> {
+pub fn threats(ctx: &CombatContext, healer: Entity, horizon: f32) -> Vec<CcThreat> {
     let Some(team) = ctx.combatants.get(&healer).map(|h| h.team) else {
         return Vec::new();
     };
@@ -288,20 +283,7 @@ pub fn threats(
         .values()
         .filter(|c| c.is_alive && c.team != team)
     {
-        let kit: Vec<AbilityType> = if enemy.is_pet {
-            abilities
-                .pet_abilities_for_class(enemy.class)
-                .into_iter()
-                .filter(|(pet, _)| Some(*pet) == enemy.pet_type)
-                .flat_map(|(_, kit)| kit)
-                .collect()
-        } else {
-            abilities.own_abilities_for_class(enemy.class)
-        };
-        for ability in kit {
-            let Some(def) = abilities.get(&ability) else {
-                continue;
-            };
+        for (&ability, def) in enemy.book.iter() {
             if held_by(def).is_none() || !could_cast(ctx, enemy, ability, def, horizon) {
                 continue;
             }
@@ -343,15 +325,9 @@ pub struct CcField {
 
 impl CcField {
     /// The field for `healer`, from its own context.
-    pub fn for_healer(
-        ctx: &CombatContext,
-        abilities: &AbilityDefinitions,
-        healer: Entity,
-        horizon: f32,
-        margin: f32,
-    ) -> Self {
+    pub fn for_healer(ctx: &CombatContext, healer: Entity, horizon: f32, margin: f32) -> Self {
         CcField {
-            threats: threats(ctx, abilities, healer, horizon),
+            threats: threats(ctx, healer, horizon),
             margin,
         }
     }
@@ -503,16 +479,14 @@ mod tests {
         }
 
         fn threats(&self) -> Vec<AbilityType> {
-            let abilities = load_ability_definitions().expect("abilities.ron loads");
-            threats(&self.ctx(), &abilities, self.healer, 1.5)
+            threats(&self.ctx(), self.healer, 1.5)
                 .into_iter()
                 .map(|t| t.ability)
                 .collect()
         }
 
         fn field(&self) -> CcField {
-            let abilities = load_ability_definitions().expect("abilities.ron loads");
-            CcField::for_healer(&self.ctx(), &abilities, self.healer, 1.5, 3.0)
+            CcField::for_healer(&self.ctx(), self.healer, 1.5, 3.0)
         }
 
         fn aura(&mut self, who: Entity, effect: AuraType) -> &mut Self {
@@ -667,6 +641,7 @@ mod tests {
         pet.is_pet = true;
         pet.slot = crate::states::play_match::constants::PET_SLOT_BASE;
         pet.pet_type = Some(PetType::Boar);
+        pet.book = crate::states::play_match::ability_book::AbilityBook::shipped_pet(PetType::Boar);
         f.roster.insert(boar, pet);
         let field = f.field();
         let charge = field

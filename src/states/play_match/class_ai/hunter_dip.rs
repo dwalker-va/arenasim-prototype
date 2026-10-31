@@ -19,7 +19,7 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::components::{
     ActiveAuras, Combatant, DRCategory, KitePosture, MovementDirective, MovementGoal, TrapRetarget,
 };
@@ -139,19 +139,14 @@ pub fn trap_focus(
 /// removal at 0.28s — and is held. That holds even when the only teammate who
 /// could free it is one the Hunter's team is killing: a focused Priest still
 /// dispels its partner within a GCD or two, so such a trap buys nothing.
-pub fn trap_victim_worth_it(
-    ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
-    owner: Entity,
-    victim: Entity,
-) -> bool {
+pub fn trap_victim_worth_it(ctx: &CombatContext, owner: Entity, victim: Entity) -> bool {
     let Some(info) = ctx.combatants.get(&victim) else {
         return false;
     };
     if !info.is_pet && info.class.is_healer() {
         return true;
     }
-    trap_would_stick(ctx, abilities, owner, victim)
+    trap_would_stick(ctx, owner, victim)
 }
 
 /// Would a Freezing Trap on `victim` stay on it? True when no living teammate
@@ -162,14 +157,9 @@ pub fn trap_victim_worth_it(
 /// when the Paladin's AI chooses to spend a 5-minute cooldown on it (a teammate
 /// low, or itself), and a trap that draws the bubble has spent the Paladin's
 /// one emergency button — a trade the Hunter takes.
-pub fn trap_would_stick(
-    ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
-    owner: Entity,
-    victim: Entity,
-) -> bool {
+pub fn trap_would_stick(ctx: &CombatContext, owner: Entity, victim: Entity) -> bool {
     let aura = crate::states::play_match::traps::freezing_trap_aura(owner);
-    super::ally_freers(ctx, abilities, victim, &aura).is_empty()
+    super::ally_freers(ctx, victim, &aura).is_empty()
 }
 
 /// The enemy healer to Freezing Trap while a melee is on the Hunter — the
@@ -198,7 +188,6 @@ pub fn trap_would_stick(
 /// healer, or why the last one considered was passed over.
 pub fn pressure_trap_healer(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
     entity: Entity,
     my_team: u8,
 ) -> Option<Result<Entity, &'static str>> {
@@ -212,7 +201,7 @@ pub fn pressure_trap_healer(
             Err(PRESSURE_TRAP_INELIGIBLE)
         } else if team_focus(ctx, entity).contains(&healer.entity) {
             Err(PRESSURE_TRAP_TEAM_ATTACKING)
-        } else if !trap_would_stick(ctx, abilities, entity, healer.entity) {
+        } else if !trap_would_stick(ctx, entity, healer.entity) {
             Err(PRESSURE_TRAP_FREEABLE)
         } else {
             Ok(healer.entity)
@@ -235,7 +224,7 @@ pub fn pressure_trap_healer(
 /// a healer walking away is led by up to three trigger radii.
 pub fn pressure_trap_landing(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     my_team: u8,
     my_pos: Vec3,
     healer: Entity,
@@ -290,7 +279,7 @@ pub fn pressure_trap_hold(
 /// exists. Movement is unchanged whenever this is `None` — in particular while
 /// the trap is on cooldown.
 pub fn trap_setup_healer(
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
@@ -311,19 +300,19 @@ pub fn trap_setup_healer(
     if !ready {
         return None;
     }
-    pressure_trap_healer(ctx, abilities, entity, combatant.team)?.ok()
+    pressure_trap_healer(ctx, entity, combatant.team)?.ok()
 }
 
 /// How close to the healer the Hunter repositions to trap it: the trap's
 /// configured range, less the trigger radius the lead landing may carry it.
-pub fn trap_setup_range(abilities: &AbilityDefinitions) -> f32 {
+pub fn trap_setup_range(abilities: &AbilityBook) -> f32 {
     abilities.get_unchecked(&AbilityType::FreezingTrap).range - TRAP_TRIGGER_RADIUS
 }
 
 /// The [`TrapSetup`] the Hunter's KITE scores against: the
 /// [`trap_setup_healer`]'s position and [`trap_setup_range`], or `None`.
 pub fn trap_setup(
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
@@ -584,19 +573,14 @@ pub fn teammate_targets(ctx: &CombatContext, entity: Entity, victim: Entity) -> 
 /// teammate from the trap ([`frees_teammates`](super::frees_teammates)) —
 /// asked of the dispeller, because the victim is not in view: at gates-open
 /// the enemy Rogue is stealthed, runs into the lane, and its Priest frees it.
-pub fn unseen_victim_would_be_freed(
-    ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
-    owner: Entity,
-    my_team: u8,
-) -> bool {
+pub fn unseen_victim_would_be_freed(ctx: &CombatContext, owner: Entity, my_team: u8) -> bool {
     if !ctx.enemy_hidden() {
         return false;
     }
     let aura = crate::states::play_match::traps::freezing_trap_aura(owner);
     ctx.combatants
         .values()
-        .any(|e| e.team != my_team && super::frees_teammates(abilities, e, &aura))
+        .any(|e| e.team != my_team && super::frees_teammates(e, &aura))
 }
 
 /// Best eligible OFF-target enemy within `reach` that the team is NOT already
@@ -607,7 +591,6 @@ pub fn unseen_victim_would_be_freed(
 /// rotation holds the trap for.
 pub fn dip_target_candidate(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
     owner: Entity,
     my_team: u8,
     my_pos: Vec3,
@@ -620,7 +603,7 @@ pub fn dip_target_candidate(
         .filter(|e| !focused.contains(&e.entity))
         .filter(|e| dip_target_eligible(ctx, my_team, e.entity))
         .filter(|e| my_pos.distance(e.position) <= reach)
-        .filter(|e| trap_victim_worth_it(ctx, abilities, owner, e.entity))
+        .filter(|e| trap_victim_worth_it(ctx, owner, e.entity))
         .min_by(|a, b| {
             // Healers first (`!is_healer` is false=0 for healers, sorts first),
             // then nearest.
@@ -638,21 +621,12 @@ pub fn dip_target_candidate(
 /// limit, excluding `focused` ([`trap_focus`]). Returns `(entity, position)`.
 pub fn opportunistic_off_target(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
     entity: Entity,
     my_team: u8,
     focused: &std::collections::BTreeSet<Entity>,
     my_pos: Vec3,
 ) -> Option<(Entity, Vec3)> {
-    let target = dip_target_candidate(
-        ctx,
-        abilities,
-        entity,
-        my_team,
-        my_pos,
-        f32::INFINITY,
-        focused,
-    )?;
+    let target = dip_target_candidate(ctx, entity, my_team, my_pos, f32::INFINITY, focused)?;
     ctx.combatants
         .get(&target)
         .filter(|i| i.is_alive)
@@ -666,7 +640,7 @@ pub fn opportunistic_off_target(
 #[allow(clippy::too_many_arguments)]
 pub fn evaluate_hunter_dip(
     commands: &mut Commands,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
@@ -762,15 +736,8 @@ pub fn evaluate_hunter_dip(
     // load-bearing in 1v1, where there are no allies (empty `team_focus`) — else
     // the Hunter would dip into its own target (e.g. point-blank onto a Warlock).
     let focused = trap_focus(ctx, entity, combatant.target);
-    let Some(target) = dip_target_candidate(
-        ctx,
-        abilities,
-        entity,
-        combatant.team,
-        my_pos,
-        reach,
-        &focused,
-    ) else {
+    let Some(target) = dip_target_candidate(ctx, entity, combatant.team, my_pos, reach, &focused)
+    else {
         return HunterDipPlan::Rotation;
     };
 

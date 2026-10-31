@@ -12,7 +12,7 @@ use super::CombatContext;
 use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::components::*;
 use crate::states::play_match::decision_trace::{
     ActorView, DecisionEventBuilder, DecisionTrace, RejectionReason, TargetView,
@@ -45,7 +45,6 @@ fn headline_ability_for(pt: PetType) -> AbilityType {
 pub fn pet_ai_system(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    abilities: Res<AbilityDefinitions>,
     mut pets: Query<
         (
             Entity,
@@ -104,6 +103,7 @@ pub fn pet_ai_system(
                     casting_ability: None,
                     pet_type: None,
                     pet: owner_to_pet.get(&entity).copied(),
+                    book: combatant.book().clone(),
                 },
             )
         })
@@ -143,6 +143,9 @@ pub fn pet_ai_system(
         if !combatant.is_alive() {
             continue;
         }
+        // The pet decides from its OWN book (its pet type's abilities).
+        let book = combatant.book().clone();
+        let abilities = &book;
 
         let is_incapacitated = crate::states::play_match::utils::is_incapacitated(auras);
         if is_incapacitated {
@@ -303,7 +306,6 @@ pub fn pet_ai_system(
                                 &mut commands,
                                 &mut combat_log,
                                 def,
-                                &abilities,
                                 entity,
                                 &mut combatant,
                                 my_pos,
@@ -313,7 +315,6 @@ pub fn pet_ai_system(
                                 &mut commands,
                                 &mut combat_log,
                                 def,
-                                &abilities,
                                 entity,
                                 &mut combatant,
                                 command.target,
@@ -322,7 +323,6 @@ pub fn pet_ai_system(
                                 &mut commands,
                                 &mut combat_log,
                                 def,
-                                &abilities,
                                 entity,
                                 &mut combatant,
                                 command.target,
@@ -377,7 +377,7 @@ pub fn pet_ai_system(
                 felhunter_ai(
                     &mut commands,
                     &mut combat_log,
-                    &abilities,
+                    abilities,
                     entity,
                     &mut combatant,
                     my_pos,
@@ -392,7 +392,7 @@ pub fn pet_ai_system(
                 spider_autonomous_dispatch(
                     &mut commands,
                     &mut combat_log,
-                    &abilities,
+                    abilities,
                     entity,
                     &mut combatant,
                     my_pos,
@@ -406,7 +406,7 @@ pub fn pet_ai_system(
                 boar_autonomous_dispatch(
                     &mut commands,
                     &mut combat_log,
-                    &abilities,
+                    abilities,
                     entity,
                     &mut combatant,
                     my_pos,
@@ -420,7 +420,7 @@ pub fn pet_ai_system(
                 bird_autonomous_dispatch(
                     &mut commands,
                     &mut combat_log,
-                    &abilities,
+                    abilities,
                     entity,
                     &mut combatant,
                     my_pos,
@@ -535,7 +535,7 @@ pub(super) fn pet_strike_reach(
 fn felhunter_ai(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -587,7 +587,7 @@ pub fn spell_lock_target(casts: &[(super::InterruptCandidate, bool)]) -> Option<
 fn try_spell_lock(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -636,9 +636,7 @@ fn try_spell_lock(
     };
     let casts: Vec<super::interrupts::EnemyCast> = casting_targets
         .iter()
-        .map(|(e, c, cast)| {
-            super::interrupts::EnemyCast::casting(e, c, position(e), cast, abilities)
-        })
+        .map(|(e, c, cast)| super::interrupts::EnemyCast::casting(e, c, position(e), cast))
         .chain(channeling_targets.iter().map(|(e, c, channel)| {
             super::interrupts::EnemyCast::channeling(e, c, position(e), channel)
         }))
@@ -649,7 +647,6 @@ fn try_spell_lock(
             execute_spell_lock(
                 commands,
                 combat_log,
-                abilities,
                 entity,
                 combatant,
                 target_entity,
@@ -667,16 +664,15 @@ fn try_spell_lock(
 pub(crate) fn execute_spell_lock(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     target_entity: Entity,
     ability_name: &str,
 ) {
     let ability = AbilityType::SpellLock;
-    let def = abilities.get_unchecked(&ability);
+    let lockout_duration = combatant.book().get_unchecked(&ability).lockout_duration;
 
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
 
     let caster_id = pet_combatant_id(
         combatant.team,
@@ -694,7 +690,7 @@ pub(crate) fn execute_spell_lock(
         caster: entity,
         target: target_entity,
         ability,
-        lockout_duration: def.lockout_duration,
+        lockout_duration,
     });
 }
 
@@ -702,7 +698,7 @@ pub(crate) fn execute_spell_lock(
 fn try_devour_magic(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -787,7 +783,7 @@ fn try_devour_magic(
 
     builder.choose(cleared, Some(target_entity), true);
 
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = super::super::constants::GCD;
 
     let caster_id = pet_combatant_id(
@@ -826,7 +822,6 @@ pub(crate) fn execute_spider_web(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     def: &crate::states::play_match::ability_config::AbilityConfig,
-    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -849,7 +844,7 @@ pub(crate) fn execute_spider_web(
         PlayMatchEntity,
     ));
 
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = super::super::constants::GCD;
 
     let caster_id = pet_combatant_id(
@@ -871,7 +866,6 @@ pub(crate) fn execute_boar_charge(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     def: &crate::states::play_match::ability_config::AbilityConfig,
-    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     target: Entity,
@@ -883,7 +877,7 @@ pub(crate) fn execute_boar_charge(
         commands.spawn((aura_pending, PlayMatchEntity));
     }
 
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = super::super::constants::GCD;
 
     let caster_id = pet_combatant_id(
@@ -906,7 +900,6 @@ pub(crate) fn execute_masters_call(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     def: &crate::states::play_match::ability_config::AbilityConfig,
-    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     target: Entity,
@@ -931,7 +924,7 @@ pub(crate) fn execute_masters_call(
         PlayMatchEntity,
     ));
 
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = super::super::constants::GCD;
 
     let caster_id = pet_combatant_id(
@@ -965,7 +958,7 @@ pub(crate) fn execute_masters_call(
 fn spider_autonomous_dispatch(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1040,9 +1033,7 @@ fn spider_autonomous_dispatch(
     }
 
     builder.choose(cleared, Some(target), true);
-    execute_spider_web(
-        commands, combat_log, def, abilities, entity, combatant, my_pos, target,
-    );
+    execute_spider_web(commands, combat_log, def, entity, combatant, my_pos, target);
 }
 
 /// Autonomous Boar Charge dispatch. Friendly-CC guard applies here because
@@ -1050,7 +1041,7 @@ fn spider_autonomous_dispatch(
 fn boar_autonomous_dispatch(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1124,9 +1115,7 @@ fn boar_autonomous_dispatch(
     }
 
     builder.choose(cleared, Some(target), true);
-    execute_boar_charge(
-        commands, combat_log, def, abilities, entity, combatant, target,
-    );
+    execute_boar_charge(commands, combat_log, def, entity, combatant, target);
 }
 
 /// Autonomous Master's Call dispatch. Cleanses Root/MovementSpeedSlow from
@@ -1134,7 +1123,7 @@ fn boar_autonomous_dispatch(
 fn bird_autonomous_dispatch(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1226,9 +1215,7 @@ fn bird_autonomous_dispatch(
     }
 
     builder.choose(cleared, Some(target), true);
-    execute_masters_call(
-        commands, combat_log, def, abilities, entity, combatant, target,
-    );
+    execute_masters_call(commands, combat_log, def, entity, combatant, target);
 }
 
 #[cfg(test)]
@@ -1263,6 +1250,10 @@ mod tests {
             casting_ability: None,
             pet_type: is_pet.then_some(PetType::Felhunter),
             pet: None,
+            book: crate::states::play_match::ability_book::AbilityBook::shipped_for(
+                class,
+                is_pet.then_some(PetType::Felhunter),
+            ),
         };
         let (felhunter, warrior) = (Entity::from_raw(1), Entity::from_raw(2));
         let (pet_pos, warrior_pos) = (Vec3::new(0.0, 1.0, 0.0), Vec3::new(16.0, 1.0, 0.0));
@@ -1304,7 +1295,8 @@ mod tests {
             let mut queue = CommandQueue::default();
             let mut commands = Commands::new(&mut queue, &world);
             let mut combat_log = CombatLog::default();
-            let mut combatant = Combatant::new(1, 0, CharacterClass::Warlock);
+            let mut combatant = Combatant::new(1, 0, CharacterClass::Warlock)
+                .with_book(AbilityBook::shipped_pet(PetType::Felhunter));
             let mut trace = DecisionTrace::default();
             let mut builder = trace.start_pet_decision(
                 ActorView::from_info(&roster[&felhunter]),
@@ -1315,7 +1307,7 @@ mod tests {
             let cast = try_devour_magic(
                 &mut commands,
                 &mut combat_log,
-                &AbilityDefinitions::default(),
+                &AbilityBook::shipped_pet(PetType::Felhunter),
                 felhunter,
                 &mut combatant,
                 pet_pos,
@@ -1372,6 +1364,9 @@ mod tests {
             casting_ability: None,
             pet_type,
             pet: None,
+            book: crate::states::play_match::ability_book::AbilityBook::shipped_for(
+                class, pet_type,
+            ),
         };
         let (bird, hunter) = (Entity::from_raw(1), Entity::from_raw(2));
         let (bird_pos, hunter_pos) = (Vec3::new(0.0, 1.0, 0.0), Vec3::new(16.0, 1.0, 0.0));
@@ -1399,7 +1394,7 @@ mod tests {
             base_y: 0.0,
             height: 10.0,
         }];
-        let abilities = AbilityDefinitions::default();
+        let abilities = crate::states::play_match::ability_config::AbilityDefinitions::default();
         let def = abilities.get(&AbilityType::MastersCall).unwrap();
         assert!(
             hunter_pos.distance(bird_pos) < def.range,
@@ -1434,7 +1429,8 @@ mod tests {
             let mut queue = CommandQueue::default();
             let mut commands = Commands::new(&mut queue, &world);
             let mut combat_log = CombatLog::default();
-            let mut combatant = Combatant::new(1, 0, CharacterClass::Hunter);
+            let mut combatant = Combatant::new(1, 0, CharacterClass::Hunter)
+                .with_book(AbilityBook::shipped_pet(PetType::Bird));
             let mut trace = DecisionTrace::default();
             let mut builder = trace.start_pet_decision(
                 ActorView::from_info(&roster[&bird]),
@@ -1445,7 +1441,7 @@ mod tests {
             bird_autonomous_dispatch(
                 &mut commands,
                 &mut combat_log,
-                &abilities,
+                &AbilityBook::shipped_pet(PetType::Bird),
                 bird,
                 &mut combatant,
                 bird_pos,
@@ -1479,7 +1475,6 @@ mod tests {
             let mut trace = DecisionTrace::default();
             let sent = super::super::hunter::try_dispatch_masters_call(
                 &mut commands,
-                &abilities,
                 &mut trace,
                 hunter,
                 bird,
@@ -1503,7 +1498,8 @@ mod tests {
                 Default::default(),
                 Default::default(),
             );
-            let combatant = Combatant::new(1, 0, CharacterClass::Hunter);
+            let combatant = Combatant::new(1, 0, CharacterClass::Hunter)
+                .with_book(AbilityBook::shipped_pet(PetType::Bird));
             pet_command_rejection(
                 AbilityType::MastersCall,
                 def,
@@ -1565,6 +1561,9 @@ mod tests {
                 casting_ability: None,
                 pet_type,
                 pet: None,
+                book: crate::states::play_match::ability_book::AbilityBook::shipped_for(
+                    class, pet_type,
+                ),
             };
             let (pet_entity, hunter, enemy) = (
                 Entity::from_raw(1),
@@ -1604,7 +1603,8 @@ mod tests {
                 base_y: 0.0,
                 height: 10.0,
             }];
-            let abilities = AbilityDefinitions::default();
+            let abilities =
+                crate::states::play_match::ability_config::AbilityDefinitions::default();
             let def = abilities.get(&ability).unwrap();
             let distance = pet_pos.distance(enemy_pos);
             assert!(
@@ -1647,7 +1647,13 @@ mod tests {
                 let mut queue = CommandQueue::default();
                 let mut commands = Commands::new(&mut queue, &world);
                 let mut combat_log = CombatLog::default();
-                let mut combatant = Combatant::new(1, 0, CharacterClass::Hunter);
+                let mut combatant = Combatant::new(1, 0, CharacterClass::Hunter).with_book(
+                    AbilityBook::shipped_pet(if ability == AbilityType::SpiderWeb {
+                        PetType::Spider
+                    } else {
+                        PetType::Boar
+                    }),
+                );
                 let mut trace = DecisionTrace::default();
                 let mut builder = trace.start_pet_decision(
                     ActorView::from_info(&roster[&pet_entity]),
@@ -1667,7 +1673,11 @@ mod tests {
                 dispatch(
                     &mut commands,
                     &mut combat_log,
-                    &abilities,
+                    &AbilityBook::shipped_pet(if ability == AbilityType::SpiderWeb {
+                        PetType::Spider
+                    } else {
+                        PetType::Boar
+                    }),
                     pet_entity,
                     &mut combatant,
                     pet_pos,
@@ -1693,7 +1703,6 @@ mod tests {
                 };
                 let sent = dispatch(
                     &mut commands,
-                    &abilities,
                     &mut trace,
                     hunter,
                     pet_entity,
@@ -1707,7 +1716,13 @@ mod tests {
             // A command dispatched in sight, re-checked once the pillar is between.
             let recheck = |obstacles: &[ObstacleVolume]| {
                 let ctx = context!(pet_entity, obstacles);
-                let combatant = Combatant::new(1, 0, CharacterClass::Hunter);
+                let combatant = Combatant::new(1, 0, CharacterClass::Hunter).with_book(
+                    AbilityBook::shipped_pet(if ability == AbilityType::SpiderWeb {
+                        PetType::Spider
+                    } else {
+                        PetType::Boar
+                    }),
+                );
                 pet_command_rejection(ability, def, &combatant, pet_pos, enemy, &ctx)
             };
 
@@ -1830,6 +1845,9 @@ mod tests {
                         casting_ability: None,
                         pet_type: pet,
                         pet: None,
+                        book: crate::states::play_match::ability_book::AbilityBook::shipped_for(
+                            class, pet,
+                        ),
                     },
                 )
             };
@@ -1890,11 +1908,9 @@ mod tests {
             let mut queue = CommandQueue::default();
             let mut commands = Commands::new(&mut queue, &world);
             let mut trace = DecisionTrace::default();
-            let abilities = AbilityDefinitions::default();
             let sent = if dispatch {
                 super::super::super::hunter::dispatch_pet_ability(
                     &mut commands,
-                    &abilities,
                     &mut trace,
                     e(HUNTER),
                     Some(e(HEALER)),
@@ -1905,7 +1921,6 @@ mod tests {
             } else {
                 super::super::super::hunter::try_pet_peel(
                     &mut commands,
-                    &abilities,
                     &mut trace,
                     e(HUNTER),
                     e(PET),

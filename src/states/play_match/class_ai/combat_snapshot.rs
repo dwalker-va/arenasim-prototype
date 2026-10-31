@@ -70,6 +70,7 @@ impl CombatantInfo {
             casting_ability,
             pet_type: pet.map(|p| p.pet_type),
             pet: owned_pet,
+            book: combatant.book().clone(),
         }
     }
 }

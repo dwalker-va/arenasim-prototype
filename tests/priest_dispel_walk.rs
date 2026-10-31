@@ -49,6 +49,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> Comb
         casting_ability: None,
         pet_type: None,
         pet: None,
+        book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
     }
 }
 
@@ -191,7 +192,6 @@ impl Scene {
 
     /// One posture tick at `NOW`, from `self.posture`.
     fn posture(&mut self) -> Tick {
-        let abilities = AbilityDefinitions::default();
         let movement = MovementConfig::default();
         let mut trace = DecisionTrace::default();
         let mut queue = CommandQueue::default();
@@ -205,7 +205,7 @@ impl Scene {
                 &self.combatant,
                 PRIEST_POS,
                 &ctx,
-                &abilities,
+                self.combatant.book(),
                 None,
                 state.as_mut(),
                 None,
@@ -239,7 +239,6 @@ impl Scene {
     /// One rotation tick with no movement plan. Returns the chosen ability and
     /// its target.
     fn decide(&mut self) -> Option<(String, Option<u64>)> {
-        let abilities = AbilityDefinitions::default();
         let movement = MovementConfig::default();
         let mut combat_log = CombatLog::default();
         let mut trace = DecisionTrace::default();
@@ -261,7 +260,7 @@ impl Scene {
             decide_priest_action(
                 &mut commands,
                 &mut combat_log,
-                &abilities,
+                &self.combatant.book().clone(),
                 self.priest,
                 &mut self.combatant,
                 PRIEST_POS,
@@ -514,7 +513,6 @@ struct Freed {
 fn step_until_dispelled(s: &mut Scene, seconds: f32) -> Option<Freed> {
     const DT: f32 = 1.0 / 60.0;
     let speed = s.combatant.base_movement_speed;
-    let abilities = AbilityDefinitions::default();
     let movement = MovementConfig::default();
     let mut pos = PRIEST_POS;
     let mut path = Vec::new();
@@ -548,7 +546,7 @@ fn step_until_dispelled(s: &mut Scene, seconds: f32) -> Option<Freed> {
                 &s.combatant,
                 pos,
                 &ctx,
-                &abilities,
+                s.combatant.book(),
                 None,
                 posture.as_mut(),
                 directive.as_ref(),
@@ -580,7 +578,7 @@ fn step_until_dispelled(s: &mut Scene, seconds: f32) -> Option<Freed> {
             decide_priest_action(
                 &mut commands,
                 &mut combat_log,
-                &abilities,
+                &s.combatant.book().clone(),
                 s.priest,
                 &mut s.combatant,
                 pos,
@@ -1001,6 +999,7 @@ fn the_trapped_teammate_and_pets_do_not_hold_the_walk() {
     p.slot = PET_SLOT_BASE;
     p.is_pet = true;
     p.pet_type = Some(PetType::Boar);
+    p.book = arenasim::states::play_match::ability_book::AbilityBook::shipped_pet(PetType::Boar);
     p.current_health = 20.0;
     s.roster.insert(pet, p);
     assert!(chases(&mut s), "a hurt friendly pet held the walk");

@@ -28,10 +28,9 @@ use arenasim::states::play_match::constants::{FLARE_DURATION, FLARE_RADIUS};
 use arenasim::states::play_match::decision_trace::DecisionTrace;
 use arenasim::states::play_match::traps::flare_system;
 use arenasim::states::play_match::{
-    animate_client_particles, spawn_flare_visuals, update_flare_visuals, AbilityDefinitions, Aura,
-    ClientParticle, Combatant, FlarePart, FlareRig, FlareZone, GameRng, MovementConfig,
-    FLARE_CORE_DIAMETER, FLARE_CORE_HEIGHT, FLARE_CORE_SPRITES, FLARE_POOL_GAIN, FLARE_TWINKLE_MAX,
-    FLARE_TWINKLE_MIN,
+    animate_client_particles, spawn_flare_visuals, update_flare_visuals, Aura, ClientParticle,
+    Combatant, FlarePart, FlareRig, FlareZone, GameRng, MovementConfig, FLARE_CORE_DIAMETER,
+    FLARE_CORE_HEIGHT, FLARE_CORE_SPRITES, FLARE_POOL_GAIN, FLARE_TWINKLE_MAX, FLARE_TWINKLE_MIN,
 };
 
 /// Additive pool alpha (material alpha times texture alpha) at or above this
@@ -72,6 +71,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> Comb
         casting_ability: None,
         pet_type: None,
         pet: None,
+        book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
     }
 }
 
@@ -127,7 +127,6 @@ impl Harness {
         let priest = world.spawn_empty().id();
         let rogue = world.spawn_empty().id();
 
-        let abilities = AbilityDefinitions::default();
         let movement = MovementConfig::default();
         let mut combat_log = CombatLog::default();
         let mut game_rng = GameRng::from_seed(7);
@@ -168,11 +167,12 @@ impl Harness {
         let mut queue = CommandQueue::default();
         let mut commands = Commands::new(&mut queue, world);
         let mut instant_attacks: Vec<QueuedInstantAttack> = Vec::new();
+        let book = combatant.book().clone();
         decide_hunter_action(
             &mut commands,
             &mut combat_log,
             &mut game_rng,
-            &abilities,
+            &book,
             hunter,
             &mut combatant,
             my_pos,

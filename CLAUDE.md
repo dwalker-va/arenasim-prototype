@@ -443,6 +443,14 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
      Rogue, and classifies every ability as an enemy area effect or not (an
      exhaustive match — a new ability must answer it); each area effect must
      be shown catching a stealthed Rogue standing in it.
+   - **An ability's config comes from its caster's book.** Every combatant
+     carries an `AbilityBook` (`ability_book.rs`), resolved once at spawn:
+     its class's abilities, or its pet type's. The class AI's `abilities` is
+     the deciding unit's book; a question about ANOTHER unit's ability (an
+     enemy's cast, its interrupt reach or crowd control, a teammate's dispel,
+     an aura's source) reads that unit's `CombatantInfo::book`. Never the
+     global `AbilityDefinitions`: talents (AS-297) resolve into the book, and
+     `tests/talent_book_audit.rs` fails on a new sim reader of the table.
    - **The cast gate, and the AI decision trace** — ask
      `cast_guard::cast_gate` (the caster's own `Combatant` and its own
      `ActiveAuras`, never `None` for a caster that has them): `Err` is the
@@ -555,9 +563,9 @@ control still stops any cast, with no lockout. Nothing in the sim pacifies.
 ability in a cooldown category, after the Classic client's `SpellCategory`:
 using any member puts EVERY member on cooldown (Freezing Trap and Frost Trap are
 both `Trap`, Classic category 411, 15s). Members must declare the same
-`cooldown` (`validate()` panics otherwise), and a member already waiting longer
-keeps its time. Start a cooldown with `combatant.start_cooldown(ability,
-abilities)` — never by writing `ability_cooldowns` directly, which would skip
+`cooldown` and be cast by one unit, so they sit in one ability book
+(`validate()` panics otherwise), and a member already waiting longer
+keeps its time. Start a cooldown with `combatant.start_cooldown(ability)` — never by writing `ability_cooldowns` directly, which would skip
 the category; `tests/cooldown_site_audit.rs` fails on such a write. Readiness
 checks need nothing: a locked member is simply on cooldown, and is traced
 `OnCooldown`.

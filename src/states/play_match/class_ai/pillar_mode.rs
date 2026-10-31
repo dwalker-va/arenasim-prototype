@@ -60,7 +60,6 @@
 use bevy::prelude::*;
 
 use crate::states::match_config::CharacterClass;
-use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::combat_core::clamp_to_arena;
 use crate::states::play_match::components::{HealerPosture, PillarMode, RingAngle};
 use crate::states::play_match::decision_trace::{
@@ -474,13 +473,8 @@ pub const MELEE_CC_REACH: f32 = 8.0;
 /// by a unit that is not a pet (a pet closes), ready within
 /// [`CC_MODE_HORIZON`] and not one `healer` is immune to. Its discs are where
 /// a hug would NOT be defended.
-pub fn pillar_threats(
-    ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
-    healer: Entity,
-    margin: f32,
-) -> CcField {
-    let mut field = CcField::for_healer(ctx, abilities, healer, CC_MODE_HORIZON, margin);
+pub fn pillar_threats(ctx: &CombatContext, healer: Entity, margin: f32) -> CcField {
+    let mut field = CcField::for_healer(ctx, healer, CC_MODE_HORIZON, margin);
     field.threats.retain(|t| {
         t.needs_sight
             && t.reach > MELEE_CC_REACH
@@ -519,18 +513,13 @@ pub fn defended_arc(
 /// pillar stance's threat key reads it, and its discs are what the team arc
 /// ([`team_arc`]) keeps the healer out of. Built from one context, so the
 /// stance and the healer that plays it read the same field.
-pub fn team_threats(
-    ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
-    members: &[Entity],
-    margin: f32,
-) -> CcField {
+pub fn team_threats(ctx: &CombatContext, members: &[Entity], margin: f32) -> CcField {
     let mut field = CcField {
         threats: Vec::new(),
         margin,
     };
     for member in members {
-        for t in pillar_threats(ctx, abilities, *member, margin).threats {
+        for t in pillar_threats(ctx, *member, margin).threats {
             if !field
                 .threats
                 .iter()
@@ -603,7 +592,6 @@ pub struct Keys {
 #[allow(clippy::too_many_arguments)]
 pub fn update(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
     entity: Entity,
     speed: f32,
     my_pos: Vec3,
@@ -655,7 +643,7 @@ pub fn update(
         .or(hugged);
     let ring = candidate?;
 
-    let threats = team_threats(ctx, abilities, &stance_members(ctx), shared.cc_reach_margin);
+    let threats = team_threats(ctx, &stance_members(ctx), shared.cc_reach_margin);
     let mate_points: Vec<Vec2> = mates.iter().map(|m| xz(m.position)).collect();
     let arc_of = |r: &Ring| team_arc(ctx, r, &mate_points, heal_reach, my_pos.y, &threats);
     let arc = arc_of(&ring);
@@ -735,7 +723,7 @@ pub fn update(
         }
     };
     hug_goal(
-        ctx, speed, my_pos, state, ring, arc, anchor, &mates, abilities, shared, now,
+        ctx, speed, my_pos, state, ring, arc, anchor, &mates, shared, now,
     )
 }
 
@@ -784,7 +772,6 @@ fn hug_goal(
     arc: Vec<bool>,
     anchor: &super::CombatantInfo,
     mates: &[&super::CombatantInfo],
-    abilities: &AbilityDefinitions,
     shared: &SharedMovementConfig,
     now: f32,
 ) -> Option<HugGoal> {
@@ -799,7 +786,6 @@ fn hug_goal(
     let core = core_of(&ring, run, spin, true);
     let field = CcField::for_healer(
         ctx,
-        abilities,
         ctx.self_entity,
         shared.cc_ready_horizon,
         shared.cc_reach_margin,

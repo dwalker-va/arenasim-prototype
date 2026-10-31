@@ -257,8 +257,8 @@ mod scenes {
     use arenasim::states::play_match::decision_trace::DecisionTrace;
     use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
     use arenasim::states::play_match::{
-        AbilityDefinitions, AbilityType, Combatant, DRTracker, HealerPosture, MovementConfig,
-        MovementDirective, MovementGoal, Posture,
+        AbilityType, Combatant, DRTracker, HealerPosture, MovementConfig, MovementDirective,
+        MovementGoal, Posture,
     };
     use bevy::ecs::world::CommandQueue;
     use bevy::prelude::*;
@@ -285,6 +285,7 @@ mod scenes {
             casting_ability: None,
             pet_type: None,
             pet: None,
+            book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
         }
     }
 
@@ -333,7 +334,6 @@ mod scenes {
         .classified(&SituationConfig::default(), MatchClock::after_gates(now));
         let combatant = Combatant::new(1, 0, class);
         let movement = MovementConfig::default();
-        let abilities = AbilityDefinitions::default();
         let mut queue = CommandQueue::default();
         let mut trace = DecisionTrace::default();
         {
@@ -346,7 +346,7 @@ mod scenes {
                         &combatant,
                         pos,
                         &ctx,
-                        &abilities,
+                        &arenasim::states::play_match::ability_book::AbilityBook::shipped(class),
                         None,
                         Some(state),
                         directive,
@@ -362,7 +362,6 @@ mod scenes {
                         &combatant,
                         pos,
                         &ctx,
-                        &abilities,
                         Some(state),
                         directive,
                         &movement,

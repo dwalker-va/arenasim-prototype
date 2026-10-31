@@ -13,7 +13,6 @@ use bevy::prelude::*;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::utils::{combat_log_id_for, combatant_id};
 
@@ -29,12 +28,11 @@ pub fn process_mana_burn(
     pending_burns: Query<(Entity, &ManaBurnPending)>,
     mut combatants: Query<(&mut Combatant, Option<&ActiveAuras>)>,
     pet_query: Query<&Pet>,
-    abilities: Res<AbilityDefinitions>,
 ) {
-    // The landing's school comes from the definition, as at every other
-    // `SchoolImpact` spawn site, so a RON retune moves the colour with it.
-    let school = abilities.get_unchecked(&AbilityType::ManaBurn).spell_school;
     for (pending_entity, pending) in pending_burns.iter() {
+        // The landing's school comes from the caster's book, as at every other
+        // `SchoolImpact` spawn site, so a RON retune moves the colour with it.
+        let school = pending.school;
         if let Ok((mut target, target_auras)) = combatants.get_mut(pending.target) {
             // Divine Shield and a Cyclone both block Mana Burn (Classic/TBC):
             // the same immunity the AI declines to cast into
@@ -112,7 +110,6 @@ mod tests {
     fn new_world() -> World {
         let mut world = World::new();
         world.insert_resource(CombatLog::default());
-        world.insert_resource(AbilityDefinitions::default());
         world
     }
 
@@ -125,6 +122,7 @@ mod tests {
                 caster_slot: 0,
                 caster_class: CharacterClass::Priest,
                 impact_from: Vec3::X,
+                school: crate::states::play_match::abilities::SpellSchool::Shadow,
             })
             .id()
     }

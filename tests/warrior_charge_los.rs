@@ -25,9 +25,7 @@ use arenasim::states::play_match::decision_trace::{
     CandidateStatus, DecisionTrace, EventPayload, RejectionReason,
 };
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
-use arenasim::states::play_match::{
-    AbilityDefinitions, AbilityType, Aura, AuraType, Combatant, DispelType, GameRng,
-};
+use arenasim::states::play_match::{AbilityType, Aura, AuraType, Combatant, DispelType, GameRng};
 
 use arenasim::combat::log::CombatLog;
 use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
@@ -56,6 +54,7 @@ fn combatant_info(
         casting_ability: None,
         pet_type: None,
         pet: None,
+        book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
     }
 }
 
@@ -125,7 +124,6 @@ fn run_charge_decision(obstacles: Vec<ObstacleVolume>) -> DecisionTrace {
 
     let mut combat_log = CombatLog::default();
     let mut game_rng = GameRng::from_seed(0);
-    let abilities = AbilityDefinitions::default();
 
     let warrior_entity = Entity::from_raw(1);
     let target_entity = Entity::from_raw(2);
@@ -170,11 +168,13 @@ fn run_charge_decision(obstacles: Vec<ObstacleVolume>) -> DecisionTrace {
     let mut battle_shouted: HashSet<Entity> = HashSet::new();
     let mut decision_trace = DecisionTrace::default();
 
+    let book = combatant.book().clone();
+
     decide_warrior_action(
         &mut commands,
         &mut combat_log,
         &mut game_rng,
-        &abilities,
+        &book,
         warrior_entity,
         &mut combatant,
         my_pos,

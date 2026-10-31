@@ -53,6 +53,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> Comb
         casting_ability: None,
         pet_type: None,
         pet: None,
+        book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
     }
 }
 
@@ -154,7 +155,6 @@ impl Scene {
     /// One posture tick. Returns the plan, the directive it left on the
     /// Paladin, and the movement triggers it traced.
     fn posture(&mut self) -> (PaladinMovementPlan, Option<MovementDirective>, Vec<String>) {
-        let abilities = AbilityDefinitions::default();
         let movement = MovementConfig::default();
         let mut trace = DecisionTrace::default();
         let mut queue = CommandQueue::default();
@@ -163,7 +163,7 @@ impl Scene {
             let mut commands = Commands::new(&mut queue, &self.world);
             evaluate_paladin_posture(
                 &mut commands,
-                &abilities,
+                self.combatant.book(),
                 self.paladin,
                 &self.combatant,
                 PALADIN_POS,
@@ -193,7 +193,6 @@ impl Scene {
     /// One rotation tick with no movement plan. Returns the Cleanse candidate
     /// as traced (`status`, `reason`) and the chosen ability and its target.
     fn decide(&mut self) -> (serde_json::Value, Option<(String, Option<u64>)>) {
-        let abilities = AbilityDefinitions::default();
         let mut combat_log = CombatLog::default();
         let mut trace = DecisionTrace::default();
         let mut queue = CommandQueue::default();
@@ -212,7 +211,7 @@ impl Scene {
             decide_paladin_action(
                 &mut commands,
                 &mut combat_log,
-                &abilities,
+                &self.combatant.book().clone(),
                 self.paladin,
                 &mut self.combatant,
                 PALADIN_POS,
@@ -335,7 +334,6 @@ struct Freed {
 fn step_until_cleansed(s: &mut Scene, seconds: f32) -> Option<Freed> {
     const DT: f32 = 1.0 / 60.0;
     let speed = s.combatant.base_movement_speed;
-    let abilities = AbilityDefinitions::default();
     let movement = MovementConfig::default();
     let mut pos = PALADIN_POS;
     let mut path = Vec::new();
@@ -354,7 +352,7 @@ fn step_until_cleansed(s: &mut Scene, seconds: f32) -> Option<Freed> {
             let mut commands = Commands::new(&mut queue, &s.world);
             let plan = evaluate_paladin_posture(
                 &mut commands,
-                &abilities,
+                s.combatant.book(),
                 s.paladin,
                 &s.combatant,
                 pos,
@@ -383,7 +381,7 @@ fn step_until_cleansed(s: &mut Scene, seconds: f32) -> Option<Freed> {
             decide_paladin_action(
                 &mut commands,
                 &mut combat_log,
-                &abilities,
+                &s.combatant.book().clone(),
                 s.paladin,
                 &mut s.combatant,
                 pos,

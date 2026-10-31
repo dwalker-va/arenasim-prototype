@@ -15,7 +15,7 @@ use bevy::prelude::*;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::match_config::WarriorShout;
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::combat_core::{
     get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice, roll_crit,
 };
@@ -49,7 +49,7 @@ pub fn decide_warrior_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -260,7 +260,7 @@ pub fn decide_warrior_action(
 fn try_shout(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -314,7 +314,7 @@ fn try_shout(
 fn try_battle_shout(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -414,7 +414,7 @@ fn try_battle_shout(
 fn try_demoralizing_shout(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -505,7 +505,7 @@ fn try_demoralizing_shout(
 fn try_commanding_shout(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -600,7 +600,7 @@ fn try_commanding_shout(
 fn try_charge(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -685,7 +685,7 @@ fn try_charge(
     builder.choose(cleared, Some(target_entity), true);
 
     // Execute Charge
-    combatant.start_cooldown(charge, abilities);
+    combatant.start_cooldown(charge);
     combatant.global_cooldown = GCD;
 
     commands.entity(entity).insert(ChargingState {
@@ -720,7 +720,7 @@ fn try_rend(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -820,7 +820,7 @@ fn try_mortal_strike(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -868,7 +868,7 @@ fn try_mortal_strike(
 
     // Execute Mortal Strike
     combatant.current_mana -= ms_def.mana_cost;
-    combatant.start_cooldown(mortal_strike, abilities);
+    combatant.start_cooldown(mortal_strike);
     combatant.global_cooldown = GCD;
 
     // Log
@@ -934,7 +934,7 @@ fn try_mortal_strike(
 /// ([`RAGE_RESERVE`] in the chain; none under the Burst play). Returns whether
 /// it was chosen.
 fn try_heroic_strike(
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     combatant: &mut Combatant,
     target_pos: Vec3,
     my_pos: Vec3,
@@ -1026,7 +1026,7 @@ fn try_heroic_strike(
 pub fn try_berserker_rage_while_cc(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1110,7 +1110,7 @@ pub fn try_berserker_rage_while_cc(
         caster_class: combatant.class,
     });
 
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;
 
     log_ability_use(

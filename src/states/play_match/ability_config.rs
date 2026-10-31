@@ -531,6 +531,17 @@ impl AbilityDefinitions {
         }
     }
 
+    /// The shipped table, loaded from `abilities.ron` once per process. What a
+    /// combatant built without a spawn path's table gets its
+    /// [`AbilityBook`](super::ability_book::AbilityBook) from
+    /// (`Combatant::new`, a test's unit). A match's spawn builds every book
+    /// from the `AbilityDefinitions` resource instead. Panics, like
+    /// [`Default`], if the file cannot be loaded.
+    pub fn shipped() -> &'static AbilityDefinitions {
+        static SHIPPED: std::sync::OnceLock<AbilityDefinitions> = std::sync::OnceLock::new();
+        SHIPPED.get_or_init(Self::default)
+    }
+
     /// Get the configuration for an ability type
     pub fn get(&self, ability: &AbilityType) -> Option<&AbilityConfig> {
         self.definitions.get(ability)
@@ -542,19 +553,6 @@ impl AbilityDefinitions {
         self.definitions
             .get(ability)
             .unwrap_or_else(|| panic!("Ability {:?} not found in definitions", ability))
-    }
-
-    /// The aura effect an ABILITY applied `aura` from — the ability whose RON
-    /// `name` the aura carries, when that ability's `applies_aura` is of the
-    /// aura's own type. `None` for an aura no ability applied directly (a totem
-    /// pulse, a proc, a trap) and for a compound's riders, which share their
-    /// face's name but not its type.
-    pub fn source_effect(&self, aura: &super::components::Aura) -> Option<&AuraEffect> {
-        self.definitions
-            .values()
-            .filter(|def| def.name == aura.ability_name)
-            .filter_map(|def| def.applies_aura.as_ref())
-            .find(|effect| effect.aura_type == aura.effect_type)
     }
 
     /// Check if all expected ability types are defined
@@ -749,6 +747,26 @@ impl AbilityDefinitions {
                 continue;
             };
             for (other, other_def) in &self.definitions {
+                // `Combatant::start_cooldown` puts the category on cooldown
+                // from its OWN ability book, which holds one class's (or one
+                // pet's) abilities: a member in another book would never be
+                // locked with the rest.
+                if other_def.cooldown_category == Some(category)
+                    && (other_def.class != def.class || other_def.pet != def.pet)
+                {
+                    panic!(
+                        "abilities.ron: {:?} and {:?} share cooldown category {:?} but are cast \
+                         by different units ({:?}{} vs {:?}{}). A category's members are in one \
+                         ability book.",
+                        ability,
+                        other,
+                        category,
+                        def.class,
+                        def.pet.map_or(String::new(), |p| format!("'s {p:?}")),
+                        other_def.class,
+                        other_def.pet.map_or(String::new(), |p| format!("'s {p:?}")),
+                    );
+                }
                 if other_def.cooldown_category == Some(category)
                     && other_def.cooldown != def.cooldown
                 {
@@ -909,6 +927,28 @@ impl Plugin for AbilityConfigPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A cooldown category's members are in one ability book, because
+    /// `Combatant::start_cooldown` locks the category from its own book: a
+    /// member another unit casts fails validation. The control: the shipped
+    /// table, whose one category (Trap) is the Hunter's, validates.
+    #[test]
+    #[should_panic(expected = "cast by different units")]
+    fn a_cooldown_category_is_one_books() {
+        let path = crate::paths::asset_path_str("config/abilities.ron");
+        let mut config: AbilitiesConfig =
+            ron::from_str(&std::fs::read_to_string(path).expect("abilities.ron")).expect("parses");
+        let shipped = AbilityDefinitions::new(AbilitiesConfig {
+            abilities: config.abilities.clone(),
+        });
+        assert!(shipped.validate().is_ok(), "the shipped table validates");
+        config
+            .abilities
+            .get_mut(&AbilityType::FrostTrap)
+            .expect("Frost Trap")
+            .class = CharacterClass::Mage;
+        let _ = AbilityDefinitions::new(config).validate();
+    }
 
     fn base_test_config() -> AbilityConfig {
         AbilityConfig {
