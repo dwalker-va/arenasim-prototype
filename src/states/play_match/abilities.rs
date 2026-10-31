@@ -260,8 +260,8 @@ impl AbilityType {
             // A charge closes the gap; what it lands on arrival is not a
             // weapon strike, and it is cast from 25 yards.
             Charge | BoarCharge => false,
-            // A weapon coating, not an attack: its proc rides a landed swing.
-            CripplingPoison => false,
+            // Weapon coatings, not attacks: each proc rides a landed swing.
+            CripplingPoison | DeadlyPoison | WoundPoison | MindNumbingPoison => false,
             // Ranged attacks: never avoided.
             AimedShot | ArcaneShot | ConcussiveShot | SerpentSting => false,
             // Everything else is a spell, a shout, a trap, a form or a
