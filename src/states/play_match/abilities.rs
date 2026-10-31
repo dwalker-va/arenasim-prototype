@@ -267,14 +267,15 @@ impl AbilityType {
             | Corruption | Shadowbolt | Fear | Immolate | DrainLife | CurseOfAgony
             | CurseOfWeakness | CurseOfTongues | UnstableAffliction | DeathCoil
             | ArcaneIntellect | BattleShout | IceBarrier | PowerWordShield | Polymorph
-            | DispelMagic | PsychicScream | ManaBurn | FlashOfLight | HolyLight | HolyShock
-            | HammerOfJustice | PaladinCleanse | DevotionAura | DivineShield | SpellLock
-            | DevourMagic | Disengage | FreezingTrap | FrostTrap | Flare | SpiderWeb
-            | MastersCall | DemoralizingShout | CommandingShout | FrostArmor | MageArmorSpell
-            | MoltenArmor | ShadowResistanceAura | ConcentrationAura | LightningBolt
-            | FrostShock | LesserHealingWave | Purge | WindShear | AirTotem | WaterTotem
-            | EarthTotem | FireTotem | Rejuvenation | Lifebloom | Swiftmend | Moonfire
-            | MarkOfTheWild | Innervate | EntanglingRoots | Cyclone | TravelForm => false,
+            | DispelMagic | PsychicScream | ManaBurn | ShadowWordPain | FlashOfLight
+            | HolyLight | HolyShock | HammerOfJustice | PaladinCleanse | DevotionAura
+            | DivineShield | SpellLock | DevourMagic | Disengage | FreezingTrap | FrostTrap
+            | Flare | SpiderWeb | MastersCall | DemoralizingShout | CommandingShout
+            | FrostArmor | MageArmorSpell | MoltenArmor | ShadowResistanceAura
+            | ConcentrationAura | LightningBolt | FrostShock | LesserHealingWave | Purge
+            | WindShear | AirTotem | WaterTotem | EarthTotem | FireTotem | Rejuvenation
+            | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild | Innervate | EntanglingRoots
+            | Cyclone | TravelForm => false,
         }
     }
 
