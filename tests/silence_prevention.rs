@@ -252,7 +252,6 @@ fn a_silenced_priest_can_neither_dispel_nor_heal_in_the_ais_view() {
     use arenasim::states::play_match::team_solve::world_from_context;
     use std::collections::BTreeMap;
 
-    let defs = AbilityDefinitions::default();
     let view = |silenced: bool| -> (bool, bool) {
         let mut world = World::new();
         let priest = world.spawn_empty().id();
@@ -283,7 +282,14 @@ fn a_silenced_priest_can_neither_dispel_nor_heal_in_the_ais_view() {
             ai_profile: Default::default(),
         };
         let ctx = snapshot.context_for(priest);
-        let dispel = can_cast_dispel(&ctx, &defs, priest, AbilityType::DispelMagic);
+        let dispel = can_cast_dispel(
+            &ctx,
+            &arenasim::states::play_match::ability_book::AbilityBook::shipped(
+                CharacterClass::Priest,
+            ),
+            priest,
+            AbilityType::DispelMagic,
+        );
         let heal = world_from_context(&ctx, 40.0, 30.0, None)
             .units
             .iter()

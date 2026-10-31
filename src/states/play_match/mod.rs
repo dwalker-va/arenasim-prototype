@@ -31,6 +31,7 @@
 
 // Submodules
 pub mod abilities;
+pub mod ability_book;
 pub mod ability_config;
 pub mod ai_profile;
 pub mod arena_bounds;
@@ -636,6 +637,7 @@ pub fn setup_play_match(
     // exactly. Present => honour them; absent => fresh defaults as normal.
     existing_rng: Option<Res<GameRng>>,
     existing_profile: Option<Res<ai_profile::AiProfiles>>,
+    abilities: Res<ability_config::AbilityDefinitions>,
 ) {
     info!("Setting up Play Match scene with config: {:?}", *config);
 
@@ -854,6 +856,7 @@ pub fn setup_play_match(
                 paladin_aura,
                 &loadout,
                 &item_defs,
+                &abilities,
             );
 
             // Log equipment loadout
@@ -877,6 +880,7 @@ pub fn setup_play_match(
                     &combatant,
                     position,
                     PetType::Felhunter,
+                    &abilities,
                 );
             }
 
@@ -901,6 +905,7 @@ pub fn setup_play_match(
                     &combatant,
                     position,
                     pet_type,
+                    &abilities,
                 );
             }
         } else {
@@ -979,6 +984,7 @@ pub fn setup_play_match(
                 paladin_aura,
                 &loadout,
                 &item_defs,
+                &abilities,
             );
 
             // Log equipment loadout
@@ -1002,6 +1008,7 @@ pub fn setup_play_match(
                     &combatant,
                     position,
                     PetType::Felhunter,
+                    &abilities,
                 );
             }
 
@@ -1026,6 +1033,7 @@ pub fn setup_play_match(
                     &combatant,
                     position,
                     pet_type,
+                    &abilities,
                 );
             }
         } else {
@@ -1407,6 +1415,7 @@ pub(crate) fn spawn_combatant(
     paladin_aura: match_config::PaladinAura,
     equipment_loadout: &Loadout,
     item_defs: &ItemDefinitions,
+    abilities: &ability_config::AbilityDefinitions,
 ) -> (Entity, Combatant) {
     // Get vibrant class colors for 3D visibility
     let base_color = class_mesh_color(class);
@@ -1430,6 +1439,8 @@ pub(crate) fn spawn_combatant(
         ..default()
     });
 
+    // The combatant's own book, resolved once at spawn (the headless spawn
+    // resolves it the same way).
     let mut combatant = Combatant::new_with_curse_prefs(
         team,
         slot,
@@ -1437,7 +1448,8 @@ pub(crate) fn spawn_combatant(
         rogue_opener,
         rogue_poison,
         warlock_curse_prefs,
-    );
+    )
+    .with_book(ability_book::AbilityBook::for_class(abilities, class));
     combatant.warrior_shout = warrior_shout;
     combatant.mage_armor = mage_armor;
     combatant.paladin_aura = paladin_aura;
@@ -1578,10 +1590,12 @@ pub(crate) fn spawn_pet(
     owner_combatant: &Combatant,
     owner_position: Vec3,
     pet_type: PetType,
+    abilities: &ability_config::AbilityDefinitions,
 ) {
     let pet_slot = PET_SLOT_BASE + owner_combatant.slot;
     let pet_combatant =
-        Combatant::new_pet(owner_combatant.team, pet_slot, pet_type, owner_combatant);
+        Combatant::new_pet(owner_combatant.team, pet_slot, pet_type, owner_combatant)
+            .with_book(ability_book::AbilityBook::for_pet(abilities, pet_type));
     // MUST match the headless spawn offsets in `headless/runner.rs` exactly, or a
     // seed stops reproducing between the two modes.
     //
@@ -2067,6 +2081,7 @@ mod held_weapon_tests {
                         match_config::PaladinAura::default(),
                         &loadout,
                         &item_defs,
+                        ability_config::AbilityDefinitions::shipped(),
                     )
                     .0
                 },

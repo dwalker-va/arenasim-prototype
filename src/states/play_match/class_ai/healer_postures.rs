@@ -14,7 +14,7 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::combat_core::{
     compass_directions_16, mask_and_los_bitmask, score_directions, AnchorConstraint, ScorerInputs,
 };
@@ -495,7 +495,7 @@ pub(super) enum DispelStep<'c> {
 /// covers the one it can.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn dispel_chase_override<'c>(
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     my_pos: Vec3,
     current_mana: f32,
@@ -972,7 +972,7 @@ pub(super) fn escape_tick(
 /// dispel, the definitions to read its range and cost from, and the mana the
 /// healer has to pay for it.
 pub(super) struct HealerDispel<'a> {
-    pub abilities: &'a AbilityDefinitions,
+    pub abilities: &'a AbilityBook,
     pub ability: AbilityType,
     pub current_mana: f32,
 }
@@ -1044,7 +1044,6 @@ pub(super) fn healer_pressured_tick_shared(
     ctx: &CombatContext,
     state: &mut HealerPosture,
     directive: Option<&MovementDirective>,
-    abilities: &AbilityDefinitions,
     base_speed: f32,
     shared: &SharedMovementConfig,
     weights: &MovementWeights,
@@ -1105,7 +1104,6 @@ pub(super) fn healer_pressured_tick_shared(
     // gains the ring's arc, a soft leash to the ring and the sight margin.
     let hug = super::pillar_mode::update(
         ctx,
-        abilities,
         entity,
         base_speed,
         my_pos,
@@ -1138,7 +1136,6 @@ pub(super) fn healer_pressured_tick_shared(
         .with_cc_field({
             let field = super::cc_reach::CcField::for_healer(
                 ctx,
-                abilities,
                 entity,
                 shared.cc_ready_horizon,
                 shared.cc_reach_margin,
@@ -1733,7 +1730,7 @@ mod tests {
         use crate::states::play_match::traps::freezing_trap_aura;
         use std::collections::BTreeMap;
 
-        let defs = AbilityDefinitions::default();
+        let defs = crate::states::play_match::ability_config::AbilityDefinitions::default();
         let cleanse = AbilityType::PaladinCleanse;
         let range = defs.get(&cleanse).unwrap().range;
         let (paladin, warrior) = (Entity::from_raw(1), Entity::from_raw(2));
@@ -1755,6 +1752,7 @@ mod tests {
             casting_ability: None,
             pet_type: None,
             pet: None,
+            book: crate::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
         };
         let roster: BTreeMap<Entity, CombatantInfo> = [
             (paladin, unit(paladin, CharacterClass::Paladin, Vec3::ZERO)),
@@ -1792,7 +1790,7 @@ mod tests {
             )
             .classified(&SituationConfig::default(), MatchClock::after_gates(30.0));
             match dispel_chase_override(
-                &defs,
+                &AbilityBook::shipped(CharacterClass::Paladin),
                 paladin,
                 Vec3::ZERO,
                 100.0,
@@ -1836,7 +1834,7 @@ mod tests {
         use crate::states::play_match::traps::freezing_trap_aura;
         use std::collections::BTreeMap;
 
-        let defs = AbilityDefinitions::default();
+        let defs = crate::states::play_match::ability_config::AbilityDefinitions::default();
         let cleanse = AbilityType::PaladinCleanse;
         let range = defs.get(&cleanse).unwrap().range;
         let (paladin, warrior, rogue) = (
@@ -1862,6 +1860,7 @@ mod tests {
             casting_ability: None,
             pet_type: None,
             pet: None,
+            book: crate::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
         };
         let trap = freezing_trap_aura(Entity::from_raw(9));
         let mut silence = trap.clone();
@@ -1927,7 +1926,7 @@ mod tests {
             let mut state = HealerPosture::new(0.0);
             state.dispel_walk = phase;
             match dispel_chase_override(
-                &defs,
+                &AbilityBook::shipped(CharacterClass::Paladin),
                 paladin,
                 Vec3::ZERO,
                 100.0,

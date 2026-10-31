@@ -1,4 +1,5 @@
 use super::super::abilities::{AbilityType, ScalingStat, SpellSchool};
+use super::super::ability_book::AbilityBook;
 use super::super::ability_config::AbilityConfig;
 use super::super::constants::{OFFHAND_DAMAGE_MULTIPLIER, UNARMED_WEAPON_SPEED};
 use super::super::equipment::{ItemDefinitions, ItemSlot, Loadout};
@@ -332,6 +333,10 @@ pub struct Combatant {
     pub slot: u8,
     /// Character class
     pub class: match_config::CharacterClass,
+    /// This combatant's own abilities, resolved once at spawn and never edited
+    /// during the match (see [`AbilityBook`]). Private so it cannot be: read
+    /// it through [`Self::book`], set it only by [`Self::with_book`].
+    book: AbilityBook,
     /// What this combatant's auto-attack IS — derived from the item actually
     /// sitting in its live weapon socket (`class.weapon_slot()`), never from
     /// its class.
@@ -619,6 +624,7 @@ impl Combatant {
             team,
             slot,
             class,
+            book: AbilityBook::shipped(class),
             // Pre-equipment default = the old class ladder verbatim, so a bare
             // combatant (unit tests, any spawn path that never equips) is
             // unchanged. `apply_equipment` overwrites it from the live socket.
@@ -715,7 +721,8 @@ impl Combatant {
     pub fn new_pet(team: u8, slot: u8, pet_type: PetType, owner: &Combatant) -> Self {
         match pet_type {
             PetType::Felhunter => {
-                let mut pet = Self::new(team, slot, match_config::CharacterClass::Warlock);
+                let mut pet = Self::new(team, slot, match_config::CharacterClass::Warlock)
+                    .with_book(AbilityBook::shipped_pet(pet_type));
                 // Scale health to ~45% of owner's max health
                 pet.max_health = owner.max_health * 0.45;
                 pet.current_health = pet.max_health;
@@ -732,7 +739,8 @@ impl Combatant {
                 pet
             }
             PetType::Spider | PetType::Boar | PetType::Bird => {
-                let mut pet = Self::new(team, slot, match_config::CharacterClass::Hunter);
+                let mut pet = Self::new(team, slot, match_config::CharacterClass::Hunter)
+                    .with_book(AbilityBook::shipped_pet(pet_type));
                 // Scale health to ~45% of owner's max health (consistent with Felhunter)
                 pet.max_health = owner.max_health * 0.45;
                 pet.current_health = pet.max_health;
@@ -784,23 +792,34 @@ impl Combatant {
     ///
     /// A category member already cooling down for longer keeps its time; the
     /// category never shortens a cooldown.
-    pub fn start_cooldown(
-        &mut self,
-        ability: AbilityType,
-        abilities: &super::super::ability_config::AbilityDefinitions,
-    ) {
-        let def = abilities.get_unchecked(&ability);
+    pub fn start_cooldown(&mut self, ability: AbilityType) {
+        let def = self.book.get_unchecked(&ability);
         self.ability_cooldowns.insert(ability, def.cooldown);
         let Some(category) = def.cooldown_category else {
             return;
         };
-        for (other, other_def) in abilities.iter() {
+        for (other, other_def) in self.book.iter() {
             if *other == ability || other_def.cooldown_category != Some(category) {
                 continue;
             }
             let remaining = self.ability_cooldowns.entry(*other).or_insert(0.0);
             *remaining = remaining.max(def.cooldown);
         }
+    }
+
+    /// This combatant's own abilities ([`AbilityBook`]): where every sim path
+    /// with this combatant to hand reads an ability's config.
+    pub fn book(&self) -> &AbilityBook {
+        &self.book
+    }
+
+    /// This combatant with `book` as its abilities. A spawn path's one way to
+    /// set the book, before the combatant enters the world: `Combatant::new`
+    /// gives the shipped table's book, and a match's spawn replaces it with the
+    /// book resolved from its own `AbilityDefinitions`.
+    pub fn with_book(mut self, book: AbilityBook) -> Self {
+        self.book = book;
+        self
     }
 
     /// Give back the stat an aura raised when it landed, as it leaves — by
@@ -1194,6 +1213,8 @@ pub struct Projectile {
 /// Pending Holy Shock heal to be processed.
 #[derive(Component)]
 pub struct HolyShockHealPending {
+    /// The Paladin's own book, which the heal is read from.
+    pub caster_book: AbilityBook,
     pub caster_spell_power: f32,
     pub caster_crit_chance: f32,
     pub caster_team: u8,
@@ -1205,6 +1226,8 @@ pub struct HolyShockHealPending {
 /// Pending Holy Shock damage to be processed.
 #[derive(Component)]
 pub struct HolyShockDamagePending {
+    /// The Paladin's own book, which the damage is read from.
+    pub caster_book: AbilityBook,
     pub caster_spell_power: f32,
     pub caster_crit_chance: f32,
     pub caster_team: u8,

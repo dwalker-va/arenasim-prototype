@@ -46,6 +46,7 @@ use super::CombatantInfo;
 use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
 use crate::states::play_match::ai_profile::{AiProfile, AiProfiles};
 use crate::states::play_match::arena_bounds::ArenaBounds;
@@ -186,7 +187,9 @@ impl Scene {
         self.units.push(SceneUnit {
             who,
             entity,
-            combatant: Combatant::new(team, slot, class),
+            // The scene's own table, so `with_config` reaches the unit's book.
+            combatant: Combatant::new(team, slot, class)
+                .with_book(AbilityBook::for_class(&self.abilities, class)),
             target: None,
             position: Vec3::new(0.0, UNIT_Y, 0.0),
             auras: Vec::new(),
@@ -496,7 +499,16 @@ impl Scene {
     /// decision reads. Inside the dispatch only the Rogue's Kidney Shot
     /// planner reads it; the interrupts themselves are decided outside the
     /// dispatch, and [`Scene::interrupt`] runs that decision.
+    /// A unit casts only what is in its book, so a staged cast of an ability
+    /// outside `who`'s class is granted to its book first (as the table
+    /// writes it).
     pub fn casting(mut self, who: Who, ability: AbilityType) -> Self {
+        let book = self.unit_mut(who).combatant.book().clone();
+        if !book.contains(&ability) {
+            let granted = book.granting(&self.abilities, ability);
+            let unit = self.unit_mut(who);
+            unit.combatant = unit.combatant.clone().with_book(granted);
+        }
         self.unit_mut(who).casting = Some(ability);
         self
     }
@@ -668,7 +680,6 @@ impl Scene {
                 withheld: self.withheld,
                 ..SituationConfig::from_movement(&self.movement)
             },
-            &self.abilities,
             &mut trace,
         );
         &self.situations
@@ -735,7 +746,6 @@ impl Scene {
             .collect();
         let empty_traps = BTreeMap::new();
         let frame = DispatchFrame {
-            abilities: &self.abilities,
             movement_config: &self.movement,
             gates_opened: self.gates_opened,
             now: self.now,
@@ -874,7 +884,6 @@ impl Scene {
         };
         let turn = interrupt_turn(
             &ctx,
-            &self.abilities,
             &combatant,
             unit.position,
             Some(&auras),
@@ -896,7 +905,6 @@ impl Scene {
                 &mut commands,
                 &mut CombatLog::default(),
                 &mut GameRng::from_seed(0),
-                &self.abilities,
                 &ctx,
                 unit.entity,
                 &mut combatant,
@@ -924,7 +932,10 @@ impl Scene {
         let casts: Vec<_> = casts.values().copied().collect();
         super::interrupts::spell_lock_pick(
             &ctx,
-            &self.abilities,
+            &AbilityBook::for_pet(
+                &self.abilities,
+                crate::states::play_match::components::PetType::Felhunter,
+            ),
             unit.combatant.team,
             unit.position,
             &casts,
@@ -950,7 +961,6 @@ impl Scene {
                 withheld: self.withheld,
                 ..SituationConfig::from_movement(&self.movement)
             },
-            &self.abilities,
             trace,
         );
         trace.pending_events.clear();
@@ -966,7 +976,7 @@ impl Scene {
             let Some(ability) = u.casting else {
                 continue;
             };
-            let def = self.abilities.get_unchecked(&ability);
+            let def = u.combatant.book().get_unchecked(&ability);
             let channel = def.is_channel();
             casts.insert(
                 u.entity,
@@ -983,6 +993,7 @@ impl Scene {
                     } else {
                         CastTake::of_cast(def, false)
                     },
+                    heal: def.is_heal(),
                 },
             );
         }

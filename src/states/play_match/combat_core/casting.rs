@@ -2,7 +2,7 @@
 
 use super::super::abilities::AbilityType;
 use super::super::abilities::SpellSchool;
-use super::super::ability_config::AbilityDefinitions;
+use super::super::ability_book::AbilityBook;
 use super::super::components::*;
 use super::super::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
 use super::super::effects::BloomPending;
@@ -155,7 +155,6 @@ pub fn process_casting(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    abilities: Res<AbilityDefinitions>,
     mut game_rng: ResMut<GameRng>,
     dampening: Res<ArenaDampening>,
     map_geometry: Res<ActiveMapGeometry>,
@@ -187,6 +186,9 @@ pub fn process_casting(
         let Some(mut casting) = casting_state else {
             continue;
         };
+        // The cast is read from the caster's own book (a shared handle, so
+        // its configs outlive the borrow of the caster).
+        let book = caster.book().clone();
 
         if !caster.is_alive() {
             // Cancel cast if caster dies
@@ -198,7 +200,7 @@ pub fn process_casting(
         // (Root does NOT interrupt casting — only movement)
         let is_incapacitated = super::super::utils::is_incapacitated(caster_auras.as_deref());
         if is_incapacitated {
-            let ability_def = abilities.get_unchecked(&casting.ability);
+            let ability_def = book.get_unchecked(&casting.ability);
             let caster_id = combatant_id(caster.team, caster.slot, caster.class);
             combat_log.mark_cast_interrupted(&caster_id, &ability_def.name);
             combat_log.log(
@@ -224,7 +226,7 @@ pub fn process_casting(
         // costing mana). A Pacify-prevented cast (Aimed Shot) goes on through
         // it, as in TBC. Silence is a separate gate from is_incapacitated —
         // silenced combatants can still move, auto-attack, shoot and shift.
-        let ability_def = abilities.get_unchecked(&casting.ability);
+        let ability_def = book.get_unchecked(&casting.ability);
         if super::super::abilities::is_silenced(&caster, caster_auras.as_deref())
             && ability_def.silence_stops()
         {
@@ -268,7 +270,7 @@ pub fn process_casting(
         // Check if cast completed
         if casting.time_remaining <= 0.0 {
             let ability = casting.ability;
-            let def = abilities.get_unchecked(&ability);
+            let def = book.get_unchecked(&ability);
             let target_entity = casting.target;
 
             // NOTE: mana is NOT consumed here. A completed cast only pays when it
@@ -344,6 +346,7 @@ pub fn process_casting(
                 // base figure the dispel backlash has always snapshotted.
                 caster.spell_power + sp_bonus,
                 def.mana_cost,
+                book.clone(),
             ));
 
             // Remove casting state
@@ -391,9 +394,10 @@ pub fn process_casting(
         caster_spell_power,
         caster_effective_spell_power,
         mana_cost,
+        book,
     ) in completed_casts
     {
-        let def = abilities.get_unchecked(&ability);
+        let def = book.get_unchecked(&ability);
 
         // Get target
         let Some(target_entity) = target_entity else {
@@ -753,7 +757,7 @@ pub fn process_casting(
             // the target it eats the caster's own, and another's only when the
             // caster has none (Classic's Swiftmend takes any Druid's).
             if let Some(consumed) = def.consumes_aura {
-                let consumed_name = &abilities.get_unchecked(&consumed).name;
+                let consumed_name = &book.get_unchecked(&consumed).name;
                 if let Some(auras) = target_auras.as_deref_mut() {
                     let named = |a: &Aura| &a.ability_name == consumed_name;
                     let own = auras
@@ -1032,7 +1036,7 @@ pub fn process_casting(
     // Apply collected ability cooldowns
     for (caster_entity, ability) in cooldown_updates {
         if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {
-            caster.start_cooldown(ability, &abilities);
+            caster.start_cooldown(ability);
         }
     }
 
@@ -1064,7 +1068,6 @@ pub fn process_channeling(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    abilities: Res<AbilityDefinitions>,
     dampening: Res<ArenaDampening>,
     mut combatants: Query<(
         Entity,
@@ -1087,7 +1090,8 @@ pub fn process_channeling(
     // Track updates to apply after the loop
     let mut remove_channel: Vec<Entity> = Vec::new();
     let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
-    // (caster_entity, target_entity, damage, caster_team, caster_slot, caster_class, spell_school)
+    // (caster_entity, target_entity, damage, caster_team, caster_slot,
+    // caster_class, spell_school, ability, the caster's book)
     let mut damage_to_apply: Vec<(
         Entity,
         Entity,
@@ -1097,6 +1101,7 @@ pub fn process_channeling(
         match_config::CharacterClass,
         SpellSchool,
         AbilityType,
+        AbilityBook,
     )> = Vec::new();
 
     // Build a snapshot of positions and health for lookups
@@ -1147,6 +1152,8 @@ pub fn process_channeling(
         let Some(mut channeling) = channeling_state else {
             continue;
         };
+        // The channel is read from the caster's own book.
+        let book = caster.book().clone();
 
         // Handle interrupted state display
         if channeling.interrupted {
@@ -1167,7 +1174,7 @@ pub fn process_channeling(
         // (Root does NOT interrupt channeling — only movement)
         let is_incapacitated = super::super::utils::is_incapacitated(caster_auras.as_deref());
         if is_incapacitated {
-            let ability_def = abilities.get_unchecked(&channeling.ability);
+            let ability_def = book.get_unchecked(&channeling.ability);
             let caster_id = combatant_id(caster.team, caster.slot, caster.class);
             combat_log.mark_cast_interrupted(&caster_id, &ability_def.name);
             combat_log.log(
@@ -1191,7 +1198,7 @@ pub fn process_channeling(
         // A silence stops a channel the same way it stops a cast
         // (`AbilityConfig::silence_stops`). Every channel is Silence-prevented
         // (`validate()`), so this is Drain Life.
-        let channel_def = abilities.get_unchecked(&channeling.ability);
+        let channel_def = book.get_unchecked(&channeling.ability);
         if super::super::abilities::is_silenced(&caster, caster_auras.as_deref())
             && channel_def.silence_stops()
         {
@@ -1231,7 +1238,7 @@ pub fn process_channeling(
 
         // Process tick if ready
         if channeling.time_until_next_tick <= 0.0 {
-            let ability_def = abilities.get_unchecked(&channeling.ability);
+            let ability_def = book.get_unchecked(&channeling.ability);
 
             // Calculate damage (flat damage per tick for Drain Life)
             let damage = ability_def.damage_base_min;
@@ -1246,6 +1253,7 @@ pub fn process_channeling(
                 caster.class,
                 ability_def.spell_school,
                 channeling.ability,
+                book.clone(),
             ));
 
             // Track healing for caster (Drain Life heals 0 if target has DamageImmunity)
@@ -1330,7 +1338,7 @@ pub fn process_channeling(
                 "Team {} {} completed {} channel ({} ticks)",
                 caster.team,
                 caster.class.name(),
-                abilities.get_unchecked(&channeling.ability).name,
+                book.get_unchecked(&channeling.ability).name,
                 channeling.ticks_applied
             );
         }
@@ -1346,6 +1354,7 @@ pub fn process_channeling(
         caster_class,
         spell_school,
         channel_ability,
+        caster_book,
     ) in damage_to_apply
     {
         // Apply damage to target
@@ -1358,7 +1367,7 @@ pub fn process_channeling(
                     &mut target,
                     target_auras.as_deref_mut(),
                     spell_school,
-                    &abilities.get_unchecked(&channel_ability).name,
+                    &caster_book.get_unchecked(&channel_ability).name,
                     &mut combat_log,
                 );
 

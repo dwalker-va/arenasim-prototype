@@ -23,7 +23,8 @@ use super::{cast_reach, priority_interrupt_target, CastReach, CombatContext, Int
 use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
+use crate::states::play_match::ability_book::AbilityBook;
+use crate::states::play_match::ability_config::AbilityConfig;
 use crate::states::play_match::components::{
     ActiveAuras, CastingState, ChannelingState, Combatant, GameRng, InstantAbilityFired,
     InterruptPending, PlayMatchEntity,
@@ -92,25 +93,29 @@ pub struct EnemyCast {
     /// A channel rather than a cast.
     pub channel: bool,
     pub take: CastTake,
+    /// Whether the cast is a heal, read from the caster's own book: Spell
+    /// Lock takes a heal first.
+    pub heal: bool,
 }
 
 impl EnemyCast {
-    /// A unit with a `CastingState`.
+    /// A unit with a `CastingState`, its cast read from its own book.
     pub fn casting(
         entity: Entity,
         combatant: &Combatant,
         position: Vec3,
         cast: &CastingState,
-        abilities: &AbilityDefinitions,
     ) -> Self {
-        let take = CastTake::of_cast(abilities.get_unchecked(&cast.ability), cast.interrupted);
+        let book = combatant.book();
+        let def = book.get_unchecked(&cast.ability);
+        let take = CastTake::of_cast(def, cast.interrupted);
         debug_assert_eq!(
             take == CastTake::Takes,
-            super::cast_is_interruptible(cast, abilities)
+            super::cast_is_interruptible(cast, book)
         );
         debug_assert_eq!(
             take == CastTake::Uninterruptible,
-            super::uninterruptible_cast(cast, abilities).is_some()
+            super::uninterruptible_cast(cast, book).is_some()
         );
         Self {
             entity,
@@ -121,6 +126,7 @@ impl EnemyCast {
             ability: cast.ability,
             channel: false,
             take,
+            heal: def.is_heal(),
         }
     }
 
@@ -144,6 +150,7 @@ impl EnemyCast {
             } else {
                 CastTake::Takes
             },
+            heal: combatant.book().get_unchecked(&channel.ability).is_heal(),
         }
     }
 }
@@ -180,7 +187,6 @@ pub enum InterruptDecision {
 /// ranks is one the interrupt REACHES ([`cast_reach`]: range, then sight).
 pub fn decide_interrupt(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
     combatant: &Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
@@ -197,7 +203,7 @@ pub fn decide_interrupt(
     let Some(ability) = class_interrupt(combatant.class) else {
         return Idle;
     };
-    let def = abilities.get_unchecked(&ability);
+    let def = combatant.book().get_unchecked(&ability);
     let reach = |at: Vec3| cast_reach(ctx, def.range, my_pos, at);
 
     // The enemy casts (not channels) a scan considers: alive, not immune.
@@ -339,14 +345,13 @@ pub fn decide_interrupt(
 #[allow(clippy::too_many_arguments)]
 pub fn interrupt_turn(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
     combatant: &Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     casts: &BTreeMap<Entity, EnemyCast>,
     trace: Option<&mut DecisionTrace>,
 ) -> Option<(AbilityType, Entity, AbilityType)> {
-    let decision = decide_interrupt(ctx, abilities, combatant, my_pos, auras, casts);
+    let decision = decide_interrupt(ctx, combatant, my_pos, auras, casts);
     let target = match &decision {
         InterruptDecision::Interrupt { target, .. } | InterruptDecision::Refuse { target, .. } => {
             *target
@@ -394,7 +399,7 @@ pub fn interrupt_turn(
 /// it could reach but not see, or no target at all.
 pub fn spell_lock_pick(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     my_team: u8,
     my_pos: Vec3,
     casts: &[EnemyCast],
@@ -422,7 +427,7 @@ pub fn spell_lock_pick(
                     ability: c.ability,
                     distance: my_pos.distance(c.position),
                 },
-                abilities.get_unchecked(&c.ability).is_heal(),
+                c.heal,
             )),
             CastTake::Uninterruptible => passed_over = passed_over.or(Some(c.ability)),
             CastTake::Nothing => {}
@@ -457,7 +462,6 @@ pub fn fire_interrupt(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
-    abilities: &AbilityDefinitions,
     ctx: &CombatContext,
     entity: Entity,
     combatant: &mut Combatant,
@@ -467,8 +471,13 @@ pub fn fire_interrupt(
     target_pos: Vec3,
     cast_ability: AbilityType,
 ) {
-    let ability_def = abilities.get_unchecked(&interrupt_ability);
-    let target_ability_name = abilities.get_unchecked(&cast_ability).name.clone();
+    let book = combatant.book().clone();
+    let ability_def = book.get_unchecked(&interrupt_ability);
+    // The cast cut is the TARGET's, named from its own book.
+    let target_ability_name = ctx.combatants.get(&target).map_or_else(
+        || format!("{cast_ability:?}"),
+        |t| t.book.get_unchecked(&cast_ability).name.clone(),
+    );
     let distance = my_pos.distance(target_pos);
 
     info!(
@@ -482,7 +491,7 @@ pub fn fire_interrupt(
     );
 
     combatant.current_mana -= ability_def.mana_cost;
-    combatant.start_cooldown(interrupt_ability, abilities);
+    combatant.start_cooldown(interrupt_ability);
     // Interrupts do NOT trigger GCD in WoW!
 
     // Log ability cast for timeline

@@ -132,7 +132,7 @@ const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
     ),
     (
         "src/states/play_match/combat_core/damage.rs",
-        "ability_name: abilities.get_unchecked(&interrupt.ability).name.clone()",
+        "ability_name: interrupt_name",
         "the school lockout a successful interrupt leaves behind. \
          `EngineAura::InterruptLockout` is derived from the same interrupt flags this site \
          reads, so interrupt N+1 is catalogued with no code in either place.",

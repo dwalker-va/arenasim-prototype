@@ -46,6 +46,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo {
         casting_ability: None,
         pet_type: None,
         pet: None,
+        book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
     }
 }
 
@@ -54,6 +55,9 @@ fn pet_info(entity: Entity, team: u8, owner_class: CharacterClass) -> CombatantI
         is_pet: true,
         casting_ability: None,
         pet_type: Some(PetType::Felhunter),
+        book: arenasim::states::play_match::ability_book::AbilityBook::shipped_pet(
+            PetType::Felhunter,
+        ),
         ..info(entity, team, owner_class)
     }
 }
@@ -320,16 +324,9 @@ fn select_purge_target(snapshot: &CombatSnapshot, my_team: u8) -> Option<Entity>
         .expect("the purger")
         .0;
     let ctx = snapshot.context_for(me);
-    select_purge(
-        &ctx,
-        &AbilityDefinitions::default(),
-        my_team,
-        Vec3::ZERO,
-        f32::MAX,
-        i32::MIN,
-    )
-    .ok()
-    .map(|choice| choice.target)
+    select_purge(&ctx, my_team, Vec3::ZERO, f32::MAX, i32::MIN)
+        .ok()
+        .map(|choice| choice.target)
 }
 
 #[test]
@@ -355,16 +352,7 @@ fn shaman_purges_enemy_with_a_purgeable_buff() {
 
     assert_eq!(select_purge_target(&snapshot, 1), Some(enemy));
     let ctx = snapshot.context_for(me);
-    let odds = select_purge(
-        &ctx,
-        &AbilityDefinitions::default(),
-        1,
-        Vec3::ZERO,
-        f32::MAX,
-        0,
-    )
-    .unwrap()
-    .odds;
+    let odds = select_purge(&ctx, 1, Vec3::ZERO, f32::MAX, 0).unwrap().odds;
     assert_eq!(odds.candidates, 2);
     assert_eq!(odds.best, purge_priority(AuraType::Absorb));
     assert_eq!(
@@ -1249,7 +1237,7 @@ fn injured(entity: Entity, team: u8, class: CharacterClass, hp_frac: f32) -> Com
 fn snapshot_with(members: &[CombatantInfo]) -> CombatSnapshot {
     let mut combatants = BTreeMap::new();
     for m in members {
-        combatants.insert(m.entity, *m);
+        combatants.insert(m.entity, m.clone());
     }
     CombatSnapshot {
         melee_defense: Default::default(),
@@ -1271,7 +1259,7 @@ fn team_hp_sums_excludes_pets_and_dead() {
     dead.is_alive = false;
     let enemy = injured(Entity::from_raw(4), 1, CharacterClass::Mage, 0.5);
 
-    let snap = snapshot_with(&[warrior, pet, dead, enemy]);
+    let snap = snapshot_with(&[warrior.clone(), pet.clone(), dead.clone(), enemy.clone()]);
     let sums = team_hp_sums(&snap.combatants);
 
     // Team 0: only the full-HP warrior counts — the pet and the dead Priest
@@ -1285,7 +1273,7 @@ fn team_hp_sums_excludes_pets_and_dead() {
 fn team_hp_advantage_zero_for_equal_teams() {
     let a = info(Entity::from_raw(1), 0, CharacterClass::Warrior);
     let b = info(Entity::from_raw(2), 1, CharacterClass::Mage);
-    let snap = snapshot_with(&[a, b]);
+    let snap = snapshot_with(&[a.clone(), b.clone()]);
     assert_eq!(snap.context_for(a.entity).team_hp_advantage(), 0.0);
     assert_eq!(snap.context_for(b.entity).team_hp_advantage(), 0.0);
 }
@@ -1296,7 +1284,7 @@ fn team_hp_advantage_signs_and_symmetry() {
     // negation for team 1.
     let a = info(Entity::from_raw(1), 0, CharacterClass::Warrior);
     let b = injured(Entity::from_raw(2), 1, CharacterClass::Mage, 0.5);
-    let snap = snapshot_with(&[a, b]);
+    let snap = snapshot_with(&[a.clone(), b.clone()]);
     assert_eq!(snap.context_for(a.entity).team_hp_advantage(), 0.5);
     assert_eq!(snap.context_for(b.entity).team_hp_advantage(), -0.5);
 }
@@ -1309,7 +1297,7 @@ fn team_hp_advantage_dead_member_drags_own_sum() {
     let mut dead = info(Entity::from_raw(2), 0, CharacterClass::Priest);
     dead.is_alive = false;
     let enemy = info(Entity::from_raw(3), 1, CharacterClass::Mage);
-    let snap = snapshot_with(&[alive, dead, enemy]);
+    let snap = snapshot_with(&[alive.clone(), dead.clone(), enemy.clone()]);
     assert_eq!(snap.context_for(alive.entity).team_hp_advantage(), 0.0);
 }
 
@@ -1333,7 +1321,7 @@ fn team_hp_advantage_deterministic_across_rebuild() {
 fn team_hp_advantage_zero_when_self_absent() {
     // Self missing from the snapshot → no team known → 0.0 (never presses).
     let a = info(Entity::from_raw(1), 0, CharacterClass::Warrior);
-    let snap = snapshot_with(&[a]);
+    let snap = snapshot_with(std::slice::from_ref(&a));
     assert_eq!(
         snap.context_for(Entity::from_raw(999)).team_hp_advantage(),
         0.0
@@ -1356,11 +1344,9 @@ fn team_hp_advantage_zero_when_self_absent() {
 /// the healers' dispels reach pets and this row, not the Hunter AI, changes.
 #[test]
 fn who_can_free_a_freezing_trap() {
-    use arenasim::states::play_match::ability_config::AbilityDefinitions;
     use arenasim::states::play_match::class_ai::can_free_ally;
     use arenasim::states::play_match::traps::freezing_trap_aura;
 
-    let defs = AbilityDefinitions::default();
     let hunter = Entity::from_raw(99);
     let aura = freezing_trap_aura(hunter);
     let victim = info(Entity::from_raw(1), 2, CharacterClass::Warrior);
@@ -1375,7 +1361,7 @@ fn who_can_free_a_freezing_trap() {
                 2,
                 CharacterClass::Warlock,
             )))
-            .filter(|freer| can_free_ally(&defs, freer, victim, &aura))
+            .filter(|freer| can_free_ally(freer, victim, &aura))
             .map(|freer| match freer.pet_type {
                 Some(pet) => pet.name().to_string(),
                 None => freer.class.name().to_string(),
@@ -1398,9 +1384,9 @@ fn who_can_free_a_freezing_trap() {
 
     // Nobody frees themselves, and nobody frees an ENEMY.
     let priest = info(Entity::from_raw(1), 2, CharacterClass::Priest);
-    assert!(!can_free_ally(&defs, &priest, &priest, &aura));
+    assert!(!can_free_ally(&priest, &priest, &aura));
     let enemy_priest = info(Entity::from_raw(3), 1, CharacterClass::Priest);
-    assert!(!can_free_ally(&defs, &enemy_priest, &victim, &aura));
+    assert!(!can_free_ally(&enemy_priest, &victim, &aura));
 }
 
 // ============================================================================
@@ -1438,7 +1424,16 @@ fn a_paladin_walks_to_a_teammate_it_can_only_free_from_closer() {
             snap.active_auras.insert(*e, auras.clone());
         }
         let ctx = snap.context_for(paladin);
-        dispel_chase_target(&ctx, &defs, paladin, Vec3::ZERO, mana, cleanse)
+        dispel_chase_target(
+            &ctx,
+            &arenasim::states::play_match::ability_book::AbilityBook::shipped(
+                CharacterClass::Paladin,
+            ),
+            paladin,
+            Vec3::ZERO,
+            mana,
+            cleanse,
+        )
     };
     let trap = || vec![freezing_trap_aura(hunter)];
     let far = range + 10.0;
@@ -1483,7 +1478,9 @@ fn a_paladin_walks_to_a_teammate_it_can_only_free_from_closer() {
     assert_eq!(
         dispel_chase_target(
             &ctx,
-            &defs,
+            &arenasim::states::play_match::ability_book::AbilityBook::shipped(
+                CharacterClass::Paladin
+            ),
             paladin,
             Vec3::new(far, 0.0, 0.0),
             100.0,
@@ -1501,10 +1498,8 @@ fn a_paladin_walks_to_a_teammate_it_can_only_free_from_closer() {
 /// hard the Hunter's team is pressing the teammate that would.
 #[test]
 fn a_trap_is_worth_throwing_where_nobody_frees_it() {
-    use arenasim::states::play_match::ability_config::AbilityDefinitions;
     use arenasim::states::play_match::class_ai::hunter_dip::trap_victim_worth_it;
 
-    let defs = AbilityDefinitions::default();
     let hunter = Entity::from_raw(0);
     let (a, b, felhunter) = (
         Entity::from_raw(1),
@@ -1526,7 +1521,7 @@ fn a_trap_is_worth_throwing_where_nobody_frees_it() {
         team.iter()
             .map(|(e, _)| *e)
             .chain(with_felhunter.then_some(felhunter))
-            .map(|e| trap_victim_worth_it(&ctx, &defs, hunter, e))
+            .map(|e| trap_victim_worth_it(&ctx, hunter, e))
             .collect::<Vec<_>>()
     };
 
@@ -1562,17 +1557,15 @@ fn a_trap_is_worth_throwing_where_nobody_frees_it() {
 /// lane trap. With nothing hidden, the question does not arise.
 #[test]
 fn an_unseen_victim_is_answered_by_the_dispeller_in_view() {
-    use arenasim::states::play_match::ability_config::AbilityDefinitions;
     use arenasim::states::play_match::class_ai::hunter_dip::unseen_victim_would_be_freed;
 
-    let defs = AbilityDefinitions::default();
     let hunter = Entity::from_raw(0);
     let freed = |enemies: &[CombatantInfo]| {
         let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
         for e in enemies {
-            snap.combatants.insert(e.entity, *e);
+            snap.combatants.insert(e.entity, e.clone());
         }
-        unseen_victim_would_be_freed(&snap.context_for(hunter), &defs, hunter, 1)
+        unseen_victim_would_be_freed(&snap.context_for(hunter), hunter, 1)
     };
     let e = |i: u32, class: CharacterClass| info(Entity::from_raw(i), 2, class);
     let hidden = |i: u32, class: CharacterClass| CombatantInfo {
@@ -1644,13 +1637,16 @@ fn a_lane_trap_is_decided_on_whoever_reaches_it_after_it_arms() {
         toward_hunter,
         Some(hunter),
     );
-    assert_eq!(springer(vec![felhunter, rogue]), Some(rogue.entity));
+    assert_eq!(
+        springer(vec![felhunter.clone(), rogue.clone()]),
+        Some(rogue.entity)
+    );
     // Alone, the Felhunter never reaches it: nobody is predicted.
-    assert_eq!(springer(vec![felhunter]), None);
+    assert_eq!(springer(vec![felhunter.clone()]), None);
 
     // An enemy already inside the radius and planted springs it as it arms.
     let planted = at(3, CharacterClass::Warrior, landing, Vec3::ZERO, None);
-    assert_eq!(springer(vec![planted]), Some(planted.entity));
+    assert_eq!(springer(vec![planted.clone()]), Some(planted.entity));
 
     // An enemy that crosses the landing before it arms and runs on (chasing a
     // unit far behind the Hunter) is gone by the time it could spring.
@@ -1664,7 +1660,7 @@ fn a_lane_trap_is_decided_on_whoever_reaches_it_after_it_arms() {
     let mut far_ally = info(Entity::from_raw(5), 1, CharacterClass::Priest);
     far_ally.position = Vec3::new(0.0, 0.0, -60.0);
     let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
-    snap.combatants.insert(far_ally.entity, far_ally);
+    snap.combatants.insert(far_ally.entity, far_ally.clone());
     snap.combatants.insert(
         through.entity,
         CombatantInfo {
@@ -1684,7 +1680,7 @@ fn a_lane_trap_is_decided_on_whoever_reaches_it_after_it_arms() {
         toward_hunter,
         Some(hunter),
     );
-    assert_eq!(springer(vec![priest]), None);
+    assert_eq!(springer(vec![priest.clone()]), None);
     let warrior = at(
         7,
         CharacterClass::Warrior,
@@ -1692,7 +1688,7 @@ fn a_lane_trap_is_decided_on_whoever_reaches_it_after_it_arms() {
         toward_hunter,
         Some(hunter),
     );
-    assert_eq!(springer(vec![warrior]), Some(warrior.entity));
+    assert_eq!(springer(vec![warrior.clone()]), Some(warrior.entity));
 }
 
 /// The trap breaks on any damage, so a lane trap is never decided on an enemy
@@ -1747,13 +1743,11 @@ fn a_lane_trap_is_not_thrown_onto_the_enemy_the_team_is_hitting() {
 /// pinned in `tests/hunter_trap_trace.rs`).
 #[test]
 fn a_pressured_hunter_traps_the_healer_nobody_else_is_killing() {
-    use arenasim::states::play_match::ability_config::AbilityDefinitions;
     use arenasim::states::play_match::class_ai::hunter_dip::{
         pressure_trap_healer, PRESSURE_TRAP_FREEABLE, PRESSURE_TRAP_INELIGIBLE,
         PRESSURE_TRAP_TEAM_ATTACKING,
     };
 
-    let defs = AbilityDefinitions::default();
     let hunter = Entity::from_raw(0);
     let (healer, partner, felhunter, teammate) = (
         Entity::from_raw(1),
@@ -1773,7 +1767,7 @@ fn a_pressured_hunter_traps_the_healer_nobody_else_is_killing() {
             hunter,
             CombatantInfo {
                 target: own_target,
-                ..snap.combatants[&hunter]
+                ..snap.combatants[&hunter].clone()
             },
         );
         snap.combatants
@@ -1803,7 +1797,7 @@ fn a_pressured_hunter_traps_the_healer_nobody_else_is_killing() {
             );
         }
         let ctx = snap.context_for(hunter);
-        pressure_trap_healer(&ctx, &defs, hunter, 1)
+        pressure_trap_healer(&ctx, hunter, 1)
     };
 
     // Rogue + Priest, the Hunter killing the Priest, and its own Priest's
@@ -1904,7 +1898,15 @@ fn a_pressure_trap_lands_only_where_it_catches_the_healer_cleanly() {
                 ..info(rogue, 2, CharacterClass::Rogue)
             },
         );
-        pressure_trap_landing(&snap.context_for(hunter), &defs, 1, Vec3::ZERO, healer)
+        pressure_trap_landing(
+            &snap.context_for(hunter),
+            &arenasim::states::play_match::ability_book::AbilityBook::shipped(
+                CharacterClass::Hunter,
+            ),
+            1,
+            Vec3::ZERO,
+            healer,
+        )
     };
     let landing = |healer_at: Vec3, rogue_at: Vec3| walking(healer_at, Vec3::ZERO, rogue_at);
     let on_hunter = Vec3::new(2.0, 0.0, 0.0);
@@ -1997,7 +1999,10 @@ fn aimed_shot_waits_for_the_time_to_finish_it() {
                 snap.active_auras.insert(e, vec![a]);
             }
             aimed_shot_has_time(
-                defs,
+                &arenasim::states::play_match::ability_book::AbilityBook::for_class(
+                    defs,
+                    CharacterClass::Hunter,
+                ),
                 hunter,
                 Vec3::ZERO,
                 None,
@@ -2033,11 +2038,19 @@ fn aimed_shot_waits_for_the_time_to_finish_it() {
         ..pet_info(Entity::from_raw(3), 2, Warlock)
     };
     let shaman = at(5, Shaman, 25.0, 0.0);
-    assert!(has_time(vec![felhunter], vec![]));
-    assert!(has_time(vec![shaman], vec![]));
+    assert!(has_time(vec![felhunter.clone()], vec![]));
+    assert!(has_time(vec![shaman.clone()], vec![]));
     // ...though were the cast interruptible, either would need no time at all...
-    assert!(!has_time_under(&interruptible, vec![felhunter], vec![]));
-    assert!(!has_time_under(&interruptible, vec![shaman], vec![]));
+    assert!(!has_time_under(
+        &interruptible,
+        vec![felhunter.clone()],
+        vec![]
+    ));
+    assert!(!has_time_under(
+        &interruptible,
+        vec![shaman.clone()],
+        vec![]
+    ));
     // ...unless held in hard CC past the cast.
     let trapped = Aura {
         duration: 6.0,
@@ -2045,7 +2058,7 @@ fn aimed_shot_waits_for_the_time_to_finish_it() {
     };
     assert!(has_time_under(
         &interruptible,
-        vec![felhunter],
+        vec![felhunter.clone()],
         vec![(felhunter.entity, trapped)]
     ));
     // A Rogue the Hunter cannot see counts as one that could stop it: the
@@ -2067,15 +2080,21 @@ fn aimed_shot_waits_for_the_time_to_finish_it() {
 /// first — which is what the Hunter vs Priest 1v1 had lost.
 #[test]
 fn aimed_shot_goes_before_the_sting_only_when_the_sting_would_cost_it_the_window() {
-    use arenasim::states::play_match::ability_config::AbilityDefinitions;
     use arenasim::states::play_match::class_ai::hunter::aimed_shot_before_sting;
 
-    let defs = AbilityDefinitions::default();
     let hunter = Entity::from_raw(0);
     let before_sting = |enemy: CombatantInfo| {
         let mut snap = snapshot_for(hunter, 1, CharacterClass::Hunter);
         snap.combatants.insert(enemy.entity, enemy);
-        aimed_shot_before_sting(&defs, hunter, Vec3::ZERO, None, &snap.context_for(hunter))
+        aimed_shot_before_sting(
+            &arenasim::states::play_match::ability_book::AbilityBook::shipped(
+                CharacterClass::Hunter,
+            ),
+            hunter,
+            Vec3::ZERO,
+            None,
+            &snap.context_for(hunter),
+        )
     };
     let at = |class: CharacterClass, z: f32, vz: f32| CombatantInfo {
         position: Vec3::new(0.0, 0.0, z),
@@ -2197,7 +2216,6 @@ fn a_hidden_kill_target_is_named_by_slot_from_the_roster() {
 #[test]
 fn a_flare_is_lit_ahead_of_the_ally_nearest_the_enemy_gate_once_the_rogue_could_be_there() {
     use arenasim::states::play_match::abilities::AbilityType;
-    use arenasim::states::play_match::ability_config::AbilityDefinitions;
     use arenasim::states::play_match::class_ai::hunter::{
         flare_plan, FlarePlan, FLARE_HELD_TOO_EARLY, FLARE_LEAD,
     };
@@ -2205,7 +2223,6 @@ fn a_flare_is_lit_ahead_of_the_ally_nearest_the_enemy_gate_once_the_rogue_could_
     use arenasim::states::play_match::decision_trace::RejectionReason;
     use arenasim::states::play_match::Combatant;
 
-    let defs = AbilityDefinitions::default();
     let hunter = Entity::from_raw(0);
     let priest = Entity::from_raw(1);
     let rogue = Entity::from_raw(2);
@@ -2222,7 +2239,13 @@ fn a_flare_is_lit_ahead_of_the_ally_nearest_the_enemy_gate_once_the_rogue_could_
     );
     let me = Combatant::new(1, 0, CharacterClass::Hunter);
     let plan = |snap: &CombatSnapshot, me: &Combatant, since_gates: f32| {
-        flare_plan(&defs, me, hunter_at, &snap.context_for(hunter), since_gates)
+        flare_plan(
+            me.book(),
+            me,
+            hunter_at,
+            &snap.context_for(hunter),
+            since_gates,
+        )
     };
 
     assert!(
@@ -2333,7 +2356,6 @@ mod druid_counterplay {
     /// Innervate falls back to 25 and nothing clears the urgent bar.
     #[test]
     fn shaman_purges_innervate_at_the_urgent_bar() {
-        let defs = AbilityDefinitions::default();
         let me = Entity::from_raw(1);
         let druid = Entity::from_raw(2);
         let priest = Entity::from_raw(3);
@@ -2354,7 +2376,10 @@ mod druid_counterplay {
             vec![landed(AbilityType::PowerWordShield, priest, priest)],
         );
 
-        assert_eq!(purge_pick_value(&innervate, &defs), PURGE_URGENT_PRIORITY);
+        assert_eq!(
+            purge_pick_value(&innervate, &snapshot.context_for(me)),
+            PURGE_URGENT_PRIORITY
+        );
         assert_eq!(
             purge_priority(AuraType::ManaRegenIncrease),
             25,
@@ -2362,11 +2387,11 @@ mod druid_counterplay {
         );
 
         let ctx = snapshot.context_for(me);
-        let urgent = select_purge(&ctx, &defs, 1, Vec3::ZERO, 30.0, PURGE_URGENT_PRIORITY)
+        let urgent = select_purge(&ctx, 1, Vec3::ZERO, 30.0, PURGE_URGENT_PRIORITY)
             .expect("Innervate clears the urgent bar");
         assert_eq!(urgent.target, druid);
         assert_eq!(urgent.odds.expected, 90.0);
-        let ordinary = select_purge(&ctx, &defs, 1, Vec3::ZERO, 30.0, PURGE_MIN_PRIORITY)
+        let ordinary = select_purge(&ctx, 1, Vec3::ZERO, 30.0, PURGE_MIN_PRIORITY)
             .expect("both clear the ordinary bar");
         assert_eq!(ordinary.target, priest, "the better odds win");
     }
@@ -2384,13 +2409,18 @@ mod druid_counterplay {
     /// stacks beside Innervate hold).
     #[test]
     fn shaman_purge_weighs_the_odds_of_a_random_pick() {
-        let defs = AbilityDefinitions::default();
         let me = Entity::from_raw(1);
         let druid = Entity::from_raw(2);
         let other_druid = Entity::from_raw(3);
         let lifebloom = landed(AbilityType::Lifebloom, druid, druid);
         assert!(lifebloom.can_be_purged());
-        assert_eq!(purge_pick_value(&lifebloom, &defs), -PURGE_BLOOM_COST);
+        assert_eq!(
+            purge_pick_value(
+                &lifebloom,
+                &snapshot_for(me, 1, CharacterClass::Shaman).context_for(me)
+            ),
+            -PURGE_BLOOM_COST
+        );
         let mut three_stacks = lifebloom.clone();
         three_stacks.stacks = three_stacks
             .stacks
@@ -2406,7 +2436,7 @@ mod druid_counterplay {
                 .combatants
                 .insert(druid, info(druid, 2, CharacterClass::Druid));
             snapshot.active_auras.insert(druid, auras);
-            select_purge(&snapshot.context_for(me), &defs, 1, Vec3::ZERO, 30.0, bar)
+            select_purge(&snapshot.context_for(me), 1, Vec3::ZERO, 30.0, bar)
         };
         let purges =
             |auras: Vec<Aura>, bar: i32| -> PurgeOdds { decide(auras, bar).expect("a purge").odds };
@@ -2485,7 +2515,18 @@ mod druid_counterplay {
         ));
         // The odds are the pick's own: computed over every candidate.
         assert_eq!(
-            PurgeOdds::of([&innervate, &lifebloom], &defs).map(|o| o.expected),
+            PurgeOdds::of(
+                [&innervate, &lifebloom],
+                &{
+                    let mut snapshot = snapshot_for(me, 1, CharacterClass::Shaman);
+                    snapshot
+                        .combatants
+                        .insert(druid, info(druid, 2, CharacterClass::Druid));
+                    snapshot
+                }
+                .context_for(me)
+            )
+            .map(|o| o.expected),
             Some(20.0)
         );
     }
@@ -2872,7 +2913,6 @@ mod purge_reach {
         let pick = |snapshot: &CombatSnapshot| {
             select_purge(
                 &snapshot.context_for(me),
-                &defs,
                 1,
                 me_pos,
                 range,

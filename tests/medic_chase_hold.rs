@@ -39,8 +39,8 @@ use arenasim::states::play_match::decision_trace::DecisionTrace;
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
 use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
 use arenasim::states::play_match::{
-    AbilityDefinitions, AbilityType, Aura, Combatant, DispelWalkPhase, HealerPosture,
-    MovementConfig, MovementDirective, MovementGoal,
+    AbilityType, Aura, Combatant, DispelWalkPhase, HealerPosture, MovementConfig,
+    MovementDirective, MovementGoal,
 };
 use common::staged::{of_class, play, sim_time, Played};
 
@@ -81,6 +81,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3, hp: f32
         casting_ability: None,
         pet_type: None,
         pet: None,
+        book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
     }
 }
 
@@ -161,7 +162,6 @@ impl Scene {
     /// directive the previous tick left in the world. Returns the movement
     /// triggers it traced, and records the plan's cast deferral in `defer`.
     fn tick(&mut self, now: f32) -> Vec<String> {
-        let abilities = AbilityDefinitions::default();
         let movement = MovementConfig::default();
         let mut trace = DecisionTrace::default();
         let mut queue = CommandQueue::default();
@@ -189,7 +189,7 @@ impl Scene {
                         &self.combatant,
                         HEALER_POS,
                         &ctx,
-                        &abilities,
+                        self.combatant.book(),
                         None,
                         state,
                         directive.as_ref(),
@@ -202,7 +202,7 @@ impl Scene {
                 CharacterClass::Paladin => {
                     evaluate_paladin_posture(
                         &mut commands,
-                        &abilities,
+                        self.combatant.book(),
                         self.healer,
                         &self.combatant,
                         HEALER_POS,
@@ -228,7 +228,6 @@ impl Scene {
                         &self.combatant,
                         HEALER_POS,
                         &ctx,
-                        &abilities,
                         state,
                         directive.as_ref(),
                         &movement,

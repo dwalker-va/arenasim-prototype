@@ -1112,6 +1112,7 @@ mod tests {
             casting_ability: None,
             pet_type: None,
             pet: None,
+            book: crate::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
         };
         let mut roster: BTreeMap<Entity, CombatantInfo> = BTreeMap::new();
         roster.insert(

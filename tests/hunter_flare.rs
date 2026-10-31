@@ -24,8 +24,7 @@ use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo, Queue
 use arenasim::states::play_match::decision_trace::DecisionTrace;
 use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
 use arenasim::states::play_match::{
-    AbilityDefinitions, AbilityType, Aura, CastingState, Combatant, FlareZone, GameRng,
-    MovementConfig,
+    AbilityType, Aura, CastingState, Combatant, FlareZone, GameRng, MovementConfig,
 };
 
 fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> CombatantInfo {
@@ -47,6 +46,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> Comb
         casting_ability: None,
         pet_type: None,
         pet: None,
+        book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
     }
 }
 
@@ -72,7 +72,6 @@ fn decide_at(since_gates: f32) -> Decision {
     let priest = world.spawn_empty().id();
     let rogue = world.spawn_empty().id();
 
-    let abilities = AbilityDefinitions::default();
     let movement = MovementConfig::default();
     let mut combat_log = CombatLog::default();
     let mut game_rng = GameRng::from_seed(7);
@@ -122,7 +121,7 @@ fn decide_at(since_gates: f32) -> Decision {
         &mut commands,
         &mut combat_log,
         &mut game_rng,
-        &abilities,
+        &combatant.book().clone(),
         hunter,
         &mut combatant,
         my_pos,

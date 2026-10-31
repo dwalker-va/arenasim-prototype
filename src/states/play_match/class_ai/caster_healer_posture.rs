@@ -8,8 +8,6 @@
 
 use bevy::prelude::*;
 
-use crate::states::play_match::ability_config::AbilityDefinitions;
-
 use crate::states::play_match::combat_core::clamp_to_arena;
 use crate::states::play_match::components::*;
 use crate::states::play_match::decision_trace::{
@@ -79,7 +77,6 @@ pub fn evaluate_caster_healer_posture(
     combatant: &Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
     posture: Option<&mut HealerPosture>,
     directive: Option<&MovementDirective>,
     movement: &MovementConfig,
@@ -251,7 +248,6 @@ pub fn evaluate_caster_healer_posture(
                 combatant,
                 my_pos,
                 ctx,
-                abilities,
                 state,
                 directive,
                 movement,
@@ -267,7 +263,6 @@ pub fn evaluate_caster_healer_posture(
                 combatant,
                 my_pos,
                 ctx,
-                abilities,
                 state,
                 directive,
                 movement,
@@ -319,7 +314,6 @@ fn caster_healer_pressured_tick(
     combatant: &Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
     state: &mut HealerPosture,
     directive: Option<&MovementDirective>,
     movement: &MovementConfig,
@@ -336,7 +330,6 @@ fn caster_healer_pressured_tick(
         ctx,
         state,
         directive,
-        abilities,
         combatant.base_movement_speed,
         &movement.shared,
         &block.weights,
@@ -360,7 +353,6 @@ fn caster_healer_free_tick(
     combatant: &Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
     state: &mut HealerPosture,
     directive: Option<&MovementDirective>,
     movement: &MovementConfig,
@@ -386,7 +378,6 @@ fn caster_healer_free_tick(
     // Hugging a pillar (AS-373): the ring point replaces the formation point.
     let hug = super::pillar_mode::update(
         ctx,
-        abilities,
         entity,
         combatant.base_movement_speed,
         my_pos,
@@ -403,7 +394,6 @@ fn caster_healer_free_tick(
             combatant,
             my_pos,
             ctx,
-            abilities,
             movement,
             block,
             &mut state.formation,
@@ -495,7 +485,6 @@ fn compute_formation_point(
     combatant: &Combatant,
     my_pos: Vec3,
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
     movement: &MovementConfig,
     block: &CasterHealerMovementConfig,
     memory: &mut FormationMemory,
@@ -621,7 +610,6 @@ fn compute_formation_point(
     Some(if super::formation::reach_constrained(ctx) {
         let field = super::cc_reach::CcField::for_healer(
             ctx,
-            abilities,
             entity,
             shared.cc_ready_horizon,
             shared.cc_reach_margin,

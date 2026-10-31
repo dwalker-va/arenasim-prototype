@@ -77,7 +77,8 @@ use super::cast_guard::{lands_after, pre_cast_ok_but_hold, PreCastOpts};
 use super::{grants_damage_immunity, holds, CombatContext, Incoming};
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
+use crate::states::play_match::ability_book::AbilityBook;
+use crate::states::play_match::ability_config::AbilityConfig;
 use crate::states::play_match::components::{ActiveAuras, Combatant, DRCategory};
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::decision_trace::{DecisionEventBuilder, RejectionReason};
@@ -242,7 +243,7 @@ pub struct ChainPlan {
 #[allow(clippy::too_many_arguments)]
 pub fn plan(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     caster: &Combatant,
     caster_pos: Vec3,
     auras: Option<&ActiveAuras>,
