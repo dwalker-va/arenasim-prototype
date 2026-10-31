@@ -14,12 +14,14 @@ use bevy::prelude::*;
 use bevy::render::mesh::VertexAttributeValues;
 use bevy::time::TimeUpdateStrategy;
 
-use arenasim::states::play_match::components::{Combatant, DispelRibbon, DispelSpark};
+use arenasim::states::play_match::components::{
+    Combatant, DispelRibbon, DispelRibbonRig, DispelSpark,
+};
 use arenasim::states::play_match::{
     cleanup_expired_dispel_ribbons, ribbon_climb, ribbon_consumed, ribbon_fold, ribbon_fold_amp,
     ribbon_fold_centre, ribbon_height, ribbon_ignition, ribbon_origin, ribbon_positions,
     ribbon_radii, ribbon_starts_at_base, ribbon_top_local, spawn_dispel_ribbon_visuals,
-    update_dispel_ribbons, update_dispel_sparks,
+    update_dispel_ribbons, update_dispel_sparks, SAND_RIBBON_LEVEL,
 };
 use arenasim::CharacterClass;
 
@@ -541,4 +543,108 @@ fn the_ribbon_expires_and_survives_losing_its_victim() {
         "ribbon never expired"
     );
     assert!(h.global::<DispelSpark>().is_empty(), "sparks never expired");
+}
+
+// ── sand legibility (AS-435) ───────────────────────────────────────────────
+
+/// The Sand Legibility Bench's dispel colours (sRGB base, linear emissive),
+/// restated here so the probe does not read the code it checks.
+const BENCH_DISPEL_COLOURS: &[(CharacterClass, [f32; 3], [f32; 3])] = &[
+    (CharacterClass::Priest, [0.85, 0.85, 1.0], [2.0, 2.0, 2.8]),
+    (CharacterClass::Paladin, [1.0, 0.9, 0.6], [2.5, 2.0, 1.0]),
+    (CharacterClass::Shaman, [0.3, 0.6, 1.0], [1.2, 2.0, 3.0]),
+    (CharacterClass::Hunter, [1.0, 0.85, 0.3], [2.0, 1.7, 0.6]),
+    // The Felhunter's Devour Magic: the neutral white.
+    (CharacterClass::Warlock, [0.9, 0.9, 1.0], [2.0, 2.0, 2.5]),
+];
+
+fn close(a: f32, b: f32, what: &str) {
+    assert!(
+        (a - b).abs() <= 1e-4 * b.abs().max(1.0),
+        "{what}: {a} vs {b}"
+    );
+}
+
+/// The strip's whole colour sits at the shared ribbon level (0.1, the
+/// signed-off bench value): its lit base and its emissive, ignition and all,
+/// in every dispeller's hue. The sparks keep the burst's full colour, additive.
+#[test]
+fn the_strip_is_drawn_dark_at_the_shared_ribbon_level_and_the_sparks_stay_bright() {
+    assert_eq!(SAND_RIBBON_LEVEL, 0.1, "the signed-off level");
+    for &(class, base, em) in BENCH_DISPEL_COLOURS {
+        let mut h = Harness::new();
+        let victim = h.spawn_victim(Vec3::ZERO);
+        h.dispel(victim, class);
+        // Two frames: the strip is still igniting, so the spike is checked too.
+        h.tick(2);
+        let (ribbon, age, strip, sparks) = {
+            let mut q = h.app.world_mut().query::<(
+                &DispelRibbon,
+                &DispelRibbonRig,
+                &MeshMaterial3d<StandardMaterial>,
+            )>();
+            let (r, rig, m) = q.iter(h.app.world()).next().expect("a ribbon");
+            (
+                r.caster_class,
+                r.initial_lifetime - r.lifetime,
+                m.0.clone(),
+                rig.spark_material.clone(),
+            )
+        };
+        assert_eq!(ribbon, class);
+        let materials = h.app.world().resource::<Assets<StandardMaterial>>();
+        let strip = materials.get(&strip).expect("strip material");
+        let sparks = materials.get(&sparks).expect("spark material");
+
+        assert_eq!(strip.alpha_mode, AlphaMode::Opaque, "{class:?}");
+        let lin = strip.base_color.to_linear();
+        let want = Color::srgb(base[0], base[1], base[2]).to_linear();
+        close(lin.red, want.red * 0.1, "base red");
+        close(lin.green, want.green * 0.1, "base green");
+        close(lin.blue, want.blue * 0.1, "base blue");
+        let ignite = ribbon_ignition(age);
+        assert!(ignite > 3.0, "{class:?} still igniting at {age}s");
+        close(
+            strip.emissive.red,
+            em[0] * 0.6 * ignite * 0.1,
+            "emissive red",
+        );
+        close(
+            strip.emissive.green,
+            em[1] * 0.6 * ignite * 0.1,
+            "emissive green",
+        );
+        close(
+            strip.emissive.blue,
+            em[2] * 0.6 * ignite * 0.1,
+            "emissive blue",
+        );
+
+        assert_eq!(sparks.alpha_mode, AlphaMode::Add, "{class:?} sparks");
+        let s = sparks.base_color.to_srgba();
+        close(s.red, base[0], "spark red");
+        close(s.green, base[1], "spark green");
+        close(s.blue, base[2], "spark blue");
+        close(sparks.emissive.red, em[0] * 1.3, "spark emissive red");
+        close(sparks.emissive.green, em[1] * 1.3, "spark emissive green");
+        close(sparks.emissive.blue, em[2] * 1.3, "spark emissive blue");
+    }
+}
+
+/// The level holds for the strip's whole life, not only at birth: the settled
+/// emissive is the dark one too.
+#[test]
+fn the_strip_stays_dark_once_settled() {
+    let mut h = Harness::new();
+    let victim = h.spawn_victim(Vec3::ZERO);
+    h.dispel(victim, CharacterClass::Priest);
+    h.tick(40);
+    let age = {
+        let mut q = h.app.world_mut().query::<&DispelRibbon>();
+        let r = q.iter(h.app.world()).next().expect("a ribbon");
+        r.initial_lifetime - r.lifetime
+    };
+    let settled = h.ribbon_emissive();
+    let want = (2.0 + 2.0 + 2.8) * 0.6 * ribbon_ignition(age) * 0.1;
+    close(settled, want, "settled emissive");
 }

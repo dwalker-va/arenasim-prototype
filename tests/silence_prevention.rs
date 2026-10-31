@@ -263,6 +263,7 @@ fn a_silenced_priest_can_neither_dispel_nor_heal_in_the_ais_view() {
             Vec::new()
         };
         let snapshot = CombatSnapshot {
+            melee_defense: Default::default(),
             combatants: BTreeMap::from([(
                 priest,
                 CombatantInfo::from_combatant(

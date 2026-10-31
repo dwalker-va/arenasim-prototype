@@ -365,6 +365,28 @@ impl DecisionTrace {
         });
     }
 
+    /// Record a `melee_avoided` event: `actor` attacked `target` with
+    /// `attack`, and the target avoided it.
+    pub fn record_melee_avoided(
+        &mut self,
+        actor: ActorView,
+        target: TargetView,
+        attack: String,
+        avoided: crate::states::play_match::combat_core::Avoidance,
+    ) {
+        self.pending_events.push(DecisionEvent {
+            frame: self.current_frame,
+            sim_time: self.current_sim_time,
+            seed: self.seed,
+            ai_profile: self.ai_profile,
+            kind: EventKind::MeleeAvoided,
+            actor: Some(actor),
+            target: Some(target),
+            situation: None,
+            payload: EventPayload::MeleeAvoided { attack, avoided },
+        });
+    }
+
     fn push_situation_change(&mut self, payload: EventPayload) {
         self.pending_events.push(DecisionEvent {
             frame: self.current_frame,

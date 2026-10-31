@@ -133,6 +133,7 @@ struct UseSite {
 fn kick_pass_at(cast: AbilityType) -> UseSite {
     let mut world = World::new();
     world.insert_resource(CombatLog::default());
+    world.insert_resource(arenasim::states::play_match::components::GameRng::from_seed(0));
     world.insert_resource(DecisionTrace::default());
     let defs = AbilityDefinitions::default();
     let cast_time = defs.get_unchecked(&cast).cast_time;

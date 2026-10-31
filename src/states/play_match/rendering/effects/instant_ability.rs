@@ -81,9 +81,9 @@ pub fn consume_instant_ability_signals(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    // Built once and reused, like the stun whirl's sparkle — the crescent is
-    // identical for every slash of every rogue stun.
-    mut crescent_tex: Local<Option<Handle<Image>>>,
+    // Built once and reused, like the stun whirl's sparkle — the crescent's
+    // opacity ladder is identical for every slash of every rogue stun.
+    mut crescent_ladder: Local<Option<CrescentLadder>>,
     mut rune_tex: Local<Option<Handle<Image>>>,
     signals: Query<(Entity, &InstantAbilityFired)>,
     mut sockets: Query<&mut WeaponSocket>,
@@ -164,7 +164,7 @@ pub fn consume_instant_ability_signals(
                         &mut meshes,
                         &mut materials,
                         &mut images,
-                        &mut crescent_tex,
+                        &mut crescent_ladder,
                         spec,
                         caster_pos,
                         target_pos,

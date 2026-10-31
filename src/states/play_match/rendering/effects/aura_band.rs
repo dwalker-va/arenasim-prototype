@@ -59,14 +59,23 @@
 //! mesh has its origin on the body's axis, so it sorts level with the capsule
 //! and the capsule paints over the half of the ring in front of it (the dispel
 //! ribbon's round-2 lesson). The band is therefore [`AURA_BAND_ARCS`] short
-//! additive arcs, each a child whose origin sits ON the ring: the front arcs
-//! sort in front of the body and draw over it, the back arcs sort behind it and
-//! are covered by it, which is exactly right.
+//! arcs, each a child whose origin sits ON the ring: the front arcs sort in
+//! front of the body and draw over it, the back arcs sort behind it and are
+//! covered by it, which is exactly right.
+//!
+//! ## Why it is blended, not light
+//!
+//! The band is alpha-BLENDED in its tint ([`aura_band_color`]), at a level by
+//! polarity: added light barely moves the bright arena sand, which sits on the
+//! tonemapper's shoulder, and the additive grey buff ring measured 6.2 ΔL* on
+//! it, faint. A darker blended band reads (AS-435, Sand Legibility Bench,
+//! <https://claude.ai/artifact/8qLsKmuRQTVwa5Kzdimkgo>, version id
+//! 1793335026-f991).
 
+use super::sand_legibility::linear_level;
 use super::school_impact::IMPACT_PET_BODY_Y;
 use crate::states::play_match::abilities::SpellSchool;
 use crate::states::play_match::components::*;
-use bevy::color::LinearRgba;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
@@ -89,11 +98,17 @@ pub const AURA_BAND_WIDTH: f32 = 0.16;
 pub const AURA_BAND_BUFF_OPEN: (f32, f32) = (0.95, 1.2);
 /// A debuff tightens as it presses down: radius multiplier at birth and end.
 pub const AURA_BAND_DEBUFF_TIGHTEN: (f32, f32) = (1.2, 0.9);
-/// Emissive strength of the ring's spine at full alpha.
-pub const AURA_BAND_EMISSIVE: f32 = 2.6;
-/// A debuff glows this fraction as bright as a buff — pressing down, not
-/// shining out.
-pub const AURA_BAND_DEBUFF_INTENSITY: f32 = 0.8;
+/// The band's peak opacity. The band is alpha-BLENDED in its tint, not added
+/// light: added light barely moves the bright arena sand, and the grey buff
+/// ring was all but invisible on it (AS-435). Sand Legibility Bench,
+/// <https://claude.ai/artifact/8qLsKmuRQTVwa5Kzdimkgo>, version id
+/// 1793335026-f991.
+pub const AURA_BAND_OPACITY: f32 = 0.9;
+/// × the tint in linear light for a buff (same bench).
+pub const AURA_BAND_BUFF_LEVEL: f32 = 0.8;
+/// × the tint in linear light for a debuff: darker than a buff, so a hostile
+/// aura presses down rather than shining out (same bench).
+pub const AURA_BAND_DEBUFF_LEVEL: f32 = 0.5;
 /// Fraction of the life spent fading in, and fading out.
 pub const AURA_BAND_FADE_IN: f32 = 0.15;
 pub const AURA_BAND_FADE_OUT: f32 = 0.4;
@@ -123,7 +138,7 @@ pub struct AuraBandFrame {
 
 /// A combatant: the 2.5-yd capsule is CENTRED on the transform (-1.25..+1.25)
 /// and sunk 0.25 into the floor, so the floor is at -1.0. The sweep runs from
-/// just above the floor (an additive ring at or below it is depth-rejected) to
+/// just above the floor (a ring at or below it is depth-rejected) to
 /// just past the crown.
 pub const COMBATANT_BAND_FRAME: AuraBandFrame = AuraBandFrame {
     centre_y: 0.0,
@@ -343,17 +358,22 @@ fn build_band_arc() -> Mesh {
     mesh
 }
 
-/// Base and emissive colour of a band at opacity `alpha`.
-fn band_colors(tint: Color, polarity: AuraBandPolarity, alpha: f32) -> (Color, LinearRgba) {
-    let intensity = match polarity {
-        AuraBandPolarity::Buff => 1.0,
-        AuraBandPolarity::Debuff => AURA_BAND_DEBUFF_INTENSITY,
-    };
-    let c = tint.to_srgba();
-    let e = AURA_BAND_EMISSIVE * intensity * alpha;
-    (
-        Color::srgba(c.red, c.green, c.blue, alpha),
-        LinearRgba::new(c.red * e, c.green * e, c.blue * e, 1.0),
+/// The level a band's tint is drawn at, by polarity.
+pub fn aura_band_level(polarity: AuraBandPolarity) -> f32 {
+    match polarity {
+        AuraBandPolarity::Buff => AURA_BAND_BUFF_LEVEL,
+        AuraBandPolarity::Debuff => AURA_BAND_DEBUFF_LEVEL,
+    }
+}
+
+/// A band's blended colour at envelope `envelope` (0..1): its tint at its
+/// polarity's level in linear light, at [`AURA_BAND_OPACITY`] × the envelope.
+/// The rims' soft edges come from the arc mesh's vertex alpha.
+pub fn aura_band_color(tint: Color, polarity: AuraBandPolarity, envelope: f32) -> Color {
+    linear_level(
+        tint,
+        aura_band_level(polarity),
+        AURA_BAND_OPACITY * envelope,
     )
 }
 
@@ -416,12 +436,11 @@ fn spawn_band(
     polarity: AuraBandPolarity,
     tint: Color,
 ) {
-    let (base, emissive) = band_colors(tint, polarity, 0.0);
+    // Unlit and alpha-BLENDED, so the band can darken the sand (AS-435).
     let material = materials.add(StandardMaterial {
-        base_color: base,
-        emissive,
-        alpha_mode: AlphaMode::Add,
-        unlit: false,
+        base_color: aura_band_color(tint, polarity, 0.0),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
         cull_mode: None,
         double_sided: true,
         ..default()
@@ -477,9 +496,7 @@ pub fn update_aura_bands(
         }
         transform.scale = Vec3::splat(aura_band_radius(band.polarity, k));
         if let Some(mat) = materials.get_mut(&material.0) {
-            let (base, emissive) = band_colors(band.tint, band.polarity, aura_band_alpha(k));
-            mat.base_color = base;
-            mat.emissive = emissive;
+            mat.base_color = aura_band_color(band.tint, band.polarity, aura_band_alpha(k));
         }
     }
 }

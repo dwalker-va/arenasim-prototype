@@ -26,6 +26,7 @@ use arenasim::states::play_match::components::InstantAbilityFired;
 /// marker DERIVED from the list, so including it would make this circular.
 const SPAWN_SOURCES: &[&str] = &[
     "src/states/play_match/combat_ai.rs",
+    "src/states/play_match/class_ai/interrupts.rs",
     "src/states/play_match/class_ai/mage.rs",
     "src/states/play_match/class_ai/rogue.rs",
     "src/states/play_match/class_ai/paladin.rs",
@@ -45,7 +46,8 @@ const VIA_DRAIN: &[AbilityType] = &[
     AbilityType::SinisterStrike,
 ];
 
-/// Abilities that reach the marker through `combat_ai.rs`'s interrupt system,
+/// Abilities that reach the marker through the interrupt system
+/// (`class_ai/interrupts.rs`'s `fire_interrupt`, run by `check_interrupts`),
 /// which selects the ability per class at runtime — the spawn site names
 /// `interrupt_ability`, not a literal, so the scan cannot see these either.
 /// Guarded by `the_interrupt_gestures_are_spawned_and_gated` below.
@@ -192,11 +194,11 @@ fn the_interrupt_gestures_are_spawned_and_gated() {
     // Pin the site directly: the guard names exactly Pummel and Kick (Wind
     // Shear is deliberately outside it — no weapon sockets, victim-side answer
     // per roadmap B), and an InstantAbilityFired spawn sits inside the guard.
-    let src = read("src/states/play_match/combat_ai.rs");
+    let src = read("src/states/play_match/class_ai/interrupts.rs");
     let guard = "matches!(interrupt_ability, AbilityType::Pummel | AbilityType::Kick)";
     let Some(at) = src.find(guard) else {
         panic!(
-            "combat_ai.rs no longer gates the interrupt gesture on \
+            "interrupts.rs no longer gates the interrupt gesture on \
              Pummel | Kick — update VIA_INTERRUPT and this test together"
         );
     };

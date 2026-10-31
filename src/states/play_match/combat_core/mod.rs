@@ -9,6 +9,7 @@
 //! - Stealth visuals
 
 mod auto_attack;
+mod avoidance;
 mod casting;
 mod damage;
 mod death;
@@ -18,6 +19,7 @@ mod movement_scoring;
 mod stealth;
 
 pub use auto_attack::*;
+pub use avoidance::*;
 pub use casting::*;
 pub use damage::*;
 pub use death::*;

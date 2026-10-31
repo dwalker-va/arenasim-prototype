@@ -538,9 +538,8 @@ fn situations(class: CharacterClass, bars: &[f32]) -> Vec<Situation> {
         ally_health: Some(0.4),
         ..caster_ally
     });
-    // A healer ally the target attacks instead of the unit: nobody has the
-    // unit targeted, and a healer can give back health it spends (a Warlock's
-    // Life Tap, at low mana).
+    // A healer ally the target attacks instead of the unit: a mana user's
+    // turn while its teammate takes the hits.
     list.push(Situation {
         name: "a healer ally under attack",
         target_attacks_ally: true,

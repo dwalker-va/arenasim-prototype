@@ -2884,6 +2884,7 @@ mod paladin_unit {
             info(self_entity, 1, CharacterClass::Paladin, Vec3::ZERO),
         );
         CombatSnapshot {
+            melee_defense: Default::default(),
             ai_profile: Default::default(),
             bounds: Default::default(),
             combatants,
@@ -3206,6 +3207,7 @@ mod bucket_a_unit {
         }
         (
             CombatSnapshot {
+                melee_defense: Default::default(),
                 ai_profile: Default::default(),
                 bounds: Default::default(),
                 combatants,

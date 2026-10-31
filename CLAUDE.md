@@ -1465,6 +1465,11 @@ jq -c 'select(.outcome.ability == "FreezingTrap") | {t: .sim_time, aimed_at: .ou
 # target-switch recipe above shows it.)
 jq -r 'select(.actor.class == "Hunter") | .candidates[]? | select(.ability == "FreezingTrap") | .reason.PreconditionUnmet.note // empty' $T | grep '^healer trap' | sort | uniq -c
 
+# Melee avoidance (`combat_core/avoidance.rs`): every dodged or parried melee
+# attack, the attacker as `actor` and the defender as `target`. Matches no
+# event in a match where nobody has a dodge or parry chance.
+jq -c 'select(.kind == "melee_avoided") | {t: .sim_time, by: .actor.class, on: .target.entity_id, attack, avoided}' $T
+
 # Pet decisions grouped by owner
 jq -c 'select(.kind == "pet_decision") | {owner, pet_type, ability: .outcome.ability}' $T
 

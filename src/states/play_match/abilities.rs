@@ -240,6 +240,46 @@ pub enum AbilityType {
 }
 
 impl AbilityType {
+    /// Whether this ability is a MELEE ATTACK — a weapon strike a defender may
+    /// dodge or parry (`combat_core::avoidance`). Spells and ranged attacks
+    /// never are.
+    ///
+    /// **Exhaustive on purpose — do not add a `_ =>` arm.** Membership is a
+    /// judgement, so a new ability does not compile until someone answers it.
+    /// A `true` here is a promise that every site landing the ability rolls
+    /// avoidance first; `tests/melee_avoidance.rs` holds each one to it.
+    pub fn is_melee_attack(self) -> bool {
+        use AbilityType::*;
+        match self {
+            // Weapon strikes, at melee range. Heroic Strike rides the next
+            // auto-attack swing, so it is rolled where that swing is.
+            HeroicStrike | MortalStrike | Rend | Pummel | Ambush | CheapShot | SinisterStrike
+            | KidneyShot | Kick => true,
+            // A charge closes the gap; what it lands on arrival is not a
+            // weapon strike, and it is cast from 25 yards.
+            Charge | BoarCharge => false,
+            // A weapon coating, not an attack: its proc rides a landed swing.
+            CripplingPoison => false,
+            // Ranged attacks: never avoided.
+            AimedShot | ArcaneShot | ConcussiveShot | SerpentSting => false,
+            // Everything else is a spell, a shout, a trap, a form or a
+            // movement.
+            Frostbolt | FlashHeal | FrostNova | MindBlast | PowerWordFortitude | BerserkerRage
+            | Corruption | Shadowbolt | Fear | Immolate | DrainLife | CurseOfAgony
+            | CurseOfWeakness | CurseOfTongues | UnstableAffliction | DeathCoil | LifeTap
+            | ArcaneIntellect | BattleShout | IceBarrier | PowerWordShield | Polymorph
+            | DispelMagic | PsychicScream | ManaBurn | ShadowWordPain | FlashOfLight
+            | HolyLight | HolyShock | HammerOfJustice | PaladinCleanse | DevotionAura
+            | DivineShield | SpellLock | DevourMagic | Disengage | FreezingTrap | FrostTrap
+            | Flare | SpiderWeb | MastersCall | DemoralizingShout | CommandingShout
+            | FrostArmor | MageArmorSpell | MoltenArmor | ShadowResistanceAura
+            | ConcentrationAura | LightningBolt | FrostShock | LesserHealingWave | Purge
+            | WindShear | AirTotem | WaterTotem | EarthTotem | FireTotem | Rejuvenation
+            | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild | Innervate | EntanglingRoots
+            | Cyclone | TravelForm => false,
+        }
+    }
+
     /// Check if a combatant can cast this ability (has mana, in range, not casting, etc.)
     pub fn can_cast_config(
         &self,

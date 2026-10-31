@@ -197,6 +197,7 @@ pub fn decide_warrior_action(
     if try_rend(
         commands,
         combat_log,
+        game_rng,
         abilities,
         entity,
         combatant,
@@ -718,6 +719,7 @@ fn try_charge(
 fn try_rend(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    game_rng: &mut GameRng,
     abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
@@ -785,6 +787,11 @@ fn try_rend(
         target_tuple,
         "uses",
     );
+
+    // A dodged or parried Rend applies nothing; its rage is spent.
+    if ctx.melee_attack_avoided(commands, game_rng, target_entity, &rend_def.name) {
+        return true;
+    }
 
     // Apply DoT aura
     if let Some(aura_pending) = AuraPending::from_ability(target_entity, entity, rend_def) {
@@ -874,6 +881,12 @@ fn try_mortal_strike(
         Some(target_info.log_id()),
         "uses",
     );
+
+    // A dodged or parried Mortal Strike deals nothing and applies no Mortal
+    // Wounds; its rage and cooldown are spent.
+    if ctx.melee_attack_avoided(commands, game_rng, target_entity, &ms_def.name) {
+        return true;
+    }
 
     // Calculate and queue damage (with dynamic aura bonuses)
     let self_auras = ctx
