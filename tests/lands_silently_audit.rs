@@ -1,7 +1,8 @@
 //! Lands-silently audits: every ability in `abilities.ron` that lands
 //! something — damage, a DoT, a crowd-control effect, a buff or debuff, a
-//! dispel, an interrupt, a heal — must put SOME visual in the scene when it
-//! does, or be named on a known-silent list with the card that will fix it.
+//! dispel, an interrupt, a heal, health into mana — must put SOME visual in
+//! the scene when it does, or be named on a known-silent list with the card
+//! that will fix it.
 //!
 //! # Why this exists
 //!
@@ -872,6 +873,39 @@ fn each_interrupt_lands_its_decided_mark() {
     }
 }
 
+// ── family: health into mana ────────────────────────────────────────────────
+
+fn is_health_to_mana(_: AbilityType, c: &AbilityConfig) -> bool {
+    c.health_to_mana.is_some()
+}
+
+const HEALTH_TO_MANA_MEMBERS: &[AbilityType] = &[LifeTap];
+
+/// Nothing draws a conversion yet: its health and mana move on the bars and
+/// in floating combat text, which every ability shares. When AS-333 dresses
+/// Life Tap, this names that visual's router and the entry below comes off.
+fn health_to_mana_visual(_: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
+    None
+}
+
+const HEALTH_TO_MANA_KNOWN_SILENT: &[(AbilityType, &str)] =
+    &[(LifeTap, "AS-333 (0.9 visuals: Life Tap)")];
+
+#[test]
+fn health_to_mana_finds_every_member() {
+    assert_finds("health-to-mana", is_health_to_mana, HEALTH_TO_MANA_MEMBERS);
+}
+
+#[test]
+fn health_to_mana_lands_nothing_silently() {
+    assert_judged(
+        "health-to-mana",
+        is_health_to_mana,
+        health_to_mana_visual,
+        HEALTH_TO_MANA_KNOWN_SILENT,
+    );
+}
+
 // ── the families cover the config ───────────────────────────────────────────
 
 /// Abilities no family scans, each with the visual that covers it. Anything
@@ -901,6 +935,7 @@ const FAMILIES: &[fn(AbilityType, &AbilityConfig) -> bool] = &[
     is_status,
     is_dispel,
     is_interrupt,
+    is_health_to_mana,
 ];
 
 #[test]

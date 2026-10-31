@@ -168,6 +168,7 @@ pub enum AbilityType {
     CurseOfTongues,     // Shadow debuff - increases target cast time
     UnstableAffliction, // Shadow DoT - dispel backlash applies Silence + Shadow damage
     DeathCoil, // Shadow instant - 3s horror (never breaks) + damage + self-heal, peel cooldown
+    LifeTap, // Shadow instant - converts the Warlock's own health into mana (not damage, not a heal)
     // Buff abilities
     ArcaneIntellect, // Mage buff - increases max mana
     BattleShout,     // Warrior buff - increases attack power
@@ -265,7 +266,7 @@ impl AbilityType {
             // movement.
             Frostbolt | FlashHeal | FrostNova | MindBlast | PowerWordFortitude | BerserkerRage
             | Corruption | Shadowbolt | Fear | Immolate | DrainLife | CurseOfAgony
-            | CurseOfWeakness | CurseOfTongues | UnstableAffliction | DeathCoil
+            | CurseOfWeakness | CurseOfTongues | UnstableAffliction | DeathCoil | LifeTap
             | ArcaneIntellect | BattleShout | IceBarrier | PowerWordShield | Polymorph
             | DispelMagic | PsychicScream | ManaBurn | ShadowWordPain | FlashOfLight
             | HolyLight | HolyShock | HammerOfJustice | PaladinCleanse | DevotionAura

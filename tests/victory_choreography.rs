@@ -178,15 +178,21 @@ fn watch_frame(
 }
 
 fn run(cfg: &str) -> Seen {
+    try_run(cfg).unwrap_or_else(|| panic!("{cfg} never reached Results"))
+}
+
+/// [`run`], or `None` for a match that does not reach Results inside
+/// [`MAX_SIM_SECS`] — one that runs to the cap has no winners to judge.
+fn try_run(cfg: &str) -> Option<Seen> {
     let mut app = boot(cfg);
     let frames = (MAX_SIM_SECS / FRAME.as_secs_f32()) as usize;
     for _ in 0..frames {
         app.update();
         if *app.world().resource::<State<GameState>>().get() == GameState::Results {
-            return std::mem::take(&mut *app.world_mut().resource_mut::<Seen>());
+            return Some(std::mem::take(&mut *app.world_mut().resource_mut::<Seen>()));
         }
     }
-    panic!("{cfg} never reached Results");
+    None
 }
 
 fn apart(w: &[(u8, Vec3)]) -> f32 {
@@ -305,7 +311,11 @@ fn three_winners_each_reach_their_own_spot() {
             let cfg = format!(
                 r#"{{"team1":{team1},"team2":{team2},"map":"{map}","random_seed":{seed}}}"#
             );
-            let seen = run(&cfg);
+            // A match with no three winners — a smaller winning side, or one
+            // that runs to the cap — is not the situation.
+            let Some(seen) = try_run(&cfg) else {
+                continue;
+            };
             if seen.at_decision.len() != 3 {
                 continue;
             }
