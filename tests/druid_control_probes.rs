@@ -1335,7 +1335,10 @@ const LEAVE_SLACK_SECS: f32 = 0.5;
 /// - a shift is not reversed inside [`DRUID_MIN_FORM_SECS`] unless the Druid
 ///   was rooted again, or left for its emergency heal (AS-242) — dying, with
 ///   no visible melee or pet enemy within [`DRUID_EMERGENCY_LEAVE_YARDS`] on
-///   the frame it decided;
+///   the frame it decided. Unlike the safe-leave check below, this exemption
+///   does NOT count a stealthed Rogue as a chaser: the emergency leave's
+///   clearance is what the Druid can see, and an unseen Rogue cannot hold it
+///   in the form;
 /// - a Druid rooted in the form is out of it within [`ROOTED_EXIT_SECS`]
 ///   (the re-shift through the root is
 ///   [`a_root_is_broken_on_the_next_global_cooldown`]'s);

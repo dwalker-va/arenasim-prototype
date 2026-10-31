@@ -464,7 +464,7 @@ fn own_aura<'c>(
 /// it.
 fn emergency_heal(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     caster: Entity,
     ally: Entity,
 ) -> AbilityType {
@@ -482,7 +482,7 @@ fn emergency_heal(
 /// What [`FormView::emergency_heal_ready`] reads.
 pub fn emergency_heal_lands(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
