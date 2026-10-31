@@ -148,7 +148,7 @@
         weights: (
             threat_repulsion: 3.0,    // the Priest's value — a pure healer flees like one
             formation_pull: 2.0,      // the Priest's backline pull
-            corner_penalty: 6.0,
+            corner_penalty: 8.0,      // MUST exceed flee (validate()) — the Hunter's value; bends the shifted run out of walls
             wand_pull: 0.0,           // no wand
             burn_pull: 0.0,           // no Mana Burn
             commitment_bonus: 1.5,

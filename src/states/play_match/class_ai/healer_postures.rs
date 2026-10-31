@@ -796,6 +796,11 @@ pub(super) fn ally_walk_tick(
     }
 }
 
+/// Yards of open ground a chaser escape's `flee` looks ahead for
+/// (`ScorerInputs::flee_reach`): about two commit windows of a Travel Form
+/// run, so a wall or a pillar bends the heading a window before it is reached.
+pub const SHIFT_FLEE_REACH: f32 = 8.0;
+
 /// ESCAPE tick (R7): on entry, score one direction with attacker repulsion
 /// dominant — threats are the impaired proximate attackers; the formation
 /// and wand pulls are OFF so repulsion is the only directional soft term,
@@ -923,6 +928,13 @@ pub(super) fn escape_tick(
         // No kill target tracked during an escape — repulsion, not LoS-seek,
         // drives the direction (and los_seek is 0.0 for healers regardless).
         los_target: None,
+        // A chaser escape outruns its chaser only while it has room to run:
+        // never down a starting room, whose back wall ends the run (AS-241).
+        // An impairment window is one short step back, not a run.
+        avoid_dead_ends: chasers_only,
+        // ...and its flee counts the ground a heading has to run before a wall
+        // or a pillar stops it, so its back to one it runs along it.
+        flee_reach: if chasers_only { SHIFT_FLEE_REACH } else { 0.0 },
     };
     // Deny posture: use cover to break attacker LoS while escaping, unless a
     // teammate needs saving (urgency suppression zeroes cover_pull that tick).
@@ -1431,6 +1443,8 @@ pub(super) fn healer_pressured_tick_shared(
         trap_setup_range: 0.0,
         stance_point: None,
         los_target,
+        avoid_dead_ends: false,
+        flee_reach: 0.0,
     };
     // Deny posture: prefer a step that breaks attacker LoS (cover_pull),
     // unless a teammate needs saving — then urgency suppression zeroes it so the

@@ -77,6 +77,15 @@ pub const MASK_ANCHOR: u16 = 1 << 1;
 /// movement-blocking footprint test, [`position_blocked`]). Always clear on
 /// obstacle-free maps, so BasicArena scoring is unaffected.
 pub const MASK_LOS: u16 = 1 << 2;
+/// Mask bit: candidate's lookahead step goes DEEPER into a dead end
+/// (`ArenaBounds::dead_end_depth` — Nagrand's starting rooms), for a scorer
+/// that asks it ([`ScorerInputs::avoid_dead_ends`]). Always clear on a map
+/// without dead ends, and for every other scorer.
+pub const MASK_DEAD_END: u16 = 1 << 3;
+
+/// How far along a candidate `MASK_DEAD_END` looks: about one commit window
+/// (0.6s) of a Travel Form run, the distance a chosen heading is held for.
+pub const DEAD_END_LOOKAHEAD: f32 = 6.0;
 
 /// Where the graded corner penalty starts biting on the HISTORICAL octagon, as
 /// |x|+|z|. Below this the term is zero; it ramps linearly to full weight at the
@@ -200,6 +209,36 @@ pub struct ScorerInputs {
     /// stance, AS-385). `None` disables it: no stance, `Legacy`, or a scorer
     /// that is not a kiter's.
     pub stance_point: Option<Vec3>,
+    /// Mask every step that goes deeper into a dead end (`MASK_DEAD_END`). Set
+    /// by a chased unit's escape (the Druid's Travel Form run, AS-241): `flee`
+    /// carries a unit straight away from its chaser, and from the bowl that is
+    /// often down a starting room, whose back wall ends the run.
+    pub avoid_dead_ends: bool,
+    /// Yards of open ground ahead the `flee` term looks for (`0.0`: it does
+    /// not look). With a reach, a heading's flee counts in proportion to the
+    /// open run it has up to this far ([`open_run`]), so a chased unit with a
+    /// wall or a pillar at its back runs along it, away from the chaser,
+    /// instead of into it. Set by the chaser escape (AS-241).
+    pub flee_reach: f32,
+}
+
+/// Step at which [`open_run`] marches a heading.
+const OPEN_RUN_STEP: f32 = 0.5;
+
+/// Yards of open ground along `candidate` from the unit, up to `reach`: how far
+/// it can run that way before leaving the arena or meeting an obstacle.
+pub fn open_run(candidate: Vec2, inputs: &ScorerInputs, reach: f32) -> f32 {
+    let dir = Vec3::new(candidate.x, 0.0, candidate.y);
+    let mut run = 0.0;
+    while run < reach {
+        let next = (run + OPEN_RUN_STEP).min(reach);
+        let p = inputs.my_pos + dir * next;
+        if !is_in_arena_bounds(&inputs.bounds, p) || position_blocked(&inputs.obstacles, p) {
+            break;
+        }
+        run = next;
+    }
+    run
 }
 
 /// Yards past `trap_setup_range` over which the `trap_setup` pull ramps to its
@@ -266,6 +305,16 @@ pub fn candidate_mask(candidate: Vec2, inputs: &ScorerInputs) -> u16 {
     // footprint test — agrees with `resolve_movement`, touching = allowed).
     if position_blocked(&inputs.obstacles, next) {
         mask |= MASK_LOS;
+    }
+    if inputs.avoid_dead_ends {
+        // Judged over the run the direction commits to, not only the scorer's
+        // lookahead: a heading whose first 2yd stay outside a room can carry
+        // the unit well down it before the next re-score.
+        let depth = |p: Vec3| inputs.bounds.dead_end_depth(p.x, p.z);
+        let run = inputs.my_pos + Vec3::new(candidate.x, 0.0, candidate.y) * DEAD_END_LOOKAHEAD;
+        if depth(next).max(depth(run)) > depth(inputs.my_pos) {
+            mask |= MASK_DEAD_END;
+        }
     }
     if let Some(anchor) = inputs.anchor {
         // The anchor constraint is distance AND sight: a healer must stay in
@@ -382,8 +431,20 @@ pub fn score_direction(candidate: Vec2, inputs: &ScorerInputs, weights: &Movemen
     // disables for healers and the Mage.
     if weights.flee > 0.0 {
         if let Some(threat) = inputs.nearest_threat {
-            let away = (my_xz - xz(threat)).normalize_or_zero();
-            score += weights.flee * candidate.dot(away);
+            if inputs.flee_reach > 0.0 {
+                // With a reach, a heading scores the distance from the chaser
+                // it would gain by running the open ground it has, up to the
+                // reach (as a fraction of the reach): a heading into a wall or
+                // a pillar a few yards off gains those few yards and no more.
+                // In the open this orders headings exactly as the plain term
+                // does; it differs only where the ground runs out.
+                let end = my_xz + candidate * open_run(candidate, inputs, inputs.flee_reach);
+                let gained = end.distance(xz(threat)) - my_xz.distance(xz(threat));
+                score += weights.flee * gained / inputs.flee_reach;
+            } else {
+                let away = (my_xz - xz(threat)).normalize_or_zero();
+                score += weights.flee * candidate.dot(away);
+            }
         }
     }
 
@@ -516,11 +577,17 @@ pub fn mask_and_los_bitmask(candidates: &[Vec2], inputs: &ScorerInputs) -> (u16,
 /// that asks it ([`AnchorConstraint::close_when_out`]), relax reach to
 /// "closing": keep the candidates that end nearer the anchor than the unit
 /// stands now; (1) allow ally-anchor
-/// violations (heal range/sight become a preference once unsatisfiable); (2) if
+/// violations (heal range/sight become a preference once unsatisfiable);
+/// (1b) also allow a step deeper into a dead end (`MASK_DEAD_END`) — kept past
+/// the anchor because a unit chased down a dead end is caught there, while one
+/// out of its ally's reach is only out of reach; (2) if
 /// still none, also allow the obstacle mask (a step into a wall the collision
 /// resolver will then slide); (3) finally lift the boundary mask too and run the
 /// full interest pass — the executor clamps the resulting step back into the
 /// arena. Returns `Vec2::ZERO` only for an empty candidate set.
+///
+/// A scorer that does not avoid dead ends never sets `MASK_DEAD_END`, so rung
+/// (1b) and the bit the rungs below it allow change nothing for it.
 pub fn score_directions(
     candidates: &[Vec2],
     inputs: &ScorerInputs,
@@ -546,8 +613,17 @@ pub fn score_directions(
     if let Some(dir) = argmax_interest(candidates, inputs, weights, MASK_ANCHOR) {
         return dir;
     }
+    // Fallback rung 1b: also allow a step deeper into a dead end.
+    if let Some(dir) = argmax_interest(candidates, inputs, weights, MASK_ANCHOR | MASK_DEAD_END) {
+        return dir;
+    }
     // Fallback rung 2: also drop the obstacle mask (resolver slides the step).
-    if let Some(dir) = argmax_interest(candidates, inputs, weights, MASK_ANCHOR | MASK_LOS) {
+    if let Some(dir) = argmax_interest(
+        candidates,
+        inputs,
+        weights,
+        MASK_ANCHOR | MASK_DEAD_END | MASK_LOS,
+    ) {
         return dir;
     }
     // Fallback rung 3: lift everything; executor clamps the step in-bounds.
@@ -555,7 +631,7 @@ pub fn score_directions(
         candidates,
         inputs,
         weights,
-        MASK_BOUNDARY | MASK_ANCHOR | MASK_LOS,
+        MASK_BOUNDARY | MASK_ANCHOR | MASK_DEAD_END | MASK_LOS,
     )
     .unwrap_or(Vec2::ZERO)
 }
@@ -1657,6 +1733,301 @@ mod tests {
         assert_eq!(
             chosen_plain, chosen_loud,
             "obstacle-free scoring must be invariant to the new terms",
+        );
+    }
+
+    /// Nagrand's bowl, as `maps.ron` ships it.
+    fn nagrand_bounds() -> ArenaBounds {
+        ArenaBounds::Bowl {
+            semi_x: 59.72,
+            semi_z: 59.72,
+            alcove_depth: 10.0,
+            alcove_half_width: 8.0,
+        }
+    }
+
+    /// The shipped Druid weights (its Travel Form run is the dead-end scorer).
+    fn druid_weights() -> MovementWeights {
+        load_movement_config()
+            .expect("assets/config/movement.ron must load")
+            .druid
+            .weights
+    }
+
+    /// A chased unit at `at` running from a chaser at `chaser`: the escape's
+    /// scorer inputs, with or without the dead-end mask.
+    fn chased(at: Vec3, chaser: Vec3, avoid_dead_ends: bool) -> ScorerInputs {
+        ScorerInputs {
+            bounds: nagrand_bounds(),
+            my_pos: at,
+            lookahead: 2.0,
+            threats: vec![chaser],
+            nearest_threat: Some(chaser),
+            avoid_dead_ends,
+            ..Default::default()
+        }
+    }
+
+    /// Where a chosen heading carries the unit in one commit window's run.
+    fn run_end(inputs: &ScorerInputs, dir: Vec2) -> Vec3 {
+        inputs.my_pos + Vec3::new(dir.x, 0.0, dir.y) * DEAD_END_LOOKAHEAD
+    }
+
+    /// AS-241: a chaser escape with its back to a starting room's mouth does
+    /// not run down the room — `flee` points straight down it, and the room's
+    /// back wall would end the run. It takes the best heading that stays in
+    /// the bowl, still away from the chaser. The control, the same scene
+    /// without the mask, runs down the room, so the pair cannot pass vacuously.
+    #[test]
+    fn a_chaser_escape_does_not_run_down_a_starting_room() {
+        let weights = druid_weights();
+        let dirs = compass_directions_16();
+        let at = Vec3::new(-55.0, 1.0, 0.0);
+        let chaser = Vec3::new(-47.0, 1.0, 0.0);
+        let bounds = nagrand_bounds();
+
+        let free = chased(at, chaser, false);
+        let ran = score_directions(&dirs, &free, &weights);
+        let end = run_end(&free, ran);
+        assert!(
+            bounds.dead_end_depth(end.x, end.z) > 0.0,
+            "control: unmasked, flee runs down the room ({ran:?} ends at {end:?})"
+        );
+
+        let masked = chased(at, chaser, true);
+        let ran = score_directions(&dirs, &masked, &weights);
+        let end = run_end(&masked, ran);
+        assert_eq!(
+            bounds.dead_end_depth(end.x, end.z),
+            0.0,
+            "masked, the run stays out of the room ({ran:?} ends at {end:?})"
+        );
+        let away = Vec2::new(at.x - chaser.x, at.z - chaser.z).normalize();
+        assert!(
+            ran.dot(away) > 0.0,
+            "it still runs away from the chaser, got {ran:?}"
+        );
+    }
+
+    /// Already inside a room with the chaser at its mouth, every heading
+    /// deeper is masked: the unit runs across the room or out of it, never
+    /// toward the back wall. Unmasked, it runs for the back wall.
+    #[test]
+    fn a_chaser_escape_inside_a_room_never_goes_deeper() {
+        let weights = druid_weights();
+        let dirs = compass_directions_16();
+        let at = Vec3::new(-64.0, 1.0, 2.0);
+        let chaser = Vec3::new(-58.0, 1.0, 0.0);
+        let bounds = nagrand_bounds();
+        let depth = |p: Vec3| bounds.dead_end_depth(p.x, p.z);
+
+        let free = chased(at, chaser, false);
+        let ran = score_directions(&dirs, &free, &weights);
+        assert!(
+            depth(free.my_pos + Vec3::new(ran.x, 0.0, ran.y) * 2.0) > depth(at),
+            "control: unmasked, it runs for the back wall ({ran:?})"
+        );
+
+        let masked = chased(at, chaser, true);
+        let ran = score_directions(&dirs, &masked, &weights);
+        assert_eq!(candidate_mask(ran, &masked) & MASK_DEAD_END, 0);
+        assert!(
+            depth(masked.my_pos + Vec3::new(ran.x, 0.0, ran.y) * 2.0) <= depth(at),
+            "masked, it never steps deeper ({ran:?})"
+        );
+    }
+
+    /// The mask is the chased escape's alone, and inert where there is no dead
+    /// end: on the octagon, and for any scorer that does not ask for it, no
+    /// candidate carries the bit, so those scorers choose exactly as before.
+    #[test]
+    fn the_dead_end_mask_is_inert_without_a_dead_end_or_the_flag() {
+        let dirs = compass_directions_16();
+        let room = chased(
+            Vec3::new(-55.0, 1.0, 0.0),
+            Vec3::new(-47.0, 1.0, 0.0),
+            false,
+        );
+        let octagon = ScorerInputs {
+            bounds: ArenaBounds::default(),
+            my_pos: Vec3::new(-30.0, 1.0, 0.0),
+            threats: vec![Vec3::new(-22.0, 1.0, 0.0)],
+            nearest_threat: Some(Vec3::new(-22.0, 1.0, 0.0)),
+            avoid_dead_ends: true,
+            ..room.clone()
+        };
+        for inputs in [&room, &octagon] {
+            for dir in dirs {
+                assert_eq!(candidate_mask(dir, inputs) & MASK_DEAD_END, 0, "{dir:?}");
+            }
+        }
+        // The flagged room scene does mask: the pair's other half.
+        let flagged = ScorerInputs {
+            avoid_dead_ends: true,
+            ..room
+        };
+        assert!(
+            dirs.iter()
+                .any(|d| candidate_mask(*d, &flagged) & MASK_DEAD_END != 0),
+            "the flagged room scene masks the headings down the room"
+        );
+    }
+
+    /// A chased unit with a wall or a pillar a few yards behind it: the escape
+    /// inputs on `bounds` with `obstacles`, with or without the flee's reach.
+    fn backed(
+        bounds: ArenaBounds,
+        obstacles: Vec<ObstacleVolume>,
+        at: Vec3,
+        chaser: Vec3,
+        flee_reach: f32,
+    ) -> ScorerInputs {
+        ScorerInputs {
+            bounds,
+            my_pos: at,
+            lookahead: 2.0,
+            threats: vec![chaser],
+            nearest_threat: Some(chaser),
+            obstacles,
+            flee_reach,
+            ..Default::default()
+        }
+    }
+
+    /// AS-241: its back to the wall with the chaser in front, a chased unit
+    /// whose flee looks ahead runs ALONG the wall — a heading with room to run
+    /// that still opens the gap — rather than at the wall a few yards behind
+    /// it, where the run ends and the chaser cuts the corner. The control is
+    /// the same scene without the reach, which heads for the wall.
+    #[test]
+    fn a_flee_with_reach_runs_along_the_wall_at_its_back() {
+        let weights = druid_weights();
+        let dirs = compass_directions_16();
+        // Octagon: the +x wall is at 36.5. Stand 3.5yd off it, the chaser
+        // 5yd inside, a little to one side so the escape has a better side.
+        let at = Vec3::new(33.0, 1.0, 0.0);
+        let chaser = Vec3::new(28.0, 1.0, 1.0);
+        let reach_of = |inputs: &ScorerInputs, dir: Vec2| open_run(dir, inputs, 8.0);
+
+        let plain = backed(ArenaBounds::default(), vec![], at, chaser, 0.0);
+        let ran = score_directions(&dirs, &plain, &weights);
+        assert!(
+            reach_of(&plain, ran) < 4.0,
+            "control: without the reach, the flee heads for the wall ({ran:?}, {:.1}yd open)",
+            reach_of(&plain, ran)
+        );
+
+        let reaching = backed(ArenaBounds::default(), vec![], at, chaser, 8.0);
+        let ran = score_directions(&dirs, &reaching, &weights);
+        assert!(
+            reach_of(&reaching, ran) >= 8.0,
+            "with the reach it takes a heading with room to run ({ran:?}, {:.1}yd open)",
+            reach_of(&reaching, ran)
+        );
+        let away = Vec2::new(at.x - chaser.x, at.z - chaser.z).normalize();
+        assert!(ran.dot(away) > 0.0, "and still opens the gap, got {ran:?}");
+    }
+
+    /// The same with a pillar at its back instead of a wall: it runs round
+    /// the pillar's side, not into its face.
+    #[test]
+    fn a_flee_with_reach_runs_round_the_pillar_at_its_back() {
+        let weights = druid_weights();
+        let dirs = compass_directions_16();
+        let pillar = vec![ObstacleVolume::Cylinder {
+            center_xz: Vec2::new(6.0, 0.0),
+            radius: 2.5,
+            base_y: 0.0,
+            height: 10.0,
+        }];
+        let at = Vec3::new(1.0, 1.0, 0.0);
+        let chaser = Vec3::new(-4.0, 1.0, 0.5);
+        let reach_of = |inputs: &ScorerInputs, dir: Vec2| open_run(dir, inputs, 8.0);
+
+        let plain = backed(ArenaBounds::default(), pillar.clone(), at, chaser, 0.0);
+        let ran = score_directions(&dirs, &plain, &weights);
+        assert!(
+            reach_of(&plain, ran) < 4.0,
+            "control: without the reach, the flee heads for the pillar ({ran:?})"
+        );
+
+        let reaching = backed(ArenaBounds::default(), pillar, at, chaser, 8.0);
+        let ran = score_directions(&dirs, &reaching, &weights);
+        assert!(
+            reach_of(&reaching, ran) >= 8.0,
+            "with the reach it runs past the pillar ({ran:?}, {:.1}yd open)",
+            reach_of(&reaching, ran)
+        );
+        let away = Vec2::new(at.x - chaser.x, at.z - chaser.z).normalize();
+        assert!(ran.dot(away) > 0.0, "and still opens the gap, got {ran:?}");
+    }
+
+    /// Without a reach the flee term is the plain `flee * dot`, so a
+    /// scorer that sets none (the Hunter's) scores every candidate as before.
+    #[test]
+    fn a_flee_without_reach_scores_as_before() {
+        let weights = druid_weights();
+        let at = Vec3::new(33.0, 1.0, 0.0);
+        let chaser = Vec3::new(28.0, 1.0, 1.0);
+        let inputs = backed(ArenaBounds::default(), vec![], at, chaser, 0.0);
+        let away = Vec2::new(at.x - chaser.x, at.z - chaser.z).normalize();
+        let no_flee = MovementWeights {
+            flee: 0.0,
+            ..weights
+        };
+        for dir in compass_directions_16() {
+            let with = score_direction(dir, &inputs, &weights);
+            let without = score_direction(dir, &inputs, &no_flee);
+            let flee = weights.flee * dir.dot(away);
+            assert!(
+                (with - without - flee).abs() < 1e-4,
+                "{dir:?}: {with} - {without} != {flee}"
+            );
+        }
+    }
+
+    /// The dead end outlasts the anchor on the fallback ladder: in a room with
+    /// its anchor deeper still and in reach only of the steps toward it, a
+    /// chased unit lets the anchor go before it goes deeper. The control (no
+    /// dead-end mask) walks deeper, to the anchor.
+    #[test]
+    fn the_dead_end_mask_outlasts_the_anchor_on_the_ladder() {
+        let weights = druid_weights();
+        let dirs = compass_directions_16();
+        let at = Vec3::new(-64.0, 1.0, 3.0);
+        let bounds = nagrand_bounds();
+        let depth = |p: Vec3| bounds.dead_end_depth(p.x, p.z);
+        let inputs = |avoid_dead_ends| ScorerInputs {
+            anchor: Some(AnchorConstraint {
+                pos: Vec3::new(-69.0, 1.0, 3.0),
+                heal_range: 4.0,
+                close_when_out: false,
+            }),
+            ..chased(at, Vec3::new(-60.0, 1.0, 0.0), avoid_dead_ends)
+        };
+        let step =
+            |inputs: &ScorerInputs, dir: Vec2| inputs.my_pos + Vec3::new(dir.x, 0.0, dir.y) * 2.0;
+
+        let free = inputs(false);
+        assert!(
+            dirs.iter().any(|d| candidate_mask(*d, &free) == 0),
+            "control: a step toward the anchor keeps it in reach"
+        );
+        let ran = score_directions(&dirs, &free, &weights);
+        assert!(
+            depth(step(&free, ran)) > depth(at),
+            "control: it goes deeper, to the anchor"
+        );
+
+        let masked = inputs(true);
+        assert!(
+            dirs.iter().all(|d| candidate_mask(*d, &masked) != 0),
+            "every step is masked: deeper, or out of the anchor's reach"
+        );
+        let ran = score_directions(&dirs, &masked, &weights);
+        assert!(
+            depth(step(&masked, ran)) <= depth(at),
+            "it lets the anchor go rather than go deeper ({ran:?})"
         );
     }
 }
