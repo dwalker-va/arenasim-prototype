@@ -174,10 +174,10 @@ Converts the Warlock's own health into as much mana, `30 + 0.8 × spell power`
 global cooldown, Shadow. The health is not damage — no absorb takes it, and it
 breaks no crowd control, reveals no stealth, feeds no rage — and the mana is
 not healing, so arena dampening does not cut it. The mana is capped at the
-pool. The AI taps only when mana-starved (below 30% of the pool) and safe: no
-enemy has it targeted, a teammate healer can heal it now, and the tap leaves
-it above `urgency_hp_threshold` (`class_ai::warlock::life_tap_hold`, each hold
-traced `TapHeld`). A Warlock with no healer on its team does not tap.
+pool. The AI taps when it needs the mana and is healthy enough to pay — below
+30% of the pool, and the tap leaves it at or above `urgency_hp_threshold` —
+under both AI profiles, with or without a healer on its team
+(`class_ai::warlock::life_tap_hold`, each hold traced `TapHeld`).
 
 ### Rage (Warrior)
 - Max: 100

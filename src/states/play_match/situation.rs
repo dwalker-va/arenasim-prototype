@@ -1374,19 +1374,6 @@ fn classify_roster_before_yield(
     }
 }
 
-/// Whether `healer` (alive) can heal `subject` NOW: not locked
-/// ([`locks_healer`]), not out of mana, and in reach and sight — the
-/// `kill_window`'s test of a healer's help, asked of either side's healer.
-pub fn healer_can_heal(
-    healer: &CombatantInfo,
-    subject: &CombatantInfo,
-    auras: &BTreeMap<Entity, Vec<Aura>>,
-    obstacles: &[ObstacleVolume],
-    cfg: &SituationConfig,
-) -> bool {
-    healer_returns_at(healer, subject, auras, obstacles, 0.0, cfg).is_none()
-}
-
 /// When `healer` (an enemy healer, alive) can next heal `subject`:
 /// `Some(Some(t))` — it is only LOCKED, and the longest locking CC on it runs
 /// out at `t`; `Some(None)` — it cannot, and when it can again is not known

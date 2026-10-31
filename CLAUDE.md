@@ -1234,7 +1234,7 @@ scripts/paired_sweep.py before.csv after.csv \
 - **Mage**: Mana, ranged, Frostbolt/Frost Nova/Polymorph
 - **Rogue**: Energy, melee, Stealth/Ambush/Kick/Eviscerate
 - **Priest**: Mana, healer, Flash Heal/Mind Blast/Power Word: Fortitude
-- **Warlock**: Mana, DoT caster, Corruption/Shadow Bolt/Fear; Life Tap turns health into mana when it is starved and safe (`docs/design/wow-mechanics.md`, Life Tap)
+- **Warlock**: Mana, DoT caster, Corruption/Shadow Bolt/Fear; Life Tap turns health into mana when it is short of mana and healthy (`docs/design/wow-mechanics.md`, Life Tap)
 - **Paladin**: Mana, healer/melee, Holy Shock/Flash of Light/Hammer of Justice
 - **Shaman**: Mana, offensive healer, Lightning Bolt/Lesser Healing Wave/Purge/Wind Shear/Frost Shock and totems
 - **Druid**: Mana, restoration healer (instant heals over time) and control, Rejuvenation/Lifebloom/Swiftmend/Entangling Roots/Cyclone/Moonfire/Innervate, a Travel Form escape shift; no wand

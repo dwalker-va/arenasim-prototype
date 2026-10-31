@@ -1,9 +1,11 @@
 //! Scene tests for the Warlock's Life Tap (AS-296): it converts health into
-//! mana when it is MANA-STARVED and the health is safe to spend — nobody has
-//! it targeted, a teammate healer can heal it now, and the tap does not leave
-//! it dying (`class_ai::warlock::life_tap_hold`). Each gate is pinned as a
-//! pair: the scene that taps, and the same scene with one condition changed,
-//! held with that gate's typed reason.
+//! mana when it NEEDS the mana (below `LIFE_TAP_STARVED_FRACTION` of its
+//! pool) and is HEALTHY — the tap leaves it at or above
+//! `urgency_hp_threshold` (`class_ai::warlock::life_tap_hold`). Those are the
+//! only two conditions (user ruling, 2026-10-30): it taps under both AI
+//! profiles, with or without a healer, targeted or not. Each gate is pinned
+//! as a pair: the scene that taps, and the same scene with one condition
+//! changed, held with that gate's typed reason.
 //!
 //! Every scene runs the real class dispatch for one tick, so a pass also
 //! proves the dispatch reaches the tap — and, since the starved Warlock still
@@ -12,8 +14,11 @@
 
 use arenasim::states::match_config::CharacterClass::{Mage, Priest, Warlock, Warrior};
 use arenasim::states::play_match::ability_config::load_ability_definitions;
+use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
-use arenasim::states::play_match::class_ai::warlock::LIFE_TAP_STARVED_FRACTION;
+use arenasim::states::play_match::class_ai::warlock::{
+    convert_health_to_mana, LIFE_TAP_STARVED_FRACTION,
+};
 use arenasim::states::play_match::components::Combatant;
 use arenasim::states::play_match::decision_trace::{RejectionReason, TapHold};
 use arenasim::states::play_match::movement_config::load_movement_config;
@@ -25,8 +30,7 @@ const ENEMY: &str = "enemy warrior";
 
 /// A starved Warlock (a fifth of its mana: still enough for Corruption) at
 /// full health, its Priest 10yd behind it, and an enemy Warrior 20yd off —
-/// in Corruption's range, and after the Priest. The Priest targets the
-/// Warlock: a teammate's target is no focus.
+/// in Corruption's range, and after the Priest.
 fn scene() -> Scene {
     Scene::new()
         .unit(WARLOCK, 1, Warlock)
@@ -34,10 +38,22 @@ fn scene() -> Scene {
         .targeting(ENEMY)
         .unit(PRIEST, 1, Priest)
         .at(-10.0, 0.0)
-        .targeting(WARLOCK)
         .unit(ENEMY, 2, Warrior)
         .at(20.0, 0.0)
         .targeting(PRIEST)
+}
+
+/// [`scene`] with a Mage in the Priest's place: no healer on the team.
+fn healerless() -> Scene {
+    Scene::new()
+        .unit(WARLOCK, 1, Warlock)
+        .mana(0.2)
+        .targeting(ENEMY)
+        .unit("mage", 1, Mage)
+        .at(-10.0, 0.0)
+        .unit(ENEMY, 2, Warrior)
+        .at(20.0, 0.0)
+        .targeting("mage")
 }
 
 fn describe(view: &DecisionView) -> String {
@@ -80,7 +96,7 @@ fn held(scene: &Scene) -> TapHold {
 }
 
 /// What a tap converts for a Warlock at base stats (a scene's units wear no
-/// gear), and the health below which it is dying.
+/// gear), the health below which it is dying, and its maximum health.
 fn amount_and_floor() -> (f32, f32, f32) {
     let abilities = load_ability_definitions().expect("abilities.ron loads");
     let movement = load_movement_config().expect("movement.ron loads");
@@ -95,7 +111,7 @@ fn amount_and_floor() -> (f32, f32, f32) {
 }
 
 #[test]
-fn a_starved_safe_warlock_taps_before_its_rotation() {
+fn a_starved_healthy_warlock_taps_before_its_rotation() {
     let scene = scene();
     assert_taps(&scene);
     // The tap took the turn the rotation would have had.
@@ -124,98 +140,6 @@ fn not_starved_holds_the_tap() {
 }
 
 #[test]
-fn an_enemy_on_the_warlock_holds_the_tap() {
-    let focused = scene().target(ENEMY, WARLOCK);
-    assert!(matches!(held(&focused), TapHold::Focused { .. }));
-    assert_taps(&scene());
-}
-
-/// A caster shooting from range is focus too, though it does not PRESSURE
-/// the Warlock (it is not closing): the gate is "an enemy has it targeted".
-#[test]
-fn a_distant_caster_on_the_warlock_holds_the_tap() {
-    let caster = scene()
-        .unit("enemy mage", 2, Mage)
-        .at(30.0, 0.0)
-        .targeting(WARLOCK);
-    assert!(matches!(held(&caster), TapHold::Focused { .. }));
-}
-
-/// A dead enemy's stale target is nobody's focus.
-#[test]
-fn a_dead_enemy_targeting_the_warlock_is_no_focus() {
-    let dead = scene()
-        .unit("enemy mage", 2, Mage)
-        .at(30.0, 0.0)
-        .targeting(WARLOCK)
-        .health(0.0);
-    assert_taps(&dead);
-}
-
-#[test]
-fn no_healer_on_the_team_holds_the_tap() {
-    // A Mage teammate in the Priest's place: alive, in reach, full of mana —
-    // everything a healer would need but the class.
-    let no_healer = Scene::new()
-        .unit(WARLOCK, 1, Warlock)
-        .mana(0.2)
-        .targeting(ENEMY)
-        .unit("mage", 1, Mage)
-        .at(-10.0, 0.0)
-        .unit(ENEMY, 2, Warrior)
-        .at(20.0, 0.0)
-        .targeting("mage");
-    assert_eq!(held(&no_healer), TapHold::NoHealer);
-}
-
-/// An ENEMY healer in reach does not give the health back.
-#[test]
-fn an_enemy_healer_is_no_healer() {
-    let enemy_priest = Scene::new()
-        .unit(WARLOCK, 1, Warlock)
-        .mana(0.2)
-        .targeting(ENEMY)
-        .unit("enemy priest", 2, Priest)
-        .at(-10.0, 0.0)
-        .unit(ENEMY, 2, Warrior)
-        .at(20.0, 0.0);
-    assert_eq!(held(&enemy_priest), TapHold::NoHealer);
-}
-
-#[test]
-fn a_dead_healer_holds_the_tap() {
-    assert_eq!(held(&scene().health_of(PRIEST, 0.0)), TapHold::NoHealer);
-}
-
-#[test]
-fn a_locked_healer_holds_the_tap() {
-    assert_eq!(
-        held(&scene().aura(PRIEST, AuraType::Stun, 4.0)),
-        TapHold::NoHealer
-    );
-    // A root does not stop it healing.
-    assert_taps(&scene().aura(PRIEST, AuraType::Root, 4.0));
-}
-
-#[test]
-fn a_healer_out_of_mana_holds_the_tap() {
-    assert_eq!(held(&scene().mana_of(PRIEST, 0.0)), TapHold::NoHealer);
-}
-
-#[test]
-fn a_healer_out_of_reach_holds_the_tap() {
-    let heal_range = load_movement_config()
-        .expect("movement.ron loads")
-        .shared
-        .heal_range;
-    assert_eq!(
-        held(&scene().place(PRIEST, -(heal_range + 1.0), 0.0)),
-        TapHold::NoHealer
-    );
-    assert_taps(&scene().place(PRIEST, -(heal_range - 1.0), 0.0));
-}
-
-#[test]
 fn a_tap_into_death_range_is_held() {
     let (amount, floor, max) = amount_and_floor();
     let short = scene().health_of(WARLOCK, (floor + amount - 1.0) / max);
@@ -233,9 +157,106 @@ fn a_tap_into_death_range_is_held() {
 }
 
 /// The gates are asked in order, so the trace names the first that holds:
-/// a full-mana Warlock under attack is "not starved", not "focused".
+/// a full-mana Warlock in death range is "not starved".
 #[test]
 fn the_first_gate_that_holds_is_the_one_traced() {
-    let both = scene().mana_of(WARLOCK, 1.0).target(ENEMY, WARLOCK);
+    let (_, floor, max) = amount_and_floor();
+    let both = scene()
+        .mana_of(WARLOCK, 1.0)
+        .health_of(WARLOCK, floor / max);
     assert!(matches!(held(&both), TapHold::NotStarved { .. }));
+}
+
+// ---------------------------------------------------------------------------
+// The ruling's "only two conditions": no healer, focus or profile gate.
+// ---------------------------------------------------------------------------
+
+/// A Warlock with no healer on its team taps — and is still held by its
+/// health, so the healerless pair is the death-range pair again.
+#[test]
+fn a_healerless_warlock_taps_when_healthy() {
+    assert_taps(&healerless());
+    let (amount, floor, max) = amount_and_floor();
+    let short = healerless().health_of(WARLOCK, (floor + amount - 1.0) / max);
+    assert!(matches!(held(&short), TapHold::DeathRange { .. }));
+}
+
+/// Whether its healer can heal it changes nothing: dead, stunned, out of
+/// mana, out of reach.
+#[test]
+fn its_healers_state_does_not_hold_the_tap() {
+    assert_taps(&scene().health_of(PRIEST, 0.0));
+    assert_taps(&scene().aura(PRIEST, AuraType::Stun, 4.0));
+    assert_taps(&scene().mana_of(PRIEST, 0.0));
+    assert_taps(&scene().place(PRIEST, -60.0, 0.0));
+}
+
+/// An enemy on the Warlock does not hold the tap: health is the gate.
+#[test]
+fn a_targeted_warlock_taps_when_healthy() {
+    assert_taps(&scene().target(ENEMY, WARLOCK));
+    assert_taps(
+        &scene()
+            .unit("enemy mage", 2, Mage)
+            .at(30.0, 0.0)
+            .targeting(WARLOCK),
+    );
+}
+
+/// Life Tap is not a play: it runs under `TeamPlan` as under `Legacy`.
+#[test]
+fn a_teamplan_warlock_taps_too() {
+    assert_taps(&scene().ai_profile(1, AiProfile::TeamPlan));
+    assert_taps(&healerless().ai_profile(1, AiProfile::TeamPlan));
+    let held_tp = scene()
+        .ai_profile(1, AiProfile::TeamPlan)
+        .mana_of(WARLOCK, LIFE_TAP_STARVED_FRACTION);
+    assert!(matches!(held(&held_tp), TapHold::NotStarved { .. }));
+}
+
+// ---------------------------------------------------------------------------
+// The conversion's backstops.
+// ---------------------------------------------------------------------------
+
+/// The 1-health floor never kills and never RAISES health; the mana cap
+/// never LOWERS mana.
+#[test]
+fn the_conversion_never_moves_the_wrong_way() {
+    let fresh = || Combatant::new(1, 0, Warlock);
+
+    // The ordinary case: one for one.
+    let mut c = fresh();
+    c.current_mana = 10.0;
+    let (h, m) = (c.current_health, c.current_mana);
+    convert_health_to_mana(&mut c, 50.0);
+    assert_eq!((c.current_health, c.current_mana), (h - 50.0, m + 50.0));
+
+    // A tap larger than the health left stops at 1.
+    let mut c = fresh();
+    c.current_health = 20.0;
+    convert_health_to_mana(&mut c, 50.0);
+    assert_eq!(c.current_health, 1.0);
+
+    // Already below 1: the floor does not raise it.
+    let mut c = fresh();
+    c.current_health = 0.5;
+    convert_health_to_mana(&mut c, 50.0);
+    assert!(
+        c.current_health <= 0.5,
+        "health rose to {}",
+        c.current_health
+    );
+
+    // Mana is capped at the pool ...
+    let mut c = fresh();
+    c.current_mana = c.max_mana - 10.0;
+    convert_health_to_mana(&mut c, 50.0);
+    assert_eq!(c.current_mana, c.max_mana);
+
+    // ... and the cap never lowers mana already above it.
+    let mut c = fresh();
+    c.current_mana = c.max_mana + 20.0;
+    let above = c.current_mana;
+    convert_health_to_mana(&mut c, 50.0);
+    assert!(c.current_mana >= above, "mana fell to {}", c.current_mana);
 }

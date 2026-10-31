@@ -777,8 +777,8 @@ pub enum RejectionReason {
         /// When the lock it would chain onto ends.
         until: f32,
     },
-    /// Life Tap held (`class_ai::warlock::life_tap_hold`): the Warlock is not
-    /// short of mana, or converting health into it is not safe now.
+    /// Life Tap held (`class_ai::warlock::life_tap_hold`): the Warlock does not
+    /// need the mana, or the tap would leave it dying.
     TapHeld {
         hold: TapHold,
     },
@@ -790,11 +790,6 @@ pub enum RejectionReason {
 pub enum TapHold {
     /// Not mana-starved: `mana` is at or above `starved_below`.
     NotStarved { mana: f32, starved_below: f32 },
-    /// An enemy (entity `by`) has the Warlock targeted.
-    Focused { by: u32 },
-    /// No teammate healer could heal the Warlock now: none alive, or each one
-    /// locked, out of mana, out of reach or out of sight.
-    NoHealer,
     /// The tap would leave the Warlock dying: `health_after` below `floor`.
     DeathRange { health_after: f32, floor: f32 },
 }
