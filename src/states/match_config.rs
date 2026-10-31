@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::states::play_match::equipment::{ItemSlot, Loadout};
+use crate::states::play_match::talents::Build;
 
 /// Rogue stealth opener choice
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -309,7 +310,7 @@ impl PaladinAura {
 }
 
 /// Available character classes
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum CharacterClass {
     Warrior,
     Mage,
@@ -665,6 +666,11 @@ pub struct MatchConfig {
     pub team1_equipment: Vec<Loadout>,
     /// Team 2's equipment overrides per slot (one HashMap per team slot)
     pub team2_equipment: Vec<Loadout>,
+    /// Team 1's talent builds, one per slot. An empty build — the default —
+    /// takes no talent and changes nothing.
+    pub team1_builds: Vec<Build>,
+    /// Team 2's talent builds, one per slot.
+    pub team2_builds: Vec<Build>,
 }
 
 impl Default for MatchConfig {
@@ -696,6 +702,8 @@ impl Default for MatchConfig {
             team2_paladin_auras: vec![PaladinAura::default()],
             team1_equipment: vec![Loadout::new()],
             team2_equipment: vec![Loadout::new()],
+            team1_builds: vec![Build::default()],
+            team2_builds: vec![Build::default()],
         }
     }
 }
@@ -729,6 +737,7 @@ impl MatchConfig {
         self.team1_paladin_auras
             .resize(size, PaladinAura::default());
         self.team1_equipment.resize(size, Loadout::new());
+        self.team1_builds.resize(size, Build::default());
     }
 
     /// Set team 2 size, adjusting the slots vector
@@ -763,6 +772,7 @@ impl MatchConfig {
         self.team2_paladin_auras
             .resize(size, PaladinAura::default());
         self.team2_equipment.resize(size, Loadout::new());
+        self.team2_builds.resize(size, Build::default());
     }
 
     /// Check if the match configuration is valid (all slots filled)
@@ -771,7 +781,8 @@ impl MatchConfig {
     }
 
     /// Assign a class to a team slot, dropping that slot's equipment overrides
-    /// when the class actually changes.
+    /// and talent build when the class actually changes (a build is one
+    /// class's talents).
     ///
     /// Equipment overrides are a socket -> item map with no class in them, so a
     /// Warrior's Arcanite Reaper survives the slot becoming a Mage and reads as
@@ -790,10 +801,18 @@ impl MatchConfig {
     /// equipment is the only per-slot state where one class's choice occupies a
     /// socket another class can see.
     pub fn set_class(&mut self, team: u8, slot: usize, class: CharacterClass) {
-        let (classes, equipment) = if team == 1 {
-            (&mut self.team1, &mut self.team1_equipment)
+        let (classes, equipment, builds) = if team == 1 {
+            (
+                &mut self.team1,
+                &mut self.team1_equipment,
+                &mut self.team1_builds,
+            )
         } else {
-            (&mut self.team2, &mut self.team2_equipment)
+            (
+                &mut self.team2,
+                &mut self.team2_equipment,
+                &mut self.team2_builds,
+            )
         };
         let Some(current) = classes.get_mut(slot) else {
             return;
@@ -804,6 +823,9 @@ impl MatchConfig {
         *current = Some(class);
         if let Some(overrides) = equipment.get_mut(slot) {
             overrides.clear();
+        }
+        if let Some(build) = builds.get_mut(slot) {
+            *build = Build::default();
         }
     }
 

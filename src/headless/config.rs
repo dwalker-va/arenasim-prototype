@@ -7,6 +7,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::str::FromStr;
 
+use crate::states::play_match::talents::{Build, TalentDefinitions};
+
 use crate::states::match_config::{
     ArenaMap, CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, RogueOpener,
     RoguePoison, WarlockCurse, WarriorShout,
@@ -192,6 +194,15 @@ pub struct HeadlessMatchConfig {
     /// Team 2's paladin aura preferences (one per slot)
     #[serde(default)]
     pub team2_paladin_auras: Vec<String>,
+    /// Team 1's talent builds, one per slot, each a map of talent to rank:
+    /// `[{"DemonicEmbrace": 2, "FelStamina": 2}]`. A slot with no entry (or
+    /// `{}`) takes no talents. Checked against the slot's class and the tree
+    /// rules (`talents.ron`) before the match.
+    #[serde(default)]
+    pub team1_builds: Vec<Build>,
+    /// Team 2's talent builds, one per slot.
+    #[serde(default)]
+    pub team2_builds: Vec<Build>,
 }
 
 fn default_map() -> String {
@@ -256,6 +267,8 @@ impl Default for HeadlessMatchConfig {
             team2_mage_armors: Vec::new(),
             team1_paladin_auras: Vec::new(),
             team2_paladin_auras: Vec::new(),
+            team1_builds: Vec::new(),
+            team2_builds: Vec::new(),
         }
     }
 }
@@ -816,6 +829,10 @@ impl HeadlessMatchConfig {
             .collect();
         team2_paladin_auras.resize(team2.len(), PaladinAura::default());
 
+        // Talent builds, defaulting to empty for missing entries.
+        let team1_builds = Self::parse_builds(1, &team1, &self.team1_builds)?;
+        let team2_builds = Self::parse_builds(2, &team2, &self.team2_builds)?;
+
         // Parse equipment overrides, defaulting to empty maps for missing entries
         self.validate_equipment()?;
         let team1_equipment = Self::parse_equipment_overrides(&self.team1_equipment, team1.len())?;
@@ -847,7 +864,41 @@ impl HeadlessMatchConfig {
             team2_paladin_auras,
             team1_equipment,
             team2_equipment,
+            team1_builds,
+            team2_builds,
         })
+    }
+
+    /// One build per slot of `team`, each checked against its slot's class
+    /// and the tree rules — the same check a spawn's resolve makes, so an
+    /// illegal build is rejected here with its slot named, never at spawn.
+    /// Reads the talent table only when a build takes a talent.
+    fn parse_builds(
+        team: u8,
+        classes: &[Option<CharacterClass>],
+        builds: &[Build],
+    ) -> Result<Vec<Build>, String> {
+        if builds.len() > classes.len() {
+            return Err(format!(
+                "team{team}_builds has {} entries but team{team} has only {} members",
+                builds.len(),
+                classes.len()
+            ));
+        }
+        for (slot, build) in builds.iter().enumerate() {
+            if build.is_empty() {
+                continue;
+            }
+            let Some(class) = classes[slot] else {
+                continue;
+            };
+            TalentDefinitions::shipped()
+                .validate_build(class, build)
+                .map_err(|e| format!("team{team}_builds slot {slot} ({class:?}): {e}"))?;
+        }
+        let mut parsed = builds.to_vec();
+        parsed.resize(classes.len(), Build::default());
+        Ok(parsed)
     }
 }
 

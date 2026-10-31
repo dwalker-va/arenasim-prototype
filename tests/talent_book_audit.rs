@@ -37,10 +37,13 @@ use regex::Regex;
 use std::collections::BTreeSet;
 
 /// The table itself and the book: where the table is defined and loaded, and
-/// where a book is built from it. Not scanned — reading the table is their job.
+/// where a book is built from it — by the book itself, and by a talent build's
+/// resolution, which grants and patches from the table. Not scanned — reading
+/// the table is their job.
 const TABLE_AND_BOOK: &[&str] = &[
     "src/states/play_match/ability_config.rs",
     "src/states/play_match/ability_book.rs",
+    "src/states/play_match/talents.rs",
 ];
 
 /// The sim items that read the global table, as (file, item), each with why.
@@ -49,12 +52,8 @@ const GLOBAL_TABLE_READERS: &[(&str, &str, &str)] = &[
     (
         "src/states/play_match/mod.rs",
         "setup_play_match",
-        "the graphical spawn: hands the table to the two spawns below",
-    ),
-    (
-        "src/states/play_match/mod.rs",
-        "spawn_combatant",
-        "resolves a combatant's book at spawn (graphical, and the sandbox's staging)",
+        "the graphical spawn: resolves each combatant's build, and hands the table to \
+         the pet spawn below",
     ),
     (
         "src/states/play_match/mod.rs",

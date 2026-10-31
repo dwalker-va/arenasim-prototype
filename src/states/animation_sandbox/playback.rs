@@ -38,6 +38,7 @@ use super::super::play_match::components::{
     VisualBody, WalkAnim,
 };
 use super::super::play_match::spawn_pet;
+use super::super::play_match::talents::ResolvedBuild;
 use super::super::play_match::{
     heal_style, landing_style, DISENGAGE_SPEED, MELEE_RANGE, TOTEM_DURATION, TOTEM_RADIUS,
 };
@@ -1623,6 +1624,8 @@ pub fn drive_sandbox_pet(
             stage.caster_home,
             pet_type,
             &defs,
+            // The sandbox stages the untalented kit.
+            &ResolvedBuild::untalented(&defs, caster_combatant.class),
         );
     }
 }

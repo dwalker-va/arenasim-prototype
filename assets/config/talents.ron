@@ -1,0 +1,78 @@
+// Talents: each class's trees and their nodes.
+//
+// Design: docs/design/proposals/2026-10-11-talents-and-gauntlet.md §3. Loaded
+// and validated by `src/states/play_match/talents.rs`, in both modes; a match
+// carries one `Build` per combatant (`team1_builds` / `team2_builds`), and an
+// empty build — the default — changes nothing.
+//
+// A node:
+//   - sits in its class's tree, at a tier (1-4) and a column (0-2). A tier
+//     opens once the tree holds 0 / 2 / 3 / 5 points in the tiers below it.
+//   - has `max_rank` ranks (tiers 1-2: one or two; tiers 3-4: one), and
+//     applies its `per_rank` effects once per rank:
+//       StatPercent(stat, fraction)     a percentage of the combatant's total,
+//                                       gear included
+//       PetStatPercent(stat, fraction)  the same, on the combatant's pet
+//       Patch(on: Ability(X) | School(S), field: <AbilityField>, op: Add(n) | Mul(n))
+//                                       rewrites a numeric field of its
+//                                       book's configs; adds before multiplies
+//       Grant(X)                        adds the `talent: true` ability X
+//   - is priced on the item budget: 11 a rank, 22 the capstone (tier 4),
+//     ±15%. A node whose every effect is a StatPercent on a stat the item
+//     budget weighs has its price COMPUTED, at the class's reference
+//     combatant below, and declares no `budget`; every other node declares
+//     its `budget` (per rank).
+//   - may `requires: Some((Talent, rank))`, a node of the same tree at a
+//     lower tier.
+(
+    trees: {
+        Warlock: [
+            (id: Demonology, name: "Demonology", icon: "icons/talents/spell_shadow_metamorphosis.jpg"),
+        ],
+    },
+
+    talents: {
+        // ---- Warlock: Demonology ----
+        DemonicEmbrace: (
+            name: "Demonic Embrace",
+            class: Warlock, tree: Demonology, tier: 1, column: 0,
+            icon: "icons/talents/spell_shadow_metamorphosis.jpg",
+            max_rank: 2,
+            // +3% maximum health a rank, gear included: 372 -> 383 -> 394 on
+            // the starting kit. Applied before the Felhunter spawns, so its
+            // 0.45 share grows with it.
+            per_rank: [StatPercent(MaxHealth, 0.03)],
+        ),
+        FelStamina: (
+            name: "Fel Stamina",
+            class: Warlock, tree: Demonology, tier: 1, column: 2,
+            icon: "icons/talents/spell_shadow_antishadow.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Felhunter +10% maximum health a rank: 167 -> 184 -> 201.
+            per_rank: [PetStatPercent(MaxHealth, 0.10)],
+        ),
+        UnholyPower: (
+            name: "Unholy Power",
+            class: Warlock, tree: Demonology, tier: 2, column: 0,
+            icon: "icons/talents/spell_shadow_shadowworddominate.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Felhunter melee +10% a rank.
+            per_rank: [PetStatPercent(WeaponDamage, 0.10)],
+        ),
+    },
+
+    // Each class's reference combatant at mid-run, which prices its computed
+    // nodes: the starting kit with three Gauntlet picks in place, named here as
+    // the sockets they fill. Until the Gauntlet's reward tables exist (G2),
+    // the picks are the class's tier-1 items for the three slots offered most
+    // (head, chest, legs: the 1.0 group).
+    reference: {
+        Warlock: {
+            Head: ArcanistCrown,
+            Chest: ArcanistRobes,
+            Legs: ArcanistLeggings,
+        },
+    },
+)

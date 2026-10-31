@@ -536,6 +536,20 @@ impl Scene {
         self
     }
 
+    /// `who`'s book with `ability` added from the scene's table, as a talent's
+    /// `Grant` adds it at spawn: a unit with a talent ability.
+    pub fn grant(mut self, who: Who, ability: AbilityType) -> Self {
+        let granted = self
+            .unit_mut(who)
+            .combatant
+            .book()
+            .clone()
+            .granting(&self.abilities, ability);
+        let unit = self.unit_mut(who);
+        unit.combatant = unit.combatant.clone().with_book(granted);
+        self
+    }
+
     /// The healer posture state `who` carries into the decision.
     pub fn healer_posture(mut self, who: Who, posture: HealerPosture) -> Self {
         self.unit_mut(who).healer_posture = Some(posture);

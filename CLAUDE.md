@@ -575,6 +575,43 @@ checks need nothing: a locked member is simply on cooldown, and is traced
 mcp__wowhead-classic__lookup_spell("Pyroblast")
 ```
 
+### Talents
+
+Each class's trees are data in `assets/config/talents.ron`
+(`src/states/play_match/talents.rs`; design:
+`docs/design/proposals/2026-10-11-talents-and-gauntlet.md` §3-4). A match
+carries one `Build` (talent → rank) per combatant, `MatchConfig::team{1,2}_builds`
+and the headless `"team1_builds": [{"DemonicEmbrace": 2, "FelStamina": 2}]`;
+an empty build is the default and changes nothing, so `Legacy` and BasicArena
+stay byte-identical. Both spawns resolve the build ONCE
+(`TalentDefinitions::resolve`, through `resolve_for_spawn`) into the
+combatant's `AbilityBook` — `Grant`s added, then `Patch`es applied, adds
+before multiplies — and its stats: `StatPercent` scales the totals after
+`apply_equipment` and before the pet spawns, so the pet's share grows with
+it; `PetStatPercent` then scales the pet. A talented match logs a `[TALENTS]`
+line beside `[EQUIPMENT]`, and its trace opens with a `match_header` line
+carrying every slot's build.
+
+- **Adding a node:** a `TalentId` variant (`talent_ids!`) and its entry. The
+  loader rejects a node outside its class's tree, a bad tier, column, rank or
+  prerequisite, and a price rule broken: a node of `StatPercent` effects on
+  stats the item budget weighs has its price COMPUTED at the class's
+  `reference` combatant (starting kit plus three Gauntlet picks) and declares
+  no `budget`; every other node declares one. `tests/talents.rs` holds every
+  rank to 11 ±15% (a capstone to 22) and every legal build at 2-8 points to
+  within one rank of the cheapest. Never give armor or another free stat an
+  item weight to price a talent: that re-prices every item.
+- **Adding a talent ability:** mark it `talent: true` in `abilities.ron` (it
+  leaves its class's base book) and `Grant` it from exactly one node. Its
+  class AI decides it with `abilities.get(..)`, never `get_unchecked`: an
+  untalented unit's book lacks it. `tests/talent_ai_audit.rs` fails until the
+  ability has a row there whose scene shows the AI deciding it when granted
+  and leaving it alone when not.
+- **Adding a patchable field:** an `AbilityField` variant;
+  `every_numeric_ability_field_is_decided` destructures `AbilityConfig`
+  without a rest pattern, so a new numeric field fails to compile until it is
+  placed or declared not patchable.
+
 ### Adding a New Item
 
 Items are data-driven via `assets/config/items.ron`. Every item must stay within its **item level budget** — enforced by `cargo test`.
