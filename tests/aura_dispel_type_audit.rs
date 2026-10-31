@@ -203,6 +203,8 @@ fn expected(ability: AbilityType) -> Row {
         // 10890. Magic since 2.0.1; the user ruled it dispellable (2026-10-11).
         AbilityType::PsychicScream => config(S::Magic, T::Magic),
         AbilityType::ManaBurn => Row::NoAura,
+        // 589 .. 25368, every rank DispelType 1 (Magic).
+        AbilityType::ShadowWordPain => config(S::Magic, T::Magic),
 
         // ---- Warrior ----
         AbilityType::HeroicStrike => Row::NoAura,

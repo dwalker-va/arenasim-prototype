@@ -120,6 +120,7 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::Polymorph
         | A::DispelMagic
         | A::ManaBurn
+        | A::ShadowWordPain
         | A::FlashOfLight
         | A::HolyLight
         | A::HolyShock

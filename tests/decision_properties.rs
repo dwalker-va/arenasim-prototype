@@ -1444,6 +1444,14 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
             "the Druid's Rejuvenation up and no Lifebloom on a dying ally under attack",
         ),
     ),
+    (
+        AbilityType::ShadowWordPain,
+        Unreached::NeedsKnob(
+            "a TeamPlan Priest with its whole team topped and shielded (or Weakened Soul), \
+             no enemy healer mana to burn, and its own Shadow Word: Pain not yet on its target \
+             (tests/shadow_word_pain_scenes.rs builds it)",
+        ),
+    ),
 ];
 
 /// Every ability of every class's own kit is chosen somewhere in the grid, or
