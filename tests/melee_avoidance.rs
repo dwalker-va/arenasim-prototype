@@ -752,10 +752,19 @@ fn a_swing_held_off_a_friendly_fear_is_not_avoided() {
 // ---------------------------------------------------------------------------
 
 /// Matches with no avoidance draw exactly as many `game_rng` values as they
-/// did before avoidance existed — recorded on main at e824cb88 (the counter
-/// itself draws nothing). Melee-heavy on purpose: dual wield, pets, Heroic
-/// Strike, a Hunter's melee hand, Kick and Pummel, on an open map and in the
-/// bowl.
+/// did before avoidance existed (the counter itself draws nothing).
+/// Melee-heavy on purpose: dual wield, pets, Heroic Strike, a Hunter's melee
+/// hand, Kick and Pummel, on an open map and in the bowl.
+///
+/// Recorded on main at e824cb88, then re-recorded for AS-303 (TBC slot
+/// multipliers; the starting kit's legs, waists, wrists and trinkets
+/// re-spent, the Hunter's into attack power), which changes what these
+/// matches play. For each cell, the merged tree's match log is byte-identical
+/// to the log of AS-303's own pre-avoidance head 7ba75140, and the counts are
+/// the merged tree's. So the claim still holds: zero avoidance draws what a
+/// pre-avoidance build of the same kit draws. Warrior+Rogue v Hunter+Priest
+/// went from 113 to 102 and the 3v3 from 234 to 229. Rogue v Warrior stayed
+/// at 53: the Rogue's and the Warrior's kits both changed, but no draw did.
 #[test]
 fn a_match_without_avoidance_draws_what_it_drew_before() {
     for (team1, team2, map, profile, seed, recorded) in ZERO_AVOIDANCE_DRAWS {
@@ -791,7 +800,7 @@ const ZERO_AVOIDANCE_DRAWS: &[DrawPin] = &[
         "BasicArena",
         "Legacy",
         11,
-        113,
+        102,
     ),
     (
         &["Rogue", "Warrior", "Paladin"],
@@ -799,7 +808,7 @@ const ZERO_AVOIDANCE_DRAWS: &[DrawPin] = &[
         "PillaredArena",
         "TeamPlan",
         5,
-        234,
+        229,
     ),
     (&["Rogue"], &["Warrior"], "BasicArena", "Legacy", 3, 53),
 ];
