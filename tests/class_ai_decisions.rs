@@ -241,9 +241,13 @@ fn purge_priority_orders_defensives_above_offensive_buffs() {
             > purge_priority(AuraType::LockoutDurationReduction)
     );
     assert!(purge_priority(AuraType::LockoutDurationReduction) > 0);
-    // SP and AP are equal-value throughput buffs.
+    // SP, AP and haste are equal-value throughput buffs.
     assert_eq!(
         purge_priority(AuraType::SpellPowerIncrease),
+        purge_priority(AuraType::AttackPowerIncrease)
+    );
+    assert_eq!(
+        purge_priority(AuraType::AttackSpeedIncrease),
         purge_priority(AuraType::AttackPowerIncrease)
     );
 

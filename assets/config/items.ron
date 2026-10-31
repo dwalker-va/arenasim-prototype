@@ -873,11 +873,15 @@
         // A trigger plus an effect, on this trinket's OWN internal cooldown.
         // The proc is charged to the item budget at its expected value
         // (weight * magnitude * duration/(duration+icd)), so the big burst
-        // number buys a small sustained one: Dragonspine's +55 attack power
-        // averages +10 AP over a long life, and costs the 15 budget points that
-        // averages to. (A short life runs above that — a trinket starts ready.)
+        // number buys a small sustained one: Sigil of Arcane Surge's +55 spell
+        // power averages +11 over a long life, and costs the 16 budget points
+        // that averages to. (A short life runs above that — a trinket starts
+        // ready.)
         // ====================================================================
 
+        // TBC's Dragonspine Trophy: haste (TBC's 325 haste rating, 20.6% at
+        // level 70), which speeds melee and ranged attacks alike. It procs on a
+        // melee hit only: `MeleeHit` is the one physical trigger there is.
         DragonspineTrophy: (
             name: "Dragonspine Trophy",
             item_level: 58,
@@ -887,8 +891,8 @@
             proc: Some((
                 trigger: MeleeHit,
                 chance: 0.15,
-                effect: AttackPowerIncrease,
-                magnitude: 55.0,
+                effect: AttackSpeedIncrease,
+                magnitude: 0.20,
                 duration: 10.0,
                 internal_cooldown: 45.0,
             )),

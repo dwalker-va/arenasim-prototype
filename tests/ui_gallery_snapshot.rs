@@ -430,7 +430,7 @@ fn right_column(ui: &mut egui::Ui, data: &EncyclopediaData) {
                                 ui,
                                 ListRow::new("Dragonspine Trophy \u{2014} +4 AP")
                                     .subtitle(
-                                        "Chance on a melee hit (15%) to gain +55 attack power \
+                                        "Chance on a melee hit (15%) to gain +20% attack speed \
                                          for 10s. Cannot occur more than once every 45s.",
                                     )
                                     .icon(ListIcon {

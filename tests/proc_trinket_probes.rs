@@ -7,15 +7,20 @@
 //! 1. **A proc actually fires.** The hooks are in `combat_auto_attack` and
 //!    `process_casting`; a wiring mistake in either would leave every unit test
 //!    green and the feature inert.
-//! 2. **A proc buff COEXISTS with a same-stat buff from another source.** This
-//!    is the whole reason `Aura::distinct_by_source` exists. A Warrior carries
-//!    Battle Shout, which is an `AttackPowerIncrease`; before the flag, the
-//!    buff dedup in `apply_pending_auras` would have swallowed an attack-power
-//!    proc for the entire match, silently.
+//! 2. **Two different proc trinkets are live at once** — the per-trinket
+//!    internal cooldown with no global lock.
 //!
 //! Both are read off `FrameObservation::aura_types`, which lists the effect
-//! type of every live aura — so "two AttackPowerIncrease auras at once" IS the
-//! coexistence claim, stated in the only vocabulary the observer has.
+//! type of every live aura. The Dragonspine Trophy is a Warrior's only source
+//! of `AttackSpeedIncrease` and the Whetstone of Fury its only source of
+//! `CritChanceIncrease`, so each type on the wearer IS that trinket's buff.
+//!
+//! That a proc buff coexists with a same-type buff from another source (an
+//! attack-power proc beside Battle Shout, the reason `Aura::distinct_by_source`
+//! exists) is held where the dedup runs, by `tests/proc_buff_removal.rs`: no
+//! shipped trinket procs a type a Warrior's own kit grants. That the haste the
+//! Dragonspine Trophy grants speeds the swing timer is held by
+//! `tests/melee_avoidance.rs`.
 //!
 //! The observer is read-only by construction (`run_headless_match_observed`),
 //! and `tests/movement_probes.rs` pins that an observed run returns a result
@@ -58,13 +63,14 @@ fn peak_concurrent(cfg: HeadlessMatchConfig, effect: AuraType) -> usize {
     peak
 }
 
-/// A Warrior wearing Dragonspine Trophy ends up with TWO attack-power buffs at
-/// once: Battle Shout's and the trinket's.
+/// A Warrior wearing Dragonspine Trophy procs its haste: an
+/// `AttackSpeedIncrease` buff, one at a time (its internal cooldown outlasts
+/// the buff).
 ///
 /// The control below is what makes the number mean something — without it, a
-/// "2" could be two Battle Shouts, or an observer counting the same aura twice.
+/// "1" could be haste from the Warrior's own kit.
 #[test]
-fn a_melee_proc_fires_and_coexists_with_battle_shout() {
+fn a_melee_proc_fires_and_hastes_the_wearer() {
     let with_trinket = peak_concurrent(
         config(
             "Warrior",
@@ -72,28 +78,27 @@ fn a_melee_proc_fires_and_coexists_with_battle_shout() {
             770_140,
             &[("Trinket2", "DragonspineTrophy")],
         ),
-        AuraType::AttackPowerIncrease,
+        AuraType::AttackSpeedIncrease,
     );
     assert_eq!(
-        with_trinket, 2,
-        "a Warrior wearing Dragonspine Trophy should carry Battle Shout's attack power AND \
-         the trinket's at the same time; saw {} concurrent AttackPowerIncrease aura(s)",
+        with_trinket, 1,
+        "a Warrior wearing Dragonspine Trophy should carry its haste buff; saw {} \
+         concurrent AttackSpeedIncrease aura(s)",
         with_trinket
     );
 }
 
 /// The control for the test above: the SAME seed and matchup with no proc
-/// trinket never reaches two. So the second buff is the proc, not the Warrior's
-/// own kit.
+/// trinket carries no haste at all. So the buff is the proc's.
 #[test]
-fn without_the_trinket_the_warrior_carries_only_battle_shout() {
+fn without_the_trinket_the_warrior_carries_no_haste() {
     let bare = peak_concurrent(
         config("Warrior", "Priest", 770_140, &[]),
-        AuraType::AttackPowerIncrease,
+        AuraType::AttackSpeedIncrease,
     );
     assert_eq!(
-        bare, 1,
-        "the unequipped control should see only Battle Shout, saw {}",
+        bare, 0,
+        "the unequipped control should carry no haste, saw {}",
         bare
     );
 }
@@ -103,9 +108,8 @@ fn without_the_trinket_the_warrior_carries_only_battle_shout() {
 /// worth filling.
 ///
 /// Asserted as an OVERLAP: a frame on which both buffs are up, not merely that
-/// each fired at some point in the match. `Whetstone of Fury` is the only
-/// source of `CritChanceIncrease` a Warrior has, so its presence is
-/// unambiguous.
+/// each fired at some point in the match. Each buff's type has no other source
+/// on a Warrior (module docs), so its presence is unambiguous.
 ///
 /// Seed re-pinned for AS-167 (weapon speed from item data), from 770_141 to
 /// 770_142. The Warrior's Arcanite Reaper now swings every 3.8s, not every
@@ -128,25 +132,18 @@ fn two_different_proc_trinkets_are_live_at_the_same_time() {
         ],
     );
     let mut overlap_frames = 0;
-    let mut saw_ap = false;
+    let mut saw_haste = false;
     let mut saw_crit = false;
     run_headless_match_observed(cfg, true, None, |frame| {
         for c in frame.combatants.values() {
             if c.team != 1 || c.slot != 0 || c.is_pet {
                 continue;
             }
-            // Battle Shout is one of the AttackPowerIncrease auras, so the
-            // TRINKET's is the second one.
-            let ap = c
-                .aura_types
-                .iter()
-                .filter(|a| **a == AuraType::AttackPowerIncrease)
-                .count()
-                >= 2;
+            let haste = c.aura_types.contains(&AuraType::AttackSpeedIncrease);
             let crit = c.aura_types.contains(&AuraType::CritChanceIncrease);
-            saw_ap |= ap;
+            saw_haste |= haste;
             saw_crit |= crit;
-            if ap && crit {
+            if haste && crit {
                 overlap_frames += 1;
             }
         }
@@ -155,7 +152,7 @@ fn two_different_proc_trinkets_are_live_at_the_same_time() {
 
     // Named separately so a failure says WHICH trinket never fired, rather
     // than only that the overlap was zero.
-    assert!(saw_ap, "Dragonspine Trophy never procced");
+    assert!(saw_haste, "Dragonspine Trophy never procced");
     assert!(saw_crit, "Whetstone of Fury never procced");
     assert!(
         overlap_frames > 0,
@@ -256,13 +253,11 @@ fn logged_match(cfg: HeadlessMatchConfig) -> String {
     text
 }
 
-/// A proc's buff line names the TRINKET. Every attack-power buff lands through
-/// the same branch of `apply_pending_auras` as Battle Shout, which once printed
-/// "Battle Shout" whatever the source — so a Dragonspine proc read as a second
-/// shout in the log, at the proc's +55.
+/// A proc is logged twice, under the TRINKET's name: the `procs` line a sweep
+/// counts proc rates by, and the buff line with what it grants.
 ///
-/// Same seed as `a_melee_proc_fires_and_coexists_with_battle_shout`, where the
-/// proc demonstrably fires, so the absence below is not a match without one.
+/// Same seed as `a_melee_proc_fires_and_hastes_the_wearer`, where the proc
+/// demonstrably fires.
 #[test]
 fn a_proc_buff_is_logged_under_the_trinket_s_name() {
     let log = logged_match(config(
@@ -276,17 +271,8 @@ fn a_proc_buff_is_logged_under_the_trinket_s_name() {
         "the proc never fired, so this test proves nothing"
     );
     assert!(
-        log.contains("gains Dragonspine Trophy (+55 attack power)"),
-        "the proc's [BUFF] line does not name the trinket"
-    );
-    assert!(
-        !log.contains("gains Battle Shout (+55"),
-        "a Dragonspine proc was logged as Battle Shout"
-    );
-    // ...and the real shout still logs as itself.
-    assert!(
-        log.contains("gains Battle Shout (+"),
-        "Battle Shout stopped logging under its own name"
+        log.contains("gains Dragonspine Trophy (+20% attack speed)"),
+        "the proc's [BUFF] line does not name the trinket and its haste"
     );
 }
 
@@ -335,12 +321,12 @@ fn a_ranged_auto_attack_does_not_fire_a_melee_proc() {
 /// cargo test --release --test proc_trinket_probes -- --ignored --nocapture
 /// ```
 ///
-/// The wearer is team 1's Warrior, carrying both melee trinkets. Team 1's
-/// Warrior is set to Demoralizing Shout so nothing else on its side grants
-/// attack power — any `AttackPowerIncrease` on it IS the Dragonspine buff, and
-/// `CritChanceIncrease` has no source but Whetstone. Uptime is measured per
-/// frame over the frames the wearer is alive after the gates, pooled across
-/// matches.
+/// The wearer is team 1's Warrior, carrying both melee trinkets and set to
+/// Demoralizing Shout. Neither buff's type has another source on its side, so
+/// any `AttackSpeedIncrease` on it IS the Dragonspine buff and any
+/// `CritChanceIncrease` the Whetstone's. Uptime is measured per frame over the
+/// frames the wearer is alive after the gates, pooled across matches; the mean
+/// of those lives is printed too.
 #[test]
 #[ignore]
 fn realised_uptime_against_the_long_run_bound() {
@@ -369,17 +355,22 @@ fn realised_uptime_against_the_long_run_bound() {
                     continue;
                 }
                 alive += 1;
-                let ap = c.aura_types.contains(&AuraType::AttackPowerIncrease);
+                let haste = c.aura_types.contains(&AuraType::AttackSpeedIncrease);
                 let crit = c.aura_types.contains(&AuraType::CritChanceIncrease);
-                dragonspine += ap as u64;
+                dragonspine += haste as u64;
                 whetstone += crit as u64;
-                both += (ap && crit) as u64;
+                both += (haste && crit) as u64;
             }
         })
         .expect("match runs");
     }
     let pct = |n: u64| 100.0 * n as f64 / alive as f64;
     println!("wearer alive post-gate frames: {alive}");
+    // A frame is exactly 1/60s (`FrameObservation::sim_time`).
+    println!(
+        "wearer's mean post-gate life: {:.1}s",
+        alive as f64 / 60.0 / 60.0
+    );
     println!(
         "Dragonspine Trophy: realised {:.1}% vs long-run bound {:.1}%",
         pct(dragonspine),

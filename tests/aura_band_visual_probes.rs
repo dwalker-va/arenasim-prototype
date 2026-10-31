@@ -74,6 +74,8 @@ const BAND_TYPES: &[AuraType] = &[
     AuraType::ArmorIncrease,
     // Travel Form, which has no apply treatment of its own.
     AuraType::TravelForm,
+    // Haste, the Dragonspine Trophy's proc, until AS-433 draws it by name.
+    AuraType::AttackSpeedIncrease,
 ];
 
 fn names(types: impl IntoIterator<Item = AuraType>) -> BTreeSet<String> {

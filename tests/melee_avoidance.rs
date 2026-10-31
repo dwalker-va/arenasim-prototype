@@ -889,6 +889,97 @@ fn an_attack_speed_bonus_swings_more_often_in_a_match() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// The haste aura (AS-428): `AttackSpeedIncrease`, the mirror of
+// `AttackSpeedSlow`, on top of the attack-speed stat.
+// ---------------------------------------------------------------------------
+
+/// A haste aura of `magnitude`, as a proc grants it.
+fn haste(magnitude: f32) -> arenasim::states::play_match::components::Aura {
+    arenasim::states::play_match::components::Aura {
+        effect_type: AuraType::AttackSpeedIncrease,
+        magnitude,
+        duration: 1_000.0,
+        break_on_damage_threshold: -1.0,
+        ..Default::default()
+    }
+}
+
+/// A +20% haste aura divides every swing interval — main hand, off hand, a
+/// Hunter's melee hand, and the live socket that is its bow — by 1.20, on top
+/// of the attack-speed stat; a slow still stretches the result; and without
+/// one the interval is untouched to the bit.
+#[test]
+fn a_haste_aura_shortens_every_swing_interval() {
+    use arenasim::states::play_match::components::ActiveAuras;
+    let mut c = Combatant::new(1, 0, CharacterClass::Rogue);
+    c.weapon_speed = 2.5;
+    c.offhand_weapon_speed = 1.5;
+    c.offhand_damage = 10.0;
+    c.melee_weapon_speed = 3.0;
+    c.melee_damage = 10.0;
+
+    let none = ActiveAuras { auras: vec![] };
+    assert_eq!(
+        effective_attack_interval(&c, Some(&none)).to_bits(),
+        2.5f32.to_bits()
+    );
+
+    let hasted = ActiveAuras {
+        auras: vec![haste(0.2)],
+    };
+    assert_eq!(effective_attack_interval(&c, Some(&hasted)), 2.5 / 1.2);
+    assert_eq!(effective_offhand_interval(&c, Some(&hasted)), 1.5 / 1.2);
+    assert_eq!(effective_melee_interval(&c, Some(&hasted)), 3.0 / 1.2);
+
+    // On top of the stat: each divides in turn.
+    c.attack_speed_bonus = 0.25;
+    assert_eq!(
+        effective_attack_interval(&c, Some(&hasted)),
+        2.5 / 1.25 / 1.2
+    );
+
+    // Two haste effects multiply, and a slow still stretches the result.
+    let mixed = ActiveAuras {
+        auras: vec![
+            haste(0.2),
+            arenasim::states::play_match::components::Aura {
+                effect_type: AuraType::AttackSpeedSlow,
+                magnitude: 0.5,
+                ..Default::default()
+            },
+            haste(0.1),
+        ],
+    };
+    assert_eq!(
+        effective_attack_interval(&c, Some(&mixed)),
+        2.5 / 1.25 / 1.2 * (1.0 / (1.0 - 0.5)) / 1.1
+    );
+}
+
+/// The haste aura is read by the swing timer: over the same staged span, a
+/// Warrior carrying +50% haste swings about half again as often as the same
+/// Warrior without it.
+#[test]
+fn a_haste_aura_swings_more_often_in_a_match() {
+    let swings = |hasted: bool| {
+        let mut stage = duel(0.0, 0.0);
+        if hasted {
+            stage = stage.aura(Unit::new(1, 0), haste(0.5));
+        }
+        let played = play(warrior_v_warrior(4), stage);
+        landed(&played.log, WARRIOR_ID, "Auto Attack")
+            + landed(&played.log, WARRIOR_ID, "Heroic Strike")
+    };
+    let (plain, hasted) = (swings(false), swings(true));
+    assert!(plain > 10, "the control swings ({plain})");
+    let ratio = hasted as f64 / plain as f64;
+    assert!(
+        (1.3..1.7).contains(&ratio),
+        "+50% haste: {hasted} swings against {plain} ({ratio:.2}x)"
+    );
+}
+
 /// `is_melee_attack` agrees with the data it judges: every melee attack is a
 /// physical attack (`prevention: Pacify`) used at melee range.
 #[test]
