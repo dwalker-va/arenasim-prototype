@@ -212,6 +212,15 @@ fn the_loader_rejects_each_broken_rule() {
     );
     assert!(load_err(&mage, defs).contains("Mage has no pet"));
 
+    // A talent with no entry.
+    let text = shipped_text();
+    let (start, end) = (
+        text.find("        FelStamina: (").unwrap(),
+        text.find("        UnholyPower: (").unwrap(),
+    );
+    let gone = format!("{}{}", &text[..start], &text[end..]);
+    assert!(load_err(&gone, defs).contains("no entry for FelStamina"));
+
     // The trees themselves.
     let twice = edited(
         "Warlock: [",
