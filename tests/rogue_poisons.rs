@@ -196,6 +196,53 @@ fn the_chosen_poison_is_the_one_the_rogue_applies() {
                 "{poison:?} never reached the funnel's refresh"
             );
         }
+        // Wound Poison alone also HITS: a Nature hit of 5 (4.7) on each
+        // application, logged as damage, never a crit. No other poison does.
+        let hits: Vec<&str> = played
+            .log
+            .lines()
+            .filter(|l| l.contains("Team 1 Rogue #1's Wound Poison "))
+            .collect();
+        if poison == RoguePoison::Wound {
+            assert!(hits.len() >= 3, "only {} Wound Poison hits", hits.len());
+            for hit in &hits {
+                assert!(
+                    hit.contains("Wound Poison hits Team 2")
+                        && (hit.contains("for 5 damage") || hit.contains("absorbed)")),
+                    "{hit}"
+                );
+            }
+        } else {
+            assert!(hits.is_empty(), "{poison:?} dealt Wound Poison damage");
+        }
+    }
+}
+
+/// Wound Poison's hit is TBC's 65 Nature damage at the kit's scale, fixed
+/// (min = max, so it rolls nothing), and no other poison carries damage.
+#[test]
+fn wound_poison_hits_for_its_fixed_nature_damage() {
+    let defs = AbilityDefinitions::default();
+    let wound = defs.get_unchecked(&AbilityType::WoundPoison);
+    assert_eq!(wound.damage_base_min, wound.damage_base_max);
+    assert!(
+        (wound.damage_base_min - 65.0 * 0.073).abs() < 0.05,
+        "65 x 0.073, to one place"
+    );
+    assert_eq!(
+        wound.spell_school,
+        arenasim::states::play_match::abilities::SpellSchool::Nature
+    );
+    for poison in [
+        AbilityType::CripplingPoison,
+        AbilityType::DeadlyPoison,
+        AbilityType::MindNumbingPoison,
+    ] {
+        assert_eq!(
+            defs.get_unchecked(&poison).damage_base_max,
+            0.0,
+            "{poison:?}"
+        );
     }
 }
 
@@ -404,6 +451,6 @@ fn the_poison_texts_state_their_effect() {
     );
     assert_eq!(
         text(AbilityType::MindNumbingPoison),
-        "Increases cast time by 60% for 10 sec."
+        "Increases cast time by 60% for 14 sec."
     );
 }

@@ -370,6 +370,7 @@ const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
     MortalStrike,
     Shadowbolt,
     SinisterStrike,
+    WoundPoison,
 ];
 
 fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
@@ -407,7 +408,11 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
 
 /// The Druid's kit lands silently until its visuals are built — each
 /// "AS-160" entry here and below is cleared by AS-160's build cards.
-const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
+///
+/// Wound Poison's hit rides the weapon swing that procced it, and the landing
+/// AS-341 draws for every poison application is its visual.
+const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] =
+    &[(WoundPoison, "AS-341 (weapon poison landing)")];
 
 #[test]
 fn direct_damage_finds_every_member() {

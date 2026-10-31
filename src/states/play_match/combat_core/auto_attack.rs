@@ -595,6 +595,11 @@ pub fn combat_auto_attack(
     let mut crit_per_target: std::collections::BTreeMap<Entity, bool> =
         std::collections::BTreeMap::new();
 
+    // Weapon-poison procs that also deal damage (Wound Poison): (attacker,
+    // target, poison), dealt after the loop so the swing's own log line and
+    // killing blow are settled first. A Vec in swing order: deterministic.
+    let mut poison_damage_hits: Vec<(Entity, Entity, AbilityType)> = Vec::new();
+
     // Track Frost Armor procs: attacker entities to apply slows to after the loop.
     let mut frost_armor_procs: std::collections::BTreeSet<Entity> =
         std::collections::BTreeSet::new();
@@ -724,6 +729,9 @@ pub fn combat_auto_attack(
                                 &mut combat_log,
                                 &mut poison_fresh_this_frame,
                             );
+                            if abilities.get_unchecked(&poison).damage_base_max > 0.0 {
+                                poison_damage_hits.push((attacker_entity, target_entity, poison));
+                            }
                         }
                     } else if game_rng.random_f32() < chance {
                         let fresh = apply_or_refresh_crippling(
@@ -861,6 +869,77 @@ pub fn combat_auto_attack(
                     }
                 }
             }
+        }
+    }
+
+    // Weapon-poison damage (Wound Poison): a fixed Nature hit through the one
+    // damage funnel, so immunity, resistance, absorbs, the stealth reveal, rage
+    // and crowd-control breaks all apply as to any Nature damage. It does not
+    // crit (poisons could not before Wrath of the Lich King), so it draws no RNG.
+    for (attacker_entity, target_entity, poison) in poison_damage_hits {
+        let def = abilities.get_unchecked(&poison);
+        let Ok((_, _, mut target, _, _, mut target_auras)) = combatants.get_mut(target_entity)
+        else {
+            continue;
+        };
+        if !target.is_alive() {
+            continue;
+        }
+        let (actual_damage, absorbed) = apply_damage_with_absorb(
+            def.damage_base_min,
+            &mut target,
+            target_auras.as_deref_mut(),
+            def.spell_school,
+            &def.name,
+            &mut combat_log,
+        );
+        if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
+            let rage_gain = actual_damage * 0.15;
+            target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
+        }
+        let is_killing_blow = !target.is_alive();
+        *damage_per_aura_break.entry(target_entity).or_insert(0.0) += actual_damage;
+        *damage_per_target.entry(target_entity).or_insert(0.0) += actual_damage;
+        *absorbed_per_target.entry(target_entity).or_insert(0.0) += absorbed;
+        damage_dealt_updates.push((attacker_entity, actual_damage + absorbed));
+        let (
+            Some((attacker_team, attacker_name, _, attacker_slot, _)),
+            Some((target_team, target_name, _, target_slot, _)),
+        ) = (
+            combatant_info.get(&attacker_entity),
+            combatant_info.get(&target_entity),
+        )
+        else {
+            continue;
+        };
+        let attacker_id = combat_log_id(*attacker_team, *attacker_slot, attacker_name);
+        let target_id = combat_log_id(*target_team, *target_slot, target_name);
+        let message = if absorbed > 0.0 {
+            format!(
+                "{}'s {} hits {} for {:.0} damage ({:.0} absorbed)",
+                attacker_id, def.name, target_id, actual_damage, absorbed
+            )
+        } else {
+            format!(
+                "{}'s {} hits {} for {:.0} damage",
+                attacker_id, def.name, target_id, actual_damage
+            )
+        };
+        combat_log.log_damage(
+            attacker_id.clone(),
+            target_id.clone(),
+            def.name.clone(),
+            actual_damage + absorbed,
+            is_killing_blow,
+            false,
+            message,
+        );
+        if is_killing_blow && !target.is_dead {
+            target.is_dead = true;
+            commands.entity(target_entity).remove::<CastingState>();
+            commands.entity(target_entity).remove::<ChannelingState>();
+            let death_message = format!("{} has been eliminated", target_id);
+            combat_log.log_death(target_id, Some(attacker_id), death_message);
         }
     }
 

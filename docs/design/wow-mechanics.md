@@ -112,8 +112,12 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
     refreshed in place.
   - **Deadly** (30%): Nature damage over time, 3.3 every 3s per stack for 12s,
     stacking to 5 per Rogue.
-  - **Wound** (50%): healing received -50% for 15s, refreshed by a new proc.
-  - **Mind-numbing** (50%): cast times +60% for 10s, refreshed by a new proc.
+  - **Wound** (50%): healing received -50% for 15s, refreshed by a new proc, and
+    4.7 Nature damage on each application (TBC's 65 at the kit's scale). The hit
+    goes through `apply_damage_with_absorb` like any Nature damage (resistance,
+    absorbs, immunity, the stealth reveal, rage) and does not crit: poisons
+    could not crit before Wrath of the Lich King.
+  - **Mind-numbing** (50%): cast times +60% for 14s, refreshed by a new proc.
   The other three land through `apply_pending_auras`. All four are poisons:
   Cleanse removes them (a stack at a time), Dispel Magic does not.
 - **Healing reductions and cast-time increases do not compound** (TBC): only

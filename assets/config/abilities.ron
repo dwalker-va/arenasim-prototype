@@ -536,7 +536,9 @@
         // Wound Poison V: healing received -50% for 15s, 50% chance — TBC's
         // five-stack maximum in one application. Refresh-only (`max_stacks:
         // 1`). Only the strongest healing reduction applies, so it does not
-        // compound with Mortal Strike's Mortal Wound (`apply_healing`).
+        // compound with Mortal Strike's Mortal Wound (`apply_healing`). Each
+        // application also deals TBC's 65 Nature damage: 65 x 0.073 = 4.7,
+        // fixed (min = max), through the damage funnel; it does not crit.
         WoundPoison: (
             name: "Wound Poison",
             class: Rogue,
@@ -547,6 +549,8 @@
             mana_cost: 0.0,
             cooldown: 0.0,
             application_chance: Some(0.5),
+            damage_base_min: 4.7,
+            damage_base_max: 4.7,
             applies_aura: Some((
                 aura_type: HealingReduction,
                 duration: 15.0,
@@ -557,7 +561,7 @@
             spell_school: Nature,
         ),
 
-        // Mind-numbing Poison III: casting time +60% for 10s, 50% chance.
+        // Mind-numbing Poison III: casting time +60% for 14s, 50% chance.
         // Refresh-only (`max_stacks: 1`): a new proc renews it, never doubles
         // it. Only the larger cast-time increase applies, so it does not add
         // to Curse of Tongues (`get_cast_time_increase`).
@@ -573,7 +577,7 @@
             application_chance: Some(0.5),
             applies_aura: Some((
                 aura_type: CastTimeIncrease,
-                duration: 10.0,
+                duration: 14.0,
                 magnitude: 0.6,
                 dispel_type: Poison,
                 stacking: Some((max_stacks: 1)),
