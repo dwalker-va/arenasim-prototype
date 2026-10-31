@@ -9,7 +9,8 @@ in each class's own stat mix). Main did not move during it: none of the in-fligh
 had merged when it finished. The Hunter's attack-power re-spend (user ruling,
 2026-10-30) came after, and is measured on its own (§3.2, DIRECTIONAL): before
 `269e4f11` (`9544e24e` merged with main at `e824cb88`, Holy Light), after that
-commit with the re-spend.
+commit with the re-spend. Shadow Word: Pain (`9cc5ee0e`) merged after it and is not in
+either arm.
 **Harness:** `arenasim --batch`, 300s cap, default loadouts. Maps: BasicArena
 (Basic), PillaredArena (Nagrand), TwinPillars (Twin).
 
