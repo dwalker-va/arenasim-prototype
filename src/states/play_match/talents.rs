@@ -239,8 +239,11 @@ pub enum PatchTarget {
     School(SpellSchool),
 }
 
-/// How a `Patch` rewrites its field. Every `Add` on a field applies before
-/// any `Mul`: `(value + Σ adds) × Π muls`, whatever order the build lists
+/// How a `Patch` rewrites its field. Ranks ADD, for every effect kind: `n`
+/// ranks of `Mul(m)` scale by `1 + n·(m − 1)` (two ranks of `Mul(1.15)` take
+/// 10 to 13, never 13.2), and every `Mul` on a field sums its bonus the same
+/// way. Every `Add` applies before the multiply:
+/// `(value + Σ adds) × (1 + Σ ranks·(m − 1))`, whatever order the build lists
 /// them in.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 pub enum PatchOp {
@@ -805,7 +808,8 @@ impl TalentDefinitions {
         let mut book = AbilityBook::for_class(abilities, class);
         let mut stats: BTreeMap<TalentStat, f32> = BTreeMap::new();
         let mut pet_stats: BTreeMap<TalentStat, f32> = BTreeMap::new();
-        // (ability, field) -> (Σ adds, Π muls), over every rank in build order.
+        // (ability, field) -> (Σ adds, Σ multiply bonuses), over every rank in
+        // build order. Ranks add, for a Mul as for everything else.
         let mut patches: BTreeMap<(AbilityType, AbilityField), (f32, f32)> = BTreeMap::new();
         let mut patch_effects: Vec<(PatchTarget, AbilityField, PatchOp, u8)> = Vec::new();
 
@@ -837,16 +841,16 @@ impl TalentDefinitions {
                 .map(|(a, _)| *a)
                 .collect();
             for ability in targets {
-                let entry = patches.entry((ability, field)).or_insert((0.0, 1.0));
-                for _ in 0..rank {
-                    match op {
-                        PatchOp::Add(n) => entry.0 += n,
-                        PatchOp::Mul(n) => entry.1 *= n,
-                    }
+                let entry = patches.entry((ability, field)).or_insert((0.0, 0.0));
+                let ranks = f32::from(rank);
+                match op {
+                    PatchOp::Add(n) => entry.0 += n * ranks,
+                    PatchOp::Mul(n) => entry.1 += (n - 1.0) * ranks,
                 }
             }
         }
-        for ((ability, field), (add, mul)) in patches {
+        for ((ability, field), (add, bonus)) in patches {
+            let mul = 1.0 + bonus;
             let mut negative = None;
             book = book.patching(ability, |config| {
                 let value = field.of(config).expect("a patch's targets have its field");

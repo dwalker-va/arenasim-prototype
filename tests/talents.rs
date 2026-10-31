@@ -1045,6 +1045,9 @@ fn the_graphical_spawn_carries_the_resolved_build() {
         "both paths agree untalented"
     );
     assert_eq!(plain.felhunter.max_health, base.1.max_health);
+    // No build, no line.
+    assert!(plain.log.iter().all(|l| !l.contains("[TALENTS]")));
+    assert!(plain.log.iter().any(|l| l.contains("[EQUIPMENT]")));
     assert_talented(
         &graphical_spawn(&demonology_build(), patching_fixture()),
         &base,
@@ -1145,4 +1148,33 @@ fn the_trace_header_records_the_builds() {
     );
     assert_eq!(talented["team2_builds"], serde_json::json!([{}]));
     assert_ne!(first_line(&Build::default())["kind"], "match_header");
+}
+
+/// Ranks add for a multiply, as for every effect kind: n ranks of Mul(m)
+/// scale by 1 + n·(m − 1). Two ranks of +15% take 10 to 11.5 and then 13,
+/// never the compounded 13.225.
+#[test]
+fn a_multiply_patch_adds_its_ranks() {
+    let defs = abilities();
+    let text = edited(
+        EMBRACE,
+        "budget: Some(11.0), per_rank: [Patch(on: Ability(Shadowbolt), field: Range, op: Mul(1.15))],",
+    );
+    let talents = TalentDefinitions::from_ron(&text, defs).unwrap();
+    let range = |rank: u8| {
+        let mut ranks = vec![];
+        if rank > 0 {
+            ranks.push((DemonicEmbrace, rank));
+        }
+        let book = talents
+            .resolve(defs, CharacterClass::Warlock, &Build::of(&ranks))
+            .unwrap();
+        book.book().get_unchecked(&AbilityType::Shadowbolt).range
+    };
+    let base = defs.get_unchecked(&AbilityType::Shadowbolt).range;
+    let scaled = |r: f32| r / base * 10.0;
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-4;
+    assert!(near(scaled(range(0)), 10.0));
+    assert!(near(scaled(range(1)), 11.5), "{}", scaled(range(1)));
+    assert!(near(scaled(range(2)), 13.0), "{}", scaled(range(2)));
 }

@@ -588,7 +588,10 @@ stay byte-identical. Both spawns resolve the build ONCE
 combatant's `AbilityBook` — `Grant`s added, then `Patch`es applied, adds
 before multiplies — and its stats: `StatPercent` scales the totals after
 `apply_equipment` and before the pet spawns, so the pet's share grows with
-it; `PetStatPercent` then scales the pet. A talented match logs a `[TALENTS]`
+it; `PetStatPercent` then scales the pet. **Ranks ADD, for every effect
+kind** (user ruling): two ranks of +3% are +6%, and n ranks of a `Mul(m)`
+patch scale by `1 + n·(m − 1)` — two of `Mul(1.15)` take 10 to 13, never
+13.2. A talented match logs a `[TALENTS]`
 line beside `[EQUIPMENT]`, and its trace opens with a `match_header` line
 carrying every slot's build.
 

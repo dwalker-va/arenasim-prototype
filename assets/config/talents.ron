@@ -9,7 +9,9 @@
 //   - sits in its class's tree, at a tier (1-4) and a column (0-2). A tier
 //     opens once the tree holds 0 / 2 / 3 / 5 points in the tiers below it.
 //   - has `max_rank` ranks (tiers 1-2: one or two; tiers 3-4: one), and
-//     applies its `per_rank` effects once per rank:
+//     applies its `per_rank` effects once per rank. Ranks ADD, for every
+//     effect kind: two ranks of +3% are +6%, and two ranks of Mul(1.15) scale
+//     by 1.30 (10 -> 11.5 -> 13), never compound.
 //       StatPercent(stat, fraction)     a percentage of the combatant's total,
 //                                       gear included
 //       PetStatPercent(stat, fraction)  the same, on the combatant's pet
@@ -38,7 +40,7 @@
             class: Warlock, tree: Demonology, tier: 1, column: 0,
             icon: "icons/talents/spell_shadow_metamorphosis.jpg",
             max_rank: 2,
-            // +3% maximum health a rank, gear included: 372 -> 383 -> 394 on
+            // +3% maximum health a rank, gear included: 377 -> 388 -> 400 on
             // the starting kit. Applied before the Felhunter spawns, so its
             // 0.45 share grows with it.
             per_rank: [StatPercent(MaxHealth, 0.03)],
@@ -49,7 +51,7 @@
             icon: "icons/talents/spell_shadow_antishadow.jpg",
             max_rank: 2,
             budget: Some(11.0),
-            // Felhunter +10% maximum health a rank: 167 -> 184 -> 201.
+            // Felhunter +10% maximum health a rank: 170 -> 187 -> 204.
             per_rank: [PetStatPercent(MaxHealth, 0.10)],
         ),
         UnholyPower: (
