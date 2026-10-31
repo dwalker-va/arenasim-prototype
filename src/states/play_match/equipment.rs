@@ -767,7 +767,9 @@ pub struct ItemConfig {
     /// Item level (informational, determines stat budget)
     #[serde(default)]
     pub item_level: u32,
-    /// Item tier (0 = base, 1 = first upgrade tier, etc.)
+    /// Item tier: 0 the starting kit, 1 the Gauntlet tier, 2 the Champion
+    /// tier. Read it through [`ItemConfig::tier`]; its `item_level` must sit
+    /// in that tier's band ([`ItemTier::item_levels`]), checked at load.
     #[serde(default)]
     pub item_tier: u32,
     /// Icon asset path (e.g. "icons/items/inv_helmet_36.jpg")
@@ -878,6 +880,13 @@ impl ItemConfig {
         }
     }
 
+    /// The tier `item_tier` names, or `None` for a number no tier has. A
+    /// loaded item always has one: [`validate_item_tier_band`] refuses the
+    /// rest at load.
+    pub fn tier(&self) -> Option<ItemTier> {
+        ItemTier::from_index(self.item_tier)
+    }
+
     /// Every socket this item can occupy, in canonical order.
     ///
     /// Item-level, unlike [`ItemSlotType::sockets`], because the hands cannot
@@ -889,6 +898,72 @@ impl ItemConfig {
             Some(HeldSlot::OneHand) => &[ItemSlot::MainHand, ItemSlot::OffHand],
             Some(HeldSlot::OffHandOnly) => &[ItemSlot::OffHand],
             None => self.slot.sockets(),
+        }
+    }
+}
+
+/// An item's tier: where it comes from, and the item-level band it sits in.
+///
+/// The bands are the talents-and-Gauntlet proposal's (§6.2): the budget is
+/// linear in item level, so a tier's band is what makes its pick worth taking
+/// — a Gauntlet item gives about +34% over the starting item in its slot, a
+/// Champion item about +59%. `items.ron` carries the tier as its index
+/// (`item_tier: 1`); [`ItemConfig::tier`] reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ItemTier {
+    /// The default loadouts (`item_tier` 0, the default).
+    StartingKit = 0,
+    /// The common Gauntlet reward (`item_tier` 1).
+    Gauntlet = 1,
+    /// The rarer reward, offered only after a win (`item_tier` 2).
+    Champion = 2,
+}
+
+impl ItemTier {
+    /// Every tier, in `item_tier` order.
+    pub const ALL: [ItemTier; 3] = [
+        ItemTier::StartingKit,
+        ItemTier::Gauntlet,
+        ItemTier::Champion,
+    ];
+
+    /// The tier `items.ron` names by `index`, or `None` for a number no tier has.
+    pub fn from_index(index: u32) -> Option<Self> {
+        Self::ALL.get(index as usize).copied()
+    }
+
+    /// The number `items.ron` names this tier by.
+    pub fn index(self) -> u32 {
+        self as u32
+    }
+
+    /// Display name.
+    pub fn name(self) -> &'static str {
+        match self {
+            ItemTier::StartingKit => "Starting kit",
+            ItemTier::Gauntlet => "Gauntlet",
+            ItemTier::Champion => "Champion",
+        }
+    }
+
+    /// The item levels an item of this tier may have, inclusive.
+    pub fn item_levels(self) -> std::ops::RangeInclusive<u32> {
+        match self {
+            ItemTier::StartingKit => 54..=60,
+            ItemTier::Gauntlet => 76..=80,
+            ItemTier::Champion => 90..=94,
+        }
+    }
+
+    /// The least fraction of its budget ([`calculate_effective_budget`]) an
+    /// item of this tier spends. A reward tier spends nearly all of it, so the
+    /// gain its band promises is the gain a pick delivers; the starting kit
+    /// predates the rule and is free to spend less. Held by
+    /// `reward_tiers_spend_their_budget`.
+    pub fn min_budget_spend(self) -> f32 {
+        match self {
+            ItemTier::StartingKit => 0.0,
+            ItemTier::Gauntlet | ItemTier::Champion => 0.9,
         }
     }
 }
@@ -1383,6 +1458,55 @@ pub fn validate_item_budget(name: &str, item: &ItemConfig) -> Result<(), String>
     }
 }
 
+/// Validate that an item names a tier and that its item level sits in that
+/// tier's band ([`ItemTier::item_levels`]).
+pub fn validate_item_tier_band(name: &str, item: &ItemConfig) -> Result<(), String> {
+    let Some(tier) = item.tier() else {
+        return Err(format!(
+            "{} (item_tier {}): no such tier — item_tier is 0 (starting kit), 1 (Gauntlet) or 2 (Champion)",
+            name, item.item_tier
+        ));
+    };
+    let band = tier.item_levels();
+    if band.contains(&item.item_level) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} (item_tier {}, {}): item_level {} is outside the tier's band {}-{}",
+            name,
+            item.item_tier,
+            tier.name(),
+            item.item_level,
+            band.start(),
+            band.end()
+        ))
+    }
+}
+
+/// [`validate_item_tier_band`] over every item, reporting every offender at
+/// once, in item order.
+pub fn validate_tier_bands(items: &ItemDefinitions) -> Result<(), String> {
+    let mut errors: Vec<(String, String)> = items
+        .iter()
+        .filter_map(|(id, item)| {
+            let name = format!("{id:?}");
+            validate_item_tier_band(&name, item)
+                .err()
+                .map(|e| (name, e))
+        })
+        .collect();
+    errors.sort();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors
+            .into_iter()
+            .map(|(_, e)| e)
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+}
+
 // ============================================================================
 // LOADOUT RESOLUTION
 // ============================================================================
@@ -1600,17 +1724,30 @@ impl DefaultLoadouts {
 // LOADING
 // ============================================================================
 
-/// Load item definitions from assets/config/items.ron
-pub fn load_item_definitions() -> Result<ItemDefinitions, String> {
-    let config_path = crate::paths::asset_path_str("config/items.ron");
-
-    let contents = std::fs::read_to_string(&config_path)
-        .map_err(|e| format!("Failed to read {}: {}", config_path, e))?;
-
+/// Parse and validate the text of an `items.ron`; `origin` names it in errors.
+/// Every item must sit in its tier's band ([`validate_tier_bands`]).
+pub fn parse_item_definitions(contents: &str, origin: &str) -> Result<ItemDefinitions, String> {
     let config: ItemsConfig =
-        ron::from_str(&contents).map_err(|e| format!("Failed to parse {}: {}", config_path, e))?;
+        ron::from_str(contents).map_err(|e| format!("Failed to parse {}: {}", origin, e))?;
 
     let definitions = ItemDefinitions::new(config);
+    validate_tier_bands(&definitions)
+        .map_err(|e| format!("{} has items that fail their tier check:\n{}", origin, e))?;
+    Ok(definitions)
+}
+
+/// Load item definitions from assets/config/items.ron
+pub fn load_item_definitions() -> Result<ItemDefinitions, String> {
+    load_item_definitions_from(&crate::paths::asset_path_str("config/items.ron"))
+}
+
+/// Load item definitions from the `items.ron` at `config_path` — the loader
+/// [`load_item_definitions`] runs on the shipped file.
+pub fn load_item_definitions_from(config_path: &str) -> Result<ItemDefinitions, String> {
+    let contents = std::fs::read_to_string(config_path)
+        .map_err(|e| format!("Failed to read {}: {}", config_path, e))?;
+
+    let definitions = parse_item_definitions(&contents, config_path)?;
 
     info!(
         "Loaded {} item definitions from {}",
@@ -3975,6 +4112,222 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             violations.join("\n")
         );
     }
+
+    // ---- tier band tests ----
+
+    /// The bands are the talents-and-Gauntlet proposal's §6.2, and each tier
+    /// is named by the `item_tier` index `items.ron` gives it.
+    #[test]
+    fn tier_bands_are_pinned() {
+        let bands: Vec<(ItemTier, u32, std::ops::RangeInclusive<u32>)> = ItemTier::ALL
+            .iter()
+            .map(|t| (*t, t.index(), t.item_levels()))
+            .collect();
+        assert_eq!(
+            bands,
+            vec![
+                (ItemTier::StartingKit, 0, 54..=60),
+                (ItemTier::Gauntlet, 1, 76..=80),
+                (ItemTier::Champion, 2, 90..=94),
+            ]
+        );
+        for tier in ItemTier::ALL {
+            assert_eq!(ItemTier::from_index(tier.index()), Some(tier));
+        }
+        assert_eq!(ItemTier::from_index(3), None);
+        let floors: Vec<f32> = ItemTier::ALL.iter().map(|t| t.min_budget_spend()).collect();
+        assert_eq!(
+            floors,
+            vec![0.0, 0.9, 0.9],
+            "the reward tiers' spend floors"
+        );
+    }
+
+    fn tiered_item(item_tier: u32, item_level: u32) -> ItemConfig {
+        let mut item = budget_test_item(ItemSlotType::Head, item_level);
+        item.item_tier = item_tier;
+        item
+    }
+
+    /// Each band admits both its edges and refuses the level either side.
+    #[test]
+    fn tier_band_admits_its_edges_and_refuses_beyond_them() {
+        for tier in ItemTier::ALL {
+            let band = tier.item_levels();
+            for level in [*band.start(), *band.end()] {
+                assert!(
+                    validate_item_tier_band("Edge", &tiered_item(tier.index(), level)).is_ok(),
+                    "{tier:?} must admit ilvl {level}"
+                );
+            }
+            for level in [band.start() - 1, band.end() + 1] {
+                let err = validate_item_tier_band("Beyond", &tiered_item(tier.index(), level))
+                    .expect_err("outside the band");
+                assert!(err.contains("outside the tier's band"), "{err}");
+            }
+        }
+    }
+
+    /// The old Gauntlet levels (69-75) are refused, and an `item_tier` no tier
+    /// has is refused whatever its level.
+    #[test]
+    fn tier_band_refuses_the_old_gauntlet_levels_and_an_unknown_tier() {
+        for level in 69..=75 {
+            assert!(validate_item_tier_band("Old", &tiered_item(1, level)).is_err());
+        }
+        let err = validate_item_tier_band("Unknown", &tiered_item(3, 92)).expect_err("no tier 3");
+        assert!(err.contains("no such tier"), "{err}");
+    }
+
+    /// The band is checked where `items.ron` is loaded: a file with an item
+    /// outside its band does not load, and names the item.
+    #[test]
+    fn an_item_outside_its_band_fails_to_load() {
+        let ron = |level: u32| {
+            format!(
+                "(items: {{ WarlordsCrown: (name: \"Warlord's Crown\", item_level: {level}, \
+                 item_tier: 1, slot: Head) }})"
+            )
+        };
+        assert!(parse_item_definitions(&ron(78), "test").is_ok());
+        let err = parse_item_definitions(&ron(75), "test")
+            .err()
+            .expect("ilvl 75 is outside the Gauntlet band");
+        assert!(err.contains("WarlordsCrown"), "{err}");
+        assert!(err.contains("outside the tier's band"), "{err}");
+    }
+
+    /// The production loader refuses an out-of-band file: the shipped
+    /// `items.ron` with one Gauntlet item put back at its old ilvl 75 does not
+    /// load through [`load_item_definitions_from`], and the error names it.
+    /// The unedited copy loads, so the refusal is the edit's.
+    #[test]
+    fn the_loader_refuses_the_shipped_file_with_an_item_outside_its_band() {
+        let shipped =
+            std::fs::read_to_string(crate::paths::asset_path_str("config/items.ron")).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("items.ron");
+        let path = path.to_str().unwrap();
+
+        std::fs::write(path, &shipped).unwrap();
+        assert!(load_item_definitions_from(path).is_ok());
+
+        let anchor =
+            "WarlordsCrown: (\n            name: \"Warlord's Crown\",\n            item_level: 80,";
+        assert!(shipped.contains(anchor), "the fixture's anchor moved");
+        let edited = shipped.replace(anchor, &anchor.replace("item_level: 80", "item_level: 75"));
+        std::fs::write(path, edited).unwrap();
+        let err = load_item_definitions_from(path)
+            .err()
+            .expect("an item at ilvl 75 is outside the Gauntlet band");
+        assert!(err.contains("WarlordsCrown"), "{err}");
+        assert!(err.contains("outside the tier's band 76-80"), "{err}");
+    }
+
+    /// A reward tier spends at least [`ItemTier::min_budget_spend`] of its
+    /// budget, so the gain its band promises is what a pick delivers. The
+    /// Gauntlet tier is named by set equality, so this cannot pass on an
+    /// empty tier and an item that joins or leaves it is seen.
+    #[test]
+    fn reward_tiers_spend_their_budget() {
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        let mut under = Vec::new();
+        for (id, item) in item_defs.iter() {
+            let floor = item
+                .tier()
+                .expect("a loaded item has a tier")
+                .min_budget_spend();
+            let budget = calculate_effective_budget(item);
+            let usage = calculate_budget_usage(item);
+            if usage < floor * budget {
+                under.push(format!(
+                    "{id:?} (ilvl {}): spends {usage:.2} of {budget:.2}, under {:.0}%",
+                    item.item_level,
+                    floor * 100.0
+                ));
+            }
+        }
+        under.sort();
+        assert!(under.is_empty(), "{}", under.join("\n"));
+
+        let gauntlet: std::collections::BTreeSet<String> = item_defs
+            .iter()
+            .filter(|(_, item)| item.tier() == Some(ItemTier::Gauntlet))
+            .map(|(id, _)| format!("{id:?}"))
+            .collect();
+        let named: std::collections::BTreeSet<String> =
+            GAUNTLET_TIER.iter().map(|id| format!("{id:?}")).collect();
+        assert_eq!(gauntlet, named, "the Gauntlet tier is this list");
+    }
+
+    /// Every Gauntlet-tier (item_tier 1) item.
+    const GAUNTLET_TIER: [ItemId; 65] = [
+        ItemId::WarlordsCrown,
+        ItemId::WarlordsVizard,
+        ItemId::WarlordsBreastplate,
+        ItemId::WarlordsLegguards,
+        ItemId::WarlordsGauntlets,
+        ItemId::WarlordsSpaulders,
+        ItemId::WarlordsGreaves,
+        ItemId::WarlordsGirdle,
+        ItemId::WarlordsBracers,
+        ItemId::JudgementCrown,
+        ItemId::JudgementBreastplate,
+        ItemId::JudgementLegguards,
+        ItemId::JudgementSpaulders,
+        ItemId::JudgementGauntlets,
+        ItemId::JudgementBelt,
+        ItemId::JudgementSabatons,
+        ItemId::JudgementBracers,
+        ItemId::GiantstalkerHelm,
+        ItemId::GiantstalkerTunic,
+        ItemId::GiantstalkerLegs,
+        ItemId::GiantstalkerGloves,
+        ItemId::GiantstalkerEpaulets,
+        ItemId::GiantstalkerBoots,
+        ItemId::GiantstalkerBelt,
+        ItemId::GiantstalkerBracers,
+        ItemId::DeathdealerCowl,
+        ItemId::DeathdealerTunic,
+        ItemId::DeathdealerLegs,
+        ItemId::DeathdealerGloves,
+        ItemId::DeathdealerMantle,
+        ItemId::DeathdealerBoots,
+        ItemId::DeathdealerBelt,
+        ItemId::DeathdealerBracers,
+        ItemId::ArcanistCrown,
+        ItemId::ArcanistRobes,
+        ItemId::ArcanistLeggings,
+        ItemId::ArcanistGloves,
+        ItemId::ArcanistMantle,
+        ItemId::ArcanistBoots,
+        ItemId::ArcanistBelt,
+        ItemId::ArcanistBracers,
+        ItemId::CloakOfConquest,
+        ItemId::CloakOfWisdom,
+        ItemId::CloakOfNatureWarding,
+        ItemId::PendantOfMight,
+        ItemId::PendantOfClarity,
+        ItemId::PendantOfArcaneWarding,
+        ItemId::RingOfBruteForce,
+        ItemId::RingOfArcaneInsight,
+        ItemId::RingOfFortitude,
+        ItemId::RingOfElementalMastery,
+        ItemId::InsigniaOfTheAlliance,
+        ItemId::TalismanOfEphemeralPower,
+        ItemId::BloodlordsBattleaxe,
+        ItemId::StormbladeEdge,
+        ItemId::FangOfTheViper,
+        ItemId::MaceOfTheRedeemer,
+        ItemId::RunestaffOfElements,
+        ItemId::ClawOfChromaggus,
+        ItemId::AzuresongMageblade,
+        ItemId::WandOfTheInvoker,
+        ItemId::EaglestrikeBow,
+        ItemId::DeadeyeCrossbow,
+        ItemId::GrimoireOfShadows,
+        ItemId::BulwarkOfTheGuardian,
+    ];
 
     /// Every class's default kit, as the budget prices it: the sum of
     /// `calculate_budget_usage` over its default loadout. A re-spend of a
