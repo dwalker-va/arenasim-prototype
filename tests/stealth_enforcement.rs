@@ -815,7 +815,7 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
         | ShadowResistanceAura | ConcentrationAura | LightningBolt | FrostShock
         | LesserHealingWave | Purge | WindShear | AirTotem | WaterTotem | EarthTotem
         | FireTotem | Rejuvenation | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild
-        | Innervate | EntanglingRoots | Cyclone | TravelForm => false,
+        | Innervate | EntanglingRoots | Cyclone | TravelForm | ShadowWordPain => false,
     }
 }
 

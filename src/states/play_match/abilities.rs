@@ -235,6 +235,10 @@ pub enum AbilityType {
     EntanglingRoots, // Druid cast root that breaks on damage, plus a small Nature DoT
     Cyclone,         // Druid cast incapacitate: no acting, immune to damage AND healing
     TravelForm,      // Druid escape shift: breaks roots and snares, faster, no casting
+    // Priest abilities (0.9). Appended, not grouped with the Priest's above:
+    // the enum's derived `Ord` keys every `BTreeMap<AbilityType, _>`, so a
+    // variant inserted mid-list would reorder what existing ones iterate.
+    ShadowWordPain, // Priest instant Shadow DoT
 }
 
 impl AbilityType {

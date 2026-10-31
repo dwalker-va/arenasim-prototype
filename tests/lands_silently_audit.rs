@@ -460,7 +460,17 @@ const DOT_MEMBERS: &[AbilityType] = &[
     Moonfire,
     Rend,
     SerpentSting,
+    ShadowWordPain,
     UnstableAffliction,
+];
+
+/// DoTs that land with nothing drawn yet. Shadow Word: Pain's state stays
+/// `None` by the Moonfire ruling; AS-342 builds its landing, and moves it to
+/// `DOT_SILENT_BY_DESIGN` when that landing is the whole visual. Deadly
+/// Poison's landing is AS-341's.
+const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[
+    (DeadlyPoison, "AS-341 (weapon poison landing)"),
+    (ShadowWordPain, "AS-342"),
 ];
 
 /// The DoT STATE a member's aura routes to. The aura carries the ability's
@@ -489,10 +499,6 @@ const DOT_SILENT_BY_DESIGN: &[SilentByDesign] = &[SilentByDesign {
     reason: "client has no state; aura icon carries it (ruling 2; the Curse of Tongues \
              precedent) — the orb-and-beam landing is the whole visual",
 }];
-
-/// DoTs that land with no visual yet, each with the card that draws it.
-const DOT_KNOWN_SILENT: &[(AbilityType, &str)] =
-    &[(DeadlyPoison, "AS-341 (weapon poison landing)")];
 
 #[test]
 fn dot_lands_nothing_silently() {
