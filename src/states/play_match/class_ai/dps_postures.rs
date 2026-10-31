@@ -580,6 +580,8 @@ fn build_kiter_inputs(
             super::pillar_stance::side_point(ctx.obstacles, &stance)
                 .map(|p| Vec3::new(p.x, my_pos.y, p.y))
         }),
+        avoid_dead_ends: false,
+        flee_reach: 0.0,
     }
 }
 

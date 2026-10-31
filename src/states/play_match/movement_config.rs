@@ -43,6 +43,8 @@ pub struct MovementWeights {
     /// (FREE, Priest only).
     pub formation_pull: f32,
     /// Graded penalty for candidate positions approaching arena corners.
+    /// Wherever `flee` is on it must EXCEED `flee` (`validate()`), or a
+    /// fleeing kiter runs into the wall behind it.
     pub corner_penalty: f32,
     /// Low-weight pull toward wand range of the kill target (Priest;
     /// 0.0 disables for Paladin).
@@ -390,9 +392,13 @@ impl CasterHealerMovementConfig {
             weights: MovementWeights {
                 threat_repulsion: 3.0,
                 formation_pull: 2.0,
-                corner_penalty: 6.0,
+                // Above `flee`, as every fleeing scorer's must be.
+                corner_penalty: 8.0,
                 wand_pull: 0.0, // no wand
                 burn_pull: 0.0, // no Mana Burn
+                // Travel Form's run from its chaser (unshifted ticks pass no
+                // chaser, so the term is silent there).
+                flee: 6.0,
                 ..MovementWeights::default()
             },
             ..Self::default()
@@ -802,6 +808,16 @@ impl MovementConfig {
                     ));
                 }
             }
+            // A fleeing kiter maximises distance from its chaser at every
+            // range, so only the corner penalty bends the run off the wall it
+            // is heading for — and only when it outweighs the flee.
+            if weights.flee > 0.0 && weights.corner_penalty <= weights.flee {
+                issues.push(format!(
+                    "{class}.weights.corner_penalty ({}) must exceed {class}.weights.flee ({}) — \
+                     otherwise the flee carries the unit into the wall behind it",
+                    weights.corner_penalty, weights.flee
+                ));
+            }
         }
 
         // DPS kiter ENGAGE/KITE blocks (Mage, Hunter).
@@ -1111,6 +1127,61 @@ mod tests {
         MovementConfig::default()
             .validate()
             .expect("built-in defaults must be internally consistent");
+    }
+
+    /// A fleeing scorer's corner penalty must exceed its flee (AS-241), in
+    /// every block: equal is refused as well as below, and a block that does
+    /// not flee is free to set either.
+    #[test]
+    fn validate_rejects_a_flee_the_corner_penalty_does_not_exceed() {
+        let shipped = load_movement_config().expect("movement.ron loads");
+        let fleeing: Vec<&str> = [
+            ("priest", &shipped.priest.weights),
+            ("paladin", &shipped.paladin.weights),
+            ("shaman", &shipped.shaman.weights),
+            ("druid", &shipped.druid.weights),
+            ("mage", &shipped.mage.weights),
+            ("hunter", &shipped.hunter.weights),
+        ]
+        .into_iter()
+        .filter(|(_, w)| w.flee > 0.0)
+        .map(|(class, _)| class)
+        .collect();
+        assert_eq!(
+            fleeing,
+            ["druid", "hunter"],
+            "the blocks that flee — each is checked below"
+        );
+
+        fn weights<'a>(config: &'a mut MovementConfig, class: &str) -> &'a mut MovementWeights {
+            match class {
+                "druid" => &mut config.druid.weights,
+                _ => &mut config.hunter.weights,
+            }
+        }
+        for class in fleeing {
+            for corner_penalty in [6.0, 5.0] {
+                let mut config = shipped;
+                weights(&mut config, class).flee = 6.0;
+                weights(&mut config, class).corner_penalty = corner_penalty;
+                let issues = config
+                    .validate()
+                    .expect_err("a corner penalty at or below flee must fail");
+                assert!(
+                    issues
+                        .iter()
+                        .any(|i| i.contains(&format!("{class}.weights.corner_penalty"))),
+                    "issues should name {class}'s corner_penalty: {issues:?}"
+                );
+            }
+            let mut config = shipped;
+            weights(&mut config, class).corner_penalty = 6.5;
+            weights(&mut config, class).flee = 6.0;
+            config.validate().expect("above flee passes");
+            weights(&mut config, class).flee = 0.0;
+            weights(&mut config, class).corner_penalty = 0.0;
+            config.validate().expect("no flee, no floor");
+        }
     }
 
     #[test]
