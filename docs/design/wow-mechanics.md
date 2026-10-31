@@ -194,6 +194,14 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   `1.10`, before any `AttackSpeedSlow` stretches it. It is 0 for every class,
   and while it is 0 the interval is computed exactly as before it existed. No
   item-budget weight here.
+- `AttackSpeedIncrease` is the haste AURA, the mirror of `AttackSpeedSlow`:
+  each one divides the interval by `1 + magnitude`, after the permanent bonus,
+  so haste effects multiply as TBC's do. It reaches the same intervals the
+  stat does — melee and ranged alike (a wand included), as TBC's haste rating
+  does. The Dragonspine Trophy's proc grants it (+20% for 10s, TBC's 325 haste
+  rating). A melee-only haste (Flurry, Swift Blades) would need a scope it
+  does not have yet. Priced at `WEIGHT_ATTACK_SPEED`, crit's weight at TBC's
+  rating exchange rate (15.77 haste rating per percent against 22.08 crit).
 
 ### Windfury Totem procs on the main hand only
 

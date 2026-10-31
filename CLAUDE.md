@@ -640,15 +640,18 @@ any ring fits either ring socket, and the same item may not occupy both
    - **Per-trinket ICD, no global lock.** A proc cannot fire again while its own
      buff is up (`internal_cooldown >= duration` is validated), and two
      DIFFERENT trinkets can be live at once. A proc buff coexists with a
-     same-stat buff from an ability (Battle Shout and a Dragonspine proc stack).
+     same-stat buff from an ability (Battle Shout and an attack-power proc stack).
    - **Pricing.** The proc is charged to the budget at
      `stat_weight × magnitude × duration / (duration + internal_cooldown)` — the
      ICD's LONG-RUN uptime bound. `chance` does not enter the price. It is not a
      ceiling over a short life: a trinket starts ready, so a life shorter than
-     one cycle runs above it (Dragonspine realises 23% against its 18.2% bound in
-     a 43s arena life — `realised_uptime_against_the_long_run_bound` in
-     `tests/proc_trinket_probes.rs`). Only the six stat auras
-     `proc_effect_budget_weight` prices may be an `effect`.
+     one cycle can run above it (Dragonspine realises 18.5% against its 18.2%
+     bound in a 37.8s arena life — `realised_uptime_against_the_long_run_bound`
+     in `tests/proc_trinket_probes.rs`). Only the seven effects
+     `proc_effect_budget_weight` prices may be an `effect`: the six stat auras
+     at their item-stat weights, and haste (`AttackSpeedIncrease`, the
+     Dragonspine Trophy's +20% attack speed) at `WEIGHT_ATTACK_SPEED`, crit's
+     weight at TBC's rating exchange rate.
    - **Procs are not purgeable.** A proc buff is `DispelType::Physical` — an
      item's effect is not a spell, however magical it looks — so no purge,
      dispel or cleanse removes it.

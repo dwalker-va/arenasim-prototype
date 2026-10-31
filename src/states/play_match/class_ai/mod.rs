@@ -1170,6 +1170,7 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         | AuraType::SpellResistanceBuff
         | AuraType::ArmorIncrease
         | AuraType::FearImmunity
+        | AuraType::AttackSpeedIncrease
         | AuraType::TravelForm => 0,
     }
 }
@@ -1404,6 +1405,7 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         // Offensive throughput buffs.
         AuraType::AttackPowerIncrease => 60,
         AuraType::SpellPowerIncrease => 60,
+        AuraType::AttackSpeedIncrease => 60,
         AuraType::WindfuryBuff => 55,
         AuraType::CritChanceIncrease => 50,
         // Minor utility buffs.
@@ -1502,6 +1504,7 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
         | AuraType::HealingOverTime
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
+        | AuraType::AttackSpeedIncrease
         | AuraType::TravelForm => false,
     }
 }
@@ -1593,6 +1596,7 @@ pub const fn grants_damage_immunity(aura: AuraType) -> bool {
         | AuraType::HealingOverTime
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
+        | AuraType::AttackSpeedIncrease
         | AuraType::TravelForm => false,
     }
 }
