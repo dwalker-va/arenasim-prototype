@@ -450,6 +450,14 @@ fn situations(class: CharacterClass, bars: &[f32]) -> Vec<Situation> {
             ..CALM
         });
     }
+    // Under TeamPlan a healer with time to cast heals a hurt ally with its
+    // big heal (the Paladin's Holy Light, ahead of Flash of Light).
+    list.push(Situation {
+        name: "ally hurt, TeamPlan",
+        ally_health: Some(0.7),
+        team_plan: true,
+        ..CALM
+    });
     // Under TeamPlan a lock the team holds that is about to end calls the
     // Chain play: the target's stun ending now (an instant hand-off lands in
     // its last moments) and the enemy healer's ending in a cast's time (a
@@ -1398,9 +1406,6 @@ enum Unreached {
     DecidedOutside(&'static str),
     /// Reachable, but only from a state the grid has no knob for (named).
     NeedsKnob(&'static str),
-    /// Never chosen from ANY state: an earlier priority that is always
-    /// castable when this one is wins first (named).
-    Shadowed(&'static str),
 }
 
 impl Unreached {
@@ -1408,7 +1413,6 @@ impl Unreached {
         match self {
             Unreached::DecidedOutside(site) => format!("decided by {site}, outside the dispatch"),
             Unreached::NeedsKnob(knob) => format!("needs a knob: {knob}"),
-            Unreached::Shadowed(by) => format!("shadowed by {by}"),
         }
     }
 }
@@ -1433,17 +1437,11 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         ),
     ),
     (
-        AbilityType::HolyLight,
-        Unreached::Shadowed(
-            "Flash of Light: same range and school, cheaper, no cooldown, wider trigger (AS-286)",
-        ),
-    ),
-    (
         AbilityType::ShadowWordPain,
-        Unreached::Shadowed(
-            "the idle slot under TeamPlan: below full upkeep a proactive Power Word: Shield \
-             or Mana Burn on the grid's enemy Priest goes first, and in full upkeep its own \
-             DoT is already up (tests/shadow_word_pain_scenes.rs pins the choice)",
+        Unreached::NeedsKnob(
+            "a TeamPlan Priest with its whole team topped and shielded (or Weakened Soul), \
+             no enemy healer mana to burn, and its own Shadow Word: Pain not yet on its target \
+             (tests/shadow_word_pain_scenes.rs builds it)",
         ),
     ),
 ];

@@ -3,13 +3,18 @@
 //! Handles AI decision-making for the Priest class.
 //!
 //! ## Priority Order
+//! (Numbered as the `Priority N` comments in [`decide_priest_action`]; the
+//! Peel play's Psychic Scream heads the chain under `TeamPlan`.)
 //! 1. Power Word: Fortitude (buff all allies pre-combat)
 //! 2. Dispel Magic - Urgent (Polymorph, Freezing Trap, UA Silence, Fear)
-//! 3. Power Word: Shield (shield low-health allies)
-//! 4. Flash Heal (heal injured allies)
-//! 5. Dispel Magic - Maintenance (Roots, DoTs when team HP is stable)
-//! 6. Mind Blast (damage when allies are healthy)
-//! 7. Shadow Word: Pain on the kill target, when no heal or dispel is owed
+//!    2.5. The `Legacy` dip's Psychic Scream
+//! 3. Psychic Scream (defensive, while pressured)
+//! 4. Power Word: Shield (shield low-health allies)
+//!    4.5. Mana Burn on the enemy healer (surplus GCDs only)
+//! 5. Flash Heal (heal injured allies)
+//! 6. Dispel Magic - Maintenance (Roots, DoTs when team HP is stable)
+//! 7. Mind Blast (damage when allies are healthy)
+//! 8. Shadow Word: Pain on the kill target, when no heal or dispel is owed
 //!    (`TeamPlan` only)
 #![allow(clippy::too_many_arguments)]
 
