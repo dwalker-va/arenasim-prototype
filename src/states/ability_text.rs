@@ -259,6 +259,19 @@ pub fn build_ability_description(
     UTILITY_FALLBACK.to_string()
 }
 
+/// `" Stacks up to N times."` for an aura that DEEPENS on reapplication
+/// (`max_stacks` above 1), and `""` for every other aura — a refresh-only one
+/// included, since renewing it changes no number the sentence states. Read by
+/// the sentence whose numbers are per stack (damage over time).
+fn stacks_sentence(aura: &AuraEffect) -> String {
+    match aura.stacking {
+        Some(stacking) if stacking.max_stacks > 1 => {
+            format!(" Stacks up to {} times.", stacking.max_stacks)
+        }
+        _ => String::new(),
+    }
+}
+
 /// Build a description string for an aura effect
 pub fn build_aura_description(aura: &AuraEffect) -> String {
     match aura.aura_type {
@@ -298,12 +311,14 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
             let total_ticks = (aura.duration / aura.tick_interval).ceil() as i32;
             let total_damage = aura.magnitude * total_ticks as f32;
             format!(
-                "Deals {:.0} damage over {:.0} sec.",
-                total_damage, aura.duration
+                "Deals {:.0} damage over {:.0} sec.{}",
+                total_damage,
+                aura.duration,
+                stacks_sentence(aura)
             )
         }
         AuraType::HealingReduction => {
-            let reduction_pct = ((1.0 - aura.magnitude) * 100.0) as i32;
+            let reduction_pct = ((1.0 - aura.magnitude) * 100.0).round() as i32;
             format!(
                 "Reduces healing received by {}% for {:.0} sec.",
                 reduction_pct, aura.duration

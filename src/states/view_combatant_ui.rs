@@ -39,7 +39,7 @@ use super::play_match::AbilityType;
 use super::{
     match_config::{
         CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, RogueOpener,
-        WarlockCurse, WarriorShout,
+        RoguePoison, WarlockCurse, WarriorShout,
     },
     GameState,
 };
@@ -661,6 +661,29 @@ fn draw_sheet(
                     &mut match_config.team2_rogue_openers,
                     view_state,
                     opener,
+                );
+            }
+
+            // The weapon poison, offered from `RoguePoison::ALL` so poison N+1
+            // needs no edit here. Its icon is the poison's own ability art.
+            pick_section(ui);
+            let current = slot_value(
+                &match_config.team1_rogue_poisons,
+                &match_config.team2_rogue_poisons,
+                view_state,
+            );
+            let options: Vec<(RoguePoison, Option<egui::TextureId>)> = RoguePoison::ALL
+                .into_iter()
+                .map(|poison| (poison, ability_icon(poison.name())))
+                .collect();
+            if let Some(poison) =
+                strategic_option_panel(ui, "Weapon Poison", &options, current, encyclopedia_data)
+            {
+                set_slot_value(
+                    &mut match_config.team1_rogue_poisons,
+                    &mut match_config.team2_rogue_poisons,
+                    view_state,
+                    poison,
                 );
             }
         }
@@ -1698,6 +1721,18 @@ trait HasNameDescription {
 }
 
 impl HasNameDescription for RogueOpener {
+    fn name(&self) -> &str {
+        self.name()
+    }
+    fn description(&self) -> &str {
+        self.description()
+    }
+    fn ability(&self) -> AbilityType {
+        self.ability()
+    }
+}
+
+impl HasNameDescription for RoguePoison {
     fn name(&self) -> &str {
         self.name()
     }

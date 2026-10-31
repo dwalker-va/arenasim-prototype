@@ -478,6 +478,9 @@
         // `application_chance` to apply/refresh the slow debuff. The slow is a
         // POISON (dispel_type: Poison) so Dispel Magic can't remove it, only a
         // cleanse. magnitude 0.3 = 70% slow; refreshed in place (no DR).
+        // Crippling Poison II, TBC's top rank, is a 70% slow at a 30% chance
+        // for 12s (rank I, spell 3408, is the 50% slow); the sim keeps the 70%
+        // slow and rolls 50% (user ruling, 2026-10-30), for 8s.
         CripplingPoison: (
             name: "Crippling Poison",
             class: Rogue,
@@ -493,6 +496,92 @@
                 duration: 8.0,
                 magnitude: 0.3,
                 dispel_type: Poison,
+            )),
+            spell_school: Nature,
+        ),
+
+        // The other three weapon poisons (AS-330). Like Crippling, each is a
+        // passive per-match choice rolled once per LANDED weapon hit (not
+        // normalized for weapon speed); none is cast. Damage at the ~0.073
+        // scale (Classic Corruption 822 -> ours 60).
+        //
+        // User ruling (2026-10-30): ONE application gives a poison's full
+        // TBC-maximum effect, and application chances stay high. TBC's
+        // five-stack build-up at low chances is what forced Shiv spam, and it
+        // is not modelled. Deadly Poison is the one that still stacks.
+
+        // Deadly Poison VII: 180 Nature damage over 12s, stacking to 5, 30%.
+        // 180 x 0.073 = 13.1 a stack: four 3s ticks of 3.3 a stack.
+        DeadlyPoison: (
+            name: "Deadly Poison",
+            class: Rogue,
+            prevention: None,
+            icon: "icons/abilities/ability_rogue_dualweild.jpg",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            application_chance: Some(0.3),
+            applies_aura: Some((
+                aura_type: DamageOverTime,
+                duration: 12.0,
+                magnitude: 3.3,              // per 3s tick PER STACK
+                tick_interval: 3.0,
+                dispel_type: Poison,
+                stacking: Some((max_stacks: 5)),
+            )),
+            spell_school: Nature,
+        ),
+
+        // Wound Poison V: healing received -50% for 15s, 50% chance — TBC's
+        // five-stack maximum in one application. Refresh-only (`max_stacks:
+        // 1`). Only the strongest healing reduction applies, so it does not
+        // compound with Mortal Strike's Mortal Wound (`apply_healing`). Each
+        // application also deals TBC's 65 Nature damage: 65 x 0.073 = 4.7,
+        // fixed (min = max), through the damage funnel. It does not crit: TBC
+        // rolled it on spell crit, which a Rogue barely has; not modelled.
+        WoundPoison: (
+            name: "Wound Poison",
+            class: Rogue,
+            prevention: None,
+            icon: "icons/abilities/inv_misc_herb_16.jpg",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            application_chance: Some(0.5),
+            damage_base_min: 4.7,
+            damage_base_max: 4.7,
+            applies_aura: Some((
+                aura_type: HealingReduction,
+                duration: 15.0,
+                magnitude: 0.5,
+                dispel_type: Poison,
+                stacking: Some((max_stacks: 1)),
+            )),
+            spell_school: Nature,
+        ),
+
+        // Mind-numbing Poison III: casting time +60% for 14s, 50% chance.
+        // Refresh-only (`max_stacks: 1`): a new proc renews it, never doubles
+        // it. Only the larger cast-time increase applies, so it does not add
+        // to Curse of Tongues (`get_cast_time_increase`).
+        MindNumbingPoison: (
+            name: "Mind-numbing Poison",
+            class: Rogue,
+            prevention: None,
+            icon: "icons/abilities/spell_nature_nullifydisease.jpg",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            application_chance: Some(0.5),
+            applies_aura: Some((
+                aura_type: CastTimeIncrease,
+                duration: 14.0,
+                magnitude: 0.6,
+                dispel_type: Poison,
+                stacking: Some((max_stacks: 1)),
             )),
             spell_school: Nature,
         ),

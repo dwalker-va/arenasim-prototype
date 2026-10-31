@@ -224,6 +224,9 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::KidneyShot => config(S::Physical, T::NoType),
         AbilityType::Kick => Row::NoAura,
         AbilityType::CripplingPoison => config(S::Poison, T::Poison),
+        AbilityType::DeadlyPoison => config(S::Poison, T::Poison),
+        AbilityType::WoundPoison => config(S::Poison, T::Poison),
+        AbilityType::MindNumbingPoison => config(S::Poison, T::Poison),
 
         // ---- Warlock ----
         AbilityType::Corruption => config(S::Magic, T::Magic),
@@ -449,7 +452,7 @@ fn every_divergence_from_tbc_is_explained() {
 /// only removal that reaches a poison, so this set is exactly what a Priest's
 /// Dispel Magic and a Felhunter's Devour Magic may not touch.
 #[test]
-fn the_poisons_are_crippling_poison_and_serpent_sting() {
+fn the_poisons_are_the_rogue_weapon_poisons_and_serpent_sting() {
     let defs = AbilityDefinitions::default();
     let mut poisons: Vec<String> = defs
         .iter()
@@ -458,7 +461,16 @@ fn the_poisons_are_crippling_poison_and_serpent_sting() {
         .map(|(ability, _)| format!("{ability:?}"))
         .collect();
     poisons.sort();
-    assert_eq!(poisons, ["CripplingPoison", "SerpentSting"]);
+    assert_eq!(
+        poisons,
+        [
+            "CripplingPoison",
+            "DeadlyPoison",
+            "MindNumbingPoison",
+            "SerpentSting",
+            "WoundPoison"
+        ]
+    );
 }
 
 // ---------------------------------------------------------------------------

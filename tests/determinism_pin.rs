@@ -116,10 +116,18 @@ fn seeded_2v2_matches_its_recorded_identity() {
     // `main` each Priest entered PRESSURED as the other closed into the
     // 28-30yd closing band, and both opened with Mind Blast; with the gap
     // neither enters PRESSURED there, and neither casts it.
+    //
+    // Re-recorded for AS-330, only the strongest healing reduction applying.
+    // Took this cell to Some(2) @ 67.54995s from Some(2) @ 49.549416s. The
+    // first line that differs from `main` @ e824cb88 is at 41.60s (log clock):
+    // a Flash Heal on the Mage lands for 69, not 45. The Warrior's Mortal
+    // Strikes at 35.27s and 41.38s had left two Mortal Wounds on it (each
+    // lasts 10s, the strike recurs every ~6s), which compounded to 0.4225;
+    // the strongest alone is 0.65.
     assert_pinned(
         &result,
         Some(2),
-        1_111_896_730,
+        1_116_150_163,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }

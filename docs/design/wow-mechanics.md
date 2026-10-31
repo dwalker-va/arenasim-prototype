@@ -97,9 +97,36 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   damage that buys back the off hand it gives up.
 - **Per-swing procs stay a flat chance per hit**, as Classic rolled them
   (Windfury Totem "each hit has a 20% chance", Crippling Poison "each strike
-  has a 30% chance"): Crippling Poison, Windfury Totem and `MeleeHit` proc
-  trinkets roll their chance on every landed swing, so a slower weapon procs
-  less often per second but each proc is a slower weapon's bigger hit.
+  has a 30% chance" — Classic's and TBC's rate; the sim's is 50%): the weapon
+  poisons, Windfury Totem and `MeleeHit` proc trinkets roll their chance on
+  every landed swing, so a slower weapon procs less often per second but each
+  proc is a slower weapon's bigger hit.
+- **Weapon poisons** are the Rogue's per-match choice (`RoguePoison`, picked in
+  View Combatant or by a headless config's `team{1,2}_rogue_poisons`), all four
+  baseline. Each is an ability in `abilities.ron` carrying its
+  `application_chance`. **One application gives a poison's full effect** — TBC's
+  five-stack maximum — and the chances stay high (user ruling, 2026-10-30): the
+  stack build-up at TBC's low chances is what made Shiv necessary, and it is not
+  modelled. Deadly is the one exception that stacks.
+  - **Crippling** (the default, 50%): a 70% slow (TBC's rank II) for 8s,
+    refreshed in place.
+  - **Deadly** (30%): Nature damage over time, 3.3 every 3s per stack for 12s,
+    stacking to 5 per Rogue.
+  - **Wound** (50%): healing received -50% for 15s, refreshed by a new proc, and
+    4.7 Nature damage on each application (TBC's 65 at the kit's scale). The hit
+    goes through `apply_damage_with_absorb` like any Nature damage (resistance,
+    absorbs, immunity, the stealth reveal, rage) and does not crit: TBC rolled
+    it on spell crit, which a Rogue barely has; not modelled.
+  - **Mind-numbing** (50%): cast times +60% for 14s, refreshed by a new proc.
+  The other three land through `apply_pending_auras`. All four are poisons:
+  Cleanse removes them (a stack at a time), Dispel Magic does not.
+- **Healing reductions and cast-time increases do not compound** (TBC): only
+  the strongest healing reduction on a target applies (`healing_multiplier` —
+  Mortal Strike's and Aimed Shot's 35% under Wound Poison's 50% is 50%), and only
+  the largest cast-time increase (`get_cast_time_increase` — Mind-numbing's 60%
+  under Curse of Tongues' 50% is 60%). This also stops one Warrior's
+  overlapping Mortal Wounds compounding: Mortal Strike recurs every ~6s and its
+  wound lasts 10s, and the two used to cut healing to 0.4225 between them.
 
 ### Dual Wield
 - **Who can**: Warrior, Rogue, Hunter — Classic's list, in
@@ -332,9 +359,9 @@ tests fail if a full-CC type or spell is left unlabelled.
   Trap slow. Nothing removes them, and nothing is meant to
 - The class is derived from the ability's school (Physical school is physical,
   every other school is magic) unless the aura declares it. Declared in the RON
-  `applies_aura`: the poisons (`dispel_type: Poison` — Crippling Poison and
-  Serpent Sting, so a Priest cannot dispel a sting and a Paladin can cleanse
-  it), the Warlock's curses (`dispel_type: Curse`), the Spider's Web
+  `applies_aura`: the poisons (`dispel_type: Poison` — the Rogue's four weapon
+  poisons and Serpent Sting, so a Priest cannot dispel a sting and a Paladin
+  can cleanse it), the Warlock's curses (`dispel_type: Curse`), the Spider's Web
   (`dispel_type: Physical`; TBC's Web is a Physical-school root, so no dispel
   frees it, though Master's Call does) and the untyped auras
   (`dispel_type: Untyped`). The totem buffs and the Frost Trap slow are built

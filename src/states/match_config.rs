@@ -50,26 +50,45 @@ impl RogueOpener {
 }
 
 /// Rogue weapon-poison choice. A strategic lever like the stealth opener — which
-/// poison the Rogue coats its weapons with. Extensible (Mind-numbing, Wound,
-/// Deadly, etc. to come); for now only Crippling.
+/// poison the Rogue coats its weapons with for the match. All four are
+/// baseline, not talents. Each is an ability in `abilities.ron` holding its
+/// aura and its per-hit `application_chance`, rolled once per LANDED weapon
+/// hit (not normalized for weapon speed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum RoguePoison {
     /// Crippling Poison — auto-attacks have a chance to apply a strong (70%)
     /// movement slow to the target. The default poison.
     #[default]
     Crippling,
+    /// Deadly Poison — auto-attacks have a chance to apply a Nature damage over
+    /// time that stacks up to five times.
+    Deadly,
+    /// Wound Poison — auto-attacks have a chance to cut the healing the target
+    /// receives by half.
+    Wound,
+    /// Mind-numbing Poison — auto-attacks have a chance to make the target's
+    /// spells take 60% longer to cast.
+    MindNumbing,
 }
 
 impl RoguePoison {
     /// Every weapon poison, in display order. Mirrors `TotemElement::ALL`:
-    /// the encyclopedia expands this into one catalog entry per poison, so
-    /// poison N+1 gets its marker-buff page for free.
-    pub const ALL: [RoguePoison; 1] = [RoguePoison::Crippling];
+    /// the encyclopedia expands this into one catalog entry per poison, and
+    /// View Combatant's Weapon Poison picker offers each.
+    pub const ALL: [RoguePoison; 4] = [
+        RoguePoison::Crippling,
+        RoguePoison::Deadly,
+        RoguePoison::Wound,
+        RoguePoison::MindNumbing,
+    ];
 
     /// Get the display name
     pub fn name(&self) -> &'static str {
         match self {
             RoguePoison::Crippling => "Crippling Poison",
+            RoguePoison::Deadly => "Deadly Poison",
+            RoguePoison::Wound => "Wound Poison",
+            RoguePoison::MindNumbing => "Mind-numbing Poison",
         }
     }
 
@@ -77,15 +96,21 @@ impl RoguePoison {
     pub fn description(&self) -> &'static str {
         match self {
             RoguePoison::Crippling => "Auto-attacks may slow the target",
+            RoguePoison::Deadly => "Auto-attacks may stack Nature damage over time",
+            RoguePoison::Wound => "Auto-attacks may cut the target's healing",
+            RoguePoison::MindNumbing => "Auto-attacks may slow the target's casting",
         }
     }
 
-    /// The ability definition that holds this poison's data (slow magnitude,
-    /// duration, application chance).
+    /// The ability definition that holds this poison's data (its aura,
+    /// duration and per-hit application chance).
     pub fn ability(&self) -> super::play_match::abilities::AbilityType {
         use super::play_match::abilities::AbilityType;
         match self {
             RoguePoison::Crippling => AbilityType::CripplingPoison,
+            RoguePoison::Deadly => AbilityType::DeadlyPoison,
+            RoguePoison::Wound => AbilityType::WoundPoison,
+            RoguePoison::MindNumbing => AbilityType::MindNumbingPoison,
         }
     }
 }
