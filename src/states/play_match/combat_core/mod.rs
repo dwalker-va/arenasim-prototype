@@ -51,8 +51,9 @@ pub fn clamp_to_arena(bounds: &ArenaBounds, pos: Vec3) -> Vec3 {
     bounds.clamp(pos)
 }
 
-/// Get the total cast time increase from CastTimeIncrease auras on a combatant.
-/// Used by Curse of Tongues to slow casting.
+/// Get the cast time increase from CastTimeIncrease auras on a combatant
+/// (Curse of Tongues, Mind-numbing Poison): the LARGEST one, since two do not
+/// stack — Mind-numbing's 60% under Tongues' 50% is 60%, not 110%.
 /// Returns the percentage increase (0.5 = 50% slower, so multiply cast time by 1.5).
 pub fn get_cast_time_increase(auras: Option<&ActiveAuras>) -> f32 {
     auras.map_or(0.0, |a| {
@@ -60,7 +61,7 @@ pub fn get_cast_time_increase(auras: Option<&ActiveAuras>) -> f32 {
             .iter()
             .filter(|aura| aura.effect_type == AuraType::CastTimeIncrease)
             .map(|aura| aura.magnitude)
-            .sum()
+            .fold(0.0, f32::max)
     })
 }
 

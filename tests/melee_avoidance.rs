@@ -765,6 +765,12 @@ fn a_swing_held_off_a_friendly_fear_is_not_avoided() {
 /// pre-avoidance build of the same kit draws. Warrior+Rogue v Hunter+Priest
 /// went from 113 to 102 and the 3v3 from 234 to 229. Rogue v Warrior stayed
 /// at 53: the Rogue's and the Warrior's kits both changed, but no draw did.
+///
+/// Re-checked when AS-303 merged `main` @ e68c9a82 (AS-330's strongest-only
+/// healing reduction, Rogue poisons): the counts held. No commit held those
+/// without avoidance, so the evidence was a scratch build of the merged tree
+/// with `roll_avoidance` returning before any draw. Each cell's match log was
+/// byte-identical between that build and the merged tree.
 #[test]
 fn a_match_without_avoidance_draws_what_it_drew_before() {
     for (team1, team2, map, profile, seed, recorded) in ZERO_AVOIDANCE_DRAWS {

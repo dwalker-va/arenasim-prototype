@@ -371,6 +371,7 @@ const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
     MortalStrike,
     Shadowbolt,
     SinisterStrike,
+    WoundPoison,
 ];
 
 fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
@@ -408,7 +409,11 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
 
 /// The Druid's kit lands silently until its visuals are built — each
 /// "AS-160" entry here and below is cleared by AS-160's build cards.
-const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
+///
+/// Wound Poison's hit rides the weapon swing that procced it, and the landing
+/// AS-341 draws for every poison application is its visual.
+const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] =
+    &[(WoundPoison, "AS-341 (weapon poison landing)")];
 
 #[test]
 fn direct_damage_finds_every_member() {
@@ -456,6 +461,7 @@ fn is_dot(a: AbilityType, c: &AbilityConfig) -> bool {
 const DOT_MEMBERS: &[AbilityType] = &[
     Corruption,
     CurseOfAgony,
+    DeadlyPoison,
     Immolate,
     Moonfire,
     Rend,
@@ -466,8 +472,12 @@ const DOT_MEMBERS: &[AbilityType] = &[
 
 /// DoTs that land with nothing drawn yet. Shadow Word: Pain's state stays
 /// `None` by the Moonfire ruling; AS-342 builds its landing, and moves it to
-/// `DOT_SILENT_BY_DESIGN` when that landing is the whole visual.
-const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[(ShadowWordPain, "AS-342")];
+/// `DOT_SILENT_BY_DESIGN` when that landing is the whole visual. Deadly
+/// Poison's landing is AS-341's.
+const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[
+    (DeadlyPoison, "AS-341 (weapon poison landing)"),
+    (ShadowWordPain, "AS-342"),
+];
 
 /// The DoT STATE a member's aura routes to. The aura carries the ability's
 /// RON `name:`, so this sweeps the config name through the very router every
@@ -642,6 +652,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     Lifebloom,
     MageArmorSpell,
     MarkOfTheWild,
+    MindNumbingPoison,
     MoltenArmor,
     MortalStrike,
     PowerWordFortitude,
@@ -650,6 +661,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     ShadowResistanceAura,
     TravelForm,
     WaterTotem,
+    WoundPoison,
 ];
 
 /// The family-wide aura-application cue — what draws a status aura that no
@@ -746,6 +758,7 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (AirTotem, "AS-134 (aura application — totem pulse)"),
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
+    (MindNumbingPoison, "AS-341 (weapon poison landing)"),
 ];
 
 #[test]

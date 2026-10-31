@@ -152,11 +152,14 @@ pub enum AbilityType {
     KidneyShot,
     PowerWordFortitude,
     Rend,
-    MortalStrike,    // Warrior damage + healing reduction
-    Pummel,          // Warrior interrupt
-    BerserkerRage,   // Warrior fear break + 10s fear immunity (horror bypasses it)
-    Kick,            // Rogue interrupt
-    CripplingPoison, // Rogue weapon poison: on-hit chance to slow (passive, not cast)
+    MortalStrike,      // Warrior damage + healing reduction
+    Pummel,            // Warrior interrupt
+    BerserkerRage,     // Warrior fear break + 10s fear immunity (horror bypasses it)
+    Kick,              // Rogue interrupt
+    CripplingPoison,   // Rogue weapon poison: on-hit chance to slow (passive, not cast)
+    DeadlyPoison,      // Rogue weapon poison: on-hit stacking Nature DoT (passive)
+    WoundPoison,       // Rogue weapon poison: on-hit healing reduction (passive)
+    MindNumbingPoison, // Rogue weapon poison: on-hit cast-time increase (passive)
     // Warlock abilities
     Corruption,         // Shadow DoT
     Shadowbolt,         // Shadow projectile
@@ -258,8 +261,8 @@ impl AbilityType {
             // A charge closes the gap; what it lands on arrival is not a
             // weapon strike, and it is cast from 25 yards.
             Charge | BoarCharge => false,
-            // A weapon coating, not an attack: its proc rides a landed swing.
-            CripplingPoison => false,
+            // Weapon coatings, not attacks: each proc rides a landed swing.
+            CripplingPoison | DeadlyPoison | WoundPoison | MindNumbingPoison => false,
             // Ranged attacks: never avoided.
             AimedShot | ArcaneShot | ConcussiveShot | SerpentSting => false,
             // Everything else is a spell, a shout, a trap, a form or a

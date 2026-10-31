@@ -124,24 +124,28 @@ pub fn combat_auto_attack(
             })
             .collect();
 
-    // Weapon-poison proc table: Rogues coated with Crippling Poison and the
-    // per-swing application chance from the ability config. A successful roll on
-    // a landed swing applies/refreshes the Crippling slow on the target.
-    let crippling_chance: std::collections::HashMap<Entity, f32> = combatants
+    // Weapon-poison proc table: each Rogue, the ability of the poison it chose
+    // for the match, and that poison's per-hit application chance from the
+    // ability config. A successful roll on a landed swing applies the poison.
+    let poison_procs: std::collections::HashMap<Entity, (AbilityType, f32)> = combatants
         .iter()
         .filter_map(|(entity, _, combatant, _, _, _)| {
-            if combatant.class == match_config::CharacterClass::Rogue
-                && combatant.rogue_poison == match_config::RoguePoison::Crippling
-            {
-                abilities
-                    .get(&AbilityType::CripplingPoison)
-                    .and_then(|def| def.application_chance)
-                    .map(|chance| (entity, chance))
-            } else {
-                None
+            if combatant.class != match_config::CharacterClass::Rogue {
+                return None;
             }
+            let poison = combatant.rogue_poison.ability();
+            abilities
+                .get(&poison)
+                .and_then(|def| def.application_chance)
+                .map(|chance| (entity, (poison, chance)))
         })
         .collect();
+    // The poisons whose first application has been logged this frame.
+    let mut poison_fresh_this_frame: std::collections::HashSet<(
+        Entity,
+        AbilityType,
+        Option<Entity>,
+    )> = std::collections::HashSet::new();
 
     // Auto-attacks must not shatter friendly crowd control. The AI ability path
     // already guards casts via `pre_cast_ok(check_friendly_cc)`, but
@@ -685,6 +689,11 @@ pub fn combat_auto_attack(
     let mut crit_per_target: std::collections::BTreeMap<Entity, bool> =
         std::collections::BTreeMap::new();
 
+    // Weapon-poison procs that also deal damage (Wound Poison): (attacker,
+    // target, poison), dealt after the loop so the swing's own log line and
+    // killing blow are settled first. A Vec in swing order: deterministic.
+    let mut poison_damage_hits: Vec<(Entity, Entity, AbilityType)> = Vec::new();
+
     // Track Frost Armor procs: attacker entities to apply slows to after the loop.
     let mut frost_armor_procs: std::collections::BTreeSet<Entity> =
         std::collections::BTreeSet::new();
@@ -767,11 +776,32 @@ pub fn combat_auto_attack(
                     melee_proc_hits.push(attacker_entity);
                 }
 
-                // Crippling Poison proc: a coated Rogue's landed swing has a
-                // chance to apply/refresh the slow. Refreshed in place so it
-                // never diminishes (poisons sidestep the slow DR category).
-                if let Some(&chance) = crippling_chance.get(&attacker_entity) {
-                    if game_rng.random_f32() < chance {
+                // Weapon-poison proc: a coated Rogue's landed swing has a
+                // chance to apply its poison. Crippling is refreshed in place
+                // so it never diminishes (poisons sidestep the slow DR
+                // category); the others land through `apply_pending_auras`,
+                // which stacks and refreshes them.
+                if let Some(&(poison, chance)) = poison_procs.get(&attacker_entity) {
+                    if poison != AbilityType::CripplingPoison {
+                        if game_rng.random_f32() < chance {
+                            apply_weapon_poison(
+                                &mut commands,
+                                &abilities,
+                                poison,
+                                attacker_entity,
+                                target_entity,
+                                target_auras.as_deref(),
+                                combatant_info.get(&target_entity).map(
+                                    |(team, name, _, slot, _)| combat_log_id(*team, *slot, name),
+                                ),
+                                &mut combat_log,
+                                &mut poison_fresh_this_frame,
+                            );
+                            if abilities.get_unchecked(&poison).damage_base_max > 0.0 {
+                                poison_damage_hits.push((attacker_entity, target_entity, poison));
+                            }
+                        }
+                    } else if game_rng.random_f32() < chance {
                         let fresh = apply_or_refresh_crippling(
                             &mut commands,
                             &abilities,
@@ -907,6 +937,78 @@ pub fn combat_auto_attack(
                     }
                 }
             }
+        }
+    }
+
+    // Weapon-poison damage (Wound Poison): a fixed Nature hit through the one
+    // damage funnel, so immunity, resistance, absorbs, the stealth reveal, rage
+    // and crowd-control breaks all apply as to any Nature damage. It does not
+    // crit — TBC rolled it on spell crit, which a Rogue barely has; not
+    // modelled — so it draws no RNG.
+    for (attacker_entity, target_entity, poison) in poison_damage_hits {
+        let def = abilities.get_unchecked(&poison);
+        let Ok((_, _, mut target, _, _, mut target_auras)) = combatants.get_mut(target_entity)
+        else {
+            continue;
+        };
+        if !target.is_alive() {
+            continue;
+        }
+        let (actual_damage, absorbed) = apply_damage_with_absorb(
+            def.damage_base_min,
+            &mut target,
+            target_auras.as_deref_mut(),
+            def.spell_school,
+            &def.name,
+            &mut combat_log,
+        );
+        if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
+            let rage_gain = actual_damage * 0.15;
+            target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
+        }
+        let is_killing_blow = !target.is_alive();
+        *damage_per_aura_break.entry(target_entity).or_insert(0.0) += actual_damage;
+        *damage_per_target.entry(target_entity).or_insert(0.0) += actual_damage;
+        *absorbed_per_target.entry(target_entity).or_insert(0.0) += absorbed;
+        damage_dealt_updates.push((attacker_entity, actual_damage + absorbed));
+        let (
+            Some((attacker_team, attacker_name, _, attacker_slot, _)),
+            Some((target_team, target_name, _, target_slot, _)),
+        ) = (
+            combatant_info.get(&attacker_entity),
+            combatant_info.get(&target_entity),
+        )
+        else {
+            continue;
+        };
+        let attacker_id = combat_log_id(*attacker_team, *attacker_slot, attacker_name);
+        let target_id = combat_log_id(*target_team, *target_slot, target_name);
+        let message = if absorbed > 0.0 {
+            format!(
+                "{}'s {} hits {} for {:.0} damage ({:.0} absorbed)",
+                attacker_id, def.name, target_id, actual_damage, absorbed
+            )
+        } else {
+            format!(
+                "{}'s {} hits {} for {:.0} damage",
+                attacker_id, def.name, target_id, actual_damage
+            )
+        };
+        combat_log.log_damage(
+            attacker_id.clone(),
+            target_id.clone(),
+            def.name.clone(),
+            actual_damage + absorbed,
+            is_killing_blow,
+            false,
+            message,
+        );
+        if is_killing_blow && !target.is_dead {
+            target.is_dead = true;
+            commands.entity(target_entity).remove::<CastingState>();
+            commands.entity(target_entity).remove::<ChannelingState>();
+            let death_message = format!("{} has been eliminated", target_id);
+            combat_log.log_death(target_id, Some(attacker_id), death_message);
         }
     }
 
@@ -1328,6 +1430,51 @@ pub(crate) fn windfury_bonus_chance(
             .find(|aura| aura.effect_type == AuraType::WindfuryBuff)
             .map(|aura| aura.magnitude)
     })
+}
+
+/// Apply a weapon poison other than Crippling — Deadly, Wound or Mind-numbing —
+/// to `target` after its proc roll succeeded.
+///
+/// The poison lands through `apply_pending_auras`, the one aura funnel: it
+/// stacks or refreshes there (each is a `stacking` aura, keyed on its source),
+/// is refused by an immunity there, and reveals a stealthed target there. A
+/// first application is logged here as a proc (the funnel may still refuse
+/// it to an immunity) — once a frame, though both hands may proc before the
+/// first has landed (`fresh_this_frame`); a refresh is logged by the funnel.
+#[allow(clippy::too_many_arguments)]
+fn apply_weapon_poison(
+    commands: &mut Commands,
+    abilities: &AbilityDefinitions,
+    poison: AbilityType,
+    attacker: Entity,
+    target: Entity,
+    target_auras: Option<&ActiveAuras>,
+    target_id: Option<String>,
+    combat_log: &mut CombatLog,
+    fresh_this_frame: &mut std::collections::HashSet<(Entity, AbilityType, Option<Entity>)>,
+) {
+    let def = abilities.get_unchecked(&poison);
+    let Some(pending) = AuraPending::from_ability(target, attacker, def) else {
+        return;
+    };
+    let fresh = !target_auras.is_some_and(|auras| {
+        auras
+            .auras
+            .iter()
+            .any(|aura| aura.stacks.is_some() && aura.same_source_as(&pending.aura))
+    });
+    // Keyed as the funnel keys the aura: target, source and, for a per-caster
+    // poison (Deadly), its caster. Insert-only, never iterated.
+    let key = (target, poison, pending.aura.stack_owner());
+    if fresh && fresh_this_frame.insert(key) {
+        if let Some(name) = target_id {
+            combat_log.log(
+                CombatLogEventType::CrowdControl,
+                format!("{} procs on {}", def.name, name),
+            );
+        }
+    }
+    commands.spawn(pending);
 }
 
 /// Apply or refresh the Crippling Poison slow on `target`. Returns true if it was

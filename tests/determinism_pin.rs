@@ -118,16 +118,28 @@ fn seeded_2v2_matches_its_recorded_identity() {
     // neither enters PRESSURED there, and neither casts it.
     //
     // Re-recorded for AS-303, TBC's slot budget multipliers and the starting
-    // kit's legs, waists, wrists and trinkets re-spent to them. Took this cell
-    // to Some(1) @ 61.949226s from Some(2) @ 49.549416s. The first line that
-    // differs from `main` @ a8a30775 is at 15.37s (log clock): the Mage's
-    // first Frostbolt into the Warrior's shield, 15 (72 absorbed) -> 16 (73
-    // absorbed): its re-spent bracers, belt and legs add 4 spell power. Paired
-    // sweep: `docs/design/balance/2026-10-29-as303-tbc-slot-multipliers.md`.
+    // kit's legs, waists, wrists and trinkets re-spent to them. On its own
+    // branch it took this cell to Some(1) @ 61.949226s from Some(2) @
+    // 49.549416s; the first line that differs from `main` @ a8a30775 is at
+    // 15.37s (log clock): the Mage's first Frostbolt into the Warrior's shield,
+    // 15 (72 absorbed) -> 16 (73 absorbed), from the 4 spell power its re-spent
+    // bracers, belt and legs add. Paired sweep:
+    // `docs/design/balance/2026-10-29-as303-tbc-slot-multipliers.md`.
+    //
+    // Re-recorded for AS-330, only the strongest healing reduction applying.
+    // On its own branch it took this cell to Some(2) @ 67.54995s from Some(2)
+    // @ 49.549416s; the first line that differs from `main` @ e824cb88 is at
+    // 41.60s (log clock): a Flash Heal on the Mage lands for 69, not 45. The
+    // Warrior's Mortal Strikes at 35.27s and 41.38s had left two Mortal Wounds
+    // on it (each lasts 10s, the strike recurs every ~6s), which compounded to
+    // 0.4225; the strongest alone is 0.65.
+    //
+    // The two landed together (AS-303 merging `main` @ e68c9a82), and neither
+    // branch's figure survives: on the merged tree this cell is Some(1) @ 62.282555s.
     assert_pinned(
         &result,
         Some(1),
-        1_115_147_266,
+        1_115_234_646,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }

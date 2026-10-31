@@ -533,9 +533,24 @@ impl HeadlessMatchConfig {
         }
     }
 
-    /// Parse a rogue poison name string into RoguePoison
-    fn parse_rogue_poison(_name: &str) -> RoguePoison {
-        RoguePoison::Crippling
+    /// Parse a rogue poison name string into RoguePoison: the variant name
+    /// (`"Deadly"`) or the display name (`"Deadly Poison"`). An unknown name is
+    /// an error rather than a silent Crippling, so a misspelt sweep arm cannot
+    /// measure the default poison under another poison's label.
+    pub(crate) fn parse_rogue_poison(name: &str) -> Result<RoguePoison, String> {
+        RoguePoison::ALL
+            .into_iter()
+            .find(|poison| name == format!("{poison:?}") || name == poison.name())
+            .ok_or_else(|| {
+                let known: Vec<String> = RoguePoison::ALL
+                    .iter()
+                    .map(|poison| format!("{poison:?}"))
+                    .collect();
+                format!(
+                    "Unknown rogue poison: {name:?} (expected one of {})",
+                    known.join(", ")
+                )
+            })
     }
 
     /// Parse a hunter pet type name string into HunterPetType
@@ -720,13 +735,13 @@ impl HeadlessMatchConfig {
             .team1_rogue_poisons
             .iter()
             .map(|s| Self::parse_rogue_poison(s))
-            .collect();
+            .collect::<Result<_, _>>()?;
         team1_rogue_poisons.resize(team1.len(), RoguePoison::default());
         let mut team2_rogue_poisons: Vec<RoguePoison> = self
             .team2_rogue_poisons
             .iter()
             .map(|s| Self::parse_rogue_poison(s))
-            .collect();
+            .collect::<Result<_, _>>()?;
         team2_rogue_poisons.resize(team2.len(), RoguePoison::default());
 
         // Parse warlock curse preferences

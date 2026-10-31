@@ -43,6 +43,23 @@ pub fn refused_fraction(before: f32, after: f32) -> Option<f32> {
     (refused > MIN_VISIBLE_REFUSAL).then_some(refused)
 }
 
+/// The multiplier the [`AuraType::HealingReduction`] debuffs on a target leave
+/// on the healing it receives: the STRONGEST one's magnitude (0.65 = 35%
+/// reduction), or 1.0 with none.
+///
+/// Only the strongest applies (TBC's rule): Mortal Strike's Mortal Wound
+/// (0.65), Aimed Shot's (0.65) and Wound Poison (0.5) do not compound, so a
+/// target carrying all three takes half healing. A target with one reduction
+/// is cut by exactly its magnitude, as before the rule.
+pub fn healing_multiplier(target_auras: Option<&ActiveAuras>) -> f32 {
+    target_auras
+        .into_iter()
+        .flat_map(|auras| auras.auras.iter())
+        .filter(|aura| aura.effect_type == AuraType::HealingReduction)
+        .map(|aura| aura.magnitude)
+        .fold(1.0, f32::min)
+}
+
 /// Land `amount` of healing on `target` and return the effective healing (the
 /// health actually gained, overheal excluded) — the figure every site credits,
 /// logs and shows.
@@ -68,16 +85,8 @@ pub fn apply_healing(
         return 0.0;
     }
 
-    // Healing reduction: each debuff's magnitude is a multiplier (0.65 = 35%
-    // reduction), and two of them compound.
-    let mut healing = amount;
-    if let Some(auras) = target_auras {
-        for aura in &auras.auras {
-            if aura.effect_type == AuraType::HealingReduction {
-                healing *= aura.magnitude;
-            }
-        }
-    }
+    // Healing reduction: only the strongest debuff applies.
+    let healing = amount * healing_multiplier(target_auras);
 
     // Mortal Wounds tell: the debuff has no body treatment, it states itself
     // by visibly breaking the heal. Before dampening, so the tell reflects the

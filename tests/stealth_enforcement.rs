@@ -805,14 +805,15 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
         FrostNova | PsychicScream | DemoralizingShout | FreezingTrap | FrostTrap | Flare => true,
         Frostbolt | FlashHeal | HeroicStrike | Ambush | CheapShot | MindBlast | SinisterStrike
         | Charge | KidneyShot | PowerWordFortitude | Rend | MortalStrike | Pummel
-        | BerserkerRage | Kick | CripplingPoison | Corruption | Shadowbolt | Fear | Immolate
-        | DrainLife | CurseOfAgony | CurseOfWeakness | CurseOfTongues | UnstableAffliction
-        | DeathCoil | LifeTap | ArcaneIntellect | BattleShout | IceBarrier | PowerWordShield
-        | Polymorph | DispelMagic | ManaBurn | FlashOfLight | HolyLight | HolyShock
-        | HammerOfJustice | PaladinCleanse | DevotionAura | DivineShield | SpellLock
-        | DevourMagic | AimedShot | ArcaneShot | ConcussiveShot | SerpentSting | Disengage
-        | SpiderWeb | BoarCharge | MastersCall | CommandingShout | FrostArmor | MageArmorSpell
-        | MoltenArmor | ShadowResistanceAura | ConcentrationAura | LightningBolt | FrostShock
+        | BerserkerRage | Kick | CripplingPoison | DeadlyPoison | WoundPoison
+        | MindNumbingPoison | Corruption | Shadowbolt | Fear | Immolate | DrainLife
+        | CurseOfAgony | CurseOfWeakness | CurseOfTongues | UnstableAffliction | DeathCoil
+        | LifeTap | ArcaneIntellect | BattleShout | IceBarrier | PowerWordShield | Polymorph
+        | DispelMagic | ManaBurn | FlashOfLight | HolyLight | HolyShock | HammerOfJustice
+        | PaladinCleanse | DevotionAura | DivineShield | SpellLock | DevourMagic | AimedShot
+        | ArcaneShot | ConcussiveShot | SerpentSting | Disengage | SpiderWeb | BoarCharge
+        | MastersCall | CommandingShout | FrostArmor | MageArmorSpell | MoltenArmor
+        | ShadowResistanceAura | ConcentrationAura | LightningBolt | FrostShock
         | LesserHealingWave | Purge | WindShear | AirTotem | WaterTotem | EarthTotem
         | FireTotem | Rejuvenation | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild
         | Innervate | EntanglingRoots | Cyclone | TravelForm | ShadowWordPain => false,

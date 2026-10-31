@@ -1430,6 +1430,18 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         Unreached::DecidedOutside("the auto-attack's weapon poison"),
     ),
     (
+        AbilityType::DeadlyPoison,
+        Unreached::DecidedOutside("the auto-attack's weapon poison"),
+    ),
+    (
+        AbilityType::WoundPoison,
+        Unreached::DecidedOutside("the auto-attack's weapon poison"),
+    ),
+    (
+        AbilityType::MindNumbingPoison,
+        Unreached::DecidedOutside("the auto-attack's weapon poison"),
+    ),
+    (
         AbilityType::BerserkerRage,
         Unreached::DecidedOutside("decide_abilities' CC-break branch, while feared"),
     ),
