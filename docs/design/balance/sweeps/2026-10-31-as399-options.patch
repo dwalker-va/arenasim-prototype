@@ -1,0 +1,153 @@
+--- a/src/states/play_match/class_ai/target_focus.rs	2026-10-31 01:12:51
++++ b/src/states/play_match/class_ai/target_focus.rs	2026-10-31 02:01:56
+@@ -50,6 +50,30 @@
+ /// switch: 24% of the blind time is in episodes shorter than 1.5s (§3.1).
+ pub const FOCUS_HIDDEN_SECS: f32 = 1.5;
+ 
++/// AS-399 measurement arms, selected by the `AS399_OPT` environment variable
++/// (a comma-separated list). Empty: the shipped focus.
++pub fn opt(name: &str) -> bool {
++    static OPTS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
++    OPTS.get_or_init(|| {
++        std::env::var("AS399_OPT")
++            .unwrap_or_default()
++            .split(',')
++            .filter(|s| !s.is_empty())
++            .map(str::to_string)
++            .collect()
++    })
++    .iter()
++    .any(|o| o == name)
++}
++
++fn hidden_secs() -> f32 {
++    if opt("hidden3") {
++        3.0
++    } else {
++        FOCUS_HIDDEN_SECS
++    }
++}
++
+ /// Seconds a focus holds before it can move again.
+ pub const FOCUS_DWELL: f32 = 2.0;
+ 
+@@ -81,6 +105,9 @@
+     /// [`FOCUS_HIDDEN_SECS`] when it moved.
+     pub from: Entity,
+     pub since: f32,
++    /// AS-399 `return`: this focus is a return to the target an earlier
++    /// focus moved off, and is not returned again.
++    pub returned: bool,
+ }
+ 
+ fn has_shadow_sight(auras: &BTreeMap<Entity, Vec<Aura>>, entity: Entity) -> bool {
+@@ -158,6 +185,14 @@
+ ) -> (Option<Focus>, SmallVec<[TargetSight; 3]>) {
+     // Off, or a map with nothing to hide behind (nobody is ever blind there).
+     if !enabled || obstacles.is_empty() {
++        return (None, SmallVec::new());
++    }
++    // AS-399 `nohealer`: a team that fields no healer runs no focus.
++    if opt("nohealer")
++        && !roster
++            .values()
++            .any(|i| i.team == team && !i.is_pet && i.class.is_healer())
++    {
+         return (None, SmallVec::new());
+     }
+     let dps: SmallVec<[&CombatantInfo; 3]> = roster
+@@ -195,11 +230,35 @@
+     if held.is_some_and(|f| now - f.since < FOCUS_DWELL) {
+         return (held, sight);
+     }
++    // AS-399 `return`: past its dwell, the focus goes back to the target it
++    // moved off as soon as that target is in a ranged DPS's sight and reach.
++    if opt("return") {
++        if let Some(f) = held.filter(|f| !f.returned) {
++            let back = roster.get(&f.from).is_some_and(|old| {
++                dps.iter().any(|d| {
++                    targetable(auras, d, old)
++                        && old.position.distance(d.position) <= FOCUS_REACH
++                        && sees(obstacles, d.position, old.position)
++                })
++            });
++            if back {
++                return (
++                    Some(Focus {
++                        subject: f.from,
++                        from: f.subject,
++                        since: now,
++                        returned: true,
++                    }),
++                    sight,
++                );
++            }
++        }
++    }
+     for s in &sight {
+         let Some(since) = s.blind_since else {
+             continue;
+         };
+-        if now - since < FOCUS_HIDDEN_SECS || kill_subject == Some(s.target) {
++        if now - since < hidden_secs() || kill_subject == Some(s.target) {
+             continue;
+         }
+         let Some(d) = roster.get(&s.dps) else {
+@@ -214,6 +273,7 @@
+                     subject,
+                     from: s.target,
+                     since: now,
++                    returned: false,
+                 }),
+                 sight,
+             );
+@@ -269,6 +329,8 @@
+     let own_hidden = current
+         .and_then(&position)
+         .is_some_and(|p| !sees(obstacles, my_pos, p));
++    // AS-399 `solo`: only a DPS blind to its own target takes the focus.
++    let reaches = reaches && !opt("solo");
+     (reaches || own_hidden).then_some(focus.subject)
+ }
+ 
+--- a/src/states/play_match/team_solve.rs	2026-10-31 01:12:51
++++ b/src/states/play_match/team_solve.rs	2026-10-31 01:50:27
+@@ -93,6 +93,9 @@
+     /// [`SolveWorld::urgency_hp_threshold`] is DYING, and an `OccupyCover`
+     /// healer anchors on it ([`C_DYING`]).
+     pub health_pct: f32,
++    /// AS-399 `trained`: an enemy ranged DPS that can see this unit has it as
++    /// its target.
++    pub trained: bool,
+ }
+ 
+ /// A teammate held in crowd control that this healer's dispel removes at the
+@@ -454,7 +457,7 @@
+         let threshold = self.world.urgency_hp_threshold;
+         self.world
+             .allies_of(self.unit.team, self.unit.entity)
+-            .filter(|a| a.health_pct < threshold)
++            .filter(|a| a.health_pct < threshold || (a.trained && threshold > 0.0))
+             .min_by(|a, b| {
+                 a.health_pct
+                     .partial_cmp(&b.health_pct)
+@@ -1527,6 +1530,19 @@
+             can_cast_heal: can_cast_heal(ctx, c),
+             dispel_goal: None,
+             health_pct: c.health_pct(),
++            trained: super::class_ai::target_focus::opt("trained")
++                && c.slot < super::constants::PET_SLOT_BASE
++                && ctx.combatants.values().any(|e| {
++                    e.is_alive
++                        && e.team != c.team
++                        && e.target == Some(c.entity)
++                        && super::class_ai::target_focus::follows_focus(e.class)
++                        && super::map_geometry::has_line_of_sight(
++                            ctx.obstacles,
++                            e.position,
++                            c.position,
++                        )
++                }),
+         })
+         .collect();
+     SolveWorld {
