@@ -19,7 +19,7 @@
 //!   Hunter's melee hand — while its ranged attacks still land;
 //! - **the zero guarantee**: matches with no avoidance draw exactly as many
 //!   `game_rng` values as they did before avoidance existed (counts recorded
-//!   on main at a8a30775, the commit this card branched from).
+//!   on main at e824cb88, the last main merged into this card).
 
 mod common;
 
@@ -631,6 +631,56 @@ fn swings_avoided_before(log: &str, until: f32) -> usize {
         .count()
 }
 
+/// The `[  12.34s]` stamp a combat-log line opens with, as written.
+fn stamp(line: &str) -> Option<&str> {
+    let rest = line.trim_start().strip_prefix('[')?;
+    Some(rest.split(']').next()?.trim())
+}
+
+/// A Windfury bonus swing is a melee swing of its own, so it may be dodged
+/// even when the swing that procced it landed. The Warrior swings one hand
+/// and Windfury procs on every landed swing (magnitude 1.0), so an avoided
+/// Auto Attack stamped on the same frame as one of its landed swings can only
+/// be the bonus swing.
+#[test]
+fn a_windfury_bonus_swing_can_be_avoided() {
+    use arenasim::states::play_match::components::Aura;
+    let stage = duel(0.5, 0.0).aura(
+        Unit::new(1, 0),
+        Aura {
+            effect_type: AuraType::WindfuryBuff,
+            magnitude: 1.0,
+            duration: 1000.0,
+            break_on_damage_threshold: -1.0,
+            ability_name: "Windfury Totem".into(),
+            ..Default::default()
+        },
+    );
+    let played = play(warrior_v_warrior(1), stage);
+    let landed_at: BTreeSet<&str> = played
+        .log
+        .lines()
+        .filter(|l| {
+            ["Auto Attack", "Heroic Strike"].iter().any(|a| {
+                l.contains(&format!("{WARRIOR_ID}'s {a} hits "))
+                    || l.contains(&format!("{WARRIOR_ID}'s {a} CRITS "))
+            })
+        })
+        .filter_map(stamp)
+        .collect();
+    let avoided_at: Vec<&str> = played
+        .log
+        .lines()
+        .filter(|l| l.contains("[AVOID] ") && l.ends_with(&format!("{WARRIOR_ID}'s Auto Attack")))
+        .filter_map(stamp)
+        .collect();
+    assert!(!landed_at.is_empty() && !avoided_at.is_empty());
+    assert!(
+        avoided_at.iter().any(|t| landed_at.contains(t)),
+        "a bonus swing was avoided beside the landed swing that procced it"
+    );
+}
+
 /// A swing the attacker's team would break its own Fear with is dropped
 /// unlanded, so it is not avoided either: no "Dodge" for an attack that never
 /// happens. The Priest stands rooted beside the Warrior, dodging everything;
@@ -702,7 +752,7 @@ fn a_swing_held_off_a_friendly_fear_is_not_avoided() {
 // ---------------------------------------------------------------------------
 
 /// Matches with no avoidance draw exactly as many `game_rng` values as they
-/// did before avoidance existed — recorded on main at a8a30775 (the counter
+/// did before avoidance existed — recorded on main at e824cb88 (the counter
 /// itself draws nothing). Melee-heavy on purpose: dual wield, pets, Heroic
 /// Strike, a Hunter's melee hand, Kick and Pummel, on an open map and in the
 /// bowl.
@@ -749,7 +799,7 @@ const ZERO_AVOIDANCE_DRAWS: &[DrawPin] = &[
         "PillaredArena",
         "TeamPlan",
         5,
-        276,
+        234,
     ),
     (&["Rogue"], &["Warrior"], "BasicArena", "Legacy", 3, 53),
 ];
