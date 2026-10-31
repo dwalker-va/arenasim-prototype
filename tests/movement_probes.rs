@@ -5355,16 +5355,19 @@ mod u10_press {
     /// re-picked four times; AS-293 migrated it here.) 120 seeds since AS-360:
     /// once the Warlock walked round a pillar for sight instead of standing
     /// out of it, fewer of these matches ran past 75s, and the first 40 seeds
-    /// held one.
-    const PRESS_BANK: std::ops::Range<u64> = 0..120;
+    /// held one. 240 since AS-296: with Life Tap the Warlock's team runs dry
+    /// less often, fewer matches reach 75s, and the first 120 seeds held one
+    /// (4 before it; 3 of 240 after it, 8 before).
+    const PRESS_BANK: std::ops::Range<u64> = 0..240;
 
     /// The most matches of the bank that may run to the cap (1 of 40 on
-    /// `main` @ 68b9a0c, and after AS-293; 0 of 120 after AS-360).
+    /// `main` @ 68b9a0c, and after AS-293; 0 of 120 after AS-360; 0 of 240
+    /// after AS-296).
     const MAX_CAPPED: usize = 2;
 
     /// The fewest kills past the 75s dampening onset the bank must hold (5 of
     /// 40 on `main` @ 68b9a0c, 4 after AS-293; 10 of 120 on `main` @
-    /// 0a8f8a36, 4 after AS-360).
+    /// 0a8f8a36, 4 after AS-360; 3 of 240 after AS-296).
     const MIN_DEEP_KILLS: usize = 2;
 
     /// F4 endgame guard: the healer-heavy comp RESOLVES by elimination — not

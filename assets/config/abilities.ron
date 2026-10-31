@@ -736,6 +736,28 @@
             )),
         ),
 
+        // Life Tap: converts the Warlock's own health into as much mana (TBC:
+        // instant, no mana cost, no cooldown, on the global cooldown, Shadow;
+        // 80% of spell power added). Rank 1's base, 30, as the rest of the
+        // Warlock book uses the low ranks' bases with TBC's coefficients. The
+        // health is not damage and the mana is not healing: nothing absorbs,
+        // breaks, reveals, enrages or dampens on it.
+        LifeTap: (
+            name: "Life Tap",
+            class: Warlock,
+            prevention: Silence,
+            icon: "icons/abilities/spell_shadow_burningspirit.jpg",
+            cast_time: 0.0,
+            range: 0.0,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            health_to_mana: Some((
+                base: 30.0,
+                spell_power_coefficient: 0.8,
+            )),
+            spell_school: Shadow,
+        ),
+
         // ============================================================================
         // PALADIN ABILITIES
         // ============================================================================
