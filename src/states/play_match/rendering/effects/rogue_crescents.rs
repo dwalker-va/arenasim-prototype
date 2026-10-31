@@ -1,8 +1,9 @@
-use bevy::color::LinearRgba;
 use bevy::prelude::*;
 
 use std::f32::consts::TAU;
+use std::sync::Arc;
 
+use super::sand_legibility::{linear_level, SAND_CRESCENT_GAIN, SAND_CRESCENT_LEVEL};
 use crate::states::play_match::components::*;
 
 // ==============================================================================
@@ -29,6 +30,15 @@ use crate::states::play_match::components::*;
 // mesh. The shape needs soft edges along both its length and its thickness, and
 // geometry cannot produce those — the same lesson the stun whirl's sparkle
 // taught (`hard_cc.rs`). The alpha lives in the texture.
+//
+// The stroke is alpha-BLENDED in its own colour track, not added light (AS-435).
+// Added light barely moves the bright arena sand, which sits on the
+// tonemapper's shoulder; a blended stroke darkens it, and reads. Its opacity is
+// `min(1, SAND_CRESCENT_GAIN × fade × texture)` and its colour the track at
+// `SAND_CRESCENT_LEVEL` in linear light — the Sand Legibility Bench's
+// signed-off values (`docs/design/benches/2026-10-29-sand-legibility-bench.html`,
+// artifact https://claude.ai/artifact/8qLsKmuRQTVwa5Kzdimkgo, version id
+// 1793335026-f991), shared with Hand of Justice's crescents.
 //
 // Graphical-only: registered in `states/mod.rs` alone, keyed on the
 // `InstantAbilityFired` marker the class AI spawns. No `game_rng` draw, no sim
@@ -123,11 +133,8 @@ pub struct CrescentSpec {
     /// Kidney Shot spikes to a white-pink at 200ms of a 1233ms model before
     /// settling to crimson, so a two-stop lerp cannot describe it.
     pub color_mid: Color,
-    /// Tint at death. Cheap Shot passes the same value for all three (the
-    /// source has ZERO colour tracks on its model — it is untinted white);
-    /// Kidney Shot travels magenta -> flash -> deep crimson.
+    /// Tint at death. Kidney Shot travels magenta -> flash -> deep crimson.
     pub color_end: Color,
-    pub emissive: LinearRgba,
 }
 
 /// How far the victim halo tilts off horizontal, as a fraction of its radius.
@@ -173,10 +180,9 @@ pub const CHEAP_SHOT_CRESCENTS: CrescentSpec = CrescentSpec {
     // no ANIMATED tint — the base texture itself is white-and-magenta, and the
     // sampled reference is #F8C8F8 fringing to #F0A0E8 against three different
     // ambients, so the magenta is intrinsic rather than borrowed from the scene.
-    color: Color::srgba(0.97, 0.80, 0.97, 0.88),
-    color_mid: Color::srgba(1.00, 0.95, 1.00, 0.92),
-    color_end: Color::srgba(0.94, 0.63, 0.91, 0.85),
-    emissive: LinearRgba::new(3.0, 1.9, 2.9, 1.0),
+    color: Color::srgb(0.97, 0.80, 0.97),
+    color_mid: Color::srgb(1.00, 0.95, 1.00),
+    color_end: Color::srgb(0.94, 0.63, 0.91),
 };
 
 /// Kidney Shot: three crescents at TORSO height, spread much wider than Cheap
@@ -200,10 +206,9 @@ pub const KIDNEY_SHOT_CRESCENTS: CrescentSpec = CrescentSpec {
     roll_step: 0.55,
     // Wider than Cheap Shot's: the finisher's slashes carry further across.
     spread: 1.80,
-    color: Color::srgba(0.96, 0.23, 0.69, 0.90),
-    color_mid: Color::srgba(1.00, 0.82, 1.00, 0.95),
-    color_end: Color::srgba(0.94, 0.03, 0.39, 0.90),
-    emissive: LinearRgba::new(3.0, 0.8, 2.0, 1.0),
+    color: Color::srgb(0.96, 0.23, 0.69),
+    color_mid: Color::srgb(1.00, 0.82, 1.00),
+    color_end: Color::srgb(0.94, 0.03, 0.39),
 };
 
 /// The procedural arc: a gaussian band along a circular spine, tapering to
@@ -212,7 +217,73 @@ pub const KIDNEY_SHOT_CRESCENTS: CrescentSpec = CrescentSpec {
 /// Generated rather than shipped as an asset for the same reason
 /// `create_surface_texture` and the stun sparkle are — a handful of arithmetic
 /// that stays tunable by named constants instead of by reopening an editor.
+#[cfg(test)]
 fn crescent_texture() -> Image {
+    crescent_texture_at_gain(1.0)
+}
+
+/// The stroke's opacity at a point in sprite space, both axes -1..1.
+fn crescent_alpha(dx: f32, dy: f32) -> f32 {
+    // Distance from the middle toward either tip.
+    let t = dx.abs().min(1.0);
+    // Elliptical profile: full at the belly, easing to nothing at the tips.
+    // Shapes BOTH the width and the brightness, so the stroke narrows and fades
+    // together the way a real slash does.
+    let profile = (1.0 - t * t).max(0.0).sqrt();
+
+    // The spine bows off the straight line, deepest at the middle.
+    let spine = CRESCENT_BOW * profile;
+    let half_width = CRESCENT_THICKNESS * (CRESCENT_TIP + (1.0 - CRESCENT_TIP) * profile);
+
+    let d = (dy - spine) / half_width.max(1.0e-4);
+    let band = (-(d * d)).exp();
+    let along = profile.powf(CRESCENT_TAPER);
+
+    (band * along).clamp(0.0, 1.0)
+}
+
+/// Rungs of the stroke's opacity ladder per unit of gain (AS-435). At 32 the
+/// material alpha makes up at most 1/32 of the rung's gain, so a saturated
+/// pixel sits within about 3% of the bench's opacity, and an unsaturated one
+/// exactly on it.
+pub const CRESCENT_LADDER_STEPS: u32 = 32;
+
+/// The gain the ladder's rung `index` bakes: 1.0 at rung 0, up to
+/// [`SAND_CRESCENT_GAIN`].
+pub fn crescent_rung_gain(index: usize) -> f32 {
+    (CRESCENT_LADDER_STEPS as usize + index) as f32 / CRESCENT_LADDER_STEPS as f32
+}
+
+/// How many rungs the ladder has: gain 1.0 up to [`SAND_CRESCENT_GAIN`].
+pub fn crescent_ladder_len() -> usize {
+    ((SAND_CRESCENT_GAIN * CRESCENT_LADDER_STEPS as f32).ceil() as usize)
+        .saturating_sub(CRESCENT_LADDER_STEPS as usize)
+        + 1
+}
+
+/// The bench's stroke opacity at a texel of opacity `texel`, at `fade`:
+/// `min(1, SAND_CRESCENT_GAIN × fade × texel)`.
+pub fn crescent_blend_alpha(texel: f32, fade: f32) -> f32 {
+    (SAND_CRESCENT_GAIN * fade * texel).min(1.0)
+}
+
+/// The ladder rung and the material alpha that draw the stroke at `fade`: the
+/// rung bakes `min(1, g × texel)` for the smallest rung gain `g` at or above
+/// `SAND_CRESCENT_GAIN × fade` (never below 1), and the material alpha
+/// `gain × fade / g`, at most 1, makes up the rest. Their product is
+/// [`crescent_blend_alpha`] wherever the rung is unsaturated.
+pub fn crescent_rung(fade: f32) -> (usize, f32) {
+    let want = SAND_CRESCENT_GAIN * fade.clamp(0.0, 1.0);
+    let steps = CRESCENT_LADDER_STEPS as f32;
+    let index = ((want * steps).ceil() as usize)
+        .saturating_sub(CRESCENT_LADDER_STEPS as usize)
+        .min(crescent_ladder_len() - 1);
+    let alpha = (want / crescent_rung_gain(index)).min(1.0);
+    (index, alpha)
+}
+
+/// The stroke texture with its opacity scaled by `gain` and capped at 1.
+fn crescent_texture_at_gain(gain: f32) -> Image {
     use bevy::image::Image;
     use bevy::render::render_asset::RenderAssetUsages;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -227,23 +298,7 @@ fn crescent_texture() -> Image {
             // also the axis `update_crescent_flares` turns to follow the aim.
             let dx = (x as f32 - centre) / centre;
             let dy = (y as f32 - centre) / centre;
-
-            // Distance from the middle toward either tip.
-            let t = dx.abs().min(1.0);
-            // Elliptical profile: full at the belly, easing to nothing at the
-            // tips. Shapes BOTH the width and the brightness, so the stroke
-            // narrows and fades together the way a real slash does.
-            let profile = (1.0 - t * t).max(0.0).sqrt();
-
-            // The spine bows off the straight line, deepest at the middle.
-            let spine = CRESCENT_BOW * profile;
-            let half_width = CRESCENT_THICKNESS * (CRESCENT_TIP + (1.0 - CRESCENT_TIP) * profile);
-
-            let d = (dy - spine) / half_width.max(1.0e-4);
-            let band = (-(d * d)).exp();
-            let along = profile.powf(CRESCENT_TAPER);
-
-            let a = (band * along).clamp(0.0, 1.0);
+            let a = (gain * crescent_alpha(dx, dy)).min(1.0);
             let i = ((y * size + x) * 4) as usize;
             data[i] = 255;
             data[i + 1] = 255;
@@ -265,6 +320,61 @@ fn crescent_texture() -> Image {
     )
 }
 
+/// Builds the stroke's opacity ladder: one texture per rung (see
+/// [`crescent_rung`]). Built once and shared by every crescent.
+pub fn build_crescent_ladder(images: &mut Assets<Image>) -> CrescentLadder {
+    let rungs: Vec<Handle<Image>> = (0..crescent_ladder_len())
+        .map(|i| images.add(crescent_texture_at_gain(crescent_rung_gain(i))))
+        .collect();
+    CrescentLadder(Arc::from(rungs))
+}
+
+/// A crescent's blended colour at life fraction `k`: the colour track's
+/// three-stop travel (birth, an early flash, death) at [`SAND_CRESCENT_LEVEL`]
+/// in linear light, with material alpha `alpha`.
+///
+/// A two-stop lerp cannot describe the source's spike to white-pink at 200ms
+/// of a 1233ms model, and dropping the flash loses the one thing that makes
+/// Kidney Shot's colour read as a strike rather than a tint.
+pub fn crescent_track_color(
+    color: Color,
+    color_mid: Color,
+    color_end: Color,
+    k: f32,
+    alpha: f32,
+) -> Color {
+    let (from, to, t) = if k < CRESCENT_FLASH_AT {
+        (color, color_mid, k / CRESCENT_FLASH_AT)
+    } else {
+        (
+            color_mid,
+            color_end,
+            (k - CRESCENT_FLASH_AT) / (1.0 - CRESCENT_FLASH_AT),
+        )
+    };
+    let from = from.to_srgba();
+    let to = to.to_srgba();
+    let track = Color::srgb(
+        from.red + (to.red - from.red) * t,
+        from.green + (to.green - from.green) * t,
+        from.blue + (to.blue - from.blue) * t,
+    );
+    linear_level(track, SAND_CRESCENT_LEVEL, alpha)
+}
+
+/// The blended stroke's material (AS-435): unlit, alpha-blended, both faces.
+fn crescent_material(rung: Handle<Image>, color: Color) -> StandardMaterial {
+    StandardMaterial {
+        base_color: color,
+        base_color_texture: Some(rung),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        cull_mode: None,
+        double_sided: true,
+        ..default()
+    }
+}
+
 /// Spawns one ability's crescent fan.
 ///
 /// `caster_pos` and `aim` are world positions; the fan is planted between them,
@@ -277,13 +387,13 @@ pub fn spawn_crescent_fan(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     images: &mut Assets<Image>,
-    texture: &mut Option<Handle<Image>>,
+    ladder: &mut Option<CrescentLadder>,
     spec: CrescentSpec,
     caster_pos: Vec3,
     aim: Option<Vec3>,
 ) {
-    let tex = texture
-        .get_or_insert_with(|| images.add(crescent_texture()))
+    let ladder = ladder
+        .get_or_insert_with(|| build_crescent_ladder(images))
         .clone();
     let mesh = meshes.add(Rectangle::new(1.0, 1.0));
 
@@ -341,16 +451,13 @@ pub fn spawn_crescent_fan(
                 (i as f32 - (spec.count as f32 - 1.0) * 0.5) * spec.roll_step
             }
         };
-        let material = materials.add(StandardMaterial {
-            base_color: spec.color,
-            base_color_texture: Some(tex.clone()),
-            emissive: spec.emissive,
-            emissive_texture: Some(tex.clone()),
-            alpha_mode: AlphaMode::Add,
-            cull_mode: None,
-            double_sided: true,
-            ..default()
-        });
+        // Born at full fade; `update_crescent_flares` holds it at zero scale
+        // until its turn in the stagger.
+        let (rung, alpha) = crescent_rung(1.0);
+        let material = materials.add(crescent_material(
+            ladder.0[rung].clone(),
+            crescent_track_color(spec.color, spec.color_mid, spec.color_end, 0.0, alpha),
+        ));
         commands.spawn((
             Mesh3d(mesh.clone()),
             MeshMaterial3d(material),
@@ -366,7 +473,7 @@ pub fn spawn_crescent_fan(
                 color: spec.color,
                 color_mid: spec.color_mid,
                 color_end: spec.color_end,
-                emissive: spec.emissive,
+                ladder: ladder.clone(),
             },
             PlayMatchEntity,
         ));
@@ -442,33 +549,14 @@ pub fn update_crescent_flares(
         if let Some(material) = materials.get_mut(&handle.0) {
             // Squared fade so the stroke thins early rather than lingering.
             let fade = (1.0 - k) * (1.0 - k);
-            // Three-stop travel: birth -> an early flash -> death. A two-stop
-            // lerp cannot describe the source's spike to white-pink at 200ms of
-            // a 1233ms model, and dropping the flash loses the one thing that
-            // makes Kidney Shot's colour read as a strike rather than a tint.
-            let (from, to, t) = if k < CRESCENT_FLASH_AT {
-                (flare.color, flare.color_mid, k / CRESCENT_FLASH_AT)
-            } else {
-                (
-                    flare.color_mid,
-                    flare.color_end,
-                    (k - CRESCENT_FLASH_AT) / (1.0 - CRESCENT_FLASH_AT),
-                )
-            };
-            let from = from.to_srgba();
-            let to = to.to_srgba();
-            material.base_color = Color::srgba(
-                from.red + (to.red - from.red) * t,
-                from.green + (to.green - from.green) * t,
-                from.blue + (to.blue - from.blue) * t,
-                (from.alpha + (to.alpha - from.alpha) * t) * fade,
-            );
-            material.emissive = LinearRgba::new(
-                flare.emissive.red * fade,
-                flare.emissive.green * fade,
-                flare.emissive.blue * fade,
-                1.0,
-            );
+            // The opacity gain rides on the ladder rung, the rest on the
+            // material alpha (see `crescent_rung`).
+            let (rung, alpha) = crescent_rung(fade);
+            material.base_color =
+                crescent_track_color(flare.color, flare.color_mid, flare.color_end, k, alpha);
+            if material.base_color_texture.as_ref() != Some(&flare.ladder.0[rung]) {
+                material.base_color_texture = Some(flare.ladder.0[rung].clone());
+            }
         }
     }
 }

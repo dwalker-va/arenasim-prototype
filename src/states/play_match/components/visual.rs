@@ -2774,6 +2774,12 @@ pub struct CcFlare {
 #[derive(Component)]
 pub struct CcBead;
 
+/// The alpha-blended disc under one [`CcBead`]'s sparkle (AS-435), so the
+/// whirl reads on the bright arena sand. A child of its bead, so it billboards,
+/// spins and scales with it.
+#[derive(Component)]
+pub struct CcBeadDisc;
+
 /// One crescent slash in a rogue stun's caster-side flare.
 ///
 /// A camera-facing quad carrying the procedural arc texture from
@@ -2781,7 +2787,7 @@ pub struct CcBead;
 /// the source pops Cheap Shot's four in two quick pairs and spreads Kidney
 /// Shot's three much wider — so the whole fan spawns in one loop and each
 /// crescent holds itself invisible until its turn.
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct CrescentFlare {
     /// World-space unit vector the slash SWEEPS along — across the caster's
     /// body, from its right to its left, perpendicular to the line of attack.
@@ -2807,8 +2813,20 @@ pub struct CrescentFlare {
     /// Mid-travel tint, for the source's early white-pink flash.
     pub color_mid: Color,
     pub color_end: Color,
-    pub emissive: LinearRgba,
+    /// The stroke's opacity ladder (AS-435), shared by every crescent.
+    pub ladder: CrescentLadder,
 }
+
+/// The crescent stroke's texture at each rung of its opacity gain (AS-435).
+///
+/// The stroke is alpha-blended at `min(1, gain × fade × texture)`. A material
+/// alpha above 1 over-blends rather than clamping, so the gain cannot ride on
+/// the material: each rung bakes `min(1, g × texture)` for one gain `g`, and the
+/// update picks the rung at or just above `gain × fade` and makes up the rest
+/// on the material alpha, which then stays at or below 1. See
+/// `rogue_crescents::crescent_rung`.
+#[derive(Clone)]
+pub struct CrescentLadder(pub std::sync::Arc<[Handle<Image>]>);
 
 /// Hammer of Justice's ground wave: a flat gold arc sweeping outward from the
 /// Paladin's own feet.
