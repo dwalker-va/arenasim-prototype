@@ -257,3 +257,67 @@ fn a_snapshot_row_carries_its_combatants_book() {
     assert_eq!(row.book.owner(), BookOwner::Class(CharacterClass::Hunter));
     assert!(!row.book.contains(&AbilityType::SpiderWeb));
 }
+
+/// Mana Burn's landing carries the school of the caster's book: a Priest
+/// whose book makes Mana Burn Fire queues a Fire burn. The control: the
+/// shipped Priest's is Shadow.
+#[test]
+fn a_mana_burn_lands_in_its_casters_school() {
+    use arenasim::states::play_match::abilities::SpellSchool;
+    use arenasim::states::play_match::combat_core::process_casting;
+    use arenasim::states::play_match::components::{
+        ArenaDampening, FloatingTextState, GameRng, ManaBurnPending,
+    };
+    use arenasim::states::play_match::map_config::ActiveMapGeometry;
+    use bevy::ecs::system::RunSystemOnce;
+    use std::time::Duration;
+
+    let burn_school = |book: AbilityBook| -> SpellSchool {
+        let mut world = World::new();
+        world.insert_resource(arenasim::combat::log::CombatLog::default());
+        world.insert_resource(ArenaDampening::default());
+        world.insert_resource(GameRng::from_seed(7));
+        let mut time = Time::<()>::default();
+        time.advance_by(Duration::from_secs_f32(1.0 / 60.0));
+        world.insert_resource(time);
+        world.insert_resource(ActiveMapGeometry {
+            bounds: Default::default(),
+            volumes: Vec::new(),
+            cover_anchors: Vec::new(),
+        });
+        let target = world
+            .spawn((
+                Combatant::new(2, 0, CharacterClass::Priest),
+                Transform::from_xyz(10.0, 0.0, 0.0),
+                FloatingTextState {
+                    next_pattern_index: 0,
+                },
+            ))
+            .id();
+        world.spawn((
+            Combatant::new_with_book(1, 0, CharacterClass::Priest, book),
+            Transform::default(),
+            CastingState::new(AbilityType::ManaBurn, target, 0.0),
+        ));
+        world.run_system_once(process_casting).unwrap();
+        let mut burns = world.query::<&ManaBurnPending>();
+        let schools: Vec<SpellSchool> = burns.iter(&world).map(|b| b.school).collect();
+        assert_eq!(schools.len(), 1, "one burn queued: {schools:?}");
+        schools[0]
+    };
+    assert_eq!(
+        burn_school(AbilityBook::shipped(CharacterClass::Priest)),
+        SpellSchool::Shadow,
+        "control: the shipped Mana Burn is Shadow"
+    );
+    let fire = table_with(|c| {
+        c.abilities
+            .get_mut(&AbilityType::ManaBurn)
+            .unwrap()
+            .spell_school = SpellSchool::Fire;
+    });
+    assert_eq!(
+        burn_school(AbilityBook::for_class(&fire, CharacterClass::Priest)),
+        SpellSchool::Fire
+    );
+}
