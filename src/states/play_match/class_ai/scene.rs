@@ -123,6 +123,8 @@ pub struct Scene {
     gates_opened: bool,
     /// Each Shaman's live totem durations, by `TotemElement::index()`.
     totems: BTreeMap<Who, [f32; 4]>,
+    /// Each Hunter's own Freezing Traps that have not sprung ([`Scene::own_trap`]).
+    own_traps: BTreeMap<Who, Vec<super::hunter_dip::LiveTrap>>,
     /// The previous frame's classification, which a latched situation (tempo)
     /// and a window's onset carry over from. Empty — no history — until
     /// [`Scene::reclassify`] runs.
@@ -161,6 +163,7 @@ impl Scene {
             now: 30.0,
             gates_opened: true,
             totems: BTreeMap::new(),
+            own_traps: BTreeMap::new(),
             situations: Situations::default(),
         }
     }
@@ -484,6 +487,22 @@ impl Scene {
         self
     }
 
+    /// One of `who`'s own Freezing Traps that has not sprung, landing (or
+    /// landed) at `(x, z)` and arming `armed_in` seconds from now (`0.0`:
+    /// armed) — what a match hands the Hunter's decision for every trap it
+    /// has down or in flight.
+    pub fn own_trap(mut self, who: Who, x: f32, z: f32, armed_in: f32) -> Self {
+        self.find(who);
+        self.own_traps
+            .entry(who)
+            .or_default()
+            .push(super::hunter_dip::LiveTrap {
+                position: Vec3::new(x, 0.0, z),
+                armed_in,
+            });
+        self
+    }
+
     /// `who`'s diminishing-returns state (default: nothing diminished).
     pub fn dr_tracker(mut self, who: Who, tracker: DRTracker) -> Self {
         self.unit_mut(who).dr = tracker;
@@ -733,7 +752,11 @@ impl Scene {
             .iter()
             .map(|(who, durations)| (self.entity(who), *durations))
             .collect();
-        let empty_traps = BTreeMap::new();
+        let own_traps: BTreeMap<Entity, Vec<super::hunter_dip::LiveTrap>> = self
+            .own_traps
+            .iter()
+            .map(|(who, traps)| (self.entity(who), traps.clone()))
+            .collect();
         let frame = DispatchFrame {
             abilities: &self.abilities,
             movement_config: &self.movement,
@@ -742,7 +765,7 @@ impl Scene {
             team1_kill_target: None,
             team2_kill_target: None,
             totem_durations: &totems,
-            own_freezing_traps: &empty_traps,
+            own_freezing_traps: &own_traps,
             lit_flares: &[],
         };
         let mut combatant = self.combatant_of(unit);

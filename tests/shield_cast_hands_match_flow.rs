@@ -17,7 +17,9 @@
 //! and counts, per cast, the launch rigs that cast's caster grew.
 //!
 //! Runs with no window or GPU. Visual-only systems never touch the sim, so the
-//! matches are the seeded ones.
+//! matches are the seeded ones, but for one staged fact: on the frame the gates
+//! open the Paladin is set to a quarter of its health, below the Divine Shield
+//! trigger, so every match of the bank has a bubble in it by construction.
 
 use std::time::Duration;
 
@@ -29,7 +31,8 @@ use bevy::time::TimeUpdateStrategy;
 use arenasim::combat::CombatPlugin;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::components::{
-    DivineShieldPending, HealCastHand, HealCastKind, HealCastPhase, InstantAbilityFired,
+    Combatant, DivineShieldPending, HealCastHand, HealCastKind, HealCastPhase, InstantAbilityFired,
+    MatchCountdown,
 };
 use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::play_match::systems::CombatSystemPhase;
@@ -38,7 +41,7 @@ use arenasim::states::play_match::{
     MovementConfigPlugin,
 };
 use arenasim::states::{GameState, StatesPlugin};
-use arenasim::HeadlessMatchConfig;
+use arenasim::{CharacterClass, HeadlessMatchConfig};
 
 /// One rendered frame at 60 fps — one sim tick, the client's own cadence.
 const FRAME: Duration = Duration::from_micros(16_667);
@@ -118,12 +121,33 @@ fn boot(cfg: &str) -> App {
     // The pending lives from the Paladin AI's queue to Phase 1 of the next
     // tick, so every frame's `Last` sees it once, independent of either hand
     // system's place in the schedule.
+    .add_systems(PreUpdate, stage_low_paladin)
     .add_systems(Last, (observe_bubbles, observe_rigs))
     .add_systems(
         Last,
         (|mut seen: ResMut<Seen>| seen.frame += 1).after(observe_rigs),
     );
     app
+}
+
+/// The staged fact: on the first frame after the gates open, team 1's Paladin
+/// stands at a quarter of its health, below `DIVINE_SHIELD_HP_THRESHOLD`, so its
+/// next decision bubbles. Applied once, before that frame's fixed ticks.
+fn stage_low_paladin(
+    mut done: Local<bool>,
+    countdown: Option<Res<MatchCountdown>>,
+    mut combatants: Query<&mut Combatant>,
+) {
+    if *done || !countdown.is_some_and(|c| c.gates_opened) {
+        return;
+    }
+    for mut c in combatants.iter_mut() {
+        if c.team == 1 && c.class == CharacterClass::Paladin {
+            c.current_health = 0.25 * c.max_health;
+            *done = true;
+        }
+    }
+    assert!(*done, "the staged match has no team 1 Paladin");
 }
 
 fn observe_fired(mut seen: ResMut<Seen>, fired: Query<&InstantAbilityFired>) {
@@ -172,8 +196,11 @@ fn kind(ability: AbilityType) -> HealCastKind {
 }
 
 /// Paladin, Priest and Mage against a melee team on the Paladin: every
-/// shield's caster is in the match, and the Paladin is pushed low enough to
-/// bubble. Over the bank, each shield is cast at least once.
+/// shield's caster is in the match. The Paladin is staged below the bubble
+/// trigger at the gates (`stage_low_paladin`), so every match casts a Divine
+/// Shield; over the bank, each shield is cast at least once. (Its bubble used
+/// to come from the seeds alone, until AS-303's gear and the Rogue poisons (#380)
+/// together moved both seeds off it.)
 const BANK: [u64; 2] = [1, 3];
 
 #[test]
@@ -187,6 +214,10 @@ fn each_shield_cast_flashes_its_hands_exactly_once_in_a_real_match() {
         for (i, ability) in SHIELDS.iter().enumerate() {
             cast_counts[i] += seen.casts.iter().filter(|c| c.2 == *ability).count();
         }
+        assert!(
+            seen.casts.iter().any(|c| c.2 == AbilityType::DivineShield),
+            "seed {seed}: the Paladin staged below its bubble trigger never bubbled"
+        );
 
         // Per cast: the two hands, once.
         for &(frame, caster, ability) in &seen.casts {

@@ -385,9 +385,17 @@ pub fn held_budget_multiplier(held: HeldSlot) -> f32 {
     }
 }
 
-/// Returns the WoW Classic-accurate slot budget multiplier for the given item
-/// slot kind. Higher multiplier = more stat budget available. Head/Chest get the
-/// full budget, while accessories like rings and trinkets get roughly half.
+/// Returns the slot budget multiplier for the given item slot kind: TBC's slot
+/// groups. Higher multiplier = more stat budget available.
+///
+/// The group VALUES are TBC's own: the TBC client's `RandPropPoints` holds one
+/// budget column per slot group, and at every TBC item level they stand at
+/// 1.0 / 0.75 / 0.56 / 0.42 / 0.32 of the first. Which slot sits in which group
+/// is read off the client's fixed-stat items. Two numbers are rulings, not
+/// readings: a trinket is 0.70 (every TBC trinket carries a spell, so none can
+/// be read), and the ranged slot keeps 0.5625 rather than TBC's 0.32, so the
+/// Hunter's bow keeps its budget. The check is
+/// `docs/design/balance/sweeps/2026-10-29-as303-tbc-slot-modifiers.py`.
 ///
 /// Keyed on the item's slot KIND, not on a socket: both ring sockets hold the
 /// same kind of item, so a ring's budget cannot depend on which finger it lands on.
@@ -400,16 +408,16 @@ pub fn slot_budget_multiplier(slot: ItemSlotType) -> f32 {
     match slot {
         ItemSlotType::Head => 1.0,
         ItemSlotType::Chest => 1.0,
-        ItemSlotType::Legs => 0.875,
+        ItemSlotType::Legs => 1.0,
         ItemSlotType::Shoulders => 0.75,
         ItemSlotType::Hands => 0.75,
+        ItemSlotType::Waist => 0.75,
         ItemSlotType::Feet => 0.75,
-        ItemSlotType::Waist => 0.625,
-        ItemSlotType::Wrists => 0.5,
+        ItemSlotType::Wrists => 0.5625,
         ItemSlotType::Neck => 0.5625,
         ItemSlotType::Back => 0.5625,
         ItemSlotType::Ring => 0.5625,
-        ItemSlotType::Trinket => 0.5625,
+        ItemSlotType::Trinket => 0.70,
         ItemSlotType::MainHand => ONE_HAND_BUDGET_MULTIPLIER,
         ItemSlotType::OffHand => OFF_HAND_BUDGET_MULTIPLIER,
         ItemSlotType::Ranged => 0.5625,
@@ -449,16 +457,16 @@ mod tests {
     fn test_slot_budget_multiplier_all_values() {
         assert_eq!(slot_budget_multiplier(ItemSlotType::Head), 1.0);
         assert_eq!(slot_budget_multiplier(ItemSlotType::Chest), 1.0);
-        assert_eq!(slot_budget_multiplier(ItemSlotType::Legs), 0.875);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Legs), 1.0);
         assert_eq!(slot_budget_multiplier(ItemSlotType::Shoulders), 0.75);
         assert_eq!(slot_budget_multiplier(ItemSlotType::Hands), 0.75);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Waist), 0.75);
         assert_eq!(slot_budget_multiplier(ItemSlotType::Feet), 0.75);
-        assert_eq!(slot_budget_multiplier(ItemSlotType::Waist), 0.625);
-        assert_eq!(slot_budget_multiplier(ItemSlotType::Wrists), 0.5);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Wrists), 0.5625);
         assert_eq!(slot_budget_multiplier(ItemSlotType::Neck), 0.5625);
         assert_eq!(slot_budget_multiplier(ItemSlotType::Back), 0.5625);
         assert_eq!(slot_budget_multiplier(ItemSlotType::Ring), 0.5625);
-        assert_eq!(slot_budget_multiplier(ItemSlotType::Trinket), 0.5625);
+        assert_eq!(slot_budget_multiplier(ItemSlotType::Trinket), 0.70);
         assert_eq!(slot_budget_multiplier(ItemSlotType::MainHand), 0.42);
         assert_eq!(slot_budget_multiplier(ItemSlotType::OffHand), 0.5625);
         assert_eq!(slot_budget_multiplier(ItemSlotType::Ranged), 0.5625);

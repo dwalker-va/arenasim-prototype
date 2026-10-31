@@ -487,12 +487,14 @@ mod tests {
 
     #[test]
     fn budget_cost_is_weight_times_magnitude_times_uptime() {
-        // The card's own worked example: +100 attack power at 20% uptime is
-        // 1.5 * 100 * 0.20 = 30 points, which overspends an ilvl-58 trinket
-        // (24.5 points) on the proc alone.
-        let c = cfg(AuraType::AttackPowerIncrease, 100.0, 10.0, 40.0);
-        assert!((c.budget_cost() - 30.0).abs() < 1e-4, "{}", c.budget_cost());
-        assert!(c.budget_cost() > 58.0 * 0.75 * 0.5625);
+        // +120 attack power at 20% uptime is 1.5 * 120 * 0.20 = 36 points,
+        // which overspends an ilvl-58 trinket (30.45 points) on the proc alone.
+        let c = cfg(AuraType::AttackPowerIncrease, 120.0, 10.0, 40.0);
+        assert!((c.budget_cost() - 36.0).abs() < 1e-4, "{}", c.budget_cost());
+        let trinket = super::super::constants::slot_budget_multiplier(
+            super::super::equipment::ItemSlotType::Trinket,
+        );
+        assert!(c.budget_cost() > 58.0 * super::super::constants::BUDGET_PER_ILVL * trinket);
     }
 
     #[test]
