@@ -8,8 +8,11 @@
 //! 2. Cleanse - Urgent (Polymorph, Freezing Trap, UA Silence, Fear on allies)
 //! 3. Emergency healing (ally < 40% HP) - Holy Shock (heal)
 //! 4. Hammer of Justice (stun enemy in melee range)
+//!    4.5. Holy Light, `TeamPlan` only (ally 50-85% HP and missing a whole
+//!    Holy Light, neither it nor the Paladin pressured)
 //! 5. Standard healing (ally < 90% HP) - Flash of Light
-//! 6. Holy Light (ally 50-85% HP, safe to cast long heal)
+//! 6. Holy Light, `Legacy` only (ally 50-85% HP) — shadowed by Flash of
+//!    Light, so never cast
 //! 7. Cleanse - Maintenance (roots, DoTs when team stable)
 //! 8. Holy Shock (damage) - when team healthy
 #![allow(clippy::too_many_arguments)]
@@ -401,6 +404,30 @@ pub fn decide_paladin_action(
         );
     }
 
+    // Priority 4.5 (TeamPlan): Holy Light, when there is time to cast it —
+    // neither the Paladin nor the ally it would heal is under pressure, and
+    // the ally is hurt but not low (`holy_light_has_time`). Under `Legacy`
+    // Flash of Light, cheaper and on a wider trigger, always wins first.
+    let team_plan = ctx.ai_profile.is_team_plan();
+    if team_plan
+        && try_holy_light(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            plan.cast_defer,
+            HolyLightWhen::TimeToCast,
+            &mut builder,
+        )
+    {
+        builder.finish();
+        return true;
+    }
+
     // Priority 5: Flash of Light.
     if try_flash_of_light(
         commands,
@@ -418,19 +445,23 @@ pub fn decide_paladin_action(
         return true;
     }
 
-    // Priority 6: Holy Light.
-    if try_holy_light(
-        commands,
-        combat_log,
-        abilities,
-        entity,
-        combatant,
-        my_pos,
-        auras,
-        ctx,
-        plan.cast_defer,
-        &mut builder,
-    ) {
+    // Priority 6 (Legacy): Holy Light, behind Flash of Light — which shadows
+    // it from every state, so a `Legacy` Paladin never casts it (AS-286).
+    if !team_plan
+        && try_holy_light(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            plan.cast_defer,
+            HolyLightWhen::Band,
+            &mut builder,
+        )
+    {
         builder.finish();
         return true;
     }
@@ -855,6 +886,48 @@ fn try_flash_of_light(
     true
 }
 
+/// When the rotation may cast Holy Light.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HolyLightWhen {
+    /// On any ally in its band (`Legacy`, behind Flash of Light).
+    Band,
+    /// Only when there is time to cast it ([`holy_light_has_time`]), ahead of
+    /// Flash of Light (`TeamPlan`).
+    TimeToCast,
+}
+
+/// Whether Holy Light is the heal for `target` now: the big heal is worth its
+/// 2.5s only when nothing hurries it, and only on a deficit it fills.
+///
+/// - Neither the Paladin nor the ally may be pressured
+///   (`AllyStanding::pressured`): a pressured caster is the one an interrupt
+///   or a melee reaches mid-cast, and a pressured ally may need the heal
+///   sooner than Holy Light lands.
+/// - The ally must be missing at least `smallest_heal` (Holy Light's lowest
+///   roll at the Paladin's spell power): a smaller deficit is Flash of Light's,
+///   and the rest of a Holy Light would be overheal.
+///
+/// The ally being above `LOW_HP_THRESHOLD` is `try_holy_light`'s own band.
+/// `Err` is the trace note.
+fn holy_light_has_time(
+    ctx: &CombatContext,
+    me: Entity,
+    target: &CombatantInfo,
+    smallest_heal: f32,
+) -> Result<(), &'static str> {
+    let situation = ctx.situation();
+    if situation.is_pressured(me) {
+        return Err("no time for Holy Light: the Paladin is pressured");
+    }
+    if situation.is_pressured(target.entity) {
+        return Err("no time for Holy Light: its target is pressured");
+    }
+    if target.max_health - target.current_health < smallest_heal {
+        return Err("Holy Light would overheal: the deficit is Flash of Light's");
+    }
+    Ok(())
+}
+
 /// Try to cast Holy Light on an injured ally between 50-85% HP.
 ///
 /// Deferred while `cast_defer` is live and the target is above the urgency
@@ -871,6 +944,7 @@ fn try_holy_light(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     cast_defer: Option<f32>,
+    when: HolyLightWhen,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::HolyLight;
@@ -948,6 +1022,18 @@ fn try_holy_light(
             return false;
         }
     };
+    // Asked after the gate, so a Paladin that could not cast at all reports
+    // why first, as every reach refusal does.
+    if when == HolyLightWhen::TimeToCast {
+        let smallest_heal = def.healing_base_min + combatant.spell_power * def.healing_coefficient;
+        if let Err(note) = holy_light_has_time(ctx, entity, target_info, smallest_heal) {
+            builder.reject(
+                ability,
+                RejectionReason::PreconditionUnmet { note: note.into() },
+            );
+            return false;
+        }
+    }
 
     builder.choose(cleared, Some(target_entity), false);
 
@@ -1902,6 +1988,7 @@ mod reach_tests {
                 None,
                 ctx,
                 None,
+                HolyLightWhen::Band,
                 builder,
             )
         })
@@ -2072,6 +2159,7 @@ mod reach_tests {
                     Some(&silenced),
                     ctx,
                     None,
+                    HolyLightWhen::Band,
                     builder,
                 )
             });

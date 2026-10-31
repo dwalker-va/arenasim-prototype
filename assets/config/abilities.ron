@@ -812,7 +812,9 @@
 
         // Holy Light: Slow, powerful heal
         // WoW Classic: 2.5s cast, 35 mana (rank 1), much higher ranks exist
-        // Scaled for our stat system
+        // Scaled for our stat system. Its coefficient is Flash of Light's
+        // scaled by cast time (Classic's cast-time rule: 0.65 x 2.5 / 1.5),
+        // so the slower heal is the bigger one per second as well as per cast.
         HolyLight: (
             name: "Holy Light",
             class: Paladin,
@@ -824,7 +826,7 @@
             cooldown: 0.0,
             healing_base_min: 25.0,
             healing_base_max: 32.0,
-            healing_coefficient: 0.90,
+            healing_coefficient: 1.08,
             spell_school: Holy,
         ),
 
