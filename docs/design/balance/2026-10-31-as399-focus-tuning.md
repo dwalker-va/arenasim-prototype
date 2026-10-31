@@ -1,7 +1,8 @@
 # AS-399: the team target focus's balance shift — diagnosis and tuning options
 
-**Card:** AS-399. **Status: DESIGN — awaiting the user's ruling (§6).** Nothing
-is built; the options in §5 are measurement arms, committed as a patch.
+**Card:** AS-399. **Status: RULED (§6.1) — the focus stays as shipped.**
+Nothing is built; the options in §5 are measurement arms, committed as a
+patch.
 **Measured commit:** `51b8101d` (main after E0, AS-303; with Holy Light,
 Shadow Word: Pain, Life Tap, the Rogue poisons, dodge/parry). Binaries:
 main `6fe2c208` (shasum of `target/release/arenasim`), option arms `f56734a5`
@@ -56,9 +57,9 @@ McNemar |z| ≥ 1.96 (`*`).
    - **The two together** are close to switching the focus off.
    - **A healer-side answer**, anchoring the healer on the teammate the
      enemy shoots, is inert as a one-line change.
-6. **Recommendation:** keep the focus as shipped. Answer the Druid, the
-   Shaman, and Mage + Warlock with class tuning in 0.9. Open a design card for the
-   healer that leaves its partner behind a pillar (§6).
+6. **Ruled (user, 2026-10-31): keep the focus as shipped** (option A, §6.1).
+   The Druid, the Shaman and Mage + Warlock go to 0.9 class tuning. A design
+   card is proposed for the healer that leaves its partner behind a pillar (§6).
 
 ## 1. The shift on current main
 
@@ -282,7 +283,7 @@ The 3v3 shift of the options was not measured, and neither was a longer hidden
 delay (`hidden3` is in the patch, unplayed: the AS-389 prototype measured
 0.5s and 2.0s within half a point of each other).
 
-## 6. Proposal and the question
+## 6. Options put to the user
 
 **Recommended: A — keep the focus as shipped**, and treat what it exposes as
 class balance:
@@ -307,9 +308,11 @@ the healers by giving back the double-ranged teams' gain. It halves the
 head-to-head value or worse and leaves the standings more spread than the
 shipped focus does. Not recommended.
 
-**Question for the user:** accept the shift as the correction §3 shows it to be,
-and leave the healers to class tuning (A)? Or tune the focus with `return` (B)
-or a no-healer exception (C)?
+### 6.1 Ruling (user, 2026-10-31)
+
+**A.** The focus stays as shipped; its shift is accepted as the correction §3
+shows. The Druid, the Shaman and Mage + Warlock are left to the 0.9 class
+tuning cards. `return` and the no-healer exception are not built.
 
 ## 7. Recompute
 
