@@ -1,7 +1,6 @@
 //! Damage application, absorb shields, and interrupt processing.
 
 use super::super::abilities::SpellSchool;
-use super::super::ability_config::AbilityDefinitions;
 use super::super::class_ai;
 use super::super::components::*;
 use super::super::constants::DIVINE_SHIELD_DAMAGE_PENALTY;
@@ -233,7 +232,6 @@ pub fn get_divine_shield_damage_penalty(auras: Option<&ActiveAuras>) -> f32 {
 pub fn process_interrupts(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    abilities: Res<AbilityDefinitions>,
     interrupts: Query<(Entity, &InterruptPending)>,
     mut casting_targets: Query<(&mut CastingState, &Combatant), Without<ChannelingState>>,
     mut channeling_targets: Query<(&mut ChannelingState, &Combatant), Without<CastingState>>,
@@ -284,9 +282,11 @@ pub fn process_interrupts(
         // (`class_ai::cast_is_interruptible`); this keeps every other path that
         // queues an `InterruptPending` to the same rule.
         if let Ok((mut cast_state, target_combatant)) = casting_targets.get_mut(interrupt.target) {
-            if class_ai::cast_is_interruptible(&cast_state, &abilities) {
+            // The cast is read from its caster's own book.
+            let book = target_combatant.book();
+            if class_ai::cast_is_interruptible(&cast_state, book) {
                 // Get the spell school of the interrupted spell
-                let interrupted_ability_def = abilities.get_unchecked(&cast_state.ability);
+                let interrupted_ability_def = book.get_unchecked(&cast_state.ability);
                 let interrupted_school = interrupted_ability_def.spell_school;
                 let interrupted_spell_name = &interrupted_ability_def.name;
 
@@ -320,7 +320,6 @@ pub fn process_interrupts(
                 apply_interrupt_lockout(
                     &mut commands,
                     &mut combat_log,
-                    &abilities,
                     interrupt,
                     &combatants,
                     &pet_query,
@@ -342,7 +341,9 @@ pub fn process_interrupts(
                 // Don't interrupt if already interrupted
                 if !channel_state.interrupted {
                     // Get the spell school of the interrupted channel
-                    let interrupted_ability_def = abilities.get_unchecked(&channel_state.ability);
+                    let interrupted_ability_def = target_combatant
+                        .book()
+                        .get_unchecked(&channel_state.ability);
                     let interrupted_school = interrupted_ability_def.spell_school;
                     let interrupted_spell_name = &interrupted_ability_def.name;
 
@@ -375,7 +376,6 @@ pub fn process_interrupts(
                     apply_interrupt_lockout(
                         &mut commands,
                         &mut combat_log,
-                        &abilities,
                         interrupt,
                         &combatants,
                         &pet_query,
@@ -397,7 +397,6 @@ pub fn process_interrupts(
 fn apply_interrupt_lockout(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
     interrupt: &InterruptPending,
     combatants: &Query<&Combatant>,
     pet_query: &Query<&Pet>,
@@ -407,10 +406,15 @@ fn apply_interrupt_lockout(
     lockout_reduction: f32,
 ) {
     // Pet-aware interrupter id (Pummel/Wind Shear can come from a pet).
-    let caster_id = combatants
-        .get(interrupt.caster)
+    let interrupter = combatants.get(interrupt.caster).ok();
+    let caster_id = interrupter
         .map(|caster| combat_log_id_for(caster, pet_query.get(interrupt.caster).ok()))
-        .unwrap_or_else(|_| "Unknown".to_string());
+        .unwrap_or_else(|| "Unknown".to_string());
+    // The interrupt is named from its interrupter's own book.
+    let interrupt_name = interrupter.map_or_else(
+        || format!("{:?}", interrupt.ability),
+        |caster| caster.book().get_unchecked(&interrupt.ability).name.clone(),
+    );
     // The interrupted combatant's id (target_combatant == interrupt.target).
     let target_id = combat_log_id_for(target_combatant, pet_query.get(interrupt.target).ok());
 
@@ -433,7 +437,7 @@ fn apply_interrupt_lockout(
             tick_interval: 0.0,
             time_until_next_tick: 0.0,
             caster: Some(interrupt.caster),
-            ability_name: abilities.get_unchecked(&interrupt.ability).name.clone(),
+            ability_name: interrupt_name,
             fear_direction: (0.0, 0.0),
             fear_direction_timer: 0.0,
             spell_school: None, // Lockouts are not dispellable

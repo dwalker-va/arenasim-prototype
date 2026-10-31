@@ -7,7 +7,6 @@ use bevy::prelude::*;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::utils::{combatant_id, get_next_fct_offset};
 
@@ -18,29 +17,28 @@ use crate::states::play_match::utils::{combatant_id, get_next_fct_offset};
 pub fn process_divine_shield(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    abilities: Res<AbilityDefinitions>,
     pending_shields: Query<(Entity, &DivineShieldPending)>,
     mut combatants: Query<(&Combatant, &Transform, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
 ) {
-    // The immunity aura is data-driven from `abilities.ron` (DivineShield's
-    // `applies_aura`) so it can be tuned without a recompile, like every other
-    // ability. Fallbacks preserve the historical values if the config is missing.
-    let ds_def = abilities.get_unchecked(&AbilityType::DivineShield);
-    // The aura, the log lines and the floating text all carry the ability's
-    // RON `name` — the name the renderer keys the bubble on.
-    let ds_name = ds_def.name.as_str();
-    let ds_aura = ds_def.applies_aura.as_ref();
-    let immunity_duration = ds_aura.map(|a| a.duration).unwrap_or(12.0);
-    let immunity_magnitude = ds_aura.map(|a| a.magnitude).unwrap_or(1.0);
-    let immunity_break = ds_aura.map(|a| a.break_on_damage).unwrap_or(-1.0);
-
     for (pending_entity, pending) in pending_shields.iter() {
         if let Ok((combatant, transform, active_auras_opt)) = combatants.get_mut(pending.caster) {
             if !combatant.is_alive() {
                 commands.entity(pending_entity).despawn();
                 continue;
             }
+            // The immunity aura is data-driven from `abilities.ron`
+            // (DivineShield's `applies_aura`), read from the Paladin's own
+            // book. Fallbacks preserve the historical values if the config is
+            // missing.
+            let ds_def = combatant.book().get_unchecked(&AbilityType::DivineShield);
+            // The aura, the log lines and the floating text all carry the
+            // ability's RON `name` — the name the renderer keys the bubble on.
+            let ds_name = ds_def.name.as_str();
+            let ds_aura = ds_def.applies_aura.as_ref();
+            let immunity_duration = ds_aura.map(|a| a.duration).unwrap_or(12.0);
+            let immunity_magnitude = ds_aura.map(|a| a.magnitude).unwrap_or(1.0);
+            let immunity_break = ds_aura.map(|a| a.break_on_damage).unwrap_or(-1.0);
 
             let immunity_aura = Aura {
                 effect_type: AuraType::DamageImmunity,

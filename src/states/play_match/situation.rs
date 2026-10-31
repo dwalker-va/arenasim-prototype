@@ -201,7 +201,6 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-use super::ability_config::AbilityDefinitions;
 use super::ai_profile::AiProfile;
 use super::class_ai::combat_snapshot::CombatSnapshot;
 use super::class_ai::pillar_stance::{self, StanceMemory, StanceWindow};
@@ -1897,13 +1896,12 @@ const UNTIL_EPSILON: f32 = 0.05;
 /// each same-frame instant CC that snapshot reflects (see the module docs).
 /// The pillar stance is classified here, after the rest, from the stance
 /// healer's own view of the snapshot (`pillar_stance::classify`): its
-/// crowd-control key reads the enemies' kits, which only `abilities` has.
+/// crowd-control key reads each enemy's kit from its own ability book.
 pub fn update_situations(
     situations: &mut Situations,
     snapshot: &CombatSnapshot,
     clock: &MatchClock,
     cfg: &SituationConfig,
-    abilities: &AbilityDefinitions,
     trace: &mut DecisionTrace,
 ) {
     for (index, team) in [1u8, 2].into_iter().enumerate() {
@@ -1911,8 +1909,7 @@ pub fn update_situations(
         let cfg = cfg.for_team(team, snapshot.ai_profile.for_team(team));
         let mut next = classify_before_yield(snapshot, team, &prev, clock, &cfg);
         next.hunt = super::class_ai::hunt::classify(snapshot, team, &prev, &next, clock, &cfg);
-        let (stance, memory) =
-            pillar_stance::classify(snapshot, team, &prev, &next, clock, &cfg, abilities);
+        let (stance, memory) = pillar_stance::classify(snapshot, team, &prev, &next, clock, &cfg);
         next.pillar_stance = stance;
         next.stance_memory = memory;
         yield_sight(
@@ -2252,6 +2249,7 @@ mod tests {
             casting_ability: None,
             pet_type: None,
             pet: None,
+            book: crate::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
         }
     }
 
@@ -3564,6 +3562,7 @@ mod sight_yield_tests {
             casting_ability: None,
             pet_type: None,
             pet: None,
+            book: crate::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
         }
     }
 

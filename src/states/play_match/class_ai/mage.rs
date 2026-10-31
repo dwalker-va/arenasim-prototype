@@ -14,7 +14,7 @@
 use crate::combat::log::CombatLog;
 use crate::states::match_config::MageArmor;
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::combat_core::{
     calculate_cast_time, get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice,
     get_spell_power_bonus_from_slice, roll_crit,
@@ -41,7 +41,7 @@ pub fn decide_mage_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -264,7 +264,7 @@ pub fn decide_mage_action(
 fn try_ice_barrier(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -320,7 +320,7 @@ fn try_ice_barrier(
     builder.choose(cleared, Some(entity), true);
 
     combatant.current_mana -= barrier_def.mana_cost;
-    combatant.start_cooldown(ice_barrier, abilities);
+    combatant.start_cooldown(ice_barrier);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -366,7 +366,7 @@ fn try_ice_barrier(
 fn try_mage_armor(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -444,7 +444,7 @@ fn try_mage_armor(
 fn try_arcane_intellect(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -549,7 +549,7 @@ fn try_frost_nova(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -639,7 +639,7 @@ fn try_frost_nova(
     ));
 
     combatant.current_mana -= nova_def.mana_cost;
-    combatant.start_cooldown(frost_nova, abilities);
+    combatant.start_cooldown(frost_nova);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -745,7 +745,7 @@ pub fn polymorph_refused(ctx: &CombatContext, target: Entity) -> bool {
 fn try_polymorph(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -767,7 +767,7 @@ fn try_polymorph(
 fn try_polymorph_on(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -892,7 +892,7 @@ fn try_polymorph_on(
 fn try_frostbolt(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -922,7 +922,7 @@ fn try_frostbolt(
 fn try_frostbolt_on(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,

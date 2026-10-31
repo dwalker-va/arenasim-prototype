@@ -14,7 +14,7 @@
 use bevy::prelude::*;
 
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::components::*;
 use crate::states::play_match::decision_trace::{
     DecisionTrace, MovementGoalKind, MovementTrigger, Posture as TracePosture,
@@ -75,7 +75,7 @@ use super::CombatContext;
 #[allow(clippy::too_many_arguments)]
 pub fn evaluate_paladin_posture(
     commands: &mut Commands,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
@@ -393,7 +393,7 @@ fn evaluate_dip_entry(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     movement: &MovementConfig,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
 ) -> Option<Entity> {
     let def = abilities.get_unchecked(&AbilityType::HammerOfJustice);
 
@@ -475,7 +475,7 @@ pub fn dip_should_abort(
 #[allow(clippy::too_many_arguments)]
 fn paladin_pressured_tick(
     commands: &mut Commands,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
@@ -495,7 +495,6 @@ fn paladin_pressured_tick(
         ctx,
         state,
         directive,
-        abilities,
         combatant.base_movement_speed,
         &movement.shared,
         &movement.paladin.weights,
@@ -564,7 +563,7 @@ fn paladin_free_tick(
 #[allow(clippy::too_many_arguments)]
 fn paladin_dip_tick(
     commands: &mut Commands,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     my_pos: Vec3,
     ctx: &CombatContext,

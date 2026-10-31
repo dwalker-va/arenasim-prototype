@@ -33,6 +33,7 @@ use arenasim::states::match_config::CharacterClass;
 use std::time::Duration;
 
 use arenasim::states::encyclopedia::abilities::{mechanics_text, summary_sentence};
+use arenasim::states::play_match::ability_book::AbilityBook;
 use arenasim::states::play_match::combat_core::process_casting;
 use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, Aura, AuraPending, AuraType, CastingState, Combatant, GameRng,
@@ -63,6 +64,18 @@ fn aimed_shot_is_the_flagged_cast() {
 
 // ── resolution ──────────────────────────────────────────────────────────────
 
+/// The Hunter, mid-`cast`. A unit casts only what is in its book, so the
+/// interruptible control (Frostbolt, not a Hunter's) is granted to it.
+fn hunter_casting(cast: AbilityType) -> Combatant {
+    let book = AbilityBook::shipped(CharacterClass::Hunter);
+    let book = if book.contains(&cast) {
+        book
+    } else {
+        book.granting(AbilityDefinitions::shipped(), cast)
+    };
+    Combatant::new(2, 0, CharacterClass::Hunter).with_book(book)
+}
+
 /// A Hunter mid-`cast`, and a Kick queued at it, resolved. Returns (cast cut?,
 /// lockouts queued).
 fn resolve_kick_at(cast: AbilityType) -> (bool, usize) {
@@ -79,7 +92,7 @@ fn resolve_kick_at(cast: AbilityType) -> (bool, usize) {
         .id();
     let hunter = world
         .spawn((
-            Combatant::new(2, 0, CharacterClass::Hunter),
+            hunter_casting(cast),
             Transform::from_xyz(2.0, 0.0, 0.0),
             CastingState::new(cast, rogue, cast_time),
         ))
@@ -144,7 +157,7 @@ fn kick_pass_at(cast: AbilityType) -> UseSite {
     let rogue = world.spawn((rogue, Transform::default())).id();
     let hunter = world
         .spawn((
-            Combatant::new(2, 0, CharacterClass::Hunter),
+            hunter_casting(cast),
             Transform::from_xyz(2.0, 0.0, 0.0),
             CastingState::new(cast, rogue, cast_time),
             ActiveAuras::default(),
@@ -242,7 +255,7 @@ fn cast_under(cast: AbilityType, cc: Option<AuraType>) -> (bool, usize) {
         .collect();
     let hunter = world
         .spawn((
-            Combatant::new(2, 0, CharacterClass::Hunter),
+            hunter_casting(cast),
             Transform::default(),
             CastingState::new(cast, rogue, cast_time),
             ActiveAuras { auras },
@@ -347,6 +360,10 @@ fn stage(cast: AbilityType) -> Stage {
                 .resource::<AbilityDefinitions>()
                 .get_unchecked(&cast)
                 .cast_time;
+            let staged = hunter_casting(cast);
+            let mut combatant = world.get_mut::<Combatant>(hunter).expect("the Hunter");
+            let granted = combatant.clone().with_book(staged.book().clone());
+            *combatant = granted;
             world
                 .entity_mut(hunter)
                 .insert(CastingState::new(cast, rogue, cast_time));

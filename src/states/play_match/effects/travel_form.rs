@@ -16,7 +16,6 @@ use bevy::prelude::*;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 use crate::states::play_match::utils::{combatant_id, get_next_fct_offset};
 
@@ -24,7 +23,6 @@ use crate::states::play_match::utils::{combatant_id, get_next_fct_offset};
 pub fn process_travel_form(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
-    abilities: Res<AbilityDefinitions>,
     pending_shifts: Query<(Entity, &ShapeshiftPending)>,
     mut combatants: Query<(&Combatant, &Transform, Option<&mut ActiveAuras>)>,
     mut fct_states: Query<&mut FloatingTextState>,
@@ -44,7 +42,7 @@ pub fn process_travel_form(
                 let Some(pending_aura) = AuraPending::from_ability(
                     pending.caster,
                     pending.caster,
-                    abilities.get_unchecked(&AbilityType::TravelForm),
+                    combatant.book().get_unchecked(&AbilityType::TravelForm),
                 ) else {
                     continue;
                 };

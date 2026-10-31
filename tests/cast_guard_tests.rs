@@ -39,6 +39,7 @@ fn target_info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo
         casting_ability: None,
         pet_type: None,
         pet: None,
+        book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
     }
 }
 

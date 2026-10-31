@@ -23,7 +23,7 @@ use bevy::prelude::*;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::match_config::{CharacterClass, WarlockCurse};
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::components::{
     ActiveAuras, AuraPending, AuraType, CastingState, ChannelingState, Combatant, DRCategory,
@@ -141,7 +141,7 @@ fn pick_death_coil_peel(me: Entity, my_pos: Vec3, ctx: &CombatContext) -> Option
 pub fn decide_warlock_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -703,7 +703,7 @@ pub fn convert_health_to_mana(combatant: &mut Combatant, amount: f32) {
 /// the health, and arena dampening does not cut the mana.
 fn try_life_tap(
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
@@ -773,7 +773,7 @@ fn try_life_tap(
 fn try_corruption(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -862,7 +862,7 @@ fn try_corruption(
 fn try_unstable_affliction(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -944,7 +944,7 @@ fn try_unstable_affliction(
 fn try_immolate(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1029,7 +1029,7 @@ fn try_immolate(
 fn try_peel_fear(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1083,7 +1083,7 @@ fn try_peel_fear(
 fn try_fear(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1151,7 +1151,7 @@ fn try_fear(
 fn try_death_coil(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1206,7 +1206,7 @@ fn try_death_coil(
     ));
 
     combatant.current_mana -= def.mana_cost;
-    combatant.start_cooldown(death_coil, abilities);
+    combatant.start_cooldown(death_coil);
     combatant.global_cooldown = GCD;
 
     let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
@@ -1233,7 +1233,7 @@ fn try_death_coil(
 fn try_shadowbolt(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1301,7 +1301,7 @@ fn try_shadowbolt(
 fn try_drain_life(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1410,7 +1410,7 @@ fn try_drain_life(
 fn try_spread_curses(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1498,7 +1498,7 @@ fn try_spread_curses(
 fn try_cast_curse(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,

@@ -23,7 +23,7 @@ use bevy::prelude::*;
 use crate::combat::log::CombatLog;
 use crate::states::match_config::{CharacterClass, RogueOpener};
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
-use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::combat_core::{
     get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice, roll_crit,
 };
@@ -43,7 +43,7 @@ pub fn decide_rogue_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -426,7 +426,7 @@ fn plan_kidney_shot(
     entity: Entity,
     combatant: &Combatant,
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     my_pos: Vec3,
 ) -> KidneyPlan {
     let kidney_cost = abilities.get_unchecked(&AbilityType::KidneyShot).mana_cost;
@@ -482,11 +482,11 @@ fn plan_kidney_shot(
 
     // 4. Caster (Mage/Priest/Warlock/Paladin): the Kick → hold → Kidney chain.
     let lockout = lockout_on(ctx, tgt);
+    // The target's cast, read from the TARGET's own book.
     let casting = ctx
         .combatants
         .get(&tgt)
-        .and_then(|i| i.casting_ability)
-        .map(|ab| abilities.get_unchecked(&ab));
+        .and_then(|i| i.casting_ability.map(|ab| i.book.get_unchecked(&ab)));
     let casting_school = casting.map(|def| def.spell_school);
     // Kick takes the cast only if it can be interrupted; against one that
     // is, the stun is the only denial there is.
@@ -554,7 +554,7 @@ fn try_ambush(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -650,7 +650,7 @@ fn try_cheap_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -753,7 +753,7 @@ fn try_kidney_shot(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -800,7 +800,7 @@ fn try_kidney_shot(
     ));
 
     combatant.current_mana -= def.mana_cost;
-    combatant.start_cooldown(kidney_shot, abilities);
+    combatant.start_cooldown(kidney_shot);
     combatant.global_cooldown = GCD;
 
     let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
@@ -855,7 +855,7 @@ fn try_sinister_strike(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,

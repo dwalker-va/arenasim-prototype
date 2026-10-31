@@ -44,6 +44,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> Comb
         casting_ability: None,
         pet_type: None,
         pet: None,
+        book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
     }
 }
 
@@ -141,7 +142,7 @@ fn decide(scene: Scene) -> Option<(AbilityType, &'static str)> {
     decide_druid_action(
         &mut commands,
         &mut combat_log,
-        &abilities,
+        &combatant.book().clone(),
         druid,
         &mut combatant,
         druid_pos,
@@ -254,7 +255,6 @@ fn same_frame_marks(share: bool) -> Vec<Option<Entity>> {
     let mut world = World::new();
     let druids = [world.spawn_empty().id(), world.spawn_empty().id()];
     let warrior = world.spawn_empty().id();
-    let abilities = AbilityDefinitions::default();
     let movement = MovementConfig::default();
     let mut combat_log = CombatLog::default();
 
@@ -310,7 +310,7 @@ fn same_frame_marks(share: bool) -> Vec<Option<Entity>> {
         decide_druid_action(
             &mut commands,
             &mut combat_log,
-            &abilities,
+            &combatant.book().clone(),
             druid,
             &mut combatant,
             my_pos,

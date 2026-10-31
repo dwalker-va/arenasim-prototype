@@ -24,7 +24,8 @@ use std::collections::HashSet;
 use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
+use crate::states::play_match::ability_book::AbilityBook;
+use crate::states::play_match::ability_config::AbilityConfig;
 use crate::states::play_match::combat_core::{
     calculate_cast_time, clamp_to_arena, get_spell_power_bonus,
 };
@@ -113,7 +114,7 @@ pub enum ScreamDipPlan {
 pub fn decide_priest_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -393,7 +394,7 @@ pub fn decide_priest_action(
 fn try_psychic_scream(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -452,7 +453,6 @@ fn try_psychic_scream(
         commands,
         combat_log,
         scream_def,
-        abilities,
         entity,
         combatant,
         my_pos,
@@ -473,7 +473,7 @@ fn try_psychic_scream(
 fn try_peel_psychic_scream(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -515,7 +515,6 @@ fn try_peel_psychic_scream(
         commands,
         combat_log,
         scream_def,
-        abilities,
         entity,
         combatant,
         my_pos,
@@ -570,7 +569,6 @@ fn fire_psychic_scream(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     scream_def: &AbilityConfig,
-    abilities: &AbilityDefinitions,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -593,7 +591,7 @@ fn fire_psychic_scream(
         PlayMatchEntity,
     ));
     combatant.current_mana -= scream_def.mana_cost;
-    combatant.start_cooldown(AbilityType::PsychicScream, abilities);
+    combatant.start_cooldown(AbilityType::PsychicScream);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -685,7 +683,7 @@ fn held_for_critical_heal(
 fn try_dip_psychic_scream(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -723,7 +721,6 @@ fn try_dip_psychic_scream(
         commands,
         combat_log,
         scream_def,
-        abilities,
         entity,
         combatant,
         my_pos,
@@ -739,7 +736,7 @@ fn try_dip_psychic_scream(
 fn try_fortitude(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -862,7 +859,7 @@ fn try_fortitude(
 fn try_power_word_shield(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1054,7 +1051,7 @@ fn try_power_word_shield(
 fn try_dispel_magic(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1096,7 +1093,7 @@ pub const FLASH_HEAL_HP: f32 = 0.9;
 fn try_flash_heal(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1202,7 +1199,7 @@ fn try_flash_heal(
 fn try_mind_blast(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1261,7 +1258,7 @@ fn try_mind_blast(
 
     builder.choose(cleared, Some(target_entity), false);
 
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
@@ -1308,7 +1305,7 @@ const MAINTENANCE_DISPEL_PRIORITY: i32 = 50;
 /// above Shadow Word: Pain in the chain, so whenever one can go it has.
 fn shadow_word_pain_held(
     ctx: &CombatContext,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     my_team: u8,
     my_pos: Vec3,
 ) -> Option<&'static str> {
@@ -1343,7 +1340,7 @@ fn shadow_word_pain_held(
 fn try_shadow_word_pain(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1526,7 +1523,7 @@ fn mana_burn_pull_target(
 fn try_mana_burn(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1652,7 +1649,7 @@ fn try_mana_burn(
 
     builder.choose(cleared, Some(target_entity), false);
 
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(def.cast_time, auras);
 
@@ -1764,7 +1761,7 @@ fn evaluate_scream_dip_entry(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     movement: &MovementConfig,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
 ) -> Option<Entity> {
     let def = abilities.get_unchecked(&AbilityType::PsychicScream);
 
@@ -1848,7 +1845,7 @@ fn scream_dip_should_abort(
 #[allow(clippy::too_many_arguments)]
 fn priest_dip_tick(
     commands: &mut Commands,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     my_pos: Vec3,
     ctx: &CombatContext,
@@ -1947,7 +1944,7 @@ pub fn evaluate_priest_posture(
     // `abilities` / `auras` are wired for the U4 offensive dip (the dip-entry
     // predicate needs the Psychic Scream def for reach/eligibility and auras
     // for pre_cast_ok). Inert in U3 — the posture machine returns Rotation.
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     auras: Option<&ActiveAuras>,
     posture: Option<&mut HealerPosture>,
     directive: Option<&MovementDirective>,
@@ -2267,7 +2264,7 @@ pub fn evaluate_priest_posture(
 #[allow(clippy::too_many_arguments)]
 fn pressured_tick(
     commands: &mut Commands,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
@@ -2287,7 +2284,6 @@ fn pressured_tick(
         ctx,
         state,
         directive,
-        abilities,
         combatant.base_movement_speed,
         &movement.shared,
         &movement.priest.weights,
@@ -2311,7 +2307,7 @@ fn pressured_tick(
 #[allow(clippy::too_many_arguments)]
 fn free_tick(
     commands: &mut Commands,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
@@ -2354,7 +2350,6 @@ fn free_tick(
     // Hugging a pillar (AS-373): the ring point replaces the formation point.
     let hug = super::pillar_mode::update(
         ctx,
-        abilities,
         entity,
         combatant.base_movement_speed,
         my_pos,
@@ -2485,7 +2480,7 @@ fn free_tick(
 /// still drifts into wand range) and into arena bounds. `None` when no
 /// living non-pet ally exists (degenerate case R5/AE4).
 fn compute_formation_point(
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &Combatant,
     my_pos: Vec3,
@@ -2653,7 +2648,6 @@ fn compute_formation_point(
     Some(if super::formation::reach_constrained(ctx) {
         let field = super::cc_reach::CcField::for_healer(
             ctx,
-            abilities,
             entity,
             shared.cc_ready_horizon,
             shared.cc_reach_margin,
@@ -2695,7 +2689,7 @@ mod reach_tests {
     }
 
     fn flash_heal(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
-        let abilities = AbilityDefinitions::default();
+        let abilities = AbilityBook::shipped(crate::states::match_config::CharacterClass::Priest);
         let me = s.units[0];
         s.run(obstacles, |commands, ctx, combatant, builder| {
             try_flash_heal(
@@ -2714,7 +2708,7 @@ mod reach_tests {
     }
 
     fn shield(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
-        let abilities = AbilityDefinitions::default();
+        let abilities = AbilityBook::shipped(crate::states::match_config::CharacterClass::Priest);
         let me = s.units[0];
         s.run(obstacles, |commands, ctx, combatant, builder| {
             try_power_word_shield(
@@ -2733,7 +2727,7 @@ mod reach_tests {
     }
 
     fn fortitude(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
-        let abilities = AbilityDefinitions::default();
+        let abilities = AbilityBook::shipped(crate::states::match_config::CharacterClass::Priest);
         let me = s.units[0];
         s.run(obstacles, |commands, ctx, combatant, builder| {
             try_fortitude(
@@ -2887,7 +2881,7 @@ mod reach_tests {
 
     /// A pressured Priest's defensive scream.
     fn scream(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
-        let abilities = AbilityDefinitions::default();
+        let abilities = AbilityBook::shipped(crate::states::match_config::CharacterClass::Priest);
         let movement = crate::states::play_match::movement_config::MovementConfig::default();
         let me = s.units[0];
         s.run(obstacles, |commands, ctx, combatant, builder| {
@@ -2941,7 +2935,7 @@ mod reach_tests {
         obstacles: &[ObstacleVolume],
         priest_hp: f32,
     ) -> DecisionTrace {
-        let abilities = AbilityDefinitions::default();
+        let abilities = AbilityBook::shipped(crate::states::match_config::CharacterClass::Priest);
         let movement = crate::states::play_match::movement_config::MovementConfig::default();
         let me = s.units[0];
         s.roster.get_mut(&me).unwrap().current_health = 100.0 * priest_hp;
@@ -3009,7 +3003,8 @@ mod reach_tests {
     #[test]
     fn an_occluded_heal_still_reports_the_priest_out_of_mana() {
         let reason = |obstacles: &[ObstacleVolume]| {
-            let abilities = AbilityDefinitions::default();
+            let abilities =
+                AbilityBook::shipped(crate::states::match_config::CharacterClass::Priest);
             let mut s = scene(0.3, 1.0);
             let me = s.units[0];
             let trace = s.run(obstacles, |commands, ctx, combatant, builder| {
@@ -3043,7 +3038,8 @@ mod reach_tests {
     fn an_occluded_shield_still_reports_the_priest_silenced() {
         let silenced = silenced();
         let reason = |obstacles: &[ObstacleVolume]| {
-            let abilities = AbilityDefinitions::default();
+            let abilities =
+                AbilityBook::shipped(crate::states::match_config::CharacterClass::Priest);
             let mut s = scene(0.3, 0.8);
             let me = s.units[0];
             s.auras.insert(me, vec![weakened_soul()]);

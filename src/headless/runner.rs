@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use crate::combat::log::{CombatLog, CombatLogEventType, CombatantMetadata, MatchMetadata};
 use crate::states::match_config::MatchConfig;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
 use crate::states::play_match::equipment::{
     format_loadout, load_default_loadouts, load_item_definitions, resolve_equipped_loadout,
@@ -311,6 +312,7 @@ fn headless_setup_match(
     item_defs: Res<ItemDefinitions>,
     default_loadouts: Res<DefaultLoadouts>,
     map_geometry: Res<MapGeometryConfig>,
+    abilities: Res<AbilityDefinitions>,
 ) {
     // Clear and initialize combat log
     combat_log.clear();
@@ -400,6 +402,9 @@ fn headless_setup_match(
                 1,
                 i as u8,
                 *character,
+                // Its own book, resolved once at spawn (the graphical spawn
+                // resolves it the same way).
+                AbilityBook::for_class(&abilities, *character),
                 rogue_opener,
                 rogue_poison,
                 warlock_curse_prefs,
@@ -439,8 +444,13 @@ fn headless_setup_match(
             // Spawn Felhunter pet for Warlocks
             if *character == CharacterClass::Warlock {
                 let pet_slot = PET_SLOT_BASE + i as u8;
-                let pet_combatant =
-                    Combatant::new_pet(1, pet_slot, PetType::Felhunter, &combatant_clone);
+                let pet_combatant = Combatant::new_pet(
+                    1,
+                    pet_slot,
+                    PetType::Felhunter,
+                    &combatant_clone,
+                    AbilityBook::for_pet(&abilities, PetType::Felhunter),
+                );
                 let pet_pos = position + Vec3::new(-2.0, 0.75, 1.5);
                 commands.spawn((
                     Transform::from_translation(pet_pos),
@@ -471,7 +481,13 @@ fn headless_setup_match(
                     HunterPetType::Bird => PetType::Bird,
                 };
                 let pet_slot = PET_SLOT_BASE + i as u8;
-                let pet_combatant = Combatant::new_pet(1, pet_slot, pet_type, &combatant_clone);
+                let pet_combatant = Combatant::new_pet(
+                    1,
+                    pet_slot,
+                    pet_type,
+                    &combatant_clone,
+                    AbilityBook::for_pet(&abilities, pet_type),
+                );
                 let pet_pos = position + Vec3::new(-2.0, 0.75, 1.5);
                 commands.spawn((
                     Transform::from_translation(pet_pos),
@@ -535,6 +551,9 @@ fn headless_setup_match(
                 2,
                 i as u8,
                 *character,
+                // Its own book, resolved once at spawn (the graphical spawn
+                // resolves it the same way).
+                AbilityBook::for_class(&abilities, *character),
                 rogue_opener,
                 rogue_poison,
                 warlock_curse_prefs,
@@ -574,8 +593,13 @@ fn headless_setup_match(
             // Spawn Felhunter pet for Warlocks
             if *character == CharacterClass::Warlock {
                 let pet_slot = PET_SLOT_BASE + i as u8;
-                let pet_combatant =
-                    Combatant::new_pet(2, pet_slot, PetType::Felhunter, &combatant_clone);
+                let pet_combatant = Combatant::new_pet(
+                    2,
+                    pet_slot,
+                    PetType::Felhunter,
+                    &combatant_clone,
+                    AbilityBook::for_pet(&abilities, PetType::Felhunter),
+                );
                 let pet_pos = position + Vec3::new(2.0, 0.75, 1.5);
                 commands.spawn((
                     Transform::from_translation(pet_pos),
@@ -606,7 +630,13 @@ fn headless_setup_match(
                     HunterPetType::Bird => PetType::Bird,
                 };
                 let pet_slot = PET_SLOT_BASE + i as u8;
-                let pet_combatant = Combatant::new_pet(2, pet_slot, pet_type, &combatant_clone);
+                let pet_combatant = Combatant::new_pet(
+                    2,
+                    pet_slot,
+                    pet_type,
+                    &combatant_clone,
+                    AbilityBook::for_pet(&abilities, pet_type),
+                );
                 let pet_pos = position + Vec3::new(2.0, 0.75, 1.5);
                 commands.spawn((
                     Transform::from_translation(pet_pos),

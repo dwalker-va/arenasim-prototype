@@ -448,6 +448,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> Comb
         casting_ability: None,
         pet_type: None,
         pet: None,
+        book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
     }
 }
 
@@ -498,7 +499,6 @@ fn decide_scene_rooted(
     let druid = world.spawn_empty().id();
     let ally = world.spawn_empty().id();
     let enemy = world.spawn_empty().id();
-    let abilities = AbilityDefinitions::default();
     let movement = MovementConfig::default();
     let mut combat_log = CombatLog::default();
     let mut trace = DecisionTrace::default();
@@ -558,7 +558,7 @@ fn decide_scene_rooted(
     decide_druid_action(
         &mut commands,
         &mut combat_log,
-        &abilities,
+        &combatant.book().clone(),
         druid,
         combatant,
         druid_pos,

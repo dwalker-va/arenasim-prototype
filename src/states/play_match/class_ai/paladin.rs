@@ -23,7 +23,8 @@ use std::collections::BTreeMap;
 use crate::combat::log::CombatLog;
 use crate::states::match_config::{CharacterClass, PaladinAura};
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
+use crate::states::play_match::ability_book::AbilityBook;
+use crate::states::play_match::ability_config::AbilityConfig;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{
@@ -151,7 +152,7 @@ pub fn dip_target_candidate(
 pub fn decide_paladin_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -517,7 +518,7 @@ pub fn decide_paladin_action(
 pub fn try_divine_shield(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -591,7 +592,7 @@ pub fn try_divine_shield(
         caster_class: combatant.class,
     });
 
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -644,7 +645,7 @@ pub fn divine_shield_while_cc_should_fire(
 pub fn try_divine_shield_while_cc(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -747,7 +748,7 @@ pub fn try_divine_shield_while_cc(
         caster_class: combatant.class,
     });
 
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -786,7 +787,7 @@ fn has_emergency_target(team: u8, combatant_info: &BTreeMap<Entity, CombatantInf
 fn try_flash_of_light(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -937,7 +938,7 @@ fn holy_light_has_time(
 fn try_holy_light(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1061,7 +1062,7 @@ fn try_holy_light(
 fn try_holy_shock_heal(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
@@ -1096,7 +1097,7 @@ fn try_holy_shock_heal(
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
 
     log_ability_use(
         combat_log,
@@ -1109,6 +1110,7 @@ fn try_holy_shock_heal(
     );
 
     commands.spawn(HolyShockHealPending {
+        caster_book: combatant.book().clone(),
         caster_spell_power: combatant.spell_power,
         caster_crit_chance: combatant.crit_chance,
         caster_team: combatant.team,
@@ -1124,7 +1126,7 @@ fn try_holy_shock_heal(
 fn try_holy_shock_damage(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
@@ -1201,7 +1203,7 @@ fn try_holy_shock_damage(
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
-    combatant.start_cooldown(ability, abilities);
+    combatant.start_cooldown(ability);
 
     log_ability_use(
         combat_log,
@@ -1214,6 +1216,7 @@ fn try_holy_shock_damage(
     );
 
     commands.spawn(HolyShockDamagePending {
+        caster_book: combatant.book().clone(),
         caster_spell_power: combatant.spell_power,
         caster_crit_chance: combatant.crit_chance,
         caster_team: combatant.team,
@@ -1232,7 +1235,7 @@ fn try_holy_shock_damage(
 fn try_hammer_of_justice(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1319,7 +1322,6 @@ fn try_hammer_of_justice(
         combat_log,
         entity,
         def,
-        abilities,
         combatant,
         target_entity,
         target_id,
@@ -1340,7 +1342,7 @@ fn try_hammer_of_justice(
 fn try_dip_hammer_of_justice(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1394,7 +1396,6 @@ fn try_dip_hammer_of_justice(
         combat_log,
         entity,
         def,
-        abilities,
         combatant,
         target,
         info.log_id(),
@@ -1415,7 +1416,7 @@ fn try_dip_hammer_of_justice(
 fn try_peel_hammer_of_justice(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1456,7 +1457,6 @@ fn try_peel_hammer_of_justice(
         combat_log,
         entity,
         def,
-        abilities,
         combatant,
         attacker,
         info.log_id(),
@@ -1476,7 +1476,6 @@ fn cast_hammer_of_justice(
     combat_log: &mut CombatLog,
     entity: Entity,
     def: &AbilityConfig,
-    abilities: &AbilityDefinitions,
     combatant: &mut Combatant,
     target_entity: Entity,
     target_id: crate::combat::log::CombatantId,
@@ -1509,7 +1508,7 @@ fn cast_hammer_of_justice(
 
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
-    combatant.start_cooldown(AbilityType::HammerOfJustice, abilities);
+    combatant.start_cooldown(AbilityType::HammerOfJustice);
 
     let caster_id = combatant_id(combatant.team, combatant.slot, combatant.class);
     log_ability_use(
@@ -1567,7 +1566,7 @@ fn cast_hammer_of_justice(
 fn try_cleanse(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1598,7 +1597,7 @@ fn try_cleanse(
 fn try_paladin_aura(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
-    abilities: &AbilityDefinitions,
+    abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
@@ -1815,6 +1814,7 @@ mod tests {
             casting_ability: None,
             pet_type: None,
             pet: None,
+            book: crate::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
         };
         let (paladin, warrior, mage) = (
             Entity::from_raw(1),
@@ -1856,7 +1856,7 @@ mod tests {
             base_y: 0.0,
             height: 10.0,
         }];
-        let abilities = AbilityDefinitions::default();
+        let abilities = AbilityBook::shipped(crate::states::match_config::CharacterClass::Paladin);
 
         // (healed ally, the HolyShock candidate)
         let shock = |roster: &BTreeMap<Entity, CombatantInfo>, obstacles: &[ObstacleVolume]| {
@@ -1956,7 +1956,7 @@ mod reach_tests {
     }
 
     fn flash_of_light(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
-        let abilities = AbilityDefinitions::default();
+        let abilities = AbilityBook::shipped(crate::states::match_config::CharacterClass::Paladin);
         let me = s.units[0];
         s.run(obstacles, |commands, ctx, combatant, builder| {
             try_flash_of_light(
@@ -1975,7 +1975,7 @@ mod reach_tests {
     }
 
     fn holy_light(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
-        let abilities = AbilityDefinitions::default();
+        let abilities = AbilityBook::shipped(crate::states::match_config::CharacterClass::Paladin);
         let me = s.units[0];
         s.run(obstacles, |commands, ctx, combatant, builder| {
             try_holy_light(
@@ -1995,7 +1995,7 @@ mod reach_tests {
     }
 
     fn holy_shock_damage(s: &mut ReachScene, obstacles: &[ObstacleVolume]) -> DecisionTrace {
-        let abilities = AbilityDefinitions::default();
+        let abilities = AbilityBook::shipped(crate::states::match_config::CharacterClass::Paladin);
         s.run(obstacles, |commands, ctx, combatant, builder| {
             try_holy_shock_damage(
                 commands,
@@ -2115,7 +2115,8 @@ mod reach_tests {
     fn an_occluded_heal_still_reports_the_paladin_silenced() {
         let silenced = silenced();
         let reason = |obstacles: &[ObstacleVolume]| {
-            let abilities = AbilityDefinitions::default();
+            let abilities =
+                AbilityBook::shipped(crate::states::match_config::CharacterClass::Paladin);
             let mut s = scene(1, 0.3, 1.0);
             let me = s.units[0];
             let trace = s.run(obstacles, |commands, ctx, combatant, builder| {
@@ -2145,7 +2146,8 @@ mod reach_tests {
     fn an_occluded_holy_light_still_reports_the_paladin_silenced() {
         let silenced = silenced();
         let reason = |obstacles: &[ObstacleVolume]| {
-            let abilities = AbilityDefinitions::default();
+            let abilities =
+                AbilityBook::shipped(crate::states::match_config::CharacterClass::Paladin);
             let mut s = scene(1, 0.6, 1.0);
             let me = s.units[0];
             let trace = s.run(obstacles, |commands, ctx, combatant, builder| {

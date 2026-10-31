@@ -75,6 +75,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> Comb
         casting_ability: None,
         pet_type: None,
         pet: None,
+        book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
     }
 }
 
@@ -395,6 +396,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
         let mut set_a: HashSet<Entity> = HashSet::new();
         let mut set_b: HashSet<Entity> = HashSet::new();
 
+        let book = combatant.book().clone();
         // Exhaustive: a new class does not compile until it is named here.
         match class {
             CharacterClass::Warrior => {
@@ -402,7 +404,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     &mut commands,
                     &mut combat_log,
                     &mut game_rng,
-                    &abilities,
+                    &book,
                     me,
                     &mut combatant,
                     my_pos,
@@ -418,7 +420,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     &mut commands,
                     &mut combat_log,
                     &mut game_rng,
-                    &abilities,
+                    &book,
                     me,
                     &mut combatant,
                     my_pos,
@@ -434,7 +436,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     &mut commands,
                     &mut combat_log,
                     &mut game_rng,
-                    &abilities,
+                    &book,
                     me,
                     &mut combatant,
                     my_pos,
@@ -449,7 +451,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                 class_ai::priest::decide_priest_action(
                     &mut commands,
                     &mut combat_log,
-                    &abilities,
+                    &book,
                     me,
                     &mut combatant,
                     my_pos,
@@ -470,7 +472,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                 class_ai::warlock::decide_warlock_action(
                     &mut commands,
                     &mut combat_log,
-                    &abilities,
+                    &book,
                     me,
                     &mut combatant,
                     my_pos,
@@ -484,7 +486,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                 class_ai::paladin::decide_paladin_action(
                     &mut commands,
                     &mut combat_log,
-                    &abilities,
+                    &book,
                     me,
                     &mut combatant,
                     my_pos,
@@ -501,7 +503,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     &mut commands,
                     &mut combat_log,
                     &mut game_rng,
-                    &abilities,
+                    &book,
                     me,
                     &mut combatant,
                     my_pos,
@@ -522,7 +524,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                 class_ai::shaman::decide_shaman_action(
                     &mut commands,
                     &mut combat_log,
-                    &abilities,
+                    &book,
                     me,
                     &mut combatant,
                     my_pos,
@@ -540,7 +542,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                 class_ai::druid::decide_druid_action(
                     &mut commands,
                     &mut combat_log,
-                    &abilities,
+                    &book,
                     me,
                     &mut combatant,
                     my_pos,

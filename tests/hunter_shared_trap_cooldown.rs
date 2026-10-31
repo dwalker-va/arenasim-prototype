@@ -52,13 +52,12 @@ fn freezing_and_frost_trap_share_the_trap_category() {
 /// ability outside the category starts only its own.
 #[test]
 fn either_trap_puts_both_on_cooldown() {
-    let defs = AbilityDefinitions::default();
     for (used, other) in [
         (AbilityType::FreezingTrap, AbilityType::FrostTrap),
         (AbilityType::FrostTrap, AbilityType::FreezingTrap),
     ] {
         let mut hunter = Combatant::new(1, 0, CharacterClass::Hunter);
-        hunter.start_cooldown(used, &defs);
+        hunter.start_cooldown(used);
         assert_eq!(hunter.ability_cooldowns.get(&used), Some(&TRAP_COOLDOWN));
         assert_eq!(
             hunter.ability_cooldowns.get(&other),
@@ -68,7 +67,7 @@ fn either_trap_puts_both_on_cooldown() {
     }
 
     let mut hunter = Combatant::new(1, 0, CharacterClass::Hunter);
-    hunter.start_cooldown(AbilityType::Disengage, &defs);
+    hunter.start_cooldown(AbilityType::Disengage);
     assert_eq!(
         hunter.ability_cooldowns.keys().copied().collect::<Vec<_>>(),
         vec![AbilityType::Disengage]
@@ -79,9 +78,8 @@ fn either_trap_puts_both_on_cooldown() {
 /// than the category's cooldown keeps its own time.
 #[test]
 fn the_category_never_shortens_a_longer_cooldown() {
-    let defs = AbilityDefinitions::default();
     let mut hunter = Combatant::new(1, 0, CharacterClass::Hunter);
-    hunter.start_cooldown(AbilityType::FreezingTrap, &defs);
+    hunter.start_cooldown(AbilityType::FreezingTrap);
     // Five seconds on, the Freezing Trap has 10s left; a Frost Trap could not
     // be thrown, but if the sim allowed it the category would put the Freezing
     // Trap back to 15s, never below what it had.
@@ -89,7 +87,7 @@ fn the_category_never_shortens_a_longer_cooldown() {
         .ability_cooldowns
         .get_mut(&AbilityType::FreezingTrap)
         .unwrap() = 40.0;
-    hunter.start_cooldown(AbilityType::FrostTrap, &defs);
+    hunter.start_cooldown(AbilityType::FrostTrap);
     assert_eq!(
         hunter.ability_cooldowns.get(&AbilityType::FreezingTrap),
         Some(&40.0)
