@@ -115,7 +115,7 @@ pub fn process_backlash(
         }
 
         // ----- Step 1: Apply backlash damage -----
-        let (actual_damage, absorbed, dispeller_id, still_alive) = {
+        let (actual_damage, absorbed, dispeller_id, still_alive, is_first_death) = {
             let (actual_damage, absorbed) = apply_damage_with_absorb(
                 event.damage,
                 &mut dispeller,
@@ -124,6 +124,12 @@ pub fn process_backlash(
                 "Unstable Affliction",
                 &mut combat_log,
             );
+            // The backlash is a killing blow like any other: mark the death
+            // once, the flag every damage site dedups its `[DEATH]` line on.
+            let is_first_death = !dispeller.is_alive() && !dispeller.is_dead;
+            if is_first_death {
+                dispeller.is_dead = true;
+            }
             (
                 actual_damage,
                 absorbed,
@@ -132,6 +138,7 @@ pub fn process_backlash(
                     pet_query.get(event.dispeller).ok(),
                 ),
                 dispeller.is_alive(),
+                is_first_death,
             )
         };
         // Dispeller borrow ends here so we can credit the caster (different entity)
@@ -140,9 +147,16 @@ pub fn process_backlash(
         // auto_attack.rs:283 do: actual_damage + absorbed. Damage that hit absorbs
         // still counts as "dealt" — only the target's damage_taken intentionally
         // omits absorbed amounts (see apply_damage_with_absorb).
-        if let Ok((mut caster_combatant, _)) = combatants.get_mut(event.caster) {
-            caster_combatant.damage_dealt += actual_damage + absorbed;
-        }
+        let killer_id = match combatants.get_mut(event.caster) {
+            Ok((mut caster_combatant, _)) => {
+                caster_combatant.damage_dealt += actual_damage + absorbed;
+                Some(crate::states::play_match::utils::combat_log_id_for(
+                    &caster_combatant,
+                    pet_query.get(event.caster).ok(),
+                ))
+            }
+            Err(_) => None,
+        };
 
         combat_log.log(
             CombatLogEventType::Damage,
@@ -151,6 +165,18 @@ pub fn process_backlash(
                 dispeller_id, actual_damage
             ),
         );
+
+        if is_first_death {
+            // Cancel any in-progress cast or channel so a dead dispeller cannot
+            // finish a spell — the same cleanup every other damage site does.
+            commands.entity(event.dispeller).remove::<CastingState>();
+            commands.entity(event.dispeller).remove::<ChannelingState>();
+            combat_log.log_death(
+                dispeller_id.clone(),
+                killer_id,
+                format!("{} has been eliminated", dispeller_id),
+            );
+        }
 
         info!(
             "[BACKLASH] {} takes {:.0} Shadow damage from Unstable Affliction",
@@ -188,6 +214,10 @@ pub fn process_backlash(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::combat::log::StructuredEventData;
+    use crate::states::match_config::CharacterClass;
+    use crate::states::play_match::abilities::AbilityType;
+    use bevy::ecs::system::RunSystemOnce;
 
     /// Smoke test: `BacklashPending` is a valid Component and its public fields can
     /// be constructed. Real integration testing (UA -> dispel -> backlash damage +
@@ -215,5 +245,82 @@ mod tests {
         // Compile-time check that BacklashPending implements Component:
         // spawn() requires the `Bundle` trait, which `Component` blanket-impls.
         let _entity = world.spawn(pending).id();
+    }
+
+    /// A Priest (team 1, slot 1) at `health` dispels a team-2 Warlock's
+    /// Unstable Affliction for `damage` backlash. Returns the world after one
+    /// `process_backlash` run and the Priest's entity.
+    fn backlash_on_priest(health: f32, damage: f32) -> (World, Entity) {
+        let mut world = World::new();
+        world.insert_resource(CombatLog::default());
+        let mut priest = Combatant::new(1, 1, CharacterClass::Priest);
+        priest.current_health = health;
+        let priest = world.spawn((priest, ActiveAuras::default())).id();
+        // Mid-cast, so a test can see whether its death cancels the cast.
+        world
+            .entity_mut(priest)
+            .insert(CastingState::new(AbilityType::FlashHeal, priest, 1.5));
+        let warlock = world
+            .spawn(Combatant::new(2, 2, CharacterClass::Warlock))
+            .id();
+        world.spawn(BacklashPending {
+            dispeller: priest,
+            damage,
+            silence_duration: DISPEL_BACKLASH_SILENCE_DURATION,
+            caster: warlock,
+        });
+        world.run_system_once(process_backlash).expect("system ran");
+        (world, priest)
+    }
+
+    /// Every `[DEATH]` entry in the log, as (victim, killer).
+    fn deaths(world: &World) -> Vec<(String, Option<String>)> {
+        world
+            .resource::<CombatLog>()
+            .entries
+            .iter()
+            .filter_map(|e| match &e.structured_data {
+                Some(StructuredEventData::Death { victim, killer }) => {
+                    Some((victim.clone(), killer.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// AS-437: a backlash that kills its dispeller is a death like any other —
+    /// the Priest is marked dead and the log names it and its killer, the
+    /// Warlock whose Unstable Affliction it dispelled. It used to leave a
+    /// Priest at 0 HP in the report with no `[DEATH]` line.
+    #[test]
+    fn a_lethal_backlash_logs_the_dispellers_death() {
+        let (world, priest) = backlash_on_priest(50.0, 120.0);
+
+        let combatant = world.get::<Combatant>(priest).unwrap();
+        assert_eq!(combatant.current_health, 0.0);
+        assert!(combatant.is_dead, "the backlash's victim is marked dead");
+        assert!(
+            world.get::<CastingState>(priest).is_none(),
+            "its death cancels the cast it was in"
+        );
+        assert_eq!(
+            deaths(&world),
+            vec![(
+                "Team 1 Priest #2".to_string(),
+                Some("Team 2 Warlock #3".to_string())
+            )]
+        );
+    }
+
+    /// The control: a backlash the Priest survives logs no death.
+    #[test]
+    fn a_survived_backlash_logs_no_death() {
+        let (world, priest) = backlash_on_priest(500.0, 120.0);
+
+        let combatant = world.get::<Combatant>(priest).unwrap();
+        assert!(combatant.current_health > 0.0);
+        assert!(!combatant.is_dead);
+        assert!(world.get::<CastingState>(priest).is_some());
+        assert_eq!(deaths(&world), vec![]);
     }
 }
