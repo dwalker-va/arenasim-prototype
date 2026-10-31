@@ -1497,7 +1497,7 @@
             max_health: 17.0,
             spell_power: 8.0,
             max_mana: 11.0,
-            movement_speed: 0.10,
+            movement_speed: 0.1,
         ),
 
         JudgementBracers: (
@@ -1594,7 +1594,7 @@
             max_health: 21.0,
             attack_power: 9.0,
             crit_chance: 0.02,
-            movement_speed: 0.10,
+            movement_speed: 0.1,
         ),
 
         GiantstalkerBelt: (
@@ -1815,7 +1815,7 @@
             max_health: 12.0,
             max_mana: 15.0,
             spell_power: 9.0,
-            movement_speed: 0.10,
+            movement_speed: 0.1,
         ),
 
         ArcanistBelt: (

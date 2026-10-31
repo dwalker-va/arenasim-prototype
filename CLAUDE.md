@@ -607,7 +607,7 @@ any ring fits either ring socket, and the same item may not occupy both
    - **`item_tier` sets the item-level band**, checked when `items.ron` loads
      (`equipment::ItemTier`): starting kit (0, the default) 54-60, Gauntlet (1)
      76-80, Champion (2) 90-94. A Gauntlet or Champion item also spends at least
-     90% of its budget (`reward_tiers_spend_their_budget`), so a reward is felt
+     90% of its budget (`reward_tiers_spend_their_budget`), so a reward is felt.
 
    **A trinket may carry a `proc:` block** — a trigger and an effect on that
    trinket's OWN internal cooldown (`src/states/play_match/proc_trinkets.rs`):

@@ -1732,18 +1732,22 @@ pub fn parse_item_definitions(contents: &str, origin: &str) -> Result<ItemDefini
 
     let definitions = ItemDefinitions::new(config);
     validate_tier_bands(&definitions)
-        .map_err(|e| format!("{} has items outside their tier band:\n{}", origin, e))?;
+        .map_err(|e| format!("{} has items that fail their tier check:\n{}", origin, e))?;
     Ok(definitions)
 }
 
 /// Load item definitions from assets/config/items.ron
 pub fn load_item_definitions() -> Result<ItemDefinitions, String> {
-    let config_path = crate::paths::asset_path_str("config/items.ron");
+    load_item_definitions_from(&crate::paths::asset_path_str("config/items.ron"))
+}
 
-    let contents = std::fs::read_to_string(&config_path)
+/// Load item definitions from the `items.ron` at `config_path` — the loader
+/// [`load_item_definitions`] runs on the shipped file.
+pub fn load_item_definitions_from(config_path: &str) -> Result<ItemDefinitions, String> {
+    let contents = std::fs::read_to_string(config_path)
         .map_err(|e| format!("Failed to read {}: {}", config_path, e))?;
 
-    let definitions = parse_item_definitions(&contents, &config_path)?;
+    let definitions = parse_item_definitions(&contents, config_path)?;
 
     info!(
         "Loaded {} item definitions from {}",
@@ -4191,6 +4195,33 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             .expect("ilvl 75 is outside the Gauntlet band");
         assert!(err.contains("WarlordsCrown"), "{err}");
         assert!(err.contains("outside the tier's band"), "{err}");
+    }
+
+    /// The production loader refuses an out-of-band file: the shipped
+    /// `items.ron` with one Gauntlet item put back at its old ilvl 75 does not
+    /// load through [`load_item_definitions_from`], and the error names it.
+    /// The unedited copy loads, so the refusal is the edit's.
+    #[test]
+    fn the_loader_refuses_the_shipped_file_with_an_item_outside_its_band() {
+        let shipped =
+            std::fs::read_to_string(crate::paths::asset_path_str("config/items.ron")).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("items.ron");
+        let path = path.to_str().unwrap();
+
+        std::fs::write(path, &shipped).unwrap();
+        assert!(load_item_definitions_from(path).is_ok());
+
+        let anchor =
+            "WarlordsCrown: (\n            name: \"Warlord's Crown\",\n            item_level: 80,";
+        assert!(shipped.contains(anchor), "the fixture's anchor moved");
+        let edited = shipped.replace(anchor, &anchor.replace("item_level: 80", "item_level: 75"));
+        std::fs::write(path, edited).unwrap();
+        let err = load_item_definitions_from(path)
+            .err()
+            .expect("an item at ilvl 75 is outside the Gauntlet band");
+        assert!(err.contains("WarlordsCrown"), "{err}");
+        assert!(err.contains("outside the tier's band 76-80"), "{err}");
     }
 
     /// A reward tier spends at least [`ItemTier::min_budget_spend`] of its
