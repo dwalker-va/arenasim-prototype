@@ -782,6 +782,11 @@ pub fn move_to_target(
             // as mana sawtooths across one Frostbolt's worth. Inert at healthy
             // mana (latch false) — pursuit is byte-identical there.
             WAND_RANGE
+        } else if combatant.druid_duel_melee {
+            // A dueling Druid that cannot pay for a Moonfire closes to swing
+            // its staff (`class_ai::druid::duel_melee`). Never latched outside
+            // a duel, so team pursuit is unchanged.
+            crate::states::play_match::class_ai::druid::DRUID_DUEL_MELEE_STOP
         } else {
             combatant.class.preferred_range()
         };
