@@ -78,8 +78,8 @@ pub use super::totems::totem_pulse_system;
 
 // === Phase 3: Combat Resolution ===
 pub use super::combat_core::combat_auto_attack;
-pub use super::talent_procs::resolve_talent_procs;
 pub use super::combat_core::resolve_melee_avoidances;
+pub use super::talent_procs::resolve_talent_procs;
 
 // === Decision Trace ===
 pub use super::decision_trace::flush_decision_trace_system;

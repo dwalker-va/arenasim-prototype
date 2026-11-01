@@ -37,7 +37,6 @@ use super::abilities::{AbilityType, SpellSchool};
 use super::ability_book::AbilityBook;
 use super::ability_config::{AbilityConfig, AbilityDefinitions};
 use super::components::{AuraType, Combatant};
-use super::talent_procs::{TalentProc, TalentProcSlot};
 use super::constants::{
     WEIGHT_ATTACK_POWER, WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN, WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA,
     WEIGHT_MOVEMENT_SPEED, WEIGHT_RESISTANCE, WEIGHT_SPELL_POWER,
@@ -46,6 +45,7 @@ use super::equipment::{
     resolve_equipped_loadout, validate_class_restrictions, DefaultLoadouts, ItemDefinitions,
     Loadout,
 };
+use super::talent_procs::{TalentProc, TalentProcSlot};
 use crate::states::match_config::CharacterClass;
 
 /// The most points a build may spend: what a Gauntlet run hands out by its

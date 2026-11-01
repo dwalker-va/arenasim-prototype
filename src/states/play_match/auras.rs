@@ -1251,7 +1251,12 @@ pub fn process_dot_ticks(
                 heals,
             });
         }
-        ticks.push((caster_entity, ability_name.clone(), target_entity, actual_damage));
+        ticks.push((
+            caster_entity,
+            ability_name.clone(),
+            target_entity,
+            actual_damage,
+        ));
 
         // Spawn floating combat text (yellow for DoT ticks, like ability damage)
         // Get deterministic offset based on pattern state

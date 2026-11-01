@@ -1043,6 +1043,72 @@ mod tests {
         let _ = AbilityDefinitions::new(config).validate();
     }
 
+    /// The shipped table with `edit` made to Death Coil's aura, validated.
+    fn validate_death_coil_aura(edit: impl FnOnce(&mut AuraEffect)) {
+        let path = crate::paths::asset_path_str("config/abilities.ron");
+        let mut config: AbilitiesConfig =
+            ron::from_str(&std::fs::read_to_string(path).expect("abilities.ron")).expect("parses");
+        edit(
+            config
+                .abilities
+                .get_mut(&AbilityType::DeathCoil)
+                .and_then(|d| d.applies_aura.as_mut())
+                .expect("Death Coil's aura"),
+        );
+        let _ = AbilityDefinitions::new(config).validate();
+    }
+
+    fn free() -> crate::states::play_match::next_cast::NextCastModifier {
+        crate::states::play_match::next_cast::NextCastModifier {
+            applies_to: crate::states::play_match::next_cast::NextCastScope::Any,
+            instant: false,
+            free: true,
+            crit_chance: 0.0,
+            cast_time_reduction: 0.0,
+            cost_reduction: 0.0,
+            power: 0.0,
+        }
+    }
+
+    /// A `next_cast` modifier rides only on a NextCast aura...
+    #[test]
+    #[should_panic(expected = "rides only on a NextCast aura")]
+    fn a_next_cast_modifier_needs_a_next_cast_aura() {
+        validate_death_coil_aura(|a| a.next_cast = Some(free()));
+    }
+
+    /// ...and a NextCast aura needs one.
+    #[test]
+    #[should_panic(expected = "with no `next_cast` modifier")]
+    fn a_next_cast_aura_needs_its_modifier() {
+        validate_death_coil_aura(|a| a.aura_type = AuraType::NextCast);
+    }
+
+    /// A modifier that changes nothing is refused where it is declared.
+    #[test]
+    #[should_panic(expected = "changes nothing")]
+    fn a_declared_modifier_must_change_something() {
+        validate_death_coil_aura(|a| {
+            a.aura_type = AuraType::NextCast;
+            let mut m = free();
+            m.free = false;
+            a.next_cast = Some(m);
+        });
+    }
+
+    /// A leech's share is a share.
+    #[test]
+    #[should_panic(expected = "outside (0, 1]")]
+    fn a_leech_fraction_is_a_share() {
+        validate_death_coil_aura(|a| {
+            a.leech = Some(crate::states::play_match::combat_core::leech::Leech {
+                fraction: 1.5,
+                to: Default::default(),
+                of: Default::default(),
+            })
+        });
+    }
+
     fn base_test_config() -> AbilityConfig {
         AbilityConfig {
             name: "Test".to_string(),

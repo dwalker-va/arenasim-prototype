@@ -19,6 +19,11 @@
 //                                       rewrites a numeric field of its
 //                                       book's configs; adds before multiplies
 //       Grant(X)                        adds the `talent: true` ability X
+//       Proc((trigger: .., chance: Chance(c) | PerMinute(r), ranks_add: Chance | Effect,
+//             effect: ApplyAura(..) | NextCast(..) | HealBack(..)))
+//                                       a trigger and an effect on the
+//                                       combatant (`talent_procs.rs`); its
+//                                       ranks add to its chance or its effect
 //   - is priced on the item budget: 11 a rank, 22 the capstone (tier 4),
 //     ±15%. A node whose every effect is a StatPercent on a stat the item
 //     budget weighs has its price COMPUTED, at the class's reference

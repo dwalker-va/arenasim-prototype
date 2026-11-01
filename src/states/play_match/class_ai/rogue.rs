@@ -620,7 +620,10 @@ fn try_ambush(
     let ap_bonus = get_attack_power_bonus_from_slice(self_auras);
     let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
     let mut damage = combatant.calculate_ability_damage_config(def, game_rng, ap_bonus, 0.0);
-    let is_crit = roll_crit(combatant.crit_chance + crit_bonus + def.crit_chance, game_rng);
+    let is_crit = roll_crit(
+        combatant.crit_chance + crit_bonus + def.crit_chance,
+        game_rng,
+    );
     if is_crit {
         damage *= CRIT_DAMAGE_MULTIPLIER;
     }
@@ -919,7 +922,10 @@ fn try_sinister_strike(
     let ap_bonus = get_attack_power_bonus_from_slice(self_auras);
     let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
     let mut damage = combatant.calculate_ability_damage_config(def, game_rng, ap_bonus, 0.0);
-    let is_crit = roll_crit(combatant.crit_chance + crit_bonus + def.crit_chance, game_rng);
+    let is_crit = roll_crit(
+        combatant.crit_chance + crit_bonus + def.crit_chance,
+        game_rng,
+    );
     if is_crit {
         damage *= CRIT_DAMAGE_MULTIPLIER;
     }

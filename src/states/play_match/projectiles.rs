@@ -7,8 +7,8 @@ use super::ability_book::AbilityBook;
 use super::ability_config::AbilityDefinitions;
 use super::combat_core::leech::{self, LeechRecipient};
 use super::components::*;
-use super::talent_procs::{self, ProcEvent, TalentTrigger};
 use super::constants::CRIT_DAMAGE_MULTIPLIER;
+use super::talent_procs::{self, ProcEvent, TalentTrigger};
 use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset, pet_combatant_id};
 use crate::combat::log::CombatLog;
 use bevy::color::LinearRgba;
@@ -204,9 +204,10 @@ pub fn process_projectile_hits(
             let book = caster_combatant.book().clone();
             // Changed by the next-cast modifier its cast spent, if any
             // (`next_cast.rs`); the book's own config otherwise.
-            let changed = projectile.next_cast.as_ref().map(|m| {
-                super::next_cast::changed(book.get_unchecked(&projectile.ability), m)
-            });
+            let changed = projectile
+                .next_cast
+                .as_ref()
+                .map(|m| super::next_cast::changed(book.get_unchecked(&projectile.ability), m));
             let def = changed
                 .as_ref()
                 .unwrap_or(book.get_unchecked(&projectile.ability));
@@ -370,8 +371,7 @@ pub fn process_projectile_hits(
 
             // Update caster damage dealt (include absorbed damage - caster dealt it)
             {
-                let Ok((_, _, mut caster, caster_auras)) = combatants.get_mut(caster_entity)
-                else {
+                let Ok((_, _, mut caster, caster_auras)) = combatants.get_mut(caster_entity) else {
                     commands.entity(projectile_entity).despawn();
                     continue;
                 };
@@ -406,7 +406,6 @@ pub fn process_projectile_hits(
                         .amount(actual_damage)
                         .other(target_entity),
                 );
-
             } // caster borrow dropped here
 
             // Leech to the caster's party (Vampiric Embrace), each teammate
@@ -617,15 +616,20 @@ fn land_party_leech(
             .cloned()
             .collect(),
     };
-    let credited = leech::land_owed(commands, combat_log, dampening, &owed, &members, |e, land| {
-        match combatants.get_mut(e) {
+    let credited = leech::land_owed(
+        commands,
+        combat_log,
+        dampening,
+        &owed,
+        &members,
+        |e, land| match combatants.get_mut(e) {
             Ok((_, _, mut ally, ally_auras)) => {
                 let id = combat_log_id_for(&ally, pet_query.get(e).ok());
                 land(&mut ally, ally_auras.as_deref(), &id)
             }
             Err(_) => 0.0,
-        }
-    });
+        },
+    );
     if let Ok((_, _, mut caster_combatant, _)) = combatants.get_mut(caster) {
         caster_combatant.healing_done += credited;
     }

@@ -195,7 +195,7 @@ pub enum ProcTarget {
 pub enum ProcEffect {
     /// An aura on its owner or on the event's other unit: Blackout's stun,
     /// Aftermath's slow, Vengeance's damage buff.
-    Aura {
+    ApplyAura {
         on: ProcTarget,
         aura_type: AuraType,
         magnitude: f32,
@@ -233,7 +233,7 @@ pub enum ProcEffect {
 impl ProcEffect {
     fn times(&self, ranks: f32) -> Self {
         match self {
-            ProcEffect::Aura {
+            ProcEffect::ApplyAura {
                 on,
                 aura_type,
                 magnitude,
@@ -241,7 +241,7 @@ impl ProcEffect {
                 tick_interval,
                 dispel_type,
                 name,
-            } => ProcEffect::Aura {
+            } => ProcEffect::ApplyAura {
                 on: *on,
                 aura_type: *aura_type,
                 magnitude: magnitude * ranks,
@@ -277,14 +277,14 @@ impl ProcEffect {
 
     fn has_magnitude(&self) -> bool {
         match self {
-            ProcEffect::Aura { .. } | ProcEffect::HealBack { .. } => true,
+            ProcEffect::ApplyAura { .. } | ProcEffect::HealBack { .. } => true,
             ProcEffect::NextCast { modifier, .. } => modifier.has_magnitude(),
         }
     }
 
     fn name(&self) -> Option<&str> {
         match self {
-            ProcEffect::Aura { name, .. }
+            ProcEffect::ApplyAura { name, .. }
             | ProcEffect::NextCast { name, .. }
             | ProcEffect::HealBack { name, .. } => name.as_deref(),
         }
@@ -385,7 +385,7 @@ impl TalentProc {
             return Err("a proc's ranks add to its effect, which has no number".to_string());
         }
         match &self.effect {
-            ProcEffect::Aura {
+            ProcEffect::ApplyAura {
                 on,
                 aura_type,
                 magnitude,
@@ -402,7 +402,11 @@ impl TalentProc {
                         self.trigger
                     ));
                 }
-                if !magnitude.is_finite() || !(*duration > 0.0) || *tick_interval < 0.0 {
+                if !magnitude.is_finite()
+                    || !duration.is_finite()
+                    || *duration <= 0.0
+                    || *tick_interval < 0.0
+                {
                     return Err("a proc aura needs a finite magnitude and a duration".to_string());
                 }
             }
@@ -410,7 +414,7 @@ impl TalentProc {
                 modifier, duration, ..
             } => {
                 modifier.validate()?;
-                if !(*duration > 0.0) {
+                if !duration.is_finite() || *duration <= 0.0 {
                     return Err("a proc's next-cast modifier needs a duration".to_string());
                 }
                 if let super::next_cast::NextCastScope::Abilities(list) = &modifier.applies_to {
@@ -426,9 +430,15 @@ impl TalentProc {
                 ..
             } => {
                 if !self.trigger.has_amount() {
-                    return Err(format!("a {:?} event has no amount to heal back", self.trigger));
+                    return Err(format!(
+                        "a {:?} event has no amount to heal back",
+                        self.trigger
+                    ));
                 }
-                if !(*fraction > 0.0) || !(*duration > 0.0) || !(*tick_interval > 0.0) {
+                if [*fraction, *duration, *tick_interval]
+                    .iter()
+                    .any(|v| !v.is_finite() || *v <= 0.0)
+                {
                     return Err("a heal-back needs a fraction, a duration and a tick".to_string());
                 }
             }
@@ -606,7 +616,7 @@ pub fn effect_aura(slot: &TalentProcSlot, owner: Entity, event: &ProcEvent) -> O
         ..Default::default()
     };
     match &slot.proc.effect {
-        ProcEffect::Aura {
+        ProcEffect::ApplyAura {
             on,
             aura_type,
             magnitude,
@@ -621,7 +631,13 @@ pub fn effect_aura(slot: &TalentProcSlot, owner: Entity, event: &ProcEvent) -> O
             };
             Some(AuraPending {
                 target,
-                aura: base(*aura_type, *magnitude, *duration, *tick_interval, *dispel_type),
+                aura: base(
+                    *aura_type,
+                    *magnitude,
+                    *duration,
+                    *tick_interval,
+                    *dispel_type,
+                ),
             })
         }
         ProcEffect::NextCast {
@@ -701,13 +717,13 @@ pub fn after_turn(
     combat_log: &mut CombatLog,
     entity: Entity,
     combatant: &mut Combatant,
-    mut auras: Option<&mut super::components::ActiveAuras>,
+    auras: Option<&mut super::components::ActiveAuras>,
     used: &[AbilityType],
 ) {
     if used.is_empty() {
         return;
     }
-    if let Some(auras) = auras.as_deref_mut() {
+    if let Some(auras) = auras {
         let mut spent = None;
         for ability in used {
             if let Some((modifier, names)) = super::next_cast::consume(auras, *ability) {
@@ -734,7 +750,10 @@ pub fn after_turn(
     } else if combatant.next_cast_spent.is_some() {
         combatant.next_cast_spent = None;
     }
-    if combatant.talent_procs.listens_for(TalentTrigger::AbilityUsed) {
+    if combatant
+        .talent_procs
+        .listens_for(TalentTrigger::AbilityUsed)
+    {
         for ability in used {
             push(
                 commands,
@@ -785,7 +804,10 @@ pub fn resolve_talent_procs(
         for (talent, pending) in fired {
             combat_log.log(
                 CombatLogEventType::Buff,
-                format!("[PROC] {}'s {} procs {}", id, talent, pending.aura.ability_name),
+                format!(
+                    "[PROC] {}'s {} procs {}",
+                    id, talent, pending.aura.ability_name
+                ),
             );
             commands.spawn((pending, PlayMatchEntity));
         }
@@ -918,8 +940,16 @@ mod tests {
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].1.aura.effect_type, AuraType::NextCast);
         assert_eq!(fired[0].1.aura.ability_name, "Shadow Trance");
-        assert_eq!(fired[0].1.aura.source_talent, Some(TalentId::DemonicEmbrace));
+        assert_eq!(
+            fired[0].1.aura.source_talent,
+            Some(TalentId::DemonicEmbrace)
+        );
         assert_eq!(rng.random_f32(), expected, "a certain proc drew");
+        // Refresh-only: a proc firing while its aura is up renews it.
+        assert_eq!(
+            fired[0].1.aura.stacks.map(|s| (s.count, s.max)),
+            Some((1, 1))
+        );
         assert_eq!(procs.slots[0].remaining_icd, 6.0);
         assert!(roll(&mut procs, unit(), &tick, &mut rng).is_empty());
         procs.tick(6.0);
@@ -943,7 +973,7 @@ mod tests {
     fn an_aura_lands_on_the_owner_or_the_other_unit() {
         let mut blackout = trance();
         blackout.trigger = TalentTrigger::SpellHit;
-        blackout.effect = ProcEffect::Aura {
+        blackout.effect = ProcEffect::ApplyAura {
             on: ProcTarget::Other,
             aura_type: AuraType::Stun,
             magnitude: 1.0,
@@ -958,10 +988,12 @@ mod tests {
         assert_eq!(landed.target, victim);
         assert_eq!(landed.aura.caster, Some(unit()));
         // No other unit: nothing lands.
-        assert!(
-            effect_aura(&slot(blackout), unit(), &ProcEvent::new(unit(), TalentTrigger::SpellHit))
-                .is_none()
-        );
+        assert!(effect_aura(
+            &slot(blackout),
+            unit(),
+            &ProcEvent::new(unit(), TalentTrigger::SpellHit)
+        )
+        .is_none());
     }
 
     /// Blessed Recovery: 25% of a 40-damage crit over 6s in 2s ticks is
@@ -984,6 +1016,46 @@ mod tests {
         assert!((landed.aura.magnitude - 10.0 / 3.0).abs() < 1e-5);
         assert_eq!(landed.aura.tick_interval, 2.0);
         assert_eq!(landed.aura.ability_name, "Nightfall");
+    }
+
+    /// The Art of War's sentence: its per-minute rate, its event and the
+    /// next cast it primes, read off the proc.
+    #[test]
+    fn a_proc_describes_itself() {
+        let aow = TalentProc {
+            trigger: TalentTrigger::MeleeHit,
+            abilities: vec![],
+            crit_only: false,
+            chance: ProcChance::PerMinute(4.8),
+            ranks_add: ProcRankScale::Chance,
+            effect: ProcEffect::NextCast {
+                modifier: NextCastModifier {
+                    applies_to: NextCastScope::Abilities(vec![AbilityType::FlashOfLight]),
+                    instant: true,
+                    free: true,
+                    crit_chance: 0.0,
+                    cast_time_reduction: 0.0,
+                    cost_reduction: 0.0,
+                    power: 0.0,
+                },
+                duration: 15.0,
+                dispel_type: DispelType::Auto,
+                name: None,
+            },
+            internal_cooldown: 0.0,
+        };
+        assert_eq!(
+            crate::states::ability_text::talent_proc_description("The Art of War", &aow),
+            "The Art of War: 4.8 times a minute of melee, whatever the weapon, on a melee \
+             hit, primes your next cast: Within 15 sec, the next Flash of Light is instant \
+             and costs nothing. The chance is per rank."
+        );
+        assert_eq!(
+            crate::states::ability_text::talent_proc_description("Nightfall", &trance()),
+            "Nightfall: A 5% chance on each damage tick of Corruption or Drain Life, primes \
+             your next cast: Within 10 sec, the next Shadow Bolt is instant. The chance is \
+             per rank."
+        );
     }
 
     #[test]
@@ -1011,7 +1083,7 @@ mod tests {
         let mut other = trance();
         other.trigger = TalentTrigger::AbilityUsed;
         other.abilities.clear();
-        other.effect = ProcEffect::Aura {
+        other.effect = ProcEffect::ApplyAura {
             on: ProcTarget::Other,
             aura_type: AuraType::Stun,
             magnitude: 1.0,

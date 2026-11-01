@@ -1,7 +1,7 @@
 use super::super::abilities::SpellSchool;
 use super::super::ability_config::AbilityConfig;
-use super::super::constants::{DR_IMMUNE_LEVEL, DR_MULTIPLIERS, DR_RESET_TIMER};
 use super::super::combat_core::leech::Leech;
+use super::super::constants::{DR_IMMUNE_LEVEL, DR_MULTIPLIERS, DR_RESET_TIMER};
 use super::super::equipment::ItemId;
 use super::super::next_cast::NextCastModifier;
 use super::super::talents::TalentId;

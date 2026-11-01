@@ -125,7 +125,9 @@ impl NextCastModifier {
     /// number is the largest. `None` for no modifiers. The scope of the result
     /// is the first one's — it is only ever applied to a cast every one
     /// covers.
-    pub fn strongest<'a>(modifiers: impl IntoIterator<Item = &'a NextCastModifier>) -> Option<Self> {
+    pub fn strongest<'a>(
+        modifiers: impl IntoIterator<Item = &'a NextCastModifier>,
+    ) -> Option<Self> {
         let mut out: Option<NextCastModifier> = None;
         for m in modifiers {
             match out.as_mut() {
@@ -178,7 +180,9 @@ impl NextCastModifier {
             ("power", self.power),
         ] {
             if !value.is_finite() || value < 0.0 {
-                return Err(format!("a next-cast modifier's {name} of {value} is negative"));
+                return Err(format!(
+                    "a next-cast modifier's {name} of {value} is negative"
+                ));
             }
         }
         if !(self.instant || self.free || self.has_magnitude()) {
@@ -206,7 +210,10 @@ pub struct SpentNextCast {
 
 /// Whether any next-cast modifier is up on a holder.
 pub fn any_live(auras: &ActiveAuras) -> bool {
-    auras.auras.iter().any(|a| a.effect_type == AuraType::NextCast)
+    auras
+        .auras
+        .iter()
+        .any(|a| a.effect_type == AuraType::NextCast)
 }
 
 /// Every live next-cast modifier on a holder, in aura order.
@@ -242,7 +249,10 @@ pub fn effective_book(book: &AbilityBook, auras: Option<&ActiveAuras>) -> Abilit
 /// Spend every live modifier covering `ability`: remove their auras from the
 /// holder and return the strongest of them, or `None` when none covers it.
 /// Returns the names of the spent auras too, for the log.
-pub fn consume(auras: &mut ActiveAuras, ability: AbilityType) -> Option<(NextCastModifier, Vec<String>)> {
+pub fn consume(
+    auras: &mut ActiveAuras,
+    ability: AbilityType,
+) -> Option<(NextCastModifier, Vec<String>)> {
     let covering: Vec<usize> = auras
         .auras
         .iter()
@@ -256,8 +266,11 @@ pub fn consume(auras: &mut ActiveAuras, ability: AbilityType) -> Option<(NextCas
     if covering.is_empty() {
         return None;
     }
-    let combined =
-        NextCastModifier::strongest(covering.iter().filter_map(|i| auras.auras[*i].next_cast.as_ref()))?;
+    let combined = NextCastModifier::strongest(
+        covering
+            .iter()
+            .filter_map(|i| auras.auras[*i].next_cast.as_ref()),
+    )?;
     let mut names = Vec::new();
     for index in covering.into_iter().rev() {
         names.push(auras.remove_debuff_at(index).ability_name);
@@ -427,6 +440,25 @@ mod tests {
         let mut m = modifier(NextCastScope::Any);
         m.free = true;
         assert!(m.validate().is_ok());
+    }
+
+    /// Two modifiers from different sources are both up at once: a NextCast
+    /// aura is keyed by its source, never by its type.
+    #[test]
+    fn a_next_cast_aura_is_keyed_by_its_source() {
+        let m = modifier(NextCastScope::Any);
+        assert!(primed("A", m).distinct_by_source());
+        let talented = Aura {
+            effect_type: AuraType::AttackPowerIncrease,
+            source_talent: Some(crate::states::play_match::talents::TalentId::FelStamina),
+            ..Default::default()
+        };
+        assert!(talented.distinct_by_source());
+        let plain = Aura {
+            effect_type: AuraType::AttackPowerIncrease,
+            ..Default::default()
+        };
+        assert!(!plain.distinct_by_source());
     }
 
     #[test]

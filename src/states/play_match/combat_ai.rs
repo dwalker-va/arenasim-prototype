@@ -1741,9 +1741,7 @@ pub fn decide_abilities(
         // `AbilityUsed` proc. Nothing for a turn that used nothing.
         let used = decision_trace.take_casts_of(entity);
         if !used.is_empty() {
-            let primed = auras
-                .as_deref()
-                .is_some_and(super::next_cast::any_live);
+            let primed = auras.as_deref().is_some_and(super::next_cast::any_live);
             super::talent_procs::after_turn(
                 &mut commands,
                 &mut combat_log,

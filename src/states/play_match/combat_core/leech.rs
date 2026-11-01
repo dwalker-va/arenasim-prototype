@@ -68,7 +68,10 @@ impl Leech {
     /// Reject a leech whose share is not in `(0, 1]`.
     pub fn validate(&self) -> Result<(), String> {
         if !(self.fraction > 0.0 && self.fraction <= 1.0) {
-            return Err(format!("a leech fraction of {} is outside (0, 1]", self.fraction));
+            return Err(format!(
+                "a leech fraction of {} is outside (0, 1]",
+                self.fraction
+            ));
         }
         Ok(())
     }
@@ -232,8 +235,12 @@ pub fn land_owed(
 ) -> f32 {
     let mut credited = 0.0;
     for heal in &owed.heals {
-        for recipient in recipients(heal.to, owed.caster, owed.caster_team, members.iter().copied())
-        {
+        for recipient in recipients(
+            heal.to,
+            owed.caster,
+            owed.caster_team,
+            members.iter().copied(),
+        ) {
             credited += visit(recipient, &mut |combatant, auras, id| {
                 land(
                     commands,
@@ -268,7 +275,13 @@ mod tests {
             to: LeechRecipient::Caster,
             of: LeechSource::Ability,
         };
-        let heals = owed(e(1), Some((&coil, "Death Coil")), None, SpellSchool::Shadow, 37.0);
+        let heals = owed(
+            e(1),
+            Some((&coil, "Death Coil")),
+            None,
+            SpellSchool::Shadow,
+            37.0,
+        );
         assert_eq!(
             heals,
             vec![LeechHeal {
@@ -277,7 +290,14 @@ mod tests {
                 amount: 37.0
             }]
         );
-        assert!(owed(e(1), Some((&coil, "Death Coil")), None, SpellSchool::Shadow, 0.0).is_empty());
+        assert!(owed(
+            e(1),
+            Some((&coil, "Death Coil")),
+            None,
+            SpellSchool::Shadow,
+            0.0
+        )
+        .is_empty());
     }
 
     /// Vampiric Embrace: only its own caster's damage, only of its school,
@@ -287,7 +307,7 @@ mod tests {
         let embrace = Aura {
             effect_type: AuraType::DamageOverTime,
             caster: Some(e(1)),
-            ability_name: "Vampiric Embrace".into(),
+            ability_name: "Test".into(),
             leech: Some(Leech {
                 fraction: 0.2,
                 to: LeechRecipient::CasterParty,
@@ -300,6 +320,7 @@ mod tests {
         };
         let heals = owed(e(1), None, Some(&auras), SpellSchool::Shadow, 50.0);
         assert_eq!(heals.len(), 1);
+        assert_eq!(heals[0].source, "Test", "named after the aura");
         assert!((heals[0].amount - 10.0).abs() < 1e-6);
         assert_eq!(heals[0].to, LeechRecipient::CasterParty);
         assert!(owed(e(2), None, Some(&auras), SpellSchool::Shadow, 50.0).is_empty());

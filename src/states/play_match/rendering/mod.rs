@@ -99,8 +99,7 @@ pub fn talent_aura_icons(talents: &TalentDefinitions) -> Vec<(String, String)> {
         .iter()
         .filter(|(_, t)| {
             !t.icon.is_empty()
-                && t
-                    .per_rank
+                && t.per_rank
                     .iter()
                     .any(|e| matches!(e, TalentEffect::Proc(_)))
         })
@@ -392,6 +391,42 @@ pub fn draw_text_with_outline(
 mod tests {
     use super::*;
     use crate::states::play_match::equipment::load_item_definitions;
+
+    /// A talent proc's aura draws under its TALENT's key, and the loaders
+    /// register that key at the talent's icon for every talent with a proc —
+    /// none in the shipped table yet, one in a fixture that gives Fel Stamina
+    /// a proc.
+    #[test]
+    fn a_talent_proc_aura_wears_its_talents_icon() {
+        let aura = Aura {
+            effect_type: AuraType::NextCast,
+            ability_name: "Test".to_string(),
+            source_talent: Some(TalentId::FelStamina),
+            ..Default::default()
+        };
+        assert_eq!(
+            get_aura_icon_key(&aura, AbilityDefinitions::shipped()),
+            talent_aura_icon_key(TalentId::FelStamina)
+        );
+        assert!(talent_aura_icons(TalentDefinitions::shipped()).is_empty());
+        let shipped =
+            std::fs::read_to_string(crate::paths::asset_path("config/talents.ron")).unwrap();
+        let text = shipped.replacen(
+            "per_rank: [PetStatPercent(MaxHealth, 0.10)],",
+            "per_rank: [Proc((trigger: StealthBreak, chance: Chance(1.0), ranks_add: Chance, \
+             effect: ApplyAura(on: Owner, aura_type: AttackPowerIncrease, magnitude: 5.0, \
+             duration: 6.0, dispel_type: Physical)))],",
+            1,
+        );
+        let talents = TalentDefinitions::from_ron(&text, AbilityDefinitions::shipped()).unwrap();
+        assert_eq!(
+            talent_aura_icons(&talents),
+            vec![(
+                talent_aura_icon_key(TalentId::FelStamina),
+                talents.get(TalentId::FelStamina).unwrap().icon.clone()
+            )]
+        );
+    }
 
     /// The buff bar and team frames draw a proc buff under its TRINKET's key,
     /// and that key is one the loaders actually register — at the trinket's

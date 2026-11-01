@@ -1179,3 +1179,152 @@ fn a_multiply_patch_adds_its_ranks() {
     assert!(near(scaled(range(1)), 11.5), "{}", scaled(range(1)));
     assert!(near(scaled(range(2)), 13.0), "{}", scaled(range(2)));
 }
+
+// ---------------------------------------------------------------------------
+// AS-331: the crit and strength fields, and a node's procs
+// ---------------------------------------------------------------------------
+
+/// The ability crit field patches like any other: Holy Specialization's
+/// shape, an Add on a school's crit chance, ranks added.
+#[test]
+fn a_crit_chance_patch_raises_an_abilitys_own_crit() {
+    let defs = abilities();
+    let text = edited(
+        EMBRACE,
+        "budget: Some(11.0), per_rank: [Patch(on: School(Shadow), field: CritChance, op: Add(0.025))],",
+    );
+    let talents = TalentDefinitions::from_ron(&text, defs).unwrap();
+    let book = talents
+        .resolve(
+            defs,
+            CharacterClass::Warlock,
+            &Build::of(&[(DemonicEmbrace, 2)]),
+        )
+        .unwrap();
+    for (ability, config) in book.book().iter() {
+        let want = if config.spell_school == arenasim::states::play_match::SpellSchool::Shadow {
+            0.05
+        } else {
+            0.0
+        };
+        assert!(
+            (config.crit_chance - want).abs() < 1e-6,
+            "{ability:?}: {}",
+            config.crit_chance
+        );
+    }
+}
+
+/// An aura's STRENGTH reads its magnitude the way round that grows with the
+/// effect: Vile Poisons' +10% on Crippling Poison's 70% slow is 77%, on
+/// Deadly Poison's damage it is its magnitude, and Mul on Curse of Agony's
+/// damage scales it by its ranks added.
+#[test]
+fn an_aura_strength_patch_strengthens_whichever_way_its_magnitude_reads() {
+    let defs = abilities();
+    let mut crippling = defs.get_unchecked(&AbilityType::CripplingPoison).clone();
+    let strength = AbilityField::AuraStrength.get(&crippling).unwrap();
+    assert!((strength - 0.7).abs() < 1e-6);
+    AbilityField::AuraStrength.set(&mut crippling, strength * 1.1);
+    let left = crippling.applies_aura.as_ref().unwrap().magnitude;
+    assert!((left - (1.0 - 0.77)).abs() < 1e-6, "{left}");
+    let deadly = defs.get_unchecked(&AbilityType::DeadlyPoison);
+    assert_eq!(
+        AbilityField::AuraStrength.get(deadly),
+        Some(deadly.applies_aura.as_ref().unwrap().magnitude)
+    );
+    assert!(AbilityField::AuraStrength
+        .get(defs.get_unchecked(&AbilityType::Shadowbolt))
+        .is_none());
+
+    let text = edited(
+        EMBRACE,
+        "budget: Some(11.0), per_rank: [Patch(on: Ability(CurseOfAgony), field: AuraStrength, op: Mul(1.1))],",
+    );
+    let talents = TalentDefinitions::from_ron(&text, defs).unwrap();
+    let book = talents
+        .resolve(
+            defs,
+            CharacterClass::Warlock,
+            &Build::of(&[(DemonicEmbrace, 2)]),
+        )
+        .unwrap();
+    let base = defs
+        .get_unchecked(&AbilityType::CurseOfAgony)
+        .applies_aura
+        .as_ref()
+        .unwrap()
+        .magnitude;
+    let patched = book
+        .book()
+        .get_unchecked(&AbilityType::CurseOfAgony)
+        .applies_aura
+        .as_ref()
+        .unwrap()
+        .magnitude;
+    assert!((patched - base * 1.2).abs() < 1e-5, "{patched}");
+}
+
+const NIGHTFALL: &str = "per_rank: [Proc((trigger: DotTick, abilities: [Corruption], \
+     chance: Chance(0.5), ranks_add: Chance, effect: NextCast(modifier: (applies_to: \
+     Abilities([Shadowbolt]), instant: true), duration: 10.0, dispel_type: Auto)))],";
+
+/// A `Proc` node resolves at its rank (here its ranks add to its chance) and
+/// its spawn installs it; an empty build installs none.
+#[test]
+fn a_proc_node_resolves_at_its_rank_and_its_spawn_carries_it() {
+    use arenasim::states::play_match::talent_procs::ProcChance;
+    let defs = abilities();
+    let text = edited("per_rank: [PetStatPercent(MaxHealth, 0.10)],", NIGHTFALL);
+    let talents = TalentDefinitions::from_ron(&text, defs).unwrap();
+    for (rank, chance) in [(1u8, 0.5f32), (2, 1.0)] {
+        let resolved = talents
+            .resolve(
+                defs,
+                CharacterClass::Warlock,
+                &Build::of(&[(FelStamina, rank)]),
+            )
+            .unwrap();
+        assert_eq!(resolved.procs().len(), 1);
+        assert_eq!(resolved.procs()[0].talent, FelStamina);
+        assert_eq!(resolved.procs()[0].name, "Fel Stamina");
+        assert_eq!(resolved.procs()[0].proc.chance, ProcChance::Chance(chance));
+        let mut c = Combatant::new(1, 0, CharacterClass::Warlock);
+        resolved.apply(&mut c);
+        assert_eq!(c.talent_procs.slots, resolved.procs());
+    }
+    let none = talents
+        .resolve(defs, CharacterClass::Warlock, &Build::default())
+        .unwrap();
+    assert!(none.procs().is_empty());
+    let mut c = Combatant::new(1, 0, CharacterClass::Warlock);
+    none.apply(&mut c);
+    assert!(c.talent_procs.is_empty());
+}
+
+/// A proc's own rules are checked as the table loads: a chance that passes
+/// one at its node's ranks, a per-minute rate off a melee hit, an ability its
+/// class cannot have, and a modifier that changes nothing are each refused.
+#[test]
+fn the_loader_refuses_a_broken_proc() {
+    let defs = abilities();
+    let pet = "per_rank: [PetStatPercent(MaxHealth, 0.10)],";
+    for (edit, why) in [
+        (NIGHTFALL.replace("Chance(0.5)", "Chance(0.6)"), "passes 1"),
+        (
+            NIGHTFALL.replace("Chance(0.5)", "PerMinute(4.8)"),
+            "MeleeHit proc only",
+        ),
+        (
+            NIGHTFALL.replace("abilities: [Corruption]", "abilities: [Frostbolt]"),
+            "cannot have",
+        ),
+        (
+            NIGHTFALL.replace("instant: true", "free: false"),
+            "changes nothing",
+        ),
+    ] {
+        let err = load_err(&edited(pet, &edit), defs);
+        assert!(err.contains(why), "{why}: {err}");
+    }
+}
