@@ -631,10 +631,12 @@ carrying every slot's build.
     `SpellHit` / `HealCrit` there.
   - A NEXT-CAST modifier (`next_cast.rs`): an `AuraType::NextCast` aura with
     a `NextCastModifier` (instant, free, crit chance, cast-time and cost cuts,
-    power). The unit decides from `next_cast::effective_book`; the turn that
-    uses a covered ability spends it, and `next_cast_spent` carries it to a
-    cast bar's or projectile's landing. Two modifiers take the strongest of
-    each field, never the sum.
+    power). The unit decides from `next_cast::effective_book`; the first
+    covered ability its turn chooses spends it (interrupts included), and a
+    cast that lands later carries it there (`next_cast_spent`, the
+    `Projectile`, Holy Shock's pending book). A cast bar that does not land —
+    interrupted, crowd-controlled, silenced or fizzled — gives it back. Two
+    modifiers take the strongest of each field, never the sum.
   - The `leech` field on `applies_aura` (`combat_core/leech.rs`): a share of
     the ability's own damage (Death Coil, Siphon Life) or of its caster's
     damage of one school to the bearer (Vampiric Embrace) heals the caster or
