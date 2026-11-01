@@ -313,7 +313,7 @@ fn an_ability_used_proc_primes_the_next_ability() {
     cut.cost_reduction = 5.0;
     let initiative = TalentProc {
         trigger: TalentTrigger::AbilityUsed,
-        abilities: vec![],
+        abilities: vec![AbilityType::SinisterStrike],
         crit_only: false,
         chance: ProcChance::Chance(1.0),
         ranks_add: ProcRankScale::Effect,
@@ -1393,4 +1393,47 @@ fn an_interrupt_is_a_use_and_a_spender() {
         played.log
     );
     assert!(!procs(&played.log, "Site").is_empty(), "{}", played.log);
+}
+
+/// An interrupt decides from the effective book: a Rogue short of Kick's 25
+/// energy kicks a casting Priest when a primed cost cut covers Kick, and is
+/// refused for energy without it (a scene, one tick).
+#[test]
+fn an_interrupt_reads_the_effective_book() {
+    use arenasim::states::match_config::CharacterClass;
+    use arenasim::states::play_match::class_ai::scene::Scene;
+    let scene = |cut: bool| {
+        let mut scene = Scene::new()
+            .unit("rogue", 1, CharacterClass::Rogue)
+            .mana(0.22)
+            .targeting("priest")
+            .unit("priest", 2, CharacterClass::Priest)
+            .at(2.0, 0.0)
+            .casting("priest", AbilityType::FlashHeal);
+        if cut {
+            let mut m = modifier(NextCastScope::Abilities(vec![AbilityType::Kick]));
+            m.cost_reduction = 10.0;
+            scene = scene.aura_full(
+                "rogue",
+                Aura {
+                    effect_type: AuraType::NextCast,
+                    duration: 30.0,
+                    magnitude: 1.0,
+                    ability_name: "Initiative".to_string(),
+                    next_cast: Some(m),
+                    ..Default::default()
+                },
+            );
+        }
+        scene.combatant_mut("rogue").stealthed = false;
+        scene.interrupt("rogue")
+    };
+    let cut = scene(true);
+    assert_eq!(
+        cut.chosen.map(|(a, _)| a),
+        Some(AbilityType::Kick),
+        "{:?}",
+        cut.candidates
+    );
+    assert_ne!(scene(false).chosen.map(|(a, _)| a), Some(AbilityType::Kick));
 }
