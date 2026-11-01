@@ -154,9 +154,12 @@ fn a_crit_taken_proc_heals_back_its_share() {
         tick_interval: 2.0,
         name: Some("Blessed Recovery".to_string()),
     };
+    // Mortal Strike held, so every crit the Priest takes is an auto-attack's.
     let crits = play(
         config(&["Warrior"], &["Priest"], 20.0),
-        with_proc(Stage::new(), T2, recovery.clone()).combatant(T1, |c| c.crit_chance = 1.0),
+        with_proc(Stage::new(), T2, recovery.clone())
+            .combatant(T1, |c| c.crit_chance = 1.0)
+            .cooldown(T1, AbilityType::MortalStrike, 1000.0),
     );
     assert!(!procs(&crits.log, "Blessed Recovery").is_empty());
     assert!(
@@ -217,7 +220,12 @@ fn a_spell_hit_proc_lands_its_aura_on_the_enemy_struck() {
 fn a_dot_tick_proc_primes_a_next_cast_that_shadow_bolt_spends() {
     let played = play(
         config(&["Warlock"], &["Priest"], 30.0),
-        with_proc(Stage::new(), T1, nightfall(1.0)),
+        // Narrowed to Corruption's ticks, so the proc is the DoT site's.
+        with_proc(Stage::new(), T1, {
+            let mut p = nightfall(1.0);
+            p.abilities = vec![AbilityType::Corruption];
+            p
+        }),
     );
     assert!(
         !procs(&played.log, "Shadow Trance").is_empty(),
@@ -985,4 +993,38 @@ fn every_damage_site_feeds_a_caster_school_leech() {
         "{}",
         priest.log
     );
+}
+
+/// A leech declared on an ability travels onto the aura it applies, and the
+/// aura's ticks feed it: the Warlock's own Corruption, given an `Ability`
+/// leech in its book, heals the Warlock each tick. The control is the
+/// shipped Corruption, which leeches nothing.
+#[test]
+fn an_abilitys_leech_rides_its_aura() {
+    let run = |leech: bool| {
+        play(
+            config(&["Warlock"], &["Priest"], 30.0),
+            Stage::new().health(T1, 0.5).combatant(T1, move |c| {
+                if leech {
+                    let book = c.book().clone().patching(AbilityType::Corruption, |d| {
+                        d.applies_aura.as_mut().expect("Corruption's aura").leech = Some(Leech {
+                            fraction: 1.0,
+                            to: LeechRecipient::Caster,
+                            of: LeechSource::Ability,
+                        });
+                    });
+                    *c = c.clone().with_book(book);
+                }
+            }),
+        )
+    };
+    let played = run(true);
+    assert!(!lines(&played.log, "Corruption ticks").is_empty());
+    assert!(
+        !lines(&played.log, "Warlock #1's Corruption heals for").is_empty(),
+        "{}",
+        played.log
+    );
+    let control = run(false);
+    assert!(lines(&control.log, "Corruption heals").is_empty());
 }
