@@ -4467,50 +4467,97 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         );
     }
 
-    /// A Champion one-hander, bow, crossbow or wand deals the weapon DPS of
-    /// the starting-kit weapon of its kind scaled by item level, as the budget
-    /// scales its stats: `anchor DPS x ilvl / anchor ilvl`. The anchor is the
-    /// starting weapon of the same type and role (physical or caster), or the
-    /// starting one-hander of its role where none of its type starts. Weapon
-    /// damage is a free stat, so nothing else ties a tier's damage to its item
-    /// level. A Champion two-hander follows from its one-hander by Classic's
-    /// premium (`two_handers_carry_the_classic_premium_over_the_one_hander_they_displace`).
-    /// Every Champion weapon that is not a two-hander is named, by set
+    /// A reward-tier (Gauntlet or Champion) one-hander, bow, crossbow or wand
+    /// deals the weapon DPS of its starting-kit anchor scaled by item level,
+    /// as the budget scales its stats: `anchor DPS x ilvl / anchor ilvl`.
+    /// Weapon damage is a free stat, so nothing else ties a tier's damage to
+    /// its item level. A reward two-hander follows from its one-hander by
+    /// Classic's premium
+    /// (`two_handers_carry_the_classic_premium_over_the_one_hander_they_displace`).
+    ///
+    /// The anchor is DERIVED here by the rule in the `items.ron` header, and
+    /// the table pins what the rule yields, so a new starting weapon that
+    /// moves an anchor fails until the table, and the reward's damage, move
+    /// with it. Every reward weapon that is not a two-hander is named, by set
     /// equality.
     #[test]
-    fn champion_weapon_dps_scales_its_starting_weapon_by_item_level() {
+    fn reward_weapon_dps_scales_its_starting_weapon_by_item_level() {
         let item_defs = load_item_definitions().expect("items.ron must load");
         let item = |id: ItemId| item_defs.get(&id).expect("shipped");
         let dps = |id: ItemId| {
             let item = item(id);
             (item.attack_damage_min + item.attack_damage_max) / 2.0 / item.weapon_speed
         };
-        // (Champion weapon, the starting-kit weapon it scales)
+        // (reward weapon, the starting-kit weapon it scales)
         let table = [
+            // Gauntlet tier.
+            (ItemId::StormbladeEdge, ItemId::FrostbiteBlade),
+            (ItemId::FangOfTheViper, ItemId::SerpentFangDagger),
+            (ItemId::MaceOfTheRedeemer, ItemId::HammerOfTheRighteous),
+            (ItemId::ClawOfChromaggus, ItemId::Witchblade),
+            // No caster sword starts: of the caster one-handers, Witchblade
+            // has the most DPS per item level.
+            (ItemId::AzuresongMageblade, ItemId::Witchblade),
+            // Two wands start: the Priest's Staff of Dominance has more DPS
+            // per item level than Wand of Shadows.
+            (ItemId::WandOfTheInvoker, ItemId::StaffOfDominance),
+            (ItemId::EaglestrikeBow, ItemId::AshwoodBow),
+            (ItemId::DeadeyeCrossbow, ItemId::SniperScope),
+            // Champion tier.
             (ItemId::Gressil, ItemId::FrostbiteBlade),
             (ItemId::Kingsfall, ItemId::SerpentFangDagger),
             (
                 ItemId::HammerOfTheTwistingNether,
                 ItemId::HammerOfTheRighteous,
             ),
-            // No caster sword starts; Witchblade is the caster one-hander.
             (ItemId::WraithBlade, ItemId::Witchblade),
-            (ItemId::Doomfinger, ItemId::WandOfShadows),
+            (ItemId::Doomfinger, ItemId::StaffOfDominance),
             (ItemId::Soulstring, ItemId::AshwoodBow),
             (ItemId::NerubianSlavemaker, ItemId::SniperScope),
         ];
-        for (champion, anchor) in table {
+        // The rule: the starting-kit weapon held the same way, of the same
+        // role and weapon type (any type of that hand and role where none of
+        // its type starts); of several, the most DPS per item level.
+        let is_caster = |item: &ItemConfig| item.spell_power > 0.0;
+        let rate = |id: ItemId| dps(id) / item(id).item_level as f32;
+        let anchor_of = |reward: ItemId| -> Option<ItemId> {
+            let r = item(reward);
+            let held_alike: Vec<ItemId> = item_defs
+                .iter()
+                .filter(|(_, s)| {
+                    s.tier() == Some(ItemTier::StartingKit)
+                        && s.is_weapon
+                        && s.slot == r.slot
+                        && s.two_handed == r.two_handed
+                        && is_caster(s) == is_caster(r)
+                })
+                .map(|(id, _)| *id)
+                .collect();
+            let same_type: Vec<ItemId> = held_alike
+                .iter()
+                .copied()
+                .filter(|id| item(*id).weapon_type == r.weapon_type)
+                .collect();
+            let pool = if same_type.is_empty() {
+                held_alike
+            } else {
+                same_type
+            };
+            pool.into_iter()
+                .max_by(|a, b| rate(*a).total_cmp(&rate(*b)))
+        };
+        for (reward, anchor) in table {
             assert_eq!(
-                item(anchor).tier(),
-                Some(ItemTier::StartingKit),
-                "{champion:?} scales a starting-kit weapon"
+                anchor_of(reward),
+                Some(anchor),
+                "{reward:?}'s anchor by the rule"
             );
             let expected =
-                dps(anchor) * item(champion).item_level as f32 / item(anchor).item_level as f32;
+                dps(anchor) * item(reward).item_level as f32 / item(anchor).item_level as f32;
             assert!(
-                (dps(champion) / expected - 1.0).abs() < 1e-3,
-                "{champion:?} DPS {:.3}, {anchor:?}'s {:.3} scaled by item level is {expected:.3}",
-                dps(champion),
+                (dps(reward) / expected - 1.0).abs() < 1e-3,
+                "{reward:?} DPS {:.3}, {anchor:?}'s {:.3} scaled by item level is {expected:.3}",
+                dps(reward),
                 dps(anchor)
             );
         }
@@ -4518,7 +4565,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         let shipped: std::collections::BTreeSet<String> = item_defs
             .iter()
             .filter(|(_, item)| {
-                item.tier() == Some(ItemTier::Champion)
+                matches!(item.tier(), Some(ItemTier::Gauntlet | ItemTier::Champion))
                     && item.is_weapon
                     && item.held() != Some(HeldSlot::TwoHand)
             })
@@ -4528,7 +4575,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             table.iter().map(|row| format!("{:?}", row.0)).collect();
         assert_eq!(
             shipped, named,
-            "every Champion one-hander and ranged weapon has its anchor in this table"
+            "every reward one-hander and ranged weapon has its anchor in this table"
         );
     }
 
