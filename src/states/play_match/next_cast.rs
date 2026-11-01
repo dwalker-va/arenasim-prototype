@@ -188,6 +188,13 @@ impl NextCastModifier {
     }
 }
 
+/// `config` changed by `modifier`: what a cast that spent it resolves with.
+pub fn changed(config: &AbilityConfig, modifier: &NextCastModifier) -> AbilityConfig {
+    let mut out = config.clone();
+    modifier.apply(&mut out);
+    out
+}
+
 /// A modifier spent by a cast that resolves after its decision: the cast it
 /// was spent on, and the change. Carried on the combatant until
 /// `process_casting` completes that cast.
@@ -195,6 +202,11 @@ impl NextCastModifier {
 pub struct SpentNextCast {
     pub ability: AbilityType,
     pub modifier: NextCastModifier,
+}
+
+/// Whether any next-cast modifier is up on a holder.
+pub fn any_live(auras: &ActiveAuras) -> bool {
+    auras.auras.iter().any(|a| a.effect_type == AuraType::NextCast)
 }
 
 /// Every live next-cast modifier on a holder, in aura order.

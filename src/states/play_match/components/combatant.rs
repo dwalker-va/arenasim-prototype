@@ -1247,6 +1247,12 @@ pub struct Projectile {
     /// projectile's damage attributes to the pet (`"Team 1 Spider #2"`), not the
     /// owner — keeping cast and impact under one id and inside #88's pet fold.
     pub caster_pet_type: Option<PetType>,
+    /// A next-cast modifier the cast that launched it spent
+    /// (`next_cast.rs`), read when it lands: its crit chance and its power.
+    /// Set by `process_casting` for a cast-bar projectile; `None` for every
+    /// other projectile, an instant one included (its cost was paid from the
+    /// changed config when the AI fired it).
+    pub next_cast: Option<crate::states::play_match::next_cast::NextCastModifier>,
 }
 
 // ============================================================================
@@ -1256,6 +1262,8 @@ pub struct Projectile {
 /// Pending Holy Shock heal to be processed.
 #[derive(Component)]
 pub struct HolyShockHealPending {
+    /// The Paladin, for its talent procs (`HealCrit`).
+    pub caster: Entity,
     /// The Paladin's own book, which the heal is read from.
     pub caster_book: AbilityBook,
     pub caster_spell_power: f32,
@@ -1269,6 +1277,8 @@ pub struct HolyShockHealPending {
 /// Pending Holy Shock damage to be processed.
 #[derive(Component)]
 pub struct HolyShockDamagePending {
+    /// The Paladin, for its talent procs (`SpellHit`).
+    pub caster: Entity,
     /// The Paladin's own book, which the damage is read from.
     pub caster_book: AbilityBook,
     pub caster_spell_power: f32,

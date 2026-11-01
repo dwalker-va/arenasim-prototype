@@ -18,6 +18,7 @@ use super::damage::{
     roll_crit,
 };
 use crate::combat::log::{CombatLog, CombatLogEventType};
+use crate::states::play_match::talent_procs::{self, ProcEvent, TalentTrigger};
 use bevy::prelude::*;
 
 /// Auto-attack system: Process attacks based on attack speed timers.
@@ -256,6 +257,10 @@ pub fn combat_auto_attack(
     // event, and the order is the RNG draw order, so it has to be the order
     // the sim produced rather than whatever a hash gives back.
     let mut melee_proc_hits: Vec<Entity> = Vec::new();
+    // Every landed swing, for the talent procs read after the loop:
+    // (attacker, target, crit, damage to health, kind, hand).
+    let mut talent_swings: Vec<(Entity, Entity, bool, f32, AutoAttackKind, WeaponHand)> =
+        Vec::new();
 
     // Track damage per target for batching floating combat text.
     // BTreeMap (not HashMap) so iteration order is deterministic by Entity —
@@ -777,6 +782,14 @@ pub fn combat_auto_attack(
                 if swing_kind == AutoAttackKind::Melee {
                     melee_proc_hits.push(attacker_entity);
                 }
+                talent_swings.push((
+                    attacker_entity,
+                    target_entity,
+                    is_crit,
+                    actual_damage,
+                    swing_kind,
+                    hand,
+                ));
 
                 // Weapon-poison proc: a coated Rogue's landed swing has a
                 // chance to apply its poison. Crippling is refreshed in place
@@ -1038,6 +1051,45 @@ pub fn combat_auto_attack(
                 target: attacker_entity,
                 aura,
             });
+        }
+    }
+
+    // Talent procs (`talent_procs.rs`): a landed melee swing is a `MeleeHit`
+    // for its attacker, carrying the weapon's own speed so a per-minute rate
+    // is normalised for it; a crit, melee or ranged, is a `CritTaken` for its
+    // target. Pushed only for a unit whose procs listen.
+    for (attacker, target, is_crit, damage, kind, hand) in talent_swings {
+        if kind == AutoAttackKind::Melee {
+            if let Ok((_, _, a, _, _, _)) = combatants.get(attacker) {
+                let weapon_speed = match hand {
+                    WeaponHand::Off => a.offhand_weapon_speed,
+                    WeaponHand::Main if a.class == match_config::CharacterClass::Hunter => {
+                        a.melee_weapon_speed
+                    }
+                    WeaponHand::Main => a.weapon_speed,
+                };
+                talent_procs::push_for(
+                    &mut commands,
+                    &a.talent_procs,
+                    ProcEvent::new(attacker, TalentTrigger::MeleeHit)
+                        .crit(is_crit)
+                        .amount(damage)
+                        .other(target)
+                        .swing(weapon_speed),
+                );
+            }
+        }
+        if is_crit {
+            if let Ok((_, _, t, _, _, _)) = combatants.get(target) {
+                talent_procs::push_for(
+                    &mut commands,
+                    &t.talent_procs,
+                    ProcEvent::new(target, TalentTrigger::CritTaken)
+                        .crit(true)
+                        .amount(damage)
+                        .other(attacker),
+                );
+            }
         }
     }
 

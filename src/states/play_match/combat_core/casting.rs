@@ -16,7 +16,9 @@ use super::damage::{
     roll_crit,
 };
 use super::healing::apply_healing;
+use super::leech::{self, OwedLeech};
 use crate::combat::log::{CombatLog, CombatLogEventType};
+use crate::states::play_match::talent_procs::{self, ProcEvent, TalentTrigger};
 use bevy::prelude::*;
 
 /// Resource regeneration system: Regenerate mana for all combatants.
@@ -184,7 +186,7 @@ pub fn process_casting(
     let mut completed_casts = Vec::new();
 
     // First pass: update cast timers and collect completed casts
-    for (caster_entity, caster_transform, caster, casting_state, caster_auras) in
+    for (caster_entity, caster_transform, mut caster, casting_state, caster_auras) in
         combatants.iter_mut()
     {
         let Some(mut casting) = casting_state else {
@@ -274,8 +276,22 @@ pub fn process_casting(
         // Check if cast completed
         if casting.time_remaining <= 0.0 {
             let ability = casting.ability;
-            let def = book.get_unchecked(&ability);
             let target_entity = casting.target;
+            // A next-cast modifier this cast spent when it began
+            // (`next_cast.rs`): its cost, crit chance and power are read from
+            // the changed config. `None` — and `def` the book's own — for
+            // every cast that spent none.
+            let spent = match &caster.next_cast_spent {
+                Some(s) if s.ability == ability => Some(s.modifier.clone()),
+                _ => None,
+            };
+            if spent.is_some() {
+                caster.next_cast_spent = None;
+            }
+            let changed = spent
+                .as_ref()
+                .map(|m| super::super::next_cast::changed(book.get_unchecked(&ability), m));
+            let def = changed.as_ref().unwrap_or(book.get_unchecked(&ability));
 
             // NOTE: mana is NOT consumed here. A completed cast only pays when it
             // actually LANDS (projectile spawns, or instant effect passes the
@@ -297,7 +313,10 @@ pub fn process_casting(
 
             // Roll crit for damage (before physical damage reduction)
             let is_crit_damage = if def.is_damage() {
-                let crit = roll_crit(caster.crit_chance + crit_bonus, &mut game_rng);
+                let crit = roll_crit(
+                    caster.crit_chance + crit_bonus + def.crit_chance,
+                    &mut game_rng,
+                );
                 if crit {
                     ability_damage *= CRIT_DAMAGE_MULTIPLIER;
                 }
@@ -321,7 +340,10 @@ pub fn process_casting(
 
             // Roll crit for healing (before healing reduction)
             let is_crit_heal = if def.is_heal() {
-                let crit = roll_crit(caster.crit_chance + crit_bonus, &mut game_rng);
+                let crit = roll_crit(
+                    caster.crit_chance + crit_bonus + def.crit_chance,
+                    &mut game_rng,
+                );
                 if crit {
                     ability_healing *= CRIT_HEALING_MULTIPLIER;
                 }
@@ -351,6 +373,7 @@ pub fn process_casting(
                 caster.spell_power + sp_bonus,
                 def.mana_cost,
                 book.clone(),
+                spent,
             ));
 
             // Remove casting state
@@ -381,6 +404,10 @@ pub fn process_casting(
     // roll needs the CASTER's combatant mutably, and this loop holds the
     // target's (which on a self-cast is the same entity).
     let mut cast_proc_events: Vec<(Entity, bool)> = Vec::new();
+    // Talent proc events (`SpellHit`, `HealCrit`) and leech heals this pass
+    // owes, landed after it for the reason mana is: they need the CASTER.
+    let mut talent_events: Vec<ProcEvent> = Vec::new();
+    let mut leeches: Vec<OwedLeech> = Vec::new();
 
     // Process completed casts
     for (
@@ -399,9 +426,13 @@ pub fn process_casting(
         caster_effective_spell_power,
         mana_cost,
         book,
+        spent,
     ) in completed_casts
     {
-        let def = book.get_unchecked(&ability);
+        let changed = spent
+            .as_ref()
+            .map(|m| super::super::next_cast::changed(book.get_unchecked(&ability), m));
+        let def = changed.as_ref().unwrap_or(book.get_unchecked(&ability));
 
         // Get target
         let Some(target_entity) = target_entity else {
@@ -469,6 +500,7 @@ pub fn process_casting(
                     caster_slot,
                     caster_class,
                     caster_pet_type: None,
+                    next_cast: spent.clone(),
                 },
                 Transform::from_translation(caster_pos + Vec3::new(0.0, 1.5, 0.0)), // Spawn at chest height
                 PlayMatchEntity,
@@ -604,6 +636,36 @@ pub fn process_casting(
 
             // Break stealth on offensive ability use
             break_stealth.push(caster_entity);
+
+            // What the hit's leeches owe, read while the target's auras are
+            // to hand; and its `SpellHit`.
+            let own = def
+                .applies_aura
+                .as_ref()
+                .and_then(|a| a.leech.as_ref())
+                .map(|l| (l, def.name.as_str()));
+            let heals = leech::owed(
+                caster_entity,
+                own,
+                target_auras.as_deref(),
+                def.spell_school,
+                actual_damage,
+            );
+            if !heals.is_empty() {
+                leeches.push(OwedLeech {
+                    caster: caster_entity,
+                    caster_team,
+                    caster_id: caster_id.clone(),
+                    heals,
+                });
+            }
+            talent_events.push(
+                ProcEvent::new(caster_entity, TalentTrigger::SpellHit)
+                    .ability(ability)
+                    .crit(is_crit_damage)
+                    .amount(actual_damage)
+                    .other(target_entity),
+            );
 
             // Track damage dealt for caster (include absorbed - caster dealt it)
             let total_damage_dealt = actual_damage + absorbed;
@@ -795,6 +857,16 @@ pub fn process_casting(
                 &dampening,
                 ability_healing,
             );
+
+            if is_crit_heal {
+                talent_events.push(
+                    ProcEvent::new(caster_entity, TalentTrigger::HealCrit)
+                        .ability(ability)
+                        .crit(true)
+                        .amount(actual_healing)
+                        .other(target_entity),
+                );
+            }
 
             // Track healing done for healer (update later to avoid double borrow)
             if is_self_target {
@@ -1017,6 +1089,44 @@ pub fn process_casting(
         }
     }
 
+    // Talent procs, `SpellHit` / `HealCrit`: pushed only for a caster whose
+    // procs listen, so a match without talents pushes nothing.
+    for event in talent_events {
+        if let Ok((_, _, caster, _, _)) = combatants.get(event.unit) {
+            talent_procs::push_for(&mut commands, &caster.talent_procs, event);
+        }
+    }
+
+    // Leech heals (a cast that applies a leeching aura, or a Vampiric
+    // Embrace on its target), each through `apply_healing`.
+    for owed in &leeches {
+        let members: Vec<(Entity, u8, bool, bool)> = if owed.needs_party() {
+            combatants
+                .iter()
+                .map(|(e, _, c, _, _)| (e, c.team, pet_query.get(e).is_ok(), c.is_alive()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let credited = leech::land_owed(
+            &mut commands,
+            &mut combat_log,
+            &dampening,
+            owed,
+            &members,
+            |e, land| match combatants.get_mut(e) {
+                Ok((_, _, mut c, _, auras)) => {
+                    let id = combat_log_id_for(&c, pet_query.get(e).ok());
+                    land(&mut c, auras.as_deref(), &id)
+                }
+                Err(_) => 0.0,
+            },
+        );
+        if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(owed.caster) {
+            caster.healing_done += credited;
+        }
+    }
+
     // Charge mana for casts that landed (fizzled/interrupted casts never pushed here)
     for (caster_entity, cost) in mana_charges {
         if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {
@@ -1091,6 +1201,10 @@ pub fn process_channeling(
     }
 
     let dt = time.delta_secs();
+
+    // Talent proc events (`DotTick`) and leech heals the ticks owe.
+    let mut talent_events: Vec<ProcEvent> = Vec::new();
+    let mut leeches: Vec<OwedLeech> = Vec::new();
 
     // Track updates to apply after the loop
     let mut remove_channel: Vec<Entity> = Vec::new();
@@ -1367,13 +1481,48 @@ pub fn process_channeling(
             combatants.get_mut(target_entity)
         {
             if target.is_alive() {
+                let channel_def = caster_book.get_unchecked(&channel_ability);
                 let (actual_damage, absorbed) = apply_damage_with_absorb(
                     damage,
                     &mut target,
                     target_auras.as_deref_mut(),
                     spell_school,
-                    &caster_book.get_unchecked(&channel_ability).name,
+                    &channel_def.name,
                     &mut combat_log,
+                );
+
+                // The tick's leeches (a leeching channel, a Vampiric Embrace
+                // on its target) and its `DotTick`.
+                let own = channel_def
+                    .applies_aura
+                    .as_ref()
+                    .and_then(|a| a.leech.as_ref())
+                    .map(|l| (l, channel_def.name.as_str()));
+                let heals = leech::owed(
+                    caster_entity,
+                    own,
+                    target_auras.as_deref(),
+                    spell_school,
+                    actual_damage,
+                );
+                if !heals.is_empty() {
+                    leeches.push(OwedLeech {
+                        caster: caster_entity,
+                        caster_team,
+                        caster_id: super::super::utils::log_id_from_parts(
+                            caster_team,
+                            caster_slot,
+                            caster_class,
+                            pet_query.get(caster_entity).ok().map(|p| p.pet_type),
+                        ),
+                        heals,
+                    });
+                }
+                talent_events.push(
+                    ProcEvent::new(caster_entity, TalentTrigger::DotTick)
+                        .ability(channel_ability)
+                        .amount(actual_damage)
+                        .other(target_entity),
                 );
 
                 // Track damage for aura breaking
@@ -1480,6 +1629,40 @@ pub fn process_channeling(
                 },
                 PlayMatchEntity,
             ));
+        }
+    }
+
+    // Talent procs and leech heals the ticks owe (see `process_casting`).
+    for event in talent_events {
+        if let Ok((_, _, caster, _, _)) = combatants.get(event.unit) {
+            talent_procs::push_for(&mut commands, &caster.talent_procs, event);
+        }
+    }
+    for owed in &leeches {
+        let members: Vec<(Entity, u8, bool, bool)> = if owed.needs_party() {
+            combatants
+                .iter()
+                .map(|(e, _, c, _, _)| (e, c.team, pet_query.get(e).is_ok(), c.is_alive()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let credited = leech::land_owed(
+            &mut commands,
+            &mut combat_log,
+            &dampening,
+            owed,
+            &members,
+            |e, land| match combatants.get_mut(e) {
+                Ok((_, _, mut c, _, auras)) => {
+                    let id = combat_log_id_for(&c, pet_query.get(e).ok());
+                    land(&mut c, auras.as_deref(), &id)
+                }
+                Err(_) => 0.0,
+            },
+        );
+        if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(owed.caster) {
+            caster.healing_done += credited;
         }
     }
 

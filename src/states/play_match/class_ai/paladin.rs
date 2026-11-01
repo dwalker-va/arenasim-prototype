@@ -1110,9 +1110,11 @@ fn try_holy_shock_heal(
     );
 
     commands.spawn(HolyShockHealPending {
+        caster: ctx.self_entity,
         caster_book: combatant.book().clone(),
         caster_spell_power: combatant.spell_power,
-        caster_crit_chance: combatant.crit_chance,
+        // Its own crit chance too (a talent's, or a next-cast modifier's).
+        caster_crit_chance: combatant.crit_chance + def.crit_chance,
         caster_team: combatant.team,
         caster_slot: combatant.slot,
         caster_class: combatant.class,
@@ -1216,9 +1218,11 @@ fn try_holy_shock_damage(
     );
 
     commands.spawn(HolyShockDamagePending {
+        caster: ctx.self_entity,
         caster_book: combatant.book().clone(),
         caster_spell_power: combatant.spell_power,
-        caster_crit_chance: combatant.crit_chance,
+        // Its own crit chance too (a talent's, or a next-cast modifier's).
+        caster_crit_chance: combatant.crit_chance + def.crit_chance,
         caster_team: combatant.team,
         caster_slot: combatant.slot,
         caster_class: combatant.class,

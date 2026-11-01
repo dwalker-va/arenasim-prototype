@@ -676,7 +676,7 @@ fn try_frost_nova(
     for (target_entity, target_pos, target_id) in &frost_nova_targets {
         let mut damage =
             combatant.calculate_ability_damage_config(nova_def, game_rng, ap_bonus, sp_bonus);
-        let is_crit = roll_crit(combatant.crit_chance + crit_bonus, game_rng);
+        let is_crit = roll_crit(combatant.crit_chance + crit_bonus + nova_def.crit_chance, game_rng);
         if is_crit {
             damage *= CRIT_DAMAGE_MULTIPLIER;
         }

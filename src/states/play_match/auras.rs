@@ -1067,8 +1067,9 @@ pub fn process_dot_ticks(
     time: Res<Time>,
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
+    dampening: Res<ArenaDampening>,
     mut combatants_with_auras: Query<(Entity, &mut Combatant, &Transform, &mut ActiveAuras)>,
-    combatants_without_auras: Query<(Entity, &Combatant), Without<ActiveAuras>>,
+    mut combatants_without_auras: Query<(Entity, &mut Combatant), Without<ActiveAuras>>,
     pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -1114,6 +1115,7 @@ pub fn process_dot_ticks(
         match_config::CharacterClass,
         String,
         super::abilities::SpellSchool,
+        Option<super::combat_core::leech::Leech>,
     )> = Vec::new();
 
     // First pass: tick down DoT timers and queue damage
@@ -1160,6 +1162,7 @@ pub fn process_dot_ticks(
                             aura.ability_name.clone(),
                             aura.spell_school
                                 .unwrap_or(super::abilities::SpellSchool::None),
+                            aura.leech,
                         ));
                     }
                 }
@@ -1174,6 +1177,10 @@ pub fn process_dot_ticks(
 
     // Track caster damage dealt updates
     let mut caster_damage_updates: Vec<(Entity, f32)> = Vec::new();
+    // The ticks' leech heals (Siphon Life's own, a Vampiric Embrace on the
+    // target) and `DotTick` events (caster, ability name, target, damage).
+    let mut leeches: Vec<super::combat_core::leech::OwedLeech> = Vec::new();
+    let mut ticks: Vec<(Entity, String, Entity, f32)> = Vec::new();
 
     // Second pass: apply queued DoT damage to targets
     for (
@@ -1186,6 +1193,7 @@ pub fn process_dot_ticks(
         caster_class,
         ability_name,
         spell_school,
+        own_leech,
     ) in dot_damage_to_apply
     {
         // Get target combatant
@@ -1227,6 +1235,23 @@ pub fn process_dot_ticks(
 
         // Queue caster damage_dealt update
         caster_damage_updates.push((caster_entity, actual_damage));
+
+        let heals = super::combat_core::leech::owed(
+            caster_entity,
+            own_leech.as_ref().map(|l| (l, ability_name.as_str())),
+            Some(&target_auras),
+            spell_school,
+            actual_damage,
+        );
+        if !heals.is_empty() {
+            leeches.push(super::combat_core::leech::OwedLeech {
+                caster: caster_entity,
+                caster_team,
+                caster_id: caster_id.clone(),
+                heals,
+            });
+        }
+        ticks.push((caster_entity, ability_name.clone(), target_entity, actual_damage));
 
         // Spawn floating combat text (yellow for DoT ticks, like ability damage)
         // Get deterministic offset based on pattern state
@@ -1311,6 +1336,82 @@ pub fn process_dot_ticks(
     for (caster_entity, damage_dealt) in caster_damage_updates {
         if let Ok((_, mut caster, _, _)) = combatants_with_auras.get_mut(caster_entity) {
             caster.damage_dealt += damage_dealt;
+        }
+    }
+
+    // `DotTick` talent procs: pushed only for a caster whose procs listen,
+    // naming the ability by its name in the caster's own book.
+    for (caster_entity, name, target_entity, amount) in ticks {
+        let caster = combatants_with_auras
+            .get(caster_entity)
+            .map(|(_, c, _, _)| c)
+            .or_else(|_| combatants_without_auras.get(caster_entity).map(|(_, c)| c));
+        let Ok(caster) = caster else { continue };
+        if !caster
+            .talent_procs
+            .listens_for(super::talent_procs::TalentTrigger::DotTick)
+        {
+            continue;
+        }
+        let Some(ability) = caster
+            .book()
+            .iter()
+            .find(|(_, def)| def.name == name)
+            .map(|(a, _)| *a)
+        else {
+            continue;
+        };
+        super::talent_procs::push(
+            &mut commands,
+            super::talent_procs::ProcEvent::new(
+                caster_entity,
+                super::talent_procs::TalentTrigger::DotTick,
+            )
+            .ability(ability)
+            .amount(amount)
+            .other(target_entity),
+        );
+    }
+
+    // Leech heals, each through `apply_healing`.
+    for owed in &leeches {
+        let members: Vec<(Entity, u8, bool, bool)> = if owed.needs_party() {
+            combatants_with_auras
+                .iter()
+                .map(|(e, c, _, _)| (e, c.team, pet_query.get(e).is_ok(), c.is_alive()))
+                .chain(
+                    combatants_without_auras
+                        .iter()
+                        .map(|(e, c)| (e, c.team, pet_query.get(e).is_ok(), c.is_alive())),
+                )
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let credited = super::combat_core::leech::land_owed(
+            &mut commands,
+            &mut combat_log,
+            &dampening,
+            owed,
+            &members,
+            |e, land| {
+                if let Ok((_, mut c, _, auras)) = combatants_with_auras.get_mut(e) {
+                    let id = combat_log_id_for(&c, pet_query.get(e).ok());
+                    land(&mut c, Some(&auras), &id)
+                } else if let Ok((_, mut c)) = combatants_without_auras.get_mut(e) {
+                    let id = combat_log_id_for(&c, pet_query.get(e).ok());
+                    land(&mut c, None, &id)
+                } else {
+                    0.0
+                }
+            },
+        );
+        if credited > 0.0 {
+            if let Ok((_, mut caster, _, _)) = combatants_with_auras.get_mut(owed.caster) {
+                caster.healing_done += credited;
+            } else if let Ok((_, mut caster)) = combatants_without_auras.get_mut(owed.caster) {
+                caster.healing_done += credited;
+            }
         }
     }
 }

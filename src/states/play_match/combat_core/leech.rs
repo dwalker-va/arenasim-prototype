@@ -191,6 +191,67 @@ pub fn land(
     effective
 }
 
+/// One damage event's leech heals, still to land: what [`owed`] returned,
+/// with the caster it came from.
+#[derive(Clone, Debug)]
+pub struct OwedLeech {
+    pub caster: Entity,
+    pub caster_team: u8,
+    pub caster_id: CombatantId,
+    pub heals: Vec<LeechHeal>,
+}
+
+impl OwedLeech {
+    /// Whether a heal goes to the caster's party, so its site must list the
+    /// party's members.
+    pub fn needs_party(&self) -> bool {
+        self.heals
+            .iter()
+            .any(|h| h.to == LeechRecipient::CasterParty)
+    }
+}
+
+/// Land every heal of `owed` on its recipients ([`recipients`]), each through
+/// [`land`], and return what landed, for the caster's `healing_done`.
+///
+/// A site hands each recipient over through `visit`: called with the
+/// recipient's entity and a lander, it calls the lander with that unit's
+/// combatant, auras and combat-log id, and returns what it returned (0 for a
+/// unit it cannot find). `members` lists every combatant as `(entity, team,
+/// is_pet, alive)` when [`OwedLeech::needs_party`], and may be empty when not.
+pub fn land_owed(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    dampening: &ArenaDampening,
+    owed: &OwedLeech,
+    members: &[(Entity, u8, bool, bool)],
+    mut visit: impl FnMut(
+        Entity,
+        &mut dyn FnMut(&mut Combatant, Option<&ActiveAuras>, &CombatantId) -> f32,
+    ) -> f32,
+) -> f32 {
+    let mut credited = 0.0;
+    for heal in &owed.heals {
+        for recipient in recipients(heal.to, owed.caster, owed.caster_team, members.iter().copied())
+        {
+            credited += visit(recipient, &mut |combatant, auras, id| {
+                land(
+                    commands,
+                    combat_log,
+                    dampening,
+                    &owed.caster_id,
+                    heal,
+                    recipient,
+                    combatant,
+                    auras,
+                    id,
+                )
+            });
+        }
+    }
+    credited
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

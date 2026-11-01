@@ -93,6 +93,9 @@ impl<'a> DecisionEventBuilder<'a> {
     ///
     /// [`cast_gate`]: crate::states::play_match::class_ai::cast_guard::cast_gate
     pub fn choose(&mut self, cleared: Cleared, target: Option<Entity>, was_instant: bool) {
+        self.trace
+            .casts
+            .push((self.actor.entity_id, cleared.ability()));
         self.record_chosen(cleared.ability(), target, was_instant);
     }
 

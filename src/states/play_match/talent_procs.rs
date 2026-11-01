@@ -686,6 +686,64 @@ pub fn roll(
     fired
 }
 
+/// The talent effects of one unit's turn, run by `decide_abilities` right
+/// after it with the abilities the turn USED
+/// ([`super::decision_trace::DecisionTrace::take_casts_of`]):
+/// - each next-cast modifier a used ability spends comes off `auras`
+///   ([`super::next_cast::consume`]), and the last one spent rides on the
+///   combatant ([`Combatant::next_cast_spent`]) for a cast that resolves
+///   later. A turn that used something but spent nothing clears it. Pass
+///   `auras` only when a `NextCast` aura is on the unit;
+/// - each use is an [`TalentTrigger::AbilityUsed`] event, for a unit that
+///   listens for one.
+pub fn after_turn(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    entity: Entity,
+    combatant: &mut Combatant,
+    mut auras: Option<&mut super::components::ActiveAuras>,
+    used: &[AbilityType],
+) {
+    if used.is_empty() {
+        return;
+    }
+    if let Some(auras) = auras.as_deref_mut() {
+        let mut spent = None;
+        for ability in used {
+            if let Some((modifier, names)) = super::next_cast::consume(auras, *ability) {
+                let cast = combatant
+                    .book()
+                    .get(ability)
+                    .map_or_else(|| format!("{ability:?}"), |d| d.name.clone());
+                combat_log.log(
+                    CombatLogEventType::Buff,
+                    format!(
+                        "{}'s {} is spent on {}",
+                        combatant_id(combatant.team, combatant.slot, combatant.class),
+                        names.join(" and "),
+                        cast
+                    ),
+                );
+                spent = Some(super::next_cast::SpentNextCast {
+                    ability: *ability,
+                    modifier,
+                });
+            }
+        }
+        combatant.next_cast_spent = spent;
+    } else if combatant.next_cast_spent.is_some() {
+        combatant.next_cast_spent = None;
+    }
+    if combatant.talent_procs.listens_for(TalentTrigger::AbilityUsed) {
+        for ability in used {
+            push(
+                commands,
+                ProcEvent::new(entity, TalentTrigger::AbilityUsed).ability(*ability),
+            );
+        }
+    }
+}
+
 /// Resolve the frame's proc events (see the module docs). Registered at the
 /// end of `CombatResolution` in both modes.
 pub fn resolve_talent_procs(

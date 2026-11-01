@@ -5,8 +5,9 @@
 use super::abilities::AbilityType;
 use super::ability_book::AbilityBook;
 use super::ability_config::AbilityDefinitions;
-use super::combat_core::apply_healing;
+use super::combat_core::leech::{self, LeechRecipient};
 use super::components::*;
+use super::talent_procs::{self, ProcEvent, TalentTrigger};
 use super::constants::CRIT_DAMAGE_MULTIPLIER;
 use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset, pet_combatant_id};
 use crate::combat::log::CombatLog;
@@ -136,7 +137,7 @@ pub fn process_projectile_hits(
     mut game_rng: ResMut<GameRng>,
     dampening: Res<ArenaDampening>,
     projectiles: Query<(Entity, &Projectile, &Transform)>,
-    mut combatants: Query<(&Transform, &mut Combatant, Option<&mut ActiveAuras>)>,
+    mut combatants: Query<(Entity, &Transform, &mut Combatant, Option<&mut ActiveAuras>)>,
     pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -164,11 +165,12 @@ pub fn process_projectile_hits(
         f32,
         bool,
         AbilityBook,
+        Option<super::next_cast::NextCastModifier>,
     )> = Vec::new();
 
     for (projectile_entity, projectile, projectile_transform) in projectiles.iter() {
         // Get target position (immutable borrow)
-        let Ok((target_transform, target, _)) = combatants.get(projectile.target) else {
+        let Ok((_, target_transform, target, _)) = combatants.get(projectile.target) else {
             // Target no longer exists, despawn projectile
             commands.entity(projectile_entity).despawn();
             continue;
@@ -187,7 +189,7 @@ pub fn process_projectile_hits(
         // Check if projectile has reached target
         if distance <= HIT_DISTANCE {
             // Get caster data (position, combatant stats, auras) in a single query
-            let Ok((caster_transform, caster_combatant, caster_auras)) =
+            let Ok((_, caster_transform, caster_combatant, caster_auras)) =
                 combatants.get(projectile.caster)
             else {
                 // Caster no longer exists, despawn projectile
@@ -200,7 +202,14 @@ pub fn process_projectile_hits(
 
             // The projectile's ability, read from its caster's own book.
             let book = caster_combatant.book().clone();
-            let def = book.get_unchecked(&projectile.ability);
+            // Changed by the next-cast modifier its cast spent, if any
+            // (`next_cast.rs`); the book's own config otherwise.
+            let changed = projectile.next_cast.as_ref().map(|m| {
+                super::next_cast::changed(book.get_unchecked(&projectile.ability), m)
+            });
+            let def = changed
+                .as_ref()
+                .unwrap_or(book.get_unchecked(&projectile.ability));
             let ap_bonus = super::combat_core::get_attack_power_bonus(caster_auras);
             let sp_bonus = super::combat_core::get_spell_power_bonus(caster_auras);
             let crit_bonus = super::combat_core::get_crit_chance_bonus(caster_auras);
@@ -215,7 +224,7 @@ pub fn process_projectile_hits(
 
             // Roll crit at impact time using caster's live crit_chance + dynamic aura bonus
             let is_crit = super::combat_core::roll_crit(
-                caster_combatant.crit_chance + crit_bonus,
+                caster_combatant.crit_chance + crit_bonus + def.crit_chance,
                 &mut game_rng,
             );
             if is_crit {
@@ -250,6 +259,7 @@ pub fn process_projectile_hits(
                 ability_healing,
                 is_crit,
                 book.clone(),
+                projectile.next_cast.clone(),
             ));
         }
     }
@@ -267,9 +277,13 @@ pub fn process_projectile_hits(
         _ability_healing,
         is_crit,
         book,
+        spent,
     ) in hits_to_process
     {
-        let def = book.get_unchecked(&ability);
+        let changed = spent
+            .as_ref()
+            .map(|m| super::next_cast::changed(book.get_unchecked(&ability), m));
+        let def = changed.as_ref().unwrap_or(book.get_unchecked(&ability));
         let text_position = target_pos + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
         let _ability_range = caster_pos.distance(target_pos);
         // Damage as a fraction of the victim's max health, for the shared
@@ -289,8 +303,9 @@ pub fn process_projectile_hits(
                 is_killing_blow,
                 is_first_death,
                 target_max_health,
+                leech_heals,
             ) = {
-                let Ok((_, mut target, mut target_auras)) = combatants.get_mut(target_entity)
+                let Ok((_, _, mut target, mut target_auras)) = combatants.get_mut(target_entity)
                 else {
                     commands.entity(projectile_entity).despawn();
                     continue;
@@ -326,6 +341,20 @@ pub fn process_projectile_hits(
                 if is_first_death {
                     target.is_dead = true;
                 }
+                // What this hit's leeches owe (Death Coil's own, a Vampiric
+                // Embrace on the target), read while its auras are to hand.
+                let own = def
+                    .applies_aura
+                    .as_ref()
+                    .and_then(|a| a.leech.as_ref())
+                    .map(|l| (l, def.name.as_str()));
+                let leech_heals = leech::owed(
+                    caster_entity,
+                    own,
+                    target_auras.as_deref(),
+                    def.spell_school,
+                    actual_damage,
+                );
                 (
                     actual_damage,
                     absorbed,
@@ -333,6 +362,7 @@ pub fn process_projectile_hits(
                     is_killing_blow,
                     is_first_death,
                     target.max_health,
+                    leech_heals,
                 )
             }; // target borrow dropped here
                // Cosmetic: how hard the hit was, for the shared impact below.
@@ -340,39 +370,57 @@ pub fn process_projectile_hits(
 
             // Update caster damage dealt (include absorbed damage - caster dealt it)
             {
-                let Ok((_, mut caster, caster_auras)) = combatants.get_mut(caster_entity) else {
+                let Ok((_, _, mut caster, caster_auras)) = combatants.get_mut(caster_entity)
+                else {
                     commands.entity(projectile_entity).despawn();
                     continue;
                 };
                 caster.damage_dealt += actual_damage + absorbed;
 
-                // Death Coil lifesteal: the Warlock gains health equal to the
-                // damage actually dealt (health removed; absorbed damage isn't
-                // "caused"). Capped at the caster's missing health.
-                if ability == AbilityType::DeathCoil && actual_damage > 0.0 {
-                    // Healing reduction and arena dampening cut lifesteal like
-                    // any other healing.
-                    let effective = apply_healing(
+                // Leech to the caster (Death Coil: the damage that reached
+                // health, every point of it): through `apply_healing`, so
+                // healing reduction and arena dampening cut it like any heal.
+                for heal in leech_heals
+                    .iter()
+                    .filter(|h| h.to == LeechRecipient::Caster)
+                {
+                    let effective = leech::land(
                         &mut commands,
+                        &mut combat_log,
+                        &dampening,
+                        &caster_id,
+                        heal,
                         caster_entity,
                         &mut caster,
                         caster_auras.as_deref(),
-                        &dampening,
-                        actual_damage,
+                        &caster_id,
                     );
                     caster.healing_done += effective;
-                    if effective > 0.0 {
-                        combat_log.log_healing(
-                            caster_id.clone(),
-                            caster_id.clone(),
-                            def.name.to_string(),
-                            effective,
-                            false,
-                            format!("{}'s Death Coil heals for {:.0}", caster_id, effective),
-                        );
-                    }
                 }
+                talent_procs::push_for(
+                    &mut commands,
+                    &caster.talent_procs,
+                    ProcEvent::new(caster_entity, TalentTrigger::SpellHit)
+                        .ability(ability)
+                        .crit(is_crit)
+                        .amount(actual_damage)
+                        .other(target_entity),
+                );
+
             } // caster borrow dropped here
+
+            // Leech to the caster's party (Vampiric Embrace), each teammate
+            // through `apply_healing`.
+            land_party_leech(
+                &mut commands,
+                &mut combat_log,
+                &dampening,
+                &mut combatants,
+                &pet_query,
+                caster_entity,
+                &caster_id,
+                &leech_heals,
+            );
 
             // Spawn yellow floating combat text for ability damage
             // Get deterministic offset based on pattern state
@@ -531,5 +579,54 @@ pub fn process_projectile_hits(
 
         // Despawn the projectile
         commands.entity(projectile_entity).despawn();
+    }
+}
+
+/// Land every party leech heal in `heals` (a caster's own went to it at the
+/// hit) on each living non-pet teammate of `caster`, crediting the caster's
+/// `healing_done`. A no-op when none of `heals` goes to a party.
+#[allow(clippy::too_many_arguments)]
+fn land_party_leech(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    dampening: &ArenaDampening,
+    combatants: &mut Query<(Entity, &Transform, &mut Combatant, Option<&mut ActiveAuras>)>,
+    pet_query: &Query<&Pet>,
+    caster: Entity,
+    caster_id: &crate::combat::log::CombatantId,
+    heals: &[leech::LeechHeal],
+) {
+    if !heals.iter().any(|h| h.to == LeechRecipient::CasterParty) {
+        return;
+    }
+    let Ok((_, _, caster_combatant, _)) = combatants.get(caster) else {
+        return;
+    };
+    let team = caster_combatant.team;
+    let members: Vec<(Entity, u8, bool, bool)> = combatants
+        .iter()
+        .map(|(e, _, c, _)| (e, c.team, pet_query.get(e).is_ok(), c.is_alive()))
+        .collect();
+    let owed = leech::OwedLeech {
+        caster,
+        caster_team: team,
+        caster_id: caster_id.clone(),
+        heals: heals
+            .iter()
+            .filter(|h| h.to == LeechRecipient::CasterParty)
+            .cloned()
+            .collect(),
+    };
+    let credited = leech::land_owed(commands, combat_log, dampening, &owed, &members, |e, land| {
+        match combatants.get_mut(e) {
+            Ok((_, _, mut ally, ally_auras)) => {
+                let id = combat_log_id_for(&ally, pet_query.get(e).ok());
+                land(&mut ally, ally_auras.as_deref(), &id)
+            }
+            Err(_) => 0.0,
+        }
+    });
+    if let Ok((_, _, mut caster_combatant, _)) = combatants.get_mut(caster) {
+        caster_combatant.healing_done += credited;
     }
 }

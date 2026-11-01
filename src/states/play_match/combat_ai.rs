@@ -859,7 +859,10 @@ pub fn dispatch_class_decision(
     } = acc;
     // The unit decides from its OWN book. Cloned (a shared handle) so the
     // configs it reads stay borrowable while the unit itself is mutated.
-    let book = combatant.book().clone();
+    // A live next-cast modifier (Shadow Trance, Divine Favor) changes the
+    // configs of what it covers in the book the unit decides from; without
+    // one this is its own book (`next_cast::effective_book`).
+    let book = super::next_cast::effective_book(combatant.book(), auras);
     let abilities = &book;
     match combatant.class {
         match_config::CharacterClass::Mage => {
@@ -1565,7 +1568,10 @@ pub fn decide_abilities(
         .map(|(e, _, _, _, _, _)| e)
         .collect();
 
-    for (entity, mut combatant, transform, auras, _, _) in combatants.iter_mut() {
+    // What each unit's turn uses is taken right after the turn; anything left
+    // from another system's choices (a pet, an interrupt) is not a turn's.
+    decision_trace.casts.clear();
+    for (entity, mut combatant, transform, mut auras, _, _) in combatants.iter_mut() {
         // Flush pending same-frame CCs into the per-frame snapshot BEFORE any checks
         // or decisions for this combatant, so that stuns/roots landed earlier this frame
         // are visible to this combatant's incapacitation check and its CombatContext.
@@ -1731,6 +1737,22 @@ pub fn decide_abilities(
             &ctx,
             posture_movement.get_mut(entity).ok(),
         );
+        // The talent effects of the turn: a next-cast modifier it spent, an
+        // `AbilityUsed` proc. Nothing for a turn that used nothing.
+        let used = decision_trace.take_casts_of(entity);
+        if !used.is_empty() {
+            let primed = auras
+                .as_deref()
+                .is_some_and(super::next_cast::any_live);
+            super::talent_procs::after_turn(
+                &mut commands,
+                &mut combat_log,
+                entity,
+                &mut combatant,
+                if primed { auras.as_deref_mut() } else { None },
+                &used,
+            );
+        }
         if acted {
             continue;
         }
@@ -1762,6 +1784,7 @@ pub fn decide_abilities(
         let ability_name = ability_def.name.clone();
         let ability_spell_school = ability_def.spell_school;
         let mut actual_damage = 0.0;
+        let mut landed = false;
 
         // Apply Divine Shield outgoing damage penalty (50%) if attacker has DamageImmunity
         let ds_penalty = if let Some(attacker_auras) = snapshot.active_auras.get(&attacker_entity) {
@@ -1914,12 +1937,43 @@ pub fn decide_abilities(
                         death_message,
                     );
                 }
+
+                // A crit landing on the target is its `CritTaken`.
+                if is_crit {
+                    super::talent_procs::push_for(
+                        &mut commands,
+                        &target.talent_procs,
+                        super::talent_procs::ProcEvent::new(
+                            target_entity,
+                            super::talent_procs::TalentTrigger::CritTaken,
+                        )
+                        .crit(true)
+                        .amount(actual_damage)
+                        .other(attacker_entity),
+                    );
+                }
+                landed = true;
             }
         }
 
         // Update attacker's damage dealt
         if let Ok((_, mut attacker, _, _, _, _)) = combatants.get_mut(attacker_entity) {
             attacker.damage_dealt += actual_damage;
+            // The strike's `SpellHit` for its attacker.
+            if landed {
+                super::talent_procs::push_for(
+                    &mut commands,
+                    &attacker.talent_procs,
+                    super::talent_procs::ProcEvent::new(
+                        attacker_entity,
+                        super::talent_procs::TalentTrigger::SpellHit,
+                    )
+                    .ability(ability)
+                    .crit(is_crit)
+                    .amount(actual_damage)
+                    .other(target_entity),
+                );
+            }
         }
     }
 
