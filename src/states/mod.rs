@@ -576,6 +576,17 @@ impl Plugin for StatesPlugin {
                 .before(play_match::consume_cast_ending_signals)
                 .run_if(in_combat_scene),
         )
+        // Weapon poison landings: every poison application seen off the
+        // victim's `ActiveAuras`, once per sim tick after its last phase.
+        // Gated on the sim RUNNING, not just the scene: a decided match stops
+        // ticking auras down, and a duration that stops falling must never
+        // read as a refresh.
+        .add_systems(
+            FixedUpdate,
+            play_match::detect_poison_landings
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(combat_sim_runs),
+        )
         // Casting orb (gathering-orb cast animation): spawn/animate/motes/
         // cleanup — separate group to avoid tuple size limits. `.chain()`
         // enforces spawn->update->motes->cleanup ordering within the
@@ -883,11 +894,15 @@ impl Plugin for StatesPlugin {
                 // billboard contract as the bespoke bolt bursts above.
                 play_match::spawn_school_impacts,
                 play_match::animate_school_impacts,
+                // The weapon poison cloud: emits, follows and retires before
+                // its particles age, and turns them after.
+                play_match::update_poison_clouds,
                 // Every client-emitter particle (missile and landing) ages
                 // here, after both have emitted and before either is turned.
                 play_match::animate_client_particles,
                 play_match::billboard_school_impacts,
                 play_match::billboard_hunter_shots,
+                play_match::billboard_poison_clouds,
             )
                 .chain()
                 .after(CombatSystemPhase::CombatResolution)

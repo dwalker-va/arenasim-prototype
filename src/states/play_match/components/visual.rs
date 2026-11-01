@@ -1464,7 +1464,8 @@ pub enum AuraApplyOwner {
     /// chill (`slow_ring.rs`). The bind ring and scuff draw the STATE while the
     /// victim moves; the apply moment is the hit a slow rides on (the bolt or
     /// arrow impact, the swing into Frost Armor, the Frost Trap zone's decal),
-    /// plus Crippling Poison's proc flash, which has no hit of its own. A band
+    /// plus Crippling Poison's landing, which has no hit of its own and plays
+    /// the weapon poison cloud (`poison_landing.rs`). A band
     /// here would double every one of those impacts.
     SlowRing,
     /// A named aura whose LANDING has its own one-shot: Rejuvenation's ribbon
@@ -3062,9 +3063,31 @@ pub struct SlowTrailEmitter {
     /// Seconds since the last bind ring. Keeps counting while the unit stands
     /// still, so the first step after a stop pulses at once.
     pub since_pulse: f32,
-    /// Whether a Crippling Poison slow was on the unit last frame — the edge
-    /// its proc flash fires on.
-    pub crippled: bool,
+}
+
+// ============================================================================
+// Weapon poison landing (`rendering/effects/poison_landing.rs`)
+// ============================================================================
+
+/// One victim's weapon-poison landing: `poison_impact_chest.m2` (kit 3031) on
+/// its chest, the cloud every Rogue poison lands with.
+///
+/// A rig entity of its own, never a component on the victim, and AT MOST ONE
+/// PER VICTIM: a new application RESTARTS this rig's timeline (`age` back to
+/// zero) instead of spawning a second, so the particles already alive finish
+/// their lives and the cloud never thickens. Its particles are its children and
+/// ride the victim's chest. Graphical-only: spawned by
+/// `detect_poison_landings`, never read by the sim.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct PoisonCloud {
+    /// The bearer. The cloud TRACKS it.
+    pub victim: Entity,
+    /// Seconds since the latest application: the emitters' shared timeline.
+    pub age: f32,
+    /// Fractional particles owed, per emitter.
+    pub carry: [f32; 3],
+    /// Particles emitted over the rig's whole life — the jitter seed.
+    pub emitted: u32,
 }
 
 /// One pulse of the bind ring: a flat annulus at the victim's feet that grows
