@@ -566,6 +566,14 @@ fn draw_frame(
             egui::FontId::proportional(hud::text::CAPTION),
             dimmed(hud::FRAME_DETAIL),
         );
+        // What the header reads, for a script: the frame names its spec.
+        ui_driver::note_into(
+            painter.ctx(),
+            format_args!(
+                "frame-spec {:?}: {} {}",
+                frame.class, spec.label, spec.short
+            ),
+        );
     }
     // Call reticle at the header's trailing edge; the STEALTH tag steps aside
     // for it, since a stealthed combatant is still callable. A DEAD frame never

@@ -955,6 +955,10 @@ struct StatLine<'a> {
     value: &'a dyn Fn(f32) -> String,
     /// A part of it as the hover explains it.
     amount: &'a dyn Fn(f32) -> String,
+    /// What the total buys, appended to the hover: armor's physical
+    /// reduction, a resistance's damage reduction. Read off the TALENTED
+    /// total, the one the spawn fights with.
+    mitigation: Option<&'a dyn Fn(f32) -> String>,
 }
 
 impl StatLine<'_> {
@@ -967,28 +971,57 @@ impl StatLine<'_> {
             return;
         }
         let from_talents = total - geared;
-        bonus_row(
-            ui,
-            self.key,
-            &(self.value)(total),
-            self.gear + from_talents,
-            || {
-                let mut explain = format!(
-                    "{} base + {} from equipment",
-                    (self.amount)(self.base),
-                    (self.amount)(self.gear)
-                );
-                if from_talents != 0.0 {
-                    explain.push_str(&format!(" + {} from talents", (self.amount)(from_talents)));
-                }
-                explain
-            },
-        );
+        let explain = || {
+            let mut explain = format!(
+                "{} base + {} from equipment",
+                (self.amount)(self.base),
+                (self.amount)(self.gear)
+            );
+            if from_talents != 0.0 {
+                explain.push_str(&format!(" + {} from talents", (self.amount)(from_talents)));
+            }
+            if let Some(mitigation) = self.mitigation {
+                explain.push_str(&format!(" ({})", mitigation(total)));
+            }
+            explain
+        };
+        let value = (self.value)(total);
+        bonus_row(ui, self.key, &value, self.gear + from_talents, explain);
+        // The row and its hover, for a script: the hover is built only when
+        // the driver formats the note (`Lazy`), so an unarmed frame pays
+        // nothing for it.
         ui_driver::note(
             ui,
-            format_args!("stat {}={}", self.key, (self.value)(total)),
+            format_args!("stat {}={value} hover={}", self.key, Lazy(&explain)),
         );
     }
+}
+
+/// Formats as what its closure returns, calling it only when formatted.
+struct Lazy<'a>(&'a dyn Fn() -> String);
+
+impl std::fmt::Display for Lazy<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&(self.0)())
+    }
+}
+
+/// What `armor` buys: "12.3% physical reduction", the share of physical
+/// damage it removes (`armor / (armor + 5500)`).
+fn armor_reduction(armor: f32) -> String {
+    format!(
+        "{:.1}% physical reduction",
+        armor / (armor + 5500.0) * 100.0
+    )
+}
+
+/// What a `resistance` buys: "5.0% damage reduction", the share of its
+/// school's damage it removes (`value / (value * 5/3 + 300)`).
+fn resistance_reduction(value: f32) -> String {
+    format!(
+        "{:.1}% damage reduction",
+        value / (value * 5.0 / 3.0 + 300.0) * 100.0
+    )
 }
 
 /// A stat total with the build's percentage of it applied, as the spawn
@@ -1208,6 +1241,7 @@ fn render_stats_panel(
                                 gear: equip.crit_chance,
                                 value: &pct,
                                 amount: &pct,
+                                mitigation: None,
                             },
                             StatLine {
                                 key: "Mana Regen",
@@ -1216,6 +1250,7 @@ fn render_stats_panel(
                                 gear: equip.mana_regen,
                                 value: &|v| format!("+{v:.1} MP5"),
                                 amount: &one,
+                                mitigation: None,
                             },
                             StatLine {
                                 key: "Move Speed",
@@ -1224,6 +1259,7 @@ fn render_stats_panel(
                                 gear: equip.move_speed,
                                 value: &|v| format!("{v:.1}/s"),
                                 amount: &one,
+                                mitigation: None,
                             },
                             StatLine {
                                 key: "Armor",
@@ -1232,6 +1268,7 @@ fn render_stats_panel(
                                 gear: equip.armor,
                                 value: &whole,
                                 amount: &whole,
+                                mitigation: Some(&armor_reduction),
                             },
                         ];
                         for (i, line) in lines.iter().enumerate() {
@@ -1288,6 +1325,7 @@ fn render_stats_panel(
                                 gear,
                                 value: &whole,
                                 amount: &whole,
+                                mitigation: Some(&resistance_reduction),
                             }
                             .draw(ui, talents);
                         }

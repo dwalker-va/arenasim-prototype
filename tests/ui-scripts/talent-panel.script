@@ -12,7 +12,9 @@
 #   6. right-click a node -> the encyclopedia, on that talent's page;
 #   7. Esc -> back on View Combatant, the build still spent;
 #   8. Esc -> Configure Match, whose slot row reads the spec;
-#   9. Reset clears the build, and the slot reads its class again.
+#   9. Reset clears the build, and the slot reads its class again;
+#  10. one point back, a match started: the Warlock's team frame names the
+#      spec (awaited on the frame's own note, not a frame count).
 #
 # Every wait is the driver's own (hover settles on egui's tooltip gate, a
 # click on the click): there is no frame count here.
@@ -78,4 +80,18 @@ assert-enabled talents:reset false
 key Escape
 assert-state ConfigureMatch
 assert-note slot:t1s0 subtitle=Shadow magic and curses
+
+# A talented match: the Warlock's team frame reads the spec its build names.
+click slot:t1s0
+assert-state ViewCombatant
+click talent:DemonicEmbrace
+assert-note talents:t1s0 points=1 spec=Demonology Warlock 1
+key Escape
+assert-state ConfigureMatch
+click slot:t2s0
+click class:Warrior
+assert-enabled configure:start true
+click configure:start
+assert-state PlayMatch
+await-note 30 frame-spec Warlock: Demonology Warlock 1
 dump

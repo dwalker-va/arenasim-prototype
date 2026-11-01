@@ -1080,7 +1080,8 @@ const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
         "src/states/play_match/rendering/effects/speech_bubbles.rs",
         2,
     ),
-    ("src/states/play_match/rendering/team_frames.rs", 2),
+    // The two aura-icon notes, and the spec a frame's header reads.
+    ("src/states/play_match/rendering/team_frames.rs", 3),
     // The four pre-match choices share one tile row (one `strategic:` mark per
     // spelling, one tooltip note, and a `choice:` mark for an option that is
     // not an ability), and the restore button registers through the kit's

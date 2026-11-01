@@ -397,6 +397,60 @@ fn every_pre_match_choice_is_on_screen_at_the_default_window_size() {
     }
 }
 
+/// The mitigation rows say what their total buys: the Armor hover gives its
+/// physical reduction (`armor / (armor + 5500)`), and a resistance's hover
+/// its damage reduction (`value / (value * 5/3 + 300)`), both read off the
+/// row's own total.
+#[test]
+fn mitigation_rows_say_what_their_total_buys() {
+    use arenasim::states::play_match::equipment::{ItemId, ItemSlot};
+
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+    let class_icons = ClassIcons::default();
+    let mut config = MatchConfig::default();
+    config.team1[0] = Some(CharacterClass::Warlock);
+    config.team1_equipment[0].insert(ItemSlot::Neck, ItemId::AmuletOfShadowWard);
+    let sheet = Sheet::open(
+        CharacterClass::Warlock,
+        config,
+        ViewCombatantData {
+            abilities: &abilities,
+            items: &items,
+            default_loadouts: &defaults,
+            class_icons: &class_icons,
+            ability_icons: None,
+            item_icons: None,
+            pet_icons: None,
+            talents: TalentDefinitions::shipped(),
+        },
+    );
+    let row = |key: &str| -> (f32, String) {
+        let prefix = format!("stat {key}=");
+        let note = sheet
+            .last
+            .notes
+            .iter()
+            .find_map(|n| n.strip_prefix(prefix.as_str()))
+            .unwrap_or_else(|| panic!("no {key} row: {:?}", sheet.last.notes));
+        let (value, hover) = note.split_once(" hover=").expect("a hover");
+        (value.parse().expect("a number"), hover.to_string())
+    };
+
+    let (armor, hover) = row("Armor");
+    assert!(armor > 0.0, "the Warlock's kit carries armor");
+    let want = format!(
+        "({:.1}% physical reduction)",
+        armor / (armor + 5500.0) * 100.0
+    );
+    assert!(hover.ends_with(&want), "{hover:?} should end {want:?}");
+
+    let (shadow, hover) = row("Shadow Resist");
+    assert_eq!(shadow, 20.0, "the amulet's 20 shadow resistance");
+    assert!(hover.ends_with("(6.0% damage reduction)"), "{hover:?}");
+}
+
 /// The sheet spends THIS combatant's build: a class with trees draws its
 /// talent panel over the slot's build, which the stats read back (Demonic
 /// Embrace 2/2 is +6% health); a class without trees draws no panel.
