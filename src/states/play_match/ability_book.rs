@@ -50,14 +50,16 @@ impl std::fmt::Debug for AbilityBook {
 }
 
 impl AbilityBook {
-    /// The book of a combatant of `class`: the class's own abilities
-    /// ([`AbilityDefinitions::own_abilities_for_class`]), pet abilities
-    /// excluded — a pet's abilities are in the pet's book.
+    /// The book of an untalented combatant of `class`: the class's base
+    /// abilities ([`AbilityDefinitions::base_abilities_for_class`]) — pet
+    /// abilities excluded, a pet's abilities are in the pet's book, and talent
+    /// abilities excluded, which only a build's `Grant` adds
+    /// (`talents::TalentDefinitions::resolve`).
     pub fn for_class(defs: &AbilityDefinitions, class: CharacterClass) -> Self {
         Self::from_entries(
             BookOwner::Class(class),
             defs,
-            defs.own_abilities_for_class(class),
+            defs.base_abilities_for_class(class),
         )
     }
 
@@ -95,6 +97,18 @@ impl AbilityBook {
     /// takes. Nothing edits a book during a match.
     pub fn granting(mut self, defs: &AbilityDefinitions, ability: AbilityType) -> Self {
         Arc::make_mut(&mut self.entries).insert(ability, defs.get_unchecked(&ability).clone());
+        self
+    }
+
+    /// This book with `edit` applied to its config for `ability`: a talent's
+    /// `Patch`, made while a build is resolved, before the book's combatant
+    /// enters the world. Panics when the book has no such ability.
+    pub fn patching(mut self, ability: AbilityType, edit: impl FnOnce(&mut AbilityConfig)) -> Self {
+        let owner = self.owner;
+        let config = Arc::make_mut(&mut self.entries)
+            .get_mut(&ability)
+            .unwrap_or_else(|| panic!("{ability:?} is not in the ability book of {owner:?}"));
+        edit(config);
         self
     }
 
@@ -173,7 +187,7 @@ mod tests {
         let defs = AbilityDefinitions::default();
         for class in CharacterClass::all() {
             let book = AbilityBook::for_class(&defs, *class);
-            let own = defs.own_abilities_for_class(*class);
+            let own = defs.base_abilities_for_class(*class);
             assert_eq!(
                 book.iter().map(|(a, _)| *a).collect::<Vec<_>>(),
                 own,
@@ -202,8 +216,10 @@ mod tests {
         }
     }
 
-    /// Every ability in the table is in exactly one book: its class's, or its
-    /// pet's. Nothing is unreachable, and nothing is held twice.
+    /// Every ability in the table is in exactly one base book — its class's,
+    /// or its pet's — except a talent ability, which is in none: only the
+    /// talent that grants it adds it (`talents.rs` holds each to exactly one
+    /// granting talent). Nothing is unreachable, and nothing is held twice.
     #[test]
     fn every_ability_is_in_exactly_one_book() {
         let defs = AbilityDefinitions::default();
@@ -226,7 +242,12 @@ mod tests {
                 .filter(|b| b.contains(ability))
                 .map(|b| b.owner())
                 .collect();
-            assert_eq!(holders.len(), 1, "{ability:?} is in {holders:?}");
+            let expected = if defs.get_unchecked(ability).talent {
+                0
+            } else {
+                1
+            };
+            assert_eq!(holders.len(), expected, "{ability:?} is in {holders:?}");
         }
     }
 

@@ -316,6 +316,10 @@ pub enum EventKind {
     /// A melee attack was dodged or parried (`combat_core::avoidance`). The
     /// `actor` is the attacker, the `target` the defender.
     MeleeAvoided,
+    /// The match's header: the first line of a trace whose match has a talent
+    /// build, carrying every slot's build. No actor. A match with no talents
+    /// writes none, so its trace is the trace it always was.
+    MatchHeader,
 }
 
 /// Payload varies by `kind`. Flattened into the parent event JSON object.
@@ -466,6 +470,13 @@ pub enum EventPayload {
     MeleeAvoided {
         attack: String,
         avoided: crate::states::play_match::combat_core::Avoidance,
+    },
+    /// The `match_header` line: each team's builds, one per slot, each a
+    /// talent-to-rank map (`{}` for a slot with none). Disambiguated by its
+    /// REQUIRED `team1_builds` / `team2_builds`, which no other variant has.
+    Header {
+        team1_builds: Vec<crate::states::play_match::talents::Build>,
+        team2_builds: Vec<crate::states::play_match::talents::Build>,
     },
 }
 

@@ -492,7 +492,7 @@ fn right_column(ui: &mut egui::Ui, data: &EncyclopediaData) {
                                     .icon(ListIcon {
                                         texture: None,
                                         edge: color::LINE,
-                                        tier: None,
+                                        tier: Some(ItemTier::StartingKit),
                                     })
                                     .wrap(),
                             );
@@ -503,7 +503,7 @@ fn right_column(ui: &mut egui::Ui, data: &EncyclopediaData) {
                                     .icon(ListIcon {
                                         texture: None,
                                         edge: color::LINE,
-                                        tier: None,
+                                        tier: Some(ItemTier::StartingKit),
                                     })
                                     .selected(true)
                                     .wrap(),
@@ -514,7 +514,7 @@ fn right_column(ui: &mut egui::Ui, data: &EncyclopediaData) {
                                     .icon(ListIcon {
                                         texture: None,
                                         edge: color::LINE,
-                                        tier: None,
+                                        tier: Some(ItemTier::StartingKit),
                                     })
                                     .wrap(),
                             );

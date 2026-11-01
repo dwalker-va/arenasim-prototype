@@ -69,6 +69,13 @@
 //! it, and neither does a focused
 //! ally who has dropped below [`DRUID_URGENT_HP`].
 //!
+//! **Late in the match the heals give way to damage.** From the Attrition
+//! onset the focus heals (5-6) skip an ally at full health
+//! ([`attrition_overheal`]); once dampening is full no heal is cast at all,
+//! and the Druid does not leave Travel Form to cast one. And a Druid left in
+//! a DUEL — its team's last unit against one enemy — that cannot afford a
+//! Moonfire closes to melee and swings its staff ([`duel_melee`]).
+//!
 //! Movement is the shared caster-healer posture machine
 //! (`caster_healer_posture`) on the `druid:` block of `movement.ron`.
 #![allow(clippy::too_many_arguments)]
@@ -89,7 +96,7 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::movement_config::MovementConfig;
 
 use super::super::utils::log_ability_use;
-use crate::states::play_match::situation::{Role, TeamSituation};
+use crate::states::play_match::situation::{MatchPhase, Role, TeamSituation};
 
 use super::cast_guard::{
     cast_gate, classify_pre_cast_failure, pre_cast_ok, unreached_reason, Cleared, PreCastOpts,
@@ -320,6 +327,59 @@ pub fn mana_reserve(max_mana: f32, situation: &TeamSituation) -> f32 {
 /// Whether the governor lets a proactive cast of `cost` through.
 fn governor_allows(combatant: &Combatant, cost: f32, situation: &TeamSituation) -> bool {
     combatant.current_mana - cost >= mana_reserve(combatant.max_mana, situation)
+}
+
+/// An ally at or above this HP fraction is at full health: in the Attrition
+/// phase its proactive heals are not cast ([`attrition_overheal`]).
+pub const DRUID_FULL_HP: f32 = 0.95;
+
+/// The Druid's heals: what full dampening empties ([`DruidTurn::cast`]).
+fn is_heal(ability: AbilityType) -> bool {
+    matches!(
+        ability,
+        AbilityType::Rejuvenation | AbilityType::Lifebloom | AbilityType::Swiftmend
+    )
+}
+
+/// Whether a PROACTIVE heal (the focus heals, steps 5-6) on an ally at
+/// `ally_health_pct` is overheal the match can no longer afford: in the
+/// Attrition phase, on an ally at [`DRUID_FULL_HP`] or above.
+///
+/// Before Attrition a heal kept rolling on a full-health focus is the pre-HoT
+/// the Druid is built on — it lands at full value when the damage does. From
+/// Attrition on, dampening has halved every heal and is taking the rest, and
+/// a global cooldown and the mana spent on an untouched ally are the ones a
+/// Moonfire needs to end the match.
+pub fn attrition_overheal(ally_health_pct: f32, situation: &TeamSituation) -> bool {
+    situation.phase == MatchPhase::Attrition && ally_health_pct >= DRUID_FULL_HP
+}
+
+/// How close a dueling Druid's pursuit closes when the duel-melee latch holds
+/// ([`duel_melee`]): inside `MELEE_RANGE`, at the melee classes' own
+/// preferred range.
+pub const DRUID_DUEL_MELEE_STOP: f32 = 2.0;
+
+/// Whether the Druid is in a DUEL: it is its team's last living unit and one
+/// enemy is left (pets on either side do not count).
+pub fn in_duel(ctx: &CombatContext) -> bool {
+    ctx.alive_allies().len() == 1 && ctx.alive_enemies().len() == 1
+}
+
+/// The duel-melee latch, pure so it can be tested on its own: a Druid in a
+/// duel ([`in_duel`]) that cannot afford a Moonfire closes to melee and
+/// swings its staff, the one damage it has that costs no mana. Two healers
+/// that cannot pay for their spells otherwise stand at spell range until the
+/// cap and draw. Released once mana is back to two Moonfires' worth, so the
+/// standoff does not strobe in and out as mana sawtooths across one cast
+/// (the Mage's out-of-mana wand latch is the same shape). Out of a duel it
+/// never holds: a Druid with a teammate to heal does not walk into melee.
+pub fn duel_melee(latched: bool, duel: bool, mana: f32, moonfire_cost: f32) -> bool {
+    let release = if latched {
+        2.0 * moonfire_cost
+    } else {
+        moonfire_cost
+    };
+    duel && mana < release
 }
 
 /// What the Druid does with Lifebloom on its focused ally this tick.
@@ -557,6 +617,12 @@ pub fn decide_druid_action(
     }) {
         combatant.druid_emergency_heal_spent = false;
     }
+    combatant.druid_duel_melee = duel_melee(
+        combatant.druid_duel_melee,
+        in_duel(ctx),
+        combatant.current_mana,
+        abilities.get_unchecked(&AbilityType::Moonfire).mana_cost,
+    );
 
     // Shifted: nothing is cast in Travel Form, so the only decision is
     // whether to leave it. Leaving is free and on no global cooldown, so it
@@ -572,6 +638,8 @@ pub fn decide_druid_action(
             .applies_aura
             .as_ref()
             .map_or(form.duration, |a| a.duration);
+        // Under full dampening there is no heal to leave the form for.
+        let heals_land = ctx.situation().dampening() < 1.0;
         let view = FormView {
             in_form_secs: form_duration - form.duration,
             rooted: auras.is_some_and(|a| {
@@ -591,10 +659,11 @@ pub fn decide_druid_action(
                 .visible_enemies_within(entity, my_pos, DRUID_EMERGENCY_LEAVE_YARDS)
                 .iter()
                 .any(|e| e.class.is_melee() || e.is_pet),
-            healing_needed: ctx.alive_allies().into_iter().any(|a| {
-                a.health_pct() < DRUID_TOP_UP_HP
-                    && my_pos.distance(a.position) <= movement.shared.heal_range
-            }),
+            healing_needed: heals_land
+                && ctx.alive_allies().into_iter().any(|a| {
+                    a.health_pct() < DRUID_TOP_UP_HP
+                        && my_pos.distance(a.position) <= movement.shared.heal_range
+                }),
             enemy_in_reach: !ctx
                 .visible_enemies_within(
                     entity,
@@ -613,15 +682,16 @@ pub fn decide_druid_action(
             ))
             .is_some(),
             dying: combatant.current_health < combatant.max_health * DRUID_EMERGENCY_HP,
-            emergency_heal_ready: emergency_heal_lands(
-                ctx,
-                abilities,
-                entity,
-                combatant,
-                my_pos,
-                auras,
-                movement.shared.heal_range,
-            ),
+            emergency_heal_ready: heals_land
+                && emergency_heal_lands(
+                    ctx,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    auras,
+                    movement.shared.heal_range,
+                ),
         };
         if gates_opened && should_leave_form(view) {
             commands.spawn(ShapeshiftPending {
@@ -838,7 +908,17 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         })
         .filter(|(a, _)| my_pos.distance(a.position) <= heal_range)
         .map(|(a, threat)| (a.entity, a.position, a.health_pct(), threat));
-        if let Some((ally, ally_pos, hp, threat)) = focus {
+        let overheal = focus.is_some_and(|(_, _, hp, _)| attrition_overheal(hp, ctx.situation()));
+        if overheal {
+            for heal in [AbilityType::Rejuvenation, AbilityType::Lifebloom] {
+                self.builder.reject(
+                    heal,
+                    RejectionReason::PreconditionUnmet {
+                        note: "attrition: no proactive heal on a focus at full health".to_string(),
+                    },
+                );
+            }
+        } else if let Some((ally, ally_pos, hp, threat)) = focus {
             let urgent = hp < DRUID_URGENT_HP;
 
             let rejuv_remaining = self
@@ -1716,6 +1796,17 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
         target: Entity,
         target_pos: Vec3,
     ) -> bool {
+        // Under full dampening a heal heals nothing — its bloom and its ticks
+        // included — so its mana and global cooldown go to damage instead.
+        if is_heal(ability) && self.ctx.situation().dampening() >= 1.0 {
+            self.builder.reject(
+                ability,
+                RejectionReason::PreconditionUnmet {
+                    note: "full dampening: a heal heals nothing".to_string(),
+                },
+            );
+            return false;
+        }
         let Some(cleared) = self.guard(combatant, ability, target, target_pos) else {
             return false;
         };
@@ -2075,6 +2166,34 @@ mod tests {
         assert!((halfway - 45.0).abs() < 1e-3, "{halfway}");
         assert_eq!(at(ATTRITION_ONSET_SECS), 0.0);
         assert_eq!(at(ATTRITION_ONSET_SECS * 2.0), 0.0);
+    }
+
+    #[test]
+    fn the_duel_melee_latch_engages_short_of_a_moonfire_and_releases_at_two() {
+        let cost = 25.0;
+        // Out of a duel it never holds, however short of mana.
+        assert!(!duel_melee(false, false, 0.0, cost));
+        assert!(!duel_melee(true, false, 0.0, cost));
+        // Engages only short of one Moonfire.
+        assert!(duel_melee(false, true, cost - 1.0, cost));
+        assert!(!duel_melee(false, true, cost, cost));
+        // Once latched, holds until two Moonfires' worth are back.
+        assert!(duel_melee(true, true, 2.0 * cost - 1.0, cost));
+        assert!(!duel_melee(true, true, 2.0 * cost, cost));
+    }
+
+    #[test]
+    fn attrition_overheal_is_a_full_health_ally_in_attrition() {
+        use crate::states::play_match::situation::TeamSituation;
+        let in_phase = |phase: MatchPhase| TeamSituation {
+            phase,
+            ..Default::default()
+        };
+        let attrition = in_phase(MatchPhase::Attrition);
+        assert!(attrition_overheal(1.0, &attrition));
+        assert!(attrition_overheal(DRUID_FULL_HP, &attrition));
+        assert!(!attrition_overheal(DRUID_FULL_HP - 0.01, &attrition));
+        assert!(!attrition_overheal(1.0, &in_phase(MatchPhase::Engaged)));
     }
 }
 

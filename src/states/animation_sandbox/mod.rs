@@ -334,8 +334,11 @@ fn spawn_staged_unit(
         PaladinAura::default(),
         &loadout,
         item_defs,
-        // The sandbox stages the shipped kit.
-        super::play_match::ability_config::AbilityDefinitions::shipped(),
+        // The sandbox stages the shipped, untalented kit.
+        &super::play_match::talents::ResolvedBuild::untalented(
+            super::play_match::ability_config::AbilityDefinitions::shipped(),
+            class,
+        ),
     );
     commands.entity(entity).insert((
         SandboxEntity,
