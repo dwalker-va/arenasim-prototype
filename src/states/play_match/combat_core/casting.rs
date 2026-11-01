@@ -12,9 +12,10 @@ use super::super::match_config;
 use super::super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
 use super::super::FCT_HEIGHT;
 use super::damage::{
-    apply_damage_with_absorb, get_divine_shield_damage_penalty, get_physical_damage_reduction,
-    roll_crit,
+    apply_damage_with_absorb, damage_dealt_multiplier, get_divine_shield_damage_penalty,
+    get_physical_damage_reduction, roll_crit, Hit, HitKind,
 };
+use super::follow_ups::DamageFollowUps;
 use super::healing::apply_healing;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use bevy::prelude::*;
@@ -377,6 +378,8 @@ pub fn process_casting(
     // roll needs the CASTER's combatant mutably, and this loop holds the
     // target's (which on a self-cast is the same entity).
     let mut cast_proc_events: Vec<(Entity, bool)> = Vec::new();
+    // What the frame's hits set off on other units, spawned once they land.
+    let mut follow_ups = DamageFollowUps::default();
 
     // Process completed casts
     for (
@@ -474,6 +477,14 @@ pub fn process_casting(
 
         // Check if this is self-targeting (e.g., priest healing themselves)
         let is_self_target = target_entity == caster_entity;
+
+        // The caster's damage-dealt increases, read before the target is
+        // borrowed (they are the same unit on a self-cast).
+        let dealt = combatants
+            .get(caster_entity)
+            .map_or(1.0, |(_, _, _, _, auras)| {
+                damage_dealt_multiplier(auras, def.spell_school)
+            });
 
         // Get target combatant
         let Ok((_, target_transform, mut target, _, mut target_auras)) =
@@ -578,12 +589,20 @@ pub fn process_casting(
             let damage = ability_damage;
 
             // Apply damage with absorb shield consideration
-            let (actual_damage, absorbed) = apply_damage_with_absorb(
+            let hit = Hit::new(
                 damage,
-                &mut target,
-                target_auras.as_deref_mut(),
                 def.spell_school,
                 &def.name,
+                Some(caster_entity),
+                None,
+                target_entity,
+            )
+            .with_dealt(dealt);
+            let (actual_damage, absorbed) = apply_damage_with_absorb(
+                hit,
+                &mut target,
+                target_auras.as_deref_mut(),
+                &mut follow_ups,
                 &mut combat_log,
             );
 
@@ -981,6 +1000,8 @@ pub fn process_casting(
         }
     }
 
+    follow_ups.spawn(&mut commands);
+
     // Proc trinkets, SpellCast / Heal. A heal fires BOTH: `Heal` is a strict
     // subset of `SpellCast`, so a trinket keyed to either one sees it, and a
     // wearer of both gets one roll from each. Guarded on emptiness before
@@ -1345,6 +1366,8 @@ pub fn process_channeling(
         }
     }
 
+    // What the frame's ticks set off on other units, spawned once they land.
+    let mut follow_ups = DamageFollowUps::default();
     // Apply damage to targets and update caster stats
     for (
         caster_entity,
@@ -1358,17 +1381,34 @@ pub fn process_channeling(
         caster_book,
     ) in damage_to_apply
     {
+        // The channeler's damage-dealt increases, read before the target is
+        // borrowed.
+        let dealt = combatants
+            .get(caster_entity)
+            .map_or(1.0, |(_, _, _, _, auras)| {
+                damage_dealt_multiplier(auras, spell_school)
+            });
         // Apply damage to target
         if let Ok((_, target_transform, mut target, _, mut target_auras)) =
             combatants.get_mut(target_entity)
         {
             if target.is_alive() {
-                let (actual_damage, absorbed) = apply_damage_with_absorb(
+                let channel_name = &caster_book.get_unchecked(&channel_ability).name;
+                let hit = Hit::new(
                     damage,
+                    spell_school,
+                    channel_name,
+                    Some(caster_entity),
+                    None,
+                    target_entity,
+                )
+                .with_dealt(dealt)
+                .of_kind(HitKind::Periodic);
+                let (actual_damage, absorbed) = apply_damage_with_absorb(
+                    hit,
                     &mut target,
                     target_auras.as_deref_mut(),
-                    spell_school,
-                    &caster_book.get_unchecked(&channel_ability).name,
+                    &mut follow_ups,
                     &mut combat_log,
                 );
 
@@ -1441,6 +1481,8 @@ pub fn process_channeling(
             caster.damage_dealt += damage;
         }
     }
+
+    follow_ups.spawn(&mut commands);
 
     // Apply healing to casters and spawn healing FCT
     for (caster_entity, healing) in caster_healing_updates {

@@ -1010,6 +1010,7 @@ fn try_power_word_shield(
             tick_interval: 0.0,
             time_until_next_tick: 0.0,
             caster: Some(entity),
+            damage_mods: Default::default(),
             ability_name: "Weakened Soul".to_string(),
             fear_direction: (0.0, 0.0),
             fear_direction_timer: 0.0,

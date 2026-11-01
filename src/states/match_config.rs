@@ -10,7 +10,9 @@ use crate::states::play_match::equipment::{ItemSlot, Loadout};
 use crate::states::play_match::talents::Build;
 
 /// Rogue stealth opener choice
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
 pub enum RogueOpener {
     /// High damage opener from stealth
     Ambush,
@@ -22,6 +24,12 @@ pub enum RogueOpener {
 }
 
 impl RogueOpener {
+    /// Every option, in display order.
+    pub const ALL: [RogueOpener; 2] = [
+        RogueOpener::Ambush,
+        RogueOpener::CheapShot,
+    ];
+
     /// Get the display name
     pub fn name(&self) -> &'static str {
         match self {
@@ -55,7 +63,9 @@ impl RogueOpener {
 /// baseline, not talents. Each is an ability in `abilities.ron` holding its
 /// aura and its per-hit `application_chance`, rolled once per LANDED weapon
 /// hit (not normalized for weapon speed).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
 pub enum RoguePoison {
     /// Crippling Poison — auto-attacks have a chance to apply a strong (70%)
     /// movement slow to the target. The default poison.
@@ -117,7 +127,9 @@ impl RoguePoison {
 }
 
 /// Warlock curse preference for a specific enemy target
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
 pub enum WarlockCurse {
     /// Curse of Agony - DoT: 84 Shadow damage over 24 seconds
     #[default]
@@ -129,6 +141,13 @@ pub enum WarlockCurse {
 }
 
 impl WarlockCurse {
+    /// Every option, in display order.
+    pub const ALL: [WarlockCurse; 3] = [
+        WarlockCurse::Agony,
+        WarlockCurse::Weakness,
+        WarlockCurse::Tongues,
+    ];
+
     /// Get a short description for UI display
     pub fn description(&self) -> &'static str {
         match self {
@@ -150,7 +169,9 @@ impl WarlockCurse {
 }
 
 /// Hunter pet type choice
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
 pub enum HunterPetType {
     /// Spider — Offensive CC: Web (ranged root)
     #[default]
@@ -162,6 +183,13 @@ pub enum HunterPetType {
 }
 
 impl HunterPetType {
+    /// Every option, in display order.
+    pub const ALL: [HunterPetType; 3] = [
+        HunterPetType::Spider,
+        HunterPetType::Boar,
+        HunterPetType::Bird,
+    ];
+
     /// Get the display name
     pub fn name(&self) -> &'static str {
         match self {
@@ -182,7 +210,9 @@ impl HunterPetType {
 }
 
 /// Warrior shout choice — which shout to maintain
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
 pub enum WarriorShout {
     /// Battle Shout — increases attack power of nearby allies
     #[default]
@@ -194,6 +224,13 @@ pub enum WarriorShout {
 }
 
 impl WarriorShout {
+    /// Every option, in display order.
+    pub const ALL: [WarriorShout; 3] = [
+        WarriorShout::BattleShout,
+        WarriorShout::DemoralizingShout,
+        WarriorShout::CommandingShout,
+    ];
+
     /// Get the display name
     pub fn name(&self) -> &'static str {
         match self {
@@ -224,7 +261,9 @@ impl WarriorShout {
 }
 
 /// Mage armor choice — which armor to self-cast
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
 pub enum MageArmor {
     /// Frost Armor — slows melee attackers who strike you
     #[default]
@@ -236,6 +275,13 @@ pub enum MageArmor {
 }
 
 impl MageArmor {
+    /// Every option, in display order.
+    pub const ALL: [MageArmor; 3] = [
+        MageArmor::FrostArmor,
+        MageArmor::MageArmor,
+        MageArmor::MoltenArmor,
+    ];
+
     /// Get the display name
     pub fn name(&self) -> &'static str {
         match self {
@@ -266,7 +312,9 @@ impl MageArmor {
 }
 
 /// Paladin aura choice — which aura to apply
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
 pub enum PaladinAura {
     /// Devotion Aura — reduces damage taken by nearby allies
     #[default]
@@ -278,6 +326,13 @@ pub enum PaladinAura {
 }
 
 impl PaladinAura {
+    /// Every option, in display order.
+    pub const ALL: [PaladinAura; 3] = [
+        PaladinAura::DevotionAura,
+        PaladinAura::ShadowResistanceAura,
+        PaladinAura::ConcentrationAura,
+    ];
+
     /// Get the display name
     pub fn name(&self) -> &'static str {
         match self {
@@ -641,6 +696,12 @@ pub struct MatchConfig {
     pub team1_rogue_poisons: Vec<RoguePoison>,
     /// Team 2's rogue weapon-poison preferences (one per slot, defaults to Crippling)
     pub team2_rogue_poisons: Vec<RoguePoison>,
+    /// Team 1's rogue off-hand poisons (one per slot): `Some` only when the
+    /// slot's build opens the second poison slot (Master Poisoner). `None`,
+    /// the default, coats both weapons with the main-hand poison.
+    pub team1_rogue_offhand_poisons: Vec<Option<RoguePoison>>,
+    /// Team 2's rogue off-hand poisons (one per slot).
+    pub team2_rogue_offhand_poisons: Vec<Option<RoguePoison>>,
     /// Team 1's warlock curse preferences: [warlock_slot][enemy_target_index] -> curse
     /// Outer vec indexed by team slot, inner vec indexed by enemy target slot
     pub team1_warlock_curse_prefs: Vec<Vec<WarlockCurse>>,
@@ -689,6 +750,8 @@ impl Default for MatchConfig {
             team2_rogue_openers: vec![RogueOpener::default()],
             team1_rogue_poisons: vec![RoguePoison::default()],
             team2_rogue_poisons: vec![RoguePoison::default()],
+            team1_rogue_offhand_poisons: vec![None],
+            team2_rogue_offhand_poisons: vec![None],
             // One vec per slot, inner vec has curse pref per enemy (defaults to Agony)
             team1_warlock_curse_prefs: vec![vec![WarlockCurse::default()]],
             team2_warlock_curse_prefs: vec![vec![WarlockCurse::default()]],
@@ -724,6 +787,7 @@ impl MatchConfig {
             .resize(size, RogueOpener::default());
         self.team1_rogue_poisons
             .resize(size, RoguePoison::default());
+        self.team1_rogue_offhand_poisons.resize(size, None);
         // Resize curse prefs: one inner vec per slot, each sized to enemy team
         let enemy_size = self.team2_size;
         self.team1_warlock_curse_prefs
@@ -755,6 +819,7 @@ impl MatchConfig {
             .resize(size, RogueOpener::default());
         self.team2_rogue_poisons
             .resize(size, RoguePoison::default());
+        self.team2_rogue_offhand_poisons.resize(size, None);
         // Resize curse prefs: one inner vec per slot, each sized to enemy team
         let enemy_size = self.team1_size;
         self.team2_warlock_curse_prefs

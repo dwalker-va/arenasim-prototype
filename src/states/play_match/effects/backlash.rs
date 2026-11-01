@@ -29,7 +29,7 @@ use bevy::prelude::*;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::abilities::SpellSchool;
-use crate::states::play_match::combat_core::apply_damage_with_absorb;
+use crate::states::play_match::combat_core::{apply_damage_with_absorb, DamageFollowUps, Hit};
 use crate::states::play_match::components::*;
 
 /// How long the dispeller is silenced. `process_dispels` stamps this onto every
@@ -98,6 +98,8 @@ pub fn process_backlash(
     // OWNER's class, so the log line must resolve its id pet-aware.
     pet_query: Query<&Pet>,
 ) {
+    // What the backlashes set off on other units, spawned once they land.
+    let mut follow_ups = DamageFollowUps::default();
     for (pending_entity, event) in pending.iter() {
         // Despawn the event regardless of outcome.
         commands.entity(pending_entity).despawn();
@@ -116,12 +118,20 @@ pub fn process_backlash(
 
         // ----- Step 1: Apply backlash damage -----
         let (actual_damage, absorbed, dispeller_id, still_alive, is_first_death) = {
-            let (actual_damage, absorbed) = apply_damage_with_absorb(
+            // A snapshotted backlash: no damage-dealt increase applies.
+            let hit = Hit::new(
                 event.damage,
-                &mut dispeller,
-                dispeller_auras.map(|a| a.into_inner()),
                 SpellSchool::Shadow,
                 "Unstable Affliction",
+                Some(event.caster),
+                None,
+                event.dispeller,
+            );
+            let (actual_damage, absorbed) = apply_damage_with_absorb(
+                hit,
+                &mut dispeller,
+                dispeller_auras.map(|a| a.into_inner()),
+                &mut follow_ups,
                 &mut combat_log,
             );
             // The backlash is a killing blow like any other: mark the death
@@ -209,6 +219,7 @@ pub fn process_backlash(
             aura: silence_aura,
         });
     }
+    follow_ups.spawn(&mut commands);
 }
 
 #[cfg(test)]

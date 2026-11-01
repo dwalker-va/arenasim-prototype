@@ -1739,6 +1739,10 @@ pub fn decide_abilities(
         stored.set_if_neq(situations);
     }
 
+    // What the frame's hits set off on other units (transfers, reflects,
+    // saves), spawned once they have all landed.
+    let mut follow_ups = super::combat_core::DamageFollowUps::default();
+
     // Process queued instant attacks (Ambush, Sinister Strike, Mortal Strike)
     for atk in acc.instant_attacks {
         let class_ai::QueuedInstantAttack {
@@ -1778,17 +1782,34 @@ pub fn decide_abilities(
         };
         let damage = (damage * ds_penalty).max(0.0);
 
+        // The attacker's damage-dealt increases, from this frame's snapshot.
+        let dealt = super::combat_core::DealtMods::from_auras(
+            snapshot
+                .active_auras
+                .get(&attacker_entity)
+                .map_or(&[], Vec::as_slice),
+        )
+        .multiplier(ability_spell_school);
         if let Ok((_, mut target, target_transform, mut target_auras, _, _)) =
             combatants.get_mut(target_entity)
         {
             if target.is_alive() {
                 // Apply damage with absorb shield consideration
-                let (dmg, absorbed) = super::combat_core::apply_damage_with_absorb(
+                let hit = super::combat_core::Hit::new(
                     damage,
-                    &mut target,
-                    target_auras.as_deref_mut(),
                     ability_spell_school,
                     &ability_name,
+                    Some(attacker_entity),
+                    None,
+                    target_entity,
+                )
+                .with_dealt(dealt)
+                .melee_if(ability.is_melee_attack());
+                let (dmg, absorbed) = super::combat_core::apply_damage_with_absorb(
+                    hit,
+                    &mut target,
+                    target_auras.as_deref_mut(),
+                    &mut follow_ups,
                     &mut combat_log,
                 );
                 actual_damage = dmg;
@@ -1948,12 +1969,28 @@ pub fn decide_abilities(
         {
             if target.is_alive() {
                 // Apply damage with absorb shield consideration (Frost Nova is always Frost school)
-                let (dmg, absorbed) = super::combat_core::apply_damage_with_absorb(
+                let hit = super::combat_core::Hit::new(
                     damage,
-                    &mut target,
-                    target_auras.as_deref_mut(),
                     super::abilities::SpellSchool::Frost,
                     "Frost Nova",
+                    Some(caster_entity),
+                    None,
+                    target_entity,
+                )
+                .with_dealt(
+                    super::combat_core::DealtMods::from_auras(
+                        snapshot
+                            .active_auras
+                            .get(&caster_entity)
+                            .map_or(&[], Vec::as_slice),
+                    )
+                    .multiplier(super::abilities::SpellSchool::Frost),
+                );
+                let (dmg, absorbed) = super::combat_core::apply_damage_with_absorb(
+                    hit,
+                    &mut target,
+                    target_auras.as_deref_mut(),
+                    &mut follow_ups,
                     &mut combat_log,
                 );
                 actual_damage = dmg;
@@ -2061,6 +2098,7 @@ pub fn decide_abilities(
             caster.damage_dealt += actual_damage;
         }
     }
+    follow_ups.spawn(&mut commands);
 }
 /// Kick, Pummel and Wind Shear: each living interrupter decides whom to
 /// interrupt ([`class_ai::interrupts::interrupt_turn`] — range, then sight)

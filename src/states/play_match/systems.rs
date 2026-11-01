@@ -78,6 +78,7 @@ pub use super::totems::totem_pulse_system;
 
 // === Phase 3: Combat Resolution ===
 pub use super::combat_core::combat_auto_attack;
+pub use super::combat_core::process_damage_follow_ups;
 pub use super::combat_core::resolve_melee_avoidances;
 
 // === Decision Trace ===
@@ -310,6 +311,11 @@ pub fn add_core_combat_systems<M, N>(
             // events go out on the frame they happened.
             ApplyDeferred,
             resolve_melee_avoidances,
+            // What the frame's hits set off on other units — transfers,
+            // reflects, saves (`combat_core::follow_ups`) — landed after every
+            // hit of the frame, through the same damage funnel. Inert unless a
+            // modifier aura or a talent queued one.
+            process_damage_follow_ups,
             flush_decision_trace_system.run_if(decide),
         )
             .chain()

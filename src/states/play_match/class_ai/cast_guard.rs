@@ -45,6 +45,10 @@ pub struct PreCastOpts {
     pub bypass_silence: bool,
 }
 
+/// The note a cast the slot's per-match choices lock is rejected with
+/// (`talent_choices::ChoiceRule`).
+pub const CHOICE_LOCKED_NOTE: &str = "locked by a per-match choice";
+
 /// The rejection note for a cast refused because the caster is in Travel Form.
 pub const SHAPESHIFTED_NOTE: &str = "shapeshifted: nothing is cast in Travel Form";
 
@@ -259,8 +263,11 @@ pub fn own_state_ok(
     auras: Option<&ActiveAuras>,
     opts: PreCastOpts,
 ) -> bool {
-    // Nothing is cast in Travel Form: the Druid shifts back first.
-    !auras.is_some_and(ActiveAuras::is_shapeshifted)
+    // A per-match choice locks it (`talent_choices`): nothing that slot
+    // chose lets it be cast this match.
+    !caster.book().is_locked(ability)
+        // Nothing is cast in Travel Form: the Druid shifts back first.
+        && !auras.is_some_and(ActiveAuras::is_shapeshifted)
         && !is_spell_school_locked(def.spell_school, auras)
         && (opts.bypass_silence || !def.silence_stops() || !is_silenced(caster, auras))
         && !caster.ability_cooldowns.contains_key(&ability)
@@ -413,6 +420,11 @@ pub fn classify_pre_cast_failure(
         if opts.check_target_immune && ctx.entity_is_immune(target_entity) {
             return RejectionReason::TargetImmune;
         }
+    }
+    if caster.book().is_locked(ability) {
+        return RejectionReason::PreconditionUnmet {
+            note: CHOICE_LOCKED_NOTE.to_string(),
+        };
     }
     if auras.is_some_and(ActiveAuras::is_shapeshifted) {
         return RejectionReason::PreconditionUnmet {

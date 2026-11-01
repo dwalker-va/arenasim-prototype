@@ -254,6 +254,9 @@ pub fn process_projectile_hits(
         }
     }
 
+    // What the frame's hits set off on other units, spawned once they land.
+    let mut follow_ups = super::combat_core::DamageFollowUps::default();
+
     // Process all queued hits
     for (
         projectile_entity,
@@ -280,6 +283,13 @@ pub fn process_projectile_hits(
         if def.is_damage() {
             // Use pre-calculated damage (already includes stat scaling)
             let damage = ability_damage;
+            // The caster's damage-dealt increases, read before the target is
+            // borrowed.
+            let dealt = combatants
+                .get(caster_entity)
+                .map_or(1.0, |(_, _, auras)| {
+                    super::combat_core::damage_dealt_multiplier(auras, def.spell_school)
+                });
 
             // Get target info and apply damage
             let (
@@ -301,12 +311,20 @@ pub fn process_projectile_hits(
                 let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
 
                 // Apply damage with absorb shield consideration
-                let (actual_damage, absorbed) = super::combat_core::apply_damage_with_absorb(
+                let hit = super::combat_core::Hit::new(
                     damage,
-                    &mut target,
-                    target_auras.as_deref_mut(),
                     def.spell_school,
                     &def.name,
+                    Some(caster_entity),
+                    None,
+                    target_entity,
+                )
+                .with_dealt(dealt);
+                let (actual_damage, absorbed) = super::combat_core::apply_damage_with_absorb(
+                    hit,
+                    &mut target,
+                    target_auras.as_deref_mut(),
+                    &mut follow_ups,
                     &mut combat_log,
                 );
 
@@ -532,4 +550,5 @@ pub fn process_projectile_hits(
         // Despawn the projectile
         commands.entity(projectile_entity).despawn();
     }
+    follow_ups.spawn(&mut commands);
 }
