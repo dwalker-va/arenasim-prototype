@@ -449,6 +449,65 @@ fn mitigation_rows_say_what_their_total_buys() {
     let (shadow, hover) = row("Shadow Resist");
     assert_eq!(shadow, 20.0, "the amulet's 20 shadow resistance");
     assert!(hover.ends_with("(6.0% damage reduction)"), "{hover:?}");
+
+    // A build that raises armor: the reduction is the TALENTED total's. A
+    // fixture makes Demonic Embrace +50% armor a rank (no shipped talent
+    // touches armor yet).
+    let text = std::fs::read_to_string(arenasim::paths::asset_path("config/talents.ron"))
+        .expect("talents.ron reads");
+    let health = "per_rank: [StatPercent(MaxHealth, 0.03)],";
+    assert!(text.contains(health));
+    let fixture = TalentDefinitions::from_ron(
+        &text.replacen(
+            health,
+            "budget: Some(11.0), per_rank: [StatPercent(Armor, 0.5)],",
+            1,
+        ),
+        &abilities,
+    )
+    .expect("the fixture validates");
+    let mut config = MatchConfig::default();
+    config.team1[0] = Some(CharacterClass::Warlock);
+    config.team1_builds[0] = Build::of(&[(TalentId::DemonicEmbrace, 1)]);
+    let talented = Sheet::open(
+        CharacterClass::Warlock,
+        config,
+        ViewCombatantData {
+            abilities: &abilities,
+            items: &items,
+            default_loadouts: &defaults,
+            class_icons: &class_icons,
+            ability_icons: None,
+            item_icons: None,
+            pet_icons: None,
+            talents: &fixture,
+        },
+    );
+    let note = talented
+        .last
+        .notes
+        .iter()
+        .find_map(|n| n.strip_prefix("stat Armor="))
+        .expect("an Armor row");
+    let (value, hover) = note.split_once(" hover=").expect("a hover");
+    // Both totals are printed whole, so compare within a point of rounding.
+    let boosted: f32 = value.parse().expect("a number");
+    assert!(
+        (boosted - armor * 1.5).abs() <= 1.0,
+        "+50% of {armor} is not {boosted}"
+    );
+    let reduction: f32 = hover
+        .rsplit_once('(')
+        .and_then(|(_, tail)| tail.strip_suffix("% physical reduction)"))
+        .expect("a physical reduction suffix")
+        .parse()
+        .expect("a percentage");
+    let talented = boosted / (boosted + 5500.0) * 100.0;
+    let geared = armor / (armor + 5500.0) * 100.0;
+    assert!(
+        (reduction - talented).abs() <= 0.1 && (reduction - geared).abs() > 0.1,
+        "{hover:?}: the talented total buys {talented:.1}%, the gear alone {geared:.1}%"
+    );
 }
 
 /// The sheet spends THIS combatant's build: a class with trees draws its
