@@ -304,6 +304,57 @@ fn the_wait_ends_when_its_grace_runs_out() {
 }
 
 #[test]
+fn a_wait_remembers_when_it_began() {
+    // The first ask starts the wait now...
+    let view = held_beside_a_priest(AuraType::Polymorph, 8.0).decide_held(WEARER);
+    assert_eq!(view.on_use_after[0].waiting, Some((NOW, NOW)), "{view:?}");
+    // ...a later ask of the same hold keeps its start...
+    let mut scene = held_beside_a_priest(AuraType::Polymorph, 8.0);
+    scene.combatant_mut(WEARER).on_use_items[0].waiting = Some((NOW - 1.0, NOW - 1.0 / 60.0));
+    let view = scene.decide_held(WEARER);
+    assert_eq!(view.on_use_after[0].waiting, Some((NOW - 1.0, NOW)), "{view:?}");
+    // ...and a break spends the Medallion.
+    let view = held(AuraType::Stun, 4.0).decide_held(WEARER);
+    assert!(view.on_use_after[0].spent, "{view:?}");
+}
+
+#[test]
+fn only_the_long_holds_must_be_dispellable() {
+    // A 1s stun under an 8s polymorph: the stun runs out on its own, so the
+    // polymorph is the one long hold, and the Priest will dispel it.
+    let view = held_beside_a_priest(AuraType::Polymorph, 8.0)
+        .aura(WEARER, AuraType::Stun, 1.0)
+        .decide_held(WEARER);
+    assert!(waits(&view), "{view:?}");
+    // A root holds nothing, so a long root beside it changes nothing.
+    let view = held_beside_a_priest(AuraType::Polymorph, 8.0)
+        .aura(WEARER, AuraType::Root, 6.0)
+        .decide_held(WEARER);
+    assert!(waits(&view), "{view:?}");
+}
+
+#[test]
+fn a_cycloned_paladin_uses_nothing() {
+    // Divine Shield's teammate trigger holds (a Priest at 30%, a long hold),
+    // but nothing is used from inside a Cyclone.
+    let scene = |hold| {
+        Scene::new()
+            .unit(WEARER, 1, Paladin)
+            .aura(WEARER, hold, 4.0)
+            .unit(PRIEST, 1, Priest)
+            .at(0.0, 10.0)
+            .health(0.3)
+            .unit(ROGUE, 2, Rogue)
+            .at(2.0, 0.0)
+    };
+    assert_eq!(scene(AuraType::Cyclone).decide_held(WEARER).chose(), None);
+    assert_eq!(
+        scene(AuraType::Stun).decide_held(WEARER).chose().map(|c| c.0),
+        Some(AbilityType::DivineShield)
+    );
+}
+
+#[test]
 fn a_wait_does_not_outlast_the_floor() {
     // An expected dispel, but the polymorph is nearly over: nothing to break.
     let view = held_beside_a_priest(AuraType::Polymorph, 1.5).decide_held(WEARER);

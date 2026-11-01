@@ -194,7 +194,6 @@ pub fn try_cc_break_while_held(
             .map(|(since, _)| since);
         match cc_break_turn(hold_remaining, dispeller, waiting_since, now) {
             BreakTurn::ShortHold { hold_remaining } => {
-                slot.waiting = None;
                 decision_trace.record_item_decision(
                     actor.clone(),
                     ctx.situation(),
@@ -227,7 +226,6 @@ pub fn try_cc_break_while_held(
                 );
             }
             BreakTurn::Break => {
-                slot.waiting = None;
                 decision_trace.record_item_decision(actor, ctx.situation(), slot.item, Ok(()));
                 slot.start_cooldown();
                 commands.spawn(OnUsePending {

@@ -932,6 +932,7 @@ impl Scene {
             used.iter(&exec_world)
                 .map(|p| (self.who(p.wearer.index()), p.item)),
         );
+        view.on_use_after = combatant.on_use_items.clone();
         view
     }
 
@@ -1176,6 +1177,9 @@ pub struct DecisionView {
     /// Every on-use the decision fired ([`OnUsePending`]), its wearer named
     /// ([`Scene::decide_held`] only).
     pub items_used: Vec<(Who, ItemId)>,
+    /// The deciding unit's on-use items as the decision left them — their
+    /// cooldowns and a wait's state ([`Scene::decide_held`] only).
+    pub on_use_after: Vec<OnUseSlot>,
 }
 
 /// An instant attack a scene decision queued, its target named.
@@ -1221,6 +1225,7 @@ impl DecisionView {
             avoided: Vec::new(),
             item_decisions: Vec::new(),
             items_used: Vec::new(),
+            on_use_after: Vec::new(),
         };
         let mine = trace.pending_events.iter().filter(|e| {
             e.actor
