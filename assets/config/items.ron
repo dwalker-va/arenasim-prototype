@@ -3300,5 +3300,199 @@
             max_mana: 10.0,
             max_health: 8.0,
         ),
+
+        // ====================================================================
+        // CHAMPION TIER (2): NECKLACES, CLOAKS AND RINGS (all classes)
+        // Named for Classic's Naxxramas accessories (ilvl 83-92; Mark of
+        // C'Thun is Ahn'Qiraj's). One set per role: a neck, a cloak and two
+        // distinct rings, so a Champion loadout fills both ring sockets.
+        // Budget at ilvl 92: 38.81 (92 x 0.75 x 0.5625).
+        // ====================================================================
+
+        // --- PHYSICAL: attack power and crit (Warrior, Rogue, Hunter) ---
+
+        StormragesTalismanOfSeething: (
+            name: "Stormrage's Talisman of Seething",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_necklace_28naxxramas.jpg",
+            slot: Neck,
+            max_health: 11.0,
+            attack_power: 12.0,
+            crit_chance: 0.03,
+        ),
+
+        ShroudOfDominion: (
+            name: "Shroud of Dominion",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_misc_cape_naxxramas_03.jpg",
+            slot: Back,
+            max_health: 8.0,
+            attack_power: 16.0,
+            crit_chance: 0.02,
+        ),
+
+        BandOfUnnaturalForces: (
+            name: "Band of Unnatural Forces",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_48naxxramas.jpg",
+            slot: Ring,
+            max_health: 4.0,
+            attack_power: 15.0,
+            crit_chance: 0.04,
+        ),
+
+        BandOfReanimation: (
+            name: "Band of Reanimation",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_49naxxramas.jpg",
+            slot: Ring,
+            max_health: 2.0,
+            attack_power: 22.0,
+            crit_chance: 0.01,
+        ),
+
+        // --- CASTER: spell power and crit (Mage, Warlock, Elemental Shaman) ---
+
+        GemOfTrappedInnocents: (
+            name: "Gem of Trapped Innocents",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_necklace_29naxxramas.jpg",
+            slot: Neck,
+            max_health: 9.0,
+            max_mana: 7.0,
+            spell_power: 11.0,
+            crit_chance: 0.02,
+        ),
+
+        CloakOfTheNecropolis: (
+            name: "Cloak of the Necropolis",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_misc_cape_naxxramas_03.jpg",
+            slot: Back,
+            max_health: 8.0,
+            max_mana: 9.0,
+            spell_power: 12.0,
+            crit_chance: 0.01,
+        ),
+
+        SealOfTheDamned: (
+            name: "Seal of the Damned",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_48naxxramas.jpg",
+            slot: Ring,
+            max_health: 11.0,
+            spell_power: 12.0,
+            crit_chance: 0.03,
+        ),
+
+        BandOfTheInevitable: (
+            name: "Band of the Inevitable",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_53naxxramas.jpg",
+            slot: Ring,
+            max_health: 1.0,
+            spell_power: 21.0,
+            crit_chance: 0.02,
+        ),
+
+        // --- HEALER: spell power, mana and regeneration (Priest, Paladin, Druid, Restoration Shaman) ---
+
+        NecklaceOfNecropsy: (
+            name: "Necklace of Necropsy",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_necklace_30naxxramas.jpg",
+            slot: Neck,
+            max_health: 5.0,
+            max_mana: 10.0,
+            spell_power: 12.0,
+            mana_regen: 1.0,
+        ),
+
+        CloakOfSuturing: (
+            name: "Cloak of Suturing",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_misc_cape_naxxramas_02.jpg",
+            slot: Back,
+            max_mana: 12.0,
+            spell_power: 11.0,
+            mana_regen: 2.0,
+        ),
+
+        BandOfUnansweredPrayers: (
+            name: "Band of Unanswered Prayers",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_50naxxramas.jpg",
+            slot: Ring,
+            max_health: 7.0,
+            max_mana: 11.0,
+            spell_power: 13.0,
+            mana_regen: 0.2,
+        ),
+
+        RingOfSpiritualFervor: (
+            name: "Ring of Spiritual Fervor",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_52naxxramas.jpg",
+            slot: Ring,
+            max_health: 6.0,
+            max_mana: 14.0,
+            spell_power: 6.0,
+            mana_regen: 1.8,
+        ),
+
+        // --- DEFENDER: health, armor and resistance (any class) ---
+
+        MarkOfCThun: (
+            name: "Mark of C'Thun",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_necklace_ahnqiraj_04.jpg",
+            slot: Neck,
+            max_health: 32.0,
+            nature_resistance: 15.0,
+        ),
+
+        CryptfiendSilkCloak: (
+            name: "Cryptfiend Silk Cloak",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_misc_cape_naxxramas_02.jpg",
+            slot: Back,
+            armor: 203.0,
+            max_health: 32.0,
+            shadow_resistance: 15.0,
+        ),
+
+        SignetOfTheFallenDefender: (
+            name: "Signet of the Fallen Defender",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_50naxxramas.jpg",
+            slot: Ring,
+            armor: 140.0,
+            max_health: 38.0,
+        ),
+
+        HailstoneBand: (
+            name: "Hailstone Band",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_35.jpg",
+            slot: Ring,
+            max_health: 30.0,
+            frost_resistance: 20.0,
+        ),
     }
 )
