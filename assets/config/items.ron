@@ -955,8 +955,9 @@
         // a once-a-match break of every loss of control and movement
         // impairment. A Champion trinket's budget (92 x 0.75 x 0.70 = 48.3):
         // the break's declared price is 24, what it measured worth in health,
-        // and the rest is health. Played against the whole budget as health it
-        // measures level (docs/design/balance/2026-10-31-as305-medallion.md).
+        // and the rest is health. PROVISIONAL: measured before the dispel
+        // wait's arrival gate; re-checked at the milestone sweep
+        // (docs/design/balance/2026-10-31-as305-medallion.md).
         MedallionOfTheAlliance: (
             name: "Medallion of the Alliance",
             item_level: 92,

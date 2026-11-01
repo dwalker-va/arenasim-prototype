@@ -729,8 +729,10 @@ any ring fits either ring socket, and the same item may not occupy both
      left. A root or slow alone never asks it. It WAITS when a teammate is
      going to dispel every long hold (`class_ai::on_use::expected_dispeller`:
      an urgent dispel in scope, castable now, owed to the wearer by
-     `owed_dispel`), at most `DISPEL_WAIT_GRACE_SECS` (a GCD and half a
-     second), re-asked every tick. It breaks every stun, fear (horror
+     `owed_dispel` — and a teammate still walking there counts only if it
+     reaches range at its base speed within `wait_budget`: the grace left, or
+     the hold left above the floor), at most `DISPEL_WAIT_GRACE_SECS` (a GCD
+     and half a second), re-asked every tick. It breaks every stun, fear (horror
      included), polymorph, incapacitate, root and slow (`cc_break_breaks`),
      never a silence, and grants no immunity. Cyclone is the one line
      `CC_BREAK_TAKES_CYCLONE` (false, as in TBC: nothing is used from inside
