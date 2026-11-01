@@ -76,6 +76,9 @@ const BAND_TYPES: &[AuraType] = &[
     AuraType::TravelForm,
     // Haste, the Dragonspine Trophy's proc, until AS-433 draws it by name.
     AuraType::AttackSpeedIncrease,
+    // A primed next cast (the talents' Shadow Trance and the rest), until its
+    // tree cards draw each by name.
+    AuraType::NextCast,
 ];
 
 fn names(types: impl IntoIterator<Item = AuraType>) -> BTreeSet<String> {
@@ -230,6 +233,9 @@ fn aura(effect_type: AuraType, name: &str, school: Option<SpellSchool>) -> Aura 
         dispel_type: DispelType::Auto,
         compound: None,
         source_item: None,
+        source_talent: None,
+        next_cast: None,
+        leech: None,
         stacks: None,
         bloom: None,
     }

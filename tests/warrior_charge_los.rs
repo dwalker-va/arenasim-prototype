@@ -81,6 +81,9 @@ fn attack_power_aura() -> Aura {
         dispel_type: DispelType::Auto,
         compound: None,
         source_item: None,
+        source_talent: None,
+        next_cast: None,
+        leech: None,
         stacks: None,
         bloom: None,
     }

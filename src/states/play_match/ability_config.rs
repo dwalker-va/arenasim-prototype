@@ -119,6 +119,18 @@ pub struct AuraEffect {
     /// (a minor re-buff). `None`, the default, leaves the type's value.
     #[serde(default)]
     pub purge_priority: Option<i32>,
+    /// Makes the aura LEECH: a share of its ability's damage, or of its
+    /// caster's damage of one school to the bearer, heals the caster or the
+    /// caster's party (Death Coil, Siphon Life, Vampiric Embrace). See
+    /// [`Leech`](super::combat_core::leech::Leech).
+    #[serde(default)]
+    pub leech: Option<super::combat_core::leech::Leech>,
+    /// What a `NextCast` aura changes about its holder's next matching cast
+    /// (Divine Favor, Amplify Curse, Inner Focus). Required on a `NextCast`
+    /// aura and refused on any other. See
+    /// [`NextCastModifier`](super::next_cast::NextCastModifier).
+    #[serde(default)]
+    pub next_cast: Option<super::next_cast::NextCastModifier>,
 }
 
 /// A stacking aura's config: how many stacks it can hold.
@@ -237,6 +249,12 @@ pub struct AbilityConfig {
     /// Which stat this ability's damage scales with
     #[serde(default = "default_scaling_none")]
     pub damage_scales_with: ScalingStat,
+    /// The ability's own crit chance, added to its caster's for each crit roll
+    /// it makes. `0.0` on every shipped ability: a talent patches it
+    /// (`AbilityField::CritChance`), and a next-cast modifier raises it for
+    /// one cast.
+    #[serde(default)]
+    pub crit_chance: f32,
 
     // === Healing ===
     /// Base minimum healing (before stat scaling)
@@ -785,6 +803,37 @@ impl AbilityDefinitions {
             }
         }
 
+        // A next-cast modifier rides only on a NextCast aura, and every
+        // NextCast aura carries one; a leech's share is a share.
+        for (ability, def) in &self.definitions {
+            let Some(aura) = def.applies_aura.as_ref() else {
+                continue;
+            };
+            let is_next_cast = aura.aura_type == AuraType::NextCast;
+            match (&aura.next_cast, is_next_cast) {
+                (None, true) => panic!(
+                    "abilities.ron: {ability:?} applies a NextCast aura with no `next_cast` \
+                     modifier"
+                ),
+                (Some(_), false) => panic!(
+                    "abilities.ron: {ability:?} sets `next_cast` on a {:?} aura; it rides only \
+                     on a NextCast aura",
+                    aura.aura_type
+                ),
+                (Some(m), true) => {
+                    if let Err(e) = m.validate() {
+                        panic!("abilities.ron: {ability:?}: {e}");
+                    }
+                }
+                (None, false) => {}
+            }
+            if let Some(leech) = aura.leech {
+                if let Err(e) = leech.validate() {
+                    panic!("abilities.ron: {ability:?}: {e}");
+                }
+            }
+        }
+
         // A talent grants an ability to its CLASS's book; no talent reaches a
         // pet's.
         for (ability, def) in &self.definitions {
@@ -1013,6 +1062,7 @@ mod tests {
             damage_base_max: 0.0,
             damage_coefficient: 0.0,
             damage_scales_with: ScalingStat::SpellPower,
+            crit_chance: 0.0,
             healing_base_min: 0.0,
             healing_base_max: 0.0,
             healing_coefficient: 0.0,

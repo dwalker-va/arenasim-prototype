@@ -239,6 +239,9 @@ impl ProcConfig {
             dispel_type: DispelType::Physical,
             compound: None,
             source_item: Some(item),
+            source_talent: None,
+            next_cast: None,
+            leech: None,
             stacks: None,
             bloom: None,
         }
@@ -318,6 +321,9 @@ pub fn proc_effect_budget_weight(effect: AuraType) -> Option<f32> {
         | AuraType::WindfuryBuff
         | AuraType::SpellResistanceBuff
         | AuraType::LockoutDurationReduction => None,
+        // A next-cast modifier changes a cast, not a stat; a talent primes
+        // one, and its node declares its price.
+        AuraType::NextCast => None,
     }
 }
 

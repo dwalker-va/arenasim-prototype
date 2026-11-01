@@ -817,6 +817,7 @@ fn every_numeric_ability_field_is_decided() {
         channel_tick_interval: _,
         channel_healing_per_tick: _,
         mana_burn_amount: _,
+        crit_chance: _,
         // Not numbers, or not patchable yet (a tree card adds the field it needs):
         name: _,
         class: _,

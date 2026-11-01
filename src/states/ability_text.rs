@@ -272,6 +272,80 @@ fn stacks_sentence(aura: &AuraEffect) -> String {
     }
 }
 
+/// The sentence for a next-cast modifier that lasts `duration` seconds:
+/// "Within 10 sec, the next Shadow Bolt is instant." The one generator, for an
+/// ability's aura and a talent proc's alike.
+pub fn next_cast_sentence(
+    m: &crate::states::play_match::next_cast::NextCastModifier,
+    duration: f32,
+) -> String {
+    use crate::states::play_match::ability_config::AbilityDefinitions;
+    use crate::states::play_match::next_cast::NextCastScope;
+    let what = match &m.applies_to {
+        NextCastScope::Any => "ability".to_string(),
+        NextCastScope::Abilities(list) => {
+            let names: Vec<String> = list
+                .iter()
+                .map(|a| {
+                    AbilityDefinitions::shipped()
+                        .get(a)
+                        .map_or_else(|| format!("{a:?}"), |d| d.name.clone())
+                })
+                .collect();
+            join_or(&names)
+        }
+    };
+    let mut changes: Vec<String> = Vec::new();
+    if m.instant {
+        changes.push("is instant".to_string());
+    } else if m.cast_time_reduction > 0.0 {
+        changes.push(format!("casts {} sec faster", trim(m.cast_time_reduction)));
+    }
+    if m.free {
+        changes.push("costs nothing".to_string());
+    } else if m.cost_reduction > 0.0 {
+        changes.push(format!("costs {} less", trim(m.cost_reduction)));
+    }
+    if m.crit_chance >= 1.0 {
+        changes.push("is a sure critical strike".to_string());
+    } else if m.crit_chance > 0.0 {
+        changes.push(format!(
+            "has {:.0}% more chance to critically strike",
+            m.crit_chance * 100.0
+        ));
+    }
+    if m.power > 0.0 {
+        changes.push(format!("is {:.0}% stronger", m.power * 100.0));
+    }
+    format!(
+        "Within {:.0} sec, the next {} {}.",
+        duration,
+        what,
+        join_and(&changes)
+    )
+}
+
+fn trim(v: f32) -> String {
+    let s = format!("{v:.2}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn join_with(items: &[String], last: &str) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [init @ .., tail] => format!("{} {last} {tail}", init.join(", ")),
+    }
+}
+
+fn join_or(items: &[String]) -> String {
+    join_with(items, "or")
+}
+
+fn join_and(items: &[String]) -> String {
+    join_with(items, "and")
+}
+
 /// Build a description string for an aura effect
 pub fn build_aura_description(aura: &AuraEffect) -> String {
     match aura.aura_type {
@@ -458,6 +532,11 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
                 aura.duration
             )
         }
+        AuraType::NextCast => aura
+            .next_cast
+            .as_ref()
+            .map(|m| next_cast_sentence(m, aura.duration))
+            .unwrap_or_default(),
         AuraType::LockoutDurationReduction => {
             let reduction_pct = (aura.magnitude * 100.0) as i32;
             format!(

@@ -163,6 +163,7 @@ pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) 
         AuraType::Cyclone => "aura_stun".to_string(), // Reuse stun icon (real icon comes from the ability config)
         AuraType::TravelForm => "aura_max_health".to_string(), // Reuse buff icon (real icon comes from the ability config)
         AuraType::AttackSpeedIncrease => "aura_max_health".to_string(), // Haste buff, reuse buff icon (a proc wears its trinket's icon)
+        AuraType::NextCast => "aura_max_health".to_string(), // A primed next cast, reuse buff icon (a talent's wears its talent's icon)
     }
 }
 
@@ -199,6 +200,7 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         | AuraType::FearImmunity
         | AuraType::WindfuryBuff
         | AuraType::AttackSpeedIncrease
+        | AuraType::NextCast
         | AuraType::TravelForm => true,
 
         // Harmful: crowd control, damage over time and stat/casting debuffs.

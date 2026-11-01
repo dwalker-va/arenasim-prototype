@@ -547,6 +547,7 @@ pub fn apply_pending_auras(
                 | AuraType::SpellResistanceBuff
                 | AuraType::AttackSpeedSlow
                 | AuraType::AttackSpeedIncrease
+                | AuraType::NextCast
                 | AuraType::SpellPowerIncrease
                 | AuraType::HealingOverTime
                 | AuraType::WindfuryBuff
@@ -1573,6 +1574,9 @@ mod tests {
             dispel_type: DispelType::Auto,
             compound: None,
             source_item: None,
+            source_talent: None,
+            next_cast: None,
+            leech: None,
             stacks: None,
             bloom: None,
         }

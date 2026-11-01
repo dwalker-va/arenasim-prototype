@@ -292,6 +292,7 @@ fn aura_family(t: AuraType) -> AuraFamily {
         // No ability grants haste yet: the Dragonspine Trophy's proc does,
         // and its band cue draws it until AS-433 gives it its own one-shot.
         | AuraType::AttackSpeedIncrease
+        | AuraType::NextCast
         | AuraType::TravelForm => AuraFamily::Status,
     }
 }

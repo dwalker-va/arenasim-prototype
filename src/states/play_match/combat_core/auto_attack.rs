@@ -1289,6 +1289,9 @@ pub fn frost_armor_movement_slow_aura() -> Aura {
         dispel_type: DispelType::Auto,
         compound: Some(CompoundDebuff::FrostArmorChill),
         source_item: None,
+        source_talent: None,
+        next_cast: None,
+        leech: None,
         stacks: None,
         bloom: None,
     }
@@ -1317,6 +1320,9 @@ pub fn frost_armor_attack_speed_aura() -> Aura {
         dispel_type: DispelType::Auto,
         compound: Some(CompoundDebuff::FrostArmorChill),
         source_item: None,
+        source_talent: None,
+        next_cast: None,
+        leech: None,
         stacks: None,
         bloom: None,
     }

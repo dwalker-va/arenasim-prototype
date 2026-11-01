@@ -1436,6 +1436,8 @@ fn magnitude_row_for(mechanic: AuraType, m: f32) -> Option<(String, String)> {
         // Amount-taken fractions.
         AuraType::AttackSpeedSlow => row("Attack speed slowed by", pct(m)),
         AuraType::AttackSpeedIncrease => row("Attack speed", format!("+{}", pct(m))),
+        // What it changes is its `next_cast`, not a magnitude.
+        AuraType::NextCast => None,
         AuraType::DamageReduction => row("Physical damage reduced by", pct(m)),
         AuraType::CastTimeIncrease => row("Cast time increased by", pct(m)),
         AuraType::DamageTakenReduction => row("Damage taken reduced by", pct(m)),

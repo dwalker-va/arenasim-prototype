@@ -63,6 +63,9 @@ pub fn make_totem_aura(
         dispel_type: DispelType::Untyped,
         compound: None,
         source_item: None,
+        source_talent: None,
+        next_cast: None,
+        leech: None,
         stacks: None,
         bloom: None,
     }

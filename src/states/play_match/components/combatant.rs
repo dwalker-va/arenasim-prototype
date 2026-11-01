@@ -507,6 +507,18 @@ pub struct Combatant {
     /// proc trinket draws exactly the numbers it drew before proc trinkets
     /// existed, and is bit-identical.
     pub proc_trinkets: Vec<crate::states::play_match::proc_trinkets::ProcSlot>,
+    /// The procs its talent build gave it ([`ResolvedBuild::apply`]), with
+    /// their live internal cooldowns. EMPTY without a talent proc, and every
+    /// site that would push a proc event asks it first, so a match without
+    /// talents pushes, rolls and draws nothing (`talent_procs.rs`).
+    ///
+    /// [`ResolvedBuild::apply`]: crate::states::play_match::talents::ResolvedBuild::apply
+    pub talent_procs: crate::states::play_match::talent_procs::TalentProcs,
+    /// A next-cast modifier its last decision spent on a cast that resolves
+    /// later (a cast bar, a projectile): read and cleared by
+    /// `process_casting` when that cast completes (`next_cast.rs`). `None`
+    /// whenever no modifier was spent.
+    pub next_cast_spent: Option<crate::states::play_match::next_cast::SpentNextCast>,
 }
 
 /// How long the weapon-poison marker is stamped for. Longer than any match's
@@ -541,6 +553,9 @@ pub fn weapon_poison_marker_aura(poison: RoguePoison) -> super::Aura {
         dispel_type: super::DispelType::Auto,
         compound: None,
         source_item: None,
+        source_talent: None,
+        next_cast: None,
+        leech: None,
         stacks: None,
         bloom: None,
     }
@@ -701,6 +716,8 @@ impl Combatant {
             trap_retarget: None,
             druid_emergency_heal_spent: false,
             proc_trinkets: Vec::new(),
+            talent_procs: Default::default(),
+            next_cast_spent: None,
         }
     }
 
