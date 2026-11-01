@@ -76,6 +76,15 @@ const BAND_TYPES: &[AuraType] = &[
     AuraType::TravelForm,
     // Haste, the Dragonspine Trophy's proc, until AS-433 draws it by name.
     AuraType::AttackSpeedIncrease,
+    // The damage-pipeline modifiers (AS-408), until their users' visual
+    // cards give any of them a treatment of its own.
+    AuraType::DamageTakenIncrease,
+    AuraType::DamageDealtIncrease,
+    AuraType::ArmorPercentIncrease,
+    AuraType::ArmorPercentReduction,
+    AuraType::DamageTransfer,
+    AuraType::KillingBlowSave,
+    AuraType::DamageReflect,
 ];
 
 fn names(types: impl IntoIterator<Item = AuraType>) -> BTreeSet<String> {
@@ -232,6 +241,7 @@ fn aura(effect_type: AuraType, name: &str, school: Option<SpellSchool>) -> Aura 
         source_item: None,
         stacks: None,
         bloom: None,
+        damage_mods: Default::default(),
     }
 }
 

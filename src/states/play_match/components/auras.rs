@@ -140,6 +140,90 @@ pub enum AuraType {
     /// Dragonspine Trophy grants, speeds melee and ranged attacks alike.
     /// Used by the Dragonspine Trophy's proc.
     AttackSpeedIncrease,
+    /// The holder takes MORE damage: a fraction (magnitude = increase per
+    /// stack, e.g. 0.10 = 10% more), within the aura's [`DamageScope`]
+    /// (`Aura::damage_mods`; none = every school). May stack (`stacking`) and
+    /// may carry hit charges, spent by the direct hits it raises
+    /// (`AuraDamageMods::charges`). Only the strongest in scope applies (the
+    /// stacking simplification). Read in `apply_damage_with_absorb`. Users:
+    /// Shadow Vulnerability, Hemorrhage, the Improved Kidney Shot rider.
+    DamageTakenIncrease,
+    /// The holder DEALS more damage: a fraction (magnitude, e.g. 0.15 = 15%
+    /// more), within the aura's [`DamageScope`]. Only the strongest in scope
+    /// applies. Read in `apply_damage_with_absorb` from the attacker's auras
+    /// (`combat_core::damage_dealt_multiplier`). Users: Touch of Shadow,
+    /// Shadowform, Master of Subtlety, Vengeance.
+    DamageDealtIncrease,
+    /// Raises the holder's armor by a fraction of its total (magnitude, e.g.
+    /// 0.12 = 12% more armor). Read at the physical-mitigation step, never
+    /// written into the `armor` stat. Only the strongest applies. User:
+    /// Inspiration.
+    ArmorPercentIncrease,
+    /// Cuts the holder's armor by a fraction of its total (magnitude, e.g.
+    /// 0.5 = half its armor). Read at the physical-mitigation step, never
+    /// written into the `armor` stat. Only the strongest applies. User: Expose
+    /// Armor.
+    ArmorPercentReduction,
+    /// A share of the damage the holder takes (magnitude, e.g. 0.30) is dealt
+    /// to the aura's CASTER instead, while the caster lives. The share leaves
+    /// after the holder's mitigation and before its absorbs; it cannot be
+    /// prevented, and it never kills the receiver: a share the receiver could
+    /// not survive stays with the holder and ends the aura. User: Blessing of
+    /// Sacrifice.
+    DamageTransfer,
+    /// The first blow that would kill the holder while it lasts is prevented
+    /// (the holder's health is left where it stood), the aura is spent, and
+    /// the holder is healed for a fraction of its maximum health (magnitude,
+    /// e.g. 0.30) through `apply_healing`. User: Guardian Spirit.
+    KillingBlowSave,
+    /// Each melee hit the holder takes deals the aura's magnitude back to the
+    /// attacker, in the aura's school, credited to the aura's caster. The
+    /// returned damage is damage: it reveals a stealthed attacker, and it
+    /// never reflects again. Only the strongest applies. User: Retribution
+    /// Aura.
+    DamageReflect,
+}
+
+/// Which hits a damage modifier aura reaches: one school, or every school but
+/// Physical (TBC's "spell damage"). `None` on the aura means every hit.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum DamageScope {
+    /// Hits of exactly this school.
+    School(SpellSchool),
+    /// Every magic school: everything but Physical and the schoolless.
+    Spells,
+}
+
+impl DamageScope {
+    /// Whether a hit of `school` is in this scope.
+    pub fn covers(self, school: SpellSchool) -> bool {
+        match self {
+            DamageScope::School(s) => s == school,
+            DamageScope::Spells => !matches!(school, SpellSchool::Physical | SpellSchool::None),
+        }
+    }
+
+    /// Whether `scope` (an aura's, `None` meaning every hit) reaches `school`.
+    pub fn reaches(scope: Option<DamageScope>, school: SpellSchool) -> bool {
+        scope.is_none_or(|s| s.covers(school))
+    }
+}
+
+/// The damage-pipeline data an aura may carry beyond its magnitude. Inert by
+/// default: no scope (every hit), no charges, no reflect.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct AuraDamageMods {
+    /// The hits a `DamageTakenIncrease`, `DamageDealtIncrease` or
+    /// `DamageTakenReduction` reaches. `None`: every hit.
+    pub scope: Option<DamageScope>,
+    /// Hit charges left on a `DamageTakenIncrease`: each direct hit it raises
+    /// spends one, and the aura ends at zero. `None`: no charges (it lasts its
+    /// duration).
+    pub charges: Option<u8>,
+    /// On an `Absorb` shield: the share of the damage it absorbs that is dealt
+    /// back to the attacker, credited to the shield's caster (Reflective
+    /// Shield, set as the shield lands). `None`: no reflect.
+    pub reflect_absorbed: Option<f32>,
 }
 
 /// A debuff's REMOVAL CLASS — what kind of thing it is for the purpose of
@@ -303,7 +387,7 @@ impl AuraType {
     /// DOES cost is coverage: a guard that sweeps `ALL` quietly stops covering
     /// whatever `ALL` forgot, while still reading like a whole-enum sweep.
     /// `aura_type_tests::all_lists_every_aura_type` is what stops that.
-    pub const ALL: [AuraType; 36] = [
+    pub const ALL: [AuraType; 43] = [
         AuraType::MovementSpeedSlow,
         AuraType::Root,
         AuraType::Stun,
@@ -340,6 +424,13 @@ impl AuraType {
         AuraType::Cyclone,
         AuraType::TravelForm,
         AuraType::AttackSpeedIncrease,
+        AuraType::DamageTakenIncrease,
+        AuraType::DamageDealtIncrease,
+        AuraType::ArmorPercentIncrease,
+        AuraType::ArmorPercentReduction,
+        AuraType::DamageTransfer,
+        AuraType::KillingBlowSave,
+        AuraType::DamageReflect,
     ];
 
     /// Player-facing name of this MECHANIC, as the encyclopedia's mechanic
@@ -392,6 +483,13 @@ impl AuraType {
             AuraType::WeaponPoison => "Weapon Poison",
             AuraType::WeakenedSoul => "Weakened Soul",
             AuraType::ShadowSight => "Shadow Sight",
+            AuraType::DamageTakenIncrease => "Vulnerability",
+            AuraType::DamageDealtIncrease => "Damage Buff",
+            AuraType::ArmorPercentIncrease => "Armor Boost",
+            AuraType::ArmorPercentReduction => "Armor Reduction",
+            AuraType::DamageTransfer => "Damage Transfer",
+            AuraType::KillingBlowSave => "Death Prevention",
+            AuraType::DamageReflect => "Damage Reflection",
         }
     }
 
@@ -497,6 +595,29 @@ impl AuraType {
                 "Reveals stealthed enemies to the holder — and makes the holder visible to the \
                  enemy team in turn."
             }
+            AuraType::DamageTakenIncrease => {
+                "The holder takes more damage — from every school, or from one."
+            }
+            AuraType::DamageDealtIncrease => {
+                "The holder deals more damage — with every school, or with one."
+            }
+            AuraType::ArmorPercentIncrease => {
+                "Raises the holder's armor by a share of its total, reducing physical damage taken."
+            }
+            AuraType::ArmorPercentReduction => {
+                "Strips a share of the holder's armor, so physical attacks hit harder."
+            }
+            AuraType::DamageTransfer => {
+                "Part of the damage the holder takes is taken by another unit instead, for as \
+                 long as that unit can bear it."
+            }
+            AuraType::KillingBlowSave => {
+                "The first blow that would kill the holder is prevented, and the holder is healed \
+                 instead."
+            }
+            AuraType::DamageReflect => {
+                "Melee attackers who strike the holder take damage in return."
+            }
         }
     }
 
@@ -567,6 +688,11 @@ impl AuraType {
             | AuraType::AttackPowerReduction
             | AuraType::AttackSpeedSlow => false,
 
+            // Stat debuffs too, scoped out like the ones above: a magic
+            // vulnerability (Shadow Vulnerability) or armor cut is not crowd
+            // control, and "no" is the status quo answer for a stat debuff.
+            AuraType::DamageTakenIncrease | AuraType::ArmorPercentReduction => false,
+
             // Cyclone is magic crowd control that NO dispel takes (TBC). It is
             // the one CC here that is undispellable by rule rather than by
             // removal class: its school is Nature, so the class above says
@@ -611,6 +737,11 @@ impl AuraType {
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
             | AuraType::AttackSpeedIncrease
+            | AuraType::DamageDealtIncrease
+            | AuraType::ArmorPercentIncrease
+            | AuraType::DamageTransfer
+            | AuraType::KillingBlowSave
+            | AuraType::DamageReflect
             | AuraType::TravelForm => false,
         }
     }
@@ -659,7 +790,9 @@ impl AuraType {
             | AuraType::DamageReduction
             | AuraType::CastTimeIncrease
             | AuraType::AttackPowerReduction
-            | AuraType::AttackSpeedSlow => true,
+            | AuraType::AttackSpeedSlow
+            | AuraType::DamageTakenIncrease
+            | AuraType::ArmorPercentReduction => true,
 
             // Beneficial — never stripped from their holder.
             AuraType::Absorb
@@ -679,6 +812,11 @@ impl AuraType {
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
             | AuraType::AttackSpeedIncrease
+            | AuraType::DamageDealtIncrease
+            | AuraType::ArmorPercentIncrease
+            | AuraType::DamageTransfer
+            | AuraType::KillingBlowSave
+            | AuraType::DamageReflect
             | AuraType::TravelForm => false,
 
             // Mechanical markers, not effects: clearing these would grant a
@@ -802,6 +940,11 @@ pub struct Aura {
     pub time_until_next_tick: f32,
     /// For DoT effects: who applied this aura (for damage attribution)
     pub caster: Option<Entity>,
+    /// The damage-pipeline data the aura carries beyond its magnitude: a
+    /// modifier's school scope, a vulnerability's hit charges, a shield's
+    /// reflect share. [`AuraDamageMods::default`] (inert) for almost every
+    /// aura.
+    pub damage_mods: AuraDamageMods,
     /// Name of the ability that created this aura (for logging)
     pub ability_name: String,
     /// For Fear: current run direction (x, z normalized)
@@ -1270,7 +1413,12 @@ impl Aura {
             | AuraType::FrostArmorBuff
             | AuraType::SpellResistanceBuff
             | AuraType::ArmorIncrease
-            | AuraType::AttackSpeedIncrease => true,
+            | AuraType::AttackSpeedIncrease
+            | AuraType::DamageDealtIncrease
+            | AuraType::ArmorPercentIncrease
+            | AuraType::DamageTransfer
+            | AuraType::KillingBlowSave
+            | AuraType::DamageReflect => true,
 
             // Beneficial, but DELIBERATELY unpurgeable — see the doc above.
             // Travel Form joins them: a shapeshift is the Druid's own body,
@@ -1297,7 +1445,9 @@ impl Aura {
             | AuraType::DamageReduction
             | AuraType::CastTimeIncrease
             | AuraType::AttackPowerReduction
-            | AuraType::AttackSpeedSlow => false,
+            | AuraType::AttackSpeedSlow
+            | AuraType::DamageTakenIncrease
+            | AuraType::ArmorPercentReduction => false,
         }
     }
 }
@@ -1547,6 +1697,7 @@ impl AuraPending {
                 tick_interval: aura_effect.tick_interval,
                 time_until_next_tick: aura_effect.tick_interval,
                 caster: Some(caster),
+                damage_mods: aura_effect.damage_mods(),
                 ability_name: ability_def.name.clone(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
@@ -1606,6 +1757,7 @@ impl AuraPending {
                 tick_interval,
                 time_until_next_tick: tick_interval, // First tick after interval
                 caster: Some(caster),
+                damage_mods: aura_effect.damage_mods(),
                 ability_name: ability_def.name.clone(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
@@ -1663,6 +1815,7 @@ impl AuraPending {
                 tick_interval: aura_effect.tick_interval,
                 time_until_next_tick: aura_effect.tick_interval,
                 caster: Some(caster),
+                damage_mods: Default::default(),
                 ability_name,
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
@@ -1824,7 +1977,9 @@ impl DRCategory {
             AuraType::DamageOverTime
             | AuraType::HealingReduction
             | AuraType::DamageReduction
-            | AuraType::AttackPowerReduction => None,
+            | AuraType::AttackPowerReduction
+            | AuraType::DamageTakenIncrease
+            | AuraType::ArmorPercentReduction => None,
 
             // Beneficial. DR exists to cap how long one side can hold the other
             // still; nothing about a buff on its own holder is a chain to cap.
@@ -1845,6 +2000,11 @@ impl DRCategory {
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
             | AuraType::AttackSpeedIncrease
+            | AuraType::DamageDealtIncrease
+            | AuraType::ArmorPercentIncrease
+            | AuraType::DamageTransfer
+            | AuraType::KillingBlowSave
+            | AuraType::DamageReflect
             | AuraType::TravelForm => None,
 
             // Mechanical markers, not effects. They track state (a spent soul,

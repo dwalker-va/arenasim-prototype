@@ -264,6 +264,22 @@ pub fn apply_pending_auras(
     // when both teams apply pending auras simultaneously.
     let mut new_auras_map: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
 
+    // Reflective Shield's one site (`talent_mechanics`): the casters of this
+    // frame's shields that reflect a share of what they absorb, read before
+    // the targets are borrowed. Empty without the talent.
+    let reflecting_casters: BTreeMap<Entity, f32> = pending_auras
+        .iter()
+        .filter(|(_, p)| p.aura.effect_type == AuraType::Absorb)
+        .filter_map(|(_, p)| p.aura.caster)
+        .filter_map(|caster| {
+            combatants
+                .get(caster)
+                .ok()
+                .and_then(|(c, ..)| c.talent_mechanics.reflective_shield())
+                .map(|share| (caster, share))
+        })
+        .collect();
+
     for (pending_entity, pending) in pending_auras.iter() {
         // Invariant: aura duration should be positive
         debug_assert!(
@@ -855,6 +871,11 @@ pub fn apply_pending_auras(
         // size at application (PW:Shield, Ice Barrier)
         if aura_to_add.effect_type == AuraType::Absorb {
             aura_to_add.magnitude = dampening.apply(aura_to_add.magnitude);
+            // A shield from a caster with Reflective Shield returns its share
+            // of what it absorbs to the attacker.
+            if let Some(share) = aura_to_add.caster.and_then(|c| reflecting_casters.get(&c)) {
+                aura_to_add.damage_mods.reflect_absorbed = Some(*share);
+            }
         }
 
         // Log DR info for CC auras
@@ -1115,6 +1136,16 @@ pub fn process_dot_ticks(
         super::abilities::SpellSchool,
     )> = Vec::new();
 
+    // Every caster's damage-dealt increases, read before the auras are
+    // borrowed mutably below.
+    let dealt_mods: std::collections::HashMap<Entity, super::combat_core::DealtMods> =
+        combatants_with_auras
+            .iter()
+            .map(|(entity, _, _, auras)| (entity, super::combat_core::DealtMods::of(Some(auras))))
+            .filter(|(_, mods)| !mods.is_empty())
+            .collect();
+    let mut follow_ups = super::combat_core::DamageFollowUps::default();
+
     // First pass: tick down DoT timers and queue damage
     for (entity, combatant, _transform, mut active_auras) in combatants_with_auras.iter_mut() {
         if !combatant.is_alive() {
@@ -1204,12 +1235,25 @@ pub fn process_dot_ticks(
         let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
 
         // Apply damage with absorb shield consideration
-        let (actual_damage, absorbed) = super::combat_core::apply_damage_with_absorb(
+        let hit = super::combat_core::Hit::new(
             damage,
-            &mut target,
-            Some(&mut target_auras),
             spell_school,
             &ability_name,
+            Some(caster_entity),
+            None,
+            target_entity,
+        )
+        .with_dealt(
+            dealt_mods
+                .get(&caster_entity)
+                .map_or(1.0, |mods| mods.multiplier(spell_school)),
+        )
+        .of_kind(super::combat_core::HitKind::Periodic);
+        let (actual_damage, absorbed) = super::combat_core::apply_damage_with_absorb(
+            hit,
+            &mut target,
+            Some(&mut target_auras),
+            &mut follow_ups,
             &mut combat_log,
         );
 
@@ -1312,6 +1356,7 @@ pub fn process_dot_ticks(
             caster.damage_dealt += damage_dealt;
         }
     }
+    follow_ups.spawn(&mut commands);
 }
 
 /// Process healing-over-time ticks.
@@ -1563,6 +1608,7 @@ mod tests {
             tick_interval: 0.0,
             time_until_next_tick: 0.0,
             caster: None,
+            damage_mods: Default::default(),
             ability_name: "TestCC".to_string(),
             fear_direction: (0.0, 0.0),
             fear_direction_timer: 0.0,

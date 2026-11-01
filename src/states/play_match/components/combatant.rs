@@ -478,6 +478,15 @@ pub struct Combatant {
     /// Rogue-specific: which weapon poison is coated (currently only Crippling).
     /// Drives the on-auto-hit poison proc in `combat_auto_attack`.
     pub rogue_poison: RoguePoison,
+    /// Rogue-specific: the off-hand poison, when the build opens the second
+    /// poison slot (Master Poisoner) and the slot chose one. `None`: the
+    /// main-hand poison coats both weapons.
+    pub rogue_offhand_poison: Option<RoguePoison>,
+    /// The bespoke rules the combatant's talents give it, each read at its
+    /// own code site (`talent_mechanics`). Empty untalented.
+    pub talent_mechanics: crate::states::play_match::talent_mechanics::TalentMechanics,
+    /// Whether a once-a-match killing-blow save (Cheat Death) has been spent.
+    pub killing_blow_save_spent: bool,
     /// Warlock-specific: which curse to apply to each enemy target (indexed by enemy slot)
     pub warlock_curse_prefs: Vec<WarlockCurse>,
     /// Warrior-specific: which shout to use (Battle Shout, Demoralizing Shout, or Commanding Shout)
@@ -535,6 +544,7 @@ pub fn weapon_poison_marker_aura(poison: RoguePoison) -> super::Aura {
         tick_interval: 0.0,
         time_until_next_tick: 0.0,
         caster: None,
+        damage_mods: Default::default(),
         ability_name: poison.name().to_string(),
         fear_direction: (0.0, 0.0),
         fear_direction_timer: 0.0,
@@ -697,6 +707,9 @@ impl Combatant {
             last_kill_target: None,
             rogue_opener: RogueOpener::default(),
             rogue_poison: RoguePoison::default(),
+            rogue_offhand_poison: None,
+            talent_mechanics: Default::default(),
+            killing_blow_save_spent: false,
             warlock_curse_prefs: Vec::new(),
             warrior_shout: WarriorShout::default(),
             mage_armor: MageArmor::default(),
@@ -1257,6 +1270,8 @@ pub struct HolyShockHealPending {
 /// Pending Holy Shock damage to be processed.
 #[derive(Component)]
 pub struct HolyShockDamagePending {
+    /// The Paladin: what the damage pipeline credits and reflects onto.
+    pub caster: Entity,
     /// The Paladin's own book, which the damage is read from.
     pub caster_book: AbilityBook,
     pub caster_spell_power: f32,

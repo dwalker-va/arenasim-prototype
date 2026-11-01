@@ -203,6 +203,7 @@ pub fn check_orb_pickups(
                         tick_interval: 0.0,
                         time_until_next_tick: 0.0,
                         caster: None,
+                        damage_mods: Default::default(),
                         ability_name: "Shadow Sight".to_string(),
                         fear_direction: (0.0, 0.0),
                         fear_direction_timer: 0.0,

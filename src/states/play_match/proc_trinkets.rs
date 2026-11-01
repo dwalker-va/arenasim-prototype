@@ -229,6 +229,7 @@ impl ProcConfig {
             tick_interval: 0.0,
             time_until_next_tick: 0.0,
             caster: None,
+            damage_mods: Default::default(),
             ability_name: source_name.to_string(),
             fear_direction: (0.0, 0.0),
             fear_direction_timer: 0.0,
@@ -294,7 +295,9 @@ pub fn proc_effect_budget_weight(effect: AuraType) -> Option<f32> {
         | AuraType::DamageReduction
         | AuraType::CastTimeIncrease
         | AuraType::AttackPowerReduction
-        | AuraType::DamageOverTime => None,
+        | AuraType::DamageOverTime
+        | AuraType::DamageTakenIncrease
+        | AuraType::ArmorPercentReduction => None,
         // Throughput effects denominated in health rather than in a stat.
         // Pricing an absorb or a heal-over-time against the stat table would be
         // inventing a second table; they are their own card when wanted.
@@ -303,6 +306,15 @@ pub fn proc_effect_budget_weight(effect: AuraType) -> Option<f32> {
         // weight at all — `DamageTakenReduction` at magnitude 1.0 is immunity,
         // which the budget would happily sell for one point.
         AuraType::DamageTakenReduction | AuraType::DamageImmunity | AuraType::FearImmunity => None,
+        // Percentage damage, armor, transfer, save and reflect effects (the
+        // damage pipeline, AS-408): none is a quantity of an item stat, so none
+        // has a weight to price by. Each is its own card when a trinket wants
+        // one.
+        AuraType::DamageDealtIncrease
+        | AuraType::ArmorPercentIncrease
+        | AuraType::DamageTransfer
+        | AuraType::KillingBlowSave
+        | AuraType::DamageReflect => None,
         // A shapeshift is an ability's state, not a stat a trinket could sell.
         AuraType::TravelForm => None,
         // Reveals stealthed enemies and reveals the holder. A visibility swap,

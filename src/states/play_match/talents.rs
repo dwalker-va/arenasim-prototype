@@ -45,6 +45,8 @@ use super::equipment::{
     resolve_equipped_loadout, validate_class_restrictions, DefaultLoadouts, ItemDefinitions,
     Loadout,
 };
+use super::talent_choices::{ranked_effects, ChoiceOption, ChoiceRule, ChoiceSlot, SlotChoices};
+use super::talent_mechanics::{TalentMechanic, TalentMechanics};
 use crate::states::match_config::CharacterClass;
 
 /// The most points a build may spend: what a Gauntlet run hands out by its
@@ -342,6 +344,17 @@ pub enum TalentEffect {
     },
     /// Adds a `talent: true` ability to the combatant's book.
     Grant(AbilityType),
+    /// Makes a per-match option selectable that is hidden without this node
+    /// (`talent_choices`): `WidenChoice(WarlockCurse(Tongues))`.
+    WidenChoice(ChoiceOption),
+    /// Opens a second slot of a per-match menu (`talent_choices`).
+    AddChoiceSlot(ChoiceSlot),
+    /// A bespoke rule with one code site (`talent_mechanics`).
+    Mechanic(TalentMechanic),
+    /// `effect`, applied once per rank from this rank on: rank 1 of a node
+    /// adds an option and rank 2 patches what it added (Retribution Aura:
+    /// `[WidenChoice(..), FromRank(2, Patch(..))]`).
+    FromRank(u8, Box<TalentEffect>),
 }
 
 impl TalentEffect {
@@ -398,6 +411,8 @@ struct TalentsFile {
     talents: BTreeMap<TalentId, TalentConfig>,
     #[serde(default)]
     reference: BTreeMap<CharacterClass, Loadout>,
+    #[serde(default)]
+    choice_rules: Vec<ChoiceRule>,
 }
 
 /// A combatant's talents: a rank for each node it took. A node it did not
@@ -444,6 +459,7 @@ pub struct TalentDefinitions {
     trees: BTreeMap<CharacterClass, Vec<TreeConfig>>,
     talents: BTreeMap<TalentId, TalentConfig>,
     reference: BTreeMap<CharacterClass, Loadout>,
+    choice_rules: Vec<ChoiceRule>,
 }
 
 /// Load and validate `assets/config/talents.ron` against `abilities`.
@@ -463,6 +479,7 @@ impl TalentDefinitions {
             trees: file.trees,
             talents: file.talents,
             reference: file.reference,
+            choice_rules: file.choice_rules,
         };
         defs.validate(abilities)?;
         Ok(defs)
@@ -511,6 +528,11 @@ impl TalentDefinitions {
     /// Every class with a reference combatant.
     pub fn reference_classes(&self) -> impl Iterator<Item = CharacterClass> + '_ {
         self.reference.keys().copied()
+    }
+
+    /// The choice rules (`talent_choices::ChoiceRule`).
+    pub(super) fn rules(&self) -> &[ChoiceRule] {
+        &self.choice_rules
     }
 
     fn validate(&self, abilities: &AbilityDefinitions) -> Result<(), String> {
@@ -615,6 +637,8 @@ impl TalentDefinitions {
             }
         }
 
+        self.validate_choice_shapes(abilities)?;
+
         // Each talent ability is granted by exactly one node.
         for ability in abilities.talent_abilities() {
             let granting: Vec<TalentId> = self
@@ -665,6 +689,42 @@ impl TalentDefinitions {
                 if talent.max_rank != 1 {
                     return Err("a node that grants an ability has one rank".to_string());
                 }
+            }
+            TalentEffect::WidenChoice(option) => {
+                if option.menu().class() != talent.class {
+                    return Err(format!(
+                        "widens {option:?}, not a {:?} choice",
+                        talent.class
+                    ));
+                }
+                if option.is_default() {
+                    return Err(format!(
+                        "widens {option:?}, its menu's default, which is never hidden"
+                    ));
+                }
+            }
+            TalentEffect::AddChoiceSlot(slot) => {
+                if slot.menu().class() != talent.class {
+                    return Err(format!("opens {slot:?}, not a {:?} slot", talent.class));
+                }
+            }
+            TalentEffect::Mechanic(mechanic) => {
+                mechanic.validate(talent.class, talent.max_rank)?;
+            }
+            TalentEffect::FromRank(rank, inner) => {
+                if *rank < 2 || *rank > talent.max_rank {
+                    return Err(format!(
+                        "FromRank({rank}, ..) on a node of {} ranks: it starts at 2 to {}",
+                        talent.max_rank, talent.max_rank
+                    ));
+                }
+                if matches!(
+                    inner.as_ref(),
+                    TalentEffect::FromRank(..) | TalentEffect::Grant(_)
+                ) {
+                    return Err(format!("FromRank({rank}, ..) wraps {inner:?}"));
+                }
+                self.validate_effect(talent, inner, abilities)?;
             }
             TalentEffect::Patch { on, field, op } => {
                 match op {
@@ -719,7 +779,7 @@ impl TalentDefinitions {
 
     /// Every ability a combatant of `class` can have: its base abilities and
     /// every ability one of its talents grants.
-    fn reachable_abilities(
+    pub(super) fn reachable_abilities(
         &self,
         class: CharacterClass,
         abilities: &AbilityDefinitions,
@@ -804,7 +864,24 @@ impl TalentDefinitions {
         class: CharacterClass,
         build: &Build,
     ) -> Result<ResolvedBuild, String> {
+        self.resolve_with_choices(abilities, class, build, &SlotChoices::default())
+    }
+
+    /// [`Self::resolve`] for a slot that made `choices`: the choices are
+    /// checked against the build ([`Self::validate_choices`]), a talent they
+    /// switch off contributes nothing, and the abilities they lock are locked
+    /// in the book (`talent_choices`).
+    pub fn resolve_with_choices(
+        &self,
+        abilities: &AbilityDefinitions,
+        class: CharacterClass,
+        build: &Build,
+        choices: &SlotChoices,
+    ) -> Result<ResolvedBuild, String> {
         self.validate_build(class, build)?;
+        self.validate_choices(class, build, choices)?;
+        let switched_off = self.switched_off(choices);
+        let mut mechanics = TalentMechanics::default();
         let mut book = AbilityBook::for_class(abilities, class);
         let mut stats: BTreeMap<TalentStat, f32> = BTreeMap::new();
         let mut pet_stats: BTreeMap<TalentStat, f32> = BTreeMap::new();
@@ -814,20 +891,31 @@ impl TalentDefinitions {
         let mut patch_effects: Vec<(PatchTarget, AbilityField, PatchOp, u8)> = Vec::new();
 
         for (id, rank) in &build.ranks {
-            for effect in &self.talents[id].per_rank {
+            if switched_off.contains(id) {
+                continue;
+            }
+            for (effect, rank) in ranked_effects(&self.talents[id].per_rank, *rank) {
                 match effect {
                     TalentEffect::Grant(ability) => {
                         book = book.granting(abilities, *ability);
                     }
                     TalentEffect::StatPercent(stat, fraction) => {
-                        *stats.entry(*stat).or_insert(0.0) += fraction * f32::from(*rank);
+                        *stats.entry(*stat).or_insert(0.0) += fraction * f32::from(rank);
                     }
                     TalentEffect::PetStatPercent(stat, fraction) => {
-                        *pet_stats.entry(*stat).or_insert(0.0) += fraction * f32::from(*rank);
+                        *pet_stats.entry(*stat).or_insert(0.0) += fraction * f32::from(rank);
                     }
                     TalentEffect::Patch { on, field, op } => {
-                        patch_effects.push((*on, *field, *op, *rank));
+                        patch_effects.push((*on, *field, *op, rank));
                     }
+                    TalentEffect::Mechanic(mechanic) => {
+                        mechanics.insert(mechanic.at_rank(rank));
+                    }
+                    // Read from the build by `offers` / `opens`, not resolved
+                    // into the combatant.
+                    TalentEffect::WidenChoice(_) | TalentEffect::AddChoiceSlot(_) => {}
+                    // `ranked_effects` unwraps these.
+                    TalentEffect::FromRank(..) => unreachable!("ranked_effects unwraps FromRank"),
                 }
             }
         }
@@ -866,11 +954,21 @@ impl TalentDefinitions {
             }
         }
 
+        let locked = self.locked_by(choices);
+        if !locked.is_empty() {
+            book = book.locking(&locked);
+        }
+
         Ok(ResolvedBuild {
             book,
             build: build.clone(),
             stats,
             pet_stats,
+            mechanics,
+            offhand_poison: match choices.second(ChoiceSlot::OffHandPoison) {
+                Some(ChoiceOption::RoguePoison(poison)) => Some(poison),
+                _ => None,
+            },
         })
     }
 
@@ -1049,6 +1147,9 @@ pub struct ResolvedBuild {
     build: Build,
     stats: BTreeMap<TalentStat, f32>,
     pet_stats: BTreeMap<TalentStat, f32>,
+    mechanics: TalentMechanics,
+    /// The off-hand poison the slot chose, when its build opens the slot.
+    offhand_poison: Option<crate::states::match_config::RoguePoison>,
 }
 
 impl ResolvedBuild {
@@ -1060,7 +1161,14 @@ impl ResolvedBuild {
             build: Build::default(),
             stats: BTreeMap::new(),
             pet_stats: BTreeMap::new(),
+            mechanics: TalentMechanics::default(),
+            offhand_poison: None,
         }
+    }
+
+    /// The build's mechanics (`talent_mechanics`).
+    pub fn mechanics(&self) -> &TalentMechanics {
+        &self.mechanics
     }
 
     /// The combatant's book.
@@ -1088,6 +1196,8 @@ impl ResolvedBuild {
     /// before the pet spawns from it. Refills the pools to their new
     /// pre-combat levels, as equipping does.
     pub fn apply(&self, combatant: &mut Combatant) {
+        combatant.talent_mechanics = self.mechanics.clone();
+        combatant.rogue_offhand_poison = self.offhand_poison;
         apply_percents(&self.stats, combatant);
     }
 
@@ -1120,8 +1230,9 @@ pub fn resolve_for_spawn(
     slot: usize,
     class: CharacterClass,
     build: &Build,
+    choices: &SlotChoices,
 ) -> ResolvedBuild {
     talents
-        .resolve(abilities, class, build)
+        .resolve_with_choices(abilities, class, build, choices)
         .unwrap_or_else(|e| panic!("team {team} slot {slot} ({class:?}): illegal build: {e}"))
 }

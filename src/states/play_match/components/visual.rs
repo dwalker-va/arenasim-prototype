@@ -776,6 +776,13 @@ impl HealImpact {
             | AuraType::FearImmunity
             | AuraType::Cyclone
             | AuraType::AttackSpeedIncrease
+            | AuraType::DamageTakenIncrease
+            | AuraType::DamageDealtIncrease
+            | AuraType::ArmorPercentIncrease
+            | AuraType::ArmorPercentReduction
+            | AuraType::DamageTransfer
+            | AuraType::KillingBlowSave
+            | AuraType::DamageReflect
             | AuraType::TravelForm => None,
         }
     }
@@ -1514,6 +1521,18 @@ impl AuraApplyRoute {
             | AuraType::HealingOverTime
             | AuraType::WindfuryBuff
             | AuraType::AttackSpeedIncrease => AuraApplyRoute::Band,
+
+            // The damage-pipeline modifiers (AS-408) have no bespoke apply
+            // treatment yet: the family cue draws each, buff or debuff by
+            // its hostility. Their users' visual cards (AS-333..337) own any
+            // bespoke one.
+            AuraType::DamageTakenIncrease
+            | AuraType::DamageDealtIncrease
+            | AuraType::ArmorPercentIncrease
+            | AuraType::ArmorPercentReduction
+            | AuraType::DamageTransfer
+            | AuraType::KillingBlowSave
+            | AuraType::DamageReflect => AuraApplyRoute::Band,
 
             // Travel Form has no bespoke apply treatment of its own, so the
             // family cue draws it.

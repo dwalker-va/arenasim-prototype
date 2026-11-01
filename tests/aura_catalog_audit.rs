@@ -119,6 +119,13 @@ const ALLOWLIST: &[(&str, &str)] = &[
 /// below, the scan needs to get smarter rather than the list longer.
 const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
     (
+        "src/states/play_match/combat_core/damage.rs",
+        "ability_name: CHEAT_DEATH_NAME.to_string()",
+        "Cheat Death's damage cut (`cheat_death_aura`), named by its constant. No shipped \
+         talent carries the Cheat Death mechanic yet, so no match applies it; the Subtlety \
+         tree card (AS-419) that adds the node gives it its catalog entry.",
+    ),
+    (
         "src/states/play_match/effects/divine_shield.rs",
         "ability_name: ds_name.to_string()",
         "Divine Shield's damage immunity, named after its own abilities.ron entry — which \
