@@ -94,6 +94,7 @@ fn mock_results() -> MatchResults {
             damage_taken: 2345.0,
             healing_done: 0.0,
             survived: false,
+            build: Default::default(),
         }],
         team2_combatants: vec![CombatantStats {
             class: CharacterClass::Warrior,
@@ -102,6 +103,7 @@ fn mock_results() -> MatchResults {
             damage_taken: 1234.0,
             healing_done: 0.0,
             survived: true,
+            build: Default::default(),
         }],
         pet_damage_links: Default::default(),
         ai_profiles: arenasim::states::play_match::ai_profile::AiProfiles::client_default(),

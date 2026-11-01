@@ -780,6 +780,26 @@ impl MatchConfig {
         self.team1.iter().all(|slot| slot.is_some()) && self.team2.iter().all(|slot| slot.is_some())
     }
 
+    /// The talent build in `team`'s `slot`, when the slot exists: what the
+    /// spawn resolves, the talent panel spends, and the frames and Results
+    /// name a spec from.
+    pub fn build(&self, team: u8, slot: usize) -> Option<&Build> {
+        if team == 1 {
+            self.team1_builds.get(slot)
+        } else {
+            self.team2_builds.get(slot)
+        }
+    }
+
+    /// The talent build in `team`'s `slot`, to spend.
+    pub fn build_mut(&mut self, team: u8, slot: usize) -> Option<&mut Build> {
+        if team == 1 {
+            self.team1_builds.get_mut(slot)
+        } else {
+            self.team2_builds.get_mut(slot)
+        }
+    }
+
     /// Assign a class to a team slot, dropping that slot's equipment overrides
     /// and talent build when the class actually changes (a build is one
     /// class's talents).

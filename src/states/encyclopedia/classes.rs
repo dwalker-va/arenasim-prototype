@@ -125,16 +125,32 @@ pub fn render_detail(
     // `abilities.ron` (the `AbilityType` declaration order). Deliberately NOT
     // re-sorted here: the class page, the abilities index and View Combatant
     // all show one order, and that order has exactly one definition.
+    //
+    // The base kit only: a talent ability (`talent: true`) is no part of what
+    // every combatant of the class has, so it sits under its own heading.
     widget::section_heading(ui, "ABILITIES");
-    let own = data.abilities.own_abilities_for_class(class);
+    let base = data.abilities.base_abilities_for_class(class);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::Vec2::splat(space::XS);
-        for ability in &own {
+        for ability in &base {
             if let Some(topic) = widget::icon_link(ui, Topic::Ability(*ability), data) {
                 clicked = Some(topic);
             }
         }
     });
+
+    let from_talents = talent_abilities(class, data);
+    if !from_talents.is_empty() {
+        widget::sub_heading(ui, "FROM TALENTS");
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::Vec2::splat(space::XS);
+            for ability in &from_talents {
+                if let Some(topic) = widget::icon_link(ui, Topic::Ability(*ability), data) {
+                    clicked = Some(topic);
+                }
+            }
+        });
+    }
 
     // Pet abilities live under a subsection named for the pet that casts them —
     // the grouping `pet_abilities_for_class` already returns.
@@ -150,7 +166,30 @@ pub fn render_detail(
         });
     }
 
+    // The class's talent trees, read-only: each node links to its page.
+    if !data.talents.trees(class).is_empty() {
+        widget::section_heading(ui, "TALENTS");
+        let salt = format!("enc-class-talents-{class:?}");
+        if let Some(topic) = crate::states::talent_panel::read_trees(ui, class, data, &salt, None) {
+            clicked = Some(topic);
+        }
+    }
+
     clicked
+}
+
+/// The class's talent abilities: its own abilities a talent grants, which no
+/// combatant has until it learns that talent.
+pub fn talent_abilities(
+    class: CharacterClass,
+    data: &EncyclopediaData,
+) -> Vec<crate::states::play_match::AbilityType> {
+    let base = data.abilities.base_abilities_for_class(class);
+    data.abilities
+        .own_abilities_for_class(class)
+        .into_iter()
+        .filter(|ability| !base.contains(ability))
+        .collect()
 }
 
 /// Key/value rows for the class stat block, read field-by-field off

@@ -1017,6 +1017,189 @@ impl TalentDefinitions {
             .collect();
         format!("{} ({})", listed.join(", "), per_tree.join(", "))
     }
+
+    /// The points `build` spends in each of `class`'s trees, in display
+    /// order (WoW's "2/6/0" reads in it).
+    pub fn tree_points(&self, class: CharacterClass, build: &Build) -> Vec<(TreeId, u32)> {
+        self.trees(class)
+            .iter()
+            .map(|tree| {
+                let points = build
+                    .ranks
+                    .iter()
+                    .filter(|(id, _)| self.talents.get(id).is_some_and(|t| t.tree == tree.id))
+                    .map(|(_, rank)| u32::from(*rank))
+                    .sum();
+                (tree.id, points)
+            })
+            .collect()
+    }
+
+    /// The points `build` spends in the tiers of `tree` below `tier`: what
+    /// opens `tier` ([`TIER_OPENS_AT`]).
+    pub fn points_below(&self, tree: TreeId, tier: u8, build: &Build) -> u32 {
+        build
+            .ranks
+            .iter()
+            .filter(|(id, _)| {
+                self.talents
+                    .get(id)
+                    .is_some_and(|t| t.tree == tree && t.tier < tier)
+            })
+            .map(|(_, rank)| u32::from(*rank))
+            .sum()
+    }
+
+    /// The spec a viewer reads off `build`: the tree with the most points
+    /// names it ("Demonology Warlock"), and WoW's shorthand gives the points
+    /// in every tree in display order ("2/6/0"). Two trees tied for the most
+    /// read as a hybrid. `None` for an empty build, or a class without trees.
+    pub fn spec(&self, class: CharacterClass, build: &Build) -> Option<Spec> {
+        let named: Vec<(&str, u32)> = self
+            .tree_points(class, build)
+            .into_iter()
+            .map(|(tree, points)| {
+                let name = self
+                    .trees(class)
+                    .iter()
+                    .find(|t| t.id == tree)
+                    .map_or("", |t| t.name.as_str());
+                (name, points)
+            })
+            .collect();
+        Spec::from_tree_points(class, &named)
+    }
+
+    /// Why `build` cannot take one more rank of `talent` for a combatant of
+    /// `class`, or `None` when it can. The same rules as
+    /// [`validate_build`](Self::validate_build), answered in terms a talent
+    /// panel can show: `None` exactly when the build with that rank added is
+    /// legal (`tests/talent_panel.rs` holds the two to each other over every
+    /// legal build).
+    pub fn learn_blocker(
+        &self,
+        class: CharacterClass,
+        build: &Build,
+        talent: TalentId,
+    ) -> Option<LearnBlocker> {
+        let Some(node) = self.talents.get(&talent).filter(|t| t.class == class) else {
+            return Some(LearnBlocker::NotThisClass);
+        };
+        if build.rank(talent) >= node.max_rank {
+            return Some(LearnBlocker::MaxRank);
+        }
+        if build.points() >= MAX_TALENT_POINTS {
+            return Some(LearnBlocker::NoPoints);
+        }
+        let needed = TIER_OPENS_AT[usize::from(node.tier - 1)];
+        let has = self.points_below(node.tree, node.tier, build);
+        if has < needed {
+            return Some(LearnBlocker::TierClosed {
+                tree: node.tree,
+                needed,
+                has,
+            });
+        }
+        if let Some((required, rank)) = node.requires {
+            if build.rank(required) < rank {
+                return Some(LearnBlocker::Requires {
+                    talent: required,
+                    rank,
+                });
+            }
+        }
+        None
+    }
+
+    /// `build` with one more rank of `talent`, when that build is legal.
+    pub fn learn(
+        &self,
+        class: CharacterClass,
+        build: &Build,
+        talent: TalentId,
+    ) -> Result<Build, LearnBlocker> {
+        if let Some(blocker) = self.learn_blocker(class, build, talent) {
+            return Err(blocker);
+        }
+        let mut next = build.clone();
+        *next.ranks.entry(talent).or_insert(0) += 1;
+        Ok(next)
+    }
+
+    /// `build` with one rank of `talent` taken back, when the build left is
+    /// legal: a rank a higher tier's gate or a prerequisite still leans on
+    /// stays. `None` when it cannot be taken back.
+    pub fn unlearn(&self, class: CharacterClass, build: &Build, talent: TalentId) -> Option<Build> {
+        let rank = build.rank(talent);
+        if rank == 0 {
+            return None;
+        }
+        let mut next = build.clone();
+        if rank == 1 {
+            next.ranks.remove(&talent);
+        } else {
+            next.ranks.insert(talent, rank - 1);
+        }
+        self.validate_build(class, &next).ok().map(|()| next)
+    }
+}
+
+/// A build's spec, as the team frames, Results and the talent panel name it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Spec {
+    /// "Demonology Warlock", or "Affliction-Demonology hybrid" for a tie.
+    pub label: String,
+    /// The points in each tree, in display order: "2/6/0".
+    pub short: String,
+}
+
+impl Spec {
+    /// The spec named by the points in each of `class`'s trees, given in
+    /// display order as `(tree name, points)`: the tree with the most points
+    /// names it, and two trees tied for the most read as a hybrid
+    /// ("Affliction-Demonology hybrid", in display order). `None` when no
+    /// point is spent.
+    pub fn from_tree_points(class: CharacterClass, trees: &[(&str, u32)]) -> Option<Spec> {
+        let total: u32 = trees.iter().map(|(_, p)| p).sum();
+        if total == 0 {
+            return None;
+        }
+        let mut ranked: Vec<(&str, u32)> = trees.to_vec();
+        // Most points first; a tie keeps display order (the sort is stable).
+        ranked.sort_by_key(|t| std::cmp::Reverse(t.1));
+        let label = match ranked.as_slice() {
+            [(first, a), (second, b), ..] if a == b => format!("{first}-{second} hybrid"),
+            [(first, _), ..] => format!("{first} {}", class.name()),
+            [] => return None,
+        };
+        let short = trees
+            .iter()
+            .map(|(_, p)| p.to_string())
+            .collect::<Vec<_>>()
+            .join("/");
+        Some(Spec { label, short })
+    }
+
+    /// The label and the shorthand on one line: "Demonology Warlock 2/6/0".
+    pub fn line(&self) -> String {
+        format!("{} {}", self.label, self.short)
+    }
+}
+
+/// Why a talent cannot take another rank.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LearnBlocker {
+    /// The talent is not one of this class's.
+    NotThisClass,
+    /// Every rank is taken.
+    MaxRank,
+    /// The build has spent [`MAX_TALENT_POINTS`].
+    NoPoints,
+    /// The talent's tier is not open yet: its tree holds `has` of the
+    /// `needed` points in the tiers below it.
+    TierClosed { tree: TreeId, needed: u32, has: u32 },
+    /// A prerequisite is not at its rank yet.
+    Requires { talent: TalentId, rank: u8 },
 }
 
 /// Whether a class fields a pet a `PetStatPercent` can reach.

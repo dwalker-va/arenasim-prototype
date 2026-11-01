@@ -297,6 +297,10 @@ pub fn check_match_end(
                 damage_taken: combatant.damage_taken,
                 healing_done: combatant.healing_done,
                 survived: combatant.is_alive(),
+                build: config
+                    .build(combatant.team, usize::from(combatant.slot))
+                    .cloned()
+                    .unwrap_or_default(),
             };
 
             let metadata = CombatantMetadata {

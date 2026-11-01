@@ -41,6 +41,28 @@ fn results_screen_2v2() {
     harness.snapshot("results_screen");
 }
 
+/// The same match with the Warlock talented: its row carries the spec its
+/// build names ("Demonology Warlock 3") under the class, and the untalented
+/// rows carry none.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn results_screen_spec_label() {
+    let mut results = mock_results();
+    results.team2_combatants[0].build = arenasim::states::play_match::talents::Build::of(&[
+        (
+            arenasim::states::play_match::talents::TalentId::DemonicEmbrace,
+            2,
+        ),
+        (
+            arenasim::states::play_match::talents::TalentId::FelStamina,
+            1,
+        ),
+    ]);
+    let mut harness = harness(results, mock_combat_log());
+    harness.run();
+    harness.snapshot("results_screen_spec_label");
+}
+
 /// No `MatchResults` at all: the empty state, under the same header, so the
 /// screen still shows its named exit and not only Esc.
 #[test]
@@ -198,6 +220,7 @@ fn sized_harness(
             item_icons: None,
             class_icons: None,
             ability_icons: None,
+            talents: arenasim::states::play_match::talents::TalentDefinitions::shipped(),
         };
         let _ = draw_results_screen(
             ctx,
@@ -224,6 +247,7 @@ fn cs(
         damage_taken: tkn,
         healing_done: heal,
         survived,
+        build: Default::default(),
     }
 }
 
@@ -245,6 +269,7 @@ fn mock_results() -> MatchResults {
                 damage_taken: 334.0,
                 healing_done: 0.0,
                 survived: true,
+                build: Default::default(),
             },
             CombatantStats {
                 class: CharacterClass::Priest,
@@ -253,6 +278,7 @@ fn mock_results() -> MatchResults {
                 damage_taken: 301.0,
                 healing_done: 1820.0,
                 survived: true,
+                build: Default::default(),
             },
         ],
         team2_combatants: vec![
@@ -263,6 +289,7 @@ fn mock_results() -> MatchResults {
                 damage_taken: 956.0,
                 healing_done: 0.0,
                 survived: false,
+                build: Default::default(),
             },
             CombatantStats {
                 class: CharacterClass::Priest,
@@ -271,6 +298,7 @@ fn mock_results() -> MatchResults {
                 damage_taken: 451.0,
                 healing_done: 1340.0,
                 survived: false,
+                build: Default::default(),
             },
         ],
         pet_damage_links: [(

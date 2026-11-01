@@ -435,6 +435,7 @@ mod tests {
             item_icons: None,
             class_icons: None,
             ability_icons: None,
+            talents: crate::states::play_match::talents::TalentDefinitions::shipped(),
         };
         let probe = Probe {
             rect: Cell::new(egui::Rect::NOTHING),

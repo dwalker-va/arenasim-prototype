@@ -603,6 +603,7 @@ fn key_aliases_resolve() {
 fn every_shipped_script_parses() {
     const SHIPPED: &[&str] = &[
         "view-combatant-tooltips.script",
+        "talent-panel.script",
         "equipment-restore-defaults.script",
         "replay-boots-into-the-match.script",
         "replay-draws-icons.script",
@@ -1061,8 +1062,10 @@ const EAGER_MARKERS: &[&str] = &[
 /// and let it fail when it moves. (A `>=` bound here previously hid a scanner
 /// that found 20 of 21.)
 const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
-    // Its one `mark` helper, through which every data-built id registers.
-    ("src/states/configure_match_ui.rs", 1),
+    // Its one `mark` helper, through which every data-built id registers,
+    // and the note of the subtitle a filled slot reads (its spec, when it has
+    // a build).
+    ("src/states/configure_match_ui.rs", 2),
     // Each binding's two key buttons, and the note of what each slot holds.
     ("src/states/keybindings_ui.rs", 2),
     // The note of every setting's current value; the screen's buttons and
@@ -1077,9 +1080,14 @@ const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
     // spelling, one tooltip note, and a `choice:` mark for an option that is
     // not an ability), and the restore button registers through the kit's
     // `driver_id`.
-    ("src/states/view_combatant_ui.rs", 11),
-    // The note of the AI profile that played, beside the duration.
-    ("src/states/results_ui.rs", 1),
+    // The stats panel notes each talent-raised total it draws.
+    ("src/states/view_combatant_ui.rs", 12),
+    // The note of the AI profile that played, beside the duration, and of
+    // each talented row's spec.
+    ("src/states/results_ui.rs", 2),
+    // The talent panel's note of the build it spends (points and spec), and
+    // each node's tooltip note.
+    ("src/states/talent_panel.rs", 2),
     // The header exit's note: what its label says, for a script to read back.
     ("src/ui/widgets/header.rs", 1),
     // The linked icon's tooltip note, moved here from encyclopedia/widget.rs.

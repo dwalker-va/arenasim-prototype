@@ -28,6 +28,7 @@ pub mod modal;
 pub mod panel;
 pub mod stat_rows;
 pub mod tabs;
+pub mod talent_tree;
 pub mod tooltip;
 
 pub use bars::{class_icon, icon_tile, resource_bar};
@@ -42,6 +43,7 @@ pub use modal::{Modal, ModalResponse};
 pub use panel::{divider, panel, panel_header, section_label};
 pub use stat_rows::{stat_row, stat_rows};
 pub use tabs::{chip, tabs, Chip, Tab};
+pub use talent_tree::{TalentNode, TalentNodeResponse, TalentTreeColumn, TalentTrees, TreeMode};
 pub use tooltip::{hint_line, tooltip_frame, Tooltip};
 
 use bevy_egui::egui;

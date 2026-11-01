@@ -614,6 +614,17 @@ carrying every slot's build.
   `every_numeric_ability_field_is_decided` destructures `AbilityConfig`
   without a rest pattern, so a new numeric field fails to compile until it is
   placed or declared not patchable.
+- **The talent panel** (`src/states/talent_panel.rs`, drawing the kit's
+  `ui::widgets::TalentTrees`) spends a build in View Combatant: a click
+  learns a rank, shift-click takes one back, right-click opens the talent's
+  encyclopedia page. It offers only what `TalentDefinitions::learn` /
+  `unlearn` allow, so a spawn never meets a build it made illegal
+  (`tests/talent_panel.rs`). A `floor` (a Gauntlet run's locked-in ranks)
+  cannot be taken back. Talent prose is ONE generator,
+  `src/states/talent_text.rs`, for the panel's tooltips and the
+  encyclopedia's Talents section. `TalentDefinitions::spec` names the spec
+  the team frames, Results and the Configure Match slot rows show ("Demonology
+  Warlock 0/3/0"); an untalented combatant shows none.
 
 ### Adding a New Item
 
@@ -2086,7 +2097,11 @@ old standalone Armory. It is a navigation FRAMEWORK plus per-section content:
   kit order — do NOT add a second sort), `items.rs`, and `auras.rs` (Buffs &
   Debuffs: every aura an ability applies, plus the engine-originated ones —
   totem buffs, interrupt lockouts, one entry per proc trinket, and the rest —
-  each with a removal badge answered by the engine's own dispel predicates).
+  each with a removal badge answered by the engine's own dispel predicates),
+  and `talents.rs` (every class's trees from `talents.ron`, drawn read-only,
+  and a page per talent). A class page shows its BASE kit
+  (`base_abilities_for_class`), its talent abilities under their own heading,
+  and its trees.
 - **Ability and aura PROSE is `src/states/ability_text.rs`** — one generator, shared
   with View Combatant, so an ability's description reads the same wherever the
   player meets it. Totem text wins over a hand-written `abilities.ron`

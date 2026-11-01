@@ -30,6 +30,7 @@ use crate::states::configure_match_ui::ClassIcons;
 use crate::states::match_config::{CharacterClass, MatchConfig};
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
+use crate::states::play_match::talents::{Spec, TalentDefinitions};
 use crate::states::results_ui::class_color32;
 use crate::ui::driver as ui_driver;
 use crate::ui::theme::{self, hud};
@@ -55,6 +56,11 @@ pub struct FrameAura {
 /// Everything the frame shows for one combatant.
 pub struct CombatantFrame {
     pub class: CharacterClass,
+    /// The combatant's spec, when its build spends a point: the header reads
+    /// it ("Demonology Warlock") in place of the class name, with its
+    /// shorthand ("0/3/0") after it. `None` for an untalented combatant and a
+    /// pet.
+    pub spec: Option<Spec>,
     /// Pets render as compact sub-frames with this label instead of the class name.
     pub pet_label: Option<String>,
     pub alive: bool,
@@ -521,13 +527,27 @@ fn draw_frame(
             hud::FRAME_INITIAL,
         );
     }
-    painter.text(
+    let name_rect = painter.text(
         egui::pos2(icon_rect.max.x + 6.0, y + HEADER_H / 2.0 - 1.0),
         egui::Align2::LEFT_CENTER,
-        frame.class.name(),
+        frame
+            .spec
+            .as_ref()
+            .map_or(frame.class.name(), |s| s.label.as_str()),
         egui::FontId::proportional(theme::text::BODY),
         dimmed(hud::HUD_LABEL),
     );
+    // The spec's shorthand after its name, a caption in the frame's detail
+    // tone: labels stay white, and the frame spends no hue on it.
+    if let Some(spec) = &frame.spec {
+        painter.text(
+            egui::pos2(name_rect.max.x + 4.0, y + HEADER_H / 2.0 - 1.0),
+            egui::Align2::LEFT_CENTER,
+            &spec.short,
+            egui::FontId::proportional(hud::text::CAPTION),
+            dimmed(hud::FRAME_DETAIL),
+        );
+    }
     // Call reticle at the header's trailing edge; the STEALTH tag steps aside
     // for it, since a stealthed combatant is still callable. A DEAD frame never
     // reaches `Called` — `call_slots` gives the dead no slot — so the reticle
@@ -792,6 +812,7 @@ pub fn render_team_frames(
     combatants: Query<(Entity, &Combatant, Option<&ActiveAuras>)>,
     pet_query: Query<&Pet>,
     display_settings: Res<DisplaySettings>,
+    talents: Res<TalentDefinitions>,
     mut config: ResMut<MatchConfig>,
 ) {
     let Some(ctx) = contexts.try_ctx_mut() else {
@@ -851,8 +872,18 @@ pub fn render_team_frames(
             }
         }
 
+        // The spec its build names, from the config the match spawned from
+        // (a pet's slot reaches no build).
+        let spec = if pet_label.is_some() {
+            None
+        } else {
+            config
+                .build(combatant.team, usize::from(combatant.slot))
+                .and_then(|build| talents.spec(combatant.class, build))
+        };
         let frame = CombatantFrame {
             class: combatant.class,
+            spec,
             pet_label,
             alive: combatant.is_alive(),
             stealthed: combatant.stealthed,
@@ -892,6 +923,7 @@ mod tests {
     fn primary(class: CharacterClass) -> CombatantFrame {
         CombatantFrame {
             class,
+            spec: None,
             pet_label: None,
             alive: true,
             stealthed: false,
