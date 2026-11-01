@@ -248,3 +248,32 @@ fn a_pet_stunned_between_the_thresholds_does_not_recover() {
         "a stunned pet at {BETWEEN_HP} that never heeled should not recover, rose {rise:.3}"
     );
 }
+
+/// A pet that dies at Heel stays dead: the recovery heals only a living pet.
+/// Its pair is `a_heeled_spider_recovers_and_re_engages`, the same latch on a
+/// living pet.
+#[test]
+fn a_pet_that_dies_at_heel_stays_dead() {
+    let played = play(
+        config("Spider"),
+        Stage::new().combatant(PET, |c| {
+            c.pet_heeled = true;
+            c.current_health = 0.0;
+            c.is_dead = true;
+        }),
+    );
+    let raised: Vec<f32> = played
+        .staged_frames()
+        .filter(|f| pet(f).current_health > 0.0)
+        .map(|f| f.sim_time)
+        .collect();
+    assert!(
+        raised.is_empty(),
+        "a dead pet at Heel was raised to health at {:?}",
+        raised.first()
+    );
+    assert!(
+        played.staged_frames().count() > 60,
+        "the match should play on past the pet's death"
+    );
+}
