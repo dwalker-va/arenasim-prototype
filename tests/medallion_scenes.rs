@@ -312,7 +312,11 @@ fn a_wait_remembers_when_it_began() {
     let mut scene = held_beside_a_priest(AuraType::Polymorph, 8.0);
     scene.combatant_mut(WEARER).on_use_items[0].waiting = Some((NOW - 1.0, NOW - 1.0 / 60.0));
     let view = scene.decide_held(WEARER);
-    assert_eq!(view.on_use_after[0].waiting, Some((NOW - 1.0, NOW)), "{view:?}");
+    assert_eq!(
+        view.on_use_after[0].waiting,
+        Some((NOW - 1.0, NOW)),
+        "{view:?}"
+    );
     // ...and a break spends the Medallion.
     let view = held(AuraType::Stun, 4.0).decide_held(WEARER);
     assert!(view.on_use_after[0].spent, "{view:?}");
@@ -349,7 +353,10 @@ fn a_cycloned_paladin_uses_nothing() {
     };
     assert_eq!(scene(AuraType::Cyclone).decide_held(WEARER).chose(), None);
     assert_eq!(
-        scene(AuraType::Stun).decide_held(WEARER).chose().map(|c| c.0),
+        scene(AuraType::Stun)
+            .decide_held(WEARER)
+            .chose()
+            .map(|c| c.0),
         Some(AbilityType::DivineShield)
     );
 }
