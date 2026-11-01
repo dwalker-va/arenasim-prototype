@@ -291,6 +291,9 @@ fn aura_family(t: AuraType) -> AuraFamily {
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
         | AuraType::ArmorIncrease
+        // No ability grants haste yet: the Dragonspine Trophy's proc does,
+        // and its band cue draws it until AS-433 gives it its own one-shot.
+        | AuraType::AttackSpeedIncrease
         | AuraType::TravelForm => AuraFamily::Status,
     }
 }

@@ -640,15 +640,18 @@ any ring fits either ring socket, and the same item may not occupy both
    - **Per-trinket ICD, no global lock.** A proc cannot fire again while its own
      buff is up (`internal_cooldown >= duration` is validated), and two
      DIFFERENT trinkets can be live at once. A proc buff coexists with a
-     same-stat buff from an ability (Battle Shout and a Dragonspine proc stack).
+     same-stat buff from an ability (Battle Shout and an attack-power proc stack).
    - **Pricing.** The proc is charged to the budget at
      `stat_weight × magnitude × duration / (duration + internal_cooldown)` — the
      ICD's LONG-RUN uptime bound. `chance` does not enter the price. It is not a
      ceiling over a short life: a trinket starts ready, so a life shorter than
-     one cycle runs above it (Dragonspine realises 23% against its 18.2% bound in
-     a 43s arena life — `realised_uptime_against_the_long_run_bound` in
-     `tests/proc_trinket_probes.rs`). Only the six stat auras
-     `proc_effect_budget_weight` prices may be an `effect`.
+     one cycle can run above it (Dragonspine realises 18.5% against its 18.2%
+     bound in a 37.8s arena life — `realised_uptime_against_the_long_run_bound`
+     in `tests/proc_trinket_probes.rs`). Only the seven effects
+     `proc_effect_budget_weight` prices may be an `effect`: the six stat auras
+     at their item-stat weights, and haste (`AttackSpeedIncrease`, the
+     Dragonspine Trophy's +20% attack speed) at `WEIGHT_ATTACK_SPEED`, crit's
+     weight at TBC's rating exchange rate.
    - **Procs are not purgeable.** A proc buff is `DispelType::Physical` — an
      item's effect is not a spell, however magical it looks — so no purge,
      dispel or cleanse removes it.
@@ -696,10 +699,13 @@ any ring fits either ring socket, and the same item may not occupy both
 
 4. **Add `ItemId` variant** in `equipment.rs` to the `ItemId` enum
 
-5. **Add item icon** (optional, for UI):
+5. **Add item icon**:
    - Download: `mcp__wowhead-classic__get_item_icon("New Item")`
    - Save to `assets/icons/items/<icon_name>.jpg`
-   - Add mapping to `ITEM_ICON_PATHS` in `rendering/mod.rs`
+   - Set `icon: "icons/items/<icon_name>.jpg"` on the item in `items.ron`. That
+     field is the only mapping: `load_item_icons` loads every item's `icon`, so
+     the item picker, tooltips and encyclopedia show it with no code change. Every
+     shipped item has one; the field defaults to empty, which draws no icon.
 
 6. **Run `cargo test`** to verify the item passes budget validation
 
@@ -1130,7 +1136,13 @@ Druid is free), pinned by `a_root_is_broken_on_the_next_global_cooldown`.
 Mark of the Wild waits behind a shift owed to break a root or snare, as it
 waits behind a dying teammate's heals: a Mark purged off the Druid is not
 recast while it stands rooted under a chaser (`DruidTurn::take`, pinned by
-`a_root_is_shifted_out_of_before_a_lost_mark_is_recast`).
+`a_root_is_shifted_out_of_before_a_lost_mark_is_recast`). A Druid below
+`DRUID_EMERGENCY_HP` leaves the form early — no dwell, a chaser inside the
+danger radius — when its emergency heal would go out on its first frame out
+(`emergency_heal_lands`, the cast gate asked without the form) and no visible
+melee or pet is within `DRUID_EMERGENCY_LEAVE_YARDS` (10), so the chaser it ran
+from cannot force the shift straight back (AS-242; `tests/druid_emergency_leave.rs`,
+`docs/design/balance/2026-10-31-as242-emergency-leave.md`).
 
 **Tangent steering (goal-directed pillar rounding)** — `map_geometry::steer_toward_goal`
 (pure, unit-tested; no RON knob). When a mover with a DESTINATION has the

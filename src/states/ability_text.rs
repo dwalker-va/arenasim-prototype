@@ -451,6 +451,13 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
                 slow_pct, aura.duration
             )
         }
+        AuraType::AttackSpeedIncrease => {
+            format!(
+                "Increases attack speed by {:.0}% for {:.0} sec.",
+                aura.magnitude * 100.0,
+                aura.duration
+            )
+        }
         AuraType::LockoutDurationReduction => {
             let reduction_pct = (aura.magnitude * 100.0) as i32;
             format!(
@@ -496,6 +503,18 @@ mod tests {
     use super::*;
     use crate::states::play_match::ability_config::load_ability_definitions;
     use crate::states::play_match::components::class_base_stats;
+
+    /// A haste aura's sentence states its gain in percent and its duration.
+    #[test]
+    fn a_haste_aura_says_how_much_faster() {
+        let aura: AuraEffect =
+            ron::from_str("(aura_type: AttackSpeedIncrease, duration: 10.0, magnitude: 0.2)")
+                .expect("a haste aura parses");
+        assert_eq!(
+            build_aura_description(&aura),
+            "Increases attack speed by 20% for 10 sec."
+        );
+    }
 
     /// Every ability in `abilities.ron` produces player-facing text, and every
     /// applied aura produces its own sentence — the property the encyclopedia's

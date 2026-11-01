@@ -132,6 +132,14 @@ pub enum AuraType {
     /// it is up the holder is immune to Polymorph and cannot cast; shifting
     /// into it breaks every root and snare (`effects::travel_form`).
     TravelForm,
+    /// Haste: increases attack speed by a fraction (magnitude = haste, e.g.
+    /// 0.20 = 20% more swings in the same time, so every swing interval is
+    /// divided by 1.20). The mirror of [`AuraType::AttackSpeedSlow`], and like
+    /// it, it reaches every auto-attack interval: both melee hands, a
+    /// Hunter's melee hand, its bow and a wand — TBC's haste rating, which the
+    /// Dragonspine Trophy grants, speeds melee and ranged attacks alike.
+    /// Used by the Dragonspine Trophy's proc.
+    AttackSpeedIncrease,
 }
 
 /// A debuff's REMOVAL CLASS — what kind of thing it is for the purpose of
@@ -295,7 +303,7 @@ impl AuraType {
     /// DOES cost is coverage: a guard that sweeps `ALL` quietly stops covering
     /// whatever `ALL` forgot, while still reading like a whole-enum sweep.
     /// `aura_type_tests::all_lists_every_aura_type` is what stops that.
-    pub const ALL: [AuraType; 35] = [
+    pub const ALL: [AuraType; 36] = [
         AuraType::MovementSpeedSlow,
         AuraType::Root,
         AuraType::Stun,
@@ -331,6 +339,7 @@ impl AuraType {
         AuraType::ArmorIncrease,
         AuraType::Cyclone,
         AuraType::TravelForm,
+        AuraType::AttackSpeedIncrease,
     ];
 
     /// Player-facing name of this MECHANIC, as the encyclopedia's mechanic
@@ -363,6 +372,7 @@ impl AuraType {
             AuraType::CastTimeIncrease => "Casting Slow",
             AuraType::AttackPowerReduction => "Attack Power Reduction",
             AuraType::AttackSpeedSlow => "Attack Speed Slow",
+            AuraType::AttackSpeedIncrease => "Haste",
             AuraType::Absorb => "Absorb Shield",
             AuraType::DamageTakenReduction => "Damage Reduction",
             AuraType::DamageImmunity => "Damage Immunity",
@@ -438,6 +448,9 @@ impl AuraType {
                 "Lowers the target's attack power, weakening its physical hits."
             }
             AuraType::AttackSpeedSlow => "Slows how often the target swings its weapon.",
+            AuraType::AttackSpeedIncrease => {
+                "Speeds up the holder's attacks, melee and ranged alike."
+            }
             AuraType::Absorb => {
                 "Soaks incoming damage until the shield is spent or expires. Absorbed damage never \
                  reaches health."
@@ -597,6 +610,7 @@ impl AuraType {
             | AuraType::SpellResistanceBuff
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
+            | AuraType::AttackSpeedIncrease
             | AuraType::TravelForm => false,
         }
     }
@@ -664,6 +678,7 @@ impl AuraType {
             | AuraType::SpellResistanceBuff
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
+            | AuraType::AttackSpeedIncrease
             | AuraType::TravelForm => false,
 
             // Mechanical markers, not effects: clearing these would grant a
@@ -1030,7 +1045,7 @@ impl Aura {
     /// being cast at all.
     ///
     /// A [`Aura::distinct_by_source`] buff has the same `effect_type` and does
-    /// NOT occupy the slot: a live Dragonspine Trophy proc is not a Battle
+    /// NOT occupy the slot: a live attack-power trinket proc is not a Battle
     /// Shout, and must not stop one. Every site asking "does this target
     /// already have the buff" asks it here, so the rule reads the same whichever
     /// of the two arrives first.
@@ -1254,7 +1269,8 @@ impl Aura {
             | AuraType::LockoutDurationReduction
             | AuraType::FrostArmorBuff
             | AuraType::SpellResistanceBuff
-            | AuraType::ArmorIncrease => true,
+            | AuraType::ArmorIncrease
+            | AuraType::AttackSpeedIncrease => true,
 
             // Beneficial, but DELIBERATELY unpurgeable — see the doc above.
             // Travel Form joins them: a shapeshift is the Druid's own body,
@@ -1835,6 +1851,7 @@ impl DRCategory {
             | AuraType::SpellResistanceBuff
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
+            | AuraType::AttackSpeedIncrease
             | AuraType::TravelForm => None,
 
             // Mechanical markers, not effects. They track state (a spent soul,
@@ -2310,6 +2327,7 @@ mod tests {
             AuraType::FrostArmorBuff,
             AuraType::SpellResistanceBuff,
             AuraType::ArmorIncrease,
+            AuraType::AttackSpeedIncrease,
         ] {
             assert!(
                 aura(ty).can_be_purged(),

@@ -354,6 +354,26 @@ pub const WEIGHT_SPELL_POWER: f32 = 1.5;
 /// so that 0.02 crit (2%) costs 6.0 budget points.
 pub const WEIGHT_CRIT_CHANCE: f32 = 300.0;
 
+/// TBC combat rating, at level 70, that buys 1% melee critical strike chance.
+pub const TBC_CRIT_RATING_PER_PERCENT: f32 = 22.08;
+
+/// TBC combat rating, at level 70, that buys 1% haste (melee and ranged alike).
+pub const TBC_HASTE_RATING_PER_PERCENT: f32 = 15.77;
+
+/// Cost weight per fraction-point of HASTE (attack speed: `0.20` = 20% more
+/// swings in the same time) in the item budget — what an
+/// `AttackSpeedIncrease` effect is priced at.
+///
+/// Priced off [`WEIGHT_CRIT_CHANCE`] at TBC's own exchange rate. TBC's item
+/// budget charges haste rating and crit rating the same per point, and at
+/// level 70 one percent of haste takes 15.77 rating where one percent of crit
+/// takes 22.08, so a percent of haste costs 15.77/22.08 (about 0.71) of a
+/// percent of crit: about 214 per whole fraction, 2.14 points per percent.
+/// Haste is not an item stat field yet (`Combatant::attack_speed_bonus` is
+/// granted, not worn), so a proc is the only thing it prices today.
+pub const WEIGHT_ATTACK_SPEED: f32 =
+    WEIGHT_CRIT_CHANCE * TBC_HASTE_RATING_PER_PERCENT / TBC_CRIT_RATING_PER_PERCENT;
+
 /// Cost weight per fraction-point of movement_speed in the item budget.
 /// Since movement_speed is stored as a fraction (0.1 = 10% speed),
 /// this weight is large so that 0.1 speed costs 3.0 budget points.
@@ -500,6 +520,17 @@ mod tests {
         );
     }
 
+    /// Haste is priced off crit at TBC's rating exchange rate: 15.77 haste
+    /// rating against 22.08 crit rating per percent, so about 214 per whole
+    /// fraction — 2.14 budget points per percent of haste.
+    #[test]
+    fn haste_is_priced_off_crit_at_tbc_s_rating_exchange_rate() {
+        assert!(
+            (WEIGHT_ATTACK_SPEED - 214.27).abs() < 0.01,
+            "{WEIGHT_ATTACK_SPEED}"
+        );
+    }
+
     #[test]
     // Pinning a relationship between constants IS this test; const-folding is the point.
     #[allow(clippy::assertions_on_constants)]
@@ -510,6 +541,7 @@ mod tests {
         assert!(WEIGHT_ATTACK_POWER > 0.0);
         assert!(WEIGHT_SPELL_POWER > 0.0);
         assert!(WEIGHT_CRIT_CHANCE > 0.0);
+        assert!(WEIGHT_ATTACK_SPEED > 0.0);
         assert!(WEIGHT_MOVEMENT_SPEED > 0.0);
         assert!(WEIGHT_RESISTANCE > 0.0);
     }

@@ -873,11 +873,15 @@
         // A trigger plus an effect, on this trinket's OWN internal cooldown.
         // The proc is charged to the item budget at its expected value
         // (weight * magnitude * duration/(duration+icd)), so the big burst
-        // number buys a small sustained one: Dragonspine's +55 attack power
-        // averages +10 AP over a long life, and costs the 15 budget points that
-        // averages to. (A short life runs above that — a trinket starts ready.)
+        // number buys a small sustained one: Sigil of Arcane Surge's +55 spell
+        // power averages +11 over a long life, and costs the 16 budget points
+        // that averages to. (A short life runs above that — a trinket starts
+        // ready.)
         // ====================================================================
 
+        // TBC's Dragonspine Trophy: haste (TBC's 325 haste rating, 20.6% at
+        // level 70), which speeds melee and ranged attacks alike. It procs on a
+        // melee hit only: `MeleeHit` is the one physical trigger there is.
         DragonspineTrophy: (
             name: "Dragonspine Trophy",
             item_level: 58,
@@ -887,8 +891,8 @@
             proc: Some((
                 trigger: MeleeHit,
                 chance: 0.15,
-                effect: AttackPowerIncrease,
-                magnitude: 55.0,
+                effect: AttackSpeedIncrease,
+                magnitude: 0.20,
                 duration: 10.0,
                 internal_cooldown: 45.0,
             )),
@@ -2220,6 +2224,346 @@
             armor: 615.0,
             max_health: 24.0,
             attack_power: 5.0,
+        ),
+
+        // ====================================================================
+        // CHAMPION TIER (2): CLOTH ARMOR (Mage, Priest, Warlock)
+        // Named for Classic's Frostfire Regalia (Naxxramas, ilvl 88-92).
+        // ====================================================================
+
+        FrostfireCirclet: (
+            name: "Frostfire Circlet",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_crown_01.jpg",
+            slot: Head,
+            armor_type: Cloth,
+            armor: 73.0,
+            max_health: 13.0,
+            max_mana: 27.0,
+            spell_power: 17.0,
+            crit_chance: 0.01,
+        ),
+
+        FrostfireRobe: (
+            name: "Frostfire Robe",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_chest_cloth_43.jpg",
+            slot: Chest,
+            armor_type: Cloth,
+            armor: 73.0,
+            max_health: 16.0,
+            max_mana: 26.0,
+            spell_power: 18.0,
+        ),
+
+        FrostfireLeggings: (
+            name: "Frostfire Leggings",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_pants_cloth_05.jpg",
+            slot: Legs,
+            armor_type: Cloth,
+            armor: 73.0,
+            max_health: 16.0,
+            max_mana: 27.0,
+            spell_power: 15.0,
+            mana_regen: 0.5,
+        ),
+
+        FrostfireShoulderpads: (
+            name: "Frostfire Shoulderpads",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_shoulder_25.jpg",
+            slot: Shoulders,
+            armor_type: Cloth,
+            armor: 73.0,
+            max_health: 12.0,
+            max_mana: 21.0,
+            spell_power: 12.0,
+        ),
+
+        FrostfireGloves: (
+            name: "Frostfire Gloves",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_gauntlets_17.jpg",
+            slot: Hands,
+            armor_type: Cloth,
+            armor: 73.0,
+            max_health: 12.0,
+            max_mana: 18.0,
+            spell_power: 12.0,
+            crit_chance: 0.01,
+        ),
+
+        FrostfireSandals: (
+            name: "Frostfire Sandals",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_boots_fabric_01.jpg",
+            slot: Feet,
+            armor_type: Cloth,
+            armor: 73.0,
+            max_health: 14.0,
+            max_mana: 18.0,
+            spell_power: 10.0,
+            movement_speed: 0.15,
+        ),
+
+        FrostfireBelt: (
+            name: "Frostfire Belt",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_belt_03.jpg",
+            slot: Waist,
+            armor_type: Cloth,
+            armor: 73.0,
+            max_health: 10.0,
+            max_mana: 20.0,
+            spell_power: 11.0,
+            mana_regen: 1.0,
+        ),
+
+        FrostfireBindings: (
+            name: "Frostfire Bindings",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_bracer_13.jpg",
+            slot: Wrists,
+            armor_type: Cloth,
+            armor: 73.0,
+            max_health: 6.0,
+            max_mana: 15.0,
+            spell_power: 8.0,
+            mana_regen: 1.0,
+        ),
+
+        // ====================================================================
+        // CHAMPION TIER (2): LEATHER ARMOR — MELEE (Rogue)
+        // Named for Classic's Bonescythe Armor (Naxxramas, ilvl 88-92).
+        // ====================================================================
+
+        BonescytheHelmet: (
+            name: "Bonescythe Helmet",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_helmet_58.jpg",
+            slot: Head,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 24.0,
+            attack_power: 18.0,
+            crit_chance: 0.06,
+        ),
+
+        BonescytheBreastplate: (
+            name: "Bonescythe Breastplate",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_chest_plate02.jpg",
+            slot: Chest,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 27.0,
+            attack_power: 16.0,
+            crit_chance: 0.06,
+        ),
+
+        BonescytheLegplates: (
+            name: "Bonescythe Legplates",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_pants_plate_05.jpg",
+            slot: Legs,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 27.0,
+            attack_power: 18.0,
+            crit_chance: 0.05,
+        ),
+
+        BonescythePauldrons: (
+            name: "Bonescythe Pauldrons",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_shoulder_29.jpg",
+            slot: Shoulders,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 18.0,
+            attack_power: 14.0,
+            crit_chance: 0.04,
+        ),
+
+        BonescytheGauntlets: (
+            name: "Bonescythe Gauntlets",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_gauntlets_28.jpg",
+            slot: Hands,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 17.0,
+            attack_power: 13.0,
+            crit_chance: 0.05,
+        ),
+
+        BonescytheSabatons: (
+            name: "Bonescythe Sabatons",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_boots_plate_06.jpg",
+            slot: Feet,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 21.0,
+            attack_power: 11.0,
+            crit_chance: 0.03,
+            movement_speed: 0.15,
+        ),
+
+        BonescytheWaistguard: (
+            name: "Bonescythe Waistguard",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_belt_27.jpg",
+            slot: Waist,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 17.0,
+            attack_power: 13.0,
+            crit_chance: 0.05,
+        ),
+
+        BonescytheBracers: (
+            name: "Bonescythe Bracers",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_bracer_15.jpg",
+            slot: Wrists,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 14.0,
+            attack_power: 10.0,
+            crit_chance: 0.03,
+        ),
+
+        // ====================================================================
+        // CHAMPION TIER (2): LEATHER ARMOR — RESTORATION (Druid)
+        // Named for Classic's Dreamwalker Raiment (Naxxramas, ilvl 88-92).
+        // ====================================================================
+
+        DreamwalkerHeadpiece: (
+            name: "Dreamwalker Headpiece",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_helmet_15.jpg",
+            slot: Head,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 16.0,
+            max_mana: 22.0,
+            spell_power: 15.0,
+            mana_regen: 1.5,
+        ),
+
+        DreamwalkerTunic: (
+            name: "Dreamwalker Tunic",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_chest_chain_15.jpg",
+            slot: Chest,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 18.0,
+            max_mana: 24.0,
+            spell_power: 18.0,
+        ),
+
+        DreamwalkerLegguards: (
+            name: "Dreamwalker Legguards",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_pants_mail_15.jpg",
+            slot: Legs,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 18.0,
+            max_mana: 24.0,
+            spell_power: 16.0,
+            mana_regen: 0.5,
+        ),
+
+        DreamwalkerSpaulders: (
+            name: "Dreamwalker Spaulders",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_shoulder_14.jpg",
+            slot: Shoulders,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 13.0,
+            max_mana: 18.0,
+            spell_power: 12.0,
+            mana_regen: 0.5,
+        ),
+
+        DreamwalkerHandguards: (
+            name: "Dreamwalker Handguards",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_gauntlets_25.jpg",
+            slot: Hands,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 12.0,
+            max_mana: 18.0,
+            spell_power: 14.0,
+        ),
+
+        DreamwalkerBoots: (
+            name: "Dreamwalker Boots",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_boots_chain_05.jpg",
+            slot: Feet,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 14.0,
+            max_mana: 18.0,
+            spell_power: 10.0,
+            movement_speed: 0.15,
+        ),
+
+        DreamwalkerGirdle: (
+            name: "Dreamwalker Girdle",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_belt_22.jpg",
+            slot: Waist,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 11.0,
+            max_mana: 16.0,
+            spell_power: 11.0,
+            mana_regen: 1.5,
+        ),
+
+        DreamwalkerWristguards: (
+            name: "Dreamwalker Wristguards",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_bracer_02.jpg",
+            slot: Wrists,
+            armor_type: Leather,
+            armor: 157.0,
+            max_health: 8.0,
+            max_mana: 13.0,
+            spell_power: 8.0,
+            mana_regen: 1.0,
         ),
     }
 )

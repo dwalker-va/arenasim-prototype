@@ -1435,6 +1435,7 @@ fn magnitude_row_for(mechanic: AuraType, m: f32) -> Option<(String, String)> {
         AuraType::HealingReduction => row("Healing reduced by", pct(1.0 - m)),
         // Amount-taken fractions.
         AuraType::AttackSpeedSlow => row("Attack speed slowed by", pct(m)),
+        AuraType::AttackSpeedIncrease => row("Attack speed", format!("+{}", pct(m))),
         AuraType::DamageReduction => row("Physical damage reduced by", pct(m)),
         AuraType::CastTimeIncrease => row("Cast time increased by", pct(m)),
         AuraType::DamageTakenReduction => row("Damage taken reduced by", pct(m)),
@@ -1519,6 +1520,16 @@ mod tests {
 
     fn abilities() -> AbilityDefinitions {
         load_ability_definitions().expect("abilities.ron must load")
+    }
+
+    /// Haste reads as a gain in attack speed, in percent — the mirror of the
+    /// attack-speed slow's row.
+    #[test]
+    fn a_haste_row_reads_as_a_percent_gain() {
+        assert_eq!(
+            magnitude_row_for(AuraType::AttackSpeedIncrease, 0.2),
+            Some(("Attack speed".to_string(), "+20%".to_string()))
+        );
     }
 
     fn items() -> ItemDefinitions {

@@ -32,11 +32,12 @@
 //! buff. Arena lives are that short. Measured by
 //! `realised_uptime_against_the_long_run_bound` (an `#[ignore]`d report in
 //! `tests/proc_trinket_probes.rs`) over 60 Warrior+Priest mirrors, a Warrior
-//! wearing both melee trinkets — alive for 43s after the gates, on average —
-//! had Dragonspine Trophy's buff up for 23.0% of that time against a bound of
-//! 18.2%, and Whetstone of Fury's for 16.7% against 11.8%. So an early proc
-//! runs ABOVE its price, and the price is exact only for a life long enough to
-//! average that out.
+//! wearing both melee trinkets — alive for 37.8s after the gates, on average —
+//! had Dragonspine Trophy's buff up for 18.5% of that time against a bound of
+//! 18.2%, and Whetstone of Fury's for 11.7% against 11.8%. That bank lands
+//! near the bound; a bank whose free first proc comes early in short lives
+//! lands above it. The price is exact only for a life long enough to average
+//! that out.
 //!
 //! A corollary: **in the long run `chance` is a feel knob, not a power knob.**
 //! Two trinkets with the same effect, duration and ICD cost the same whether
@@ -80,8 +81,8 @@ use serde::{Deserialize, Serialize};
 use super::components::GameRng;
 use super::components::{Aura, AuraType, DispelType};
 use super::constants::{
-    WEIGHT_ATTACK_POWER, WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN, WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA,
-    WEIGHT_SPELL_POWER,
+    WEIGHT_ATTACK_POWER, WEIGHT_ATTACK_SPEED, WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN,
+    WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA, WEIGHT_SPELL_POWER,
 };
 use super::equipment::ItemId;
 
@@ -171,8 +172,8 @@ pub struct ProcConfig {
     /// load.
     pub effect: AuraType,
     /// The buff's magnitude, in the effect aura's own units (flat points for
-    /// attack/spell power, a fraction for crit chance, mana per second for
-    /// mana regen).
+    /// attack/spell power, a fraction for crit chance and for haste, mana per
+    /// second for mana regen).
     pub magnitude: f32,
     /// How long the buff lasts, in seconds.
     pub duration: f32,
@@ -255,7 +256,10 @@ impl ProcConfig {
 ///
 /// The priced set is the stat auras whose magnitude is denominated in the same
 /// unit as an item stat field, at the same `WEIGHT_*` the item budget already
-/// charges for that stat. Nothing here invents a second pricing table.
+/// charges for that stat. Nothing here invents a second pricing table. Haste is
+/// the one priced effect with no item stat field behind it; its weight,
+/// `WEIGHT_ATTACK_SPEED`, sits beside the others in `constants.rs`, derived
+/// from crit's.
 pub fn proc_effect_budget_weight(effect: AuraType) -> Option<f32> {
     match effect {
         // --- priced: a flat or fractional stat, in an item stat's own units ---
@@ -265,6 +269,9 @@ pub fn proc_effect_budget_weight(effect: AuraType) -> Option<f32> {
         AuraType::ManaRegenIncrease => Some(WEIGHT_MANA_REGEN),
         AuraType::MaxHealthIncrease => Some(WEIGHT_MAX_HEALTH),
         AuraType::MaxManaIncrease => Some(WEIGHT_MAX_MANA),
+        // Haste. No item carries it as a stat field, so its weight is the one
+        // derived from crit at TBC's rating exchange rate (`WEIGHT_ATTACK_SPEED`).
+        AuraType::AttackSpeedIncrease => Some(WEIGHT_ATTACK_SPEED),
 
         // --- not priceable as a proc effect ---
         // Crowd control. A trinket that randomly stuns the enemy it hit is a
@@ -458,6 +465,9 @@ fn proc_effect_phrase(proc: &ProcConfig) -> String {
         AuraType::ManaRegenIncrease => format!("+{:.0} mana per second", proc.magnitude),
         AuraType::MaxHealthIncrease => format!("+{:.0} maximum health", proc.magnitude),
         AuraType::MaxManaIncrease => format!("+{:.0} maximum mana", proc.magnitude),
+        AuraType::AttackSpeedIncrease => {
+            format!("+{:.0}% attack speed", proc.magnitude * 100.0)
+        }
         other => format!("{} ({:.0})", other.display_name(), proc.magnitude),
     }
 }
@@ -534,6 +544,7 @@ mod tests {
             (AuraType::ManaRegenIncrease, WEIGHT_MANA_REGEN),
             (AuraType::MaxHealthIncrease, WEIGHT_MAX_HEALTH),
             (AuraType::MaxManaIncrease, WEIGHT_MAX_MANA),
+            (AuraType::AttackSpeedIncrease, WEIGHT_ATTACK_SPEED),
         ];
         for (effect, weight) in expected {
             assert_eq!(
@@ -543,7 +554,7 @@ mod tests {
                 effect
             );
         }
-        // ...and the priced SET is exactly those six. A seventh variant
+        // ...and the priced SET is exactly those seven. An eighth variant
         // becoming priceable must be a deliberate edit here, not a surprise.
         let priced: Vec<AuraType> = AuraType::ALL
             .iter()
@@ -553,6 +564,36 @@ mod tests {
         let mut named: Vec<AuraType> = expected.iter().map(|(a, _)| *a).collect();
         named.sort_by_key(|a| AuraType::ALL.iter().position(|x| x == a).unwrap());
         assert_eq!(priced, named, "the priced effect set changed");
+    }
+
+    /// The shipped Dragonspine Trophy procs haste — +20% attack speed for 10s
+    /// on a melee hit, 15%, 45s internal cooldown — priced at the haste weight
+    /// over its long-run uptime, and says so in its one player-facing sentence.
+    #[test]
+    fn the_dragonspine_trophy_procs_haste() {
+        let items = super::super::equipment::load_item_definitions().expect("items.ron loads");
+        let proc = items
+            .get(&ItemId::DragonspineTrophy)
+            .and_then(|item| item.proc.clone())
+            .expect("the Dragonspine Trophy carries a proc");
+        assert_eq!(
+            proc,
+            ProcConfig {
+                trigger: ProcTrigger::MeleeHit,
+                chance: 0.15,
+                effect: AuraType::AttackSpeedIncrease,
+                magnitude: 0.20,
+                duration: 10.0,
+                internal_cooldown: 45.0,
+            }
+        );
+        let expected = WEIGHT_ATTACK_SPEED * 0.20 * 10.0 / 55.0;
+        assert!((proc.budget_cost() - expected).abs() < 1e-4);
+        assert_eq!(
+            proc_description(&proc),
+            "Chance on a melee hit (15%) to gain +20% attack speed for 10s. \
+             Cannot occur more than once every 45s."
+        );
     }
 
     // ---- validation ----

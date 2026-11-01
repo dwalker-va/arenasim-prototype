@@ -1324,8 +1324,11 @@ pub fn frost_armor_attack_speed_aura() -> Aura {
 
 /// Effective auto-attack interval for a combatant: its weapon's speed,
 /// shortened by its permanent attack-speed bonus
-/// ([`Combatant::attack_speed_bonus`]) and stretched by each `AttackSpeedSlow`
-/// aura (magnitude clamped at 0.75 to prevent division by near-zero).
+/// ([`Combatant::attack_speed_bonus`]), shortened again by each
+/// `AttackSpeedIncrease` (haste) aura and stretched by each `AttackSpeedSlow`
+/// aura (magnitude clamped at 0.75 to prevent division by near-zero). Haste
+/// and slows apply to every interval here — melee hands, a Hunter's melee
+/// hand, its bow and a wand alike — as TBC's haste rating does.
 ///
 /// Shared by the swing timer in `combat_auto_attack` above AND the graphical
 /// windup animation (`rendering/effects.rs`), so the anticipation window can
@@ -1380,7 +1383,9 @@ enum MainArm {
 ///
 /// The two hands share this rather than each spelling out the arithmetic,
 /// **and the operation order below is load-bearing**: it multiplies the
-/// interval by each slow in turn. Folding the slows together first and
+/// interval by each slow, and divides it by each haste, in aura order, one at
+/// a time. A unit with no haste aura takes exactly the operations it took
+/// before haste existed. Folding the slows together first and
 /// multiplying once is algebraically the same and is NOT the same in `f32`,
 /// which would shift the main hand's interval by an ULP and, through the
 /// timer comparison, potentially every match in the project's baselines.
@@ -1391,10 +1396,18 @@ fn swing_interval(weapon_speed: f32, attack_speed_bonus: f32, auras: Option<&Act
     }
     if let Some(auras) = auras {
         for aura in auras.auras.iter() {
-            if aura.effect_type == AuraType::AttackSpeedSlow {
-                // magnitude = slow amount (e.g., 0.25 = 25% slower → 1.33x interval)
-                let clamped = aura.magnitude.min(0.75);
-                attack_interval *= 1.0 / (1.0 - clamped);
+            match aura.effect_type {
+                AuraType::AttackSpeedSlow => {
+                    // magnitude = slow amount (e.g., 0.25 = 25% slower → 1.33x interval)
+                    let clamped = aura.magnitude.min(0.75);
+                    attack_interval *= 1.0 / (1.0 - clamped);
+                }
+                AuraType::AttackSpeedIncrease => {
+                    // magnitude = haste (e.g., 0.20 = 20% more swings → interval / 1.20).
+                    // Each haste effect multiplies, as TBC's haste effects do.
+                    attack_interval /= 1.0 + aura.magnitude;
+                }
+                _ => {}
             }
         }
     }

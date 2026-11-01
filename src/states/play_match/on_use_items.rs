@@ -212,6 +212,7 @@ pub const fn cc_break_breaks(aura: AuraType) -> bool {
         | AuraType::MaxManaIncrease
         | AuraType::ArmorIncrease
         | AuraType::AttackPowerIncrease
+        | AuraType::AttackSpeedIncrease
         | AuraType::SpellPowerIncrease
         | AuraType::CritChanceIncrease
         | AuraType::ManaRegenIncrease
