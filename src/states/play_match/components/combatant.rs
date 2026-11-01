@@ -498,6 +498,10 @@ pub struct Combatant {
     /// so the next one goes to the shift. Cleared once the Druid is free of
     /// roots and snares.
     pub druid_emergency_heal_spent: bool,
+    /// Druid-specific: the duel-melee latch ([`duel_melee`](crate::states::play_match::class_ai::druid::duel_melee)).
+    /// While it holds, the Druid's pursuit closes to melee to swing its
+    /// staff instead of standing at spell range.
+    pub druid_duel_melee: bool,
     /// Equipped proc trinkets and their live internal cooldowns, in socket
     /// order. Filled by [`Combatant::apply_equipment`].
     ///
@@ -715,6 +719,7 @@ impl Combatant {
             hunter_opened: false,
             trap_retarget: None,
             druid_emergency_heal_spent: false,
+            druid_duel_melee: false,
             proc_trinkets: Vec::new(),
             talent_procs: Default::default(),
             next_cast_spent: None,
