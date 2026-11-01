@@ -73,6 +73,11 @@ const HEALERS: &[(&str, &str)] = &[
         "src/states/play_match/projectiles.rs",
         "process_projectile_hits",
     ),
+    // A killing-blow save's heal (Guardian Spirit's shape, AS-408).
+    (
+        "src/states/play_match/combat_core/follow_ups.rs",
+        "process_damage_follow_ups",
+    ),
     // Devour Magic's heal to the Felhunter.
     (
         "src/states/play_match/effects/dispels.rs",

@@ -550,6 +550,20 @@ impl Scene {
         self
     }
 
+    /// `who`'s book with `ability` locked, as a slot's per-match choices lock
+    /// it at spawn (`talent_choices::ChoiceRule`).
+    pub fn lock(mut self, who: Who, ability: AbilityType) -> Self {
+        let locked = self
+            .unit_mut(who)
+            .combatant
+            .book()
+            .clone()
+            .locking(&std::collections::BTreeSet::from([ability]));
+        let unit = self.unit_mut(who);
+        unit.combatant = unit.combatant.clone().with_book(locked);
+        self
+    }
+
     /// The healer posture state `who` carries into the decision.
     pub fn healer_posture(mut self, who: Who, posture: HealerPosture) -> Self {
         self.unit_mut(who).healer_posture = Some(posture);

@@ -86,6 +86,9 @@ const DAMAGERS: &[(&str, &str)] = &[
         "src/states/play_match/effects/holy_shock.rs",
         "process_holy_shock_damage",
     ),
+    // What a hit sets off on other units: transferred shares, reflected
+    // damage (AS-408).
+    ("src/states/play_match/combat_core/follow_ups.rs", "land"),
     // The Unstable Affliction dispel backlash (AS-437).
     (
         "src/states/play_match/effects/backlash.rs",

@@ -39,7 +39,7 @@ pub enum TransferReceiver {
 }
 
 /// One effect a hit sets off beyond its victim.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum DamageFollowUp {
     /// `amount` of the holder's damage goes to `receiver` instead.
     Transfer {
@@ -71,9 +71,10 @@ pub enum DamageFollowUp {
         /// The heal it lands, as a fraction of the holder's maximum health
         /// (Guardian Spirit), through `apply_healing`.
         heal_fraction: Option<f32>,
-        /// An aura the save leaves that the funnel could not land on a holder
-        /// with no `ActiveAuras` (Cheat Death's damage cut).
-        aura: Option<Aura>,
+        /// The damage cut `(reduction, duration)` the save leaves, when the
+        /// funnel could not land it itself on a holder with no `ActiveAuras`
+        /// (Cheat Death).
+        aura: Option<(f32, f32)>,
     },
 }
 
@@ -292,10 +293,10 @@ pub fn process_damage_follow_ups(
                         format!("[SAVED] {by} heals {holder_id} for {healed:.0}"),
                     );
                 }
-                if let Some(aura) = aura {
+                if let Some((reduction, duration)) = aura {
                     commands.spawn(AuraPending {
                         target: holder,
-                        aura,
+                        aura: super::cheat_death_aura(reduction, duration),
                     });
                 }
                 if let Some(Ok((mut c, _, _))) = caster.map(|c| combatants.get_mut(c)) {

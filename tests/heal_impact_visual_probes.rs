@@ -943,6 +943,7 @@ fn totem_hot_aura(caster: Entity) -> Aura {
         tick_interval: 1.0,
         time_until_next_tick: 0.001,
         caster: Some(caster),
+        damage_mods: Default::default(),
         ability_name: "Healing Stream Totem".to_string(),
         fear_direction: (0.0, 0.0),
         fear_direction_timer: 0.0,

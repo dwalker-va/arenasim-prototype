@@ -3184,6 +3184,7 @@ mod bucket_a_unit {
             source_item: None,
             stacks: None,
             bloom: None,
+            damage_mods: Default::default(),
         }
     }
 
@@ -4914,6 +4915,7 @@ mod u9_seek_reset {
             source_item: None,
             stacks: None,
             bloom: None,
+            damage_mods: Default::default(),
         }
     }
 

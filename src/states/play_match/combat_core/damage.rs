@@ -638,7 +638,7 @@ fn prevent_killing_blow(
             by: aura.ability_name.clone(),
             caster: None,
             heal_fraction: None,
-            aura: Some(aura),
+            aura: Some((aura.magnitude, aura.duration)),
         });
     }
 }
