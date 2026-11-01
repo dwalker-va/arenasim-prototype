@@ -538,6 +538,14 @@ impl TeamSituation {
         (1.0 - self.since_gates / ATTRITION_ONSET_SECS).clamp(0.0, 1.0)
     }
 
+    /// The arena dampening's healing reduction now — the fraction
+    /// `ArenaDampening::reduction` holds, from the same clock: 0 until
+    /// `DAMPENING_START_SECS`, 1 once the ramp has run, when a heal heals
+    /// nothing.
+    pub fn dampening(&self) -> f32 {
+        super::match_flow::dampening_reduction(self.since_gates)
+    }
+
     /// The play the unit `me`, playing `role`, runs in this situation, as
     /// its TEAM sees it: the first stage of the pipeline
     /// (`class_ai::plays::PLAY_ORDER` — Peel, Hunt, Pillar, Chain, Burst) that

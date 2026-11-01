@@ -788,6 +788,46 @@ item_ids! {
     DreamwalkerGirdle,
     DreamwalkerWristguards,
 
+    // === Champion: Mail Armor — Marksman (Hunter) ===
+    CryptstalkerHeadpiece,
+    CryptstalkerTunic,
+    CryptstalkerLegguards,
+    CryptstalkerSpaulders,
+    CryptstalkerHandguards,
+    CryptstalkerBoots,
+    CryptstalkerGirdle,
+    CryptstalkerWristguards,
+
+    // === Champion: Mail Armor — Elemental and Restoration (Shaman) ===
+    EarthshatterHeadpiece,
+    EarthshatterTunic,
+    EarthshatterLegguards,
+    EarthshatterSpaulders,
+    EarthshatterHandguards,
+    EarthshatterBoots,
+    EarthshatterGirdle,
+    EarthshatterWristguards,
+
+    // === Champion: Plate Armor — Melee (Warrior) ===
+    DreadnaughtHelmet,
+    DreadnaughtBreastplate,
+    DreadnaughtLegplates,
+    DreadnaughtPauldrons,
+    DreadnaughtGauntlets,
+    DreadnaughtSabatons,
+    DreadnaughtWaistguard,
+    DreadnaughtBracers,
+
+    // === Champion: Plate Armor — Holy (Paladin) ===
+    RedemptionHeadpiece,
+    RedemptionTunic,
+    RedemptionLegguards,
+    RedemptionSpaulders,
+    RedemptionHandguards,
+    RedemptionBoots,
+    RedemptionGirdle,
+    RedemptionWristguards,
+
     // === Champion: Trinkets ===
     HandOfJustice,
 }
@@ -4368,7 +4408,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     const CHAMPION_ARMOR_GAIN: f32 = 0.55;
 
     /// Every Champion-tier (item_tier 2) item.
-    const CHAMPION_TIER: [ItemId; 25] = [
+    const CHAMPION_TIER: [ItemId; 57] = [
         ItemId::HandOfJustice,
         ItemId::FrostfireCirclet,
         ItemId::FrostfireRobe,
@@ -4394,6 +4434,38 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         ItemId::DreamwalkerBoots,
         ItemId::DreamwalkerGirdle,
         ItemId::DreamwalkerWristguards,
+        ItemId::CryptstalkerHeadpiece,
+        ItemId::CryptstalkerTunic,
+        ItemId::CryptstalkerLegguards,
+        ItemId::CryptstalkerSpaulders,
+        ItemId::CryptstalkerHandguards,
+        ItemId::CryptstalkerBoots,
+        ItemId::CryptstalkerGirdle,
+        ItemId::CryptstalkerWristguards,
+        ItemId::EarthshatterHeadpiece,
+        ItemId::EarthshatterTunic,
+        ItemId::EarthshatterLegguards,
+        ItemId::EarthshatterSpaulders,
+        ItemId::EarthshatterHandguards,
+        ItemId::EarthshatterBoots,
+        ItemId::EarthshatterGirdle,
+        ItemId::EarthshatterWristguards,
+        ItemId::DreadnaughtHelmet,
+        ItemId::DreadnaughtBreastplate,
+        ItemId::DreadnaughtLegplates,
+        ItemId::DreadnaughtPauldrons,
+        ItemId::DreadnaughtGauntlets,
+        ItemId::DreadnaughtSabatons,
+        ItemId::DreadnaughtWaistguard,
+        ItemId::DreadnaughtBracers,
+        ItemId::RedemptionHeadpiece,
+        ItemId::RedemptionTunic,
+        ItemId::RedemptionLegguards,
+        ItemId::RedemptionSpaulders,
+        ItemId::RedemptionHandguards,
+        ItemId::RedemptionBoots,
+        ItemId::RedemptionGirdle,
+        ItemId::RedemptionWristguards,
     ];
 
     /// Every Gauntlet-tier (item_tier 1) item.

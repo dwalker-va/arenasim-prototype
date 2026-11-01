@@ -407,6 +407,42 @@ impl DecisionTrace {
         self.writer = Some(writer);
     }
 
+    /// Write the `match_header` line — every slot's talent build — when any
+    /// slot has one; a match with no talents writes nothing. Call right after
+    /// [`Self::install_writer`] and stamping the seed and profile, so it is
+    /// the trace's first line.
+    pub fn write_build_header(
+        &mut self,
+        team1_builds: &[crate::states::play_match::talents::Build],
+        team2_builds: &[crate::states::play_match::talents::Build],
+    ) -> std::io::Result<()> {
+        if team1_builds
+            .iter()
+            .chain(team2_builds)
+            .all(|b| b.is_empty())
+        {
+            return Ok(());
+        }
+        let event = DecisionEvent {
+            frame: self.current_frame,
+            sim_time: self.current_sim_time,
+            seed: self.seed,
+            ai_profile: self.ai_profile,
+            kind: EventKind::MatchHeader,
+            actor: None,
+            target: None,
+            situation: None,
+            payload: EventPayload::Header {
+                team1_builds: team1_builds.to_vec(),
+                team2_builds: team2_builds.to_vec(),
+            },
+        };
+        match self.writer.as_mut() {
+            Some(writer) => writer.write_header(&event),
+            None => Ok(()),
+        }
+    }
+
     /// Detach and drop the writer (drained on drop). Used between matches in
     /// matrix mode.
     ///

@@ -1149,23 +1149,33 @@ pub fn dispatch_class_decision(
         // rotation holds damage and utility for the heal (`class_ai::druid`).
         match_config::CharacterClass::Druid => {
             let mut plan = class_ai::caster_healer_posture::CasterHealerPlan::default();
+            // Travel Form: a shifted Druid runs (ESCAPE).
+            let shifted = auras.is_some_and(ActiveAuras::is_shapeshifted);
             if gates_opened {
                 if let Some((healer_posture, _mage, directive, _reset, _flare)) = posture {
-                    plan = class_ai::caster_healer_posture::evaluate_caster_healer_posture(
-                        commands,
-                        entity,
-                        combatant,
-                        my_pos,
-                        ctx,
-                        healer_posture.map(bevy::prelude::Mut::into_inner),
-                        directive,
-                        movement_config,
-                        &movement_config.druid,
-                        // Travel Form: a shifted Druid runs (ESCAPE).
-                        auras.is_some_and(ActiveAuras::is_shapeshifted),
-                        now,
-                        decision_trace,
-                    );
+                    if combatant.druid_duel_melee && !shifted {
+                        // Closing to swing its staff in a duel
+                        // (`druid::duel_melee`): the pursuit has the legs,
+                        // not the posture machine's retreat.
+                        if directive.is_some() {
+                            commands.entity(entity).remove::<MovementDirective>();
+                        }
+                    } else {
+                        plan = class_ai::caster_healer_posture::evaluate_caster_healer_posture(
+                            commands,
+                            entity,
+                            combatant,
+                            my_pos,
+                            ctx,
+                            healer_posture.map(bevy::prelude::Mut::into_inner),
+                            directive,
+                            movement_config,
+                            &movement_config.druid,
+                            shifted,
+                            now,
+                            decision_trace,
+                        );
+                    }
                 }
             }
             class_ai::druid::decide_druid_action(
