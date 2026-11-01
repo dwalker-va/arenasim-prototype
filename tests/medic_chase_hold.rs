@@ -78,6 +78,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3, hp: f32
         stealthed: false,
         target: None,
         is_pet: false,
+        pet_heeled: false,
         casting_ability: None,
         pet_type: None,
         pet: None,

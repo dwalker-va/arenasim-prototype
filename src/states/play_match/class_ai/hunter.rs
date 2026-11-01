@@ -2591,7 +2591,7 @@ pub(super) fn try_dispatch_masters_call(
         hunter_entity,
     );
 
-    if pet_info.health_pct() < 0.25 {
+    if pet_info.is_heeled() {
         builder.reject(ability, RejectionReason::LowHealthHeel);
         builder.finish();
         return false;
@@ -2662,7 +2662,7 @@ fn dispatch_predicates_for_damaging(
     target_info: &CombatantInfo,
     ctx: &CombatContext,
 ) -> Option<RejectionReason> {
-    if pet_info.health_pct() < 0.25 {
+    if pet_info.is_heeled() {
         return Some(RejectionReason::LowHealthHeel);
     }
 

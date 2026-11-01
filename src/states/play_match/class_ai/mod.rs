@@ -97,6 +97,10 @@ pub struct CombatantInfo {
     pub stealthed: bool,
     pub target: Option<Entity>,
     pub is_pet: bool,
+    /// A pet's Heel latch as its `Combatant` carries it (`pet_heeled`); false
+    /// for everyone else. Read it through [`Self::is_heeled`], which also
+    /// counts a pet that has just dropped below the Heel threshold this frame.
+    pub pet_heeled: bool,
     /// The ability this combatant is currently casting or channeling, if any.
     /// `Some` iff the entity has a live `CastingState`/`ChannelingState` this
     /// frame. Consumers map it to a `SpellSchool` (via [`Self::book`]) to
@@ -166,6 +170,13 @@ impl CombatantInfo {
         } else {
             0.0
         }
+    }
+
+    /// Whether this pet is at Heel: the latch [`pet_ai::heel_latch`] would
+    /// hold for it now, so an owner deciding before `pet_ai_system` folds this
+    /// frame's health in still agrees with the pet. False for a non-pet.
+    pub fn is_heeled(&self) -> bool {
+        self.is_pet && pet_ai::heel_latch(self.pet_heeled, self.health_pct())
     }
 
     /// Mana as a percentage (0.0 to 1.0)
@@ -2637,6 +2648,7 @@ pub(crate) mod reach_fixture {
             stealthed: false,
             target: None,
             is_pet: false,
+            pet_heeled: false,
             casting_ability: None,
             pet_type: None,
             pet: None,

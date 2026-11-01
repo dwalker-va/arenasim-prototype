@@ -51,7 +51,7 @@ pub use super::effects::process_travel_form;
 // === Phase 2: Combat and Movement ===
 pub use super::auras::process_aura_breaks;
 pub use super::class_ai::dps_postures::tick_kite_occlusion;
-pub use super::class_ai::pet_ai::pet_ai_system;
+pub use super::class_ai::pet_ai::{pet_ai_system, recover_heeled_pets};
 pub use super::combat_ai::acquire_targets;
 pub use super::combat_ai::check_interrupts;
 pub use super::combat_ai::decide_abilities;
@@ -202,7 +202,14 @@ pub fn add_core_combat_systems<M, N>(
             regenerate_resources,
             track_shadow_sight_timer.run_if(decide.clone()),
             process_dot_ticks,
-            process_hot_ticks, // HoT healing — like process_dot_ticks, must run BEFORE update_auras
+            // HoT healing — like process_dot_ticks, must run BEFORE update_auras.
+            // Then a heeled pet's recovery, the other periodic heal. A nested
+            // chain, because the outer tuple is at Bevy's 20-system limit.
+            (
+                process_hot_ticks,
+                recover_heeled_pets.run_if(decide.clone()),
+            )
+                .chain(),
             update_auras,
             slow_zone_system,   // Zone slow refresh before aura processing
             flare_system,       // Exposes Rogues standing in a Flare before anyone acquires targets

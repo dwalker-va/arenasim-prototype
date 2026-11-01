@@ -41,6 +41,72 @@ fn headline_ability_for(pt: PetType) -> AbilityType {
     }
 }
 
+/// Health fraction below which a pet goes to Heel: it drops its target and
+/// returns to its owner's side.
+pub const PET_HEEL_ENTER_HP: f32 = 0.25;
+
+/// Health fraction a heeled pet must recover to before it re-engages. Above
+/// [`PET_HEEL_ENTER_HP`], so a pet that comes back is not knocked straight
+/// back to Heel by the next hit and does not strobe between the two.
+pub const PET_HEEL_RELEASE_HP: f32 = 0.5;
+
+/// A heeled pet's recovery, as a fraction of its maximum health per second.
+/// From the Heel threshold to the release takes about 12.5s with nothing
+/// hitting it. It is healing, so healing reduction and arena dampening cut it
+/// (`combat_core::apply_healing`).
+pub const PET_HEEL_RECOVERY_PER_SEC: f32 = 0.02;
+
+/// The Heel latch: whether a pet that `heeled` last frame is heeled at
+/// `hp_ratio`. It goes to Heel below [`PET_HEEL_ENTER_HP`] and stays there,
+/// recovering, until it is back to [`PET_HEEL_RELEASE_HP`].
+pub fn heel_latch(heeled: bool, hp_ratio: f32) -> bool {
+    if heeled {
+        hp_ratio < PET_HEEL_RELEASE_HP
+    } else {
+        hp_ratio < PET_HEEL_ENTER_HP
+    }
+}
+
+/// The health fraction of `combatant`, 0 for one with no maximum.
+fn hp_ratio_of(combatant: &Combatant) -> f32 {
+    if combatant.max_health > 0.0 {
+        combatant.current_health / combatant.max_health
+    } else {
+        0.0
+    }
+}
+
+/// A heeled pet recovers health at its owner's side
+/// ([`PET_HEEL_RECOVERY_PER_SEC`]) until the Heel latch releases it. Without
+/// it a pet knocked below the Heel threshold sat out the rest of the match:
+/// no healer heals a pet, and Heel had no way out.
+pub fn recover_heeled_pets(
+    time: Res<Time>,
+    mut commands: Commands,
+    dampening: Res<crate::states::play_match::systems::ArenaDampening>,
+    mut pets: Query<(Entity, &mut Combatant, Option<&ActiveAuras>), With<Pet>>,
+    celebration: Option<Res<VictoryCelebration>>,
+) {
+    if celebration.is_some() {
+        return;
+    }
+    let dt = time.delta_secs();
+    for (entity, mut combatant, auras) in pets.iter_mut() {
+        if !combatant.is_alive() || !combatant.pet_heeled {
+            continue;
+        }
+        let amount = combatant.max_health * PET_HEEL_RECOVERY_PER_SEC * dt;
+        crate::states::play_match::combat_core::apply_healing(
+            &mut commands,
+            entity,
+            &mut combatant,
+            auras,
+            &dampening,
+            amount,
+        );
+    }
+}
+
 /// Pet AI decision system.
 pub fn pet_ai_system(
     mut commands: Commands,
@@ -99,6 +165,7 @@ pub fn pet_ai_system(
                     stealthed: combatant.stealthed,
                     target: combatant.target,
                     is_pet: false,
+                    pet_heeled: false,
                     // Pet AI doesn't read casts; this coarse snapshot omits CastingState.
                     casting_ability: None,
                     pet_type: None,
@@ -147,6 +214,12 @@ pub fn pet_ai_system(
         let book = combatant.book().clone();
         let abilities = &book;
 
+        // The Heel latch folds this frame's health in before anything else,
+        // crowd control included, so a pet held in CC at Heel keeps
+        // recovering (`recover_heeled_pets`) and is released on time.
+        let hp_ratio = hp_ratio_of(&combatant);
+        combatant.pet_heeled = heel_latch(combatant.pet_heeled, hp_ratio);
+
         let is_incapacitated = crate::states::play_match::utils::is_incapacitated(auras);
         if is_incapacitated {
             // Despawn any queued PetCommand so it doesn't fire next tick.
@@ -161,18 +234,13 @@ pub fn pet_ai_system(
         // ~107). Pet AI assigns pet.target = owner.target so existing
         // target-pursuit movement (movement.rs:391+) closes pets on enemies.
         //
-        // U6: Heel predicate — when HP < 25%, target is cleared, any queued
+        // U6: Heel — while the latch holds (below `PET_HEEL_ENTER_HP`, until
+        // it recovers to `PET_HEEL_RELEASE_HP`), target is cleared, any queued
         // PetCommand is despawned, and the pet returns to the owner's flank
         // via the existing follow-owner branch (movement.rs:309+). A
         // LowHealthHeel rejection trace event is emitted so the audit can
         // attribute the no-action to the predicate.
-        let hp_ratio = if combatant.max_health > 0.0 {
-            combatant.current_health / combatant.max_health
-        } else {
-            0.0
-        };
-        let in_heel = hp_ratio < 0.25;
-        if in_heel {
+        if combatant.pet_heeled {
             combatant.target = None;
             // Despawn any Hunter-dispatched PetCommand without execution.
             if pet_command.is_some() {
@@ -975,14 +1043,9 @@ fn spider_autonomous_dispatch(
         return;
     };
 
-    // Heel suppression — pet AI already handled HP<25% via continue above,
-    // but defensively skip dispatch if the pet is heeling.
-    let hp_ratio = if combatant.max_health > 0.0 {
-        combatant.current_health / combatant.max_health
-    } else {
-        0.0
-    };
-    if hp_ratio < 0.25 {
+    // Heel suppression — pet AI already handled the Heel latch via continue
+    // above, but defensively skip dispatch if the pet is heeling.
+    if combatant.pet_heeled {
         return;
     }
 
@@ -1058,12 +1121,7 @@ fn boar_autonomous_dispatch(
         return;
     };
 
-    let hp_ratio = if combatant.max_health > 0.0 {
-        combatant.current_health / combatant.max_health
-    } else {
-        0.0
-    };
-    if hp_ratio < 0.25 {
+    if combatant.pet_heeled {
         return;
     }
 
@@ -1140,12 +1198,7 @@ fn bird_autonomous_dispatch(
         return;
     };
 
-    let hp_ratio = if combatant.max_health > 0.0 {
-        combatant.current_health / combatant.max_health
-    } else {
-        0.0
-    };
-    if hp_ratio < 0.25 {
+    if combatant.pet_heeled {
         return;
     }
 
@@ -1227,6 +1280,67 @@ mod tests {
     use bevy::ecs::world::CommandQueue;
     use std::collections::BTreeMap;
 
+    /// A pet goes to Heel below the enter threshold; at the same health a pet
+    /// that is not at Heel keeps fighting.
+    #[test]
+    fn heel_is_entered_below_the_enter_threshold() {
+        assert!(heel_latch(false, PET_HEEL_ENTER_HP - 0.01));
+        assert!(!heel_latch(false, PET_HEEL_ENTER_HP));
+    }
+
+    /// Between the two thresholds the latch decides: a heeled pet stays at
+    /// Heel, recovering, and a fighting pet keeps fighting.
+    #[test]
+    fn between_the_thresholds_a_heeled_pet_stays_at_heel() {
+        let between = (PET_HEEL_ENTER_HP + PET_HEEL_RELEASE_HP) / 2.0;
+        assert!(heel_latch(true, between));
+        assert!(!heel_latch(false, between));
+    }
+
+    /// A heeled pet is released once it has recovered to the release
+    /// threshold, and not a hair before.
+    #[test]
+    fn a_heeled_pet_is_released_at_the_release_threshold() {
+        assert!(heel_latch(true, PET_HEEL_RELEASE_HP - 0.01));
+        assert!(!heel_latch(true, PET_HEEL_RELEASE_HP));
+    }
+
+    /// An owner deciding from the snapshot sees the pet's latch, and also a
+    /// pet that dropped below the threshold this frame, before `pet_ai_system`
+    /// has folded the drop in; a non-pet is never at Heel.
+    #[test]
+    fn an_owner_reads_the_heel_latch_from_the_snapshot() {
+        let row = |is_pet, pet_heeled, hp: f32| CombatantInfo {
+            entity: Entity::from_raw(1),
+            team: 1,
+            slot: 0,
+            class: CharacterClass::Hunter,
+            current_health: hp * 100.0,
+            max_health: 100.0,
+            current_mana: 0.0,
+            max_mana: 0.0,
+            position: Vec3::ZERO,
+            velocity: Vec3::ZERO,
+            is_alive: true,
+            stealthed: false,
+            target: None,
+            is_pet,
+            pet_heeled,
+            casting_ability: None,
+            pet_type: is_pet.then_some(PetType::Spider),
+            pet: None,
+            book: AbilityBook::shipped_for(
+                CharacterClass::Hunter,
+                is_pet.then_some(PetType::Spider),
+            ),
+        };
+        let between = (PET_HEEL_ENTER_HP + PET_HEEL_RELEASE_HP) / 2.0;
+        assert!(row(true, true, between).is_heeled());
+        assert!(!row(true, false, between).is_heeled());
+        assert!(row(true, false, PET_HEEL_ENTER_HP - 0.01).is_heeled());
+        assert!(!row(false, false, PET_HEEL_ENTER_HP - 0.01).is_heeled());
+    }
+
     /// Devour Magic frees a trapped teammate it can see, and refuses — traced
     /// `LosBlocked` — the same teammate at the same distance behind a pillar
     /// (AS-186: no ally dispel goes through a pillar).
@@ -1247,6 +1361,7 @@ mod tests {
             stealthed: false,
             target: None,
             is_pet,
+            pet_heeled: false,
             casting_ability: None,
             pet_type: is_pet.then_some(PetType::Felhunter),
             pet: None,
@@ -1361,6 +1476,7 @@ mod tests {
             stealthed: false,
             target: None,
             is_pet: pet_type.is_some(),
+            pet_heeled: false,
             casting_ability: None,
             pet_type,
             pet: None,
@@ -1558,6 +1674,7 @@ mod tests {
                 stealthed: false,
                 target: None,
                 is_pet: pet_type.is_some(),
+                pet_heeled: false,
                 casting_ability: None,
                 pet_type,
                 pet: None,
@@ -1842,6 +1959,7 @@ mod tests {
                         stealthed: false,
                         target: None,
                         is_pet: pet.is_some(),
+                        pet_heeled: false,
                         casting_ability: None,
                         pet_type: pet,
                         pet: None,
