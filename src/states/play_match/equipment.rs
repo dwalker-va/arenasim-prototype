@@ -827,6 +827,9 @@ item_ids! {
     RedemptionBoots,
     RedemptionGirdle,
     RedemptionWristguards,
+
+    // === Champion: Trinkets ===
+    HandOfJustice,
 }
 
 // ============================================================================
@@ -952,6 +955,13 @@ impl ItemConfig {
             ItemSlotType::OffHand => Some(HeldSlot::OffHandOnly),
             _ => None,
         }
+    }
+
+    /// The item's proc when it grants a BUFF — the procs that have an aura to
+    /// list, draw and describe. `None` for no proc, and for an extra swing
+    /// (Hand of Justice), which lands an attack rather than an aura.
+    pub fn proc_buff(&self) -> Option<&ProcConfig> {
+        self.proc.as_ref().filter(|p| p.buff().is_some())
     }
 
     /// The tier `item_tier` names, or `None` for a number no tier has. A
@@ -4398,7 +4408,8 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     const CHAMPION_ARMOR_GAIN: f32 = 0.55;
 
     /// Every Champion-tier (item_tier 2) item.
-    const CHAMPION_TIER: [ItemId; 56] = [
+    const CHAMPION_TIER: [ItemId; 57] = [
+        ItemId::HandOfJustice,
         ItemId::FrostfireCirclet,
         ItemId::FrostfireRobe,
         ItemId::FrostfireLeggings,
@@ -4829,7 +4840,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     #[test]
     fn budget_rejects_a_proc_that_is_over_budget_on_its_own() {
         use super::super::components::AuraType;
-        use super::super::proc_trinkets::{ProcConfig, ProcTrigger};
+        use super::super::proc_trinkets::{ProcConfig, ProcEffect, ProcTrigger};
 
         let mut item = budget_test_item(ItemSlotType::Trinket, 58);
         assert!(
@@ -4840,7 +4851,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         item.proc = Some(ProcConfig {
             trigger: ProcTrigger::MeleeHit,
             chance: 0.15,
-            effect: AuraType::AttackPowerIncrease,
+            effect: ProcEffect::Buff(AuraType::AttackPowerIncrease),
             magnitude: 120.0,
             duration: 10.0,
             internal_cooldown: 40.0,
@@ -4855,13 +4866,13 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     #[test]
     fn budget_accepts_the_same_proc_once_its_cooldown_prices_it_in() {
         use super::super::components::AuraType;
-        use super::super::proc_trinkets::{ProcConfig, ProcTrigger};
+        use super::super::proc_trinkets::{ProcConfig, ProcEffect, ProcTrigger};
 
         let mut item = budget_test_item(ItemSlotType::Trinket, 58);
         item.proc = Some(ProcConfig {
             trigger: ProcTrigger::MeleeHit,
             chance: 0.15,
-            effect: AuraType::AttackPowerIncrease,
+            effect: ProcEffect::Buff(AuraType::AttackPowerIncrease),
             magnitude: 120.0,
             duration: 10.0,
             // 10/110 uptime -> 1.5 * 120 * 0.0909 = 16.4 points.

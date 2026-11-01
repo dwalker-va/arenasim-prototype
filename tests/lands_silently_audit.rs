@@ -32,6 +32,8 @@
 //! On top of the families, `every_ability_belongs_to_a_family` makes the
 //! families a cover of the whole config: an ability that no family scans is
 //! a failure unless it is named in `NO_FAMILY` with the visual that covers it.
+//! One family is not an ability's: an item proc's EXTRA SWING (Hand of
+//! Justice) lands an attack too, so `extra_swing_*` scans `items.ron` for it.
 //! The harness's own failure modes are proved by planted offenders at the
 //! bottom of the file.
 //!
@@ -54,10 +56,13 @@ use std::collections::BTreeSet;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
+use arenasim::states::play_match::combat_core::ExtraSwingSource;
 use arenasim::states::play_match::components::{
     AuraLandingKind, AuraType, CurseKind, HealImpact, HealImpactKind, HotVisual,
     InstantAbilityFired, RootStyle, SchoolImpact, TotemElement,
 };
+use arenasim::states::play_match::equipment::{load_item_definitions, ItemId};
+use arenasim::states::play_match::proc_trinkets::ProcEffect;
 use arenasim::states::play_match::{
     bolt_kind_for, client_landing_style, curse_spec, hunter_shot_for, root_style_for,
     DotStateVisual, InterruptLanding, SlowTint, DIVINE_SHIELD_AURA_NAME, ICE_BARRIER_AURA_NAME,
@@ -73,12 +78,12 @@ use AbilityType::*;
 type Judge = fn(AbilityType, &AbilityConfig) -> Option<&'static str>;
 
 /// Claim 1: the scan found exactly the named members.
-fn check_finds(
+fn check_finds<T: Ord + Copy + std::fmt::Debug>(
     family: &str,
-    scanned: &BTreeSet<AbilityType>,
-    named: &[AbilityType],
+    scanned: &BTreeSet<T>,
+    named: &[T],
 ) -> Result<(), String> {
-    let named: BTreeSet<AbilityType> = named.iter().copied().collect();
+    let named: BTreeSet<T> = named.iter().copied().collect();
     let mut problems = Vec::new();
     for lost in named.difference(scanned) {
         problems.push(format!(
@@ -101,11 +106,11 @@ fn check_finds(
 
 /// Claim 2: the judge draws every member except exactly the known-silent
 /// ones.
-fn check_judged(
+fn check_judged<T: Ord + Copy + std::fmt::Debug>(
     family: &str,
-    members: &BTreeSet<AbilityType>,
-    judge: impl Fn(AbilityType) -> Option<&'static str>,
-    known_silent: &[(AbilityType, &str)],
+    members: &BTreeSet<T>,
+    judge: impl Fn(T) -> Option<&'static str>,
+    known_silent: &[(T, &str)],
 ) -> Result<(), String> {
     let mut problems = Vec::new();
     let mut listed = BTreeSet::new();
@@ -942,6 +947,63 @@ const NO_FAMILY: &[(AbilityType, &str)] = &[
          lands nothing on anyone",
     ),
 ];
+
+// ── family: extra swings (item procs) ───────────────────────────────────────
+
+/// An item proc that lands an extra swing (`ProcEffect::ExtraSwing`) lands an
+/// attack, so it is a landing like any ability's — but it is no ability, so
+/// this family scans `items.ron` and is keyed by item. Its swing takes Windfury
+/// Totem's path, and its only possible visual on that path is the totem's
+/// tornado, which a trinket must NOT draw (`ExtraSwingSource`): so the judge
+/// reports what the shared path would draw for the item, and every member is
+/// silent until its own visual lands.
+fn extra_swing_items() -> BTreeSet<&'static str> {
+    let items = load_item_definitions().expect("items.ron loads");
+    ItemId::all()
+        .iter()
+        .filter(|id| {
+            items
+                .get(id)
+                .and_then(|item| item.proc.as_ref())
+                .is_some_and(|p| p.effect == ProcEffect::ExtraSwing)
+        })
+        .map(|id| id.as_str())
+        .collect()
+}
+
+fn extra_swing_judge(name: &'static str) -> Option<&'static str> {
+    let item = *ItemId::all()
+        .iter()
+        .find(|id| id.as_str() == name)
+        .expect("a member is an item");
+    ExtraSwingSource::Trinket(item)
+        .spawns_windfury_tornado()
+        .then_some("WindfuryTornado (Windfury Totem's visual — a trinket must not draw it)")
+}
+
+const EXTRA_SWING_MEMBERS: &[&str] = &["HandOfJustice"];
+
+/// Hand of Justice's own visual is the client's Cheap Shot crescents.
+const EXTRA_SWING_KNOWN_SILENT: &[(&str, &str)] = &[("HandOfJustice", "AS-434")];
+
+#[test]
+fn extra_swing_finds_every_member() {
+    if let Err(e) = check_finds("extra-swing", &extra_swing_items(), EXTRA_SWING_MEMBERS) {
+        panic!("{e}");
+    }
+}
+
+#[test]
+fn extra_swing_lands_nothing_silently() {
+    if let Err(e) = check_judged(
+        "extra-swing",
+        &extra_swing_items(),
+        extra_swing_judge,
+        EXTRA_SWING_KNOWN_SILENT,
+    ) {
+        panic!("{e}");
+    }
+}
 
 const FAMILIES: &[fn(AbilityType, &AbilityConfig) -> bool] = &[
     is_heal,

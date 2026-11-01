@@ -663,7 +663,7 @@ any ring fits either ring socket, and the same item may not occupy both
    proc: Some((
        trigger: MeleeHit,         // MeleeHit | SpellCast | Heal
        chance: 0.15,              // per qualifying event, in (0.0, 1.0]
-       effect: AttackPowerIncrease,
+       effect: Buff(AttackPowerIncrease),  // or ExtraSwing (see below)
        magnitude: 55.0,           // in the effect aura's own units
        duration: 10.0,
        internal_cooldown: 45.0,   // must be >= duration
@@ -692,6 +692,17 @@ any ring fits either ring socket, and the same item may not occupy both
      at their item-stat weights, and haste (`AttackSpeedIncrease`, the
      Dragonspine Trophy's +20% attack speed) at `WEIGHT_ATTACK_SPEED`, crit's
      weight at TBC's rating exchange rate.
+   - **`effect: ExtraSwing`** (Hand of Justice) is the one proc that is not a
+     buff: on a `MeleeHit` from either hand it queues one extra MAIN-hand swing
+     on Windfury Totem's own path (`combat_core::ExtraSwingSource`), rolled
+     where the swing is queued rather than after it lands. It takes no
+     `magnitude`, `duration` or `internal_cooldown` (validated), never draws
+     the totem's `WindfuryTornado`, grants no rage (a TBC deviation, AS-448)
+     and no further extra swing, and logs `X procs <trinket> (extra attack)`.
+     No stat buys it, so it is priced at a DECLARED rate per unit of `chance`,
+     `WEIGHT_EXTRA_SWING`: 1.5x haste's weight, provisional (a 10x-dose sweep
+     the constant cites). Every consumer that lists or draws proc BUFFS asks
+     `ItemConfig::proc_buff`, which excludes it.
    - **Procs are not purgeable.** A proc buff is `DispelType::Physical` — an
      item's effect is not a spell, however magical it looks — so no purge,
      dispel or cleanse removes it.

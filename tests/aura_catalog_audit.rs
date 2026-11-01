@@ -553,6 +553,8 @@ fn named_auras_built_from_helpers_also_resolve() {
     }
 
     // `proc_trinkets::ProcConfig::aura` names a proc's buff after the trinket.
+    // Only a BUFF proc has one: Hand of Justice's extra swing lands an attack,
+    // not an aura, so `proc_buff` passes over it.
     // Built through the SIMULATION's own constructor — the one `roll_procs`
     // calls — so a trinket whose buff the catalog does not cover fails here
     // rather than showing the player a frame with no page behind it.
@@ -563,7 +565,7 @@ fn named_auras_built_from_helpers_also_resolve() {
     let items = shipped_items();
     for id in ItemId::all() {
         let Some(item) = items.get(id) else { continue };
-        let Some(proc) = item.proc.as_ref() else {
+        let Some(proc) = item.proc_buff() else {
             continue;
         };
         let sample = proc.aura(*id, &item.name);
@@ -596,6 +598,7 @@ fn at_least_one_proc_trinket_ships() {
         with_procs,
         vec![
             "Dragonspine Trophy",
+            "Hand of Justice",
             "Reliquary of Renewal",
             "Sigil of Arcane Surge",
             "Whetstone of Fury",

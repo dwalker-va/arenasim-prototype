@@ -368,6 +368,28 @@ pub const TBC_HASTE_RATING_PER_PERCENT: f32 = 15.77;
 pub const WEIGHT_ATTACK_SPEED: f32 =
     WEIGHT_CRIT_CHANCE * TBC_HASTE_RATING_PER_PERCENT / TBC_CRIT_RATING_PER_PERCENT;
 
+/// What an extra swing on a fraction `p` of landed melee hits is worth, as a
+/// multiple of what `p` of haste costs ([`WEIGHT_ATTACK_SPEED`]). PROVISIONAL:
+/// see [`WEIGHT_EXTRA_SWING`].
+pub const EXTRA_SWING_HASTE_RATIO: f32 = 1.5;
+
+/// Cost per unit of `chance` of an EXTRA-SWING proc (Hand of Justice: a 5%
+/// chance on each landed melee hit of one more main-hand swing costs
+/// `0.05 * 321.4 = 16.07` points).
+///
+/// A DECLARED price, not a stat weight: no item stat buys an extra swing. Its
+/// unit is haste's, because an extra swing on a fraction `p` of landed hits
+/// is about `p` more main-hand swings in the same time — what `p` of haste
+/// buys. Its size is PROVISIONAL, from a directional sweep at a 10x dose:
+/// traded for attack power in the item budget, an extra swing priced at
+/// haste's weight beat the attack power it was traded for, at 1.5x the two
+/// broke even, and at 2x the attack power won
+/// (`docs/design/balance/2026-10-31-as427-extra-swing-price.md`). The rate at
+/// the shipped 5% is ASSUMED from that bracket — damage is linear in chance,
+/// its worth in wins is not — and is retuned with the rest of the gear after
+/// the milestone sweep.
+pub const WEIGHT_EXTRA_SWING: f32 = EXTRA_SWING_HASTE_RATIO * WEIGHT_ATTACK_SPEED;
+
 /// Cost weight per fraction-point of movement_speed in the item budget.
 /// Since movement_speed is stored as a fraction (0.1 = 10% speed),
 /// this weight is large so that 0.1 speed costs 3.0 budget points.

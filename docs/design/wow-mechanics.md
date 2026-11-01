@@ -227,6 +227,29 @@ So main-hand-only is the realistic *outcome* of how the buff was actually used.
 We model that outcome directly rather than modelling the enchant slot that
 produces it.
 
+### Hand of Justice: the same extra swing, off either hand
+
+Hand of Justice (a Champion trinket) procs Windfury's extra swing from a
+trinket: 5% on each melee hit that connects (Classic's 11815 is 2%). Its swing
+takes the totem's path (`ExtraSwingSource` in `combat_core/auto_attack.rs`) —
+its own avoidance and crit rolls, no Heroic Strike bonus, no rage, no further
+extra swing — with three differences:
+
+- **Either hand procs it, and the swing is the main hand's**, as in Classic,
+  where an extra attack is always a main-hand attack. Nothing occupies the
+  trinket the way a poison occupies the off-hand enchant slot.
+- **It draws no `WindfuryTornado`.** The funnel is Windfury Attack's client
+  visual and reads as a totem proc; the trinket's own visual is AS-434.
+- **It is priced at a declared rate** (`WEIGHT_EXTRA_SWING`): no stat buys an
+  extra swing.
+
+Neither swing carries bonus attack power: an auto-attack here is weapon damage
+alone, so the totem's swing and the trinket's are the same swing.
+
+**Deviation from TBC: an extra swing generates no rage.** In TBC an extra
+attack generates rage like any white hit. Here neither the totem's swing nor
+the trinket's does; the rule change is AS-448.
+
 ---
 
 ## Resource Systems

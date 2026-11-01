@@ -46,6 +46,13 @@
 //! chance lands the free first proc sooner, and the price does not see that
 //! either.
 //!
+//! **An extra swing is the exception: a declared price.** Hand of Justice's
+//! [`ProcEffect::ExtraSwing`] grants no stat, so no stat weight prices it. It
+//! carries [`WEIGHT_EXTRA_SWING`] per unit of `chance`: in haste's unit (an
+//! extra swing on a fraction of hits is that fraction more swings, which is
+//! what haste buys), at a provisional multiple of haste's weight from a
+//! sweep — the constant cites it.
+//!
 //! ## Determinism
 //!
 //! Every roll is drawn from the seeded `GameRng`, and the whole mechanism is
@@ -81,8 +88,8 @@ use serde::{Deserialize, Serialize};
 use super::components::GameRng;
 use super::components::{Aura, AuraType, DispelType};
 use super::constants::{
-    WEIGHT_ATTACK_POWER, WEIGHT_ATTACK_SPEED, WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN,
-    WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA, WEIGHT_SPELL_POWER,
+    WEIGHT_ATTACK_POWER, WEIGHT_ATTACK_SPEED, WEIGHT_CRIT_CHANCE, WEIGHT_EXTRA_SWING,
+    WEIGHT_MANA_REGEN, WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA, WEIGHT_SPELL_POWER,
 };
 use super::equipment::ItemId;
 
@@ -151,8 +158,10 @@ proc_triggers! {
     // `DamageTaken` — the one trigger that fires from inside the damage
     // application path, which is where a proc could re-enter itself (a proc
     // that deals damage, procced by damage). Leaving it out is what lets this
-    // module state flatly that no proc effect deals damage or healing, and so
-    // that a proc can never trigger another proc. Adding it is a card of its
+    // module state flatly that no proc can re-enter itself. The one proc that
+    // deals damage, the extra swing, lands an ordinary melee hit — which may
+    // proc a BUFF on `MeleeHit` — but is never rolled for an extra swing
+    // again, and a buff fires nothing. Adding `DamageTaken` is a card of its
     // own, and that analysis is its cost of entry.
 }
 
@@ -167,20 +176,46 @@ pub struct ProcConfig {
     pub trigger: ProcTrigger,
     /// Probability per qualifying event, in `(0.0, 1.0]`.
     pub chance: f32,
-    /// The buff the proc grants its wearer. Restricted to the stat auras
-    /// [`proc_effect_budget_weight`] can price; anything else is rejected at
-    /// load.
-    pub effect: AuraType,
-    /// The buff's magnitude, in the effect aura's own units (flat points for
+    /// What the proc does when it fires — see [`ProcEffect`].
+    pub effect: ProcEffect,
+    /// A buff's magnitude, in the effect aura's own units (flat points for
     /// attack/spell power, a fraction for crit chance and for haste, mana per
-    /// second for mana regen).
+    /// second for mana regen). `0.0` for a [`ProcEffect::ExtraSwing`], which
+    /// has none and leaves it out of `items.ron`.
+    #[serde(default)]
     pub magnitude: f32,
-    /// How long the buff lasts, in seconds.
+    /// How long a buff lasts, in seconds. `0.0` for an extra swing.
+    #[serde(default)]
     pub duration: f32,
     /// How long this trinket cannot proc again, in seconds, measured from the
-    /// moment it fires. Must be at least `duration` — that is what makes "a
-    /// proc cannot stack on top of itself" structural rather than hoped for.
+    /// moment it fires. For a buff it must be at least `duration` — that is
+    /// what makes "a proc cannot stack on top of itself" structural rather than
+    /// hoped for. `0.0` for an extra swing, which has no buff to stack.
+    #[serde(default)]
     pub internal_cooldown: f32,
+}
+
+/// What a proc does when it fires.
+///
+/// Two kinds, because they resolve in different places: a BUFF is an aura on
+/// the wearer, landed through `apply_pending_auras` after the swing or cast
+/// that procced it; an EXTRA SWING is one more melee attack, queued beside the
+/// swing that procced it on the path Windfury Totem's bonus swing takes
+/// (`combat_core::ExtraSwingSource`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ProcEffect {
+    /// Grant the wearer a buff of this aura type, for `duration`, at
+    /// `magnitude`. Restricted to the stat auras [`proc_effect_budget_weight`]
+    /// can price; anything else is rejected at load.
+    Buff(AuraType),
+    /// One extra MAIN-HAND swing at the target the procced swing hit (Hand of
+    /// Justice). Keyed only to [`ProcTrigger::MeleeHit`]. It resolves exactly
+    /// as Windfury Totem's bonus swing does — a swing of its own, which may be
+    /// dodged or parried, rolls its own crit, and carries no Heroic Strike
+    /// bonus — and it grants no further extra swing. It has no magnitude,
+    /// duration or cooldown, and is priced at [`WEIGHT_EXTRA_SWING`] per unit
+    /// of `chance`.
+    ExtraSwing,
 }
 
 impl ProcConfig {
@@ -201,10 +236,30 @@ impl ProcConfig {
     /// The item-budget cost of carrying this proc — see the module docs.
     /// `0.0` for an effect with no price, which cannot ship: [`validate_proc`]
     /// rejects it before it can reach an item.
+    ///
+    /// An extra swing has no stat behind it, so it carries a DECLARED price:
+    /// [`WEIGHT_EXTRA_SWING`] per unit of `chance` (that constant says how it
+    /// was set and where it is checked). It has no buff to keep up, so there
+    /// is no uptime term, and here — unlike a buff — `chance` IS the power knob.
     pub fn budget_cost(&self) -> f32 {
-        proc_effect_budget_weight(self.effect).unwrap_or(0.0)
-            * self.magnitude
-            * self.long_run_uptime()
+        match self.effect {
+            ProcEffect::Buff(aura) => {
+                proc_effect_budget_weight(aura).unwrap_or(0.0)
+                    * self.magnitude
+                    * self.long_run_uptime()
+            }
+            ProcEffect::ExtraSwing => WEIGHT_EXTRA_SWING * self.chance,
+        }
+    }
+
+    /// The aura type this proc's buff carries, or `None` when the proc is not
+    /// a buff. Every consumer that lists, draws or describes proc BUFFS asks
+    /// this, so an extra swing is never mistaken for one.
+    pub fn buff(&self) -> Option<AuraType> {
+        match self.effect {
+            ProcEffect::Buff(aura) => Some(aura),
+            ProcEffect::ExtraSwing => None,
+        }
     }
 
     /// The buff this proc grants, ready to hand to `AuraPending`.
@@ -219,9 +274,15 @@ impl ProcConfig {
     /// takes magic, and an item's effect is not a spell however magical it
     /// looks. Declared here rather than derived from a school because a
     /// trinket has no school to derive it from.
+    ///
+    /// Panics on a proc that is not a buff: an extra swing grants no aura, and
+    /// [`roll_procs`] never asks one for it.
     pub fn aura(&self, item: ItemId, source_name: &str) -> Aura {
+        let effect_type = self
+            .buff()
+            .unwrap_or_else(|| panic!("{source_name}: an extra-swing proc grants no aura"));
         Aura {
-            effect_type: self.effect,
+            effect_type,
             duration: self.duration,
             magnitude: self.magnitude,
             break_on_damage_threshold: -1.0,
@@ -327,18 +388,41 @@ pub fn proc_effect_budget_weight(effect: AuraType) -> Option<f32> {
 /// promise — "trinket procs cannot stack on top of each other" — a property of
 /// the DATA rather than of the roll: a trinket whose buff is still up is still
 /// on its own cooldown, so there is no ordering in which it doubles up.
+///
+/// An extra swing is held to the shape it has: a melee trigger, and no
+/// magnitude, duration or cooldown — its price charges a roll on every landed
+/// hit, so a cooldown would be paid for and never delivered.
 pub fn validate_proc(item_name: &str, proc: &ProcConfig) -> Result<(), String> {
-    if proc_effect_budget_weight(proc.effect).is_none() {
-        return Err(format!(
-            "{}: proc effect {:?} has no budget price — a proc may only grant an effect \
-             `proc_effect_budget_weight` prices",
-            item_name, proc.effect
-        ));
-    }
     if !(proc.chance > 0.0 && proc.chance <= 1.0) {
         return Err(format!(
             "{}: proc chance {} is outside (0.0, 1.0]",
             item_name, proc.chance
+        ));
+    }
+    let aura = match proc.effect {
+        ProcEffect::Buff(aura) => aura,
+        ProcEffect::ExtraSwing => {
+            if proc.trigger != ProcTrigger::MeleeHit {
+                return Err(format!(
+                    "{}: an extra swing procs on a melee hit, not on {:?}",
+                    item_name, proc.trigger
+                ));
+            }
+            if proc.magnitude != 0.0 || proc.duration != 0.0 || proc.internal_cooldown != 0.0 {
+                return Err(format!(
+                    "{}: an extra swing has no magnitude, duration or internal_cooldown — \
+                     leave them out",
+                    item_name
+                ));
+            }
+            return Ok(());
+        }
+    };
+    if proc_effect_budget_weight(aura).is_none() {
+        return Err(format!(
+            "{}: proc effect {:?} has no budget price — a proc may only grant an effect \
+             `proc_effect_budget_weight` prices",
+            item_name, aura
         ));
     }
     if proc.duration <= 0.0 {
@@ -421,7 +505,12 @@ pub fn roll_procs(
     }
     let mut granted = Vec::new();
     for slot in slots.iter_mut() {
-        if slot.remaining_icd > 0.0 || !fired.contains(&slot.config.trigger) {
+        // An extra swing is rolled where its swing is queued
+        // (`roll_extra_swing`), never here, where it would draw for nothing.
+        if slot.config.buff().is_none()
+            || slot.remaining_icd > 0.0
+            || !fired.contains(&slot.config.trigger)
+        {
             continue;
         }
         if game_rng.random_f32() < slot.config.chance {
@@ -430,6 +519,38 @@ pub fn roll_procs(
         }
     }
     granted
+}
+
+/// Roll the wearer's extra-swing procs for one melee swing, of either hand,
+/// that connected (neither missed, dodged nor parried), and return the trinket
+/// that fired and its display name, if one did.
+///
+/// Called by `combat_auto_attack` where the swing is QUEUED — the site Windfury
+/// Totem's bonus swing is rolled at — rather than with [`roll_procs`] after the
+/// apply pass, because the extra swing is queued beside the swing that procced
+/// it. A swing the friendly-CC guard or a same-frame death later drops has
+/// still rolled, and its extra swing is dropped with it.
+///
+/// **Draws nothing for a wearer with no extra-swing proc**, so every loadout
+/// without one keeps its RNG stream. At most one extra swing per hit: the
+/// first slot that fires ends the roll.
+pub fn roll_extra_swing(
+    slots: &mut [ProcSlot],
+    game_rng: &mut GameRng,
+) -> Option<(ItemId, String)> {
+    for slot in slots.iter_mut() {
+        if slot.config.effect != ProcEffect::ExtraSwing
+            || slot.config.trigger != ProcTrigger::MeleeHit
+            || slot.remaining_icd > 0.0
+        {
+            continue;
+        }
+        if game_rng.random_f32() < slot.config.chance {
+            slot.remaining_icd = slot.config.internal_cooldown;
+            return Some((slot.item, slot.name.clone()));
+        }
+    }
+    None
 }
 
 // ============================================================================
@@ -444,6 +565,13 @@ pub fn proc_description(proc: &ProcConfig) -> String {
         ProcTrigger::SpellCast => "on a completed spell cast",
         ProcTrigger::Heal => "on a completed heal",
     };
+    if proc.effect == ProcEffect::ExtraSwing {
+        return format!(
+            "Chance {} ({:.0}%) to make an extra attack with your main-hand weapon.",
+            event,
+            proc.chance * 100.0,
+        );
+    }
     format!(
         "Chance {} ({:.0}%) to gain {} for {:.0}s. Cannot occur more than once every {:.0}s.",
         event,
@@ -458,7 +586,10 @@ pub fn proc_description(proc: &ProcConfig) -> String {
 /// chance". Exhaustive over the PRICED effects and falls back to the aura's own
 /// mechanic name for the rest, which cannot reach an item anyway.
 fn proc_effect_phrase(proc: &ProcConfig) -> String {
-    match proc.effect {
+    let Some(aura) = proc.buff() else {
+        return "an extra attack".to_string();
+    };
+    match aura {
         AuraType::AttackPowerIncrease => format!("+{:.0} attack power", proc.magnitude),
         AuraType::SpellPowerIncrease => format!("+{:.0} spell power", proc.magnitude),
         AuraType::CritChanceIncrease => format!("+{:.0}% crit chance", proc.magnitude * 100.0),
@@ -480,7 +611,7 @@ mod tests {
         ProcConfig {
             trigger: ProcTrigger::MeleeHit,
             chance: 0.15,
-            effect,
+            effect: ProcEffect::Buff(effect),
             magnitude,
             duration,
             internal_cooldown: icd,
@@ -581,7 +712,7 @@ mod tests {
             ProcConfig {
                 trigger: ProcTrigger::MeleeHit,
                 chance: 0.15,
-                effect: AuraType::AttackSpeedIncrease,
+                effect: ProcEffect::Buff(AuraType::AttackSpeedIncrease),
                 magnitude: 0.20,
                 duration: 10.0,
                 internal_cooldown: 45.0,
@@ -651,7 +782,7 @@ mod tests {
             config: ProcConfig {
                 trigger,
                 chance: 1.0,
-                effect: AuraType::AttackPowerIncrease,
+                effect: ProcEffect::Buff(AuraType::AttackPowerIncrease),
                 magnitude: 30.0,
                 duration: 10.0,
                 internal_cooldown: 40.0,
@@ -775,6 +906,127 @@ mod tests {
         assert_eq!(
             aura.break_on_damage_threshold, -1.0,
             "a proc buff is not broken by damage"
+        );
+    }
+
+    // ---- the extra swing ----
+
+    /// An extra-swing proc as Hand of Justice declares it.
+    fn extra_swing(chance: f32) -> ProcConfig {
+        ProcConfig {
+            trigger: ProcTrigger::MeleeHit,
+            chance,
+            effect: ProcEffect::ExtraSwing,
+            magnitude: 0.0,
+            duration: 0.0,
+            internal_cooldown: 0.0,
+        }
+    }
+
+    fn extra_swing_slot(chance: f32) -> ProcSlot {
+        ProcSlot {
+            item: ItemId::HandOfJustice,
+            name: "Hand of Justice".to_string(),
+            config: extra_swing(chance),
+            remaining_icd: 0.0,
+        }
+    }
+
+    /// The shipped Hand of Justice: +21 attack power and a 5% chance on a
+    /// melee hit of an extra swing, the swing priced at its declared rate.
+    #[test]
+    fn hand_of_justice_procs_an_extra_swing_at_its_declared_price() {
+        let items = super::super::equipment::load_item_definitions().expect("items.ron loads");
+        let item = items
+            .get(&ItemId::HandOfJustice)
+            .expect("Hand of Justice ships");
+        assert_eq!(item.attack_power, 21.0);
+        let proc = item.proc.clone().expect("Hand of Justice carries a proc");
+        assert_eq!(proc, extra_swing(0.05));
+        assert!(item.proc_buff().is_none(), "an extra swing is not a buff");
+        assert_eq!(WEIGHT_EXTRA_SWING, 1.5 * WEIGHT_ATTACK_SPEED);
+        assert!((proc.budget_cost() - 0.05 * 1.5 * WEIGHT_ATTACK_SPEED).abs() < 1e-4);
+        assert!(
+            (proc.budget_cost() - 16.07).abs() < 0.01,
+            "{}",
+            proc.budget_cost()
+        );
+        assert_eq!(
+            proc_description(&proc),
+            "Chance on a melee hit (5%) to make an extra attack with your main-hand weapon."
+        );
+    }
+
+    /// Unlike a buff's, an extra swing's price is linear in its chance: every
+    /// landed hit rolls it, and nothing bounds it but the chance.
+    #[test]
+    fn an_extra_swing_is_priced_by_its_chance() {
+        assert!(
+            (extra_swing(0.10).budget_cost() - 2.0 * extra_swing(0.05).budget_cost()).abs() < 1e-4
+        );
+    }
+
+    #[test]
+    fn validate_holds_an_extra_swing_to_its_shape() {
+        assert!(validate_proc("ok", &extra_swing(0.05)).is_ok());
+        let mut on_cast = extra_swing(0.05);
+        on_cast.trigger = ProcTrigger::SpellCast;
+        assert!(validate_proc("x", &on_cast)
+            .unwrap_err()
+            .contains("melee hit"));
+        for field in 0..3 {
+            let mut shaped = extra_swing(0.05);
+            match field {
+                0 => shaped.magnitude = 1.0,
+                1 => shaped.duration = 1.0,
+                _ => shaped.internal_cooldown = 1.0,
+            }
+            assert!(
+                validate_proc("x", &shaped)
+                    .unwrap_err()
+                    .contains("leave them out"),
+                "field {field}"
+            );
+        }
+        let mut zero = extra_swing(0.05);
+        zero.chance = 0.0;
+        assert!(validate_proc("x", &zero).is_err());
+    }
+
+    #[test]
+    fn a_certain_extra_swing_fires_and_names_its_trinket() {
+        let mut rng = GameRng::from_seed(2);
+        let mut slots = vec![extra_swing_slot(1.0)];
+        assert_eq!(
+            roll_extra_swing(&mut slots, &mut rng),
+            Some((ItemId::HandOfJustice, "Hand of Justice".to_string()))
+        );
+    }
+
+    /// The two rolls never cross: the after-the-swing buff roll draws nothing
+    /// for an extra-swing slot, and the at-the-swing extra-swing roll draws
+    /// nothing for a buff slot. Either drawing would move the RNG stream of
+    /// every match its wearer plays, for nothing.
+    #[test]
+    fn the_buff_roll_and_the_extra_swing_roll_never_draw_for_each_other() {
+        let expected = GameRng::from_seed(4).random_f32();
+
+        let mut rng = GameRng::from_seed(4);
+        let mut swing = vec![extra_swing_slot(1.0)];
+        assert!(roll_procs(&mut swing, &[ProcTrigger::MeleeHit], &mut rng).is_empty());
+        assert_eq!(
+            rng.random_f32(),
+            expected,
+            "roll_procs drew for an extra swing"
+        );
+
+        let mut rng = GameRng::from_seed(4);
+        let mut buff = vec![certain(ProcTrigger::MeleeHit, ItemId::DragonspineTrophy)];
+        assert_eq!(roll_extra_swing(&mut buff, &mut rng), None);
+        assert_eq!(
+            rng.random_f32(),
+            expected,
+            "roll_extra_swing drew for a buff"
         );
     }
 
