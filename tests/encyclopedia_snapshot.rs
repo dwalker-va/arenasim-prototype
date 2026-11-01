@@ -41,6 +41,7 @@ use arenasim::states::play_match::ability_config::{load_ability_definitions, Abi
 use arenasim::states::play_match::equipment::{
     load_item_definitions, ArmorType, ItemDefinitions, ItemId, ItemSlotType,
 };
+use arenasim::states::play_match::talents::{TalentDefinitions, TalentId};
 use arenasim::states::play_match::AbilityType;
 
 const SIZE: [f32; 2] = [1400.0, 900.0];
@@ -452,6 +453,30 @@ fn encyclopedia_aura_detail_source_siblings() {
     snapshot("encyclopedia_aura_detail_source_siblings", state);
 }
 
+/// The Talents index: every class with trees, each drawn read-only by the
+/// kit's talent tree, each node a link to its page; the classes without trees
+/// are named under them.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_talents_index() {
+    let mut state = state_at_root();
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::index(Section::Talents)),
+    );
+    snapshot("encyclopedia_talents_index", state);
+}
+
+/// A talent's page: its placement, every rank's generated text, its tier
+/// gate, and its place in its class's trees (the node drawn lit).
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_talent_detail() {
+    snapshot(
+        "encyclopedia_talent_detail",
+        state_at(Topic::Talent(TalentId::UnholyPower)),
+    );
+}
+
 /// The navigation cluster at a DEEP LINK: entered from the Results screen, so
 /// Back is disabled (a deep link is a fresh stack with no history above it) and
 /// Home names Results rather than the main menu. The two other cluster states —
@@ -505,7 +530,7 @@ fn abilities() -> AbilityDefinitions {
 /// on its first frame.
 fn state_at_root() -> EncyclopediaState {
     let mut state = EncyclopediaState::default();
-    state.rebuild_registry(&items(), &abilities());
+    state.rebuild_registry(&items(), &abilities(), TalentDefinitions::shipped());
     state
 }
 
@@ -540,6 +565,7 @@ fn snapshot_opened_from(
             item_icons: None,
             class_icons: None,
             ability_icons: None,
+            talents: TalentDefinitions::shipped(),
         };
         let _ = draw_encyclopedia(ctx, &mut state, &data, return_to);
     });

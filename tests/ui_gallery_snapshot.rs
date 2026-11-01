@@ -39,11 +39,12 @@ use arenasim::ui::theme::{class_color, color, data, icon, school_color, size, sp
 use arenasim::ui::widgets::{
     class_icon, empty_state, link, list_row, paint_icon, panel, panel_header, resource_bar,
     section_label, stat_row, stat_rows, tier_badge, tier_icon, tooltip_frame, Button, Checkbox,
-    Chip, ChoiceTile, Header, ListIcon, ListRow, Look, Modal, Nav, Tab, Tooltip, Variant,
+    Chip, ChoiceTile, Header, ListIcon, ListRow, Look, Modal, Nav, Tab, TalentNode,
+    TalentTreeColumn, TalentTrees, Tooltip, TreeMode, Variant,
 };
 
 const WIDTH: f32 = 1400.0;
-const HEIGHT: f32 = 1800.0;
+const HEIGHT: f32 = 2340.0;
 /// Each of the page's two columns.
 const COLUMN: f32 = 660.0;
 
@@ -60,6 +61,7 @@ fn ui_gallery() {
         item_icons: None,
         class_icons: None,
         ability_icons: None,
+        talents: arenasim::states::play_match::talents::TalentDefinitions::shipped(),
     };
 
     let mut harness = Harness::builder().with_size([WIDTH, HEIGHT]).build(|ctx| {
@@ -87,12 +89,109 @@ fn gallery(ctx: &egui::Context, data: &EncyclopediaData) {
                     );
                 });
             ui.add_space(space::LG);
+            talent_trees(ui);
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = space::XL;
                 column(ui, left_column);
                 column(ui, |ui| right_column(ui, data));
             });
         });
+}
+
+/// The talent tree, full width, over fixture trees in the full shape the
+/// design gives a class (three trees, four tiers, a capstone each), whatever
+/// `talents.ron` ships today. One set of trees shows every node state:
+///
+/// * Affliction, untouched: tier 1 open, the gated tiers locked, an unmet
+///   arrow into its capstone;
+/// * Demonology, the spec (accent head): taken nodes, a met arrow into a
+///   taken capstone, a node hovered, and one rank PENDING above a locked-in
+///   floor — the Gauntlet's locked mode;
+/// * Destruction, two points in: tier 2 open beside a maxed tier-1 node.
+fn talent_trees(ui: &mut egui::Ui) {
+    let node =
+        |name: &'static str, tier: u8, column: u8, rank: u8, max_rank: u8, open: bool| TalentNode {
+            name,
+            icon: None,
+            tier,
+            column,
+            rank,
+            max_rank,
+            pending: 0,
+            open,
+            capstone: tier == 4,
+            requires: None,
+            driver_id: None,
+        };
+    let gates = [0, 2, 3, 5];
+    let affliction = TalentTreeColumn {
+        name: "Affliction",
+        icon: None,
+        points: 0,
+        leading: false,
+        gates,
+        nodes: vec![
+            node("Improved Drain Life", 1, 0, 0, 2, true),
+            node("Improved Curse of Agony", 1, 2, 0, 2, true),
+            node("Amplify Curse", 2, 0, 0, 1, false),
+            node("Nightfall", 2, 2, 0, 2, false),
+            node("Siphon Life", 3, 0, 0, 1, false),
+            node("Curse of Exhaustion", 3, 2, 0, 1, false),
+            TalentNode {
+                requires: Some((4, 1)),
+                ..node("Shadow Mastery", 4, 0, 0, 1, false)
+            },
+        ],
+    };
+    let demonology = TalentTreeColumn {
+        name: "Demonology",
+        icon: None,
+        points: 6,
+        leading: true,
+        gates,
+        nodes: vec![
+            node("Demonic Embrace", 1, 0, 1, 2, true),
+            node("Fel Stamina", 1, 2, 2, 2, false),
+            TalentNode {
+                pending: 1,
+                ..node("Unholy Power", 2, 0, 1, 2, true)
+            },
+            node("Master Demonologist", 2, 2, 0, 1, true),
+            node("Demonic Sacrifice", 3, 1, 1, 1, false),
+            TalentNode {
+                requires: Some((1, 2)),
+                ..node("Soul Link", 4, 2, 1, 1, false)
+            },
+        ],
+    };
+    let destruction = TalentTreeColumn {
+        name: "Destruction",
+        icon: None,
+        points: 2,
+        leading: false,
+        gates,
+        nodes: vec![
+            node("Improved Shadow Bolt", 1, 0, 0, 2, true),
+            node("Bane", 1, 2, 2, 2, false),
+            node("Aftermath", 2, 0, 0, 2, true),
+            node("Shadowburn", 2, 2, 0, 1, true),
+            node("Improved Immolate", 3, 1, 0, 1, false),
+            TalentNode {
+                requires: Some((4, 1)),
+                ..node("Conflagrate", 4, 1, 0, 1, false)
+            },
+        ],
+    };
+    let trees = [affliction, demonology, destruction];
+    section(
+        ui,
+        "Talent trees (fixture): untouched / the spec, one rank pending, a node hovered / two points in",
+        |ui| {
+            let _ = TalentTrees::new("gallery", &trees, TreeMode::Spend)
+                .preview_hover(1, 3)
+                .show(ui);
+        },
+    );
 }
 
 fn column(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {

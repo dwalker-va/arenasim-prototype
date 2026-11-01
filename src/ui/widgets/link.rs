@@ -96,6 +96,8 @@ pub fn tooltip(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) {
         // The same generated text the aura's own page shows — one builder, one
         // source of truth.
         Topic::Aura(id) => crate::states::encyclopedia::auras::render_tooltip(ui, id, data),
+        // The generated talent text its page shows.
+        Topic::Talent(id) => crate::states::encyclopedia::talents::tooltip(ui, id, data),
     }
 }
 

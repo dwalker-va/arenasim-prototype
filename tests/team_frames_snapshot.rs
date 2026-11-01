@@ -32,6 +32,7 @@ use egui_kittest::Harness;
 
 use arenasim::states::configure_match_ui::ClassIcons;
 use arenasim::states::match_config::{CharacterClass, MatchConfig};
+use arenasim::states::play_match::talents::{Build, TalentDefinitions, TalentId};
 use arenasim::states::play_match::{
     apply_call_click, column_frame_rects, draw_team_frames, CallClick, CombatantFrame, FrameAura,
     ResourceType, SpellIcons, TeamFramesData,
@@ -69,6 +70,7 @@ fn mock_data() -> TeamFramesData {
         team1: vec![
             CombatantFrame {
                 class: CharacterClass::Warrior,
+                spec: None,
                 pet_label: None,
                 alive: true,
                 stealthed: false,
@@ -90,6 +92,7 @@ fn mock_data() -> TeamFramesData {
             },
             CombatantFrame {
                 class: CharacterClass::Priest,
+                spec: None,
                 pet_label: None,
                 alive: true,
                 stealthed: false,
@@ -109,6 +112,12 @@ fn mock_data() -> TeamFramesData {
         team2: vec![
             CombatantFrame {
                 class: CharacterClass::Warlock,
+                // A talented combatant: the header reads its spec, named
+                // from the shipped trees the way the wrapper names it.
+                spec: TalentDefinitions::shipped().spec(
+                    CharacterClass::Warlock,
+                    &Build::of(&[(TalentId::DemonicEmbrace, 2), (TalentId::FelStamina, 1)]),
+                ),
                 pet_label: None,
                 alive: true,
                 stealthed: false,
@@ -134,6 +143,7 @@ fn mock_data() -> TeamFramesData {
             },
             CombatantFrame {
                 class: CharacterClass::Rogue,
+                spec: None,
                 pet_label: None,
                 alive: false,
                 stealthed: false,
@@ -148,6 +158,7 @@ fn mock_data() -> TeamFramesData {
             },
             CombatantFrame {
                 class: CharacterClass::Hunter,
+                spec: None,
                 pet_label: Some("Spider (pet)".to_string()),
                 alive: true,
                 stealthed: false,

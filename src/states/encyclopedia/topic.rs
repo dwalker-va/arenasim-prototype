@@ -14,6 +14,7 @@ use bevy_egui::egui;
 
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::equipment::{ItemId, ItemTier};
+use crate::states::play_match::talents::TalentId;
 use crate::states::play_match::AbilityType;
 
 use super::auras::AuraId;
@@ -27,6 +28,7 @@ pub enum Section {
     Abilities,
     Auras,
     Items,
+    Talents,
 }
 
 impl Section {
@@ -38,6 +40,7 @@ impl Section {
             Section::Abilities,
             Section::Auras,
             Section::Items,
+            Section::Talents,
         ]
     }
 
@@ -47,6 +50,7 @@ impl Section {
             Section::Abilities => "ABILITIES",
             Section::Auras => "BUFFS & DEBUFFS",
             Section::Items => "ITEMS",
+            Section::Talents => "TALENTS",
         }
     }
 
@@ -57,6 +61,7 @@ impl Section {
             Section::Abilities => "Abilities",
             Section::Auras => "Buffs & Debuffs",
             Section::Items => "Items",
+            Section::Talents => "Talents",
         }
     }
 
@@ -82,6 +87,8 @@ pub enum Topic {
     /// See [`AuraId`] for why the address is shaped this way.
     Aura(AuraId),
     Item(ItemId),
+    /// One talent node of a class's trees.
+    Talent(TalentId),
 }
 
 impl Topic {
@@ -92,6 +99,7 @@ impl Topic {
             Topic::Ability(_) => Section::Abilities,
             Topic::Aura(_) => Section::Auras,
             Topic::Item(_) => Section::Items,
+            Topic::Talent(_) => Section::Talents,
         }
     }
 
@@ -115,6 +123,7 @@ impl Topic {
                 .unwrap_or_else(|| spaced_debug(&ability)),
             Topic::Aura(id) => super::auras::name_of(id, data.abilities, data.items)
                 .unwrap_or_else(|| "Unknown aura".to_string()),
+            Topic::Talent(id) => crate::states::talent_text::talent_name(data.talents, id),
         }
     }
 
@@ -136,6 +145,7 @@ impl Topic {
             Topic::Aura(id) => {
                 super::auras::subtitle_of(id, data.abilities, data.items).unwrap_or_default()
             }
+            Topic::Talent(id) => super::talents::subtitle(id, data),
         }
     }
 
@@ -144,7 +154,7 @@ impl Topic {
     pub fn item_tier(self, data: &EncyclopediaData) -> Option<ItemTier> {
         match self {
             Topic::Item(id) => data.items.get(&id).and_then(|item| item.tier()),
-            Topic::Class(_) | Topic::Ability(_) | Topic::Aura(_) => None,
+            Topic::Class(_) | Topic::Ability(_) | Topic::Aura(_) | Topic::Talent(_) => None,
         }
     }
 
@@ -176,6 +186,13 @@ impl Topic {
                         .and_then(|icons| icons.textures.get(&key).copied())
                 })
             }
+            // Talent art is registered in the same map, under its own key.
+            Topic::Talent(id) => data.ability_icons.and_then(|icons| {
+                icons
+                    .textures
+                    .get(&super::talents::talent_icon_key(id))
+                    .copied()
+            }),
         }
     }
 
@@ -219,6 +236,7 @@ mod tests {
     fn sections_order_matches_the_tab_row() {
         assert_eq!(Section::Classes.order(), 0);
         assert_eq!(Section::Items.order(), 3);
+        assert_eq!(Section::Talents.order(), 4);
     }
 
     #[test]

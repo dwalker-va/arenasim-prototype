@@ -95,6 +95,10 @@ pub mod color {
 
     /// The tint an image is drawn with to keep its own colours.
     pub const UNTINTED: Color32 = Color32::WHITE;
+    /// The tint over the art of something not yet reachable — a talent
+    /// whose tier or prerequisite is closed: the art, darkened, with no hue
+    /// of its own.
+    pub const ICON_LOCKED: Color32 = Color32::from_gray(96);
 
     /// The empty part of a chrome bar (the kit's `resource_bar`). The HUD's
     /// bars use [`super::hud::BAR_TRACK`].
@@ -632,6 +636,11 @@ pub mod size {
     pub const HERO_BUTTON_WIDTH: f32 = 280.0;
     /// How far in from a scene's edge its vignette fades out.
     pub const VIGNETTE: f32 = 180.0;
+    /// A rank pip's diameter: one dot per rank under a talent node.
+    pub const PIP: f32 = 6.0;
+    /// The widest a talent node grows, so a tree drawn across a wide page
+    /// keeps its nodes a size the eye reads as one lattice.
+    pub const TALENT_NODE_MAX: f32 = 96.0;
 }
 
 /// A class's colour as egui draws it, from the one source,

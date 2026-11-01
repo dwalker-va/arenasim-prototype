@@ -58,8 +58,11 @@ use super::play_match::proc_trinkets::proc_description;
 // so the first Back comes straight back here.
 use super::chrome::ScreenNav;
 use super::encyclopedia::{
-    abilities as encyclopedia_abilities, widget, EncyclopediaData, EncyclopediaState, Topic,
+    abilities as encyclopedia_abilities, talents as encyclopedia_talents, widget, EncyclopediaData,
+    EncyclopediaState, Topic,
 };
+use super::play_match::talents::{Build, TalentDefinitions, TalentEffect, TalentStat};
+use super::talent_panel;
 use crate::ui::driver as ui_driver;
 use crate::ui::theme::{class_color, color, data, icon, size, space, text};
 use crate::ui::widgets::panel::margin_xy;
@@ -198,6 +201,7 @@ pub fn load_ability_icons(
     images: Res<Assets<Image>>,
     ability_definitions: Res<AbilityDefinitions>,
     item_definitions: Res<ItemDefinitions>,
+    talent_definitions: Res<TalentDefinitions>,
 ) {
     // Only load once
     if ability_icons.loaded {
@@ -223,6 +227,12 @@ pub fn load_ability_icons(
         // An item-applied aura (a proc buff) draws its item, under the same
         // key the buff bar uses.
         for (key, path) in item_aura_icons(&item_definitions) {
+            let handle: Handle<Image> = asset_server.load(path);
+            icon_handles.handles.push((key, handle));
+        }
+        // Talent and talent-tree art, under the keys the talent panel and the
+        // encyclopedia's Talents section ask for.
+        for (key, path) in encyclopedia_talents::icon_paths(&talent_definitions) {
             let handle: Handle<Image> = asset_server.load(path);
             icon_handles.handles.push((key, handle));
         }
@@ -380,6 +390,9 @@ pub struct ViewCombatantData<'a> {
     pub ability_icons: Option<&'a AbilityIcons>,
     pub item_icons: Option<&'a ItemIcons>,
     pub pet_icons: Option<&'a HunterPetIcons>,
+    /// Every class's talent trees: the talent panel spends this combatant's
+    /// build against them.
+    pub talents: &'a TalentDefinitions,
 }
 
 /// Main UI system for the View Combatant screen (Bevy wrapper).
@@ -397,6 +410,7 @@ pub fn view_combatant_ui(
     item_icons: Option<Res<ItemIcons>>,
     pet_icons: Option<Res<HunterPetIcons>>,
     ability_definitions: Res<AbilityDefinitions>,
+    talent_definitions: Res<TalentDefinitions>,
     mut match_config: ResMut<MatchConfig>,
     item_definitions: Res<ItemDefinitions>,
     default_loadouts: Res<DefaultLoadouts>,
@@ -426,6 +440,7 @@ pub fn view_combatant_ui(
         ability_icons: ability_icons.as_deref(),
         item_icons: item_icons.as_deref(),
         pet_icons: pet_icons.as_deref(),
+        talents: &talent_definitions,
     };
 
     match draw_view_combatant(
@@ -499,6 +514,7 @@ pub fn draw_view_combatant(
         item_icons: data.item_icons,
         class_icons: Some(data.class_icons),
         ability_icons: data.ability_icons,
+        talents: data.talents,
     };
 
     egui::CentralPanel::default()
@@ -623,7 +639,10 @@ fn draw_sheet(
     // the `class` attribution on each `abilities.ron` entry. Neither can drift
     // from the sim or silently drop ability N+1.
     let stats = class_base_stats(class);
-    let abilities = data.abilities.own_abilities_for_class(class);
+    // The base kit: what every combatant of the class has. A talent ability
+    // joins the kit only once this combatant's build grants it, under its own
+    // label; an ungranted one is a node in the talent panel, not a kit row.
+    let abilities = data.abilities.base_abilities_for_class(class);
 
     // Compute equipment bonuses for the stats panel
     let equip_overrides = equipment_overrides(match_config, view_state);
@@ -792,6 +811,36 @@ fn draw_sheet(
         CharacterClass::Priest | CharacterClass::Shaman | CharacterClass::Druid => {}
     }
 
+    // The talent panel, for a class with trees: the build is the other
+    // decision this screen exists for, so it sits under the pre-match choice
+    // and above the sheet it changes.
+    if !data.talents.trees(class).is_empty() {
+        ui.add_space(space::LG);
+        let key = format!("t{}s{}", view_state.team, view_state.slot);
+        if let Some(build) = match_config.build_mut(view_state.team, view_state.slot) {
+            open_topic = open_topic.or(talent_panel::spend_panel(
+                ui,
+                class,
+                build,
+                None,
+                encyclopedia_data,
+                &key,
+            ));
+        }
+    }
+
+    // Read after the panel, so a rank learned this frame shows in the stats
+    // and the kit on the same frame.
+    let build = combatant_build(match_config, view_state);
+    let granted = granted_abilities(data.talents, &build);
+    // The build's stat percentages, as the spawn applies them (after the
+    // equipment, gear included).
+    let talent_percents = data
+        .talents
+        .resolve(data.abilities, class, &build)
+        .map(|resolved| resolved.stat_percents().clone())
+        .unwrap_or_default();
+
     // The pet whose abilities belong in THIS combatant's kit. View Combatant is
     // a loadout editor, so it shows the pet that is actually configured rather
     // than every pet the class could bring. The Pet Type panel above is where
@@ -831,10 +880,17 @@ fn draw_sheet(
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.x = space::LG;
         ui.columns(2, |columns| {
-            natural[0] = render_stats_panel(&mut columns[0], &stats, &equip_bonuses, held);
+            natural[0] = render_stats_panel(
+                &mut columns[0],
+                &stats,
+                &equip_bonuses,
+                &talent_percents,
+                held,
+            );
             let (kit_height, clicked) = render_abilities_panel(
                 &mut columns[1],
                 &abilities,
+                &granted,
                 active_pet,
                 held,
                 encyclopedia_data,
@@ -862,6 +918,87 @@ fn draw_sheet(
     ));
 
     open_topic
+}
+
+/// This combatant's talent build (empty if its slot is missing).
+fn combatant_build(match_config: &MatchConfig, view_state: &ViewCombatantState) -> Build {
+    match_config
+        .build(view_state.team, view_state.slot)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The talent abilities `build` grants, in `AbilityType` order.
+fn granted_abilities(talents: &TalentDefinitions, build: &Build) -> Vec<AbilityType> {
+    let mut granted: Vec<AbilityType> = build
+        .ranks
+        .keys()
+        .filter_map(|id| talents.get(*id))
+        .flat_map(|talent| talent.per_rank.iter())
+        .filter_map(|effect| match effect {
+            TalentEffect::Grant(ability) => Some(*ability),
+            _ => None,
+        })
+        .collect();
+    granted.sort_unstable();
+    granted.dedup();
+    granted
+}
+
+/// One Stats row the gear and the build both raise.
+struct StatLine<'a> {
+    key: &'a str,
+    stat: TalentStat,
+    base: f32,
+    gear: f32,
+    /// The total as the row prints it.
+    value: &'a dyn Fn(f32) -> String,
+    /// A part of it as the hover explains it.
+    amount: &'a dyn Fn(f32) -> String,
+}
+
+impl StatLine<'_> {
+    /// Draw the row when its total is not zero: in the bonus colour when the
+    /// gear or the build raised it, the breakdown on hover.
+    fn draw(&self, ui: &mut egui::Ui, talents: &std::collections::BTreeMap<TalentStat, f32>) {
+        let geared = self.base + self.gear;
+        let total = talented(geared, talents, self.stat);
+        if total == 0.0 {
+            return;
+        }
+        let from_talents = total - geared;
+        bonus_row(
+            ui,
+            self.key,
+            &(self.value)(total),
+            self.gear + from_talents,
+            || {
+                let mut explain = format!(
+                    "{} base + {} from equipment",
+                    (self.amount)(self.base),
+                    (self.amount)(self.gear)
+                );
+                if from_talents != 0.0 {
+                    explain.push_str(&format!(" + {} from talents", (self.amount)(from_talents)));
+                }
+                explain
+            },
+        );
+        ui_driver::note(
+            ui,
+            format_args!("stat {}={}", self.key, (self.value)(total)),
+        );
+    }
+}
+
+/// A stat total with the build's percentage of it applied, as the spawn
+/// applies it: `total × (1 + percent)`.
+fn talented(
+    total: f32,
+    percents: &std::collections::BTreeMap<TalentStat, f32>,
+    stat: TalentStat,
+) -> f32 {
+    total * (1.0 + percents.get(&stat).copied().unwrap_or(0.0))
 }
 
 /// Write this combatant's value into a per-slot `MatchConfig` table. A slot
@@ -948,6 +1085,7 @@ fn render_stats_panel(
     ui: &mut egui::Ui,
     stats: &ClassBaseStats,
     equip: &EquipmentBonuses,
+    talents: &std::collections::BTreeMap<TalentStat, f32>,
     min_height: f32,
 ) -> f32 {
     panel(None)
@@ -965,135 +1103,204 @@ fn render_stats_panel(
                     ui.scope(|ui| {
                         ui.spacing_mut().item_spacing.y = space::XS;
 
-                        let health = stats.max_health as i32;
-                        let health_bonus = equip.health as i32;
-                        bonus_row(
+                        // A total the gear and the build both raise: base, plus
+                        // equipment, then the build's percentage of that sum
+                        // (the spawn's order). Drawn in the bonus colour when
+                        // either raised it, and explained on hover.
+                        let raised_row =
+                            |ui: &mut egui::Ui,
+                             key: &str,
+                             prefix: &str,
+                             base: f32,
+                             gear: f32,
+                             stat: TalentStat| {
+                                let geared = base + gear;
+                                let total = talented(geared, talents, stat);
+                                let from_talents = total - geared;
+                                let (base, gear, total, from_talents) = (
+                                    base.round() as i32,
+                                    gear.round() as i32,
+                                    total.round() as i32,
+                                    from_talents.round() as i32,
+                                );
+                                bonus_row(
+                                    ui,
+                                    key,
+                                    &format!("{prefix}{total}"),
+                                    (gear + from_talents) as f32,
+                                    || {
+                                        let mut explain = format!("{base} + {gear} from equipment");
+                                        if from_talents != 0 {
+                                            explain.push_str(&format!(
+                                                " + {from_talents} from talents"
+                                            ));
+                                        }
+                                        explain
+                                    },
+                                );
+                                ui_driver::note(ui, format_args!("stat {key}={total}"));
+                            };
+
+                        raised_row(
                             ui,
                             "Health",
-                            &(health + health_bonus).to_string(),
-                            health_bonus as f32,
-                            || format!("{health} + {health_bonus} from equipment"),
+                            "",
+                            stats.max_health,
+                            equip.health,
+                            TalentStat::MaxHealth,
                         );
 
-                        // Resource: only mana takes a bonus from gear.
-                        let mana_bonus = if stats.resource_type == ResourceType::Mana {
-                            equip.mana as i32
+                        // Resource: only mana takes a bonus from gear or talents.
+                        if stats.resource_type == ResourceType::Mana {
+                            raised_row(
+                                ui,
+                                "Resource",
+                                &format!("{} ", stats.resource_type.name()),
+                                stats.max_resource,
+                                equip.mana,
+                                TalentStat::MaxMana,
+                            );
                         } else {
-                            0
-                        };
-                        let resource = stats.max_resource as i32;
-                        bonus_row(
-                            ui,
-                            "Resource",
-                            &format!("{} {}", stats.resource_type.name(), resource + mana_bonus),
-                            mana_bonus as f32,
-                            || format!("{resource} + {mana_bonus} from equipment"),
-                        );
+                            stat_row(
+                                ui,
+                                "Resource",
+                                &format!(
+                                    "{} {}",
+                                    stats.resource_type.name(),
+                                    stats.max_resource as i32
+                                ),
+                                color::TEXT,
+                            );
+                        }
 
-                        let ap = stats.attack_power as i32;
-                        let ap_bonus = equip.attack_power as i32;
-                        bonus_row(
+                        raised_row(
                             ui,
                             "Attack Power",
-                            &(ap + ap_bonus).to_string(),
-                            ap_bonus as f32,
-                            || format!("{ap} + {ap_bonus} from equipment"),
+                            "",
+                            stats.attack_power,
+                            equip.attack_power,
+                            TalentStat::AttackPower,
                         );
-                        let sp = stats.spell_power as i32;
-                        let sp_bonus = equip.spell_power as i32;
-                        bonus_row(
+                        raised_row(
                             ui,
                             "Spell Power",
-                            &(sp + sp_bonus).to_string(),
-                            sp_bonus as f32,
-                            || format!("{sp} + {sp_bonus} from equipment"),
+                            "",
+                            stats.spell_power,
+                            equip.spell_power,
+                            TalentStat::SpellPower,
                         );
 
-                        // Crit chance: every class has a non-zero base (Rogue 10% down
-                        // to Priest 4%), so this row always shows.
-                        bonus_row(
-                            ui,
-                            "Crit Chance",
-                            &format!("{:.1}%", (stats.crit_chance + equip.crit_chance) * 100.0),
-                            equip.crit_chance,
-                            || {
-                                format!(
-                                    "{:.1}% base + {:.1}% from equipment",
-                                    stats.crit_chance * 100.0,
-                                    equip.crit_chance * 100.0
-                                )
+                        // The rest read through one rule: base plus gear, then
+                        // the build's share of that sum. A row whose total is
+                        // zero is not drawn (no armor, no resistance), so a
+                        // talent that raises a stat the gear left at zero
+                        // raises nothing, exactly as the spawn applies it.
+                        let pct = |v: f32| format!("{:.1}%", v * 100.0);
+                        let one = |v: f32| format!("{v:.1}");
+                        let whole = |v: f32| format!("{v:.0}");
+                        let lines: [StatLine; 4] = [
+                            // Every class has a non-zero base crit (Rogue 10% down
+                            // to Priest 4%), so this row always shows.
+                            StatLine {
+                                key: "Crit Chance",
+                                stat: TalentStat::CritChance,
+                                base: stats.crit_chance,
+                                gear: equip.crit_chance,
+                                value: &pct,
+                                amount: &pct,
                             },
-                        );
-
-                        // Mana regen (only shown when equipment provides it)
-                        if equip.mana_regen > 0.0 {
-                            bonus_row(
-                                ui,
-                                "Mana Regen",
-                                &format!("+{:.1} MP5", equip.mana_regen),
-                                equip.mana_regen,
-                                || format!("{:.1} from equipment", equip.mana_regen),
-                            );
-                        }
-
-                        // Weapon speed: seconds per swing, straight from the weapon in
-                        // the live socket — there is no class speed to compare it to.
-                        let speed = match equip.weapon_speed {
-                            Some(speed) => format!("{speed:.2}s"),
-                            None => "No weapon".to_string(),
-                        };
-                        stat_row(ui, "Weapon Speed", &speed, color::TEXT);
-
-                        bonus_row(
-                            ui,
-                            "Move Speed",
-                            &format!("{:.1}/s", stats.movement_speed + equip.move_speed),
-                            equip.move_speed,
-                            || {
-                                format!(
-                                    "{:.1} base + {:.1} from equipment",
-                                    stats.movement_speed, equip.move_speed
-                                )
+                            StatLine {
+                                key: "Mana Regen",
+                                stat: TalentStat::ManaRegen,
+                                base: 0.0,
+                                gear: equip.mana_regen,
+                                value: &|v| format!("+{v:.1} MP5"),
+                                amount: &one,
                             },
-                        );
-
-                        // Armor (only shown when equipment provides it, since base is 0)
-                        if equip.armor > 0.0 {
-                            let effective_armor = stats.armor + equip.armor;
-                            let reduction_pct =
-                                effective_armor / (effective_armor + 5500.0) * 100.0;
-                            bonus_row(
-                                ui,
-                                "Armor",
-                                &format!("{effective_armor:.0}"),
-                                equip.armor,
-                                || {
-                                    format!(
-                                "{:.0} from equipment ({reduction_pct:.1}% physical reduction)",
-                                equip.armor
-                            )
-                                },
-                            );
-                        }
-
-                        // Spell resistances (only non-zero values)
-                        let resistances: &[(&str, f32)] = &[
-                            ("Fire Resist", equip.fire_resistance),
-                            ("Frost Resist", equip.frost_resistance),
-                            ("Shadow Resist", equip.shadow_resistance),
-                            ("Arcane Resist", equip.arcane_resistance),
-                            ("Nature Resist", equip.nature_resistance),
-                            ("Holy Resist", equip.holy_resistance),
+                            StatLine {
+                                key: "Move Speed",
+                                stat: TalentStat::MovementSpeed,
+                                base: stats.movement_speed,
+                                gear: equip.move_speed,
+                                value: &|v| format!("{v:.1}/s"),
+                                amount: &one,
+                            },
+                            StatLine {
+                                key: "Armor",
+                                stat: TalentStat::Armor,
+                                base: stats.armor,
+                                gear: equip.armor,
+                                value: &whole,
+                                amount: &whole,
+                            },
                         ];
-                        for &(label, value) in resistances {
-                            if value > 0.0 {
-                                let reduction_pct = value / (value * 5.0 / 3.0 + 300.0) * 100.0;
-                                bonus_row(ui, label, &format!("{value:.0}"), value, || {
-                                    format!(
-                                "{value:.0} from equipment ({reduction_pct:.1}% damage reduction)"
-                            )
-                                });
+                        for (i, line) in lines.iter().enumerate() {
+                            line.draw(ui, talents);
+                            // Weapon speed sits after the regen row, as it
+                            // always has: seconds per swing, straight from the
+                            // weapon in the live socket.
+                            if i == 1 {
+                                let speed = match equip.weapon_speed {
+                                    Some(speed) => format!("{speed:.2}s"),
+                                    None => "No weapon".to_string(),
+                                };
+                                stat_row(ui, "Weapon Speed", &speed, color::TEXT);
                             }
+                        }
+
+                        let resistances = [
+                            (
+                                "Fire Resist",
+                                TalentStat::FireResistance,
+                                equip.fire_resistance,
+                            ),
+                            (
+                                "Frost Resist",
+                                TalentStat::FrostResistance,
+                                equip.frost_resistance,
+                            ),
+                            (
+                                "Shadow Resist",
+                                TalentStat::ShadowResistance,
+                                equip.shadow_resistance,
+                            ),
+                            (
+                                "Arcane Resist",
+                                TalentStat::ArcaneResistance,
+                                equip.arcane_resistance,
+                            ),
+                            (
+                                "Nature Resist",
+                                TalentStat::NatureResistance,
+                                equip.nature_resistance,
+                            ),
+                            (
+                                "Holy Resist",
+                                TalentStat::HolyResistance,
+                                equip.holy_resistance,
+                            ),
+                        ];
+                        for (key, stat, gear) in resistances {
+                            StatLine {
+                                key,
+                                stat,
+                                base: 0.0,
+                                gear,
+                                value: &whole,
+                                amount: &whole,
+                            }
+                            .draw(ui, talents);
+                        }
+
+                        // Weapon damage has no row of its own (the swing is the
+                        // weapon's); a build that raises it says so here.
+                        if let Some(bonus) = talents.get(&TalentStat::WeaponDamage) {
+                            stat_row(
+                                ui,
+                                "Weapon Damage",
+                                &format!("+{:.0}%", bonus * 100.0),
+                                bonus_color(*bonus),
+                            );
                         }
                     });
                 })
@@ -1113,6 +1320,7 @@ fn render_stats_panel(
 fn render_abilities_panel(
     ui: &mut egui::Ui,
     abilities: &[AbilityType],
+    granted: &[AbilityType],
     active_pet: Option<PetType>,
     min_height: f32,
     data: &EncyclopediaData,
@@ -1130,7 +1338,22 @@ fn render_abilities_panel(
                     ui.scope(|ui| {
                         ui.spacing_mut().item_spacing.y = space::XXS;
                         for ability in abilities {
-                            clicked = clicked.or(render_ability_row(ui, *ability, data));
+                            clicked = clicked.or(render_ability_row(ui, *ability, "kit", data));
+                        }
+
+                        // What this combatant's build grants, apart from the
+                        // base kit every combatant of the class has.
+                        if !granted.is_empty() {
+                            ui.add_space(space::SM);
+                            section_label(ui, "From talents");
+                            for ability in granted {
+                                clicked = clicked.or(render_ability_row(
+                                    ui,
+                                    *ability,
+                                    "kit-talent",
+                                    data,
+                                ));
+                            }
                         }
 
                         // Pet subsection, labelled by the pet that casts them.
@@ -1140,7 +1363,8 @@ fn render_abilities_panel(
                                 ui.add_space(space::SM);
                                 section_label(ui, &format!("{} (pet)", pet.name()));
                                 for ability in pet_abilities {
-                                    clicked = clicked.or(render_ability_row(ui, ability, data));
+                                    clicked =
+                                        clicked.or(render_ability_row(ui, ability, "kit", data));
                                 }
                             }
                         }
@@ -1165,6 +1389,7 @@ fn render_abilities_panel(
 fn render_ability_row(
     ui: &mut egui::Ui,
     ability: AbilityType,
+    section: &str,
     data: &EncyclopediaData,
 ) -> Option<Topic> {
     let topic = Topic::Ability(ability);
@@ -1177,7 +1402,14 @@ fn render_ability_row(
             tier: None,
         }),
     );
-    ui_driver::mark(ui, response.rect, true, format_args!("kit:{ability:?}"));
+    // `kit:` for the base kit and the pet's, `kit-talent:` for what the
+    // build grants: the script id says which list the row is in.
+    ui_driver::mark(
+        ui,
+        response.rect,
+        true,
+        format_args!("{section}:{ability:?}"),
+    );
 
     // The SLIM tooltip: name, stat strip, one sentence. The long-form version
     // is the encyclopedia's page, one click away.

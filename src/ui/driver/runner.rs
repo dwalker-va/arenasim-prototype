@@ -239,13 +239,27 @@ pub fn expand(step: &Step, settle: u32) -> VecDeque<Micro> {
             q.push_back(Micro::SettleForTooltip);
             q.push_back(Micro::Idle(settle));
         }
-        Step::Click { id, button } => {
+        // A modifier goes down before the press and up after the release, at
+        // the same Bevy input layer as the button, so `ButtonInput<KeyCode>`
+        // and egui's own modifier state both hold it across the click.
+        Step::Click {
+            id,
+            button,
+            modifier,
+        } => {
             q.push_back(Micro::Move { id: id.clone() });
+            if let Some(key) = modifier {
+                q.push_back(Micro::KeyDown(*key));
+            }
             q.push_back(Micro::Idle(settle));
             q.push_back(Micro::Press(*button));
             q.push_back(Micro::Idle(1));
             q.push_back(Micro::Release(*button));
             q.push_back(Micro::Idle(settle));
+            if let Some(key) = modifier {
+                q.push_back(Micro::KeyUp(*key));
+                q.push_back(Micro::Idle(settle));
+            }
         }
         Step::Key(k) => {
             q.push_back(Micro::KeyDown(*k));
@@ -406,6 +420,7 @@ fn key_codes(key: NamedKey) -> (KeyCode, Key) {
         NamedKey::ArrowRight => (KeyCode::ArrowRight, Key::ArrowRight),
         NamedKey::ArrowUp => (KeyCode::ArrowUp, Key::ArrowUp),
         NamedKey::ArrowDown => (KeyCode::ArrowDown, Key::ArrowDown),
+        NamedKey::Shift => (KeyCode::ShiftLeft, Key::Shift),
     }
 }
 

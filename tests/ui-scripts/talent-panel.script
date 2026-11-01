@@ -1,0 +1,81 @@
+# The talent panel: spend points in Custom Match, follow a talent's
+# encyclopedia deep link, and come back to the same build.
+#
+# Run:  cargo run --release -- --ui-script tests/ui-scripts/talent-panel.script
+#
+#   1. a Warlock in team 1's first slot, its View Combatant sheet open;
+#   2. tier 2 is locked until two points are spent in Demonology;
+#   3. three clicks learn three ranks, and the panel names the spec;
+#   4. the tier-2 node opens and takes a rank;
+#   5. shift-click takes a rank back (the driver holds Shift across the
+#      press at Bevy's input layer), and a click learns it again;
+#   6. right-click a node -> the encyclopedia, on that talent's page;
+#   7. Esc -> back on View Combatant, the build still spent;
+#   8. Esc -> Configure Match, whose slot row reads the spec;
+#   9. Reset clears the build, and the slot reads its class again.
+#
+# Every wait is the driver's own (hover settles on egui's tooltip gate, a
+# click on the click): there is no frame count here.
+
+assert-state MainMenu
+click menu:MATCH
+assert-state ConfigureMatch
+
+click slot:t1s0
+click class:Warlock
+click slot:t1s0
+assert-state ViewCombatant
+
+# Nothing spent: tier 1 open, tier 2 locked.
+assert-note talents:t1s0 points=0
+assert-enabled talent:DemonicEmbrace true
+assert-enabled talent:UnholyPower false
+
+hover talent:UnholyPower
+assert-note tooltip:Talent(UnholyPower)
+
+# Spend three points in tier 1.
+click talent:DemonicEmbrace
+assert-note talents:t1s0 points=1 spec=Demonology Warlock 1
+click talent:DemonicEmbrace
+click talent:FelStamina
+assert-note talents:t1s0 points=3 spec=Demonology Warlock 3
+
+# Two points in the tiers above open tier 2.
+assert-enabled talent:UnholyPower true
+click talent:UnholyPower
+assert-note talents:t1s0 points=4 spec=Demonology Warlock 4
+
+# A maxed node takes no more.
+assert-enabled talent:DemonicEmbrace false
+
+# Shift-click takes a rank back; a plain click learns it again.
+click talent:UnholyPower left shift
+assert-note talents:t1s0 points=3 spec=Demonology Warlock 3
+click talent:UnholyPower
+assert-note talents:t1s0 points=4 spec=Demonology Warlock 4
+
+# The deep link: right-click opens the talent's page.
+click talent:UnholyPower right
+assert-state Encyclopedia
+assert-view Talent(UnholyPower)
+
+# Back to the same combatant, the build still spent.
+key Escape
+assert-state ViewCombatant
+assert-note talents:t1s0 points=4 spec=Demonology Warlock 4
+
+key Escape
+assert-state ConfigureMatch
+assert-note slot:t1s0 subtitle=Demonology Warlock 4
+
+# Reset clears the build, and the slot reads its class again.
+click slot:t1s0
+assert-state ViewCombatant
+click talents:reset
+assert-note talents:t1s0 points=0 spec=No talents learned
+assert-enabled talents:reset false
+key Escape
+assert-state ConfigureMatch
+assert-note slot:t1s0 subtitle=Shadow magic and curses
+dump
