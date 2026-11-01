@@ -1088,6 +1088,7 @@ impl Combatant {
                         config: on_use.clone(),
                         remaining: 0.0,
                         spent: false,
+                        waiting: None,
                     });
             }
 

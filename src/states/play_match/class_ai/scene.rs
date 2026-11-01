@@ -339,6 +339,7 @@ impl Scene {
             config: on_use,
             remaining: 0.0,
             spent: false,
+            waiting: None,
         });
         self
     }
@@ -878,8 +879,7 @@ impl Scene {
 
     /// Run a HELD unit's tick — what `decide_abilities` runs for a unit under
     /// a stun, fear, polymorph or incapacitate: [`dispatch_while_held`], the
-    /// on-use break and the class's own break, with the enemy team's kill
-    /// window as the frame classifies it. The scene is not changed.
+    /// on-use break and the class's own break. The scene is not changed.
     pub fn decide_held(&self, who: Who) -> DecisionView {
         let unit = self.find(who);
         assert!(
@@ -896,10 +896,6 @@ impl Scene {
         let ctx = snapshot
             .context_for(unit.entity)
             .with_situation(situations.for_team(team));
-        let enemy_kill_target = situations
-            .for_team(if team == 1 { 2 } else { 1 })
-            .kill_window
-            .map(|w| w.subject);
         let mut exec_world = World::new();
         for u in &self.units {
             let e = exec_world.spawn_empty();
@@ -925,7 +921,9 @@ impl Scene {
             unit.position,
             Some(&auras),
             &ctx,
-            enemy_kill_target,
+            unit.auras
+                .iter()
+                .any(|a| a.effect_type == AuraType::Cyclone),
         );
         queue.apply(&mut exec_world);
         let mut view = DecisionView::read(self, unit.entity, acted, &trace);

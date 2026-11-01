@@ -809,27 +809,19 @@ pub struct DispatchIo<'r, 'w, 's> {
     pub decision_trace: &'r mut crate::states::play_match::decision_trace::DecisionTrace,
 }
 
-/// The other team of a two-team match.
-fn enemy_team_of(team: u8) -> u8 {
-    if team == 1 {
-        2
-    } else {
-        1
-    }
-}
-
 /// What an INCAPACITATED unit may still do this tick: break free. The ONE
 /// entry point for a held unit, as [`dispatch_class_decision`] is for a free
 /// one: `decide_abilities` calls it for every unit held by a stun, fear,
-/// polymorph or incapacitate (a Cyclone excepted), and a
+/// polymorph, incapacitate or Cyclone, and a
 /// [`Scene`](class_ai::scene::Scene) calls it for a held unit under test.
 ///
 /// In order: an on-use item's crowd-control break (any class wearing one,
 /// `class_ai::on_use`), then the class's own (the Paladin's Divine Shield,
-/// the Warrior's Berserker Rage). Each arm owns its trace event, because the
-/// class decision never runs this frame. `enemy_kill_target` is the enemy
-/// team's `kill_window` subject — the unit their burst is on. Returns whether
-/// the unit acted; the break lands next frame either way.
+/// the Warrior's Berserker Rage). Nothing is used from inside a Cyclone
+/// (`cycloned`) — the on-use break only if it takes one
+/// ([`CC_BREAK_TAKES_CYCLONE`](crate::states::play_match::on_use_items::CC_BREAK_TAKES_CYCLONE)).
+/// Each arm owns its trace event, because the class decision never runs this
+/// frame. Returns whether the unit acted; the break lands next frame either way.
 #[allow(clippy::too_many_arguments)]
 pub fn dispatch_while_held(
     io: DispatchIo<'_, '_, '_>,
@@ -838,7 +830,7 @@ pub fn dispatch_while_held(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &class_ai::CombatContext,
-    enemy_kill_target: Option<Entity>,
+    cycloned: bool,
 ) -> bool {
     let DispatchIo {
         commands,
@@ -848,16 +840,19 @@ pub fn dispatch_while_held(
     } = io;
 
     if !combatant.on_use_items.is_empty()
+        && (!cycloned || crate::states::play_match::on_use_items::CC_BREAK_TAKES_CYCLONE)
         && class_ai::on_use::try_cc_break_while_held(
             commands,
             decision_trace,
             entity,
             combatant,
             ctx,
-            enemy_kill_target,
         )
     {
         return true; // OnUsePending spawned — the hold breaks next frame
+    }
+    if cycloned {
+        return false;
     }
 
     // Paladin-specific: Divine Shield can be used while incapacitated.
@@ -1744,36 +1739,23 @@ pub fn decide_abilities(
             });
 
         // An incapacitated unit runs only what may be used from inside the
-        // hold — never from inside a Cyclone, which is not a hold anything
-        // answers.
+        // hold (`dispatch_while_held`, which also answers for a Cyclone).
         if is_incapacitated {
-            if !is_cycloned {
-                let held_ctx = snapshot.context_for(entity).with_situation(situation);
-                // The enemy team's kill window, when this unit wears something
-                // that asks whether it is the one being burst.
-                let enemy_kill_target = if combatant.on_use_items.is_empty() {
-                    None
-                } else {
-                    situations
-                        .for_team(enemy_team_of(combatant.team))
-                        .kill_window
-                        .map(|w| w.subject)
-                };
-                dispatch_while_held(
-                    DispatchIo {
-                        commands: &mut commands,
-                        combat_log: &mut combat_log,
-                        game_rng: &mut game_rng,
-                        decision_trace: &mut decision_trace,
-                    },
-                    entity,
-                    &mut combatant,
-                    transform.translation,
-                    auras.as_deref(),
-                    &held_ctx,
-                    enemy_kill_target,
-                );
-            }
+            let held_ctx = snapshot.context_for(entity).with_situation(situation);
+            dispatch_while_held(
+                DispatchIo {
+                    commands: &mut commands,
+                    combat_log: &mut combat_log,
+                    game_rng: &mut game_rng,
+                    decision_trace: &mut decision_trace,
+                },
+                entity,
+                &mut combatant,
+                transform.translation,
+                auras.as_deref(),
+                &held_ctx,
+                is_cycloned,
+            );
             continue; // Still incapacitated, or the break lands next frame
         }
 

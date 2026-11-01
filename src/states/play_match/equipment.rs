@@ -901,7 +901,7 @@ pub struct ItemConfig {
     /// cooldown — the Medallion shape. `None` for every ordinary item.
     ///
     /// Priced into the stat budget by [`calculate_budget_usage`] at its uses
-    /// in a median arena life, and checked (a declared price exactly where no
+    /// in a mean arena life, and checked (a declared price exactly where no
     /// stat weight prices the effect, a positive cooldown) by
     /// `all_shipped_on_uses_are_well_formed`. See the `on_use_items` module.
     #[serde(default)]
@@ -1472,7 +1472,7 @@ use super::constants::{
 /// invisible to the budget, because it is not a stat field, and a proc of any
 /// magnitude would pass this check.
 ///
-/// An ON-USE is charged too, at its uses in a median arena life — see
+/// An ON-USE is charged too, at its uses in a mean arena life — see
 /// [`OnUseConfig::budget_cost`].
 pub fn calculate_budget_usage(item: &ItemConfig) -> f32 {
     item.max_health * WEIGHT_MAX_HEALTH
@@ -4884,7 +4884,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     /// make every on-use free. A 40-point break on a bare ilvl-58 trinket
     /// (30.45) is over budget on the break alone.
     #[test]
-    fn budget_charges_an_on_use_at_its_uses_in_a_median_life() {
+    fn budget_charges_an_on_use_at_its_uses_in_an_arena_life() {
         use super::super::on_use_items::{OnUseConfig, OnUseCooldown, OnUseEffect};
         let mut item = budget_test_item(ItemSlotType::Trinket, 58);
         item.on_use = Some(OnUseConfig {
@@ -4894,11 +4894,11 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         });
         let err = validate_item_budget("Dear Break", &item).expect_err("over budget");
         assert!(err.contains("over budget"), "{err}");
-        // A 20s cooldown gets three uses in a median life: 10 a use is 30
+        // A 15s cooldown gets three uses in an arena life: 10 a use is 30
         // points, within the cap; 12 a use is 36, over it.
         item.on_use = Some(OnUseConfig {
             effect: OnUseEffect::CcBreak,
-            cooldown: OnUseCooldown::Seconds(20.0),
+            cooldown: OnUseCooldown::Seconds(15.0),
             price: Some(10.0),
         });
         assert!(validate_item_budget("Cheap Break", &item).is_ok());

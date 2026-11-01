@@ -10,14 +10,14 @@
 //! ## What an on-use costs
 //!
 //! An on-use starts READY, and arena lives are short, so its price is its
-//! value over the USES IT GETS IN A MEDIAN ARENA LIFE
-//! ([`MEDIAN_ARENA_LIFE_SECS`], 43s — measured by
-//! `realised_uptime_against_the_long_run_bound` in
+//! value over the USES IT GETS IN AN ARENA LIFE ([`ARENA_LIFE_SECS`], 37.8s —
+//! measured by `realised_uptime_against_the_long_run_bound` in
 //! `tests/proc_trinket_probes.rs`), not the long-run uptime bound a proc is
-//! charged at. In a 43s life a 45s cooldown is ONE use: 15s of +40 spell
-//! power is `1.5 x 40 x 15/43`, about 21 points, where the long-run bound
+//! charged at. In a 37.8s life a 45s cooldown is ONE use: 15s of +40 spell
+//! power is `1.5 x 40 x 15/37.8`, about 24 points, where the long-run bound
 //! (`15/60`) would charge 15 and underprice it ([`on_use_buff_cost`], the
-//! talents proposal §6.5 item 3).
+//! talents proposal §6.5 item 3, which wrote it against the 43s life measured
+//! before the 0.9 changes).
 //!
 //! An effect no stat weight can price — the crowd-control break — carries a
 //! DECLARED price per use (`price:` in `items.ron`), sweep-checked like a
@@ -39,11 +39,12 @@ use serde::{Deserialize, Serialize};
 use super::components::AuraType;
 use super::equipment::ItemId;
 
-/// The median arena life after the gates, in seconds: how long a wearer is
+/// The mean arena life after the gates, in seconds: how long a wearer is
 /// alive to use an on-use item, on average. Measured over 60 Warrior+Priest
 /// mirrors by `realised_uptime_against_the_long_run_bound`
-/// (`tests/proc_trinket_probes.rs`); the proc module cites the same figure.
-pub const MEDIAN_ARENA_LIFE_SECS: f32 = 43.0;
+/// (`tests/proc_trinket_probes.rs`) on 2026-10-31 (main at 2c63c1ff); the proc
+/// module cites the same figure. Re-measure it when lives move.
+pub const ARENA_LIFE_SECS: f32 = 37.8;
 
 // ============================================================================
 // CONFIG
@@ -59,14 +60,12 @@ pub enum OnUseCooldown {
 }
 
 impl OnUseCooldown {
-    /// How many times an item that starts ready can be used in a median arena
-    /// life: every `k` with `k x cooldown < MEDIAN_ARENA_LIFE_SECS`.
-    pub fn uses_in_median_life(self) -> u32 {
+    /// How many times an item that starts ready can be used in an arena
+    /// life: every `k` with `k x cooldown < ARENA_LIFE_SECS`.
+    pub fn uses_in_arena_life(self) -> u32 {
         match self {
             OnUseCooldown::OncePerMatch => 1,
-            OnUseCooldown::Seconds(cooldown) => {
-                (MEDIAN_ARENA_LIFE_SECS / cooldown).ceil().max(1.0) as u32
-            }
+            OnUseCooldown::Seconds(cooldown) => (ARENA_LIFE_SECS / cooldown).ceil().max(1.0) as u32,
         }
     }
 
@@ -115,36 +114,32 @@ pub struct OnUseConfig {
 
 impl OnUseConfig {
     /// The item-budget cost of carrying this on-use: its per-use price times
-    /// its uses in a median arena life. See the module docs.
+    /// its uses in a mean arena life. See the module docs.
     pub fn budget_cost(&self) -> f32 {
-        self.price.unwrap_or(0.0) * self.cooldown.uses_in_median_life() as f32
+        self.price.unwrap_or(0.0) * self.cooldown.uses_in_arena_life() as f32
     }
 }
 
 /// The budget cost of an on-use STAT BUFF (+`magnitude` of a stat whose item
 /// weight is `weight`, for `duration` seconds, on `cooldown`): its weight times
-/// its magnitude times the fraction of a median arena life it is up, counting
+/// its magnitude times the fraction of a mean arena life it is up, counting
 /// every use an item that starts ready gets in that life, each cut off where
 /// the life ends.
 ///
-/// The pricing rule the stat-burst on-uses (AS-430) are charged by; the card's
-/// worked example is 15s of +40 spell power on a 45s cooldown, about 21.
+/// The pricing rule the stat-burst on-uses (AS-430) are charged by: 15s of +40
+/// spell power on a 45s cooldown is about 24.
 pub fn on_use_buff_cost(
     weight: f32,
     magnitude: f32,
     duration: f32,
     cooldown: OnUseCooldown,
 ) -> f32 {
-    let uses = cooldown.uses_in_median_life();
+    let uses = cooldown.uses_in_arena_life();
     let gap = cooldown.seconds().unwrap_or(f32::INFINITY);
     let up: f32 = (0..uses)
-        .map(|k| {
-            duration
-                .min(MEDIAN_ARENA_LIFE_SECS - k as f32 * gap)
-                .max(0.0)
-        })
+        .map(|k| duration.min(ARENA_LIFE_SECS - k as f32 * gap).max(0.0))
         .sum();
-    weight * magnitude * up / MEDIAN_ARENA_LIFE_SECS
+    weight * magnitude * up / ARENA_LIFE_SECS
 }
 
 /// Reject an on-use that cannot be priced or cannot be used.
@@ -179,10 +174,11 @@ pub fn validate_on_use(item_name: &str, on_use: &OnUseConfig) -> Result<(), Stri
 /// **Exhaustive on purpose — do not add a `_ =>` arm.** Whether a new
 /// `AuraType` is something the break frees its wearer from is a judgement.
 ///
-/// The set is TBC's medallion scope — every movement impairment and every
-/// loss of control: stun, fear (a horror too), polymorph, incapacitate
-/// (Freezing Trap), root and slow. Not a Cyclone: nothing is used from inside
-/// one.
+/// The set is every crowd control on the wearer (user ruling, 2026-10-31) —
+/// every movement impairment and every loss of control: stun, fear (a horror
+/// too), polymorph, incapacitate (Freezing Trap), root and slow. A Cyclone
+/// only if [`CC_BREAK_TAKES_CYCLONE`]. Not a silence: TBC's trinket left
+/// silences alone, and a silenced unit still moves and swings.
 pub const fn cc_break_breaks(aura: AuraType) -> bool {
     match aura {
         AuraType::Stun
@@ -191,9 +187,7 @@ pub const fn cc_break_breaks(aura: AuraType) -> bool {
         | AuraType::Incapacitate
         | AuraType::Root
         | AuraType::MovementSpeedSlow => true,
-        // The banish-like immunity: the holder cannot act on it, and the
-        // dispatch uses nothing from inside it.
-        AuraType::Cyclone => false,
+        AuraType::Cyclone => CC_BREAK_TAKES_CYCLONE,
         // Not loss of control: a silenced unit still moves and swings, and a
         // school lockout is an interrupt's.
         AuraType::Silence | AuraType::SpellSchoolLockout => false,
@@ -229,6 +223,12 @@ pub const fn cc_break_breaks(aura: AuraType) -> bool {
     }
 }
 
+/// Whether the crowd-control break frees its wearer from a Cyclone — and so
+/// whether a cycloned wearer may use it at all (`combat_ai::dispatch_while_held`).
+/// `false`, as in TBC: a Cyclone makes its target immune to everything, its
+/// own trinket included. THE ONE LINE a ruling on Cyclone changes.
+pub const CC_BREAK_TAKES_CYCLONE: bool = false;
+
 // ============================================================================
 // PER-WEARER STATE
 // ============================================================================
@@ -247,7 +247,17 @@ pub struct OnUseSlot {
     pub remaining: f32,
     /// A once-a-match item that has been used.
     pub spent: bool,
+    /// While its wearer holds the item for a teammate's dispel
+    /// (`class_ai::on_use`): when the wait began, and when it was last asked,
+    /// on the trace's clock. A wait not asked for longer than
+    /// [`WAIT_GAP_SECS`] belongs to an earlier hold and starts over.
+    pub waiting: Option<(f32, f32)>,
 }
+
+/// The longest gap between two asks of a held wearer that still counts as one
+/// hold: the dispatch asks every frame of a hold, so a longer gap means the
+/// hold ended and this is a new one.
+pub const WAIT_GAP_SECS: f32 = 0.25;
 
 impl OnUseSlot {
     /// Whether the item may be used now.
@@ -298,6 +308,9 @@ pub fn on_use_description(on_use: &OnUseConfig) -> String {
 /// sentence with its own "USE" (the encyclopedia's item page).
 pub fn on_use_sentence(on_use: &OnUseConfig) -> String {
     let effect = match on_use.effect {
+        OnUseEffect::CcBreak if CC_BREAK_TAKES_CYCLONE => {
+            "Breaks every stun, fear, polymorph, incapacitate, cyclone, root and slow on you"
+        }
         OnUseEffect::CcBreak => {
             "Breaks every stun, fear, polymorph, incapacitate, root and slow on you"
         }
@@ -323,23 +336,24 @@ mod tests {
     }
 
     #[test]
-    fn uses_in_a_median_life_count_every_use_that_starts_inside_it() {
-        assert_eq!(OnUseCooldown::OncePerMatch.uses_in_median_life(), 1);
-        // A 45s cooldown outlives the 43s life: one use.
-        assert_eq!(OnUseCooldown::Seconds(45.0).uses_in_median_life(), 1);
-        // Exactly the life: the second use would land at 43s, which is not
+    fn uses_in_an_arena_life_count_every_use_that_starts_inside_it() {
+        assert_eq!(ARENA_LIFE_SECS, 37.8);
+        assert_eq!(OnUseCooldown::OncePerMatch.uses_in_arena_life(), 1);
+        // A 45s cooldown outlives the 37.8s life: one use.
+        assert_eq!(OnUseCooldown::Seconds(45.0).uses_in_arena_life(), 1);
+        // Exactly the life: the second use would land at 37.8s, which is not
         // inside it.
-        assert_eq!(OnUseCooldown::Seconds(43.0).uses_in_median_life(), 1);
-        // 0, 20 and 40s.
-        assert_eq!(OnUseCooldown::Seconds(20.0).uses_in_median_life(), 3);
+        assert_eq!(OnUseCooldown::Seconds(37.8).uses_in_arena_life(), 1);
+        // 0, 15 and 30s.
+        assert_eq!(OnUseCooldown::Seconds(15.0).uses_in_arena_life(), 3);
     }
 
     #[test]
     fn the_card_example_prices_at_its_uses_not_the_long_run_bound() {
-        // §6.5 item 3: 15s of +40 SP on a 45s cooldown is 1.5 x 40 x 15/43.
+        // §6.5 item 3: 15s of +40 SP on a 45s cooldown is 1.5 x 40 x 15/37.8.
         let cost = on_use_buff_cost(WEIGHT_SPELL_POWER, 40.0, 15.0, OnUseCooldown::Seconds(45.0));
-        assert!((cost - 1.5 * 40.0 * 15.0 / 43.0).abs() < 1e-4, "{cost}");
-        assert!((cost - 20.93).abs() < 0.01, "{cost}");
+        assert!((cost - 1.5 * 40.0 * 15.0 / 37.8).abs() < 1e-4, "{cost}");
+        assert!((cost - 23.81).abs() < 0.01, "{cost}");
         // ...where the long-run bound would charge 15 and underprice it.
         let long_run = WEIGHT_SPELL_POWER * 40.0 * 15.0 / 60.0;
         assert!(cost > long_run);
@@ -347,9 +361,9 @@ mod tests {
 
     #[test]
     fn a_later_use_is_cut_off_where_the_life_ends() {
-        // 0s and 30s: the first buff is whole, the second runs 13s of its 15.
-        let cost = on_use_buff_cost(1.0, 43.0, 15.0, OnUseCooldown::Seconds(30.0));
-        assert!((cost - 28.0).abs() < 1e-4, "{cost}");
+        // 0s and 30s: the first buff is whole, the second runs 7.8s of its 15.
+        let cost = on_use_buff_cost(1.0, 37.8, 15.0, OnUseCooldown::Seconds(30.0));
+        assert!((cost - 22.8).abs() < 1e-4, "{cost}");
     }
 
     #[test]
@@ -359,7 +373,7 @@ mod tests {
             30.0
         );
         assert_eq!(
-            cc_break(OnUseCooldown::Seconds(20.0), Some(10.0)).budget_cost(),
+            cc_break(OnUseCooldown::Seconds(15.0), Some(10.0)).budget_cost(),
             30.0
         );
     }
@@ -473,6 +487,7 @@ mod tests {
             config: cc_break(OnUseCooldown::OncePerMatch, Some(30.0)),
             remaining: 0.0,
             spent: false,
+            waiting: None,
         };
         assert!(once.ready());
         once.start_cooldown();
@@ -508,6 +523,7 @@ mod tests {
             config: cc_break(OnUseCooldown::Seconds(60.0), Some(10.0)),
             remaining: 0.0,
             spent: false,
+            waiting: None,
         };
         slot.start_cooldown();
         combatant.on_use_items.push(slot);
