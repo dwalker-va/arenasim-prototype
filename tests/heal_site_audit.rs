@@ -78,6 +78,11 @@ const HEALERS: &[(&str, &str)] = &[
         "src/states/play_match/effects/dispels.rs",
         "process_dispels",
     ),
+    // A heeled pet's recovery at its owner's side.
+    (
+        "src/states/play_match/class_ai/pet_ai.rs",
+        "recover_heeled_pets",
+    ),
 ];
 
 /// Every (file, enclosing fn) in non-test `src/` code where `pattern` matches
