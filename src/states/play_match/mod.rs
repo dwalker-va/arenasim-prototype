@@ -60,6 +60,7 @@ pub mod selection;
 pub mod shadow_sight;
 pub mod situation;
 pub mod systems;
+pub mod talents;
 pub mod team_plan;
 pub mod team_solve;
 pub mod totems;
@@ -639,6 +640,7 @@ pub fn setup_play_match(
     existing_rng: Option<Res<GameRng>>,
     existing_profile: Option<Res<ai_profile::AiProfiles>>,
     abilities: Res<ability_config::AbilityDefinitions>,
+    talent_defs: Res<talents::TalentDefinitions>,
 ) {
     info!("Setting up Play Match scene with config: {:?}", *config);
 
@@ -839,6 +841,9 @@ pub fn setup_play_match(
             );
 
             let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
+            let build = config.team1_builds.get(i).cloned().unwrap_or_default();
+            let resolved =
+                talents::resolve_for_spawn(&talent_defs, &abilities, 1, i, *character, &build);
             let (entity, combatant) = spawn_combatant(
                 &mut commands,
                 &mut meshes,
@@ -857,7 +862,7 @@ pub fn setup_play_match(
                 paladin_aura,
                 &loadout,
                 &item_defs,
-                &abilities,
+                &resolved,
             );
 
             // Log equipment loadout
@@ -869,6 +874,16 @@ pub fn setup_play_match(
                     format_loadout(&loadout, &item_defs)
                 ),
             );
+            if !build.is_empty() {
+                combat_log.log(
+                    CombatLogEventType::MatchEvent,
+                    format!(
+                        "[TALENTS] {}: {}",
+                        combatant_id(1, i as u8, *character),
+                        talent_defs.describe(*character, &build)
+                    ),
+                );
+            }
 
             // Spawn Felhunter pet for Warlocks
             if *character == match_config::CharacterClass::Warlock {
@@ -882,6 +897,7 @@ pub fn setup_play_match(
                     position,
                     PetType::Felhunter,
                     &abilities,
+                    &resolved,
                 );
             }
 
@@ -907,6 +923,7 @@ pub fn setup_play_match(
                     position,
                     pet_type,
                     &abilities,
+                    &resolved,
                 );
             }
         } else {
@@ -967,6 +984,9 @@ pub fn setup_play_match(
             );
 
             let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
+            let build = config.team2_builds.get(i).cloned().unwrap_or_default();
+            let resolved =
+                talents::resolve_for_spawn(&talent_defs, &abilities, 2, i, *character, &build);
             let (entity, combatant) = spawn_combatant(
                 &mut commands,
                 &mut meshes,
@@ -985,7 +1005,7 @@ pub fn setup_play_match(
                 paladin_aura,
                 &loadout,
                 &item_defs,
-                &abilities,
+                &resolved,
             );
 
             // Log equipment loadout
@@ -997,6 +1017,16 @@ pub fn setup_play_match(
                     format_loadout(&loadout, &item_defs)
                 ),
             );
+            if !build.is_empty() {
+                combat_log.log(
+                    CombatLogEventType::MatchEvent,
+                    format!(
+                        "[TALENTS] {}: {}",
+                        combatant_id(2, i as u8, *character),
+                        talent_defs.describe(*character, &build)
+                    ),
+                );
+            }
 
             // Spawn Felhunter pet for Warlocks
             if *character == match_config::CharacterClass::Warlock {
@@ -1010,6 +1040,7 @@ pub fn setup_play_match(
                     position,
                     PetType::Felhunter,
                     &abilities,
+                    &resolved,
                 );
             }
 
@@ -1035,6 +1066,7 @@ pub fn setup_play_match(
                     position,
                     pet_type,
                     &abilities,
+                    &resolved,
                 );
             }
         } else {
@@ -1416,7 +1448,7 @@ pub(crate) fn spawn_combatant(
     paladin_aura: match_config::PaladinAura,
     equipment_loadout: &Loadout,
     item_defs: &ItemDefinitions,
-    abilities: &ability_config::AbilityDefinitions,
+    talents: &talents::ResolvedBuild,
 ) -> (Entity, Combatant) {
     // Get vibrant class colors for 3D visibility
     let base_color = class_mesh_color(class);
@@ -1440,13 +1472,13 @@ pub(crate) fn spawn_combatant(
         ..default()
     });
 
-    // The combatant's own book, resolved once at spawn (the headless spawn
-    // resolves it the same way).
+    // The combatant's own book, its build resolved once at spawn (the
+    // headless spawn resolves it the same way).
     let mut combatant = Combatant::new_with_curse_prefs(
         team,
         slot,
         class,
-        ability_book::AbilityBook::for_class(abilities, class),
+        talents.book().clone(),
         rogue_opener,
         rogue_poison,
         warlock_curse_prefs,
@@ -1455,6 +1487,7 @@ pub(crate) fn spawn_combatant(
     combatant.mage_armor = mage_armor;
     combatant.paladin_aura = paladin_aura;
     combatant.apply_equipment(equipment_loadout, item_defs);
+    talents.apply(&mut combatant);
     let combatant_clone = combatant.clone();
     let weapon_poison_buff = combatant.weapon_poison_self_buff();
 
@@ -1592,15 +1625,17 @@ pub(crate) fn spawn_pet(
     owner_position: Vec3,
     pet_type: PetType,
     abilities: &ability_config::AbilityDefinitions,
+    owner_talents: &talents::ResolvedBuild,
 ) {
     let pet_slot = PET_SLOT_BASE + owner_combatant.slot;
-    let pet_combatant = Combatant::new_pet(
+    let mut pet_combatant = Combatant::new_pet(
         owner_combatant.team,
         pet_slot,
         pet_type,
         owner_combatant,
         ability_book::AbilityBook::for_pet(abilities, pet_type),
     );
+    owner_talents.apply_to_pet(&mut pet_combatant);
     // MUST match the headless spawn offsets in `headless/runner.rs` exactly, or a
     // seed stops reproducing between the two modes.
     //
@@ -2086,7 +2121,10 @@ mod held_weapon_tests {
                         match_config::PaladinAura::default(),
                         &loadout,
                         &item_defs,
-                        ability_config::AbilityDefinitions::shipped(),
+                        &talents::ResolvedBuild::untalented(
+                            ability_config::AbilityDefinitions::shipped(),
+                            class,
+                        ),
                     )
                     .0
                 },

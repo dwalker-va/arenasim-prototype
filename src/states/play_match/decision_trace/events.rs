@@ -316,6 +316,10 @@ pub enum EventKind {
     /// A melee attack was dodged or parried (`combat_core::avoidance`). The
     /// `actor` is the attacker, the `target` the defender.
     MeleeAvoided,
+    /// The match's header: the first line of a trace whose match has a talent
+    /// build, carrying every slot's build. No actor. A match with no talents
+    /// writes none, so its trace is the trace it always was.
+    MatchHeader,
     /// A wearer's AI considered an on-use item (`class_ai::on_use`): used it,
     /// or held it with a reason. Emitted only for a wearer of one.
     ItemDecision,
@@ -470,10 +474,18 @@ pub enum EventPayload {
         attack: String,
         avoided: crate::states::play_match::combat_core::Avoidance,
     },
+    /// The `match_header` line: each team's builds, one per slot, each a
+    /// talent-to-rank map (`{}` for a slot with none). Disambiguated by its
+    /// REQUIRED `team1_builds` / `team2_builds`, which no other variant has.
+    Header {
+        team1_builds: Vec<crate::states::play_match::talents::Build>,
+        team2_builds: Vec<crate::states::play_match::talents::Build>,
+    },
     /// One `item_decision` event: the on-use item considered, whether it was
     /// used (`chosen`) or held (`rejected`, with its reason). Disambiguated by
     /// its REQUIRED `item` field, which no other variant has, while it lacks
-    /// the `candidates` / `posture` / `name` / `avoided` the others require.
+    /// the `candidates` / `posture` / `name` / `avoided` / builds the others
+    /// require.
     Item {
         item: crate::states::play_match::equipment::ItemId,
         status: CandidateStatus,

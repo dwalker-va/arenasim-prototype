@@ -174,6 +174,12 @@ pub struct AbilityConfig {
     /// with `class`.
     #[serde(default)]
     pub pet: Option<PetType>,
+    /// A TALENT ability: no combatant has it unless its build takes the one
+    /// talent that grants it (`talents.ron`, a `Grant`). Its class's base book
+    /// leaves it out ([`AbilityDefinitions::base_abilities_for_class`]); the
+    /// class AI must still decide it (`tests/talent_ai_audit.rs`).
+    #[serde(default)]
+    pub talent: bool,
     /// Icon asset path (e.g. "icons/abilities/spell_frost_frostbolt02.jpg")
     #[serde(default)]
     pub icon: String,
@@ -779,6 +785,18 @@ impl AbilityDefinitions {
             }
         }
 
+        // A talent grants an ability to its CLASS's book; no talent reaches a
+        // pet's.
+        for (ability, def) in &self.definitions {
+            if def.talent && def.pet.is_some() {
+                panic!(
+                    "abilities.ron: {:?} is a talent ability cast by a pet. A talent grants \
+                     an ability to its class's own book, never a pet's.",
+                    ability
+                );
+            }
+        }
+
         // A channel is interrupted by its own path, which does not read
         // `prevention`, so a channel declaring anything but Silence would be
         // a value the interrupt silently ignores.
@@ -822,6 +840,29 @@ impl AbilityDefinitions {
             .definitions
             .iter()
             .filter(|(_, def)| def.class == class && def.pet.is_none())
+            .map(|(ability, _)| *ability)
+            .collect();
+        abilities.sort_unstable();
+        abilities
+    }
+
+    /// The abilities EVERY combatant of the class has, whatever its build:
+    /// its own abilities less its talent abilities (`talent: true`), which
+    /// only the talent that grants one adds. What a class's
+    /// [`AbilityBook`](super::ability_book::AbilityBook) starts from.
+    pub fn base_abilities_for_class(&self, class: CharacterClass) -> Vec<AbilityType> {
+        self.own_abilities_for_class(class)
+            .into_iter()
+            .filter(|ability| !self.definitions[ability].talent)
+            .collect()
+    }
+
+    /// Every talent ability (`talent: true`), in `AbilityType` order.
+    pub fn talent_abilities(&self) -> Vec<AbilityType> {
+        let mut abilities: Vec<AbilityType> = self
+            .definitions
+            .iter()
+            .filter(|(_, def)| def.talent)
             .map(|(ability, _)| *ability)
             .collect();
         abilities.sort_unstable();
@@ -910,10 +951,13 @@ pub struct AbilityConfigPlugin;
 
 impl Plugin for AbilityConfigPlugin {
     fn build(&self, app: &mut App) {
-        // Load ability definitions at startup
+        // Load ability definitions at startup, and the talent table, which
+        // is validated against them (its grants and patches name abilities).
         match load_ability_definitions() {
             Ok(definitions) => {
-                app.insert_resource(definitions);
+                let talents = super::talents::load_talent_definitions(&definitions)
+                    .unwrap_or_else(|e| panic!("Failed to load talent definitions: {e}"));
+                app.insert_resource(definitions).insert_resource(talents);
             }
             Err(e) => {
                 // In development, we might want to continue with hardcoded fallback
@@ -955,6 +999,7 @@ mod tests {
             name: "Test".to_string(),
             class: CharacterClass::Mage,
             pet: None,
+            talent: false,
             icon: String::new(),
             description: String::new(),
             cast_time: 0.0,
