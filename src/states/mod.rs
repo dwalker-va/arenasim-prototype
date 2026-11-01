@@ -966,6 +966,20 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Life Tap's landing (kit 1167, `lifetap.m2`) on the Warlock's chest —
+        // graphical only. Spawned by `consume_instant_ability_signals`; its
+        // particles are client particles, aged and turned by
+        // `animate_client_particles` / `billboard_hunter_shots`.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_life_tap_glow_visuals,
+                play_match::update_life_tap_glows,
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Dispel ribbon visual effects (separate group to avoid tuple size limits)
         // The spiraling "you got cleansed" indicator — graphical only.
         .add_systems(
