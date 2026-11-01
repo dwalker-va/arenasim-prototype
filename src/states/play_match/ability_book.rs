@@ -19,7 +19,7 @@
 //! [`AbilityBook::get`] answers `None` ("this unit has no such ability").
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::abilities::AbilityType;
 use super::ability_config::{AbilityConfig, AbilityDefinitions, AuraEffect};
@@ -41,6 +41,61 @@ pub enum BookOwner {
 pub struct AbilityBook {
     owner: BookOwner,
     entries: Arc<BTreeMap<AbilityType, AbilityConfig>>,
+    /// The live next-cast modifiers' view of this book, for one decision
+    /// (`next_cast::effective_book`). `None` for every book a combatant
+    /// carries.
+    overlay: Option<Arc<NextCastOverlay>>,
+}
+
+/// One turn's next-cast modifiers over a book: the configs of the abilities
+/// they cover, changed, until the turn CHOOSES one of them
+/// ([`NextCastOverlay::spend`], called by the decision trace's `choose`). From
+/// then on the chosen ability keeps its changed config and every other covered
+/// ability reads its own again — a modifier is spent by the first cast that
+/// uses it, never by two in one turn.
+pub struct NextCastOverlay {
+    changed: BTreeMap<AbilityType, AbilityConfig>,
+    modifiers: BTreeMap<AbilityType, crate::states::play_match::next_cast::NextCastModifier>,
+    spent: Mutex<Option<AbilityType>>,
+}
+
+impl NextCastOverlay {
+    /// An overlay changing `changed`'s abilities, each by its modifier.
+    pub fn new(
+        changed: BTreeMap<AbilityType, AbilityConfig>,
+        modifiers: BTreeMap<AbilityType, crate::states::play_match::next_cast::NextCastModifier>,
+    ) -> Self {
+        Self {
+            changed,
+            modifiers,
+            spent: Mutex::new(None),
+        }
+    }
+
+    /// Record `ability` as the cast that spends the modifiers, when it is
+    /// covered and nothing has spent them yet.
+    pub fn spend(&self, ability: AbilityType) {
+        if self.changed.contains_key(&ability) {
+            let mut spent = self.spent.lock().expect("an unpoisoned lock");
+            if spent.is_none() {
+                *spent = Some(ability);
+            }
+        }
+    }
+
+    /// The covered ability that spent the modifiers, if one did.
+    pub fn spent(&self) -> Option<AbilityType> {
+        *self.spent.lock().expect("an unpoisoned lock")
+    }
+
+    fn view(&self, ability: &AbilityType) -> Option<&AbilityConfig> {
+        let config = self.changed.get(ability)?;
+        match self.spent() {
+            None => Some(config),
+            Some(spent) if spent == *ability => Some(config),
+            Some(_) => None,
+        }
+    }
 }
 
 impl std::fmt::Debug for AbilityBook {
@@ -100,6 +155,31 @@ impl AbilityBook {
         self
     }
 
+    /// This book seen through `overlay` (`next_cast::effective_book`).
+    pub fn with_overlay(mut self, overlay: NextCastOverlay) -> Self {
+        self.overlay = Some(Arc::new(overlay));
+        self
+    }
+
+    /// The overlay this book is seen through, if any: what the decision
+    /// trace's `choose` spends.
+    pub fn overlay(&self) -> Option<Arc<NextCastOverlay>> {
+        self.overlay.clone()
+    }
+
+    /// The next-cast modifier `ability` spent in this book's turn, if it did:
+    /// what a cast that lands later (an instant projectile, a pending effect)
+    /// carries to its landing.
+    pub fn spent_modifier(
+        &self,
+        ability: AbilityType,
+    ) -> Option<crate::states::play_match::next_cast::NextCastModifier> {
+        let overlay = self.overlay.as_ref()?;
+        (overlay.spent() == Some(ability))
+            .then(|| overlay.modifiers.get(&ability).cloned())
+            .flatten()
+    }
+
     /// This book with `edit` applied to its config for `ability`: a talent's
     /// `Patch`, made while a build is resolved, before the book's combatant
     /// enters the world. Panics when the book has no such ability.
@@ -124,6 +204,7 @@ impl AbilityBook {
         Self {
             owner,
             entries: Arc::new(entries),
+            overlay: None,
         }
     }
 
@@ -135,6 +216,9 @@ impl AbilityBook {
     /// This combatant's config for `ability`, or `None` when it has no such
     /// ability.
     pub fn get(&self, ability: &AbilityType) -> Option<&AbilityConfig> {
+        if let Some(changed) = self.overlay.as_ref().and_then(|o| o.view(ability)) {
+            return Some(changed);
+        }
         self.entries.get(ability)
     }
 
@@ -143,7 +227,7 @@ impl AbilityBook {
     /// another unit's ability should be asking that unit's book.
     #[track_caller]
     pub fn get_unchecked(&self, ability: &AbilityType) -> &AbilityConfig {
-        self.entries.get(ability).unwrap_or_else(|| {
+        self.get(ability).unwrap_or_else(|| {
             panic!(
                 "{:?} is not in the ability book of {:?}: ask the book of the unit that casts it",
                 ability, self.owner
@@ -170,7 +254,8 @@ impl AbilityBook {
             .find(|effect| effect.aura_type == aura.effect_type)
     }
 
-    /// Every ability in the book with its config, in `AbilityType` order.
+    /// Every ability in the book with its OWN config, in `AbilityType` order
+    /// (a next-cast overlay is not read: `get` reads it).
     pub fn iter(&self) -> impl Iterator<Item = (&AbilityType, &AbilityConfig)> {
         self.entries.iter()
     }

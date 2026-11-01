@@ -791,6 +791,7 @@ fn start_component_entry(
             if let Some(dummy) = dummy {
                 commands.spawn((
                     HolyShockDamagePending {
+                        caster,
                         caster_book: crate::states::play_match::ability_book::AbilityBook::shipped(
                             info.class,
                         ),
@@ -808,6 +809,7 @@ fn start_component_entry(
             } else {
                 commands.spawn((
                     HolyShockHealPending {
+                        caster,
                         caster_book: crate::states::play_match::ability_book::AbilityBook::shipped(
                             info.class,
                         ),

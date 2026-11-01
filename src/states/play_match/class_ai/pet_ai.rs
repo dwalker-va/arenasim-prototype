@@ -839,6 +839,7 @@ pub(crate) fn execute_spider_web(
             caster_slot: combatant.owner_relative_slot(),
             caster_class: combatant.class,
             caster_pet_type: Some(PetType::Spider),
+            next_cast: None,
         },
         Transform::from_translation(my_pos + Vec3::new(0.0, 0.5, 0.0)),
         PlayMatchEntity,

@@ -203,7 +203,10 @@ pub fn decide_interrupt(
     let Some(ability) = class_interrupt(combatant.class) else {
         return Idle;
     };
-    let def = combatant.book().get_unchecked(&ability);
+    // Through a live next-cast modifier (Initiative's energy cut), as every
+    // decision reads its book.
+    let book = crate::states::play_match::next_cast::effective_book(combatant.book(), auras);
+    let def = book.get_unchecked(&ability);
     let reach = |at: Vec3| cast_reach(ctx, def.range, my_pos, at);
 
     // The enemy casts (not channels) a scan considers: alive, not immune.
@@ -470,8 +473,10 @@ pub fn fire_interrupt(
     target: Entity,
     target_pos: Vec3,
     cast_ability: AbilityType,
+    auras: Option<&ActiveAuras>,
 ) {
-    let book = combatant.book().clone();
+    // The book the decision read: a live next-cast modifier changes its cost.
+    let book = crate::states::play_match::next_cast::effective_book(combatant.book(), auras);
     let ability_def = book.get_unchecked(&interrupt_ability);
     // The cast cut is the TARGET's, named from its own book.
     let target_ability_name = ctx.combatants.get(&target).map_or_else(

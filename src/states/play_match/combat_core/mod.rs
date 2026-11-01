@@ -14,6 +14,7 @@ mod casting;
 mod damage;
 mod death;
 mod healing;
+pub mod leech;
 mod movement;
 mod movement_scoring;
 mod stealth;
@@ -210,6 +211,9 @@ mod tests {
             dispel_type: DispelType::Auto,
             compound: None,
             source_item: None,
+            source_talent: None,
+            next_cast: None,
+            leech: None,
             stacks: None,
             bloom: None,
         }
@@ -602,6 +606,9 @@ mod tests {
                 dispel_type: DispelType::Auto,
                 compound: None,
                 source_item: None,
+                source_talent: None,
+                next_cast: None,
+                leech: None,
                 stacks: None,
                 bloom: None,
             }],
@@ -665,6 +672,9 @@ mod tests {
                 dispel_type: DispelType::Auto,
                 compound: None,
                 source_item: None,
+                source_talent: None,
+                next_cast: None,
+                leech: None,
                 stacks: None,
                 bloom: None,
             }],
@@ -762,6 +772,9 @@ mod tests {
                 dispel_type: DispelType::Auto,
                 compound: None,
                 source_item: None,
+                source_talent: None,
+                next_cast: None,
+                leech: None,
                 stacks: None,
                 bloom: None,
             }],
@@ -800,6 +813,9 @@ mod tests {
                 dispel_type: DispelType::Auto,
                 compound: None,
                 source_item: None,
+                source_talent: None,
+                next_cast: None,
+                leech: None,
                 stacks: None,
                 bloom: None,
             }],
@@ -954,6 +970,9 @@ mod tests {
             dispel_type: DispelType::Auto,
             compound: None,
             source_item: None,
+            source_talent: None,
+            next_cast: None,
+            leech: None,
             stacks: None,
             bloom: None,
         }

@@ -226,6 +226,13 @@ pub fn load_ability_icons(
             let handle: Handle<Image> = asset_server.load(path);
             icon_handles.handles.push((key, handle));
         }
+        // ...and a talent-applied aura (a talent's proc buff) its talent.
+        for (key, path) in super::play_match::rendering::talent_aura_icons(
+            super::play_match::talents::TalentDefinitions::shipped(),
+        ) {
+            let handle: Handle<Image> = asset_server.load(path);
+            icon_handles.handles.push((key, handle));
+        }
         return; // Wait for next frame to check if loaded
     }
 

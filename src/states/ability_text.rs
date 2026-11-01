@@ -272,6 +272,183 @@ fn stacks_sentence(aura: &AuraEffect) -> String {
     }
 }
 
+/// The sentence for a next-cast modifier that lasts `duration` seconds:
+/// "Within 10 sec, the next Shadow Bolt is instant." The one generator, for an
+/// ability's aura and a talent proc's alike.
+pub fn next_cast_sentence(
+    m: &crate::states::play_match::next_cast::NextCastModifier,
+    duration: f32,
+) -> String {
+    use crate::states::play_match::ability_config::AbilityDefinitions;
+    use crate::states::play_match::next_cast::NextCastScope;
+    let what = match &m.applies_to {
+        NextCastScope::Any => "ability".to_string(),
+        NextCastScope::Abilities(list) => {
+            let names: Vec<String> = list
+                .iter()
+                .map(|a| {
+                    AbilityDefinitions::shipped()
+                        .get(a)
+                        .map_or_else(|| format!("{a:?}"), |d| d.name.clone())
+                })
+                .collect();
+            join_or(&names)
+        }
+    };
+    let mut changes: Vec<String> = Vec::new();
+    if m.instant {
+        changes.push("is instant".to_string());
+    } else if m.cast_time_reduction > 0.0 {
+        changes.push(format!("casts {} sec faster", trim(m.cast_time_reduction)));
+    }
+    if m.free {
+        changes.push("costs nothing".to_string());
+    } else if m.cost_reduction > 0.0 {
+        changes.push(format!("costs {} less", trim(m.cost_reduction)));
+    }
+    if m.crit_chance >= 1.0 {
+        changes.push("is a sure critical strike".to_string());
+    } else if m.crit_chance > 0.0 {
+        changes.push(format!(
+            "has {:.0}% more chance to critically strike",
+            m.crit_chance * 100.0
+        ));
+    }
+    if m.power > 0.0 {
+        changes.push(format!("is {:.0}% stronger", m.power * 100.0));
+    }
+    format!(
+        "Within {:.0} sec, the next {} {}.",
+        duration,
+        what,
+        join_and(&changes)
+    )
+}
+
+/// The player-facing sentence for one rank of a talent's proc, named
+/// `talent`: when it fires, and what it does. The one generator, for the
+/// encyclopedia's entry and any tooltip.
+pub fn talent_proc_description(
+    talent: &str,
+    proc: &crate::states::play_match::talent_procs::TalentProc,
+) -> String {
+    use crate::states::play_match::abilities::AbilityType;
+    use crate::states::play_match::talent_procs::{
+        ProcChance, ProcEffect, ProcRankScale, ProcTarget, TalentTrigger,
+    };
+    let names = |list: &[AbilityType]| -> String {
+        let defs = crate::states::play_match::ability_config::AbilityDefinitions::shipped();
+        let names: Vec<String> = list
+            .iter()
+            .map(|a| {
+                defs.get(a)
+                    .map_or_else(|| format!("{a:?}"), |d| d.name.clone())
+            })
+            .collect();
+        names.join(" or ")
+    };
+    let of = |what: &str| {
+        if proc.abilities.is_empty() {
+            what.to_string()
+        } else {
+            format!("{what} of {}", names(&proc.abilities))
+        }
+    };
+    let event = match proc.trigger {
+        TalentTrigger::MeleeHit if proc.crit_only => "a melee critical strike".to_string(),
+        TalentTrigger::MeleeHit => "a melee hit".to_string(),
+        TalentTrigger::SpellHit => of("a hit"),
+        TalentTrigger::DotTick => of("each damage tick"),
+        TalentTrigger::HealCrit => of("a critical heal"),
+        TalentTrigger::CritTaken => "being struck by a critical hit".to_string(),
+        TalentTrigger::StealthBreak => "leaving stealth".to_string(),
+        TalentTrigger::AbilityUsed if proc.abilities.is_empty() => "using any ability".to_string(),
+        TalentTrigger::AbilityUsed => format!("using {}", names(&proc.abilities)),
+    };
+    let chance = match proc.chance {
+        ProcChance::Chance(c) if c >= 1.0 => "On".to_string(),
+        ProcChance::Chance(c) => format!("A {:.0}% chance on", c * 100.0),
+        ProcChance::PerMinute(r) => format!(
+            "{} times a minute of melee, whatever the weapon, on",
+            trim_number(r)
+        ),
+    };
+    let effect = match &proc.effect {
+        ProcEffect::ApplyAura {
+            on,
+            aura_type,
+            duration,
+            ..
+        } => {
+            let whom = match on {
+                ProcTarget::Owner => "you",
+                ProcTarget::Other => match proc.trigger {
+                    TalentTrigger::HealCrit => "the ally healed",
+                    TalentTrigger::CritTaken => "the attacker",
+                    _ => "the target",
+                },
+            };
+            format!(
+                "gives {whom} {} for {:.0} sec",
+                aura_type.display_name(),
+                duration
+            )
+        }
+        ProcEffect::NextCast {
+            modifier, duration, ..
+        } => {
+            let s = next_cast_sentence(modifier, *duration);
+            format!("primes your next cast: {}", s.trim_end_matches('.'))
+        }
+        ProcEffect::HealBack {
+            fraction, duration, ..
+        } => format!(
+            "heals you for {:.0}% of it over {:.0} sec",
+            fraction * 100.0,
+            duration
+        ),
+    };
+    let rank = match proc.ranks_add {
+        ProcRankScale::Chance => " The chance is per rank.",
+        ProcRankScale::Effect => " Its effect is per rank.",
+    };
+    let cooldown = if proc.internal_cooldown > 0.0 {
+        format!(
+            " Cannot occur more than once every {:.0} sec.",
+            proc.internal_cooldown
+        )
+    } else {
+        String::new()
+    };
+    format!("{talent}: {chance} {event}, {effect}.{rank}{cooldown}")
+}
+
+/// `v` with no trailing zeros: 4.8, 5, 0.25.
+pub fn trim_number(v: f32) -> String {
+    trim(v)
+}
+
+fn trim(v: f32) -> String {
+    let s = format!("{v:.2}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn join_with(items: &[String], last: &str) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [init @ .., tail] => format!("{} {last} {tail}", init.join(", ")),
+    }
+}
+
+fn join_or(items: &[String]) -> String {
+    join_with(items, "or")
+}
+
+fn join_and(items: &[String]) -> String {
+    join_with(items, "and")
+}
+
 /// Build a description string for an aura effect
 pub fn build_aura_description(aura: &AuraEffect) -> String {
     match aura.aura_type {
@@ -458,6 +635,11 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
                 aura.duration
             )
         }
+        AuraType::NextCast => aura
+            .next_cast
+            .as_ref()
+            .map(|m| next_cast_sentence(m, aura.duration))
+            .unwrap_or_default(),
         AuraType::LockoutDurationReduction => {
             let reduction_pct = (aura.magnitude * 100.0) as i32;
             format!(

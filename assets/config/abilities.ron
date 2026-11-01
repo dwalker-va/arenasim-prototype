@@ -816,6 +816,9 @@
                 // classification, but diminish on a dedicated Horror bucket so
                 // Death Coil and Fear do NOT share DR (WoW Classic behavior).
                 dr_category: Some(Horror),
+                // Lifesteal: every point of the hit that reaches health heals
+                // the Warlock (`combat_core/leech.rs`).
+                leech: Some((fraction: 1.0)),
             )),
             spell_school: Shadow,
             projectile_speed: Some(40.0),

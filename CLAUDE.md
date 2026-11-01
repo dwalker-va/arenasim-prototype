@@ -613,7 +613,34 @@ carrying every slot's build.
 - **Adding a patchable field:** an `AbilityField` variant;
   `every_numeric_ability_field_is_decided` destructures `AbilityConfig`
   without a rest pattern, so a new numeric field fails to compile until it is
-  placed or declared not patchable.
+  placed or declared not patchable. `CritChance` is the ability's own crit,
+  added at every crit roll it makes; `AuraStrength` is its aura's magnitude
+  read the way that grows with the effect (`1 − magnitude` for a slow or a
+  healing cut, `talents::strength_is_remainder`).
+- **The general mechanisms (AS-331)**, each inert until a build or an
+  ability uses it:
+  - `Proc(..)` (`talent_procs.rs`): a trigger — `MeleeHit` (optionally
+    `crit_only`), `SpellHit`, `DotTick`, `HealCrit`, `CritTaken`,
+    `StealthBreak`, `AbilityUsed`, each narrowable to named `abilities` — a
+    `ProcChance` (`Chance` or `PerMinute`), `ranks_add: Chance | Effect`, and
+    an effect: an aura on its owner or the event's other unit, a next-cast
+    modifier, or a heal-back. Sites push a `ProcEvent` only for a unit whose
+    `talent_procs` listens; `resolve_talent_procs` rolls them all at the end
+    of Phase 3. A proc's aura carries `Aura::source_talent` and wears the
+    talent's icon. A new damage or heal site for a talent ability pushes its
+    `SpellHit` / `HealCrit` there.
+  - A NEXT-CAST modifier (`next_cast.rs`): an `AuraType::NextCast` aura with
+    a `NextCastModifier` (instant, free, crit chance, cast-time and cost cuts,
+    power). The unit decides from `next_cast::effective_book`; the first
+    covered ability its turn chooses spends it (interrupts included), and a
+    cast that lands later carries it there (`next_cast_spent`, the
+    `Projectile`, Holy Shock's pending book). A cast bar that does not land —
+    interrupted, crowd-controlled, silenced or fizzled — gives it back. Two
+    modifiers take the strongest of each field, never the sum.
+  - The `leech` field on `applies_aura` (`combat_core/leech.rs`): a share of
+    the ability's own damage (Death Coil, Siphon Life) or of its caster's
+    damage of one school to the bearer (Vampiric Embrace) heals the caster or
+    its party, through `apply_healing`.
 
 ### Adding a New Item
 
@@ -677,6 +704,12 @@ any ring fits either ring socket, and the same item may not occupy both
      weapon's speed, so a slow weapon's fewer swings proc less often per
      second. That is Classic's shape for Windfury and poisons; the sim's proc
      trinkets have no Classic counterpart, so none is rated per minute.
+     **A talent's `MeleeHit` proc may instead declare a rate per minute**
+     (`ProcChance::PerMinute`, user ruling): each landed hit's chance is
+     `rate × swing_time / 60`, from the swinging hand's own weapon speed, so
+     the procs per minute of melee are the same whatever the weapon — The
+     Art of War's 4.8 a minute is 20% on a 2.5s swing, 32% on a 4.0s one.
+     Per-hit chances (the trinkets above, the Rogue's poisons) are unchanged.
    - **Per-trinket ICD, no global lock.** A proc cannot fire again while its own
      buff is up (`internal_cooldown >= duration` is validated), and two
      DIFFERENT trinkets can be live at once. A proc buff coexists with a

@@ -170,6 +170,26 @@ const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
          `named_auras_built_from_helpers_also_resolve`.",
     ),
     (
+        "src/states/play_match/talent_procs.rs",
+        "ability_name: name.clone()",
+        "a talent proc's aura, named after its effect or its talent \
+         (`talent_procs::effect_aura`). `EngineAura::TalentProcAura` is derived from the \
+         `Proc` effects in talents.ron and builds its entry with this same constructor, so \
+         talent N+1's proc is catalogued with no code in either place.",
+    ),
+    (
+        "src/states/play_match/talent_procs.rs",
+        "..base",
+        "a talent proc's next-cast modifier, built on the named aura above (`..base(..)`); \
+         covered by `EngineAura::TalentProcAura` the same way.",
+    ),
+    (
+        "src/states/play_match/next_cast.rs",
+        "ability_name: name.to_string()",
+        "`primed`, a #[cfg(test)] fixture in this file's own unit tests — never applied in a \
+         match.",
+    ),
+    (
         "src/states/play_match/proc_trinkets.rs",
         "ability_name: source_name.to_string()",
         "a proc trinket's buff, named after the trinket. `EngineAura::ProcTrinketBuff` is \

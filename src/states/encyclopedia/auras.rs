@@ -58,6 +58,7 @@ use crate::ui::fonts::body_family;
 use bevy_egui::egui;
 
 use crate::states::ability_text::build_aura_description;
+use crate::states::ability_text::talent_proc_description;
 use crate::states::match_config::RoguePoison;
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::ability_config::AbilityDefinitions;
@@ -75,10 +76,14 @@ use crate::states::play_match::effects::backlash::{
 };
 use crate::states::play_match::equipment::{ItemDefinitions, ItemId};
 use crate::states::play_match::proc_trinkets::proc_description;
-use crate::states::play_match::rendering::{is_buff_aura, item_aura_icon_key};
+use crate::states::play_match::rendering::{
+    is_buff_aura, item_aura_icon_key, talent_aura_icon_key,
+};
 use crate::states::play_match::shadow_sight::{
     SHADOW_SIGHT_BREAK_ON_DAMAGE, SHADOW_SIGHT_DURATION, SHADOW_SIGHT_SPAWN_TIME,
 };
+use crate::states::play_match::talent_procs::{effect_aura, ProcEvent, TalentProcSlot};
+use crate::states::play_match::talents::{TalentDefinitions, TalentEffect, TalentId};
 
 use super::search::SearchEntry;
 use super::widget;
@@ -185,6 +190,11 @@ pub enum EngineAura {
     /// a `proc:` block gets an entry, so trinket N+1 (the whole point of
     /// AS-61) needs no variant here.
     ProcTrinketBuff(ItemId),
+    /// The aura a TALENT's proc applies (Shadow Trance, Blackout's stun),
+    /// named after its effect: the talent and the proc's index among its
+    /// `Proc` effects. Derived from `talents.ron`, so talent N+1's proc gets
+    /// an entry with no variant here.
+    TalentProcAura(TalentId, u8),
 }
 
 impl EngineAura {
@@ -193,6 +203,16 @@ impl EngineAura {
     /// The two nested variants expand from their own sources, so this list only
     /// has to name the genuinely one-off auras.
     pub fn all(abilities: &AbilityDefinitions, items: &ItemDefinitions) -> Vec<EngineAura> {
+        Self::all_with(abilities, items, TalentDefinitions::shipped())
+    }
+
+    /// [`Self::all`] under the given talent table rather than the shipped
+    /// one.
+    pub fn all_with(
+        abilities: &AbilityDefinitions,
+        items: &ItemDefinitions,
+        talents: &TalentDefinitions,
+    ) -> Vec<EngineAura> {
         let mut all = vec![
             EngineAura::WeakenedSoul,
             EngineAura::ShadowSight,
@@ -225,6 +245,15 @@ impl EngineAura {
                 .copied()
                 .map(EngineAura::ProcTrinketBuff),
         );
+        // Every talent proc that lands an aura, in `TalentId` order.
+        for (talent, config) in talents.iter() {
+            let procs = config
+                .per_rank
+                .iter()
+                .filter(|e| matches!(e, TalentEffect::Proc(_)))
+                .count();
+            all.extend((0..procs as u8).map(|i| EngineAura::TalentProcAura(talent, i)));
+        }
         all
     }
 }
@@ -327,6 +356,9 @@ pub enum AuraArt {
     /// The aura wears the icon of the ITEM that applies it — a proc trinket's
     /// buff. Resolved through `item_aura_icon_key`, the key the buff bar uses.
     Item(ItemId),
+    /// The aura wears the icon of the TALENT whose proc applies it. Resolved
+    /// through `talent_aura_icon_key`, the key the buff bar uses.
+    Talent(TalentId),
 }
 
 /// One catalog entry: a named aura, fully resolved.
@@ -494,15 +526,24 @@ impl NamedAura {
 /// Deterministic: `AbilityDefinitions` iterates a `HashMap`, so the sort is
 /// what makes the index, the search registry and the snapshots stable.
 pub fn catalog(abilities: &AbilityDefinitions, items: &ItemDefinitions) -> Vec<NamedAura> {
+    catalog_with(abilities, items, TalentDefinitions::shipped())
+}
+
+/// [`catalog`] under the given talent table rather than the shipped one.
+pub fn catalog_with(
+    abilities: &AbilityDefinitions,
+    items: &ItemDefinitions,
+    talents: &TalentDefinitions,
+) -> Vec<NamedAura> {
     let mut entries: Vec<NamedAura> = abilities
         .iter()
         .filter_map(|(ability, _)| ron_entry(*ability, abilities))
         .collect();
 
     entries.extend(
-        EngineAura::all(abilities, items)
+        EngineAura::all_with(abilities, items, talents)
             .into_iter()
-            .filter_map(|engine| engine_entry(engine, abilities, items)),
+            .filter_map(|engine| engine_entry_with(engine, abilities, items, talents)),
     );
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     entries
@@ -695,6 +736,9 @@ fn engine_art(engine: EngineAura) -> AuraArt {
         // trinket's own icon — as it does in the buff bar, which reads the
         // same key off the aura's `source_item`.
         EngineAura::ProcTrinketBuff(item) => AuraArt::Item(item),
+        // A talent's proc wears its talent's icon, as in the buff bar, which
+        // reads the same key off the aura's `source_talent`.
+        EngineAura::TalentProcAura(talent, _) => AuraArt::Talent(talent),
     }
 }
 
@@ -710,6 +754,16 @@ fn engine_entry(
     engine: EngineAura,
     abilities: &AbilityDefinitions,
     items: &ItemDefinitions,
+) -> Option<NamedAura> {
+    engine_entry_with(engine, abilities, items, TalentDefinitions::shipped())
+}
+
+/// [`engine_entry`] under the given talent table.
+fn engine_entry_with(
+    engine: EngineAura,
+    abilities: &AbilityDefinitions,
+    items: &ItemDefinitions,
+    talents: &TalentDefinitions,
 ) -> Option<NamedAura> {
     let spec = match engine {
         EngineAura::WeakenedSoul => EngineSpec {
@@ -911,6 +965,37 @@ fn engine_entry(
                 provenance: proc_description(proc),
             }
         }
+        EngineAura::TalentProcAura(talent, index) => {
+            let config = talents.get(talent)?;
+            let proc = config
+                .per_rank
+                .iter()
+                .filter_map(|e| match e {
+                    TalentEffect::Proc(p) => Some(p),
+                    _ => None,
+                })
+                .nth(usize::from(index))?;
+            // Built by the constructor the resolver lands it with, so the page
+            // states the aura that lands.
+            let slot = TalentProcSlot::new(talent, &config.name, proc.clone());
+            let event = ProcEvent::new(bevy::prelude::Entity::PLACEHOLDER, proc.trigger)
+                .other(bevy::prelude::Entity::PLACEHOLDER)
+                .amount(1.0);
+            let landed = effect_aura(&slot, bevy::prelude::Entity::PLACEHOLDER, &event)?.aura;
+            EngineSpec {
+                name: landed.ability_name.clone(),
+                frame_name: None,
+                mechanic: landed.effect_type,
+                source: AuraSource::Mechanic("a talent"),
+                magnitude: landed.magnitude,
+                school: None,
+                break_on_damage: landed.break_on_damage_threshold,
+                dispel_type: landed.dispel_type,
+                persistence: Persistence::Seconds(landed.duration),
+                riders: EngineSpec::no_riders(),
+                provenance: talent_proc_description(&config.name, proc),
+            }
+        }
     };
 
     let EngineSpec {
@@ -1082,6 +1167,7 @@ pub fn icon_key(
     match identity.art {
         AuraArt::Own(key) => Some(key.to_string()),
         AuraArt::Item(item) => Some(item_aura_icon_key(item)),
+        AuraArt::Talent(talent) => Some(talent_aura_icon_key(talent)),
         AuraArt::FromSource => {
             let ability = identity.source.ability()?;
             abilities.get(&ability).map(|def| def.name.clone())
@@ -1436,6 +1522,8 @@ fn magnitude_row_for(mechanic: AuraType, m: f32) -> Option<(String, String)> {
         // Amount-taken fractions.
         AuraType::AttackSpeedSlow => row("Attack speed slowed by", pct(m)),
         AuraType::AttackSpeedIncrease => row("Attack speed", format!("+{}", pct(m))),
+        // What it changes is its `next_cast`, not a magnitude.
+        AuraType::NextCast => None,
         AuraType::DamageReduction => row("Physical damage reduced by", pct(m)),
         AuraType::CastTimeIncrease => row("Cast time increased by", pct(m)),
         AuraType::DamageTakenReduction => row("Damage taken reduced by", pct(m)),
@@ -1514,6 +1602,43 @@ fn badge(ui: &mut egui::Ui, label: &str, color: egui::Color32) -> egui::Response
 
 #[cfg(test)]
 mod tests {
+
+    /// A talent's proc gets its own Buffs & Debuffs entry with no code: the
+    /// fixture's Fel Stamina primes Shadow Trance, and the catalog lists it
+    /// named after its effect, wearing the talent's icon, its sentence read
+    /// off the proc.
+    #[test]
+    fn a_talent_proc_has_an_entry_wearing_its_talent() {
+        use crate::states::play_match::talents::TalentDefinitions;
+        let abilities = AbilityDefinitions::shipped();
+        let shipped =
+            std::fs::read_to_string(crate::paths::asset_path("config/talents.ron")).unwrap();
+        let text = shipped.replacen(
+            "per_rank: [PetStatPercent(MaxHealth, 0.10)],",
+            "per_rank: [Proc((trigger: DotTick, abilities: [Corruption], chance: Chance(0.5), \
+             ranks_add: Chance, effect: NextCast(modifier: (applies_to: Abilities([Shadowbolt]), \
+             instant: true), duration: 10.0, dispel_type: Auto, name: Some(\"Shadow Trance\"))))],",
+            1,
+        );
+        let talents = TalentDefinitions::from_ron(&text, abilities).unwrap();
+        let engine = EngineAura::all_with(abilities, &items(), &talents);
+        let address = EngineAura::TalentProcAura(TalentId::FelStamina, 0);
+        assert!(engine.contains(&address));
+        assert_eq!(engine_art(address), AuraArt::Talent(TalentId::FelStamina));
+        let entry = catalog_with(abilities, &items(), &talents)
+            .into_iter()
+            .find(|e| e.name == "Shadow Trance")
+            .expect("an entry for the proc's aura");
+        assert_eq!(entry.mechanic, AuraType::NextCast);
+        assert!(entry
+            .provenance
+            .as_deref()
+            .is_some_and(|p| p.starts_with("Fel Stamina: A 50% chance on each damage tick")));
+        // The shipped table has no proc yet, and so no such entry.
+        assert!(!EngineAura::all(abilities, &items())
+            .iter()
+            .any(|e| matches!(e, EngineAura::TalentProcAura(..))));
+    }
     use super::*;
     use crate::states::play_match::ability_config::load_ability_definitions;
     use crate::states::play_match::rendering::{item_aura_icons, GENERIC_AURA_ICONS};
@@ -2464,6 +2589,30 @@ mod tests {
                         on_disk.display()
                     );
                     item_art.push(entry.name.clone());
+                }
+                AuraArt::Talent(talent) => {
+                    // The key the buff bar draws a talent's proc under, at the
+                    // talent's own icon file.
+                    use crate::states::play_match::rendering::{
+                        talent_aura_icon_key, talent_aura_icons,
+                    };
+                    use crate::states::play_match::talents::TalentDefinitions;
+                    assert_eq!(key, talent_aura_icon_key(talent));
+                    let path = talent_aura_icons(TalentDefinitions::shipped())
+                        .into_iter()
+                        .find(|(registered, _)| *registered == key)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "{}'s talent icon {key:?} is registered by no loader",
+                                entry.name
+                            )
+                        })
+                        .1;
+                    assert!(
+                        std::path::Path::new("assets").join(&path).exists(),
+                        "{} points at {path}, which is not in the asset tree",
+                        entry.name
+                    );
                 }
                 AuraArt::FromSource => {
                     let ability = entry

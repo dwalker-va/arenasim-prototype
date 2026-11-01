@@ -68,11 +68,10 @@ const HEALERS: &[(&str, &str)] = &[
         "src/states/play_match/effects/holy_shock.rs",
         "process_holy_shock_heals",
     ),
-    // Death Coil's lifesteal.
-    (
-        "src/states/play_match/projectiles.rs",
-        "process_projectile_hits",
-    ),
+    // Every leech heal (`combat_core/leech.rs`): Death Coil's lifesteal,
+    // Siphon Life and Vampiric Embrace, from the projectile, cast, channel and
+    // DoT tick sites alike.
+    ("src/states/play_match/combat_core/leech.rs", "land"),
     // Devour Magic's heal to the Felhunter.
     (
         "src/states/play_match/effects/dispels.rs",
