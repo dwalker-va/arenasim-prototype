@@ -620,8 +620,15 @@ carrying every slot's build.
   choices exclusive: `SwitchesOff` (an option turns a talent off for the
   match), `Forbids` and `Requires` (an ability locked by the slot's choices
   stays in its book, `AbilityBook::is_locked`, and the cast gate refuses it,
-  traced `CHOICE_LOCKED_NOTE`). Every entrance checks a slot's choices against
-  its build (`validate_config_choices`, in `to_match_config`).
+  traced `CHOICE_LOCKED_NOTE`). A config built from JSON — `--headless`,
+  `--batch`, `--matrix` (each goes through `HeadlessPlugin`) and `--replay` —
+  has its slots' choices checked against their builds in `to_match_config`
+  (`validate_config_choices`), so a bad one is an error naming the slot. The
+  client's own `MatchConfig` is built by its screens, which offer only legal
+  choices; its spawn re-checks (`resolve_for_spawn` panics, naming the slot).
+  The loader rejects a `Forbids` and a `Requires` on the same ability and
+  option (they would lock it for good), and `to_match_config` rejects an
+  off-hand poison on a slot that is not a Rogue.
 - **`Mechanic(TalentMechanic)`** (`talent_mechanics.rs`) is the last resort: a
   named rule with its numbers in the RON and ONE code site, carried on the
   combatant as `Combatant::talent_mechanics`. Today: `SoulLink` (the transfer
@@ -631,14 +638,15 @@ carrying every slot's build.
   `Hit`): immunity, the attacker's `DamageDealtIncrease` (every site passes it
   with `Hit::with_dealt` — `damage_site_audit` checks), armor (with
   `ArmorPercentIncrease`/`Reduction`, never written into `armor`) and
-  resistance, every in-scope `DamageTakenReduction` (they multiply, as always),
-  the strongest in-scope `DamageTakenIncrease` (a charged one is spent by
+  resistance, the strongest in-scope `DamageTakenReduction`, the strongest
+  in-scope `DamageTakenIncrease` (a charged one is spent by
   direct hits only, and does not raise ticks), the strongest transfer
   (`DamageTransfer` to its caster, or Soul Link), absorbs (a reflecting one
   returns its share), the stealth reveal, the killing-blow save
   (`KillingBlowSave`, Cheat Death), health, then `DamageReflect` on a melee
-  hit. The new increase/armor/transfer/reflect kinds take only their
-  STRONGEST (the stacking simplification). What a hit sets off on another
+  hit. Every one of these kinds takes only its STRONGEST instance in scope
+  (the stacking simplification: Cheat Death's 90% cut under Devotion Aura is
+  90%, not 91%); different kinds multiply. What a hit sets off on another
   unit is a `DamageFollowUp`, spawned by its site and landed at the end of the
   frame by `process_damage_follow_ups`: a transfer cannot be prevented and
   never kills its receiver (a share it could not survive stays with the

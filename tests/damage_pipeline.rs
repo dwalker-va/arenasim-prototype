@@ -911,3 +911,83 @@ fn a_saves_heal_goes_through_apply_healing() {
         }]
     );
 }
+
+// ---------------------------------------------------------------------------
+// The exact-lethal boundary, and the strongest damage-taken reduction
+// ---------------------------------------------------------------------------
+
+/// A target with `health` left and the given save, struck for `blow`.
+/// Returns its health after, and whether its save was spent.
+fn strike(blow: f32, health: f32, cheat_death: bool) -> (f32, bool) {
+    let (attacker, holder, priest) = entities();
+    let mut target = bare(400.0);
+    target.current_health = health;
+    let mut target_auras = auras(vec![]);
+    if cheat_death {
+        target.talent_mechanics = TalentMechanics::of(&[TalentMechanic::CheatDeath {
+            health: 0.01,
+            reduction: 0.9,
+            duration: 3.0,
+        }]);
+    } else {
+        let mut spirit = aura(AuraType::KillingBlowSave, 0.25);
+        spirit.caster = Some(priest);
+        target_auras.auras.push(spirit);
+    }
+    land(
+        direct(blow, SpellSchool::Fire, Some(attacker), holder),
+        &mut target,
+        Some(&mut target_auras),
+    );
+    let spent = if cheat_death {
+        target.killing_blow_save_spent
+    } else {
+        target_auras
+            .auras
+            .iter()
+            .all(|a| a.effect_type != AuraType::KillingBlowSave)
+    };
+    (target.current_health, spent)
+}
+
+/// A blow of EXACTLY the holder's health is a killing blow, and the save
+/// takes it; one point less is not, and the save stays unspent.
+#[test]
+fn a_blow_of_exactly_the_holders_health_is_saved() {
+    // Guardian Spirit's shape: health left where it stood.
+    assert_eq!(strike(50.0, 50.0, false), (50.0, true));
+    assert_eq!(strike(49.0, 50.0, false), (1.0, false));
+    // Cheat Death: left at 1% of 400 = 4.
+    assert_eq!(strike(50.0, 50.0, true), (4.0, true));
+    assert_eq!(strike(49.0, 50.0, true), (1.0, false));
+}
+
+/// Only the strongest damage-taken reduction applies: Cheat Death's 90% cut
+/// under Devotion Aura's 10% is 90%, not 91%.
+#[test]
+fn only_the_strongest_damage_taken_reduction_applies() {
+    let (_, v, _) = entities();
+    let hit = || direct(100.0, SpellSchool::Fire, None, v);
+    let devotion = aura(AuraType::DamageTakenReduction, 0.10);
+    let cut = arenasim::states::play_match::combat_core::cheat_death_aura(0.90, 3.0);
+    let mut both = auras(vec![devotion.clone(), cut]);
+    let (dealt, ..) = land(hit(), &mut bare(500.0), Some(&mut both));
+    assert!((dealt - 10.0).abs() < 1e-3, "{dealt}");
+    // Order does not matter.
+    both.auras.reverse();
+    let (dealt, ..) = land(hit(), &mut bare(500.0), Some(&mut both));
+    assert!((dealt - 10.0).abs() < 1e-3, "{dealt}");
+    // Control: Devotion alone cuts exactly its 10%.
+    let mut alone = auras(vec![devotion]);
+    assert_eq!(land(hit(), &mut bare(500.0), Some(&mut alone)).0, 90.0);
+    // An out-of-scope reduction does not outrank an in-scope one.
+    let mut scoped_big = auras(vec![
+        aura(AuraType::DamageTakenReduction, 0.10),
+        scoped(
+            AuraType::DamageTakenReduction,
+            0.5,
+            DamageScope::School(SpellSchool::Physical),
+        ),
+    ]);
+    assert_eq!(land(hit(), &mut bare(500.0), Some(&mut scoped_big)).0, 90.0);
+}

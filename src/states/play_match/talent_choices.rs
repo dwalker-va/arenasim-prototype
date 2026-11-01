@@ -367,6 +367,19 @@ impl TalentDefinitions {
             }
         }
         for rule in self.rules() {
+            // Forbidden with the option AND required to have it: locked
+            // whatever the slot chooses.
+            if let ChoiceRule::Forbids { option, ability } = *rule {
+                if self
+                    .rules()
+                    .contains(&ChoiceRule::Requires { ability, option })
+                {
+                    return Err(format!(
+                        "the choice rules both forbid {ability:?} with {option:?} and require \
+                         {option:?} for it: no choice could ever cast it"
+                    ));
+                }
+            }
             let option = rule.option();
             if option.is_default() {
                 return Err(format!(
@@ -554,6 +567,18 @@ impl TalentDefinitions {
                 let Some(class) = class else {
                     continue;
                 };
+                let offhand = if team == 1 {
+                    &config.team1_rogue_offhand_poisons
+                } else {
+                    &config.team2_rogue_offhand_poisons
+                };
+                if *class != CharacterClass::Rogue && offhand.get(slot).copied().flatten().is_some()
+                {
+                    return Err(format!(
+                        "team{team} slot {slot} ({class:?}): an off-hand poison is a Rogue's \
+                         choice"
+                    ));
+                }
                 let build = builds.get(slot).cloned().unwrap_or_default();
                 let choices = SlotChoices::from_config(config, team, slot, *class);
                 self.validate_choices(*class, &build, &choices)

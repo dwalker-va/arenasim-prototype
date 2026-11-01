@@ -245,10 +245,11 @@ pub fn effective_armor(target: &Combatant, auras: Option<&ActiveAuras>) -> f32 {
 /// 1. **Damage dealt**: the attacker's strongest in-scope
 ///    [`AuraType::DamageDealtIncrease`] ([`Hit::dealt`]).
 /// 2. **Armor** for Physical ([`effective_armor`]), **resistance** for magic.
-/// 3. **Damage taken**: every [`AuraType::DamageTakenReduction`] whose scope
-///    reaches the school (they multiply, as they always have), then the
-///    strongest in-scope [`AuraType::DamageTakenIncrease`]; a charged one
-///    spends a charge on a direct hit.
+/// 3. **Damage taken**: the strongest in-scope
+///    [`AuraType::DamageTakenReduction`], then the strongest in-scope
+///    [`AuraType::DamageTakenIncrease`]; a charged one spends a charge on a
+///    direct hit. Each kind applies its strongest only (the stacking
+///    simplification); the two kinds multiply.
 /// 4. **Transfer**: the strongest [`AuraType::DamageTransfer`] (or the
 ///    holder's Soul Link) sends its share to its receiver (`follow_ups`,
 ///    resolved by `process_damage_follow_ups`).
@@ -364,17 +365,18 @@ pub fn apply_damage_with_absorb(
             }
         }
 
-        // Apply damage taken reduction (e.g., Devotion Aura), each within its
-        // scope. Multiple reductions stack multiplicatively (two 10% reductions
-        // = 19% total).
-        if let Some(ref auras) = active_auras {
-            for aura in auras.auras.iter() {
-                if aura.effect_type == AuraType::DamageTakenReduction
-                    && remaining_damage > 0.0
-                    && DamageScope::reaches(aura.damage_mods.scope, spell_school)
-                {
-                    remaining_damage *= 1.0 - aura.magnitude;
-                }
+        // Damage taken reduction (Devotion Aura, Pain Suppression, Cheat
+        // Death's cut): the strongest in scope only — the stacking
+        // simplification, as for the increase below. A single reduction
+        // reduces exactly as it always has.
+        if remaining_damage > 0.0 {
+            if let Some((_, value)) = strongest_in_scope(
+                active_auras.as_deref(),
+                AuraType::DamageTakenReduction,
+                spell_school,
+                false,
+            ) {
+                remaining_damage *= 1.0 - value;
             }
         }
 

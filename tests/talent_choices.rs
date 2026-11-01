@@ -222,6 +222,18 @@ fn the_headless_config_checks_choices_against_builds() {
         .to_match_config()
         .expect_err("no build opens the off-hand slot");
     assert!(err.contains("OffHandPoison"), "{err}");
+    // An off-hand poison on a slot that is not a Rogue is refused, not
+    // ignored.
+    let warrior = HeadlessMatchConfig {
+        team1: vec!["Warrior".into()],
+        team2: vec!["Warrior".into()],
+        team1_rogue_offhand_poisons: vec![Some("Deadly".into())],
+        ..Default::default()
+    };
+    let err = warrior
+        .to_match_config()
+        .expect_err("a Warrior has no poison");
+    assert!(err.contains("Rogue's choice"), "{err}");
     let ok = config(vec![None])
         .to_match_config()
         .expect("an empty slot is fine");
@@ -468,6 +480,12 @@ fn the_loader_rejects_each_broken_choice_rule() {
     )
     .contains("switches off a Rogue talent"));
     assert!(load_err("ability: DrainLife", "ability: FlashHeal").contains("no Warlock can have"));
+    // A Forbids and a Requires on one ability and option lock it for good.
+    assert!(load_err(
+        "Requires(ability: DeathCoil, option: WarlockCurse(Weakness)),",
+        "Requires(ability: DrainLife, option: WarlockCurse(Tongues)),"
+    )
+    .contains("no choice could ever cast it"));
     // The fixture itself loads (the control).
     fixture();
 }
