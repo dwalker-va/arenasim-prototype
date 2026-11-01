@@ -4459,7 +4459,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     const CHAMPION_ARMOR_GAIN: f32 = 0.55;
 
     /// Every Champion-tier (item_tier 2) item.
-    const CHAMPION_TIER: [ItemId; 56] = [
+    const CHAMPION_TIER: [ItemId; 57] = [
         ItemId::FrostfireCirclet,
         ItemId::FrostfireRobe,
         ItemId::FrostfireLeggings,
@@ -4516,6 +4516,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         ItemId::RedemptionBoots,
         ItemId::RedemptionGirdle,
         ItemId::RedemptionWristguards,
+        ItemId::MedallionOfTheAlliance,
     ];
 
     /// Every Gauntlet-tier (item_tier 1) item.

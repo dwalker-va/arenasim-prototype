@@ -13,7 +13,7 @@
 use bevy_egui::egui;
 
 use crate::states::match_config::CharacterClass;
-use crate::states::play_match::equipment::ItemId;
+use crate::states::play_match::equipment::{ItemId, ItemTier};
 use crate::states::play_match::AbilityType;
 
 use super::auras::AuraId;
@@ -136,6 +136,15 @@ impl Topic {
             Topic::Aura(id) => {
                 super::auras::subtitle_of(id, data.abilities, data.items).unwrap_or_default()
             }
+        }
+    }
+
+    /// The tier of an item, read from `items.ron`; `None` for anything that
+    /// is not an item. Its icon wears this tier's frame.
+    pub fn item_tier(self, data: &EncyclopediaData) -> Option<ItemTier> {
+        match self {
+            Topic::Item(id) => data.items.get(&id).and_then(|item| item.tier()),
+            Topic::Class(_) | Topic::Ability(_) | Topic::Aura(_) => None,
         }
     }
 
