@@ -17,7 +17,7 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 
-use arenasim::combat::log::CombatLog;
+use arenasim::combat::log::{CombatLog, StructuredEventData};
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::combat_core::{combat_auto_attack, ExtraSwingSource};
 use arenasim::states::play_match::components::{
@@ -218,6 +218,109 @@ fn an_off_hand_hit_procs_a_main_hand_swing() {
     );
     assert!(worn.procs > 0, "no off-hand hit procced the trinket");
     assert!(worn.main > 0, "an off-hand proc swung no main hand");
+}
+
+/// Main- and off-hand damage far enough apart that a hit's size names its
+/// weapon even through a crit: an off-hand hit is 20 or 40, a main-hand one
+/// 100 or 200.
+const MAIN_DAMAGE: f32 = 100.0;
+const OFF_DAMAGE: f32 = 20.0;
+/// Between an off-hand crit (40) and a main-hand hit (100).
+const MAIN_FLOOR: f32 = 60.0;
+
+/// Run `attacker` — wearing a certain Hand of Justice, with a main hand that
+/// never comes round and an off hand that swings fast — at an armourless
+/// target, and return how many main-hand swings landed and the weapon damage
+/// of every hit (a crit's halved back), read off the combat log.
+fn off_hand_procced_swings(mut attacker: Combatant) -> (usize, Vec<f32>) {
+    let mut app = app(11);
+    let mut mage = Combatant::new(2, 0, CharacterClass::Mage);
+    mage.max_health = 1.0e6;
+    mage.current_health = 1.0e6;
+    mage.armor = 0.0;
+    let target = app
+        .world_mut()
+        .spawn((mage, Transform::from_translation(Vec3::new(1.5, 0.0, 0.0))))
+        .id();
+    attacker.target = Some(target);
+    attacker.offhand_damage = OFF_DAMAGE;
+    attacker.offhand_weapon_speed = 0.2;
+    attacker.proc_trinkets.push(certain_hand_of_justice());
+    let attacker = app
+        .world_mut()
+        .spawn((attacker, Transform::from_translation(Vec3::ZERO)))
+        .id();
+
+    let mut main = 0;
+    for _ in 0..FRAMES {
+        app.update();
+        let mut swings = app.world_mut().query::<(Entity, &AutoAttackSwing)>();
+        let seen: Vec<_> = swings
+            .iter(app.world())
+            .filter(|(_, s)| s.attacker == attacker)
+            .map(|(e, s)| (e, s.hand))
+            .collect();
+        for (e, hand) in seen {
+            if hand == WeaponHand::Main {
+                main += 1;
+            }
+            app.world_mut().despawn(e);
+        }
+    }
+    let hits = app
+        .world()
+        .resource::<CombatLog>()
+        .entries
+        .iter()
+        .filter_map(|e| match &e.structured_data {
+            Some(StructuredEventData::Damage {
+                amount, is_crit, ..
+            }) => Some(if *is_crit { amount / 2.0 } else { *amount }),
+            _ => None,
+        })
+        .collect();
+    (main, hits)
+}
+
+/// Every hit the size of a main-hand swing is one of the main-hand swings
+/// seen — so each extra swing an off-hand hit procced dealt main-hand damage —
+/// and every other hit is the size of an off-hand one.
+fn assert_extra_swings_deal_main_hand_damage(who: &str, main: usize, hits: &[f32]) {
+    assert!(main > 0, "{who}: no off-hand hit procced an extra swing");
+    let big: Vec<f32> = hits.iter().copied().filter(|d| *d > MAIN_FLOOR).collect();
+    assert_eq!(
+        big.len(),
+        main,
+        "{who}: {main} main-hand swings landed, but {} hits were main-hand sized: {hits:?}",
+        big.len()
+    );
+    assert!(
+        hits.iter().all(|d| *d > MAIN_FLOOR || *d <= OFF_DAMAGE),
+        "{who}: a hit is neither off-hand nor main-hand sized: {hits:?}"
+    );
+}
+
+/// A dual-wielder's off-hand hit procs a swing of its MAIN-hand weapon.
+#[test]
+fn an_off_hand_proc_swings_the_main_hand_weapon() {
+    let mut warrior = Combatant::new(1, 0, CharacterClass::Warrior);
+    warrior.attack_damage = MAIN_DAMAGE;
+    warrior.weapon_speed = 1000.0;
+    let (main, hits) = off_hand_procced_swings(warrior);
+    assert_extra_swings_deal_main_hand_damage("dual-wielding Warrior", main, &hits);
+}
+
+/// A Hunter's off hand accompanies its MELEE main hand, so the swing its
+/// off-hand hit procs is that weapon's, never the bow's.
+#[test]
+fn a_hunter_s_off_hand_proc_swings_its_melee_weapon_not_its_bow() {
+    let mut hunter = Combatant::new(1, 0, CharacterClass::Hunter);
+    hunter.attack_damage = 7.0; // the bow: neither hand's size
+    hunter.weapon_speed = 1000.0;
+    hunter.melee_damage = MAIN_DAMAGE;
+    hunter.melee_weapon_speed = 1000.0;
+    let (main, hits) = off_hand_procced_swings(hunter);
+    assert_extra_swings_deal_main_hand_damage("Hunter", main, &hits);
 }
 
 /// The source decides the tornado, and nothing else does.

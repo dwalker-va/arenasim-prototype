@@ -246,6 +246,10 @@ extra swing — with three differences:
 Neither swing carries bonus attack power: an auto-attack here is weapon damage
 alone, so the totem's swing and the trinket's are the same swing.
 
+**Deviation from TBC: an extra swing generates no rage.** In TBC an extra
+attack generates rage like any white hit. Here neither the totem's swing nor
+the trinket's does; the rule change is AS-448.
+
 ---
 
 ## Resource Systems

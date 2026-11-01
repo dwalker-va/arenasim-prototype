@@ -3014,7 +3014,7 @@
         // swing is Windfury Totem's, made with the main-hand weapon off a hit
         // from either hand, and draws no tornado. It has no stat weight, so it
         // carries a declared price — WEIGHT_EXTRA_SWING, 1.5x haste's weight
-        // (measured), per unit of chance: 0.05 * 321.4 = 16.07 — and the
+        // (provisional), per unit of chance: 0.05 * 321.4 = 16.07 — and the
         // attack power spends the rest of the 48.3: 21 * 1.5 + 16.07 = 47.57.
         HandOfJustice: (
             name: "Hand of Justice",

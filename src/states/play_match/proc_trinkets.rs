@@ -50,8 +50,8 @@
 //! [`ProcEffect::ExtraSwing`] grants no stat, so no stat weight prices it. It
 //! carries [`WEIGHT_EXTRA_SWING`] per unit of `chance`: in haste's unit (an
 //! extra swing on a fraction of hits is that fraction more swings, which is
-//! what haste buys), at a multiple of haste's weight a sweep measured — the
-//! constant cites it.
+//! what haste buys), at a provisional multiple of haste's weight from a
+//! sweep — the constant cites it.
 //!
 //! ## Determinism
 //!

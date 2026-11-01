@@ -697,11 +697,12 @@ any ring fits either ring socket, and the same item may not occupy both
      on Windfury Totem's own path (`combat_core::ExtraSwingSource`), rolled
      where the swing is queued rather than after it lands. It takes no
      `magnitude`, `duration` or `internal_cooldown` (validated), never draws
-     the totem's `WindfuryTornado`, grants no rage and no further extra swing,
-     and logs `X procs <trinket> (extra attack)`. No stat buys it, so it is
-     priced at a DECLARED rate per unit of `chance`, `WEIGHT_EXTRA_SWING`:
-     1.5x haste's weight, measured by the sweep the constant cites. Every consumer that
-     lists or draws proc BUFFS asks `ItemConfig::proc_buff`, which excludes it.
+     the totem's `WindfuryTornado`, grants no rage (a TBC deviation, AS-448)
+     and no further extra swing, and logs `X procs <trinket> (extra attack)`.
+     No stat buys it, so it is priced at a DECLARED rate per unit of `chance`,
+     `WEIGHT_EXTRA_SWING`: 1.5x haste's weight, provisional (a 10x-dose sweep
+     the constant cites). Every consumer that lists or draws proc BUFFS asks
+     `ItemConfig::proc_buff`, which excludes it.
    - **Procs are not purgeable.** A proc buff is `DispelType::Physical` — an
      item's effect is not a spell, however magical it looks — so no purge,
      dispel or cleanse removes it.

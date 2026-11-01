@@ -16,9 +16,12 @@ haste's weight (`WEIGHT_ATTACK_SPEED`, 214.27 per unit chance):
 
 A fair price predicts no difference between a swing arm and the power arm
 that pays for it. The shipped pair is the item; the dose pairs bracket the
-exchange RATE where it is big enough to see. The price is linear in chance,
-and so is the swing's value, so the rate the dose measures is the rate the
-item is charged.
+exchange RATE where it is big enough to see. The 5% item is charged the rate
+the dose brackets, an ASSUMPTION: the damage each side adds is linear in
+chance, but its worth in wins is not.
+
+Ran on commit 29a716e6 (this card on main 2c63c1ff). A re-run on a later main
+differs in Druid rows: #397 changed the Druid's kit after it.
 
     cargo build --release
     docs/design/balance/sweeps/2026-10-31-as427-arms.py target/release/arenasim assets OUT

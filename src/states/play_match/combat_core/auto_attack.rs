@@ -1490,8 +1490,9 @@ type QueuedAttack = (Entity, Entity, f32, bool, bool, WeaponHand, AutoAttackKind
 /// Queue ONE extra main-hand swing, whatever gave it. The extra swing is a
 /// melee swing of its own: it may be dodged or parried (logged as the swing
 /// would be), and otherwise rolls its own crit at the procced swing's
-/// modifiers. It grants no rage and rolls no further extra swing. Returns
-/// the attack to queue, or `None` when it was avoided.
+/// modifiers. It grants no rage (a deviation from TBC, AS-448) and rolls no
+/// further extra swing. Returns the attack to queue, or `None` when it was
+/// avoided.
 ///
 /// Windfury Totem's bonus swing has taken this path since before the trinket
 /// shared it, in the same draw order (avoidance, then crit), so a match with a

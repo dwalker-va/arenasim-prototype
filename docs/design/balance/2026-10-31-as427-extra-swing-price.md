@@ -4,10 +4,12 @@
 `WEIGHT_EXTRA_SWING` is worth the attack power the same budget buys
 (`--expect nothing` on the item pair).
 
-**Result:** the extra swing is worth **1.5x haste's weight** per unit of
-chance, so `WEIGHT_EXTRA_SWING = 1.5 * WEIGHT_ATTACK_SPEED = 321.4`. Hand of
-Justice's 5% swing costs 16.07 points, and the item is +21 attack power with
-it (47.57 of a Champion trinket's 48.3).
+**Result (PROVISIONAL):** at a 10x dose the extra swing breaks even at
+**1.5x haste's weight** per unit of chance, so `WEIGHT_EXTRA_SWING = 1.5 *
+WEIGHT_ATTACK_SPEED = 321.4`. Hand of Justice's 5% swing costs 16.07 points,
+and the item is +21 attack power with it (47.57 of a Champion trinket's 48.3).
+The 5% rate is assumed from the dose, not measured, and the price is tuned
+with the rest of the gear after the milestone sweep.
 
 ## What was measured
 
@@ -28,9 +30,13 @@ differing only in Hand of Justice (`sweeps/2026-10-31-as427-arms.py`):
 | dose-power-1x / 1.5x / 2x | no proc, the 50% swing paid in AP at 1x / 1.5x / 2x haste's weight (+92.42 / +128.13 / +163.85 AP) |
 
 The 5% item is too small for any sweep to see — its whole swing is about 10
-attack power — so the RATE is measured at a 10x dose. Both sides of the trade
-are linear in chance (each landed hit rolls once; attack power adds per point),
-so the rate the dose finds is the rate the item is charged.
+attack power — so the RATE is measured at a 10x dose, and the 5% item's rate
+is ASSUMED from that bracket, not measured. The damage each side adds is
+linear in chance, but what damage is worth in wins is not, so the 1.5x a 50%
+swing breaks even at need not be where a 5% swing does.
+
+**Ran on commit 29a716e6** (this card on main 2c63c1ff). A re-run on a later
+main differs in Druid rows, because #397 changed the Druid's kit after it.
 
 Cells: every 2v2 a melee swinger can reach, plus 8 control cells, 10 seeds each
 (`scripts/gen_sweep.py --full 2 --exclude-double-healer --affects
@@ -76,4 +82,4 @@ rating exchange rate predicts.
 - **2v2 only, BasicArena.** Map and 3v3 effects on the swing's worth are not
   measured.
 - **The shipped item's null is uninformative on its own** (resolution 1.8pt
-  against an effect expected near 0.2pt); the rate rests on the dose bracket.
+  against an effect expected near 0.2pt); the 5% rate is assumed from the dose bracket.
