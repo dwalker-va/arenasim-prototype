@@ -149,6 +149,42 @@ fn log_los_fizzle(
     );
 }
 
+/// Give back the next-cast modifier `caster` spent on its cast of `ability`,
+/// which did not land: interrupted, stopped by crowd control or a silence, or
+/// fizzled at completion (`next_cast.rs`). A no-op for a caster that spent
+/// none on it.
+fn give_back_spent(
+    caster: &mut Combatant,
+    auras: Option<&mut ActiveAuras>,
+    ability: AbilityType,
+    combat_log: &mut CombatLog,
+) {
+    if !caster
+        .next_cast_spent
+        .as_ref()
+        .is_some_and(|s| s.ability == ability)
+    {
+        return;
+    }
+    let (Some(spent), Some(auras)) = (caster.next_cast_spent.take(), auras) else {
+        return;
+    };
+    let cast = caster
+        .book()
+        .get(&ability)
+        .map_or_else(|| format!("{ability:?}"), |d| d.name.clone());
+    combat_log.log(
+        CombatLogEventType::Buff,
+        format!(
+            "{}'s {} is kept: its {} did not land",
+            combatant_id(caster.team, caster.slot, caster.class),
+            spent.names(),
+            cast
+        ),
+    );
+    crate::states::play_match::next_cast::restore(spent, auras);
+}
+
 /// Process casting: update cast timers and apply effects when casts complete.
 ///
 /// When a cast completes:
@@ -186,7 +222,7 @@ pub fn process_casting(
     let mut completed_casts = Vec::new();
 
     // First pass: update cast timers and collect completed casts
-    for (caster_entity, caster_transform, mut caster, casting_state, caster_auras) in
+    for (caster_entity, caster_transform, mut caster, casting_state, mut caster_auras) in
         combatants.iter_mut()
     {
         let Some(mut casting) = casting_state else {
@@ -215,6 +251,12 @@ pub fn process_casting(
                     "{}'s {} interrupted by crowd control",
                     caster_id, ability_def.name
                 ),
+            );
+            give_back_spent(
+                &mut caster,
+                caster_auras.as_deref_mut(),
+                casting.ability,
+                &mut combat_log,
             );
             commands.spawn((
                 CastEnding {
@@ -245,6 +287,12 @@ pub fn process_casting(
                     caster_id, ability_def.name
                 ),
             );
+            give_back_spent(
+                &mut caster,
+                caster_auras.as_deref_mut(),
+                casting.ability,
+                &mut combat_log,
+            );
             commands.spawn((
                 CastEnding {
                     caster: caster_entity,
@@ -258,6 +306,14 @@ pub fn process_casting(
 
         // Handle interrupted casts
         if casting.interrupted {
+            // An interrupted cast gives back the modifier it spent (once: the
+            // first frame takes it).
+            give_back_spent(
+                &mut caster,
+                caster_auras.as_deref_mut(),
+                casting.ability,
+                &mut combat_log,
+            );
             // Tick down the interrupted display timer
             casting.interrupted_display_time -= dt;
 
@@ -281,16 +337,18 @@ pub fn process_casting(
             // (`next_cast.rs`): its cost, crit chance and power are read from
             // the changed config. `None` — and `def` the book's own — for
             // every cast that spent none.
-            let spent = match &caster.next_cast_spent {
-                Some(s) if s.ability == ability => Some(s.modifier.clone()),
-                _ => None,
-            };
-            if spent.is_some() {
-                caster.next_cast_spent = None;
-            }
-            let changed = spent
+            let spent = if caster
+                .next_cast_spent
                 .as_ref()
-                .map(|m| super::super::next_cast::changed(book.get_unchecked(&ability), m));
+                .is_some_and(|s| s.ability == ability)
+            {
+                caster.next_cast_spent.take()
+            } else {
+                None
+            };
+            let changed = spent.as_ref().map(|s| {
+                super::super::next_cast::changed(book.get_unchecked(&ability), &s.modifier)
+            });
             let def = changed.as_ref().unwrap_or(book.get_unchecked(&ability));
 
             // NOTE: mana is NOT consumed here. A completed cast only pays when it
@@ -408,6 +466,9 @@ pub fn process_casting(
     // owes, landed after it for the reason mana is: they need the CASTER.
     let mut talent_events: Vec<ProcEvent> = Vec::new();
     let mut leeches: Vec<OwedLeech> = Vec::new();
+    // Next-cast modifiers spent by casts that fizzled at completion, to give
+    // back to their casters after the pass (it holds the targets).
+    let mut restores: Vec<crate::states::play_match::next_cast::SpentNextCast> = Vec::new();
 
     // Process completed casts
     for (
@@ -431,7 +492,7 @@ pub fn process_casting(
     {
         let changed = spent
             .as_ref()
-            .map(|m| super::super::next_cast::changed(book.get_unchecked(&ability), m));
+            .map(|s| super::super::next_cast::changed(book.get_unchecked(&ability), &s.modifier));
         let def = changed.as_ref().unwrap_or(book.get_unchecked(&ability));
 
         // Get target
@@ -470,6 +531,7 @@ pub fn process_casting(
                         },
                         PlayMatchEntity,
                     ));
+                    restores.extend(spent);
                     continue;
                 }
             }
@@ -500,7 +562,7 @@ pub fn process_casting(
                     caster_slot,
                     caster_class,
                     caster_pet_type: None,
-                    next_cast: spent.clone(),
+                    next_cast: spent.as_ref().map(|s| s.modifier.clone()),
                 },
                 Transform::from_translation(caster_pos + Vec3::new(0.0, 1.5, 0.0)), // Spawn at chest height
                 PlayMatchEntity,
@@ -523,6 +585,7 @@ pub fn process_casting(
                 },
                 PlayMatchEntity,
             ));
+            restores.extend(spent);
             continue;
         };
 
@@ -536,6 +599,7 @@ pub fn process_casting(
                 },
                 PlayMatchEntity,
             ));
+            restores.extend(spent);
             continue;
         }
 
@@ -570,6 +634,7 @@ pub fn process_casting(
                 },
                 PlayMatchEntity,
             ));
+            restores.extend(spent);
             continue;
         }
 
@@ -1086,6 +1151,18 @@ pub fn process_casting(
                 target: caster_entity,
                 aura,
             });
+        }
+    }
+
+    // A cast that fizzled gives back the next-cast modifier it spent.
+    for spent in restores {
+        let caster_entity = spent.caster;
+        if let Ok((_, _, mut caster, _, mut auras)) = combatants.get_mut(caster_entity) {
+            caster.next_cast_spent = Some(spent);
+            let ability = caster.next_cast_spent.as_ref().map(|s| s.ability);
+            if let Some(ability) = ability {
+                give_back_spent(&mut caster, auras.as_deref_mut(), ability, &mut combat_log);
+            }
         }
     }
 

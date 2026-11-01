@@ -864,7 +864,8 @@ pub fn dispatch_class_decision(
     // one this is its own book (`next_cast::effective_book`).
     let book = super::next_cast::effective_book(combatant.book(), auras);
     let abilities = &book;
-    match combatant.class {
+    decision_trace.next_cast = book.overlay();
+    let acted = match combatant.class {
         match_config::CharacterClass::Mage => {
             // Posture evaluation (ENGAGE/KITE, U5) runs BEFORE the ability
             // pass and OUTSIDE decide_mage_action's GCD short-circuit so the
@@ -1341,7 +1342,12 @@ pub fn dispatch_class_decision(
                 decision_trace,
             )
         }
-    }
+    };
+    // The turn is over: the covered ability it chose spends the modifiers
+    // (`talent_procs::after_turn`, in `decide_abilities`).
+    let overlay = decision_trace.next_cast.take();
+    decision_trace.turn_spent = overlay.and_then(|o| o.spent());
+    acted
 }
 
 /// Check if an entity is currently CC'd (Stun, Fear, Root, or Polymorph).
@@ -1750,6 +1756,7 @@ pub fn decide_abilities(
         // The talent effects of the turn: a next-cast modifier it spent, an
         // `AbilityUsed` proc. Nothing for a turn that used nothing.
         let used = decision_trace.take_casts_of(entity);
+        let spent_on = decision_trace.turn_spent.take();
         if !used.is_empty() {
             let primed = auras.as_deref().is_some_and(super::next_cast::any_live);
             super::talent_procs::after_turn(
@@ -1759,6 +1766,7 @@ pub fn decide_abilities(
                 &mut combatant,
                 if primed { auras.as_deref_mut() } else { None },
                 &used,
+                spent_on,
             );
         }
         if acted {
@@ -1998,6 +2006,7 @@ pub fn decide_abilities(
             is_crit,
         } = aoe;
         let mut actual_damage = 0.0;
+        let mut nova_landed = false;
 
         // Skip if caster died from an instant attack earlier this frame (or entity is gone)
         match combatants.get(caster_entity) {
@@ -2019,6 +2028,7 @@ pub fn decide_abilities(
                     &mut combat_log,
                 );
                 actual_damage = dmg;
+                nova_landed = true;
                 // Pet-aware target id (structured fields + message text).
                 let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
 
@@ -2121,6 +2131,21 @@ pub fn decide_abilities(
         // Update caster's damage dealt
         if let Ok((_, mut caster, _, _, _, _)) = combatants.get_mut(caster_entity) {
             caster.damage_dealt += actual_damage;
+            // The nova's hit on this target is its caster's `SpellHit`.
+            if nova_landed {
+                super::talent_procs::push_for(
+                    &mut commands,
+                    &caster.talent_procs,
+                    super::talent_procs::ProcEvent::new(
+                        caster_entity,
+                        super::talent_procs::TalentTrigger::SpellHit,
+                    )
+                    .ability(AbilityType::FrostNova)
+                    .crit(is_crit)
+                    .amount(actual_damage)
+                    .other(target_entity),
+                );
+            }
         }
     }
 }
@@ -2248,6 +2273,16 @@ pub fn check_interrupts(
             target_entity,
             target_pos,
             cast_ability,
+            all_auras.get(entity).ok(),
+        );
+        // An interrupt is a use, and spends a modifier that covers it
+        // (Initiative): `talent_procs::after_interrupt`.
+        super::talent_procs::after_interrupt(
+            &mut commands,
+            entity,
+            &combatant,
+            all_auras.get(entity).ok(),
+            interrupt_ability,
         );
     }
 }

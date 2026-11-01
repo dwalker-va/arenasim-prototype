@@ -31,6 +31,10 @@ use common::staged::play;
 const T1: Unit = Unit::new(1, 0);
 const T1B: Unit = Unit::new(1, 1);
 const T2: Unit = Unit::new(2, 0);
+/// The Felhunter of the Warlock in slot 0 of team 1.
+const PET1: Unit = Unit::pet_of(1, 0);
+/// No leech heals a pet: a party is its living non-pet teammates.
+const PET_HEALED: &str = "Vampiric Embrace heals Team 1 Felhunter";
 
 fn config(team1: &[&str], team2: &[&str], secs: f32) -> HeadlessMatchConfig {
     HeadlessMatchConfig {
@@ -661,16 +665,19 @@ fn a_caster_school_leech_heals_the_casters_party() {
         };
         play(
             config(&["Warlock", "Warrior"], &["Priest"], 25.0),
-            Stage::new().health(T1B, 0.5).world(move |w| {
-                let warlock = T1.entity(w);
-                let priest = T2.entity(w);
-                let mut aura = aura;
-                aura.caster = Some(warlock);
-                w.get_mut::<arenasim::states::play_match::ActiveAuras>(priest)
-                    .expect("auras")
-                    .auras
-                    .push(aura);
-            }),
+            Stage::new()
+                .health(T1B, 0.5)
+                .health(PET1, 0.5)
+                .world(move |w| {
+                    let warlock = T1.entity(w);
+                    let priest = T2.entity(w);
+                    let mut aura = aura;
+                    aura.caster = Some(warlock);
+                    w.get_mut::<arenasim::states::play_match::ActiveAuras>(priest)
+                        .expect("auras")
+                        .auras
+                        .push(aura);
+                }),
         )
     };
     let played = run(SpellSchool::Shadow);
@@ -679,6 +686,7 @@ fn a_caster_school_leech_heals_the_casters_party() {
         "{}",
         played.log
     );
+    assert!(lines(&played.log, PET_HEALED).is_empty(), "{}", played.log);
     // The Warlock deals no Arcane damage at all.
     let control = run(SpellSchool::Arcane);
     assert!(lines(&control.log, "Vampiric Embrace heals").is_empty());
@@ -739,6 +747,7 @@ fn landing_after_spend(log: &str, name: &str) -> String {
         .lines()
         .find(|l| {
             l.contains(&format!("'s {name} "))
+                && !l.contains(&format!("'s {name} heals for"))
                 && (l.contains(" hits ") || l.contains(" heals ") || l.contains("CRIT"))
         })
         .unwrap_or_else(|| panic!("{name} never landed after spending it: {after}"))
@@ -752,7 +761,15 @@ fn landing_after_spend(log: &str, name: &str) -> String {
 /// cast heal and the projectile are pinned above.
 #[test]
 fn every_crit_roll_reads_the_abilitys_own_crit_chance() {
-    let cases: [(&[&str], &[&str], AbilityType, &str, Option<Unit>); 7] = [
+    let cases: [(&[&str], &[&str], AbilityType, &str, Option<Unit>); 8] = [
+        // An instant projectile carries what it spent to its impact.
+        (
+            &["Warlock"],
+            &["Warrior"],
+            AbilityType::DeathCoil,
+            "Death Coil",
+            None,
+        ),
         (
             &["Warrior"],
             &["Priest"],
@@ -865,6 +882,12 @@ fn every_site_pushes_its_trigger() {
             on(TalentTrigger::DotTick, AbilityType::DrainLife),
             Stage::new().health(T1, 0.5),
         ),
+        (
+            &["Mage"],
+            &["Warrior"],
+            on(TalentTrigger::SpellHit, AbilityType::FrostNova),
+            Stage::new(),
+        ),
     ];
     for (team1, team2, proc, stage) in cases {
         let what = format!("{:?} {:?}", proc.trigger, proc.abilities);
@@ -947,7 +970,8 @@ fn embrace(stage: Stage, caster: Unit, bearer: Unit, school: SpellSchool) -> Sta
 
 /// Every damage site reads a caster-school leech: a projectile (Shadow
 /// Bolt), a DoT tick (Corruption), a channel tick (Drain Life) and a cast
-/// (the Priest's Mind Blast), each the caster's only Shadow damage. A lone
+/// (Immolate's direct hit, on a Fire embrace), each the only damage that can
+/// feed it. A pet is never healed. A lone
 /// Warlock is its own party, so its heals name no one.
 #[test]
 fn every_damage_site_feeds_a_caster_school_leech() {
@@ -957,7 +981,9 @@ fn every_damage_site_feeds_a_caster_school_leech() {
         AbilityType::DrainLife,
     ] {
         let stage = embrace(
-            only(Stage::new(), T1, keep).health(T1, 0.5),
+            only(Stage::new(), T1, keep)
+                .health(T1, 0.5)
+                .health(PET1, 0.5),
             T1,
             T2,
             SpellSchool::Shadow,
@@ -978,21 +1004,37 @@ fn every_damage_site_feeds_a_caster_school_leech() {
             "{keep:?}: {}",
             played.log
         );
+        assert!(
+            lines(&played.log, PET_HEALED).is_empty(),
+            "{keep:?}: {}",
+            played.log
+        );
     }
-    let priest = play(
-        config(&["Priest", "Warrior"], &["Warrior"], 30.0),
-        embrace(Stage::new().health(T1B, 0.5), T1, T2, SpellSchool::Shadow),
+    // The cast site: Immolate's direct hit, with a FIRE embrace on the
+    // enemy, so the heal that lands on the hit's own frame is the cast's (its
+    // ticks come later, through the DoT site). The party a Warrior and the
+    // Warlock's Felhunter, both hurt.
+    let fire = play(
+        config(&["Warlock", "Warrior"], &["Warrior"], 30.0),
+        embrace(
+            only(Stage::new(), T1, AbilityType::Immolate)
+                .cooldown(T2, AbilityType::Pummel, 1000.0)
+                .health(T1B, 0.5)
+                .health(PET1, 0.5),
+            T1,
+            T2,
+            SpellSchool::Fire,
+        ),
     );
+    let hits = stamps(&fire.log, "Warlock #1's Immolate hits");
+    let heals = stamps(&fire.log, "Vampiric Embrace heals Team 1 Warrior #2 for");
+    assert!(!hits.is_empty(), "{}", fire.log);
     assert!(
-        !lines(&priest.log, "Mind Blast").is_empty(),
-        "{}",
-        priest.log
+        hits.iter().any(|at| heals.contains(at)),
+        "no heal on an Immolate hit's frame: {}",
+        fire.log
     );
-    assert!(
-        !lines(&priest.log, "Vampiric Embrace heals Team 1 Warrior #2 for").is_empty(),
-        "{}",
-        priest.log
-    );
+    assert!(lines(&fire.log, PET_HEALED).is_empty(), "{}", fire.log);
 }
 
 /// A leech declared on an ability travels onto the aura it applies, and the
@@ -1027,4 +1069,328 @@ fn an_abilitys_leech_rides_its_aura() {
     );
     let control = run(false);
     assert!(lines(&control.log, "Corruption heals").is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Round 2: a cast's three endings, each hand's own speed, the cooldown's
+// release
+// ---------------------------------------------------------------------------
+
+/// The Priest mid-way through a Mind Blast at the enemy Warrior that spent a
+/// sure-crit modifier ("Favor") when it began: the modifier is off its auras
+/// and riding on the cast, as `after_turn` leaves it. `ending` stages how the
+/// cast ends.
+fn mid_cast(ending: impl FnOnce(&mut bevy::prelude::World) + Send + Sync + 'static) -> Stage {
+    Stage::new().world(move |w| {
+        use arenasim::states::play_match::next_cast::SpentNextCast;
+        use arenasim::states::play_match::{CastingState, Combatant};
+        let priest = T1.entity(w);
+        let warrior = T2.entity(w);
+        let mut m = modifier(NextCastScope::Abilities(vec![AbilityType::MindBlast]));
+        m.crit_chance = 1.0;
+        let favor = Aura {
+            effect_type: AuraType::NextCast,
+            duration: 300.0,
+            magnitude: 1.0,
+            ability_name: "Favor".to_string(),
+            next_cast: Some(m.clone()),
+            break_on_damage_threshold: -1.0,
+            ..Default::default()
+        };
+        {
+            let mut c = w.get_mut::<Combatant>(priest).expect("the Priest");
+            c.crit_chance = 0.0;
+            c.target = Some(warrior);
+            c.next_cast_spent = Some(SpentNextCast {
+                caster: priest,
+                ability: AbilityType::MindBlast,
+                modifier: m,
+                auras: vec![favor],
+            });
+        }
+        w.entity_mut(priest)
+            .insert(CastingState::new(AbilityType::MindBlast, warrior, 0.2));
+        ending(w);
+    })
+}
+
+fn mind_blast_config() -> HeadlessMatchConfig {
+    config(&["Priest"], &["Warrior", "Priest"], 12.0)
+}
+
+const KEPT: &str = "Priest #1's Favor is kept: its Mind Blast did not land";
+
+/// A cast that LANDS keeps the change: the Mind Blast crits, and the
+/// modifier does not come back.
+#[test]
+fn a_spent_modifier_stays_spent_when_its_cast_lands() {
+    let played = play(mind_blast_config(), mid_cast(|_| {}));
+    let first = played
+        .log
+        .lines()
+        .find(|l| l.contains("Priest #1's Mind Blast"))
+        .unwrap_or_else(|| panic!("the Mind Blast lands: {}", played.log));
+    assert!(first.contains("CRITS"), "{first}");
+    assert!(lines(&played.log, KEPT).is_empty(), "{}", played.log);
+}
+
+/// An INTERRUPTED cast gives the modifier back (TBC restores a mod a
+/// cancelled cast consumed), and costs nothing.
+#[test]
+fn an_interrupted_cast_gives_its_modifier_back() {
+    let played = play(
+        mind_blast_config(),
+        mid_cast(|w| {
+            let priest = T1.entity(w);
+            let mut cast = w
+                .get_mut::<arenasim::states::play_match::CastingState>(priest)
+                .expect("the cast");
+            cast.interrupted = true;
+            cast.interrupted_display_time = 0.5;
+        }),
+    );
+    assert_eq!(lines(&played.log, KEPT).len(), 1, "{}", played.log);
+}
+
+/// A cast CROWD CONTROL stops gives it back too.
+#[test]
+fn a_cast_crowd_control_stops_gives_its_modifier_back() {
+    let played = play(
+        mind_blast_config(),
+        mid_cast(|_| {}).aura(
+            T1,
+            Aura {
+                effect_type: AuraType::Stun,
+                duration: 2.0,
+                magnitude: 1.0,
+                ability_name: "Test".to_string(),
+                break_on_damage_threshold: -1.0,
+                ..Default::default()
+            },
+        ),
+    );
+    assert_eq!(lines(&played.log, KEPT).len(), 1, "{}", played.log);
+}
+
+/// A cast that FIZZLES at completion (its target dead) gives it back.
+#[test]
+fn a_fizzled_cast_gives_its_modifier_back() {
+    let played = play(
+        mind_blast_config(),
+        mid_cast(|w| {
+            let warrior = T2.entity(w);
+            let mut c = w
+                .get_mut::<arenasim::states::play_match::Combatant>(warrior)
+                .expect("the Warrior");
+            c.current_health = 0.0;
+            c.is_dead = true;
+        }),
+    );
+    assert_eq!(lines(&played.log, KEPT).len(), 1, "{}", played.log);
+}
+
+/// The total of an auto-attack line's damage and its absorb.
+fn hit_total(line: &str) -> f32 {
+    let after = line.split(" for ").nth(1).unwrap_or("0");
+    let dealt: f32 = after
+        .split_whitespace()
+        .next()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(0.0);
+    let absorbed: f32 = line
+        .split('(')
+        .nth(1)
+        .and_then(|p| p.split_whitespace().next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(0.0);
+    dealt + absorbed
+}
+
+/// The `[PROC]` lines' timestamps (`[ 12.34s]`).
+fn stamps<'a>(log: &'a str, needle: &str) -> Vec<&'a str> {
+    log.lines()
+        .filter(|l| l.contains(needle))
+        .filter_map(|l| l.split(']').next())
+        .collect()
+}
+
+/// Each hand's per-minute chance follows ITS weapon: a Rogue whose off hand
+/// is a slow 4.0s weapon (certain at 15 a minute) and whose main hand is a
+/// fast 1.0s one (a quarter). Every off-hand hit procs; a main-hand hit only
+/// sometimes. The hands are told apart by damage: the main hand hits for far
+/// more.
+#[test]
+fn each_hand_procs_at_its_own_weapon_speed() {
+    let mut fury = certain(TalentTrigger::MeleeHit, "Fury");
+    fury.chance = ProcChance::PerMinute(15.0);
+    let played = play(
+        config(&["Rogue"], &["Priest"], 60.0),
+        with_proc(Stage::new(), T1, fury).combatant(T1, |c| {
+            c.crit_chance = 0.0;
+            c.weapon_speed = 1.0;
+            c.attack_damage = 12.0;
+            c.offhand_weapon_speed = 4.0;
+            c.offhand_damage = 2.0;
+        }),
+    );
+    let proc_at: std::collections::BTreeSet<&str> = stamps(&played.log, "Test Talent procs Fury")
+        .into_iter()
+        .collect();
+    let swings: Vec<(&str, f32)> = played
+        .log
+        .lines()
+        .filter(|l| l.contains("Rogue #1's Auto Attack"))
+        .map(|l| (l.split(']').next().unwrap(), hit_total(l)))
+        .collect();
+    let (off, main): (Vec<_>, Vec<_>) = swings.iter().partition(|(_, dmg)| *dmg < 5.0);
+    assert!(off.len() >= 4 && main.len() >= 10, "{swings:?}");
+    for (at, dmg) in &off {
+        assert!(
+            proc_at.contains(at),
+            "an off-hand hit for {dmg} at {at} did not proc: {}",
+            played.log
+        );
+    }
+    let main_procs = main.iter().filter(|(at, _)| proc_at.contains(at)).count();
+    assert!(main_procs < main.len(), "every main-hand hit procced");
+}
+
+/// A Hunter's melee hand procs at its MELEE weapon's speed, not its bow's: a
+/// 4.0s melee weapon is certain at 15 a minute where the 1.0s bow would be a
+/// quarter. Rooted beside a Warrior, every melee hit procs.
+#[test]
+fn a_hunters_melee_hand_procs_at_its_melee_weapons_speed() {
+    let mut fury = certain(TalentTrigger::MeleeHit, "Fury");
+    fury.chance = ProcChance::PerMinute(15.0);
+    let played = play(
+        config(&["Hunter"], &["Warrior"], 30.0),
+        with_proc(Stage::new(), T1, fury)
+            .combatant(T1, |c| {
+                c.weapon_speed = 1.0;
+                c.melee_damage = 20.0;
+                c.melee_weapon_speed = 4.0;
+            })
+            .aura(
+                T1,
+                Aura {
+                    effect_type: AuraType::Root,
+                    duration: 300.0,
+                    magnitude: 1.0,
+                    ability_name: "Test".to_string(),
+                    break_on_damage_threshold: -1.0,
+                    ..Default::default()
+                },
+            )
+            .place(T1, 0.0, 0.0)
+            .place(T2, 1.5, 0.0)
+            .target(T1, T2),
+    );
+    let proc_at: std::collections::BTreeSet<&str> = stamps(&played.log, "Test Talent procs Fury")
+        .into_iter()
+        .collect();
+    let melee: Vec<&str> = stamps(&played.log, "Hunter #1's Auto Attack");
+    assert!(melee.len() >= 3, "{}", played.log);
+    for at in melee {
+        assert!(
+            proc_at.contains(at),
+            "a melee hit at {at} did not proc: {}",
+            played.log
+        );
+    }
+}
+
+/// A proc's internal cooldown runs out and lets it fire again: a certain
+/// melee proc on a 3s cooldown fires again and again, never twice inside 3s.
+#[test]
+fn an_internal_cooldown_releases_its_proc() {
+    let mut fury = certain(TalentTrigger::MeleeHit, "Fury");
+    fury.internal_cooldown = 3.0;
+    let played = play(
+        config(&["Warrior"], &["Priest"], 30.0),
+        with_proc(Stage::new(), T1, fury),
+    );
+    let at: Vec<f32> = stamps(&played.log, "Test Talent procs Fury")
+        .iter()
+        .map(|s| {
+            s.trim_start_matches('[')
+                .trim_end_matches('s')
+                .trim()
+                .parse()
+                .unwrap()
+        })
+        .collect();
+    assert!(at.len() >= 3, "{}", played.log);
+    for pair in at.windows(2) {
+        assert!(pair[1] - pair[0] >= 3.0 - 0.02, "{at:?}");
+    }
+}
+
+/// Holy Shock's pending effect lands with the book its decision read: a
+/// power modifier Holy Shock spent (here +900%) is in its damage.
+#[test]
+fn holy_shock_lands_with_the_modifier_it_spent() {
+    let run = |power: f32| {
+        let mut m = modifier(NextCastScope::Abilities(vec![AbilityType::HolyShock]));
+        m.power = power;
+        if power == 0.0 {
+            m.cost_reduction = 1.0;
+        }
+        play(
+            config(&["Paladin"], &["Warrior"], 30.0),
+            Stage::new()
+                .aura(
+                    T1,
+                    Aura {
+                        effect_type: AuraType::NextCast,
+                        duration: 300.0,
+                        magnitude: 1.0,
+                        ability_name: "Sure Crit".to_string(),
+                        next_cast: Some(m),
+                        break_on_damage_threshold: -1.0,
+                        ..Default::default()
+                    },
+                )
+                .combatant(T1, |c| c.crit_chance = 0.0),
+        )
+    };
+    let damage = |log: &str| -> f32 { hit_total(&landing_after_spend(log, "Holy Shock")) };
+    let plain = damage(&run(0.0).log);
+    let empowered = damage(&run(9.0).log);
+    assert!(empowered > plain * 5.0, "{plain} -> {empowered}");
+}
+
+/// An interrupt is a use: Kick spends a modifier that covers it and fires an
+/// `AbilityUsed` proc narrowed to it (Initiative's shape).
+#[test]
+fn an_interrupt_is_a_use_and_a_spender() {
+    let mut cut = modifier(NextCastScope::Abilities(vec![AbilityType::Kick]));
+    cut.cost_reduction = 5.0;
+    let primed = Aura {
+        effect_type: AuraType::NextCast,
+        duration: 300.0,
+        magnitude: 1.0,
+        ability_name: "Initiative".to_string(),
+        next_cast: Some(cut),
+        break_on_damage_threshold: -1.0,
+        ..Default::default()
+    };
+    let played = play(
+        config(&["Rogue"], &["Priest"], 40.0),
+        with_proc(
+            Stage::new().aura(T1, primed).health(T2, 0.5),
+            T1,
+            on(TalentTrigger::AbilityUsed, AbilityType::Kick),
+        ),
+    );
+    assert!(
+        !lines(&played.log, "uses Kick").is_empty(),
+        "{}",
+        played.log
+    );
+    assert!(
+        !lines(&played.log, "Initiative is spent on Kick").is_empty(),
+        "{}",
+        played.log
+    );
+    assert!(!procs(&played.log, "Site").is_empty(), "{}", played.log);
 }

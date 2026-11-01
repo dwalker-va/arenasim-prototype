@@ -96,6 +96,9 @@ impl<'a> DecisionEventBuilder<'a> {
         self.trace
             .casts
             .push((self.actor.entity_id, cleared.ability()));
+        if let Some(overlay) = &self.trace.next_cast {
+            overlay.spend(cleared.ability());
+        }
         self.record_chosen(cleared.ability(), target, was_instant);
     }
 

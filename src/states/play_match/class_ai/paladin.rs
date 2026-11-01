@@ -1111,7 +1111,9 @@ fn try_holy_shock_heal(
 
     commands.spawn(HolyShockHealPending {
         caster: ctx.self_entity,
-        caster_book: combatant.book().clone(),
+        // The book the decision read: a next-cast modifier Holy Shock spent
+        // is in it, and lands with the pending effect.
+        caster_book: abilities.clone(),
         caster_spell_power: combatant.spell_power,
         // Its own crit chance too (a talent's, or a next-cast modifier's).
         caster_crit_chance: combatant.crit_chance + def.crit_chance,
@@ -1219,7 +1221,9 @@ fn try_holy_shock_damage(
 
     commands.spawn(HolyShockDamagePending {
         caster: ctx.self_entity,
-        caster_book: combatant.book().clone(),
+        // The book the decision read: a next-cast modifier Holy Shock spent
+        // is in it, and lands with the pending effect.
+        caster_book: abilities.clone(),
         caster_spell_power: combatant.spell_power,
         // Its own crit chance too (a talent's, or a next-cast modifier's).
         caster_crit_chance: combatant.crit_chance + def.crit_chance,

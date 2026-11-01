@@ -11,19 +11,31 @@
 //! Infusion of Light, Light's Grace, The Art of War, Initiative).
 //!
 //! **Read.** While a modifier is up, its holder decides from an EFFECTIVE book
-//! ([`effective_book`]): its own book with every covered ability's config
-//! changed. So the cast gate, the cast time a cast starts with and the cost an
-//! instant pays all read the changed numbers, with no edit at any class AI
-//! site. A holder with no modifier decides from its own book unchanged, which
-//! is what keeps a match without talents byte-identical.
+//! ([`effective_book`]): its own book seen through an overlay that changes
+//! every covered ability's config. So the cast gate, the cast time a cast
+//! starts with and the cost an instant pays all read the changed numbers,
+//! with no edit at any class AI site. A holder with no modifier decides from
+//! its own book unchanged, which is what keeps a match without talents
+//! byte-identical.
 //!
-//! **Spent.** The decision that USES a covered ability spends every modifier
-//! covering it ([`consume`]), in `decide_abilities` right after the unit's
-//! turn. A cast with a cast bar resolves later, in `process_casting` (and a
-//! projectile later still), so the spent modifier rides on the combatant as
-//! [`SpentNextCast`] until that cast completes: its cost, its crit chance and
-//! its power are read from it there. A cast that is interrupted keeps nothing:
-//! the modifier was spent when the cast began.
+//! **Spent by the first covered choice.** The decision trace's `choose`
+//! spends the overlay on the first covered ability the turn chooses; from
+//! then on every OTHER covered ability reads its own config again, so one
+//! modifier never serves two casts in a turn. Right after the turn,
+//! `talent_procs::after_turn` takes the spent modifiers off the holder
+//! ([`consume`]). An interrupt (`check_interrupts`) reads the effective book
+//! too and spends a modifier that covers it (`talent_procs::after_interrupt`).
+//!
+//! **Kept until the cast lands.** An instant has landed when it is chosen. A
+//! cast that resolves later carries what it spent: a cast bar on the
+//! combatant ([`SpentNextCast`], read by `process_casting` when the cast
+//! completes), a projectile on the `Projectile` (cast-bar or instant), Holy
+//! Shock's pending effect in the book it carries. A cast with a bar that does
+//! NOT land — interrupted, stopped by crowd control or a silence, or fizzled
+//! at completion on a dead or unseen target — gives its modifiers back
+//! ([`restore`]), as TBC restores a mod a cancelled cast consumed, and as the
+//! sim charges such a cast nothing. A channel is paid for when it starts, so
+//! its modifier is spent then.
 //!
 //! **Stacking.** Two modifiers covering one cast do not compound: each field
 //! takes the strongest of them ([`NextCastModifier::strongest`]), the stacking
@@ -34,7 +46,7 @@ use serde::{Deserialize, Serialize};
 use super::abilities::AbilityType;
 use super::ability_book::AbilityBook;
 use super::ability_config::AbilityConfig;
-use super::components::{ActiveAuras, AuraType};
+use super::components::{ActiveAuras, Aura, AuraType};
 use super::talents::AbilityField;
 
 /// The abilities a [`NextCastModifier`] changes.
@@ -200,12 +212,44 @@ pub fn changed(config: &AbilityConfig, modifier: &NextCastModifier) -> AbilityCo
 }
 
 /// A modifier spent by a cast that resolves after its decision: the cast it
-/// was spent on, and the change. Carried on the combatant until
-/// `process_casting` completes that cast.
-#[derive(Clone, Debug, PartialEq)]
+/// was spent on, the change, and the auras the cast took off its caster.
+/// Carried on the combatant until `process_casting` resolves that cast: a
+/// cast that lands keeps the change, and one that does not — interrupted,
+/// stopped by crowd control or a silence, or fizzled at completion — gives the
+/// auras back ([`restore`]).
+#[derive(Clone)]
 pub struct SpentNextCast {
+    /// The unit that cast it.
+    pub caster: bevy::prelude::Entity,
     pub ability: AbilityType,
     pub modifier: NextCastModifier,
+    pub auras: Vec<Aura>,
+}
+
+impl std::fmt::Debug for SpentNextCast {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let names: Vec<&str> = self.auras.iter().map(|a| a.ability_name.as_str()).collect();
+        f.debug_struct("SpentNextCast")
+            .field("ability", &self.ability)
+            .field("modifier", &self.modifier)
+            .field("auras", &names)
+            .finish()
+    }
+}
+
+impl SpentNextCast {
+    /// The spent auras' names, joined for the log.
+    pub fn names(&self) -> String {
+        let names: Vec<&str> = self.auras.iter().map(|a| a.ability_name.as_str()).collect();
+        names.join(" and ")
+    }
+}
+
+/// Give a cast's spent modifier back to its caster, whose cast did not land:
+/// each aura it took returns as it was taken (its remaining duration did not
+/// run while the cast held it).
+pub fn restore(spent: SpentNextCast, auras: &mut ActiveAuras) {
+    auras.auras.extend(spent.auras);
 }
 
 /// Whether any next-cast modifier is up on a holder.
@@ -225,34 +269,39 @@ fn live(auras: Option<&ActiveAuras>) -> impl Iterator<Item = &NextCastModifier> 
         .filter_map(|a| a.next_cast.as_ref())
 }
 
-/// The book its holder decides from: `book` with every ability a live
-/// modifier covers changed by the strongest of them. `book` itself (a shared
-/// handle, so no copy) when no modifier is up.
+/// The book its holder decides from: `book` seen through an overlay that
+/// changes every ability a live modifier covers by the strongest of them,
+/// until the turn chooses one of them (`AbilityBook`'s `NextCastOverlay`).
+/// `book` itself (a shared handle, so no copy) when no modifier is up.
 pub fn effective_book(book: &AbilityBook, auras: Option<&ActiveAuras>) -> AbilityBook {
     if live(auras).next().is_none() {
         return book.clone();
     }
-    let mut out = book.clone();
-    let covered: Vec<(AbilityType, NextCastModifier)> = book
-        .iter()
-        .filter_map(|(ability, _)| {
-            NextCastModifier::strongest(live(auras).filter(|m| m.covers(*ability)))
-                .map(|m| (*ability, m))
-        })
-        .collect();
-    for (ability, modifier) in covered {
-        out = out.patching(ability, |config| modifier.apply(config));
+    let mut changed = std::collections::BTreeMap::new();
+    let mut modifiers = std::collections::BTreeMap::new();
+    for (ability, config) in book.iter() {
+        if let Some(m) = NextCastModifier::strongest(live(auras).filter(|m| m.covers(*ability))) {
+            changed.insert(*ability, self::changed(config, &m));
+            modifiers.insert(*ability, m);
+        }
     }
-    out
+    if changed.is_empty() {
+        return book.clone();
+    }
+    book.clone()
+        .with_overlay(super::ability_book::NextCastOverlay::new(
+            changed, modifiers,
+        ))
 }
 
 /// Spend every live modifier covering `ability`: remove their auras from the
 /// holder and return the strongest of them, or `None` when none covers it.
 /// Returns the names of the spent auras too, for the log.
 pub fn consume(
+    caster: bevy::prelude::Entity,
     auras: &mut ActiveAuras,
     ability: AbilityType,
-) -> Option<(NextCastModifier, Vec<String>)> {
+) -> Option<SpentNextCast> {
     let covering: Vec<usize> = auras
         .auras
         .iter()
@@ -271,12 +320,17 @@ pub fn consume(
             .iter()
             .filter_map(|i| auras.auras[*i].next_cast.as_ref()),
     )?;
-    let mut names = Vec::new();
+    let mut taken = Vec::new();
     for index in covering.into_iter().rev() {
-        names.push(auras.remove_debuff_at(index).ability_name);
+        taken.push(auras.remove_debuff_at(index));
     }
-    names.reverse();
-    Some((combined, names))
+    taken.reverse();
+    Some(SpentNextCast {
+        caster,
+        ability,
+        modifier: combined,
+        auras: taken,
+    })
 }
 
 #[cfg(test)]
@@ -419,13 +473,49 @@ mod tests {
         let mut auras = ActiveAuras {
             auras: vec![primed("Shadow Trance", trance), primed("Other", other)],
         };
-        assert!(consume(&mut auras, AbilityType::Corruption).is_none());
+        let me = bevy::prelude::Entity::from_raw(3);
+        assert!(consume(me, &mut auras, AbilityType::Corruption).is_none());
         assert_eq!(auras.auras.len(), 2);
-        let (spent, names) = consume(&mut auras, AbilityType::Shadowbolt).unwrap();
-        assert!(spent.instant);
-        assert_eq!(names, vec!["Shadow Trance".to_string()]);
+        let spent = consume(me, &mut auras, AbilityType::Shadowbolt).unwrap();
+        assert!(spent.modifier.instant);
+        assert_eq!(spent.names(), "Shadow Trance");
         assert_eq!(auras.auras.len(), 1);
         assert_eq!(auras.auras[0].ability_name, "Other");
+        // A cast that did not land gives it back.
+        restore(spent, &mut auras);
+        assert_eq!(auras.auras.len(), 2);
+        assert_eq!(auras.auras[1].ability_name, "Shadow Trance");
+    }
+
+    /// One turn, two covered abilities: the first one chosen spends the
+    /// modifier, and from then on the other reads its own config again.
+    #[test]
+    fn the_first_covered_choice_spends_the_turns_modifier() {
+        let book = book();
+        let mut free = modifier(NextCastScope::Abilities(vec![
+            AbilityType::Shadowbolt,
+            AbilityType::Immolate,
+        ]));
+        free.free = true;
+        let auras = ActiveAuras {
+            auras: vec![primed("Free", free)],
+        };
+        let eff = effective_book(&book, Some(&auras));
+        assert_eq!(eff.get_unchecked(&AbilityType::Immolate).mana_cost, 0.0);
+        assert_eq!(eff.get_unchecked(&AbilityType::Shadowbolt).mana_cost, 0.0);
+        let overlay = eff.overlay().expect("an overlay");
+        overlay.spend(AbilityType::Corruption);
+        assert_eq!(overlay.spent(), None, "an uncovered cast spends nothing");
+        overlay.spend(AbilityType::Shadowbolt);
+        overlay.spend(AbilityType::Immolate);
+        assert_eq!(overlay.spent(), Some(AbilityType::Shadowbolt));
+        assert_eq!(eff.get_unchecked(&AbilityType::Shadowbolt).mana_cost, 0.0);
+        assert_eq!(
+            eff.get_unchecked(&AbilityType::Immolate).mana_cost,
+            book.get_unchecked(&AbilityType::Immolate).mana_cost
+        );
+        assert!(eff.spent_modifier(AbilityType::Shadowbolt).is_some());
+        assert!(eff.spent_modifier(AbilityType::Immolate).is_none());
     }
 
     #[test]

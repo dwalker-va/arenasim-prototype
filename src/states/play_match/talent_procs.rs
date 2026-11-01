@@ -703,13 +703,14 @@ pub fn roll(
 }
 
 /// The talent effects of one unit's turn, run by `decide_abilities` right
-/// after it with the abilities the turn USED
-/// ([`super::decision_trace::DecisionTrace::take_casts_of`]):
-/// - each next-cast modifier a used ability spends comes off `auras`
-///   ([`super::next_cast::consume`]), and the last one spent rides on the
-///   combatant ([`Combatant::next_cast_spent`]) for a cast that resolves
-///   later. A turn that used something but spent nothing clears it. Pass
-///   `auras` only when a `NextCast` aura is on the unit;
+/// after it (and by `check_interrupts` after an interrupt) with what the turn
+/// USED ([`super::decision_trace::DecisionTrace::take_casts_of`]) and the
+/// covered ability that SPENT the turn's next-cast modifiers, if one did (the
+/// first covered choice, [`super::ability_book::NextCastOverlay::spend`]):
+/// - the spent modifiers come off `auras` ([`super::next_cast::consume`]) and
+///   ride on the combatant ([`Combatant::next_cast_spent`]) until the cast
+///   resolves: `process_casting` gives them back if it does not land. A turn
+///   that used something and spent nothing clears it;
 /// - each use is an [`TalentTrigger::AbilityUsed`] event, for a unit that
 ///   listens for one.
 pub fn after_turn(
@@ -719,36 +720,32 @@ pub fn after_turn(
     combatant: &mut Combatant,
     auras: Option<&mut super::components::ActiveAuras>,
     used: &[AbilityType],
+    spent_on: Option<AbilityType>,
 ) {
     if used.is_empty() {
         return;
     }
-    if let Some(auras) = auras {
-        let mut spent = None;
-        for ability in used {
-            if let Some((modifier, names)) = super::next_cast::consume(auras, *ability) {
-                let cast = combatant
-                    .book()
-                    .get(ability)
-                    .map_or_else(|| format!("{ability:?}"), |d| d.name.clone());
-                combat_log.log(
-                    CombatLogEventType::Buff,
-                    format!(
-                        "{}'s {} is spent on {}",
-                        combatant_id(combatant.team, combatant.slot, combatant.class),
-                        names.join(" and "),
-                        cast
-                    ),
-                );
-                spent = Some(super::next_cast::SpentNextCast {
-                    ability: *ability,
-                    modifier,
-                });
-            }
-        }
+    let spent = match (auras, spent_on) {
+        (Some(auras), Some(ability)) => super::next_cast::consume(entity, auras, ability),
+        _ => None,
+    };
+    if let Some(spent) = &spent {
+        let cast = combatant
+            .book()
+            .get(&spent.ability)
+            .map_or_else(|| format!("{:?}", spent.ability), |d| d.name.clone());
+        combat_log.log(
+            CombatLogEventType::Buff,
+            format!(
+                "{}'s {} is spent on {}",
+                combatant_id(combatant.team, combatant.slot, combatant.class),
+                spent.names(),
+                cast
+            ),
+        );
+    }
+    if spent.is_some() || combatant.next_cast_spent.is_some() {
         combatant.next_cast_spent = spent;
-    } else if combatant.next_cast_spent.is_some() {
-        combatant.next_cast_spent = None;
     }
     if combatant
         .talent_procs
@@ -760,6 +757,52 @@ pub fn after_turn(
                 ProcEvent::new(entity, TalentTrigger::AbilityUsed).ability(*ability),
             );
         }
+    }
+}
+
+/// The talent effects of an interrupt `check_interrupts` fired: it is a use
+/// (an [`TalentTrigger::AbilityUsed`] event), and it spends a live next-cast
+/// modifier that covers it, through `commands` (the interrupt pass holds the
+/// auras read-only). An instant, so nothing is carried to a landing.
+pub fn after_interrupt(
+    commands: &mut Commands,
+    entity: Entity,
+    combatant: &Combatant,
+    auras: Option<&super::components::ActiveAuras>,
+    interrupt: AbilityType,
+) {
+    let covered = auras.is_some_and(|a| {
+        a.auras.iter().any(|aura| {
+            aura.effect_type == AuraType::NextCast
+                && aura.next_cast.as_ref().is_some_and(|m| m.covers(interrupt))
+        })
+    });
+    if covered {
+        let id = combatant_id(combatant.team, combatant.slot, combatant.class);
+        let cast = combatant
+            .book()
+            .get(&interrupt)
+            .map_or_else(|| format!("{interrupt:?}"), |d| d.name.clone());
+        commands.queue(move |world: &mut World| {
+            let spent = world
+                .get_mut::<super::components::ActiveAuras>(entity)
+                .and_then(|mut auras| super::next_cast::consume(entity, &mut auras, interrupt));
+            if let Some(spent) = spent {
+                world.resource_mut::<CombatLog>().log(
+                    CombatLogEventType::Buff,
+                    format!("{}'s {} is spent on {}", id, spent.names(), cast),
+                );
+            }
+        });
+    }
+    if combatant
+        .talent_procs
+        .listens_for(TalentTrigger::AbilityUsed)
+    {
+        push(
+            commands,
+            ProcEvent::new(entity, TalentTrigger::AbilityUsed).ability(interrupt),
+        );
     }
 }
 

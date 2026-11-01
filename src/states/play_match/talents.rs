@@ -353,12 +353,15 @@ impl AbilityField {
     /// Write `value` to this field on `config` (a no-op when it has none).
     pub fn set(self, config: &mut AbilityConfig, value: f32) {
         match self {
+            // Clamped: a remainder's strength is at most 1 (a 100% slow), so
+            // no patch or power pushes its magnitude below 0; no strength is
+            // below 0.
             AbilityField::AuraStrength => {
                 if let Some(a) = config.applies_aura.as_mut() {
                     a.magnitude = if strength_is_remainder(a.aura_type) {
-                        1.0 - value
+                        1.0 - value.clamp(0.0, 1.0)
                     } else {
-                        value
+                        value.max(0.0)
                     };
                 }
             }

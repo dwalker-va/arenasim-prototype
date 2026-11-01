@@ -1830,7 +1830,8 @@ fn try_concussive_shot(
             caster_slot: combatant.slot,
             caster_class: combatant.class,
             caster_pet_type: None,
-            next_cast: None,
+            // A next-cast modifier this shot spent rides to its impact.
+            next_cast: abilities.spent_modifier(ability),
         },
         Transform::from_translation(my_pos + Vec3::new(0.0, 1.5, 0.0)),
         PlayMatchEntity,
@@ -2012,7 +2013,8 @@ fn try_arcane_shot(
             caster_slot: combatant.slot,
             caster_class: combatant.class,
             caster_pet_type: None,
-            next_cast: None,
+            // A next-cast modifier this shot spent rides to its impact.
+            next_cast: abilities.spent_modifier(ability),
         },
         Transform::from_translation(my_pos + Vec3::new(0.0, 1.5, 0.0)),
         PlayMatchEntity,
@@ -2197,7 +2199,8 @@ fn try_serpent_sting(
             caster_slot: combatant.slot,
             caster_class: combatant.class,
             caster_pet_type: None,
-            next_cast: None,
+            // A next-cast modifier this shot spent rides to its impact.
+            next_cast: abilities.spent_modifier(ability),
         },
         Transform::from_translation(my_pos + Vec3::new(0.0, 1.5, 0.0)),
         PlayMatchEntity,

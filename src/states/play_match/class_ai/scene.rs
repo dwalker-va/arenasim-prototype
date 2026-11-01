@@ -957,6 +957,9 @@ impl Scene {
                 target,
                 target_pos,
                 cast,
+                Some(&ActiveAuras {
+                    auras: unit.auras.clone(),
+                }),
             );
             queue.apply(&mut exec_world);
             self.read_landings(&mut exec_world, &mut view);

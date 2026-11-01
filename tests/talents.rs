@@ -1328,3 +1328,16 @@ fn the_loader_refuses_a_broken_proc() {
         assert!(err.contains(why), "{why}: {err}");
     }
 }
+
+/// A strength is clamped: no patch pushes a remainder aura (a slow, a heal
+/// cut) below a magnitude of 0, nor any strength below 0.
+#[test]
+fn an_aura_strength_is_clamped() {
+    let defs = abilities();
+    let mut crippling = defs.get_unchecked(&AbilityType::CripplingPoison).clone();
+    AbilityField::AuraStrength.set(&mut crippling, 5.0);
+    assert_eq!(crippling.applies_aura.as_ref().unwrap().magnitude, 0.0);
+    let mut agony = defs.get_unchecked(&AbilityType::CurseOfAgony).clone();
+    AbilityField::AuraStrength.set(&mut agony, -3.0);
+    assert_eq!(agony.applies_aura.as_ref().unwrap().magnitude, 0.0);
+}

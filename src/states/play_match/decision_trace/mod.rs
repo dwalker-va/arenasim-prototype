@@ -59,6 +59,13 @@ pub struct DecisionTrace {
     /// effects of a turn read it (`talent_procs::after_turn`: a next-cast
     /// modifier spent, an `AbilityUsed` proc).
     pub casts: Vec<(u32, crate::states::play_match::abilities::AbilityType)>,
+    /// The next-cast overlay of the unit deciding now
+    /// (`next_cast::effective_book`), set by `dispatch_class_decision` for the
+    /// length of its turn: `choose` spends it on the first covered cast.
+    pub next_cast: Option<std::sync::Arc<crate::states::play_match::ability_book::NextCastOverlay>>,
+    /// The covered ability the last dispatched turn spent its next-cast
+    /// modifiers on, if any; taken by `decide_abilities` after the turn.
+    pub turn_spent: Option<crate::states::play_match::abilities::AbilityType>,
 }
 
 impl DecisionTrace {
