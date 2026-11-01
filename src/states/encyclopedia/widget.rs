@@ -195,6 +195,7 @@ pub fn row(
     let mut list_row = ListRow::new(&name).width(width).icon(ListIcon {
         texture: topic.icon(data),
         edge: color::LINE,
+        tier: topic.item_tier(data),
     });
     if !trailing.is_empty() {
         list_row = list_row.meta(trailing);
@@ -453,6 +454,70 @@ mod tests {
             probe.out.set(link(response, TOPIC, &data));
         });
         press_and_release(&mut harness, &probe, button)
+    }
+
+    /// Every item icon the encyclopedia draws wears its item's tier frame —
+    /// the linked icon under tiles, kit cells and page headers, the search
+    /// row, and the item tooltip's badge — one item of each tier, so a frame
+    /// keyed on the wrong thing cannot pass. Nothing that is not an item
+    /// wears one.
+    #[test]
+    fn every_item_icon_wears_its_tier_frame() {
+        use crate::states::play_match::equipment::ItemTier;
+        use crate::ui::theme::tier_color;
+        use crate::ui::widgets::tier_frame::painted_frames;
+
+        let items = load_item_definitions().expect("items.ron must load");
+        let abilities = load_ability_definitions().expect("abilities.ron must load");
+        let data = EncyclopediaData {
+            items: &items,
+            abilities: &abilities,
+            item_icons: None,
+            class_icons: None,
+            ability_icons: None,
+            talents: crate::states::play_match::talents::TalentDefinitions::shipped(),
+        };
+        for tier in ItemTier::ALL {
+            let (id, item) = items
+                .iter()
+                .find(|(_, item)| item.tier() == Some(tier))
+                .unwrap_or_else(|| panic!("items.ron ships no {tier:?} item"));
+            let topic = Topic::Item(*id);
+            let want = vec![tier_color(tier)];
+
+            let icon = painted_frames(|ui| {
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::Vec2::splat(icon::LG), egui::Sense::hover());
+                paint_icon(ui.painter(), rect, topic, &data);
+            });
+            assert_eq!(icon, want, "{tier:?}: linked icon");
+            let tile_frames = painted_frames(|ui| {
+                let _ = tile(ui, topic, "", None, KIT_CELL_WIDTH, &data);
+            });
+            assert_eq!(tile_frames, want, "{tier:?}: index tile");
+            let header = painted_frames(|ui| detail_header(ui, topic, "", &data));
+            assert_eq!(header, want, "{tier:?}: page header");
+            let search = painted_frames(|ui| {
+                let _ = row(ui, topic, "", KIT_CELL_WIDTH, &data);
+            });
+            assert_eq!(search, want, "{tier:?}: search row");
+            let tooltip = painted_frames(|ui| {
+                crate::states::encyclopedia::items::render_item_tooltip(ui, item)
+            });
+            assert_eq!(tooltip, want, "{tier:?}: item tooltip");
+        }
+        for topic in [
+            Topic::Ability(AbilityType::Frostbolt),
+            Topic::Class(crate::states::match_config::CharacterClass::Mage),
+        ] {
+            let frames = painted_frames(|ui| {
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::Vec2::splat(icon::LG), egui::Sense::hover());
+                paint_icon(ui.painter(), rect, topic, &data);
+                let _ = row(ui, topic, "", KIT_CELL_WIDTH, &data);
+            });
+            assert!(frames.is_empty(), "{topic:?} wears a tier frame");
+        }
     }
 
     /// A primary click navigates: the widget yields its topic on the frame the

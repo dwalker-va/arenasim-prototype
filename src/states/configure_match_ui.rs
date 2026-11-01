@@ -407,6 +407,7 @@ fn class_list_icon(class_icons: &ClassIcons, class: CharacterClass) -> ListIcon 
     ListIcon {
         texture: class_icons.textures.get(&class).copied(),
         edge: class_color(class),
+        tier: None,
     }
 }
 

@@ -29,6 +29,7 @@ use bevy_egui::egui::Color32;
 
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::SpellSchool;
+use crate::states::play_match::equipment::ItemTier;
 
 /// Chrome and text colours: the encyclopedia's gold-on-navy palette, renamed
 /// by role.
@@ -138,6 +139,22 @@ pub mod data {
     /// What equipment adds: an item tooltip's stat lines, a stat the worn
     /// gear raised, a socket holding a pick other than the class default.
     pub const ITEM_BONUS: Color32 = Color32::from_rgb(100, 255, 100);
+
+    // Item tiers: the tier frame an item's icon wears
+    // ([`crate::ui::widgets::tier_frame`]). The genre's quality ladder — a
+    // plain kit, then blue, then purple — so a player reads it without a
+    // legend, kept clear of the reserved floating-combat-text hues: the blue
+    // is a deep royal blue, well below the light-blue absorb in luminance.
+    // Each is at least 3:1 against every ground an icon sits on (`BG`,
+    // `PANEL`, `RAISED`), and luminance climbs with the tier, so the three
+    // tell apart by lightness as well as by hue. `tier_colours_climb_and_read`
+    // holds both.
+    /// The starting kit: a quiet steel, a frame without a hue.
+    pub const TIER_STARTING_KIT: Color32 = Color32::from_rgb(112, 116, 140);
+    /// The Gauntlet reward tier.
+    pub const TIER_GAUNTLET: Color32 = Color32::from_rgb(64, 128, 255);
+    /// The Champion reward tier, the rarest.
+    pub const TIER_CHAMPION: Color32 = Color32::from_rgb(190, 135, 255);
 }
 
 /// HUD colours: in-match only (decision D6). The HUD keeps its broadcast look
@@ -577,6 +594,9 @@ pub mod stroke {
     pub const DASH_GAP: f32 = 3.0;
     /// A glyph drawn as strokes: the checkbox's tick.
     pub const MARK: f32 = 2.0;
+    /// The tier frame round an item's icon: heavier than a hairline, so its
+    /// colour reads at [`super::icon::SM`].
+    pub const TIER_FRAME: f32 = 2.0;
 }
 
 /// Fixed control dimensions, in points: the size a component is drawn at,
@@ -635,6 +655,15 @@ pub fn class_color(class: CharacterClass) -> Color32 {
         (c.green * 255.0) as u8,
         (c.blue * 255.0) as u8,
     )
+}
+
+/// The colour of an item tier's frame: one token per tier, in [`data`].
+pub fn tier_color(tier: ItemTier) -> Color32 {
+    match tier {
+        ItemTier::StartingKit => data::TIER_STARTING_KIT,
+        ItemTier::Gauntlet => data::TIER_GAUNTLET,
+        ItemTier::Champion => data::TIER_CHAMPION,
+    }
 }
 
 /// `c` multiplied toward black by `factor` (1.0 = unchanged, below 1 =
@@ -766,6 +795,55 @@ fn visuals() -> egui::Visuals {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// WCAG relative luminance of an opaque colour.
+    fn luminance(c: Color32) -> f32 {
+        let channel = |v: u8| {
+            let v = v as f32 / 255.0;
+            if v <= 0.04045 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(c.r()) + 0.7152 * channel(c.g()) + 0.0722 * channel(c.b())
+    }
+
+    /// WCAG contrast ratio between two opaque colours.
+    fn contrast(a: Color32, b: Color32) -> f32 {
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    /// Every tier frame reads against every ground an item icon sits on (3:1,
+    /// the bar for a non-text mark), and the tiers climb in lightness in
+    /// tier order, each a visible step above the last — so they tell apart
+    /// by luminance, not by hue alone.
+    #[test]
+    fn tier_colours_climb_and_read() {
+        for tier in ItemTier::ALL {
+            for (name, ground) in [
+                ("BG", color::BG),
+                ("PANEL", color::PANEL),
+                ("RAISED", color::RAISED),
+            ] {
+                let ratio = contrast(tier_color(tier), ground);
+                assert!(
+                    ratio >= 3.0,
+                    "{tier:?}'s frame is {ratio:.2}:1 against {name}"
+                );
+            }
+        }
+        for pair in ItemTier::ALL.windows(2) {
+            let ratio = contrast(tier_color(pair[1]), tier_color(pair[0]));
+            assert!(
+                luminance(tier_color(pair[1])) > luminance(tier_color(pair[0])) && ratio >= 1.2,
+                "{:?} must be a visible step lighter than {:?} ({ratio:.2}:1)",
+                pair[1],
+                pair[0]
+            );
+        }
+    }
 
     /// `HUD_PANEL` is written premultiplied; it must stay the colour the team
     /// frames were drawn with, (13, 13, 20) at alpha 235.

@@ -1320,6 +1320,7 @@ fn render_ability_row(
         ListRow::new(&name).icon(ListIcon {
             texture: topic.icon(data),
             edge: color::LINE,
+            tier: None,
         }),
     );
     ui_driver::mark(ui, response.rect, true, format_args!("kit:{ability:?}"));
@@ -1486,6 +1487,7 @@ fn render_equipment_row(
             .icon(ListIcon {
                 texture: texture.copied(),
                 edge: color::LINE,
+                tier: item.and_then(|item| item.tier()),
             }),
     );
     ui_driver::mark(ui, response.rect, true, format_args!("equip:{slot:?}"));
@@ -1611,6 +1613,7 @@ pub fn draw_item_picker_list(
                     .icon(ListIcon {
                         texture: item_icons.and_then(|icons| icons.textures.get(item_id).copied()),
                         edge: color::LINE,
+                        tier: item.tier(),
                     })
                     .selected(is_equipped)
                     .wrap();
@@ -2140,6 +2143,50 @@ mod tests {
         let mut resolved = resolve_loadout(CharacterClass::Warrior, defaults, overrides);
         enforce_unique_equipped(&mut resolved);
         resolved
+    }
+
+    /// The equipment sheet's rows and the picker's rows draw each item in the
+    /// tier frame the encyclopedia draws it in: one item of each tier through
+    /// each, so a row that dropped or mis-keyed the tier fails.
+    #[test]
+    fn equipment_rows_and_the_picker_wear_the_tier_frame() {
+        use crate::states::play_match::equipment::{load_item_definitions, ItemTier};
+        use crate::ui::theme::tier_color;
+        use crate::ui::widgets::tier_frame::painted_frames;
+
+        let items = load_item_definitions().expect("items.ron must load");
+        let picks: Vec<(ItemId, &ItemConfig)> = ItemTier::ALL
+            .iter()
+            .map(|tier| {
+                let (id, item) = items
+                    .iter()
+                    .find(|(_, item)| item.tier() == Some(*tier))
+                    .unwrap_or_else(|| panic!("items.ron ships no {tier:?} item"));
+                (*id, item)
+            })
+            .collect();
+        let want: Vec<egui::Color32> = ItemTier::ALL.iter().map(|t| tier_color(*t)).collect();
+
+        let picker = painted_frames(|ui| {
+            let _ = draw_item_picker_list(ui, &picks, None, None, f32::INFINITY);
+        });
+        assert_eq!(picker, want, "the picker");
+
+        for ((id, item), colour) in picks.iter().zip(&want) {
+            let mut worn = Loadout::new();
+            worn.insert(item.sockets()[0], *id);
+            let sheet = painted_frames(|ui| {
+                let _ = render_equipment_row(
+                    ui,
+                    item.sockets()[0],
+                    &items,
+                    &worn,
+                    &Loadout::new(),
+                    None,
+                );
+            });
+            assert_eq!(sheet, vec![*colour], "the sheet row for {id:?}");
+        }
     }
 
     #[test]

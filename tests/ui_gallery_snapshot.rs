@@ -31,16 +31,16 @@ use arenasim::states::encyclopedia::{EncyclopediaData, Topic};
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::SpellSchool;
 use arenasim::states::play_match::ability_config::load_ability_definitions;
-use arenasim::states::play_match::equipment::load_item_definitions;
+use arenasim::states::play_match::equipment::{load_item_definitions, ItemId, ItemTier};
 use arenasim::states::play_match::AbilityType;
 use arenasim::states::GameState;
 use arenasim::ui::fonts::body_family;
 use arenasim::ui::theme::{class_color, color, data, icon, school_color, size, space, text};
 use arenasim::ui::widgets::{
     class_icon, empty_state, link, list_row, paint_icon, panel, panel_header, resource_bar,
-    section_label, stat_row, stat_rows, tooltip_frame, Button, Checkbox, Chip, ChoiceTile, Header,
-    ListIcon, ListRow, Look, Modal, Nav, Tab, TalentNode, TalentTreeColumn, TalentTrees, Tooltip,
-    TreeMode, Variant,
+    section_label, stat_row, stat_rows, tier_badge, tier_icon, tooltip_frame, Button, Checkbox,
+    Chip, ChoiceTile, Header, ListIcon, ListRow, Look, Modal, Nav, Tab, TalentNode,
+    TalentTreeColumn, TalentTrees, Tooltip, TreeMode, Variant,
 };
 
 const WIDTH: f32 = 1400.0;
@@ -364,6 +364,7 @@ fn left_column(ui: &mut egui::Ui) {
                         .icon(ListIcon {
                             texture: None,
                             edge: class_color(class),
+                            tier: None,
                         })
                 };
                 let _ = list_row(
@@ -390,6 +391,7 @@ fn left_column(ui: &mut egui::Ui) {
                     ListRow::new("Frostbolt").meta("1.5s").icon(ListIcon {
                         texture: None,
                         edge: color::LINE,
+                        tier: None,
                     }),
                 );
             });
@@ -446,6 +448,7 @@ fn left_column(ui: &mut egui::Ui) {
                     .icon(ListIcon {
                         texture: None,
                         edge: class_color(CharacterClass::Warlock),
+                        tier: None,
                     }),
             );
         });
@@ -474,6 +477,7 @@ fn right_column(ui: &mut egui::Ui, data: &EncyclopediaData) {
                     Topic::Ability(AbilityType::Shadowbolt),
                     Topic::Ability(AbilityType::Corruption),
                     Topic::Class(CharacterClass::Druid),
+                    Topic::Item(ItemId::DragonspineTrophy),
                 ] {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = space::XS;
@@ -487,6 +491,58 @@ fn right_column(ui: &mut egui::Ui, data: &EncyclopediaData) {
                                 .color(color::LINK),
                         );
                     });
+                }
+            });
+        },
+    );
+
+    section(
+        ui,
+        "Tier frames: starting kit / Gauntlet / Champion (tile, row, tooltip badge)",
+        |ui| {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = space::XL;
+                for tier in ItemTier::ALL {
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = space::SM;
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = space::SM;
+                            for edge in [icon::LG, icon::MD, icon::SM] {
+                                let (rect, _) = ui.allocate_exact_size(
+                                    egui::Vec2::splat(edge),
+                                    egui::Sense::hover(),
+                                );
+                                tier_icon(ui.painter(), rect, None, color::LINE, Some(tier));
+                            }
+                        });
+                        let _ = tier_badge(ui, tier);
+                    });
+                }
+            });
+            ui.add_space(space::SM);
+            panel(None).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                for (tier, name, look) in [
+                    (ItemTier::StartingKit, "Starting kit item", Look::Idle),
+                    (ItemTier::Gauntlet, "Gauntlet item", Look::Hovered),
+                    (ItemTier::Champion, "Champion item (selected)", Look::Idle),
+                    (
+                        ItemTier::Champion,
+                        "Champion item (disabled: no frame)",
+                        Look::Disabled,
+                    ),
+                ] {
+                    let row = ListRow::new(name)
+                        .meta("Head")
+                        .icon(ListIcon {
+                            texture: None,
+                            edge: color::LINE,
+                            tier: Some(tier),
+                        })
+                        .selected(name.contains("selected"))
+                        .enabled(look != Look::Disabled)
+                        .preview(look);
+                    let _ = list_row(ui, row);
                 }
             });
         },
@@ -535,6 +591,7 @@ fn right_column(ui: &mut egui::Ui, data: &EncyclopediaData) {
                                     .icon(ListIcon {
                                         texture: None,
                                         edge: color::LINE,
+                                        tier: Some(ItemTier::StartingKit),
                                     })
                                     .wrap(),
                             );
@@ -545,6 +602,7 @@ fn right_column(ui: &mut egui::Ui, data: &EncyclopediaData) {
                                     .icon(ListIcon {
                                         texture: None,
                                         edge: color::LINE,
+                                        tier: Some(ItemTier::StartingKit),
                                     })
                                     .selected(true)
                                     .wrap(),
@@ -555,6 +613,7 @@ fn right_column(ui: &mut egui::Ui, data: &EncyclopediaData) {
                                     .icon(ListIcon {
                                         texture: None,
                                         edge: color::LINE,
+                                        tier: Some(ItemTier::StartingKit),
                                     })
                                     .wrap(),
                             );
