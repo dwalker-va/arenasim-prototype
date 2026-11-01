@@ -15,7 +15,7 @@ use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::decision_trace::RejectionReason;
 use arenasim::states::play_match::equipment::ItemId::MedallionOfTheAlliance as MEDALLION;
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
-use arenasim::states::play_match::{AbilityType, AuraType};
+use arenasim::states::play_match::{AbilityType, Aura, AuraType, DispelType};
 
 const WEARER: &str = "wearer";
 const PRIEST: &str = "priest";
@@ -44,17 +44,40 @@ fn held(hold: AuraType, secs: f32) -> Scene {
 
 /// As [`held`], with a Priest beside the wearer — in Dispel Magic's reach.
 fn held_beside_a_priest(hold: AuraType, secs: f32) -> Scene {
+    held_beside(Priest, 10.0, hold, secs)
+}
+
+/// As [`held_beside_a_priest`], with a dispeller of `class` standing `yards`
+/// from the wearer.
+fn held_beside(
+    class: arenasim::states::match_config::CharacterClass,
+    yards: f32,
+    hold: AuraType,
+    secs: f32,
+) -> Scene {
     Scene::new()
         .unit(WEARER, 1, Warrior)
         .on_use_item(WEARER, MEDALLION)
         .aura(WEARER, hold, secs)
-        .unit(PRIEST, 1, Priest)
-        .at(0.0, 10.0)
+        .unit(PRIEST, 1, class)
+        .at(0.0, yards)
         .unit(ROGUE, 2, Rogue)
         .at(2.0, 0.0)
         .targeting(WEARER)
         .unit(MAGE, 2, Mage)
         .at(0.0, -25.0)
+}
+
+/// An 8s Incapacitate of removal class `dispel_type` (a fixture: no shipped
+/// incapacitate is a poison or physical).
+fn incapacitate(dispel_type: DispelType) -> Aura {
+    Aura {
+        effect_type: AuraType::Incapacitate,
+        duration: 8.0,
+        ability_name: "Fixture Trap".to_string(),
+        dispel_type,
+        ..Default::default()
+    }
 }
 
 fn used(view: &DecisionView) -> bool {
@@ -214,6 +237,49 @@ fn a_dispellable_hold_waits_for_the_priest_and_a_stun_does_not() {
         .aura(WEARER, AuraType::Stun, 4.0)
         .decide_held(WEARER);
     assert!(used(&view), "{view:?}");
+}
+
+#[test]
+fn every_long_hold_must_be_one_the_dispel_frees_at_the_urgent_bar() {
+    // Control: a magic incapacitate under the polymorph — Dispel Magic frees
+    // both, urgently.
+    let view = held_beside_a_priest(AuraType::Polymorph, 8.0)
+        .aura_full(WEARER, incapacitate(DispelType::Auto))
+        .decide_held(WEARER);
+    assert!(waits(&view), "{view:?}");
+    // A poison incapacitate beside a Paladin: Cleanse takes it, but a poison
+    // is a maintenance cleanse, below the urgent bar, so one Cleanse does not
+    // free the wearer of both.
+    let view = held_beside(Paladin, 10.0, AuraType::Polymorph, 8.0)
+        .aura_full(WEARER, incapacitate(DispelType::Poison))
+        .decide_held(WEARER);
+    assert!(used(&view), "{view:?}");
+    // A physical incapacitate beside a Priest: urgent, but no dispel takes it.
+    let view = held_beside_a_priest(AuraType::Polymorph, 8.0)
+        .aura_full(WEARER, incapacitate(DispelType::Physical))
+        .decide_held(WEARER);
+    assert!(used(&view), "{view:?}");
+}
+
+#[test]
+fn a_walking_dispeller_counts_only_if_it_arrives_in_time() {
+    // Dispel Magic reaches 30yd; a Priest walks 5yd/s. From 38yd it is in
+    // range in 1.6s, inside the 2s grace...
+    let view = held_beside(Priest, 38.0, AuraType::Polymorph, 8.0).decide_held(WEARER);
+    assert!(waits(&view), "{view:?}");
+    // ...from 42yd it needs 2.4s, so the wearer breaks free now.
+    let view = held_beside(Priest, 42.0, AuraType::Polymorph, 8.0).decide_held(WEARER);
+    assert!(used(&view), "{view:?}");
+    // A 3s polymorph leaves 1s above the floor: the Priest at 38yd would
+    // arrive after it, the one beside the wearer is already there.
+    let view = held_beside(Priest, 38.0, AuraType::Polymorph, 3.0).decide_held(WEARER);
+    assert!(used(&view), "{view:?}");
+    let view = held_beside(Priest, 10.0, AuraType::Polymorph, 3.0).decide_held(WEARER);
+    assert!(waits(&view), "{view:?}");
+    // A wait already 1s old has 1s of grace left: 1.6s of walk no longer fits.
+    let mut scene = held_beside(Priest, 38.0, AuraType::Polymorph, 8.0);
+    scene.combatant_mut(WEARER).on_use_items[0].waiting = Some((NOW - 1.0, NOW - 1.0 / 60.0));
+    assert!(used(&scene.decide_held(WEARER)));
 }
 
 #[test]

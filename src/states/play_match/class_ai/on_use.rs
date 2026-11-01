@@ -23,8 +23,8 @@
 use bevy::prelude::*;
 
 use super::{
-    ally_dispel_priority, ally_removal, can_cast_dispel, holds, owed_dispel, CombatContext,
-    OwedDispel, URGENT_DISPEL_PRIORITY,
+    ally_dispel_priority, ally_removal, can_cast_dispel, class_base_stats, holds, owed_dispel,
+    CombatContext, OwedDispel, URGENT_DISPEL_PRIORITY,
 };
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::{Aura, Combatant};
@@ -60,8 +60,18 @@ fn long_holds(auras: &[Aura]) -> impl Iterator<Item = &Aura> {
 ///   school ([`can_cast_dispel`]), and the dispel is off cooldown;
 /// - the dispel is owed to the WEARER ([`owed_dispel`]): the rotation's urgent
 ///   dispel reaches it from where the healer stands, or the dispel walk is
-///   carrying the healer to it. That also asks that the healer can afford it.
-pub fn expected_dispeller(ctx: &CombatContext, wearer: Entity) -> Option<(Entity, AbilityType)> {
+///   carrying the healer to it — and then only when the walk brings it into
+///   range within `within` seconds at its class's base speed (the way
+///   `ROOT_DISPEL_WALK_MAX_SECS` gates the root walk). That also asks that the
+///   healer can afford it.
+///
+/// `within` is how long the wearer can still afford to wait
+/// ([`wait_budget`]).
+pub fn expected_dispeller(
+    ctx: &CombatContext,
+    wearer: Entity,
+    within: f32,
+) -> Option<(Entity, AbilityType)> {
     let holds_on_wearer: Vec<&Aura> = long_holds(ctx.active_auras.get(&wearer)?).collect();
     if holds_on_wearer.is_empty() {
         return None;
@@ -88,10 +98,29 @@ pub fn expected_dispeller(ctx: &CombatContext, wearer: Entity) -> Option<(Entity
                 .get(&mate.entity)
                 .and_then(|cds| cds.get(dispel))
                 .is_none_or(|remaining| *remaining <= 0.0);
-            let owed = matches!(
-                owed_dispel(ctx, &mate.book, mate.entity, mate.position, mate.current_mana, *dispel),
-                Some(OwedDispel::Reached(e) | OwedDispel::Unreached(e)) if e == wearer
-            );
+            let owed = match owed_dispel(
+                ctx,
+                &mate.book,
+                mate.entity,
+                mate.position,
+                mate.current_mana,
+                *dispel,
+            ) {
+                Some(OwedDispel::Reached(e)) => e == wearer,
+                Some(OwedDispel::Unreached(e)) if e == wearer => {
+                    let range = mate.book.get(dispel).map_or(0.0, |def| def.range);
+                    let speed = class_base_stats(mate.class).movement_speed;
+                    let gap = ctx
+                        .combatants
+                        .get(&wearer)
+                        .map_or(f32::INFINITY, |w| {
+                            mate.position.distance(w.position) - range
+                        })
+                        .max(0.0);
+                    speed > 0.0 && gap / speed <= within
+                }
+                _ => false,
+            };
             (frees_every_hold
                 && ready
                 && can_cast_dispel(ctx, &mate.book, mate.entity, *dispel)
@@ -99,6 +128,14 @@ pub fn expected_dispeller(ctx: &CombatContext, wearer: Entity) -> Option<(Entity
                 .then_some((mate.entity, *dispel))
         })
     })
+}
+
+/// How long a held wearer can still wait for a dispel: what is left of the
+/// grace of a wait begun at `since`, or what is left of the hold above the
+/// floor, whichever is shorter. A dispel arriving later than that comes when
+/// the Medallion could no longer have broken anything worth breaking.
+pub fn wait_budget(hold_remaining: f32, since: f32, now: f32) -> f32 {
+    (DISPEL_WAIT_GRACE_SECS - (now - since)).min(hold_remaining - CC_BREAK_MIN_HOLD_REMAINING)
 }
 
 /// What a held wearer does with a ready crowd-control break this tick.
@@ -167,8 +204,6 @@ pub fn try_cc_break_while_held(
             .map(|a| a.duration)
             .fold(0.0_f32, f32::max)
     });
-    let dispeller = expected_dispeller(ctx, entity);
-
     for slot in combatant.on_use_items.iter_mut() {
         match slot.config.effect {
             OnUseEffect::CcBreak => {}
@@ -192,6 +227,8 @@ pub fn try_cc_break_while_held(
             .waiting
             .filter(|(_, last)| now - last <= WAIT_GAP_SECS)
             .map(|(since, _)| since);
+        let budget = wait_budget(hold_remaining, waiting_since.unwrap_or(now), now);
+        let dispeller = expected_dispeller(ctx, entity, budget);
         match cc_break_turn(hold_remaining, dispeller, waiting_since, now) {
             BreakTurn::ShortHold { hold_remaining } => {
                 decision_trace.record_item_decision(

@@ -321,7 +321,6 @@ impl Scene {
         self
     }
 
-    /// The map's obstacle volumes.
     /// `who` carries `item`'s on-use (from the shipped `items.ron`), ready, as
     /// `Combatant::apply_equipment` captures it. Only the on-use: the item's
     /// stats are not added, so the scene's health fractions mean what they say.
@@ -344,6 +343,7 @@ impl Scene {
         self
     }
 
+    /// The map's obstacle volumes.
     pub fn obstacles(mut self, obstacles: Vec<ObstacleVolume>) -> Self {
         self.obstacles = obstacles;
         self
