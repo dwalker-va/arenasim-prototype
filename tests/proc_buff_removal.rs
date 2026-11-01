@@ -23,7 +23,7 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::effects::process_dispels;
 use arenasim::states::play_match::equipment::ItemId;
-use arenasim::states::play_match::proc_trinkets::{ProcConfig, ProcTrigger};
+use arenasim::states::play_match::proc_trinkets::{ProcConfig, ProcEffect, ProcTrigger};
 use arenasim::CharacterClass;
 
 /// An attack-power proc's buff, from the constructor the proc hook uses. No
@@ -33,7 +33,7 @@ fn ap_proc_buff() -> Aura {
     ProcConfig {
         trigger: ProcTrigger::MeleeHit,
         chance: 0.15,
-        effect: AuraType::AttackPowerIncrease,
+        effect: ProcEffect::Buff(AuraType::AttackPowerIncrease),
         magnitude: 55.0,
         duration: 10.0,
         internal_cooldown: 45.0,

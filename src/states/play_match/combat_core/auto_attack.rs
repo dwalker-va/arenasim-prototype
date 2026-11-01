@@ -7,6 +7,7 @@ use super::super::constants::{
     CRIT_DAMAGE_MULTIPLIER, DUAL_WIELD_MISS_CHANCE, OFFHAND_DAMAGE_MULTIPLIER,
     RAGE_PER_WEAPON_SECOND,
 };
+use super::super::equipment::ItemId;
 use super::super::map_config::ActiveMapGeometry;
 use super::super::map_geometry::has_line_of_sight;
 use super::super::match_config;
@@ -526,62 +527,45 @@ pub fn combat_auto_attack(
                             // seeded game_rng, so match determinism is preserved. This branch
                             // is only reached when a WindfuryBuff aura is present, so existing
                             // (totem-free) matches draw zero extra RNG and stay byte-identical.
+                            let main_swing = ExtraSwingWeapon {
+                                damage: weapon_damage,
+                                kind: swing_kind,
+                                crit_chance: combatant.crit_chance + crit_bonus,
+                                damage_reduction,
+                                ds_penalty,
+                            };
                             if let Some(wf_chance) = windfury_chance {
-                                // The bonus swing is a melee swing of its
-                                // own, and may itself be avoided.
-                                if game_rng.random_f32() < wf_chance
-                                    && avoid_melee_attack(
+                                if game_rng.random_f32() < wf_chance {
+                                    attacks.extend(queue_extra_swing(
+                                        ExtraSwingSource::WindfuryTotem,
+                                        main_swing,
                                         &mut commands,
                                         &mut game_rng,
                                         defense,
                                         defender_auras,
                                         attacker_entity,
                                         target_entity,
-                                        auto_attack_name(false, swing_kind),
-                                    )
-                                    .is_none()
-                                {
-                                    // Bonus swing uses base weapon damage (the Heroic Strike
-                                    // bonus is consumed by the primary swing) and re-rolls crit.
-                                    let wf_base = weapon_damage;
-                                    let wf_is_crit = roll_crit(
-                                        combatant.crit_chance + crit_bonus,
-                                        &mut game_rng,
-                                    );
-                                    let wf_crit_damage = if wf_is_crit {
-                                        wf_base * CRIT_DAMAGE_MULTIPLIER
-                                    } else {
-                                        wf_base
-                                    };
-                                    let wf_total =
-                                        (wf_crit_damage * (1.0 - damage_reduction) * ds_penalty)
-                                            .max(0.0);
-                                    attacks.push((
-                                        attacker_entity,
-                                        target_entity,
-                                        wf_total,
-                                        false,
-                                        wf_is_crit,
-                                        WeaponHand::Main,
-                                        swing_kind,
-                                    ));
-
-                                    // Signature Windfury VFX: a wind funnel swirls up
-                                    // around the proccing melee ally. Spawned here like
-                                    // FloatingCombatText; the mesh is built only in
-                                    // graphical mode (rendering/effects.rs, registered
-                                    // solely in states/mod.rs), so headless stays
-                                    // mesh-free and deterministic.
-                                    commands.spawn((
-                                        WindfuryTornado {
-                                            target: attacker_entity,
-                                            lifetime: 0.6,
-                                            initial_lifetime: 0.6,
-                                            spin: 0.0,
-                                        },
-                                        PlayMatchEntity,
                                     ));
                                 }
+                            }
+                            // An extra-swing trinket (Hand of Justice) on the
+                            // same path, rolled after the totem's. A melee
+                            // swing only, like the totem's: `swing_kind` is
+                            // the live socket's, so a wand or an Auto Shot
+                            // never rolls it. No roll at all without one.
+                            if swing_kind == AutoAttackKind::Melee {
+                                attacks.extend(roll_trinket_extra_swing(
+                                    &mut combatant,
+                                    main_swing,
+                                    &mut commands,
+                                    &mut game_rng,
+                                    &mut combat_log,
+                                    &combatant_info,
+                                    defense,
+                                    defender_auras,
+                                    attacker_entity,
+                                    target_entity,
+                                ));
                             }
                             // Break stealth on auto-attack
                             if combatant.stealthed {
@@ -653,6 +637,37 @@ pub fn combat_auto_attack(
                                 WeaponHand::Off,
                                 // An off-hand weapon is always swung.
                                 AutoAttackKind::Melee,
+                            ));
+
+                            // An off-hand hit rolls an extra-swing trinket
+                            // too (Classic's Hand of Justice procs off either
+                            // hand), and the extra swing is the MAIN hand's:
+                            // the one the off hand accompanies — a Hunter's
+                            // melee main hand, everyone else's live one.
+                            // Windfury Totem's buff sits on the main hand
+                            // alone, so it has no roll here.
+                            let main_swing = ExtraSwingWeapon {
+                                damage: if melee_main {
+                                    combatant.melee_damage
+                                } else {
+                                    combatant.attack_damage
+                                },
+                                kind: AutoAttackKind::Melee,
+                                crit_chance: combatant.crit_chance + crit_bonus,
+                                damage_reduction,
+                                ds_penalty,
+                            };
+                            attacks.extend(roll_trinket_extra_swing(
+                                &mut combatant,
+                                main_swing,
+                                &mut commands,
+                                &mut game_rng,
+                                &mut combat_log,
+                                &combatant_info,
+                                defense,
+                                defender_auras,
+                                attacker_entity,
+                                target_entity,
                             ));
 
                             // Rage tracks the damage a swing deals, and an
@@ -1428,6 +1443,164 @@ fn auto_attack_name(has_bonus: bool, kind: AutoAttackKind) -> &'static str {
         // (`live_in_range` is false for it), so it never swings.
         AutoAttackKind::None => "Auto Attack",
     }
+}
+
+/// What gave a melee swing its extra swing. Both sources take ONE path,
+/// [`queue_extra_swing`]; the source decides only what the extra swing
+/// draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtraSwingSource {
+    /// Windfury Totem's `WindfuryBuff` on a melee ally's main hand.
+    WindfuryTotem,
+    /// An extra-swing proc trinket (`ProcEffect::ExtraSwing`): Hand of Justice.
+    Trinket(ItemId),
+}
+
+impl ExtraSwingSource {
+    /// Whether this extra swing spawns [`WindfuryTornado`]. Only the totem's
+    /// does: the funnel is Windfury Attack's own client visual and reads as a
+    /// Windfury Totem proc — a Shaman-team signal a trinket must not send.
+    /// Hand of Justice's own visual (the client's Cheap Shot crescents) is
+    /// AS-434; until then its swing draws only the ordinary swing.
+    pub fn spawns_windfury_tornado(self) -> bool {
+        match self {
+            ExtraSwingSource::WindfuryTotem => true,
+            ExtraSwingSource::Trinket(_) => false,
+        }
+    }
+}
+
+/// The main-hand weapon an extra swing is made with, and the modifiers the
+/// swing that procced it rolled under.
+#[derive(Clone, Copy)]
+struct ExtraSwingWeapon {
+    /// The weapon's damage — base, with no Heroic Strike bonus: that bonus
+    /// buffs the swing it was queued against, never the extra one.
+    damage: f32,
+    kind: AutoAttackKind,
+    crit_chance: f32,
+    damage_reduction: f32,
+    ds_penalty: f32,
+}
+
+/// One queued attack: (attacker, target, damage, Heroic Strike bonus, crit,
+/// hand, kind) — the shape `combat_auto_attack` collects.
+type QueuedAttack = (Entity, Entity, f32, bool, bool, WeaponHand, AutoAttackKind);
+
+/// Queue ONE extra main-hand swing, whatever gave it. The extra swing is a
+/// melee swing of its own: it may be dodged or parried (logged as the swing
+/// would be), and otherwise rolls its own crit at the procced swing's
+/// modifiers. It grants no rage and rolls no further extra swing. Returns
+/// the attack to queue, or `None` when it was avoided.
+///
+/// Windfury Totem's bonus swing has taken this path since before the trinket
+/// shared it, in the same draw order (avoidance, then crit), so a match with a
+/// totem and no trinket is byte-identical to one before the trinket existed.
+#[allow(clippy::too_many_arguments)]
+fn queue_extra_swing(
+    source: ExtraSwingSource,
+    weapon: ExtraSwingWeapon,
+    commands: &mut Commands,
+    game_rng: &mut GameRng,
+    defense: MeleeDefense,
+    defender_auras: &[Aura],
+    attacker: Entity,
+    target: Entity,
+) -> Option<QueuedAttack> {
+    if avoid_melee_attack(
+        commands,
+        game_rng,
+        defense,
+        defender_auras,
+        attacker,
+        target,
+        auto_attack_name(false, weapon.kind),
+    )
+    .is_some()
+    {
+        return None;
+    }
+    let is_crit = roll_crit(weapon.crit_chance, game_rng);
+    let crit_damage = if is_crit {
+        weapon.damage * CRIT_DAMAGE_MULTIPLIER
+    } else {
+        weapon.damage
+    };
+    let total = (crit_damage * (1.0 - weapon.damage_reduction) * weapon.ds_penalty).max(0.0);
+
+    // Signature Windfury VFX: a wind funnel swirls up around the proccing
+    // melee ally. Spawned here like FloatingCombatText; the mesh is built only
+    // in graphical mode (rendering/effects.rs, registered solely in
+    // states/mod.rs), so headless stays mesh-free and deterministic. The
+    // totem's swing only — see `ExtraSwingSource::spawns_windfury_tornado`.
+    if source.spawns_windfury_tornado() {
+        commands.spawn((
+            WindfuryTornado {
+                target: attacker,
+                lifetime: 0.6,
+                initial_lifetime: 0.6,
+                spin: 0.0,
+            },
+            PlayMatchEntity,
+        ));
+    }
+    Some((
+        attacker,
+        target,
+        total,
+        false,
+        is_crit,
+        WeaponHand::Main,
+        weapon.kind,
+    ))
+}
+
+/// Roll the attacker's extra-swing trinket for a melee swing that connected
+/// and, if it fires, log the proc and queue the extra swing through
+/// [`queue_extra_swing`]. Returns nothing and draws nothing for an attacker
+/// with no proc trinket — the guard is the first line, before the RNG.
+#[allow(clippy::too_many_arguments)]
+fn roll_trinket_extra_swing(
+    attacker_combatant: &mut Combatant,
+    weapon: ExtraSwingWeapon,
+    commands: &mut Commands,
+    game_rng: &mut GameRng,
+    combat_log: &mut CombatLog,
+    combatant_info: &std::collections::HashMap<Entity, (u8, String, bool, u8, AutoAttackKind)>,
+    defense: MeleeDefense,
+    defender_auras: &[Aura],
+    attacker: Entity,
+    target: Entity,
+) -> Option<QueuedAttack> {
+    if attacker_combatant.proc_trinkets.is_empty() {
+        return None;
+    }
+    let (item, name) = super::super::proc_trinkets::roll_extra_swing(
+        &mut attacker_combatant.proc_trinkets,
+        game_rng,
+    )?;
+    // The same `procs` line a buff proc logs (`apply_pending_auras`), so one
+    // count over the log reports every trinket's proc rate.
+    if let Some((team, class_name, _, slot, _)) = combatant_info.get(&attacker) {
+        combat_log.log(
+            CombatLogEventType::Buff,
+            format!(
+                "{} procs {} (extra attack)",
+                combat_log_id(*team, *slot, class_name),
+                name
+            ),
+        );
+    }
+    queue_extra_swing(
+        ExtraSwingSource::Trinket(item),
+        weapon,
+        commands,
+        game_rng,
+        defense,
+        defender_auras,
+        attacker,
+        target,
+    )
 }
 
 /// Windfury Totem bonus-swing chance for this attacker. Returns `Some(magnitude)`

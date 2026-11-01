@@ -72,7 +72,7 @@ pub fn item_aura_icon_key(item: ItemId) -> String {
 pub fn item_aura_icons(items: &ItemDefinitions) -> Vec<(String, String)> {
     let mut icons: Vec<(String, String)> = items
         .iter()
-        .filter(|(_, item)| item.proc.is_some() && !item.icon.is_empty())
+        .filter(|(_, item)| item.proc_buff().is_some() && !item.icon.is_empty())
         .map(|(id, item)| (item_aura_icon_key(*id), item.icon.clone()))
         .collect();
     // `ItemDefinitions` is a HashMap; sort so the load order is not
@@ -366,7 +366,9 @@ mod tests {
         let registered = item_aura_icons(&items);
         let mut procs = 0;
         for (id, item) in items.iter() {
-            let Some(proc) = &item.proc else { continue };
+            let Some(proc) = item.proc_buff() else {
+                continue;
+            };
             procs += 1;
             let aura = proc.aura(*id, &item.name);
             let key = get_aura_icon_key(&aura, &abilities);

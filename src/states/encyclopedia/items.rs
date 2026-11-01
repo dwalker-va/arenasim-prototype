@@ -636,11 +636,14 @@ mod tests {
             let Some(proc) = &item.proc else { continue };
             checked += 1;
             let text = proc_description(proc);
-            for needle in [
-                format!("{:.0}%", proc.chance * 100.0),
-                format!("{:.0}s", proc.duration),
-                format!("{:.0}s", proc.internal_cooldown),
-            ] {
+            // An extra swing has no duration or cooldown to name (Hand of
+            // Justice): its chance is its only number.
+            let mut needles = vec![format!("{:.0}%", proc.chance * 100.0)];
+            if proc.buff().is_some() {
+                needles.push(format!("{:.0}s", proc.duration));
+                needles.push(format!("{:.0}s", proc.internal_cooldown));
+            }
+            for needle in needles {
                 assert!(
                     text.contains(&needle),
                     "{}'s proc line omits {:?}: {:?}",

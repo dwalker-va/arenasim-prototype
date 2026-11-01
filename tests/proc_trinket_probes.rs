@@ -312,6 +312,81 @@ fn a_ranged_auto_attack_does_not_fire_a_melee_proc() {
     );
 }
 
+/// Team 1's Rogue's landed auto-attacks and Hand of Justice procs across the
+/// seeds, each match played with `gear` on the Rogue.
+fn rogue_swings_and_procs(seeds: std::ops::Range<u64>, gear: &[(&str, &str)]) -> (usize, usize) {
+    let (mut hits, mut procs) = (0, 0);
+    for seed in seeds {
+        let log = logged_match(config("Rogue", "Paladin", seed, gear));
+        hits += log.matches("Team 1 Rogue #1's Auto Attack hits").count()
+            + log.matches("Team 1 Rogue #1's Auto Attack CRITS").count();
+        procs += log
+            .matches("Team 1 Rogue #1 procs Hand of Justice (extra attack)")
+            .count();
+    }
+    (hits, procs)
+}
+
+/// Hand of Justice procs its extra swing in real matches, at its declared
+/// chance per landed melee hit (AS-427). A Rogue, because it rolls the proc
+/// off both hands, against a Paladin, the longest-lived melee fight.
+///
+/// The landed hits include the extra swings themselves, which roll nothing,
+/// so the rolled hits lie between `hits - procs` and `hits`: the rate is
+/// bracketed, not estimated, and both ends must sit near 5%. Thirty seeds give
+/// on the order of a thousand rolls, where a binomial 5% has a standard
+/// error under 0.7 points, so the [3%, 7.5%] window is several of them wide
+/// and holds for any bank, not a fitted one.
+#[test]
+fn hand_of_justice_procs_at_its_chance_in_real_matches() {
+    let (hits, procs) = rogue_swings_and_procs(770_427..770_457, &[("Trinket2", "HandOfJustice")]);
+    assert!(
+        hits >= 500,
+        "only {hits} landed swings — too few to judge a rate"
+    );
+    assert!(
+        procs > 0,
+        "Hand of Justice never procced in {hits} landed swings"
+    );
+    let low = procs as f64 / hits as f64;
+    let high = procs as f64 / (hits - procs) as f64;
+    assert!(
+        low >= 0.03 && high <= 0.075,
+        "Hand of Justice procced on {procs} of {hits} landed swings: rate in [{low:.3}, {high:.3}], \
+         not near its 5%"
+    );
+}
+
+/// The control: the same Rogue and seeds without the trinket log no proc.
+#[test]
+fn without_hand_of_justice_nothing_procs_an_extra_swing() {
+    let (hits, procs) = rogue_swings_and_procs(770_427..770_457, &[]);
+    assert!(hits >= 500, "only {hits} landed swings");
+    assert_eq!(procs, 0);
+}
+
+/// An extra swing is a MELEE proc: a Priest's wand shots never roll it, however
+/// many it fires. Counted, not assumed — at 5% a trigger that DID fire on wand
+/// shots would stay silent across 100 of them with probability 0.95^100 < 1%.
+#[test]
+fn a_wand_shot_does_not_proc_an_extra_swing() {
+    let mut shots = 0;
+    for seed in 770_427..770_431 {
+        let log = logged_match(config(
+            "Priest",
+            "Priest",
+            seed,
+            &[("Trinket2", "HandOfJustice")],
+        ));
+        shots += log.matches("Team 1 Priest #1's Wand Shot").count();
+        assert!(
+            !log.contains("procs Hand of Justice"),
+            "seed {seed}: a Priest's wand shot procced Hand of Justice"
+        );
+    }
+    assert!(shots >= 100, "only {shots} wand shots across the seeds");
+}
+
 /// The REALISED uptime of each melee proc against the long-run bound it is
 /// priced at, over 60 Warrior+Priest mirrors — the measurement the
 /// `proc_trinkets` module docs quote. A report, not an assertion: `--ignored`,
