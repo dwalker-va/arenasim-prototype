@@ -28,6 +28,7 @@ pub use team_frames::*;
 use super::ability_config::AbilityDefinitions;
 use super::components::{Aura, AuraType, SpellIconHandles, SpellIcons};
 use super::equipment::{ItemDefinitions, ItemId};
+use super::talents::{TalentDefinitions, TalentEffect, TalentId};
 use bevy::prelude::*;
 use bevy_egui::egui;
 
@@ -81,6 +82,32 @@ pub fn item_aura_icons(items: &ItemDefinitions) -> Vec<(String, String)> {
     icons
 }
 
+/// The icon key an aura a TALENT's proc applied draws under — Shadow Trance
+/// wears Nightfall's icon. The talent counterpart of [`item_aura_icon_key`],
+/// in the same keyspace; the `talent:` prefix cannot collide with an ability
+/// name, an item key or a generic key.
+pub fn talent_aura_icon_key(talent: TalentId) -> String {
+    format!("talent:{:?}", talent)
+}
+
+/// `(key, path)` for every talent that can APPLY an aura — every node with a
+/// `Proc` effect — keyed by [`talent_aura_icon_key`], from the shipped
+/// `talents.ron`. Registered beside [`item_aura_icons`] in both aura icon
+/// loaders, so talent N+1's proc buff gets its icon with no code change.
+pub fn talent_aura_icons(talents: &TalentDefinitions) -> Vec<(String, String)> {
+    talents
+        .iter()
+        .filter(|(_, t)| {
+            !t.icon.is_empty()
+                && t
+                    .per_rank
+                    .iter()
+                    .any(|e| matches!(e, TalentEffect::Proc(_)))
+        })
+        .map(|(id, t)| (talent_aura_icon_key(id), t.icon.clone()))
+        .collect()
+}
+
 /// `(key, path)` for every ability with an `icon` in `abilities.ron`, keyed by
 /// the ability's display name — the key `load_spell_icons` registers each
 /// texture under, and the one the timeline, buff bar and team frames read it
@@ -116,6 +143,9 @@ pub fn icon_load_settled(state: &bevy::asset::LoadState) -> bool {
 pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) -> String {
     if let Some(item) = aura.source_item {
         return item_aura_icon_key(item);
+    }
+    if let Some(talent) = aura.source_talent {
+        return talent_aura_icon_key(talent);
     }
     // Check if the ability that created this aura has a specific icon
     let has_icon = ability_definitions
@@ -259,6 +289,12 @@ pub fn load_spell_icons(
         // ...and the art of every item that can apply an aura, so a proc buff
         // draws its trinket.
         for (key, path) in item_aura_icons(&item_definitions) {
+            let handle: Handle<Image> = asset_server.load(path);
+            icon_handles.handles.push((key, handle));
+        }
+        // ...and of every talent that can, so a talent's proc buff draws its
+        // talent.
+        for (key, path) in talent_aura_icons(TalentDefinitions::shipped()) {
             let handle: Handle<Image> = asset_server.load(path);
             icon_handles.handles.push((key, handle));
         }
