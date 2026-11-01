@@ -602,10 +602,17 @@ fn at_least_one_proc_trinket_ships() {
     assert_eq!(
         with_procs,
         vec![
+            // Champion weapons (AS-425) carry procs too.
+            "Corrupted Ashbringer",
+            "Doomfinger",
             "Dragonspine Trophy",
+            "Hammer of the Twisting Nether",
+            "Kingsfall",
             "Reliquary of Renewal",
             "Sigil of Arcane Surge",
+            "Soulseeker",
             "Whetstone of Fury",
+            "Wraith Blade",
         ],
         "the shipped proc-trinket set changed — extend this list deliberately, and check \
          `named_auras_built_from_helpers_also_resolve` still covers every member"
