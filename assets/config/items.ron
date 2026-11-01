@@ -10,6 +10,17 @@
 // one-hander it displaces — see docs/design/balance/2026-09-28-as167-weapon-speed.md.
 // Non-weapon items add their stats to the combatant's base stats.
 //
+// Weapon damage is a free stat, so the budget does not scale it; the item
+// level does. A reward-tier (Gauntlet or Champion) one-hander, bow, crossbow or
+// wand deals its anchor's weapon DPS x `item_level / anchor item_level`. The
+// anchor is the starting-kit weapon held the same way, of the same role
+// (spell power: caster; otherwise physical) and weapon type — any type of that
+// hand and role where none of its type starts — and, of several, the one with
+// the most DPS per item level, so no wearer's reward scales below the weapon
+// it starts with. A reward two-hander deals its one-hander's DPS x Classic's
+// two-hander premium. The spread (min:max) is the Classic stand-in's own.
+// Pinned by `reward_weapon_dps_scales_its_starting_weapon_by_item_level`.
+//
 // `item_tier` names the item's tier, and its `item_level` must sit in that
 // tier's band (`equipment::ItemTier`, checked at load): the starting kit (0,
 // the default) at 54-60, the Gauntlet tier (1) at 76-80, the Champion tier
@@ -2021,6 +2032,7 @@
 
         // ====================================================================
         // GAUNTLET TIER (1): MELEE WEAPONS
+        // Weapon damage follows the item-level rule in this file's header.
         // ====================================================================
 
         // A two-hander is priced at what the one-hander + off-hand pair it
@@ -2037,8 +2049,8 @@
             weapon_type: Axe,
             is_weapon: true,
             two_handed: true,
-            attack_damage_min: 59.75,
-            attack_damage_max: 79.67,
+            attack_damage_min: 65.11,
+            attack_damage_max: 86.82,
             weapon_speed: 3.2, // Classic: Draconic Avenger (19354)
             attack_power: 23.0,
             crit_chance: 0.07,
@@ -2052,8 +2064,8 @@
             slot: MainHand,
             weapon_type: Sword,
             is_weapon: true,
-            attack_damage_min: 33.0,
-            attack_damage_max: 49.5,
+            attack_damage_min: 35.96,
+            attack_damage_max: 53.94,
             weapon_speed: 2.5, // Classic: Brutality Blade (18832)
             attack_power: 10.0,
             crit_chance: 0.03,
@@ -2067,8 +2079,8 @@
             slot: MainHand,
             weapon_type: Dagger,
             is_weapon: true,
-            attack_damage_min: 24.0,
-            attack_damage_max: 38.4,
+            attack_damage_min: 25.15,
+            attack_damage_max: 40.24,
             weapon_speed: 1.6, // Classic: Core Hound Tooth (18805)
             attack_power: 8.0,
             crit_chance: 0.04,
@@ -2082,8 +2094,8 @@
             slot: MainHand,
             weapon_type: Mace,
             is_weapon: true,
-            attack_damage_min: 32.4,
-            attack_damage_max: 48.6,
+            attack_damage_min: 36.78,
+            attack_damage_max: 55.17,
             weapon_speed: 2.7, // Classic: Aurastone Hammer (17105)
             spell_power: 13.0,
             max_health: 5.0,
@@ -2103,8 +2115,8 @@
             weapon_type: Staff,
             is_weapon: true,
             two_handed: true,
-            attack_damage_min: 49.05,
-            attack_damage_max: 85.83,
+            attack_damage_min: 52.29,
+            attack_damage_max: 91.5,
             weapon_speed: 2.9, // Classic: Staff of Dominance (18842)
             spell_power: 23.0,
             max_mana: 20.0,
@@ -2127,8 +2139,8 @@
             slot: MainHand,
             weapon_type: Dagger,
             is_weapon: true,
-            attack_damage_min: 20.25,
-            attack_damage_max: 31.5,
+            attack_damage_min: 21.59,
+            attack_damage_max: 33.58,
             weapon_speed: 1.5, // Classic: Claw of Chromaggus (19347)
             spell_power: 8.0,
             max_mana: 10.0,
@@ -2143,8 +2155,8 @@
             slot: MainHand,
             weapon_type: Sword,
             is_weapon: true,
-            attack_damage_min: 29.04,
-            attack_damage_max: 44.88,
+            attack_damage_min: 34.67,
+            attack_damage_max: 53.58,
             weapon_speed: 2.4, // Classic: Azuresong Mageblade (17103)
             spell_power: 10.0,
             max_health: 6.0,
@@ -2153,6 +2165,7 @@
 
         // ====================================================================
         // GAUNTLET TIER (1): RANGED WEAPONS
+        // Weapon damage follows the item-level rule in this file's header.
         // ====================================================================
 
         WandOfTheInvoker: (
@@ -2163,8 +2176,8 @@
             slot: Ranged,
             weapon_type: Wand,
             is_weapon: true,
-            attack_damage_min: 11.9,
-            attack_damage_max: 19.04,
+            attack_damage_min: 15.48,
+            attack_damage_max: 24.76,
             weapon_speed: 1.7, // Classic: Cold Snap (19130)
             spell_power: 12.0,
             max_mana: 14.0,
@@ -2178,8 +2191,8 @@
             slot: Ranged,
             weapon_type: Bow,
             is_weapon: true,
-            attack_damage_min: 27.84,
-            attack_damage_max: 37.12,
+            attack_damage_min: 46.72,
+            attack_damage_max: 62.3,
             weapon_speed: 2.9, // Classic: Rhok'delar, Longbow of the Ancient Keepers (18713)
             attack_power: 14.0,
             crit_chance: 0.04,
@@ -2193,8 +2206,8 @@
             slot: Ranged,
             weapon_type: Crossbow,
             is_weapon: true,
-            attack_damage_min: 28.21,
-            attack_damage_max: 36.89,
+            attack_damage_min: 31.34,
+            attack_damage_max: 40.99,
             weapon_speed: 3.1, // Classic: Crossbow of Imminent Doom (21459)
             attack_power: 10.0,
             crit_chance: 0.06,
@@ -3035,14 +3048,7 @@
         // CHAMPION TIER (2): WEAPONS, OFF HANDS AND RELICS
         // Named for Classic's Naxxramas weapons (ilvl 81-92).
         //
-        // Weapon damage is a free stat, so the budget does not move it. A
-        // Champion one-hander, bow, crossbow or wand deals the weapon DPS of
-        // the starting-kit weapon of its kind (same type and role; the caster
-        // one-hander where no caster sword starts) scaled by item level, as
-        // the budget is: `anchor DPS x 92 / anchor ilvl`. A two-hander deals
-        // its pair's one-hander's DPS x Classic's two-hander premium. The
-        // spread (min:max) is the Classic stand-in's own. Pinned by
-        // `champion_weapon_dps_scales_its_starting_weapon_by_item_level`.
+        // Weapon damage follows the item-level rule in this file's header.
         // ====================================================================
 
         // Priced at what Gressil + The Face of Death spends (67.0), as the
@@ -3199,8 +3205,8 @@
             slot: Ranged,
             weapon_type: Wand,
             is_weapon: true,
-            attack_damage_min: 12.08,
-            attack_damage_max: 22.42,
+            attack_damage_min: 14.66,
+            attack_damage_max: 27.21,
             weapon_speed: 1.5, // Classic: Doomfinger (22821)
             spell_power: 14.0,
             crit_chance: 0.02,
