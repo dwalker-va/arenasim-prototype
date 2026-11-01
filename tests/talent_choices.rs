@@ -100,15 +100,25 @@ fn a_widened_option_is_offered_only_to_a_build_that_takes_its_node() {
     let embrace = Build::of(&[(DemonicEmbrace, 1)]);
     assert!(!t.offers(&empty, TONGUES), "hidden without the talent");
     assert!(t.offers(&embrace, TONGUES));
-    assert!(t.offers(&empty, AGONY) && t.offers(&empty, WEAKNESS), "the rest are not hidden");
-    assert_eq!(t.offered(&empty, ChoiceMenu::WarlockCurse), vec![AGONY, WEAKNESS]);
+    assert!(
+        t.offers(&empty, AGONY) && t.offers(&empty, WEAKNESS),
+        "the rest are not hidden"
+    );
+    assert_eq!(
+        t.offered(&empty, ChoiceMenu::WarlockCurse),
+        vec![AGONY, WEAKNESS]
+    );
     assert_eq!(
         t.offered(&embrace, ChoiceMenu::WarlockCurse),
         vec![AGONY, WEAKNESS, TONGUES]
     );
     // A slot that picks the hidden option without the talent is refused.
-    assert!(t.validate_choices(CharacterClass::Warlock, &empty, &warlock(&[TONGUES])).is_err());
-    assert!(t.validate_choices(CharacterClass::Warlock, &embrace, &warlock(&[TONGUES])).is_ok());
+    assert!(t
+        .validate_choices(CharacterClass::Warlock, &empty, &warlock(&[TONGUES]))
+        .is_err());
+    assert!(t
+        .validate_choices(CharacterClass::Warlock, &embrace, &warlock(&[TONGUES]))
+        .is_ok());
     // The shipped table widens nothing: every option is offered.
     let shipped = TalentDefinitions::shipped();
     assert!(shipped.widened_options().is_empty());
@@ -160,16 +170,22 @@ fn a_second_slot_opens_only_with_its_talent_and_holds_a_different_option() {
     assert!(!t.opens(&Build::default(), ChoiceSlot::OffHandPoison));
     assert!(t.validate_choices(rogue, &poisoner, &off(deadly)).is_ok());
     assert!(
-        t.validate_choices(rogue, &Build::default(), &off(deadly)).is_err(),
+        t.validate_choices(rogue, &Build::default(), &off(deadly))
+            .is_err(),
         "no talent, no second slot"
     );
     assert!(
-        t.validate_choices(rogue, &poisoner, &off(crippling)).is_err(),
+        t.validate_choices(rogue, &poisoner, &off(crippling))
+            .is_err(),
         "the off hand's poison differs from the main hand's"
     );
     assert!(
-        t.validate_choices(rogue, &poisoner, &SlotChoices::of(&[crippling], &[(ChoiceSlot::OffHandPoison, TONGUES)]))
-            .is_err(),
+        t.validate_choices(
+            rogue,
+            &poisoner,
+            &SlotChoices::of(&[crippling], &[(ChoiceSlot::OffHandPoison, TONGUES)])
+        )
+        .is_err(),
         "the slot holds an option of its own menu"
     );
     // Resolved, the spawn writes the off-hand poison onto the Rogue.
@@ -180,9 +196,14 @@ fn a_second_slot_opens_only_with_its_talent_and_holds_a_different_option() {
     assert_eq!(combatant.rogue_offhand_poison, Some(RoguePoison::Deadly));
     // Control: the slot left empty coats both weapons with the one poison.
     let mut combatant = Combatant::new(1, 0, rogue);
-    t.resolve_with_choices(abilities(), rogue, &poisoner, &SlotChoices::of(&[crippling], &[]))
-        .unwrap()
-        .apply(&mut combatant);
+    t.resolve_with_choices(
+        abilities(),
+        rogue,
+        &poisoner,
+        &SlotChoices::of(&[crippling], &[]),
+    )
+    .unwrap()
+    .apply(&mut combatant);
     assert_eq!(combatant.rogue_offhand_poison, None);
 }
 
@@ -201,7 +222,9 @@ fn the_headless_config_checks_choices_against_builds() {
         .to_match_config()
         .expect_err("no build opens the off-hand slot");
     assert!(err.contains("OffHandPoison"), "{err}");
-    let ok = config(vec![None]).to_match_config().expect("an empty slot is fine");
+    let ok = config(vec![None])
+        .to_match_config()
+        .expect("an empty slot is fine");
     assert_eq!(ok.team1_rogue_offhand_poisons, vec![None]);
     assert_eq!(ok.team2_rogue_offhand_poisons, vec![None]);
 }
@@ -214,19 +237,35 @@ fn the_headless_config_checks_choices_against_builds() {
 fn a_mechanic_resolves_onto_the_combatant_and_its_ranks_add() {
     let t = fixture();
     let resolved = t
-        .resolve(abilities(), CharacterClass::Warlock, &Build::of(&[(UnholyPower, 2)]))
+        .resolve(
+            abilities(),
+            CharacterClass::Warlock,
+            &Build::of(&[(UnholyPower, 2)]),
+        )
         .unwrap();
-    assert!((resolved.mechanics().soul_link().unwrap() - 0.12).abs() < 1e-6, "0.06 a rank");
+    assert!(
+        (resolved.mechanics().soul_link().unwrap() - 0.12).abs() < 1e-6,
+        "0.06 a rank"
+    );
     let mut combatant = Combatant::new(1, 0, CharacterClass::Warlock);
     resolved.apply(&mut combatant);
     assert_eq!(combatant.talent_mechanics, *resolved.mechanics());
     assert_eq!(
-        combatant.talent_mechanics.iter().copied().collect::<Vec<_>>().len(),
+        combatant
+            .talent_mechanics
+            .iter()
+            .copied()
+            .collect::<Vec<_>>()
+            .len(),
         1
     );
     // A Rogue's Cheat Death.
     let rogue = t
-        .resolve(abilities(), CharacterClass::Rogue, &Build::of(&[(FelStamina, 1)]))
+        .resolve(
+            abilities(),
+            CharacterClass::Rogue,
+            &Build::of(&[(FelStamina, 1)]),
+        )
         .unwrap();
     assert_eq!(rogue.mechanics().cheat_death(), Some((0.1, 0.9, 3.0)));
     // Control: an empty build carries none.
@@ -249,11 +288,24 @@ fn an_option_chosen_switches_a_talent_off_for_the_match() {
     let t = fixture();
     let build = Build::of(&[(DemonicEmbrace, 1), (UnholyPower, 2)]);
     let with = t
-        .resolve_with_choices(abilities(), CharacterClass::Warlock, &build, &warlock(&[TONGUES]))
+        .resolve_with_choices(
+            abilities(),
+            CharacterClass::Warlock,
+            &build,
+            &warlock(&[TONGUES]),
+        )
         .unwrap();
-    assert!(with.mechanics().is_empty(), "Tongues switches Unholy Power off");
+    assert!(
+        with.mechanics().is_empty(),
+        "Tongues switches Unholy Power off"
+    );
     let without = t
-        .resolve_with_choices(abilities(), CharacterClass::Warlock, &build, &warlock(&[AGONY]))
+        .resolve_with_choices(
+            abilities(),
+            CharacterClass::Warlock,
+            &build,
+            &warlock(&[AGONY]),
+        )
         .unwrap();
     assert!(without.mechanics().soul_link().is_some());
 }
@@ -265,14 +317,25 @@ fn options_lock_the_abilities_they_forbid_or_do_not_allow() {
     let t = fixture();
     let build = Build::of(&[(DemonicEmbrace, 1)]);
     let book = |choices: &[ChoiceOption]| {
-        t.resolve_with_choices(abilities(), CharacterClass::Warlock, &build, &warlock(choices))
-            .unwrap()
-            .book()
-            .clone()
+        t.resolve_with_choices(
+            abilities(),
+            CharacterClass::Warlock,
+            &build,
+            &warlock(choices),
+        )
+        .unwrap()
+        .book()
+        .clone()
     };
     let tongues = book(&[TONGUES]);
-    assert!(tongues.is_locked(AbilityType::DrainLife), "Tongues forbids it");
-    assert!(tongues.is_locked(AbilityType::DeathCoil), "it requires Weakness");
+    assert!(
+        tongues.is_locked(AbilityType::DrainLife),
+        "Tongues forbids it"
+    );
+    assert!(
+        tongues.is_locked(AbilityType::DeathCoil),
+        "it requires Weakness"
+    );
     assert!(!tongues.is_locked(AbilityType::Shadowbolt));
     let weakness = book(&[WEAKNESS]);
     assert!(!weakness.is_locked(AbilityType::DrainLife));
@@ -292,8 +355,20 @@ fn options_lock_the_abilities_they_forbid_or_do_not_allow() {
     let def = abilities().get_unchecked(&AbilityType::DrainLife);
     let locked = Combatant::new(1, 0, CharacterClass::Warlock).with_book(tongues);
     let free = Combatant::new(1, 0, CharacterClass::Warlock).with_book(weakness);
-    assert!(!own_state_ok(AbilityType::DrainLife, def, &locked, None, PreCastOpts::default()));
-    assert!(own_state_ok(AbilityType::DrainLife, def, &free, None, PreCastOpts::default()));
+    assert!(!own_state_ok(
+        AbilityType::DrainLife,
+        def,
+        &locked,
+        None,
+        PreCastOpts::default()
+    ));
+    assert!(own_state_ok(
+        AbilityType::DrainLife,
+        def,
+        &free,
+        None,
+        PreCastOpts::default()
+    ));
 }
 
 /// The cast gate's refusal, played through the class dispatch: a Priest whose
@@ -319,7 +394,11 @@ fn a_locked_heal_is_refused_by_the_gate_in_a_scene() {
         }
     };
     let free = scene(false).decide("priest");
-    assert_eq!(free.chose().map(|(a, _)| a), Some(AbilityType::FlashHeal), "control");
+    assert_eq!(
+        free.chose().map(|(a, _)| a),
+        Some(AbilityType::FlashHeal),
+        "control"
+    );
     let locked = scene(true).decide("priest");
     assert_ne!(locked.chose().map(|(a, _)| a), Some(AbilityType::FlashHeal));
     assert!(
@@ -339,14 +418,23 @@ fn a_locked_heal_is_refused_by_the_gate_in_a_scene() {
 #[test]
 fn the_loader_rejects_each_broken_choice_rule() {
     // A default is never hidden.
-    assert!(load_err("WidenChoice(WarlockCurse(Tongues))", "WidenChoice(WarlockCurse(Agony))")
-        .contains("default"));
+    assert!(load_err(
+        "WidenChoice(WarlockCurse(Tongues))",
+        "WidenChoice(WarlockCurse(Agony))"
+    )
+    .contains("default"));
     // Another class's menu.
-    assert!(load_err("WidenChoice(WarlockCurse(Tongues))", "WidenChoice(PaladinAura(ConcentrationAura))")
-        .contains("not a Warlock choice"));
+    assert!(load_err(
+        "WidenChoice(WarlockCurse(Tongues))",
+        "WidenChoice(PaladinAura(ConcentrationAura))"
+    )
+    .contains("not a Warlock choice"));
     // One option, one node.
-    assert!(load_err("Mechanic(SoulLink(share: 0.06))", "WidenChoice(WarlockCurse(Tongues))")
-        .contains("already taken"));
+    assert!(load_err(
+        "Mechanic(SoulLink(share: 0.06))",
+        "WidenChoice(WarlockCurse(Tongues))"
+    )
+    .contains("already taken"));
     // FromRank starts at 2, at most max_rank, and wraps no grant or FromRank.
     assert!(load_err("FromRank(2,", "FromRank(1,").contains("FromRank"));
     assert!(load_err("FromRank(2,", "FromRank(3,").contains("FromRank"));
@@ -362,8 +450,11 @@ fn the_loader_rejects_each_broken_choice_rule() {
         "AddChoiceSlot(OffHandPoison),\n                Mechanic(SoulLink(share: 0.1)), Mechanic(CheatDeath"
     )
     .contains("pet"));
-    assert!(load_err("max_rank: 1, budget: Some(11.0),\n            per_rank: [\n                AddChoiceSlot", "max_rank: 2, budget: Some(11.0),\n            per_rank: [\n                AddChoiceSlot")
-        .contains("one rank"));
+    assert!(load_err(
+        "max_rank: 1, budget: Some(11.0),\n            per_rank: [\n                AddChoiceSlot",
+        "max_rank: 2, budget: Some(11.0),\n            per_rank: [\n                AddChoiceSlot"
+    )
+    .contains("one rank"));
     // Rules name a picked option, a talent of the option's class, a reachable
     // ability.
     assert!(load_err(
@@ -386,13 +477,20 @@ fn the_loader_rejects_each_broken_choice_rule() {
 #[test]
 fn every_mechanic_parses_from_its_ron_shape() {
     let parse = |s: &str| ron::from_str::<TalentMechanic>(s).unwrap();
-    assert_eq!(parse("SoulLink(share: 0.12)"), TalentMechanic::SoulLink { share: 0.12 });
+    assert_eq!(
+        parse("SoulLink(share: 0.12)"),
+        TalentMechanic::SoulLink { share: 0.12 }
+    );
     assert_eq!(
         parse("ReflectiveShield(share: 0.3)"),
         TalentMechanic::ReflectiveShield { share: 0.3 }
     );
     assert_eq!(
         parse("CheatDeath(health: 0.1, reduction: 0.9, duration: 3.0)"),
-        TalentMechanic::CheatDeath { health: 0.1, reduction: 0.9, duration: 3.0 }
+        TalentMechanic::CheatDeath {
+            health: 0.1,
+            reduction: 0.9,
+            duration: 3.0
+        }
     );
 }

@@ -25,10 +25,7 @@ pub enum RogueOpener {
 
 impl RogueOpener {
     /// Every option, in display order.
-    pub const ALL: [RogueOpener; 2] = [
-        RogueOpener::Ambush,
-        RogueOpener::CheapShot,
-    ];
+    pub const ALL: [RogueOpener; 2] = [RogueOpener::Ambush, RogueOpener::CheapShot];
 
     /// Get the display name
     pub fn name(&self) -> &'static str {

@@ -17,7 +17,13 @@
 use std::collections::BTreeMap;
 
 /// One node as a card writes it: (name, tree, tier, ranks, prerequisite).
-type Node = (&'static str, &'static str, u8, u8, Option<(&'static str, u8)>);
+type Node = (
+    &'static str,
+    &'static str,
+    u8,
+    u8,
+    Option<(&'static str, u8)>,
+);
 
 const WARLOCK: &[Node] = &[
     ("Improved Drain Life", "Affliction", 1, 2, None),
@@ -26,7 +32,13 @@ const WARLOCK: &[Node] = &[
     ("Nightfall", "Affliction", 2, 2, None),
     ("Siphon Life", "Affliction", 3, 1, None),
     ("Curse of Exhaustion", "Affliction", 3, 1, None),
-    ("Shadow Mastery", "Affliction", 4, 1, Some(("Siphon Life", 1))),
+    (
+        "Shadow Mastery",
+        "Affliction",
+        4,
+        1,
+        Some(("Siphon Life", 1)),
+    ),
     ("Demonic Embrace", "Demonology", 1, 2, None),
     ("Fel Stamina", "Demonology", 1, 2, None),
     ("Unholy Power", "Demonology", 2, 2, None),
@@ -38,7 +50,13 @@ const WARLOCK: &[Node] = &[
     ("Aftermath", "Destruction", 2, 2, None),
     ("Shadowburn", "Destruction", 2, 1, None),
     ("Improved Immolate", "Destruction", 3, 1, None),
-    ("Conflagrate", "Destruction", 4, 1, Some(("Improved Immolate", 1))),
+    (
+        "Conflagrate",
+        "Destruction",
+        4,
+        1,
+        Some(("Improved Immolate", 1)),
+    ),
 ];
 
 const PRIEST: &[Node] = &[
@@ -48,14 +66,26 @@ const PRIEST: &[Node] = &[
     ("Inner Focus", "Discipline", 2, 1, None),
     ("Reflective Shield", "Discipline", 3, 1, None),
     ("Power Infusion", "Discipline", 3, 1, None),
-    ("Pain Suppression", "Discipline", 4, 1, Some(("Reflective Shield", 1))),
+    (
+        "Pain Suppression",
+        "Discipline",
+        4,
+        1,
+        Some(("Reflective Shield", 1)),
+    ),
     ("Holy Specialization", "Holy", 1, 2, None),
     ("Spiritual Healing", "Holy", 1, 2, None),
     ("Inspiration", "Holy", 2, 2, None),
     ("Blessed Recovery", "Holy", 2, 1, None),
     ("Holy Concentration", "Holy", 3, 1, None),
     ("Holy Nova", "Holy", 3, 1, None),
-    ("Guardian Spirit", "Holy", 4, 1, Some(("Holy Concentration", 1))),
+    (
+        "Guardian Spirit",
+        "Holy",
+        4,
+        1,
+        Some(("Holy Concentration", 1)),
+    ),
     ("Improved Mind Blast", "Shadow", 1, 2, None),
     ("Improved Psychic Scream", "Shadow", 1, 2, None),
     ("Shadowform", "Shadow", 2, 1, None),
@@ -103,14 +133,32 @@ const PALADIN: &[Node] = &[
     ("Retribution Aura", "Protection", 2, 2, None),
     ("Toughness", "Protection", 2, 2, None),
     ("Blessing of Sacrifice", "Protection", 3, 1, None),
-    ("Sacred Shield", "Protection", 4, 1, Some(("Blessing of Sacrifice", 1))),
+    (
+        "Sacred Shield",
+        "Protection",
+        4,
+        1,
+        Some(("Blessing of Sacrifice", 1)),
+    ),
     ("Conviction", "Retribution", 1, 2, None),
     ("Pursuit of Justice", "Retribution", 1, 2, None),
-    ("Two-Handed Weapon Specialization", "Retribution", 2, 2, None),
+    (
+        "Two-Handed Weapon Specialization",
+        "Retribution",
+        2,
+        2,
+        None,
+    ),
     ("Vengeance", "Retribution", 2, 2, None),
     ("The Art of War", "Retribution", 3, 1, None),
     ("Repentance", "Retribution", 3, 1, None),
-    ("Crusader Strike", "Retribution", 4, 1, Some(("Vengeance", 1))),
+    (
+        "Crusader Strike",
+        "Retribution",
+        4,
+        1,
+        Some(("Vengeance", 1)),
+    ),
 ];
 
 const TIER_OPENS_AT: [u32; 4] = [0, 2, 3, 5];
@@ -260,10 +308,19 @@ fn the_enumeration_opens_capstones_and_enforces_prerequisites() {
         ("Demonic Sacrifice", 1),
         ("Soul Link", 1),
     ]);
-    assert!(!legal(WARLOCK, &no_prereq), "Soul Link needs Fel Stamina 2/2");
+    assert!(
+        !legal(WARLOCK, &no_prereq),
+        "Soul Link needs Fel Stamina 2/2"
+    );
     let early = at(&[("Demonic Embrace", 2), ("Soul Link", 1)]);
-    assert!(!legal(WARLOCK, &early), "the capstone opens at 5 points below it");
+    assert!(
+        !legal(WARLOCK, &early),
+        "the capstone opens at 5 points below it"
+    );
     let six = costs(WARLOCK).remove(&6).unwrap();
-    assert!(six.contains(&(5.0 * RANK + CAPSTONE)), "a capstone build at 6");
+    assert!(
+        six.contains(&(5.0 * RANK + CAPSTONE)),
+        "a capstone build at 6"
+    );
     assert!(six.contains(&(6.0 * RANK)));
 }

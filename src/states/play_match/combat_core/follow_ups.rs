@@ -202,7 +202,7 @@ pub fn process_damage_follow_ups(
                 if let Some((actual, _, victim_id)) = landed {
                     let holder_id = combatants
                         .get(holder)
-                        .map(|(c, _, _)| combat_log_id_for(&c, pet_of(holder)))
+                        .map(|(c, _, _)| combat_log_id_for(c, pet_of(holder)))
                         .unwrap_or_default();
                     let message = if returned {
                         format!(
@@ -243,7 +243,7 @@ pub fn process_damage_follow_ups(
                 if let Some((actual, absorbed, victim_id)) = landed {
                     let from_id = combatants
                         .get(from)
-                        .map(|(c, _, _)| combat_log_id_for(&c, pet_of(from)))
+                        .map(|(c, _, _)| combat_log_id_for(c, pet_of(from)))
                         .unwrap_or_default();
                     combat_log.log(
                         CombatLogEventType::Damage,
@@ -328,14 +328,19 @@ fn land<'p>(
         combatants
             .get(a)
             .ok()
-            .map(|(c, _, _)| combat_log_id_for(&c, pet_of(a)))
+            .map(|(c, _, _)| combat_log_id_for(c, pet_of(a)))
     });
     let (mut victim, auras, taken) = combatants.get_mut(hit.victim).ok()?;
     if !victim.is_alive() {
         return None;
     }
-    let (actual, absorbed) =
-        apply_damage_with_absorb(hit, &mut victim, auras.map(|a| a.into_inner()), follow_ups, combat_log);
+    let (actual, absorbed) = apply_damage_with_absorb(
+        hit,
+        &mut victim,
+        auras.map(|a| a.into_inner()),
+        follow_ups,
+        combat_log,
+    );
     if actual > 0.0 && victim.resource_type == ResourceType::Rage {
         let rage_gain = actual * 0.15;
         victim.current_mana = (victim.current_mana + rage_gain).min(victim.max_mana);

@@ -147,11 +147,12 @@ pub fn process_holy_shock_damage(
         let ability_def = pending.caster_book.get_unchecked(&AbilityType::HolyShock);
         // The Paladin's damage-dealt increases, read before the target is
         // borrowed.
-        let dealt = combatants
-            .get(pending.caster)
-            .map_or(1.0, |(_, _, auras)| {
-                damage_dealt_multiplier(auras, crate::states::play_match::abilities::SpellSchool::Holy)
-            });
+        let dealt = combatants.get(pending.caster).map_or(1.0, |(_, _, auras)| {
+            damage_dealt_multiplier(
+                auras,
+                crate::states::play_match::abilities::SpellSchool::Holy,
+            )
+        });
         // Get target combatant
         if let Ok((mut target, target_transform, mut target_auras)) =
             combatants.get_mut(pending.target)

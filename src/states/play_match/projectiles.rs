@@ -285,11 +285,9 @@ pub fn process_projectile_hits(
             let damage = ability_damage;
             // The caster's damage-dealt increases, read before the target is
             // borrowed.
-            let dealt = combatants
-                .get(caster_entity)
-                .map_or(1.0, |(_, _, auras)| {
-                    super::combat_core::damage_dealt_multiplier(auras, def.spell_school)
-                });
+            let dealt = combatants.get(caster_entity).map_or(1.0, |(_, _, auras)| {
+                super::combat_core::damage_dealt_multiplier(auras, def.spell_school)
+            });
 
             // Get target info and apply damage
             let (

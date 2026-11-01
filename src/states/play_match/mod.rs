@@ -843,8 +843,7 @@ pub fn setup_play_match(
 
             let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let build = config.team1_builds.get(i).cloned().unwrap_or_default();
-            let choices =
-                talent_choices::SlotChoices::from_config(&config, 1, i, *character);
+            let choices = talent_choices::SlotChoices::from_config(&config, 1, i, *character);
             let resolved = talents::resolve_for_spawn(
                 &talent_defs,
                 &abilities,
@@ -995,8 +994,7 @@ pub fn setup_play_match(
 
             let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let build = config.team2_builds.get(i).cloned().unwrap_or_default();
-            let choices =
-                talent_choices::SlotChoices::from_config(&config, 2, i, *character);
+            let choices = talent_choices::SlotChoices::from_config(&config, 2, i, *character);
             let resolved = talents::resolve_for_spawn(
                 &talent_defs,
                 &abilities,

@@ -190,3 +190,51 @@ fn every_damager_logs_the_deaths_it_causes() {
          `process_dot_ticks` does: {silent:?}"
     );
 }
+
+/// The damagers whose hits come from no attacker's own damage, so no
+/// damage-dealt increase applies: each with why.
+const NO_DEALT_MULTIPLIER: &[(&str, &str, &str)] = &[
+    (
+        "src/states/play_match/effects/backlash.rs",
+        "process_backlash",
+        "a snapshotted backlash, fixed when the Unstable Affliction landed",
+    ),
+    (
+        "src/states/play_match/combat_core/follow_ups.rs",
+        "land",
+        "secondary damage: a share of a hit already raised, or a reflect",
+    ),
+];
+
+/// Every damager raises its hits by the attacker's damage-dealt increase
+/// (`Hit::with_dealt`, or `Hit::new` handed the attacker's auras) and spawns
+/// the follow-ups its hits set off (`DamageFollowUps::spawn`) — or is the one
+/// that lands them. A site that drops either silently loses Touch of Shadow,
+/// Shadowform, a transfer, a reflect or a save's heal (AS-408). Lexical: it
+/// reads the system's body, so it vouches the call is there, not its value.
+#[test]
+fn every_damager_raises_by_the_attacker_and_spawns_its_follow_ups() {
+    let files = load_sources(&["src"]).expect("read src/");
+    let exempt: BTreeSet<(String, String)> = NO_DEALT_MULTIPLIER
+        .iter()
+        .map(|(f, n, _)| (f.to_string(), n.to_string()))
+        .collect();
+    let mut bad = Vec::new();
+    for (file, name) in named(DAMAGERS) {
+        let src = files
+            .iter()
+            .find(|f| f.rel_display() == file)
+            .unwrap_or_else(|| panic!("{file} is not in src/"));
+        let code = blank_test_modules(&blank_comments_and_strings(&src.raw));
+        let body = common::source_audit::find_fn_body(&code, &name)
+            .unwrap_or_else(|| panic!("no fn {name} in {file}"));
+        if !exempt.contains(&(file.clone(), name.clone())) && !body.contains(".with_dealt(") {
+            bad.push(format!("{file} {name}: no `.with_dealt(`"));
+        }
+        let lands_them = name == "land";
+        if !lands_them && !body.contains("follow_ups.spawn(") {
+            bad.push(format!("{file} {name}: no `follow_ups.spawn(`"));
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}

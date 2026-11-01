@@ -818,7 +818,8 @@ pub fn combat_auto_attack(
                 // which stacks and refreshes them.
                 if let Some((poison, chance, book)) = poison_procs.get(&attacker_entity) {
                     // The off hand rolls its own poison when it has one.
-                    let (poison, chance) = match (hand, offhand_poison_procs.get(&attacker_entity)) {
+                    let (poison, chance) = match (hand, offhand_poison_procs.get(&attacker_entity))
+                    {
                         (WeaponHand::Off, Some(off)) => *off,
                         _ => (*poison, *chance),
                     };

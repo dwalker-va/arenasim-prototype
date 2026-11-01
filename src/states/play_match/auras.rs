@@ -873,10 +873,7 @@ pub fn apply_pending_auras(
             aura_to_add.magnitude = dampening.apply(aura_to_add.magnitude);
             // A shield from a caster with Reflective Shield returns its share
             // of what it absorbs to the attacker.
-            if let Some(share) = aura_to_add
-                .caster
-                .and_then(|c| reflecting_casters.get(&c))
-            {
+            if let Some(share) = aura_to_add.caster.and_then(|c| reflecting_casters.get(&c)) {
                 aura_to_add.damage_mods.reflect_absorbed = Some(*share);
             }
         }

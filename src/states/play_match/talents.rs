@@ -41,12 +41,12 @@ use super::constants::{
     WEIGHT_ATTACK_POWER, WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN, WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA,
     WEIGHT_MOVEMENT_SPEED, WEIGHT_RESISTANCE, WEIGHT_SPELL_POWER,
 };
-use super::talent_choices::{ranked_effects, ChoiceOption, ChoiceRule, ChoiceSlot, SlotChoices};
-use super::talent_mechanics::{TalentMechanic, TalentMechanics};
 use super::equipment::{
     resolve_equipped_loadout, validate_class_restrictions, DefaultLoadouts, ItemDefinitions,
     Loadout,
 };
+use super::talent_choices::{ranked_effects, ChoiceOption, ChoiceRule, ChoiceSlot, SlotChoices};
+use super::talent_mechanics::{TalentMechanic, TalentMechanics};
 use crate::states::match_config::CharacterClass;
 
 /// The most points a build may spend: what a Gauntlet run hands out by its
@@ -692,7 +692,10 @@ impl TalentDefinitions {
             }
             TalentEffect::WidenChoice(option) => {
                 if option.menu().class() != talent.class {
-                    return Err(format!("widens {option:?}, not a {:?} choice", talent.class));
+                    return Err(format!(
+                        "widens {option:?}, not a {:?} choice",
+                        talent.class
+                    ));
                 }
                 if option.is_default() {
                     return Err(format!(

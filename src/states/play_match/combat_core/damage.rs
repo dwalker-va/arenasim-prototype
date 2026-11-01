@@ -557,10 +557,13 @@ fn transfer_share(
                     )
                 })
             })
-            .fold(None, |best: Option<(TransferReceiver, f32, &str)>, t| match best {
-                Some((_, b, _)) if b >= t.1 => best,
-                _ => Some(t),
-            })
+            .fold(
+                None,
+                |best: Option<(TransferReceiver, f32, &str)>, t| match best {
+                    Some((_, b, _)) if b >= t.1 => best,
+                    _ => Some(t),
+                },
+            )
     });
     let link = target
         .talent_mechanics

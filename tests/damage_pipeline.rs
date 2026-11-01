@@ -12,9 +12,9 @@ use arenasim::combat::log::{CombatLog, StructuredEventData};
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::SpellSchool;
 use arenasim::states::play_match::combat_core::{
-    apply_damage_with_absorb, damage_dealt_multiplier, effective_armor,
-    process_damage_follow_ups, DamageFollowUp, DamageFollowUps, DealtMods, Hit, HitKind,
-    KillingBlowPrevented, PendingDamageFollowUp, TransferReceiver, CHEAT_DEATH_NAME,
+    apply_damage_with_absorb, damage_dealt_multiplier, effective_armor, process_damage_follow_ups,
+    DamageFollowUp, DamageFollowUps, DealtMods, Hit, HitKind, KillingBlowPrevented,
+    PendingDamageFollowUp, TransferReceiver, CHEAT_DEATH_NAME,
 };
 use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, Aura, AuraDamageMods, AuraStacks, AuraType, Combatant,
@@ -94,7 +94,12 @@ fn land(
     (to_health, absorbed, follow_ups.as_slice().to_vec())
 }
 
-fn direct(amount: f32, school: SpellSchool, attacker: Option<Entity>, victim: Entity) -> Hit<'static> {
+fn direct(
+    amount: f32,
+    school: SpellSchool,
+    attacker: Option<Entity>,
+    victim: Entity,
+) -> Hit<'static> {
     Hit::new(amount, school, "Probe", attacker, None, victim)
 }
 
@@ -110,8 +115,22 @@ fn a_damage_dealt_increase_raises_hits_in_its_scope_only() {
         0.15,
         DamageScope::School(SpellSchool::Shadow),
     )]);
-    let shadow = Hit::new(100.0, SpellSchool::Shadow, "Probe", Some(a), Some(&attacker), v);
-    let fire = Hit::new(100.0, SpellSchool::Fire, "Probe", Some(a), Some(&attacker), v);
+    let shadow = Hit::new(
+        100.0,
+        SpellSchool::Shadow,
+        "Probe",
+        Some(a),
+        Some(&attacker),
+        v,
+    );
+    let fire = Hit::new(
+        100.0,
+        SpellSchool::Fire,
+        "Probe",
+        Some(a),
+        Some(&attacker),
+        v,
+    );
     assert_eq!(land(shadow, &mut bare(500.0), None).0, 115.0);
     assert_eq!(land(fire, &mut bare(500.0), None).0, 100.0, "out of scope");
     // Control: no aura on the attacker.
@@ -126,8 +145,14 @@ fn only_the_strongest_damage_dealt_increase_applies() {
         aura(AuraType::DamageDealtIncrease, 0.10),
         aura(AuraType::DamageDealtIncrease, 0.15),
     ]);
-    assert_eq!(damage_dealt_multiplier(Some(&both), SpellSchool::Fire), 1.15);
-    assert_eq!(DealtMods::of(Some(&both)).multiplier(SpellSchool::Fire), 1.15);
+    assert_eq!(
+        damage_dealt_multiplier(Some(&both), SpellSchool::Fire),
+        1.15
+    );
+    assert_eq!(
+        DealtMods::of(Some(&both)).multiplier(SpellSchool::Fire),
+        1.15
+    );
     assert_eq!(damage_dealt_multiplier(None, SpellSchool::Fire), 1.0);
     // The read-ahead copy honours scope as the live read does.
     let shadow_only = auras(vec![scoped(
@@ -165,7 +190,10 @@ fn the_strongest_damage_taken_increase_in_scope_applies_per_stack() {
         &mut bare(500.0),
         Some(&mut target_auras),
     );
-    assert!((to_health - 110.0).abs() < 1e-3, "5 stacks of 2% beat 5%: {to_health}");
+    assert!(
+        (to_health - 110.0).abs() < 1e-3,
+        "5 stacks of 2% beat 5%: {to_health}"
+    );
     // A Fire hit: only the unscoped 5% reaches it.
     let (to_health, ..) = land(
         direct(100.0, SpellSchool::Fire, None, v),
@@ -175,7 +203,12 @@ fn the_strongest_damage_taken_increase_in_scope_applies_per_stack() {
     assert!((to_health - 105.0).abs() < 1e-3, "{to_health}");
     // Control.
     assert_eq!(
-        land(direct(100.0, SpellSchool::Fire, None, v), &mut bare(500.0), None).0,
+        land(
+            direct(100.0, SpellSchool::Fire, None, v),
+            &mut bare(500.0),
+            None
+        )
+        .0,
         100.0
     );
 }
@@ -199,15 +232,27 @@ fn a_charged_vulnerability_is_spent_by_direct_hits_only() {
     assert_eq!(dealt, 100.0, "a tick is not raised");
     assert_eq!(target_auras.auras[0].damage_mods.charges, Some(2));
 
-    let (dealt, ..) = land(direct(100.0, SpellSchool::Shadow, None, v), &mut target, Some(&mut target_auras));
+    let (dealt, ..) = land(
+        direct(100.0, SpellSchool::Shadow, None, v),
+        &mut target,
+        Some(&mut target_auras),
+    );
     assert!((dealt - 110.0).abs() < 1e-3);
     assert_eq!(target_auras.auras[0].damage_mods.charges, Some(1));
 
-    let (dealt, ..) = land(direct(100.0, SpellSchool::Shadow, None, v), &mut target, Some(&mut target_auras));
+    let (dealt, ..) = land(
+        direct(100.0, SpellSchool::Shadow, None, v),
+        &mut target,
+        Some(&mut target_auras),
+    );
     assert!((dealt - 110.0).abs() < 1e-3);
     assert!(target_auras.auras.is_empty(), "the last charge ends it");
 
-    let (dealt, ..) = land(direct(100.0, SpellSchool::Shadow, None, v), &mut target, Some(&mut target_auras));
+    let (dealt, ..) = land(
+        direct(100.0, SpellSchool::Shadow, None, v),
+        &mut target,
+        Some(&mut target_auras),
+    );
     assert_eq!(dealt, 100.0, "spent");
 }
 
@@ -220,15 +265,35 @@ fn a_scoped_damage_taken_reduction_reaches_only_its_school() {
         0.15,
         DamageScope::School(SpellSchool::Physical),
     )]);
-    let (phys, ..) = land(direct(100.0, SpellSchool::Physical, None, v), &mut bare(500.0), Some(&mut target_auras));
+    let (phys, ..) = land(
+        direct(100.0, SpellSchool::Physical, None, v),
+        &mut bare(500.0),
+        Some(&mut target_auras),
+    );
     assert!((phys - 85.0).abs() < 1e-3);
-    let (shadow, ..) = land(direct(100.0, SpellSchool::Shadow, None, v), &mut bare(500.0), Some(&mut target_auras));
+    let (shadow, ..) = land(
+        direct(100.0, SpellSchool::Shadow, None, v),
+        &mut bare(500.0),
+        Some(&mut target_auras),
+    );
     assert_eq!(shadow, 100.0);
     // "Spell damage" (Master Demonologist): every magic school, not Physical.
-    let mut spells = auras(vec![scoped(AuraType::DamageTakenReduction, 0.04, DamageScope::Spells)]);
-    let (shadow, ..) = land(direct(100.0, SpellSchool::Shadow, None, v), &mut bare(500.0), Some(&mut spells));
+    let mut spells = auras(vec![scoped(
+        AuraType::DamageTakenReduction,
+        0.04,
+        DamageScope::Spells,
+    )]);
+    let (shadow, ..) = land(
+        direct(100.0, SpellSchool::Shadow, None, v),
+        &mut bare(500.0),
+        Some(&mut spells),
+    );
     assert!((shadow - 96.0).abs() < 1e-3);
-    let (phys, ..) = land(direct(100.0, SpellSchool::Physical, None, v), &mut bare(500.0), Some(&mut spells));
+    let (phys, ..) = land(
+        direct(100.0, SpellSchool::Physical, None, v),
+        &mut bare(500.0),
+        Some(&mut spells),
+    );
     assert_eq!(phys, 100.0);
 }
 
@@ -258,8 +323,16 @@ fn percentage_armor_auras_scale_the_armor_a_hit_meets() {
     // And the funnel reads it: Expose Armor makes a Physical hit land harder.
     let (_, v, _) = entities();
     let mut exposed = auras(vec![aura(AuraType::ArmorPercentReduction, 0.5)]);
-    let (with, ..) = land(direct(100.0, SpellSchool::Physical, None, v), &mut target.clone(), Some(&mut exposed));
-    let (without, ..) = land(direct(100.0, SpellSchool::Physical, None, v), &mut target.clone(), None);
+    let (with, ..) = land(
+        direct(100.0, SpellSchool::Physical, None, v),
+        &mut target.clone(),
+        Some(&mut exposed),
+    );
+    let (without, ..) = land(
+        direct(100.0, SpellSchool::Physical, None, v),
+        &mut target.clone(),
+        None,
+    );
     assert!((without - 100.0 * (1.0 - 1000.0 / 6500.0)).abs() < 1e-3);
     assert!((with - 100.0 * (1.0 - 500.0 / 6000.0)).abs() < 1e-3);
 }
@@ -284,7 +357,11 @@ fn a_transfer_aura_sends_its_share_to_its_caster() {
         &mut bare(500.0),
         Some(&mut target_auras),
     );
-    assert_eq!((to_health, absorbed), (25.0, 50.0), "25 leaves before the shield");
+    assert_eq!(
+        (to_health, absorbed),
+        (25.0, 50.0),
+        "25 leaves before the shield"
+    );
     assert_eq!(
         follow_ups,
         vec![DamageFollowUp::Transfer {
@@ -304,7 +381,8 @@ fn a_transfer_aura_sends_its_share_to_its_caster() {
     assert_eq!((to_health, follow_ups.len()), (100.0, 0));
     // A secondary hit is never transferred again.
     let mut target_auras = auras(vec![sac]);
-    let reflected = direct(100.0, SpellSchool::Fire, Some(attacker), holder).of_kind(HitKind::Reflected);
+    let reflected =
+        direct(100.0, SpellSchool::Fire, Some(attacker), holder).of_kind(HitKind::Reflected);
     let (to_health, _, follow_ups) = land(reflected, &mut bare(500.0), Some(&mut target_auras));
     assert_eq!((to_health, follow_ups.len()), (100.0, 0));
 }
@@ -342,12 +420,23 @@ fn a_save_aura_prevents_the_killing_blow_and_is_spent() {
     let mut target_auras = auras(vec![spirit.clone()]);
     let mut target = bare(500.0);
     target.current_health = 50.0;
-    let (dealt, _, follow_ups) = land(direct(30.0, SpellSchool::Fire, Some(attacker), holder), &mut target, Some(&mut target_auras));
-    assert_eq!((dealt, target.current_health, follow_ups.len()), (30.0, 20.0, 0));
+    let (dealt, _, follow_ups) = land(
+        direct(30.0, SpellSchool::Fire, Some(attacker), holder),
+        &mut target,
+        Some(&mut target_auras),
+    );
+    assert_eq!(
+        (dealt, target.current_health, follow_ups.len()),
+        (30.0, 20.0, 0)
+    );
     assert_eq!(target_auras.auras.len(), 1);
     // The killing blow is prevented: health stays, the save is spent and its
     // heal queued.
-    let (dealt, _, follow_ups) = land(direct(80.0, SpellSchool::Fire, Some(attacker), holder), &mut target, Some(&mut target_auras));
+    let (dealt, _, follow_ups) = land(
+        direct(80.0, SpellSchool::Fire, Some(attacker), holder),
+        &mut target,
+        Some(&mut target_auras),
+    );
     assert_eq!((dealt, target.current_health), (0.0, 20.0));
     assert!(target_auras.auras.is_empty());
     assert!(matches!(
@@ -356,7 +445,11 @@ fn a_save_aura_prevents_the_killing_blow_and_is_spent() {
             if by == "Guardian Spirit" && *c == priest && *f == 0.30
     ));
     // Spent: the next killing blow kills.
-    land(direct(80.0, SpellSchool::Fire, Some(attacker), holder), &mut target, Some(&mut target_auras));
+    land(
+        direct(80.0, SpellSchool::Fire, Some(attacker), holder),
+        &mut target,
+        Some(&mut target_auras),
+    );
     assert_eq!(target.current_health, 0.0);
 }
 
@@ -371,25 +464,50 @@ fn cheat_death_leaves_the_rogue_at_its_floor_once_a_match() {
         duration: 3.0,
     }]);
     let mut target_auras = auras(vec![]);
-    let (dealt, _, follow_ups) = land(direct(300.0, SpellSchool::Fire, Some(attacker), holder), &mut rogue, Some(&mut target_auras));
-    assert_eq!((dealt, rogue.current_health), (60.0, 40.0), "left at 10% of 400");
+    let (dealt, _, follow_ups) = land(
+        direct(300.0, SpellSchool::Fire, Some(attacker), holder),
+        &mut rogue,
+        Some(&mut target_auras),
+    );
+    assert_eq!(
+        (dealt, rogue.current_health),
+        (60.0, 40.0),
+        "left at 10% of 400"
+    );
     assert!(rogue.killing_blow_save_spent);
     assert_eq!(target_auras.auras.len(), 1);
     let cut = &target_auras.auras[0];
     assert_eq!(
-        (cut.effect_type, cut.magnitude, cut.duration, cut.ability_name.as_str()),
+        (
+            cut.effect_type,
+            cut.magnitude,
+            cut.duration,
+            cut.ability_name.as_str()
+        ),
         (AuraType::DamageTakenReduction, 0.90, 3.0, CHEAT_DEATH_NAME)
     );
     assert!(matches!(
         follow_ups.as_slice(),
-        [DamageFollowUp::Saved { heal_fraction: None, aura: None, .. }]
+        [DamageFollowUp::Saved {
+            heal_fraction: None,
+            aura: None,
+            ..
+        }]
     ));
     // The cut applies: a 100 hit lands for 10.
-    let (dealt, ..) = land(direct(100.0, SpellSchool::Fire, Some(attacker), holder), &mut rogue, Some(&mut target_auras));
+    let (dealt, ..) = land(
+        direct(100.0, SpellSchool::Fire, Some(attacker), holder),
+        &mut rogue,
+        Some(&mut target_auras),
+    );
     assert!((dealt - 10.0).abs() < 1e-3);
     // Once a match: the next killing blow kills.
     target_auras.auras.clear();
-    land(direct(300.0, SpellSchool::Fire, Some(attacker), holder), &mut rogue, Some(&mut target_auras));
+    land(
+        direct(300.0, SpellSchool::Fire, Some(attacker), holder),
+        &mut rogue,
+        Some(&mut target_auras),
+    );
     assert_eq!(rogue.current_health, 0.0);
 
     // Below the floor already: the blow is spent and the Rogue keeps what it
@@ -397,13 +515,21 @@ fn cheat_death_leaves_the_rogue_at_its_floor_once_a_match() {
     let mut low = bare(400.0);
     low.current_health = 20.0;
     low.talent_mechanics = rogue.talent_mechanics.clone();
-    let (dealt, ..) = land(direct(300.0, SpellSchool::Fire, Some(attacker), holder), &mut low, None);
+    let (dealt, ..) = land(
+        direct(300.0, SpellSchool::Fire, Some(attacker), holder),
+        &mut low,
+        None,
+    );
     assert_eq!((dealt, low.current_health), (0.0, 20.0));
 
     // Control: no Cheat Death, the blow kills.
     let mut plain = bare(400.0);
     plain.current_health = 100.0;
-    land(direct(300.0, SpellSchool::Fire, Some(attacker), holder), &mut plain, None);
+    land(
+        direct(300.0, SpellSchool::Fire, Some(attacker), holder),
+        &mut plain,
+        None,
+    );
     assert_eq!(plain.current_health, 0.0);
 }
 
@@ -474,10 +600,15 @@ fn a_reflect_aura_answers_melee_hits_only_and_never_reflects_again() {
     );
     // A spell is not a melee strike.
     let spell = direct(50.0, SpellSchool::Physical, Some(attacker), holder);
-    assert!(land(spell, &mut bare(500.0), Some(&mut target_auras)).2.is_empty());
+    assert!(land(spell, &mut bare(500.0), Some(&mut target_auras))
+        .2
+        .is_empty());
     // Reflected damage never reflects again.
-    let back = direct(50.0, SpellSchool::Physical, Some(attacker), holder).of_kind(HitKind::Reflected);
-    assert!(land(back, &mut bare(500.0), Some(&mut target_auras)).2.is_empty());
+    let back =
+        direct(50.0, SpellSchool::Physical, Some(attacker), holder).of_kind(HitKind::Reflected);
+    assert!(land(back, &mut bare(500.0), Some(&mut target_auras))
+        .2
+        .is_empty());
     // Control: no aura, no reflect.
     let melee = direct(50.0, SpellSchool::Physical, Some(attacker), holder).of_kind(HitKind::Melee);
     assert!(land(melee, &mut bare(500.0), None).2.is_empty());
@@ -545,7 +676,9 @@ fn units() -> Units {
 
 fn run(world: &mut World, follow_up: DamageFollowUp) {
     world.spawn(PendingDamageFollowUp(follow_up));
-    world.run_system_once(process_damage_follow_ups).expect("ran");
+    world
+        .run_system_once(process_damage_follow_ups)
+        .expect("ran");
 }
 
 fn health(world: &World, e: Entity) -> f32 {
@@ -558,7 +691,9 @@ fn deaths(world: &World) -> Vec<(String, Option<String>)> {
         .entries
         .iter()
         .filter_map(|e| match &e.structured_data {
-            Some(StructuredEventData::Death { victim, killer }) => Some((victim.clone(), killer.clone())),
+            Some(StructuredEventData::Death { victim, killer }) => {
+                Some((victim.clone(), killer.clone()))
+            }
             _ => None,
         })
         .collect()
@@ -566,7 +701,12 @@ fn deaths(world: &World) -> Vec<(String, Option<String>)> {
 
 #[test]
 fn a_transfer_lands_on_its_receiver_and_credits_the_dealer() {
-    let Units { mut world, holder, receiver, attacker } = units();
+    let Units {
+        mut world,
+        holder,
+        receiver,
+        attacker,
+    } = units();
     run(
         &mut world,
         DamageFollowUp::Transfer {
@@ -581,7 +721,11 @@ fn a_transfer_lands_on_its_receiver_and_credits_the_dealer() {
     assert_eq!(health(&world, holder), 400.0);
     assert_eq!(world.get::<Combatant>(attacker).unwrap().damage_dealt, 30.0);
     assert!(
-        world.query::<&PendingDamageFollowUp>().iter(&world).next().is_none(),
+        world
+            .query::<&PendingDamageFollowUp>()
+            .iter(&world)
+            .next()
+            .is_none(),
         "the follow-up is spent"
     );
 }
@@ -590,11 +734,20 @@ fn a_transfer_lands_on_its_receiver_and_credits_the_dealer() {
 /// holder, and the transfer aura ends.
 #[test]
 fn an_unbearable_transfer_returns_to_the_holder_and_ends_the_aura() {
-    let Units { mut world, holder, receiver, attacker } = units();
+    let Units {
+        mut world,
+        holder,
+        receiver,
+        attacker,
+    } = units();
     world.get_mut::<Combatant>(receiver).unwrap().current_health = 20.0;
     let mut sac = aura(AuraType::DamageTransfer, 0.3);
     sac.caster = Some(receiver);
-    world.get_mut::<ActiveAuras>(holder).unwrap().auras.push(sac);
+    world
+        .get_mut::<ActiveAuras>(holder)
+        .unwrap()
+        .auras
+        .push(sac);
     run(
         &mut world,
         DamageFollowUp::Transfer {
@@ -607,19 +760,34 @@ fn an_unbearable_transfer_returns_to_the_holder_and_ends_the_aura() {
     );
     assert_eq!(health(&world, receiver), 20.0, "the receiver is spared");
     assert_eq!(health(&world, holder), 370.0, "the holder keeps the share");
-    assert!(world.get::<ActiveAuras>(holder).unwrap().auras.is_empty(), "the transfer ends");
+    assert!(
+        world.get::<ActiveAuras>(holder).unwrap().auras.is_empty(),
+        "the transfer ends"
+    );
     assert!(deaths(&world).is_empty());
 }
 
 #[test]
 fn a_soul_link_share_finds_the_holders_pet() {
-    let Units { mut world, holder, attacker, .. } = units();
+    let Units {
+        mut world,
+        holder,
+        attacker,
+        ..
+    } = units();
     let mut felhunter = bare(150.0);
     felhunter.team = 1;
     felhunter.slot = 10;
     felhunter.class = CharacterClass::Warlock;
     let pet = world
-        .spawn((felhunter, ActiveAuras::default(), Pet { owner: holder, pet_type: PetType::Felhunter }))
+        .spawn((
+            felhunter,
+            ActiveAuras::default(),
+            Pet {
+                owner: holder,
+                pet_type: PetType::Felhunter,
+            },
+        ))
         .id();
     run(
         &mut world,
@@ -639,7 +807,12 @@ fn a_soul_link_share_finds_the_holders_pet() {
 /// and the death is logged with the reflect's dealer as the killer.
 #[test]
 fn a_reflect_reveals_and_can_kill_the_attacker() {
-    let Units { mut world, holder, receiver, attacker } = units();
+    let Units {
+        mut world,
+        holder,
+        receiver,
+        attacker,
+    } = units();
     assert!(world.get::<Combatant>(attacker).unwrap().stealthed);
     run(
         &mut world,
@@ -657,18 +830,33 @@ fn a_reflect_reveals_and_can_kill_the_attacker() {
     assert!(rogue.is_dead);
     assert_eq!(
         deaths(&world),
-        vec![("Team 2 Rogue #1".to_string(), Some("Team 1 Paladin #2".to_string()))]
+        vec![(
+            "Team 2 Rogue #1".to_string(),
+            Some("Team 1 Paladin #2".to_string())
+        )]
     );
-    assert_eq!(world.get::<Combatant>(receiver).unwrap().damage_dealt, 100.0);
+    assert_eq!(
+        world.get::<Combatant>(receiver).unwrap().damage_dealt,
+        100.0
+    );
 }
 
 /// A reflected hit on a unit that itself reflects is not reflected back.
 #[test]
 fn a_reflect_on_a_reflecting_unit_stops_there() {
-    let Units { mut world, holder, receiver, attacker } = units();
+    let Units {
+        mut world,
+        holder,
+        receiver,
+        attacker,
+    } = units();
     let mut ret = aura(AuraType::DamageReflect, 6.0);
     ret.caster = Some(attacker);
-    world.get_mut::<ActiveAuras>(attacker).unwrap().auras.push(ret);
+    world
+        .get_mut::<ActiveAuras>(attacker)
+        .unwrap()
+        .auras
+        .push(ret);
     run(
         &mut world,
         DamageFollowUp::Reflect {
@@ -689,7 +877,12 @@ fn a_reflect_on_a_reflecting_unit_stops_there() {
 /// "Saved" marker is spawned for the shared cue.
 #[test]
 fn a_saves_heal_goes_through_apply_healing() {
-    let Units { mut world, holder, receiver, .. } = units();
+    let Units {
+        mut world,
+        holder,
+        receiver,
+        ..
+    } = units();
     world.get_mut::<Combatant>(holder).unwrap().current_health = 10.0;
     world.resource_mut::<ArenaDampening>().reduction = 0.5;
     run(
@@ -712,6 +905,9 @@ fn a_saves_heal_goes_through_apply_healing() {
         .collect();
     assert_eq!(
         marks,
-        vec![KillingBlowPrevented { holder, by: "Guardian Spirit".into() }]
+        vec![KillingBlowPrevented {
+            holder,
+            by: "Guardian Spirit".into()
+        }]
     );
 }

@@ -78,23 +78,13 @@ impl ChoiceMenu {
     /// Every option of the menu, in display order, hidden ones included.
     pub fn options(self) -> Vec<ChoiceOption> {
         match self {
-            ChoiceMenu::RogueOpener => RogueOpener::ALL
-                .map(ChoiceOption::RogueOpener)
-                .to_vec(),
-            ChoiceMenu::RoguePoison => RoguePoison::ALL
-                .map(ChoiceOption::RoguePoison)
-                .to_vec(),
-            ChoiceMenu::WarlockCurse => WarlockCurse::ALL
-                .map(ChoiceOption::WarlockCurse)
-                .to_vec(),
+            ChoiceMenu::RogueOpener => RogueOpener::ALL.map(ChoiceOption::RogueOpener).to_vec(),
+            ChoiceMenu::RoguePoison => RoguePoison::ALL.map(ChoiceOption::RoguePoison).to_vec(),
+            ChoiceMenu::WarlockCurse => WarlockCurse::ALL.map(ChoiceOption::WarlockCurse).to_vec(),
             ChoiceMenu::HunterPet => HunterPetType::ALL.map(ChoiceOption::HunterPet).to_vec(),
-            ChoiceMenu::WarriorShout => WarriorShout::ALL
-                .map(ChoiceOption::WarriorShout)
-                .to_vec(),
+            ChoiceMenu::WarriorShout => WarriorShout::ALL.map(ChoiceOption::WarriorShout).to_vec(),
             ChoiceMenu::MageArmor => MageArmor::ALL.map(ChoiceOption::MageArmor).to_vec(),
-            ChoiceMenu::PaladinAura => PaladinAura::ALL
-                .map(ChoiceOption::PaladinAura)
-                .to_vec(),
+            ChoiceMenu::PaladinAura => PaladinAura::ALL.map(ChoiceOption::PaladinAura).to_vec(),
         }
     }
 
@@ -227,11 +217,24 @@ impl SlotChoices {
         let mut second = BTreeMap::new();
         match class {
             CharacterClass::Rogue => {
-                let opener = pick_for(team, slot, &config.team1_rogue_openers, &config.team2_rogue_openers);
+                let opener = pick_for(
+                    team,
+                    slot,
+                    &config.team1_rogue_openers,
+                    &config.team2_rogue_openers,
+                );
                 chosen.insert(ChoiceOption::RogueOpener(opener.unwrap_or_default()));
-                let poison = pick_for(team, slot, &config.team1_rogue_poisons, &config.team2_rogue_poisons);
+                let poison = pick_for(
+                    team,
+                    slot,
+                    &config.team1_rogue_poisons,
+                    &config.team2_rogue_poisons,
+                );
                 chosen.insert(ChoiceOption::RoguePoison(poison.unwrap_or_default()));
-                let off = pick_for(team, slot, &config.team1_rogue_offhand_poisons,
+                let off = pick_for(
+                    team,
+                    slot,
+                    &config.team1_rogue_offhand_poisons,
                     &config.team2_rogue_offhand_poisons,
                 );
                 if let Some(Some(off)) = off {
@@ -251,19 +254,39 @@ impl SlotChoices {
                 chosen.extend(curses.into_iter().map(ChoiceOption::WarlockCurse));
             }
             CharacterClass::Hunter => {
-                let pet = pick_for(team, slot, &config.team1_hunter_pet_types, &config.team2_hunter_pet_types);
+                let pet = pick_for(
+                    team,
+                    slot,
+                    &config.team1_hunter_pet_types,
+                    &config.team2_hunter_pet_types,
+                );
                 chosen.insert(ChoiceOption::HunterPet(pet.unwrap_or_default()));
             }
             CharacterClass::Warrior => {
-                let shout = pick_for(team, slot, &config.team1_warrior_shouts, &config.team2_warrior_shouts);
+                let shout = pick_for(
+                    team,
+                    slot,
+                    &config.team1_warrior_shouts,
+                    &config.team2_warrior_shouts,
+                );
                 chosen.insert(ChoiceOption::WarriorShout(shout.unwrap_or_default()));
             }
             CharacterClass::Mage => {
-                let armor = pick_for(team, slot, &config.team1_mage_armors, &config.team2_mage_armors);
+                let armor = pick_for(
+                    team,
+                    slot,
+                    &config.team1_mage_armors,
+                    &config.team2_mage_armors,
+                );
                 chosen.insert(ChoiceOption::MageArmor(armor.unwrap_or_default()));
             }
             CharacterClass::Paladin => {
-                let aura = pick_for(team, slot, &config.team1_paladin_auras, &config.team2_paladin_auras);
+                let aura = pick_for(
+                    team,
+                    slot,
+                    &config.team1_paladin_auras,
+                    &config.team2_paladin_auras,
+                );
                 chosen.insert(ChoiceOption::PaladinAura(aura.unwrap_or_default()));
             }
             CharacterClass::Priest | CharacterClass::Shaman | CharacterClass::Druid => {}
@@ -327,10 +350,12 @@ impl TalentDefinitions {
             });
             for effect in effects {
                 let clash = match effect {
-                    TalentEffect::WidenChoice(o) => widened.insert(*o, id).map(|t| format!("{o:?} by {t:?}")),
-                    TalentEffect::AddChoiceSlot(slot) => {
-                        opened.insert(*slot, id).map(|t| format!("{slot:?} by {t:?}"))
+                    TalentEffect::WidenChoice(o) => {
+                        widened.insert(*o, id).map(|t| format!("{o:?} by {t:?}"))
                     }
+                    TalentEffect::AddChoiceSlot(slot) => opened
+                        .insert(*slot, id)
+                        .map(|t| format!("{slot:?} by {t:?}")),
                     TalentEffect::Mechanic(m) => mechanics
                         .insert(m.kind(), id)
                         .map(|t| format!("{:?} by {t:?}", m.kind())),
@@ -353,7 +378,9 @@ impl TalentDefinitions {
             match *rule {
                 ChoiceRule::SwitchesOff { talent, .. } => {
                     let Some(t) = self.get(talent) else {
-                        return Err(format!("the choice rule {rule:?} names a talent with no entry"));
+                        return Err(format!(
+                            "the choice rule {rule:?} names a talent with no entry"
+                        ));
                     };
                     if t.class != class {
                         return Err(format!(
@@ -364,7 +391,10 @@ impl TalentDefinitions {
                     }
                 }
                 ChoiceRule::Forbids { ability, .. } | ChoiceRule::Requires { ability, .. } => {
-                    if !self.reachable_abilities(class, abilities).contains(&ability) {
+                    if !self
+                        .reachable_abilities(class, abilities)
+                        .contains(&ability)
+                    {
                         return Err(format!(
                             "the choice rule {rule:?} names {ability:?}, which no {class:?} can have"
                         ));
@@ -473,7 +503,9 @@ impl TalentDefinitions {
                 return Err(format!("{slot:?} holds {option:?}, from another menu"));
             }
             if !self.offers(build, option) {
-                return Err(format!("{slot:?} holds {option:?}, which the build is not offered"));
+                return Err(format!(
+                    "{slot:?} holds {option:?}, which the build is not offered"
+                ));
             }
             if choices.chosen.contains(&option) {
                 return Err(format!(
