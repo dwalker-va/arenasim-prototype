@@ -957,6 +957,18 @@ mod tests {
         );
     }
 
+    /// Gressil, Dawn of Ruin carries the same extra swing on a sword, at 4%,
+    /// and still spends exactly the 28.0 the Corrupted Ashbringer's pair price
+    /// counts on.
+    #[test]
+    fn gressil_procs_an_extra_swing_and_keeps_its_pair_price() {
+        let items = super::super::equipment::load_item_definitions().expect("items.ron loads");
+        let item = items.get(&ItemId::Gressil).expect("Gressil ships");
+        assert_eq!(item.proc, Some(extra_swing(0.04)));
+        let spent = super::super::equipment::calculate_budget_usage(item);
+        assert!((spent - 28.0).abs() < 1e-3, "Gressil spends {spent}");
+    }
+
     /// Unlike a buff's, an extra swing's price is linear in its chance: every
     /// landed hit rolls it, and nothing bounds it but the chance.
     #[test]

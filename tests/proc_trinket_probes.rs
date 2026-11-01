@@ -357,6 +357,26 @@ fn hand_of_justice_procs_at_its_chance_in_real_matches() {
     );
 }
 
+/// Gressil, Dawn of Ruin procs the same extra swing from the main hand
+/// (AS-427), and a Rogue holding its default main hand logs none.
+#[test]
+fn gressil_procs_its_extra_swing_in_real_matches() {
+    let count = |gear: &[(&str, &str)]| {
+        (770_427..770_437)
+            .map(|seed| {
+                logged_match(config("Rogue", "Paladin", seed, gear))
+                    .matches("Team 1 Rogue #1 procs Gressil, Dawn of Ruin (extra attack)")
+                    .count()
+            })
+            .sum::<usize>()
+    };
+    assert!(
+        count(&[("MainHand", "Gressil")]) > 0,
+        "Gressil never procced across the seeds"
+    );
+    assert_eq!(count(&[]), 0);
+}
+
 /// The control: the same Rogue and seeds without the trinket log no proc.
 #[test]
 fn without_hand_of_justice_nothing_procs_an_extra_swing() {

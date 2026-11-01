@@ -692,7 +692,7 @@ any ring fits either ring socket, and the same item may not occupy both
      at their item-stat weights, and haste (`AttackSpeedIncrease`, the
      Dragonspine Trophy's +20% attack speed) at `WEIGHT_ATTACK_SPEED`, crit's
      weight at TBC's rating exchange rate.
-   - **`effect: ExtraSwing`** (Hand of Justice) is the one proc that is not a
+   - **`effect: ExtraSwing`** (Hand of Justice, Gressil) is the one proc that is not a
      buff: on a `MeleeHit` from either hand it queues one extra MAIN-hand swing
      on Windfury Totem's own path (`combat_core::ExtraSwingSource`), rolled
      where the swing is queued rather than after it lands. It takes no

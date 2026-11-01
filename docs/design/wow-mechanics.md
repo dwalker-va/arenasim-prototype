@@ -230,8 +230,10 @@ produces it.
 ### Hand of Justice: the same extra swing, off either hand
 
 Hand of Justice (a Champion trinket) procs Windfury's extra swing from a
-trinket: 5% on each melee hit that connects (Classic's 11815 is 2%). Its swing
-takes the totem's path (`ExtraSwingSource` in `combat_core/auto_attack.rs`) —
+trinket: 5% on each melee hit that connects (Classic's 11815 is 2%). Gressil,
+Dawn of Ruin (a Champion sword) carries the same proc at 4%, our design: the
+Classic sword has none. The swing takes the totem's path (`ExtraSwingSource`
+in `combat_core/auto_attack.rs`) —
 its own avoidance and crit rolls, no Heroic Strike bonus, no rage, no further
 extra swing — with three differences:
 

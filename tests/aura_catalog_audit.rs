@@ -584,24 +584,32 @@ fn named_auras_built_from_helpers_also_resolve() {
 /// The companion claim to the proc-trinket loop above: it walks a pool, so an
 /// empty pool would pass it silently. This says the pool is not empty and names
 /// what it should contain — the proof set AS-140 shipped, one per trigger.
+/// BUFF procs only, the pool the loop walks: an extra swing (Hand of Justice,
+/// Gressil) lands an attack, not an aura.
 #[test]
 fn at_least_one_proc_trinket_ships() {
     let items = shipped_items();
     let mut with_procs: Vec<&str> = ItemId::all()
         .iter()
         .filter_map(|id| items.get(id))
-        .filter(|item| item.proc.is_some())
+        .filter(|item| item.proc_buff().is_some())
         .map(|item| item.name.as_str())
         .collect();
     with_procs.sort_unstable();
     assert_eq!(
         with_procs,
         vec![
+            // Champion weapons (AS-425) carry procs too.
+            "Corrupted Ashbringer",
+            "Doomfinger",
             "Dragonspine Trophy",
-            "Hand of Justice",
+            "Hammer of the Twisting Nether",
+            "Kingsfall",
             "Reliquary of Renewal",
             "Sigil of Arcane Surge",
+            "Soulseeker",
             "Whetstone of Fury",
+            "Wraith Blade",
         ],
         "the shipped proc-trinket set changed — extend this list deliberately, and check \
          `named_auras_built_from_helpers_also_resolve` still covers every member"

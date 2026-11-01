@@ -981,10 +981,12 @@ fn extra_swing_judge(name: &'static str) -> Option<&'static str> {
         .then_some("WindfuryTornado (Windfury Totem's visual — a trinket must not draw it)")
 }
 
-const EXTRA_SWING_MEMBERS: &[&str] = &["HandOfJustice"];
+const EXTRA_SWING_MEMBERS: &[&str] = &["Gressil", "HandOfJustice"];
 
-/// Hand of Justice's own visual is the client's Cheap Shot crescents.
-const EXTRA_SWING_KNOWN_SILENT: &[(&str, &str)] = &[("HandOfJustice", "AS-434")];
+/// Both visuals are AS-434's (Hand of Justice's own is the client's Cheap Shot
+/// crescents).
+const EXTRA_SWING_KNOWN_SILENT: &[(&str, &str)] =
+    &[("Gressil", "AS-434"), ("HandOfJustice", "AS-434")];
 
 #[test]
 fn extra_swing_finds_every_member() {
