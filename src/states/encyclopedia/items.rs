@@ -24,7 +24,7 @@ use super::search::SearchEntry;
 use super::widget;
 use super::{EncyclopediaData, Topic};
 use crate::ui::theme::{color, data, size, space, text};
-use crate::ui::widgets::{empty_state, Chip};
+use crate::ui::widgets::{empty_state, tier_badge, Chip};
 
 /// Default upper bound for the item-level filter. No current item exceeds ~75,
 /// so 100 leaves headroom without forcing the user to slide a max.
@@ -369,9 +369,13 @@ pub fn render_detail(ui: &mut egui::Ui, id: ItemId, data: &EncyclopediaData) -> 
     clicked
 }
 
-/// `Item level 63 · Chest · Plate` (plus `Two-handed` where it applies).
+/// `Gauntlet · Item level 78 · Chest · Plate` (plus `Two-handed` where it
+/// applies): the tier first, naming the frame the header icon wears.
 fn detail_subtitle(item: &ItemConfig) -> String {
     let mut parts = Vec::new();
+    if let Some(tier) = item.tier() {
+        parts.push(tier.name().to_string());
+    }
     if item.item_level > 0 {
         parts.push(format!("Item level {}", item.item_level));
     }
@@ -529,6 +533,11 @@ pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
             .strong(),
     );
 
+    // The tier, framed as the item's icon is: the frame's legend.
+    if let Some(tier) = item.tier() {
+        tier_badge(ui, tier);
+    }
+
     if item.item_level > 0 {
         ui.label(
             egui::RichText::new(format!("Item Level {}", item.item_level))
@@ -663,6 +672,25 @@ mod tests {
             checked > 0,
             "no item declares a proc — this checked nothing"
         );
+    }
+
+    /// An item page's subtitle leads with the tier its header icon's frame
+    /// shows, for every tier.
+    #[test]
+    fn the_page_subtitle_names_the_tier() {
+        use crate::states::play_match::equipment::ItemTier;
+        let items = load_item_definitions().expect("items.ron must load");
+        for tier in ItemTier::ALL {
+            let (_, item) = items
+                .iter()
+                .find(|(_, item)| item.tier() == Some(tier))
+                .unwrap_or_else(|| panic!("items.ron ships no {tier:?} item"));
+            assert!(
+                detail_subtitle(item).starts_with(&format!("{} · ", tier.name())),
+                "{:?}",
+                detail_subtitle(item)
+            );
+        }
     }
 
     #[test]
