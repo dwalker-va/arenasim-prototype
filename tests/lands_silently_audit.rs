@@ -473,14 +473,9 @@ const DOT_MEMBERS: &[AbilityType] = &[
     UnstableAffliction,
 ];
 
-/// DoTs that land with nothing drawn yet. Shadow Word: Pain's state stays
-/// `None` by the Moonfire ruling; AS-342 builds its landing, and moves it to
-/// `DOT_SILENT_BY_DESIGN` when that landing is the whole visual. Deadly
-/// Poison's landing is AS-341's.
-const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[
-    (DeadlyPoison, "AS-341 (weapon poison landing)"),
-    (ShadowWordPain, "AS-342"),
-];
+/// DoTs that land with nothing drawn yet. Deadly Poison's landing is AS-341's.
+const DOT_KNOWN_SILENT: &[(AbilityType, &str)] =
+    &[(DeadlyPoison, "AS-341 (weapon poison landing)")];
 
 /// The DoT STATE a member's aura routes to. The aura carries the ability's
 /// RON `name:`, so this sweeps the config name through the very router every
@@ -502,12 +497,33 @@ fn dot_finds_every_member() {
 
 /// DoTs that draw no state by ruling. The landing is the whole visual and the
 /// aura icon carries the DoT, as with Curse of Tongues.
-const DOT_SILENT_BY_DESIGN: &[SilentByDesign] = &[SilentByDesign {
-    ability: Moonfire,
-    doc: "docs/design/2026-10-03-druid-client-data.md",
-    reason: "client has no state; aura icon carries it (ruling 2; the Curse of Tongues \
-             precedent) — the orb-and-beam landing is the whole visual",
-}];
+const DOT_SILENT_BY_DESIGN: &[SilentByDesign] = &[
+    SilentByDesign {
+        ability: Moonfire,
+        doc: "docs/design/2026-10-03-druid-client-data.md",
+        reason: "client has no state; aura icon carries it (ruling 2; the Curse of Tongues \
+                 precedent) — the orb-and-beam landing is the whole visual",
+    },
+    SilentByDesign {
+        ability: ShadowWordPain,
+        doc: "docs/design/2026-10-17-baseline-kit-client-data.md",
+        reason: "client has no state and no tick visual (§3); aura icon carries it, by the \
+                 Moonfire ruling — the shadowwordpain_chest landing is the whole visual",
+    },
+];
+
+/// Shadow Word: Pain's landing is its whole visual, so it must be routed: the
+/// aura its RON name lands marks the hit (`apply_pending_auras` →
+/// `shadow_word_pain.rs`).
+#[test]
+fn shadow_word_pain_lands_its_hit() {
+    let defs = AbilityDefinitions::default();
+    let name = &defs.get(&ShadowWordPain).unwrap().name;
+    assert_eq!(
+        AuraLandingKind::for_aura(AuraType::DamageOverTime, name),
+        Some(AuraLandingKind::ShadowWordPainHit)
+    );
+}
 
 #[test]
 fn dot_lands_nothing_silently() {

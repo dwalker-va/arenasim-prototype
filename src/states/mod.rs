@@ -933,6 +933,20 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Shadow Word: Pain's landing (`shadow_word_pain.rs`): spawn (consumes
+        // the sim's SW:P landing markers) -> emit -> particles -> billboard.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_shadow_pain_hits,
+                play_match::animate_shadow_pain_hits,
+                play_match::animate_shadow_pain_particles,
+                play_match::billboard_shadow_pain_particles,
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Dispel burst visual effects (separate group to avoid tuple size limits)
         // Still used by Concussive Shot impact and Master's Call — NOT the dispel.
         .add_systems(

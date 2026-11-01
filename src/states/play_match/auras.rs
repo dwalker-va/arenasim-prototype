@@ -939,10 +939,11 @@ pub fn apply_pending_auras(
 }
 
 /// Spawn the one-shot an aura plays where it LANDS — a fresh application or a
-/// refresh — if it has one (Rejuvenation's swirl, Mark of the Wild's glyph).
-/// Same both-modes spawn idiom as the heal landings: purely cosmetic, reads
-/// combat state, writes none, draws no `game_rng`; rendered only in graphical
-/// mode (`rendering/effects/druid_heals.rs`).
+/// refresh — if it has one (Rejuvenation's swirl, Mark of the Wild's glyph,
+/// Shadow Word: Pain's hit). Same both-modes spawn idiom as the heal landings:
+/// purely cosmetic, reads combat state, writes none, draws no `game_rng`;
+/// rendered only in graphical mode (`rendering/effects/druid_heals.rs`,
+/// `rendering/effects/shadow_word_pain.rs`).
 fn spawn_aura_landing(commands: &mut Commands, target: Entity, aura: &Aura) {
     if let Some(kind) = AuraLandingKind::for_aura(aura.effect_type, &aura.ability_name) {
         commands.spawn((AuraLanding { target, kind }, PlayMatchEntity));
