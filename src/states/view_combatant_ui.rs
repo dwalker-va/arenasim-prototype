@@ -49,7 +49,6 @@ use std::collections::HashMap;
 // Item presentation lives in the encyclopedia's Items section — the loadout
 // editor renders the same tooltip and stat line so the two never drift.
 use super::encyclopedia::items::{format_item_stats, render_item_tooltip};
-use super::play_match::proc_trinkets::proc_description;
 // This screen is a loadout EDITOR, not a reference work: every fact about an
 // ability, item or class it shows is one the encyclopedia already owns, so it
 // links there instead of reprinting it. `widget::link_with` carries the shared
@@ -1383,14 +1382,15 @@ pub struct ItemPickerAction {
 }
 
 /// The text of one picker row: `Name  —  stats`, and — for an item carrying a
-/// proc — the sentence saying what the proc does, for the row's quieter
-/// second line. That line is `proc_description`, the same sentence the item
-/// tooltip and the encyclopedia print, so the picker cannot describe a
-/// trinket a third way. Rows without a proc are exactly one line.
+/// proc or an on-use — the sentence saying what it does, for the row's
+/// quieter second line. That line is `ItemConfig::effect_description`, the
+/// same sentence the item tooltip and the encyclopedia print, so the picker
+/// cannot describe a trinket a third way. Rows without one are exactly one
+/// line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemPickerRowText {
     pub name: String,
-    pub proc_line: Option<String>,
+    pub effect_line: Option<String>,
 }
 
 /// The [`ItemPickerRowText`] for `item`.
@@ -1403,7 +1403,7 @@ pub fn item_picker_row_text(item: &ItemConfig) -> ItemPickerRowText {
     };
     ItemPickerRowText {
         name,
-        proc_line: item.proc.as_ref().map(proc_description),
+        effect_line: item.effect_description(),
     }
 }
 
@@ -1471,8 +1471,8 @@ pub fn draw_item_picker_list(
                     })
                     .selected(is_equipped)
                     .wrap();
-                if let Some(proc_line) = &text.proc_line {
-                    row = row.subtitle(proc_line);
+                if let Some(effect_line) = &text.effect_line {
+                    row = row.subtitle(effect_line);
                 }
                 let response = list_row(ui, row);
                 ui_driver::mark(ui, response.rect, true, format_args!("pick:{item_id:?}"));

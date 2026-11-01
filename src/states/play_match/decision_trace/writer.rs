@@ -136,6 +136,7 @@ fn kind_order(kind: EventKind) -> u8 {
         EventKind::SituationChange => 4,
         EventKind::MeleeAvoided => 5,
         EventKind::MatchHeader => 6,
+        EventKind::ItemDecision => 7,
     }
 }
 

@@ -15,6 +15,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
+use super::on_use_items::OnUseConfig;
 use super::proc_trinkets::ProcConfig;
 use crate::states::match_config::CharacterClass;
 
@@ -490,7 +491,7 @@ macro_rules! item_ids {
         /// The variant name is the item's canonical string form: the key
         /// `items.ron` stores the item under, what serde round-trips it as, and
         /// what a headless config names it by. Declared via [`item_ids!`].
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         pub enum ItemId {
             $( $(#[$meta])* $variant, )*
         }
@@ -627,6 +628,9 @@ item_ids! {
     WhetstoneOfFury,
     SigilOfArcaneSurge,
     ReliquaryOfRenewal,
+
+    // === Champion Trinkets — an on-use effect. See the `on_use_items` module.
+    MedallionOfTheAlliance,
 
     // === Melee Weapons ===
     ArcaniteReaper,
@@ -948,6 +952,17 @@ pub struct ItemConfig {
     /// `all_shipped_procs_are_well_formed`. See the `proc_trinkets` module.
     #[serde(default)]
     pub proc: Option<ProcConfig>,
+
+    // === On use ===
+    /// An EFFECT the wearer's AI chooses when to fire, on the item's own
+    /// cooldown — the Medallion shape. `None` for every ordinary item.
+    ///
+    /// Priced into the stat budget by [`calculate_budget_usage`] at its uses
+    /// in a mean arena life, and checked (a declared price exactly where no
+    /// stat weight prices the effect, a positive cooldown) by
+    /// `all_shipped_on_uses_are_well_formed`. See the `on_use_items` module.
+    #[serde(default)]
+    pub on_use: Option<OnUseConfig>,
 }
 
 impl ItemConfig {
@@ -969,6 +984,24 @@ impl ItemConfig {
             ItemSlotType::OffHand => Some(HeldSlot::OffHandOnly),
             _ => None,
         }
+    }
+
+    /// What the item DOES beyond its stats, as the player reads it: its
+    /// proc's sentence and its on-use's, in that order, one line. `None` for
+    /// an item that does nothing but its stats. Every surface that shows an
+    /// item's effect reads this, so an item cannot describe itself two ways.
+    pub fn effect_description(&self) -> Option<String> {
+        let lines: Vec<String> = self
+            .proc
+            .iter()
+            .map(super::proc_trinkets::proc_description)
+            .chain(
+                self.on_use
+                    .iter()
+                    .map(super::on_use_items::on_use_description),
+            )
+            .collect();
+        (!lines.is_empty()).then(|| lines.join(" "))
     }
 
     /// The tier `item_tier` names, or `None` for a number no tier has. A
@@ -1495,6 +1528,9 @@ use super::constants::{
 /// [`ProcConfig::budget_cost`]. Without that term a trigger-and-effect would be
 /// invisible to the budget, because it is not a stat field, and a proc of any
 /// magnitude would pass this check.
+///
+/// An ON-USE is charged too, at its uses in a mean arena life — see
+/// [`OnUseConfig::budget_cost`].
 pub fn calculate_budget_usage(item: &ItemConfig) -> f32 {
     item.max_health * WEIGHT_MAX_HEALTH
         + item.max_mana * WEIGHT_MAX_MANA
@@ -1510,6 +1546,7 @@ pub fn calculate_budget_usage(item: &ItemConfig) -> f32 {
         + item.nature_resistance * WEIGHT_RESISTANCE
         + item.holy_resistance * WEIGHT_RESISTANCE
         + item.proc.as_ref().map_or(0.0, |p| p.budget_cost())
+        + item.on_use.as_ref().map_or(0.0, |u| u.budget_cost())
 }
 
 /// The budget multiplier an item is priced at: how it is held for a hand item
@@ -1824,7 +1861,28 @@ pub fn parse_item_definitions(contents: &str, origin: &str) -> Result<ItemDefini
     let definitions = ItemDefinitions::new(config);
     validate_tier_bands(&definitions)
         .map_err(|e| format!("{} has items that fail their tier check:\n{}", origin, e))?;
+    validate_on_uses(&definitions)
+        .map_err(|e| format!("{} has malformed on-use items:\n{}", origin, e))?;
     Ok(definitions)
+}
+
+/// [`validate_on_use`](super::on_use_items::validate_on_use) over every item
+/// that carries one, every offender at once, in item order. Run at load: an
+/// on-use that declares no price would otherwise be charged nothing.
+pub fn validate_on_uses(items: &ItemDefinitions) -> Result<(), String> {
+    let mut errors: Vec<String> = items
+        .iter()
+        .filter_map(|(id, item)| {
+            let on_use = item.on_use.as_ref()?;
+            super::on_use_items::validate_on_use(&format!("{id:?}"), on_use).err()
+        })
+        .collect();
+    errors.sort();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("\n"))
+    }
 }
 
 /// Load item definitions from assets/config/items.ron
@@ -1984,6 +2042,7 @@ mod tests {
             attack_damage_max: 0.0,
             weapon_speed: 0.0,
             proc: None,
+            on_use: None,
         }
     }
 
@@ -2024,6 +2083,7 @@ mod tests {
             attack_damage_max: dmg_max,
             weapon_speed: speed,
             proc: None,
+            on_use: None,
         }
     }
 
@@ -4090,6 +4150,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             attack_damage_max: 0.0,
             weapon_speed: 0.0,
             proc: None,
+            on_use: None,
         }
     }
 
@@ -4536,7 +4597,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     const CHAMPION_GAIN: f32 = 0.55;
 
     /// Every Champion-tier (item_tier 2) item.
-    const CHAMPION_TIER: [ItemId; 71] = [
+    const CHAMPION_TIER: [ItemId; 72] = [
         ItemId::FrostfireCirclet,
         ItemId::FrostfireRobe,
         ItemId::FrostfireLeggings,
@@ -4608,6 +4669,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         ItemId::LibramOfLight,
         ItemId::TotemOfTheStorm,
         ItemId::IdolOfTheMoon,
+        ItemId::MedallionOfTheAlliance,
     ];
 
     /// Every Gauntlet-tier (item_tier 1) item.
@@ -5033,6 +5095,88 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         let err = validate_item_budget("Overbudget Proc", &item)
             .expect_err("a 36-point proc on a 30.45-point trinket must be rejected");
         assert!(err.contains("over budget"), "{}", err);
+    }
+
+    /// Every shipped on-use is coherent: a declared price exactly where no
+    /// stat weight prices its effect, a positive cooldown. Named members, so
+    /// the guard cannot pass on an empty pool.
+    #[test]
+    fn all_shipped_on_uses_are_well_formed() {
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        assert!(validate_on_uses(&item_defs).is_ok());
+        let mut members: Vec<ItemId> = item_defs
+            .iter()
+            .filter(|(_, item)| item.on_use.is_some())
+            .map(|(id, _)| *id)
+            .collect();
+        members.sort();
+        assert_eq!(members, vec![ItemId::MedallionOfTheAlliance]);
+    }
+
+    /// The Medallion is a Champion trinket whose break is priced into its
+    /// budget, which it spends within its tier's band.
+    #[test]
+    fn the_medallion_is_a_champion_trinket_priced_by_its_break() {
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        let medallion = item_defs.get_unchecked(&ItemId::MedallionOfTheAlliance);
+        assert_eq!(medallion.tier(), Some(ItemTier::Champion));
+        assert_eq!(medallion.slot, ItemSlotType::Trinket);
+        let on_use = medallion
+            .on_use
+            .as_ref()
+            .expect("the Medallion has an on-use");
+        assert_eq!(
+            on_use.effect,
+            super::super::on_use_items::OnUseEffect::CcBreak
+        );
+        assert_eq!(
+            on_use.cooldown,
+            super::super::on_use_items::OnUseCooldown::OncePerMatch
+        );
+        let usage = calculate_budget_usage(medallion);
+        assert!(on_use.budget_cost() > 0.0 && usage >= on_use.budget_cost());
+        assert!(validate_item_budget("Medallion", medallion).is_ok());
+    }
+
+    /// The on-use term bites: a declared price the budget did not see would
+    /// make every on-use free. A 40-point break on a bare ilvl-58 trinket
+    /// (30.45) is over budget on the break alone.
+    #[test]
+    fn budget_charges_an_on_use_at_its_uses_in_an_arena_life() {
+        use super::super::on_use_items::{OnUseConfig, OnUseCooldown, OnUseEffect};
+        let mut item = budget_test_item(ItemSlotType::Trinket, 58);
+        item.on_use = Some(OnUseConfig {
+            effect: OnUseEffect::CcBreak,
+            cooldown: OnUseCooldown::OncePerMatch,
+            price: Some(40.0),
+        });
+        let err = validate_item_budget("Dear Break", &item).expect_err("over budget");
+        assert!(err.contains("over budget"), "{err}");
+        // A 15s cooldown gets three uses in an arena life: 10 a use is 30
+        // points, within the cap; 12 a use is 36, over it.
+        item.on_use = Some(OnUseConfig {
+            effect: OnUseEffect::CcBreak,
+            cooldown: OnUseCooldown::Seconds(15.0),
+            price: Some(10.0),
+        });
+        assert!(validate_item_budget("Cheap Break", &item).is_ok());
+        item.on_use.as_mut().unwrap().price = Some(12.0);
+        assert!(validate_item_budget("Frequent Break", &item).is_err());
+    }
+
+    /// The loader refuses an on-use with no declared price.
+    #[test]
+    fn the_loader_refuses_an_unpriced_break() {
+        let ron = r#"(items: {
+            MedallionOfTheAlliance: (
+                name: "Free Break", item_level: 92, item_tier: 2, slot: Trinket,
+                on_use: Some((effect: CcBreak, cooldown: OncePerMatch)),
+            ),
+        })"#;
+        let err = parse_item_definitions(ron, "test").err().expect("refused");
+        assert!(err.contains("must declare its price"), "{err}");
+        let priced = ron.replace("OncePerMatch)", "OncePerMatch, price: Some(48.0))");
+        assert!(parse_item_definitions(&priced, "test").is_ok());
     }
 
     /// ...and the same proc at a longer internal cooldown fits, so the
