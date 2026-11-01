@@ -105,6 +105,15 @@ impl TraceWriter {
     }
 }
 
+impl TraceWriter {
+    /// Write `event` as the trace's next line, now: the match header, which
+    /// precedes every frame's sorted events.
+    pub fn write_header(&mut self, event: &DecisionEvent) -> std::io::Result<()> {
+        serde_json::to_writer(&mut self.inner, event).map_err(std::io::Error::other)?;
+        self.inner.write_all(b"\n")
+    }
+}
+
 impl Drop for TraceWriter {
     fn drop(&mut self) {
         // Best-effort flush on drop. Errors are intentionally swallowed —
@@ -126,6 +135,7 @@ fn kind_order(kind: EventKind) -> u8 {
         EventKind::MovementDecision => 3,
         EventKind::SituationChange => 4,
         EventKind::MeleeAvoided => 5,
+        EventKind::MatchHeader => 6,
     }
 }
 

@@ -17,6 +17,9 @@ use crate::states::play_match::equipment::{
 };
 use crate::states::play_match::map_config::{load_map_geometry_config, MapGeometryConfig};
 use crate::states::play_match::movement_config::{load_movement_config, MovementConfig};
+use crate::states::play_match::talents::{
+    load_talent_definitions, resolve_for_spawn, TalentDefinitions,
+};
 use crate::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementConfigPlugin};
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::match_config::CharacterClass;
@@ -313,6 +316,7 @@ fn headless_setup_match(
     default_loadouts: Res<DefaultLoadouts>,
     map_geometry: Res<MapGeometryConfig>,
     abilities: Res<AbilityDefinitions>,
+    talents: Res<TalentDefinitions>,
 ) {
     // Clear and initialize combat log
     combat_log.clear();
@@ -398,13 +402,16 @@ fn headless_setup_match(
                 &item_defs,
             );
             let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
+            // Its build, resolved once at spawn into its own book and the
+            // stats applied below (the graphical spawn resolves it the same
+            // way).
+            let build = config.team1_builds.get(i).cloned().unwrap_or_default();
+            let resolved = resolve_for_spawn(&talents, &abilities, 1, i, *character, &build);
             let mut combatant = Combatant::new_with_curse_prefs(
                 1,
                 i as u8,
                 *character,
-                // Its own book, resolved once at spawn (the graphical spawn
-                // resolves it the same way).
-                AbilityBook::for_class(&abilities, *character),
+                resolved.book().clone(),
                 rogue_opener,
                 rogue_poison,
                 warlock_curse_prefs,
@@ -413,6 +420,7 @@ fn headless_setup_match(
             combatant.mage_armor = mage_armor;
             combatant.paladin_aura = paladin_aura;
             combatant.apply_equipment(&loadout, &item_defs);
+            resolved.apply(&mut combatant);
             let combatant_clone = combatant.clone();
             let weapon_poison_buff = combatant.weapon_poison_self_buff();
             let entity = commands
@@ -440,17 +448,28 @@ fn headless_setup_match(
                     format_loadout(&loadout, &item_defs)
                 ),
             );
+            if !build.is_empty() {
+                combat_log.log(
+                    CombatLogEventType::MatchEvent,
+                    format!(
+                        "[TALENTS] {}: {}",
+                        combatant_id(1, i as u8, *character),
+                        talents.describe(*character, &build)
+                    ),
+                );
+            }
 
             // Spawn Felhunter pet for Warlocks
             if *character == CharacterClass::Warlock {
                 let pet_slot = PET_SLOT_BASE + i as u8;
-                let pet_combatant = Combatant::new_pet(
+                let mut pet_combatant = Combatant::new_pet(
                     1,
                     pet_slot,
                     PetType::Felhunter,
                     &combatant_clone,
                     AbilityBook::for_pet(&abilities, PetType::Felhunter),
                 );
+                resolved.apply_to_pet(&mut pet_combatant);
                 let pet_pos = position + Vec3::new(-2.0, 0.75, 1.5);
                 commands.spawn((
                     Transform::from_translation(pet_pos),
@@ -481,13 +500,14 @@ fn headless_setup_match(
                     HunterPetType::Bird => PetType::Bird,
                 };
                 let pet_slot = PET_SLOT_BASE + i as u8;
-                let pet_combatant = Combatant::new_pet(
+                let mut pet_combatant = Combatant::new_pet(
                     1,
                     pet_slot,
                     pet_type,
                     &combatant_clone,
                     AbilityBook::for_pet(&abilities, pet_type),
                 );
+                resolved.apply_to_pet(&mut pet_combatant);
                 let pet_pos = position + Vec3::new(-2.0, 0.75, 1.5);
                 commands.spawn((
                     Transform::from_translation(pet_pos),
@@ -547,13 +567,16 @@ fn headless_setup_match(
                 &item_defs,
             );
             let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
+            // Its build, resolved once at spawn into its own book and the
+            // stats applied below (the graphical spawn resolves it the same
+            // way).
+            let build = config.team2_builds.get(i).cloned().unwrap_or_default();
+            let resolved = resolve_for_spawn(&talents, &abilities, 2, i, *character, &build);
             let mut combatant = Combatant::new_with_curse_prefs(
                 2,
                 i as u8,
                 *character,
-                // Its own book, resolved once at spawn (the graphical spawn
-                // resolves it the same way).
-                AbilityBook::for_class(&abilities, *character),
+                resolved.book().clone(),
                 rogue_opener,
                 rogue_poison,
                 warlock_curse_prefs,
@@ -562,6 +585,7 @@ fn headless_setup_match(
             combatant.mage_armor = mage_armor;
             combatant.paladin_aura = paladin_aura;
             combatant.apply_equipment(&loadout, &item_defs);
+            resolved.apply(&mut combatant);
             let combatant_clone = combatant.clone();
             let weapon_poison_buff = combatant.weapon_poison_self_buff();
             let entity = commands
@@ -589,17 +613,28 @@ fn headless_setup_match(
                     format_loadout(&loadout, &item_defs)
                 ),
             );
+            if !build.is_empty() {
+                combat_log.log(
+                    CombatLogEventType::MatchEvent,
+                    format!(
+                        "[TALENTS] {}: {}",
+                        combatant_id(2, i as u8, *character),
+                        talents.describe(*character, &build)
+                    ),
+                );
+            }
 
             // Spawn Felhunter pet for Warlocks
             if *character == CharacterClass::Warlock {
                 let pet_slot = PET_SLOT_BASE + i as u8;
-                let pet_combatant = Combatant::new_pet(
+                let mut pet_combatant = Combatant::new_pet(
                     2,
                     pet_slot,
                     PetType::Felhunter,
                     &combatant_clone,
                     AbilityBook::for_pet(&abilities, PetType::Felhunter),
                 );
+                resolved.apply_to_pet(&mut pet_combatant);
                 let pet_pos = position + Vec3::new(2.0, 0.75, 1.5);
                 commands.spawn((
                     Transform::from_translation(pet_pos),
@@ -630,13 +665,14 @@ fn headless_setup_match(
                     HunterPetType::Bird => PetType::Bird,
                 };
                 let pet_slot = PET_SLOT_BASE + i as u8;
-                let pet_combatant = Combatant::new_pet(
+                let mut pet_combatant = Combatant::new_pet(
                     2,
                     pet_slot,
                     pet_type,
                     &combatant_clone,
                     AbilityBook::for_pet(&abilities, pet_type),
                 );
+                resolved.apply_to_pet(&mut pet_combatant);
                 let pet_pos = position + Vec3::new(2.0, 0.75, 1.5);
                 commands.spawn((
                     Transform::from_translation(pet_pos),
@@ -908,6 +944,7 @@ pub fn run_headless_match(config: HeadlessMatchConfig) -> Result<MatchResult, St
 /// Used by the batch runner.
 pub struct PreloadedConfigs {
     pub abilities: AbilityDefinitions,
+    pub talents: TalentDefinitions,
     pub items: ItemDefinitions,
     pub loadouts: DefaultLoadouts,
     pub movement: MovementConfig,
@@ -920,12 +957,14 @@ impl PreloadedConfigs {
     /// geometry config).
     pub fn load() -> Result<Self, String> {
         let abilities = load_ability_definitions()?;
+        let talents = load_talent_definitions(&abilities)?;
         let items = load_item_definitions()?;
         let loadouts = load_default_loadouts(&items)?;
         let movement = load_movement_config()?;
         let maps = load_map_geometry_config()?;
         Ok(Self {
             abilities,
+            talents,
             items,
             loadouts,
             movement,
@@ -1152,6 +1191,7 @@ pub fn build_headless_app(
     match preloaded {
         Some(c) => {
             app.insert_resource(c.abilities.clone())
+                .insert_resource(c.talents.clone())
                 .insert_resource(c.items.clone())
                 .insert_resource(c.loadouts.clone())
                 .insert_resource(c.movement)
@@ -1265,6 +1305,16 @@ fn run_match_impl(
                     // thousands of matches per process, and a per-match
                     // `Box::leak` would never be reclaimed.
                     trace.ai_profile = profile.trace_label();
+                }
+                let builds = world
+                    .get_resource::<MatchConfig>()
+                    .map(|c| (c.team1_builds.clone(), c.team2_builds.clone()));
+                if let (Some((team1, team2)), Some(mut trace)) =
+                    (builds, world.get_resource_mut::<DecisionTrace>())
+                {
+                    if let Err(e) = trace.write_build_header(&team1, &team2) {
+                        eprintln!("decision_trace: failed to write the match header: {e}");
+                    }
                 }
             }
             Err(e) => {
