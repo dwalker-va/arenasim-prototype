@@ -3030,5 +3030,301 @@
             mana_regen: 1.0,
             spell_power: 8.0,
         ),
+
+        // ====================================================================
+        // CHAMPION TIER (2): WEAPONS, OFF HANDS AND RELICS
+        // Named for Classic's Naxxramas weapons (ilvl 81-92).
+        //
+        // Weapon damage is a free stat, so the budget does not move it. A
+        // Champion one-hander, bow, crossbow or wand deals the weapon DPS of
+        // the starting-kit weapon of its kind (same type and role; the caster
+        // one-hander where no caster sword starts) scaled by item level, as
+        // the budget is: `anchor DPS x 92 / anchor ilvl`. A two-hander deals
+        // its pair's one-hander's DPS x Classic's two-hander premium. The
+        // spread (min:max) is the Classic stand-in's own. Pinned by
+        // `champion_weapon_dps_scales_its_starting_weapon_by_item_level`.
+        // ====================================================================
+
+        // Priced at what Gressil + The Face of Death spends (67.0), as the
+        // Arcanite Reaper is at Frostbite Blade + Wall of the Dead. Its DPS is
+        // Gressil's x Classic's premium, Corrupted Ashbringer 90.00 / Gressil
+        // 73.15 = 1.23. A sword, so the Hunter may swing it too.
+        CorruptedAshbringer: (
+            name: "Corrupted Ashbringer",
+            item_level: 91,
+            item_tier: 2,
+            icon: "icons/items/inv_sword_2h_ashbringercorrupt.jpg",
+            slot: MainHand,
+            weapon_type: Sword,
+            is_weapon: true,
+            two_handed: true,
+            attack_damage_min: 74.13,
+            attack_damage_max: 111.34,
+            weapon_speed: 3.6, // Classic: Corrupted Ashbringer (22691)
+            attack_power: 18.0,
+            crit_chance: 0.04,
+            max_health: 3.0,
+            proc: Some((
+                trigger: MeleeHit,
+                chance: 0.25,
+                effect: AttackPowerIncrease,
+                magnitude: 100.0,
+                duration: 10.0,
+                internal_cooldown: 50.0,
+            )),
+        ),
+
+        // Its extra swing (Hand of Justice's mechanism) waits for AS-427.
+        Gressil: (
+            name: "Gressil, Dawn of Ruin",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_sword_61.jpg",
+            slot: MainHand,
+            weapon_type: Sword,
+            is_weapon: true,
+            attack_damage_min: 39.5,
+            attack_damage_max: 73.56,
+            weapon_speed: 2.7, // Classic: Gressil, Dawn of Ruin (23054)
+            attack_power: 12.0,
+            crit_chance: 0.03,
+            max_health: 1.0,
+        ),
+
+        Kingsfall: (
+            name: "Kingsfall",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_weapon_shortblade_37.jpg",
+            slot: MainHand,
+            weapon_type: Dagger,
+            is_weapon: true,
+            attack_damage_min: 34.2,
+            attack_damage_max: 51.46,
+            weapon_speed: 1.8, // Classic: Kingsfall (22802)
+            attack_power: 10.0,
+            crit_chance: 0.02,
+            max_health: 1.0,
+            proc: Some((
+                trigger: MeleeHit,
+                chance: 0.10,
+                effect: CritChanceIncrease,
+                magnitude: 0.10,
+                duration: 10.0,
+                internal_cooldown: 50.0,
+            )),
+        ),
+
+        HammerOfTheTwistingNether: (
+            name: "Hammer of the Twisting Nether",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_mace_27.jpg",
+            slot: MainHand,
+            weapon_type: Mace,
+            is_weapon: true,
+            attack_damage_min: 17.64,
+            attack_damage_max: 57.7,
+            weapon_speed: 1.9, // Classic: Hammer of the Twisting Nether (23056)
+            spell_power: 6.0,
+            max_mana: 7.0,
+            mana_regen: 0.5,
+            proc: Some((
+                trigger: Heal,
+                chance: 0.20,
+                effect: SpellPowerIncrease,
+                magnitude: 40.0,
+                duration: 10.0,
+                internal_cooldown: 50.0,
+            )),
+        ),
+
+        WraithBlade: (
+            name: "Wraith Blade",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_sword_11.jpg",
+            slot: MainHand,
+            weapon_type: Sword,
+            is_weapon: true,
+            attack_damage_min: 20.18,
+            attack_damage_max: 56.91,
+            weapon_speed: 1.8, // Classic: Wraith Blade (22807)
+            spell_power: 8.0,
+            max_health: 3.0,
+            max_mana: 3.0,
+            proc: Some((
+                trigger: SpellCast,
+                chance: 0.15,
+                effect: SpellPowerIncrease,
+                magnitude: 40.0,
+                duration: 10.0,
+                internal_cooldown: 50.0,
+            )),
+        ),
+
+        // Priced at what Hammer of the Twisting Nether + Sapphiron's Left Eye
+        // spends (67.5). Its DPS is the Hammer's x Classic's premium,
+        // Soulseeker 63.59 / Hammer of the Twisting Nether 41.58 = 1.53.
+        Soulseeker: (
+            name: "Soulseeker",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_staff_15.jpg",
+            slot: MainHand,
+            weapon_type: Staff,
+            is_weapon: true,
+            two_handed: true,
+            attack_damage_min: 67.7,
+            attack_damage_max: 126.35,
+            weapon_speed: 3.2, // Classic: Soulseeker (22799)
+            spell_power: 21.0,
+            max_mana: 12.0,
+            max_health: 6.0,
+            proc: Some((
+                trigger: SpellCast,
+                chance: 0.15,
+                effect: SpellPowerIncrease,
+                magnitude: 60.0,
+                duration: 12.0,
+                internal_cooldown: 48.0,
+            )),
+        ),
+
+        Doomfinger: (
+            name: "Doomfinger",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_wand_1h_stratholme_d_02.jpg",
+            slot: Ranged,
+            weapon_type: Wand,
+            is_weapon: true,
+            attack_damage_min: 12.08,
+            attack_damage_max: 22.42,
+            weapon_speed: 1.5, // Classic: Doomfinger (22821)
+            spell_power: 14.0,
+            crit_chance: 0.02,
+            max_mana: 7.0,
+            proc: Some((
+                trigger: SpellCast,
+                chance: 0.15,
+                effect: CritChanceIncrease,
+                magnitude: 0.10,
+                duration: 10.0,
+                internal_cooldown: 50.0,
+            )),
+        ),
+
+        // Its on-use attack speed burst (Rapid Fire's shape) waits for AS-305.
+        Soulstring: (
+            name: "Soulstring",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_weapon_bow_13.jpg",
+            slot: Ranged,
+            weapon_type: Bow,
+            is_weapon: true,
+            attack_damage_min: 44.33,
+            attack_damage_max: 82.63,
+            weapon_speed: 2.9, // Classic: Soulstring (22811)
+            attack_power: 18.0,
+            crit_chance: 0.03,
+            max_health: 3.0,
+        ),
+
+        NerubianSlavemaker: (
+            name: "Nerubian Slavemaker",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_weapon_crossbow_12.jpg",
+            slot: Ranged,
+            weapon_type: Crossbow,
+            is_weapon: true,
+            attack_damage_min: 30.03,
+            attack_damage_max: 55.84,
+            weapon_speed: 3.2, // Classic: Nerubian Slavemaker (22812)
+            attack_power: 14.0,
+            crit_chance: 0.05,
+            max_health: 3.0,
+        ),
+
+        SapphironsLeftEye: (
+            name: "Sapphiron's Left Eye",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_offhand_naxxramas_03.jpg",
+            slot: OffHand,
+            weapon_type: OffhandFrill,
+            spell_power: 16.0,
+            max_mana: 8.0,
+            max_health: 7.0,
+        ),
+
+        TheFaceOfDeath: (
+            name: "The Face of Death",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_shield_26.jpg",
+            slot: OffHand,
+            weapon_type: Shield,
+            armor: 730.0,
+            max_health: 24.0,
+            attack_power: 10.0,
+        ),
+
+        ShieldOfCondemnation: (
+            name: "Shield of Condemnation",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_shield_28.jpg",
+            slot: OffHand,
+            weapon_type: Shield,
+            armor: 730.0,
+            max_health: 10.0,
+            max_mana: 8.0,
+            mana_regen: 1.2,
+            spell_power: 10.0,
+        ),
+
+        // The Champion relics spend their whole budget, as every Champion item
+        // does; the starting relics deliberately spend under half of theirs.
+        LibramOfLight: (
+            name: "Libram of Light",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_relics_libramofgrace.jpg",
+            slot: Ranged,
+            weapon_type: Relic,
+            allowed_classes: Some([Paladin]),
+            spell_power: 14.0,
+            max_mana: 10.0,
+            mana_regen: 1.6,
+        ),
+
+        TotemOfTheStorm: (
+            name: "Totem of the Storm",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_relics_totemofrage.jpg",
+            slot: Ranged,
+            weapon_type: Relic,
+            allowed_classes: Some([Shaman]),
+            spell_power: 14.0,
+            crit_chance: 0.03,
+            max_mana: 9.0,
+        ),
+
+        IdolOfTheMoon: (
+            name: "Idol of the Moon",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_relics_idolofrejuvenation.jpg",
+            slot: Ranged,
+            weapon_type: Relic,
+            allowed_classes: Some([Druid]),
+            spell_power: 14.0,
+            max_mana: 10.0,
+            max_health: 8.0,
+        ),
     }
 )

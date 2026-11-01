@@ -831,6 +831,23 @@ item_ids! {
     RedemptionBoots,
     RedemptionGirdle,
     RedemptionWristguards,
+
+    // === Champion: Weapons, Off Hands and Relics ===
+    CorruptedAshbringer,
+    Gressil,
+    Kingsfall,
+    HammerOfTheTwistingNether,
+    WraithBlade,
+    Soulseeker,
+    Doomfinger,
+    Soulstring,
+    NerubianSlavemaker,
+    SapphironsLeftEye,
+    TheFaceOfDeath,
+    ShieldOfCondemnation,
+    LibramOfLight,
+    TotemOfTheStorm,
+    IdolOfTheMoon,
 }
 
 // ============================================================================
@@ -4405,11 +4422,12 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     }
 
     /// The Champion offer floor (talents-and-Gauntlet proposal §6.5): a
-    /// Champion armor piece spends at least [`CHAMPION_ARMOR_GAIN`] more of
+    /// Champion armor piece spends at least [`CHAMPION_GAIN`] more of
     /// the budget than the starting-kit item it would replace — the item of
     /// the same armor type that a class holds in that slot by default (a
     /// Paladin's plate chest is not what a cloth robe replaces). Armor only;
-    /// a weapon or accessory has its own measure. The floor is G2's to
+    /// the weapon sockets are
+    /// `champion_weapons_clear_the_offer_floor_over_the_starting_kit`. The floor is G2's to
     /// enforce on offers; this holds the authored items to it. Every pairing
     /// is counted, so the check cannot pass on none.
     #[test]
@@ -4434,7 +4452,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
                         continue;
                     }
                     checked.insert(id.as_str());
-                    let floor = calculate_budget_usage(start) * (1.0 + CHAMPION_ARMOR_GAIN);
+                    let floor = calculate_budget_usage(start) * (1.0 + CHAMPION_GAIN);
                     if gain < floor {
                         short.push(format!(
                             "{id:?} spends {gain:.2}, under {floor:.2} over {class:?}'s {socket:?} {start_id:?}"
@@ -4455,11 +4473,131 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         );
     }
 
+    /// The Champion offer floor in the weapon sockets (main hand, off hand,
+    /// ranged): a Champion item there spends at least [`CHAMPION_GAIN`] more
+    /// of the budget than the starting-kit item it would replace — the item a
+    /// class holds in that socket by default, when it is held the same way. A
+    /// one-hander replaces a one-hander, a two-hander a two-hander, an off-hand
+    /// item an off-hand item, so a Warrior's sword is not measured against
+    /// the Arcanite Reaper it cannot stand in for alone. Every Champion item in
+    /// a weapon socket must meet at least one starting item, named by set
+    /// equality, so the check cannot pass on none.
+    #[test]
+    fn champion_weapons_clear_the_offer_floor_over_the_starting_kit() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let loadouts = load_default_loadouts(&items).expect("loadouts.ron must load");
+        let mut short = Vec::new();
+        let mut checked: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for (id, item) in items.iter() {
+            if item.tier() != Some(ItemTier::Champion) || !item.slot.is_weapon_slot() {
+                continue;
+            }
+            let gain = calculate_budget_usage(item);
+            for class in CharacterClass::all() {
+                let kit = loadouts.get(*class).expect("every class has a loadout");
+                for socket in item.sockets() {
+                    if !can_equip_in_socket(*class, *socket, item) {
+                        continue;
+                    }
+                    let Some(start_id) = kit.get(socket) else {
+                        continue;
+                    };
+                    let start = items.get(start_id).expect("kit item is defined");
+                    if start.held() != item.held() {
+                        continue;
+                    }
+                    checked.insert(id.as_str());
+                    let floor = calculate_budget_usage(start) * (1.0 + CHAMPION_GAIN);
+                    if gain < floor {
+                        short.push(format!(
+                            "{id:?} spends {gain:.2}, under {floor:.2} over {class:?}'s {socket:?} {start_id:?}"
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(short.is_empty(), "{}", short.join("\n"));
+        let weapons: std::collections::BTreeSet<&str> = CHAMPION_TIER
+            .iter()
+            .filter(|id| items.get(id).expect("shipped").slot.is_weapon_slot())
+            .map(|id| id.as_str())
+            .collect();
+        assert_eq!(
+            checked, weapons,
+            "every Champion weapon-socket item met a starting item"
+        );
+    }
+
+    /// A Champion one-hander, bow, crossbow or wand deals the weapon DPS of
+    /// the starting-kit weapon of its kind scaled by item level, as the budget
+    /// scales its stats: `anchor DPS x ilvl / anchor ilvl`. The anchor is the
+    /// starting weapon of the same type and role (physical or caster), or the
+    /// starting one-hander of its role where none of its type starts. Weapon
+    /// damage is a free stat, so nothing else ties a tier's damage to its item
+    /// level. A Champion two-hander follows from its one-hander by Classic's
+    /// premium (`two_handers_carry_the_classic_premium_over_the_one_hander_they_displace`).
+    /// Every Champion weapon that is not a two-hander is named, by set
+    /// equality.
+    #[test]
+    fn champion_weapon_dps_scales_its_starting_weapon_by_item_level() {
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        let item = |id: ItemId| item_defs.get(&id).expect("shipped");
+        let dps = |id: ItemId| {
+            let item = item(id);
+            (item.attack_damage_min + item.attack_damage_max) / 2.0 / item.weapon_speed
+        };
+        // (Champion weapon, the starting-kit weapon it scales)
+        let table = [
+            (ItemId::Gressil, ItemId::FrostbiteBlade),
+            (ItemId::Kingsfall, ItemId::SerpentFangDagger),
+            (
+                ItemId::HammerOfTheTwistingNether,
+                ItemId::HammerOfTheRighteous,
+            ),
+            // No caster sword starts; Witchblade is the caster one-hander.
+            (ItemId::WraithBlade, ItemId::Witchblade),
+            (ItemId::Doomfinger, ItemId::WandOfShadows),
+            (ItemId::Soulstring, ItemId::AshwoodBow),
+            (ItemId::NerubianSlavemaker, ItemId::SniperScope),
+        ];
+        for (champion, anchor) in table {
+            assert_eq!(
+                item(anchor).tier(),
+                Some(ItemTier::StartingKit),
+                "{champion:?} scales a starting-kit weapon"
+            );
+            let expected =
+                dps(anchor) * item(champion).item_level as f32 / item(anchor).item_level as f32;
+            assert!(
+                (dps(champion) / expected - 1.0).abs() < 1e-3,
+                "{champion:?} DPS {:.3}, {anchor:?}'s {:.3} scaled by item level is {expected:.3}",
+                dps(champion),
+                dps(anchor)
+            );
+        }
+
+        let shipped: std::collections::BTreeSet<String> = item_defs
+            .iter()
+            .filter(|(_, item)| {
+                item.tier() == Some(ItemTier::Champion)
+                    && item.is_weapon
+                    && item.held() != Some(HeldSlot::TwoHand)
+            })
+            .map(|(id, _)| format!("{id:?}"))
+            .collect();
+        let named: std::collections::BTreeSet<String> =
+            table.iter().map(|row| format!("{:?}", row.0)).collect();
+        assert_eq!(
+            shipped, named,
+            "every Champion one-hander and ranged weapon has its anchor in this table"
+        );
+    }
+
     /// The Champion tier's gain over the starting item in its slot (§6.5).
-    const CHAMPION_ARMOR_GAIN: f32 = 0.55;
+    const CHAMPION_GAIN: f32 = 0.55;
 
     /// Every Champion-tier (item_tier 2) item.
-    const CHAMPION_TIER: [ItemId; 57] = [
+    const CHAMPION_TIER: [ItemId; 72] = [
         ItemId::FrostfireCirclet,
         ItemId::FrostfireRobe,
         ItemId::FrostfireLeggings,
@@ -4516,6 +4654,21 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         ItemId::RedemptionBoots,
         ItemId::RedemptionGirdle,
         ItemId::RedemptionWristguards,
+        ItemId::CorruptedAshbringer,
+        ItemId::Gressil,
+        ItemId::Kingsfall,
+        ItemId::HammerOfTheTwistingNether,
+        ItemId::WraithBlade,
+        ItemId::Soulseeker,
+        ItemId::Doomfinger,
+        ItemId::Soulstring,
+        ItemId::NerubianSlavemaker,
+        ItemId::SapphironsLeftEye,
+        ItemId::TheFaceOfDeath,
+        ItemId::ShieldOfCondemnation,
+        ItemId::LibramOfLight,
+        ItemId::TotemOfTheStorm,
+        ItemId::IdolOfTheMoon,
         ItemId::MedallionOfTheAlliance,
     ];
 
@@ -4705,6 +4858,16 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
                 ItemId::FrostbiteBlade,
                 ItemId::SerpentFangDagger,
             ),
+            (
+                ItemId::CorruptedAshbringer,
+                ItemId::Gressil,
+                ItemId::TheFaceOfDeath,
+            ),
+            (
+                ItemId::Soulseeker,
+                ItemId::HammerOfTheTwistingNether,
+                ItemId::SapphironsLeftEye,
+            ),
         ];
         for (two_hander, one_hander, off_hand) in table {
             let pair = usage(one_hander) + usage(off_hand);
@@ -4742,7 +4905,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     fn every_weapon_declares_its_classic_speed() {
         let item_defs = load_item_definitions().expect("items.ron must load");
         // (sim item, Classic speed, Wowhead item id of the Classic stand-in)
-        let table: [(ItemId, f32, u32); 21] = [
+        let table: [(ItemId, f32, u32); 30] = [
             (ItemId::ArcaniteReaper, 3.8, 12784),
             (ItemId::FrostbiteBlade, 2.8, 12940),
             (ItemId::SerpentFangDagger, 1.7, 12590),
@@ -4764,6 +4927,19 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             (ItemId::EaglestrikeBow, 2.9, 18713),
             (ItemId::DeadeyeCrossbow, 3.1, 21459),
             (ItemId::Peacemaker, 3.4, 18725),
+            // Champion tier (AS-425): Naxxramas. Each is its same-named item
+            // where that is within 5 item levels, else the nearest of its
+            // type, hand and role (Soulstring, ilvl 83, is the nearest bow;
+            // Wraith Blade, 83, the nearest caster sword).
+            (ItemId::CorruptedAshbringer, 3.6, 22691),
+            (ItemId::Gressil, 2.7, 23054),
+            (ItemId::Kingsfall, 1.8, 22802),
+            (ItemId::HammerOfTheTwistingNether, 1.9, 23056),
+            (ItemId::WraithBlade, 1.8, 22807),
+            (ItemId::Soulseeker, 3.2, 22799),
+            (ItemId::Doomfinger, 1.5, 22821),
+            (ItemId::Soulstring, 2.9, 22811),
+            (ItemId::NerubianSlavemaker, 3.2, 22812),
         ];
         for (id, speed, classic_id) in table {
             let item = item_defs.get(&id).expect("shipped");
@@ -4824,6 +5000,15 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             ),
             // Peacemaker (18725) / Dal'Rend's Sacred Charge (12940)
             (ItemId::Peacemaker, ItemId::FrostbiteBlade, 50.44, 41.43),
+            // Corrupted Ashbringer (22691) / Gressil, Dawn of Ruin (23054)
+            (ItemId::CorruptedAshbringer, ItemId::Gressil, 90.00, 73.15),
+            // Soulseeker (22799) / Hammer of the Twisting Nether (23056)
+            (
+                ItemId::Soulseeker,
+                ItemId::HammerOfTheTwistingNether,
+                63.59,
+                41.58,
+            ),
         ];
         for (two_hander, one_hander, classic_2h, classic_1h) in table {
             let premium = classic_2h / classic_1h;
