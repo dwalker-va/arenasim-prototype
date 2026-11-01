@@ -413,7 +413,7 @@ mod tests {
             std::fs::read_to_string(crate::paths::asset_path("config/talents.ron")).unwrap();
         let text = shipped.replacen(
             "per_rank: [PetStatPercent(MaxHealth, 0.10)],",
-            "per_rank: [Proc((trigger: StealthBreak, chance: Chance(1.0), ranks_add: Chance, \
+            "per_rank: [Proc((trigger: StealthBreak, chance: Chance(1.0), ranks_add: Effect, \
              effect: ApplyAura(on: Owner, aura_type: AttackPowerIncrease, magnitude: 5.0, \
              duration: 6.0, dispel_type: Physical)))],",
             1,
