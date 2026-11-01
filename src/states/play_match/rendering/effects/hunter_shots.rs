@@ -992,10 +992,11 @@ pub fn animate_client_particles(
         &mut ClientParticle,
         &mut Transform,
         &mut MeshMaterial3d<StandardMaterial>,
+        Option<&ParticleDrag>,
     )>,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut p, mut transform, mut material) in particles.iter_mut() {
+    for (entity, mut p, mut transform, mut material, drag) in particles.iter_mut() {
         p.age += dt;
         if p.age >= p.life {
             if p.owned {
@@ -1006,6 +1007,9 @@ pub fn animate_client_particles(
             continue;
         }
         p.velocity.y -= p.gravity * dt;
+        if let Some(drag) = drag {
+            p.velocity *= (-drag.per_sec * dt).exp();
+        }
         let velocity = p.velocity;
         transform.translation += velocity * dt;
         let t = p.age / p.life;

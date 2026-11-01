@@ -28,6 +28,7 @@
 
 use super::frost_nova::spawn_frost_nova;
 use super::holy_justice::spawn_holy_justice;
+use super::life_tap::spawn_life_tap_glow;
 use super::mortal_strike::spawn_mortal_strike_flourish;
 use super::rogue_crescents::{spawn_crescent_fan, CHEAP_SHOT_CRESCENTS, KIDNEY_SHOT_CRESCENTS};
 use crate::states::play_match::abilities::AbilityType;
@@ -212,6 +213,12 @@ pub fn consume_instant_ability_signals(
                         caster_pos,
                         &victims,
                     );
+                }
+            }
+            // Caster-centred too: Life Tap lands on the Warlock's own chest.
+            a if LifeTapGlow::plays_for(a) => {
+                if let Some(caster_pos) = caster_pos {
+                    spawn_life_tap_glow(&mut commands, signal.caster, caster_pos);
                 }
             }
             _ => {}

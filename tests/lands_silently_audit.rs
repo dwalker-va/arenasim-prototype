@@ -56,7 +56,7 @@ use arenasim::states::play_match::ability_config::{AbilityConfig, AbilityDefinit
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::components::{
     AuraLandingKind, AuraType, CurseKind, HealImpact, HealImpactKind, HotVisual,
-    InstantAbilityFired, RootStyle, SchoolImpact, TotemElement,
+    InstantAbilityFired, LifeTapGlow, RootStyle, SchoolImpact, TotemElement,
 };
 use arenasim::states::play_match::equipment::{load_item_definitions, ItemDefinitions, ItemId};
 use arenasim::states::play_match::on_use_items::OnUseEffect;
@@ -899,15 +899,15 @@ fn is_health_to_mana(_: AbilityType, c: &AbilityConfig) -> bool {
 
 const HEALTH_TO_MANA_MEMBERS: &[AbilityType] = &[LifeTap];
 
-/// Nothing draws a conversion yet: its health and mana move on the bars and
-/// in floating combat text, which every ability shares. When AS-333 dresses
-/// Life Tap, this names that visual's router and the entry below comes off.
-fn health_to_mana_visual(_: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
-    None
+/// A conversion lands on its caster: the Warlock AI spawns the
+/// `InstantAbilityFired` marker, and the instant-ability router plays the
+/// Life Tap glow off it (`lifetap.m2`, AS-340).
+fn health_to_mana_visual(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
+    (InstantAbilityFired::is_spawned_for(a) && LifeTapGlow::plays_for(a))
+        .then_some("Life Tap glow on the caster's chest (life_tap.rs)")
 }
 
-const HEALTH_TO_MANA_KNOWN_SILENT: &[(AbilityType, &str)] =
-    &[(LifeTap, "AS-333 (0.9 visuals: Life Tap)")];
+const HEALTH_TO_MANA_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
 
 #[test]
 fn health_to_mana_finds_every_member() {

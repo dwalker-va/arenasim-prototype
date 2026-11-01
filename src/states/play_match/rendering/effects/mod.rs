@@ -20,6 +20,8 @@ mod transform_puffs;
 pub use transform_puffs::*;
 mod shapeshift;
 pub use shapeshift::*;
+mod life_tap;
+pub use life_tap::*;
 mod flame;
 pub use flame::*;
 mod drain_life;
