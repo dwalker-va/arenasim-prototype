@@ -954,7 +954,7 @@
         // TBC's Medallion of the Alliance / Horde (Classic's Insignia, 18854):
         // a once-a-match break of every loss of control and movement
         // impairment. A Champion trinket's budget (92 x 0.75 x 0.70 = 48.3):
-        // the break's declared price is 18, what it measured worth in health,
+        // the break's declared price is 24, what it measured worth in health,
         // and the rest is health. Played against the whole budget as health it
         // measures level (docs/design/balance/2026-10-31-as305-medallion.md).
         MedallionOfTheAlliance: (
@@ -963,11 +963,11 @@
             item_tier: 2,
             icon: "icons/items/inv_jewelry_trinketpvp_01.jpg",
             slot: Trinket,
-            max_health: 30.0,
+            max_health: 24.0,
             on_use: Some((
                 effect: CcBreak,
                 cooldown: OncePerMatch,
-                price: Some(18.0),
+                price: Some(24.0),
             )),
         ),
 

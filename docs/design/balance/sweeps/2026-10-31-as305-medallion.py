@@ -29,6 +29,7 @@ import itertools
 import json
 import math
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -141,13 +142,20 @@ def analyze(out, a_name, b_name):
 
 
 def fires(out, binary, n):
-    """Play every (len/n)th Medallion match alone with its trace, and count the
-    wearer's holds, waits for a dispel, and uses."""
+    """Play a seeded sample of `n` Medallion matches alone with their traces,
+    and count the wearer's holds, its uses of the Medallion, and its waits for
+    a teammate's dispel: a wait ENDS when its last `waiting for` ask is not
+    followed within a frame or two by a use — the dispel landed, or the hold
+    ended — and is BROKEN when it is (the grace ran out, or the dispeller
+    could no longer dispel)."""
     work = os.path.join(out, "fires")
     os.makedirs(work, exist_ok=True)
     lines = open(os.path.join(out, "med.jsonl")).read().splitlines()
-    sample = lines[:: max(len(lines) // n, 1)][:n]
-    held = used = waited = waited_then_dispelled = 0
+    # A seeded random sample: a fixed stride walks the cell grid in step and
+    # can miss a class's CC-heavy cells altogether.
+    sample = random.Random(305).sample(lines, min(n, len(lines)))
+    held = used = 0
+    waits_ended = waits_broken = 0
     per_class = Counter()
     per_class_used = Counter()
     for line in sample:
@@ -155,7 +163,10 @@ def fires(out, binary, n):
         open(os.path.join(work, "c.json"), "w").write(line)
         for f in glob.glob(os.path.join(work, "match_logs", "*")):
             os.remove(f)
+        # CARGO_MANIFEST_DIR set: logs land in `work/match_logs`, not the
+        # player's data directory (`paths::match_log_dir`).
         subprocess.run([binary, "--headless", "c.json", "--trace-mode", "on"], cwd=work,
+                       env={**os.environ, "CARGO_MANIFEST_DIR": work},
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         traces = glob.glob(os.path.join(work, "match_logs", "*_trace.jsonl"))
         if not traces:
@@ -175,16 +186,19 @@ def fires(out, binary, n):
         if any(e["status"] == "chosen" for e in events):
             used += 1
             per_class_used[cls] += 1
-        waits = [e for e in events if "waiting for" in json.dumps(e.get("reason"))]
-        if waits:
-            waited += 1
-            if not any(e["status"] == "chosen" and e["sim_time"] - waits[0]["sim_time"] < 3.0
-                       for e in events):
-                waited_then_dispelled += 1
+        for i, e in enumerate(events):
+            if "waiting for" not in json.dumps(e.get("reason")):
+                continue
+            nxt = events[i + 1] if i + 1 < len(events) else None
+            if nxt is not None and nxt["sim_time"] - e["sim_time"] < 0.05:
+                if nxt["status"] == "chosen":
+                    waits_broken += 1
+                continue
+            waits_ended += 1
     total = sum(per_class.values())
     print(f"{total} matches: wearer held in {held}, used the Medallion in {used} "
-          f"({100*used/total:.0f}%), waited for a dispel in {waited} "
-          f"(kept it through the wait in {waited_then_dispelled})")
+          f"({100*used/total:.0f}%); waits for a dispel: {waits_ended} ended with the "
+          f"Medallion kept, {waits_broken} broken after the wait")
     for c in sorted(per_class):
         print(f"    {c:8} used in {per_class_used[c]}/{per_class[c]}")
 

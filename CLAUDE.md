@@ -710,7 +710,7 @@ any ring fits either ring socket, and the same item may not occupy both
    on_use: Some((
        effect: CcBreak,           // the Medallion's break
        cooldown: OncePerMatch,    // or Seconds(60.0)
-       price: Some(18.0),         // declared, per use; only where no stat weight prices the effect
+       price: Some(24.0),         // declared, per use; only where no stat weight prices the effect
    )),
    ```
    - **Pricing: uses in an arena life**, not the proc's long-run bound.
