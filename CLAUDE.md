@@ -2040,7 +2040,7 @@ cargo run --release -- --ui-script tests/ui-scripts/view-combatant-tooltips.scri
 Input is injected at BEVY's input events (`CursorMoved` / `MouseButtonInput` /
 `KeyboardInput` / `MouseWheel`) in `PreUpdate` before `InputSystem`, so
 `ButtonInput<KeyCode>` and bevy_egui's own conversion both run exactly as they
-do for a physical device. Steps: `hover`, `click <id> [left|right]`, `key`,
+do for a physical device. Steps: `hover`, `click <id> [left|right] [shift]`, `key`,
 `wait`, `assert-state`, `assert-view`, `assert-note`, `assert-no-note`,
 `await-note <secs> <substring>` (polls on the wall clock for something the
 match produces on its own, e.g. a banter line), `assert-visible` (drawn AND on screen), `assert-absent` (not drawn at all —

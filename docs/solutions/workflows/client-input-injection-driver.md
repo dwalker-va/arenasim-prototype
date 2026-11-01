@@ -112,8 +112,8 @@ Three smaller limits, all real:
 ```text
 # Comments and blank lines are ignored; '#' also ends a line.
 hover <id>                  # park the cursor
-click <id> [left|right]     # hover, press, release
-key <Escape|Enter|Tab|Space|Backspace|ArrowLeft|ArrowRight|ArrowUp|ArrowDown>
+click <id> [left|right] [shift]  # hover, press, release; shift is held across the press
+key <Escape|Enter|Tab|Space|Backspace|ArrowLeft|ArrowRight|ArrowUp|ArrowDown|Shift>
 wait <frames>               # on top of each step's own settle
 assert-state <GameState>    # the Rust variant name, e.g. ViewCombatant
 assert-view <Topic>         # the encyclopedia's topic, Debug form, or `none`

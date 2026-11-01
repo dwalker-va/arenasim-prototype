@@ -463,15 +463,18 @@ dump
             },
             Step::Click {
                 id: "menu:MATCH".into(),
-                button: Button::Left
+                button: Button::Left,
+                modifier: None,
             },
             Step::Click {
                 id: "equip:Ring1".into(),
-                button: Button::Left
+                button: Button::Left,
+                modifier: None,
             },
             Step::Click {
                 id: "equip:Ring1".into(),
-                button: Button::Right
+                button: Button::Right,
+                modifier: None,
             },
             Step::Key(NamedKey::Escape),
             Step::Wait { frames: 12 },
@@ -849,6 +852,7 @@ fn a_hover_waits_on_eguis_gates_rather_than_counting_frames() {
         &Step::Click {
             id: "kit:Ambush".into(),
             button: Button::Left,
+            modifier: None,
         },
         3,
     );
@@ -904,6 +908,7 @@ fn only_assertions_expand_to_a_check() {
         Step::Click {
             id: "x".into(),
             button: Button::Right,
+            modifier: None,
         },
         Step::Key(NamedKey::Escape),
         Step::Wait { frames: 5 },
@@ -1080,8 +1085,12 @@ const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
     // spelling, one tooltip note, and a `choice:` mark for an option that is
     // not an ability), and the restore button registers through the kit's
     // `driver_id`.
-    // The stats panel notes each talent-raised total it draws.
-    ("src/states/view_combatant_ui.rs", 12),
+    // The stats panel notes each total it draws (the four raised rows, and
+    // the rows read through `StatLine`).
+    ("src/states/view_combatant_ui.rs", 13),
+    // A class page notes which list each ability is drawn in: the base kit
+    // or the talent abilities.
+    ("src/states/encyclopedia/classes.rs", 2),
     // The note of the AI profile that played, beside the duration, and of
     // each talented row's spec.
     ("src/states/results_ui.rs", 2),
@@ -1488,4 +1497,60 @@ fn a_hover_waits_out_the_click_rest_in_seconds_at_any_frame_rate() {
              the 0.1s it waits for"
         );
     }
+}
+
+/// `click <id> <button> shift` holds Shift across the whole press: the key
+/// goes down before the button is pressed and up only after it is released,
+/// so egui sees the modifier on the frame it reads the click. A plain click
+/// sends no key at all, and any other modifier word is a parse error.
+#[test]
+fn a_shift_click_holds_shift_across_the_press() {
+    use arenasim::ui::driver::runner::Micro;
+
+    let parsed: Vec<Step> = Script::parse("shift", "click talent:X left shift\nclick talent:X\n")
+        .expect("parses")
+        .steps
+        .into_iter()
+        .map(|(_, step)| step)
+        .collect();
+    assert_eq!(
+        parsed,
+        vec![
+            Step::Click {
+                id: "talent:X".into(),
+                button: Button::Left,
+                modifier: Some(NamedKey::Shift),
+            },
+            Step::Click {
+                id: "talent:X".into(),
+                button: Button::Left,
+                modifier: None,
+            },
+        ]
+    );
+    assert!(Script::parse("bad", "click talent:X left ctrl\n").is_err());
+
+    let shifted = runner::expand(&parsed[0], 3);
+    let at = |want: &dyn Fn(&Micro) -> bool| {
+        shifted
+            .iter()
+            .position(want)
+            .unwrap_or_else(|| panic!("missing from {shifted:?}"))
+    };
+    let down = at(&|m| matches!(m, Micro::KeyDown(NamedKey::Shift)));
+    let press = at(&|m| matches!(m, Micro::Press(Button::Left)));
+    let release = at(&|m| matches!(m, Micro::Release(Button::Left)));
+    let up = at(&|m| matches!(m, Micro::KeyUp(NamedKey::Shift)));
+    assert!(
+        down < press && press < release && release < up,
+        "{shifted:?}"
+    );
+
+    let plain = runner::expand(&parsed[1], 3);
+    assert!(
+        !plain
+            .iter()
+            .any(|m| matches!(m, Micro::KeyDown(_) | Micro::KeyUp(_))),
+        "{plain:?}"
+    );
 }

@@ -192,6 +192,12 @@ fn the_spec_reads_three_trees_and_names_a_hybrid() {
     assert_eq!(hybrid.short, "4/0/4");
     // A tie BELOW the top is no hybrid.
     assert_eq!(named([1, 6, 1]).expect("spent").label, "Demonology Warlock");
+    // Three level at the top name no pair.
+    let even = named([2, 2, 2]).expect("spent");
+    assert_eq!(
+        (even.label.as_str(), even.short.as_str()),
+        ("Hybrid Warlock", "2/2/2")
+    );
 }
 
 /// The shipped trees with Unholy Power needing Fel Stamina 2/2 — an arrow the

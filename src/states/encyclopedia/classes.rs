@@ -133,6 +133,7 @@ pub fn render_detail(
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::Vec2::splat(space::XS);
         for ability in &base {
+            crate::ui::driver::note(ui, format_args!("class-kit base {ability:?}"));
             if let Some(topic) = widget::icon_link(ui, Topic::Ability(*ability), data) {
                 clicked = Some(topic);
             }
@@ -145,6 +146,7 @@ pub fn render_detail(
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::Vec2::splat(space::XS);
             for ability in &from_talents {
+                crate::ui::driver::note(ui, format_args!("class-kit talent {ability:?}"));
                 if let Some(topic) = widget::icon_link(ui, Topic::Ability(*ability), data) {
                     clicked = Some(topic);
                 }

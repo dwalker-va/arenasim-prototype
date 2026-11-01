@@ -169,7 +169,7 @@ impl<'a> TalentTrees<'a> {
         // class with fewer than three trees keeps the lattice's proportions;
         // the set starts at the left edge, as the page's text does.
         let widest = 2.0 * space::SM
-            + gutter_width(ui)
+            + gutter_width(ui, self.trees)
             + COLUMNS as f32 * size::TALENT_NODE_MAX
             + (COLUMNS as f32 - 1.0) * space::SM;
         let tree_w = ((width - (count - 1.0) * space::MD) / count).min(widest);
@@ -248,7 +248,7 @@ impl<'a> TalentTrees<'a> {
 
         // The grid: a gate gutter, then three node columns, centred in what
         // is left when a node reaches its widest.
-        let gutter = gutter_width(ui);
+        let gutter = gutter_width(ui, self.trees);
         let grid_left = inner.left() + gutter;
         let grid_w = inner.right() - grid_left;
         let columns = COLUMNS as f32;
@@ -284,7 +284,7 @@ impl<'a> TalentTrees<'a> {
             painter.text(
                 egui::pos2(inner.left(), row_top(tier) + space::XS),
                 egui::Align2::LEFT_TOP,
-                format!("{gate}+"),
+                gate_label(*gate),
                 egui::FontId::proportional(text::MICRO),
                 gate_color,
             );
@@ -454,12 +454,25 @@ fn name_font() -> egui::FontId {
     egui::FontId::proportional(text::SMALL)
 }
 
-/// The gutter left of the tier rows, wide enough for the widest gate ("5+").
-fn gutter_width(ui: &egui::Ui) -> f32 {
-    super::galley(ui, "5+", text::MICRO, color::TEXT_DIM)
-        .size()
-        .x
+/// The gutter left of the tier rows, wide enough for the widest gate label
+/// any of `trees` draws.
+fn gutter_width(ui: &egui::Ui, trees: &[TalentTreeColumn]) -> f32 {
+    trees
+        .iter()
+        .flat_map(|tree| tree.gates.iter())
+        .filter(|gate| **gate > 0)
+        .map(|gate| {
+            super::galley(ui, gate_label(*gate), text::MICRO, color::TEXT_DIM)
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max)
         + space::XS
+}
+
+/// A tier gate's label: the points it needs, "2+".
+fn gate_label(gate: u32) -> String {
+    format!("{gate}+")
 }
 
 /// A tree head's height: its name at [`text::H3`].

@@ -7,9 +7,12 @@
 #   2. tier 2 is locked until two points are spent in Demonology;
 #   3. three clicks learn three ranks, and the panel names the spec;
 #   4. the tier-2 node opens and takes a rank;
-#   5. right-click a node -> the encyclopedia, on that talent's page;
-#   6. Esc -> back on View Combatant, the build still spent;
-#   7. Esc -> Configure Match, whose slot row reads the spec.
+#   5. shift-click takes a rank back (the driver holds Shift across the
+#      press at Bevy's input layer), and a click learns it again;
+#   6. right-click a node -> the encyclopedia, on that talent's page;
+#   7. Esc -> back on View Combatant, the build still spent;
+#   8. Esc -> Configure Match, whose slot row reads the spec;
+#   9. Reset clears the build, and the slot reads its class again.
 #
 # Every wait is the driver's own (hover settles on egui's tooltip gate, a
 # click on the click): there is no frame count here.
@@ -46,6 +49,12 @@ assert-note talents:t1s0 points=4 spec=Demonology Warlock 4
 # A maxed node takes no more.
 assert-enabled talent:DemonicEmbrace false
 
+# Shift-click takes a rank back; a plain click learns it again.
+click talent:UnholyPower left shift
+assert-note talents:t1s0 points=3 spec=Demonology Warlock 3
+click talent:UnholyPower
+assert-note talents:t1s0 points=4 spec=Demonology Warlock 4
+
 # The deep link: right-click opens the talent's page.
 click talent:UnholyPower right
 assert-state Encyclopedia
@@ -59,4 +68,14 @@ assert-note talents:t1s0 points=4 spec=Demonology Warlock 4
 key Escape
 assert-state ConfigureMatch
 assert-note slot:t1s0 subtitle=Demonology Warlock 4
+
+# Reset clears the build, and the slot reads its class again.
+click slot:t1s0
+assert-state ViewCombatant
+click talents:reset
+assert-note talents:t1s0 points=0 spec=No talents learned
+assert-enabled talents:reset false
+key Escape
+assert-state ConfigureMatch
+assert-note slot:t1s0 subtitle=Shadow magic and curses
 dump

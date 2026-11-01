@@ -114,6 +114,25 @@ pub fn called_slots(config: &MatchConfig) -> (Option<usize>, Option<usize>) {
     (config.team2_kill_target, config.team1_kill_target)
 }
 
+/// The spec a frame's header reads for the combatant in `team`'s `slot`: the
+/// one its build in the config the match spawned from names. `None` for a pet
+/// (its slot reaches no build), and for an untalented combatant.
+pub fn frame_spec(
+    config: &MatchConfig,
+    talents: &TalentDefinitions,
+    team: u8,
+    slot: u8,
+    class: CharacterClass,
+    is_pet: bool,
+) -> Option<Spec> {
+    if is_pet {
+        return None;
+    }
+    config
+        .build(team, usize::from(slot))
+        .and_then(|build| talents.spec(class, build))
+}
+
 /// Apply a frame click to the kill-target config.
 ///
 /// A team's call points at an enemy, so a click in the Team 2 column sets
@@ -872,15 +891,14 @@ pub fn render_team_frames(
             }
         }
 
-        // The spec its build names, from the config the match spawned from
-        // (a pet's slot reaches no build).
-        let spec = if pet_label.is_some() {
-            None
-        } else {
-            config
-                .build(combatant.team, usize::from(combatant.slot))
-                .and_then(|build| talents.spec(combatant.class, build))
-        };
+        let spec = frame_spec(
+            &config,
+            &talents,
+            combatant.team,
+            combatant.slot,
+            combatant.class,
+            pet_label.is_some(),
+        );
         let frame = CombatantFrame {
             class: combatant.class,
             spec,
@@ -936,6 +954,36 @@ mod tests {
             buffs: Vec::new(),
             debuffs: Vec::new(),
         }
+    }
+
+    /// A frame names its slot's spec, an untalented slot none, and a pet
+    /// none even where its owner's slot index holds a build.
+    #[test]
+    fn a_frame_reads_its_slots_spec() {
+        use crate::states::play_match::talents::{Build, TalentId};
+        let talents = TalentDefinitions::shipped();
+        let mut config = MatchConfig::default();
+        config.set_team2_size(2);
+        config.team2[0] = Some(CharacterClass::Warlock);
+        config.team2[1] = Some(CharacterClass::Warlock);
+        config.team2_builds[0] =
+            Build::of(&[(TalentId::DemonicEmbrace, 2), (TalentId::FelStamina, 1)]);
+        let spec = frame_spec(&config, talents, 2, 0, CharacterClass::Warlock, false)
+            .expect("a talented slot names a spec");
+        assert_eq!(spec.line(), "Demonology Warlock 3");
+        assert_eq!(
+            frame_spec(&config, talents, 2, 1, CharacterClass::Warlock, false),
+            None
+        );
+        assert_eq!(
+            frame_spec(&config, talents, 2, 0, CharacterClass::Warlock, true),
+            None
+        );
+        // Team 1's same slot is its own: untalented.
+        assert_eq!(
+            frame_spec(&config, talents, 1, 0, CharacterClass::Warlock, false),
+            None
+        );
     }
 
     fn pet(class: CharacterClass) -> CombatantFrame {

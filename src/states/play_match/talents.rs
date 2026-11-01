@@ -1156,9 +1156,10 @@ pub struct Spec {
 impl Spec {
     /// The spec named by the points in each of `class`'s trees, given in
     /// display order as `(tree name, points)`: the tree with the most points
-    /// names it, and two trees tied for the most read as a hybrid
-    /// ("Affliction-Demonology hybrid", in display order). `None` when no
-    /// point is spent.
+    /// names it, two trees tied for the most read as a hybrid of the two
+    /// ("Affliction-Demonology hybrid", in display order), and three or more
+    /// level at the top as a plain "Hybrid Warlock". `None` when no point is
+    /// spent.
     pub fn from_tree_points(class: CharacterClass, trees: &[(&str, u32)]) -> Option<Spec> {
         let total: u32 = trees.iter().map(|(_, p)| p).sum();
         if total == 0 {
@@ -1168,6 +1169,10 @@ impl Spec {
         // Most points first; a tie keeps display order (the sort is stable).
         ranked.sort_by_key(|t| std::cmp::Reverse(t.1));
         let label = match ranked.as_slice() {
+            // Three or more trees level at the top: no pair names it.
+            [(_, a), (_, b), (_, c), ..] if a == b && b == c => {
+                format!("Hybrid {}", class.name())
+            }
             [(first, a), (second, b), ..] if a == b => format!("{first}-{second} hybrid"),
             [(first, _), ..] => format!("{first} {}", class.name()),
             [] => return None,
