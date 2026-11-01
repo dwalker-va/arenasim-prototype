@@ -18,7 +18,7 @@
 
 use bevy_egui::egui;
 
-use super::bars::icon_tile;
+use super::tier_frame::tier_icon;
 use super::tooltip::hint_line;
 use crate::states::encyclopedia::{EncyclopediaData, Topic};
 use crate::ui::theme::{color, size, space, text};
@@ -51,14 +51,22 @@ pub fn secondary_click_chrome_hint(ui: &mut egui::Ui) {
 }
 
 /// Paint an entity's icon into `rect`, falling back to the shared neutral tile
-/// when its icon resource has not been loaded (or does not exist yet).
+/// when its icon resource has not been loaded (or does not exist yet). An
+/// item's icon wears its tier frame ([`super::tier_frame`]), so every item
+/// icon drawn through here says which tier it is.
 pub fn paint_icon(
     painter: &egui::Painter,
     rect: egui::Rect,
     topic: Topic,
     data: &EncyclopediaData,
 ) {
-    icon_tile(painter, rect, topic.icon(data), color::LINE);
+    tier_icon(
+        painter,
+        rect,
+        topic.icon(data),
+        color::LINE,
+        topic.item_tier(data),
+    );
 }
 
 /// The entity's tooltip. Delegates to the existing builder for each kind —

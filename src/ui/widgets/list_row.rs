@@ -16,17 +16,20 @@
 
 use bevy_egui::egui;
 
-use super::bars::icon_tile;
+use super::tier_frame::tier_icon;
 use super::{allocate, fitted, mark, Look};
+use crate::states::play_match::equipment::ItemTier;
 use crate::ui::fonts::body_family;
 use crate::ui::theme::{color, icon, radius, space, stroke, text};
 
 /// A row's icon: a texture when there is one, else the shared fallback tile,
-/// edged in `edge` (a class colour, or [`color::LINE`]).
+/// edged in `edge` (a class colour, or [`color::LINE`]). An item's icon also
+/// names its `tier`, and wears that tier's frame ([`super::tier_frame`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ListIcon {
     pub texture: Option<egui::TextureId>,
     pub edge: egui::Color32,
+    pub tier: Option<ItemTier>,
 }
 
 /// A list row, configured. Draw it with [`list_row`].
@@ -200,13 +203,14 @@ pub fn list_row(ui: &mut egui::Ui, row: ListRow<'_>) -> egui::Response {
             egui::pos2(rect.left() + space::SM, icon_top),
             egui::Vec2::splat(icon_len),
         );
-        // A disabled row gives up its colour, the icon's edge included.
-        let edge = if look == Look::Disabled {
-            color::LINE
+        // A disabled row gives up its colour, the icon's edge and tier frame
+        // included.
+        let (edge, tier) = if look == Look::Disabled {
+            (color::LINE, None)
         } else {
-            row_icon.edge
+            (row_icon.edge, row_icon.tier)
         };
-        icon_tile(&painter, icon_rect, row_icon.texture, edge);
+        tier_icon(&painter, icon_rect, row_icon.texture, edge, tier);
     }
 
     let (name_color, sub_color, meta_color) = if look == Look::Disabled {

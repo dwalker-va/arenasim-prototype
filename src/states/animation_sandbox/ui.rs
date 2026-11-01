@@ -272,6 +272,7 @@ fn stage_controls(ui: &mut egui::Ui, view: &SandboxView, actions: &mut Vec<Sandb
             .icon(ListIcon {
                 texture: *icon,
                 edge: class_color(*class),
+                tier: None,
             })
             .selected(selected);
         if list_row(ui, row).clicked() && !selected {
@@ -369,6 +370,7 @@ fn entry_list(ui: &mut egui::Ui, view: &SandboxView, actions: &mut Vec<SandboxAc
             .icon(ListIcon {
                 texture: row.icon,
                 edge: color::LINE,
+                tier: None,
             })
             .selected(selected)
             .enabled(enabled);
