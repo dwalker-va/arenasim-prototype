@@ -844,6 +844,24 @@ item_ids! {
     LibramOfLight,
     TotemOfTheStorm,
     IdolOfTheMoon,
+
+    // === Champion: Necklaces, Cloaks and Rings (all classes) ===
+    StormragesTalismanOfSeething,
+    ShroudOfDominion,
+    BandOfUnnaturalForces,
+    BandOfReanimation,
+    GemOfTrappedInnocents,
+    CloakOfTheNecropolis,
+    SealOfTheDamned,
+    BandOfTheInevitable,
+    NecklaceOfNecropsy,
+    CloakOfSuturing,
+    BandOfUnansweredPrayers,
+    RingOfSpiritualFervor,
+    MarkOfCThun,
+    CryptfiendSilkCloak,
+    SignetOfTheFallenDefender,
+    HailstoneBand,
 }
 
 // ============================================================================
@@ -4366,7 +4384,8 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     /// the same armor type that a class holds in that slot by default (a
     /// Paladin's plate chest is not what a cloth robe replaces). Armor only;
     /// the weapon sockets are
-    /// `champion_weapons_clear_the_offer_floor_over_the_starting_kit`. The floor is G2's to
+    /// `champion_weapons_clear_the_offer_floor_over_the_starting_kit`, the
+    /// accessories `champion_accessories_clear_the_offer_floor_over_the_starting_kit`. The floor is G2's to
     /// enforce on offers; this holds the authored items to it. Every pairing
     /// is counted, so the check cannot pass on none.
     #[test]
@@ -4410,6 +4429,120 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             checked, armor,
             "every Champion armor piece met a starting item"
         );
+    }
+
+    /// The Champion offer floor in the accessory sockets (neck, back, both
+    /// rings, and the trinkets once a Champion one exists): a Champion
+    /// accessory spends at least [`CHAMPION_GAIN`] more of the budget than
+    /// the starting-kit item every class holds in that socket by default. An
+    /// accessory has no armor type and every class wears it, so each class's
+    /// default is a starting item it would replace, and a ring is measured
+    /// against both ring sockets. Every Champion accessory must meet at least
+    /// one starting item, named by set equality, so the check cannot pass on
+    /// none.
+    #[test]
+    fn champion_accessories_clear_the_offer_floor_over_the_starting_kit() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let loadouts = load_default_loadouts(&items).expect("loadouts.ron must load");
+        let is_accessory =
+            |item: &ItemConfig| item.armor_type == ArmorType::None && !item.slot.is_weapon_slot();
+        let mut short = Vec::new();
+        let mut checked: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for (id, item) in items.iter() {
+            if item.tier() != Some(ItemTier::Champion) || !is_accessory(item) {
+                continue;
+            }
+            let gain = calculate_budget_usage(item);
+            for class in CharacterClass::all() {
+                let kit = loadouts.get(*class).expect("every class has a loadout");
+                for socket in item.sockets() {
+                    if !can_equip_in_socket(*class, *socket, item) {
+                        continue;
+                    }
+                    let Some(start_id) = kit.get(socket) else {
+                        continue;
+                    };
+                    let start = items.get(start_id).expect("kit item is defined");
+                    checked.insert(id.as_str());
+                    let floor = calculate_budget_usage(start) * (1.0 + CHAMPION_GAIN);
+                    if gain < floor {
+                        short.push(format!(
+                            "{id:?} spends {gain:.2}, under {floor:.2} over {class:?}'s {socket:?} {start_id:?}"
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(short.is_empty(), "{}", short.join("\n"));
+        let accessories: std::collections::BTreeSet<&str> = CHAMPION_TIER
+            .iter()
+            .filter(|id| is_accessory(items.get(id).expect("shipped")))
+            .map(|id| id.as_str())
+            .collect();
+        assert_eq!(
+            checked, accessories,
+            "every Champion accessory met a starting item"
+        );
+    }
+
+    /// The Champion ring set fills both ring sockets: for each stat role a
+    /// Champion ring serves, there are two DISTINCT rings, because a ring is
+    /// unique-equipped across `Ring1` and `Ring2` and one ring cannot fill
+    /// both. A role is named by the stats a ring spends on, so the check
+    /// lists the rings per role by set equality.
+    #[test]
+    fn champion_rings_fill_both_ring_sockets_per_role() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let mut by_role: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
+            std::collections::BTreeMap::new();
+        for id in CHAMPION_TIER.iter() {
+            let item = items.get(id).expect("shipped");
+            if item.slot != ItemSlotType::Ring {
+                continue;
+            }
+            let role = if item.attack_power > 0.0 {
+                "physical"
+            } else if item.mana_regen > 0.0 {
+                "healer"
+            } else if item.spell_power > 0.0 {
+                "caster"
+            } else {
+                "defender"
+            };
+            by_role.entry(role).or_default().insert(id.as_str());
+        }
+        let expected: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> = [
+            ("physical", ["BandOfUnnaturalForces", "BandOfReanimation"]),
+            ("caster", ["SealOfTheDamned", "BandOfTheInevitable"]),
+            (
+                "healer",
+                ["BandOfUnansweredPrayers", "RingOfSpiritualFervor"],
+            ),
+            ("defender", ["SignetOfTheFallenDefender", "HailstoneBand"]),
+        ]
+        .into_iter()
+        .map(|(role, rings)| (role, rings.into_iter().collect()))
+        .collect();
+        assert_eq!(by_role, expected);
+
+        // Two of a role fit both sockets together; the same ring does not.
+        for rings in expected.values() {
+            let mut it = rings.iter();
+            let (a, b) = (it.next().unwrap(), it.next().unwrap());
+            let id = |name: &str| *CHAMPION_TIER.iter().find(|i| i.as_str() == name).unwrap();
+            let mut loadout: Loadout = Loadout::new();
+            loadout.insert(ItemSlot::Ring1, id(a));
+            loadout.insert(ItemSlot::Ring2, id(b));
+            assert!(
+                validate_unique_equipped(&loadout, &items).is_ok(),
+                "{a} and {b} fill both ring sockets"
+            );
+            loadout.insert(ItemSlot::Ring2, id(a));
+            assert!(
+                validate_unique_equipped(&loadout, &items).is_err(),
+                "{a} cannot fill both ring sockets"
+            );
+        }
     }
 
     /// The Champion offer floor in the weapon sockets (main hand, off hand,
@@ -4536,7 +4669,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     const CHAMPION_GAIN: f32 = 0.55;
 
     /// Every Champion-tier (item_tier 2) item.
-    const CHAMPION_TIER: [ItemId; 71] = [
+    const CHAMPION_TIER: [ItemId; 87] = [
         ItemId::FrostfireCirclet,
         ItemId::FrostfireRobe,
         ItemId::FrostfireLeggings,
@@ -4608,6 +4741,22 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         ItemId::LibramOfLight,
         ItemId::TotemOfTheStorm,
         ItemId::IdolOfTheMoon,
+        ItemId::StormragesTalismanOfSeething,
+        ItemId::ShroudOfDominion,
+        ItemId::BandOfUnnaturalForces,
+        ItemId::BandOfReanimation,
+        ItemId::GemOfTrappedInnocents,
+        ItemId::CloakOfTheNecropolis,
+        ItemId::SealOfTheDamned,
+        ItemId::BandOfTheInevitable,
+        ItemId::NecklaceOfNecropsy,
+        ItemId::CloakOfSuturing,
+        ItemId::BandOfUnansweredPrayers,
+        ItemId::RingOfSpiritualFervor,
+        ItemId::MarkOfCThun,
+        ItemId::CryptfiendSilkCloak,
+        ItemId::SignetOfTheFallenDefender,
+        ItemId::HailstoneBand,
     ];
 
     /// Every Gauntlet-tier (item_tier 1) item.
