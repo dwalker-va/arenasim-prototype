@@ -543,70 +543,32 @@ fn the_scuff_is_laid_along_the_path_on_the_floor() {
 }
 
 // =============================================================================
-// Crippling Poison's proc flash
+// No school impact from a slow
 // =============================================================================
 
+/// The slow treatment lands nothing at the chest. Crippling Poison's landing is
+/// the weapon poison cloud every poison shares (`poison_landing.rs`, and
+/// `tests/poison_landing_visual_probes.rs`); the Nature school impact that
+/// stood in for it is gone, so the two never play over each other.
 #[test]
-fn crippling_poison_flashes_once_on_application() {
+fn no_slow_lands_a_school_impact() {
     let mut h = Harness::new();
-    let unit = h.spawn_unit(
+    let crippled = h.spawn_unit(
         Vec3::new(0.0, 1.0, 0.0),
         vec![slow("Crippling Poison", 0.3)],
     );
+    h.spawn_unit(Vec3::new(4.0, 1.0, 0.0), vec![slow("Frostbolt", 0.7)]);
+    h.walk(crippled, Vec3::X, 1.5, 10);
+    assert!(
+        !h.rings().is_empty(),
+        "guard: the Crippling slow is drawn by the ring"
+    );
+    // Re-applied after a lapse: still nothing at the chest.
+    h.set_auras(crippled, vec![]);
+    h.idle(5);
+    h.set_auras(crippled, vec![slow("Crippling Poison", 0.3)]);
     h.idle(10);
-    let flashes = h.flashes();
-    assert_eq!(
-        flashes.len(),
-        1,
-        "one flash per application, got {}",
-        flashes.len()
-    );
-    assert_eq!(
-        flashes[0],
-        (unit, SpellSchool::Nature, AbilityType::CripplingPoison)
-    );
-}
-
-#[test]
-fn other_slows_bring_no_flash() {
-    let mut h = Harness::new();
-    h.spawn_unit(Vec3::new(0.0, 1.0, 0.0), vec![slow("Frostbolt", 0.7)]);
-    h.idle(10);
-    assert!(h.flashes().is_empty());
-}
-
-#[test]
-fn a_refreshed_poison_does_not_flash_again() {
-    let mut h = Harness::new();
-    let unit = h.spawn_unit(
-        Vec3::new(0.0, 1.0, 0.0),
-        vec![slow("Crippling Poison", 0.3)],
-    );
-    h.idle(5);
-    assert_eq!(h.flashes().len(), 1, "guard: the application flashed");
-    // A proc on a still-poisoned victim resets the timer; the aura never lapses.
-    let mut refreshed = slow("Crippling Poison", 0.3);
-    refreshed.duration = 12.0;
-    h.set_auras(unit, vec![refreshed]);
-    h.idle(5);
-    assert_eq!(h.flashes().len(), 1, "a refresh replayed the flash");
-}
-
-#[test]
-fn a_reapplied_poison_flashes_again() {
-    let mut h = Harness::new();
-    let unit = h.spawn_unit(
-        Vec3::new(0.0, 1.0, 0.0),
-        vec![slow("Crippling Poison", 0.3)],
-    );
-    h.idle(5);
-    // Lapses (dispelled or expired), then lands again.
-    h.set_auras(unit, vec![]);
-    h.idle(5);
-    assert_eq!(h.flashes().len(), 1, "guard: nothing flashes on the lapse");
-    h.set_auras(unit, vec![slow("Crippling Poison", 0.3)]);
-    h.idle(5);
-    assert_eq!(h.flashes().len(), 2, "a fresh application must flash");
+    assert!(h.flashes().is_empty(), "{:?}", h.flashes());
 }
 
 // =============================================================================

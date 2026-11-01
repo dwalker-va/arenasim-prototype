@@ -5,7 +5,7 @@ use std::f32::consts::FRAC_PI_2;
 use super::gait::gait_is_moving;
 use super::movement_trails::emit_along_path;
 use super::school_impact::PHYSICAL_COLOR;
-use crate::states::play_match::abilities::{AbilityType, SpellSchool};
+use crate::states::play_match::abilities::SpellSchool;
 use crate::states::play_match::components::*;
 
 // ==============================================================================
@@ -61,8 +61,8 @@ use crate::states::play_match::components::*;
 // fight it.
 //
 // Crippling Poison's proc is the one slow with no hit of its own to carry its
-// apply moment, so its fresh application gets the shared Nature landing at the
-// chest — the client plays a one-shot `poison_impact_chest.m2` there.
+// apply moment. Its landing is the weapon poison cloud every poison shares
+// (`poison_landing.rs`, the client's `poison_impact_chest.m2`), not this file's.
 //
 // Graphical-only: registered in `states/mod.rs` alone. No `game_rng` draw, no
 // sim write — the only components it inserts are its own emitter and its own
@@ -168,9 +168,6 @@ impl SlowTint {
         }
     }
 }
-
-/// The aura name of Crippling Poison's slow — the one slow with a proc flash.
-const CRIPPLING_POISON_SLOW: &str = "Crippling Poison";
 
 /// The routed slow a unit is drawn with: the hardest one it carries (the
 /// lowest speed multiplier), first in aura order on a tie.
@@ -330,8 +327,7 @@ fn spawn_scuff(
 // ==============================================================================
 
 /// Owns each slowed victim's [`SlowTrailEmitter`]: pulses the bind ring and
-/// lays the scuff while the victim moves, and fires Crippling Poison's proc
-/// flash on a fresh application.
+/// lays the scuff while the victim moves.
 ///
 /// `ActiveAuras` is OPTIONAL because `update_auras` removes the component once
 /// the last aura expires, and a query requiring it would never see the slow
@@ -358,7 +354,6 @@ pub fn update_slow_treatment(
         ),
         Without<Celebrating>,
     >,
-    positions: Query<&Transform>,
 ) {
     let dt = time.delta_secs();
     let scuff_mesh = scuff_mesh
@@ -374,12 +369,6 @@ pub fn update_slow_treatment(
             continue;
         };
         let tint = tint.color();
-        let crippling = auras.and_then(|a| {
-            a.auras.iter().find(|au| {
-                au.effect_type == AuraType::MovementSpeedSlow
-                    && au.ability_name == CRIPPLING_POISON_SLOW
-            })
-        });
 
         let ground = Vec3::new(transform.translation.x, 0.0, transform.translation.z);
         let stature = if pet.is_some() { SLOW_PET_STATURE } else { 1.0 };
@@ -388,39 +377,12 @@ pub fn update_slow_treatment(
             last_emit: ground,
             // Armed, so a unit already on the move pulses on its first frame.
             since_pulse: SLOW_RING_PERIOD,
-            crippled: false,
         };
         let is_new = emitter.is_none();
         let state: &mut SlowTrailEmitter = match emitter {
             Some(em) => em.into_inner(),
             None => &mut fresh,
         };
-
-        // ---- Crippling Poison: the proc flash, on the edge only ----
-        if let Some(aura) = crippling {
-            if !state.crippled {
-                let from = aura
-                    .caster
-                    .and_then(|c| positions.get(c).ok())
-                    .map(|c| c.translation - transform.translation)
-                    .and_then(|d| Vec3::new(d.x, 0.0, d.z).try_normalize())
-                    .unwrap_or(Vec3::Z);
-                commands.spawn((
-                    SchoolImpact {
-                        target: entity,
-                        ability: AbilityType::CripplingPoison,
-                        school: SpellSchool::Nature,
-                        anchor: ImpactAnchor::Chest,
-                        from,
-                        magnitude: 0.0,
-                        is_crit: false,
-                        age: 0.0,
-                    },
-                    PlayMatchEntity,
-                ));
-            }
-        }
-        state.crippled = crippling.is_some();
 
         // ---- Only while moving ----
         state.since_pulse += dt;
