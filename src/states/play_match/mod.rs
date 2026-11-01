@@ -2375,6 +2375,7 @@ mod held_weapon_tests {
             vec![
                 ("CrescentStaff", WeaponModel::Exact(WeaponKind::Staff)),
                 ("RunestaffOfElements", WeaponModel::Exact(WeaponKind::Staff)),
+                ("Soulseeker", WeaponModel::Exact(WeaponKind::Staff)),
             ]
         );
         // A caster with a staff and no wand holds the staff up.
@@ -2591,11 +2592,15 @@ mod held_weapon_tests {
             proxied,
             BTreeSet::from([
                 "AzuresongMageblade",
+                "CorruptedAshbringer",
                 "DeadeyeCrossbow",
                 "FrostbiteBlade",
+                "Gressil",
+                "NerubianSlavemaker",
                 "Peacemaker",
                 "SniperScope",
                 "StormbladeEdge",
+                "WraithBlade",
             ])
         );
         assert_eq!(
@@ -2603,13 +2608,17 @@ mod held_weapon_tests {
             BTreeSet::from([
                 "GrimoireOfShadows",
                 "IdolOfHealth",
+                "IdolOfTheMoon",
                 "LibramOfGrace",
                 "LibramOfHope",
+                "LibramOfLight",
                 "LibramOfTruth",
+                "SapphironsLeftEye",
                 "TomeOfKnowledge",
                 "TotemOfLife",
                 "TotemOfRage",
                 "TotemOfRebirth",
+                "TotemOfTheStorm",
             ])
         );
         assert!(exact > 0, "guard: the exact set must not be empty");
