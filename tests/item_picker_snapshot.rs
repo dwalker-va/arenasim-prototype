@@ -59,25 +59,38 @@ fn item_picker_trinket_socket() {
 #[test]
 fn a_proc_row_carries_the_shared_proc_sentence_and_nothing_else_grows() {
     use arenasim::states::play_match::proc_trinkets::proc_description;
+    use arenasim::states::play_match::triggered_absorbs::triggered_absorb_description;
     use arenasim::states::view_combatant_ui::item_picker_row_text;
 
     let items = load_item_definitions().expect("items.ron must load");
     let mut proc_rows = 0;
+    let mut absorb_rows = 0;
     for (_, item) in items.iter() {
         let text = item_picker_row_text(item);
         assert!(!text.name.contains('\n'), "{}: {:?}", item.name, text.name);
-        match &item.proc {
-            Some(proc) => {
+        match (&item.proc, &item.triggered_absorb) {
+            (Some(proc), None) => {
                 proc_rows += 1;
                 assert_eq!(
-                    text.proc_line.as_deref(),
+                    text.effect_line.as_deref(),
                     Some(proc_description(proc).as_str()),
                     "{}",
                     item.name
                 );
             }
-            None => assert_eq!(text.proc_line, None, "{} grew a second line", item.name),
+            (None, Some(absorb)) => {
+                absorb_rows += 1;
+                assert_eq!(
+                    text.effect_line.as_deref(),
+                    Some(triggered_absorb_description(absorb).as_str()),
+                    "{}",
+                    item.name
+                );
+            }
+            (None, None) => assert_eq!(text.effect_line, None, "{} grew a second line", item.name),
+            (Some(_), Some(_)) => panic!("{}: no item carries both", item.name),
         }
     }
     assert!(proc_rows > 0, "no proc trinket ships — vacuous");
+    assert!(absorb_rows > 0, "no triggered absorb ships — vacuous");
 }

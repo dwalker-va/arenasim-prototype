@@ -66,13 +66,15 @@ pub fn item_aura_icon_key(item: ItemId) -> String {
     format!("item:{:?}", item)
 }
 
-/// `(key, path)` for every item that can APPLY an aura — today, every item
-/// carrying a `proc:` — keyed by [`item_aura_icon_key`]. Derived from
+/// `(key, path)` for every item that can APPLY an aura — every item carrying
+/// a `proc:` or a `triggered_absorb:` — keyed by [`item_aura_icon_key`]. Derived from
 /// `items.ron`, so trinket N+1 gets its icon registered with no code change.
 pub fn item_aura_icons(items: &ItemDefinitions) -> Vec<(String, String)> {
     let mut icons: Vec<(String, String)> = items
         .iter()
-        .filter(|(_, item)| item.proc.is_some() && !item.icon.is_empty())
+        .filter(|(_, item)| {
+            (item.proc.is_some() || item.triggered_absorb.is_some()) && !item.icon.is_empty()
+        })
         .map(|(id, item)| (item_aura_icon_key(*id), item.icon.clone()))
         .collect();
     // `ItemDefinitions` is a HashMap; sort so the load order is not
@@ -365,10 +367,20 @@ mod tests {
         let abilities = AbilityDefinitions::default();
         let registered = item_aura_icons(&items);
         let mut procs = 0;
+        let mut absorbs = 0;
         for (id, item) in items.iter() {
-            let Some(proc) = &item.proc else { continue };
-            procs += 1;
-            let aura = proc.aura(*id, &item.name);
+            // A proc's buff, or a triggered absorb's shield: both item auras.
+            let aura = match (&item.proc, &item.triggered_absorb) {
+                (Some(proc), _) => {
+                    procs += 1;
+                    proc.aura(*id, &item.name)
+                }
+                (None, Some(absorb)) => {
+                    absorbs += 1;
+                    absorb.aura(&item.name, Some(*id), 1.0)
+                }
+                (None, None) => continue,
+            };
             let key = get_aura_icon_key(&aura, &abilities);
             assert_eq!(
                 key,
@@ -384,10 +396,11 @@ mod tests {
             );
         }
         assert!(procs > 0, "no proc trinket ships — vacuous");
+        assert!(absorbs > 0, "no triggered absorb ships — vacuous");
         assert_eq!(
             registered.len(),
-            procs,
-            "a non-proc item is registered as aura art"
+            procs + absorbs,
+            "an item applying no aura is registered as aura art"
         );
     }
 

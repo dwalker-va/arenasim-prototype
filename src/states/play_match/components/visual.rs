@@ -254,6 +254,8 @@ pub enum ShieldPhase {
 /// (`docs/design/2026-10-16-divine-shield-client-data.md`); Ice Barrier dresses
 /// the cards frost blue at its own weights and adds icicles, a glint and a
 /// falling frost mist (`docs/design/2026-10-17-ice-barrier-client-data.md`).
+/// Aegis is PW:S's model with a silver outline
+/// (`docs/design/2026-10-29-trinket-effects-client-data.md` §1).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum ShieldKind {
     /// `holydivineshield_state_base.m2` (fdid 166342): hollow, all gold.
@@ -262,19 +264,24 @@ pub enum ShieldKind {
     DivineShield,
     /// `iceshield_state.m2` (fdid 166392): bright frost blue, icicles, mist.
     IceBarrier,
+    /// Aegis of the Last Stand's triggered absorb: PW:S's model (the client's
+    /// own item absorbs wear its state kit 847), with a SILVER outline in
+    /// place of PW:S's gold so the two can be told apart (AS-338 ruling).
+    Aegis,
 }
 
 impl ShieldKind {
-    pub const ALL: [ShieldKind; 3] = [
+    pub const ALL: [ShieldKind; 4] = [
         ShieldKind::PowerWordShield,
         ShieldKind::DivineShield,
         ShieldKind::IceBarrier,
+        ShieldKind::Aegis,
     ];
 
     /// The cards this shield wears, in draw order.
     pub fn layers(self) -> &'static [ShieldLayer] {
         match self {
-            ShieldKind::PowerWordShield => &[
+            ShieldKind::PowerWordShield | ShieldKind::Aegis => &[
                 ShieldLayer::Outline,
                 ShieldLayer::Rim,
                 ShieldLayer::StreakA,

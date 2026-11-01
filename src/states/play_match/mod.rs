@@ -64,6 +64,7 @@ pub mod team_plan;
 pub mod team_solve;
 pub mod totems;
 pub mod traps;
+pub mod triggered_absorbs;
 pub mod utils;
 
 // Re-exports

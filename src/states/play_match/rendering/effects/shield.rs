@@ -81,6 +81,14 @@
 //! numbers off a Mage under Ice Barrier are this barrier's own, and the Frost
 //! palette already spends the same blue.
 //!
+//! **Aegis of the Last Stand** (AS-429) is PW:S's model again, worn by the
+//! trinket's triggered absorb: the client's own absorb trinkets wear PW:S's
+//! state kit 847 (`docs/design/2026-10-29-trinket-effects-client-data.md`
+//! §1). Every PW:S value holds except the outline, which is silver
+//! ([`AEGIS_OUTLINE_RGB`]) so a bearer's Aegis and a Priest's shield read as
+//! two shields. Its birth pop is the moment the wearer's health crosses the
+//! threshold, and its death swell plays when the absorb is used up.
+//!
 //! **Legibility (AS-401).** All of the above is additive light, and on the
 //! bright arena sand, which sits on the tonemapper's shoulder, added light
 //! barely moves a pixel: at the client's values the held shields were all but
@@ -267,6 +275,23 @@ pub const IB_OUTLINE_RGB: [f32; 3] = IB_RIM_RGB;
 pub const IB_OUTLINE_LEVEL: f32 = 0.5;
 pub const IB_OUTLINE_PULSE: f32 = 0.3;
 
+// --- Aegis of the Last Stand: PW:S's rig, a silver outline (AS-338, AS-429) ---
+//
+// The client's own absorb trinkets (Talisman of Arathor, Defiler's Talisman,
+// Runed Fungalcap) all wear SpellVisual 1726, a single state kit, 847, which
+// is PW:S's: `holydivineshield_state_base.m2`
+// (`docs/design/2026-10-29-trinket-effects-client-data.md` §1). So Aegis
+// wears PW:S's model, tracks and every PW:S value, with one difference, the
+// user's ruling: the alpha-blended outline is silver, not PW:S's rim gold, so
+// the two can be told apart on one bearer. Signed off on the AS-338 trinket
+// effects bench (artifact 1FRTwgEeJZWYK1iFcHPkY2, Aegis tab, version
+// 1793333359-b46c), measured there at ΔL* 13.0 over the calibrated sand
+// (PW:S's gold: 12.7).
+
+/// Aegis's outline colour (sRGB): silver, its role being to tell the trinket's
+/// shield from a Priest's Power Word: Shield.
+pub const AEGIS_OUTLINE_RGB: [f32; 3] = [0.80, 0.84, 0.92];
+
 /// The two readings of the halo emitter's `enabled` track.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum HaloMode {
@@ -389,10 +414,20 @@ pub const IB_TUNING: ShieldTuning = ShieldTuning {
     fill_tint: 0.0,
 };
 
+/// Aegis: PW:S's tuning, its outline silver.
+pub const AEGIS_TUNING: ShieldTuning = ShieldTuning {
+    outline: OutlineTuning {
+        rgb: AEGIS_OUTLINE_RGB,
+        ..PWS_TUNING.outline
+    },
+    ..PWS_TUNING
+};
+
 /// A shield kind's tuning.
 pub fn shield_tuning(kind: ShieldKind) -> &'static ShieldTuning {
     match kind {
         ShieldKind::PowerWordShield => &PWS_TUNING,
+        ShieldKind::Aegis => &AEGIS_TUNING,
         ShieldKind::DivineShield => &DS_TUNING,
         ShieldKind::IceBarrier => &IB_TUNING,
     }
@@ -411,6 +446,11 @@ pub const DIVINE_SHIELD_AURA_NAME: &str = "Divine Shield";
 /// The aura name Ice Barrier is keyed on (`abilities.ron`'s `name`;
 /// `the_aura_name_is_the_ability_name` in its probes pins the two together).
 pub const ICE_BARRIER_AURA_NAME: &str = "Ice Barrier";
+/// The aura name Aegis of the Last Stand's shield is keyed on: its item's
+/// `name` in `items.ron`, which `Combatant::apply_equipment` gives the
+/// triggered absorb (`the_aegis_aura_name_is_the_item_name` in its probes pins
+/// the two together).
+pub const AEGIS_AURA_NAME: &str = "Aegis of the Last Stand";
 
 /// Half the capsule's height: the feet sit this far below a body's centre.
 pub(super) const BODY_HALF_HEIGHT: f32 = 1.25;
@@ -609,7 +649,7 @@ const IB_TRACKS: WeightTracks = WeightTracks {
 
 fn weight_tracks(kind: ShieldKind) -> &'static WeightTracks {
     match kind {
-        ShieldKind::PowerWordShield | ShieldKind::DivineShield => &HOLY_TRACKS,
+        ShieldKind::PowerWordShield | ShieldKind::DivineShield | ShieldKind::Aegis => &HOLY_TRACKS,
         ShieldKind::IceBarrier => &IB_TRACKS,
     }
 }
@@ -1021,10 +1061,19 @@ pub fn is_live_ice_barrier(aura: &Aura) -> bool {
         && aura.magnitude > 0.0
 }
 
+/// Whether this aura is a live Aegis of the Last Stand shield (an absorb with
+/// something left).
+pub fn is_live_aegis(aura: &Aura) -> bool {
+    aura.effect_type == AuraType::Absorb
+        && aura.ability_name == AEGIS_AURA_NAME
+        && aura.magnitude > 0.0
+}
+
 /// Whether this aura is a live shield of `kind`.
 pub fn is_live_shield(kind: ShieldKind, aura: &Aura) -> bool {
     match kind {
         ShieldKind::PowerWordShield => is_live_pw_shield(aura),
+        ShieldKind::Aegis => is_live_aegis(aura),
         ShieldKind::DivineShield => is_divine_shield(aura),
         ShieldKind::IceBarrier => is_live_ice_barrier(aura),
     }
@@ -1190,12 +1239,12 @@ pub(super) fn disc_texture(size: u32, alpha: impl Fn(f32, f32) -> f32) -> Image 
     )
 }
 
-/// Shared by every shield: one card quad and seven textures (rim, the two
+/// Shared by every shield: one card quad and eight textures (rim, the two
 /// streak rings, fill, and each kind's outline), Divine Shield's particle quad and two palettes, and
 /// Ice Barrier's icicle mesh and mist palettes (one per puff shape).
 pub struct ShieldAssets {
     quad: Handle<Mesh>,
-    textures: [Handle<Image>; 7],
+    textures: [Handle<Image>; 8],
     particle_quad: Handle<Mesh>,
     sparkle_palette: Arc<[Handle<StandardMaterial>]>,
     halo_palette: Arc<[Handle<StandardMaterial>]>,
@@ -1225,6 +1274,7 @@ impl ShieldAssets {
                 images.add(outline_texture(ShieldKind::PowerWordShield)),
                 images.add(outline_texture(ShieldKind::DivineShield)),
                 images.add(outline_texture(ShieldKind::IceBarrier)),
+                images.add(outline_texture(ShieldKind::Aegis)),
             ],
             // 1 × 1, so a particle's scale IS its diameter (`ClientParticle`).
             particle_quad: meshes.add(Rectangle::new(1.0, 1.0)),
@@ -1300,6 +1350,7 @@ fn texture_slot(kind: ShieldKind, layer: ShieldLayer) -> Option<usize> {
         (ShieldKind::PowerWordShield, ShieldLayer::Outline) => Some(4),
         (ShieldKind::DivineShield, ShieldLayer::Outline) => Some(5),
         (ShieldKind::IceBarrier, ShieldLayer::Outline) => Some(6),
+        (ShieldKind::Aegis, ShieldLayer::Outline) => Some(7),
     }
 }
 
@@ -1318,7 +1369,7 @@ pub fn shield_layer_rgb(kind: ShieldKind, layer: ShieldLayer) -> [f32; 3] {
         // The icicles carry their colour in their vertices.
         (_, ShieldLayer::Icicles | ShieldLayer::Glint) => [1.0, 1.0, 1.0],
         (_, ShieldLayer::Rim) => RIM_RGB,
-        (ShieldKind::PowerWordShield, ShieldLayer::StreakA) => STREAK_A_RGB,
+        (ShieldKind::PowerWordShield | ShieldKind::Aegis, ShieldLayer::StreakA) => STREAK_A_RGB,
         (ShieldKind::DivineShield, ShieldLayer::StreakA) => DS_STREAK_A_RGB,
         (_, ShieldLayer::StreakB) => STREAK_B_RGB,
         (_, ShieldLayer::FillOuter | ShieldLayer::FillInner) => DS_FILL_RGB,
@@ -1513,7 +1564,7 @@ pub fn update_shield_visuals(
             ShieldKind::IceBarrier => {
                 rig.insert(IceBarrierEmitters::default());
             }
-            ShieldKind::PowerWordShield => {}
+            ShieldKind::PowerWordShield | ShieldKind::Aegis => {}
         }
         rig.with_children(|rig| {
             for &layer in kind.layers() {

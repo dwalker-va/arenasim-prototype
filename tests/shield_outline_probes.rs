@@ -23,8 +23,8 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::{
     place_shield_cards, shield_outline_alpha, shield_tuning, update_shield_visuals,
-    DIVINE_SHIELD_AURA_NAME, DS_FILL_RGB, DS_FILL_TINT, ICE_BARRIER_AURA_NAME, OUTLINE_INNER,
-    PW_SHIELD_AURA_NAME,
+    AEGIS_AURA_NAME, AEGIS_OUTLINE_RGB, DIVINE_SHIELD_AURA_NAME, DS_FILL_RGB, DS_FILL_TINT,
+    ICE_BARRIER_AURA_NAME, OUTLINE_INNER, PW_SHIELD_AURA_NAME,
 };
 use arenasim::CharacterClass;
 
@@ -102,14 +102,14 @@ impl Harness {
                 ability_name: DIVINE_SHIELD_AURA_NAME.to_string(),
                 ..Default::default()
             },
-            ShieldKind::PowerWordShield | ShieldKind::IceBarrier => Aura {
+            ShieldKind::PowerWordShield | ShieldKind::IceBarrier | ShieldKind::Aegis => Aura {
                 effect_type: AuraType::Absorb,
                 duration: 30.0,
                 magnitude: 70.0,
-                ability_name: if kind == ShieldKind::IceBarrier {
-                    ICE_BARRIER_AURA_NAME
-                } else {
-                    PW_SHIELD_AURA_NAME
+                ability_name: match kind {
+                    ShieldKind::IceBarrier => ICE_BARRIER_AURA_NAME,
+                    ShieldKind::Aegis => AEGIS_AURA_NAME,
+                    _ => PW_SHIELD_AURA_NAME,
                 }
                 .to_string(),
                 ..Default::default()
@@ -197,6 +197,8 @@ fn class_of(kind: ShieldKind) -> CharacterClass {
         ShieldKind::PowerWordShield => CharacterClass::Priest,
         ShieldKind::DivineShield => CharacterClass::Paladin,
         ShieldKind::IceBarrier => CharacterClass::Mage,
+        // A trinket: anyone can wear it.
+        ShieldKind::Aegis => CharacterClass::Warrior,
     }
 }
 
@@ -335,7 +337,8 @@ fn the_outline_and_tint_blend_and_the_client_cards_stay_additive() {
 /// Every outline is drawn in its own rim's colour, read off the live rim card;
 /// and Divine Shield's is PW:S's gold line at PW:S's level, because the client
 /// draws the same gold rim on both (AS-405). Its blue stays inside, in the
-/// tint and the fill.
+/// tint and the fill. Aegis is the one exception, by ruling (AS-338): PW:S's
+/// gold rim, outlined in silver so the two can be told apart.
 #[test]
 fn every_outline_wears_its_rim_colour_and_the_bubble_wears_the_shields_gold() {
     let mut outlines = Vec::new();
@@ -347,7 +350,12 @@ fn every_outline_wears_its_rim_colour_and_the_bubble_wears_the_shields_gold() {
         let rim = h.card(kind, ShieldLayer::Rim).unwrap();
         let level = shield_tuning(kind).outline.level;
         let got = outline.material.base_color.to_linear();
-        let want = rim.material.base_color.to_linear() * level;
+        let want = if kind == ShieldKind::Aegis {
+            let [r, g, b] = AEGIS_OUTLINE_RGB;
+            Color::srgb(r, g, b).to_linear() * level
+        } else {
+            rim.material.base_color.to_linear() * level
+        };
         for (g, w) in [
             (got.red, want.red),
             (got.green, want.green),
@@ -378,6 +386,16 @@ fn every_outline_wears_its_rim_colour_and_the_bubble_wears_the_shields_gold() {
     assert!(
         ds.red > 2.0 * ds.blue,
         "Divine Shield's outline is not gold: {ds:?}"
+    );
+    // Aegis: silver, so it reads apart from the gold PW:S line on its own rim.
+    let aegis = of(ShieldKind::Aegis);
+    assert!(
+        aegis.blue > aegis.red && aegis.red > 0.5 * aegis.blue,
+        "Aegis's outline is not silver: {aegis:?}"
+    );
+    assert!(
+        (aegis.blue - pws.blue).abs() > 0.1,
+        "Aegis's outline {aegis:?} reads as PW:S's gold {pws:?}"
     );
 }
 

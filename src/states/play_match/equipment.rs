@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 use super::proc_trinkets::ProcConfig;
+use super::triggered_absorbs::TriggeredAbsorbConfig;
 use crate::states::match_config::CharacterClass;
 
 /// What a character wears: one item per equip socket.
@@ -490,7 +491,7 @@ macro_rules! item_ids {
         /// The variant name is the item's canonical string form: the key
         /// `items.ron` stores the item under, what serde round-trips it as, and
         /// what a headless config names it by. Declared via [`item_ids!`].
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         pub enum ItemId {
             $( $(#[$meta])* $variant, )*
         }
@@ -844,6 +845,9 @@ item_ids! {
     LibramOfLight,
     TotemOfTheStorm,
     IdolOfTheMoon,
+
+    // === Champion: Trinkets (all classes) ===
+    AegisOfTheLastStand,
 }
 
 // ============================================================================
@@ -948,6 +952,16 @@ pub struct ItemConfig {
     /// `all_shipped_procs_are_well_formed`. See the `proc_trinkets` module.
     #[serde(default)]
     pub proc: Option<ProcConfig>,
+
+    // === Triggered absorb ===
+    /// A shield a condition on the wearer raises — Aegis of the Last Stand's
+    /// "below 35% health, a shield of 20% of maximum health, once a match".
+    /// `None` for every ordinary item. Priced into the budget at value times
+    /// its declared trigger rate ([`TriggeredAbsorbConfig::budget_cost`]) and
+    /// checked by `all_shipped_triggered_absorbs_are_well_formed`. See the
+    /// `triggered_absorbs` module.
+    #[serde(default)]
+    pub triggered_absorb: Option<TriggeredAbsorbConfig>,
 }
 
 impl ItemConfig {
@@ -969,6 +983,25 @@ impl ItemConfig {
             ItemSlotType::OffHand => Some(HeldSlot::OffHandOnly),
             _ => None,
         }
+    }
+
+    /// The sentence saying what this item DOES beyond its stats: its proc's
+    /// sentence and its triggered absorb's, in that order, one line. `None`
+    /// for an item that does nothing but its stats. Every surface that shows
+    /// an item's effect reads this, so an item cannot describe itself two
+    /// ways.
+    pub fn effect_description(&self) -> Option<String> {
+        let lines: Vec<String> = self
+            .proc
+            .iter()
+            .map(super::proc_trinkets::proc_description)
+            .chain(
+                self.triggered_absorb
+                    .iter()
+                    .map(super::triggered_absorbs::triggered_absorb_description),
+            )
+            .collect();
+        (!lines.is_empty()).then(|| lines.join(" "))
     }
 
     /// The tier `item_tier` names, or `None` for a number no tier has. A
@@ -1492,7 +1525,8 @@ use super::constants::{
 /// Free stats (armor, attack_damage_min/max, weapon_speed) are excluded.
 ///
 /// A PROC is charged too, at its expected value — see
-/// [`ProcConfig::budget_cost`]. Without that term a trigger-and-effect would be
+/// [`ProcConfig::budget_cost`] — and a TRIGGERED ABSORB at its value times its
+/// declared trigger rate ([`TriggeredAbsorbConfig::budget_cost`]). Without that term a trigger-and-effect would be
 /// invisible to the budget, because it is not a stat field, and a proc of any
 /// magnitude would pass this check.
 pub fn calculate_budget_usage(item: &ItemConfig) -> f32 {
@@ -1510,6 +1544,10 @@ pub fn calculate_budget_usage(item: &ItemConfig) -> f32 {
         + item.nature_resistance * WEIGHT_RESISTANCE
         + item.holy_resistance * WEIGHT_RESISTANCE
         + item.proc.as_ref().map_or(0.0, |p| p.budget_cost())
+        + item
+            .triggered_absorb
+            .as_ref()
+            .map_or(0.0, |t| t.budget_cost())
 }
 
 /// The budget multiplier an item is priced at: how it is held for a hand item
@@ -1984,6 +2022,7 @@ mod tests {
             attack_damage_max: 0.0,
             weapon_speed: 0.0,
             proc: None,
+            triggered_absorb: None,
         }
     }
 
@@ -2024,6 +2063,7 @@ mod tests {
             attack_damage_max: dmg_max,
             weapon_speed: speed,
             proc: None,
+            triggered_absorb: None,
         }
     }
 
@@ -4090,6 +4130,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             attack_damage_max: 0.0,
             weapon_speed: 0.0,
             proc: None,
+            triggered_absorb: None,
         }
     }
 
@@ -4536,7 +4577,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     const CHAMPION_GAIN: f32 = 0.55;
 
     /// Every Champion-tier (item_tier 2) item.
-    const CHAMPION_TIER: [ItemId; 71] = [
+    const CHAMPION_TIER: [ItemId; 72] = [
         ItemId::FrostfireCirclet,
         ItemId::FrostfireRobe,
         ItemId::FrostfireLeggings,
@@ -4608,6 +4649,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         ItemId::LibramOfLight,
         ItemId::TotemOfTheStorm,
         ItemId::IdolOfTheMoon,
+        ItemId::AegisOfTheLastStand,
     ];
 
     /// Every Gauntlet-tier (item_tier 1) item.
@@ -5001,6 +5043,53 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         assert!(
             checked > 0,
             "no item declares a proc, so this guard checked nothing"
+        );
+    }
+
+    /// Every shipped triggered absorb can fire, is priced, and shields
+    /// something; its members are named by set equality, so the guard cannot
+    /// pass on none.
+    #[test]
+    fn all_shipped_triggered_absorbs_are_well_formed() {
+        use super::super::triggered_absorbs::validate_triggered_absorb;
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        let mut violations: Vec<String> = Vec::new();
+        let mut members = std::collections::BTreeSet::new();
+        for (item_id, item) in &item_defs.definitions {
+            if let Some(absorb) = &item.triggered_absorb {
+                members.insert(item_id.as_str());
+                if let Err(msg) = validate_triggered_absorb(item_id.as_str(), absorb) {
+                    violations.push(msg);
+                }
+            }
+        }
+        assert!(violations.is_empty(), "{}", violations.join("\n"));
+        assert_eq!(
+            members,
+            ["AegisOfTheLastStand"].into_iter().collect(),
+            "the items carrying a triggered absorb"
+        );
+    }
+
+    /// The budget sees a triggered absorb: Aegis of the Last Stand spends its
+    /// whole Champion trinket budget (48.3) on the shield, and nothing else.
+    #[test]
+    fn aegis_spends_its_budget_on_the_shield() {
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        let aegis = item_defs.get_unchecked(&ItemId::AegisOfTheLastStand);
+        let shield = aegis
+            .triggered_absorb
+            .as_ref()
+            .expect("a triggered absorb")
+            .budget_cost();
+        assert!((calculate_effective_budget(aegis) - 48.3).abs() < 1e-3);
+        assert!(
+            (shield - calculate_effective_budget(aegis)).abs() < 1e-3,
+            "{shield}"
+        );
+        assert!(
+            (calculate_budget_usage(aegis) - shield).abs() < 1e-6,
+            "no other stats"
         );
     }
 

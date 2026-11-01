@@ -3300,5 +3300,33 @@
             max_mana: 10.0,
             max_health: 8.0,
         ),
+
+        // ====================================================================
+        // CHAMPION TIER (2): TRINKETS (all classes)
+        // ====================================================================
+
+        // The jackpot (talents-and-Gauntlet proposal §6.4): no Classic or TBC
+        // original, and no other stats. Its whole Champion trinket budget
+        // (92 x 0.75 x 0.70 = 48.3) is on the shield, priced at value times
+        // trigger rate: 20% of a capped combatant's ~420 health is an 84-point
+        // shield, worth its price if it fires in 57.5% of combatant-lives.
+        // That rate is ASSUMED, not measured — provisional until the Gauntlet
+        // bot measures it (G4/G5), when the shield or threshold is sized to it.
+        // Offered at a QUARTER of the other Champion trinkets' weight: rare by
+        // weight, not by tier (for G2's reward tables).
+        AegisOfTheLastStand: (
+            name: "Aegis of the Last Stand",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_talisman_05.jpg",
+            slot: Trinket,
+            triggered_absorb: Some((
+                trigger: HealthBelow(0.35),
+                shield: MaxHealthFraction(0.20),
+                limit: OncePerMatch,
+                duration: 30.0,
+                trigger_rate: 0.575,
+            )),
+        ),
     }
 )

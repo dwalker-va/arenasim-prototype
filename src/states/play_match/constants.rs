@@ -331,6 +331,13 @@ pub const BUDGET_TOLERANCE: f32 = 0.05;
 /// Cost weight per point of max_health in the item budget.
 pub const WEIGHT_MAX_HEALTH: f32 = 1.0;
 
+/// The maximum health a triggered absorb's price is read on: a capped
+/// combatant of about 420 health (talents-and-Gauntlet proposal §6.4). A shield
+/// sized as a fraction of maximum health is priced at its size on this
+/// combatant (`TriggeredAbsorbConfig::budget_cost`). Provisional, with the
+/// trigger rate it multiplies.
+pub const TRIGGERED_ABSORB_REFERENCE_HEALTH: f32 = 420.0;
+
 /// Cost weight per point of max_mana in the item budget.
 pub const WEIGHT_MAX_MANA: f32 = 1.0;
 

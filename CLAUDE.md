@@ -703,6 +703,35 @@ any ring fits either ring socket, and the same item may not occupy both
      frames and the encyclopedia — the buff carries `Aura::source_item`, and
      `item_aura_icons` registers the art in both aura icon loaders.
 
+   **A trinket may carry a `triggered_absorb:` block** — a shield a condition
+   on its wearer raises (`src/states/play_match/triggered_absorbs.rs`; Aegis
+   of the Last Stand is the first):
+   ```ron
+   triggered_absorb: Some((
+       trigger: HealthBelow(0.35),       // the wearer alive below 35% health
+       shield: MaxHealthFraction(0.20),  // 20% of its maximum health
+       limit: OncePerMatch,
+       duration: 30.0,
+       trigger_rate: 0.575,              // the price's assumed rate
+   )),
+   ```
+   - **Where it fires:** `fire_triggered_absorbs`, at the end of Phase 3,
+     after the frame's last damage; it never touches the damage funnel. The
+     shield is an `Absorb` aura named after the item, keyed by source, so it
+     sits beside a Power Word: Shield. It applies `ArenaDampening` itself, at
+     that landing site, and logs `<wearer> gains <item> (absorbs N)` with the
+     landed amount. Not purgeable (`DispelType::Physical`), as for procs.
+   - **Pricing:** value times trigger rate — the shield on a
+     `TRIGGERED_ABSORB_REFERENCE_HEALTH` (420) combatant at the health weight,
+     times the declared `trigger_rate`, which stays provisional until the
+     Gauntlet bot measures it.
+   - It gets the same surfaces a proc does, with no code change (its sentence
+     is `triggered_absorb_description`, through `ItemConfig::effect_description`),
+     and is a member of `tests/lands_silently_audit.rs`'s triggered-absorb
+     family: its shield must reach a `ShieldKind` (`is_live_shield`, keyed on
+     the aura's name). New variants of trigger, size and limit (Sacred Shield,
+     AS-421) are exhaustive matches in that module.
+
 3. **Add to a class loadout** in `loadouts.ron` if it should be default equipment
 
 4. **Add `ItemId` variant** in `equipment.rs` to the `ItemId` enum
