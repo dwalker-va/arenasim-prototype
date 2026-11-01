@@ -314,3 +314,36 @@ fn an_off_hand_poison_rides_the_off_hand_swings() {
     let control = play(config("Rogue", "Warrior", 11, 15.0), stage(None));
     assert!(hits(&control, rogue, "Wound Poison").is_empty());
 }
+
+/// A melee ABILITY (Mortal Strike, the instant-attack site) is a melee strike
+/// too: every Warrior strike on a Retribution Aura holder — its swings and its
+/// Mortal Strikes — is answered once, and its Rend ticks are not.
+#[test]
+fn a_melee_ability_on_a_reflect_holder_is_answered() {
+    let mut ret = aura(AuraType::DamageReflect, 1.0, None);
+    ret.spell_school = Some(SpellSchool::Holy);
+    ret.ability_name = "Retribution Aura".into();
+    let played = play(
+        config("Warrior", "Mage", 3, 20.0),
+        melee_stage().aura(T2, ret),
+    );
+    let strikes = hits(&played, WARRIOR, "Mortal Strike").len();
+    assert!(
+        strikes > 0,
+        "the Warrior landed a Mortal Strike:\n{}",
+        played.log
+    );
+    // Every direct Warrior hit (swings, Heroic Strike, Mortal Strike, crits
+    // included); Rend's ticks are periodic, not strikes.
+    let melee_hits = played
+        .log
+        .lines()
+        .filter(|l| l.contains(&format!("[DMG] {WARRIOR}'s")) && !l.contains(" ticks for "))
+        .count();
+    let reflects = played
+        .log
+        .lines()
+        .filter(|l| l.contains(&format!("[REFLECT] {WARRIOR} takes")))
+        .count();
+    assert_eq!(reflects, melee_hits, "{}", played.log);
+}
