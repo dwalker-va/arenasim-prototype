@@ -101,6 +101,7 @@ fn shadow_sight() -> Aura {
         source_item: None,
         stacks: None,
         bloom: None,
+        damage_mods: Default::default(),
     }
 }
 

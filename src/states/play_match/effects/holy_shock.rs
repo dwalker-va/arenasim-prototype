@@ -7,7 +7,10 @@ use bevy::prelude::*;
 
 use crate::combat::log::CombatLog;
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::combat_core::{apply_damage_with_absorb, apply_healing, roll_crit};
+use crate::states::play_match::combat_core::{
+    apply_damage_with_absorb, apply_healing, damage_dealt_multiplier, roll_crit, DamageFollowUps,
+    Hit,
+};
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
 use crate::states::play_match::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
@@ -137,9 +140,19 @@ pub fn process_holy_shock_damage(
     pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
 ) {
+    // What the shocks set off on other units, spawned once they land.
+    let mut follow_ups = DamageFollowUps::default();
     for (pending_entity, pending) in pending_damage.iter() {
         // The damage is read from the Paladin's own book.
         let ability_def = pending.caster_book.get_unchecked(&AbilityType::HolyShock);
+        // The Paladin's damage-dealt increases, read before the target is
+        // borrowed.
+        let dealt = combatants.get(pending.caster).map_or(1.0, |(_, _, auras)| {
+            damage_dealt_multiplier(
+                auras,
+                crate::states::play_match::abilities::SpellSchool::Holy,
+            )
+        });
         // Get target combatant
         if let Ok((mut target, target_transform, mut target_auras)) =
             combatants.get_mut(pending.target)
@@ -163,12 +176,20 @@ pub fn process_holy_shock_damage(
             }
 
             // Apply damage with absorb shield consideration
-            let (actual_damage, absorbed) = apply_damage_with_absorb(
+            let hit = Hit::new(
                 raw_damage,
-                &mut target,
-                target_auras.as_deref_mut(),
                 crate::states::play_match::abilities::SpellSchool::Holy,
                 "Holy Shock",
+                Some(pending.caster),
+                None,
+                pending.target,
+            )
+            .with_dealt(dealt);
+            let (actual_damage, absorbed) = apply_damage_with_absorb(
+                hit,
+                &mut target,
+                target_auras.as_deref_mut(),
+                &mut follow_ups,
                 &mut combat_log,
             );
 
@@ -302,4 +323,5 @@ pub fn process_holy_shock_damage(
         // Remove the pending damage entity
         commands.entity(pending_entity).despawn();
     }
+    follow_ups.spawn(&mut commands);
 }
