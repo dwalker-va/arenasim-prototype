@@ -426,7 +426,7 @@ fn only_the_long_holds_must_be_dispellable() {
 #[test]
 fn a_cycloned_paladin_uses_nothing() {
     // Divine Shield's teammate trigger holds (a Priest at 30%, a long hold),
-    // but nothing is used from inside a Cyclone.
+    // but no class break is used from inside a Cyclone.
     let scene = |hold| {
         Scene::new()
             .unit(WEARER, 1, Paladin)

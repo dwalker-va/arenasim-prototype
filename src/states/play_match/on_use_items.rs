@@ -84,8 +84,8 @@ impl OnUseCooldown {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OnUseEffect {
     /// Break every loss of control and movement impairment on the wearer —
-    /// stun, fear (horror included), polymorph, incapacitate, root and slow
-    /// ([`cc_break_breaks`]). Grants no immunity: the next CC lands.
+    /// stun, fear (horror included), polymorph, incapacitate, Cyclone, root and
+    /// slow ([`cc_break_breaks`]). Grants no immunity: the next CC lands.
     CcBreak,
 }
 

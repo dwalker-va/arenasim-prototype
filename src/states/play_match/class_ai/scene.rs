@@ -906,8 +906,9 @@ impl Scene {
     }
 
     /// Run a HELD unit's tick — what `decide_abilities` runs for a unit under
-    /// a stun, fear, polymorph or incapacitate: [`dispatch_while_held`], the
-    /// on-use break and the class's own break. The scene is not changed.
+    /// a stun, fear, polymorph, incapacitate or Cyclone:
+    /// [`dispatch_while_held`], the on-use break and the class's own break.
+    /// The scene is not changed.
     pub fn decide_held(&self, who: Who) -> DecisionView {
         let unit = self.find(who);
         assert!(
