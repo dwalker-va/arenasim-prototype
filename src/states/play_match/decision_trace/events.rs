@@ -320,6 +320,9 @@ pub enum EventKind {
     /// build, carrying every slot's build. No actor. A match with no talents
     /// writes none, so its trace is the trace it always was.
     MatchHeader,
+    /// A wearer's AI considered an on-use item (`class_ai::on_use`): used it,
+    /// or held it with a reason. Emitted only for a wearer of one.
+    ItemDecision,
 }
 
 /// Payload varies by `kind`. Flattened into the parent event JSON object.
@@ -477,6 +480,17 @@ pub enum EventPayload {
     Header {
         team1_builds: Vec<crate::states::play_match::talents::Build>,
         team2_builds: Vec<crate::states::play_match::talents::Build>,
+    },
+    /// One `item_decision` event: the on-use item considered, whether it was
+    /// used (`chosen`) or held (`rejected`, with its reason). Disambiguated by
+    /// its REQUIRED `item` field, which no other variant has, while it lacks
+    /// the `candidates` / `posture` / `name` / `avoided` / builds the others
+    /// require.
+    Item {
+        item: crate::states::play_match::equipment::ItemId,
+        status: CandidateStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<RejectionReason>,
     },
 }
 

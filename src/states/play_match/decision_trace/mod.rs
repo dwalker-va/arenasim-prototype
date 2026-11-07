@@ -387,6 +387,36 @@ impl DecisionTrace {
         });
     }
 
+    /// Record an `item_decision` event: `actor` used `item` (`Ok`) or held it
+    /// for the given reason (`Err`), in the team situation it saw.
+    pub fn record_item_decision(
+        &mut self,
+        actor: ActorView,
+        situation: &crate::states::play_match::situation::TeamSituation,
+        item: crate::states::play_match::equipment::ItemId,
+        outcome: Result<(), RejectionReason>,
+    ) {
+        let (status, reason) = match outcome {
+            Ok(()) => (CandidateStatus::Chosen, None),
+            Err(reason) => (CandidateStatus::Rejected, Some(reason)),
+        };
+        self.pending_events.push(DecisionEvent {
+            frame: self.current_frame,
+            sim_time: self.current_sim_time,
+            seed: self.seed,
+            ai_profile: self.ai_profile,
+            kind: EventKind::ItemDecision,
+            actor: Some(actor),
+            target: None,
+            situation: Some(SituationTag::from(situation)),
+            payload: EventPayload::Item {
+                item,
+                status,
+                reason,
+            },
+        });
+    }
+
     fn push_situation_change(&mut self, payload: EventPayload) {
         self.pending_events.push(DecisionEvent {
             frame: self.current_frame,

@@ -511,6 +511,11 @@ pub struct Combatant {
     /// proc trinket draws exactly the numbers it drew before proc trinkets
     /// existed, and is bit-identical.
     pub proc_trinkets: Vec<crate::states::play_match::proc_trinkets::ProcSlot>,
+    /// Equipped on-use items and their live cooldowns, in socket order.
+    /// Filled by [`Combatant::apply_equipment`]. EMPTY for every loadout that
+    /// carries none, and every on-use hook returns on that emptiness, so such
+    /// a match runs and traces exactly as it did before on-use items existed.
+    pub on_use_items: Vec<crate::states::play_match::on_use_items::OnUseSlot>,
 }
 
 /// How long the weapon-poison marker is stamped for. Longer than any match's
@@ -706,6 +711,7 @@ impl Combatant {
             druid_emergency_heal_spent: false,
             druid_duel_melee: false,
             proc_trinkets: Vec::new(),
+            on_use_items: Vec::new(),
         }
     }
 
@@ -1074,6 +1080,20 @@ impl Combatant {
                         name: item.name.clone(),
                         config: proc.clone(),
                         remaining_icd: 0.0,
+                    });
+            }
+            // An on-use item, captured the same way and for the same reason:
+            // the AI and the resolution site need no `ItemDefinitions`. It
+            // starts ready.
+            if let Some(on_use) = &item.on_use {
+                self.on_use_items
+                    .push(crate::states::play_match::on_use_items::OnUseSlot {
+                        item: *item_id,
+                        name: item.name.clone(),
+                        config: on_use.clone(),
+                        remaining: 0.0,
+                        spent: false,
+                        waiting: None,
                     });
             }
 
