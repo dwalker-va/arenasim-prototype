@@ -65,6 +65,7 @@ fn make_aura(effect_type: AuraType, ability_name: &str) -> Aura {
         source_item: None,
         stacks: None,
         bloom: None,
+        damage_mods: Default::default(),
     }
 }
 

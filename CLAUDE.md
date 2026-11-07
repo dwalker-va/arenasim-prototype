@@ -610,6 +610,51 @@ carrying every slot's build.
   untalented unit's book lacks it. `tests/talent_ai_audit.rs` fails until the
   ability has a row there whose scene shows the AI deciding it when granted
   and leaving it alone when not.
+- **Per-match choices** (`talent_choices.rs`). `WidenChoice(<menu>(<option>))`
+  hides an option from every build without the node (which options are hidden
+  is data: the ones some node widens; a menu's default never is);
+  `AddChoiceSlot(OffHandPoison)` opens a second slot (the Rogue's off-hand
+  poison, `team{1,2}_rogue_offhand_poisons`, which must differ from the main
+  hand's); `FromRank(r, effect)` applies an effect from rank `r` on (rank 1
+  adds an option, rank 2 patches it). `choice_rules` in `talents.ron` make
+  choices exclusive: `SwitchesOff` (an option turns a talent off for the
+  match), `Forbids` and `Requires` (an ability locked by the slot's choices
+  stays in its book, `AbilityBook::is_locked`, and the cast gate refuses it,
+  traced `CHOICE_LOCKED_NOTE`). A config built from JSON — `--headless`,
+  `--batch`, `--matrix` (each goes through `HeadlessPlugin`) and `--replay` —
+  has its slots' choices checked against their builds in `to_match_config`
+  (`validate_config_choices`), so a bad one is an error naming the slot. The
+  client's own `MatchConfig` is built by its screens, which offer only legal
+  choices; its spawn re-checks (`resolve_for_spawn` panics, naming the slot).
+  The loader rejects a `Forbids` and a `Requires` on the same ability and
+  option (they would lock it for good), and `to_match_config` rejects an
+  off-hand poison on a slot that is not a Rogue.
+- **`Mechanic(TalentMechanic)`** (`talent_mechanics.rs`) is the last resort: a
+  named rule with its numbers in the RON and ONE code site, carried on the
+  combatant as `Combatant::talent_mechanics`. Today: `SoulLink` (the transfer
+  step, to the holder's pet), `ReflectiveShield` (`apply_pending_auras` marks
+  the shields its holder casts), `CheatDeath` (the killing-blow step).
+- **The damage pipeline** (`combat_core::apply_damage_with_absorb`, taking a
+  `Hit`): immunity, the attacker's `DamageDealtIncrease` (every site passes it
+  with `Hit::with_dealt` — `damage_site_audit` checks), armor (with
+  `ArmorPercentIncrease`/`Reduction`, never written into `armor`) and
+  resistance, the strongest in-scope `DamageTakenReduction`, the strongest
+  in-scope `DamageTakenIncrease` (a charged one is spent by
+  direct hits only, and does not raise ticks), the strongest transfer
+  (`DamageTransfer` to its caster, or Soul Link), absorbs (a reflecting one
+  returns its share), the stealth reveal, the killing-blow save
+  (`KillingBlowSave`, Cheat Death), health, then `DamageReflect` on a melee
+  hit. Every one of these kinds takes only its STRONGEST instance in scope
+  (the stacking simplification: Cheat Death's 90% cut under Devotion Aura is
+  90%, not 91%); different kinds multiply. What a hit sets off on another
+  unit is a `DamageFollowUp`, spawned by its site and landed at the end of the
+  frame by `process_damage_follow_ups`: a transfer cannot be prevented and
+  never kills its receiver (a share it could not survive stays with the
+  holder and ends the transfer aura), reflected and transferred damage never
+  reflects or transfers again, and a save's heal goes through `apply_healing`.
+  A save is checked per blow, so it spares the first lethal blow of a frame;
+  a mutual lethal where one side holds a save is that side's survival, not a
+  draw.
 - **Adding a patchable field:** an `AbilityField` variant;
   `every_numeric_ability_field_is_decided` destructures `AbilityConfig`
   without a rest pattern, so a new numeric field fails to compile until it is

@@ -18,7 +18,7 @@
 //! book — so [`AbilityBook::get_unchecked`] names the book in its panic, and
 //! [`AbilityBook::get`] answers `None` ("this unit has no such ability").
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::abilities::AbilityType;
@@ -41,6 +41,10 @@ pub enum BookOwner {
 pub struct AbilityBook {
     owner: BookOwner,
     entries: Arc<BTreeMap<AbilityType, AbilityConfig>>,
+    /// Abilities the slot's per-match choices lock for the match
+    /// (`talent_choices::ChoiceRule`): in the book, refused by the cast gate.
+    /// Empty unless a choice rule binds.
+    locked: Arc<BTreeSet<AbilityType>>,
 }
 
 impl std::fmt::Debug for AbilityBook {
@@ -124,7 +128,23 @@ impl AbilityBook {
         Self {
             owner,
             entries: Arc::new(entries),
+            locked: Arc::default(),
         }
+    }
+
+    /// This book with `abilities` locked for the match: a slot's per-match
+    /// choices forbid them, or they need an option it did not choose
+    /// (`talent_choices`). Made while a build is resolved, before the book's
+    /// combatant enters the world.
+    pub fn locking(mut self, abilities: &BTreeSet<AbilityType>) -> Self {
+        Arc::make_mut(&mut self.locked).extend(abilities.iter().copied());
+        self
+    }
+
+    /// Whether the slot's choices lock `ability` for the match: the cast gate
+    /// refuses it (`cast_guard::own_state_ok`).
+    pub fn is_locked(&self, ability: AbilityType) -> bool {
+        self.locked.contains(&ability)
     }
 
     /// Whose abilities this book holds.

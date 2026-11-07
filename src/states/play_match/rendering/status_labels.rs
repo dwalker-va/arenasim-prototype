@@ -102,6 +102,13 @@ pub fn overhead_status_label(aura: &Aura) -> Option<OverheadLabel> {
         | AuraType::WindfuryBuff
         | AuraType::ArmorIncrease
         | AuraType::AttackSpeedIncrease
+        | AuraType::DamageTakenIncrease
+        | AuraType::DamageDealtIncrease
+        | AuraType::ArmorPercentIncrease
+        | AuraType::ArmorPercentReduction
+        | AuraType::DamageTransfer
+        | AuraType::KillingBlowSave
+        | AuraType::DamageReflect
         | AuraType::TravelForm => None,
     }
 }
