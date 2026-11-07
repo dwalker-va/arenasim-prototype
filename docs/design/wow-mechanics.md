@@ -343,7 +343,9 @@ tests fail if a full-CC type or spell is left unlabelled.
 - Never breaks on damage, and no dispel takes it
 - Diminishes on its own bucket (`DRCategory::Cyclone`): Polymorph and Fear do
   not shorten it, and it does not shorten them
-- Nothing is used from inside it — not Divine Shield, not Berserker Rage
+- Only a crowd-control break trinket (the Medallion) is used from inside it,
+  and breaks it, as TBC's PvP trinket does — not Divine Shield, not Berserker
+  Rage
 - The other classes' AIs play against it (AS-163): it counts as immunity
   through the same predicate as Divine Shield (`class_ai::grants_damage_immunity`),
   so attackers switch off a cycloned target, interrupts and Mana Burn are not
