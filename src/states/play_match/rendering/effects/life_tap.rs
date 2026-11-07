@@ -3,9 +3,10 @@ use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 use std::f32::consts::TAU;
 
+use super::druid_heals::keyed;
 use super::hunter_shots::{draw, ClientEmitter, EmitterAssets, EmitterSprite};
 use super::school_impact::impact_origin;
-use super::spell_bolts::soft_dot_texture;
+use super::shield::disc_texture;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::*;
 
@@ -20,18 +21,24 @@ use crate::states::play_match::components::*;
 // Warlock. One 3334 ms sequence, no sustained state:
 //
 // - **Blue glow** — two spherical-billboard quads, 1.84 x 2.38 and
-//   1.66 x 2.14 yd, `genericglow64`, additive, constant `#5165FF`. Alpha
-//   0 -> 1 at 1334 ms -> 0 at 3334 ms; both scale-pulse
-//   0.67 -> 0.99 -> 0.72 -> 0.84 -> 0.73 on the model's 833 ms global loop.
-// - **P3 converging motes** — 834-2167 ms, 50/s, 1.0 s life, born 0.7-1.4 yd
-//   out and travelling INWARD at 2.22 yd/s, red -> blue. Additive. The
-//   health-into-mana identity.
-// - **P2 cyan twinkles** — star sprites gated on and off from 1.0 s, 0.2 s
-//   life, in a 0.56 x 1.11 yd column. Additive.
+//   1.66 x 2.14 yd, `genericglow64`, additive, constant `#5165FF`, drawn as
+//   the bench's radial gradient (0.55 at the centre, 0.25 at half radius, 0
+//   at the rim) under the alpha track 0 -> 1 at 1334 ms -> 0 at 3334 ms; both
+//   scale-pulse 0.67 -> 0.99 -> 0.72 -> 0.84 -> 0.73 on the model's 833 ms
+//   global loop.
+// - **P3 converging motes** — 834-2167 ms, 50/s, 1.0 s life, born on the
+//   bench's 0.7 yd shell (0.42-0.70 yd out) and travelling INWARD at
+//   2.22 yd/s, red -> blue. Additive. The health-into-mana identity.
+// - **P2 cyan twinkles** — star sprites gated on and off from 1.0 s (five
+//   gates, the last 2467-2634 ms), 0.2 s life, in a 0.56 x 1.11 yd column,
+//   spinning -0.64 turns a second. Additive.
 // - **P0 green puff** — 0-334 ms, 100/s, 1.0 s life, 1.94 yd/s under heavy
 //   drag: it bursts out and stalls. Alpha-blended.
-// - **P1 green sparks** — 34-334 ms, 100/s, 1.0 s life, 1.39 yd/s.
-//   Alpha-blended.
+// - **P1 green sparks** — 34-334 ms, 100/s, 1.0 s life, 1.39 yd/s. Additive,
+//   as the signed-off bench draws them (the client table lists blend 2).
+//
+// The bench's `scale` keys are sprite RADII; a particle's quad is a unit
+// DIAMETER, so every size ramp below is twice the bench's keys.
 //
 // The values are the AS-333 Baseline Kit Visuals Bench's Life Tap tab at its
 // defaults, which the user signed off (version 1792202136-e9a0): every layer
@@ -84,8 +91,11 @@ const GLOW_ALPHA: [(f32, f32); 3] = [(0.0, 0.0), (1.334, 1.0), (3.334, 0.0)];
 pub const LIFE_TAP_PULSE_LOOP_SECS: f32 = 0.833;
 /// The scale pulse, keyed evenly across the loop.
 pub const LIFE_TAP_PULSE: [f32; 5] = [0.67, 0.99, 0.72, 0.84, 0.73];
-/// Emissive gain of the glow over its colour.
-const GLOW_GAIN: f32 = 1.5;
+/// The glow's radial alpha stops over its quad's radius, `(r, alpha)` — the
+/// bench's gradient, multiplied by the alpha track.
+pub const LIFE_TAP_GLOW_STOPS: [(f32, f32); 3] = [(0.0, 0.55), (0.5, 0.25), (1.0, 0.0)];
+/// The glow texture, pixels on a side.
+const GLOW_TEXTURE_PX: u32 = 64;
 
 /// Drag on the green puff (the M2's 8), as the bench integrates it: the
 /// velocity loses `3 x drag` per second, exponentially.
@@ -93,9 +103,9 @@ const PUFF_DRAG: f32 = 8.0;
 const DRAG_PER_SEC: f32 = 3.0 * PUFF_DRAG;
 /// Twinkle spin, rad/s (the M2's -4: the bench's -0.64 turns a second).
 const TWINKLE_SPIN: f32 = -0.64 * TAU;
-/// The motes' birth shell, yards out from the chest (the client's 1.39 yd
-/// area, from its half-extent to its whole).
-pub const LIFE_TAP_MOTE_SHELL: (f32, f32) = (0.7, 1.4);
+/// The motes' birth shell, yards out from the chest: the bench's `inward:
+/// 0.7`, each mote born 0.6-1.0 of it out (0.42-0.70 yd).
+pub const LIFE_TAP_MOTE_SHELL: f32 = 0.7;
 
 const RED: [u8; 3] = [255, 0, 0];
 const MANA_BLUE: [u8; 3] = [63, 179, 255];
@@ -121,9 +131,10 @@ enum Launch {
     /// From the emitter's spawn volume, in a uniformly random direction at the
     /// emitter's speed.
     Out,
-    /// On a shell `(near, far)` yards out, travelling straight in at the
-    /// emitter's speed.
-    Inward { near: f32, far: f32 },
+    /// On the bench's shell of `radius` yards — a cube direction, normalised,
+    /// each particle born 0.6-1.0 of the radius out — travelling straight in
+    /// at the emitter's speed (`PainLaunch::Inward`).
+    Inward { radius: f32 },
 }
 
 /// One of the model's four emitters: its ramps (as a [`ClientEmitter`], whose
@@ -141,8 +152,13 @@ struct Layer {
 }
 
 const MOTE_WINDOWS: [(f32, f32); 1] = [(0.834, 2.167)];
-const TWINKLE_WINDOWS: [(f32, f32); 4] =
-    [(1.0, 1.167), (1.334, 1.5), (1.634, 1.834), (2.067, 2.234)];
+const TWINKLE_WINDOWS: [(f32, f32); 5] = [
+    (1.0, 1.167),
+    (1.334, 1.5),
+    (1.634, 1.834),
+    (2.067, 2.234),
+    (2.467, 2.634),
+];
 const PUFF_WINDOWS: [(f32, f32); 1] = [(0.0, 0.334)];
 const SPARK_WINDOWS: [(f32, f32); 1] = [(0.034, 0.334)];
 
@@ -154,11 +170,13 @@ const fn alpha3(a: [f32; 3]) -> [f32; 3] {
     ]
 }
 
-const fn size3(s: [f32; 3]) -> [f32; 3] {
+/// A size ramp from the bench's `scale` keys, which are RADII: the quad is a
+/// unit diameter, so it is drawn at twice the key.
+const fn diameter(radius: [f32; 3]) -> [f32; 3] {
     [
-        s[0] * LIFE_TAP_SIZE_MUL,
-        s[1] * LIFE_TAP_SIZE_MUL,
-        s[2] * LIFE_TAP_SIZE_MUL,
+        radius[0] * 2.0 * LIFE_TAP_SIZE_MUL,
+        radius[1] * 2.0 * LIFE_TAP_SIZE_MUL,
+        radius[2] * 2.0 * LIFE_TAP_SIZE_MUL,
     ]
 }
 
@@ -181,14 +199,13 @@ static LAYERS: [Layer; 4] = [
             rise: false,
             color: [RED, lerp_rgb(RED, MANA_BLUE, 0.3), MANA_BLUE],
             alpha: alpha3([0.2, 1.0, 0.9]),
-            size: size3([0.03, 0.14, 0.28]),
+            size: diameter([0.03, 0.14, 0.28]),
             mid: 0.3,
             track: None,
         },
         windows: &MOTE_WINDOWS,
         launch: Launch::Inward {
-            near: LIFE_TAP_MOTE_SHELL.0 * LIFE_TAP_SPREAD_MUL,
-            far: LIFE_TAP_MOTE_SHELL.1 * LIFE_TAP_SPREAD_MUL,
+            radius: LIFE_TAP_MOTE_SHELL * LIFE_TAP_SPREAD_MUL,
         },
         size_mid: 0.5,
         drag: 0.0,
@@ -211,7 +228,7 @@ static LAYERS: [Layer; 4] = [
             rise: false,
             color: [CYAN, lerp_rgb(CYAN, PALE, 0.5), PALE],
             alpha: alpha3([1.0, 0.9, 0.8]),
-            size: size3([0.014, 0.11, 0.014]),
+            size: diameter([0.014, 0.11, 0.014]),
             mid: 0.5,
             track: None,
         },
@@ -238,7 +255,7 @@ static LAYERS: [Layer; 4] = [
             rise: false,
             color: [PUFF_GREEN, PUFF_GREEN, PUFF_END],
             alpha: alpha3([0.7, 0.45, 0.0]),
-            size: size3([0.11, 0.44, 1.11]),
+            size: diameter([0.11, 0.44, 1.11]),
             mid: 0.5,
             track: None,
         },
@@ -254,7 +271,7 @@ static LAYERS: [Layer; 4] = [
         emitter: ClientEmitter {
             name: "lifetap/p1 green sparks",
             sprite: EmitterSprite::Flare,
-            additive: false,
+            additive: true,
             rate: 100.0 * LIFE_TAP_DENSITY_MUL,
             window: None,
             life: 1.0 * TIME,
@@ -269,7 +286,7 @@ static LAYERS: [Layer; 4] = [
                 SPARK_END,
             ],
             alpha: alpha3([1.0, 0.5, 0.0]),
-            size: size3([0.08, 0.06, 0.03]),
+            size: diameter([0.08, 0.06, 0.03]),
             mid: 0.5,
             track: None,
         },
@@ -302,17 +319,26 @@ impl Layer {
     /// Where a particle is born relative to the chest, and how it launches.
     fn launch(&self, seed: u32) -> (Vec3, Vec3) {
         let e = &self.emitter;
-        // A uniform direction on the sphere.
-        let u = draw(seed, 4) * 2.0 - 1.0;
-        let theta = draw(seed, 5) * TAU;
-        let r = (1.0 - u * u).max(0.0).sqrt();
-        let dir = Vec3::new(r * theta.cos(), u, r * theta.sin());
         match self.launch {
-            Launch::Inward { near, far } => {
-                let out = near + (far - near) * draw(seed, 1);
-                (dir * out, -dir * e.speed)
+            Launch::Inward { radius } => {
+                // The bench's shell: a cube direction, normalised; born 0.6-1.0
+                // of the radius out, travelling straight in.
+                let d = Vec3::new(
+                    draw(seed, 1) * 2.0 - 1.0,
+                    draw(seed, 2) * 2.0 - 1.0,
+                    draw(seed, 3) * 2.0 - 1.0,
+                )
+                .try_normalize()
+                .unwrap_or(Vec3::Y);
+                let out = radius * (0.6 + 0.4 * draw(seed, 4));
+                (d * out, -d * e.speed)
             }
             Launch::Out => {
+                // A uniform direction on the sphere.
+                let u = draw(seed, 4) * 2.0 - 1.0;
+                let theta = draw(seed, 5) * TAU;
+                let r = (1.0 - u * u).max(0.0).sqrt();
+                let dir = Vec3::new(r * theta.cos(), u, r * theta.sin());
                 let offset = match e.column {
                     Some((w, h)) => Vec3::new(
                         (draw(seed, 1) - 0.5) * w,
@@ -379,6 +405,11 @@ pub fn life_tap_glow_pulse(secs: f32) -> f32 {
     LIFE_TAP_PULSE[i] + (LIFE_TAP_PULSE[i + 1] - LIFE_TAP_PULSE[i]) * f
 }
 
+/// The glow's texture: white texels, the bench's radial gradient in alpha.
+pub fn life_tap_glow_texture() -> Image {
+    disc_texture(GLOW_TEXTURE_PX, |r, _| keyed(&LIFE_TAP_GLOW_STOPS, r))
+}
+
 /// Build the glow's two quads under each new landing: one additive material
 /// per landing, since its alpha follows that landing's own clock.
 pub fn spawn_life_tap_glow_visuals(
@@ -397,7 +428,7 @@ pub fn spawn_life_tap_glow_visuals(
             .get_or_insert_with(|| {
                 (
                     meshes.add(Rectangle::new(1.0, 1.0)),
-                    images.add(soft_dot_texture()),
+                    images.add(life_tap_glow_texture()),
                 )
             })
             .clone();
@@ -410,7 +441,8 @@ pub fn spawn_life_tap_glow_visuals(
         let material = materials.add(StandardMaterial {
             base_color: color.with_alpha(0.0),
             base_color_texture: Some(dot.clone()),
-            emissive: LinearRgba::rgb(c.red * GLOW_GAIN, c.green * GLOW_GAIN, c.blue * GLOW_GAIN),
+            // The bench adds the colour itself: no gain over it.
+            emissive: LinearRgba::rgb(c.red, c.green, c.blue),
             emissive_texture: Some(dot),
             alpha_mode: AlphaMode::Add,
             cull_mode: None,
@@ -562,17 +594,13 @@ mod tests {
 
     #[test]
     fn each_layer_emits_its_client_count() {
-        // Rate x window: 66.65 motes, 4 x ~8.4 twinkles, 33.4 puffs, 30 sparks.
+        // Rate x window: 66.65 motes, 5 gates of ~8.7 twinkles, 33.4 puffs,
+        // 30 sparks.
         let counts: Vec<f32> = LAYERS
             .iter()
             .map(|l| l.count_between(0.0, LIFE_TAP_SECS))
             .collect();
-        let want = [
-            50.0 * 1.333,
-            50.0 * (0.167 + 0.166 + 0.2 + 0.167),
-            33.4,
-            30.0,
-        ];
+        let want = [50.0 * 1.333, 50.0 * 0.867, 33.4, 30.0];
         for (got, want) in counts.iter().zip(want) {
             assert!((got - want).abs() < 1e-2, "{counts:?}");
         }
@@ -600,9 +628,43 @@ mod tests {
         for seed in 0..200 {
             let (at, v) = LAYERS[0].launch(seed);
             let r = at.length();
-            assert!((0.7 - 1e-4..=1.4 + 1e-4).contains(&r), "{r}");
+            assert!((0.42 - 1e-4..=0.70 + 1e-4).contains(&r), "{r}");
             assert!((v.length() - 2.22).abs() < 1e-4);
             assert!(v.dot(at) < 0.0, "a mote must travel inward");
         }
+        // The whole shell is used: its inner and outer edges both appear.
+        let radii: Vec<f32> = (0..200).map(|s| LAYERS[0].launch(s).0.length()).collect();
+        assert!(radii.iter().any(|r| *r < 0.46), "{radii:?}");
+        assert!(radii.iter().any(|r| *r > 0.66), "{radii:?}");
+    }
+
+    /// The glow texture's alpha is the bench's gradient: 0.55 at the centre,
+    /// 0.25 at half radius, nothing at the rim.
+    #[test]
+    fn the_glow_texture_is_the_benchs_radial_gradient() {
+        let image = life_tap_glow_texture();
+        let px = GLOW_TEXTURE_PX as usize;
+        let data = image.data.as_ref().expect("the texture's texels");
+        let alpha_at = |x: usize, y: usize| data[(y * px + x) * 4 + 3] as f32 / 255.0;
+        let r_at = |x: usize, y: usize| {
+            let d = |i: usize| (i as f32 + 0.5) / px as f32 * 2.0 - 1.0;
+            (d(x).powi(2) + d(y).powi(2)).sqrt()
+        };
+        let mut seen = [false; 3];
+        for y in 0..px {
+            for x in 0..px {
+                let (r, a) = (r_at(x, y), alpha_at(x, y));
+                for (i, (at, want)) in LIFE_TAP_GLOW_STOPS.iter().enumerate() {
+                    if (r - at).abs() < 0.03 {
+                        assert!((a - want).abs() < 0.025, "alpha {a} at r {r}, want {want}");
+                        seen[i] = true;
+                    }
+                }
+                if r >= 1.0 {
+                    assert_eq!(a, 0.0, "alpha {a} outside the disc at r {r}");
+                }
+            }
+        }
+        assert_eq!(seen, [true; 3], "every stop sampled");
     }
 }

@@ -4,9 +4,10 @@
 //! Everything is read off the rendered world — `GlobalTransform` and the live
 //! material colour — never the rig's stored fields: where the glow sits, how
 //! big it is and how it throbs, when it peaks and when it is gone, that it
-//! faces the camera and rides the Warlock, that the red motes close on the
-//! chest and turn blue, that the green puff bursts and stalls, and that the
-//! cyan twinkles wait for their gate.
+//! faces the camera and rides the Warlock and goes with it, that the red
+//! motes close on the chest and turn blue, that the green puff bursts and
+//! stalls, that the cyan twinkles wait for their gate and spin, and that every
+//! layer's particles render at the bench's size.
 //!
 //! Runs on `MinimalPlugins` + `AssetPlugin` + `TransformPlugin` with the
 //! production systems in production order: the instant-ability router (which
@@ -22,7 +23,7 @@ use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::{
-    ClientParticle, Combatant, InstantAbilityFired, LifeTapGlowQuad,
+    ClientParticle, Combatant, InstantAbilityFired, LifeTapGlow, LifeTapGlowQuad,
 };
 use arenasim::states::play_match::{
     animate_client_particles, billboard_hunter_shots, consume_instant_ability_signals,
@@ -154,6 +155,45 @@ impl Harness {
             .collect()
     }
 
+    /// Every live client particle: its rendered colour, blend, world
+    /// rotation and world size (the unit quad's scale), with how far through
+    /// its life it is — the clock the bench's keys are read on.
+    fn rendered(&mut self) -> Vec<Rendered> {
+        let mut q = self.app.world_mut().query::<(
+            Entity,
+            &ClientParticle,
+            &GlobalTransform,
+            &MeshMaterial3d<StandardMaterial>,
+        )>();
+        let rows: Vec<(Entity, f32, GlobalTransform, Handle<StandardMaterial>)> = q
+            .iter(self.app.world())
+            .map(|(e, p, g, m)| (e, p.age / p.life, *g, m.0.clone()))
+            .collect();
+        let materials = self.app.world().resource::<Assets<StandardMaterial>>();
+        rows.into_iter()
+            .map(|(entity, t, g, m)| {
+                let material = materials.get(&m).unwrap();
+                let (scale, rotation, _) = g.to_scale_rotation_translation();
+                Rendered {
+                    entity,
+                    t,
+                    hue: hue(material.base_color.to_linear()),
+                    additive: material.alpha_mode == AlphaMode::Add,
+                    size: scale.x,
+                    rotation,
+                }
+            })
+            .collect()
+    }
+
+    fn camera_rotation(&mut self) -> Quat {
+        let mut q = self
+            .app
+            .world_mut()
+            .query_filtered::<&GlobalTransform, With<Camera3d>>();
+        q.single(self.app.world()).unwrap().rotation()
+    }
+
     /// Every live client particle: entity, world position, rendered colour.
     fn particles(&mut self) -> Vec<(Entity, Vec3, LinearRgba)> {
         let mut q = self.app.world_mut().query_filtered::<(
@@ -195,6 +235,36 @@ fn hue(c: LinearRgba) -> Hue {
     } else {
         Hue::Other
     }
+}
+
+/// One rendered client particle.
+#[derive(Debug, Clone, Copy)]
+struct Rendered {
+    entity: Entity,
+    /// Age over life, 0..1.
+    t: f32,
+    hue: Hue,
+    additive: bool,
+    /// World size, yards: the unit quad's scale.
+    size: f32,
+    rotation: Quat,
+}
+
+/// The bench's `scale` keys at life 0, 0.5 and 1, per layer — sprite RADII.
+const MOTE_SCALE: [f32; 3] = [0.03, 0.14, 0.28];
+const TWINKLE_SCALE: [f32; 3] = [0.014, 0.11, 0.014];
+const PUFF_SCALE: [f32; 3] = [0.11, 0.44, 1.11];
+const SPARK_SCALE: [f32; 3] = [0.08, 0.06, 0.03];
+
+/// The bench's sprite DIAMETER at `t` through a particle's life: twice its
+/// radius key (`sc = keys(scale) * 2`, drawn at `r = sc * 0.5`).
+fn bench_diameter(keys: [f32; 3], t: f32) -> f32 {
+    let radius = if t < 0.5 {
+        keys[0] + (keys[1] - keys[0]) * t / 0.5
+    } else {
+        keys[1] + (keys[2] - keys[1]) * (t - 0.5) / 0.5
+    };
+    radius * 2.0
 }
 
 fn harness() -> Harness {
@@ -334,8 +404,9 @@ fn the_glow_rides_the_warlock() {
     }
 }
 
-/// The red-to-blue pull: motes are born red, 0.7-1.4 yd out, close on the
-/// chest, and render blue late in their lives.
+/// The red-to-blue pull: motes are born red on the bench's 0.7 yd shell
+/// (0.42-0.70 yd out), close on the chest, and render blue late in their
+/// lives.
 #[test]
 fn red_motes_close_on_the_chest_and_turn_blue() {
     let mut h = Harness::tapped();
@@ -358,7 +429,7 @@ fn red_motes_close_on_the_chest_and_turn_blue() {
         .iter()
         .map(|(_, at)| at.distance(chest))
         .fold(0.0f32, f32::max);
-    assert!((0.6..=1.45).contains(&far), "outermost mote {far} yd out");
+    assert!((0.35..=0.71).contains(&far), "outermost mote {far} yd out");
     // Closing: every red mote nearer the chest a few frames on.
     let before: Vec<f32> = red.iter().map(|(_, at)| at.distance(chest)).collect();
     h.tick(3);
@@ -502,4 +573,155 @@ fn the_warlocks_own_tap_lights_its_chest() {
     let control = tap_scene(1.0).decide(WARLOCK);
     assert_ne!(control.chosen.map(|c| c.0), Some(AbilityType::LifeTap));
     assert!(glow_from_decision(&control).1.is_empty());
+}
+
+/// Every layer's particles render at the bench's size: twice its `scale`
+/// key, which is a radius, at that particle's point in its life.
+#[test]
+fn every_layer_renders_at_the_benchs_size() {
+    let mut h = Harness::tapped();
+    let check = |rows: &[Rendered], name: &str, keys: [f32; 3]| {
+        assert!(!rows.is_empty(), "no {name} to measure");
+        for p in rows {
+            let want = bench_diameter(keys, p.t);
+            assert!(
+                (p.size - want).abs() < 1e-3 + want * 1e-3,
+                "a {name} renders {} yd at t {}, the bench {want}",
+                p.size,
+                p.t
+            );
+        }
+    };
+    // The green burst: the puff alpha-blended, the sparks additive.
+    h.run_to(0.25);
+    let rows = h.rendered();
+    let green: Vec<Rendered> = rows
+        .iter()
+        .copied()
+        .filter(|p| p.hue == Hue::Green)
+        .collect();
+    let puff: Vec<Rendered> = green.iter().copied().filter(|p| !p.additive).collect();
+    let sparks: Vec<Rendered> = green.iter().copied().filter(|p| p.additive).collect();
+    check(&puff, "puff", PUFF_SCALE);
+    check(&sparks, "spark", SPARK_SCALE);
+    // The motes (red early in their lives) and the first gate's twinkles.
+    h.run_to(1.1);
+    let rows = h.rendered();
+    let motes: Vec<Rendered> = rows.iter().copied().filter(|p| p.hue == Hue::Red).collect();
+    let twinkles: Vec<Rendered> = rows
+        .iter()
+        .copied()
+        .filter(|p| p.hue == Hue::Cyan)
+        .collect();
+    check(&motes, "mote", MOTE_SCALE);
+    check(&twinkles, "twinkle", TWINKLE_SCALE);
+}
+
+/// The twinkles spin in the view plane at the bench's -0.64 turns a second.
+#[test]
+fn the_twinkles_spin_at_the_benchs_rate() {
+    let mut h = Harness::tapped();
+    h.run_to(1.04);
+    let camera = h.camera_rotation();
+    // A young twinkle, so it outlives the measurement.
+    let young = h
+        .rendered()
+        .into_iter()
+        .filter(|p| p.hue == Hue::Cyan && p.t < 0.4)
+        .collect::<Vec<_>>();
+    assert!(!young.is_empty(), "no young twinkle at 1.04 s");
+    // The roll about the view axis, read off the world rotation.
+    let roll = |rotation: Quat| {
+        let rel = camera.inverse() * rotation;
+        assert!(
+            (rel * Vec3::Z).dot(Vec3::Z) > 0.999,
+            "a twinkle turned off the camera's facing"
+        );
+        let x = rel * Vec3::X;
+        x.y.atan2(x.x)
+    };
+    let before: Vec<(Entity, f32)> = young.iter().map(|p| (p.entity, roll(p.rotation))).collect();
+    const FRAMES: u32 = 3;
+    h.tick(FRAMES);
+    let now = h.rendered();
+    let secs = FRAMES as f32 * TICK.as_secs_f32();
+    let want = -0.64 * std::f32::consts::TAU * secs;
+    for (e, r0) in before {
+        let p = now
+            .iter()
+            .find(|p| p.entity == e)
+            .expect("the twinkle lived on");
+        let mut turned = roll(p.rotation) - r0;
+        // Wrap into (-pi, pi].
+        turned = (turned + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+            - std::f32::consts::PI;
+        assert!(
+            (turned - want).abs() < 0.01,
+            "a twinkle turned {turned} rad in {secs} s, the bench {want}"
+        );
+    }
+}
+
+/// A landing whose Warlock is gone goes with it: the glow and both its quads.
+#[test]
+fn the_glow_goes_with_its_warlock() {
+    let mut h = Harness::tapped();
+    h.run_to(0.5);
+    assert_eq!(h.quads().len(), 2);
+    h.app.world_mut().entity_mut(h.warlock).despawn();
+    h.tick(2);
+    assert!(
+        h.quads().is_empty(),
+        "the glow's quads outlived its Warlock"
+    );
+    let mut glows = h.app.world_mut().query::<&LifeTapGlow>();
+    assert_eq!(glows.iter(h.app.world()).count(), 0, "an orphaned landing");
+}
+
+/// The glow is the bench's radial gradient in the bench's own blue: alpha
+/// 0.55 at the centre, 0.25 at half radius, 0 at the rim (under the alpha
+/// track), lit by the colour itself with no gain over it.
+#[test]
+fn the_glow_draws_the_benchs_gradient_in_its_blue() {
+    let mut h = Harness::tapped();
+    h.run_to(0.5);
+    let mut q = h
+        .app
+        .world_mut()
+        .query_filtered::<&MeshMaterial3d<StandardMaterial>, With<LifeTapGlowQuad>>();
+    let handles: Vec<Handle<StandardMaterial>> =
+        q.iter(h.app.world()).map(|m| m.0.clone()).collect();
+    assert_eq!(handles.len(), 2);
+    let world = h.app.world();
+    let materials = world.resource::<Assets<StandardMaterial>>();
+    let images = world.resource::<Assets<Image>>();
+    let blue = Color::srgb_u8(81, 101, 255).to_linear();
+    for handle in handles {
+        let material = materials.get(&handle).unwrap();
+        assert_eq!(material.alpha_mode, AlphaMode::Add);
+        let e = material.emissive;
+        assert!(
+            (e.red - blue.red).abs() < 1e-4
+                && (e.green - blue.green).abs() < 1e-4
+                && (e.blue - blue.blue).abs() < 1e-4,
+            "the glow is lit {e:?}, its colour is {blue:?}"
+        );
+        let texture = material.base_color_texture.as_ref().expect("a gradient");
+        let image = images.get(texture).unwrap();
+        let (w, hgt) = (image.width() as usize, image.height() as usize);
+        let data = image.data.as_ref().unwrap();
+        // Alpha along the row through the centre, by radius.
+        let row = hgt / 2;
+        let alpha_at = |r: f32| {
+            let x = ((r + 1.0) * 0.5 * w as f32).floor().min(w as f32 - 1.0) as usize;
+            data[(row * w + x) * 4 + 3] as f32 / 255.0
+        };
+        for (r, want) in [(0.0, 0.55), (0.5, 0.25), (0.999, 0.0)] {
+            let got = alpha_at(r);
+            assert!(
+                (got - want).abs() < 0.03,
+                "the glow's alpha at radius {r} is {got}, the bench {want}"
+            );
+        }
+    }
 }
