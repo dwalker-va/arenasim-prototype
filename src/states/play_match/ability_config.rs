@@ -21,7 +21,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::abilities::{AbilityType, ScalingStat, SpellSchool};
-use super::components::{AuraType, CompoundDebuff, DRCategory, DispelType, PetType};
+use super::components::{
+    AuraDamageMods, AuraType, CompoundDebuff, DRCategory, DamageScope, DispelType, PetType,
+};
 use super::match_config::CharacterClass;
 
 /// Default value for break_on_damage: -1.0 means the aura doesn't break on damage.
@@ -69,6 +71,16 @@ pub struct AuraEffect {
     /// must not share stun DR with Cheap Shot.
     #[serde(default)]
     pub dr_category: Option<DRCategory>,
+    /// The hits a damage modifier reaches (`DamageTakenIncrease`,
+    /// `DamageDealtIncrease`, `DamageTakenReduction`): `Some(School(Shadow))`
+    /// or `Some(Spells)`. `None`, the default, reaches every hit.
+    #[serde(default)]
+    pub scope: Option<DamageScope>,
+    /// Hit charges on a `DamageTakenIncrease`: each direct hit it raises
+    /// spends one, and the aura ends at zero (Shadow Vulnerability: 4). `None`,
+    /// the default, lasts its duration.
+    #[serde(default)]
+    pub charges: Option<u8>,
     /// Removal class of the applied aura. Leave it at `Auto` (the default) and
     /// the class is derived from the ability's `spell_school`: a `Physical`
     /// ability applies a physical debuff that no dispel, cleanse or purge
@@ -119,6 +131,19 @@ pub struct AuraEffect {
     /// (a minor re-buff). `None`, the default, leaves the type's value.
     #[serde(default)]
     pub purge_priority: Option<i32>,
+}
+
+impl AuraEffect {
+    /// The damage-pipeline data the configured aura carries: its scope and
+    /// hit charges. A reflect share is never configured; it is set as a
+    /// shield lands (`talent_mechanics`).
+    pub fn damage_mods(&self) -> AuraDamageMods {
+        AuraDamageMods {
+            scope: self.scope,
+            charges: self.charges,
+            reflect_absorbed: None,
+        }
+    }
 }
 
 /// A stacking aura's config: how many stacks it can hold.

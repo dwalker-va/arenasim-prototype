@@ -14,9 +14,10 @@ use super::super::utils::{combat_log_id, get_next_fct_offset};
 use super::super::{AUTO_SHOT_RANGE, FCT_HEIGHT, HUNTER_DEAD_ZONE, MELEE_RANGE, WAND_RANGE};
 use super::avoidance::{avoid_melee_attack, MeleeDefense};
 use super::damage::{
-    apply_damage_with_absorb, get_divine_shield_damage_penalty, get_physical_damage_reduction,
-    roll_crit,
+    apply_damage_with_absorb, damage_dealt_multiplier, get_divine_shield_damage_penalty,
+    get_physical_damage_reduction, roll_crit, Hit,
 };
+use super::follow_ups::DamageFollowUps;
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use bevy::prelude::*;
 
@@ -142,6 +143,20 @@ pub fn combat_auto_attack(
                     .map(|chance| (entity, (poison, chance, book.clone())))
             })
             .collect();
+    // The off-hand poison of each Rogue whose build opened the second poison
+    // slot and filled it (Master Poisoner): its off-hand swings roll it
+    // instead of the main-hand poison. Empty for every other match.
+    let offhand_poison_procs: std::collections::HashMap<Entity, (AbilityType, f32)> = combatants
+        .iter()
+        .filter_map(|(entity, _, combatant, _, _, _)| {
+            let poison = combatant.rogue_offhand_poison?.ability();
+            combatant
+                .book()
+                .get(&poison)
+                .and_then(|def| def.application_chance)
+                .map(|chance| (entity, (poison, chance)))
+        })
+        .collect();
     // The poisons whose first application has been logged this frame.
     let mut poison_fresh_this_frame: std::collections::HashSet<(
         Entity,
@@ -700,6 +715,8 @@ pub fn combat_auto_attack(
     let mut frost_armor_procs: std::collections::BTreeSet<Entity> =
         std::collections::BTreeSet::new();
 
+    // What the frame's hits set off on other units, spawned once they land.
+    let mut follow_ups = DamageFollowUps::default();
     for (attacker_entity, target_entity, damage, has_bonus, is_crit, hand, swing_kind) in attacks {
         // If any attack to this target crits, mark the FCT as crit
         crit_per_target
@@ -724,16 +741,32 @@ pub fn combat_auto_attack(
             }
         }
 
+        // The attacker's damage-dealt increases, read before the target is
+        // borrowed.
+        let dealt = combatants
+            .get(attacker_entity)
+            .map_or(1.0, |(_, _, _, _, _, auras)| {
+                damage_dealt_multiplier(auras, SpellSchool::Physical)
+            });
         if let Ok((_, _, mut target, _, _, mut target_auras)) = combatants.get_mut(target_entity) {
             if target.is_alive() {
                 let attack_name = auto_attack_name(has_bonus, swing_kind);
                 // Apply damage with absorb shield consideration
-                let (actual_damage, absorbed) = apply_damage_with_absorb(
+                let hit = Hit::new(
                     damage,
-                    &mut target,
-                    target_auras.as_deref_mut(),
                     SpellSchool::Physical,
                     attack_name,
+                    Some(attacker_entity),
+                    None,
+                    target_entity,
+                )
+                .with_dealt(dealt)
+                .melee_if(swing_kind == AutoAttackKind::Melee);
+                let (actual_damage, absorbed) = apply_damage_with_absorb(
+                    hit,
+                    &mut target,
+                    target_auras.as_deref_mut(),
+                    &mut follow_ups,
                     &mut combat_log,
                 );
 
@@ -784,7 +817,12 @@ pub fn combat_auto_attack(
                 // category); the others land through `apply_pending_auras`,
                 // which stacks and refreshes them.
                 if let Some((poison, chance, book)) = poison_procs.get(&attacker_entity) {
-                    let (poison, chance) = (*poison, *chance);
+                    // The off hand rolls its own poison when it has one.
+                    let (poison, chance) = match (hand, offhand_poison_procs.get(&attacker_entity))
+                    {
+                        (WeaponHand::Off, Some(off)) => *off,
+                        _ => (*poison, *chance),
+                    };
                     if poison != AbilityType::CripplingPoison {
                         if game_rng.random_f32() < chance {
                             apply_weapon_poison(
@@ -952,6 +990,11 @@ pub fn combat_auto_attack(
         // Only a Rogue in the proc table queues a poison hit.
         let (_, _, book) = &poison_procs[&attacker_entity];
         let def = book.get_unchecked(&poison);
+        let dealt = combatants
+            .get(attacker_entity)
+            .map_or(1.0, |(_, _, _, _, _, auras)| {
+                damage_dealt_multiplier(auras, def.spell_school)
+            });
         let Ok((_, _, mut target, _, _, mut target_auras)) = combatants.get_mut(target_entity)
         else {
             continue;
@@ -959,12 +1002,20 @@ pub fn combat_auto_attack(
         if !target.is_alive() {
             continue;
         }
-        let (actual_damage, absorbed) = apply_damage_with_absorb(
+        let hit = Hit::new(
             def.damage_base_min,
-            &mut target,
-            target_auras.as_deref_mut(),
             def.spell_school,
             &def.name,
+            Some(attacker_entity),
+            None,
+            target_entity,
+        )
+        .with_dealt(dealt);
+        let (actual_damage, absorbed) = apply_damage_with_absorb(
+            hit,
+            &mut target,
+            target_auras.as_deref_mut(),
+            &mut follow_ups,
             &mut combat_log,
         );
         if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
@@ -1016,6 +1067,8 @@ pub fn combat_auto_attack(
             combat_log.log_death(target_id, Some(attacker_id), death_message);
         }
     }
+
+    follow_ups.spawn(&mut commands);
 
     // Proc trinkets, MeleeHit: one roll per ready trinket per landed swing.
     // `proc_trinkets` is empty for every combatant not wearing one, and the
@@ -1279,6 +1332,7 @@ pub fn frost_armor_movement_slow_aura() -> Aura {
         tick_interval: 0.0,
         time_until_next_tick: 0.0,
         caster: None,
+        damage_mods: Default::default(),
         ability_name: "Frost Armor".to_string(),
         fear_direction: (0.0, 0.0),
         fear_direction_timer: 0.0,
@@ -1307,6 +1361,7 @@ pub fn frost_armor_attack_speed_aura() -> Aura {
         tick_interval: 0.0,
         time_until_next_tick: 0.0,
         caster: None,
+        damage_mods: Default::default(),
         ability_name: "Frost Armor".to_string(),
         fear_direction: (0.0, 0.0),
         fear_direction_timer: 0.0,

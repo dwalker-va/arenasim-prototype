@@ -199,7 +199,9 @@ pub const fn cc_break_breaks(aura: AuraType) -> bool {
         | AuraType::DamageReduction
         | AuraType::AttackPowerReduction
         | AuraType::DamageOverTime
-        | AuraType::WeakenedSoul => false,
+        | AuraType::WeakenedSoul
+        | AuraType::DamageTakenIncrease
+        | AuraType::ArmorPercentReduction => false,
         // Buffs, states and markers.
         AuraType::Absorb
         | AuraType::HealingOverTime
@@ -220,7 +222,12 @@ pub const fn cc_break_breaks(aura: AuraType) -> bool {
         | AuraType::WeaponPoison
         | AuraType::WindfuryBuff
         | AuraType::SpellResistanceBuff
-        | AuraType::LockoutDurationReduction => false,
+        | AuraType::LockoutDurationReduction
+        | AuraType::DamageDealtIncrease
+        | AuraType::ArmorPercentIncrease
+        | AuraType::DamageTransfer
+        | AuraType::KillingBlowSave
+        | AuraType::DamageReflect => false,
     }
 }
 
