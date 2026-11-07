@@ -183,6 +183,70 @@ fn a_crit_taken_proc_heals_back_its_share() {
 /// `SpellHit` with an aura on the struck enemy (Aftermath), narrowed to
 /// Shadow Bolt: it fires for Shadow Bolt and not when the only ability it
 /// names is one the Warlock's hits are not.
+/// A full-share, one-tick Blessed Recovery on a Priest taking double damage,
+/// struck by `attacker` with every blow a crit. The Priest is held silenced,
+/// so no shield or heal of its own gets in the way, with health to spare.
+fn heal_back_run(attacker: &str, stage: Stage) -> String {
+    let mut recovery = certain(TalentTrigger::CritTaken, "");
+    recovery.effect = ProcEffect::HealBack {
+        fraction: 1.0,
+        duration: 0.1,
+        tick_interval: 0.1,
+        name: Some("Blessed Recovery".to_string()),
+    };
+    let held = |effect_type, name: &str| Aura {
+        effect_type,
+        duration: 300.0,
+        magnitude: 1.0,
+        ability_name: name.to_string(),
+        break_on_damage_threshold: -1.0,
+        ..Default::default()
+    };
+    play(
+        config(&[attacker], &["Priest"], 25.0),
+        with_proc(stage, T2, recovery)
+            .combatant(T1, |c| c.crit_chance = 1.0)
+            .combatant(T2, |c| {
+                c.max_health = 10_000.0;
+                c.current_health = 5_000.0;
+            })
+            .clear_auras(T2)
+            .aura(T2, held(AuraType::Silence, "Held"))
+            .aura(T2, held(AuraType::DamageTakenIncrease, "Vulnerable")),
+    )
+    .log
+}
+
+const RECOVERED: &str = "Priest #1's Blessed Recovery heals Team 2 Priest #1 for";
+
+/// A crit-taken heal-back heals its share of what the crit LANDED, after the
+/// damage pipeline (AS-408), at both crit sites: each auto-attack crit is
+/// healed back exactly (Mortal Strike held, so no healing cut), and so is
+/// each Sinister Strike crit that ticks before another crit refreshes it.
+#[test]
+fn a_crit_taken_heal_back_reads_the_damage_the_crit_landed() {
+    let swings = heal_back_run(
+        "Warrior",
+        Stage::new().cooldown(T1, AbilityType::MortalStrike, 1000.0),
+    );
+    let crits = amounts(&swings, "Warrior #1's Auto Attack CRITS", " for ");
+    let healed = amounts(&swings, RECOVERED, " for ");
+    let n = crits.len().min(healed.len());
+    assert!(n >= 2, "{swings}");
+    assert_eq!(crits[..n], healed[..n], "{swings}");
+
+    // A Rogue's swings can land right after its Sinister Strike and refresh
+    // the heal-back before it ticks, so not every strike is healed back;
+    // at least two are, whole.
+    let strikes = heal_back_run("Rogue", Stage::new());
+    let healed = amounts(&strikes, RECOVERED, " for ");
+    let whole = amounts(&strikes, "Rogue #1's Sinister Strike CRITS", " for ")
+        .into_iter()
+        .filter(|c| healed.contains(c))
+        .count();
+    assert!(whole >= 2, "{strikes}");
+}
+
 #[test]
 fn a_spell_hit_proc_lands_its_aura_on_the_enemy_struck() {
     let mut aftermath = certain(TalentTrigger::SpellHit, "");
@@ -692,6 +756,120 @@ fn a_caster_school_leech_heals_the_casters_party() {
     assert!(lines(&control.log, "Vampiric Embrace heals").is_empty());
 }
 
+/// The amounts after `marker` (" for N") on every line containing `needle`.
+fn amounts(log: &str, needle: &str, marker: &str) -> Vec<f32> {
+    lines(log, needle)
+        .iter()
+        .filter_map(|l| {
+            l.split(marker)
+                .nth(1)?
+                .split_whitespace()
+                .next()?
+                .parse()
+                .ok()
+        })
+        .collect()
+}
+
+/// A leech heals off the damage the hit LANDS on its victim's health — after
+/// the damage pipeline's modifiers (AS-408), its transfers and its absorbs —
+/// not off the damage its source computed. Each Siphon Life tick that lands
+/// heals the Warlock exactly what the tick's line says it dealt: twice the
+/// plain tick on a Warrior that takes double damage, half of it on a Warrior whose
+/// teammate takes half its damage for it. The Warrior and its Priest are
+/// held stunned so nothing else heals, cuts healing or dispels. (That an
+/// absorbed hit feeds nothing is `leech.rs`'s unit tests'.)
+#[test]
+fn a_leech_heals_off_the_damage_the_pipeline_lands() {
+    const TICKS: &str = "Warlock #1's Siphon Life ticks for";
+    const HEALS: &str = "Warlock #1's Siphon Life heals for";
+    let held = || Aura {
+        effect_type: AuraType::Stun,
+        duration: 300.0,
+        magnitude: 1.0,
+        ability_name: "Held".to_string(),
+        break_on_damage_threshold: -1.0,
+        ..Default::default()
+    };
+    let run = |modifier: Option<Aura>| {
+        let mut siphon = leeching(
+            "Siphon Life",
+            Some(Leech {
+                fraction: 1.0,
+                to: LeechRecipient::Caster,
+                of: LeechSource::Ability,
+            }),
+        );
+        siphon.magnitude = 20.0;
+        play(
+            config(&["Warlock"], &["Warrior", "Priest"], 20.0),
+            Stage::new()
+                .health(T1, 0.2)
+                // No pre-match shield to soak the ticks.
+                .clear_auras(T2)
+                .aura(T2, held())
+                .aura(Unit::new(2, 1), held())
+                .world(move |w| {
+                    let warlock = T1.entity(w);
+                    let warrior = T2.entity(w);
+                    let priest = Unit::new(2, 1).entity(w);
+                    let mut auras = w
+                        .get_mut::<arenasim::states::play_match::ActiveAuras>(warrior)
+                        .expect("auras");
+                    siphon.caster = Some(warlock);
+                    auras.auras.push(siphon);
+                    if let Some(mut m) = modifier {
+                        if m.effect_type == AuraType::DamageTransfer {
+                            m.caster = Some(priest);
+                        }
+                        auras.auras.push(m);
+                    }
+                }),
+        )
+    };
+    let read = |label: &str, modifier: Option<Aura>| -> f32 {
+        let played = run(modifier);
+        let ticks = amounts(&played.log, TICKS, " ticks for ");
+        let heals = amounts(&played.log, HEALS, " heals for ");
+        assert!(ticks.len() >= 3, "{label}: {}", played.log);
+        assert_eq!(ticks, heals, "{label}: {}", played.log);
+        if label == "transferred" {
+            assert!(
+                !lines(&played.log, "[TRANSFER]").is_empty(),
+                "{}",
+                played.log
+            );
+        }
+        assert!(ticks.iter().all(|t| *t == ticks[0]), "{label}: {ticks:?}");
+        ticks[0]
+    };
+    let plain = read("plain", None);
+    let doubled = read(
+        "doubled",
+        Some(Aura {
+            effect_type: AuraType::DamageTakenIncrease,
+            duration: 300.0,
+            magnitude: 1.0,
+            ability_name: "Vulnerable".to_string(),
+            break_on_damage_threshold: -1.0,
+            ..Default::default()
+        }),
+    );
+    let transferred = read(
+        "transferred",
+        Some(Aura {
+            effect_type: AuraType::DamageTransfer,
+            duration: 300.0,
+            magnitude: 0.5,
+            ability_name: "Sacrifice".to_string(),
+            break_on_damage_threshold: -1.0,
+            ..Default::default()
+        }),
+    );
+    assert!(doubled >= plain * 2.0 - 1.0, "{plain} -> {doubled}");
+    assert!(transferred <= plain / 2.0 + 1.0, "{plain} -> {transferred}");
+}
+
 /// Death Coil's lifesteal is the leech field now: the shipped Death Coil
 /// heals the Warlock it was fired by.
 #[test]
@@ -1037,6 +1215,112 @@ fn every_damage_site_feeds_a_caster_school_leech() {
     assert!(lines(&fire.log, PET_HEALED).is_empty(), "{}", fire.log);
 }
 
+/// Every damage site leeches off the damage it LANDED, after the damage
+/// pipeline (AS-408), not off what its source computed: on a Priest taking
+/// double damage, a full-share embrace heals the Warlock exactly what each
+/// of its hits landed — a projectile (Shadow Bolt), a DoT tick (Corruption),
+/// a channel tick (Drain Life) and a cast (Immolate's direct hit, with its
+/// ticks, on a Fire embrace). The Priest is held silenced so it
+/// cannot dispel the embrace or fear the Warlock, both have health to spare,
+/// and the Warlock has room to take every heal whole.
+#[test]
+fn every_damage_site_leeches_off_the_damage_it_landed() {
+    for (keep, school, name) in [
+        (AbilityType::Shadowbolt, SpellSchool::Shadow, "Shadow Bolt"),
+        (AbilityType::Corruption, SpellSchool::Shadow, "Corruption"),
+        (AbilityType::DrainLife, SpellSchool::Shadow, "Drain Life"),
+        (AbilityType::Immolate, SpellSchool::Fire, "Immolate"),
+    ] {
+        let stage = only(Stage::new(), T1, keep)
+            .combatant(T1, |c| {
+                c.max_health = 100_000.0;
+                c.current_health = 1_000.0;
+            })
+            .combatant(T2, |c| {
+                c.max_health = 100_000.0;
+                c.current_health = 100_000.0;
+            })
+            .place(T1, 0.0, -12.0)
+            .place(T2, 0.0, 12.0)
+            .clear_auras(T2)
+            .aura(
+                T2,
+                Aura {
+                    effect_type: AuraType::Silence,
+                    duration: 300.0,
+                    magnitude: 1.0,
+                    ability_name: "Held".to_string(),
+                    break_on_damage_threshold: -1.0,
+                    ..Default::default()
+                },
+            )
+            .aura(
+                T2,
+                Aura {
+                    effect_type: AuraType::DamageTakenIncrease,
+                    duration: 300.0,
+                    magnitude: 1.0,
+                    ability_name: "Vulnerable".to_string(),
+                    break_on_damage_threshold: -1.0,
+                    ..Default::default()
+                },
+            )
+            .world(move |w| {
+                let warlock = T1.entity(w);
+                let priest = T2.entity(w);
+                w.get_mut::<arenasim::states::play_match::ActiveAuras>(priest)
+                    .expect("auras")
+                    .auras
+                    .push(Aura {
+                        effect_type: AuraType::HealingReduction,
+                        duration: 300.0,
+                        magnitude: 1.0,
+                        caster: Some(warlock),
+                        ability_name: "Vampiric Embrace".to_string(),
+                        leech: Some(Leech {
+                            fraction: 1.0,
+                            to: LeechRecipient::CasterParty,
+                            of: LeechSource::CasterSchool(school),
+                        }),
+                        break_on_damage_threshold: -1.0,
+                        ..Default::default()
+                    });
+            });
+        let played = play(config(&["Warlock"], &["Priest"], 25.0), stage);
+        let dealt: Vec<f32> = lines(&played.log, &format!("Warlock #1's {name}"))
+            .iter()
+            .filter(|l| l.contains("[DMG]"))
+            .map(|l| {
+                let n = l
+                    .split(" for ")
+                    .nth(1)
+                    .and_then(|t| t.split_whitespace().next());
+                n.and_then(|n| n.parse().ok())
+                    .unwrap_or_else(|| panic!("an amount on {l}"))
+            })
+            .collect();
+        let healed = amounts(
+            &played.log,
+            "Warlock #1's Vampiric Embrace heals for",
+            " heals for ",
+        );
+        assert!(dealt.len() >= 2, "{name} hardly landed: {}", played.log);
+        // A channel's tick line reports the tick it computed, before the
+        // pipeline doubles it; every other site's line reports what landed.
+        let landed = if keep == AbilityType::DrainLife {
+            2.0
+        } else {
+            1.0
+        };
+        assert_eq!(
+            dealt.iter().sum::<f32>() * landed,
+            healed.iter().sum::<f32>(),
+            "{name}: dealt {dealt:?}, healed {healed:?}: {}",
+            played.log
+        );
+    }
+}
+
 /// A leech declared on an ability travels onto the aura it applies, and the
 /// aura's ticks feed it: the Warlock's own Corruption, given an `Ability`
 /// leech in its book, heals the Warlock each tick. The control is the
@@ -1081,12 +1365,20 @@ fn an_abilitys_leech_rides_its_aura() {
 /// and riding on the cast, as `after_turn` leaves it. `ending` stages how the
 /// cast ends.
 fn mid_cast(ending: impl FnOnce(&mut bevy::prelude::World) + Send + Sync + 'static) -> Stage {
+    mid_cast_of(AbilityType::MindBlast, ending)
+}
+
+/// [`mid_cast`], for the team-1 caster's cast of `ability` at the Warrior.
+fn mid_cast_of(
+    ability: AbilityType,
+    ending: impl FnOnce(&mut bevy::prelude::World) + Send + Sync + 'static,
+) -> Stage {
     Stage::new().world(move |w| {
         use arenasim::states::play_match::next_cast::SpentNextCast;
         use arenasim::states::play_match::{CastingState, Combatant};
-        let priest = T1.entity(w);
+        let caster = T1.entity(w);
         let warrior = T2.entity(w);
-        let mut m = modifier(NextCastScope::Abilities(vec![AbilityType::MindBlast]));
+        let mut m = modifier(NextCastScope::Abilities(vec![ability]));
         m.crit_chance = 1.0;
         let favor = Aura {
             effect_type: AuraType::NextCast,
@@ -1098,18 +1390,18 @@ fn mid_cast(ending: impl FnOnce(&mut bevy::prelude::World) + Send + Sync + 'stat
             ..Default::default()
         };
         {
-            let mut c = w.get_mut::<Combatant>(priest).expect("the Priest");
+            let mut c = w.get_mut::<Combatant>(caster).expect("the caster");
             c.crit_chance = 0.0;
             c.target = Some(warrior);
             c.next_cast_spent = Some(SpentNextCast {
-                caster: priest,
-                ability: AbilityType::MindBlast,
+                caster,
+                ability,
                 modifier: m,
                 auras: vec![favor],
             });
         }
-        w.entity_mut(priest)
-            .insert(CastingState::new(AbilityType::MindBlast, warrior, 0.2));
+        w.entity_mut(caster)
+            .insert(CastingState::new(ability, warrior, 0.2));
         ending(w);
     })
 }
@@ -1184,6 +1476,133 @@ fn a_fizzled_cast_gives_its_modifier_back() {
                 .expect("the Warrior");
             c.current_health = 0.0;
             c.is_dead = true;
+        }),
+    );
+    assert_eq!(lines(&played.log, KEPT).len(), 1, "{}", played.log);
+}
+
+/// A cast a SILENCE stops gives it back; the same cast unsilenced lands and
+/// keeps it spent.
+#[test]
+fn a_cast_a_silence_stops_gives_its_modifier_back() {
+    let silence = Aura {
+        effect_type: AuraType::Silence,
+        duration: 2.0,
+        magnitude: 1.0,
+        ability_name: "Test".to_string(),
+        break_on_damage_threshold: -1.0,
+        ..Default::default()
+    };
+    let played = play(mind_blast_config(), mid_cast(|_| {}).aura(T1, silence));
+    assert_eq!(
+        lines(&played.log, "Priest #1's Mind Blast interrupted by Silence").len(),
+        1,
+        "{}",
+        played.log
+    );
+    assert_eq!(lines(&played.log, KEPT).len(), 1, "{}", played.log);
+    let control = play(mind_blast_config(), mid_cast(|_| {}));
+    assert!(lines(&control.log, "interrupted by Silence").is_empty());
+    assert!(lines(&control.log, KEPT).is_empty(), "{}", control.log);
+}
+
+/// The Priest and the Warrior either side of a TwinPillars pillar (centred at
+/// (9, 0), radius 2.5) when `blocked`; the same distance apart down the open
+/// middle of the map otherwise. The enemy Priest stands well off the line.
+fn across_a_pillar(stage: Stage, blocked: bool) -> Stage {
+    let x = if blocked { 9.0 } else { 0.0 };
+    stage
+        .place(T1, x, -12.0)
+        .place(T2, x, 12.0)
+        .place(Unit::new(2, 1), -20.0, 15.0)
+}
+
+fn on_twin_pillars(mut config: HeadlessMatchConfig) -> HeadlessMatchConfig {
+    config.map = "TwinPillars".to_string();
+    config
+}
+
+/// An instant-effect cast whose target is out of sight at completion
+/// fizzles and gives its modifier back; the same cast in sight lands with
+/// the change and keeps it spent.
+#[test]
+fn a_cast_out_of_sight_at_completion_gives_its_modifier_back() {
+    let run = |blocked| {
+        play(
+            on_twin_pillars(mind_blast_config()),
+            across_a_pillar(mid_cast(|_| {}), blocked),
+        )
+    };
+    let played = run(true);
+    assert_eq!(
+        lines(
+            &played.log,
+            "Priest #1 fails to cast Mind Blast: target out of line of sight"
+        )
+        .len(),
+        1,
+        "{}",
+        played.log
+    );
+    assert_eq!(lines(&played.log, KEPT).len(), 1, "{}", played.log);
+    let control = run(false);
+    let first = control
+        .log
+        .lines()
+        .find(|l| l.contains("Priest #1's Mind Blast"))
+        .unwrap_or_else(|| panic!("the Mind Blast lands: {}", control.log));
+    assert!(first.contains("CRITS"), "{first}");
+    assert!(lines(&control.log, KEPT).is_empty(), "{}", control.log);
+}
+
+/// A projectile cast whose target is out of sight at completion fizzles
+/// before the bolt flies and gives its modifier back; the same Frostbolt in
+/// sight flies, lands with the change, and keeps it spent.
+#[test]
+fn a_projectile_cast_out_of_sight_at_completion_gives_its_modifier_back() {
+    const FROST_KEPT: &str = "Mage #1's Favor is kept: its Frostbolt did not land";
+    let run = |blocked| {
+        play(
+            on_twin_pillars(config(&["Mage"], &["Warrior", "Priest"], 12.0)),
+            across_a_pillar(mid_cast_of(AbilityType::Frostbolt, |_| {}), blocked),
+        )
+    };
+    let played = run(true);
+    assert_eq!(
+        lines(
+            &played.log,
+            "Mage #1 fails to cast Frostbolt: target out of line of sight"
+        )
+        .len(),
+        1,
+        "{}",
+        played.log
+    );
+    assert_eq!(lines(&played.log, FROST_KEPT).len(), 1, "{}", played.log);
+    let control = run(false);
+    let first = control
+        .log
+        .lines()
+        .find(|l| l.contains("Mage #1's Frostbolt"))
+        .unwrap_or_else(|| panic!("the Frostbolt lands: {}", control.log));
+    assert!(first.contains("CRITS"), "{first}");
+    assert!(
+        lines(&control.log, FROST_KEPT).is_empty(),
+        "{}",
+        control.log
+    );
+}
+
+/// A cast whose target no longer resolves at completion gives it back. No
+/// system despawns a combatant while a match runs, so the stage removes the
+/// Warrior itself: this pins the defensive branch, not a path play reaches.
+#[test]
+fn a_cast_whose_target_is_gone_gives_its_modifier_back() {
+    let played = play(
+        mind_blast_config(),
+        mid_cast(|w| {
+            let warrior = T2.entity(w);
+            w.despawn(warrior);
         }),
     );
     assert_eq!(lines(&played.log, KEPT).len(), 1, "{}", played.log);

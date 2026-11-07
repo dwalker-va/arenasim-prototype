@@ -13,7 +13,11 @@
 //!
 //! Every leech heal lands through `apply_healing` ([`land`]), so healing
 //! reduction, a Cyclone and arena dampening cut it like any other heal. Its
-//! amount is the damage that reached health: an absorbed hit feeds nothing.
+//! amount is the damage that reached the victim's health — the first value
+//! `apply_damage_with_absorb` returns, after the damage pipeline's dealt and
+//! taken modifiers, a transfer's share and the absorbs — as TBC's leeches heal
+//! off the damage done to their victim. An absorbed hit feeds nothing, and a
+//! share transferred to another unit feeds nothing: it left the victim.
 //!
 //! **Where it is read.** The sites a caster's spell damage lands at: a cast
 //! completing (`process_casting`), a projectile arriving
