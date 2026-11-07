@@ -46,6 +46,7 @@ pub use super::effects::process_divine_shield;
 pub use super::effects::process_holy_shock_damage;
 pub use super::effects::process_holy_shock_heals;
 pub use super::effects::process_mana_burn;
+pub use super::effects::process_on_use_items;
 pub use super::effects::process_travel_form;
 
 // === Phase 2: Combat and Movement ===
@@ -216,6 +217,9 @@ pub fn add_core_combat_systems<M, N>(
                 process_divine_shield,
                 process_berserker_rage,
                 process_travel_form,
+                // An on-use item's effect: the Medallion's CC break, which
+                // grants no immunity, so a CC queued this frame lands after it.
+                process_on_use_items,
             )
                 .chain(),
             apply_pending_auras,
