@@ -53,8 +53,15 @@ pub const PET_HEEL_RELEASE_HP: f32 = 0.5;
 /// A heeled pet's recovery, as a fraction of its maximum health per second.
 /// From the Heel threshold to the release takes about 12.5s with nothing
 /// hitting it. It is healing, so healing reduction and arena dampening cut it
-/// (`combat_core::apply_healing`).
+/// (`combat_core::apply_healing`), and at full dampening it stops. Provisional:
+/// priced by the card, not by a sweep; tuned with the next balance batch.
 pub const PET_HEEL_RECOVERY_PER_SEC: f32 = 0.02;
+
+/// How often a heeled pet's recovery lands, in seconds: one tick of
+/// [`PET_HEEL_RECOVERY_PER_SEC`] × this, the first one this long after the pet
+/// heels, like a heal over time. Discrete, so a pet under healing reduction
+/// shows the Mortal Wounds tell once a tick rather than once a frame.
+pub const PET_HEEL_RECOVERY_TICK_SECS: f32 = 1.0;
 
 /// The Heel latch: whether a pet that `heeled` last frame is heeled at
 /// `hp_ratio`. It goes to Heel below [`PET_HEEL_ENTER_HP`] and stays there,
@@ -77,9 +84,11 @@ fn hp_ratio_of(combatant: &Combatant) -> f32 {
 }
 
 /// A heeled pet recovers health at its owner's side
-/// ([`PET_HEEL_RECOVERY_PER_SEC`]) until the Heel latch releases it. Without
-/// it a pet knocked below the Heel threshold sat out the rest of the match:
-/// no healer heals a pet, and Heel had no way out.
+/// ([`PET_HEEL_RECOVERY_PER_SEC`], in ticks of [`PET_HEEL_RECOVERY_TICK_SECS`])
+/// until the Heel latch releases it. Every pet, the Felhunter included.
+/// Without it a pet knocked below the Heel threshold sat out the rest of the
+/// match: no healer heals a pet, and Heel had no way out. A heal from anywhere
+/// else adds to it; the tick clock is the pet's own.
 pub fn recover_heeled_pets(
     time: Res<Time>,
     mut commands: Commands,
@@ -93,9 +102,19 @@ pub fn recover_heeled_pets(
     let dt = time.delta_secs();
     for (entity, mut combatant, auras) in pets.iter_mut() {
         if !combatant.is_alive() || !combatant.pet_heeled {
+            // The next Heel starts its clock afresh. Written only when it
+            // has run, so an unheeled pet is not marked changed every frame.
+            if combatant.pet_heel_recovery_timer != 0.0 {
+                combatant.pet_heel_recovery_timer = 0.0;
+            }
             continue;
         }
-        let amount = combatant.max_health * PET_HEEL_RECOVERY_PER_SEC * dt;
+        combatant.pet_heel_recovery_timer += dt;
+        if combatant.pet_heel_recovery_timer < PET_HEEL_RECOVERY_TICK_SECS {
+            continue;
+        }
+        combatant.pet_heel_recovery_timer -= PET_HEEL_RECOVERY_TICK_SECS;
+        let amount = combatant.max_health * PET_HEEL_RECOVERY_PER_SEC * PET_HEEL_RECOVERY_TICK_SECS;
         crate::states::play_match::combat_core::apply_healing(
             &mut commands,
             entity,

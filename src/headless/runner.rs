@@ -24,8 +24,8 @@ use crate::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementCo
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::components::{
-    ActiveAuras, AuraType, DRTracker, MovementDirective, MovementGoal, Pet, PetType, Totem,
-    TotemElement, TrapLaunchProjectile, TrapType,
+    ActiveAuras, AuraType, DRTracker, HealingRefused, MovementDirective, MovementGoal, Pet,
+    PetType, Totem, TotemElement, TrapLaunchProjectile, TrapType,
 };
 use crate::states::play_match::constants::PET_SLOT_BASE;
 use crate::states::play_match::decision_trace::{DecisionTrace, TraceWriter};
@@ -145,6 +145,10 @@ pub struct FrameObservation {
     pub totems: Vec<ObservedTotem>,
     /// Every Hunter trap in flight this frame, sorted by entity id.
     pub trap_launches: Vec<ObservedTrapLaunch>,
+    /// The Mortal Wounds tells (`HealingRefused` markers) in the world this
+    /// frame, counted by the entity each names. Headless never consumes one
+    /// (the client turns it into ash), so a count only rises, one per tell.
+    pub healing_refused: BTreeMap<Entity, usize>,
 }
 
 /// Result of a completed headless match
@@ -1076,7 +1080,12 @@ fn observe_frame(world: &World) -> FrameObservation {
     let mut combatants = BTreeMap::new();
     let mut totems: Vec<(Entity, ObservedTotem)> = Vec::new();
     let mut trap_launches: Vec<ObservedTrapLaunch> = Vec::new();
+    let mut healing_refused: BTreeMap<Entity, usize> = BTreeMap::new();
     for entity_ref in world.iter_entities() {
+        if let Some(tell) = entity_ref.get::<HealingRefused>() {
+            *healing_refused.entry(tell.target).or_default() += 1;
+            continue;
+        }
         if let Some(launch) = entity_ref.get::<TrapLaunchProjectile>() {
             trap_launches.push(ObservedTrapLaunch {
                 entity: entity_ref.id(),
@@ -1152,6 +1161,7 @@ fn observe_frame(world: &World) -> FrameObservation {
         combatants,
         totems,
         trap_launches,
+        healing_refused,
     }
 }
 

@@ -15,11 +15,15 @@
 mod common;
 
 use arenasim::headless::{FrameObservation, HeadlessMatchConfig, ObservedCombatant, Stage, Unit};
-use arenasim::states::play_match::class_ai::pet_ai::{PET_HEEL_ENTER_HP, PET_HEEL_RELEASE_HP};
+use arenasim::states::play_match::class_ai::pet_ai::{
+    PET_HEEL_ENTER_HP, PET_HEEL_RECOVERY_PER_SEC, PET_HEEL_RELEASE_HP,
+};
 use arenasim::states::play_match::components::{Aura, AuraType};
+use bevy::prelude::Entity;
 use common::staged::{play, sim_time, Played};
 
 const PET: Unit = Unit::pet_of(1, 0);
+const WARRIOR: Unit = Unit::new(2, 0);
 
 /// Below the Heel threshold, as the Spider was in the reported match.
 const HEELED_HP: f32 = 0.15;
@@ -61,6 +65,16 @@ fn played_stunned(hp: f32) -> Played {
         config("Spider"),
         Stage::new().health(PET, hp).aura(PET, stun),
     )
+}
+
+/// The Hunter's pet's entity.
+fn pet_entity(frame: &FrameObservation) -> Entity {
+    *frame
+        .combatants
+        .iter()
+        .find(|(_, c)| c.is_pet && c.team == 1)
+        .expect("the Hunter's pet")
+        .0
 }
 
 /// The Hunter's pet's row on a frame.
@@ -275,5 +289,198 @@ fn a_pet_that_dies_at_heel_stays_dead() {
     assert!(
         played.staged_frames().count() > 60,
         "the match should play on past the pet's death"
+    );
+}
+
+/// Mortal Wound's cut, as Mortal Strike and Aimed Shot land it: 0.65 of the
+/// healing received.
+const MORTAL_WOUND: f32 = 0.65;
+
+/// How long a recovery is measured: ten ticks, with half a tick to spare.
+const WINDOW_SECS: f32 = 10.5;
+
+/// The Hunter's pet staged at Heel with the enemy Warrior stunned past the
+/// window, so nothing touches the pet's health but its recovery; with a
+/// Mortal Wound of `wound` on the pet when given.
+fn played_recovering(wound: Option<f32>) -> Played {
+    let held = Aura {
+        effect_type: AuraType::Stun,
+        duration: WINDOW_SECS + 5.0,
+        break_on_damage_threshold: -1.0,
+        ability_name: "Kidney Shot".into(),
+        ..Default::default()
+    };
+    let mut stage = Stage::new().health(PET, HEELED_HP).aura(WARRIOR, held);
+    if let Some(magnitude) = wound {
+        stage = stage.aura(
+            PET,
+            Aura {
+                effect_type: AuraType::HealingReduction,
+                duration: WINDOW_SECS + 5.0,
+                magnitude,
+                break_on_damage_threshold: -1.0,
+                ability_name: "Mortal Strike".into(),
+                ..Default::default()
+            },
+        );
+    }
+    play(config("Spider"), stage)
+}
+
+/// The staged frames inside the window.
+fn in_window(played: &Played) -> Vec<&FrameObservation> {
+    let landed = played.landed().app;
+    let frames: Vec<&FrameObservation> = played
+        .staged_frames()
+        .take_while(|f| f.sim_time < landed + WINDOW_SECS)
+        .collect();
+    assert!(
+        frames.last().unwrap().sim_time > landed + WINDOW_SECS - 0.1,
+        "the match should play through the window"
+    );
+    assert!(
+        frames
+            .iter()
+            .all(|f| pet(f).alive && pet(f).target.is_none()),
+        "the pet should sit at Heel, alive, throughout the window"
+    );
+    frames
+}
+
+/// The pet's health rise over the window.
+fn recovery_over_window(played: &Played) -> f32 {
+    let frames = in_window(played);
+    hp(frames.last().unwrap()) - hp(frames[0])
+}
+
+/// The window's sim times at which a Mortal Wounds tell naming the pet was
+/// spawned, asserting each frame spawned at most one.
+fn tells_over_window(played: &Played) -> Vec<f32> {
+    let frames = in_window(played);
+    let pet = pet_entity(frames[0]);
+    let count = |f: &FrameObservation| f.healing_refused.get(&pet).copied().unwrap_or(0);
+    let mut tells = Vec::new();
+    for pair in frames.windows(2) {
+        let new = count(pair[1]) - count(pair[0]);
+        assert!(
+            new <= 1,
+            "{new} tells named the pet on one frame, at {:.2}",
+            pair[1].sim_time
+        );
+        if new == 1 {
+            tells.push(pair[1].sim_time);
+        }
+    }
+    tells
+}
+
+/// Under a Mortal Wound the recovery runs at the wound's cut of its rate —
+/// healing reduction cuts it, as it cuts every heal.
+#[test]
+fn a_mortal_wound_cuts_a_heeled_pets_recovery() {
+    let wounded = recovery_over_window(&played_recovering(Some(MORTAL_WOUND)));
+    let clean = recovery_over_window(&played_recovering(None));
+    let ratio = wounded / clean;
+    assert!(
+        (ratio - MORTAL_WOUND).abs() < 0.02,
+        "a pet under a {MORTAL_WOUND} Mortal Wound should recover at {MORTAL_WOUND} of the \
+         rate, recovered {wounded:.3} against {clean:.3} ({ratio:.3})"
+    );
+}
+
+/// Control: with nothing on it, the pet recovers at the full rate.
+#[test]
+fn a_clean_heeled_pet_recovers_at_the_full_rate() {
+    let clean = recovery_over_window(&played_recovering(None));
+    let ticks = WINDOW_SECS.floor();
+    let full = PET_HEEL_RECOVERY_PER_SEC * ticks;
+    assert!(
+        (clean - full).abs() < 0.005,
+        "a clean pet should recover {full:.3} in {ticks} ticks, recovered {clean:.3}"
+    );
+}
+
+/// The recovery lands in ticks, so a wounded pet shows the Mortal Wounds tell
+/// at most once a second — not once a frame.
+#[test]
+fn a_wounded_heeled_pet_tells_at_most_once_a_second() {
+    let tells = tells_over_window(&played_recovering(Some(MORTAL_WOUND)));
+    assert!(
+        tells.len() >= WINDOW_SECS.floor() as usize - 1,
+        "a wounded pet recovering at Heel should show the tell on its ticks, showed it at \
+         {tells:?}"
+    );
+    for pair in tells.windows(2) {
+        assert!(
+            pair[1] - pair[0] > 0.95,
+            "two tells {:.3}s apart, at {:.2} and {:.2}",
+            pair[1] - pair[0],
+            pair[0],
+            pair[1]
+        );
+    }
+}
+
+/// Control: a pet with no healing reduction on it shows no tell.
+#[test]
+fn a_clean_heeled_pet_shows_no_tell() {
+    let tells = tells_over_window(&played_recovering(None));
+    assert!(
+        tells.is_empty(),
+        "a pet with no Mortal Wound showed the tell at {tells:?}"
+    );
+}
+
+/// Seconds from the stage to the pet's first recovery tick, the pet staged at
+/// Heel's threshold with `timer` seconds already on its tick clock and with
+/// the Heel latch `heeled` or not; the Warrior is held, so nothing else
+/// touches the pet's health.
+fn first_tick_after_stage(heeled: bool, timer: f32) -> f32 {
+    let held = Aura {
+        effect_type: AuraType::Stun,
+        duration: 5.0,
+        break_on_damage_threshold: -1.0,
+        ability_name: "Kidney Shot".into(),
+        ..Default::default()
+    };
+    let played = play(
+        config("Spider"),
+        Stage::new()
+            .health(PET, HEELED_HP)
+            .combatant(PET, move |c| {
+                c.pet_heeled = heeled;
+                c.pet_heel_recovery_timer = timer;
+            })
+            .aura(WARRIOR, held),
+    );
+    let landed = played.landed().app;
+    let start = hp(played.staged_frames().next().unwrap());
+    let ticked = played
+        .staged_frames()
+        .find(|f| hp(f) > start + 0.001)
+        .expect("the pet recovers")
+        .sim_time;
+    ticked - landed
+}
+
+/// A pet that goes to Heel starts its tick clock afresh: time left on it from
+/// an earlier Heel does not bring the first tick forward.
+#[test]
+fn a_new_heel_starts_its_tick_clock_afresh() {
+    let first = first_tick_after_stage(false, 0.9);
+    assert!(
+        first > 0.95,
+        "a pet that has just heeled should recover a full tick later, recovered after {first:.2}s"
+    );
+}
+
+/// Control: a pet already at Heel keeps its clock, so the same time on it
+/// brings the tick forward.
+#[test]
+fn a_heel_in_progress_keeps_its_tick_clock() {
+    let first = first_tick_after_stage(true, 0.9);
+    assert!(
+        first < 0.2,
+        "a heeled pet with 0.9s on its clock should tick at once, ticked after {first:.2}s"
     );
 }
