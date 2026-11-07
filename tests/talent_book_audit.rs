@@ -38,12 +38,15 @@ use std::collections::BTreeSet;
 
 /// The table itself and the book: where the table is defined and loaded, and
 /// where a book is built from it — by the book itself, and by a talent build's
-/// resolution, which grants and patches from the table. Not scanned — reading
+/// resolution and loader, which grant, patch and validate from the table. Not scanned — reading
 /// the table is their job.
 const TABLE_AND_BOOK: &[&str] = &[
     "src/states/play_match/ability_config.rs",
     "src/states/play_match/ability_book.rs",
     "src/states/play_match/talents.rs",
+    // The talent loader's choice rules, validated against the table as the
+    // talents themselves are (AS-408).
+    "src/states/play_match/talent_choices.rs",
 ];
 
 /// The sim items that read the global table, as (file, item), each with why.

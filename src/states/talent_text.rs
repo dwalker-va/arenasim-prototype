@@ -15,6 +15,10 @@
 
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::talent_choices::{
+    ranked_effects, ChoiceMenu, ChoiceOption, ChoiceSlot,
+};
+use crate::states::play_match::talent_mechanics::TalentMechanic;
 use crate::states::play_match::talents::{
     AbilityField, LearnBlocker, PatchOp, PatchTarget, TalentConfig, TalentDefinitions,
     TalentEffect, TalentId, TalentStat, TreeId, CAPSTONE_TIER, MAX_TALENT_POINTS, TIER_OPENS_AT,
@@ -49,19 +53,89 @@ pub fn effect_text(effect: &TalentEffect, ranks: u8, abilities: &AbilityDefiniti
                 .map_or_else(|| format!("{ability:?}"), |c| c.name.clone());
             format!("Learn {name}")
         }
+        TalentEffect::WidenChoice(option) => {
+            format!(
+                "Unlocks {} as a {} choice",
+                option_name(*option, abilities),
+                menu_name(option.menu())
+            )
+        }
+        TalentEffect::AddChoiceSlot(slot) => match slot {
+            ChoiceSlot::OffHandPoison => "Opens a second poison slot for the off hand".to_string(),
+        },
+        TalentEffect::Mechanic(mechanic) => mechanic_text(mechanic.at_rank(ranks)),
+        // The engine's own rank rule: once per rank from rank `from` on.
+        TalentEffect::FromRank(from, inner) => {
+            match ranked_effects(std::slice::from_ref(effect), ranks).next() {
+                Some((inner, times)) => effect_text(inner, times, abilities),
+                None => format!("From rank {from}: {}", effect_text(inner, 1, abilities)),
+            }
+        }
     }
 }
 
 /// What `rank` ranks of `talent` do, every effect joined: "+6% maximum
-/// health". Rank 0 reads as rank 1, what the first point buys.
+/// health". Rank 0 reads as rank 1, what the first point buys. An effect
+/// that starts at a later rank (`FromRank`) is left out until that rank.
 pub fn rank_text(talent: &TalentConfig, rank: u8, abilities: &AbilityDefinitions) -> String {
     let rank = rank.max(1);
-    let clauses: Vec<String> = talent
-        .per_rank
-        .iter()
-        .map(|effect| effect_text(effect, rank, abilities))
+    let clauses: Vec<String> = ranked_effects(&talent.per_rank, rank)
+        .map(|(effect, times)| effect_text(effect, times, abilities))
         .collect();
     format!("{}.", clauses.join(", "))
+}
+
+/// A per-match option's name: the curse's ability name from the config, the
+/// others' own display names.
+fn option_name(option: ChoiceOption, abilities: &AbilityDefinitions) -> String {
+    match option {
+        ChoiceOption::RogueOpener(o) => o.name().to_string(),
+        ChoiceOption::RoguePoison(p) => p.name().to_string(),
+        ChoiceOption::WarlockCurse(c) => abilities
+            .get(&c.ability())
+            .map_or_else(|| format!("{c:?}"), |a| a.name.clone()),
+        ChoiceOption::HunterPet(p) => p.name().to_string(),
+        ChoiceOption::WarriorShout(s) => s.name().to_string(),
+        ChoiceOption::MageArmor(a) => a.name().to_string(),
+        ChoiceOption::PaladinAura(a) => a.name().to_string(),
+    }
+}
+
+/// A per-match menu's name in a sentence ("a curse choice").
+fn menu_name(menu: ChoiceMenu) -> &'static str {
+    match menu {
+        ChoiceMenu::RogueOpener => "stealth opener",
+        ChoiceMenu::RoguePoison => "weapon poison",
+        ChoiceMenu::WarlockCurse => "curse",
+        ChoiceMenu::HunterPet => "pet",
+        ChoiceMenu::WarriorShout => "shout",
+        ChoiceMenu::MageArmor => "armor",
+        ChoiceMenu::PaladinAura => "aura",
+    }
+}
+
+/// A bespoke mechanic, at the rank its numbers were scaled to.
+fn mechanic_text(mechanic: TalentMechanic) -> String {
+    match mechanic {
+        TalentMechanic::SoulLink { share } => format!(
+            "{} of the damage you take is dealt to your pet instead, while it lives",
+            unsigned_percent(share)
+        ),
+        TalentMechanic::ReflectiveShield { share } => format!(
+            "{} of the damage your absorb shields soak is dealt back to the attacker",
+            unsigned_percent(share)
+        ),
+        TalentMechanic::CheatDeath {
+            health,
+            reduction,
+            duration,
+        } => format!(
+            "The first blow that would kill you leaves you at {} health, and you take {} less damage for {}",
+            unsigned_percent(health),
+            unsigned_percent(reduction),
+            unsigned(duration, "sec")
+        ),
+    }
 }
 
 /// Every rank's text, one line each: "Rank 1: +3% maximum health." A
@@ -155,9 +229,19 @@ fn percent(fraction: f32) -> String {
     signed(fraction * 100.0, "%")
 }
 
+/// "30%", with no sign: a share, not a change.
+fn unsigned_percent(fraction: f32) -> String {
+    unsigned(fraction * 100.0, "%")
+}
+
 /// A signed number with its unit: "+3%", "-0.25 sec", "+1.5%".
 fn signed(value: f32, unit: &str) -> String {
     let sign = if value < 0.0 { "\u{2212}" } else { "+" };
+    format!("{sign}{}", unsigned(value.abs(), unit))
+}
+
+/// A number with its unit and no sign: "3%", "0.25 sec", "8 sec".
+fn unsigned(value: f32, unit: &str) -> String {
     let magnitude = value.abs();
     let rounded = (magnitude * 100.0).round() / 100.0;
     let number = if (rounded - rounded.round()).abs() < f32::EPSILON {
@@ -171,7 +255,7 @@ fn signed(value: f32, unit: &str) -> String {
     } else {
         " "
     };
-    format!("{sign}{number}{gap}{unit}")
+    format!("{number}{gap}{unit}")
 }
 
 /// A stat's name in a sentence.
@@ -291,6 +375,77 @@ mod tests {
         );
         let grant = TalentEffect::Grant(AbilityType::DeathCoil);
         assert_eq!(effect_text(&grant, 1, abilities()), "Learn Death Coil");
+    }
+
+    #[test]
+    fn choices_and_mechanics_say_what_they_do() {
+        use crate::states::match_config::{RoguePoison, WarlockCurse};
+        let tongues = TalentEffect::WidenChoice(ChoiceOption::WarlockCurse(WarlockCurse::Tongues));
+        assert_eq!(
+            effect_text(&tongues, 1, abilities()),
+            "Unlocks Curse of Tongues as a curse choice"
+        );
+        let wound = TalentEffect::WidenChoice(ChoiceOption::RoguePoison(RoguePoison::Wound));
+        assert_eq!(
+            effect_text(&wound, 1, abilities()),
+            "Unlocks Wound Poison as a weapon poison choice"
+        );
+        let slot = TalentEffect::AddChoiceSlot(ChoiceSlot::OffHandPoison);
+        assert_eq!(
+            effect_text(&slot, 1, abilities()),
+            "Opens a second poison slot for the off hand"
+        );
+        // A share scales by the rank, as `at_rank` scales it in the engine.
+        let link = TalentEffect::Mechanic(TalentMechanic::SoulLink { share: 0.1 });
+        assert_eq!(
+            effect_text(&link, 2, abilities()),
+            "20% of the damage you take is dealt to your pet instead, while it lives"
+        );
+        let shield = TalentEffect::Mechanic(TalentMechanic::ReflectiveShield { share: 0.25 });
+        assert_eq!(
+            effect_text(&shield, 1, abilities()),
+            "25% of the damage your absorb shields soak is dealt back to the attacker"
+        );
+        let cheat = TalentEffect::Mechanic(TalentMechanic::CheatDeath {
+            health: 0.1,
+            reduction: 0.9,
+            duration: 3.0,
+        });
+        assert_eq!(
+            effect_text(&cheat, 1, abilities()),
+            "The first blow that would kill you leaves you at 10% health, \
+             and you take 90% less damage for 3 sec"
+        );
+    }
+
+    #[test]
+    fn a_from_rank_effect_reads_from_its_rank_on() {
+        let talent = TalentConfig {
+            per_rank: vec![
+                TalentEffect::StatPercent(TalentStat::MaxHealth, 0.03),
+                TalentEffect::FromRank(
+                    2,
+                    Box::new(TalentEffect::StatPercent(TalentStat::Armor, 0.05)),
+                ),
+            ],
+            max_rank: 3,
+            ..TalentDefinitions::shipped()
+                .get(TalentId::DemonicEmbrace)
+                .expect("shipped")
+                .clone()
+        };
+        assert_eq!(rank_text(&talent, 1, abilities()), "+3% maximum health.");
+        assert_eq!(
+            rank_text(&talent, 2, abilities()),
+            "+6% maximum health, +5% armor."
+        );
+        assert_eq!(
+            rank_text(&talent, 3, abilities()),
+            "+9% maximum health, +10% armor."
+        );
+        let late = &talent.per_rank[1];
+        assert_eq!(effect_text(late, 1, abilities()), "From rank 2: +5% armor");
+        assert_eq!(effect_text(late, 3, abilities()), "+10% armor");
     }
 
     #[test]

@@ -19,6 +19,17 @@
 //                                       rewrites a numeric field of its
 //                                       book's configs; adds before multiplies
 //       Grant(X)                        adds the `talent: true` ability X
+//       WidenChoice(<Menu>(<Option>))   offers a per-match option that is
+//                                       hidden from every build without this
+//                                       node (talent_choices.rs)
+//       AddChoiceSlot(OffHandPoison)    opens a second slot of a menu
+//       Mechanic(<TalentMechanic>)      a bespoke rule with one code site
+//                                       (talent_mechanics.rs)
+//       FromRank(r, <effect>)           <effect>, once per rank from rank r
+//   - `choice_rules: [...]` (top level) makes per-match choices exclusive:
+//       SwitchesOff(option: O, talent: T)  O chosen turns T off for the match
+//       Forbids(option: O, ability: A)     O chosen locks A
+//       Requires(ability: A, option: O)    A is locked unless O is chosen
 //   - is priced on the item budget: 11 a rank, 22 the capstone (tier 4),
 //     ±15%. A node whose every effect is a StatPercent on a stat the item
 //     budget weighs has its price COMPUTED, at the class's reference

@@ -157,6 +157,14 @@ pub struct HeadlessMatchConfig {
     /// Team 2's rogue weapon-poison preferences (one per slot: "Crippling")
     #[serde(default)]
     pub team2_rogue_poisons: Vec<String>,
+    /// Team 1's rogue off-hand poisons (one per slot: "Deadly", or null for
+    /// none). Only a build that opens the second poison slot (Master
+    /// Poisoner) may fill one.
+    #[serde(default)]
+    pub team1_rogue_offhand_poisons: Vec<Option<String>>,
+    /// Team 2's rogue off-hand poisons.
+    #[serde(default)]
+    pub team2_rogue_offhand_poisons: Vec<Option<String>>,
     /// Team 1's warlock curse preferences: outer vec indexed by slot, inner vec indexed by enemy target
     /// Values: "Agony", "Weakness", "Tongues" (defaults to Agony)
     #[serde(default)]
@@ -255,6 +263,8 @@ impl Default for HeadlessMatchConfig {
             team2_rogue_openers: Vec::new(),
             team1_rogue_poisons: Vec::new(),
             team2_rogue_poisons: Vec::new(),
+            team1_rogue_offhand_poisons: Vec::new(),
+            team2_rogue_offhand_poisons: Vec::new(),
             team1_warlock_curse_prefs: Vec::new(),
             team2_warlock_curse_prefs: Vec::new(),
             team1_hunter_pet_types: Vec::new(),
@@ -756,6 +766,10 @@ impl HeadlessMatchConfig {
             .map(|s| Self::parse_rogue_poison(s))
             .collect::<Result<_, _>>()?;
         team2_rogue_poisons.resize(team2.len(), RoguePoison::default());
+        let team1_rogue_offhand_poisons =
+            Self::parse_offhand_poisons(1, &team1, &self.team1_rogue_offhand_poisons)?;
+        let team2_rogue_offhand_poisons =
+            Self::parse_offhand_poisons(2, &team2, &self.team2_rogue_offhand_poisons)?;
 
         // Parse warlock curse preferences
         let team1_warlock_curse_prefs = Self::parse_warlock_curse_prefs(
@@ -838,7 +852,7 @@ impl HeadlessMatchConfig {
         let team1_equipment = Self::parse_equipment_overrides(&self.team1_equipment, team1.len())?;
         let team2_equipment = Self::parse_equipment_overrides(&self.team2_equipment, team2.len())?;
 
-        Ok(MatchConfig {
+        let config = MatchConfig {
             team1_size: team1.len(),
             team2_size: team2.len(),
             team1,
@@ -852,6 +866,8 @@ impl HeadlessMatchConfig {
             team2_rogue_openers,
             team1_rogue_poisons,
             team2_rogue_poisons,
+            team1_rogue_offhand_poisons,
+            team2_rogue_offhand_poisons,
             team1_warlock_curse_prefs,
             team2_warlock_curse_prefs,
             team1_hunter_pet_types,
@@ -866,7 +882,34 @@ impl HeadlessMatchConfig {
             team2_equipment,
             team1_builds,
             team2_builds,
-        })
+        };
+        // Each slot's per-match choices against its build: an option a
+        // talent hides, or a second slot, needs the talent.
+        TalentDefinitions::shipped().validate_config_choices(&config)?;
+        Ok(config)
+    }
+
+    /// One off-hand poison per slot of `team` (`None` for a slot that names
+    /// none), padded to the team's size.
+    fn parse_offhand_poisons(
+        team: u8,
+        classes: &[Option<CharacterClass>],
+        names: &[Option<String>],
+    ) -> Result<Vec<Option<RoguePoison>>, String> {
+        if names.len() > classes.len() {
+            return Err(format!(
+                "team{team}_rogue_offhand_poisons has {} entries but team{team} has only {} \
+                 members",
+                names.len(),
+                classes.len()
+            ));
+        }
+        let mut parsed = names
+            .iter()
+            .map(|name| name.as_deref().map(Self::parse_rogue_poison).transpose())
+            .collect::<Result<Vec<_>, _>>()?;
+        parsed.resize(classes.len(), None);
+        Ok(parsed)
     }
 
     /// One build per slot of `team`, each checked against its slot's class

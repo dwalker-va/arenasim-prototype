@@ -59,6 +59,7 @@ pub fn process_berserker_rage(
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
                 caster: Some(pending.caster),
+                damage_mods: Default::default(),
                 ability_name: "Berserker Rage".to_string(),
                 spell_school: None,
                 applied_this_frame: false,

@@ -25,6 +25,7 @@ pub fn freezing_trap_aura(owner: Entity) -> Aura {
         tick_interval: 0.0,
         time_until_next_tick: 0.0,
         caster: Some(owner),
+        damage_mods: Default::default(),
         ability_name: "Freezing Trap".to_string(),
         break_on_damage_threshold: 0.0, // Breaks on ANY damage
         accumulated_damage: 0.0,
@@ -56,6 +57,7 @@ pub fn frost_trap_slow_aura(owner: Entity, magnitude: f32) -> Aura {
         tick_interval: 0.0,
         time_until_next_tick: 0.0,
         caster: Some(owner),
+        damage_mods: Default::default(),
         ability_name: "Frost Trap".to_string(),
         break_on_damage_threshold: -1.0, // Never breaks on damage
         accumulated_damage: 0.0,
