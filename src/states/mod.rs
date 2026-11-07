@@ -578,9 +578,9 @@ impl Plugin for StatesPlugin {
         )
         // Weapon poison landings: every poison application seen off the
         // victim's `ActiveAuras`, once per sim tick after its last phase.
-        // Gated on the sim RUNNING, not just the scene: a decided match stops
-        // ticking auras down, and a duration that stops falling must never
-        // read as a refresh.
+        // Gated on the sim running as belt and braces: a duration that stops
+        // falling (a decided match) already never reads as a refresh, since
+        // the ledger lands only on a duration that strictly ROSE.
         .add_systems(
             FixedUpdate,
             play_match::detect_poison_landings

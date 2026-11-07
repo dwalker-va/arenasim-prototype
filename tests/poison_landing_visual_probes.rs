@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use bevy::prelude::*;
+use bevy::render::mesh::MeshAabb;
 use bevy::time::TimeUpdateStrategy;
 
 use arenasim::states::play_match::abilities::AbilityType;
@@ -340,6 +341,72 @@ fn the_cloud_drifts_at_the_clients_speeds() {
     assert!(
         min < CLOUD_SPEED * 0.8 && max > CLOUD_SPEED * 1.2,
         "the cloud drifts at one speed: {min:.3}..{max:.3}"
+    );
+}
+
+/// One puff's drawn width in WORLD space: its quad's extent under its
+/// propagated scale.
+fn world_diameter(h: &mut Harness, e: Entity) -> f32 {
+    let world = h.app.world();
+    let mesh = world.get::<Mesh3d>(e).expect("a drawn particle");
+    let aabb = world
+        .resource::<Assets<Mesh>>()
+        .get(&mesh.0)
+        .and_then(|m| m.compute_aabb())
+        .expect("the particle quad");
+    let (scale, _, _) = world
+        .get::<GlobalTransform>(e)
+        .unwrap()
+        .to_scale_rotation_translation();
+    2.0 * aabb.half_extents.x * scale.x
+}
+
+/// A puff is born 0.44 yd across and dies 1.38 yd across: the client's
+/// 0.22 -> 0.69 yd scale keys are RADII (the bench draws them as such), so
+/// the drawn sprite is twice each.
+#[test]
+fn a_puff_swells_from_the_clients_radius_keys_as_a_diameter() {
+    const BIRTH: f32 = 2.0 * 0.22;
+    const DEATH: f32 = 2.0 * 0.69;
+    let mut h = Harness::new();
+    let victim = h.spawn_unit(Vec3::ZERO, vec![]);
+    h.apply(victim, landed(AbilityType::DeadlyPoison));
+    let puff_life = poison_landing_emitters()[1].life;
+
+    // The first puff seen, on the frame it is born.
+    let mut puff = None;
+    for _ in 0..10 {
+        h.run(DT);
+        puff = h
+            .particles()
+            .into_iter()
+            .find(|(_, s)| s.kind == Kind::Puff && s.age <= DT + 1e-4)
+            .map(|(e, _)| e);
+        if puff.is_some() {
+            break;
+        }
+    }
+    let puff = puff.expect("guard: a puff is born within 0.2 s");
+    let born = world_diameter(&mut h, puff);
+    assert!(
+        (born - BIRTH).abs() < 0.01,
+        "a puff is born {born:.3} yd across, not {BIRTH:.2}"
+    );
+
+    // Follow it to its last live frame.
+    let mut last = (0.0, born);
+    while let Some(seen) = h.particles().get(&puff).copied() {
+        last = (seen.age, world_diameter(&mut h, puff));
+        h.run(DT);
+    }
+    let (age, died) = last;
+    assert!(
+        age > puff_life - DT - 1e-3,
+        "guard: the puff was followed to its end ({age:.3} s of {puff_life})"
+    );
+    assert!(
+        (died - DEATH).abs() < 0.02,
+        "a puff dies {died:.3} yd across, not {DEATH:.2}"
     );
 }
 

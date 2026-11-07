@@ -27,8 +27,10 @@ use crate::states::play_match::components::*;
 //   burst  -> about 25 green flares in the first 167 ms, out at 3.33 yd/s,
 //             dying by 0.6 s;
 //   puffs  -> olive cloud puffs at 20/s for 3.0 s, drifting at 0.28 yd/s
-//             (±50%) and swelling 0.22 -> 0.69 yd over a 2.5 s life;
-//   motes  -> additive pin-point motes on the puffs' timing and colours.
+//             (±50%) and swelling 0.22 -> 0.69 yd in radius over a 2.5 s
+//             life, alpha 0.39 -> 0.85 -> 0;
+//   motes  -> additive pin-point motes on the puffs' timing and colours, a
+//             constant 0.056 yd in radius, alpha 0.39 -> 1 -> 0.
 //
 // Rulings (AS-333, user 2026-10-17), as the signed-off bench plays them
 // (AS-333 Baseline Kit Visuals Bench, version 1792202136-e9a0, "Poison on
@@ -59,9 +61,10 @@ use crate::states::play_match::components::*;
 // tick down. So between two observations an aura's duration either FELL (no
 // application) or ROSE (one landed), and a key that was not there before is a
 // fresh landing. Two applications on consecutive ticks read as one — a
-// restart one tick (1/60 s) apart, which no one can see. The detector is
-// gated on the sim running (`combat_sim_runs`), so a frozen match never reads
-// as a refresh.
+// restart one tick (1/60 s) apart, which no one can see. A frozen match
+// never reads as a refresh: a duration that stops falling equals the last one
+// seen, and only a duration that strictly ROSE lands. The detector's
+// `combat_sim_runs` gate is belt and braces on top of that.
 //
 // No `game_rng` draw (scatter is the shared deterministic hash), no sim write
 // — the only entities it spawns are its own rigs and particles — and every
@@ -96,6 +99,15 @@ const EMIT_EPSILON: f32 = 1e-4;
 const PUFF_COLOR: [[u8; 3]; 3] = [[18, 55, 0], [106, 146, 0], [163, 196, 64]];
 const PUFF_WINDOW: (f32, f32) = (0.0, 3.0);
 
+/// The scale track is a RADIUS; the quad is a unit diameter. The client's
+/// (and the bench's) size keys are each sprite's radius in yards — the bench
+/// draws `r = scale * size * 2 * 0.5` — while `ClientEmitter::size` is the
+/// quad's diameter, so every key below is written as the radius the source
+/// gives and doubled here.
+const fn diameters(radius: [f32; 3]) -> [f32; 3] {
+    [radius[0] * 2.0, radius[1] * 2.0, radius[2] * 2.0]
+}
+
 /// `poison_impact_chest.m2` (kit 3031, fdid 166643) at the CHEST.
 const POISON_IMPACT_CHEST: [ClientEmitter; 3] = [
     // P1: the burst — 150/s for 167 ms (about 25 flares), alpha-blended.
@@ -113,7 +125,7 @@ const POISON_IMPACT_CHEST: [ClientEmitter; 3] = [
         rise: false,
         color: [[49, 102, 1], [99, 136, 20], [115, 152, 1]],
         alpha: [1.0, 1.0, 0.0],
-        size: [0.11, 0.06, 0.03],
+        size: diameters([0.11, 0.06, 0.03]),
         mid: 0.5,
         track: None,
     },
@@ -132,8 +144,9 @@ const POISON_IMPACT_CHEST: [ClientEmitter; 3] = [
         column: None,
         rise: false,
         color: PUFF_COLOR,
-        alpha: [0.39, 1.0, 0.0],
-        size: [0.22, 0.31, 0.69],
+        // The bench's "Olive cloud puffs" layer: 0.39 -> 0.85 -> 0.
+        alpha: [0.39, 0.85, 0.0],
+        size: diameters([0.22, 0.31, 0.69]),
         mid: 0.5,
         track: None,
     },
@@ -153,7 +166,7 @@ const POISON_IMPACT_CHEST: [ClientEmitter; 3] = [
         rise: false,
         color: PUFF_COLOR,
         alpha: [0.39, 1.0, 0.0],
-        size: [0.056, 0.056, 0.056],
+        size: diameters([0.056, 0.056, 0.056]),
         mid: 0.5,
         track: None,
     },
@@ -422,6 +435,30 @@ mod tests {
                 "{}",
                 e.name
             );
+        }
+    }
+
+    /// The three layers against the signed-off bench (version
+    /// 1792202136-e9a0, "Poison on hit"): its scale keys are radii, drawn here
+    /// as diameters, and its alpha keys are taken as they stand — the puffs
+    /// peak at 0.85, the flares and motes at 1.
+    #[test]
+    fn the_layers_are_the_benchs_radii_and_alphas() {
+        let bench: [(&str, [f32; 3], [f32; 3]); 3] = [
+            ("flare burst", [0.11, 0.06, 0.03], [1.0, 1.0, 0.0]),
+            ("cloud puffs", [0.22, 0.31, 0.69], [0.39, 0.85, 0.0]),
+            ("pin-point motes", [0.056, 0.056, 0.056], [0.39, 1.0, 0.0]),
+        ];
+        for (e, (name, radius, alpha)) in POISON_LANDING.iter().zip(bench) {
+            assert!(e.name.ends_with(name), "{} is not the {name}", e.name);
+            for k in 0..3 {
+                assert!(
+                    (e.size[k] - 2.0 * radius[k]).abs() < 1e-6,
+                    "{} size",
+                    e.name
+                );
+                assert!((e.alpha[k] - alpha[k]).abs() < 1e-6, "{} alpha", e.name);
+            }
         }
     }
 
