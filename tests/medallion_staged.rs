@@ -163,3 +163,56 @@ fn a_polymorph_its_priest_dispels_keeps_the_medallion() {
         played.log
     );
 }
+
+/// Team 1 as in [`config`], against a Druid and a Mage.
+fn against_a_druid() -> HeadlessMatchConfig {
+    HeadlessMatchConfig {
+        team2: vec!["Druid".into(), "Mage".into()],
+        ..config("Mage")
+    }
+}
+
+/// The first `ability_decision` of the wearer from the stage on.
+fn wearer_acts(played: &Played) -> Option<f32> {
+    let warrior = entity_id(played, 1, 0);
+    played
+        .staged_trace()
+        .find(|e| e["kind"] == "ability_decision" && e["actor"]["entity_id"] == warrior)
+        .map(sim_time)
+}
+
+#[test]
+fn a_cyclone_is_broken_and_the_wearer_acts() {
+    const DRUID: Unit = Unit::new(2, 0);
+    let stage = || placed().land(WEARER, AbilityType::Cyclone, DRUID);
+    let played = play(against_a_druid(), stage());
+    let decisions = item_decisions(&played);
+    assert_eq!(
+        decisions.first().map(|d| d.1.as_str()),
+        Some("chosen"),
+        "{decisions:?}"
+    );
+    assert!(
+        played
+            .log
+            .contains("Team 1 Warrior #1's Medallion of the Alliance breaks Cyclone"),
+        "{}",
+        played.log
+    );
+    let used_at = decisions[0].0;
+    let acts = wearer_acts(&played).expect("the Warrior acts after the break");
+    assert!(acts - used_at < 0.1, "used at {used_at}, acted at {acts}");
+
+    // Control: with the Medallion spent, the same Cyclone holds the Warrior
+    // for the whole 4s of the match.
+    let spent = stage().combatant(WEARER, |c| c.on_use_items[0].spent = true);
+    let played = play(against_a_druid(), spent);
+    assert!(
+        played.log.contains("Cyclone"),
+        "the Cyclone landed: {}",
+        played.log
+    );
+    assert!(item_decisions(&played).is_empty());
+    assert!(!played.log.contains("[ITEM]"), "{}", played.log);
+    assert_eq!(wearer_acts(&played), None);
+}
