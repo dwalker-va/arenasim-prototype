@@ -16,6 +16,7 @@ pub mod dispels;
 pub mod divine_shield;
 pub mod holy_shock;
 pub mod mana_burn;
+pub mod on_use;
 pub mod travel_form;
 
 pub use backlash::*;
@@ -25,4 +26,5 @@ pub use dispels::process_dispels;
 pub use divine_shield::process_divine_shield;
 pub use holy_shock::{process_holy_shock_damage, process_holy_shock_heals};
 pub use mana_burn::process_mana_burn;
+pub use on_use::process_on_use_items;
 pub use travel_form::process_travel_form;

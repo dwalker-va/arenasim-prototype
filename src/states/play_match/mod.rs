@@ -52,6 +52,7 @@ pub mod map_config;
 pub mod map_geometry;
 pub mod match_flow;
 pub mod movement_config;
+pub mod on_use_items;
 pub mod proc_trinkets;
 pub mod projectiles;
 pub mod rendering;
