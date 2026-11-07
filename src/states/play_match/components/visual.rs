@@ -797,6 +797,9 @@ pub const REJUVENATION_AURA: &str = "Rejuvenation";
 pub const LIFEBLOOM_AURA: &str = "Lifebloom";
 /// Mark of the Wild's aura name (the RON `name:` string).
 pub const MARK_OF_THE_WILD_AURA: &str = "Mark of the Wild";
+/// Shadow Word: Pain's aura name (the RON `name:` string). Its landing is the
+/// one visual the client gives it (`rendering/effects/shadow_word_pain.rs`).
+pub const SHADOW_WORD_PAIN_AURA: &str = "Shadow Word: Pain";
 
 /// What a heal-over-time aura draws — the ONE place a HoT meets its visual,
 /// routed by the aura's RON name the way `DotStateVisual::for_dot` routes a
@@ -839,6 +842,10 @@ pub enum AuraLandingKind {
     /// Mark of the Wild: the paw glyph above the head for 0.667 s
     /// (`markofwild_impact_head.m2`, kit 542).
     MarkOfTheWildGlyph,
+    /// Shadow Word: Pain: a dark, violet-edged hit on the victim's chest, 0.9 s
+    /// of emission whose smoke trails off by about 2.3 s
+    /// (`shadowwordpain_chest.m2`, kit 304). The DoT draws nothing else.
+    ShadowWordPainHit,
 }
 
 impl AuraLandingKind {
@@ -851,6 +858,9 @@ impl AuraLandingKind {
             },
             AuraType::MaxHealthIncrease if name == MARK_OF_THE_WILD_AURA => {
                 Some(AuraLandingKind::MarkOfTheWildGlyph)
+            }
+            AuraType::DamageOverTime if name == SHADOW_WORD_PAIN_AURA => {
+                Some(AuraLandingKind::ShadowWordPainHit)
             }
             _ => None,
         }
@@ -976,6 +986,46 @@ pub struct DruidParticle {
 /// The sprite or streak child of a [`DruidParticle`].
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DruidParticlePart {
+    Sprite,
+    Streak,
+}
+
+/// The rig one Shadow Word: Pain landing plays from (graphical only): it
+/// tracks the victim, emits for the model's 0.9 s and retires when its
+/// longest-lived particle has died. Drawn by `shadow_word_pain.rs`.
+#[derive(Component, Debug)]
+pub struct ShadowPainHit {
+    pub target: Entity,
+    pub age: f32,
+    /// Particles owed per emitter (fractional carry).
+    pub carry: Vec<f32>,
+    /// Particles emitted so far — the scatter seed.
+    pub emitted: u32,
+}
+
+/// A particle of a [`ShadowPainHit`] (graphical only). It stays where it was
+/// born — none of the model's emitters follows the victim — and its children
+/// are the sprite and, for an emitter with a tail, the streak behind it.
+#[derive(Component, Debug)]
+pub struct ShadowPainParticle {
+    pub rig: Entity,
+    /// Index into the landing's emitter table.
+    pub emitter: usize,
+    pub age: f32,
+    pub life: f32,
+    pub velocity: Vec3,
+    /// Sprite roll, radians.
+    pub angle: f32,
+    /// Stature scale (a pet victim draws smaller).
+    pub stature: f32,
+    /// The emitter's colour/alpha palettes over a life: sprite, then streak.
+    pub sprite_palette: std::sync::Arc<[Handle<StandardMaterial>]>,
+    pub streak_palette: std::sync::Arc<[Handle<StandardMaterial>]>,
+}
+
+/// The sprite or streak child of a [`ShadowPainParticle`].
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShadowPainParticlePart {
     Sprite,
     Streak,
 }
@@ -1468,7 +1518,8 @@ pub enum AuraApplyOwner {
     /// here would double every one of those impacts.
     SlowRing,
     /// A named aura whose LANDING has its own one-shot: Rejuvenation's ribbon
-    /// swirl and Mark of the Wild's glyph (`druid_heals.rs`). Owned per aura
+    /// swirl and Mark of the Wild's glyph (`druid_heals.rs`), and Shadow Word:
+    /// Pain's dark hit (`shadow_word_pain.rs`). Owned per aura
     /// NAME, not per type — see [`AuraApplyRoute::for_instance`] — because
     /// their types are shared with auras that keep the band (Healing Stream's
     /// HoT, Power Word: Fortitude). Lifebloom is not here: its pulse starts a

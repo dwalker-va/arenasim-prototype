@@ -49,6 +49,10 @@ pub fn regenerate_resources(
         if !combatant.proc_trinkets.is_empty() {
             super::super::proc_trinkets::tick_proc_cooldowns(&mut combatant.proc_trinkets, dt);
         }
+        // ...and on-use item cooldowns, the same way.
+        if !combatant.on_use_items.is_empty() {
+            super::super::on_use_items::tick_on_use_cooldowns(&mut combatant.on_use_items, dt);
+        }
 
         // Tick down ability cooldowns
         let abilities_on_cooldown: Vec<AbilityType> =

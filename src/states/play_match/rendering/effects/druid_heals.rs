@@ -503,11 +503,15 @@ impl DruidEffect {
     }
 }
 
-impl From<AuraLandingKind> for DruidEffect {
-    fn from(kind: AuraLandingKind) -> Self {
+impl DruidEffect {
+    /// The Druid effect an aura landing plays, or `None` for a landing another
+    /// renderer owns (Shadow Word: Pain's, `shadow_word_pain.rs`), which this
+    /// one leaves alone.
+    pub fn for_landing(kind: AuraLandingKind) -> Option<Self> {
         match kind {
-            AuraLandingKind::RejuvenationSwirl => DruidEffect::RejuvenationSwirl,
-            AuraLandingKind::MarkOfTheWildGlyph => DruidEffect::MarkOfTheWildGlyph,
+            AuraLandingKind::RejuvenationSwirl => Some(DruidEffect::RejuvenationSwirl),
+            AuraLandingKind::MarkOfTheWildGlyph => Some(DruidEffect::MarkOfTheWildGlyph),
+            AuraLandingKind::ShadowWordPainHit => None,
         }
     }
 }
@@ -946,8 +950,11 @@ pub fn spawn_druid_effects(
 
     let mut new_rigs: Vec<(Entity, DruidEffect, Option<Entity>)> = Vec::new();
     for (marker, landing) in landings.iter() {
+        let Some(effect) = DruidEffect::for_landing(landing.kind) else {
+            continue;
+        };
         commands.entity(marker).despawn();
-        new_rigs.push((landing.target, landing.kind.into(), None));
+        new_rigs.push((landing.target, effect, None));
     }
     for (marker, bloom) in blooms.iter() {
         commands.entity(marker).despawn();

@@ -263,6 +263,17 @@ fn encyclopedia_item_detail_proc_trinket() {
     );
 }
 
+/// An ON-USE trinket's item page: the Medallion, whose whole budget is its
+/// break, so the USE section is the page.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_item_detail_on_use_trinket() {
+    snapshot(
+        "encyclopedia_item_detail_on_use_trinket",
+        state_at(Topic::Item(ItemId::MedallionOfTheAlliance)),
+    );
+}
+
 /// An active search: grouped, linked result rows over the whole registry —
 /// classes, abilities and items in one list.
 #[test]
