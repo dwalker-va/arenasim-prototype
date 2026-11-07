@@ -110,3 +110,5 @@ mod moonfire;
 pub use moonfire::*;
 mod druid_heals;
 pub use druid_heals::*;
+mod shadow_word_pain;
+pub use shadow_word_pain::*;

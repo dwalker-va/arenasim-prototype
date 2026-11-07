@@ -703,6 +703,46 @@ any ring fits either ring socket, and the same item may not occupy both
      frames and the encyclopedia — the buff carries `Aura::source_item`, and
      `item_aura_icons` registers the art in both aura icon loaders.
 
+   **An item may carry an `on_use:` block** — an effect its wearer's AI
+   chooses when to fire, on the item's own cooldown
+   (`src/states/play_match/on_use_items.rs`):
+   ```ron
+   on_use: Some((
+       effect: CcBreak,           // the Medallion's break
+       cooldown: OncePerMatch,    // or Seconds(60.0)
+       price: Some(24.0),         // declared, per use; only where no stat weight prices the effect
+   )),
+   ```
+   - **Pricing: uses in an arena life**, not the proc's long-run bound.
+     An on-use starts ready, so it is charged per use times the uses it gets in
+     `ARENA_LIFE_SECS` (37.8s, the mean life the proc probe measures): a 45s
+     cooldown is one use. A stat burst prices through `on_use_buff_cost` (15s
+     of +40 SP on 45s is about 24). An
+     effect no stat weight prices (the CC break) DECLARES its per-use price,
+     sweep-checked against the same budget spent on stats; the loader refuses
+     one that declares none.
+   - **One AI rule per effect kind, never per item** (`class_ai/on_use.rs`).
+     The CC break is asked only while its wearer is HELD — stunned, feared,
+     polymorphed or incapacitated, through `combat_ai::dispatch_while_held`,
+     ahead of the class's own break (Divine Shield, Berserker Rage) — and
+     fires on the first LONG hold: `CC_BREAK_MIN_HOLD_REMAINING` (2s) or more
+     left. A root or slow alone never asks it. It WAITS when a teammate is
+     going to dispel every long hold (`class_ai::on_use::expected_dispeller`:
+     an urgent dispel in scope, castable now, owed to the wearer by
+     `owed_dispel` — and a teammate still walking there counts only if it
+     reaches range at its base speed within `wait_budget`: the grace left, or
+     the hold left above the floor), at most `DISPEL_WAIT_GRACE_SECS` (a GCD
+     and half a second), re-asked every tick. It breaks every stun, fear (horror
+     included), polymorph, incapacitate, root and slow (`cc_break_breaks`),
+     never a silence, and grants no immunity. Cyclone is the one line
+     `CC_BREAK_TAKES_CYCLONE` (false, as in TBC: nothing is used from inside
+     one). Traced as an `item_decision` event (`item`, `status`, `reason` —
+     "short hold" or "waiting for <id>'s <dispel>"); `Scene::on_use_item` and
+     `Scene::decide_held` test it.
+   - Its line ("Use: …") is `ItemConfig::effect_description`, shared by the
+     encyclopedia page, the tooltip and the equipment picker. Its landing is in
+     `tests/lands_silently_audit.rs`'s on-use family.
+
 3. **Add to a class loadout** in `loadouts.ron` if it should be default equipment
 
 4. **Add `ItemId` variant** in `equipment.rs` to the `ItemId` enum
