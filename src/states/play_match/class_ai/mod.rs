@@ -30,6 +30,7 @@ pub mod hunter_dip;
 pub mod hunter_lane;
 pub mod interrupts;
 pub mod mage;
+pub mod on_use;
 pub mod paladin;
 pub(crate) mod paladin_postures;
 pub mod peel;
@@ -1146,7 +1147,9 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         | AuraType::AttackPowerReduction
         | AuraType::AttackSpeedSlow
         | AuraType::DamageReduction
-        | AuraType::CastTimeIncrease => 0,
+        | AuraType::CastTimeIncrease
+        | AuraType::DamageTakenIncrease
+        | AuraType::ArmorPercentReduction => 0,
 
         // Mechanical markers, not effects. Lifting `WeakenedSoul` would hand the
         // Priest a free Power Word: Shield reset.
@@ -1172,6 +1175,11 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         | AuraType::FearImmunity
         | AuraType::AttackSpeedIncrease
         | AuraType::NextCast
+        | AuraType::DamageDealtIncrease
+        | AuraType::ArmorPercentIncrease
+        | AuraType::DamageTransfer
+        | AuraType::KillingBlowSave
+        | AuraType::DamageReflect
         | AuraType::TravelForm => 0,
     }
 }
@@ -1401,7 +1409,9 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
     match aura_type {
         // Defensives — most valuable to remove (denies mitigation / sustain).
         AuraType::Absorb => 100,              // PW:Shield / damage absorb
+        AuraType::KillingBlowSave => 100,     // a death prevented (Guardian Spirit)
         AuraType::DamageTakenReduction => 90, // flat damage cut (Devotion Aura is untyped)
+        AuraType::DamageTransfer => 80,       // damage moved off the holder (Blessing of Sacrifice)
         AuraType::HealingOverTime => 70,      // ongoing sustain (Rejuvenation)
         // Offensive throughput buffs.
         AuraType::AttackPowerIncrease => 60,
@@ -1410,6 +1420,7 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         // A primed next cast (Shadow Trance, Divine Favor): a burst or a save
         // in waiting.
         AuraType::NextCast => 60,
+        AuraType::DamageDealtIncrease => 60,
         AuraType::WindfuryBuff => 55,
         AuraType::CritChanceIncrease => 50,
         // Minor utility buffs.
@@ -1417,6 +1428,8 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         AuraType::ManaRegenIncrease => 25,
         AuraType::SpellResistanceBuff => 20,
         AuraType::ArmorIncrease => 20,
+        AuraType::ArmorPercentIncrease => 20,
+        AuraType::DamageReflect => 20,
         AuraType::FrostArmorBuff => 20,
         AuraType::MaxHealthIncrease => 15, // cheap re-buff (PW:Fortitude) — not worth a GCD to strip
         AuraType::LockoutDurationReduction => 15,
@@ -1446,7 +1459,9 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         | AuraType::DamageReduction
         | AuraType::CastTimeIncrease
         | AuraType::AttackPowerReduction
-        | AuraType::AttackSpeedSlow => 0,
+        | AuraType::AttackSpeedSlow
+        | AuraType::DamageTakenIncrease
+        | AuraType::ArmorPercentReduction => 0,
     }
 }
 
@@ -1510,6 +1525,13 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
         | AuraType::FearImmunity
         | AuraType::AttackSpeedIncrease
         | AuraType::NextCast
+        | AuraType::DamageTakenIncrease
+        | AuraType::DamageDealtIncrease
+        | AuraType::ArmorPercentIncrease
+        | AuraType::ArmorPercentReduction
+        | AuraType::DamageTransfer
+        | AuraType::KillingBlowSave
+        | AuraType::DamageReflect
         | AuraType::TravelForm => false,
     }
 }
@@ -1603,6 +1625,13 @@ pub const fn grants_damage_immunity(aura: AuraType) -> bool {
         | AuraType::FearImmunity
         | AuraType::AttackSpeedIncrease
         | AuraType::NextCast
+        | AuraType::DamageTakenIncrease
+        | AuraType::DamageDealtIncrease
+        | AuraType::ArmorPercentIncrease
+        | AuraType::ArmorPercentReduction
+        | AuraType::DamageTransfer
+        | AuraType::KillingBlowSave
+        | AuraType::DamageReflect
         | AuraType::TravelForm => false,
     }
 }

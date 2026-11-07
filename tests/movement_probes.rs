@@ -3187,6 +3187,7 @@ mod bucket_a_unit {
             leech: None,
             stacks: None,
             bloom: None,
+            damage_mods: Default::default(),
         }
     }
 
@@ -4920,6 +4921,7 @@ mod u9_seek_reset {
             leech: None,
             stacks: None,
             bloom: None,
+            damage_mods: Default::default(),
         }
     }
 

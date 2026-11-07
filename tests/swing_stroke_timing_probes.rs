@@ -253,6 +253,7 @@ fn attack_speed_slow(magnitude: f32) -> Aura {
         tick_interval: 0.0,
         time_until_next_tick: 0.0,
         caster: None,
+        damage_mods: Default::default(),
         ability_name: "Thunder Clap".to_string(),
         fear_direction: (0.0, 0.0),
         fear_direction_timer: 0.0,

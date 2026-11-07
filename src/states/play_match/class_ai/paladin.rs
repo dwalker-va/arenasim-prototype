@@ -1549,6 +1549,7 @@ fn cast_hammer_of_justice(
             tick_interval: 0.0,
             time_until_next_tick: 0.0,
             caster: None,
+            damage_mods: Default::default(),
             ability_name: def.name.to_string(),
             fear_direction: (0.0, 0.0),
             fear_direction_timer: 0.0,

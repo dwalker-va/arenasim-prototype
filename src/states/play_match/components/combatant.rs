@@ -478,6 +478,15 @@ pub struct Combatant {
     /// Rogue-specific: which weapon poison is coated (currently only Crippling).
     /// Drives the on-auto-hit poison proc in `combat_auto_attack`.
     pub rogue_poison: RoguePoison,
+    /// Rogue-specific: the off-hand poison, when the build opens the second
+    /// poison slot (Master Poisoner) and the slot chose one. `None`: the
+    /// main-hand poison coats both weapons.
+    pub rogue_offhand_poison: Option<RoguePoison>,
+    /// The bespoke rules the combatant's talents give it, each read at its
+    /// own code site (`talent_mechanics`). Empty untalented.
+    pub talent_mechanics: crate::states::play_match::talent_mechanics::TalentMechanics,
+    /// Whether a once-a-match killing-blow save (Cheat Death) has been spent.
+    pub killing_blow_save_spent: bool,
     /// Warlock-specific: which curse to apply to each enemy target (indexed by enemy slot)
     pub warlock_curse_prefs: Vec<WarlockCurse>,
     /// Warrior-specific: which shout to use (Battle Shout, Demoralizing Shout, or Commanding Shout)
@@ -523,6 +532,11 @@ pub struct Combatant {
     /// `process_casting` when that cast completes (`next_cast.rs`). `None`
     /// whenever no modifier was spent.
     pub next_cast_spent: Option<crate::states::play_match::next_cast::SpentNextCast>,
+    /// Equipped on-use items and their live cooldowns, in socket order.
+    /// Filled by [`Combatant::apply_equipment`]. EMPTY for every loadout that
+    /// carries none, and every on-use hook returns on that emptiness, so such
+    /// a match runs and traces exactly as it did before on-use items existed.
+    pub on_use_items: Vec<crate::states::play_match::on_use_items::OnUseSlot>,
 }
 
 /// How long the weapon-poison marker is stamped for. Longer than any match's
@@ -547,6 +561,7 @@ pub fn weapon_poison_marker_aura(poison: RoguePoison) -> super::Aura {
         tick_interval: 0.0,
         time_until_next_tick: 0.0,
         caster: None,
+        damage_mods: Default::default(),
         ability_name: poison.name().to_string(),
         fear_direction: (0.0, 0.0),
         fear_direction_timer: 0.0,
@@ -712,6 +727,9 @@ impl Combatant {
             last_kill_target: None,
             rogue_opener: RogueOpener::default(),
             rogue_poison: RoguePoison::default(),
+            rogue_offhand_poison: None,
+            talent_mechanics: Default::default(),
+            killing_blow_save_spent: false,
             warlock_curse_prefs: Vec::new(),
             warrior_shout: WarriorShout::default(),
             mage_armor: MageArmor::default(),
@@ -723,6 +741,7 @@ impl Combatant {
             proc_trinkets: Vec::new(),
             talent_procs: Default::default(),
             next_cast_spent: None,
+            on_use_items: Vec::new(),
         }
     }
 
@@ -1093,6 +1112,20 @@ impl Combatant {
                         remaining_icd: 0.0,
                     });
             }
+            // An on-use item, captured the same way and for the same reason:
+            // the AI and the resolution site need no `ItemDefinitions`. It
+            // starts ready.
+            if let Some(on_use) = &item.on_use {
+                self.on_use_items
+                    .push(crate::states::play_match::on_use_items::OnUseSlot {
+                        item: *item_id,
+                        name: item.name.clone(),
+                        config: on_use.clone(),
+                        remaining: 0.0,
+                        spent: false,
+                        waiting: None,
+                    });
+            }
 
             // For the primary weapon slot, replace attack_damage and weapon_speed
             if item.is_weapon && *slot == primary_weapon_slot {
@@ -1282,7 +1315,8 @@ pub struct HolyShockHealPending {
 /// Pending Holy Shock damage to be processed.
 #[derive(Component)]
 pub struct HolyShockDamagePending {
-    /// The Paladin, for its talent procs (`SpellHit`).
+    /// The Paladin: what the damage pipeline credits and reflects onto, and
+    /// whose talent procs the hit feeds (`SpellHit`).
     pub caster: Entity,
     /// The Paladin's own book, which the damage is read from.
     pub caster_book: AbilityBook,

@@ -53,6 +53,7 @@ pub mod map_geometry;
 pub mod match_flow;
 pub mod movement_config;
 pub mod next_cast;
+pub mod on_use_items;
 pub mod proc_trinkets;
 pub mod projectiles;
 pub mod rendering;
@@ -60,6 +61,8 @@ pub mod selection;
 pub mod shadow_sight;
 pub mod situation;
 pub mod systems;
+pub mod talent_choices;
+pub mod talent_mechanics;
 pub mod talent_procs;
 pub mod talents;
 pub mod team_plan;
@@ -843,8 +846,16 @@ pub fn setup_play_match(
 
             let position = Vec3::new(team1_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let build = config.team1_builds.get(i).cloned().unwrap_or_default();
-            let resolved =
-                talents::resolve_for_spawn(&talent_defs, &abilities, 1, i, *character, &build);
+            let choices = talent_choices::SlotChoices::from_config(&config, 1, i, *character);
+            let resolved = talents::resolve_for_spawn(
+                &talent_defs,
+                &abilities,
+                1,
+                i,
+                *character,
+                &build,
+                &choices,
+            );
             let (entity, combatant) = spawn_combatant(
                 &mut commands,
                 &mut meshes,
@@ -986,8 +997,16 @@ pub fn setup_play_match(
 
             let position = Vec3::new(team2_spawn_x, 1.0, (i as f32 - 1.0) * 3.0);
             let build = config.team2_builds.get(i).cloned().unwrap_or_default();
-            let resolved =
-                talents::resolve_for_spawn(&talent_defs, &abilities, 2, i, *character, &build);
+            let choices = talent_choices::SlotChoices::from_config(&config, 2, i, *character);
+            let resolved = talents::resolve_for_spawn(
+                &talent_defs,
+                &abilities,
+                2,
+                i,
+                *character,
+                &build,
+                &choices,
+            );
             let (entity, combatant) = spawn_combatant(
                 &mut commands,
                 &mut meshes,

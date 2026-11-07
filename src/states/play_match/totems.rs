@@ -53,6 +53,7 @@ pub fn make_totem_aura(
         tick_interval,
         time_until_next_tick: tick_interval,
         caster: Some(owner),
+        damage_mods: Default::default(),
         ability_name: buff_name.to_string(),
         fear_direction: (0.0, 0.0),
         fear_direction_timer: 0.0,

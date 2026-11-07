@@ -34,7 +34,9 @@ use arenasim::states::play_match::class_ai::druid::{
     DRUID_MIN_FORM_SECS, DRUID_RESHIFT_HOLD_SECS,
 };
 use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo};
-use arenasim::states::play_match::combat_core::{apply_damage_with_absorb, apply_healing};
+use arenasim::states::play_match::combat_core::{
+    apply_damage_with_absorb, apply_healing, DamageFollowUps, Hit,
+};
 use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, Aura, AuraPending, AuraType, CastingState, Combatant, DRTracker,
     GameRng, ShapeshiftPending, Shift,
@@ -268,11 +270,10 @@ fn a_cycloned_target_takes_no_damage() {
             let (mut target, mut auras) = cycloned_target(cycloned);
             let mut log = CombatLog::default();
             let (dealt, _) = apply_damage_with_absorb(
-                40.0,
+                Hit::new(40.0, school, "probe", None, None, Entity::PLACEHOLDER),
                 &mut target,
                 Some(&mut auras),
-                school,
-                "probe",
+                &mut DamageFollowUps::default(),
                 &mut log,
             );
             (dealt, target.current_health)

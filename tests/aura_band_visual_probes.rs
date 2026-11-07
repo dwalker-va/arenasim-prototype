@@ -79,6 +79,15 @@ const BAND_TYPES: &[AuraType] = &[
     // A primed next cast (the talents' Shadow Trance and the rest), until its
     // tree cards draw each by name.
     AuraType::NextCast,
+    // The damage-pipeline modifiers (AS-408), until their users' visual
+    // cards give any of them a treatment of its own.
+    AuraType::DamageTakenIncrease,
+    AuraType::DamageDealtIncrease,
+    AuraType::ArmorPercentIncrease,
+    AuraType::ArmorPercentReduction,
+    AuraType::DamageTransfer,
+    AuraType::KillingBlowSave,
+    AuraType::DamageReflect,
 ];
 
 fn names(types: impl IntoIterator<Item = AuraType>) -> BTreeSet<String> {
@@ -238,6 +247,7 @@ fn aura(effect_type: AuraType, name: &str, school: Option<SpellSchool>) -> Aura 
         leech: None,
         stacks: None,
         bloom: None,
+        damage_mods: Default::default(),
     }
 }
 

@@ -17,6 +17,7 @@ use crate::states::play_match::equipment::{
 };
 use crate::states::play_match::map_config::{load_map_geometry_config, MapGeometryConfig};
 use crate::states::play_match::movement_config::{load_movement_config, MovementConfig};
+use crate::states::play_match::talent_choices::SlotChoices;
 use crate::states::play_match::talents::{
     load_talent_definitions, resolve_for_spawn, TalentDefinitions,
 };
@@ -406,7 +407,9 @@ fn headless_setup_match(
             // stats applied below (the graphical spawn resolves it the same
             // way).
             let build = config.team1_builds.get(i).cloned().unwrap_or_default();
-            let resolved = resolve_for_spawn(&talents, &abilities, 1, i, *character, &build);
+            let choices = SlotChoices::from_config(&config, 1, i, *character);
+            let resolved =
+                resolve_for_spawn(&talents, &abilities, 1, i, *character, &build, &choices);
             let mut combatant = Combatant::new_with_curse_prefs(
                 1,
                 i as u8,
@@ -571,7 +574,9 @@ fn headless_setup_match(
             // stats applied below (the graphical spawn resolves it the same
             // way).
             let build = config.team2_builds.get(i).cloned().unwrap_or_default();
-            let resolved = resolve_for_spawn(&talents, &abilities, 2, i, *character, &build);
+            let choices = SlotChoices::from_config(&config, 2, i, *character);
+            let resolved =
+                resolve_for_spawn(&talents, &abilities, 2, i, *character, &build, &choices);
             let mut combatant = Combatant::new_with_curse_prefs(
                 2,
                 i as u8,

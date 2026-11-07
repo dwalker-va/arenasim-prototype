@@ -13,6 +13,7 @@ mod avoidance;
 mod casting;
 mod damage;
 mod death;
+mod follow_ups;
 mod healing;
 pub mod leech;
 mod movement;
@@ -24,6 +25,7 @@ pub use avoidance::*;
 pub use casting::*;
 pub use damage::*;
 pub use death::*;
+pub use follow_ups::*;
 pub use healing::*;
 pub use movement::*;
 pub use movement_scoring::*;
@@ -172,11 +174,17 @@ mod tests {
         spell_school: SpellSchool,
     ) -> (f32, f32) {
         apply_damage_with_absorb(
-            damage,
+            Hit::new(
+                damage,
+                spell_school,
+                "Test Strike",
+                None,
+                None,
+                Entity::PLACEHOLDER,
+            ),
             target,
             active_auras,
-            spell_school,
-            "Test Strike",
+            &mut DamageFollowUps::default(),
             &mut crate::combat::log::CombatLog::default(),
         )
     }
@@ -201,6 +209,7 @@ mod tests {
             tick_interval: 0.0,
             time_until_next_tick: 0.0,
             caster: None,
+            damage_mods: Default::default(),
             ability_name: ability_name.to_string(),
             fear_direction: (0.0, 0.0),
             fear_direction_timer: 0.0,
@@ -290,11 +299,17 @@ mod tests {
         let mut rogue = stealthed_rogue(100.0);
         let mut log = crate::combat::log::CombatLog::default();
         apply_damage_with_absorb(
-            10.0,
+            Hit::new(
+                10.0,
+                SpellSchool::Frost,
+                "Frostbolt",
+                None,
+                None,
+                Entity::PLACEHOLDER,
+            ),
             &mut rogue,
             None,
-            SpellSchool::Frost,
-            "Frostbolt",
+            &mut DamageFollowUps::default(),
             &mut log,
         );
         assert!(!rogue.stealthed, "damage that reached health must reveal");
@@ -307,11 +322,17 @@ mod tests {
 
         // Already revealed: a second hit reveals nothing and logs nothing.
         apply_damage_with_absorb(
-            10.0,
+            Hit::new(
+                10.0,
+                SpellSchool::Frost,
+                "Frostbolt",
+                None,
+                None,
+                Entity::PLACEHOLDER,
+            ),
             &mut rogue,
             None,
-            SpellSchool::Frost,
-            "Frostbolt",
+            &mut DamageFollowUps::default(),
             &mut log,
         );
         assert_eq!(log.entries.len(), 1);
@@ -596,6 +617,7 @@ mod tests {
                 tick_interval: 0.0,
                 time_until_next_tick: 0.0,
                 caster: None,
+                damage_mods: Default::default(),
                 ability_name: "Divine Shield".to_string(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
@@ -662,6 +684,7 @@ mod tests {
                 tick_interval: 0.0,
                 time_until_next_tick: 0.0,
                 caster: None,
+                damage_mods: Default::default(),
                 ability_name: "Shadow Resistance Aura".to_string(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
@@ -762,6 +785,7 @@ mod tests {
                 tick_interval: 0.0,
                 time_until_next_tick: 0.0,
                 caster: None,
+                damage_mods: Default::default(),
                 ability_name: "Frostbolt".to_string(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
@@ -803,6 +827,7 @@ mod tests {
                 tick_interval: 0.0,
                 time_until_next_tick: 0.0,
                 caster: None,
+                damage_mods: Default::default(),
                 ability_name: "Weakened Soul".to_string(),
                 fear_direction: (0.0, 0.0),
                 fear_direction_timer: 0.0,
@@ -960,6 +985,7 @@ mod tests {
             tick_interval: 0.0,
             time_until_next_tick: 0.0,
             caster: None,
+            damage_mods: Default::default(),
             ability_name: "Test".to_string(),
             fear_direction: (0.0, 0.0),
             fear_direction_timer: 0.0,

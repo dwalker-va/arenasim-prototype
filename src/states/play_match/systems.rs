@@ -46,6 +46,7 @@ pub use super::effects::process_divine_shield;
 pub use super::effects::process_holy_shock_damage;
 pub use super::effects::process_holy_shock_heals;
 pub use super::effects::process_mana_burn;
+pub use super::effects::process_on_use_items;
 pub use super::effects::process_travel_form;
 
 // === Phase 2: Combat and Movement ===
@@ -78,6 +79,7 @@ pub use super::totems::totem_pulse_system;
 
 // === Phase 3: Combat Resolution ===
 pub use super::combat_core::combat_auto_attack;
+pub use super::combat_core::process_damage_follow_ups;
 pub use super::combat_core::resolve_melee_avoidances;
 pub use super::talent_procs::resolve_talent_procs;
 
@@ -220,6 +222,9 @@ pub fn add_core_combat_systems<M, N>(
                 process_divine_shield,
                 process_berserker_rage,
                 process_travel_form,
+                // An on-use item's effect: the Medallion's CC break, which
+                // grants no immunity, so a CC queued this frame lands after it.
+                process_on_use_items,
             )
                 .chain(),
             apply_pending_auras,
@@ -314,6 +319,11 @@ pub fn add_core_combat_systems<M, N>(
             // events go out on the frame they happened.
             ApplyDeferred,
             resolve_melee_avoidances,
+            // What the frame's hits set off on other units — transfers,
+            // reflects, saves (`combat_core::follow_ups`) — landed after every
+            // hit of the frame, through the same damage funnel. Inert unless a
+            // modifier aura or a talent queued one.
+            process_damage_follow_ups,
             // Every talent proc event pushed this frame (by the phases above,
             // through their commands) rolled at one site, in event order.
             // AFTER a flush, so the pushes queued by `combat_auto_attack` are

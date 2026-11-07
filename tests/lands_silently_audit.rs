@@ -58,6 +58,8 @@ use arenasim::states::play_match::components::{
     AuraLandingKind, AuraType, CurseKind, HealImpact, HealImpactKind, HotVisual,
     InstantAbilityFired, RootStyle, SchoolImpact, TotemElement,
 };
+use arenasim::states::play_match::equipment::{load_item_definitions, ItemDefinitions, ItemId};
+use arenasim::states::play_match::on_use_items::OnUseEffect;
 use arenasim::states::play_match::{
     bolt_kind_for, client_landing_style, curse_spec, hunter_shot_for, root_style_for,
     DotStateVisual, InterruptLanding, SlowTint, DIVINE_SHIELD_AURA_NAME, ICE_BARRIER_AURA_NAME,
@@ -73,12 +75,12 @@ use AbilityType::*;
 type Judge = fn(AbilityType, &AbilityConfig) -> Option<&'static str>;
 
 /// Claim 1: the scan found exactly the named members.
-fn check_finds(
+fn check_finds<T: Ord + Copy + std::fmt::Debug>(
     family: &str,
-    scanned: &BTreeSet<AbilityType>,
-    named: &[AbilityType],
+    scanned: &BTreeSet<T>,
+    named: &[T],
 ) -> Result<(), String> {
-    let named: BTreeSet<AbilityType> = named.iter().copied().collect();
+    let named: BTreeSet<T> = named.iter().copied().collect();
     let mut problems = Vec::new();
     for lost in named.difference(scanned) {
         problems.push(format!(
@@ -101,11 +103,11 @@ fn check_finds(
 
 /// Claim 2: the judge draws every member except exactly the known-silent
 /// ones.
-fn check_judged(
+fn check_judged<T: Ord + Copy + std::fmt::Debug>(
     family: &str,
-    members: &BTreeSet<AbilityType>,
-    judge: impl Fn(AbilityType) -> Option<&'static str>,
-    known_silent: &[(AbilityType, &str)],
+    members: &BTreeSet<T>,
+    judge: impl Fn(T) -> Option<&'static str>,
+    known_silent: &[(T, &str)],
 ) -> Result<(), String> {
     let mut problems = Vec::new();
     let mut listed = BTreeSet::new();
@@ -293,6 +295,16 @@ fn aura_family(t: AuraType) -> AuraFamily {
         // and its band cue draws it until AS-433 gives it its own one-shot.
         | AuraType::AttackSpeedIncrease
         | AuraType::NextCast
+        // The damage-pipeline modifiers (AS-408): stat-shaped buffs and
+        // debuffs, judged by the aura-application sweep (the band cue draws
+        // each until its user's visual card gives it its own).
+        | AuraType::DamageTakenIncrease
+        | AuraType::DamageDealtIncrease
+        | AuraType::ArmorPercentIncrease
+        | AuraType::ArmorPercentReduction
+        | AuraType::DamageTransfer
+        | AuraType::KillingBlowSave
+        | AuraType::DamageReflect
         | AuraType::TravelForm => AuraFamily::Status,
     }
 }
@@ -474,14 +486,9 @@ const DOT_MEMBERS: &[AbilityType] = &[
     UnstableAffliction,
 ];
 
-/// DoTs that land with nothing drawn yet. Shadow Word: Pain's state stays
-/// `None` by the Moonfire ruling; AS-342 builds its landing, and moves it to
-/// `DOT_SILENT_BY_DESIGN` when that landing is the whole visual. Deadly
-/// Poison's landing is AS-341's.
-const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[
-    (DeadlyPoison, "AS-341 (weapon poison landing)"),
-    (ShadowWordPain, "AS-342"),
-];
+/// DoTs that land with nothing drawn yet. Deadly Poison's landing is AS-341's.
+const DOT_KNOWN_SILENT: &[(AbilityType, &str)] =
+    &[(DeadlyPoison, "AS-341 (weapon poison landing)")];
 
 /// The DoT STATE a member's aura routes to. The aura carries the ability's
 /// RON `name:`, so this sweeps the config name through the very router every
@@ -503,12 +510,33 @@ fn dot_finds_every_member() {
 
 /// DoTs that draw no state by ruling. The landing is the whole visual and the
 /// aura icon carries the DoT, as with Curse of Tongues.
-const DOT_SILENT_BY_DESIGN: &[SilentByDesign] = &[SilentByDesign {
-    ability: Moonfire,
-    doc: "docs/design/2026-10-03-druid-client-data.md",
-    reason: "client has no state; aura icon carries it (ruling 2; the Curse of Tongues \
-             precedent) — the orb-and-beam landing is the whole visual",
-}];
+const DOT_SILENT_BY_DESIGN: &[SilentByDesign] = &[
+    SilentByDesign {
+        ability: Moonfire,
+        doc: "docs/design/2026-10-03-druid-client-data.md",
+        reason: "client has no state; aura icon carries it (ruling 2; the Curse of Tongues \
+                 precedent) — the orb-and-beam landing is the whole visual",
+    },
+    SilentByDesign {
+        ability: ShadowWordPain,
+        doc: "docs/design/2026-10-17-baseline-kit-client-data.md",
+        reason: "client has no state and no tick visual (§3); aura icon carries it, by the \
+                 Moonfire ruling — the shadowwordpain_chest landing is the whole visual",
+    },
+];
+
+/// Shadow Word: Pain's landing is its whole visual, so it must be routed: the
+/// aura its RON name lands marks the hit (`apply_pending_auras` →
+/// `shadow_word_pain.rs`).
+#[test]
+fn shadow_word_pain_lands_its_hit() {
+    let defs = AbilityDefinitions::default();
+    let name = &defs.get(&ShadowWordPain).unwrap().name;
+    assert_eq!(
+        AuraLandingKind::for_aura(AuraType::DamageOverTime, name),
+        Some(AuraLandingKind::ShadowWordPainHit)
+    );
+}
 
 #[test]
 fn dot_lands_nothing_silently() {
@@ -921,6 +949,64 @@ fn health_to_mana_lands_nothing_silently() {
         health_to_mana_visual,
         HEALTH_TO_MANA_KNOWN_SILENT,
     );
+}
+
+// ── family: on-use items ────────────────────────────────────────────────────
+//
+// An on-use item's effect lands through `process_on_use_items`
+// (effects/on_use.rs), not through an ability, so this family scans
+// `items.ron` rather than `abilities.ron` and names its members by item.
+
+const ON_USE_MEMBERS: &[ItemId] = &[ItemId::MedallionOfTheAlliance];
+
+/// The visual an on-use's landing reaches, by its effect kind. None yet: the
+/// Medallion's break (a self-cast gold dispel ribbon, the Holy launch hands,
+/// the broken CC's own visual scattering) is AS-432's.
+fn on_use_visual(effect: OnUseEffect) -> Option<&'static str> {
+    match effect {
+        OnUseEffect::CcBreak => None,
+    }
+}
+
+const ON_USE_KNOWN_SILENT: &[(ItemId, &str)] = &[(ItemId::MedallionOfTheAlliance, "AS-432")];
+
+fn scan_on_use() -> (BTreeSet<ItemId>, ItemDefinitions) {
+    let items = load_item_definitions().expect("items.ron loads");
+    let members = items
+        .iter()
+        .filter(|(_, item)| item.on_use.is_some())
+        .map(|(id, _)| *id)
+        .collect();
+    (members, items)
+}
+
+#[test]
+fn on_use_finds_every_member() {
+    let (members, _) = scan_on_use();
+    if let Err(e) = check_finds("on-use", &members, ON_USE_MEMBERS) {
+        panic!("{e}");
+    }
+}
+
+#[test]
+fn on_use_lands_nothing_silently() {
+    let (members, items) = scan_on_use();
+    let judged = check_judged(
+        "on-use",
+        &members,
+        |id| {
+            let on_use = items
+                .get_unchecked(&id)
+                .on_use
+                .as_ref()
+                .expect("a member has an on-use");
+            on_use_visual(on_use.effect)
+        },
+        ON_USE_KNOWN_SILENT,
+    );
+    if let Err(e) = judged {
+        panic!("{e}");
+    }
 }
 
 // ── the families cover the config ───────────────────────────────────────────

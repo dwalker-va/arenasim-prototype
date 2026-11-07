@@ -104,6 +104,7 @@ fn shadow_sight() -> Aura {
         leech: None,
         stacks: None,
         bloom: None,
+        damage_mods: Default::default(),
     }
 }
 

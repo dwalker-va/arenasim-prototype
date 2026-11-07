@@ -193,6 +193,14 @@ pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) 
         AuraType::TravelForm => "aura_max_health".to_string(), // Reuse buff icon (real icon comes from the ability config)
         AuraType::AttackSpeedIncrease => "aura_max_health".to_string(), // Haste buff, reuse buff icon (a proc wears its trinket's icon)
         AuraType::NextCast => "aura_max_health".to_string(), // A primed next cast, reuse buff icon (a talent's wears its talent's icon)
+        // The damage-pipeline modifiers: buffs reuse the buff icon, debuffs the
+        // DoT icon (the real icon comes from the ability config).
+        AuraType::DamageDealtIncrease
+        | AuraType::ArmorPercentIncrease
+        | AuraType::DamageTransfer
+        | AuraType::KillingBlowSave
+        | AuraType::DamageReflect => "aura_max_health".to_string(),
+        AuraType::DamageTakenIncrease | AuraType::ArmorPercentReduction => "aura_dot".to_string(),
     }
 }
 
@@ -230,6 +238,11 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         | AuraType::WindfuryBuff
         | AuraType::AttackSpeedIncrease
         | AuraType::NextCast
+        | AuraType::DamageDealtIncrease
+        | AuraType::ArmorPercentIncrease
+        | AuraType::DamageTransfer
+        | AuraType::KillingBlowSave
+        | AuraType::DamageReflect
         | AuraType::TravelForm => true,
 
         // Harmful: crowd control, damage over time and stat/casting debuffs.
@@ -247,7 +260,9 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         | AuraType::DamageReduction
         | AuraType::CastTimeIncrease
         | AuraType::AttackPowerReduction
-        | AuraType::AttackSpeedSlow => false,
+        | AuraType::AttackSpeedSlow
+        | AuraType::DamageTakenIncrease
+        | AuraType::ArmorPercentReduction => false,
 
         // Weakened Soul is the Power Word: Shield cooldown marker the Priest
         // hangs on the ally it just shielded. Not beneficial — it is what stops
