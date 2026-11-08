@@ -1174,6 +1174,77 @@ fn a_crit_from_an_instant_attack_is_a_crit_taken() {
     assert!(!procs(&played.log, "Struck").is_empty(), "{}", played.log);
 }
 
+/// A crit-taken heal-back reads what the crit landed past a TRIGGERED absorb
+/// (AS-429): a Priest wearing Aegis of the Last Stand, staged just above its
+/// 35% line, is crit below it and raises the shield; the crit that breaks
+/// through the shield lands part of its damage, and the heal-back heals that
+/// part, not the crit as rolled. Mortal Strike held, so no healing cut.
+#[test]
+fn a_crit_taken_heal_back_reads_the_damage_past_a_triggered_absorb() {
+    let mut recovery = certain(TalentTrigger::CritTaken, "");
+    recovery.effect = ProcEffect::HealBack {
+        fraction: 1.0,
+        duration: 0.1,
+        tick_interval: 0.1,
+        name: Some("Blessed Recovery".to_string()),
+    };
+    let mut cfg = config(&["Warrior"], &["Priest"], 40.0);
+    cfg.team2_equipment = vec![std::collections::HashMap::from([(
+        "Trinket1".to_string(),
+        "AegisOfTheLastStand".to_string(),
+    )])];
+    let held = Aura {
+        effect_type: AuraType::Silence,
+        duration: 300.0,
+        magnitude: 1.0,
+        ability_name: "Held".to_string(),
+        break_on_damage_threshold: -1.0,
+        ..Default::default()
+    };
+    let log = play(
+        cfg,
+        with_proc(Stage::new(), T2, recovery)
+            .cooldown(T1, AbilityType::MortalStrike, 1000.0)
+            .combatant(T1, |c| c.crit_chance = 1.0)
+            .combatant(T2, |c| {
+                c.max_health = 2_000.0;
+                c.current_health = 760.0;
+            })
+            .clear_auras(T2)
+            .aura(T2, held),
+    )
+    .log;
+    assert!(
+        !lines(&log, "gains Aegis of the Last Stand").is_empty(),
+        "{log}"
+    );
+    let log_lines: Vec<&str> = log.lines().collect();
+    let mut broke_through = 0;
+    for (i, line) in log_lines.iter().enumerate() {
+        // An auto-attack's crit or a queued strike's (Heroic Strike).
+        if !(line.contains("Team 1 Warrior #1's ")
+            && line.contains(" CRITS Team 2 Priest")
+            && line.contains(" absorbed)"))
+        {
+            continue;
+        }
+        let landed: f32 = amounts(line, "CRITS", " for ")[0];
+        if landed <= 0.0 {
+            continue;
+        }
+        broke_through += 1;
+        let healed = log_lines[i + 1..]
+            .iter()
+            .find(|l| l.contains(RECOVERED))
+            .map(|l| amounts(l, RECOVERED, " for ")[0]);
+        assert_eq!(healed, Some(landed), "{line}\n{log}");
+    }
+    assert!(
+        broke_through >= 1,
+        "no crit broke through the shield: {log}"
+    );
+}
+
 /// A shot's crit is a ranged crit, so its target's `CritTaken`, and the
 /// heal-back reads what the crit LANDED: a Hunter whose only crit is one
 /// Arcane Shot (a sure-crit modifier on it, no crit chance of its own or its

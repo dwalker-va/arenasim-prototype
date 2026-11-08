@@ -82,6 +82,7 @@ pub use super::combat_core::combat_auto_attack;
 pub use super::combat_core::process_damage_follow_ups;
 pub use super::combat_core::resolve_melee_avoidances;
 pub use super::talent_procs::resolve_talent_procs;
+pub use super::triggered_absorbs::fire_triggered_absorbs;
 
 // === Decision Trace ===
 pub use super::decision_trace::flush_decision_trace_system;
@@ -331,6 +332,10 @@ pub fn add_core_combat_systems<M, N>(
             // hit of the frame, through the same damage funnel. Inert unless a
             // modifier aura or a talent queued one.
             process_damage_follow_ups,
+            // After the frame's last damage (the follow-ups above): a shield a
+            // health threshold raises (Aegis of the Last Stand) is up for all
+            // of the next frame's damage. A no-op for a combatant carrying none.
+            fire_triggered_absorbs,
             // Every talent proc event pushed this frame (by the phases above,
             // through their commands) rolled at one site, in event order.
             // AFTER a flush, so the pushes queued by `combat_auto_attack` are

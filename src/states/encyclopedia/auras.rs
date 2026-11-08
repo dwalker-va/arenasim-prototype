@@ -83,6 +83,7 @@ use crate::states::play_match::shadow_sight::{
 };
 use crate::states::play_match::talent_procs::{effect_aura, ProcEvent, TalentProcSlot};
 use crate::states::play_match::talents::{TalentDefinitions, TalentEffect, TalentId};
+use crate::states::play_match::triggered_absorbs::triggered_absorb_description;
 use crate::states::talent_text::talent_proc_description;
 
 use super::search::SearchEntry;
@@ -195,6 +196,10 @@ pub enum EngineAura {
     /// `Proc` effects. Derived from `talents.ron`, so talent N+1's proc gets
     /// an entry with no variant here.
     TalentProcAura(TalentId, u8),
+    /// The absorb shield an item's TRIGGERED ABSORB raises (Aegis of the Last
+    /// Stand), named after the item. Derived from the `triggered_absorb:`
+    /// blocks in `items.ron`, as the proc buffs are from `proc:`.
+    TriggeredAbsorbShield(ItemId),
 }
 
 impl EngineAura {
@@ -254,6 +259,13 @@ impl EngineAura {
                 .count();
             all.extend((0..procs as u8).map(|i| EngineAura::TalentProcAura(talent, i)));
         }
+        all.extend(
+            ItemId::all()
+                .iter()
+                .filter(|id| items.get(id).is_some_and(|i| i.triggered_absorb.is_some()))
+                .copied()
+                .map(EngineAura::TriggeredAbsorbShield),
+        );
         all
     }
 }
@@ -735,7 +747,9 @@ fn engine_art(engine: EngineAura) -> AuraArt {
         // No ability applies it; the TRINKET does, and the buff wears the
         // trinket's own icon — as it does in the buff bar, which reads the
         // same key off the aura's `source_item`.
-        EngineAura::ProcTrinketBuff(item) => AuraArt::Item(item),
+        EngineAura::ProcTrinketBuff(item) | EngineAura::TriggeredAbsorbShield(item) => {
+            AuraArt::Item(item)
+        }
         // A talent's proc wears its talent's icon, as in the buff bar, which
         // reads the same key off the aura's `source_talent`.
         EngineAura::TalentProcAura(talent, _) => AuraArt::Talent(talent),
@@ -747,8 +761,8 @@ fn engine_art(engine: EngineAura) -> AuraArt {
 /// Every value here is read from the constant, shared constructor or spec the
 /// apply site reads, so the page cannot state a number the simulation does not
 /// use.
-/// `None` only for a `ProcTrinketBuff` address whose item no longer carries a
-/// proc — an address that `EngineAura::all` cannot produce, but that a stale
+/// `None` only for a `ProcTrinketBuff` (or `TriggeredAbsorbShield`) address
+/// whose item no longer carries a proc (or a triggered absorb) — an address that `EngineAura::all` cannot produce, but that a stale
 /// navigation stack can still hold.
 fn engine_entry(
     engine: EngineAura,
@@ -994,6 +1008,27 @@ fn engine_entry_with(
                 persistence: Persistence::Seconds(landed.duration),
                 riders: EngineSpec::no_riders(),
                 provenance: talent_proc_description(&config.name, proc, abilities),
+            }
+        }
+        EngineAura::TriggeredAbsorbShield(item) => {
+            let def = items.get(&item)?;
+            let absorb = def.triggered_absorb.as_ref()?;
+            // The aura the simulation raises, before dampening: its size on a
+            // reference combatant is the item's to state, so the page reads
+            // its mechanic, removal and duration off the real constructor.
+            let sample = absorb.aura(&def.name, Some(item), 0.0);
+            EngineSpec {
+                name: def.name.clone(),
+                frame_name: None,
+                mechanic: sample.effect_type,
+                source: AuraSource::Mechanic("a trinket you are wearing"),
+                magnitude: 0.0,
+                school: None,
+                break_on_damage: sample.break_on_damage_threshold,
+                dispel_type: sample.dispel_type,
+                persistence: Persistence::Seconds(absorb.duration),
+                riders: EngineSpec::no_riders(),
+                provenance: triggered_absorb_description(absorb),
             }
         }
     };
@@ -1531,7 +1566,9 @@ fn magnitude_row_for(mechanic: AuraType, m: f32) -> Option<(String, String)> {
         AuraType::WindfuryBuff => row("Extra-attack chance", pct(m)),
         AuraType::DamageOverTime => row("Damage per tick", format!("{:.0}", m)),
         AuraType::HealingOverTime => row("Healing per tick", format!("{:.0}", m)),
-        AuraType::Absorb => row("Absorbs", format!("{:.0} damage", m)),
+        // A shield sized off its bearer (Aegis of the Last Stand) has no
+        // fixed number; its provenance sentence states the size.
+        AuraType::Absorb if m > 0.0 => row("Absorbs", format!("{:.0} damage", m)),
         AuraType::MaxHealthIncrease => row("Maximum health", format!("+{:.0}", m)),
         AuraType::MaxManaIncrease => row("Maximum mana", format!("+{:.0}", m)),
         AuraType::AttackPowerIncrease => row("Attack power", format!("+{:.0}", m)),
@@ -1661,17 +1698,18 @@ mod tests {
         crate::states::play_match::equipment::load_item_definitions().expect("items.ron must load")
     }
 
-    /// Every shipped proc trinket's display name — which is also the name of
-    /// the buff it grants. DERIVED from `items.ron` rather than listed, so the
+    /// Every shipped item that applies an aura of its own — a proc trinket's
+    /// buff, a triggered absorb's shield — by display name, which is also the
+    /// aura's name. DERIVED from `items.ron` rather than listed, so the
     /// content pass can add trinket N+1 without editing a guard; the guards
     /// below still NAME every non-proc member, so an ordinary entry losing its
     /// source or its art is caught exactly as before.
-    fn proc_trinket_names() -> Vec<String> {
+    fn item_aura_names() -> Vec<String> {
         let items = items();
         ItemId::all()
             .iter()
             .filter_map(|id| items.get(id))
-            .filter(|item| item.proc_buff().is_some())
+            .filter(|item| item.proc_buff().is_some() || item.triggered_absorb.is_some())
             .map(|item| item.name.clone())
             .collect()
     }
@@ -2067,7 +2105,7 @@ mod tests {
             .collect();
         let mut sorted = untouchable.clone();
         sorted.sort();
-        let mut expected = proc_trinket_names();
+        let mut expected = item_aura_names();
         expected.extend(
             [
                 "Berserker Rage",
@@ -2472,7 +2510,7 @@ mod tests {
             }
         }
         ability_less.sort();
-        let mut expected = proc_trinket_names();
+        let mut expected = item_aura_names();
         expected.push("Shadow Sight".to_string());
         expected.sort();
         assert_eq!(
@@ -2630,7 +2668,7 @@ mod tests {
             "the auras whose own art beats a borrowed icon"
         );
         item_art.sort();
-        let mut expected = proc_trinket_names();
+        let mut expected = item_aura_names();
         expected.sort();
         assert_eq!(
             item_art, expected,

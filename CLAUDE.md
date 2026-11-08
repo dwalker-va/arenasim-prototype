@@ -844,6 +844,43 @@ any ring fits either ring socket, and the same item may not occupy both
      encyclopedia page, the tooltip and the equipment picker. Its landing is in
      `tests/lands_silently_audit.rs`'s on-use family.
 
+   **A trinket may carry a `triggered_absorb:` block** — a shield a condition
+   on its wearer raises (`src/states/play_match/triggered_absorbs.rs`; Aegis
+   of the Last Stand is the first):
+   ```ron
+   triggered_absorb: Some((
+       trigger: HealthBelow(0.35),       // the wearer alive below 35% health
+       shield: MaxHealthFraction(0.20),  // 20% of its maximum health
+       limit: OncePerMatch,
+       duration: 30.0,
+       trigger_rate: 0.575,              // the price's assumed rate
+   )),
+   ```
+   - **Where it fires:** `fire_triggered_absorbs`, at the end of Phase 3,
+     after the frame's last damage and after `process_damage_follow_ups`; it
+     never touches the damage funnel. The shield is an `Absorb` aura named
+     after the item, keyed by source, so it sits beside a Power Word: Shield.
+     It applies `ArenaDampening` itself, at that landing site, and logs
+     `<wearer> gains <item> (absorbs N)` with the landed amount. Not purgeable
+     (`DispelType::Physical`), as for procs.
+   - **In the damage pipeline** it is an ordinary absorb (the funnel's step 5):
+     it soaks a hit after the damage-taken modifiers and a transfer's share,
+     before the killing-blow save, and never a transferred hit. Because it
+     fires after the follow-ups, a transfer that crosses the line raises it
+     that frame, and a save is judged first: Cheat Death leaving its Rogue
+     below the line raises it on the frame of the blow
+     (`tests/triggered_absorb_pipeline.rs`).
+   - **Pricing:** value times trigger rate — the shield on a
+     `TRIGGERED_ABSORB_REFERENCE_HEALTH` (420) combatant at the health weight,
+     times the declared `trigger_rate`, which stays provisional until the
+     Gauntlet bot measures it.
+   - It gets the same surfaces a proc does, with no code change (its sentence
+     is `triggered_absorb_description`, through `ItemConfig::effect_lines`),
+     and is a member of `tests/lands_silently_audit.rs`'s triggered-absorb
+     family: its shield must reach a `ShieldKind` (`is_live_shield`, keyed on
+     the aura's name). New variants of trigger, size and limit (Sacred Shield,
+     AS-421) are exhaustive matches in that module.
+
 3. **Add to a class loadout** in `loadouts.ron` if it should be default equipment
 
 4. **Add `ItemId` variant** in `equipment.rs` to the `ItemId` enum
