@@ -58,7 +58,6 @@ use crate::ui::fonts::body_family;
 use bevy_egui::egui;
 
 use crate::states::ability_text::build_aura_description;
-use crate::states::ability_text::talent_proc_description;
 use crate::states::match_config::RoguePoison;
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::ability_config::AbilityDefinitions;
@@ -84,6 +83,7 @@ use crate::states::play_match::shadow_sight::{
 };
 use crate::states::play_match::talent_procs::{effect_aura, ProcEvent, TalentProcSlot};
 use crate::states::play_match::talents::{TalentDefinitions, TalentEffect, TalentId};
+use crate::states::talent_text::talent_proc_description;
 
 use super::search::SearchEntry;
 use super::widget;
@@ -993,7 +993,7 @@ fn engine_entry_with(
                 dispel_type: landed.dispel_type,
                 persistence: Persistence::Seconds(landed.duration),
                 riders: EngineSpec::no_riders(),
-                provenance: talent_proc_description(&config.name, proc),
+                provenance: talent_proc_description(&config.name, proc, abilities),
             }
         }
     };

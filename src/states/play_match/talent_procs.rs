@@ -1089,14 +1089,15 @@ mod tests {
             },
             internal_cooldown: 0.0,
         };
+        let defs = crate::states::play_match::ability_config::AbilityDefinitions::shipped();
         assert_eq!(
-            crate::states::ability_text::talent_proc_description("The Art of War", &aow),
+            crate::states::talent_text::talent_proc_description("The Art of War", &aow, defs),
             "The Art of War: 4.8 times a minute of melee, whatever the weapon, on a melee \
              hit, primes your next cast: Within 15 sec, the next Flash of Light is instant \
              and costs nothing. The chance is per rank."
         );
         assert_eq!(
-            crate::states::ability_text::talent_proc_description("Nightfall", &trance()),
+            crate::states::talent_text::talent_proc_description("Nightfall", &trance(), defs),
             "Nightfall: A 5% chance on each damage tick of Corruption or Drain Life, primes \
              your next cast: Within 10 sec, the next Shadow Bolt is instant. The chance is \
              per rank."

@@ -20,6 +20,8 @@ pub mod match_config;
 pub mod options_ui;
 pub mod play_match;
 pub mod results_ui;
+pub mod talent_panel;
+pub mod talent_text;
 pub mod view_combatant_ui;
 
 pub use match_config::MatchConfig;

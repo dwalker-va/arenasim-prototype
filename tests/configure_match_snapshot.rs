@@ -31,6 +31,7 @@ use arenasim::states::configure_match_ui::{
 };
 use arenasim::states::match_config::{ArenaMap, CharacterClass, MatchConfig};
 use arenasim::states::play_match::map_config::MapGeometryConfig;
+use arenasim::states::play_match::talents::{Build, TalentDefinitions, TalentId};
 use arenasim::states::GameState;
 use arenasim::ui::widgets::Nav;
 
@@ -71,6 +72,7 @@ fn configure_match_2v2() {
                 &icons,
                 &map_geometry,
                 None,
+                TalentDefinitions::shipped(),
                 NAV,
             );
         });
@@ -105,10 +107,96 @@ fn configure_match_picker_open() {
                 &icons,
                 &map_geometry,
                 None,
+                TalentDefinitions::shipped(),
                 NAV,
             );
         });
 
     harness.run();
     harness.snapshot("configure_match_picker_open");
+}
+
+/// A talented slot: Team 2's second slot is a Warlock with a Demonology
+/// build, so its row reads the spec ("Demonology Warlock 3") where an
+/// untalented row reads its class's line.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn configure_match_talented_slot() {
+    let mut config = mock_config();
+    config.set_class(2, 1, CharacterClass::Warlock);
+    config.team2_builds[1] = Build::of(&[(TalentId::DemonicEmbrace, 2), (TalentId::FelStamina, 1)]);
+    let mut picker = CharacterPickerState::default();
+    let icons = ClassIcons::default();
+    let map_geometry = MapGeometryConfig::default();
+
+    let mut harness = Harness::builder()
+        .with_size([1500.0, 900.0])
+        .build(move |ctx| {
+            arenasim::ui::install(ctx);
+            let _ = draw_configure_match(
+                ctx,
+                &mut config,
+                &mut picker,
+                &icons,
+                &map_geometry,
+                None,
+                TalentDefinitions::shipped(),
+                NAV,
+            );
+        });
+
+    harness.run();
+    harness.snapshot("configure_match_talented_slot");
+}
+
+/// A slot row reads its spec, and only a talented one does. Laid out in a
+/// bare egui context with the `--ui-script` registry armed (no GPU), so the
+/// default `cargo test` holds it.
+#[test]
+fn a_talented_slot_reads_its_spec() {
+    use arenasim::ui::driver::registry;
+    use bevy_egui::egui;
+
+    let mut config = mock_config();
+    config.set_class(2, 1, CharacterClass::Warlock);
+    config.team2_builds[1] = Build::of(&[(TalentId::DemonicEmbrace, 2), (TalentId::FelStamina, 1)]);
+    let mut picker = CharacterPickerState::default();
+    let icons = ClassIcons::default();
+    let map_geometry = MapGeometryConfig::default();
+    let ctx = egui::Context::default();
+    arenasim::ui::install(&ctx);
+    let mut last = registry::Frame::default();
+    for _ in 0..2 {
+        registry::arm(&ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1500.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            let _ = draw_configure_match(
+                ctx,
+                &mut config,
+                &mut picker,
+                &icons,
+                &map_geometry,
+                None,
+                TalentDefinitions::shipped(),
+                NAV,
+            );
+        });
+        last = registry::snapshot(&ctx).expect("armed");
+    }
+    assert!(
+        last.has_note("slot:t2s1 subtitle=Demonology Warlock 3"),
+        "{:?}",
+        last.notes
+    );
+    assert!(
+        last.has_note("slot:t1s0 subtitle=Sturdy melee fighter"),
+        "{:?}",
+        last.notes
+    );
 }

@@ -60,6 +60,8 @@ pub enum NamedKey {
     ArrowRight,
     ArrowUp,
     ArrowDown,
+    /// A modifier: held across a `click ... shift`, or pressed alone.
+    Shift,
 }
 
 impl NamedKey {
@@ -74,6 +76,7 @@ impl NamedKey {
             "ArrowRight" | "Right" => NamedKey::ArrowRight,
             "ArrowUp" | "Up" => NamedKey::ArrowUp,
             "ArrowDown" | "Down" => NamedKey::ArrowDown,
+            "Shift" => NamedKey::Shift,
             _ => return None,
         })
     }
@@ -85,7 +88,13 @@ pub enum Step {
     /// Park the synthetic cursor over a registered widget.
     Hover { id: String },
     /// Hover, then press and release a button over a registered widget.
-    Click { id: String, button: Button },
+    /// Press and release `button` on `id`, holding `modifier` (a key such
+    /// as Shift) down across the whole press when there is one.
+    Click {
+        id: String,
+        button: Button,
+        modifier: Option<NamedKey>,
+    },
     /// Press and release a key.
     Key(NamedKey),
     /// Burn frames. Each step already settles; this is for a screen that needs
@@ -132,7 +141,15 @@ impl Step {
     pub fn describe(&self) -> String {
         match self {
             Step::Hover { id } => format!("hover {id}"),
-            Step::Click { id, button } => format!("click {id} {button}"),
+            Step::Click {
+                id,
+                button,
+                modifier,
+            } => match modifier {
+                Some(NamedKey::Shift) => format!("click {id} {button} shift"),
+                Some(other) => format!("click {id} {button} {other:?}"),
+                None => format!("click {id} {button}"),
+            },
             Step::Key(k) => format!("key {k:?}"),
             Step::Wait { frames } => format!("wait {frames}"),
             Step::AssertState { state } => format!("assert-state {state}"),
@@ -246,10 +263,24 @@ fn parse_step(line_no: usize, line: &str) -> Result<Step, ParseError> {
                     ))
                 }
             };
+            let modifier = match it.next() {
+                None => None,
+                Some("shift") => Some(NamedKey::Shift),
+                Some(other) => {
+                    return Err(err(
+                        line_no,
+                        format!("`click` takes a `shift` modifier after its button, got `{other}`"),
+                    ))
+                }
+            };
             if let Some(extra) = it.next() {
                 return Err(err(line_no, format!("`click` got a stray token `{extra}`")));
             }
-            Step::Click { id, button }
+            Step::Click {
+                id,
+                button,
+                modifier,
+            }
         }
         "key" => {
             let name = one_word("a key name")?;
