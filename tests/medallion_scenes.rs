@@ -5,7 +5,8 @@
 //! incapacitated or cycloned unit) for one tick, paired with its control: the
 //! same scene with the rule's one condition removed.
 //!
-//! The rule: break on the first LONG hold (2s or more left) — unless a
+//! The rule: break on the first LONG hold (2s or more left, a Cyclone
+//! included) — unless a
 //! teammate is going to dispel every long hold, in which case wait for it, at
 //! most `DISPEL_WAIT_GRACE_SECS`.
 
@@ -120,6 +121,7 @@ fn every_hold_breaks_without_anyone_low() {
         AuraType::Fear,
         AuraType::Polymorph,
         AuraType::Incapacitate,
+        AuraType::Cyclone,
     ] {
         let view = held(hold, 6.0).decide_held(WEARER);
         assert!(used(&view), "{hold:?}: {view:?}");
@@ -141,13 +143,31 @@ fn a_root_does_not_count_toward_the_floor() {
 }
 
 #[test]
-fn nothing_is_used_from_inside_a_cyclone() {
+fn a_cyclone_is_broken_and_a_spent_medallion_leaves_it() {
+    // The trinket breaks a Cyclone, as TBC's does...
     let view = held(AuraType::Cyclone, 6.0).decide_held(WEARER);
+    assert!(used(&view), "{view:?}");
+    // ...and with the Medallion spent, nothing else is used from inside one.
+    let mut scene = held(AuraType::Cyclone, 6.0);
+    scene.combatant_mut(WEARER).on_use_items[0].spent = true;
+    let view = scene.decide_held(WEARER);
     assert!(
         view.item_decisions.is_empty() && view.items_used.is_empty(),
         "{view:?}"
     );
+    assert_eq!(view.chose(), None, "{view:?}");
     assert!(!view.acted);
+}
+
+#[test]
+fn a_cyclone_is_not_waited_out_for_a_priest() {
+    // No dispel takes a Cyclone, so a Priest beside the wearer is no reason
+    // to wait...
+    let view = held_beside_a_priest(AuraType::Cyclone, 6.0).decide_held(WEARER);
+    assert!(used(&view), "{view:?}");
+    // ...and it holds the floor like any other hold.
+    let view = held(AuraType::Cyclone, 1.9).decide_held(WEARER);
+    assert!(held_because(&view, "short hold"), "{view:?}");
 }
 
 #[test]
@@ -406,7 +426,7 @@ fn only_the_long_holds_must_be_dispellable() {
 #[test]
 fn a_cycloned_paladin_uses_nothing() {
     // Divine Shield's teammate trigger holds (a Priest at 30%, a long hold),
-    // but nothing is used from inside a Cyclone.
+    // but no class break is used from inside a Cyclone.
     let scene = |hold| {
         Scene::new()
             .unit(WEARER, 1, Paladin)

@@ -902,7 +902,7 @@
             proc: Some((
                 trigger: MeleeHit,
                 chance: 0.15,
-                effect: AttackSpeedIncrease,
+                effect: Buff(AttackSpeedIncrease),
                 magnitude: 0.20,
                 duration: 10.0,
                 internal_cooldown: 45.0,
@@ -918,7 +918,7 @@
             proc: Some((
                 trigger: MeleeHit,
                 chance: 0.10,
-                effect: CritChanceIncrease,
+                effect: Buff(CritChanceIncrease),
                 magnitude: 0.10,
                 duration: 8.0,
                 internal_cooldown: 60.0,
@@ -934,7 +934,7 @@
             proc: Some((
                 trigger: SpellCast,
                 chance: 0.12,
-                effect: SpellPowerIncrease,
+                effect: Buff(SpellPowerIncrease),
                 magnitude: 55.0,
                 duration: 12.0,
                 internal_cooldown: 50.0,
@@ -950,7 +950,7 @@
             proc: Some((
                 trigger: Heal,
                 chance: 0.20,
-                effect: ManaRegenIncrease,
+                effect: Buff(ManaRegenIncrease),
                 magnitude: 12.0,
                 duration: 10.0,
                 internal_cooldown: 45.0,
@@ -3073,14 +3073,20 @@
             proc: Some((
                 trigger: MeleeHit,
                 chance: 0.25,
-                effect: AttackPowerIncrease,
+                effect: Buff(AttackPowerIncrease),
                 magnitude: 100.0,
                 duration: 10.0,
                 internal_cooldown: 50.0,
             )),
         ),
 
-        // Its extra swing (Hand of Justice's mechanism) waits for AS-427.
+        // Hand of Justice's extra swing on a sword: our design (Classic's
+        // Gressil procs no extra attack). 4% (provisional) on a 2.7-speed
+        // one-hander, a little under the trinket's 5% because the sword also
+        // carries a Champion weapon's damage. The swing costs 0.04 x 321.4 =
+        // 12.856; 6 AP (9.0) and 2% crit (6.0) spend most of the rest, and
+        // 0.144 health closes it to the 28.0 the Corrupted Ashbringer's pair
+        // price counts on.
         Gressil: (
             name: "Gressil, Dawn of Ruin",
             item_level: 92,
@@ -3092,9 +3098,14 @@
             attack_damage_min: 39.5,
             attack_damage_max: 73.56,
             weapon_speed: 2.7, // Classic: Gressil, Dawn of Ruin (23054)
-            attack_power: 12.0,
-            crit_chance: 0.03,
-            max_health: 1.0,
+            attack_power: 6.0,
+            crit_chance: 0.02,
+            max_health: 0.144,
+            proc: Some((
+                trigger: MeleeHit,
+                chance: 0.04,
+                effect: ExtraSwing,
+            )),
         ),
 
         Kingsfall: (
@@ -3114,7 +3125,7 @@
             proc: Some((
                 trigger: MeleeHit,
                 chance: 0.10,
-                effect: CritChanceIncrease,
+                effect: Buff(CritChanceIncrease),
                 magnitude: 0.10,
                 duration: 10.0,
                 internal_cooldown: 50.0,
@@ -3138,7 +3149,7 @@
             proc: Some((
                 trigger: Heal,
                 chance: 0.20,
-                effect: SpellPowerIncrease,
+                effect: Buff(SpellPowerIncrease),
                 magnitude: 40.0,
                 duration: 10.0,
                 internal_cooldown: 50.0,
@@ -3162,7 +3173,7 @@
             proc: Some((
                 trigger: SpellCast,
                 chance: 0.15,
-                effect: SpellPowerIncrease,
+                effect: Buff(SpellPowerIncrease),
                 magnitude: 40.0,
                 duration: 10.0,
                 internal_cooldown: 50.0,
@@ -3190,7 +3201,7 @@
             proc: Some((
                 trigger: SpellCast,
                 chance: 0.15,
-                effect: SpellPowerIncrease,
+                effect: Buff(SpellPowerIncrease),
                 magnitude: 60.0,
                 duration: 12.0,
                 internal_cooldown: 48.0,
@@ -3214,7 +3225,7 @@
             proc: Some((
                 trigger: SpellCast,
                 chance: 0.15,
-                effect: CritChanceIncrease,
+                effect: Buff(CritChanceIncrease),
                 magnitude: 0.10,
                 duration: 10.0,
                 internal_cooldown: 50.0,
@@ -3531,6 +3542,31 @@
             slot: Ring,
             max_health: 30.0,
             frost_resistance: 20.0,
+        ),
+
+        // ====================================================================
+        // CHAMPION TIER (2): TRINKETS
+        // ====================================================================
+
+        // Classic's Hand of Justice (11815: +20 attack power, 2% chance on a
+        // melee hit of an extra attack), at the Champion tier's 5%. The extra
+        // swing is Windfury Totem's, made with the main-hand weapon off a hit
+        // from either hand, and draws no tornado. It has no stat weight, so it
+        // carries a declared price — WEIGHT_EXTRA_SWING, 1.5x haste's weight
+        // (provisional), per unit of chance: 0.05 * 321.4 = 16.07 — and the
+        // attack power spends the rest of the 48.3: 21 * 1.5 + 16.07 = 47.57.
+        HandOfJustice: (
+            name: "Hand of Justice",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_talisman_01.jpg",
+            slot: Trinket,
+            attack_power: 21.0,
+            proc: Some((
+                trigger: MeleeHit,
+                chance: 0.05,
+                effect: ExtraSwing,
+            )),
         ),
     }
 )

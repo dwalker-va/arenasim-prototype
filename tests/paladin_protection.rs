@@ -529,3 +529,23 @@ fn retribution_aura_strikes_back_at_melee_attackers() {
         assert!(hit.contains(&reflect), "rank {rank}: {hit}");
     }
 }
+
+/// The tree's prose (`talent_text`): Retribution Aura's first rank names the
+/// option it unlocks, and every node reads.
+#[test]
+fn the_protection_tree_reads() {
+    use arenasim::states::talent_text::rank_lines;
+    let defs = AbilityDefinitions::shipped();
+    let talents = TalentDefinitions::shipped();
+    for (id, talent) in talents.talents_for_class(Paladin) {
+        let lines = rank_lines(talent, defs);
+        eprintln!("{id:?}: {lines:?}");
+        assert_eq!(lines.len(), usize::from(talent.max_rank), "{id:?}");
+        assert!(lines.iter().all(|l| !l.is_empty()), "{id:?}");
+    }
+    let ret = rank_lines(talents.get(TalentId::RetributionAura).unwrap(), defs);
+    assert!(
+        ret[0].contains("Unlocks Retribution Aura as an aura choice"),
+        "{ret:?}"
+    );
+}

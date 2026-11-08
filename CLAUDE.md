@@ -672,6 +672,17 @@ carrying every slot's build.
   `every_numeric_ability_field_is_decided` destructures `AbilityConfig`
   without a rest pattern, so a new numeric field fails to compile until it is
   placed or declared not patchable.
+- **The talent panel** (`src/states/talent_panel.rs`, drawing the kit's
+  `ui::widgets::TalentTrees`) spends a build in View Combatant: a click
+  learns a rank, shift-click takes one back, right-click opens the talent's
+  encyclopedia page. It offers only what `TalentDefinitions::learn` /
+  `unlearn` allow, so a spawn never meets a build it made illegal
+  (`tests/talent_panel.rs`). A `floor` (a Gauntlet run's locked-in ranks)
+  cannot be taken back. Talent prose is ONE generator,
+  `src/states/talent_text.rs`, for the panel's tooltips and the
+  encyclopedia's Talents section. `TalentDefinitions::spec` names the spec
+  the team frames, Results and the Configure Match slot rows show ("Demonology
+  Warlock 0/3/0"); an untalented combatant shows none.
 
 ### Adding a New Item
 
@@ -721,7 +732,7 @@ any ring fits either ring socket, and the same item may not occupy both
    proc: Some((
        trigger: MeleeHit,         // MeleeHit | SpellCast | Heal
        chance: 0.15,              // per qualifying event, in (0.0, 1.0]
-       effect: AttackPowerIncrease,
+       effect: Buff(AttackPowerIncrease),  // or ExtraSwing (see below)
        magnitude: 55.0,           // in the effect aura's own units
        duration: 10.0,
        internal_cooldown: 45.0,   // must be >= duration
@@ -750,6 +761,17 @@ any ring fits either ring socket, and the same item may not occupy both
      at their item-stat weights, and haste (`AttackSpeedIncrease`, the
      Dragonspine Trophy's +20% attack speed) at `WEIGHT_ATTACK_SPEED`, crit's
      weight at TBC's rating exchange rate.
+   - **`effect: ExtraSwing`** (Hand of Justice, Gressil) is the one proc that is not a
+     buff: on a `MeleeHit` from either hand it queues one extra MAIN-hand swing
+     on Windfury Totem's own path (`combat_core::ExtraSwingSource`), rolled
+     where the swing is queued rather than after it lands. It takes no
+     `magnitude`, `duration` or `internal_cooldown` (validated), never draws
+     the totem's `WindfuryTornado`, grants no rage (a TBC deviation, AS-448)
+     and no further extra swing, and logs `X procs <trinket> (extra attack)`.
+     No stat buys it, so it is priced at a DECLARED rate per unit of `chance`,
+     `WEIGHT_EXTRA_SWING`: 1.5x haste's weight, provisional (a 10x-dose sweep
+     the constant cites). Every consumer that lists or draws proc BUFFS asks
+     `ItemConfig::proc_buff`, which excludes it.
    - **Procs are not purgeable.** A proc buff is `DispelType::Physical` — an
      item's effect is not a spell, however magical it looks — so no purge,
      dispel or cleanse removes it.
@@ -781,7 +803,7 @@ any ring fits either ring socket, and the same item may not occupy both
      one that declares none.
    - **One AI rule per effect kind, never per item** (`class_ai/on_use.rs`).
      The CC break is asked only while its wearer is HELD — stunned, feared,
-     polymorphed or incapacitated, through `combat_ai::dispatch_while_held`,
+     polymorphed, incapacitated or cycloned, through `combat_ai::dispatch_while_held`,
      ahead of the class's own break (Divine Shield, Berserker Rage) — and
      fires on the first LONG hold: `CC_BREAK_MIN_HOLD_REMAINING` (2s) or more
      left. A root or slow alone never asks it. It WAITS when a teammate is
@@ -791,11 +813,12 @@ any ring fits either ring socket, and the same item may not occupy both
      reaches range at its base speed within `wait_budget`: the grace left, or
      the hold left above the floor), at most `DISPEL_WAIT_GRACE_SECS` (a GCD
      and half a second), re-asked every tick. It breaks every stun, fear (horror
-     included), polymorph, incapacitate, root and slow (`cc_break_breaks`),
-     never a silence, and grants no immunity. Cyclone is the one line
-     `CC_BREAK_TAKES_CYCLONE` (false, as in TBC: nothing is used from inside
-     one). Traced as an `item_decision` event (`item`, `status`, `reason` —
-     "short hold" or "waiting for <id>'s <dispel>"); `Scene::on_use_item` and
+     included), polymorph, incapacitate, Cyclone, root and slow
+     (`cc_break_breaks`), never a silence, and grants no immunity. It breaks a
+     Cyclone as TBC's PvP trinket does; the class breaks (Divine Shield,
+     Berserker Rage) are not used from inside one. Traced as an
+     `item_decision` event (`item`, `status`, `reason` — "short hold" or
+     "waiting for <id>'s <dispel>"); `Scene::on_use_item` and
      `Scene::decide_held` test it.
    - Its line ("Use: …") is `ItemConfig::effect_description`, shared by the
      encyclopedia page, the tooltip and the equipment picker. Its landing is in
@@ -2127,7 +2150,7 @@ cargo run --release -- --ui-script tests/ui-scripts/view-combatant-tooltips.scri
 Input is injected at BEVY's input events (`CursorMoved` / `MouseButtonInput` /
 `KeyboardInput` / `MouseWheel`) in `PreUpdate` before `InputSystem`, so
 `ButtonInput<KeyCode>` and bevy_egui's own conversion both run exactly as they
-do for a physical device. Steps: `hover`, `click <id> [left|right]`, `key`,
+do for a physical device. Steps: `hover`, `click <id> [left|right] [shift]`, `key`,
 `wait`, `assert-state`, `assert-view`, `assert-note`, `assert-no-note`,
 `await-note <secs> <substring>` (polls on the wall clock for something the
 match produces on its own, e.g. a banter line), `assert-visible` (drawn AND on screen), `assert-absent` (not drawn at all —
@@ -2184,7 +2207,11 @@ old standalone Armory. It is a navigation FRAMEWORK plus per-section content:
   kit order — do NOT add a second sort), `items.rs`, and `auras.rs` (Buffs &
   Debuffs: every aura an ability applies, plus the engine-originated ones —
   totem buffs, interrupt lockouts, one entry per proc trinket, and the rest —
-  each with a removal badge answered by the engine's own dispel predicates).
+  each with a removal badge answered by the engine's own dispel predicates),
+  and `talents.rs` (every class's trees from `talents.ron`, drawn read-only,
+  and a page per talent). A class page shows its BASE kit
+  (`base_abilities_for_class`), its talent abilities under their own heading,
+  and its trees.
 - **Ability and aura PROSE is `src/states/ability_text.rs`** — one generator, shared
   with View Combatant, so an ability's description reads the same wherever the
   player meets it. Totem text wins over a hand-written `abilities.ron`

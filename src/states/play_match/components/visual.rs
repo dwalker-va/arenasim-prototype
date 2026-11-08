@@ -1522,7 +1522,8 @@ pub enum AuraApplyOwner {
     /// chill (`slow_ring.rs`). The bind ring and scuff draw the STATE while the
     /// victim moves; the apply moment is the hit a slow rides on (the bolt or
     /// arrow impact, the swing into Frost Armor, the Frost Trap zone's decal),
-    /// plus Crippling Poison's proc flash, which has no hit of its own. A band
+    /// plus Crippling Poison's landing, which has no hit of its own and plays
+    /// the weapon poison cloud (`poison_landing.rs`). A band
     /// here would double every one of those impacts.
     SlowRing,
     /// A named aura whose LANDING has its own one-shot: Rejuvenation's ribbon
@@ -2376,13 +2377,16 @@ impl InstantAbilityFired {
             // deliberately absent — the Shaman has no weapon sockets and its
             // answer is a victim-side effect, not an actor stroke.
             | Pummel | Kick
+            // Instant and caster-centred, applied inline in the Warlock AI:
+            // Life Tap's landing plays on the Warlock's own chest.
+            | LifeTap
         )
     }
 
     /// Whether this ability's gesture is anchored on the caster rather than a
     /// victim — the `target: None` cases.
     pub fn is_caster_centred(ability: AbilityType) -> bool {
-        matches!(ability, AbilityType::FrostNova)
+        matches!(ability, AbilityType::FrostNova | AbilityType::LifeTap)
     }
 }
 
@@ -2624,6 +2628,40 @@ pub enum ParticleFacing {
     /// its own start angle, both in milliradians (an M2 emitter's `spin`):
     /// Divine Shield's star glints.
     Spin { mrad_per_sec: i16, start_mrad: i16 },
+}
+
+/// Drag on a [`ClientParticle`]: its velocity decays by `exp(-per_sec × dt)`
+/// each frame, so the particle bursts out and stalls (an M2 emitter's `drag`).
+/// Read by `animate_client_particles`; a particle without it keeps its speed.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct ParticleDrag {
+    pub per_sec: f32,
+}
+
+/// Life Tap's landing (`lifetap.m2`, kit 1167) on the Warlock's own chest
+/// (`rendering/effects/life_tap.rs`): a blue glow, about a body tall, that
+/// swells and throbs, with the green puff, the converging red-to-blue motes
+/// and the cyan twinkles emitted around it. Spawned by the instant-ability
+/// router off the Warlock's `InstantAbilityFired`; graphical only.
+///
+/// The glow's two quads are its [`LifeTapGlowQuad`] children. It follows the
+/// Warlock's chest for its whole life; its particles are world-space and
+/// finish their own lives after it retires.
+#[derive(Component)]
+pub struct LifeTapGlow {
+    /// The Warlock who tapped.
+    pub caster: Entity,
+    pub age: f32,
+    /// Particles owed per emitter layer, carried between frames.
+    pub carry: [f32; 4],
+    pub emitted: u32,
+}
+
+/// One of the two camera-facing glow quads of a [`LifeTapGlow`]; `size` is its
+/// client `(width, height)` in yards before the scale pulse.
+#[derive(Component)]
+pub struct LifeTapGlowQuad {
+    pub size: Vec2,
 }
 
 /// One particle of a transcribed client emitter
@@ -3134,9 +3172,31 @@ pub struct SlowTrailEmitter {
     /// Seconds since the last bind ring. Keeps counting while the unit stands
     /// still, so the first step after a stop pulses at once.
     pub since_pulse: f32,
-    /// Whether a Crippling Poison slow was on the unit last frame — the edge
-    /// its proc flash fires on.
-    pub crippled: bool,
+}
+
+// ============================================================================
+// Weapon poison landing (`rendering/effects/poison_landing.rs`)
+// ============================================================================
+
+/// One victim's weapon-poison landing: `poison_impact_chest.m2` (kit 3031) on
+/// its chest, the cloud every Rogue poison lands with.
+///
+/// A rig entity of its own, never a component on the victim, and AT MOST ONE
+/// PER VICTIM: a new application RESTARTS this rig's timeline (`age` back to
+/// zero) instead of spawning a second, so the particles already alive finish
+/// their lives and the cloud never thickens. Its particles are its children and
+/// ride the victim's chest. Graphical-only: spawned by
+/// `detect_poison_landings`, never read by the sim.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct PoisonCloud {
+    /// The bearer. The cloud TRACKS it.
+    pub victim: Entity,
+    /// Seconds since the latest application: the emitters' shared timeline.
+    pub age: f32,
+    /// Fractional particles owed, per emitter.
+    pub carry: [f32; 3],
+    /// Particles emitted over the rig's whole life — the jitter seed.
+    pub emitted: u32,
 }
 
 /// One pulse of the bind ring: a flat annulus at the victim's feet that grows

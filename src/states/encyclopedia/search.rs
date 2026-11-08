@@ -13,6 +13,7 @@ use bevy_egui::egui;
 
 use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::equipment::ItemDefinitions;
+use crate::states::play_match::talents::TalentDefinitions;
 
 use super::{EncyclopediaData, Section, Topic};
 use crate::ui::theme::{color, space, text};
@@ -51,7 +52,11 @@ impl SearchEntry {
 /// Sections contribute in tab order, and each section's entries are sorted by
 /// name, so results are stable across runs no matter how the underlying maps
 /// iterate.
-pub fn build_registry(items: &ItemDefinitions, abilities: &AbilityDefinitions) -> Vec<SearchEntry> {
+pub fn build_registry(
+    items: &ItemDefinitions,
+    abilities: &AbilityDefinitions,
+    talents: &TalentDefinitions,
+) -> Vec<SearchEntry> {
     let mut entries = Vec::new();
     // Every section contributes here; each is one call that reads its own
     // data source.
@@ -59,6 +64,7 @@ pub fn build_registry(items: &ItemDefinitions, abilities: &AbilityDefinitions) -
     super::abilities::search_entries(abilities, &mut entries);
     super::items::search_entries(items, &mut entries);
     super::auras::search_entries(abilities, items, &mut entries);
+    super::talents::search_entries(talents, &mut entries);
     entries.sort_by(|a, b| {
         a.topic
             .section()
@@ -165,7 +171,11 @@ mod tests {
     #[test]
     fn every_entity_is_searchable_without_a_hand_authored_entry() {
         let (items, abilities) = fixtures();
-        let registry = build_registry(&items, &abilities);
+        let registry = build_registry(
+            &items,
+            &abilities,
+            crate::states::play_match::talents::TalentDefinitions::shipped(),
+        );
         let auras = super::super::auras::catalog(&abilities, &items).len();
         assert_eq!(
             registry.len(),
@@ -173,14 +183,25 @@ mod tests {
                 + abilities.ability_types().count()
                 + auras
                 + items.item_count()
+                + crate::states::play_match::talents::TalentDefinitions::shipped()
+                    .iter()
+                    .count()
         );
     }
 
     #[test]
     fn registry_order_is_deterministic() {
         let (items, abilities) = fixtures();
-        let a = build_registry(&items, &abilities);
-        let b = build_registry(&items, &abilities);
+        let a = build_registry(
+            &items,
+            &abilities,
+            crate::states::play_match::talents::TalentDefinitions::shipped(),
+        );
+        let b = build_registry(
+            &items,
+            &abilities,
+            crate::states::play_match::talents::TalentDefinitions::shipped(),
+        );
         let names_a: Vec<&str> = a.iter().map(|e| e.name.as_str()).collect();
         let names_b: Vec<&str> = b.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names_a, names_b);
@@ -198,7 +219,11 @@ mod tests {
     #[test]
     fn matching_is_case_insensitive_substring() {
         let (items, abilities) = fixtures();
-        let registry = build_registry(&items, &abilities);
+        let registry = build_registry(
+            &items,
+            &abilities,
+            crate::states::play_match::talents::TalentDefinitions::shipped(),
+        );
         let hits = registry
             .iter()
             .filter(|e| rank(e, "wand").is_some())
@@ -214,7 +239,11 @@ mod tests {
     #[test]
     fn named_auras_are_reachable_by_search() {
         let (items, abilities) = fixtures();
-        let registry = build_registry(&items, &abilities);
+        let registry = build_registry(
+            &items,
+            &abilities,
+            crate::states::play_match::talents::TalentDefinitions::shipped(),
+        );
         assert!(
             registry
                 .iter()
@@ -228,7 +257,11 @@ mod tests {
     #[test]
     fn a_query_can_hit_several_sections_at_once() {
         let (items, abilities) = fixtures();
-        let registry = build_registry(&items, &abilities);
+        let registry = build_registry(
+            &items,
+            &abilities,
+            crate::states::play_match::talents::TalentDefinitions::shipped(),
+        );
         let sections: Vec<Section> = registry
             .iter()
             .filter(|e| rank(e, "sha").is_some())
