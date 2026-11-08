@@ -66,6 +66,7 @@ use super::encyclopedia::{widget, EncyclopediaData, EncyclopediaState, Topic};
 use super::match_config::CharacterClass;
 use super::play_match::ability_config::AbilityDefinitions;
 use super::play_match::equipment::ItemDefinitions;
+use super::play_match::talents::TalentDefinitions;
 use super::play_match::AbilityType;
 use super::view_combatant_ui::{AbilityIcons, ItemIcons};
 use super::{
@@ -191,6 +192,7 @@ pub fn results_ui(
     class_icons: Res<ClassIcons>,
     item_definitions: Res<ItemDefinitions>,
     ability_definitions: Res<AbilityDefinitions>,
+    talent_definitions: Res<TalentDefinitions>,
     item_icons: Option<Res<ItemIcons>>,
     ability_icons: Option<Res<AbilityIcons>>,
     mut encyclopedia: ResMut<EncyclopediaState>,
@@ -220,6 +222,7 @@ pub fn results_ui(
         item_icons: item_icons.as_deref(),
         class_icons: Some(&class_icons),
         ability_icons: ability_icons.as_deref(),
+        talents: &talent_definitions,
     };
 
     let action = draw_results_screen(ctx, results.as_deref(), &combat_log, &data, screen_nav);
@@ -536,6 +539,20 @@ fn combatant_block(
             );
         });
     });
+
+    // The spec its build names, under the row: the shorthand reads beside
+    // it, and an untalented combatant shows nothing here.
+    if let Some(spec) = links.data.talents.spec(stats.class, &stats.build) {
+        crate::ui::driver::note(
+            ui,
+            format_args!("results:spec t{team}s{} {}", stats.slot, spec.line()),
+        );
+        ui.label(
+            egui::RichText::new(spec.line())
+                .size(text::SMALL)
+                .color(dim(color::TEXT_MUTED, dimf)),
+        );
+    }
 
     // Relative damage mini-bar + survival tag.
     let frac = (stats.damage_dealt / max_damage).clamp(0.0, 1.0);
@@ -916,6 +933,7 @@ mod tests {
             item_icons: None,
             class_icons: None,
             ability_icons: None,
+            talents: crate::states::play_match::talents::TalentDefinitions::shipped(),
         };
         f(&Links::new(&data));
     }

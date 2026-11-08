@@ -20,6 +20,8 @@ pub mod match_config;
 pub mod options_ui;
 pub mod play_match;
 pub mod results_ui;
+pub mod talent_panel;
+pub mod talent_text;
 pub mod view_combatant_ui;
 
 pub use match_config::MatchConfig;
@@ -992,6 +994,20 @@ impl Plugin for StatesPlugin {
         .add_systems(
             Update,
             play_match::update_shift_puffs
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Life Tap's landing (kit 1167, `lifetap.m2`) on the Warlock's chest —
+        // graphical only. Spawned by `consume_instant_ability_signals`; its
+        // particles are client particles, aged and turned by
+        // `animate_client_particles` / `billboard_hunter_shots`.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_life_tap_glow_visuals,
+                play_match::update_life_tap_glows,
+            )
+                .chain()
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )

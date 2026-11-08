@@ -28,6 +28,7 @@ pub mod modal;
 pub mod panel;
 pub mod stat_rows;
 pub mod tabs;
+pub mod talent_tree;
 pub mod tier_frame;
 pub mod tooltip;
 
@@ -43,6 +44,7 @@ pub use modal::{Modal, ModalResponse};
 pub use panel::{divider, panel, panel_header, section_label};
 pub use stat_rows::{stat_row, stat_rows};
 pub use tabs::{chip, tabs, Chip, Tab};
+pub use talent_tree::{TalentNode, TalentNodeResponse, TalentTreeColumn, TalentTrees, TreeMode};
 pub use tier_frame::{tier_badge, tier_frame, tier_icon};
 pub use tooltip::{hint_line, tooltip_frame, Tooltip};
 

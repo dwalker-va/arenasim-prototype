@@ -34,6 +34,7 @@ use super::{
     GameState,
 };
 use crate::states::match_config::CharacterClass;
+use crate::states::play_match::talents::TalentDefinitions;
 use crate::ui::driver as ui_driver;
 use crate::ui::theme::{class_color, color, data, radius, size, space, stroke, text};
 use crate::ui::widgets::panel::margin_xy;
@@ -189,6 +190,7 @@ pub fn configure_match_ui(
     class_icons: Res<ClassIcons>,
     map_geometry: Res<MapGeometryConfig>,
     map_preview: Option<Res<MapPreview>>,
+    talents: Res<TalentDefinitions>,
 ) {
     // Initialize picker state if it doesn't exist
     if picker_state.is_none() {
@@ -239,6 +241,7 @@ pub fn configure_match_ui(
         &class_icons,
         &map_geometry,
         preview_texture,
+        &talents,
         screen_nav,
     ) {
         Some(ConfigureMatchAction::Exit) => {
@@ -298,6 +301,7 @@ pub fn draw_configure_match(
     class_icons: &ClassIcons,
     map_geometry: &MapGeometryConfig,
     preview_texture: Option<egui::TextureId>,
+    talents: &TalentDefinitions,
     nav: Nav,
 ) -> Option<ConfigureMatchAction> {
     let mut action: Option<ConfigureMatchAction> = None;
@@ -346,7 +350,7 @@ pub fn draw_configure_match(
                 ui.spacing_mut().item_spacing.x = space::MD;
                 ui.columns(3, |columns| {
                     if let Some(a) =
-                        render_team_panel(&mut columns[0], config, 1, picker, class_icons)
+                        render_team_panel(&mut columns[0], config, 1, picker, class_icons, talents)
                     {
                         action = Some(a);
                     }
@@ -355,7 +359,7 @@ pub fn draw_configure_match(
                         render_map_panel(ui, config, map_geometry, preview_texture);
                     });
                     if let Some(a) =
-                        render_team_panel(&mut columns[2], config, 2, picker, class_icons)
+                        render_team_panel(&mut columns[2], config, 2, picker, class_icons, talents)
                     {
                         action = Some(a);
                     }
@@ -474,6 +478,7 @@ fn render_team_panel(
     team: u8,
     picker: &mut CharacterPickerState,
     class_icons: &ClassIcons,
+    talents: &TalentDefinitions,
 ) -> Option<ConfigureMatchAction> {
     let tint = team_color(team);
     panel(Some(tint))
@@ -523,9 +528,24 @@ fn render_team_panel(
             for slot in 0..3 {
                 let character = slot_class(config, team, slot);
                 let is_active = slot < team_size;
-                if let Some(a) =
-                    render_character_slot(ui, team, slot, character, is_active, picker, class_icons)
-                {
+                // A talented slot reads as its spec ("Demonology Warlock
+                // 0/3/0") where an untalented one reads its class's line.
+                let spec = character.and_then(|class| {
+                    config
+                        .build(team, slot)
+                        .and_then(|build| talents.spec(class, build))
+                        .map(|spec| spec.line())
+                });
+                if let Some(a) = render_character_slot(
+                    ui,
+                    team,
+                    slot,
+                    character,
+                    spec.as_deref(),
+                    is_active,
+                    picker,
+                    class_icons,
+                ) {
                     action = Some(a);
                 }
             }
@@ -594,11 +614,13 @@ fn render_kill_target(ui: &mut egui::Ui, config: &mut MatchConfig, team: u8) {
 /// - **Active + empty**: an invitation to add a character; clicking opens the
 ///   picker.
 /// - **Inactive**: a disabled row, past the team's size.
+#[allow(clippy::too_many_arguments)]
 fn render_character_slot(
     ui: &mut egui::Ui,
     team: u8,
     slot: usize,
     character: Option<CharacterClass>,
+    spec: Option<&str>,
     is_active: bool,
     picker: &mut CharacterPickerState,
     class_icons: &ClassIcons,
@@ -619,14 +641,16 @@ fn render_character_slot(
             let mut action = None;
             ui.horizontal(|ui| {
                 let gap = ui.spacing().item_spacing.x;
+                let subtitle = spec.unwrap_or(class.description());
                 let row = ListRow::new(class.name())
                     .name_color(class_color(class))
-                    .subtitle(class.description())
+                    .subtitle(subtitle)
                     .icon(class_list_icon(class_icons, class))
                     .meta("View \u{203a}")
                     .width(ui.available_width() - CHANGE_WIDTH - gap);
                 let response = list_row(ui, row);
                 mark_slot(ui, &response);
+                ui_driver::note(ui, format_args!("slot:t{team}s{slot} subtitle={subtitle}"));
                 if response.clicked() {
                     action = Some(ConfigureMatchAction::ViewCombatant { class, team, slot });
                 }
