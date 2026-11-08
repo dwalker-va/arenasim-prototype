@@ -29,7 +29,9 @@
 //!   (`process_dot_ticks`) or of its channel (`process_channeling`);
 //! - [`TalentTrigger::HealCrit`] — a cast heal that crit (`process_casting`);
 //! - [`TalentTrigger::CritTaken`] — a melee or ranged crit landing ON the unit:
-//!   an auto-attack or a queued instant attack;
+//!   an auto-attack, a queued instant attack, or a shot's projectile arriving
+//!   (`process_projectile_hits`; an attack, `AbilityConfig::is_attack`, never
+//!   a spell's);
 //! - [`TalentTrigger::StealthBreak`] — the unit left stealth, by any means,
 //!   noticed by the resolver itself from the unit's `stealthed` flag;
 //! - [`TalentTrigger::AbilityUsed`] — the unit's decision used an ability

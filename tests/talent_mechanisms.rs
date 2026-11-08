@@ -187,6 +187,11 @@ fn a_crit_taken_proc_heals_back_its_share() {
 /// struck by `attacker` with every blow a crit. The Priest is held silenced,
 /// so no shield or heal of its own gets in the way, with health to spare.
 fn heal_back_run(attacker: &str, stage: Stage) -> String {
+    heal_back_run_at(attacker, 1.0, stage)
+}
+
+/// [`heal_back_run`] with the attacker's own crit chance set to `crit`.
+fn heal_back_run_at(attacker: &str, crit: f32, stage: Stage) -> String {
     let mut recovery = certain(TalentTrigger::CritTaken, "");
     recovery.effect = ProcEffect::HealBack {
         fraction: 1.0,
@@ -205,7 +210,7 @@ fn heal_back_run(attacker: &str, stage: Stage) -> String {
     play(
         config(&[attacker], &["Priest"], 25.0),
         with_proc(stage, T2, recovery)
-            .combatant(T1, |c| c.crit_chance = 1.0)
+            .combatant(T1, move |c| c.crit_chance = crit)
             .combatant(T2, |c| {
                 c.max_health = 10_000.0;
                 c.current_health = 5_000.0;
@@ -1167,6 +1172,79 @@ fn a_crit_from_an_instant_attack_is_a_crit_taken() {
         played.log
     );
     assert!(!procs(&played.log, "Struck").is_empty(), "{}", played.log);
+}
+
+/// A shot's crit is a ranged crit, so its target's `CritTaken`, and the
+/// heal-back reads what the crit LANDED: a Hunter whose only crit is one
+/// Arcane Shot (a sure-crit modifier on it, no crit chance of its own or its
+/// Spider's, so no Auto Shot or pet crits) sets off the Priest's Blessed
+/// Recovery, which heals back exactly the shot's landed damage (Aimed Shot
+/// held, so its healing cut does not shrink the heal). Arcane Shot is an Arcane attack, so the
+/// site keys on the attack, not the school. The control: a Mage whose only
+/// crit is one Frostbolt — a spell's crit, which is no `CritTaken`.
+#[test]
+fn a_shots_crit_is_a_crit_taken_and_a_spells_is_not() {
+    let shot = heal_back_run_at(
+        "Hunter",
+        0.0,
+        Stage::new()
+            .aura(T1, sure_crit_on(AbilityType::ArcaneShot))
+            .cooldown(T1, AbilityType::AimedShot, 1000.0)
+            .combatant(Unit::pet_of(1, 0), |c| c.crit_chance = 0.0),
+    );
+    let crits = amounts(&shot, "Hunter #1's Arcane Shot CRITS", " for ");
+    assert_eq!(crits.len(), 1, "{shot}");
+    assert_eq!(procs(&shot, "Blessed Recovery").len(), 1, "{shot}");
+    assert_eq!(amounts(&shot, RECOVERED, " for "), crits, "{shot}");
+
+    let spell = heal_back_run_at(
+        "Mage",
+        0.0,
+        Stage::new().aura(T1, sure_crit_on(AbilityType::Frostbolt)),
+    );
+    assert_eq!(
+        lines(&spell, "Mage #1's Frostbolt CRITS").len(),
+        1,
+        "{spell}"
+    );
+    assert!(procs(&spell, "Blessed Recovery").is_empty(), "{spell}");
+}
+
+/// A projectile's `SpellHit` carries the damage the shot LANDED: a Hunter
+/// whose Arcane Shot heals it back in full (a one-tick heal-back narrowed to
+/// Arcane Shot), shooting a Priest that takes double damage, heals exactly
+/// each shot's landed damage. The Hunter starts hurt, so every heal shows.
+/// (Its crit-taken twin is `a_shots_crit_is_a_crit_taken_and_a_spells_is_not`.)
+#[test]
+fn a_projectiles_spell_hit_heal_back_reads_the_damage_it_landed() {
+    let mut drink = certain(TalentTrigger::SpellHit, "");
+    drink.abilities = vec![AbilityType::ArcaneShot];
+    drink.effect = ProcEffect::HealBack {
+        fraction: 1.0,
+        duration: 0.1,
+        tick_interval: 0.1,
+        name: Some("Drink".to_string()),
+    };
+    let log = heal_back_run_at(
+        "Hunter",
+        0.0,
+        with_proc(Stage::new(), T1, drink)
+            .cooldown(T1, AbilityType::AimedShot, 1000.0)
+            .combatant(T1, |c| {
+                c.max_health = 10_000.0;
+                c.current_health = 5_000.0;
+            }),
+    );
+    let shots = amounts(&log, "Hunter #1's Arcane Shot hits", " for ");
+    let healed = amounts(
+        &log,
+        "Hunter #1's Drink heals Team 1 Hunter #1 for",
+        " for ",
+    );
+    // The match can end between the last shot and its heal.
+    assert!(healed.len() >= 2, "{log}");
+    assert!(shots.len() - healed.len() <= 1, "{log}");
+    assert_eq!(healed, shots[..healed.len()], "{log}");
 }
 
 /// The Warlock's Shadow damage, ability by ability, with every other Shadow

@@ -362,7 +362,7 @@ pub fn talent_proc_description(
         TalentTrigger::SpellHit => of("a hit"),
         TalentTrigger::DotTick => of("each damage tick"),
         TalentTrigger::HealCrit => of("a critical heal"),
-        TalentTrigger::CritTaken => "being struck by a critical hit".to_string(),
+        TalentTrigger::CritTaken => "being struck by a melee or ranged critical hit".to_string(),
         TalentTrigger::StealthBreak => "leaving stealth".to_string(),
         TalentTrigger::AbilityUsed if proc.abilities.is_empty() => "using any ability".to_string(),
         TalentTrigger::AbilityUsed => format!("using {}", names(&proc.abilities)),

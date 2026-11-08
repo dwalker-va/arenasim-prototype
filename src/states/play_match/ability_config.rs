@@ -508,6 +508,15 @@ impl AbilityConfig {
         self.prevention == Prevention::Silence && self.mana_cost > 0.0
     }
 
+    /// Whether this ability is a physical ATTACK — a melee strike or a ranged
+    /// shot — rather than a spell: its [`prevention`](Self::prevention) is
+    /// Pacify, TBC's own mark of one. So its crit is a melee or ranged crit
+    /// (a `CritTaken` for its target, `talent_procs.rs`) whatever its school:
+    /// Arcane Shot is an Arcane attack, Frostbolt a Frost spell.
+    pub fn is_attack(&self) -> bool {
+        self.prevention == Prevention::Pacify
+    }
+
     /// Returns true if this is a channeled ability
     pub fn is_channel(&self) -> bool {
         self.channel_duration.is_some()

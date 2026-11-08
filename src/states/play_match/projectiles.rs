@@ -360,6 +360,18 @@ pub fn process_projectile_hits(
                 if is_first_death {
                     target.is_dead = true;
                 }
+                // A shot's crit is a ranged crit: its target's `CritTaken`. A
+                // spell's (Frostbolt, Shadow Bolt) is not.
+                if is_crit && def.is_attack() {
+                    talent_procs::push_for(
+                        &mut commands,
+                        &target.talent_procs,
+                        ProcEvent::new(target_entity, TalentTrigger::CritTaken)
+                            .crit(true)
+                            .amount(actual_damage)
+                            .other(caster_entity),
+                    );
+                }
                 // What this hit's leeches owe (Death Coil's own, a Vampiric
                 // Embrace on the target), read while its auras are to hand.
                 let own = def
