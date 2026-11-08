@@ -310,3 +310,62 @@ fn the_shield_lands_with_or_without_an_aura_list() {
         assert_eq!(auras.auras.len(), if listed { 2 } else { 1 });
     }
 }
+
+/// A bearer with no aura list, given one by another system earlier in the
+/// same frame (before the commands are applied): the shield joins that list
+/// rather than replacing it. Control: the other system's aura alone, with no
+/// trigger, is what is left when the bearer is above the line.
+#[test]
+fn a_shield_landing_beside_another_new_aura_list_keeps_both() {
+    fn give_a_list(mut commands: Commands, bearers: Query<Entity, With<Combatant>>) {
+        for e in bearers.iter() {
+            commands.entity(e).insert(ActiveAuras {
+                auras: vec![aura(AuraType::DamageTakenReduction, 0.1, None)],
+            });
+        }
+    }
+    for below in [true, false] {
+        let mut world = World::new();
+        world.insert_resource(CombatLog::default());
+        world.insert_resource(ArenaDampening::default());
+        let e = world
+            .spawn(wearing_aegis(rogue(if below { 100.0 } else { 300.0 })))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems((give_a_list, fire_triggered_absorbs).chain());
+        schedule.run(&mut world);
+        let auras = world.get::<ActiveAuras>(e).expect("an aura list");
+        let kinds: Vec<AuraType> = auras.auras.iter().map(|a| a.effect_type).collect();
+        if below {
+            assert_eq!(
+                kinds,
+                vec![AuraType::DamageTakenReduction, AuraType::Absorb]
+            );
+        } else {
+            assert_eq!(kinds, vec![AuraType::DamageTakenReduction]);
+        }
+    }
+}
+
+/// At full dampening the trigger still fires, and is spent, but lands no
+/// empty shield for the visual to draw. Control: at half dampening it lands a
+/// half shield.
+#[test]
+fn a_fully_dampened_shield_is_spent_but_lands_nothing() {
+    for (reduction, want) in [(1.0, None), (0.5, Some(40.0))] {
+        let mut world = World::new();
+        world.insert_resource(CombatLog::default());
+        world.insert_resource(ArenaDampening {
+            reduction,
+            ..Default::default()
+        });
+        let e = world
+            .spawn((wearing_aegis(rogue(100.0)), ActiveAuras::default()))
+            .id();
+        world.run_system_once(fire_triggered_absorbs).expect("ran");
+        assert!(world.get::<Combatant>(e).unwrap().triggered_absorbs[0].spent);
+        let auras = world.get::<ActiveAuras>(e).unwrap();
+        assert_eq!(the_shield(auras), want, "reduction {reduction}");
+        assert_eq!(auras.auras.len(), usize::from(want.is_some()));
+    }
+}
