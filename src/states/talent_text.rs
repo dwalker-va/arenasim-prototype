@@ -414,7 +414,7 @@ mod tests {
                 "Unlocks Bird as a pet choice",
                 "Unlocks Commanding Shout as a shout choice",
                 "Unlocks Molten Armor as an armor choice",
-                "Unlocks Concentration Aura as an aura choice",
+                "Unlocks Retribution Aura as an aura choice",
             ]
         );
         let slot = TalentEffect::AddChoiceSlot(ChoiceSlot::OffHandPoison);
