@@ -52,46 +52,42 @@ fn item_picker_trinket_socket() {
     harness.snapshot("item_picker_trinket_socket");
 }
 
-/// The claim the snapshot pictures, without a GPU: every proc trinket's row,
-/// and every on-use item's, carries exactly its proc or on-use sentence as its
-/// second line — the tooltip's and the encyclopedia's, not a third copy — and
-/// every other item's row is a single line.
+/// The claim the snapshot pictures, without a GPU: every item carrying an
+/// effect — a proc, an on-use or a triggered absorb — has exactly that
+/// effect's sentence as its row's second line (the tooltip's and the
+/// encyclopedia's, not a third copy), and every other item's row is a single
+/// line.
 #[test]
 fn an_effect_row_carries_the_shared_sentence_and_nothing_else_grows() {
     use arenasim::states::play_match::on_use_items::on_use_description;
     use arenasim::states::play_match::proc_trinkets::proc_description;
+    use arenasim::states::play_match::triggered_absorbs::triggered_absorb_description;
     use arenasim::states::view_combatant_ui::item_picker_row_text;
 
     let items = load_item_definitions().expect("items.ron must load");
-    let (mut proc_rows, mut on_use_rows) = (0, 0);
+    let (mut proc_rows, mut on_use_rows, mut absorb_rows) = (0, 0, 0);
     for (_, item) in items.iter() {
         let text = item_picker_row_text(item);
         assert!(!text.name.contains('\n'), "{}: {:?}", item.name, text.name);
-        match (&item.proc, &item.on_use) {
-            (Some(proc), None) => {
+        let expected = match (&item.proc, &item.on_use, &item.triggered_absorb) {
+            (Some(proc), None, None) => {
                 proc_rows += 1;
-                assert_eq!(
-                    text.effect_line.as_deref(),
-                    Some(proc_description(proc).as_str()),
-                    "{}",
-                    item.name
-                );
+                Some(proc_description(proc))
             }
-            (None, Some(on_use)) => {
+            (None, Some(on_use), None) => {
                 on_use_rows += 1;
-                assert_eq!(
-                    text.effect_line.as_deref(),
-                    Some(on_use_description(on_use).as_str()),
-                    "{}",
-                    item.name
-                );
+                Some(on_use_description(on_use))
             }
-            (Some(_), Some(_)) => panic!("{}: no shipped item carries both", item.name),
-            (None, None) => {
-                assert_eq!(text.effect_line, None, "{} grew a second line", item.name)
+            (None, None, Some(absorb)) => {
+                absorb_rows += 1;
+                Some(triggered_absorb_description(absorb))
             }
-        }
+            (None, None, None) => None,
+            _ => panic!("{}: no shipped item carries two effects", item.name),
+        };
+        assert_eq!(text.effect_line, expected, "{}", item.name);
     }
     assert!(proc_rows > 0, "no proc trinket ships — vacuous");
     assert!(on_use_rows > 0, "no on-use item ships — vacuous");
+    assert!(absorb_rows > 0, "no triggered absorb ships — vacuous");
 }

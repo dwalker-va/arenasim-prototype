@@ -17,17 +17,22 @@ use bevy::render::render_phase::ViewRangefinder3d;
 use bevy::time::TimeUpdateStrategy;
 use bevy::transform::TransformSystem;
 
+use arenasim::combat::log::CombatLog;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
+use arenasim::states::play_match::components::ArenaDampening;
 use arenasim::states::play_match::components::{
     ActiveAuras, Aura, AuraType, CastEnding, CastEndingKind, Combatant, HealCastHand, HealCastKind,
     InstantAbilityFired, LandedCast, ShieldCard, ShieldKind, ShieldLayer, ShieldPhase,
     ShieldVisual, VisualBody,
 };
+use arenasim::states::play_match::equipment::{load_item_definitions, ItemId, ItemSlot, Loadout};
+use arenasim::states::play_match::triggered_absorbs::fire_triggered_absorbs;
 use arenasim::states::play_match::{
-    place_shield_cards, pws_card_extent, spawn_instant_cast_hands, update_shield_visuals,
-    PWS_CLIENT_TO_RIG, PWS_RIM_GAIN, PWS_RIM_QUAD, PWS_STREAK_QUAD, PW_SHIELD_AURA_NAME,
+    place_shield_cards, pws_card_extent, shield_tuning, spawn_instant_cast_hands,
+    update_shield_visuals, AEGIS_AURA_NAME, AEGIS_OUTLINE_RGB, PWS_CLIENT_TO_RIG, PWS_RIM_GAIN,
+    PWS_RIM_QUAD, PWS_STREAK_QUAD, PW_SHIELD_AURA_NAME,
 };
 use arenasim::CharacterClass;
 
@@ -833,4 +838,146 @@ fn a_dying_bearer_lets_its_shield_go() {
         .auras
         .iter()
         .any(|a| a.ability_name == PW_SHIELD_AURA_NAME));
+}
+
+// --- Aegis of the Last Stand (AS-429): PW:S's rig, a silver outline ----------
+
+/// Aegis's shield is keyed on its aura's name, which is its ITEM's name in
+/// `items.ron` (`apply_equipment` names the triggered absorb after the item):
+/// a rename there must fail here, not leave the shield undrawn.
+#[test]
+fn the_aegis_aura_name_is_the_item_name() {
+    let items = load_item_definitions().expect("items.ron loads");
+    assert_eq!(
+        items.get_unchecked(&ItemId::AegisOfTheLastStand).name,
+        AEGIS_AURA_NAME
+    );
+}
+
+fn rig_of_kind(h: &mut Harness, kind: ShieldKind) -> Entity {
+    let mut q = h.app.world_mut().query::<(Entity, &ShieldVisual)>();
+    q.iter(h.app.world())
+        .find(|(_, r)| r.kind == kind)
+        .map(|(e, _)| e)
+        .expect("a rig")
+}
+
+/// A rig's cards as (layer, world scale, weight), sorted by layer.
+fn cards_of(h: &mut Harness, rig: Entity) -> Vec<(String, Vec3, f32)> {
+    let world = h.app.world();
+    let materials = world.resource::<Assets<StandardMaterial>>();
+    let mut cards: Vec<(String, Vec3, f32)> = world
+        .get::<Children>(rig)
+        .expect("cards")
+        .iter()
+        .filter_map(|k| {
+            let layer = world.get::<ShieldCard>(k)?.layer;
+            let g = world.get::<GlobalTransform>(k)?.compute_transform();
+            let m = materials.get(&world.get::<MeshMaterial3d<StandardMaterial>>(k)?.0)?;
+            Some((format!("{layer:?}"), g.scale, m.base_color.alpha()))
+        })
+        .collect();
+    cards.sort_by(|a, b| a.0.cmp(&b.0));
+    cards
+}
+
+/// The outline card's linear colour.
+fn outline_colour(h: &mut Harness, rig: Entity) -> LinearRgba {
+    let world = h.app.world();
+    let materials = world.resource::<Assets<StandardMaterial>>();
+    let kids = world.get::<Children>(rig).expect("cards");
+    kids.iter()
+        .find(|k| world.get::<ShieldCard>(*k).map(|c| c.layer) == Some(ShieldLayer::Outline))
+        .and_then(|k| world.get::<MeshMaterial3d<StandardMaterial>>(k))
+        .and_then(|m| materials.get(&m.0))
+        .expect("an outline card")
+        .base_color
+        .to_linear()
+}
+
+/// One bearer holding a Priest's shield and Aegis's wears both rigs: Aegis
+/// wears PW:S's cards and keys (rim, streaks, outline, frame for frame) and
+/// differs only in its outline's colour, which is silver.
+#[test]
+fn aegis_wears_the_pws_rig_with_a_silver_outline() {
+    let (mut h, bearer, _) = standard_harness();
+    h.give(bearer, PW_SHIELD_AURA_NAME);
+    h.give(bearer, AEGIS_AURA_NAME);
+    h.tick(1);
+    let mut kinds: Vec<String> = h.rigs().iter().map(|r| format!("{:?}", r.kind)).collect();
+    kinds.sort();
+    assert_eq!(kinds, vec!["Aegis", "PowerWordShield"]);
+
+    let aegis = rig_of_kind(&mut h, ShieldKind::Aegis);
+    let pws = rig_of_kind(&mut h, ShieldKind::PowerWordShield);
+    // Through the birth and into the loop, every card's size and weight match.
+    for _ in 0..60 {
+        h.tick(1);
+        assert_eq!(cards_of(&mut h, aegis), cards_of(&mut h, pws));
+    }
+    assert_eq!(
+        ShieldKind::Aegis.layers(),
+        ShieldKind::PowerWordShield.layers()
+    );
+
+    let silver = outline_colour(&mut h, aegis);
+    let gold = outline_colour(&mut h, pws);
+    let level = shield_tuning(ShieldKind::Aegis).outline.level;
+    let [r, g, b] = AEGIS_OUTLINE_RGB;
+    let want = Color::srgb(r, g, b).to_linear() * level;
+    for (got, want) in [
+        (silver.red, want.red),
+        (silver.green, want.green),
+        (silver.blue, want.blue),
+    ] {
+        assert!((got - want).abs() < 1e-5, "Aegis outline {silver:?}");
+    }
+    assert!(silver.blue > silver.red, "silver leans cool: {silver:?}");
+    assert!(gold.red > 2.0 * gold.blue, "PW:S's stays gold: {gold:?}");
+}
+
+/// The trigger to the visual, through the production systems: a wearer above
+/// 35% has no rig; dropping below raises the shield and its rig pops (birth);
+/// spending the absorb plays the death swell and the rig is gone, and no
+/// second shield follows while the wearer stays below the line.
+#[test]
+fn aegis_spawns_on_the_trigger_and_dies_when_spent() {
+    let (mut h, bearer, _) = standard_harness();
+    h.app.insert_resource(ArenaDampening::default());
+    h.app.insert_resource(CombatLog::default());
+    h.app
+        .add_systems(Update, fire_triggered_absorbs.before(update_shield_visuals));
+    let items = load_item_definitions().expect("items.ron loads");
+    let mut loadout = Loadout::new();
+    loadout.insert(ItemSlot::Trinket1, ItemId::AegisOfTheLastStand);
+    {
+        let mut c = h.app.world_mut().get_mut::<Combatant>(bearer).unwrap();
+        c.apply_equipment(&loadout, &items);
+        c.current_health = c.max_health * 0.5;
+    }
+    h.tick(10);
+    assert!(h.rigs().is_empty(), "a rig above the threshold");
+
+    {
+        let mut c = h.app.world_mut().get_mut::<Combatant>(bearer).unwrap();
+        c.current_health = c.max_health * 0.3;
+    }
+    h.tick(1);
+    let rig = h
+        .rig_of(bearer)
+        .expect("no rig once the wearer dropped below 35%");
+    assert_eq!(rig.kind, ShieldKind::Aegis);
+    assert_eq!(rig.phase, ShieldPhase::Birth);
+
+    h.run_to(bearer, ShieldPhase::Loop, 0.1);
+    h.break_shield(bearer);
+    let seq = ending(&mut h, bearer);
+    assert!(
+        (60..=75).contains(&seq.len()),
+        "the spent shield's ending lasted {} frames, not the 1.1 s swell",
+        seq.len()
+    );
+    assert!(seq.iter().any(|s| s.0 > 1.2), "it left without the swell");
+    h.tick(30);
+    assert!(h.rigs().is_empty(), "a second Aegis rig");
 }

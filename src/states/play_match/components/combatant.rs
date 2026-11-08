@@ -534,6 +534,11 @@ pub struct Combatant {
     /// carries none, and every on-use hook returns on that emptiness, so such
     /// a match runs and traces exactly as it did before on-use items existed.
     pub on_use_items: Vec<crate::states::play_match::on_use_items::OnUseSlot>,
+    /// Triggered absorbs this combatant carries (Aegis of the Last Stand), and
+    /// whether each is spent. Filled by [`Combatant::apply_equipment`]; read
+    /// by `triggered_absorbs::fire_triggered_absorbs`, which returns on an
+    /// empty list before touching anything.
+    pub triggered_absorbs: Vec<crate::states::play_match::triggered_absorbs::TriggeredAbsorbSlot>,
 }
 
 /// How long the weapon-poison marker is stamped for. Longer than any match's
@@ -736,6 +741,7 @@ impl Combatant {
             druid_duel_melee: false,
             proc_trinkets: Vec::new(),
             on_use_items: Vec::new(),
+            triggered_absorbs: Vec::new(),
         }
     }
 
@@ -1119,6 +1125,19 @@ impl Combatant {
                         spent: false,
                         waiting: None,
                     });
+            }
+
+            // A triggered absorb (Aegis of the Last Stand), named after its
+            // item, which is what its shield aura and visual are keyed on.
+            if let Some(absorb) = &item.triggered_absorb {
+                self.triggered_absorbs.push(
+                    crate::states::play_match::triggered_absorbs::TriggeredAbsorbSlot {
+                        name: item.name.clone(),
+                        source_item: Some(*item_id),
+                        config: absorb.clone(),
+                        spent: false,
+                    },
+                );
             }
 
             // For the primary weapon slot, replace attack_damage and weapon_speed
