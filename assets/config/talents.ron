@@ -76,7 +76,7 @@
         ),
         MasterDemonologist: (
             name: "Master Demonologist",
-            class: Warlock, tree: Demonology, tier: 2, column: 2,
+            class: Warlock, tree: Demonology, tier: 2, column: 1,
             icon: "icons/talents/spell_shadow_shadowpact.jpg",
             max_rank: 1,
             budget: Some(11.0),
@@ -100,7 +100,7 @@
         ),
         SoulLink: (
             name: "Soul Link",
-            class: Warlock, tree: Demonology, tier: 4, column: 1,
+            class: Warlock, tree: Demonology, tier: 4, column: 2,
             icon: "icons/talents/spell_shadow_gathershadows.jpg",
             max_rank: 1,
             // A capstone is two ranks' price (22, ±15%). Priced at 20.5 so a

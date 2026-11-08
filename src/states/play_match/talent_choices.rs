@@ -332,7 +332,7 @@ impl SlotChoices {
 
 /// The effects a node's rank applies, each with the times it applies: a
 /// plain effect once per rank, a `FromRank(r, e)` once per rank from `r` on.
-pub(super) fn ranked_effects(
+pub(crate) fn ranked_effects(
     per_rank: &[TalentEffect],
     rank: u8,
 ) -> impl Iterator<Item = (&TalentEffect, u8)> {

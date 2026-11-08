@@ -58,6 +58,7 @@ pub mod auras;
 pub mod classes;
 pub mod items;
 pub mod search;
+pub mod talents;
 pub mod topic;
 pub mod widget;
 
@@ -68,6 +69,7 @@ use super::chrome::ScreenNav;
 use super::configure_match_ui::ClassIcons;
 use super::play_match::ability_config::AbilityDefinitions;
 use super::play_match::equipment::ItemDefinitions;
+use super::play_match::talents::TalentDefinitions;
 use super::view_combatant_ui::{AbilityIcons, ItemIcons};
 use super::GameState;
 use crate::ui::theme::{color, size, space, text};
@@ -264,8 +266,13 @@ impl EncyclopediaState {
     }
 
     /// Rebuild the search registry from the live data sources.
-    pub fn rebuild_registry(&mut self, items: &ItemDefinitions, abilities: &AbilityDefinitions) {
-        self.registry = build_registry(items, abilities);
+    pub fn rebuild_registry(
+        &mut self,
+        items: &ItemDefinitions,
+        abilities: &AbilityDefinitions,
+        talents: &TalentDefinitions,
+    ) {
+        self.registry = build_registry(items, abilities, talents);
     }
 }
 
@@ -281,6 +288,9 @@ pub struct EncyclopediaData<'a> {
     /// Keyed by ability NAME. Auras borrow the icon of the ability that applies
     /// them, the same convention the in-match buff bar uses.
     pub ability_icons: Option<&'a AbilityIcons>,
+    /// Every class's talent trees. Talent art is in `ability_icons`, under
+    /// [`talents::talent_icon_key`].
+    pub talents: &'a TalentDefinitions,
 }
 
 // ============================================================================
@@ -296,6 +306,7 @@ pub fn encyclopedia_ui(
     mut nav: ScreenNav,
     item_definitions: Res<ItemDefinitions>,
     ability_definitions: Res<AbilityDefinitions>,
+    talent_definitions: Res<TalentDefinitions>,
     item_icons: Option<Res<ItemIcons>>,
     class_icons: Option<Res<ClassIcons>>,
     ability_icons: Option<Res<AbilityIcons>>,
@@ -322,7 +333,7 @@ pub fn encyclopedia_ui(
     // The registry is derived purely from the data sources, so building it once
     // per session is enough — nothing hand-authored, nothing to invalidate.
     if state.registry.is_empty() {
-        state.rebuild_registry(&item_definitions, &ability_definitions);
+        state.rebuild_registry(&item_definitions, &ability_definitions, &talent_definitions);
     }
 
     let data = EncyclopediaData {
@@ -331,6 +342,7 @@ pub fn encyclopedia_ui(
         item_icons: item_icons.as_deref(),
         class_icons: class_icons.as_deref(),
         ability_icons: ability_icons.as_deref(),
+        talents: &talent_definitions,
     };
 
     if let Some(action) = draw_encyclopedia(ctx, &mut state, &data, return_to) {
@@ -612,6 +624,7 @@ fn render_section_index(
         Section::Abilities => abilities::render_index(ui, ability_filters, data),
         Section::Items => items::render_index(ui, item_filters, data),
         Section::Auras => auras::render_index(ui, data),
+        Section::Talents => talents::render_index(ui, data),
     }
 }
 
@@ -623,6 +636,7 @@ fn render_topic_page(ui: &mut egui::Ui, topic: Topic, data: &EncyclopediaData) -
         Topic::Ability(ability) => abilities::render_detail(ui, ability, data),
         Topic::Item(id) => items::render_detail(ui, id, data),
         Topic::Aura(id) => auras::render_detail(ui, id, data),
+        Topic::Talent(id) => talents::render_detail(ui, id, data),
     }
 }
 
@@ -999,8 +1013,9 @@ mod tests {
             .expect("items.ron must load");
         let abilities = crate::states::play_match::ability_config::load_ability_definitions()
             .expect("abilities.ron must load");
+        let talents = crate::states::play_match::talents::TalentDefinitions::shipped();
         let mut state = EncyclopediaState::default();
-        state.rebuild_registry(&items, &abilities);
+        state.rebuild_registry(&items, &abilities, talents);
 
         let ctx = egui::Context::default();
         let field = egui::Id::new(SEARCH_FIELD_ID);
@@ -1021,6 +1036,7 @@ mod tests {
                     item_icons: None,
                     class_icons: None,
                     ability_icons: None,
+                    talents,
                 };
                 let _ = draw_encyclopedia(ctx, state, &data, GameState::MainMenu);
             });
