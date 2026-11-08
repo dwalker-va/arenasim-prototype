@@ -605,6 +605,37 @@ fn slot_value<T: Copy + Default>(team1: &[T], team2: &[T], view_state: &ViewComb
     team.get(view_state.slot).copied().unwrap_or_default()
 }
 
+/// The Paladin auras a slot with `build` may choose, in display order: every
+/// aura but one a talent widens and `build` does not take
+/// (`TalentDefinitions::offers`).
+fn offered_paladin_auras(
+    talents: &super::play_match::talents::TalentDefinitions,
+    build: &super::play_match::talents::Build,
+) -> Vec<PaladinAura> {
+    PaladinAura::ALL
+        .into_iter()
+        .filter(|aura| {
+            talents.offers(
+                build,
+                super::play_match::talent_choices::ChoiceOption::PaladinAura(*aura),
+            )
+        })
+        .collect()
+}
+
+/// The talent build of the slot being viewed (empty when it has none).
+fn slot_build(
+    match_config: &MatchConfig,
+    view_state: &ViewCombatantState,
+) -> super::play_match::talents::Build {
+    let builds = if view_state.team == 1 {
+        &match_config.team1_builds
+    } else {
+        &match_config.team2_builds
+    };
+    builds.get(view_state.slot).cloned().unwrap_or_default()
+}
+
 /// The sheet itself: everything under the header for one combatant. Returns
 /// the topic a reference surface asked to open this frame.
 fn draw_sheet(
@@ -745,17 +776,15 @@ fn draw_sheet(
                 &match_config.team2_paladin_auras,
                 view_state,
             );
-            let options = [
-                (PaladinAura::DevotionAura, ability_icon("Devotion Aura")),
-                (
-                    PaladinAura::ShadowResistanceAura,
-                    ability_icon("Shadow Resistance Aura"),
-                ),
-                (
-                    PaladinAura::ConcentrationAura,
-                    ability_icon("Concentration Aura"),
-                ),
-            ];
+            // An aura a talent widens (Retribution Aura) is offered only to a
+            // build that takes that talent.
+            let build = slot_build(match_config, view_state);
+            let talents = super::play_match::talents::TalentDefinitions::shipped();
+            let options: Vec<(PaladinAura, Option<egui::TextureId>)> =
+                offered_paladin_auras(talents, &build)
+                    .into_iter()
+                    .map(|aura| (aura, ability_icon(aura.name())))
+                    .collect();
             if let Some(aura) =
                 strategic_option_panel(ui, "Paladin Aura", &options, current, encyclopedia_data)
             {
@@ -1979,6 +2008,24 @@ fn enemy_label(
 mod tests {
     use super::super::play_match::equipment::{enforce_unique_equipped, LoadoutsConfig};
     use super::*;
+
+    /// Retribution Aura is offered only to a build that takes its talent;
+    /// every other aura to every build.
+    #[test]
+    fn retribution_aura_is_offered_only_with_its_talent() {
+        use super::super::play_match::talents::{Build, TalentDefinitions, TalentId};
+        let talents = TalentDefinitions::shipped();
+        let base = vec![
+            PaladinAura::DevotionAura,
+            PaladinAura::ShadowResistanceAura,
+            PaladinAura::ConcentrationAura,
+        ];
+        assert_eq!(offered_paladin_auras(talents, &Build::default()), base);
+        let talented = Build::of(&[(TalentId::SacredDuty, 2), (TalentId::RetributionAura, 1)]);
+        let mut all = base;
+        all.push(PaladinAura::RetributionAura);
+        assert_eq!(offered_paladin_auras(talents, &talented), all);
+    }
 
     /// The Warrior's shipped ring defaults: Band of Accuria / Ring of Protection.
     fn warrior_defaults() -> DefaultLoadouts {

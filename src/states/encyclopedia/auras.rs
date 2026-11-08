@@ -1961,6 +1961,7 @@ mod tests {
                 "Mage Armor",
                 "Molten Armor",
                 "Healing Stream Totem",
+                "Retribution Aura",
                 "Shadow Resistance Aura",
                 "Strength of Earth Totem",
                 "Travel Form",

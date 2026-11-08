@@ -261,6 +261,13 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::DevotionAura => config(S::Untyped, T::NoType),
         AbilityType::ShadowResistanceAura => config(S::Untyped, T::NoType),
         AbilityType::ConcentrationAura => config(S::Untyped, T::NoType),
+        AbilityType::RetributionAura => config(S::Untyped, T::NoType), // 27150
+        // The Protection talents (AS-421).
+        AbilityType::DivineProtection => config(S::Magic, T::Magic), // 5573
+        AbilityType::BlessingOfSacrifice => config(S::Magic, T::Magic), // 27148
+        // Not in TBC: the column reads Wrath 3.4.5.63697's 53601 (its absorb,
+        // 58597, is Magic too).
+        AbilityType::SacredShield => config(S::Magic, T::Magic),
 
         // ---- Hunter ----
         AbilityType::AimedShot => config(S::Physical, T::NoType),
@@ -623,6 +630,7 @@ fn purge_cannot_take_a_paladin_aura_a_totem_buff_or_travel_form() {
         AbilityType::DevotionAura,
         AbilityType::ShadowResistanceAura,
         AbilityType::ConcentrationAura,
+        AbilityType::RetributionAura,
         AbilityType::AirTotem,
         AbilityType::WaterTotem,
         AbilityType::EarthTotem,

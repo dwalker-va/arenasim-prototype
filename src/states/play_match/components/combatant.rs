@@ -487,6 +487,12 @@ pub struct Combatant {
     pub talent_mechanics: crate::states::play_match::talent_mechanics::TalentMechanics,
     /// Whether a once-a-match killing-blow save (Cheat Death) has been spent.
     pub killing_blow_save_spent: bool,
+    /// Triggered absorbs this combatant carries (Sacred Shield's, while its
+    /// arming aura is up), and where each one's trigger and limit stand.
+    /// Pushed by `apply_pending_auras` as an arming aura lands; read by
+    /// `triggered_absorbs::fire_triggered_absorbs`, which skips a combatant
+    /// with none before touching anything.
+    pub triggered_absorbs: Vec<crate::states::play_match::triggered_absorbs::TriggeredAbsorbSlot>,
     /// Warlock-specific: which curse to apply to each enemy target (indexed by enemy slot)
     pub warlock_curse_prefs: Vec<WarlockCurse>,
     /// Warrior-specific: which shout to use (Battle Shout, Demoralizing Shout, or Commanding Shout)
@@ -724,6 +730,7 @@ impl Combatant {
             rogue_offhand_poison: None,
             talent_mechanics: Default::default(),
             killing_blow_save_spent: false,
+            triggered_absorbs: Vec::new(),
             warlock_curse_prefs: Vec::new(),
             warrior_shout: WarriorShout::default(),
             mage_armor: MageArmor::default(),

@@ -781,6 +781,7 @@ impl HealImpact {
             | AuraType::ArmorPercentIncrease
             | AuraType::ArmorPercentReduction
             | AuraType::DamageTransfer
+            | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
             | AuraType::DamageReflect
             | AuraType::TravelForm => None,
@@ -1582,6 +1583,7 @@ impl AuraApplyRoute {
             | AuraType::ArmorPercentIncrease
             | AuraType::ArmorPercentReduction
             | AuraType::DamageTransfer
+            | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
             | AuraType::DamageReflect => AuraApplyRoute::Band,
 

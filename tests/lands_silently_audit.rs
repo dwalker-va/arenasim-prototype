@@ -304,6 +304,8 @@ fn aura_family(t: AuraType) -> AuraFamily {
         | AuraType::DamageTransfer
         | AuraType::KillingBlowSave
         | AuraType::DamageReflect
+        // Sacred Shield's arming buff (AS-421): a buff like any other.
+        | AuraType::TriggeredAbsorb
         | AuraType::TravelForm => AuraFamily::Status,
     }
 }
@@ -668,12 +670,14 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     ArcaneIntellect,
     BattleShout,
     BerserkerRage,
+    BlessingOfSacrifice,
     CommandingShout,
     ConcentrationAura,
     CurseOfTongues,
     CurseOfWeakness,
     DemoralizingShout,
     DevotionAura,
+    DivineProtection,
     DivineShield,
     EarthTotem,
     FireTotem,
@@ -689,6 +693,8 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     PowerWordFortitude,
     PowerWordShield,
     Rejuvenation,
+    RetributionAura,
+    SacredShield,
     ShadowResistanceAura,
     TravelForm,
     WaterTotem,
@@ -790,6 +796,11 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
     (MindNumbingPoison, "AS-341 (weapon poison landing)"),
+    // The Protection talents (AS-421), drawn by AS-337's build cards.
+    (BlessingOfSacrifice, "AS-374 (Blessing of Sacrifice impact)"),
+    (RetributionAura, "AS-374 (Retribution Aura rune disc)"),
+    (SacredShield, "AS-375 (Sacred Shield disc and absorb card)"),
+    (DivineProtection, "AS-376 (Divine Protection globe)"),
 ];
 
 #[test]

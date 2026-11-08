@@ -313,6 +313,7 @@ pub fn proc_effect_budget_weight(effect: AuraType) -> Option<f32> {
         AuraType::DamageDealtIncrease
         | AuraType::ArmorPercentIncrease
         | AuraType::DamageTransfer
+        | AuraType::TriggeredAbsorb
         | AuraType::KillingBlowSave
         | AuraType::DamageReflect => None,
         // A shapeshift is an ability's state, not a stat a trinket could sell.

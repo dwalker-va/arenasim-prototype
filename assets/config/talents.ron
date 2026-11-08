@@ -42,6 +42,9 @@
         Warlock: [
             (id: Demonology, name: "Demonology", icon: "icons/talents/spell_shadow_metamorphosis.jpg"),
         ],
+        Paladin: [
+            (id: Protection, name: "Protection", icon: "icons/talents/spell_holy_devotionaura.jpg"),
+        ],
     },
 
     talents: {
@@ -74,6 +77,87 @@
             // Felhunter melee +10% a rank.
             per_rank: [PetStatPercent(WeaponDamage, 0.10)],
         ),
+
+        // ---- Paladin: Protection (AS-421) ----
+        // Survivability for the Paladin and its allies. Values provisional:
+        // tuning is the milestone sweep's (AS-302).
+        SacredDuty: (
+            name: "Sacred Duty",
+            class: Paladin, tree: Protection, tier: 1, column: 0,
+            icon: "icons/talents/spell_holy_divineintervention.jpg",
+            max_rank: 2,
+            // About +2.5% maximum health a rank, gear included: 448 -> 459
+            // -> 470 at the reference Paladin. Its price is computed there,
+            // and the fraction is the one that prices it at exactly a rank
+            // (11 / 448): a tree with a capstone holds every legal build
+            // within one rank only if each rank costs 11, so any other
+            // fraction breaks build parity at 6 points.
+            per_rank: [StatPercent(MaxHealth, 0.024554)],
+        ),
+        ImprovedHammerOfJustice: (
+            name: "Improved Hammer of Justice",
+            class: Paladin, tree: Protection, tier: 1, column: 2,
+            icon: "icons/talents/spell_holy_sealofmight.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Hammer of Justice's cooldown -10s a rank: 60 -> 50 -> 40.
+            per_rank: [Patch(on: Ability(HammerOfJustice), field: Cooldown, op: Add(-10.0))],
+        ),
+        DivineProtection: (
+            name: "Divine Protection",
+            class: Paladin, tree: Protection, tier: 2, column: 0,
+            icon: "icons/talents/spell_holy_restoration.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // 30% less damage taken for 8s, 45s cooldown; no lockout shared
+            // with Divine Shield.
+            per_rank: [Grant(DivineProtection)],
+        ),
+        RetributionAura: (
+            name: "Retribution Aura",
+            class: Paladin, tree: Protection, tier: 2, column: 1,
+            icon: "icons/talents/spell_holy_auraoflight.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Rank 1 offers Retribution Aura as a fourth aura choice (taking
+            // it means no Devotion Aura that match): 4 Holy damage to a melee
+            // attacker each time it hits a teammate. Rank 2 raises it to 6.
+            per_rank: [
+                WidenChoice(PaladinAura(RetributionAura)),
+                FromRank(2, Patch(on: Ability(RetributionAura), field: AuraMagnitude, op: Add(2.0))),
+            ],
+        ),
+        Toughness: (
+            name: "Toughness",
+            class: Paladin, tree: Protection, tier: 2, column: 2,
+            icon: "icons/talents/spell_holy_devotion.jpg",
+            max_rank: 2,
+            // Armor is free on the item budget, so its percentage declares a
+            // price: +10% of the Paladin's own armor a rank.
+            budget: Some(11.0),
+            per_rank: [StatPercent(Armor, 0.10)],
+        ),
+        BlessingOfSacrifice: (
+            name: "Blessing of Sacrifice",
+            class: Paladin, tree: Protection, tier: 3, column: 1,
+            icon: "icons/talents/spell_holy_sealofsacrifice.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // For 12s, 30% of an ally's damage taken is transferred to the
+            // Paladin; 30s cooldown.
+            per_rank: [Grant(BlessingOfSacrifice)],
+        ),
+        SacredShield: (
+            name: "Sacred Shield",
+            class: Paladin, tree: Protection, tier: 4, column: 1,
+            icon: "icons/talents/ability_paladin_blessedmending.jpg",
+            max_rank: 1,
+            budget: Some(22.0),
+            requires: Some((BlessingOfSacrifice, 1)),
+            // An ally gains Sacred Shield for 30s: when it takes damage it
+            // gains a shield absorbing 40, at most once every 6s.
+            per_rank: [Grant(SacredShield)],
+        ),
     },
 
     // Each class's reference combatant at mid-run, which prices its computed
@@ -86,6 +170,11 @@
             Head: ArcanistCrown,
             Chest: ArcanistRobes,
             Legs: ArcanistLeggings,
+        },
+        Paladin: {
+            Head: JudgementCrown,
+            Chest: JudgementBreastplate,
+            Legs: JudgementLegguards,
         },
     },
 )

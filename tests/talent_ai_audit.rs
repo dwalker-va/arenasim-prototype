@@ -22,6 +22,7 @@ use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::{AbilitiesConfig, AbilityDefinitions};
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene, Who};
+use arenasim::states::play_match::components::{Aura, AuraType};
 use arenasim::states::play_match::movement_config::load_movement_config;
 
 /// A scene builder for one talent ability: its class's unit (the `Who`)
@@ -29,7 +30,62 @@ use arenasim::states::play_match::movement_config::load_movement_config;
 type SceneFor = fn(&AbilityDefinitions) -> (Scene, Who);
 
 /// Every talent ability, with the scene its rule is decided in.
-const SCENES: &[(AbilityType, SceneFor)] = &[];
+const SCENES: &[(AbilityType, SceneFor)] = &[
+    (AbilityType::DivineProtection, paladin_under_attack),
+    (AbilityType::BlessingOfSacrifice, paladin_ally_under_attack),
+    (AbilityType::SacredShield, paladin_ally_pressured),
+];
+
+const PALADIN: Who = "paladin";
+const MAGE: Who = "mage";
+
+/// Devotion Aura already up, so the Paladin's aura step is out of the way.
+fn devotion() -> Aura {
+    Aura {
+        effect_type: AuraType::DamageTakenReduction,
+        duration: 600.0,
+        magnitude: 0.10,
+        ability_name: "Devotion Aura".into(),
+        ..Default::default()
+    }
+}
+
+/// A Paladin at 40% health with an enemy Warrior on it: Divine Protection's
+/// moment.
+fn paladin_under_attack(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PALADIN, 1, CharacterClass::Paladin)
+        .health(0.4)
+        .aura_full(PALADIN, devotion())
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(2.0, 0.0)
+        .targeting(PALADIN);
+    (scene, PALADIN)
+}
+
+/// A healthy Paladin whose Mage, at `health`, has an enemy Warrior on it.
+fn paladin_ally_at(defs: &AbilityDefinitions, health: f32) -> (Scene, Who) {
+    let scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PALADIN, 1, CharacterClass::Paladin)
+        .aura_full(PALADIN, devotion())
+        .unit(MAGE, 1, CharacterClass::Mage)
+        .at(15.0, 0.0)
+        .health(health)
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(17.0, 0.0)
+        .targeting(MAGE);
+    (scene, PALADIN)
+}
+
+/// The Mage dying under the Warrior: Blessing of Sacrifice's moment.
+fn paladin_ally_under_attack(defs: &AbilityDefinitions) -> (Scene, Who) {
+    paladin_ally_at(defs, 0.3)
+}
+
+/// The Mage pressured but healthy: Sacred Shield's moment.
+fn paladin_ally_pressured(defs: &AbilityDefinitions) -> (Scene, Who) {
+    paladin_ally_at(defs, 0.8)
+}
 
 fn considered(view: &DecisionView, ability: AbilityType) -> bool {
     view.candidates.iter().any(|c| c.ability == ability)
@@ -104,6 +160,14 @@ fn flagged(ability: AbilityType) -> AbilityDefinitions {
     AbilityDefinitions::new(config)
 }
 
+/// The shipped rows plus one for the fixture's ability, so the shipped
+/// talent abilities stay covered and only the fixture's row can fail.
+fn with_row(ability: AbilityType, scene: SceneFor) -> Vec<(AbilityType, SceneFor)> {
+    let mut rows = SCENES.to_vec();
+    rows.push((ability, scene));
+    rows
+}
+
 const WARLOCK: Who = "warlock";
 const WARRIOR: Who = "enemy warrior";
 
@@ -131,14 +195,14 @@ fn empty_scene(defs: &AbilityDefinitions) -> (Scene, Who) {
 #[test]
 fn a_talent_ability_with_no_row_fails() {
     let defs = flagged(AbilityType::DeathCoil);
-    let err = audit(&defs, &[]).unwrap_err();
+    let err = audit(&defs, SCENES).unwrap_err();
     assert!(err.contains("with no row: [DeathCoil]"), "{err}");
 }
 
 #[test]
 fn a_row_for_an_ability_that_is_not_a_talent_fails() {
     let defs = AbilityDefinitions::shipped();
-    let err = audit(defs, &[(AbilityType::DeathCoil, coil_scene)]).unwrap_err();
+    let err = audit(defs, &with_row(AbilityType::DeathCoil, coil_scene)).unwrap_err();
     assert!(err.contains("not talent abilities: [DeathCoil]"), "{err}");
 }
 
@@ -147,7 +211,7 @@ fn a_row_for_an_ability_that_is_not_a_talent_fails() {
 #[test]
 fn an_ai_that_asks_for_an_ungranted_ability_fails() {
     let defs = flagged(AbilityType::DeathCoil);
-    let err = audit(&defs, &[(AbilityType::DeathCoil, coil_scene)]).unwrap_err();
+    let err = audit(&defs, &with_row(AbilityType::DeathCoil, coil_scene)).unwrap_err();
     assert_eq!(
         err,
         "DeathCoil: not granted, warlock's AI panics (it asks the book for an ability it lacks)"
@@ -159,7 +223,7 @@ fn an_ai_that_asks_for_an_ungranted_ability_fails() {
 #[test]
 fn a_scene_that_never_reaches_the_rule_fails() {
     let defs = flagged(AbilityType::DeathCoil);
-    let err = audit(&defs, &[(AbilityType::DeathCoil, empty_scene)]).unwrap_err();
+    let err = audit(&defs, &with_row(AbilityType::DeathCoil, empty_scene)).unwrap_err();
     assert!(
         err.contains("DeathCoil: granted, warlock's AI never decides it"),
         "{err}"
@@ -175,6 +239,6 @@ fn an_ai_that_decides_an_ungranted_ability_fails() {
         (scene.grant(who, AbilityType::DeathCoil), who)
     }
     let defs = flagged(AbilityType::DeathCoil);
-    let err = audit(&defs, &[(AbilityType::DeathCoil, holding)]).unwrap_err();
+    let err = audit(&defs, &with_row(AbilityType::DeathCoil, holding)).unwrap_err();
     assert_eq!(err, "DeathCoil: not granted, warlock's AI still decides it");
 }

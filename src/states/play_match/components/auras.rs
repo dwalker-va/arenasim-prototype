@@ -182,6 +182,11 @@ pub enum AuraType {
     /// never reflects again. Only the strongest applies. User: Retribution
     /// Aura.
     DamageReflect,
+    /// Arms a triggered absorb on the holder while it lasts: its config
+    /// (`AuraDamageMods::triggered_absorb`) says what raises an `Absorb`
+    /// shield, how big and how often (`triggered_absorbs`). The aura itself
+    /// changes no number; its magnitude is unread. User: Sacred Shield.
+    TriggeredAbsorb,
 }
 
 /// Which hits a damage modifier aura reaches: one school, or every school but
@@ -210,7 +215,7 @@ impl DamageScope {
 }
 
 /// The damage-pipeline data an aura may carry beyond its magnitude. Inert by
-/// default: no scope (every hit), no charges, no reflect.
+/// default: no scope (every hit), no charges, no reflect, no triggered absorb.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct AuraDamageMods {
     /// The hits a `DamageTakenIncrease`, `DamageDealtIncrease` or
@@ -224,6 +229,10 @@ pub struct AuraDamageMods {
     /// back to the attacker, credited to the shield's caster (Reflective
     /// Shield, set as the shield lands). `None`: no reflect.
     pub reflect_absorbed: Option<f32>,
+    /// On a `TriggeredAbsorb`: the absorb it arms (`triggered_absorbs`).
+    /// `None` on every other aura.
+    pub triggered_absorb:
+        Option<crate::states::play_match::triggered_absorbs::TriggeredAbsorbConfig>,
 }
 
 /// A debuff's REMOVAL CLASS — what kind of thing it is for the purpose of
@@ -387,7 +396,7 @@ impl AuraType {
     /// DOES cost is coverage: a guard that sweeps `ALL` quietly stops covering
     /// whatever `ALL` forgot, while still reading like a whole-enum sweep.
     /// `aura_type_tests::all_lists_every_aura_type` is what stops that.
-    pub const ALL: [AuraType; 43] = [
+    pub const ALL: [AuraType; 44] = [
         AuraType::MovementSpeedSlow,
         AuraType::Root,
         AuraType::Stun,
@@ -431,6 +440,7 @@ impl AuraType {
         AuraType::DamageTransfer,
         AuraType::KillingBlowSave,
         AuraType::DamageReflect,
+        AuraType::TriggeredAbsorb,
     ];
 
     /// Player-facing name of this MECHANIC, as the encyclopedia's mechanic
@@ -488,6 +498,7 @@ impl AuraType {
             AuraType::ArmorPercentIncrease => "Armor Boost",
             AuraType::ArmorPercentReduction => "Armor Reduction",
             AuraType::DamageTransfer => "Damage Transfer",
+            AuraType::TriggeredAbsorb => "Triggered Shield",
             AuraType::KillingBlowSave => "Death Prevention",
             AuraType::DamageReflect => "Damage Reflection",
         }
@@ -618,6 +629,9 @@ impl AuraType {
             AuraType::DamageReflect => {
                 "Melee attackers who strike the holder take damage in return."
             }
+            AuraType::TriggeredAbsorb => {
+                "Taking damage raises an absorb shield on the holder, at most once in a while."
+            }
         }
     }
 
@@ -740,6 +754,7 @@ impl AuraType {
             | AuraType::DamageDealtIncrease
             | AuraType::ArmorPercentIncrease
             | AuraType::DamageTransfer
+            | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
             | AuraType::DamageReflect
             | AuraType::TravelForm => false,
@@ -815,6 +830,7 @@ impl AuraType {
             | AuraType::DamageDealtIncrease
             | AuraType::ArmorPercentIncrease
             | AuraType::DamageTransfer
+            | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
             | AuraType::DamageReflect
             | AuraType::TravelForm => false,
@@ -1417,6 +1433,7 @@ impl Aura {
             | AuraType::DamageDealtIncrease
             | AuraType::ArmorPercentIncrease
             | AuraType::DamageTransfer
+            | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
             | AuraType::DamageReflect => true,
 
@@ -2010,6 +2027,7 @@ impl DRCategory {
             | AuraType::DamageDealtIncrease
             | AuraType::ArmorPercentIncrease
             | AuraType::DamageTransfer
+            | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
             | AuraType::DamageReflect
             | AuraType::TravelForm => None,

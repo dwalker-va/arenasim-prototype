@@ -250,8 +250,42 @@ pub fn decide_paladin_action(
         return true;
     }
 
+    // Priority 1.4 (Protection talent): Divine Protection, while the Paladin
+    // is dying and pressured — the 45s cut before the 5-minute bubble.
+    if super::paladin_protection::try_divine_protection(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
     // Priority 1.5: Divine Shield (emergency defensive).
     if try_divine_shield(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // Priority 1.6 (Protection talent): Blessing of Sacrifice on the
+    // teammate in danger.
+    if super::paladin_protection::try_blessing_of_sacrifice(
         commands,
         combat_log,
         abilities,
@@ -403,6 +437,23 @@ pub fn decide_paladin_action(
                 note: "HoJ reserved for enemy-healer dip".into(),
             },
         );
+    }
+
+    // Priority 4.2 (Protection talent): Sacred Shield, kept on the teammate
+    // most likely to be focused.
+    if super::paladin_protection::try_sacred_shield(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
     }
 
     // Priority 4.5 (TeamPlan): Holy Light, when there is time to cast it —
@@ -569,6 +620,30 @@ pub fn try_divine_shield(
 
     let survival_trigger = self_hp_pct < DIVINE_SHIELD_HP_THRESHOLD;
     let pressure_trigger = self_hp_pct < LOW_HP_THRESHOLD;
+
+    // While the talent's Divine Protection is up, the bubble waits for the
+    // survival trigger: the cut is the answer to pressure, and two
+    // defensives on one dive waste one. A Paladin without the talent has no
+    // Divine Protection in its book, and decides as it always has.
+    let protected = abilities
+        .get(&AbilityType::DivineProtection)
+        .is_some_and(|dp| {
+            auras.is_some_and(|a| {
+                a.auras.iter().any(|aura| {
+                    aura.effect_type == AuraType::DamageTakenReduction
+                        && aura.ability_name == dp.name
+                })
+            })
+        });
+    if protected && !survival_trigger {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "Divine Protection is up; holding the bubble for the survival trigger".into(),
+            },
+        );
+        return false;
+    }
 
     if !survival_trigger && !pressure_trigger {
         builder.reject(
@@ -1623,6 +1698,11 @@ fn try_paladin_aura(
             AbilityType::ConcentrationAura,
             AuraType::LockoutDurationReduction,
             "Concentration Aura",
+        ),
+        PaladinAura::RetributionAura => (
+            AbilityType::RetributionAura,
+            AuraType::DamageReflect,
+            "Retribution Aura",
         ),
     };
 

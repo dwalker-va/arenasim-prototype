@@ -878,6 +878,28 @@ pub fn apply_pending_auras(
             }
         }
 
+        // A triggered absorb's arming aura (Sacred Shield) gives its bearer
+        // the slot that raises the shield (`triggered_absorbs`). A refresh of
+        // a refresh-only arming aura never reaches this line, so it keeps the
+        // slot, and its limit, as they were.
+        if let Some(config) = aura_to_add.damage_mods.triggered_absorb {
+            let name = aura_to_add.ability_name.clone();
+            target_combatant
+                .triggered_absorbs
+                .retain(|slot| slot.name != name);
+            let slot = super::triggered_absorbs::TriggeredAbsorbSlot::new(
+                &name,
+                super::triggered_absorbs::AbsorbSource::Aura,
+                config,
+                target_combatant.damage_taken,
+            );
+            target_combatant.triggered_absorbs.push(slot);
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!("{} gains {}", target_id, name),
+            );
+        }
+
         // Log DR info for CC auras
         if let Some(category) = dr_category {
             let dr_pct = (dr_multiplier * 100.0) as i32;

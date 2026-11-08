@@ -276,6 +276,28 @@ fn stacks_sentence(aura: &AuraEffect) -> String {
 
 /// The words a damage modifier's scope adds before "damage": `""` for every
 /// hit, `" Shadow"` for one school, `" spell"` for every magic school.
+/// A triggered absorb's sentence, for the aura that arms it for `duration`
+/// seconds (Sacred Shield): "For 30 sec, each time the target takes damage it
+/// gains a shield absorbing 40 damage for 6 sec, at most once every 6 sec."
+fn triggered_absorb_sentence(
+    absorb: &crate::states::play_match::triggered_absorbs::TriggeredAbsorbConfig,
+    duration: f32,
+) -> String {
+    use crate::states::play_match::triggered_absorbs::{AbsorbTrigger, TriggerLimit};
+    let when = match absorb.trigger {
+        AbsorbTrigger::DamageTaken => "each time the target takes damage",
+    };
+    let limit = match absorb.limit {
+        TriggerLimit::Cooldown(secs) => format!("at most once every {secs:.0} sec"),
+    };
+    format!(
+        "For {duration:.0} sec, {when} it gains a shield absorbing {:.0} damage for {:.0} sec, \
+         {limit}.",
+        absorb.shield.points(),
+        absorb.duration
+    )
+}
+
 fn scope_words(scope: Option<DamageScope>) -> String {
     match scope {
         None => String::new(),
@@ -457,6 +479,10 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
                 aura.magnitude, aura.duration
             )
         }
+        AuraType::TriggeredAbsorb => match aura.triggered_absorb {
+            Some(absorb) => triggered_absorb_sentence(&absorb, aura.duration),
+            None => format!("Arms an absorb shield for {:.0} sec.", aura.duration),
+        },
         AuraType::DamageImmunity => {
             format!(
                 "Immune to all damage for {:.0} sec. Reduces damage dealt by 50%.",

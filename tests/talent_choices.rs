@@ -8,7 +8,7 @@
 //! paired with its control.
 
 use arenasim::headless::HeadlessMatchConfig;
-use arenasim::states::match_config::{CharacterClass, RoguePoison, WarlockCurse};
+use arenasim::states::match_config::{CharacterClass, PaladinAura, RoguePoison, WarlockCurse};
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::class_ai::cast_guard::{
@@ -38,6 +38,7 @@ const FIXTURE: &str = r#"(
     trees: {
         Warlock: [(id: Demonology, name: "Demonology", icon: "x.jpg")],
         Rogue: [(id: Demonology, name: "Fixture", icon: "x.jpg")],
+        Paladin: [(id: Protection, name: "Protection", icon: "x.jpg")],
     },
     talents: {
         DemonicEmbrace: (
@@ -60,6 +61,43 @@ const FIXTURE: &str = r#"(
             name: "Unholy Power", class: Warlock, tree: Demonology, tier: 1, column: 2,
             icon: "x.jpg", max_rank: 2, budget: Some(11.0),
             per_rank: [Mechanic(SoulLink(share: 0.06))],
+        ),
+        // The shipped Paladin nodes, inert here: every table names every
+        // talent, and grants each talent ability once.
+        SacredDuty: (
+            name: "Sacred Duty", class: Paladin, tree: Protection, tier: 1, column: 0,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [Patch(on: Ability(HammerOfJustice), field: Cooldown, op: Add(-1.0))],
+        ),
+        ImprovedHammerOfJustice: (
+            name: "Improved Hammer of Justice", class: Paladin, tree: Protection, tier: 1,
+            column: 2, icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [Patch(on: Ability(HammerOfJustice), field: Cooldown, op: Add(-10.0))],
+        ),
+        DivineProtection: (
+            name: "Divine Protection", class: Paladin, tree: Protection, tier: 2, column: 0,
+            icon: "x.jpg", max_rank: 1, budget: Some(11.0),
+            per_rank: [Grant(DivineProtection)],
+        ),
+        RetributionAura: (
+            name: "Retribution Aura", class: Paladin, tree: Protection, tier: 2, column: 1,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [WidenChoice(PaladinAura(RetributionAura))],
+        ),
+        Toughness: (
+            name: "Toughness", class: Paladin, tree: Protection, tier: 2, column: 2,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [StatPercent(Armor, 0.10)],
+        ),
+        BlessingOfSacrifice: (
+            name: "Blessing of Sacrifice", class: Paladin, tree: Protection, tier: 3, column: 1,
+            icon: "x.jpg", max_rank: 1, budget: Some(11.0),
+            per_rank: [Grant(BlessingOfSacrifice)],
+        ),
+        SacredShield: (
+            name: "Sacred Shield", class: Paladin, tree: Protection, tier: 4, column: 1,
+            icon: "x.jpg", max_rank: 1, budget: Some(22.0),
+            per_rank: [Grant(SacredShield)],
         ),
     },
     choice_rules: [
@@ -119,11 +157,18 @@ fn a_widened_option_is_offered_only_to_a_build_that_takes_its_node() {
     assert!(t
         .validate_choices(CharacterClass::Warlock, &embrace, &warlock(&[TONGUES]))
         .is_ok());
-    // The shipped table widens nothing: every option is offered.
+    // The shipped table widens exactly Retribution Aura (AS-421): an empty
+    // build is offered every other option.
     let shipped = TalentDefinitions::shipped();
-    assert!(shipped.widened_options().is_empty());
+    let retribution = ChoiceOption::PaladinAura(PaladinAura::RetributionAura);
+    assert_eq!(
+        shipped.widened_options().into_iter().collect::<Vec<_>>(),
+        vec![retribution]
+    );
     for menu in ChoiceMenu::ALL {
-        assert_eq!(shipped.offered(&empty, menu), menu.options(), "{menu:?}");
+        let mut all = menu.options();
+        all.retain(|o| *o != retribution);
+        assert_eq!(shipped.offered(&empty, menu), all, "{menu:?}");
     }
 }
 

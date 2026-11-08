@@ -184,6 +184,13 @@ const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
          code in either place; asserted per shipped trinket by \
          `named_auras_built_from_helpers_also_resolve`.",
     ),
+    (
+        "src/states/play_match/triggered_absorbs.rs",
+        "ability_name: self.name.clone()",
+        "a triggered absorb's shield, named after the aura that arms it (Sacred Shield) — \
+         whose abilities.ron entry carries an `applies_aura` block, so the catalog's RON half \
+         already has the page.",
+    ),
 ];
 
 /// Files that must each still yield at least one `ability_name:` STRING

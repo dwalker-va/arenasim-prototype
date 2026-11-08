@@ -71,6 +71,9 @@ pub use super::traps::trap_system;
 // === Phase 1 (additional): Slow Zone ===
 pub use super::traps::slow_zone_system;
 
+// === Phase 3 (additional): Triggered absorbs ===
+pub use super::triggered_absorbs::fire_triggered_absorbs;
+
 // === Phase 1 (additional): Flare ===
 pub use super::traps::flare_system;
 
@@ -327,6 +330,11 @@ pub fn add_core_combat_systems<M, N>(
             // hit of the frame, through the same damage funnel. Inert unless a
             // modifier aura or a talent queued one.
             process_damage_follow_ups,
+            // Triggered absorbs (Sacred Shield): raised after the frame's
+            // last damage, from each bearer's own state, so every damage
+            // source reaches them alike (`triggered_absorbs`). Inert for a
+            // combatant that carries none.
+            fire_triggered_absorbs,
             flush_decision_trace_system.run_if(decide),
         )
             .chain()

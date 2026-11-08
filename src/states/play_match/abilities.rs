@@ -240,6 +240,11 @@ pub enum AbilityType {
     // the enum's derived `Ord` keys every `BTreeMap<AbilityType, _>`, so a
     // variant inserted mid-list would reorder what existing ones iterate.
     ShadowWordPain, // Priest instant Shadow DoT
+    // Paladin: the Protection tree (AS-421). Appended for the same reason.
+    DivineProtection,    // talent: the Paladin takes 30% less damage for 8s
+    BlessingOfSacrifice, // talent: 30% of an ally's damage goes to the Paladin for 12s
+    SacredShield,        // talent: arms a triggered absorb on an ally for 30s
+    RetributionAura,     // team aura a talent offers: Holy damage to melee attackers
 }
 
 impl AbilityType {
@@ -279,7 +284,8 @@ impl AbilityType {
             | ConcentrationAura | LightningBolt | FrostShock | LesserHealingWave | Purge
             | WindShear | AirTotem | WaterTotem | EarthTotem | FireTotem | Rejuvenation
             | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild | Innervate | EntanglingRoots
-            | Cyclone | TravelForm => false,
+            | Cyclone | TravelForm | DivineProtection | BlessingOfSacrifice | SacredShield
+            | RetributionAura => false,
         }
     }
 

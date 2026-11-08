@@ -624,6 +624,9 @@ impl HeadlessMatchConfig {
             "concentration" | "concentrationaura" | "concentration_aura" | "concentration aura" => {
                 PaladinAura::ConcentrationAura
             }
+            "retribution" | "retributionaura" | "retribution_aura" | "retribution aura" => {
+                PaladinAura::RetributionAura
+            }
             _ => PaladinAura::default(),
         }
     }

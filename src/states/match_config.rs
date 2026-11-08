@@ -320,14 +320,18 @@ pub enum PaladinAura {
     ShadowResistanceAura,
     /// Concentration Aura — reduces cast time of nearby allies
     ConcentrationAura,
+    /// Retribution Aura — Holy damage to a melee attacker of a nearby ally.
+    /// Offered only to a build with the Retribution Aura talent.
+    RetributionAura,
 }
 
 impl PaladinAura {
     /// Every option, in display order.
-    pub const ALL: [PaladinAura; 3] = [
+    pub const ALL: [PaladinAura; 4] = [
         PaladinAura::DevotionAura,
         PaladinAura::ShadowResistanceAura,
         PaladinAura::ConcentrationAura,
+        PaladinAura::RetributionAura,
     ];
 
     /// Get the display name
@@ -336,6 +340,7 @@ impl PaladinAura {
             PaladinAura::DevotionAura => "Devotion Aura",
             PaladinAura::ShadowResistanceAura => "Shadow Resistance Aura",
             PaladinAura::ConcentrationAura => "Concentration Aura",
+            PaladinAura::RetributionAura => "Retribution Aura",
         }
     }
 
@@ -347,6 +352,7 @@ impl PaladinAura {
             PaladinAura::ConcentrationAura => {
                 "Reduces interrupt lockout duration for nearby allies"
             }
+            PaladinAura::RetributionAura => "Deals Holy damage to melee attackers of nearby allies",
         }
     }
 
@@ -357,6 +363,7 @@ impl PaladinAura {
             PaladinAura::DevotionAura => AbilityType::DevotionAura,
             PaladinAura::ShadowResistanceAura => AbilityType::ShadowResistanceAura,
             PaladinAura::ConcentrationAura => AbilityType::ConcentrationAura,
+            PaladinAura::RetributionAura => AbilityType::RetributionAura,
         }
     }
 }

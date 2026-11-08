@@ -538,6 +538,19 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
   or expired `MaxHealthIncrease` gives its health back either way
   (`Combatant::reverse_stat_mutation`).
 
+- `triggered_absorb: Some((trigger: DamageTaken, shield: Flat(N), limit:
+  Cooldown(S), duration: D))` on a `TriggeredAbsorb` aura arms a TRIGGERED
+  ABSORB (`triggered_absorbs.rs`; Sacred Shield): while the aura lasts, damage
+  that reaches the holder's health raises an `Absorb` of N for D seconds, at
+  most once every S. The hit that sets it off is not absorbed; the shield waits
+  for the next. Its slot (`Combatant::triggered_absorbs`) is pushed as the aura
+  lands and dropped once the aura is gone; a refresh keeps it, cooldown and
+  all. `fire_triggered_absorbs` raises the shield at the end of Phase 3 from
+  the bearer's own state, never inside the damage funnel, and applies
+  `ArenaDampening` there. A new source (an item's, AS-429) is a new variant of
+  `AbsorbTrigger` / `AbsorbSize` / `TriggerLimit` / `AbsorbSource`, each matched
+  exhaustively.
+
 `process_casting` applies every aura it lands through
 `AuraPending::from_ability_scaled`, so an instant routed through a zero-length
 `CastingState` (the Druid's heals, Frost Shock) may set `magnitude_coefficient`;

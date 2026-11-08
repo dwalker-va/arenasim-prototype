@@ -1442,6 +1442,105 @@
             spell_school: Holy,
         ),
 
+        // Retribution Aura: Paladin team aura - Holy damage to melee attackers.
+        // A fourth aura option that only the Protection talent of the same
+        // name offers (talents.ron, WidenChoice); rank 2 patches the damage
+        // 4 -> 6. Each melee hit on a teammate deals the magnitude back to the
+        // attacker (`AuraType::DamageReflect`). TBC 27150: no dispel type.
+        RetributionAura: (
+            name: "Retribution Aura",
+            class: Paladin,
+            prevention: Silence,
+            icon: "icons/abilities/spell_holy_auraoflight.jpg",
+            cast_time: 0.0,
+            range: 100.0,
+            mana_cost: 0.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: DamageReflect,
+                duration: 600.0,
+                magnitude: 4.0,
+                dispel_type: Untyped,  // TBC: a Paladin aura has no dispel type; no purge takes it
+            )),
+            spell_school: Holy,
+        ),
+
+        // Divine Protection (talent, Protection tier 2): the Wrath form - 30%
+        // less damage taken for 8s, 45s cooldown. No lockout shared with
+        // Divine Shield (user ruling: no Forbearance). Refresh-only stacking
+        // keys it by its source, so it sits beside Devotion Aura's 10% (the
+        // damage pipeline applies the strongest). TBC 5573: Magic.
+        DivineProtection: (
+            name: "Divine Protection",
+            class: Paladin,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_holy_restoration.jpg",
+            cast_time: 0.0,
+            range: 0.0,  // Self-cast
+            mana_cost: 15.0,
+            cooldown: 45.0,
+            applies_aura: Some((
+                aura_type: DamageTakenReduction,
+                duration: 8.0,
+                magnitude: 0.30,
+                stacking: Some((max_stacks: 1)),
+            )),
+            spell_school: Holy,
+        ),
+
+        // Blessing of Sacrifice (talent, Protection tier 3): for 12s, 30% of
+        // the damage an ally takes is dealt to the Paladin instead
+        // (`AuraType::DamageTransfer`); 30s cooldown. TBC 27148: Magic.
+        BlessingOfSacrifice: (
+            name: "Blessing of Sacrifice",
+            class: Paladin,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_holy_sealofsacrifice.jpg",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 20.0,
+            cooldown: 30.0,
+            applies_aura: Some((
+                aura_type: DamageTransfer,
+                duration: 12.0,
+                magnitude: 0.30,
+            )),
+            spell_school: Holy,
+        ),
+
+        // Sacred Shield (talent, Protection capstone): an ally gains Sacred
+        // Shield for 30s. Each time it takes damage it gains a shield
+        // absorbing 40 for 6s, at most once every 6s (`triggered_absorbs`):
+        // an aura that holds until the next damage uses it (Wrath's form).
+        // Refresh-only, so a recast renews the 30s without rearming the
+        // shield. Not in TBC; Wrath 53601 (and its absorb, 58597): Magic.
+        SacredShield: (
+            name: "Sacred Shield",
+            class: Paladin,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/ability_paladin_blessedmending.jpg",
+            cast_time: 0.0,
+            range: 40.0,
+            mana_cost: 25.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: TriggeredAbsorb,
+                duration: 30.0,
+                magnitude: 0.0,  // unread: the shield's size is its triggered absorb's
+                stacking: Some((max_stacks: 1)),
+                triggered_absorb: Some((
+                    trigger: DamageTaken,
+                    shield: Flat(40.0),
+                    limit: Cooldown(6.0),
+                    duration: 6.0,
+                )),
+            )),
+            spell_school: Holy,
+        ),
+
         // ============================================================================
         // SHAMAN ABILITIES
         // ============================================================================
