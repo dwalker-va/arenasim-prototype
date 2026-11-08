@@ -55,9 +55,9 @@ pub fn effect_text(effect: &TalentEffect, ranks: u8, abilities: &AbilityDefiniti
         }
         TalentEffect::WidenChoice(option) => {
             format!(
-                "Unlocks {} as a {} choice",
+                "Unlocks {} as {} choice",
                 option_name(*option, abilities),
-                menu_name(option.menu())
+                menu_phrase(option.menu())
             )
         }
         TalentEffect::AddChoiceSlot(slot) => match slot {
@@ -101,16 +101,17 @@ fn option_name(option: ChoiceOption, abilities: &AbilityDefinitions) -> String {
     }
 }
 
-/// A per-match menu's name in a sentence ("a curse choice").
-fn menu_name(menu: ChoiceMenu) -> &'static str {
+/// A per-match menu in a sentence, with its article ("a curse", "an aura"):
+/// each menu carries its own, so no rule guesses one from the spelling.
+fn menu_phrase(menu: ChoiceMenu) -> &'static str {
     match menu {
-        ChoiceMenu::RogueOpener => "stealth opener",
-        ChoiceMenu::RoguePoison => "weapon poison",
-        ChoiceMenu::WarlockCurse => "curse",
-        ChoiceMenu::HunterPet => "pet",
-        ChoiceMenu::WarriorShout => "shout",
-        ChoiceMenu::MageArmor => "armor",
-        ChoiceMenu::PaladinAura => "aura",
+        ChoiceMenu::RogueOpener => "a stealth opener",
+        ChoiceMenu::RoguePoison => "a weapon poison",
+        ChoiceMenu::WarlockCurse => "a curse",
+        ChoiceMenu::HunterPet => "a pet",
+        ChoiceMenu::WarriorShout => "a shout",
+        ChoiceMenu::MageArmor => "an armor",
+        ChoiceMenu::PaladinAura => "an aura",
     }
 }
 
@@ -389,6 +390,32 @@ mod tests {
         assert_eq!(
             effect_text(&wound, 1, abilities()),
             "Unlocks Wound Poison as a weapon poison choice"
+        );
+        // Every menu reads with its own article: the last option that is
+        // not its default, all seven named.
+        let unlocks: Vec<String> = ChoiceMenu::ALL
+            .iter()
+            .map(|menu| {
+                let option = menu
+                    .options()
+                    .into_iter()
+                    .rev()
+                    .find(|o| !o.is_default())
+                    .expect("a menu has a non-default option");
+                effect_text(&TalentEffect::WidenChoice(option), 1, abilities())
+            })
+            .collect();
+        assert_eq!(
+            unlocks,
+            vec![
+                "Unlocks Ambush as a stealth opener choice",
+                "Unlocks Mind-numbing Poison as a weapon poison choice",
+                "Unlocks Curse of Tongues as a curse choice",
+                "Unlocks Bird as a pet choice",
+                "Unlocks Commanding Shout as a shout choice",
+                "Unlocks Molten Armor as an armor choice",
+                "Unlocks Concentration Aura as an aura choice",
+            ]
         );
         let slot = TalentEffect::AddChoiceSlot(ChoiceSlot::OffHandPoison);
         assert_eq!(

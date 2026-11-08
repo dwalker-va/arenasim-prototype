@@ -43,6 +43,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo {
         stealthed: false,
         target: None,
         is_pet: false,
+        pet_heeled: false,
         casting_ability: None,
         pet_type: None,
         pet: None,
@@ -53,6 +54,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo {
 fn pet_info(entity: Entity, team: u8, owner_class: CharacterClass) -> CombatantInfo {
     CombatantInfo {
         is_pet: true,
+        pet_heeled: false,
         casting_ability: None,
         pet_type: Some(PetType::Felhunter),
         book: arenasim::states::play_match::ability_book::AbilityBook::shipped_pet(

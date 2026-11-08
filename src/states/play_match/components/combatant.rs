@@ -507,6 +507,15 @@ pub struct Combatant {
     /// so the next one goes to the shift. Cleared once the Druid is free of
     /// roots and snares.
     pub druid_emergency_heal_spent: bool,
+    /// Pet-specific: the Heel latch ([`heel_latch`](crate::states::play_match::class_ai::pet_ai::heel_latch)).
+    /// A pet heels below `PET_HEEL_ENTER_HP` and stays heeled, recovering
+    /// health at its owner's side, until it is back to `PET_HEEL_RELEASE_HP`.
+    /// Always false for a non-pet.
+    pub pet_heeled: bool,
+    /// Pet-specific: seconds toward the next tick of a heeled pet's recovery
+    /// ([`recover_heeled_pets`](crate::states::play_match::class_ai::pet_ai::recover_heeled_pets)).
+    /// Zero while the pet is not at Heel.
+    pub pet_heel_recovery_timer: f32,
     /// Druid-specific: the duel-melee latch ([`duel_melee`](crate::states::play_match::class_ai::druid::duel_melee)).
     /// While it holds, the Druid's pursuit closes to melee to swing its
     /// staff instead of standing at spell range.
@@ -722,6 +731,8 @@ impl Combatant {
             hunter_opened: false,
             trap_retarget: None,
             druid_emergency_heal_spent: false,
+            pet_heeled: false,
+            pet_heel_recovery_timer: 0.0,
             druid_duel_melee: false,
             proc_trinkets: Vec::new(),
             on_use_items: Vec::new(),

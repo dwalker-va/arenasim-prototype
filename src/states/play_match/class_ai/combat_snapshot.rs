@@ -67,6 +67,7 @@ impl CombatantInfo {
             stealthed: combatant.stealthed,
             target: combatant.target,
             is_pet: pet.is_some(),
+            pet_heeled: pet.is_some() && combatant.pet_heeled,
             casting_ability,
             pet_type: pet.map(|p| p.pet_type),
             pet: owned_pet,

@@ -2,8 +2,8 @@
 //! never one per item (the talents proposal §6.4).
 //!
 //! **The crowd-control break** ([`OnUseEffect::CcBreak`], the Medallion;
-//! user rulings, 2026-10-31). It is asked only while the wearer is HELD — a
-//! stun, fear, polymorph or incapacitate, through
+//! user rulings, 2026-10-31 and 2026-11-07). It is asked only while the
+//! wearer is HELD — a stun, fear, polymorph, incapacitate or Cyclone, through
 //! `combat_ai::dispatch_while_held` — and fires on the first LONG hold that
 //! lands while it is ready: one with [`CC_BREAK_MIN_HOLD_REMAINING`] or more
 //! left on the holds it removes. A shorter hold runs out on its own, and a

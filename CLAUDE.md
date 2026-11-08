@@ -719,7 +719,7 @@ any ring fits either ring socket, and the same item may not occupy both
    proc: Some((
        trigger: MeleeHit,         // MeleeHit | SpellCast | Heal
        chance: 0.15,              // per qualifying event, in (0.0, 1.0]
-       effect: AttackPowerIncrease,
+       effect: Buff(AttackPowerIncrease),  // or ExtraSwing (see below)
        magnitude: 55.0,           // in the effect aura's own units
        duration: 10.0,
        internal_cooldown: 45.0,   // must be >= duration
@@ -748,6 +748,17 @@ any ring fits either ring socket, and the same item may not occupy both
      at their item-stat weights, and haste (`AttackSpeedIncrease`, the
      Dragonspine Trophy's +20% attack speed) at `WEIGHT_ATTACK_SPEED`, crit's
      weight at TBC's rating exchange rate.
+   - **`effect: ExtraSwing`** (Hand of Justice, Gressil) is the one proc that is not a
+     buff: on a `MeleeHit` from either hand it queues one extra MAIN-hand swing
+     on Windfury Totem's own path (`combat_core::ExtraSwingSource`), rolled
+     where the swing is queued rather than after it lands. It takes no
+     `magnitude`, `duration` or `internal_cooldown` (validated), never draws
+     the totem's `WindfuryTornado`, grants no rage (a TBC deviation, AS-448)
+     and no further extra swing, and logs `X procs <trinket> (extra attack)`.
+     No stat buys it, so it is priced at a DECLARED rate per unit of `chance`,
+     `WEIGHT_EXTRA_SWING`: 1.5x haste's weight, provisional (a 10x-dose sweep
+     the constant cites). Every consumer that lists or draws proc BUFFS asks
+     `ItemConfig::proc_buff`, which excludes it.
    - **Procs are not purgeable.** A proc buff is `DispelType::Physical` — an
      item's effect is not a spell, however magical it looks — so no purge,
      dispel or cleanse removes it.
@@ -779,7 +790,7 @@ any ring fits either ring socket, and the same item may not occupy both
      one that declares none.
    - **One AI rule per effect kind, never per item** (`class_ai/on_use.rs`).
      The CC break is asked only while its wearer is HELD — stunned, feared,
-     polymorphed or incapacitated, through `combat_ai::dispatch_while_held`,
+     polymorphed, incapacitated or cycloned, through `combat_ai::dispatch_while_held`,
      ahead of the class's own break (Divine Shield, Berserker Rage) — and
      fires on the first LONG hold: `CC_BREAK_MIN_HOLD_REMAINING` (2s) or more
      left. A root or slow alone never asks it. It WAITS when a teammate is
@@ -789,11 +800,12 @@ any ring fits either ring socket, and the same item may not occupy both
      reaches range at its base speed within `wait_budget`: the grace left, or
      the hold left above the floor), at most `DISPEL_WAIT_GRACE_SECS` (a GCD
      and half a second), re-asked every tick. It breaks every stun, fear (horror
-     included), polymorph, incapacitate, root and slow (`cc_break_breaks`),
-     never a silence, and grants no immunity. Cyclone is the one line
-     `CC_BREAK_TAKES_CYCLONE` (false, as in TBC: nothing is used from inside
-     one). Traced as an `item_decision` event (`item`, `status`, `reason` —
-     "short hold" or "waiting for <id>'s <dispel>"); `Scene::on_use_item` and
+     included), polymorph, incapacitate, Cyclone, root and slow
+     (`cc_break_breaks`), never a silence, and grants no immunity. It breaks a
+     Cyclone as TBC's PvP trinket does; the class breaks (Divine Shield,
+     Berserker Rage) are not used from inside one. Traced as an
+     `item_decision` event (`item`, `status`, `reason` — "short hold" or
+     "waiting for <id>'s <dispel>"); `Scene::on_use_item` and
      `Scene::decide_held` test it.
    - Its line ("Use: …") is `ItemConfig::effect_description`, shared by the
      encyclopedia page, the tooltip and the equipment picker. Its landing is in
@@ -1408,7 +1420,7 @@ scripts/paired_sweep.py before.csv after.csv \
 - **Paladin**: Mana, healer/melee, Holy Shock/Flash of Light/Hammer of Justice
 - **Shaman**: Mana, offensive healer, Lightning Bolt/Lesser Healing Wave/Purge/Wind Shear/Frost Shock and totems
 - **Druid**: Mana, restoration healer (instant heals over time) and control, Rejuvenation/Lifebloom/Swiftmend/Entangling Roots/Cyclone/Moonfire/Innervate, a Travel Form escape shift; no wand
-- **Hunter**: Mana, ranged physical DPS with pet, Aimed Shot/Arcane Shot/Concussive Shot/Disengage/Freezing Trap/Frost Trap/Flare. Two auto-attacks on separate timers: Auto Shot at 8-35yd, and a melee swing from its main-hand (and off-hand) weapon inside `MELEE_RANGE` when it holds one (the default loadout does not); nothing in the dead zone between (see `docs/design/wow-mechanics.md`, Auto-Attacks). Pet engagement model: pet inherits Hunter's target, pursues into melee via existing target-pursuit movement, and retreats ("Heel") when pet HP drops below 25%. Per-pet headline abilities (Spider Web, Boar Charge, Master's Call) are dispatched by Hunter AI via the `PetCommand` component (hybrid model — Hunter owns headline calls, pet handles auto-attacks and pursuit). When Hunter is mid-cast (CastingState excludes it from `decide_abilities`), `pet_ai_system` falls back to autonomous dispatch using the same predicate logic; trace events distinguish via `dispatched_by` (set for Hunter dispatch, omitted for autonomous). Iteration 2a shipped pet target ownership + Heel predicate + PetCommand framework; iteration 2b shipped the Hunter `try_dispatch_*` helpers plus the pet-side `pet_command_rejection` authoritative check, with the autonomous fallback kept to cover Hunter's CastingState windows.
+- **Hunter**: Mana, ranged physical DPS with pet, Aimed Shot/Arcane Shot/Concussive Shot/Disengage/Freezing Trap/Frost Trap/Flare. Two auto-attacks on separate timers: Auto Shot at 8-35yd, and a melee swing from its main-hand (and off-hand) weapon inside `MELEE_RANGE` when it holds one (the default loadout does not); nothing in the dead zone between (see `docs/design/wow-mechanics.md`, Auto-Attacks). Pet engagement model: pet inherits Hunter's target, pursues into melee via existing target-pursuit movement, and retreats ("Heel") when pet HP drops below 25%. A heeled pet — every pet, the Warlock's Felhunter included — recovers 2% of its maximum health a second at its owner's side, in one tick a second like a heal over time (`pet_ai::recover_heeled_pets`; the 2% is provisional), and re-engages once back to 50% (`pet_ai::heel_latch`). The recovery is healing: healing reduction cuts it, with one Mortal Wounds tell a tick, and dampening cuts it to nothing at full dampening. No healer heals a pet. Per-pet headline abilities (Spider Web, Boar Charge, Master's Call) are dispatched by Hunter AI via the `PetCommand` component (hybrid model — Hunter owns headline calls, pet handles auto-attacks and pursuit). When Hunter is mid-cast (CastingState excludes it from `decide_abilities`), `pet_ai_system` falls back to autonomous dispatch using the same predicate logic; trace events distinguish via `dispatched_by` (set for Hunter dispatch, omitted for autonomous). Iteration 2a shipped pet target ownership + Heel predicate + PetCommand framework; iteration 2b shipped the Hunter `try_dispatch_*` helpers plus the pet-side `pet_command_rejection` authoritative check, with the autonomous fallback kept to cover Hunter's CastingState windows.
 
 ## Common Tasks
 
@@ -1649,7 +1661,7 @@ jq -c 'select(.kind == "pet_decision") | {owner, pet_type, ability: .outcome.abi
 # this recipe filters to non-null values.
 jq -c 'select(.kind == "pet_decision" and .dispatched_by != null) | {owner, pet_type, ability: .outcome.ability, dispatched_by}' $T
 
-# Heel-state retreats (pet HP < 25%, target cleared, returns to owner's
+# Heel-state retreats (pet HP < 25% until it recovers to 50%; target cleared, returns to owner's
 # flank, queued PetCommand despawned without execution)
 jq -c 'select(.kind == "pet_decision") | .candidates[]? | select((.reason | if type == "object" then keys[0] else . end) == "LowHealthHeel")' $T | wc -l
 

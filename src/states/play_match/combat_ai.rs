@@ -817,9 +817,9 @@ pub struct DispatchIo<'r, 'w, 's> {
 ///
 /// In order: an on-use item's crowd-control break (any class wearing one,
 /// `class_ai::on_use`), then the class's own (the Paladin's Divine Shield,
-/// the Warrior's Berserker Rage). Nothing is used from inside a Cyclone
-/// (`cycloned`) — the on-use break only if it takes one
-/// ([`CC_BREAK_TAKES_CYCLONE`](crate::states::play_match::on_use_items::CC_BREAK_TAKES_CYCLONE)).
+/// the Warrior's Berserker Rage). From inside a Cyclone (`cycloned`) only the
+/// on-use break may be used: it breaks a Cyclone, as TBC's trinket does, and
+/// the class breaks do not.
 /// Each arm owns its trace event, because the class decision never runs this
 /// frame. Returns whether the unit acted; the break lands next frame either way.
 #[allow(clippy::too_many_arguments)]
@@ -840,7 +840,6 @@ pub fn dispatch_while_held(
     } = io;
 
     if !combatant.on_use_items.is_empty()
-        && (!cycloned || crate::states::play_match::on_use_items::CC_BREAK_TAKES_CYCLONE)
         && class_ai::on_use::try_cc_break_while_held(
             commands,
             decision_trace,
@@ -1737,8 +1736,9 @@ pub fn decide_abilities(
                     .any(|a| super::utils::is_incapacitating(&a.effect_type))
             })
             .unwrap_or(false);
-        // Nothing is used from inside a Cyclone — not even the CC-break
-        // cooldowns below, which answer the CC a Cyclone is not.
+        // Inside a Cyclone only an on-use item's crowd-control break may be
+        // used — not the class CC-break cooldowns, which answer the CC a
+        // Cyclone is not.
         let is_cycloned = snapshot
             .active_auras
             .get(&entity)
