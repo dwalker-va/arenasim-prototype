@@ -221,7 +221,7 @@ impl EngineAura {
         all.extend(
             ItemId::all()
                 .iter()
-                .filter(|id| items.get(id).is_some_and(|i| i.proc.is_some()))
+                .filter(|id| items.get(id).is_some_and(|i| i.proc_buff().is_some()))
                 .copied()
                 .map(EngineAura::ProcTrinketBuff),
         );
@@ -888,11 +888,11 @@ fn engine_entry(
         }
         EngineAura::ProcTrinketBuff(item) => {
             let def = items.get(&item)?;
-            let proc = def.proc.as_ref()?;
+            let proc = def.proc_buff()?;
             EngineSpec {
                 name: def.name.clone(),
                 frame_name: None,
-                mechanic: proc.effect,
+                mechanic: proc.buff()?,
                 // The trinket is not an ability and has no page of its own to
                 // link to from here; the ITEM's page is where its numbers live,
                 // and the provenance line below names it.
@@ -1546,7 +1546,7 @@ mod tests {
         ItemId::all()
             .iter()
             .filter_map(|id| items.get(id))
-            .filter(|item| item.proc.is_some())
+            .filter(|item| item.proc_buff().is_some())
             .map(|item| item.name.clone())
             .collect()
     }
