@@ -10,7 +10,7 @@ use super::class_ai;
 use super::components::*;
 use super::constants::{TRAP_ARM_DELAY, TRAP_LAUNCH_SPEED};
 use super::match_config;
-use super::situation::{update_situations, MatchClock, SituationConfig, Situations};
+use super::situation::{update_situations, MatchClock, Role, SituationConfig, Situations};
 use super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
 use crate::combat::log::CombatLog;
 use bevy::ecs::system::SystemParam;
@@ -89,13 +89,15 @@ pub fn acquire_targets(
         .collect();
 
     // Build list of all alive combatants with their info
-    // Tuple: (entity, position, stealthed, has_shadow_sight, class, current_health, is_immune, is_pet)
+    // Tuple: (entity, position, stealthed, has_shadow_sight, (class, role), current_health, is_immune, is_pet).
+    // Healer questions read the ROLE, never the class: a Shadowform Priest is
+    // no enemy healer to crowd-control or to avoid trapping.
     let mut team1_combatants: Vec<(
         Entity,
         Vec3,
         bool,
         bool,
-        match_config::CharacterClass,
+        (match_config::CharacterClass, Role),
         f32,
         bool,
         bool,
@@ -105,7 +107,7 @@ pub fn acquire_targets(
         Vec3,
         bool,
         bool,
-        match_config::CharacterClass,
+        (match_config::CharacterClass, Role),
         f32,
         bool,
         bool,
@@ -140,7 +142,7 @@ pub fn acquire_targets(
                 transform.translation,
                 c.stealthed,
                 has_shadow_sight,
-                c.class,
+                (c.class, c.role()),
                 c.current_health,
                 is_immune,
                 is_pet,
@@ -151,7 +153,7 @@ pub fn acquire_targets(
                 transform.translation,
                 c.stealthed,
                 has_shadow_sight,
-                c.class,
+                (c.class, c.role()),
                 c.current_health,
                 is_immune,
                 is_pet,
@@ -360,7 +362,7 @@ pub fn acquire_targets(
             if let Some(next) = class_ai::target_focus::retarget(
                 focus,
                 entity,
-                combatant.class,
+                combatant.role(),
                 transform.translation,
                 combatant.target,
                 kill_subject,
@@ -409,8 +411,8 @@ pub fn acquire_targets(
         let is_healer = |target: Entity| {
             enemy_combatants
                 .iter()
-                .any(|(e, _, _, _, class, _, _, is_pet)| {
-                    *e == target && !is_pet && class.is_healer()
+                .any(|(e, _, _, _, (_, role), _, _, is_pet)| {
+                    *e == target && !is_pet && *role == Role::Healer
                 })
         };
         if let Some(avoid) = combatant
@@ -423,7 +425,7 @@ pub fn acquire_targets(
                 Vec3,
                 bool,
                 bool,
-                match_config::CharacterClass,
+                (match_config::CharacterClass, Role),
                 f32,
                 bool,
                 bool,
@@ -616,7 +618,7 @@ pub fn acquire_targets(
                 enemy_pos,
                 stealthed,
                 enemy_ss,
-                enemy_class,
+                (enemy_class, _),
                 enemy_hp,
                 enemy_immune,
                 is_pet,
@@ -689,7 +691,7 @@ pub fn select_cc_target_heuristic(
         Vec3,
         bool,
         bool,
-        match_config::CharacterClass,
+        (match_config::CharacterClass, Role),
         f32,
         bool,
         bool,
@@ -704,7 +706,7 @@ pub fn select_cc_target_heuristic(
             enemy_combatants
                 .iter()
                 .find(|(e, _, _, _, _, _, _, _)| *e == kt)
-                .map(|(_, _, _, _, class, _, _, _)| class.is_healer())
+                .map(|(_, _, _, _, (_, role), _, _, _)| *role == Role::Healer)
         })
         .unwrap_or(false);
 
@@ -716,9 +718,9 @@ pub fn select_cc_target_heuristic(
             can_see(*stealthed, *enemy_ss) && !immune && !is_pet
         })
         .filter(|(entity, _, _, _, _, _, _, _)| !is_entity_ccd(*entity, active_auras_map))
-        .map(|(entity, _, _, _, class, current_health, _, _)| {
+        .map(|(entity, _, _, _, (_, role), current_health, _, _)| {
             let mut score = 0i32;
-            let is_healer = class.is_healer();
+            let is_healer = *role == Role::Healer;
 
             // Healer/DPS priority depends on who we're killing
             if killing_healer {
@@ -1026,6 +1028,51 @@ pub fn dispatch_class_decision(
                 auras,
                 ctx,
                 frost_nova_damage,
+                same_frame_cc_queue,
+                decision_trace,
+            )
+        }
+        match_config::CharacterClass::Priest
+            if combatant.priest_form == match_config::PriestForm::Shadowform =>
+        {
+            // A Shadowform Priest is a ranged damage dealer (AS-413): no
+            // healer posture machine. It moves as the Warlock does — the
+            // shared pursuit to its preferred range, walking for sight, and
+            // the Hunt play's station when its team hunts — because, like the
+            // Warlock, it stands and casts: DoT, nuke, a point-blank fear for
+            // a melee that reaches it. The kiters' ENGAGE/KITE machine is
+            // built round a snare and a long-range nuke it does not have.
+            if gates_opened {
+                if let (Some((_healer, _kite, directive, _reset, _flare)), Some(station)) =
+                    (posture, ctx.hunt_station())
+                {
+                    class_ai::hunt::walk_to_station(
+                        commands,
+                        entity,
+                        my_pos,
+                        station,
+                        directive,
+                        crate::states::play_match::decision_trace::Posture::Engage,
+                        movement_config.shared.commit_window,
+                        movement_config.shared.directive_ttl,
+                        now,
+                        ctx,
+                        decision_trace,
+                    );
+                }
+            }
+            class_ai::priest::decide_shadow_priest_action(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                shielded_this_frame,
+                fortified_this_frame,
+                movement_config,
                 same_frame_cc_queue,
                 decision_trace,
             )

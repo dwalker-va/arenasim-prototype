@@ -240,6 +240,7 @@ pub enum AbilityType {
     // the enum's derived `Ord` keys every `BTreeMap<AbilityType, _>`, so a
     // variant inserted mid-list would reorder what existing ones iterate.
     ShadowWordPain, // Priest instant Shadow DoT
+    Shadowform,     // Priest form, held all match: a talent's Form choice (AS-413)
 }
 
 impl AbilityType {
@@ -279,7 +280,7 @@ impl AbilityType {
             | ConcentrationAura | LightningBolt | FrostShock | LesserHealingWave | Purge
             | WindShear | AirTotem | WaterTotem | EarthTotem | FireTotem | Rejuvenation
             | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild | Innervate | EntanglingRoots
-            | Cyclone | TravelForm => false,
+            | Cyclone | TravelForm | Shadowform => false,
         }
     }
 

@@ -47,6 +47,7 @@ use super::components::{ActiveAuras, AuraType, Combatant, MatchCountdown};
 use super::constants::PET_SLOT_BASE;
 use super::map_config::ActiveMapGeometry;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS};
+use super::situation::Role;
 use crate::states::match_config::CharacterClass;
 
 /// Where a team wants the fight to happen.
@@ -180,12 +181,15 @@ impl CompProfile {
 
 /// Classify a roster of classes. Pure, so plan selection is testable without a
 /// `World`.
-pub fn classify_comp(classes: &[CharacterClass]) -> CompProfile {
+pub fn classify_comp(units: &[(CharacterClass, Role)]) -> CompProfile {
     CompProfile {
-        has_melee: classes.iter().any(|c| c.is_melee()),
-        has_healer: classes.iter().any(|c| c.is_healer()),
+        has_melee: units.iter().any(|(c, _)| c.is_melee()),
+        // The ROLE: a Shadowform Priest heals no one.
+        has_healer: units.iter().any(|(_, r)| *r == Role::Healer),
         // A healer that is also melee (Paladin) does not make a team "ranged".
-        has_ranged: classes.iter().any(|c| !c.is_melee() && !c.is_healer()),
+        has_ranged: units
+            .iter()
+            .any(|(c, r)| !c.is_melee() && *r != Role::Healer),
     }
 }
 
@@ -564,7 +568,7 @@ pub fn update_team_plans(
                     .any(|aura| aura.effect_type == AuraType::ShadowSight)
             }),
             is_melee: c.class.is_melee(),
-            is_healer: c.class.is_healer(),
+            is_healer: c.is_healer(),
             is_pet: c.slot >= PET_SLOT_BASE,
         })
         .collect();
@@ -648,13 +652,13 @@ pub fn update_team_plans(
         if !profiles.for_team(team).is_team_plan() {
             return None;
         }
-        let classes: Vec<CharacterClass> = combatants
+        let units: Vec<(CharacterClass, Role)> = combatants
             .iter()
             .map(|(_, c, _, _)| c)
             .filter(|c| c.team == team && c.is_alive() && c.slot < PET_SLOT_BASE)
-            .map(|c| c.class)
+            .map(|c| (c.class, c.role()))
             .collect();
-        let comp = classify_comp(&classes);
+        let comp = classify_comp(&units);
 
         // Team 1 spawns at -x, team 2 at +x. Camping the cover nearest our own
         // gate is what makes the enemy walk to us; camping theirs would mean
@@ -1607,7 +1611,10 @@ mod tests {
 
     #[test]
     fn melee_plus_healer_wants_to_camp() {
-        let comp = classify_comp(&[CharacterClass::Warrior, CharacterClass::Priest]);
+        let comp = classify_comp(&[
+            (CharacterClass::Warrior, Role::of(CharacterClass::Warrior)),
+            (CharacterClass::Priest, Role::of(CharacterClass::Priest)),
+        ]);
         assert!(
             comp.wants_to_camp(),
             "melee + healer is the camping archetype"
@@ -1618,7 +1625,10 @@ mod tests {
     /// enemy walk to it.
     #[test]
     fn double_ranged_does_not_camp() {
-        let comp = classify_comp(&[CharacterClass::Mage, CharacterClass::Warlock]);
+        let comp = classify_comp(&[
+            (CharacterClass::Mage, Role::of(CharacterClass::Mage)),
+            (CharacterClass::Warlock, Role::of(CharacterClass::Warlock)),
+        ]);
         assert!(!comp.wants_to_camp());
         assert!(comp.has_ranged);
     }
@@ -1627,7 +1637,7 @@ mod tests {
     /// and must NOT be counted as ranged.
     #[test]
     fn paladin_counts_as_melee_and_healer_but_not_ranged() {
-        let comp = classify_comp(&[CharacterClass::Paladin]);
+        let comp = classify_comp(&[(CharacterClass::Paladin, Role::of(CharacterClass::Paladin))]);
         assert!(comp.has_melee && comp.has_healer);
         assert!(
             !comp.has_ranged,

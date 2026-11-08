@@ -424,7 +424,7 @@ impl Scene {
         let next = super::target_focus::retarget(
             focus,
             me.entity,
-            me.class,
+            me.role,
             me.position,
             me.target,
             kill_subject,
@@ -586,6 +586,49 @@ impl Scene {
         let unit = self.unit_mut(who);
         unit.combatant = unit.combatant.clone().with_book(locked);
         self
+    }
+
+    /// `who`, a Priest, with `form` chosen for the match as a spawn resolves
+    /// it: the form's spell granted (the Shadowform talent's `Grant`), the
+    /// abilities `talents.ron`'s choice rules lock for that choice locked, and
+    /// `Combatant::priest_form` set. It does not take the form: add
+    /// [`Scene::in_shadowform`] for a Priest that has.
+    pub fn priest_form(mut self, who: Who, form: crate::states::match_config::PriestForm) -> Self {
+        use crate::states::play_match::talent_choices::{ChoiceOption, SlotChoices};
+        use crate::states::play_match::talents::TalentDefinitions;
+        let choices = SlotChoices::of(&[ChoiceOption::PriestForm(form)], &[]);
+        let locked = TalentDefinitions::shipped().locked_by(&choices);
+        let mut book = self.unit_mut(who).combatant.book().clone();
+        if let Some(spell) = form.ability() {
+            book = book.granting(&self.abilities, spell);
+        }
+        let book = book.locking(&locked);
+        let unit = self.unit_mut(who);
+        unit.combatant = unit.combatant.clone().with_book(book);
+        unit.combatant.priest_form = form;
+        self
+    }
+
+    /// `who` holding Shadowform, as a Shadowform Priest does from before the
+    /// gates: [`Scene::priest_form`] with Shadowform, and the form's aura and
+    /// its rider on it, as its own cast landed them.
+    pub fn in_shadowform(self, who: Who) -> Self {
+        let mut s = self.priest_form(who, crate::states::match_config::PriestForm::Shadowform);
+        let entity = s.entity(who);
+        let def = s.abilities.get_unchecked(&AbilityType::Shadowform).clone();
+        let pending =
+            AuraPending::from_ability(entity, entity, &def).expect("Shadowform applies an aura");
+        let face = pending.aura;
+        let riders = face
+            .compound
+            .map(crate::states::play_match::combat_core::compound_riders)
+            .unwrap_or_default();
+        for mut aura in std::iter::once(face.clone()).chain(riders) {
+            aura.caster = Some(entity);
+            aura.duration = face.duration;
+            s = s.aura_full(who, aura);
+        }
+        s
     }
 
     /// The healer posture state `who` carries into the decision.
@@ -1120,21 +1163,32 @@ impl Scene {
             };
             let def = u.combatant.book().get_unchecked(&ability);
             let channel = def.is_channel();
+            if !channel {
+                // A cast is read through the production constructor, as
+                // `check_interrupts` reads a live `CastingState`.
+                let cast = crate::states::play_match::components::CastingState::new(
+                    ability,
+                    u.entity,
+                    def.cast_time.max(0.1),
+                );
+                casts.insert(
+                    u.entity,
+                    EnemyCast::casting(u.entity, &u.combatant, u.position, &cast),
+                );
+                continue;
+            }
             casts.insert(
                 u.entity,
                 EnemyCast {
                     entity: u.entity,
                     team: u.combatant.team,
                     class: u.combatant.class,
+                    healer: u.combatant.is_healer(),
                     alive: u.combatant.is_alive(),
                     position: u.position,
                     ability,
-                    channel,
-                    take: if channel {
-                        CastTake::Takes
-                    } else {
-                        CastTake::of_cast(def, false)
-                    },
+                    channel: true,
+                    take: CastTake::Takes,
                     heal: def.is_heal(),
                 },
             );

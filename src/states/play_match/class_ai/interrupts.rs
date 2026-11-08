@@ -86,6 +86,9 @@ pub struct EnemyCast {
     pub entity: Entity,
     pub team: u8,
     pub class: CharacterClass,
+    /// Whether the caster heals its team (`Combatant::is_healer`, its role):
+    /// the Shaman's Wind Shear takes a healer's cast first.
+    pub healer: bool,
     pub alive: bool,
     pub position: Vec3,
     /// The ability being cast or channelled.
@@ -121,6 +124,7 @@ impl EnemyCast {
             entity,
             team: combatant.team,
             class: combatant.class,
+            healer: combatant.is_healer(),
             alive: combatant.is_alive(),
             position,
             ability: cast.ability,
@@ -141,6 +145,7 @@ impl EnemyCast {
             entity,
             team: combatant.team,
             class: combatant.class,
+            healer: combatant.is_healer(),
             alive: combatant.is_alive(),
             position,
             ability: channel.ability,
@@ -255,7 +260,7 @@ pub fn decide_interrupt(
                 }
                 _ => continue,
             }
-            let is_healer = c.class.is_healer();
+            let is_healer = c.healer;
             let replace = match best {
                 None => true,
                 Some((be, bh, bd)) => {

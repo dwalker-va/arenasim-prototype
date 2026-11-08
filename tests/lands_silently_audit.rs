@@ -690,6 +690,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     PowerWordShield,
     Rejuvenation,
     ShadowResistanceAura,
+    Shadowform,
     TravelForm,
     WaterTotem,
     WoundPoison,
@@ -790,6 +791,8 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
     (MindNumbingPoison, "AS-341 (weapon poison landing)"),
+    // The form on the Priest all match: AS-333 scoped it, AS-343 draws it.
+    (Shadowform, "AS-343 (Shadowform)"),
 ];
 
 #[test]

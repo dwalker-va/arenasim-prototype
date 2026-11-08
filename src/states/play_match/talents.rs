@@ -119,12 +119,17 @@ talent_ids! {
     DemonicEmbrace,
     FelStamina,
     UnholyPower,
+    // Priest: Shadow
+    ImprovedMindBlast,
+    ImprovedPsychicScream,
+    Shadowform,
 }
 
 /// A talent tree. A tree is named per class: `(class, TreeId)` is the key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TreeId {
     Demonology,
+    Shadow,
 }
 
 /// One tree of a class, as `talents.ron` lists it. A class's trees are in

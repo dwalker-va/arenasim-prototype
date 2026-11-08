@@ -1962,6 +1962,7 @@ mod tests {
                 "Molten Armor",
                 "Healing Stream Totem",
                 "Shadow Resistance Aura",
+                "Shadowform",
                 "Strength of Earth Totem",
                 "Travel Form",
                 "Windfury Totem",

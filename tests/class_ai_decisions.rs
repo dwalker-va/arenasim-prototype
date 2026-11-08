@@ -48,6 +48,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo {
         pet_type: None,
         pet: None,
         book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+        role: arenasim::states::play_match::situation::Role::of(class),
     }
 }
 

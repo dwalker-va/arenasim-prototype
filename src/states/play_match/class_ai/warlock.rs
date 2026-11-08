@@ -74,7 +74,7 @@ fn is_being_kited(
 fn pick_healer_to_fear(kill_target: Entity, ctx: &CombatContext) -> Option<Entity> {
     ctx.alive_enemies()
         .into_iter()
-        .filter(|info| info.class.is_healer())
+        .filter(|info| info.is_healer())
         .map(|info| info.entity)
         // Don't Fear the target we're actively trying to kill.
         .filter(|&healer| healer != kill_target)

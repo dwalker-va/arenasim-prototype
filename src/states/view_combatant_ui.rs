@@ -38,8 +38,8 @@ use super::play_match::rendering::{icon_load_settled, item_aura_icons, GENERIC_A
 use super::play_match::AbilityType;
 use super::{
     match_config::{
-        CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, RogueOpener,
-        RoguePoison, WarlockCurse, WarriorShout,
+        CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, PriestForm,
+        RogueOpener, RoguePoison, WarlockCurse, WarriorShout,
     },
     GameState,
 };
@@ -788,7 +788,16 @@ fn draw_sheet(
                 encyclopedia_data,
             );
         }
-        CharacterClass::Priest | CharacterClass::Shaman | CharacterClass::Druid => {}
+        CharacterClass::Priest => {
+            render_priest_form_panel(
+                ui,
+                view_state,
+                match_config,
+                &ability_icon,
+                encyclopedia_data,
+            );
+        }
+        CharacterClass::Shaman | CharacterClass::Druid => {}
     }
 
     // The pet whose abilities belong in THIS combatant's kit. View Combatant is
@@ -1780,6 +1789,63 @@ impl HasNameDescription for PaladinAura {
     }
     fn ability(&self) -> AbilityType {
         self.ability()
+    }
+}
+
+/// Render the Priest's Form choice — only for a build a talent offers a form
+/// to (Shadowform): with no form but the default to choose, there is no
+/// choice, and nothing is drawn.
+fn render_priest_form_panel(
+    ui: &mut egui::Ui,
+    view_state: &ViewCombatantState,
+    match_config: &mut MatchConfig,
+    ability_icon: &dyn Fn(&str) -> Option<egui::TextureId>,
+    data: &EncyclopediaData,
+) {
+    use super::play_match::talent_choices::{ChoiceMenu, ChoiceOption as MenuOption};
+    use super::play_match::talents::TalentDefinitions;
+    let builds = if view_state.team == 1 {
+        &match_config.team1_builds
+    } else {
+        &match_config.team2_builds
+    };
+    let build = builds.get(view_state.slot).cloned().unwrap_or_default();
+    let offered: Vec<PriestForm> = TalentDefinitions::shipped()
+        .offered(&build, ChoiceMenu::PriestForm)
+        .into_iter()
+        .filter_map(|o| match o {
+            MenuOption::PriestForm(form) => Some(form),
+            _ => None,
+        })
+        .collect();
+    if offered.len() < 2 {
+        return;
+    }
+    ui.add_space(space::LG);
+    let current = slot_value(
+        &match_config.team1_priest_forms,
+        &match_config.team2_priest_forms,
+        view_state,
+    );
+    let tiles: Vec<ChoiceOption> = offered
+        .iter()
+        .map(|form| ChoiceOption {
+            label: form.name(),
+            texture: form.ability().and_then(|_| ability_icon(form.name())),
+            ability: form.ability(),
+        })
+        .collect();
+    let selected = offered
+        .iter()
+        .position(|f| *f == current)
+        .unwrap_or_default();
+    if let Some(i) = choice_panel(ui, "Form", &tiles, selected, current.description(), data) {
+        set_slot_value(
+            &mut match_config.team1_priest_forms,
+            &mut match_config.team2_priest_forms,
+            view_state,
+            offered[i],
+        );
     }
 }
 

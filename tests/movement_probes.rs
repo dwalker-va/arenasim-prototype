@@ -2876,6 +2876,7 @@ mod paladin_unit {
             pet_type: None,
             pet: None,
             book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+            role: arenasim::states::play_match::situation::Role::of(class),
         }
     }
 
@@ -3161,6 +3162,7 @@ mod bucket_a_unit {
             pet_type: None,
             pet: None,
             book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+            role: arenasim::states::play_match::situation::Role::of(class),
         }
     }
 
@@ -4968,6 +4970,7 @@ mod u9_seek_reset {
             pet_type: None,
             pet: None,
             book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+            role: arenasim::states::play_match::situation::Role::of(class),
         }
     }
 

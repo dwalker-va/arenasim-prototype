@@ -365,7 +365,7 @@ pub fn evaluate_paladin_posture(
 
     // HoJ reservation (R8) — unless the dip tick already claimed the cast.
     if !matches!(plan.hoj, HojPlan::DipCast { .. }) {
-        let enemy_healer_alive = ctx.alive_enemies().iter().any(|e| e.class.is_healer());
+        let enemy_healer_alive = ctx.alive_enemies().iter().any(|e| e.is_healer());
         plan.hoj = if rotation_hoj_allowed(state.posture, enemy_healer_alive) {
             HojPlan::Rotation
         } else {

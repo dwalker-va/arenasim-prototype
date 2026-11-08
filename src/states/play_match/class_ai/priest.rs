@@ -16,13 +16,29 @@
 //! 7. Mind Blast (damage when allies are healthy)
 //! 8. Shadow Word: Pain on the kill target, when no heal or dispel is owed
 //!    (`TeamPlan` only)
+//!
+//! ## Shadowform
+//! A Priest whose Form choice is Shadowform (AS-413) is a ranged damage
+//! dealer: it heals no one (`talents.ron`'s choice rules lock Flash Heal), so
+//! it runs [`decide_shadow_priest_action`] instead of the chain above, and a
+//! damage dealer's movement (the Warlock's pursuit, `combat_ai`) instead of
+//! the healer posture machine. Its order, under the play pipeline's steps:
+//! 1. Shadowform, until it holds the form (before the gates)
+//! 2. Power Word: Fortitude (buff all allies pre-combat)
+//! 3. Dispel Magic - Urgent
+//! 4. Psychic Scream (defensive, while pressured)
+//! 5. Power Word: Shield (shield low-health allies)
+//! 6. Shadow Word: Pain on the kill target, kept up: a core DoT here (user
+//!    ruling 2026-10-29)
+//! 7. Mind Blast on the kill target
+//! 8. Mana Burn on the enemy healer
 #![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
 use std::collections::HashSet;
 
 use crate::combat::log::CombatLog;
-use crate::states::match_config::CharacterClass;
+use crate::states::match_config::{CharacterClass, PriestForm};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::ability_config::AbilityConfig;
@@ -36,7 +52,6 @@ use crate::states::play_match::decision_trace::{
     Posture as TracePosture, RejectionReason,
 };
 use crate::states::play_match::movement_config::{MovementConfig, SharedMovementConfig};
-use crate::states::play_match::situation::Role;
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::cast_guard::{cast_gate, pre_cast_ok, unreached_reason, Cleared, PreCastOpts};
@@ -140,7 +155,7 @@ pub fn decide_priest_action(
 
     // The Peel play (TeamPlan): a teammate is in danger, so Psychic Scream
     // heads the chain when one of its attackers stands inside the scream.
-    if let Some(call) = super::peel::peel_call(ctx, Role::Healer) {
+    if let Some(call) = super::peel::peel_call(ctx, combatant.role()) {
         if try_peel_psychic_scream(
             commands,
             combat_log,
@@ -258,6 +273,7 @@ pub fn decide_priest_action(
         auras,
         ctx,
         plan.pressured,
+        true,
         &movement.shared,
         same_frame_cc_queue,
         &mut builder,
@@ -341,6 +357,7 @@ pub fn decide_priest_action(
     }
 
     // Priority 7: Mind Blast
+    let target = combatant.target;
     if try_mind_blast(
         commands,
         combat_log,
@@ -351,6 +368,7 @@ pub fn decide_priest_action(
         auras,
         ctx,
         escape_defer,
+        target,
         &mut builder,
     ) {
         builder.finish();
@@ -378,6 +396,326 @@ pub fn decide_priest_action(
     false
 }
 
+/// A Shadowform Priest's decision: a ranged damage dealer's chain (see the
+/// module docs). Its Peel step is the healing Priest's Psychic Scream; its
+/// Burst step is Mind Blast on the kill window's enemy. AS-416's grants take
+/// the slots marked below: Silence on an enemy healer's cast (castable only in
+/// the form), Vampiric Embrace on the kill target, and Mind Flay as the
+/// filler.
+///
+/// Returns `true` if an action was taken this frame.
+pub fn decide_shadow_priest_action(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    shielded_this_frame: &mut HashSet<Entity>,
+    fortified_this_frame: &mut HashSet<Entity>,
+    movement: &MovementConfig,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
+    decision_trace: &mut DecisionTrace,
+) -> bool {
+    if combatant.global_cooldown > 0.0 {
+        return false;
+    }
+    let Some(mut builder) = ctx.start_ability_decision(decision_trace, combatant.target, my_pos)
+    else {
+        return false;
+    };
+
+    // Priority 1: the form itself, before anything else it changes.
+    if try_shadowform(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // The Peel play (TeamPlan): as a damage dealer the Priest peels with the
+    // same Psychic Scream.
+    if let Some(call) = super::peel::peel_call(ctx, combatant.role()) {
+        if try_peel_psychic_scream(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            &call.attackers,
+            same_frame_cc_queue,
+            &mut builder,
+        ) {
+            builder.play_step(PlayStep::Peel);
+            builder.finish();
+            return true;
+        }
+    }
+
+    // The Burst play (TeamPlan): Mind Blast on the kill window's enemy heads
+    // the chain, if it lands before the window ends (the cast gate's fit).
+    if let Some(call) = super::burst::burst_call(ctx) {
+        if try_mind_blast(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            None,
+            Some(call.subject),
+            &mut builder,
+        ) {
+            builder.play_step(PlayStep::Burst);
+            builder.finish();
+            return true;
+        }
+    }
+
+    // Priority 2: Power Word: Fortitude — castable in the form.
+    if try_fortitude(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        fortified_this_frame,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // Priority 3: Dispel Magic - Urgent — castable in the form.
+    if try_dispel_magic(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        super::URGENT_DISPEL_PRIORITY,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // Priority 4: Psychic Scream, defensively, while pressured. There is no
+    // heal to hold it for.
+    let pressured = super::healer_postures::compound_pressure_trigger(entity, ctx);
+    if try_psychic_scream(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        pressured,
+        false,
+        &movement.shared,
+        same_frame_cc_queue,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // Priority 5: Power Word: Shield — castable in the form.
+    if try_power_word_shield(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        shielded_this_frame,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // (AS-416: Silence on an enemy healer's cast, here.)
+
+    // Priority 6: Shadow Word: Pain on the kill target, kept up — a core DoT
+    // in the form, never waiting on a heal it cannot cast.
+    if cast_shadow_word_pain(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // (AS-416: Vampiric Embrace on the kill target, here.)
+
+    // Priority 7: Mind Blast on the kill target.
+    let target = combatant.target;
+    if try_mind_blast(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        None,
+        target,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // (AS-416: Mind Flay, the filler, here.)
+
+    // Priority 8: Mana Burn on the enemy healer — once the Priest stands in
+    // its damage spells' reach of its target. Its 40 yards outreach Mind
+    // Blast's and Shadow Word: Pain's 30, and a hard cast plants the Priest:
+    // burned back to back from beyond 30, they would hold it out of its own
+    // rotation's range.
+    if let Some(note) = shadow_burn_held(abilities, combatant, my_pos, ctx) {
+        builder.reject(
+            AbilityType::ManaBurn,
+            RejectionReason::PreconditionUnmet {
+                note: note.to_string(),
+            },
+        );
+    } else if cast_mana_burn(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    builder.finish();
+    false
+}
+
+/// Why a Shadowform Priest holds its Mana Burn, if it does: its target stands
+/// beyond Mind Blast's reach, so the Priest closes first.
+fn shadow_burn_held(
+    abilities: &AbilityBook,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+) -> Option<&'static str> {
+    let reach = abilities.get_unchecked(&AbilityType::MindBlast).range;
+    let in_reach = combatant
+        .target
+        .and_then(|t| ctx.combatants.get(&t))
+        .is_some_and(|info| my_pos.distance(info.position) <= reach);
+    (!in_reach).then_some("closing on the target: beyond Mind Blast's reach")
+}
+
+/// Take Shadowform: the Priest's chosen form, cast once before the gates and
+/// held all match (nothing removes it, and it lasts past the match cap).
+/// Considered only by a Priest whose Form choice is Shadowform and whose book
+/// holds the spell (the Shadowform talent grants it); every other Priest never
+/// sees it.
+fn try_shadowform(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::Shadowform;
+    if combatant.priest_form != PriestForm::Shadowform {
+        return false;
+    }
+    let Some(def) = abilities.get(&ability) else {
+        return false;
+    };
+    let in_form = auras.is_some_and(|a| {
+        a.auras
+            .iter()
+            .any(|aura| aura.compound == Some(CompoundDebuff::Shadowform))
+    });
+    if in_form {
+        builder.reject(ability, RejectionReason::AlreadyApplied);
+        return false;
+    }
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
+    builder.choose(cleared, Some(entity), true);
+
+    combatant.current_mana -= def.mana_cost;
+    combatant.global_cooldown = GCD;
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        None,
+        "casts",
+    );
+    if let Some(pending) = AuraPending::from_ability(entity, entity, def) {
+        commands.spawn(pending);
+    }
+    true
+}
+
 /// Try to cast Psychic Scream — instant self-centered AoE Fear (R1/R2/R5/R9/R10).
 ///
 /// Defensive self-peel / escape opener: fires only when the Priest is genuinely
@@ -401,6 +739,7 @@ fn try_psychic_scream(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     pressured: bool,
+    can_heal: bool,
     shared: &SharedMovementConfig,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
     builder: &mut DecisionEventBuilder<'_>,
@@ -432,7 +771,9 @@ fn try_psychic_scream(
         return false;
     }
 
-    if held_for_critical_heal(ctx, shared, my_pos, builder) {
+    // A Priest that cannot heal (Shadowform) has no heal to hold the scream
+    // for.
+    if can_heal && held_for_critical_heal(ctx, shared, my_pos, builder) {
         return false;
     }
 
@@ -1207,6 +1548,7 @@ fn try_mind_blast(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     escape_defer: Option<f32>,
+    target: Option<Entity>,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::MindBlast;
@@ -1223,7 +1565,7 @@ fn try_mind_blast(
         return false;
     }
 
-    let Some(target_entity) = combatant.target else {
+    let Some(target_entity) = target else {
         builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
     };
@@ -1353,7 +1695,6 @@ fn try_shadow_word_pain(
         return false;
     }
     let ability = AbilityType::ShadowWordPain;
-    let def = abilities.get_unchecked(&ability);
 
     if let Some(note) = shadow_word_pain_held(ctx, abilities, combatant.team, my_pos) {
         builder.reject(
@@ -1364,6 +1705,29 @@ fn try_shadow_word_pain(
         );
         return false;
     }
+
+    cast_shadow_word_pain(
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, builder,
+    )
+}
+
+/// Shadow Word: Pain on the unit's target, kept up: never recast while its own
+/// is ticking. The cast itself, behind whichever rule decides it is time — a
+/// healing Priest's idle slot ([`try_shadow_word_pain`]), or a Shadowform
+/// Priest's core DoT ([`decide_shadow_priest_action`]).
+fn cast_shadow_word_pain(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::ShadowWordPain;
+    let def = abilities.get_unchecked(&ability);
 
     let Some((target, target_pos)) = combatant
         .target
@@ -1604,6 +1968,29 @@ fn try_mana_burn(
         return false;
     }
 
+    cast_mana_burn(
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, builder,
+    )
+}
+
+/// Mana Burn on the enemy healer (`ctx.enemy_healer()`, a ROLE: never an
+/// enemy Shadowform Priest), when it has mana worth burning. The cast itself,
+/// behind whichever rule decides it is time — a healing Priest's surplus GCD
+/// ([`try_mana_burn`]) or a Shadowform Priest's rotation.
+fn cast_mana_burn(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::ManaBurn;
+    let def = abilities.get_unchecked(&ability);
+
     let Some(target_entity) = ctx.enemy_healer() else {
         builder.reject(ability, RejectionReason::NoValidTarget);
         return false;
@@ -1737,7 +2124,7 @@ fn scream_dip_target_candidate(
 ) -> Option<Entity> {
     ctx.alive_enemies()
         .into_iter()
-        .filter(|e| e.class.is_healer())
+        .filter(|e| e.is_healer())
         .filter(|e| !focused.contains(&e.entity)) // respect the kill target
         .filter(|e| scream_dip_target_eligible(ctx, my_team, e.entity))
         .filter(|e| my_pos.distance(e.position) <= reach)
@@ -2895,6 +3282,7 @@ mod reach_tests {
                 CASTER,
                 None,
                 ctx,
+                true,
                 true,
                 &movement.shared,
                 &mut Vec::new(),

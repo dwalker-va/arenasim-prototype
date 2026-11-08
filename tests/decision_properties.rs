@@ -965,7 +965,7 @@ fn cc_target(scene: &mut Scene, p: &Point) -> Option<Entity> {
             pos3(who, p),
             c.stealthed,
             false,
-            c.class,
+            (c.class, c.role()),
             c.current_health,
             immune,
             false,
@@ -1461,6 +1461,13 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
             "a TeamPlan Priest with its whole team topped and shielded (or Weakened Soul), \
              no enemy healer mana to burn, and its own Shadow Word: Pain not yet on its target \
              (tests/shadow_word_pain_scenes.rs builds it)",
+        ),
+    ),
+    (
+        AbilityType::Shadowform,
+        Unreached::NeedsKnob(
+            "a Priest whose build takes the Shadowform talent and whose Form choice is \
+             Shadowform, before it holds the form (tests/shadowform_scenes.rs builds it)",
         ),
     ),
 ];

@@ -534,7 +534,7 @@ fn build_kiter_inputs(
                 i.team == self_team
                     && i.is_alive
                     && !i.is_pet
-                    && i.class.is_healer()
+                    && i.is_healer()
                     && i.entity != entity
             })
             .map(|i| i.position)

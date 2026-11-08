@@ -1210,7 +1210,34 @@ pub fn compound_riders(compound: CompoundDebuff) -> Vec<Aura> {
         CompoundDebuff::FrostArmorChill => vec![frost_armor_attack_speed_aura()],
         CompoundDebuff::MarkOfTheWild => mark_of_the_wild_riders(),
         CompoundDebuff::EntanglingRoots => entangling_roots_riders(),
+        CompoundDebuff::Shadowform => shadowform_riders(),
     }
+}
+
+/// The Physical damage Shadowform takes off: TBC spell 15473's
+/// `MOD_DAMAGE_PERCENT_TAKEN` (aura 87) at -15%, school mask 1.
+pub const SHADOWFORM_PHYSICAL_REDUCTION: f32 = 0.15;
+
+/// Shadowform's RIDER: 15% less Physical damage taken. The face — 15% more
+/// Shadow damage dealt — is the aura `abilities.ron` describes; this lands
+/// with it, at its duration, and could only leave with it (nothing removes
+/// the form).
+pub fn shadowform_riders() -> Vec<Aura> {
+    vec![Aura {
+        effect_type: AuraType::DamageTakenReduction,
+        duration: 600.0, // overwritten with the face's on landing
+        magnitude: SHADOWFORM_PHYSICAL_REDUCTION,
+        break_on_damage_threshold: -1.0,
+        damage_mods: AuraDamageMods {
+            scope: Some(DamageScope::School(SpellSchool::Physical)),
+            ..Default::default()
+        },
+        ability_name: "Shadowform".to_string(),
+        spell_school: Some(SpellSchool::Shadow),
+        dispel_type: DispelType::Untyped,
+        compound: Some(CompoundDebuff::Shadowform),
+        ..Default::default()
+    }]
 }
 
 /// Entangling Roots' damage per tick — its rider's `magnitude`.
