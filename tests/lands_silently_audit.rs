@@ -32,6 +32,8 @@
 //! On top of the families, `every_ability_belongs_to_a_family` makes the
 //! families a cover of the whole config: an ability that no family scans is
 //! a failure unless it is named in `NO_FAMILY` with the visual that covers it.
+//! One family is not an ability's: an item proc's EXTRA SWING (Hand of
+//! Justice) lands an attack too, so `extra_swing_*` scans `items.ron` for it.
 //! The harness's own failure modes are proved by planted offenders at the
 //! bottom of the file.
 //!
@@ -54,21 +56,28 @@ use std::collections::BTreeSet;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
+use arenasim::states::play_match::combat_core::ExtraSwingSource;
 use arenasim::states::play_match::components::{
     AuraLandingKind, AuraType, CurseKind, HealImpact, HealImpactKind, HotVisual,
-    InstantAbilityFired, RootStyle, SchoolImpact, TotemElement,
+    InstantAbilityFired, LifeTapGlow, RootStyle, SchoolImpact, TotemElement,
 };
 use arenasim::states::play_match::equipment::{load_item_definitions, ItemDefinitions, ItemId};
 use arenasim::states::play_match::on_use_items::OnUseEffect;
+use arenasim::states::play_match::proc_trinkets::ProcEffect;
 use arenasim::states::play_match::{
-    bolt_kind_for, client_landing_style, curse_spec, hunter_shot_for, root_style_for,
-    DotStateVisual, InterruptLanding, SlowTint, DIVINE_SHIELD_AURA_NAME, ICE_BARRIER_AURA_NAME,
-    PW_SHIELD_AURA_NAME,
+    bolt_kind_for, client_landing_style, curse_spec, hunter_shot_for, lands_poison_cloud,
+    root_style_for, DotStateVisual, InterruptLanding, SlowTint, DIVINE_SHIELD_AURA_NAME,
+    ICE_BARRIER_AURA_NAME, PW_SHIELD_AURA_NAME,
 };
 
 use AbilityType::*;
 
 // ── the harness ─────────────────────────────────────────────────────────────
+
+/// What every weapon poison lands with (`lands_poison_cloud`): one shared
+/// cloud, replayed on each application. It is the whole of a poison's visual
+/// in the direct-damage, DoT and aura-application families.
+const POISON_CLOUD: &str = "weapon poison cloud on every application (poison_landing.rs)";
 
 /// A judge: the visual an ability's landing reaches in this family, or `None`
 /// if it lands silently.
@@ -405,6 +414,11 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
     if InstantAbilityFired::is_spawned_for(a) {
         return Some("instant-ability stroke (instant_ability.rs)");
     }
+    // A poison's hit rides the weapon swing that procced it; what lands is
+    // the poison cloud, on every application.
+    if lands_poison_cloud(a) {
+        return Some(POISON_CLOUD);
+    }
     // Bespoke landings spawned by an `ability ==` branch at the resolution
     // site. A new ability cannot reach these arms without being named here.
     match a {
@@ -423,13 +437,7 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
     }
 }
 
-/// The Druid's kit lands silently until its visuals are built — each
-/// "AS-160" entry here and below is cleared by AS-160's build cards.
-///
-/// Wound Poison's hit rides the weapon swing that procced it, and the landing
-/// AS-341 draws for every poison application is its visual.
-const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] =
-    &[(WoundPoison, "AS-341 (weapon poison landing)")];
+const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
 
 #[test]
 fn direct_damage_finds_every_member() {
@@ -486,14 +494,21 @@ const DOT_MEMBERS: &[AbilityType] = &[
     UnstableAffliction,
 ];
 
-/// DoTs that land with nothing drawn yet. Deadly Poison's landing is AS-341's.
-const DOT_KNOWN_SILENT: &[(AbilityType, &str)] =
-    &[(DeadlyPoison, "AS-341 (weapon poison landing)")];
+/// DoTs that land with nothing drawn yet.
+const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
 
 /// The DoT STATE a member's aura routes to. The aura carries the ability's
 /// RON `name:`, so this sweeps the config name through the very router every
 /// DoT renderer asks.
-fn dot_state(_: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
+///
+/// Deadly Poison has no state — the client draws none for any Rogue poison,
+/// and nothing per tick — so its visual is the poison cloud that lands with
+/// every application. It must not ALSO route to a state.
+fn dot_state(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
+    if lands_poison_cloud(a) {
+        assert_eq!(DotStateVisual::for_dot(&c.name), None, "{a:?}");
+        return Some(POISON_CLOUD);
+    }
     DotStateVisual::for_dot(&c.name).map(|v| match v {
         DotStateVisual::Drip(_) => "affliction drips (affliction.rs)",
         DotStateVisual::CorruptionShroud => "Corruption shroud (warlock_dots.rs)",
@@ -766,6 +781,10 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             {
                 Some("Mark of the Wild glyph on landing (druid_heals.rs)")
             }
+            // Mind-numbing Poison's cast slow: the poison cloud on every
+            // application. (Wound Poison's reduction is the heal-refused tell
+            // above, which keys on the type.)
+            _ if lands_poison_cloud(a) => Some(POISON_CLOUD),
             _ => family_application_cue(t),
         };
         // Every status aura must be drawn for the member to pass.
@@ -790,7 +809,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (AirTotem, "AS-134 (aura application — totem pulse)"),
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
-    (MindNumbingPoison, "AS-341 (weapon poison landing)"),
 ];
 
 #[test]
@@ -926,15 +944,15 @@ fn is_health_to_mana(_: AbilityType, c: &AbilityConfig) -> bool {
 
 const HEALTH_TO_MANA_MEMBERS: &[AbilityType] = &[LifeTap];
 
-/// Nothing draws a conversion yet: its health and mana move on the bars and
-/// in floating combat text, which every ability shares. When AS-333 dresses
-/// Life Tap, this names that visual's router and the entry below comes off.
-fn health_to_mana_visual(_: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
-    None
+/// A conversion lands on its caster: the Warlock AI spawns the
+/// `InstantAbilityFired` marker, and the instant-ability router plays the
+/// Life Tap glow off it (`lifetap.m2`, AS-340).
+fn health_to_mana_visual(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
+    (InstantAbilityFired::is_spawned_for(a) && LifeTapGlow::plays_for(a))
+        .then_some("Life Tap glow on the caster's chest (life_tap.rs)")
 }
 
-const HEALTH_TO_MANA_KNOWN_SILENT: &[(AbilityType, &str)] =
-    &[(LifeTap, "AS-333 (0.9 visuals: Life Tap)")];
+const HEALTH_TO_MANA_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
 
 #[test]
 fn health_to_mana_finds_every_member() {
@@ -1029,6 +1047,65 @@ const NO_FAMILY: &[(AbilityType, &str)] = &[
          lands nothing on anyone",
     ),
 ];
+
+// ── family: extra swings (item procs) ───────────────────────────────────────
+
+/// An item proc that lands an extra swing (`ProcEffect::ExtraSwing`) lands an
+/// attack, so it is a landing like any ability's — but it is no ability, so
+/// this family scans `items.ron` and is keyed by item. Its swing takes Windfury
+/// Totem's path, and its only possible visual on that path is the totem's
+/// tornado, which a trinket must NOT draw (`ExtraSwingSource`): so the judge
+/// reports what the shared path would draw for the item, and every member is
+/// silent until its own visual lands.
+fn extra_swing_items() -> BTreeSet<&'static str> {
+    let items = load_item_definitions().expect("items.ron loads");
+    ItemId::all()
+        .iter()
+        .filter(|id| {
+            items
+                .get(id)
+                .and_then(|item| item.proc.as_ref())
+                .is_some_and(|p| p.effect == ProcEffect::ExtraSwing)
+        })
+        .map(|id| id.as_str())
+        .collect()
+}
+
+fn extra_swing_judge(name: &'static str) -> Option<&'static str> {
+    let item = *ItemId::all()
+        .iter()
+        .find(|id| id.as_str() == name)
+        .expect("a member is an item");
+    ExtraSwingSource::Trinket(item)
+        .spawns_windfury_tornado()
+        .then_some("WindfuryTornado (Windfury Totem's visual — a trinket must not draw it)")
+}
+
+const EXTRA_SWING_MEMBERS: &[&str] = &["Gressil", "HandOfJustice"];
+
+/// Both visuals are AS-434's (Hand of Justice's own is the client's Cheap Shot
+/// crescents).
+const EXTRA_SWING_KNOWN_SILENT: &[(&str, &str)] =
+    &[("Gressil", "AS-434"), ("HandOfJustice", "AS-434")];
+
+#[test]
+fn extra_swing_finds_every_member() {
+    if let Err(e) = check_finds("extra-swing", &extra_swing_items(), EXTRA_SWING_MEMBERS) {
+        panic!("{e}");
+    }
+}
+
+#[test]
+fn extra_swing_lands_nothing_silently() {
+    if let Err(e) = check_judged(
+        "extra-swing",
+        &extra_swing_items(),
+        extra_swing_judge,
+        EXTRA_SWING_KNOWN_SILENT,
+    ) {
+        panic!("{e}");
+    }
+}
 
 const FAMILIES: &[fn(AbilityType, &AbilityConfig) -> bool] = &[
     is_heal,

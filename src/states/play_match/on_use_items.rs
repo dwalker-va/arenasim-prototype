@@ -84,8 +84,8 @@ impl OnUseCooldown {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OnUseEffect {
     /// Break every loss of control and movement impairment on the wearer —
-    /// stun, fear (horror included), polymorph, incapacitate, root and slow
-    /// ([`cc_break_breaks`]). Grants no immunity: the next CC lands.
+    /// stun, fear (horror included), polymorph, incapacitate, Cyclone, root and
+    /// slow ([`cc_break_breaks`]). Grants no immunity: the next CC lands.
     CcBreak,
 }
 
@@ -176,8 +176,9 @@ pub fn validate_on_use(item_name: &str, on_use: &OnUseConfig) -> Result<(), Stri
 ///
 /// The set is every crowd control on the wearer (user ruling, 2026-10-31) —
 /// every movement impairment and every loss of control: stun, fear (a horror
-/// too), polymorph, incapacitate (Freezing Trap), root and slow. A Cyclone
-/// only if [`CC_BREAK_TAKES_CYCLONE`]. Not a silence: TBC's trinket left
+/// too), polymorph, incapacitate (Freezing Trap), Cyclone, root and slow. A
+/// Cyclone's immunity does not reach its target's own trinket, which breaks
+/// it as in TBC (user ruling, 2026-11-07). Not a silence: TBC's trinket left
 /// silences alone, and a silenced unit still moves and swings.
 pub const fn cc_break_breaks(aura: AuraType) -> bool {
     match aura {
@@ -186,8 +187,8 @@ pub const fn cc_break_breaks(aura: AuraType) -> bool {
         | AuraType::Polymorph
         | AuraType::Incapacitate
         | AuraType::Root
-        | AuraType::MovementSpeedSlow => true,
-        AuraType::Cyclone => CC_BREAK_TAKES_CYCLONE,
+        | AuraType::MovementSpeedSlow
+        | AuraType::Cyclone => true,
         // Not loss of control: a silenced unit still moves and swings, and a
         // school lockout is an interrupt's.
         AuraType::Silence | AuraType::SpellSchoolLockout => false,
@@ -230,12 +231,6 @@ pub const fn cc_break_breaks(aura: AuraType) -> bool {
         | AuraType::DamageReflect => false,
     }
 }
-
-/// Whether the crowd-control break frees its wearer from a Cyclone — and so
-/// whether a cycloned wearer may use it at all (`combat_ai::dispatch_while_held`).
-/// `false`, as in TBC: a Cyclone makes its target immune to everything, its
-/// own trinket included. THE ONE LINE a ruling on Cyclone changes.
-pub const CC_BREAK_TAKES_CYCLONE: bool = false;
 
 // ============================================================================
 // PER-WEARER STATE
@@ -316,11 +311,8 @@ pub fn on_use_description(on_use: &OnUseConfig) -> String {
 /// sentence with its own "USE" (the encyclopedia's item page).
 pub fn on_use_sentence(on_use: &OnUseConfig) -> String {
     let effect = match on_use.effect {
-        OnUseEffect::CcBreak if CC_BREAK_TAKES_CYCLONE => {
-            "Breaks every stun, fear, polymorph, incapacitate, cyclone, root and slow on you"
-        }
         OnUseEffect::CcBreak => {
-            "Breaks every stun, fear, polymorph, incapacitate, root and slow on you"
+            "Breaks every stun, fear, polymorph, incapacitate, cyclone, root and slow on you"
         }
     };
     let cooldown = match on_use.cooldown {
@@ -412,6 +404,7 @@ mod tests {
             AuraType::Fear,
             AuraType::Polymorph,
             AuraType::Incapacitate,
+            AuraType::Cyclone,
             AuraType::Root,
             AuraType::MovementSpeedSlow,
         ];
@@ -466,7 +459,8 @@ mod tests {
                 "Polymorph",
                 "Freezing Trap",
                 "Entangling Roots",
-                "Hamstring"
+                "Hamstring",
+                "Cyclone"
             ]
         );
         let left: Vec<&str> = auras
@@ -481,7 +475,6 @@ mod tests {
                 "Silence",
                 "Corruption",
                 "Mortal Strike",
-                "Cyclone",
                 "Arcane Brilliance"
             ]
         );
@@ -551,7 +544,7 @@ mod tests {
     fn the_description_names_the_effect_and_the_cooldown() {
         assert_eq!(
             on_use_description(&cc_break(OnUseCooldown::OncePerMatch, Some(30.0))),
-            "Use: Breaks every stun, fear, polymorph, incapacitate, root and slow on you. \
+            "Use: Breaks every stun, fear, polymorph, incapacitate, cyclone, root and slow on you. \
              Once per match."
         );
         assert!(

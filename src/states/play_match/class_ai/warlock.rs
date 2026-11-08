@@ -27,7 +27,7 @@ use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::components::{
     ActiveAuras, AuraPending, AuraType, CastingState, ChannelingState, Combatant, DRCategory,
-    PlayMatchEntity, Projectile,
+    InstantAbilityFired, PlayMatchEntity, Projectile,
 };
 use crate::states::play_match::constants::GCD;
 use crate::states::play_match::decision_trace::{
@@ -386,8 +386,10 @@ pub fn decide_warlock_action(
     // Life Tap: short of mana and healthy enough to pay for it, the Warlock
     // converts health into mana before its rotation asks for any.
     if try_life_tap(
+        commands,
         combat_log,
         abilities,
+        entity,
         combatant,
         my_pos,
         auras,
@@ -702,8 +704,10 @@ pub fn convert_health_to_mana(combatant: &mut Combatant, amount: f32) {
 /// [`convert_health_to_mana`]: nothing absorbs, breaks, reveals or enrages on
 /// the health, and arena dampening does not cut the mana.
 fn try_life_tap(
+    commands: &mut Commands,
     combat_log: &mut CombatLog,
     abilities: &AbilityBook,
+    entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
@@ -765,6 +769,20 @@ fn try_life_tap(
     );
     combat_log.log(CombatLogEventType::Buff, msg.clone());
     info!("{}", msg);
+
+    // Cosmetic marker for the graphical router: Life Tap's landing plays on
+    // the Warlock's own chest. Spawned in BOTH modes (headless never reads it;
+    // the match-exit `PlayMatchEntity` sweep reclaims it), per
+    // `cosmetic-marker-cross-mode-spawn-parity.md`.
+    commands.spawn((
+        InstantAbilityFired {
+            caster: entity,
+            target: None,
+            ability: life_tap,
+            is_crit: false,
+        },
+        PlayMatchEntity,
+    ));
 
     true
 }
