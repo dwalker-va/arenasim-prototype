@@ -277,6 +277,10 @@ fn stat_name(stat: TalentStat) -> &'static str {
         TalentStat::NatureResistance => "nature resistance",
         TalentStat::HolyResistance => "holy resistance",
         TalentStat::WeaponDamage => "weapon damage",
+        TalentStat::OffHandDamage => "off-hand weapon damage",
+        TalentStat::DodgeChance => "dodge chance",
+        TalentStat::ParryChance => "parry chance",
+        TalentStat::MeleeAttackSpeed => "melee attack speed",
     }
 }
 
@@ -306,6 +310,7 @@ fn field_name(field: AbilityField) -> &'static str {
         AbilityField::AuraMagnitudeCoefficient => "effect strength from spell power",
         AbilityField::AuraBreakOnDamage => "damage to break",
         AbilityField::AuraTickInterval => "time between ticks",
+        AbilityField::Damage => "damage",
     }
 }
 
@@ -332,7 +337,9 @@ fn field_unit(field: AbilityField) -> &'static str {
         | AbilityField::ChannelHealingPerTick
         | AbilityField::AuraMagnitude
         | AbilityField::AuraMagnitudeCoefficient
-        | AbilityField::AuraBreakOnDamage => "",
+        | AbilityField::AuraBreakOnDamage
+        // Takes only a Mul, which is written as a percentage.
+        | AbilityField::Damage => "",
     }
 }
 
@@ -352,6 +359,26 @@ mod tests {
         assert_eq!(effect_text(&effect, 2, abilities()), "+6% maximum health");
         let pet = TalentEffect::PetStatPercent(TalentStat::WeaponDamage, 0.10);
         assert_eq!(effect_text(&pet, 2, abilities()), "+20% pet weapon damage");
+    }
+
+    /// The Combat tree's nodes read as Classic writes them: a raised chance
+    /// or haste in points, and Aggression as Sinister Strike's damage.
+    #[test]
+    fn the_combat_tree_reads_as_classic_writes_it() {
+        let talents = TalentDefinitions::shipped();
+        let text = |id: TalentId, rank: u8| rank_text(talents.get(id).unwrap(), rank, abilities());
+        assert_eq!(text(TalentId::LightningReflexes, 2), "+8% dodge chance.");
+        assert_eq!(text(TalentId::Deflection, 1), "+4% parry chance.");
+        assert_eq!(
+            text(TalentId::DualWieldSpecialization, 2),
+            "+20% off-hand weapon damage."
+        );
+        assert_eq!(
+            text(TalentId::Aggression, 2),
+            "+12% Sinister Strike damage."
+        );
+        assert_eq!(text(TalentId::SwiftBlades, 1), "+10% melee attack speed.");
+        assert_eq!(text(TalentId::ExposeArmor, 1), "Learn Expose Armor.");
     }
 
     #[test]

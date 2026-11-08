@@ -1916,6 +1916,7 @@ mod tests {
                 // first two have no dispel type, the Web is physical.
                 "Cyclone [—]",
                 "Demoralizing Shout [—]",
+                "Expose Armor [Physical]",
                 "Frost Trap [—]",
                 "Hammer of Justice [Magic]",
                 "Kick [—]",

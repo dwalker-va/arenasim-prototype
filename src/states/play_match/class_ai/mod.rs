@@ -83,6 +83,9 @@ pub struct CombatantInfo {
     pub max_health: f32,
     pub current_mana: f32,
     pub max_mana: f32,
+    /// The armor stat (gear and talents), before any aura: what
+    /// `combat_core::armor_met` reads with the unit's auras.
+    pub armor: f32,
     /// Per-frame snapshot from Transform.
     pub position: Vec3,
     /// Estimated planar velocity (XZ, units/sec): the facing heading (from the
@@ -2671,6 +2674,7 @@ pub(crate) mod reach_fixture {
             max_health: 100.0,
             current_mana: 100.0,
             max_mana: 100.0,
+            armor: 0.0,
             position,
             velocity: Vec3::ZERO,
             is_alive: true,

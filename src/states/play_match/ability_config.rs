@@ -681,6 +681,7 @@ impl AbilityDefinitions {
             AbilityType::EntanglingRoots,
             AbilityType::Cyclone,
             AbilityType::TravelForm,
+            AbilityType::ExposeArmor,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -1186,6 +1187,9 @@ mod tests {
                     AbilityType::DeadlyPoison,
                     AbilityType::WoundPoison,
                     AbilityType::MindNumbingPoison,
+                    // The Combat capstone (AS-418): a talent ability is in
+                    // its class's own kit, as every kit surface shows it.
+                    AbilityType::ExposeArmor,
                 ],
             ),
             (

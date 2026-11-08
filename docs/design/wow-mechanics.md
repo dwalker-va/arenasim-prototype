@@ -187,6 +187,9 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   `[AVOID] X dodges Y's Mortal Strike`, the floating word "Dodge" / "Parry"
   over the defender (white, number-sized), and a `melee_avoided` trace event.
 - The stats carry no item-budget weight; whatever grants them prices them.
+  The Rogue's Combat talents grant them (Lightning Reflexes +4% dodge and
+  Deflection +4% parry a rank, added in points), which makes the Rogue the
+  first class that can parry.
 
 ### Attack Speed
 - `Combatant::attack_speed_bonus` is a permanent haste fraction: `0.10` divides
@@ -199,9 +202,14 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   so haste effects multiply as TBC's do. It reaches the same intervals the
   stat does — melee and ranged alike (a wand included), as TBC's haste rating
   does. The Dragonspine Trophy's proc grants it (+20% for 10s, TBC's 325 haste
-  rating). A melee-only haste (Flurry, Swift Blades) would need a scope it
-  does not have yet. Priced at `WEIGHT_ATTACK_SPEED`, crit's weight at TBC's
-  rating exchange rate (15.77 haste rating per percent against 22.08 crit).
+  rating). Priced at `WEIGHT_ATTACK_SPEED`, crit's weight at TBC's rating
+  exchange rate (15.77 haste rating per percent against 22.08 crit).
+- `Combatant::melee_attack_speed_bonus` is the melee-only haste (TBC's Swift
+  Blades and Flurry, `HasteScope::Melee`): it divides a MELEE swing's
+  interval — a main hand holding a melee weapon, an off hand, a Hunter's melee
+  hand — after the shared bonus, and never a bow's or a wand's. 0 for every
+  class; the Combat Rogue's Swift Blades grants +10%, at a declared talent
+  price rather than `WEIGHT_ATTACK_SPEED`.
 
 ### Windfury Totem procs on the main hand only
 

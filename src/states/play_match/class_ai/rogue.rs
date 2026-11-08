@@ -16,6 +16,11 @@
 //!      immediately if the target casts an un-locked second school.
 //!    - **Aggressive** (Warrior/Rogue/Hunter): opportunistic stun whenever up.
 //! 2. Sinister Strike (combo point builder)
+//!
+//! Expose Armor (the Combat capstone, a talent) goes ahead of both, after the
+//! Peel and Chain plays: on the kill target — the kill window's enemy while a
+//! burst is called — when halving its armor makes a Physical hit land at least
+//! [`EXPOSE_ARMOR_MIN_GAIN`] harder ([`try_expose_armor`]).
 #![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
@@ -24,8 +29,10 @@ use crate::combat::log::CombatLog;
 use crate::states::match_config::{CharacterClass, RogueOpener};
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::ability_book::AbilityBook;
+use crate::states::play_match::ability_config::AbilityConfig;
 use crate::states::play_match::combat_core::{
-    get_attack_power_bonus_from_slice, get_crit_chance_bonus_from_slice, roll_crit,
+    armor_met, armor_reduction, get_attack_power_bonus_from_slice,
+    get_crit_chance_bonus_from_slice, roll_crit,
 };
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RANGE};
@@ -201,6 +208,28 @@ pub fn decide_rogue_action(
             builder.play_step(PlayStep::Chain);
             builder.finish();
             return handed;
+        }
+    }
+
+    // Expose Armor (a talent): the kill target's armor halved, ahead of the
+    // burst on it. A Rogue without the talent has no rule here.
+    if abilities.get(&AbilityType::ExposeArmor).is_some() {
+        let subject = super::burst::burst_call(ctx).map_or(target_entity, |call| call.subject);
+        if try_expose_armor(
+            commands,
+            combat_log,
+            game_rng,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            subject,
+            ctx,
+            &mut builder,
+        ) {
+            builder.finish();
+            return true;
         }
     }
 
@@ -847,6 +876,123 @@ fn try_kidney_shot(
         def.name
     );
 
+    true
+}
+
+/// The least Expose Armor must add to a Physical hit on its target for the
+/// Rogue to spend it there: 8%. Halving the starting kit's armor adds about
+/// 10% on mail and 17-20% on plate, against 6.5% on leather and 3% on cloth,
+/// so it goes on mail and plate and not on the rest.
+pub const EXPOSE_ARMOR_MIN_GAIN: f32 = 0.08;
+
+/// How much harder a Physical hit lands on a target with `armor` wearing
+/// `auras` once Expose Armor (`def`) is on it too, as a fraction: `0.17` is
+/// 17% more damage. Read through the damage pipeline's own armor rule
+/// (`combat_core::armor_met`), so an Expose (or any stronger reduction)
+/// already on the target makes another worth nothing.
+pub fn expose_armor_gain(armor: f32, auras: &[Aura], def: &AbilityConfig) -> f32 {
+    let Some(effect) = def.applies_aura.as_ref() else {
+        return 0.0;
+    };
+    let before = armor_met(armor, auras);
+    let mut exposed = auras.to_vec();
+    exposed.push(Aura {
+        effect_type: effect.aura_type,
+        magnitude: effect.magnitude,
+        ..Default::default()
+    });
+    let after = armor_met(armor, &exposed);
+    (1.0 - armor_reduction(after)) / (1.0 - armor_reduction(before)) - 1.0
+}
+
+/// Try to use Expose Armor on `target_entity`: only while it is worth
+/// [`EXPOSE_ARMOR_MIN_GAIN`] ([`expose_armor_gain`]). A melee attack: dodged
+/// or parried, it applies nothing and its cost is spent.
+fn try_expose_armor(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    game_rng: &mut GameRng,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::ExposeArmor;
+    let def = abilities.get_unchecked(&ability);
+    let Some(info) = ctx.combatants.get(&target_entity) else {
+        builder.reject(ability, RejectionReason::NoValidTarget);
+        return false;
+    };
+    let target_auras = ctx
+        .active_auras
+        .get(&target_entity)
+        .map_or(&[][..], Vec::as_slice);
+    if expose_armor_gain(info.armor, target_auras, def) < EXPOSE_ARMOR_MIN_GAIN {
+        let exposed = def.applies_aura.as_ref().is_some_and(|effect| {
+            target_auras
+                .iter()
+                .any(|a| a.effect_type == effect.aura_type && a.magnitude >= effect.magnitude)
+        });
+        builder.reject(
+            ability,
+            hold_reason(if exposed {
+                "target's armor is already exposed"
+            } else {
+                "target's armor is too light to expose"
+            }),
+        );
+        return false;
+    }
+
+    let opts = PreCastOpts {
+        check_target_immune: true,
+        ..Default::default()
+    };
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, info.position)),
+        ctx,
+        opts,
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
+
+    builder.choose(cleared, Some(target_entity), true);
+
+    combatant.current_mana -= def.mana_cost;
+    combatant.start_cooldown(ability);
+    combatant.global_cooldown = GCD;
+
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        Some(info.log_id()),
+        "uses",
+    );
+
+    // A dodged or parried Expose Armor exposes nothing; its energy is spent.
+    if ctx.melee_attack_avoided(commands, game_rng, target_entity, &def.name) {
+        return true;
+    }
+
+    if let Some(pending) = AuraPending::from_ability(target_entity, entity, def) {
+        commands.spawn(pending);
+    }
     true
 }
 

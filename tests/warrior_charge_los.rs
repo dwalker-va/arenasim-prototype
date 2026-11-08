@@ -45,6 +45,7 @@ fn combatant_info(
         max_health: 100.0,
         current_mana: 100.0,
         max_mana: 100.0,
+        armor: 0.0,
         position,
         velocity: Vec3::ZERO,
         is_alive: true,

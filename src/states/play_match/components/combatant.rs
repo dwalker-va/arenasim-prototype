@@ -420,6 +420,13 @@ pub struct Combatant {
     /// melee hand and its bow). 0 for every class; while it is 0 the interval
     /// is computed exactly as before it existed. No item-budget weight here.
     pub attack_speed_bonus: f32,
+    /// Permanent MELEE attack-speed bonus, as a fraction: the same haste as
+    /// [`Self::attack_speed_bonus`], applied after it, on melee swings only
+    /// (main hand while it holds a melee weapon, off hand, a Hunter's melee
+    /// hand), never a bow or a wand — TBC's Swift Blades and Flurry. 0 for
+    /// every class; while it is 0 no interval changes by a bit. Granted by
+    /// talents, which declare its price.
+    pub melee_attack_speed_bonus: f32,
     /// Armor rating - reduces incoming Physical spell school damage.
     /// Formula: Reduction % = armor / (armor + 5500)
     pub armor: f32,
@@ -696,6 +703,7 @@ impl Combatant {
             dodge_chance: 0.0,
             parry_chance: 0.0,
             attack_speed_bonus: 0.0,
+            melee_attack_speed_bonus: 0.0,
             armor,
             fire_resistance: 0.0,
             frost_resistance: 0.0,
