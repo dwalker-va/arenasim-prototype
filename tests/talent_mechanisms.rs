@@ -894,6 +894,74 @@ fn death_coil_leeches_through_the_field() {
     assert_eq!(lines(&played.log, "'s Death Coil heals for").len(), coils);
 }
 
+/// A Death Coil that lands after its Warlock has died heals nobody: a leech
+/// heals only a living recipient. The coil is staged in flight, on top of
+/// the enemy Warrior, from a Warlock already dead (its own Death Coil held,
+/// so the staged one is the only one); the control is the same coil from a
+/// living, hurt Warlock.
+#[test]
+fn a_death_coil_landing_after_its_warlock_died_heals_nothing() {
+    let run = |dead: bool| {
+        play(
+            config(&["Warlock", "Warrior"], &["Warrior"], 12.0),
+            Stage::new()
+                .cooldown(T1, AbilityType::DeathCoil, 1000.0)
+                .world(move |w| {
+                    use arenasim::states::match_config::CharacterClass;
+                    use arenasim::states::play_match::{Combatant, PlayMatchEntity, Projectile};
+                    let warlock = T1.entity(w);
+                    let warrior = T2.entity(w);
+                    {
+                        let mut c = w.get_mut::<Combatant>(warlock).expect("the Warlock");
+                        if dead {
+                            c.current_health = 0.0;
+                            c.is_dead = true;
+                        } else {
+                            c.current_health = c.max_health * 0.5;
+                        }
+                    }
+                    let at = w
+                        .get::<bevy::prelude::Transform>(warrior)
+                        .expect("the Warrior")
+                        .translation;
+                    w.spawn((
+                        Projectile {
+                            caster: warlock,
+                            target: warrior,
+                            ability: AbilityType::DeathCoil,
+                            speed: 40.0,
+                            caster_team: 1,
+                            caster_slot: 0,
+                            caster_class: CharacterClass::Warlock,
+                            caster_pet_type: None,
+                            next_cast: None,
+                        },
+                        bevy::prelude::Transform::from_translation(at),
+                        PlayMatchEntity,
+                    ));
+                }),
+        )
+    };
+    let dead = run(true);
+    assert!(
+        !lines(&dead.log, "Warlock #1's Death Coil hits").is_empty()
+            || !lines(&dead.log, "Warlock #1's Death Coil CRITS").is_empty(),
+        "{}",
+        dead.log
+    );
+    assert!(
+        lines(&dead.log, "Death Coil heals").is_empty(),
+        "{}",
+        dead.log
+    );
+    let alive = run(false);
+    assert!(
+        !lines(&alive.log, "Warlock #1's Death Coil heals for").is_empty(),
+        "{}",
+        alive.log
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Every site, one by one
 // ---------------------------------------------------------------------------
