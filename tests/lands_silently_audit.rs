@@ -61,7 +61,7 @@ use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::combat_core::ExtraSwingSource;
 use arenasim::states::play_match::components::{
     AuraLandingKind, AuraType, CurseKind, HealImpact, HealImpactKind, HotVisual,
-    InstantAbilityFired, LifeTapGlow, RootStyle, SchoolImpact, TotemElement,
+    InstantAbilityFired, LifeTapGlow, RootStyle, SchoolImpact, ShieldKind, TotemElement,
 };
 use arenasim::states::play_match::equipment::{load_item_definitions, ItemDefinitions, ItemId};
 use arenasim::states::play_match::on_use_items::OnUseEffect;
@@ -69,9 +69,9 @@ use arenasim::states::play_match::proc_trinkets::ProcEffect;
 use arenasim::states::play_match::talent_mechanics::MechanicKind;
 use arenasim::states::play_match::talents::{TalentDefinitions, TalentEffect, TalentId};
 use arenasim::states::play_match::{
-    bolt_kind_for, client_landing_style, curse_spec, hunter_shot_for, lands_poison_cloud,
-    root_style_for, DotStateVisual, InterruptLanding, SlowTint, DIVINE_SHIELD_AURA_NAME,
-    ICE_BARRIER_AURA_NAME, PW_SHIELD_AURA_NAME,
+    bolt_kind_for, client_landing_style, curse_spec, hunter_shot_for, is_live_shield,
+    lands_poison_cloud, root_style_for, DotStateVisual, InterruptLanding, SlowTint,
+    DIVINE_SHIELD_AURA_NAME, ICE_BARRIER_AURA_NAME, PW_SHIELD_AURA_NAME,
 };
 
 use AbilityType::*;
@@ -1027,6 +1027,61 @@ fn on_use_lands_nothing_silently() {
             on_use_visual(on_use.effect)
         },
         ON_USE_KNOWN_SILENT,
+    );
+    if let Err(e) = judged {
+        panic!("{e}");
+    }
+}
+
+// ── family: triggered absorbs (items) ───────────────────────────────────────
+//
+// A triggered absorb's shield lands through `fire_triggered_absorbs`
+// (triggered_absorbs.rs), not through an ability, so this family scans
+// `items.ron` and names its members by item.
+
+const TRIGGERED_ABSORB_MEMBERS: &[ItemId] = &[ItemId::AegisOfTheLastStand];
+
+/// The visual a triggered absorb's shield reaches: a client shield rig keyed on
+/// its aura's name (`is_live_shield`), built through the constructor the
+/// simulation raises it with.
+fn triggered_absorb_visual(items: &ItemDefinitions, id: ItemId) -> Option<&'static str> {
+    let item = items.get_unchecked(&id);
+    let absorb = item.triggered_absorb.as_ref().expect("a member has one");
+    let shield = absorb.aura(&item.name, Some(id), 1.0);
+    ShieldKind::ALL
+        .into_iter()
+        .any(|kind| is_live_shield(kind, &shield))
+        .then_some("client shield cards (shield.rs)")
+}
+
+const TRIGGERED_ABSORB_KNOWN_SILENT: &[(ItemId, &str)] = &[];
+
+fn scan_triggered_absorbs() -> (BTreeSet<ItemId>, ItemDefinitions) {
+    let items = load_item_definitions().expect("items.ron loads");
+    let members = items
+        .iter()
+        .filter(|(_, item)| item.triggered_absorb.is_some())
+        .map(|(id, _)| *id)
+        .collect();
+    (members, items)
+}
+
+#[test]
+fn triggered_absorbs_find_every_member() {
+    let (members, _) = scan_triggered_absorbs();
+    if let Err(e) = check_finds("triggered-absorb", &members, TRIGGERED_ABSORB_MEMBERS) {
+        panic!("{e}");
+    }
+}
+
+#[test]
+fn triggered_absorbs_land_nothing_silently() {
+    let (members, items) = scan_triggered_absorbs();
+    let judged = check_judged(
+        "triggered-absorb",
+        &members,
+        |id| triggered_absorb_visual(&items, id),
+        TRIGGERED_ABSORB_KNOWN_SILENT,
     );
     if let Err(e) = judged {
         panic!("{e}");
