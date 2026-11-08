@@ -1885,6 +1885,7 @@ mod tests {
                 count,
                 max: 3,
                 scope: StackScope::PerCaster,
+                one_target: false,
             }),
             ..Default::default()
         }
@@ -2926,6 +2927,7 @@ mod reach_tests {
                 count,
                 max: 3,
                 scope: StackScope::PerCaster,
+                one_target: false,
             }),
             ..Default::default()
         }

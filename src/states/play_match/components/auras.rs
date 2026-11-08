@@ -1057,6 +1057,12 @@ pub struct AuraStacks {
     pub max: u8,
     /// Whose stack it is — see [`StackScope`].
     pub scope: StackScope,
+    /// One target per caster: a caster holds this aura on one unit at a time,
+    /// so landing it on a new one takes the caster's from every other
+    /// (`apply_pending_auras`; Sacred Shield, as in TBC's one-target
+    /// blessings). Declared as `stacking: Some((max_stacks: 1, one_target:
+    /// true))`.
+    pub one_target: bool,
 }
 
 impl AuraStacks {
@@ -1066,7 +1072,13 @@ impl AuraStacks {
             count: 1,
             max,
             scope,
+            one_target: false,
         }
+    }
+
+    /// This aura, held on one target per caster ([`Self::one_target`]).
+    pub fn one_target(self, one_target: bool) -> Self {
+        Self { one_target, ..self }
     }
 
     /// One more application: a stack more, never past `max`.
@@ -1740,6 +1752,7 @@ impl AuraPending {
                         stacking.max_stacks,
                         StackScope::for_aura(aura_effect.aura_type),
                     )
+                    .one_target(stacking.one_target)
                 }),
                 bloom: aura_effect
                     .bloom
@@ -1799,6 +1812,7 @@ impl AuraPending {
                         stacking.max_stacks,
                         StackScope::for_aura(aura_effect.aura_type),
                     )
+                    .one_target(stacking.one_target)
                 }),
                 // This constructor takes no spell power, so a bloom is its base.
                 bloom: aura_effect.bloom.map(|bloom| bloom.heal_base),
@@ -1857,6 +1871,7 @@ impl AuraPending {
                         stacking.max_stacks,
                         StackScope::for_aura(aura_effect.aura_type),
                     )
+                    .one_target(stacking.one_target)
                 }),
                 // This constructor takes no spell power, so a bloom is its base.
                 bloom: aura_effect.bloom.map(|bloom| bloom.heal_base),

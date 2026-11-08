@@ -282,3 +282,58 @@ fn the_loader_refuses_a_triggered_absorb_on_the_wrong_aura_or_none() {
         .shield = AbsorbSize::Flat(0.0);
     assert!(!validates(empty), "a shield of nothing");
 }
+
+fn holds_shield(world: &World, who: Entity) -> bool {
+    world.get::<ActiveAuras>(who).is_some_and(|a| {
+        a.auras
+            .iter()
+            .any(|a| a.effect_type == AuraType::TriggeredAbsorb && a.ability_name == SHIELD)
+    })
+}
+
+/// One target per Paladin: casting it on a second ally takes it off the
+/// first, whose slot then ends; a second Paladin's shield on that ally is its
+/// own and stays.
+#[test]
+fn sacred_shield_is_one_target_per_paladin() {
+    let mut w = world();
+    let (caster, first) = units(&mut w);
+    let second = w
+        .spawn((
+            Combatant::new(1, 2, CharacterClass::Mage),
+            Transform::default(),
+            ActiveAuras { auras: Vec::new() },
+        ))
+        .id();
+    cast(&mut w, AbilityType::SacredShield, first, caster);
+    assert!(holds_shield(&w, first));
+    cast(&mut w, AbilityType::SacredShield, second, caster);
+    assert!(holds_shield(&w, second));
+    assert!(!holds_shield(&w, first), "moved off the first ally");
+    frame(&mut w, 0.1);
+    assert_eq!(slots(&w, first), 0, "its slot ends with it");
+    assert!(w.resource::<CombatLog>().entries.iter().any(|e| e
+        .message
+        .contains("Sacred Shield fades (it moved to another target)")));
+
+    // Control: another Paladin's shield on the second ally leaves the first
+    // Paladin's on the first.
+    let mut w = world();
+    let (caster, first) = units(&mut w);
+    let other = w
+        .spawn((
+            Combatant::new(1, 2, CharacterClass::Paladin),
+            Transform::default(),
+        ))
+        .id();
+    let second = w
+        .spawn((
+            Combatant::new(1, 3, CharacterClass::Mage),
+            Transform::default(),
+            ActiveAuras { auras: Vec::new() },
+        ))
+        .id();
+    cast(&mut w, AbilityType::SacredShield, first, caster);
+    cast(&mut w, AbilityType::SacredShield, second, other);
+    assert!(holds_shield(&w, first) && holds_shield(&w, second));
+}

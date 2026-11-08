@@ -519,6 +519,9 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
   `Aura::stack_owner` / `Aura::same_source_as` carry the key, and every lookup
   of a source-keyed aura goes through them — the refresh and the already-applied
   gate.
+  `stacking: Some((max_stacks: 1, one_target: true))` makes the caster hold the
+  aura on ONE unit at a time (`AuraStacks::one_target`; Sacred Shield): when it
+  lands on another, `apply_pending_auras` takes the caster's off the first.
   Swiftmend eats its caster's own Rejuvenation first, and the Druid AI reads
   only its own heals over time. Two Druids marking in one frame never mark the
   same ally (`marked_this_frame`, the Paladin's `paladin_aura_this_frame` guard).

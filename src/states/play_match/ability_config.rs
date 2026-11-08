@@ -159,6 +159,10 @@ pub struct AuraStackingConfig {
     /// At least 1. `1` means the aura refreshes on reapplication but never
     /// deepens.
     pub max_stacks: u8,
+    /// The caster holds it on one target at a time: landing it on another
+    /// unit takes the caster's from the first (Sacred Shield). Default false.
+    #[serde(default)]
+    pub one_target: bool,
 }
 
 /// A blooming aura's heal, per stack: `heal_base + caster spell power ×

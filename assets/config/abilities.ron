@@ -1515,7 +1515,9 @@
         // absorbing 40 for 6s, at most once every 6s (`triggered_absorbs`):
         // an aura that holds until the next damage uses it (Wrath's form).
         // Refresh-only, so a recast renews the 30s without rearming the
-        // shield. Not in TBC; Wrath 53601 (and its absorb, 58597): Magic.
+        // shield; one target per Paladin, so casting it on another ally
+        // takes it off the first. Not in TBC; Wrath 53601 (and its absorb,
+        // 58597): Magic.
         SacredShield: (
             name: "Sacred Shield",
             class: Paladin,
@@ -1530,7 +1532,7 @@
                 aura_type: TriggeredAbsorb,
                 duration: 30.0,
                 magnitude: 0.0,  // unread: the shield's size is its triggered absorb's
-                stacking: Some((max_stacks: 1)),
+                stacking: Some((max_stacks: 1, one_target: true)),
                 triggered_absorb: Some((
                     trigger: DamageTaken,
                     shield: Flat(40.0),

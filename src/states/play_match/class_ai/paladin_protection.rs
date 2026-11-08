@@ -50,17 +50,27 @@ pub fn sacrifice_target(situation: &TeamSituation, me: Entity) -> Option<Entity>
 }
 
 /// The teammate Sacred Shield belongs on, among those `reaches` accepts: the
-/// teammate in danger, else the most injured pressured teammate (by
-/// `health`, a fraction; entity order on a tie). `None` while no teammate it
-/// reaches is pressured.
+/// teammate in danger; else `holder`, the teammate already holding this
+/// Paladin's shield, while it is still pressured (the shield is one target a
+/// Paladin, so moving it between two pressured teammates as their health
+/// trades places would spend a global cooldown each time and re-arm the
+/// absorb); else the most injured pressured teammate (by `health`, a
+/// fraction; entity order on a tie). `None` while no teammate it reaches is
+/// pressured.
 pub fn sacred_shield_pick(
     situation: &TeamSituation,
     health: impl Fn(Entity) -> f32,
     reaches: impl Fn(Entity) -> bool,
+    holder: Option<Entity>,
 ) -> Option<Entity> {
     if let Some(subject) = situation.ally_in_danger.map(|w| w.subject) {
         if reaches(subject) {
             return Some(subject);
+        }
+    }
+    if let Some(holder) = holder {
+        if situation.is_pressured(holder) && reaches(holder) {
+            return Some(holder);
         }
     }
     situation
@@ -253,9 +263,24 @@ pub fn try_sacred_shield(
             }
         })
     };
-    let Some(target) =
-        sacred_shield_pick(situation, health, |e| reach(e) == Some(CastReach::Reaches))
-    else {
+    // The teammate holding this Paladin's shield (one target a Paladin).
+    let holder = ctx
+        .active_auras
+        .iter()
+        .find(|(_, list)| {
+            list.iter().any(|a| {
+                a.effect_type == AuraType::TriggeredAbsorb
+                    && a.ability_name == def.name
+                    && a.caster == Some(entity)
+            })
+        })
+        .map(|(e, _)| *e);
+    let Some(target) = sacred_shield_pick(
+        situation,
+        health,
+        |e| reach(e) == Some(CastReach::Reaches),
+        holder,
+    ) else {
         // A pressured teammate it cannot reach is reported as such.
         let unreached = situation
             .allies
@@ -393,18 +418,37 @@ mod tests {
         s.allies.push(standing(b, true));
         s.allies.push(standing(c, false));
         // The unpressured, most injured teammate is not picked.
-        assert_eq!(sacred_shield_pick(&s, hp, |_| true), Some(b));
+        assert_eq!(sacred_shield_pick(&s, hp, |_| true, None), Some(b));
         // Out of reach, the next pressured one is.
-        assert_eq!(sacred_shield_pick(&s, hp, |e| e != b), Some(a));
+        assert_eq!(sacred_shield_pick(&s, hp, |e| e != b, None), Some(a));
         // The teammate in danger first, when it is reached.
         s.ally_in_danger = Some(window(a));
-        assert_eq!(sacred_shield_pick(&s, hp, |_| true), Some(a));
-        assert_eq!(sacred_shield_pick(&s, hp, |e| e != a), Some(b));
+        assert_eq!(sacred_shield_pick(&s, hp, |_| true, None), Some(a));
+        assert_eq!(sacred_shield_pick(&s, hp, |e| e != a, None), Some(b));
         // Nobody pressured: no pick.
         let calm = TeamSituation {
             allies: [standing(a, false)].into_iter().collect(),
             ..Default::default()
         };
-        assert_eq!(sacred_shield_pick(&calm, hp, |_| true), None);
+        assert_eq!(sacred_shield_pick(&calm, hp, |_| true, None), None);
+    }
+
+    #[test]
+    fn sacred_shield_stays_on_a_holder_while_it_is_pressured() {
+        let a = Entity::from_raw(1);
+        let b = Entity::from_raw(2);
+        let hp = |e: Entity| if e == a { 0.9 } else { 0.6 };
+        let mut s = TeamSituation::default();
+        s.allies.push(standing(a, true));
+        s.allies.push(standing(b, true));
+        // The healthier holder keeps it while pressured.
+        assert_eq!(sacred_shield_pick(&s, hp, |_| true, Some(a)), Some(a));
+        // Unpressured, it moves to the most injured pressured teammate.
+        s.allies[0].pressured = false;
+        assert_eq!(sacred_shield_pick(&s, hp, |_| true, Some(a)), Some(b));
+        // The teammate in danger outranks the holder.
+        s.allies[0].pressured = true;
+        s.ally_in_danger = Some(window(b));
+        assert_eq!(sacred_shield_pick(&s, hp, |_| true, Some(a)), Some(b));
     }
 }

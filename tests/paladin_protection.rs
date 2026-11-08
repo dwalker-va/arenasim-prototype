@@ -340,6 +340,52 @@ fn sacred_shields_text_states_its_triggered_absorb() {
     );
 }
 
+/// One target a Paladin: while the teammate holding its shield is still
+/// pressured, the shield stays there, though another pressured teammate is
+/// more injured. Without a holder, the more injured one gets it.
+#[test]
+fn sacred_shield_stays_on_its_holder_while_it_is_pressured() {
+    let held = |holder: bool| {
+        let mut scene = mage_under_attack(0.9)
+            .grant(PALADIN, AbilityType::SacredShield)
+            .cooldown(PALADIN, AbilityType::HammerOfJustice, 30.0)
+            .unit("enemy warrior 2", 2, Warrior)
+            .at(2.0, 0.0)
+            .targeting(PALADIN);
+        scene.set_health(PALADIN, 0.7);
+        if holder {
+            let paladin = scene.entity(PALADIN);
+            scene = scene.aura_full(
+                MAGE,
+                Aura {
+                    effect_type: AuraType::TriggeredAbsorb,
+                    duration: 20.0,
+                    caster: Some(paladin),
+                    ability_name: "Sacred Shield".into(),
+                    ..Default::default()
+                },
+            );
+        }
+        scene.decide(PALADIN)
+    };
+    let view = held(true);
+    assert!(
+        matches!(
+            view.rejected(AbilityType::SacredShield),
+            Some(RejectionReason::AlreadyApplied)
+        ),
+        "{}",
+        describe(&view)
+    );
+    let view = held(false);
+    assert_eq!(
+        view.chose(),
+        Some((AbilityType::SacredShield, Some(PALADIN))),
+        "{}",
+        describe(&view)
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The tree, as the card writes it.
 // ---------------------------------------------------------------------------
