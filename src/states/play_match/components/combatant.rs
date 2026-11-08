@@ -478,6 +478,15 @@ pub struct Combatant {
     /// Rogue-specific: which weapon poison is coated (currently only Crippling).
     /// Drives the on-auto-hit poison proc in `combat_auto_attack`.
     pub rogue_poison: RoguePoison,
+    /// Rogue-specific: the off-hand poison, when the build opens the second
+    /// poison slot (Master Poisoner) and the slot chose one. `None`: the
+    /// main-hand poison coats both weapons.
+    pub rogue_offhand_poison: Option<RoguePoison>,
+    /// The bespoke rules the combatant's talents give it, each read at its
+    /// own code site (`talent_mechanics`). Empty untalented.
+    pub talent_mechanics: crate::states::play_match::talent_mechanics::TalentMechanics,
+    /// Whether a once-a-match killing-blow save (Cheat Death) has been spent.
+    pub killing_blow_save_spent: bool,
     /// Warlock-specific: which curse to apply to each enemy target (indexed by enemy slot)
     pub warlock_curse_prefs: Vec<WarlockCurse>,
     /// Warrior-specific: which shout to use (Battle Shout, Demoralizing Shout, or Commanding Shout)
@@ -498,6 +507,15 @@ pub struct Combatant {
     /// so the next one goes to the shift. Cleared once the Druid is free of
     /// roots and snares.
     pub druid_emergency_heal_spent: bool,
+    /// Pet-specific: the Heel latch ([`heel_latch`](crate::states::play_match::class_ai::pet_ai::heel_latch)).
+    /// A pet heels below `PET_HEEL_ENTER_HP` and stays heeled, recovering
+    /// health at its owner's side, until it is back to `PET_HEEL_RELEASE_HP`.
+    /// Always false for a non-pet.
+    pub pet_heeled: bool,
+    /// Pet-specific: seconds toward the next tick of a heeled pet's recovery
+    /// ([`recover_heeled_pets`](crate::states::play_match::class_ai::pet_ai::recover_heeled_pets)).
+    /// Zero while the pet is not at Heel.
+    pub pet_heel_recovery_timer: f32,
     /// Druid-specific: the duel-melee latch ([`duel_melee`](crate::states::play_match::class_ai::druid::duel_melee)).
     /// While it holds, the Druid's pursuit closes to melee to swing its
     /// staff instead of standing at spell range.
@@ -511,6 +529,11 @@ pub struct Combatant {
     /// proc trinket draws exactly the numbers it drew before proc trinkets
     /// existed, and is bit-identical.
     pub proc_trinkets: Vec<crate::states::play_match::proc_trinkets::ProcSlot>,
+    /// Equipped on-use items and their live cooldowns, in socket order.
+    /// Filled by [`Combatant::apply_equipment`]. EMPTY for every loadout that
+    /// carries none, and every on-use hook returns on that emptiness, so such
+    /// a match runs and traces exactly as it did before on-use items existed.
+    pub on_use_items: Vec<crate::states::play_match::on_use_items::OnUseSlot>,
     /// Triggered absorbs this combatant carries (Aegis of the Last Stand), and
     /// whether each is spent. Filled by [`Combatant::apply_equipment`]; read
     /// by `triggered_absorbs::fire_triggered_absorbs`, which returns on an
@@ -540,6 +563,7 @@ pub fn weapon_poison_marker_aura(poison: RoguePoison) -> super::Aura {
         tick_interval: 0.0,
         time_until_next_tick: 0.0,
         caster: None,
+        damage_mods: Default::default(),
         ability_name: poison.name().to_string(),
         fear_direction: (0.0, 0.0),
         fear_direction_timer: 0.0,
@@ -702,6 +726,9 @@ impl Combatant {
             last_kill_target: None,
             rogue_opener: RogueOpener::default(),
             rogue_poison: RoguePoison::default(),
+            rogue_offhand_poison: None,
+            talent_mechanics: Default::default(),
+            killing_blow_save_spent: false,
             warlock_curse_prefs: Vec::new(),
             warrior_shout: WarriorShout::default(),
             mage_armor: MageArmor::default(),
@@ -709,8 +736,11 @@ impl Combatant {
             hunter_opened: false,
             trap_retarget: None,
             druid_emergency_heal_spent: false,
+            pet_heeled: false,
+            pet_heel_recovery_timer: 0.0,
             druid_duel_melee: false,
             proc_trinkets: Vec::new(),
+            on_use_items: Vec::new(),
             triggered_absorbs: Vec::new(),
         }
     }
@@ -1082,6 +1112,20 @@ impl Combatant {
                         remaining_icd: 0.0,
                     });
             }
+            // An on-use item, captured the same way and for the same reason:
+            // the AI and the resolution site need no `ItemDefinitions`. It
+            // starts ready.
+            if let Some(on_use) = &item.on_use {
+                self.on_use_items
+                    .push(crate::states::play_match::on_use_items::OnUseSlot {
+                        item: *item_id,
+                        name: item.name.clone(),
+                        config: on_use.clone(),
+                        remaining: 0.0,
+                        spent: false,
+                        waiting: None,
+                    });
+            }
 
             // A triggered absorb (Aegis of the Last Stand), named after its
             // item, which is what its shield aura and visual are keyed on.
@@ -1276,6 +1320,8 @@ pub struct HolyShockHealPending {
 /// Pending Holy Shock damage to be processed.
 #[derive(Component)]
 pub struct HolyShockDamagePending {
+    /// The Paladin: what the damage pipeline credits and reflects onto.
+    pub caster: Entity,
     /// The Paladin's own book, which the damage is read from.
     pub caster_book: AbilityBook,
     pub caster_spell_power: f32,

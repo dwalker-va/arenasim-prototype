@@ -610,6 +610,51 @@ carrying every slot's build.
   untalented unit's book lacks it. `tests/talent_ai_audit.rs` fails until the
   ability has a row there whose scene shows the AI deciding it when granted
   and leaving it alone when not.
+- **Per-match choices** (`talent_choices.rs`). `WidenChoice(<menu>(<option>))`
+  hides an option from every build without the node (which options are hidden
+  is data: the ones some node widens; a menu's default never is);
+  `AddChoiceSlot(OffHandPoison)` opens a second slot (the Rogue's off-hand
+  poison, `team{1,2}_rogue_offhand_poisons`, which must differ from the main
+  hand's); `FromRank(r, effect)` applies an effect from rank `r` on (rank 1
+  adds an option, rank 2 patches it). `choice_rules` in `talents.ron` make
+  choices exclusive: `SwitchesOff` (an option turns a talent off for the
+  match), `Forbids` and `Requires` (an ability locked by the slot's choices
+  stays in its book, `AbilityBook::is_locked`, and the cast gate refuses it,
+  traced `CHOICE_LOCKED_NOTE`). A config built from JSON — `--headless`,
+  `--batch`, `--matrix` (each goes through `HeadlessPlugin`) and `--replay` —
+  has its slots' choices checked against their builds in `to_match_config`
+  (`validate_config_choices`), so a bad one is an error naming the slot. The
+  client's own `MatchConfig` is built by its screens, which offer only legal
+  choices; its spawn re-checks (`resolve_for_spawn` panics, naming the slot).
+  The loader rejects a `Forbids` and a `Requires` on the same ability and
+  option (they would lock it for good), and `to_match_config` rejects an
+  off-hand poison on a slot that is not a Rogue.
+- **`Mechanic(TalentMechanic)`** (`talent_mechanics.rs`) is the last resort: a
+  named rule with its numbers in the RON and ONE code site, carried on the
+  combatant as `Combatant::talent_mechanics`. Today: `SoulLink` (the transfer
+  step, to the holder's pet), `ReflectiveShield` (`apply_pending_auras` marks
+  the shields its holder casts), `CheatDeath` (the killing-blow step).
+- **The damage pipeline** (`combat_core::apply_damage_with_absorb`, taking a
+  `Hit`): immunity, the attacker's `DamageDealtIncrease` (every site passes it
+  with `Hit::with_dealt` — `damage_site_audit` checks), armor (with
+  `ArmorPercentIncrease`/`Reduction`, never written into `armor`) and
+  resistance, the strongest in-scope `DamageTakenReduction`, the strongest
+  in-scope `DamageTakenIncrease` (a charged one is spent by
+  direct hits only, and does not raise ticks), the strongest transfer
+  (`DamageTransfer` to its caster, or Soul Link), absorbs (a reflecting one
+  returns its share), the stealth reveal, the killing-blow save
+  (`KillingBlowSave`, Cheat Death), health, then `DamageReflect` on a melee
+  hit. Every one of these kinds takes only its STRONGEST instance in scope
+  (the stacking simplification: Cheat Death's 90% cut under Devotion Aura is
+  90%, not 91%); different kinds multiply. What a hit sets off on another
+  unit is a `DamageFollowUp`, spawned by its site and landed at the end of the
+  frame by `process_damage_follow_ups`: a transfer cannot be prevented and
+  never kills its receiver (a share it could not survive stays with the
+  holder and ends the transfer aura), reflected and transferred damage never
+  reflects or transfers again, and a save's heal goes through `apply_healing`.
+  A save is checked per blow, so it spares the first lethal blow of a frame;
+  a mutual lethal where one side holds a save is that side's survival, not a
+  draw.
 - **Adding a patchable field:** an `AbilityField` variant;
   `every_numeric_ability_field_is_decided` destructures `AbilityConfig`
   without a rest pattern, so a new numeric field fails to compile until it is
@@ -663,7 +708,7 @@ any ring fits either ring socket, and the same item may not occupy both
    proc: Some((
        trigger: MeleeHit,         // MeleeHit | SpellCast | Heal
        chance: 0.15,              // per qualifying event, in (0.0, 1.0]
-       effect: AttackPowerIncrease,
+       effect: Buff(AttackPowerIncrease),  // or ExtraSwing (see below)
        magnitude: 55.0,           // in the effect aura's own units
        duration: 10.0,
        internal_cooldown: 45.0,   // must be >= duration
@@ -692,6 +737,17 @@ any ring fits either ring socket, and the same item may not occupy both
      at their item-stat weights, and haste (`AttackSpeedIncrease`, the
      Dragonspine Trophy's +20% attack speed) at `WEIGHT_ATTACK_SPEED`, crit's
      weight at TBC's rating exchange rate.
+   - **`effect: ExtraSwing`** (Hand of Justice, Gressil) is the one proc that is not a
+     buff: on a `MeleeHit` from either hand it queues one extra MAIN-hand swing
+     on Windfury Totem's own path (`combat_core::ExtraSwingSource`), rolled
+     where the swing is queued rather than after it lands. It takes no
+     `magnitude`, `duration` or `internal_cooldown` (validated), never draws
+     the totem's `WindfuryTornado`, grants no rage (a TBC deviation, AS-448)
+     and no further extra swing, and logs `X procs <trinket> (extra attack)`.
+     No stat buys it, so it is priced at a DECLARED rate per unit of `chance`,
+     `WEIGHT_EXTRA_SWING`: 1.5x haste's weight, provisional (a 10x-dose sweep
+     the constant cites). Every consumer that lists or draws proc BUFFS asks
+     `ItemConfig::proc_buff`, which excludes it.
    - **Procs are not purgeable.** A proc buff is `DispelType::Physical` — an
      item's effect is not a spell, however magical it looks — so no purge,
      dispel or cleanse removes it.
@@ -702,6 +758,47 @@ any ring fits either ring socket, and the same item may not occupy both
      wears the TRINKET's icon (`ItemConfig.icon`) in the buff bar, the team
      frames and the encyclopedia — the buff carries `Aura::source_item`, and
      `item_aura_icons` registers the art in both aura icon loaders.
+
+   **An item may carry an `on_use:` block** — an effect its wearer's AI
+   chooses when to fire, on the item's own cooldown
+   (`src/states/play_match/on_use_items.rs`):
+   ```ron
+   on_use: Some((
+       effect: CcBreak,           // the Medallion's break
+       cooldown: OncePerMatch,    // or Seconds(60.0)
+       price: Some(24.0),         // declared, per use; only where no stat weight prices the effect
+   )),
+   ```
+   - **Pricing: uses in an arena life**, not the proc's long-run bound.
+     An on-use starts ready, so it is charged per use times the uses it gets in
+     `ARENA_LIFE_SECS` (37.8s, the mean life the proc probe measures): a 45s
+     cooldown is one use. A stat burst prices through `on_use_buff_cost` (15s
+     of +40 SP on 45s is about 24). An
+     effect no stat weight prices (the CC break) DECLARES its per-use price,
+     sweep-checked against the same budget spent on stats; the loader refuses
+     one that declares none.
+   - **One AI rule per effect kind, never per item** (`class_ai/on_use.rs`).
+     The CC break is asked only while its wearer is HELD — stunned, feared,
+     polymorphed, incapacitated or cycloned, through `combat_ai::dispatch_while_held`,
+     ahead of the class's own break (Divine Shield, Berserker Rage) — and
+     fires on the first LONG hold: `CC_BREAK_MIN_HOLD_REMAINING` (2s) or more
+     left. A root or slow alone never asks it. It WAITS when a teammate is
+     going to dispel every long hold (`class_ai::on_use::expected_dispeller`:
+     an urgent dispel in scope, castable now, owed to the wearer by
+     `owed_dispel` — and a teammate still walking there counts only if it
+     reaches range at its base speed within `wait_budget`: the grace left, or
+     the hold left above the floor), at most `DISPEL_WAIT_GRACE_SECS` (a GCD
+     and half a second), re-asked every tick. It breaks every stun, fear (horror
+     included), polymorph, incapacitate, Cyclone, root and slow
+     (`cc_break_breaks`), never a silence, and grants no immunity. It breaks a
+     Cyclone as TBC's PvP trinket does; the class breaks (Divine Shield,
+     Berserker Rage) are not used from inside one. Traced as an
+     `item_decision` event (`item`, `status`, `reason` — "short hold" or
+     "waiting for <id>'s <dispel>"); `Scene::on_use_item` and
+     `Scene::decide_held` test it.
+   - Its line ("Use: …") is `ItemConfig::effect_description`, shared by the
+     encyclopedia page, the tooltip and the equipment picker. Its landing is in
+     `tests/lands_silently_audit.rs`'s on-use family.
 
    **A trinket may carry a `triggered_absorb:` block** — a shield a condition
    on its wearer raises (`src/states/play_match/triggered_absorbs.rs`; Aegis
@@ -716,17 +813,25 @@ any ring fits either ring socket, and the same item may not occupy both
    )),
    ```
    - **Where it fires:** `fire_triggered_absorbs`, at the end of Phase 3,
-     after the frame's last damage; it never touches the damage funnel. The
-     shield is an `Absorb` aura named after the item, keyed by source, so it
-     sits beside a Power Word: Shield. It applies `ArenaDampening` itself, at
-     that landing site, and logs `<wearer> gains <item> (absorbs N)` with the
-     landed amount. Not purgeable (`DispelType::Physical`), as for procs.
+     after the frame's last damage and after `process_damage_follow_ups`; it
+     never touches the damage funnel. The shield is an `Absorb` aura named
+     after the item, keyed by source, so it sits beside a Power Word: Shield.
+     It applies `ArenaDampening` itself, at that landing site, and logs
+     `<wearer> gains <item> (absorbs N)` with the landed amount. Not purgeable
+     (`DispelType::Physical`), as for procs.
+   - **In the damage pipeline** it is an ordinary absorb (the funnel's step 5):
+     it soaks a hit after the damage-taken modifiers and a transfer's share,
+     before the killing-blow save, and never a transferred hit. Because it
+     fires after the follow-ups, a transfer that crosses the line raises it
+     that frame, and a save is judged first: Cheat Death leaving its Rogue
+     below the line raises it on the frame of the blow
+     (`tests/triggered_absorb_pipeline.rs`).
    - **Pricing:** value times trigger rate — the shield on a
      `TRIGGERED_ABSORB_REFERENCE_HEALTH` (420) combatant at the health weight,
      times the declared `trigger_rate`, which stays provisional until the
      Gauntlet bot measures it.
    - It gets the same surfaces a proc does, with no code change (its sentence
-     is `triggered_absorb_description`, through `ItemConfig::effect_description`),
+     is `triggered_absorb_description`, through `ItemConfig::effect_lines`),
      and is a member of `tests/lands_silently_audit.rs`'s triggered-absorb
      family: its shield must reach a `ShieldKind` (`is_live_shield`, keyed on
      the aura's name). New variants of trigger, size and limit (Sacred Shield,
@@ -1341,7 +1446,7 @@ scripts/paired_sweep.py before.csv after.csv \
 - **Paladin**: Mana, healer/melee, Holy Shock/Flash of Light/Hammer of Justice
 - **Shaman**: Mana, offensive healer, Lightning Bolt/Lesser Healing Wave/Purge/Wind Shear/Frost Shock and totems
 - **Druid**: Mana, restoration healer (instant heals over time) and control, Rejuvenation/Lifebloom/Swiftmend/Entangling Roots/Cyclone/Moonfire/Innervate, a Travel Form escape shift; no wand
-- **Hunter**: Mana, ranged physical DPS with pet, Aimed Shot/Arcane Shot/Concussive Shot/Disengage/Freezing Trap/Frost Trap/Flare. Two auto-attacks on separate timers: Auto Shot at 8-35yd, and a melee swing from its main-hand (and off-hand) weapon inside `MELEE_RANGE` when it holds one (the default loadout does not); nothing in the dead zone between (see `docs/design/wow-mechanics.md`, Auto-Attacks). Pet engagement model: pet inherits Hunter's target, pursues into melee via existing target-pursuit movement, and retreats ("Heel") when pet HP drops below 25%. Per-pet headline abilities (Spider Web, Boar Charge, Master's Call) are dispatched by Hunter AI via the `PetCommand` component (hybrid model — Hunter owns headline calls, pet handles auto-attacks and pursuit). When Hunter is mid-cast (CastingState excludes it from `decide_abilities`), `pet_ai_system` falls back to autonomous dispatch using the same predicate logic; trace events distinguish via `dispatched_by` (set for Hunter dispatch, omitted for autonomous). Iteration 2a shipped pet target ownership + Heel predicate + PetCommand framework; iteration 2b shipped the Hunter `try_dispatch_*` helpers plus the pet-side `pet_command_rejection` authoritative check, with the autonomous fallback kept to cover Hunter's CastingState windows.
+- **Hunter**: Mana, ranged physical DPS with pet, Aimed Shot/Arcane Shot/Concussive Shot/Disengage/Freezing Trap/Frost Trap/Flare. Two auto-attacks on separate timers: Auto Shot at 8-35yd, and a melee swing from its main-hand (and off-hand) weapon inside `MELEE_RANGE` when it holds one (the default loadout does not); nothing in the dead zone between (see `docs/design/wow-mechanics.md`, Auto-Attacks). Pet engagement model: pet inherits Hunter's target, pursues into melee via existing target-pursuit movement, and retreats ("Heel") when pet HP drops below 25%. A heeled pet — every pet, the Warlock's Felhunter included — recovers 2% of its maximum health a second at its owner's side, in one tick a second like a heal over time (`pet_ai::recover_heeled_pets`; the 2% is provisional), and re-engages once back to 50% (`pet_ai::heel_latch`). The recovery is healing: healing reduction cuts it, with one Mortal Wounds tell a tick, and dampening cuts it to nothing at full dampening. No healer heals a pet. Per-pet headline abilities (Spider Web, Boar Charge, Master's Call) are dispatched by Hunter AI via the `PetCommand` component (hybrid model — Hunter owns headline calls, pet handles auto-attacks and pursuit). When Hunter is mid-cast (CastingState excludes it from `decide_abilities`), `pet_ai_system` falls back to autonomous dispatch using the same predicate logic; trace events distinguish via `dispatched_by` (set for Hunter dispatch, omitted for autonomous). Iteration 2a shipped pet target ownership + Heel predicate + PetCommand framework; iteration 2b shipped the Hunter `try_dispatch_*` helpers plus the pet-side `pet_command_rejection` authoritative check, with the autonomous fallback kept to cover Hunter's CastingState windows.
 
 ## Common Tasks
 
@@ -1582,7 +1687,7 @@ jq -c 'select(.kind == "pet_decision") | {owner, pet_type, ability: .outcome.abi
 # this recipe filters to non-null values.
 jq -c 'select(.kind == "pet_decision" and .dispatched_by != null) | {owner, pet_type, ability: .outcome.ability, dispatched_by}' $T
 
-# Heel-state retreats (pet HP < 25%, target cleared, returns to owner's
+# Heel-state retreats (pet HP < 25% until it recovers to 50%; target cleared, returns to owner's
 # flank, queued PetCommand despawned without execution)
 jq -c 'select(.kind == "pet_decision") | .candidates[]? | select((.reason | if type == "object" then keys[0] else . end) == "LowHealthHeel")' $T | wc -l
 

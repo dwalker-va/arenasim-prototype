@@ -30,6 +30,7 @@ pub mod hunter_dip;
 pub mod hunter_lane;
 pub mod interrupts;
 pub mod mage;
+pub mod on_use;
 pub mod paladin;
 pub(crate) mod paladin_postures;
 pub mod peel;
@@ -97,6 +98,10 @@ pub struct CombatantInfo {
     pub stealthed: bool,
     pub target: Option<Entity>,
     pub is_pet: bool,
+    /// A pet's Heel latch as its `Combatant` carries it (`pet_heeled`); false
+    /// for everyone else. Read it through [`Self::is_heeled`], which also
+    /// counts a pet that has just dropped below the Heel threshold this frame.
+    pub pet_heeled: bool,
     /// The ability this combatant is currently casting or channeling, if any.
     /// `Some` iff the entity has a live `CastingState`/`ChannelingState` this
     /// frame. Consumers map it to a `SpellSchool` (via [`Self::book`]) to
@@ -166,6 +171,13 @@ impl CombatantInfo {
         } else {
             0.0
         }
+    }
+
+    /// Whether this pet is at Heel: the latch [`pet_ai::heel_latch`] would
+    /// hold for it now, so an owner deciding before `pet_ai_system` folds this
+    /// frame's health in still agrees with the pet. False for a non-pet.
+    pub fn is_heeled(&self) -> bool {
+        self.is_pet && pet_ai::heel_latch(self.pet_heeled, self.health_pct())
     }
 
     /// Mana as a percentage (0.0 to 1.0)
@@ -1146,7 +1158,9 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         | AuraType::AttackPowerReduction
         | AuraType::AttackSpeedSlow
         | AuraType::DamageReduction
-        | AuraType::CastTimeIncrease => 0,
+        | AuraType::CastTimeIncrease
+        | AuraType::DamageTakenIncrease
+        | AuraType::ArmorPercentReduction => 0,
 
         // Mechanical markers, not effects. Lifting `WeakenedSoul` would hand the
         // Priest a free Power Word: Shield reset.
@@ -1171,6 +1185,11 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         | AuraType::ArmorIncrease
         | AuraType::FearImmunity
         | AuraType::AttackSpeedIncrease
+        | AuraType::DamageDealtIncrease
+        | AuraType::ArmorPercentIncrease
+        | AuraType::DamageTransfer
+        | AuraType::KillingBlowSave
+        | AuraType::DamageReflect
         | AuraType::TravelForm => 0,
     }
 }
@@ -1400,12 +1419,15 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
     match aura_type {
         // Defensives — most valuable to remove (denies mitigation / sustain).
         AuraType::Absorb => 100,              // PW:Shield / damage absorb
+        AuraType::KillingBlowSave => 100,     // a death prevented (Guardian Spirit)
         AuraType::DamageTakenReduction => 90, // flat damage cut (Devotion Aura is untyped)
+        AuraType::DamageTransfer => 80,       // damage moved off the holder (Blessing of Sacrifice)
         AuraType::HealingOverTime => 70,      // ongoing sustain (Rejuvenation)
         // Offensive throughput buffs.
         AuraType::AttackPowerIncrease => 60,
         AuraType::SpellPowerIncrease => 60,
         AuraType::AttackSpeedIncrease => 60,
+        AuraType::DamageDealtIncrease => 60,
         AuraType::WindfuryBuff => 55,
         AuraType::CritChanceIncrease => 50,
         // Minor utility buffs.
@@ -1413,6 +1435,8 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         AuraType::ManaRegenIncrease => 25,
         AuraType::SpellResistanceBuff => 20,
         AuraType::ArmorIncrease => 20,
+        AuraType::ArmorPercentIncrease => 20,
+        AuraType::DamageReflect => 20,
         AuraType::FrostArmorBuff => 20,
         AuraType::MaxHealthIncrease => 15, // cheap re-buff (PW:Fortitude) — not worth a GCD to strip
         AuraType::LockoutDurationReduction => 15,
@@ -1442,7 +1466,9 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         | AuraType::DamageReduction
         | AuraType::CastTimeIncrease
         | AuraType::AttackPowerReduction
-        | AuraType::AttackSpeedSlow => 0,
+        | AuraType::AttackSpeedSlow
+        | AuraType::DamageTakenIncrease
+        | AuraType::ArmorPercentReduction => 0,
     }
 }
 
@@ -1505,6 +1531,13 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
         | AuraType::AttackSpeedIncrease
+        | AuraType::DamageTakenIncrease
+        | AuraType::DamageDealtIncrease
+        | AuraType::ArmorPercentIncrease
+        | AuraType::ArmorPercentReduction
+        | AuraType::DamageTransfer
+        | AuraType::KillingBlowSave
+        | AuraType::DamageReflect
         | AuraType::TravelForm => false,
     }
 }
@@ -1597,6 +1630,13 @@ pub const fn grants_damage_immunity(aura: AuraType) -> bool {
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
         | AuraType::AttackSpeedIncrease
+        | AuraType::DamageTakenIncrease
+        | AuraType::DamageDealtIncrease
+        | AuraType::ArmorPercentIncrease
+        | AuraType::ArmorPercentReduction
+        | AuraType::DamageTransfer
+        | AuraType::KillingBlowSave
+        | AuraType::DamageReflect
         | AuraType::TravelForm => false,
     }
 }
@@ -2637,6 +2677,7 @@ pub(crate) mod reach_fixture {
             stealthed: false,
             target: None,
             is_pet: false,
+            pet_heeled: false,
             casting_ability: None,
             pet_type: None,
             pet: None,

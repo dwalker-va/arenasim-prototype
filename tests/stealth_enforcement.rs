@@ -72,6 +72,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> Comb
         stealthed: false,
         target: None,
         is_pet: false,
+        pet_heeled: false,
         casting_ability: None,
         pet_type: None,
         pet: None,
@@ -101,6 +102,7 @@ fn shadow_sight() -> Aura {
         source_item: None,
         stacks: None,
         bloom: None,
+        damage_mods: Default::default(),
     }
 }
 

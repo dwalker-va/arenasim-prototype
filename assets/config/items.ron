@@ -10,6 +10,17 @@
 // one-hander it displaces — see docs/design/balance/2026-09-28-as167-weapon-speed.md.
 // Non-weapon items add their stats to the combatant's base stats.
 //
+// Weapon damage is a free stat, so the budget does not scale it; the item
+// level does. A reward-tier (Gauntlet or Champion) one-hander, bow, crossbow or
+// wand deals its anchor's weapon DPS x `item_level / anchor item_level`. The
+// anchor is the starting-kit weapon held the same way, of the same role
+// (spell power: caster; otherwise physical) and weapon type — any type of that
+// hand and role where none of its type starts — and, of several, the one with
+// the most DPS per item level, so no wearer's reward scales below the weapon
+// it starts with. A reward two-hander deals its one-hander's DPS x Classic's
+// two-hander premium. The spread (min:max) is the Classic stand-in's own.
+// Pinned by `reward_weapon_dps_scales_its_starting_weapon_by_item_level`.
+//
 // `item_tier` names the item's tier, and its `item_level` must sit in that
 // tier's band (`equipment::ItemTier`, checked at load): the starting kit (0,
 // the default) at 54-60, the Gauntlet tier (1) at 76-80, the Champion tier
@@ -891,7 +902,7 @@
             proc: Some((
                 trigger: MeleeHit,
                 chance: 0.15,
-                effect: AttackSpeedIncrease,
+                effect: Buff(AttackSpeedIncrease),
                 magnitude: 0.20,
                 duration: 10.0,
                 internal_cooldown: 45.0,
@@ -907,7 +918,7 @@
             proc: Some((
                 trigger: MeleeHit,
                 chance: 0.10,
-                effect: CritChanceIncrease,
+                effect: Buff(CritChanceIncrease),
                 magnitude: 0.10,
                 duration: 8.0,
                 internal_cooldown: 60.0,
@@ -923,7 +934,7 @@
             proc: Some((
                 trigger: SpellCast,
                 chance: 0.12,
-                effect: SpellPowerIncrease,
+                effect: Buff(SpellPowerIncrease),
                 magnitude: 55.0,
                 duration: 12.0,
                 internal_cooldown: 50.0,
@@ -939,10 +950,36 @@
             proc: Some((
                 trigger: Heal,
                 chance: 0.20,
-                effect: ManaRegenIncrease,
+                effect: Buff(ManaRegenIncrease),
                 magnitude: 12.0,
                 duration: 10.0,
                 internal_cooldown: 45.0,
+            )),
+        ),
+
+        // ====================================================================
+        // CHAMPION TRINKETS (2): an on-use effect. See the `on_use_items`
+        // module for the pricing rule.
+        // ====================================================================
+
+        // TBC's Medallion of the Alliance / Horde (Classic's Insignia, 18854):
+        // a once-a-match break of every loss of control and movement
+        // impairment. A Champion trinket's budget (92 x 0.75 x 0.70 = 48.3):
+        // the break's declared price is 24, what it measured worth in health,
+        // and the rest is health. PROVISIONAL: measured before the dispel
+        // wait's arrival gate; re-checked at the milestone sweep
+        // (docs/design/balance/2026-10-31-as305-medallion.md).
+        MedallionOfTheAlliance: (
+            name: "Medallion of the Alliance",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_trinketpvp_01.jpg",
+            slot: Trinket,
+            max_health: 24.0,
+            on_use: Some((
+                effect: CcBreak,
+                cooldown: OncePerMatch,
+                price: Some(24.0),
             )),
         ),
 
@@ -1995,6 +2032,7 @@
 
         // ====================================================================
         // GAUNTLET TIER (1): MELEE WEAPONS
+        // Weapon damage follows the item-level rule in this file's header.
         // ====================================================================
 
         // A two-hander is priced at what the one-hander + off-hand pair it
@@ -2011,8 +2049,8 @@
             weapon_type: Axe,
             is_weapon: true,
             two_handed: true,
-            attack_damage_min: 59.75,
-            attack_damage_max: 79.67,
+            attack_damage_min: 65.11,
+            attack_damage_max: 86.82,
             weapon_speed: 3.2, // Classic: Draconic Avenger (19354)
             attack_power: 23.0,
             crit_chance: 0.07,
@@ -2026,8 +2064,8 @@
             slot: MainHand,
             weapon_type: Sword,
             is_weapon: true,
-            attack_damage_min: 33.0,
-            attack_damage_max: 49.5,
+            attack_damage_min: 35.96,
+            attack_damage_max: 53.94,
             weapon_speed: 2.5, // Classic: Brutality Blade (18832)
             attack_power: 10.0,
             crit_chance: 0.03,
@@ -2041,8 +2079,8 @@
             slot: MainHand,
             weapon_type: Dagger,
             is_weapon: true,
-            attack_damage_min: 24.0,
-            attack_damage_max: 38.4,
+            attack_damage_min: 25.15,
+            attack_damage_max: 40.24,
             weapon_speed: 1.6, // Classic: Core Hound Tooth (18805)
             attack_power: 8.0,
             crit_chance: 0.04,
@@ -2056,8 +2094,8 @@
             slot: MainHand,
             weapon_type: Mace,
             is_weapon: true,
-            attack_damage_min: 32.4,
-            attack_damage_max: 48.6,
+            attack_damage_min: 36.78,
+            attack_damage_max: 55.17,
             weapon_speed: 2.7, // Classic: Aurastone Hammer (17105)
             spell_power: 13.0,
             max_health: 5.0,
@@ -2077,8 +2115,8 @@
             weapon_type: Staff,
             is_weapon: true,
             two_handed: true,
-            attack_damage_min: 49.05,
-            attack_damage_max: 85.83,
+            attack_damage_min: 52.29,
+            attack_damage_max: 91.5,
             weapon_speed: 2.9, // Classic: Staff of Dominance (18842)
             spell_power: 23.0,
             max_mana: 20.0,
@@ -2101,8 +2139,8 @@
             slot: MainHand,
             weapon_type: Dagger,
             is_weapon: true,
-            attack_damage_min: 20.25,
-            attack_damage_max: 31.5,
+            attack_damage_min: 21.59,
+            attack_damage_max: 33.58,
             weapon_speed: 1.5, // Classic: Claw of Chromaggus (19347)
             spell_power: 8.0,
             max_mana: 10.0,
@@ -2117,8 +2155,8 @@
             slot: MainHand,
             weapon_type: Sword,
             is_weapon: true,
-            attack_damage_min: 29.04,
-            attack_damage_max: 44.88,
+            attack_damage_min: 34.67,
+            attack_damage_max: 53.58,
             weapon_speed: 2.4, // Classic: Azuresong Mageblade (17103)
             spell_power: 10.0,
             max_health: 6.0,
@@ -2127,6 +2165,7 @@
 
         // ====================================================================
         // GAUNTLET TIER (1): RANGED WEAPONS
+        // Weapon damage follows the item-level rule in this file's header.
         // ====================================================================
 
         WandOfTheInvoker: (
@@ -2137,8 +2176,8 @@
             slot: Ranged,
             weapon_type: Wand,
             is_weapon: true,
-            attack_damage_min: 11.9,
-            attack_damage_max: 19.04,
+            attack_damage_min: 15.48,
+            attack_damage_max: 24.76,
             weapon_speed: 1.7, // Classic: Cold Snap (19130)
             spell_power: 12.0,
             max_mana: 14.0,
@@ -2152,8 +2191,8 @@
             slot: Ranged,
             weapon_type: Bow,
             is_weapon: true,
-            attack_damage_min: 27.84,
-            attack_damage_max: 37.12,
+            attack_damage_min: 46.72,
+            attack_damage_max: 62.3,
             weapon_speed: 2.9, // Classic: Rhok'delar, Longbow of the Ancient Keepers (18713)
             attack_power: 14.0,
             crit_chance: 0.04,
@@ -2167,8 +2206,8 @@
             slot: Ranged,
             weapon_type: Crossbow,
             is_weapon: true,
-            attack_damage_min: 28.21,
-            attack_damage_max: 36.89,
+            attack_damage_min: 31.34,
+            attack_damage_max: 40.99,
             weapon_speed: 3.1, // Classic: Crossbow of Imminent Doom (21459)
             attack_power: 10.0,
             crit_chance: 0.06,
@@ -3009,14 +3048,7 @@
         // CHAMPION TIER (2): WEAPONS, OFF HANDS AND RELICS
         // Named for Classic's Naxxramas weapons (ilvl 81-92).
         //
-        // Weapon damage is a free stat, so the budget does not move it. A
-        // Champion one-hander, bow, crossbow or wand deals the weapon DPS of
-        // the starting-kit weapon of its kind (same type and role; the caster
-        // one-hander where no caster sword starts) scaled by item level, as
-        // the budget is: `anchor DPS x 92 / anchor ilvl`. A two-hander deals
-        // its pair's one-hander's DPS x Classic's two-hander premium. The
-        // spread (min:max) is the Classic stand-in's own. Pinned by
-        // `champion_weapon_dps_scales_its_starting_weapon_by_item_level`.
+        // Weapon damage follows the item-level rule in this file's header.
         // ====================================================================
 
         // Priced at what Gressil + The Face of Death spends (67.0), as the
@@ -3041,14 +3073,20 @@
             proc: Some((
                 trigger: MeleeHit,
                 chance: 0.25,
-                effect: AttackPowerIncrease,
+                effect: Buff(AttackPowerIncrease),
                 magnitude: 100.0,
                 duration: 10.0,
                 internal_cooldown: 50.0,
             )),
         ),
 
-        // Its extra swing (Hand of Justice's mechanism) waits for AS-427.
+        // Hand of Justice's extra swing on a sword: our design (Classic's
+        // Gressil procs no extra attack). 4% (provisional) on a 2.7-speed
+        // one-hander, a little under the trinket's 5% because the sword also
+        // carries a Champion weapon's damage. The swing costs 0.04 x 321.4 =
+        // 12.856; 6 AP (9.0) and 2% crit (6.0) spend most of the rest, and
+        // 0.144 health closes it to the 28.0 the Corrupted Ashbringer's pair
+        // price counts on.
         Gressil: (
             name: "Gressil, Dawn of Ruin",
             item_level: 92,
@@ -3060,9 +3098,14 @@
             attack_damage_min: 39.5,
             attack_damage_max: 73.56,
             weapon_speed: 2.7, // Classic: Gressil, Dawn of Ruin (23054)
-            attack_power: 12.0,
-            crit_chance: 0.03,
-            max_health: 1.0,
+            attack_power: 6.0,
+            crit_chance: 0.02,
+            max_health: 0.144,
+            proc: Some((
+                trigger: MeleeHit,
+                chance: 0.04,
+                effect: ExtraSwing,
+            )),
         ),
 
         Kingsfall: (
@@ -3082,7 +3125,7 @@
             proc: Some((
                 trigger: MeleeHit,
                 chance: 0.10,
-                effect: CritChanceIncrease,
+                effect: Buff(CritChanceIncrease),
                 magnitude: 0.10,
                 duration: 10.0,
                 internal_cooldown: 50.0,
@@ -3106,7 +3149,7 @@
             proc: Some((
                 trigger: Heal,
                 chance: 0.20,
-                effect: SpellPowerIncrease,
+                effect: Buff(SpellPowerIncrease),
                 magnitude: 40.0,
                 duration: 10.0,
                 internal_cooldown: 50.0,
@@ -3130,7 +3173,7 @@
             proc: Some((
                 trigger: SpellCast,
                 chance: 0.15,
-                effect: SpellPowerIncrease,
+                effect: Buff(SpellPowerIncrease),
                 magnitude: 40.0,
                 duration: 10.0,
                 internal_cooldown: 50.0,
@@ -3158,7 +3201,7 @@
             proc: Some((
                 trigger: SpellCast,
                 chance: 0.15,
-                effect: SpellPowerIncrease,
+                effect: Buff(SpellPowerIncrease),
                 magnitude: 60.0,
                 duration: 12.0,
                 internal_cooldown: 48.0,
@@ -3173,8 +3216,8 @@
             slot: Ranged,
             weapon_type: Wand,
             is_weapon: true,
-            attack_damage_min: 12.08,
-            attack_damage_max: 22.42,
+            attack_damage_min: 14.66,
+            attack_damage_max: 27.21,
             weapon_speed: 1.5, // Classic: Doomfinger (22821)
             spell_power: 14.0,
             crit_chance: 0.02,
@@ -3182,7 +3225,7 @@
             proc: Some((
                 trigger: SpellCast,
                 chance: 0.15,
-                effect: CritChanceIncrease,
+                effect: Buff(CritChanceIncrease),
                 magnitude: 0.10,
                 duration: 10.0,
                 internal_cooldown: 50.0,
@@ -3302,8 +3345,229 @@
         ),
 
         // ====================================================================
-        // CHAMPION TIER (2): TRINKETS (all classes)
+        // CHAMPION TIER (2): NECKLACES, CLOAKS AND RINGS (all classes)
+        // Named for Classic's Naxxramas accessories (ilvl 83-92; Mark of
+        // C'Thun is Ahn'Qiraj's). One set per role: a neck, a cloak and two
+        // distinct rings, so a Champion loadout fills both ring sockets.
+        // Budget at ilvl 92: 38.81 (92 x 0.75 x 0.5625).
         // ====================================================================
+
+        // --- PHYSICAL: attack power and crit (Warrior, Rogue, Hunter) ---
+
+        StormragesTalismanOfSeething: (
+            name: "Stormrage's Talisman of Seething",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_necklace_28naxxramas.jpg",
+            slot: Neck,
+            max_health: 11.0,
+            attack_power: 12.0,
+            crit_chance: 0.03,
+        ),
+
+        ShroudOfDominion: (
+            name: "Shroud of Dominion",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_misc_cape_naxxramas_03.jpg",
+            slot: Back,
+            max_health: 8.0,
+            attack_power: 16.0,
+            crit_chance: 0.02,
+        ),
+
+        BandOfUnnaturalForces: (
+            name: "Band of Unnatural Forces",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_48naxxramas.jpg",
+            slot: Ring,
+            max_health: 4.0,
+            attack_power: 15.0,
+            crit_chance: 0.04,
+        ),
+
+        BandOfReanimation: (
+            name: "Band of Reanimation",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_49naxxramas.jpg",
+            slot: Ring,
+            max_health: 2.0,
+            attack_power: 22.0,
+            crit_chance: 0.01,
+        ),
+
+        // --- CASTER: spell power and crit (Mage, Warlock, Elemental Shaman) ---
+
+        GemOfTrappedInnocents: (
+            name: "Gem of Trapped Innocents",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_necklace_29naxxramas.jpg",
+            slot: Neck,
+            max_health: 9.0,
+            max_mana: 7.0,
+            spell_power: 11.0,
+            crit_chance: 0.02,
+        ),
+
+        CloakOfTheNecropolis: (
+            name: "Cloak of the Necropolis",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_misc_cape_naxxramas_03.jpg",
+            slot: Back,
+            max_health: 8.0,
+            max_mana: 9.0,
+            spell_power: 12.0,
+            crit_chance: 0.01,
+        ),
+
+        SealOfTheDamned: (
+            name: "Seal of the Damned",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_48naxxramas.jpg",
+            slot: Ring,
+            max_health: 11.0,
+            spell_power: 12.0,
+            crit_chance: 0.03,
+        ),
+
+        BandOfTheInevitable: (
+            name: "Band of the Inevitable",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_53naxxramas.jpg",
+            slot: Ring,
+            max_health: 1.0,
+            spell_power: 21.0,
+            crit_chance: 0.02,
+        ),
+
+        // --- HEALER: spell power, mana and regeneration (Priest, Paladin, Druid, Restoration Shaman) ---
+
+        NecklaceOfNecropsy: (
+            name: "Necklace of Necropsy",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_necklace_30naxxramas.jpg",
+            slot: Neck,
+            max_health: 5.0,
+            max_mana: 10.0,
+            spell_power: 12.0,
+            mana_regen: 1.0,
+        ),
+
+        CloakOfSuturing: (
+            name: "Cloak of Suturing",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_misc_cape_naxxramas_02.jpg",
+            slot: Back,
+            max_mana: 12.0,
+            spell_power: 11.0,
+            mana_regen: 2.0,
+        ),
+
+        BandOfUnansweredPrayers: (
+            name: "Band of Unanswered Prayers",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_50naxxramas.jpg",
+            slot: Ring,
+            max_health: 7.0,
+            max_mana: 11.0,
+            spell_power: 13.0,
+            mana_regen: 0.2,
+        ),
+
+        RingOfSpiritualFervor: (
+            name: "Ring of Spiritual Fervor",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_52naxxramas.jpg",
+            slot: Ring,
+            max_health: 6.0,
+            max_mana: 14.0,
+            spell_power: 6.0,
+            mana_regen: 1.8,
+        ),
+
+        // --- DEFENDER: health, armor and resistance (any class) ---
+        //
+        // Armor is a free stat, so an accessory may carry it, but an
+        // accessory generally spends its budget elsewhere. Only a piece meant
+        // for a tank or for durability keeps armor: here the Cryptfiend Silk
+        // Cloak (203) and the Signet of the Fallen Defender (140), both at
+        // their Classic values.
+
+        MarkOfCThun: (
+            name: "Mark of C'Thun",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_necklace_ahnqiraj_04.jpg",
+            slot: Neck,
+            max_health: 32.0,
+            nature_resistance: 15.0,
+        ),
+
+        CryptfiendSilkCloak: (
+            name: "Cryptfiend Silk Cloak",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_misc_cape_naxxramas_02.jpg",
+            slot: Back,
+            armor: 203.0,
+            max_health: 32.0,
+            shadow_resistance: 15.0,
+        ),
+
+        SignetOfTheFallenDefender: (
+            name: "Signet of the Fallen Defender",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_50naxxramas.jpg",
+            slot: Ring,
+            armor: 140.0,
+            max_health: 38.0,
+        ),
+
+        HailstoneBand: (
+            name: "Hailstone Band",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_ring_35.jpg",
+            slot: Ring,
+            max_health: 30.0,
+            frost_resistance: 20.0,
+        ),
+
+        // ====================================================================
+        // CHAMPION TIER (2): TRINKETS
+        // ====================================================================
+
+        // Classic's Hand of Justice (11815: +20 attack power, 2% chance on a
+        // melee hit of an extra attack), at the Champion tier's 5%. The extra
+        // swing is Windfury Totem's, made with the main-hand weapon off a hit
+        // from either hand, and draws no tornado. It has no stat weight, so it
+        // carries a declared price — WEIGHT_EXTRA_SWING, 1.5x haste's weight
+        // (provisional), per unit of chance: 0.05 * 321.4 = 16.07 — and the
+        // attack power spends the rest of the 48.3: 21 * 1.5 + 16.07 = 47.57.
+        HandOfJustice: (
+            name: "Hand of Justice",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_jewelry_talisman_01.jpg",
+            slot: Trinket,
+            attack_power: 21.0,
+            proc: Some((
+                trigger: MeleeHit,
+                chance: 0.05,
+                effect: ExtraSwing,
+            )),
+        ),
 
         // The jackpot (talents-and-Gauntlet proposal §6.4): no Classic or TBC
         // original, and no other stats. Its whole Champion trinket budget

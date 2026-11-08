@@ -36,6 +36,7 @@ fn target_info(entity: Entity, team: u8, class: CharacterClass) -> CombatantInfo
         stealthed: false,
         target: None,
         is_pet: false,
+        pet_heeled: false,
         casting_ability: None,
         pet_type: None,
         pet: None,
@@ -65,6 +66,7 @@ fn make_aura(effect_type: AuraType, ability_name: &str) -> Aura {
         source_item: None,
         stacks: None,
         bloom: None,
+        damage_mods: Default::default(),
     }
 }
 

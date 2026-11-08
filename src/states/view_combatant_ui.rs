@@ -1382,11 +1382,11 @@ pub struct ItemPickerAction {
 }
 
 /// The text of one picker row: `Name  —  stats`, and — for an item carrying a
-/// proc or a triggered absorb — the sentence saying what it does, for the
-/// row's quieter second line. That line is `ItemConfig::effect_description`,
-/// the same sentence the item tooltip and the encyclopedia print, so the
-/// picker cannot describe a trinket a third way. Rows without one are exactly
-/// one line.
+/// proc, an on-use or a triggered absorb — the sentence saying what it does,
+/// for the row's quieter second line. That line is
+/// `ItemConfig::effect_description`, the same sentences the item tooltip and
+/// the encyclopedia print, so the picker cannot describe a trinket a third
+/// way. Rows without one are exactly one line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemPickerRowText {
     pub name: String,

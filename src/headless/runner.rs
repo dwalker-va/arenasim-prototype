@@ -17,6 +17,7 @@ use crate::states::play_match::equipment::{
 };
 use crate::states::play_match::map_config::{load_map_geometry_config, MapGeometryConfig};
 use crate::states::play_match::movement_config::{load_movement_config, MovementConfig};
+use crate::states::play_match::talent_choices::SlotChoices;
 use crate::states::play_match::talents::{
     load_talent_definitions, resolve_for_spawn, TalentDefinitions,
 };
@@ -24,8 +25,8 @@ use crate::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementCo
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::components::{
-    ActiveAuras, AuraType, DRTracker, MovementDirective, MovementGoal, Pet, PetType, Totem,
-    TotemElement, TrapLaunchProjectile, TrapType,
+    ActiveAuras, AuraType, DRTracker, HealingRefused, MovementDirective, MovementGoal, Pet,
+    PetType, Totem, TotemElement, TrapLaunchProjectile, TrapType,
 };
 use crate::states::play_match::constants::PET_SLOT_BASE;
 use crate::states::play_match::decision_trace::{DecisionTrace, TraceWriter};
@@ -145,6 +146,10 @@ pub struct FrameObservation {
     pub totems: Vec<ObservedTotem>,
     /// Every Hunter trap in flight this frame, sorted by entity id.
     pub trap_launches: Vec<ObservedTrapLaunch>,
+    /// The Mortal Wounds tells (`HealingRefused` markers) in the world this
+    /// frame, counted by the entity each names. Headless never consumes one
+    /// (the client turns it into ash), so a count only rises, one per tell.
+    pub healing_refused: BTreeMap<Entity, usize>,
 }
 
 /// Result of a completed headless match
@@ -406,7 +411,9 @@ fn headless_setup_match(
             // stats applied below (the graphical spawn resolves it the same
             // way).
             let build = config.team1_builds.get(i).cloned().unwrap_or_default();
-            let resolved = resolve_for_spawn(&talents, &abilities, 1, i, *character, &build);
+            let choices = SlotChoices::from_config(&config, 1, i, *character);
+            let resolved =
+                resolve_for_spawn(&talents, &abilities, 1, i, *character, &build, &choices);
             let mut combatant = Combatant::new_with_curse_prefs(
                 1,
                 i as u8,
@@ -571,7 +578,9 @@ fn headless_setup_match(
             // stats applied below (the graphical spawn resolves it the same
             // way).
             let build = config.team2_builds.get(i).cloned().unwrap_or_default();
-            let resolved = resolve_for_spawn(&talents, &abilities, 2, i, *character, &build);
+            let choices = SlotChoices::from_config(&config, 2, i, *character);
+            let resolved =
+                resolve_for_spawn(&talents, &abilities, 2, i, *character, &build, &choices);
             let mut combatant = Combatant::new_with_curse_prefs(
                 2,
                 i as u8,
@@ -1076,7 +1085,12 @@ fn observe_frame(world: &World) -> FrameObservation {
     let mut combatants = BTreeMap::new();
     let mut totems: Vec<(Entity, ObservedTotem)> = Vec::new();
     let mut trap_launches: Vec<ObservedTrapLaunch> = Vec::new();
+    let mut healing_refused: BTreeMap<Entity, usize> = BTreeMap::new();
     for entity_ref in world.iter_entities() {
+        if let Some(tell) = entity_ref.get::<HealingRefused>() {
+            *healing_refused.entry(tell.target).or_default() += 1;
+            continue;
+        }
         if let Some(launch) = entity_ref.get::<TrapLaunchProjectile>() {
             trap_launches.push(ObservedTrapLaunch {
                 entity: entity_ref.id(),
@@ -1152,6 +1166,7 @@ fn observe_frame(world: &World) -> FrameObservation {
         combatants,
         totems,
         trap_launches,
+        healing_refused,
     }
 }
 

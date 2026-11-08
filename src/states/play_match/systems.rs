@@ -46,12 +46,13 @@ pub use super::effects::process_divine_shield;
 pub use super::effects::process_holy_shock_damage;
 pub use super::effects::process_holy_shock_heals;
 pub use super::effects::process_mana_burn;
+pub use super::effects::process_on_use_items;
 pub use super::effects::process_travel_form;
 
 // === Phase 2: Combat and Movement ===
 pub use super::auras::process_aura_breaks;
 pub use super::class_ai::dps_postures::tick_kite_occlusion;
-pub use super::class_ai::pet_ai::pet_ai_system;
+pub use super::class_ai::pet_ai::{pet_ai_system, recover_heeled_pets};
 pub use super::combat_ai::acquire_targets;
 pub use super::combat_ai::check_interrupts;
 pub use super::combat_ai::decide_abilities;
@@ -78,6 +79,7 @@ pub use super::totems::totem_pulse_system;
 
 // === Phase 3: Combat Resolution ===
 pub use super::combat_core::combat_auto_attack;
+pub use super::combat_core::process_damage_follow_ups;
 pub use super::combat_core::resolve_melee_avoidances;
 pub use super::triggered_absorbs::fire_triggered_absorbs;
 
@@ -203,7 +205,14 @@ pub fn add_core_combat_systems<M, N>(
             regenerate_resources,
             track_shadow_sight_timer.run_if(decide.clone()),
             process_dot_ticks,
-            process_hot_ticks, // HoT healing — like process_dot_ticks, must run BEFORE update_auras
+            // HoT healing — like process_dot_ticks, must run BEFORE update_auras.
+            // Then a heeled pet's recovery, the other periodic heal. A nested
+            // chain, because the outer tuple is at Bevy's 20-system limit.
+            (
+                process_hot_ticks,
+                recover_heeled_pets.run_if(decide.clone()),
+            )
+                .chain(),
             update_auras,
             slow_zone_system,   // Zone slow refresh before aura processing
             flare_system,       // Exposes Rogues standing in a Flare before anyone acquires targets
@@ -217,6 +226,9 @@ pub fn add_core_combat_systems<M, N>(
                 process_divine_shield,
                 process_berserker_rage,
                 process_travel_form,
+                // An on-use item's effect: the Medallion's CC break, which
+                // grants no immunity, so a CC queued this frame lands after it.
+                process_on_use_items,
             )
                 .chain(),
             apply_pending_auras,
@@ -311,7 +323,12 @@ pub fn add_core_combat_systems<M, N>(
             // events go out on the frame they happened.
             ApplyDeferred,
             resolve_melee_avoidances,
-            // After the frame's last damage (the auto-attacks above): a shield a
+            // What the frame's hits set off on other units — transfers,
+            // reflects, saves (`combat_core::follow_ups`) — landed after every
+            // hit of the frame, through the same damage funnel. Inert unless a
+            // modifier aura or a talent queued one.
+            process_damage_follow_ups,
+            // After the frame's last damage (the follow-ups above): a shield a
             // health threshold raises (Aegis of the Last Stand) is up for all
             // of the next frame's damage. A no-op for a combatant carrying none.
             fire_triggered_absorbs,

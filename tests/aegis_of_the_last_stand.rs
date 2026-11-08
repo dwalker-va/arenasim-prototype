@@ -12,6 +12,7 @@ mod common;
 use std::collections::HashMap;
 
 use arenasim::headless::{HeadlessMatchConfig, Stage, Unit};
+use arenasim::states::play_match::components::{ActiveAuras, Aura, AuraType, DispelType};
 use arenasim::states::play_match::DAMPENING_RAMP_SECS;
 use arenasim::states::play_match::DAMPENING_START_SECS;
 use common::staged::{play, Played};
@@ -88,6 +89,23 @@ fn warrior_track(played: &Played) -> Vec<(f32, f32, f32)> {
         .collect()
 }
 
+/// Whether the Warrior's first absorb appears on the frame at app time `at`:
+/// it wears one on that frame and wore none on the frame before.
+fn shield_appears_at(played: &Played, at: f32) -> bool {
+    let shielded: Vec<(f32, bool)> = played
+        .staged_frames()
+        .filter_map(|f| {
+            f.combatants
+                .values()
+                .find(|c| c.team == 1 && c.slot == 0 && !c.is_pet)
+                .map(|c| (f.sim_time, c.aura_types.contains(&AuraType::Absorb)))
+        })
+        .collect();
+    shielded
+        .windows(2)
+        .any(|w| w[1].0 == at && w[1].1 && !w[0].1)
+}
+
 /// The first frame the Warrior is alive below the threshold.
 fn first_below(track: &[(f32, f32, f32)]) -> (f32, f32) {
     track
@@ -113,7 +131,12 @@ fn crossing_the_threshold_raises_the_shield_once() {
         lines.len()
     );
     let (at, absorbs) = lines[0];
-    // The frame of the crossing (stamps are to the hundredth).
+    // The frame of the crossing: the shield is on it (and its log line,
+    // whose stamps are to the hundredth).
+    assert!(
+        shield_appears_at(&played, crossed),
+        "the shield did not appear on the crossing frame"
+    );
     assert!(
         (at - crossed).abs() < 0.02,
         "the shield landed at {at}s, the crossing was at {crossed}s"
@@ -198,4 +221,95 @@ fn dampening_scales_the_shield_where_it_lands() {
         "the dampened shield absorbs {}, want {want:.1} (reduction {reduction:.3})",
         damped_lines[0].1
     );
+}
+
+const PRIEST: Unit = Unit::new(1, 1);
+
+/// The crossing comes by a TRANSFER: the Warrior is immune to every hit, and
+/// half of what its Priest takes is sent to it (a `DamageTransfer` whose
+/// caster it is, Blessing of Sacrifice's shape). A transfer lands in
+/// `process_damage_follow_ups`, after the frame's hits, so this pins that the
+/// trigger runs after it: the shield is up on the frame the transfer crossed
+/// the line, not the frame after. And transferred damage cannot be prevented,
+/// so the shield it raised soaks none of the transfers that follow it.
+#[test]
+fn a_transfer_that_crosses_the_line_raises_the_shield_that_frame() {
+    let mut trinket = HashMap::new();
+    trinket.insert("Trinket1".to_string(), "AegisOfTheLastStand".to_string());
+    let config = HeadlessMatchConfig {
+        team1: vec!["Warrior".into(), "Priest".into()],
+        team2: vec!["Rogue".into(), "Warlock".into()],
+        map: "BasicArena".into(),
+        team1_equipment: vec![trinket, HashMap::new()],
+        // Both enemies on the Priest.
+        team2_kill_target: Some(1),
+        random_seed: Some(7),
+        max_duration_secs: 30.0,
+        ..Default::default()
+    };
+    let stage = Stage::new()
+        .place(WARRIOR, -30.0, 0.0)
+        .place(PRIEST, 10.0, 0.0)
+        .place(Unit::new(2, 0), 12.0, 0.0)
+        .place(Unit::new(2, 1), 25.0, 0.0)
+        .health(WARRIOR, 0.36)
+        // Nothing the countdown put on it: its Priest's Power Word: Shield
+        // would be an absorb before the crossing.
+        .clear_auras(WARRIOR)
+        // No mana: the Priest cannot heal the Warrior back over the line.
+        .mana(PRIEST, 0.0)
+        .aura(
+            WARRIOR,
+            Aura {
+                effect_type: AuraType::DamageImmunity,
+                duration: 100.0,
+                magnitude: 1.0,
+                break_on_damage_threshold: -1.0,
+                ability_name: "Staged immunity".into(),
+                dispel_type: DispelType::Untyped,
+                ..Default::default()
+            },
+        )
+        .world(|world| {
+            let warrior = WARRIOR.entity(world);
+            let priest = PRIEST.entity(world);
+            let transfer = Aura {
+                effect_type: AuraType::DamageTransfer,
+                duration: 100.0,
+                magnitude: 0.5,
+                break_on_damage_threshold: -1.0,
+                ability_name: "Staged sacrifice".into(),
+                caster: Some(warrior),
+                dispel_type: DispelType::Untyped,
+                ..Default::default()
+            };
+            match world.get_mut::<ActiveAuras>(priest) {
+                Some(mut auras) => auras.auras.push(transfer),
+                None => {
+                    world.entity_mut(priest).insert(ActiveAuras {
+                        auras: vec![transfer],
+                    });
+                }
+            }
+        });
+    let played = play(config, stage);
+    let (crossed, _) = first_below(&warrior_track(&played));
+    assert!(
+        played
+            .log
+            .lines()
+            .any(|l| l.contains("[TRANSFER] Team 1 Warrior #1 takes")),
+        "no transfer reached the Warrior"
+    );
+    assert_eq!(aegis_lines(&played).len(), 1);
+    assert!(
+        shield_appears_at(&played, crossed),
+        "the shield did not appear on the frame the transfer crossed the line"
+    );
+    let shielded_transfers = played
+        .log
+        .lines()
+        .filter(|l| l.contains("Team 1 Warrior") && l.contains("absorbed"))
+        .count();
+    assert_eq!(shielded_transfers, 0, "the shield soaked a transfer");
 }

@@ -51,6 +51,7 @@ fn combatant_info(
         stealthed: false,
         target: None,
         is_pet: false,
+        pet_heeled: false,
         casting_ability: None,
         pet_type: None,
         pet: None,
@@ -83,6 +84,7 @@ fn attack_power_aura() -> Aura {
         source_item: None,
         stacks: None,
         bloom: None,
+        damage_mods: Default::default(),
     }
 }
 

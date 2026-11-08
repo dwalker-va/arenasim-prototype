@@ -15,13 +15,30 @@
 //!
 //! One system, [`fire_triggered_absorbs`], at the END of the frame's combat
 //! resolution: after every damage site of the frame (DoT ticks, casts,
-//! projectiles, traps and the auto-attacks, which are the last). It reads the
-//! bearer's state, so it never touches the damage funnel
+//! projectiles, traps, the auto-attacks) and after the follow-ups those hits
+//! set off (`process_damage_follow_ups`: transfers, reflects, a save's heal).
+//! It reads the bearer's state, so it never touches the damage funnel
 //! (`apply_damage_with_absorb`) and every damage source reaches it alike. A
 //! shield raised there is up for all of the next frame's damage. The hit that
 //! crosses the threshold is not absorbed — the shield is the answer to it, as
 //! a trinket's is. A blow that kills from above the threshold raises nothing:
 //! the bearer is dead before the system runs.
+//!
+//! ## How it meets the damage pipeline
+//!
+//! The shield is an ordinary [`AuraType::Absorb`] aura, so the funnel soaks
+//! with it where it soaks every absorb (its step 5): after the attacker's
+//! damage-dealt increase, armor or resistance, the damage-taken modifiers and
+//! a transfer's share, and before the killing-blow save and health. So it
+//! soaks the hit as the pipeline has made it, not as its source rolled it; a
+//! transferred hit (Blessing of Sacrifice, Soul Link) skips it, as it skips
+//! every absorb; and a blow it soaks below the bearer's health spends no save.
+//! Because the system runs after the follow-ups, damage a transfer or a
+//! reflect lands raises the shield on the same frame as a direct hit would,
+//! and a killing-blow save is judged before it: Cheat Death, which leaves its
+//! Rogue alive below the line, raises the shield on the frame of the blow; a
+//! save that leaves its holder where it stood raises nothing unless it stood
+//! below the line already.
 //!
 //! ## Dampening
 //!
@@ -132,22 +149,11 @@ impl TriggeredAbsorbConfig {
             duration: self.duration,
             magnitude: points,
             break_on_damage_threshold: -1.0,
-            accumulated_damage: 0.0,
-            tick_interval: 0.0,
-            time_until_next_tick: 0.0,
-            caster: None,
             ability_name: name.to_string(),
-            fear_direction: (0.0, 0.0),
-            fear_direction_timer: 0.0,
-            spell_school: None,
             applied_this_frame: true,
-            backlash_damage: None,
-            dr_category_override: None,
             dispel_type: DispelType::Physical,
-            compound: None,
             source_item,
-            stacks: None,
-            bloom: None,
+            ..Default::default()
         }
     }
 }
@@ -278,10 +284,20 @@ pub fn fire_triggered_absorbs(
             }
             match auras.as_mut() {
                 Some(auras) => auras.auras.push(aura),
+                // No aura list yet. Another system may insert one for this
+                // bearer this frame too, so merge into whatever is there when
+                // the command lands rather than insert over it.
                 None => {
-                    commands
-                        .entity(entity)
-                        .insert(ActiveAuras { auras: vec![aura] });
+                    commands.queue(move |world: &mut World| {
+                        match world.get_mut::<ActiveAuras>(entity) {
+                            Some(mut auras) => auras.auras.push(aura),
+                            None => {
+                                if let Ok(mut bearer) = world.get_entity_mut(entity) {
+                                    bearer.insert(ActiveAuras { auras: vec![aura] });
+                                }
+                            }
+                        }
+                    });
                 }
             }
         }

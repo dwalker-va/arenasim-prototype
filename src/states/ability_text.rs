@@ -24,7 +24,9 @@
 
 use crate::states::play_match::abilities::ScalingStat;
 use crate::states::play_match::ability_config::{AbilityConfig, AuraEffect};
-use crate::states::play_match::components::{class_base_stats, AuraType, ClassBaseStats};
+use crate::states::play_match::components::{
+    class_base_stats, AuraType, ClassBaseStats, DamageScope,
+};
 use crate::states::play_match::AbilityType;
 
 /// What [`build_ability_description`] says when none of an ability's numeric
@@ -272,6 +274,24 @@ fn stacks_sentence(aura: &AuraEffect) -> String {
     }
 }
 
+/// The words a damage modifier's scope adds before "damage": `""` for every
+/// hit, `" Shadow"` for one school, `" spell"` for every magic school.
+fn scope_words(scope: Option<DamageScope>) -> String {
+    match scope {
+        None => String::new(),
+        Some(DamageScope::School(school)) => format!(" {school:?}"),
+        Some(DamageScope::Spells) => " spell".to_string(),
+    }
+}
+
+/// `" Lasts N hits."` for an aura with hit charges, `""` otherwise.
+fn charges_sentence(aura: &AuraEffect) -> String {
+    match aura.charges {
+        Some(n) => format!(" Lasts {n} hits."),
+        None => String::new(),
+    }
+}
+
 /// Build a description string for an aura effect
 pub fn build_aura_description(aura: &AuraEffect) -> String {
     match aura.aura_type {
@@ -377,8 +397,64 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
         AuraType::DamageTakenReduction => {
             let reduction_pct = (aura.magnitude * 100.0) as i32;
             format!(
-                "Reduces damage taken by {}% for {:.0} sec.",
-                reduction_pct, aura.duration
+                "Reduces{} damage taken by {}% for {:.0} sec.",
+                scope_words(aura.scope),
+                reduction_pct,
+                aura.duration
+            )
+        }
+        AuraType::DamageTakenIncrease => {
+            format!(
+                "Increases{} damage taken by {:.0}% for {:.0} sec.{}{}",
+                scope_words(aura.scope),
+                aura.magnitude * 100.0,
+                aura.duration,
+                charges_sentence(aura),
+                stacks_sentence(aura)
+            )
+        }
+        AuraType::DamageDealtIncrease => {
+            format!(
+                "Increases{} damage dealt by {:.0}% for {:.0} sec.",
+                scope_words(aura.scope),
+                aura.magnitude * 100.0,
+                aura.duration
+            )
+        }
+        AuraType::ArmorPercentIncrease => {
+            format!(
+                "Increases armor by {:.0}% for {:.0} sec.",
+                aura.magnitude * 100.0,
+                aura.duration
+            )
+        }
+        AuraType::ArmorPercentReduction => {
+            format!(
+                "Reduces armor by {:.0}% for {:.0} sec.",
+                aura.magnitude * 100.0,
+                aura.duration
+            )
+        }
+        AuraType::DamageTransfer => {
+            format!(
+                "Transfers {:.0}% of the damage the target takes to the caster for {:.0} sec. \
+                 Ends if the caster could not survive it.",
+                aura.magnitude * 100.0,
+                aura.duration
+            )
+        }
+        AuraType::KillingBlowSave => {
+            format!(
+                "Prevents the first killing blow within {:.0} sec and heals for {:.0}% of \
+                 maximum health instead.",
+                aura.duration,
+                aura.magnitude * 100.0
+            )
+        }
+        AuraType::DamageReflect => {
+            format!(
+                "Deals {:.0} damage to a melee attacker each time it strikes, for {:.0} sec.",
+                aura.magnitude, aura.duration
             )
         }
         AuraType::DamageImmunity => {

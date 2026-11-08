@@ -2871,6 +2871,7 @@ mod paladin_unit {
             stealthed: false,
             target: None,
             is_pet: false,
+            pet_heeled: false,
             casting_ability: None,
             pet_type: None,
             pet: None,
@@ -3155,6 +3156,7 @@ mod bucket_a_unit {
             stealthed: false,
             target: None,
             is_pet: false,
+            pet_heeled: false,
             casting_ability: None,
             pet_type: None,
             pet: None,
@@ -3184,6 +3186,7 @@ mod bucket_a_unit {
             source_item: None,
             stacks: None,
             bloom: None,
+            damage_mods: Default::default(),
         }
     }
 
@@ -4914,6 +4917,7 @@ mod u9_seek_reset {
             source_item: None,
             stacks: None,
             bloom: None,
+            damage_mods: Default::default(),
         }
     }
 
@@ -4959,6 +4963,7 @@ mod u9_seek_reset {
             stealthed: false,
             target,
             is_pet: false,
+            pet_heeled: false,
             casting_ability: None,
             pet_type: None,
             pet: None,
