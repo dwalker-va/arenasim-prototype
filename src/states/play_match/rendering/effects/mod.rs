@@ -98,6 +98,8 @@ mod aura_band;
 pub use aura_band::*;
 mod slow_ring;
 pub use slow_ring::*;
+mod poison_landing;
+pub use poison_landing::*;
 mod client_landings;
 pub use client_landings::*;
 mod heroic_strike;
