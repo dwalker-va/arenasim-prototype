@@ -10,7 +10,8 @@
 //! there. An empty build carries none, so no site does anything.
 //!
 //! **Ranks add**, as for every effect kind: a mechanic with a share takes
-//! `share × rank`; one without ([`TalentMechanic::CheatDeath`]) has one rank.
+//! `share × rank`; one without ([`TalentMechanic::CheatDeath`],
+//! [`TalentMechanic::DemonicSacrifice`]) has one rank.
 //!
 //! [`ResolvedBuild::apply`]: super::talents::ResolvedBuild::apply
 
@@ -41,6 +42,17 @@ pub enum TalentMechanic {
         reduction: f32,
         duration: f32,
     },
+    /// Master Demonologist: the holder and its pet both take `reduction` less
+    /// SPELL damage (every magic school) while the pet lives — the resistance
+    /// as magnitude. Its site: `demonology::demonic_bonds`, which keeps a
+    /// Spells-scoped `DamageTakenReduction` aura on both for as long as the
+    /// pet lives, and lifts the holder's when it dies.
+    MasterDemonologist { reduction: f32 },
+    /// Demonic Sacrifice: a holder whose demon choice is `Sacrifice` kills its
+    /// pet at the gates and gains Touch of Shadow, `shadow_damage` more Shadow
+    /// damage for the match. Its site: `demonology::demonic_bonds`. The node
+    /// that carries it also widens the Sacrifice option (`talents.ron`).
+    DemonicSacrifice { shadow_damage: f32 },
 }
 
 /// Which mechanic a variant is, ignoring its numbers: a node names each at
@@ -50,6 +62,8 @@ pub enum MechanicKind {
     SoulLink,
     ReflectiveShield,
     CheatDeath,
+    MasterDemonologist,
+    DemonicSacrifice,
 }
 
 impl TalentMechanic {
@@ -59,6 +73,8 @@ impl TalentMechanic {
             TalentMechanic::SoulLink { .. } => MechanicKind::SoulLink,
             TalentMechanic::ReflectiveShield { .. } => MechanicKind::ReflectiveShield,
             TalentMechanic::CheatDeath { .. } => MechanicKind::CheatDeath,
+            TalentMechanic::MasterDemonologist { .. } => MechanicKind::MasterDemonologist,
+            TalentMechanic::DemonicSacrifice { .. } => MechanicKind::DemonicSacrifice,
         }
     }
 
@@ -96,6 +112,27 @@ impl TalentMechanic {
                     return Err(format!("{self:?} has one rank"));
                 }
             }
+            TalentMechanic::MasterDemonologist { reduction } => {
+                fraction("reduction", reduction * f32::from(max_rank))?;
+                if !matches!(class, CharacterClass::Warlock | CharacterClass::Hunter) {
+                    return Err(format!("{self:?} needs a class with a pet, not {class:?}"));
+                }
+            }
+            TalentMechanic::DemonicSacrifice { shadow_damage } => {
+                if !shadow_damage.is_finite() || shadow_damage <= 0.0 {
+                    return Err(format!(
+                        "{self:?}: shadow_damage {shadow_damage} is not positive"
+                    ));
+                }
+                if class != CharacterClass::Warlock {
+                    return Err(format!(
+                        "{self:?} sacrifices a demon: a Warlock's, not a {class:?}'s"
+                    ));
+                }
+                if max_rank != 1 {
+                    return Err(format!("{self:?} has one rank"));
+                }
+            }
         }
         Ok(())
     }
@@ -108,7 +145,13 @@ impl TalentMechanic {
             TalentMechanic::ReflectiveShield { share } => {
                 TalentMechanic::ReflectiveShield { share: share * r }
             }
-            cheat_death @ TalentMechanic::CheatDeath { .. } => cheat_death,
+            TalentMechanic::MasterDemonologist { reduction } => {
+                TalentMechanic::MasterDemonologist {
+                    reduction: reduction * r,
+                }
+            }
+            one_rank @ (TalentMechanic::CheatDeath { .. }
+            | TalentMechanic::DemonicSacrifice { .. }) => one_rank,
         }
     }
 }
@@ -159,6 +202,23 @@ impl TalentMechanics {
     pub fn reflective_shield(&self) -> Option<f32> {
         self.list.iter().find_map(|m| match m {
             TalentMechanic::ReflectiveShield { share } => Some(*share),
+            _ => None,
+        })
+    }
+
+    /// Master Demonologist's spell damage reduction, when the combatant has
+    /// it.
+    pub fn master_demonologist(&self) -> Option<f32> {
+        self.list.iter().find_map(|m| match m {
+            TalentMechanic::MasterDemonologist { reduction } => Some(*reduction),
+            _ => None,
+        })
+    }
+
+    /// Demonic Sacrifice's Shadow damage bonus, when the combatant has it.
+    pub fn demonic_sacrifice(&self) -> Option<f32> {
+        self.list.iter().find_map(|m| match m {
+            TalentMechanic::DemonicSacrifice { shadow_damage } => Some(*shadow_damage),
             _ => None,
         })
     }

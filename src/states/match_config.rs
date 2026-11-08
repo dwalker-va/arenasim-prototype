@@ -165,6 +165,32 @@ impl WarlockCurse {
     }
 }
 
+/// The Warlock's demon choice: what becomes of its Felhunter for the match.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub enum WarlockDemon {
+    /// The Felhunter fights beside the Warlock.
+    #[default]
+    Felhunter,
+    /// The Felhunter is sacrificed at the gates for Touch of Shadow. Offered
+    /// only to a build with Demonic Sacrifice (`talents.ron` widens it).
+    Sacrifice,
+}
+
+impl WarlockDemon {
+    /// Every option, in display order.
+    pub const ALL: [WarlockDemon; 2] = [WarlockDemon::Felhunter, WarlockDemon::Sacrifice];
+
+    /// The display name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            WarlockDemon::Felhunter => "Felhunter",
+            WarlockDemon::Sacrifice => "Sacrifice",
+        }
+    }
+}
+
 /// Hunter pet type choice
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
@@ -704,6 +730,11 @@ pub struct MatchConfig {
     pub team1_warlock_curse_prefs: Vec<Vec<WarlockCurse>>,
     /// Team 2's warlock curse preferences: [warlock_slot][enemy_target_index] -> curse
     pub team2_warlock_curse_prefs: Vec<Vec<WarlockCurse>>,
+    /// Team 1's warlock demon choices (one per slot, defaults to Felhunter).
+    /// Sacrifice needs Demonic Sacrifice in the slot's build.
+    pub team1_warlock_demons: Vec<WarlockDemon>,
+    /// Team 2's warlock demon choices (one per slot, defaults to Felhunter).
+    pub team2_warlock_demons: Vec<WarlockDemon>,
     /// Team 1's hunter pet type preferences (one per slot, defaults to Spider)
     pub team1_hunter_pet_types: Vec<HunterPetType>,
     /// Team 2's hunter pet type preferences (one per slot, defaults to Spider)
@@ -752,6 +783,8 @@ impl Default for MatchConfig {
             // One vec per slot, inner vec has curse pref per enemy (defaults to Agony)
             team1_warlock_curse_prefs: vec![vec![WarlockCurse::default()]],
             team2_warlock_curse_prefs: vec![vec![WarlockCurse::default()]],
+            team1_warlock_demons: vec![WarlockDemon::default()],
+            team2_warlock_demons: vec![WarlockDemon::default()],
             team1_hunter_pet_types: vec![HunterPetType::default()],
             team2_hunter_pet_types: vec![HunterPetType::default()],
             team1_warrior_shouts: vec![WarriorShout::default()],
@@ -792,6 +825,8 @@ impl MatchConfig {
         for prefs in &mut self.team1_warlock_curse_prefs {
             prefs.resize(enemy_size, WarlockCurse::default());
         }
+        self.team1_warlock_demons
+            .resize(size, WarlockDemon::default());
         self.team1_warrior_shouts
             .resize(size, WarriorShout::default());
         self.team1_mage_armors.resize(size, MageArmor::default());
@@ -828,6 +863,8 @@ impl MatchConfig {
         for prefs in &mut self.team1_warlock_curse_prefs {
             prefs.resize(size, WarlockCurse::default());
         }
+        self.team2_warlock_demons
+            .resize(size, WarlockDemon::default());
         self.team2_warrior_shouts
             .resize(size, WarriorShout::default());
         self.team2_mage_armors.resize(size, MageArmor::default());

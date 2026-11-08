@@ -65,6 +65,11 @@ fn patching_fixture() -> TalentDefinitions {
         .expect("the fixture validates")
 }
 
+/// Soul Link's prerequisite, and the same at Fel Stamina 1/1, for the edits
+/// that take Fel Stamina down to one rank.
+const SOUL_LINK_NEEDS: &str = "requires: Some((FelStamina, 2)),";
+const SOUL_LINK_NEEDS_ONE: &str = "requires: Some((FelStamina, 1)),";
+
 fn demonology_build() -> Build {
     Build::of(&[(DemonicEmbrace, 2), (FelStamina, 2), (UnholyPower, 2)])
 }
@@ -255,6 +260,7 @@ fn the_loader_rejects_each_broken_rule() {
             1,
         )
         .replacen("per_rank: [PetStatPercent(MaxHealth, 0.10)],", per_rank, 1)
+        .replacen(SOUL_LINK_NEEDS, "", 1)
     };
     // A prerequisite in another class's tree of the same name.
     let across = hunter("per_rank: [PetStatPercent(MaxHealth, 0.10)],").replacen(
@@ -404,6 +410,7 @@ fn a_talent_ability_is_granted_by_exactly_one_node() {
         "max_rank: 2,\n            budget: Some(11.0),\n            // Felhunter +10%",
         "max_rank: 1,\n            budget: Some(11.0),\n            // Felhunter +10%",
     )
+    .replacen(SOUL_LINK_NEEDS, SOUL_LINK_NEEDS_ONE, 1)
     .replacen(
         "per_rank: [PetStatPercent(MaxHealth, 0.10)],",
         "per_rank: [Grant(DeathCoil)],",
@@ -498,9 +505,21 @@ fn prerequisites_and_the_points_cap_are_enforced() {
     assert!(talents
         .validate_build(warlock, &Build::of(&[(FelStamina, 2), (UnholyPower, 1)]))
         .is_ok());
-    // Six ranks exist, so no seventh point can be spent.
+    // Nine ranks exist; the cap stops the ninth.
+    let all_nine = Build::of(&[
+        (DemonicEmbrace, 2),
+        (FelStamina, 2),
+        (UnholyPower, 2),
+        (MasterDemonologist, 1),
+        (DemonicSacrifice, 1),
+        (SoulLink, 1),
+    ]);
     assert!(TalentDefinitions::shipped()
-        .legal_builds(warlock, 7)
+        .validate_build(warlock, &all_nine)
+        .unwrap_err()
+        .contains("at most 8"));
+    assert!(TalentDefinitions::shipped()
+        .legal_builds(warlock, 9)
         .is_empty());
 }
 
@@ -618,6 +637,7 @@ fn a_grant_adds_its_ability_to_the_book() {
         "max_rank: 2,\n            budget: Some(11.0),\n            // Felhunter +10%",
         "max_rank: 1,\n            budget: Some(11.0),\n            // Felhunter +10%",
     )
+    .replacen(SOUL_LINK_NEEDS, SOUL_LINK_NEEDS_ONE, 1)
     .replacen(
         "per_rank: [PetStatPercent(MaxHealth, 0.10)],",
         "per_rank: [Grant(DeathCoil)],",
@@ -750,7 +770,7 @@ fn every_legal_build_at_a_point_count_costs_within_one_rank() {
 }
 
 /// The enumeration finds every legal build, and only legal ones: the
-/// Demonology tier 1-2 nodes at each count, by set equality.
+/// Demonology tree at its counts, by set equality.
 #[test]
 fn legal_builds_are_enumerated_exactly() {
     let talents = TalentDefinitions::shipped();
@@ -771,13 +791,38 @@ fn legal_builds_are_enumerated_exactly() {
         .into_iter()
         .collect()
     );
-    // Three points: tier 2 opens only after two in tier 1.
-    assert_eq!(names(3).len(), 2 + 3);
-    assert_eq!(
-        names(6),
-        [demonology_build().ranks.into_iter().collect::<Vec<_>>()]
-            .into_iter()
+    // Three points: tier 2 opens only after two in tier 1 — three in tier 1,
+    // or two there and one in either tier-2 node.
+    assert_eq!(names(3).len(), 2 + 3 * 2);
+    // Eight points: every rank but one. Not Fel Stamina's (Soul Link needs
+    // both); every other node's.
+    let full = [
+        (DemonicEmbrace, 2),
+        (FelStamina, 2),
+        (UnholyPower, 2),
+        (MasterDemonologist, 1),
+        (DemonicSacrifice, 1),
+        (SoulLink, 1),
+    ];
+    let less = |node: TalentId| -> Vec<(TalentId, u8)> {
+        full.iter()
+            .filter_map(|(id, r)| {
+                let r = if *id == node { r - 1 } else { *r };
+                (r > 0).then_some((*id, r))
+            })
             .collect()
+    };
+    assert_eq!(
+        names(8),
+        [
+            less(DemonicEmbrace),
+            less(UnholyPower),
+            less(MasterDemonologist),
+            less(DemonicSacrifice),
+            less(SoulLink),
+        ]
+        .into_iter()
+        .collect()
     );
     // Every one of them resolves.
     for points in 1..=MAX_TALENT_POINTS {

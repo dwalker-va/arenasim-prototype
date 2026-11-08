@@ -70,6 +70,7 @@ use crate::states::play_match::constants::{
     DR_MULTIPLIERS, DR_RESET_TIMER, FROST_TRAP_SLOW_MAGNITUDE, FROST_TRAP_ZONE_DURATION,
     TOTEM_DURATION, WEAKENED_SOUL_DURATION,
 };
+use crate::states::play_match::demonology;
 use crate::states::play_match::effects::backlash::{
     dispel_backlash_silence_aura, DISPEL_BACKLASH_SILENCE_DURATION,
 };
@@ -185,6 +186,11 @@ pub enum EngineAura {
     /// a `proc:` block gets an entry, so trinket N+1 (the whole point of
     /// AS-61) needs no variant here.
     ProcTrinketBuff(ItemId),
+    /// Master Demonologist's spell damage cut, which the talent keeps on the
+    /// Warlock and its Felhunter while the Felhunter lives.
+    MasterDemonologist,
+    /// Touch of Shadow, the buff a Demonic Sacrifice grants for the match.
+    TouchOfShadow,
 }
 
 impl EngineAura {
@@ -199,6 +205,8 @@ impl EngineAura {
             EngineAura::FrostTrapSlow,
             EngineAura::DispelBacklashSilence,
             EngineAura::FrostArmorChill,
+            EngineAura::MasterDemonologist,
+            EngineAura::TouchOfShadow,
         ];
         all.extend(TotemElement::ALL.iter().copied().map(EngineAura::TotemBuff));
         all.extend(
@@ -695,6 +703,10 @@ fn engine_art(engine: EngineAura) -> AuraArt {
         // trinket's own icon — as it does in the buff bar, which reads the
         // same key off the aura's `source_item`.
         EngineAura::ProcTrinketBuff(item) => AuraArt::Item(item),
+        // No ability applies them; each wears its talent node's icon, under
+        // the key the buff bar reads (`demonology::talent_aura_icon_key`).
+        EngineAura::MasterDemonologist => AuraArt::Own("talent_master_demonologist"),
+        EngineAura::TouchOfShadow => AuraArt::Own("talent_touch_of_shadow"),
     }
 }
 
@@ -909,6 +921,50 @@ fn engine_entry(
                 // cooldown the trinket does not have. The trinket is not named
                 // again here — the page header IS its name.
                 provenance: proc_description(proc),
+            }
+        }
+        EngineAura::MasterDemonologist => {
+            let reduction = demonology::shipped_master_demonologist().unwrap_or_default();
+            let sample =
+                demonology::master_demonologist_aura(reduction, bevy::prelude::Entity::PLACEHOLDER);
+            EngineSpec {
+                name: sample.ability_name.clone(),
+                frame_name: None,
+                mechanic: sample.effect_type,
+                source: AuraSource::Mechanic("the Warlock's Master Demonologist talent"),
+                magnitude: sample.magnitude,
+                school: None,
+                break_on_damage: sample.break_on_damage_threshold,
+                dispel_type: sample.dispel_type,
+                persistence: Persistence::WholeMatch,
+                riders: EngineSpec::no_riders(),
+                provenance: format!(
+                    "The Warlock and its Felhunter each take {:.0}% less spell damage while the \
+                     Felhunter lives. The Warlock's ends when the Felhunter dies.",
+                    reduction * 100.0
+                ),
+            }
+        }
+        EngineAura::TouchOfShadow => {
+            let bonus = demonology::shipped_demonic_sacrifice().unwrap_or_default();
+            let sample =
+                demonology::touch_of_shadow_aura(bonus, bevy::prelude::Entity::PLACEHOLDER);
+            EngineSpec {
+                name: sample.ability_name.clone(),
+                frame_name: None,
+                mechanic: sample.effect_type,
+                source: AuraSource::Mechanic("the Warlock's Demonic Sacrifice talent"),
+                magnitude: sample.magnitude,
+                school: Some(SpellSchool::Shadow),
+                break_on_damage: sample.break_on_damage_threshold,
+                dispel_type: sample.dispel_type,
+                persistence: Persistence::WholeMatch,
+                riders: EngineSpec::no_riders(),
+                provenance: format!(
+                    "Granted at the gates to a Warlock that sacrifices its Felhunter: {:.0}% more \
+                     Shadow damage for the match.",
+                    bonus * 100.0
+                ),
             }
         }
     };
@@ -1966,6 +2022,9 @@ mod tests {
                 "Travel Form",
                 "Windfury Totem",
                 "Weakened Soul",
+                // The Demonology talents' auras: untyped, for the match.
+                "Master Demonologist",
+                "Touch of Shadow",
             ]
             .map(String::from),
         );
@@ -2349,11 +2408,15 @@ mod tests {
         ability_less.sort();
         let mut expected = proc_trinket_names();
         expected.push("Shadow Sight".to_string());
+        // Talents, not abilities, apply these.
+        expected.push("Master Demonologist".to_string());
+        expected.push("Touch of Shadow".to_string());
         expected.sort();
         assert_eq!(
             ability_less, expected,
-            "an arena orb pickup and the proc trinkets are the only auras no ability applies \
-             — a new one here is either a genuine mechanic or a `source` nobody filled in"
+            "an arena orb pickup, the proc trinkets and the talent auras are the only auras no \
+             ability applies — a new one here is either a genuine mechanic or a `source` nobody \
+             filled in"
         );
     }
 
@@ -2477,7 +2540,12 @@ mod tests {
         own_art.sort();
         assert_eq!(
             own_art,
-            vec!["Shadow Sight".to_string(), "Weakened Soul".to_string()],
+            vec![
+                "Master Demonologist".to_string(),
+                "Shadow Sight".to_string(),
+                "Touch of Shadow".to_string(),
+                "Weakened Soul".to_string()
+            ],
             "the auras whose own art beats a borrowed icon"
         );
         item_art.sort();

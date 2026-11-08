@@ -33,6 +33,7 @@ pub use super::auras::process_dot_ticks;
 pub use super::auras::process_hot_ticks;
 pub use super::auras::update_auras;
 pub use super::combat_core::regenerate_resources;
+pub use super::demonology::demonic_bonds;
 pub use super::match_flow::update_countdown;
 pub use super::match_flow::update_dampening;
 pub use super::shadow_sight::track_shadow_sight_timer;
@@ -198,7 +199,14 @@ pub fn add_core_combat_systems<M, N>(
     app.add_systems(
         FixedUpdate,
         (
-            update_countdown.run_if(decide.clone()),
+            // Demonology's passives and the Demonic Sacrifice, right after
+            // the countdown so a sacrifice lands on the frame the gates open
+            // and its Touch of Shadow meets `apply_pending_auras` below. A
+            // nested chain, because the outer tuple is at Bevy's 20-system
+            // limit.
+            (update_countdown, demonic_bonds)
+                .chain()
+                .run_if(decide.clone()),
             // Ramp heal/absorb dampening BEFORE any healing applies this frame
             update_dampening.run_if(decide.clone()),
             regenerate_resources,

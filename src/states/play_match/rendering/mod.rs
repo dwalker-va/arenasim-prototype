@@ -51,6 +51,16 @@ pub const GENERIC_AURA_ICONS: &[(&str, &str)] = &[
     ("aura_lockout", "icons/auras/lockout.jpg"),
     ("aura_weakened_soul", "icons/auras/weakened_soul.jpg"),
     ("aura_shadow_sight", "icons/auras/shadow_sight.jpg"),
+    // The talent auras, each wearing its node's icon
+    // (`demonology::talent_aura_icon_key`).
+    (
+        "talent_master_demonologist",
+        "icons/talents/spell_shadow_shadowpact.jpg",
+    ),
+    (
+        "talent_touch_of_shadow",
+        "icons/talents/spell_shadow_psychicscream.jpg",
+    ),
 ];
 
 /// The icon key an aura applied by `item` draws under — a proc trinket's buff
@@ -110,12 +120,16 @@ pub fn icon_load_settled(state: &bevy::asset::LoadState) -> bool {
 
 /// Get the icon key for an aura.
 ///
-/// An aura an ITEM applied draws the item's icon ([`item_aura_icon_key`]).
+/// An aura an ITEM applied draws the item's icon ([`item_aura_icon_key`]); a
+/// talent's aura, its node's icon (`demonology::talent_aura_icon_key`).
 /// Otherwise: the applying ability's name if it has a specific icon, else a
 /// generic per-type key.
 pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) -> String {
     if let Some(item) = aura.source_item {
         return item_aura_icon_key(item);
+    }
+    if let Some(key) = super::demonology::talent_aura_icon_key(&aura.ability_name) {
+        return key.to_string();
     }
     // Check if the ability that created this aura has a specific icon
     let has_icon = ability_definitions

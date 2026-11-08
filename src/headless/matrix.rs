@@ -301,6 +301,8 @@ fn build_config(
         team2_rogue_poisons: vec![],
         team1_rogue_offhand_poisons: vec![],
         team2_rogue_offhand_poisons: vec![],
+        team1_warlock_demons: vec![],
+        team2_warlock_demons: vec![],
         team1_warlock_curse_prefs: vec![],
         team2_warlock_curse_prefs: vec![],
         team1_hunter_pet_types: vec![],

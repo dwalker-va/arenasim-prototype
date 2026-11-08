@@ -74,7 +74,52 @@
             // Felhunter melee +10% a rank.
             per_rank: [PetStatPercent(WeaponDamage, 0.10)],
         ),
+        MasterDemonologist: (
+            name: "Master Demonologist",
+            class: Warlock, tree: Demonology, tier: 2, column: 2,
+            icon: "icons/talents/spell_shadow_shadowpact.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // The Warlock and its Felhunter both take 4% less spell damage
+            // while the Felhunter lives: Classic's resistances as magnitude.
+            per_rank: [Mechanic(MasterDemonologist(reduction: 0.04))],
+        ),
+        DemonicSacrifice: (
+            name: "Demonic Sacrifice",
+            class: Warlock, tree: Demonology, tier: 3, column: 1,
+            icon: "icons/talents/spell_shadow_psychicscream.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // Adds Sacrifice to the demon choice. Sacrificed, the Felhunter
+            // dies at the gates and the Warlock gains Touch of Shadow: +15%
+            // Shadow damage for the match. No mana effect (Life Tap's job).
+            per_rank: [
+                WidenChoice(WarlockDemon(Sacrifice)),
+                Mechanic(DemonicSacrifice(shadow_damage: 0.15)),
+            ],
+        ),
+        SoulLink: (
+            name: "Soul Link",
+            class: Warlock, tree: Demonology, tier: 4, column: 1,
+            icon: "icons/talents/spell_shadow_gathershadows.jpg",
+            max_rank: 1,
+            // A capstone is two ranks' price (22, ±15%). Priced at 20.5 so a
+            // Soul Link build with 2/2 Demonic Embrace (computed, 11.67 a rank
+            // on the reference Warlock) stays within one rank of every other
+            // build at its point count.
+            budget: Some(20.5),
+            requires: Some((FelStamina, 2)),
+            // 12% of the Warlock's damage taken goes to the Felhunter while
+            // it lives. No damage rider.
+            per_rank: [Mechanic(SoulLink(share: 0.12))],
+        ),
     },
+
+    // A sacrificed Felhunter cannot carry the link: Sacrifice switches Soul
+    // Link off for the match.
+    choice_rules: [
+        SwitchesOff(option: WarlockDemon(Sacrifice), talent: SoulLink),
+    ],
 
     // Each class's reference combatant at mid-run, which prices its computed
     // nodes: the starting kit with three Gauntlet picks in place, named here as

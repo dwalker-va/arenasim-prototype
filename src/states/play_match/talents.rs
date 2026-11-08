@@ -119,6 +119,9 @@ talent_ids! {
     DemonicEmbrace,
     FelStamina,
     UnholyPower,
+    MasterDemonologist,
+    DemonicSacrifice,
+    SoulLink,
 }
 
 /// A talent tree. A tree is named per class: `(class, TreeId)` is the key.
@@ -969,6 +972,9 @@ impl TalentDefinitions {
                 Some(ChoiceOption::RoguePoison(poison)) => Some(poison),
                 _ => None,
             },
+            sacrifices_pet: choices.chose(ChoiceOption::WarlockDemon(
+                crate::states::match_config::WarlockDemon::Sacrifice,
+            )),
         })
     }
 
@@ -1150,6 +1156,8 @@ pub struct ResolvedBuild {
     mechanics: TalentMechanics,
     /// The off-hand poison the slot chose, when its build opens the slot.
     offhand_poison: Option<crate::states::match_config::RoguePoison>,
+    /// Whether the slot chose to sacrifice its demon at the gates.
+    sacrifices_pet: bool,
 }
 
 impl ResolvedBuild {
@@ -1163,12 +1171,19 @@ impl ResolvedBuild {
             pet_stats: BTreeMap::new(),
             mechanics: TalentMechanics::default(),
             offhand_poison: None,
+            sacrifices_pet: false,
         }
     }
 
     /// The build's mechanics (`talent_mechanics`).
     pub fn mechanics(&self) -> &TalentMechanics {
         &self.mechanics
+    }
+
+    /// Whether the slot sacrifices its demon at the gates (the Warlock's
+    /// demon choice, `Sacrifice`).
+    pub fn sacrifices_pet(&self) -> bool {
+        self.sacrifices_pet
     }
 
     /// The combatant's book.
@@ -1198,6 +1213,7 @@ impl ResolvedBuild {
     pub fn apply(&self, combatant: &mut Combatant) {
         combatant.talent_mechanics = self.mechanics.clone();
         combatant.rogue_offhand_poison = self.offhand_poison;
+        combatant.sacrifice_pending = self.sacrifices_pet;
         apply_percents(&self.stats, combatant);
     }
 

@@ -46,6 +46,7 @@ pub mod combat_core;
 pub mod components;
 pub mod constants;
 pub mod decision_trace;
+pub mod demonology;
 pub mod effects;
 pub mod equipment;
 pub mod map_config;
