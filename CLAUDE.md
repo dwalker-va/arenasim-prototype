@@ -659,6 +659,17 @@ carrying every slot's build.
   `every_numeric_ability_field_is_decided` destructures `AbilityConfig`
   without a rest pattern, so a new numeric field fails to compile until it is
   placed or declared not patchable.
+- **The talent panel** (`src/states/talent_panel.rs`, drawing the kit's
+  `ui::widgets::TalentTrees`) spends a build in View Combatant: a click
+  learns a rank, shift-click takes one back, right-click opens the talent's
+  encyclopedia page. It offers only what `TalentDefinitions::learn` /
+  `unlearn` allow, so a spawn never meets a build it made illegal
+  (`tests/talent_panel.rs`). A `floor` (a Gauntlet run's locked-in ranks)
+  cannot be taken back. Talent prose is ONE generator,
+  `src/states/talent_text.rs`, for the panel's tooltips and the
+  encyclopedia's Talents section. `TalentDefinitions::spec` names the spec
+  the team frames, Results and the Configure Match slot rows show ("Demonology
+  Warlock 0/3/0"); an untalented combatant shows none.
 
 ### Adding a New Item
 
@@ -708,7 +719,7 @@ any ring fits either ring socket, and the same item may not occupy both
    proc: Some((
        trigger: MeleeHit,         // MeleeHit | SpellCast | Heal
        chance: 0.15,              // per qualifying event, in (0.0, 1.0]
-       effect: AttackPowerIncrease,
+       effect: Buff(AttackPowerIncrease),  // or ExtraSwing (see below)
        magnitude: 55.0,           // in the effect aura's own units
        duration: 10.0,
        internal_cooldown: 45.0,   // must be >= duration
@@ -737,6 +748,17 @@ any ring fits either ring socket, and the same item may not occupy both
      at their item-stat weights, and haste (`AttackSpeedIncrease`, the
      Dragonspine Trophy's +20% attack speed) at `WEIGHT_ATTACK_SPEED`, crit's
      weight at TBC's rating exchange rate.
+   - **`effect: ExtraSwing`** (Hand of Justice, Gressil) is the one proc that is not a
+     buff: on a `MeleeHit` from either hand it queues one extra MAIN-hand swing
+     on Windfury Totem's own path (`combat_core::ExtraSwingSource`), rolled
+     where the swing is queued rather than after it lands. It takes no
+     `magnitude`, `duration` or `internal_cooldown` (validated), never draws
+     the totem's `WindfuryTornado`, grants no rage (a TBC deviation, AS-448)
+     and no further extra swing, and logs `X procs <trinket> (extra attack)`.
+     No stat buys it, so it is priced at a DECLARED rate per unit of `chance`,
+     `WEIGHT_EXTRA_SWING`: 1.5x haste's weight, provisional (a 10x-dose sweep
+     the constant cites). Every consumer that lists or draws proc BUFFS asks
+     `ItemConfig::proc_buff`, which excludes it.
    - **Procs are not purgeable.** A proc buff is `DispelType::Physical` — an
      item's effect is not a spell, however magical it looks — so no purge,
      dispel or cleanse removes it.
@@ -788,6 +810,43 @@ any ring fits either ring socket, and the same item may not occupy both
    - Its line ("Use: …") is `ItemConfig::effect_description`, shared by the
      encyclopedia page, the tooltip and the equipment picker. Its landing is in
      `tests/lands_silently_audit.rs`'s on-use family.
+
+   **A trinket may carry a `triggered_absorb:` block** — a shield a condition
+   on its wearer raises (`src/states/play_match/triggered_absorbs.rs`; Aegis
+   of the Last Stand is the first):
+   ```ron
+   triggered_absorb: Some((
+       trigger: HealthBelow(0.35),       // the wearer alive below 35% health
+       shield: MaxHealthFraction(0.20),  // 20% of its maximum health
+       limit: OncePerMatch,
+       duration: 30.0,
+       trigger_rate: 0.575,              // the price's assumed rate
+   )),
+   ```
+   - **Where it fires:** `fire_triggered_absorbs`, at the end of Phase 3,
+     after the frame's last damage and after `process_damage_follow_ups`; it
+     never touches the damage funnel. The shield is an `Absorb` aura named
+     after the item, keyed by source, so it sits beside a Power Word: Shield.
+     It applies `ArenaDampening` itself, at that landing site, and logs
+     `<wearer> gains <item> (absorbs N)` with the landed amount. Not purgeable
+     (`DispelType::Physical`), as for procs.
+   - **In the damage pipeline** it is an ordinary absorb (the funnel's step 5):
+     it soaks a hit after the damage-taken modifiers and a transfer's share,
+     before the killing-blow save, and never a transferred hit. Because it
+     fires after the follow-ups, a transfer that crosses the line raises it
+     that frame, and a save is judged first: Cheat Death leaving its Rogue
+     below the line raises it on the frame of the blow
+     (`tests/triggered_absorb_pipeline.rs`).
+   - **Pricing:** value times trigger rate — the shield on a
+     `TRIGGERED_ABSORB_REFERENCE_HEALTH` (420) combatant at the health weight,
+     times the declared `trigger_rate`, which stays provisional until the
+     Gauntlet bot measures it.
+   - It gets the same surfaces a proc does, with no code change (its sentence
+     is `triggered_absorb_description`, through `ItemConfig::effect_lines`),
+     and is a member of `tests/lands_silently_audit.rs`'s triggered-absorb
+     family: its shield must reach a `ShieldKind` (`is_live_shield`, keyed on
+     the aura's name). New variants of trigger, size and limit (Sacred Shield,
+     AS-421) are exhaustive matches in that module.
 
 3. **Add to a class loadout** in `loadouts.ron` if it should be default equipment
 
@@ -2115,7 +2174,7 @@ cargo run --release -- --ui-script tests/ui-scripts/view-combatant-tooltips.scri
 Input is injected at BEVY's input events (`CursorMoved` / `MouseButtonInput` /
 `KeyboardInput` / `MouseWheel`) in `PreUpdate` before `InputSystem`, so
 `ButtonInput<KeyCode>` and bevy_egui's own conversion both run exactly as they
-do for a physical device. Steps: `hover`, `click <id> [left|right]`, `key`,
+do for a physical device. Steps: `hover`, `click <id> [left|right] [shift]`, `key`,
 `wait`, `assert-state`, `assert-view`, `assert-note`, `assert-no-note`,
 `await-note <secs> <substring>` (polls on the wall clock for something the
 match produces on its own, e.g. a banter line), `assert-visible` (drawn AND on screen), `assert-absent` (not drawn at all —
@@ -2172,7 +2231,11 @@ old standalone Armory. It is a navigation FRAMEWORK plus per-section content:
   kit order — do NOT add a second sort), `items.rs`, and `auras.rs` (Buffs &
   Debuffs: every aura an ability applies, plus the engine-originated ones —
   totem buffs, interrupt lockouts, one entry per proc trinket, and the rest —
-  each with a removal badge answered by the engine's own dispel predicates).
+  each with a removal badge answered by the engine's own dispel predicates),
+  and `talents.rs` (every class's trees from `talents.ron`, drawn read-only,
+  and a page per talent). A class page shows its BASE kit
+  (`base_abilities_for_class`), its talent abilities under their own heading,
+  and its trees.
 - **Ability and aura PROSE is `src/states/ability_text.rs`** — one generator, shared
   with View Combatant, so an ability's description reads the same wherever the
   player meets it. Totem text wins over a hand-written `abilities.ron`

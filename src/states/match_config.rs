@@ -902,6 +902,50 @@ impl MatchConfig {
         self.team1.iter().all(|slot| slot.is_some()) && self.team2.iter().all(|slot| slot.is_some())
     }
 
+    /// The talent build in `team`'s `slot`, when the slot exists: what the
+    /// spawn resolves, the talent panel spends, and the frames and Results
+    /// name a spec from.
+    pub fn build(&self, team: u8, slot: usize) -> Option<&Build> {
+        if team == 1 {
+            self.team1_builds.get(slot)
+        } else {
+            self.team2_builds.get(slot)
+        }
+    }
+
+    /// The talent build in `team`'s `slot`, to spend.
+    pub fn build_mut(&mut self, team: u8, slot: usize) -> Option<&mut Build> {
+        if team == 1 {
+            self.team1_builds.get_mut(slot)
+        } else {
+            self.team2_builds.get_mut(slot)
+        }
+    }
+
+    /// Return `team`'s `slot` to no form when its build no longer offers the
+    /// form it holds: the talent that offered it was unlearned. The slot then
+    /// never carries a choice its build cannot make, which the match would
+    /// refuse at the gates.
+    pub fn drop_unoffered_priest_form(
+        &mut self,
+        team: u8,
+        slot: usize,
+        talents: &crate::states::play_match::talents::TalentDefinitions,
+    ) {
+        use crate::states::play_match::talent_choices::ChoiceOption;
+        let build = self.build(team, slot).cloned().unwrap_or_default();
+        let forms = if team == 1 {
+            &mut self.team1_priest_forms
+        } else {
+            &mut self.team2_priest_forms
+        };
+        if let Some(form) = forms.get_mut(slot) {
+            if !talents.offers(&build, ChoiceOption::PriestForm(*form)) {
+                *form = PriestForm::default();
+            }
+        }
+    }
+
     /// Assign a class to a team slot, dropping that slot's equipment overrides
     /// and talent build when the class actually changes (a build is one
     /// class's talents).

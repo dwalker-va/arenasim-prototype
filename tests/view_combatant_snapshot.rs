@@ -33,6 +33,7 @@ use arenasim::states::configure_match_ui::ClassIcons;
 use arenasim::states::match_config::{CharacterClass, MatchConfig};
 use arenasim::states::play_match::ability_config::load_ability_definitions;
 use arenasim::states::play_match::equipment::{load_default_loadouts, load_item_definitions};
+use arenasim::states::play_match::talents::{Build, TalentDefinitions, TalentId};
 use arenasim::states::view_combatant_ui::{
     draw_view_combatant, EquipmentPickerState, ViewCombatantData, ViewCombatantState,
 };
@@ -45,6 +46,10 @@ use arenasim::ui::widgets::Nav;
 /// Tall enough that the whole sheet — header, stats and kit, the class's
 /// strategic panel and every equipment row — fits without scrolling.
 const SIZE: [f32; 2] = [1280.0, 1820.0];
+
+/// The same for a class with talent trees, whose sheet carries the talent
+/// panel under its pre-match choice.
+const TALENTED_SIZE: [f32; 2] = [1280.0, 2320.0];
 
 /// A 2v2: Warrior + Priest against Mage + Warlock, so both views below have a
 /// filled enemy team (the Warlock's curse panel draws one row per enemy).
@@ -86,6 +91,26 @@ fn view_combatant_warlock() {
             team: 2,
             slot: 1,
         },
+    );
+}
+
+/// The Warlock with a build: the talent panel's spec line and points, taken
+/// nodes (Demonic Embrace 2/2, Fel Stamina 1/2), the tier-2 node open, and the
+/// stats panel's health raised by the build.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn view_combatant_warlock_talented() {
+    let mut config = mock_config();
+    config.team2_builds[1] = Build::of(&[(TalentId::DemonicEmbrace, 2), (TalentId::FelStamina, 1)]);
+    snapshot_with(
+        "view_combatant_warlock_talented",
+        ViewCombatantState {
+            class: CharacterClass::Warlock,
+            team: 2,
+            slot: 1,
+        },
+        config,
+        TALENTED_SIZE,
     );
 }
 
@@ -265,6 +290,7 @@ fn every_tooltip_shows_at_the_default_window_size() {
                 ability_icons: None,
                 item_icons: None,
                 pet_icons: None,
+                talents: TalentDefinitions::shipped(),
             },
         );
 
@@ -323,6 +349,7 @@ fn every_pre_match_choice_is_on_screen_at_the_default_window_size() {
                 ability_icons: None,
                 item_icons: None,
                 pet_icons: None,
+                talents: TalentDefinitions::shipped(),
             },
         );
         sheet.frame(Vec::new());
@@ -370,6 +397,184 @@ fn every_pre_match_choice_is_on_screen_at_the_default_window_size() {
     }
 }
 
+/// The mitigation rows say what their total buys: the Armor hover gives its
+/// physical reduction (`armor / (armor + 5500)`), and a resistance's hover
+/// its damage reduction (`value / (value * 5/3 + 300)`), both read off the
+/// row's own total.
+#[test]
+fn mitigation_rows_say_what_their_total_buys() {
+    use arenasim::states::play_match::equipment::{ItemId, ItemSlot};
+
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+    let class_icons = ClassIcons::default();
+    let mut config = MatchConfig::default();
+    config.team1[0] = Some(CharacterClass::Warlock);
+    config.team1_equipment[0].insert(ItemSlot::Neck, ItemId::AmuletOfShadowWard);
+    let sheet = Sheet::open(
+        CharacterClass::Warlock,
+        config,
+        ViewCombatantData {
+            abilities: &abilities,
+            items: &items,
+            default_loadouts: &defaults,
+            class_icons: &class_icons,
+            ability_icons: None,
+            item_icons: None,
+            pet_icons: None,
+            talents: TalentDefinitions::shipped(),
+        },
+    );
+    let row = |key: &str| -> (f32, String) {
+        let prefix = format!("stat {key}=");
+        let note = sheet
+            .last
+            .notes
+            .iter()
+            .find_map(|n| n.strip_prefix(prefix.as_str()))
+            .unwrap_or_else(|| panic!("no {key} row: {:?}", sheet.last.notes));
+        let (value, hover) = note.split_once(" hover=").expect("a hover");
+        (value.parse().expect("a number"), hover.to_string())
+    };
+
+    let (armor, hover) = row("Armor");
+    assert!(armor > 0.0, "the Warlock's kit carries armor");
+    let want = format!(
+        "({:.1}% physical reduction)",
+        armor / (armor + 5500.0) * 100.0
+    );
+    assert!(hover.ends_with(&want), "{hover:?} should end {want:?}");
+
+    let (shadow, hover) = row("Shadow Resist");
+    assert_eq!(shadow, 20.0, "the amulet's 20 shadow resistance");
+    assert!(hover.ends_with("(6.0% damage reduction)"), "{hover:?}");
+
+    // A build that raises armor: the reduction is the TALENTED total's. A
+    // fixture makes Demonic Embrace +50% armor a rank (no shipped talent
+    // touches armor yet).
+    let text = std::fs::read_to_string(arenasim::paths::asset_path("config/talents.ron"))
+        .expect("talents.ron reads");
+    let health = "per_rank: [StatPercent(MaxHealth, 0.03)],";
+    assert!(text.contains(health));
+    let fixture = TalentDefinitions::from_ron(
+        &text.replacen(
+            health,
+            "budget: Some(11.0), per_rank: [StatPercent(Armor, 0.5)],",
+            1,
+        ),
+        &abilities,
+    )
+    .expect("the fixture validates");
+    let mut config = MatchConfig::default();
+    config.team1[0] = Some(CharacterClass::Warlock);
+    config.team1_builds[0] = Build::of(&[(TalentId::DemonicEmbrace, 1)]);
+    let talented = Sheet::open(
+        CharacterClass::Warlock,
+        config,
+        ViewCombatantData {
+            abilities: &abilities,
+            items: &items,
+            default_loadouts: &defaults,
+            class_icons: &class_icons,
+            ability_icons: None,
+            item_icons: None,
+            pet_icons: None,
+            talents: &fixture,
+        },
+    );
+    let note = talented
+        .last
+        .notes
+        .iter()
+        .find_map(|n| n.strip_prefix("stat Armor="))
+        .expect("an Armor row");
+    let (value, hover) = note.split_once(" hover=").expect("a hover");
+    // Both totals are printed whole, so compare within a point of rounding.
+    let boosted: f32 = value.parse().expect("a number");
+    assert!(
+        (boosted - armor * 1.5).abs() <= 1.0,
+        "+50% of {armor} is not {boosted}"
+    );
+    let reduction: f32 = hover
+        .rsplit_once('(')
+        .and_then(|(_, tail)| tail.strip_suffix("% physical reduction)"))
+        .expect("a physical reduction suffix")
+        .parse()
+        .expect("a percentage");
+    let talented = boosted / (boosted + 5500.0) * 100.0;
+    let geared = armor / (armor + 5500.0) * 100.0;
+    assert!(
+        (reduction - talented).abs() <= 0.1 && (reduction - geared).abs() > 0.1,
+        "{hover:?}: the talented total buys {talented:.1}%, the gear alone {geared:.1}%"
+    );
+}
+
+/// The sheet spends THIS combatant's build: a class with trees draws its
+/// talent panel over the slot's build, which the stats read back (Demonic
+/// Embrace 2/2 is +6% health); a class without trees draws no panel.
+#[test]
+fn the_sheet_draws_the_slots_build_and_its_stats_read_it() {
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+    let class_icons = ClassIcons::default();
+    let data = || ViewCombatantData {
+        abilities: &abilities,
+        items: &items,
+        default_loadouts: &defaults,
+        class_icons: &class_icons,
+        ability_icons: None,
+        item_icons: None,
+        pet_icons: None,
+        talents: TalentDefinitions::shipped(),
+    };
+    let health = |sheet: &Sheet| -> i32 {
+        sheet
+            .last
+            .notes
+            .iter()
+            .find_map(|n| n.strip_prefix("stat Health="))
+            .unwrap_or_else(|| panic!("no health note: {:?}", sheet.last.notes))
+            .parse()
+            .expect("a number")
+    };
+
+    let mut config = MatchConfig::default();
+    config.team1[0] = Some(CharacterClass::Warlock);
+    let untalented = Sheet::open(CharacterClass::Warlock, config.clone(), data());
+    assert!(untalented.last.widget("talent:DemonicEmbrace").is_some());
+    assert!(untalented.last.has_note("talents:t1s0 points=0"));
+
+    config.team1_builds[0] = Build::of(&[(TalentId::DemonicEmbrace, 2)]);
+    let talented = Sheet::open(CharacterClass::Warlock, config, data());
+    assert!(
+        talented
+            .last
+            .has_note("talents:t1s0 points=2 spec=Demonology Warlock 2"),
+        "{:?}",
+        talented.last.notes
+    );
+    let (before, after) = (health(&untalented), health(&talented));
+    assert_eq!(
+        after,
+        (before as f32 * 1.06).round() as i32,
+        "{before} -> {after}"
+    );
+
+    let mut config = MatchConfig::default();
+    config.team1[0] = Some(CharacterClass::Warrior);
+    let warrior = Sheet::open(CharacterClass::Warrior, config, data());
+    assert!(
+        !warrior
+            .last
+            .widgets
+            .iter()
+            .any(|w| w.id.starts_with("talent:")),
+        "a class without trees draws no talent panel"
+    );
+}
+
 /// Every widget on the sheet with a tooltip, and the note its tooltip body
 /// leaves: `kit:X` and `strategic:X[:eN]` show `Ability(X)`, and a worn item's
 /// `equip:<Slot>` row shows `Item(<id>)`. An empty socket has no tooltip.
@@ -398,14 +603,23 @@ fn hover_targets(frame: &registry::Frame) -> Vec<(String, String)> {
 }
 
 fn snapshot(name: &str, view: ViewCombatantState) {
+    let size = if TalentDefinitions::shipped().trees(view.class).is_empty() {
+        SIZE
+    } else {
+        TALENTED_SIZE
+    };
+    snapshot_with(name, view, mock_config(), size);
+}
+
+fn snapshot_with(name: &str, view: ViewCombatantState, config: MatchConfig, size: [f32; 2]) {
     let abilities = load_ability_definitions().expect("abilities.ron must load");
     let items = load_item_definitions().expect("items.ron must load");
     let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
     let class_icons = ClassIcons::default();
-    let mut config = mock_config();
+    let mut config = config;
     let mut picker = EquipmentPickerState::default();
 
-    let mut harness = Harness::builder().with_size(SIZE).build(move |ctx| {
+    let mut harness = Harness::builder().with_size(size).build(move |ctx| {
         arenasim::ui::install(ctx);
         let data = ViewCombatantData {
             abilities: &abilities,
@@ -415,6 +629,7 @@ fn snapshot(name: &str, view: ViewCombatantState) {
             ability_icons: None,
             item_icons: None,
             pet_icons: None,
+            talents: TalentDefinitions::shipped(),
         };
         let _ = draw_view_combatant(
             ctx,

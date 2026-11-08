@@ -18,8 +18,9 @@ use crate::states::match_config::CharacterClass;
 use crate::states::play_match::equipment::{
     can_equip, ArmorType, ItemConfig, ItemDefinitions, ItemId, ItemSlotType, WeaponType,
 };
-use crate::states::play_match::on_use_items::{on_use_description, on_use_sentence};
+use crate::states::play_match::on_use_items::on_use_sentence;
 use crate::states::play_match::proc_trinkets::proc_description;
+use crate::states::play_match::triggered_absorbs::triggered_absorb_description;
 
 use super::search::SearchEntry;
 use super::widget;
@@ -352,6 +353,16 @@ pub fn render_detail(ui: &mut egui::Ui, id: ItemId, data: &EncyclopediaData) -> 
         widget::section_heading(ui, "USE");
         widget::prose(ui, &on_use_sentence(on_use), text::BODY, color::TEXT);
     }
+    // A triggered absorb is a sentence too, under its own heading.
+    if let Some(absorb) = &item.triggered_absorb {
+        widget::section_heading(ui, "EFFECT");
+        widget::prose(
+            ui,
+            &triggered_absorb_description(absorb),
+            text::BODY,
+            color::TEXT,
+        );
+    }
 
     let usable: Vec<CharacterClass> = CharacterClass::all()
         .iter()
@@ -572,29 +583,17 @@ pub fn render_item_tooltip(ui: &mut egui::Ui, item: &ItemConfig) {
         }
     }
 
-    // The proc, in the same sentence the encyclopedia page shows — both read
-    // `proc_description`, so a trinket cannot describe itself two ways. Width
-    // is capped so a tooltip wraps the sentence instead of growing a line
-    // wide enough to leave the screen.
-    if let Some(proc) = &item.proc {
+    // Each effect — the proc, the on-use, the triggered absorb — in the same
+    // sentence the encyclopedia page shows: both read the item's own
+    // sentences (`effect_lines`), so an item cannot describe itself two ways.
+    // Width is capped so a tooltip wraps the sentence instead of growing a
+    // line wide enough to leave the screen.
+    for effect in item.effect_lines() {
         ui.add_space(space::XS);
         ui.scope(|ui| {
             ui.set_max_width(size::PROC_TEXT_MAX_WIDTH);
             ui.label(
-                egui::RichText::new(proc_description(proc))
-                    .family(body_family(ui.ctx()))
-                    .size(text::SMALL)
-                    .color(color::TEXT_MUTED),
-            );
-        });
-    }
-    // The on-use, the same way and in the same sentence as its page.
-    if let Some(on_use) = &item.on_use {
-        ui.add_space(space::XS);
-        ui.scope(|ui| {
-            ui.set_max_width(size::PROC_TEXT_MAX_WIDTH);
-            ui.label(
-                egui::RichText::new(on_use_description(on_use))
+                egui::RichText::new(effect)
                     .family(body_family(ui.ctx()))
                     .size(text::SMALL)
                     .color(color::TEXT_MUTED),
@@ -664,11 +663,14 @@ mod tests {
             let Some(proc) = &item.proc else { continue };
             checked += 1;
             let text = proc_description(proc);
-            for needle in [
-                format!("{:.0}%", proc.chance * 100.0),
-                format!("{:.0}s", proc.duration),
-                format!("{:.0}s", proc.internal_cooldown),
-            ] {
+            // An extra swing has no duration or cooldown to name (Hand of
+            // Justice): its chance is its only number.
+            let mut needles = vec![format!("{:.0}%", proc.chance * 100.0)];
+            if proc.buff().is_some() {
+                needles.push(format!("{:.0}s", proc.duration));
+                needles.push(format!("{:.0}s", proc.internal_cooldown));
+            }
+            for needle in needles {
                 assert!(
                     text.contains(&needle),
                     "{}'s proc line omits {:?}: {:?}",

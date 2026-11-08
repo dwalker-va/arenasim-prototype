@@ -163,6 +163,23 @@ fn a_class_change_drops_the_form_with_the_build() {
     assert!(config.team1_builds[0].is_empty());
 }
 
+/// Unlearning the talent in the talent panel drops the form it offered; a
+/// build that still offers it keeps it.
+#[test]
+fn unlearning_the_talent_drops_the_form() {
+    use arenasim::states::match_config::MatchConfig;
+    let t = TalentDefinitions::shipped();
+    let mut config = MatchConfig::default();
+    config.set_class(1, 0, Priest);
+    config.team1_builds[0] = shadow_build();
+    config.team1_priest_forms[0] = PriestForm::Shadowform;
+    config.drop_unoffered_priest_form(1, 0, t);
+    assert_eq!(config.team1_priest_forms[0], PriestForm::Shadowform);
+    config.team1_builds[0] = Build::of(&[(TalentId::ImprovedMindBlast, 2)]);
+    config.drop_unoffered_priest_form(1, 0, t);
+    assert_eq!(config.team1_priest_forms[0], PriestForm::NoForm);
+}
+
 // ---------------------------------------------------------------------------
 // The Holy lockout, and what the form requires
 // ---------------------------------------------------------------------------

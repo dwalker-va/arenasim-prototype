@@ -319,4 +319,7 @@ pub struct CombatantStats {
     pub damage_taken: f32,
     pub healing_done: f32,
     pub survived: bool,
+    /// The talent build it fought with (empty when untalented): Results names
+    /// its spec from it.
+    pub build: crate::states::play_match::talents::Build,
 }
