@@ -500,3 +500,57 @@ fn expose_armor_goes_on_the_kill_window_enemy_ahead_of_the_burst() {
         describe(&control)
     );
 }
+
+/// In a real match the Combat Rogue's Expose Armor lands on the Warrior it
+/// fights (plate, from its starting kit) and lasts its 15 seconds; the same
+/// Rogue untalented never puts one there.
+#[test]
+fn expose_armor_lands_on_a_warrior_in_a_match_for_fifteen_seconds() {
+    let runs = |build: &Build| -> Vec<f32> {
+        let config = HeadlessMatchConfig {
+            team1: vec!["Warrior".into()],
+            team2: vec!["Rogue".into()],
+            random_seed: Some(5),
+            max_duration_secs: 60.0,
+            team2_builds: vec![build.clone()],
+            ..Default::default()
+        };
+        let played = play(config, unkillable());
+        // The length of every unbroken run of frames the Warrior wears it.
+        let mut runs = Vec::new();
+        let mut start: Option<f32> = None;
+        let mut last = 0.0;
+        for frame in &played.frames {
+            let exposed = frame.combatants.values().any(|c| {
+                c.class == Warrior && c.aura_types.contains(&AuraType::ArmorPercentReduction)
+            });
+            match (exposed, start) {
+                (true, None) => start = Some(frame.sim_time),
+                (false, Some(s)) => {
+                    runs.push(last - s);
+                    start = None;
+                }
+                _ => {}
+            }
+            last = frame.sim_time;
+        }
+        if let Some(s) = start {
+            runs.push(last - s);
+        }
+        runs
+    };
+    let talented = runs(&Build::of(&[
+        (LightningReflexes, 2),
+        (Deflection, 2),
+        (SwiftBlades, 1),
+        (ExposeArmor, 1),
+    ]));
+    assert!(!talented.is_empty(), "Expose Armor never landed");
+    // Every run but a last one the match's end cut short is the full 15s.
+    let (last, whole) = talented.split_last().unwrap();
+    for run in whole {
+        assert!((run - 15.0).abs() < 0.05, "a run of {run}s: {talented:?}");
+    }
+    assert!(*last <= 15.0 + 0.05, "{talented:?}");
+    assert!(runs(&Build::default()).is_empty());
+}
