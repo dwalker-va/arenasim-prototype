@@ -186,10 +186,13 @@ const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
     ),
     (
         "src/states/play_match/triggered_absorbs.rs",
-        "ability_name: self.name.clone()",
-        "a triggered absorb's shield, named after the aura that arms it (Sacred Shield) — \
-         whose abilities.ron entry carries an `applies_aura` block, so the catalog's RON half \
-         already has the page.",
+        "ability_name: name.to_string()",
+        "a triggered absorb's shield (`TriggeredAbsorbConfig::shield_aura`), named after its \
+         source. An item's (Aegis of the Last Stand): `EngineAura::TriggeredAbsorbShield` is \
+         derived from the `triggered_absorb:` blocks in items.ron; asserted per shipped item by \
+         `named_auras_built_from_helpers_also_resolve`. An aura's (Sacred Shield): named after \
+         the aura that arms it, whose abilities.ron entry carries an `applies_aura` block, so \
+         the catalog's RON half already has the page.",
     ),
 ];
 
@@ -593,6 +596,35 @@ fn named_auras_built_from_helpers_also_resolve() {
             sample.ability_name
         );
     }
+
+    // `TriggeredAbsorbConfig::aura` names a triggered absorb's shield after
+    // its item, through the constructor `fire_triggered_absorbs` calls.
+    let mut absorbs = 0;
+    for id in ItemId::all() {
+        let Some(item) = items.get(id) else { continue };
+        let Some(absorb) = item.triggered_absorb.as_ref() else {
+            continue;
+        };
+        absorbs += 1;
+        let sample = absorb.absorb.shield_aura(
+            &item.name,
+            arenasim::states::play_match::triggered_absorbs::ShieldFrom::Item(*id),
+            1.0,
+        );
+        let mechanic = format!("{:?}", sample.effect_type);
+        assert!(
+            known.contains(&(sample.ability_name.clone(), mechanic.clone())),
+            "the triggered absorb \"{}\" raises a ({}) shield the frames call \"{}\", and the \
+             catalog has no entry for it",
+            item.name,
+            mechanic,
+            sample.ability_name
+        );
+    }
+    assert_eq!(
+        absorbs, 1,
+        "Aegis of the Last Stand is the one triggered absorb"
+    );
 }
 
 /// The companion claim to the proc-trinket loop above: it walks a pool, so an

@@ -487,12 +487,6 @@ pub struct Combatant {
     pub talent_mechanics: crate::states::play_match::talent_mechanics::TalentMechanics,
     /// Whether a once-a-match killing-blow save (Cheat Death) has been spent.
     pub killing_blow_save_spent: bool,
-    /// Triggered absorbs this combatant carries (Sacred Shield's, while its
-    /// arming aura is up), and where each one's trigger and limit stand.
-    /// Pushed by `apply_pending_auras` as an arming aura lands; read by
-    /// `triggered_absorbs::fire_triggered_absorbs`, which skips a combatant
-    /// with none before touching anything.
-    pub triggered_absorbs: Vec<crate::states::play_match::triggered_absorbs::TriggeredAbsorbSlot>,
     /// Warlock-specific: which curse to apply to each enemy target (indexed by enemy slot)
     pub warlock_curse_prefs: Vec<WarlockCurse>,
     /// Warrior-specific: which shout to use (Battle Shout, Demoralizing Shout, or Commanding Shout)
@@ -540,6 +534,14 @@ pub struct Combatant {
     /// carries none, and every on-use hook returns on that emptiness, so such
     /// a match runs and traces exactly as it did before on-use items existed.
     pub on_use_items: Vec<crate::states::play_match::on_use_items::OnUseSlot>,
+    /// Triggered absorbs this combatant carries, and where each one's trigger
+    /// and limit stand: an item's (Aegis of the Last Stand), pushed by
+    /// [`Combatant::apply_equipment`] for the match, and an aura-armed one's
+    /// (Sacred Shield), pushed by `apply_pending_auras` as its arming aura
+    /// lands, for as long as that aura lives. Read by
+    /// `triggered_absorbs::fire_triggered_absorbs`, which skips a combatant
+    /// with none before touching anything.
+    pub triggered_absorbs: Vec<crate::states::play_match::triggered_absorbs::TriggeredAbsorbSlot>,
 }
 
 /// How long the weapon-poison marker is stamped for. Longer than any match's
@@ -730,7 +732,6 @@ impl Combatant {
             rogue_offhand_poison: None,
             talent_mechanics: Default::default(),
             killing_blow_save_spent: false,
-            triggered_absorbs: Vec::new(),
             warlock_curse_prefs: Vec::new(),
             warrior_shout: WarriorShout::default(),
             mage_armor: MageArmor::default(),
@@ -743,6 +744,7 @@ impl Combatant {
             druid_duel_melee: false,
             proc_trinkets: Vec::new(),
             on_use_items: Vec::new(),
+            triggered_absorbs: Vec::new(),
         }
     }
 
@@ -1126,6 +1128,20 @@ impl Combatant {
                         spent: false,
                         waiting: None,
                     });
+            }
+
+            // A triggered absorb (Aegis of the Last Stand), named after its
+            // item, which is what its shield aura and visual are keyed on.
+            if let Some(absorb) = &item.triggered_absorb {
+                use crate::states::play_match::triggered_absorbs::{
+                    AbsorbSource, TriggeredAbsorbSlot,
+                };
+                self.triggered_absorbs.push(TriggeredAbsorbSlot::new(
+                    &item.name,
+                    AbsorbSource::Item(*item_id),
+                    absorb.absorb,
+                    self.damage_taken,
+                ));
             }
 
             // For the primary weapon slot, replace attack_damage and weapon_speed

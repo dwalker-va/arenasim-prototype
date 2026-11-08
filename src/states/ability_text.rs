@@ -283,17 +283,24 @@ fn triggered_absorb_sentence(
     absorb: &crate::states::play_match::triggered_absorbs::TriggeredAbsorbConfig,
     duration: f32,
 ) -> String {
-    use crate::states::play_match::triggered_absorbs::{AbsorbTrigger, TriggerLimit};
+    use crate::states::play_match::triggered_absorbs::{AbsorbSize, AbsorbTrigger, TriggerLimit};
     let when = match absorb.trigger {
-        AbsorbTrigger::DamageTaken => "each time the target takes damage",
+        AbsorbTrigger::DamageTaken => "each time the target takes damage".to_string(),
+        AbsorbTrigger::HealthBelow(f) => {
+            format!("when the target's health drops below {:.0}%", f * 100.0)
+        }
+    };
+    let size = match absorb.shield {
+        AbsorbSize::Flat(points) => format!("{points:.0} damage"),
+        AbsorbSize::MaxHealthFraction(f) => format!("{:.0}% of its maximum health", f * 100.0),
     };
     let limit = match absorb.limit {
         TriggerLimit::Cooldown(secs) => format!("at most once every {secs:.0} sec"),
+        TriggerLimit::OncePerMatch => "once".to_string(),
     };
     format!(
-        "For {duration:.0} sec, {when} it gains a shield absorbing {:.0} damage for {:.0} sec, \
+        "For {duration:.0} sec, {when} it gains a shield absorbing {size} for {:.0} sec, \
          {limit}.",
-        absorb.shield.points(),
         absorb.duration
     )
 }

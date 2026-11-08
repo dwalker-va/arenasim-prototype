@@ -550,9 +550,9 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
   lands and dropped once the aura is gone; a refresh keeps it, cooldown and
   all. `fire_triggered_absorbs` raises the shield at the end of Phase 3 from
   the bearer's own state, never inside the damage funnel, and applies
-  `ArenaDampening` there. A new source (an item's, AS-429) is a new variant of
-  `AbsorbTrigger` / `AbsorbSize` / `TriggerLimit` / `AbsorbSource`, each matched
-  exhaustively.
+  `ArenaDampening` there. It is the system an item's triggered absorb runs on
+  too (Aegis of the Last Stand, `AbsorbSource::Item`; see *Adding a New
+  Item*): trigger, size, limit and source are each matched exhaustively.
 
 `process_casting` applies every aura it lands through
 `AuraPending::from_ability_scaled`, so an instant routed through a zero-length
@@ -826,6 +826,49 @@ any ring fits either ring socket, and the same item may not occupy both
    - Its line ("Use: …") is `ItemConfig::effect_description`, shared by the
      encyclopedia page, the tooltip and the equipment picker. Its landing is in
      `tests/lands_silently_audit.rs`'s on-use family.
+
+   **A trinket may carry a `triggered_absorb:` block** — a shield a condition
+   on its wearer raises (`src/states/play_match/triggered_absorbs.rs`; Aegis
+   of the Last Stand is the first):
+   ```ron
+   triggered_absorb: Some((
+       absorb: (
+           trigger: HealthBelow(0.35),       // the wearer alive below 35% health
+           shield: MaxHealthFraction(0.20),  // 20% of its maximum health
+           limit: OncePerMatch,
+           duration: 30.0,
+       ),
+       trigger_rate: 0.575,                  // the price's assumed rate
+   )),
+   ```
+   - **Where it fires:** `fire_triggered_absorbs`, at the end of Phase 3,
+     after the frame's last damage and after `process_damage_follow_ups`; it
+     never touches the damage funnel. The shield is an `Absorb` aura named
+     after the item, keyed by source, so it sits beside a Power Word: Shield.
+     It applies `ArenaDampening` itself, at that landing site, and logs
+     `<wearer> gains <item> (absorbs N)` with the landed amount. Not purgeable
+     (`DispelType::Physical`), as for procs.
+   - **In the damage pipeline** it is an ordinary absorb (the funnel's step 5):
+     it soaks a hit after the damage-taken modifiers and a transfer's share,
+     before the killing-blow save, and never a transferred hit. Because it
+     fires after the follow-ups, a transfer that crosses the line raises it
+     that frame, and a save is judged first: Cheat Death leaving its Rogue
+     below the line raises it on the frame of the blow
+     (`tests/triggered_absorb_pipeline.rs`).
+   - **Pricing:** value times trigger rate — the shield on a
+     `TRIGGERED_ABSORB_REFERENCE_HEALTH` (420) combatant at the health weight,
+     times the declared `trigger_rate`, which stays provisional until the
+     Gauntlet bot measures it.
+   - It gets the same surfaces a proc does, with no code change (its sentence
+     is `triggered_absorb_description`, through `ItemConfig::effect_lines`),
+     and is a member of `tests/lands_silently_audit.rs`'s triggered-absorb
+     family: its shield must reach a `ShieldKind` (`is_live_shield`, keyed on
+     the aura's name). The shared `absorb` config is the one a talent's
+     triggered absorb uses too (Sacred Shield's `DamageTaken` / `Flat` /
+     `Cooldown`, armed by an aura; see *Stacking, refreshing and blooming
+     auras*): one firing system, one dampening site; trigger, size, limit and
+     source (`AbsorbSource::Item` / `Aura`) are exhaustive matches in that
+     module, and `trigger_rate` lives on the item's wrapper alone.
 
 3. **Add to a class loadout** in `loadouts.ron` if it should be default equipment
 

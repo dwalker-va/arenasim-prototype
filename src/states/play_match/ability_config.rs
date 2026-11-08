@@ -847,8 +847,11 @@ impl AbilityDefinitions {
                     ability, aura.aura_type
                 ),
                 (true, Some(config)) => {
-                    if let Err(e) = config.validate() {
-                        panic!("abilities.ron: {:?}'s triggered absorb: {e}", ability);
+                    if let Err(e) = super::triggered_absorbs::validate_triggered_absorb(
+                        &format!("{ability:?}"),
+                        config,
+                    ) {
+                        panic!("abilities.ron: {e}");
                     }
                 }
                 (false, None) => {}

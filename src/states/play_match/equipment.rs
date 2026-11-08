@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use super::on_use_items::OnUseConfig;
 use super::proc_trinkets::ProcConfig;
+use super::triggered_absorbs::ItemTriggeredAbsorb;
 use crate::states::match_config::CharacterClass;
 
 /// What a character wears: one item per equip socket.
@@ -869,6 +870,7 @@ item_ids! {
 
     // === Champion: Trinkets ===
     HandOfJustice,
+    AegisOfTheLastStand,
 }
 
 // ============================================================================
@@ -984,6 +986,16 @@ pub struct ItemConfig {
     /// `all_shipped_on_uses_are_well_formed`. See the `on_use_items` module.
     #[serde(default)]
     pub on_use: Option<OnUseConfig>,
+
+    // === Triggered absorb ===
+    /// A shield a condition on the wearer raises — Aegis of the Last Stand's
+    /// "below 35% health, a shield of 20% of maximum health, once a match".
+    /// `None` for every ordinary item. Priced into the budget at value times
+    /// its declared trigger rate ([`ItemTriggeredAbsorb::budget_cost`]) and
+    /// checked by `all_shipped_triggered_absorbs_are_well_formed`. See the
+    /// `triggered_absorbs` module.
+    #[serde(default)]
+    pub triggered_absorb: Option<ItemTriggeredAbsorb>,
 }
 
 impl ItemConfig {
@@ -1015,12 +1027,13 @@ impl ItemConfig {
     }
 
     /// What the item DOES beyond its stats, as the player reads it: its
-    /// proc's sentence and its on-use's, in that order, one line. `None` for
-    /// an item that does nothing but its stats. Every surface that shows an
-    /// item's effect reads this, so an item cannot describe itself two ways.
-    pub fn effect_description(&self) -> Option<String> {
-        let lines: Vec<String> = self
-            .proc
+    /// proc's sentence, its on-use's and its triggered absorb's, in that
+    /// order, one per effect. Empty for an item that does nothing but its
+    /// stats. Every surface that shows an item's effect reads this (or
+    /// [`ItemConfig::effect_description`], the same sentences on one line), so
+    /// an item cannot describe itself two ways.
+    pub fn effect_lines(&self) -> Vec<String> {
+        self.proc
             .iter()
             .map(super::proc_trinkets::proc_description)
             .chain(
@@ -1028,7 +1041,18 @@ impl ItemConfig {
                     .iter()
                     .map(super::on_use_items::on_use_description),
             )
-            .collect();
+            .chain(
+                self.triggered_absorb
+                    .iter()
+                    .map(|t| super::triggered_absorbs::triggered_absorb_description(&t.absorb)),
+            )
+            .collect()
+    }
+
+    /// [`ItemConfig::effect_lines`] on one line. `None` for an item that does
+    /// nothing but its stats.
+    pub fn effect_description(&self) -> Option<String> {
+        let lines = self.effect_lines();
         (!lines.is_empty()).then(|| lines.join(" "))
     }
 
@@ -1553,9 +1577,10 @@ use super::constants::{
 /// Free stats (armor, attack_damage_min/max, weapon_speed) are excluded.
 ///
 /// A PROC is charged too, at its expected value — see
-/// [`ProcConfig::budget_cost`]. Without that term a trigger-and-effect would be
-/// invisible to the budget, because it is not a stat field, and a proc of any
-/// magnitude would pass this check.
+/// [`ProcConfig::budget_cost`] — and a TRIGGERED ABSORB at its value times its
+/// declared trigger rate ([`ItemTriggeredAbsorb::budget_cost`]). Without
+/// those terms a trigger-and-effect would be invisible to the budget, because
+/// it is not a stat field, and a proc of any magnitude would pass this check.
 ///
 /// An ON-USE is charged too, at its uses in a mean arena life — see
 /// [`OnUseConfig::budget_cost`].
@@ -1574,6 +1599,10 @@ pub fn calculate_budget_usage(item: &ItemConfig) -> f32 {
         + item.nature_resistance * WEIGHT_RESISTANCE
         + item.holy_resistance * WEIGHT_RESISTANCE
         + item.proc.as_ref().map_or(0.0, |p| p.budget_cost())
+        + item
+            .triggered_absorb
+            .as_ref()
+            .map_or(0.0, |t| t.budget_cost())
         + item.on_use.as_ref().map_or(0.0, |u| u.budget_cost())
 }
 
@@ -1891,6 +1920,8 @@ pub fn parse_item_definitions(contents: &str, origin: &str) -> Result<ItemDefini
         .map_err(|e| format!("{} has items that fail their tier check:\n{}", origin, e))?;
     validate_on_uses(&definitions)
         .map_err(|e| format!("{} has malformed on-use items:\n{}", origin, e))?;
+    validate_triggered_absorbs(&definitions)
+        .map_err(|e| format!("{} has malformed triggered absorbs:\n{}", origin, e))?;
     Ok(definitions)
 }
 
@@ -1903,6 +1934,26 @@ pub fn validate_on_uses(items: &ItemDefinitions) -> Result<(), String> {
         .filter_map(|(id, item)| {
             let on_use = item.on_use.as_ref()?;
             super::on_use_items::validate_on_use(&format!("{id:?}"), on_use).err()
+        })
+        .collect();
+    errors.sort();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("\n"))
+    }
+}
+
+/// [`validate_triggered_absorb`](super::triggered_absorbs::validate_triggered_absorb)
+/// over every item that carries one, every offender at once, in item order.
+/// Run at load: a threshold outside (0, 1) would never fire, and a rate
+/// outside (0, 1] would misprice it.
+pub fn validate_triggered_absorbs(items: &ItemDefinitions) -> Result<(), String> {
+    let mut errors: Vec<String> = items
+        .iter()
+        .filter_map(|(id, item)| {
+            let absorb = item.triggered_absorb.as_ref()?;
+            absorb.validate(&format!("{id:?}")).err()
         })
         .collect();
     errors.sort();
@@ -2071,6 +2122,7 @@ mod tests {
             weapon_speed: 0.0,
             proc: None,
             on_use: None,
+            triggered_absorb: None,
         }
     }
 
@@ -2112,6 +2164,7 @@ mod tests {
             weapon_speed: speed,
             proc: None,
             on_use: None,
+            triggered_absorb: None,
         }
     }
 
@@ -4179,6 +4232,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             weapon_speed: 0.0,
             proc: None,
             on_use: None,
+            triggered_absorb: None,
         }
     }
 
@@ -4800,7 +4854,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     const CHAMPION_GAIN: f32 = 0.55;
 
     /// Every Champion-tier (item_tier 2) item.
-    const CHAMPION_TIER: [ItemId; 89] = [
+    const CHAMPION_TIER: [ItemId; 90] = [
         ItemId::HandOfJustice,
         ItemId::FrostfireCirclet,
         ItemId::FrostfireRobe,
@@ -4890,6 +4944,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         ItemId::CryptfiendSilkCloak,
         ItemId::SignetOfTheFallenDefender,
         ItemId::HailstoneBand,
+        ItemId::AegisOfTheLastStand,
     ];
 
     /// Every Gauntlet-tier (item_tier 1) item.
@@ -5286,6 +5341,52 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         );
     }
 
+    /// Every shipped triggered absorb can fire, is priced, and shields
+    /// something; its members are named by set equality, so the guard cannot
+    /// pass on none.
+    #[test]
+    fn all_shipped_triggered_absorbs_are_well_formed() {
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        let mut violations: Vec<String> = Vec::new();
+        let mut members = std::collections::BTreeSet::new();
+        for (item_id, item) in &item_defs.definitions {
+            if let Some(absorb) = &item.triggered_absorb {
+                members.insert(item_id.as_str());
+                if let Err(msg) = absorb.validate(item_id.as_str()) {
+                    violations.push(msg);
+                }
+            }
+        }
+        assert!(violations.is_empty(), "{}", violations.join("\n"));
+        assert_eq!(
+            members,
+            ["AegisOfTheLastStand"].into_iter().collect(),
+            "the items carrying a triggered absorb"
+        );
+    }
+
+    /// The budget sees a triggered absorb: Aegis of the Last Stand spends its
+    /// whole Champion trinket budget (48.3) on the shield, and nothing else.
+    #[test]
+    fn aegis_spends_its_budget_on_the_shield() {
+        let item_defs = load_item_definitions().expect("items.ron must load");
+        let aegis = item_defs.get_unchecked(&ItemId::AegisOfTheLastStand);
+        let shield = aegis
+            .triggered_absorb
+            .as_ref()
+            .expect("a triggered absorb")
+            .budget_cost();
+        assert!((calculate_effective_budget(aegis) - 48.3).abs() < 1e-3);
+        assert!(
+            (shield - calculate_effective_budget(aegis)).abs() < 1e-3,
+            "{shield}"
+        );
+        assert!(
+            (calculate_budget_usage(aegis) - shield).abs() < 1e-6,
+            "no other stats"
+        );
+    }
+
     /// The pricing rule bites. A proc the budget does NOT see would make every
     /// proc free, which is the defect this whole term exists to prevent — so
     /// plant an offender and require the shipped check to reject it.
@@ -5397,6 +5498,28 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         assert!(err.contains("must declare its price"), "{err}");
         let priced = ron.replace("OncePerMatch)", "OncePerMatch, price: Some(48.0))");
         assert!(parse_item_definitions(&priced, "test").is_ok());
+    }
+
+    /// The loader refuses a triggered absorb that could never fire: a
+    /// threshold at full health. The same item below it loads.
+    #[test]
+    fn the_loader_refuses_a_triggered_absorb_that_cannot_fire() {
+        let ron = r#"(items: {
+            AegisOfTheLastStand: (
+                name: "Never", item_level: 92, item_tier: 2, slot: Trinket,
+                triggered_absorb: Some((
+                    absorb: (
+                        trigger: HealthBelow(1.0), shield: MaxHealthFraction(0.2),
+                        limit: OncePerMatch, duration: 30.0,
+                    ),
+                    trigger_rate: 0.575,
+                )),
+            ),
+        })"#;
+        let err = parse_item_definitions(ron, "test").err().expect("refused");
+        assert!(err.contains("outside (0.0, 1.0)"), "{err}");
+        let fires = ron.replace("HealthBelow(1.0)", "HealthBelow(0.35)");
+        assert!(parse_item_definitions(&fires, "test").is_ok());
     }
 
     /// ...and the same proc at a longer internal cooldown fits, so the
