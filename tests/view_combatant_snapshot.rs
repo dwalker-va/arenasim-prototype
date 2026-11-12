@@ -30,7 +30,7 @@ use bevy_egui::egui;
 use egui_kittest::Harness;
 
 use arenasim::states::configure_match_ui::ClassIcons;
-use arenasim::states::match_config::{CharacterClass, MatchConfig};
+use arenasim::states::match_config::{CharacterClass, MatchConfig, PaladinAura};
 use arenasim::states::play_match::ability_config::load_ability_definitions;
 use arenasim::states::play_match::equipment::{load_default_loadouts, load_item_definitions};
 use arenasim::states::play_match::talents::{Build, TalentDefinitions, TalentId};
@@ -573,6 +573,50 @@ fn the_sheet_draws_the_slots_build_and_its_stats_read_it() {
             .any(|w| w.id.starts_with("talent:")),
         "a class without trees draws no talent panel"
     );
+}
+
+/// The Paladin's aura choice offers Retribution Aura only to a build that
+/// takes its talent, and a choice of it the build no longer offers goes back
+/// to Devotion Aura as the sheet draws, so the slot's spawn stays legal.
+/// Control: with the talent, the tile shows and the choice stays.
+#[test]
+fn retribution_aura_is_offered_and_kept_only_with_its_talent() {
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+    let class_icons = ClassIcons::default();
+    for talented in [false, true] {
+        let data = ViewCombatantData {
+            abilities: &abilities,
+            items: &items,
+            default_loadouts: &defaults,
+            class_icons: &class_icons,
+            ability_icons: None,
+            item_icons: None,
+            pet_icons: None,
+            talents: TalentDefinitions::shipped(),
+        };
+        let mut config = MatchConfig::default();
+        config.team1[0] = Some(CharacterClass::Paladin);
+        config.team1_paladin_auras[0] = PaladinAura::RetributionAura;
+        if talented {
+            config.team1_builds[0] =
+                Build::of(&[(TalentId::SacredDuty, 2), (TalentId::RetributionAura, 1)]);
+        }
+        let sheet = Sheet::open(CharacterClass::Paladin, config, data);
+        let tile = sheet.last.widget("strategic:RetributionAura").is_some();
+        assert_eq!(tile, talented, "talented: {talented}");
+        assert!(sheet.last.widget("strategic:DevotionAura").is_some());
+        let want = if talented {
+            PaladinAura::RetributionAura
+        } else {
+            PaladinAura::DevotionAura
+        };
+        assert_eq!(
+            sheet.config.team1_paladin_auras[0], want,
+            "talented: {talented}"
+        );
+    }
 }
 
 /// Every widget on the sheet with a tooltip, and the note its tooltip body
