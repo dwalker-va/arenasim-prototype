@@ -107,7 +107,7 @@ build shape as the Wowhead server — `dist/` and `node_modules/` are gitignored
 ```bash
 # from the repo root
 npm --prefix tools/dispatch-board ci && npm --prefix tools/dispatch-board run build
-node tools/dispatch-board/dist/cli.js serve   # leave running; DB: <main checkout>/.dispatch/board.db
+npm --prefix tools/dispatch-board run serve  # rebuilds dist/, then serves; leave running; DB: <main checkout>/.dispatch/board.db
 ```
 
 Start the daemon **before** the sessions that use it, or reconnect via `/mcp`

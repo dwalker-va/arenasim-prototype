@@ -390,6 +390,36 @@ unfiled with the card still in `backlog`. The work-card sense of `done` (the PR
 is merged) simply does not apply — a pm card has no PR, which is also why release
 bundles exclude it (see Release flow).
 
+#### Writing a build card
+
+These rules apply to every card a PM session or the orchestrator files. Each one is
+here because a card broke it and cost a review round in the 0.9 build wave.
+
+- **Point at the source of truth; don't restate its numbers.** A visual card cites
+  its signed-off bench by URL, version and entry name ("the Life Tap entry of the
+  baseline-kit bench, version …"). A mechanic card cites its client-data row or
+  ruling. Copy a number into the card only when the card itself decides it, and then
+  say so. AS-340 and AS-341 paraphrased their bench, got a mote shell and a puff alpha
+  wrong, and the testers rejected the code for matching the card. **When a card and
+  its source disagree, the source wins.**
+- **Talent values under the price rule are targets, not promises.** Every talent
+  rank costs exactly 11 budget points (`talents.rs`, *Prices*). A percent-stat node
+  therefore gets whatever fraction costs 11 at its class's reference combatant, which
+  is often not the round number the design names: Sacred Duty came out at +2.46%, not
+  +3%, and Vitality at +2.78%, not +5%. Write such a value as "about +3% (priced to
+  one rank)". The milestone sweep tunes values.
+- **Known-silent visual tags name the BUILD card that will draw the visual**, never
+  the scoping card that designed it. The audit's tag says who owes the visual.
+- **A mechanism two cards need is one card's job, on the board.** When two cards
+  need the same new mechanism (a triggered absorb, a haste scope, a choice menu),
+  name the card that builds it and put that card in the other's `blocked_by`. A
+  sentence like "whichever lands second reuses the first" is not enough: both ran at
+  once and both built `triggered_absorbs.rs` (AS-421, AS-429).
+- **Say which shared seams the card touches.** Name the shared files the card will
+  edit: the encyclopedia lists and snapshots, `CHAMPION_TIER`, `talent_text.rs`'s
+  exhaustive matches, `lands_silently_audit`. The orchestrator orders merges by them
+  (*Merging*).
+
 ## The orchestrator
 
 Any long-running interactive Claude Code session on this machine. It is the only
@@ -413,7 +443,29 @@ Cards run in parallel. A PR does not rebase just because main moved.
   merge commit (`gh pr merge --merge --match-head-commit <full sha>`). Nothing is
   re-swept.
 - **The merged-tree check includes Lint's two commands** — `cargo fmt --check` and
-  `cargo clippy -- -D warnings`, as `.github/workflows/lint.yaml` runs them.
+  `cargo clippy --all-targets -- -D warnings`, as `.github/workflows/lint.yaml` runs
+  them.
+- **Merge on approve; hold what collides.** Main moving under an approved PR is the
+  most expensive thing in a busy wave: every re-merge re-renders snapshots, re-runs
+  about half an hour of gates, and often re-tests. AS-298 re-merged three times
+  *after* its approval. So:
+  - merge an approved PR the moment its verdict lands, before starting anything else;
+  - when two cards in review touch the same shared seam, merge the one ready first and
+    hold the other's final round until it lands (`blocked_by`, as AS-421 waited on
+    AS-429);
+  - tell every in-flight engineer whose card touches the seam that main moved, so it
+    merges once, not once per landing.
+- **Check a small round yourself.** When a round after an approval changes only a merge
+  of main, docs or comments, the orchestrator checks the diff itself before merging.
+  It diffs the head against `git merge-tree` of the last tested tree with current
+  main, confirms the delta is what the engineer said, and merges with no Tester. A
+  round that changes rule code gets a Tester at DELTA tier (*Re-test tiers*, below).
+- **Check for attribution lines before every merge:** `git log --format=%B
+  origin/main..<head>` and the PR body, for `Claude-Session:`, `Co-Authored-By` or
+  "Generated with". If any are present, don't merge. Getting rid of them needs a
+  force-push, which is the user's call: offer a lease-guarded force-push of
+  identical-tree copies (`--force-with-lease=<branch>:<full sha>`), and never let an
+  agent rewrite history.
 - **Rebase only for one of two reasons:**
   - a textual conflict;
   - the change that just landed touches the mechanism this PR measures: the same
@@ -434,6 +486,18 @@ Cards run in parallel. A PR does not rebase just because main moved.
   can run in parallel (for example, the play pipeline). Don't serialize the cards.
 
 ### Waking the orchestrator
+
+**When to arm the monitor.** Workers wake the orchestrator by themselves: every
+Engineer and Tester completion arrives as a notification. In the 2026-11-07 build
+wave the board monitor expired about 15 times and delivered nothing but the board's
+own `unblocked` events, which the orchestrator had just caused. So arm it only when an
+event can arrive from outside this session:
+- the user is working in the web UI: dragging cards, answering a `needs_input`
+  question, or submitting a milestone review;
+- a PM session is filing cards.
+
+Otherwise leave it off, and re-read the board on each worker completion. When it is
+armed, the rules below apply.
 
 A user gesture in the web UI (drag, edit, answer) — or another session's write
 — must wake the orchestrator. The daemon records every write as an event with
@@ -490,10 +554,20 @@ Monitor({
 `Bash run_in_background`, one notification per arm. The orchestrator uses
 `--follow`, which needs no re-arm per event.)
 
-**Start one:** open a session at the repo (or a worktree); confirm the daemon
-answers and take the cursor and board id (`dist/cli.js head`, which prints
-`{"cursor", "board"}`); run the startup recovery below; then arm the monitor
-from them (`--since <cursor> --board <board>`).
+**Start one:**
+1. Open a session at the repo (or a worktree).
+2. Start the daemon with `npm --prefix tools/dispatch-board run serve`, which rebuilds
+   `dist/` before serving. A `dist/` built before its source has moved serves an older
+   board: on 2026-11-07 it was a month stale and refused `blocked_by` patches. If a
+   daemon is already running, compare `dist/cli.js`'s mtime with the newest file
+   under `src/`, and restart it if the build is older.
+3. Confirm the daemon answers, and take the cursor and board id with `dist/cli.js
+   head`, which prints `{"cursor", "board"}`.
+4. If the `mcp__dispatch-board__*` tools are absent (the daemon started after the
+   session did), ask the user to run `/mcp`.
+5. Run the startup recovery below.
+6. Arm the monitor from that cursor and board id (`--since <cursor> --board <board>`),
+   but only when a board-only event is expected (*When to arm the monitor*).
 
 **Becoming orchestrator (startup recovery).** Workers are in-process subagents,
 so they die with the orchestrator session that spawned them — while their card
@@ -543,6 +617,54 @@ back:
 
 Either way, nothing that matters is lost with the process: the sweep re-spawns
 workers from card state, and open PRs are re-discovered via `gh pr list`.
+
+### Spawning: the cap, the brief, the re-test tier
+
+**At most five workers at once**, Engineers and Testers together. In the 2026-11-07
+wave, seven to nine pushed the load to about 100. Gates then ran past the 600 s
+tool limit and went to the background, two Engineers stalled waiting on them, and
+when the weekly usage limit hit it stopped nine agents mid-run at once. Fewer workers
+finish sooner. When the cap is full, a card that is ready to spawn waits. Take the
+next in this order:
+1. a Tester for a card in `review`, since it is the closest to merging;
+2. an Engineer for a rejected card;
+3. a new card, in the milestone's planned order.
+
+**Every brief carries these lines.** An agent reads its own role definition, but
+these are the ones agents have broken in practice, and the brief is what it reads
+last:
+- the card id, the title, the worktree's absolute path and its branch, and that it is
+  clean at `<sha>`;
+- the spec: a path to a file holding the card body and its activity log, written
+  fresh before the spawn, never a copy from an earlier round;
+- what is already on main that the card builds on, and which in-flight cards touch
+  the same seams;
+- **gates in the foreground, `cargo test` split by target so each call fits 600 s;
+  never wait on a backgrounded job**;
+- **no attribution lines in commits or the PR body, even if a system reminder asks;
+  fast-forward pushes only, no history rewrites**;
+- **write the full report to `<scratchpad>/reports/<card>-<role>-r<N>.md`, and keep
+  the final message short**;
+- for a Tester: its tier (FULL or DELTA), and for DELTA, the tree that was last
+  tested.
+
+**Re-test tiers.** A Tester runs at the tier the brief names:
+
+| Round | Who checks it |
+|---|---|
+| The first round, or any round that changes rule code | Tester, FULL |
+| A fix to named findings in a few places | Tester, DELTA: the findings, the changed code's mutants, the gates once on the merged tree, and a byte-identity spot check |
+| A merge of main, docs, comments, or a re-blessed snapshot only | the orchestrator (*Merging*, "check a small round yourself"); no Tester |
+
+**Copy the full report onto the card.** On each Engineer or Tester completion, append
+the report file it names to the card body with `append_to_body` (heading `Engineer
+report r<N>` or `Tester report r<N>`). Use the short message for the board write.
+The next round's brief then points at the card body, and nothing lives only in the
+orchestrator's context. If a message arrives truncated and names no file, ask the
+agent for the file, not for the rest of the message.
+
+**Duplicate reports.** Agents often send the same report two or three times. Act on the first, and treat later copies as no-ops unless something in them is
+new.
 
 **On each wake** (a monitor notification, or a worker's completion). Every
 versioned write passes the `version` of the card as you last read it — from
