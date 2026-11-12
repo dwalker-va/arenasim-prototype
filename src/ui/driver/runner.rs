@@ -795,22 +795,27 @@ pub fn pointer_step(
         // nothing.
         Micro::RegisterMove { id } => match move_counted_gate(ctx) {
             Ok(()) => done(),
-            Err(shut) => {
-                let inject = frame
-                    .widget(id)
-                    .filter(|widget| widget.aim_point().is_some())
-                    .map(|widget| {
-                        let to = nudge(widget, *cursor);
-                        let delta = to - *cursor;
-                        *cursor = to;
-                        vec![Inject::Pointer { to, delta }]
-                    })
-                    .unwrap_or_default();
-                again(
-                    format!("the hover's move over `{id}` never registered: {shut}"),
-                    inject,
-                )
-            }
+            // A widget that has left the screen gets no nudge, since a point
+            // there is over whatever is drawn in its place; and the wait then
+            // names that, not the frame interval.
+            Err(shut) => match frame.widget(id).filter(|w| w.aim_point().is_some()) {
+                Some(widget) => {
+                    let to = nudge(widget, *cursor);
+                    let delta = to - *cursor;
+                    *cursor = to;
+                    again(
+                        format!("the hover's move over `{id}` never registered: {shut}"),
+                        vec![Inject::Pointer { to, delta }],
+                    )
+                }
+                None => again(
+                    format!(
+                        "widget `{id}` left the screen while the hover's move waited for \
+                         egui to count it"
+                    ),
+                    Vec::new(),
+                ),
+            },
         },
         Micro::SettleForTooltip => match tooltip_gate(ctx) {
             Ok(()) => done(),

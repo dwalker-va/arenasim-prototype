@@ -1653,42 +1653,69 @@ fn a_hover_after_a_click_names_eguis_limit_while_every_frame_is_slow() {
     );
 }
 
+/// A bare `egui::Context` that has seen one click at `at`, driven a pass at a
+/// time at a fixed frame interval.
+struct Clicked {
+    ctx: egui::Context,
+    time: f64,
+    dt: f64,
+}
+
+impl Clicked {
+    /// The pointer moves to `at` and clicks there, then rests for `rest`
+    /// further passes.
+    fn at(at: egui::Pos2, dt: f64, rest: u32) -> Self {
+        let mut clicked = Clicked {
+            ctx: egui::Context::default(),
+            time: 0.0,
+            dt,
+        };
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        };
+        clicked.pass(vec![egui::Event::PointerMoved(at)]);
+        clicked.pass(vec![button(true)]);
+        clicked.pass(vec![button(false)]);
+        for _ in 0..rest {
+            clicked.pass(Vec::new());
+        }
+        clicked
+    }
+
+    fn pass(&mut self, events: Vec<egui::Event>) {
+        self.time += self.dt;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            time: Some(self.time),
+            events,
+            ..Default::default()
+        };
+        let _ = self.ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |_| {});
+        });
+    }
+}
+
 /// One frame of `RegisterMove` while egui has not counted a move since a
 /// click: it moves the pointer to a point on the widget other than where it
 /// is, and moves nothing over a widget that is not on screen, since a point
-/// there would be over whatever is drawn in its place.
+/// there would be over whatever is drawn in its place. Each wait names its
+/// own cause: egui's frame interval, or the widget leaving the screen.
 #[test]
 fn register_move_nudges_only_over_a_widget_on_screen() {
     use arenasim::ui::driver::runner::{Inject, Micro, Progress};
 
-    let ctx = egui::Context::default();
-    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
     let at = rect().center();
-    let mut time = 0.0_f64;
-    let mut pass = |events: Vec<egui::Event>| {
-        time += 0.1;
-        let input = egui::RawInput {
-            screen_rect: Some(screen),
-            time: Some(time),
-            events,
-            ..Default::default()
-        };
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |_| {});
-        });
-    };
-    let button = |pressed| egui::Event::PointerButton {
-        pos: at,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: egui::Modifiers::default(),
-    };
-    pass(vec![egui::Event::PointerMoved(at)]);
-    pass(vec![button(true)]);
-    pass(vec![button(false)]);
-    pass(Vec::new());
+    let clicked = Clicked::at(at, 0.1, 1);
+    let ctx = &clicked.ctx;
     assert!(
-        runner::move_counted_gate(&ctx).is_err(),
+        runner::move_counted_gate(ctx).is_err(),
         "the pointer has rested since the click, so no move is counted"
     );
 
@@ -1697,9 +1724,12 @@ fn register_move_nudges_only_over_a_widget_on_screen() {
     let mut last_seen = None;
     let mut cursor = at;
     let on_screen = frame_with(vec![(id, true, true)], vec![]);
-    let step = runner::pointer_step(&register, &on_screen, &ctx, &mut cursor, &mut last_seen)
+    let step = runner::pointer_step(&register, &on_screen, ctx, &mut cursor, &mut last_seen)
         .expect("a pointer action");
-    assert!(matches!(step.progress, Progress::Again { .. }), "{step:?}");
+    match &step.progress {
+        Progress::Again { stuck } => assert!(stuck.contains("50ms"), "{stuck}"),
+        Progress::Done => panic!("no move is counted yet: {step:?}"),
+    }
     match step.inject.as_slice() {
         [Inject::Pointer { to, delta }] => {
             assert!(rect().contains(*to) && *to != at, "{step:?}");
@@ -1711,11 +1741,107 @@ fn register_move_nudges_only_over_a_widget_on_screen() {
 
     let mut cursor = at;
     let off_screen = frame_with(vec![(id, true, false)], vec![]);
-    let step = runner::pointer_step(&register, &off_screen, &ctx, &mut cursor, &mut last_seen)
+    let step = runner::pointer_step(&register, &off_screen, ctx, &mut cursor, &mut last_seen)
         .expect("a pointer action");
-    assert!(matches!(step.progress, Progress::Again { .. }), "{step:?}");
+    match &step.progress {
+        Progress::Again { stuck } => assert!(
+            stuck.contains("left the screen") && !stuck.contains("50ms"),
+            "an off-screen widget is the cause, not the frame interval: {stuck}"
+        ),
+        Progress::Done => panic!("no move is counted yet: {step:?}"),
+    }
     assert!(step.inject.is_empty(), "{step:?}");
     assert_eq!(cursor, at);
+}
+
+/// The nudge keeps within 3 points of the widget's centre, along a sawtooth
+/// through every whole offset from -3 to 3, on a widget wide enough that its
+/// own size does not bound it.
+#[test]
+fn register_move_nudges_within_three_points_of_the_centre() {
+    use arenasim::ui::driver::runner::{Inject, Micro};
+
+    let wide = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 200.0));
+    let center = wide.center();
+    let frame = registry::Frame {
+        widgets: vec![registry::Widget {
+            id: "kit:Ambush".into(),
+            rect: wide,
+            enabled: true,
+            visible: true,
+            clip: egui::Rect::EVERYTHING,
+        }],
+        notes: Vec::new(),
+    };
+    let clicked = Clicked::at(center, 0.1, 1);
+    let register = Micro::RegisterMove {
+        id: "kit:Ambush".into(),
+    };
+    let mut cursor = center;
+    let mut last_seen = None;
+    let mut offsets = std::collections::BTreeSet::new();
+    for _ in 0..30 {
+        let step =
+            runner::pointer_step(&register, &frame, &clicked.ctx, &mut cursor, &mut last_seen)
+                .expect("a pointer action");
+        let [Inject::Pointer { to, .. }] = step.inject.as_slice() else {
+            panic!("expected one pointer move, got {step:?}");
+        };
+        assert_eq!(to.y, center.y, "{step:?}");
+        let offset = to.x - center.x;
+        assert!(offset.abs() <= 3.0, "nudged {offset}pt from the centre");
+        offsets.insert(offset as i32);
+    }
+    assert_eq!(
+        offsets,
+        (-3..=3).collect::<std::collections::BTreeSet<i32>>(),
+        "the sawtooth should pass through every offset in its reach"
+    );
+}
+
+/// Once egui has counted the aim as a move — at 60 frames a second, after the
+/// click's rest — `RegisterMove` is done at once and moves nothing. This is
+/// what keeps it a no-op for a hover at an ordinary frame rate.
+#[test]
+fn register_move_moves_nothing_once_egui_has_counted_the_move() {
+    use arenasim::ui::driver::runner::{Micro, Progress};
+
+    let at = rect().center();
+    // Click well away from the widget, and rest past egui's 0.1s click rest.
+    let mut clicked = Clicked::at(egui::pos2(400.0, 300.0), 1.0 / 60.0, 12);
+    assert!(
+        runner::click_rest_gate(&clicked.ctx).is_ok(),
+        "the click rest must be over before the aim, as a hover waits for it"
+    );
+    assert!(
+        runner::move_counted_gate(&clicked.ctx).is_err(),
+        "before the aim no move is counted since the click"
+    );
+    // The aim, then a pass for egui to count it.
+    clicked.pass(vec![egui::Event::PointerMoved(at)]);
+    clicked.pass(Vec::new());
+    assert_eq!(
+        runner::move_counted_gate(&clicked.ctx),
+        Ok(()),
+        "egui counts the aim at 60 frames a second"
+    );
+
+    let frame = frame_with(vec![("kit:Ambush", true, true)], vec![]);
+    let mut cursor = at;
+    let mut last_seen = None;
+    let step = runner::pointer_step(
+        &Micro::RegisterMove {
+            id: "kit:Ambush".into(),
+        },
+        &frame,
+        &clicked.ctx,
+        &mut cursor,
+        &mut last_seen,
+    )
+    .expect("a pointer action");
+    assert_eq!(step.progress, Progress::Done, "{step:?}");
+    assert!(step.inject.is_empty(), "nothing to nudge: {step:?}");
+    assert_eq!(cursor, at, "the pointer stays where the aim put it");
 }
 
 /// `click <id> <button> shift` holds Shift across the whole press: the key
