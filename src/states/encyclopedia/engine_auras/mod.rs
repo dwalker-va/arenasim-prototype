@@ -29,6 +29,30 @@
 //! A missing function, or one with the wrong signature, fails the build at
 //! the generated dispatch, naming the file.
 //!
+//! ## Name collisions
+//!
+//! Three engine auras carry a `frame_name` that is NOT their catalog name,
+//! because the engine hangs two distinct DEBUFFS under one name and a player
+//! reading their frames cannot tell which is which:
+//!
+//! - "Crippling Poison" is both the Rogue's own coating marker and the slow it
+//!   puts on the target.
+//! - "Unstable Affliction" is both an 18-second Shadow damage-over-time and the
+//!   silence its dispel backlash inflicts.
+//! - "Frost Armor" is the Mage's self-buff AND the chill it hangs on melee
+//!   attackers.
+//!
+//! Each gets its own entry with a parenthetical qualifier, and its page says
+//! what the frames call it. The alternative — one entry per NAME — sends a
+//! player from their own gold-bordered buff to the enemy debuff's page.
+//!
+//! **A collision is two debuffs sharing a name, never two EFFECTS of one
+//! debuff.** Frost Armor's chill used to be listed twice, once per effect, and
+//! the two rows wore different removal badges over what a player experiences as
+//! one thing. That is fixed upstream in the engine rather than papered over
+//! here: the chill's effects are bound into a [`CompoundDebuff`](crate::states::play_match::components::CompoundDebuff), so it is one
+//! entry that states both (see [`NamedAura::riders`](super::auras::NamedAura::riders)).
+//!
 //! ## Formatting
 //!
 //! `cargo fmt` reaches a module only through a `mod` item it can read in the

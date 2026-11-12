@@ -34,7 +34,7 @@
 //! while the catalog was sending a player from their own gold-bordered buff to
 //! the enemy debuff's page — wrong polarity, wrong mechanic, wrong duration,
 //! wrong removal rule. The pair key makes each of the six resolvable
-//! separately (see `CatalogSource`'s collision note), and blocks a seventh.
+//! separately (see the collision note in `encyclopedia::engine_auras`), and blocks a seventh.
 //!
 //! Six auras, but only FIVE entries: the chill's two effects are one COMPOUND
 //! debuff, so they share an entry (and a dispel takes both). An entry
@@ -796,7 +796,7 @@ fn the_catalog_disambiguates_every_reused_engine_name() {
         assert!(
             sharing.len() > 1,
             "\"{}\" is documented as a reused engine name but only {} entry(s) carry it: {:?}. \
-             If the engine renamed one, update the module doc and `CatalogSource`'s collision note.",
+             If the engine renamed one, update the module doc and the collision note in `encyclopedia::engine_auras`.",
             reused,
             sharing.len(),
             sharing
