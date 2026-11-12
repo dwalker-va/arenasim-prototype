@@ -298,6 +298,18 @@ impl EngineAura {
     }
 }
 
+/// The aura an apply site that writes its aura out in place (no shared
+/// constructor to call) lands: its name and mechanic, and no item or talent
+/// source, since such a site sets neither. A family's `landed` for those
+/// sites — a witness for the tests, never applied.
+pub fn landed_as_written(effect_type: AuraType, name: &str) -> Aura {
+    Aura {
+        effect_type,
+        ability_name: name.to_string(),
+        ..Default::default()
+    }
+}
+
 /// Whether `source` holds `ability`: the gate of every family an ability
 /// applies from code.
 pub fn has_ability(source: &CatalogSource, ability: AbilityType) -> bool {

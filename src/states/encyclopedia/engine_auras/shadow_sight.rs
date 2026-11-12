@@ -2,9 +2,9 @@
 //! aura no ability, item or talent applies, so it is listed whatever the
 //! tables hold.
 
-use super::{unit_if, ArtKind, EngineKey, EngineSpec, SourceKind};
+use super::{landed_as_written, unit_if, ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
-use crate::states::play_match::components::{Aura, AuraType, DispelType};
+use crate::states::play_match::components::{AuraType, DispelType};
 use crate::states::play_match::shadow_sight::{
     SHADOW_SIGHT_BREAK_ON_DAMAGE, SHADOW_SIGHT_DURATION, SHADOW_SIGHT_SPAWN_TIME,
 };
@@ -37,10 +37,6 @@ pub fn entry(key: EngineKey, _source: &CatalogSource) -> Option<EngineSpec> {
         ),
         // The orb pickup (`shadow_sight.rs`) writes this aura out in place,
         // named and typed so, with no item or talent source.
-        landed: Aura {
-            effect_type: AuraType::ShadowSight,
-            ability_name: "Shadow Sight".to_string(),
-            ..Default::default()
-        },
+        landed: landed_as_written(AuraType::ShadowSight, "Shadow Sight"),
     })
 }

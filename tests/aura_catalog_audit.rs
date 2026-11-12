@@ -127,6 +127,14 @@ const ALLOWLIST: &[(&str, &str)] = &[
 /// rather than both at the end.
 const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
     (
+        "src/states/encyclopedia/engine_auras/mod.rs",
+        "ability_name: name.to_string()",
+        "`landed_as_written`, the witness a family the encyclopedia lists gives for an \
+         apply site that writes its aura out in place, so the tests can hold the page's \
+         icon to the buff bar's. Never applied: the apply sites it mirrors are scanned \
+         themselves.",
+    ),
+    (
         "src/states/play_match/class_ai/paladin.rs",
         "ability_name: def.name.to_string()",
         "Hammer of Justice's stun, named after its own abilities.ron entry — which carries an \

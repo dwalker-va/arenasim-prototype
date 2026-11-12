@@ -3,10 +3,10 @@
 //! ability carrying the interrupt flags, so interrupt N+1 gets a lockout entry
 //! with no code here.
 
-use super::{ArtKind, EngineKey, EngineSpec, SourceKind};
+use super::{landed_as_written, ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::components::{Aura, AuraType, DispelType};
+use crate::states::play_match::components::{AuraType, DispelType};
 
 pub const SOURCE: SourceKind = SourceKind::Ability;
 pub const ART: ArtKind = ArtKind::FromSource;
@@ -48,10 +48,6 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
             .to_string(),
         // `combat_core::damage` writes the lockout out in place, named after
         // the interrupt, with no item or talent source.
-        landed: Aura {
-            effect_type: AuraType::SpellSchoolLockout,
-            ability_name: def.name.clone(),
-            ..Default::default()
-        },
+        landed: landed_as_written(AuraType::SpellSchoolLockout, &def.name),
     })
 }
