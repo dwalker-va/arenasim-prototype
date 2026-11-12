@@ -280,3 +280,17 @@ fn the_medallion_is_never_asked_by_a_free_unit() {
     assert!(view.items_used.is_empty(), "{view:?}");
     assert!(view.item_decisions.is_empty(), "{view:?}");
 }
+
+#[test]
+fn a_held_wearer_never_uses_a_buff() {
+    // A stunned Warrior in its team's kill window: the held dispatch asks only
+    // a crowd-control break, and a buff would break nothing.
+    let item = ItemId::Earthstrike;
+    let view = dps(Warrior, item, 0.2)
+        .aura(WEARER, arenasim::states::play_match::AuraType::Stun, 6.0)
+        .decide_held(WEARER);
+    assert!(view.items_used.is_empty(), "{view:?}");
+    assert!(view.item_decisions.is_empty(), "{view:?}");
+    // Control: the same wearer free uses it.
+    assert!(used(&dps(Warrior, item, 0.2).decide(WEARER), item));
+}
