@@ -414,8 +414,8 @@ mod tests {
     use crate::states::play_match::equipment::load_item_definitions;
 
     /// A talent proc's aura draws under its TALENT's key, and the loaders
-    /// register that key at the talent's icon for every talent whose aura the
-    /// encyclopedia lists wearing its talent's art — read off the catalogue's
+    /// register that key at the talent's icon for exactly the talents whose
+    /// auras the encyclopedia lists wearing their talent's art — read off the catalogue's
     /// own engine aura families, a different path from `talent_aura_icons`, so
     /// neither can lose a talent alone. A fixture that gives Fel Stamina a
     /// proc adds exactly Fel Stamina's key, whatever the shipped table holds.
@@ -446,9 +446,10 @@ mod tests {
                 .collect()
         };
         let shipped = keys(talent_aura_icons(TalentDefinitions::shipped()));
-        assert!(
-            worn(TalentDefinitions::shipped()).is_subset(&shipped),
-            "every talent art the encyclopedia draws is registered"
+        assert_eq!(
+            worn(TalentDefinitions::shipped()),
+            shipped,
+            "the talents whose art the encyclopedia draws are those the loaders register"
         );
         // Witness: the Demonology talents whose mechanics land an aura.
         assert!(shipped.contains(&talent_aura_icon_key(TalentId::MasterDemonologist)));
@@ -471,8 +472,7 @@ mod tests {
         let mut expected = shipped.clone();
         expected.insert(talent_aura_icon_key(TalentId::FelStamina));
         assert_eq!(keys(icons), expected);
-        assert!(worn(&talents).is_subset(&expected));
-        assert!(worn(&talents).contains(&talent_aura_icon_key(TalentId::FelStamina)));
+        assert_eq!(worn(&talents), expected);
     }
 
     /// The buff bar and team frames draw a proc buff under its TRINKET's key,

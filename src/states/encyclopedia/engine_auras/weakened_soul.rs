@@ -4,7 +4,7 @@
 use super::{has_ability, unit_if, ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::components::{AuraType, DispelType};
+use crate::states::play_match::components::{Aura, AuraType, DispelType};
 use crate::states::play_match::constants::WEAKENED_SOUL_DURATION;
 
 pub const SOURCE: SourceKind = SourceKind::Ability;
@@ -33,6 +33,14 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
             riders: EngineSpec::no_riders(),
             provenance: "Placed on the ally the moment the shield lands: one cast applies both."
                 .to_string(),
+            // The Power Word: Shield cast (`class_ai/priest.rs`) writes this
+            // aura out in place, named and typed so, with no item or talent
+            // source.
+            landed: Aura {
+                effect_type: AuraType::WeakenedSoul,
+                ability_name: "Weakened Soul".to_string(),
+                ..Default::default()
+            },
         }
     })
 }

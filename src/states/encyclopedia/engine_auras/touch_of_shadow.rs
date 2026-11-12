@@ -34,6 +34,7 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
         dispel_type: sample.dispel_type,
         persistence: Persistence::WholeMatch,
         riders: EngineSpec::no_riders(),
+        landed: sample.clone(),
         provenance: format!(
             "Granted at the gates to a Warlock that sacrifices its Felhunter: {:.0}% more \
              Shadow damage for the match.",

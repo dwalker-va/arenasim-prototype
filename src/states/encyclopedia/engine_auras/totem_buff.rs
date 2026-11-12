@@ -25,7 +25,17 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
         return None;
     };
     let (ability, aura_type, magnitude, school) = totem_spec(element);
-    has_ability(source, ability).then(|| EngineSpec {
+    if !has_ability(source, ability) {
+        return None;
+    }
+    let landed = make_totem_aura(
+        aura_type,
+        magnitude,
+        bevy::prelude::Entity::PLACEHOLDER,
+        school,
+        element.buff_name(),
+    );
+    Some(EngineSpec {
         name: element.buff_name().to_string(),
         frame_name: None,
         mechanic: aura_type,
@@ -36,19 +46,13 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
         break_on_damage: -1.0,
         // The engine's own constructor decides the class, so the page cannot
         // disagree with the buff a totem actually pulses.
-        dispel_type: make_totem_aura(
-            aura_type,
-            magnitude,
-            bevy::prelude::Entity::PLACEHOLDER,
-            school,
-            element.buff_name(),
-        )
-        .dispel_type,
+        dispel_type: landed.dispel_type,
         persistence: Persistence::WhileSourceActive("while you stand near the totem"),
         riders: EngineSpec::no_riders(),
         provenance: format!(
             "Pulsed onto nearby allies by a dropped totem, which itself lasts {:.0} sec.",
             TOTEM_DURATION
         ),
+        landed,
     })
 }

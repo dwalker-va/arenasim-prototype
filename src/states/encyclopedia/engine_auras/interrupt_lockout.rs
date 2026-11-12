@@ -6,7 +6,7 @@
 use super::{ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
 use crate::states::play_match::abilities::AbilityType;
-use crate::states::play_match::components::{AuraType, DispelType};
+use crate::states::play_match::components::{Aura, AuraType, DispelType};
 
 pub const SOURCE: SourceKind = SourceKind::Ability;
 pub const ART: ArtKind = ArtKind::FromSource;
@@ -46,5 +46,12 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
                      interrupted spell is locked — the target's other schools keep \
                      working."
             .to_string(),
+        // `combat_core::damage` writes the lockout out in place, named after
+        // the interrupt, with no item or talent source.
+        landed: Aura {
+            effect_type: AuraType::SpellSchoolLockout,
+            ability_name: def.name.clone(),
+            ..Default::default()
+        },
     })
 }

@@ -578,6 +578,7 @@ fn engine_entry(engine: EngineAura, source: &CatalogSource) -> Option<NamedAura>
         persistence,
         riders,
         provenance,
+        landed: _,
     } = spec;
 
     let tick_interval = if mechanic == AuraType::HealingOverTime {
@@ -1516,6 +1517,41 @@ mod tests {
             render_detail(ui, orb, &data(&[]));
         });
         assert!(!page.contains(&badge), "{page:?}");
+    }
+
+    /// Every engine entry's icon is the one the buff bar draws for the aura
+    /// the simulation lands: the page's key (read from the family's declared
+    /// art) against `rendering::get_aura_icon_key` read off the family's
+    /// `landed` aura, which its apply site's own constructor builds — two
+    /// paths, so a family whose declared art and entry agree on the wrong
+    /// icon still fails. Its frame name and mechanic are the landed aura's
+    /// too. Checked over a talent table with a proc, so every family has
+    /// members.
+    #[test]
+    fn every_engine_entry_wears_the_icon_the_buff_bar_draws() {
+        use crate::states::play_match::rendering::get_aura_icon_key;
+        let abilities = abilities();
+        let item_defs = items();
+        let talents = talents_with_a_proc();
+        let source = CatalogSource::new(&abilities, &item_defs, &talents);
+        let mut families = std::collections::BTreeSet::new();
+        for aura in EngineAura::all(&source) {
+            let spec = aura.spec(&source).expect("a listed aura resolves");
+            let page = icon_key(AuraId::Engine(aura), &source).expect("an icon key");
+            assert_eq!(
+                page,
+                get_aura_icon_key(&spec.landed, &abilities),
+                "{aura:?}: the page's icon is not the buff bar's"
+            );
+            assert_eq!(
+                spec.frame_name.as_deref().unwrap_or(&spec.name),
+                spec.landed.ability_name,
+                "{aura:?}: the frames name it otherwise"
+            );
+            assert_eq!(spec.mechanic, spec.landed.effect_type, "{aura:?}");
+            families.insert(aura.family);
+        }
+        assert_eq!(families, EngineFamily::ALL.iter().copied().collect());
     }
 
     /// Each family lists only the auras of a source its tables hold, so a

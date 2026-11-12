@@ -17,7 +17,14 @@ pub fn members(source: &CatalogSource) -> Vec<EngineKey> {
 }
 
 pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
-    (key == EngineKey::Unit && has_ability(source, AbilityType::FrostTrap)).then(|| EngineSpec {
+    if key != EngineKey::Unit || !has_ability(source, AbilityType::FrostTrap) {
+        return None;
+    }
+    let landed = frost_trap_slow_aura(
+        bevy::prelude::Entity::PLACEHOLDER,
+        FROST_TRAP_SLOW_MAGNITUDE,
+    );
+    Some(EngineSpec {
         name: "Frost Trap".to_string(),
         frame_name: None,
         mechanic: AuraType::MovementSpeedSlow,
@@ -28,11 +35,7 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
         break_on_damage: -1.0,
         // The engine's own constructor decides the class, as for the totem
         // buffs.
-        dispel_type: frost_trap_slow_aura(
-            bevy::prelude::Entity::PLACEHOLDER,
-            FROST_TRAP_SLOW_MAGNITUDE,
-        )
-        .dispel_type,
+        dispel_type: landed.dispel_type,
         persistence: Persistence::WhileSourceActive("while you stand in the zone"),
         riders: EngineSpec::no_riders(),
         provenance: format!(
@@ -40,5 +43,6 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
              lasts {:.0} sec.",
             FROST_TRAP_ZONE_DURATION
         ),
+        landed,
     })
 }

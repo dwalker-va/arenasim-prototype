@@ -939,13 +939,17 @@ any ring fits either ring socket, and the same item may not occupy both
      the item picker, tooltips and encyclopedia show it with no code change. Every
      shipped item has one; the field defaults to empty, which draws no icon.
 
-6. **Run `cargo test`** to verify the item passes budget validation. The
-   item's `items.ron` entry and its `ItemId` line are the only edits: the
+6. **Run `cargo test`** to verify the item passes budget validation. A
+   stat item's `items.ron` entry and its `ItemId` line are its only edits: the
    tests that check a tier or a mechanism walk every item in `items.ron` (a
    frozen witness keeps each walk from passing on none), and the snapshots
    draw a pinned catalogue (`tests/common/pinned_catalogue.rs`), so a new item
-   re-blesses no PNG. Two cards that each append an item at the same place in
-   `items.ron` and the `ItemId` list still conflict there.
+   re-blesses no PNG. An item with an `on_use:`, a `triggered_absorb:` or an
+   extra-swing `proc:` also names itself in its family in
+   `tests/lands_silently_audit.rs` (the member list, and the visual it owes:
+   a judgement, so it is listed, in name order). Two cards that each append an
+   item at the same place in `items.ron` and the `ItemId` list still conflict
+   there.
 
 **Tip**: Use the Wowhead MCP to look up WoW Classic item stats as a reference:
 ```
@@ -2336,13 +2340,20 @@ old standalone Armory. It is a navigation FRAMEWORK plus per-section content:
   directory and generates `EngineFamily` and its dispatch, so a new family is a
   new file — `members` (the auras of that family the tables hold, read from
   their source), `entry` (its page, read from the apply site's own
-  constructor), and two declarations the compiler asks for: `SOURCE` (an
-  ability, an item, a talent or the arena applies it) and `ART` (whose icon
-  it wears). The tests derive their expected sets from those declarations, so
-  a new family is never an edit to a shared list. Lint's `cargo fmt --check`
-  cannot see these files (they are declared in generated code): run
-  `rustfmt --edition 2021 src/states/encyclopedia/engine_auras/*.rs`, and the
-  default `cargo test` holds them to it (`family_files_are_rustfmt_clean`).
+  constructor, with the aura it lands as `landed`), and two declarations the
+  compiler asks for: `SOURCE` (an ability, an item, a talent or the arena
+  applies it) and `ART` (whose icon it wears), which must fit each other
+  (`ArtKind::fits`). The tests derive their expected sets from those
+  declarations, so a new family is never an edit to a shared list, and hold
+  each entry's icon to the key the buff bar draws for its `landed` aura
+  (`rendering::get_aura_icon_key`), an independent path. Lint's
+  `cargo fmt --check` cannot see these files (they are declared in generated
+  code): run `rustfmt --edition 2021 src/states/encyclopedia/engine_auras/*.rs`,
+  and the default `cargo test` holds them to it
+  (`family_files_are_rustfmt_clean`). Two checkouts sharing one
+  `CARGO_TARGET_DIR` can be handed each other's generated registry; the build
+  refuses it (`GENERATED_FOR`), and `touch
+  src/states/encyclopedia/engine_auras` regenerates it.
   `tests/aura_catalog_audit.rs` fails an aura applied in code that no entry
   covers.
 - **Ability and aura PROSE is `src/states/ability_text.rs`** — one generator, shared

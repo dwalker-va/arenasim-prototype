@@ -60,6 +60,7 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
         dispel_type: landed.dispel_type,
         persistence: Persistence::Seconds(landed.duration),
         riders: EngineSpec::no_riders(),
+        landed: landed.clone(),
         provenance: talent_proc_description(&config.name, proc, source.abilities),
     })
 }

@@ -49,6 +49,7 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
         dispel_type: face.dispel_type,
         persistence: Persistence::Seconds(face.duration),
         riders,
+        landed: face.clone(),
         provenance: on_use_description(on_use),
     })
 }

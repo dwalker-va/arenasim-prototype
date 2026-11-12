@@ -65,6 +65,17 @@
 //! here: the chill's effects are bound into a [`CompoundDebuff`](crate::states::play_match::components::CompoundDebuff), so it is one
 //! entry that states both (see [`NamedAura::riders`](super::auras::NamedAura::riders)).
 //!
+//! ## A build directory shared by two checkouts
+//!
+//! Cargo reruns the build script when a file in this directory changes, by
+//! modification time, and keys its run on neither checkout's path. So two
+//! checkouts sharing one `CARGO_TARGET_DIR` can be handed each other's
+//! generated file, whose `#[path]`s point into the other tree. The generated
+//! `GENERATED_FOR` names the checkout it was written for, and a compile-time
+//! assertion refuses any other; `every_family_file_is_a_variant` also reads
+//! this directory at run time. One checkout with its own target directory
+//! never meets either.
+//!
 //! ## Formatting
 //!
 //! `cargo fmt` reaches a module only through a `mod` item it can read in the
@@ -82,6 +93,32 @@ use crate::states::play_match::talents::TalentId;
 use super::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
 
 include!(concat!(env!("OUT_DIR"), "/engine_aura_families.rs"));
+
+// A build directory shared by two checkouts can hand this one the other's
+// generated registry, whose `#[path]`s compile the OTHER tree's families:
+// Cargo keys the build script's run on neither checkout's path. Refused here,
+// at compile time, rather than built. The fix is to make the script run
+// again here: `touch src/states/encyclopedia/engine_auras`.
+const _: () = assert!(
+    same_str(GENERATED_FOR, env!("CARGO_MANIFEST_DIR")),
+    "the engine aura registry was generated for another checkout: run \
+     `touch src/states/encyclopedia/engine_auras` and build again"
+);
+
+const fn same_str(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
 
 /// Which member of a family an address names. A family of one aura is
 /// [`EngineKey::Unit`]; a family that expands from a source names the source.
@@ -140,6 +177,19 @@ pub enum ArtKind {
 }
 
 impl ArtKind {
+    /// Whether a family applied by `source` may wear this kind of art: a
+    /// borrowed icon needs an ability to borrow from, an item's icon an item,
+    /// a talent's a talent. Art of its own fits any source. Checked for every
+    /// family by `every_family_declares_art_its_source_can_give`.
+    pub fn fits(self, source: SourceKind) -> bool {
+        match self {
+            ArtKind::FromSource => source == SourceKind::Ability,
+            ArtKind::Item => source == SourceKind::Item,
+            ArtKind::Talent => source == SourceKind::Talent,
+            ArtKind::Own => true,
+        }
+    }
+
     /// The kind an entry's [`AuraArt`] is.
     pub fn of(art: AuraArt) -> Self {
         match art {
@@ -186,6 +236,13 @@ pub struct EngineSpec {
     /// so the page lists exactly what lands.
     pub riders: Vec<Aura>,
     pub provenance: String,
+    /// The aura the simulation lands for this entry, built by its apply
+    /// site's own constructor wherever there is one (a literal's mirror where
+    /// the site writes the aura out in place). Never read by the page: it is
+    /// the INDEPENDENT witness the tests hold the entry to — the buff bar
+    /// draws an aura under the key `rendering::get_aura_icon_key` reads off
+    /// it, so the page's declared art must reach that same key.
+    pub landed: Aura,
 }
 
 impl EngineSpec {
@@ -295,6 +352,23 @@ mod tests {
             ArtKind::of(AuraArt::Talent(TalentId::FelStamina)),
             ArtKind::Talent
         );
+    }
+
+    /// Every family declares art its source can give.
+    #[test]
+    fn every_family_declares_art_its_source_can_give() {
+        for family in EngineFamily::ALL {
+            assert!(
+                family.art_kind().fits(family.source_kind()),
+                "{family:?} wears {:?} art but is applied by {:?}",
+                family.art_kind(),
+                family.source_kind()
+            );
+        }
+        assert!(!ArtKind::Talent.fits(SourceKind::Ability));
+        assert!(!ArtKind::Item.fits(SourceKind::Talent));
+        assert!(!ArtKind::FromSource.fits(SourceKind::Item));
+        assert!(ArtKind::Own.fits(SourceKind::Arena));
     }
 
     /// The generated enum has exactly one variant per family file, named

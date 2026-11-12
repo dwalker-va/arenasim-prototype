@@ -38,6 +38,7 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
         dispel_type: sample.dispel_type,
         persistence: Persistence::WholeMatch,
         riders: EngineSpec::no_riders(),
+        landed: sample.clone(),
         provenance: "A Rogue carries this from the opening bell — it marks the coated \
                      weapon. The poison's effect comes from the coating's on-hit proc, \
                      not from this mark."

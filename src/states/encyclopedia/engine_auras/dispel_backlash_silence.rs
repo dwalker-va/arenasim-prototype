@@ -32,6 +32,7 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
         dispel_type: sample.dispel_type,
         persistence: Persistence::Seconds(sample.duration),
         riders: EngineSpec::no_riders(),
+        landed: sample.clone(),
         provenance: "Punishes whoever lifts an Unstable Affliction off an ally, \
                      alongside the backlash damage. Dispelling it on your own team \
                      costs nothing."

@@ -35,6 +35,7 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
         dispel_type: sample.dispel_type,
         persistence: Persistence::WholeMatch,
         riders: EngineSpec::no_riders(),
+        landed: sample.clone(),
         provenance: format!(
             "The Warlock and its Felhunter each take {:.0}% less spell damage while the \
              Felhunter lives. The Warlock's ends when the Felhunter dies.",

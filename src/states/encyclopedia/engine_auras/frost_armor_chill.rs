@@ -39,6 +39,7 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
         dispel_type: face.dispel_type,
         persistence: Persistence::Seconds(face.duration),
         riders: vec![rider],
+        landed: face.clone(),
         provenance: "Hung on any melee attacker who strikes a Mage wearing Frost Armor. \
                      One debuff doing two things — a dispel that lifts it takes both. It \
                      does not stack with itself: a second hit while it is up refreshes \

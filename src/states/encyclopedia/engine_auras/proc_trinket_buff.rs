@@ -53,6 +53,7 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
         // against, so the page cannot state a chance, a duration or a cooldown
         // the trinket does not have. The trinket is not named again here —
         // the page header IS its name.
+        landed: proc.aura(item, &def.name),
         provenance: proc_description(proc),
     })
 }

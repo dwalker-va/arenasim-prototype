@@ -45,6 +45,7 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
         dispel_type: sample.dispel_type,
         persistence: Persistence::Seconds(absorb.duration),
         riders: EngineSpec::no_riders(),
+        landed: sample.clone(),
         provenance: triggered_absorb_description(absorb),
     })
 }
