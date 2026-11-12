@@ -1,0 +1,322 @@
+<title>Interrupt Landing Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --ink:#1b2530; --muted:#5b6978; --line:#d5dce4;
+  --accent:#2f6fb3; --accent-ink:#ffffff; --chip:#e4eaf1; --code-bg:#f5f7fa;
+  --font:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#11161c; --panel:#18202a; --ink:#e3e9f0; --muted:#8e9cab; --line:#2a3542;
+    --accent:#6aa8ec; --accent-ink:#0c1420; --chip:#222d3a; --code-bg:#0e141a; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#11161c; --panel:#18202a; --ink:#e3e9f0; --muted:#8e9cab; --line:#2a3542;
+  --accent:#6aa8ec; --accent-ink:#0c1420; --chip:#222d3a; --code-bg:#0e141a; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.45;padding-inline:16px;padding-block:18px 32px}
+.wrap{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px}
+h1{font-size:22px;font-weight:700;margin:0;text-wrap:balance}
+header p{margin:0;color:var(--muted);max-width:80ch}
+.card-id{font-family:var(--mono);font-size:12px;color:var(--muted);border:1px solid var(--line);padding:1px 7px;border-radius:4px}
+.main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;align-items:start}
+@media (max-width:900px){.main{grid-template-columns:1fr}}
+.stage{background:#2b2620;border-radius:8px;overflow:hidden;position:relative}
+canvas{display:block;width:100%;height:auto;aspect-ratio:16/10;max-width:100%}
+.hud{position:absolute;left:10px;top:8px;font-family:var(--mono);font-size:12px;color:#f3ead9;text-shadow:0 1px 2px #000a;pointer-events:none;display:flex;flex-direction:column;gap:2px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:12px}
+.panel h2{margin:0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:999px;padding:4px 10px;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.chip:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sub{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);width:100%}
+.row{display:grid;grid-template-columns:128px minmax(0,1fr) 46px;gap:8px;align-items:center;font-size:13px}
+.row output{font-family:var(--mono);font-size:12px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.row input[type=range]{width:100%;accent-color:var(--accent)}
+.checks{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px}
+.checks label{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.group{display:flex;flex-direction:column;gap:6px;padding-top:10px;border-top:1px solid var(--line)}
+.group h3{margin:0;font-size:13px;font-weight:600}
+.below{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+@media (max-width:900px){.below{grid-template-columns:1fr}}
+.note{font-size:13px;color:var(--muted);margin:0}
+code{font-family:var(--mono);font-size:12px}
+pre{margin:0;background:var(--code-bg);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-family:var(--mono);font-size:12px;line-height:1.5;overflow-x:auto;max-height:380px}
+.codehead{display:flex;justify-content:space-between;align-items:center}
+button.copy{font:inherit;font-size:13px;background:var(--accent);color:var(--accent-ink);border:0;border-radius:5px;padding:4px 12px;cursor:pointer}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Interrupt Landing Bench</h1><span class="card-id">AS-137</span>
+    <p>Every effect in the AS-137 batch, built from the Classic client's models. The interrupts land on a target that is mid-cast, and "Fizzle beside it" plays a plain fizzle on a second target at the same moment, so you can judge whether each interrupt now reads differently. The layer toggles and multipliers are per effect.</p>
+  </header>
+
+  <div class="main">
+    <div class="stage">
+      <canvas id="cv" width="1280" height="800" aria-label="Arena preview of AS-137 effects"></canvas>
+      <div class="hud"><span id="hud1"></span><span id="hud2"></span></div>
+    </div>
+    <div class="panel">
+      <div><h2>Effect</h2><div class="chips" id="fx" role="group" aria-label="Effect"></div></div>
+      <div class="group"><h3 id="fxTitle">Layers</h3><p class="note" id="fxNote"></p><div class="checks" id="layers"></div><div id="fxSliders"></div></div>
+      <div class="group" id="g-scene"><h3>Scene</h3><div class="checks" id="scene"></div></div>
+    </div>
+  </div>
+
+  <div class="below">
+    <div class="panel">
+      <h2>How to read it</h2>
+      <p class="note">Rates, lives, speeds, gravity, colour ramps and emission windows come from the parsed M2 files (see the research doc for AS-137). Three things are inferred. Heroic Strike's landing uses a small burst, because its rate tracks literally yield one or two particles. Rings default to facing the camera, because the particle flag that might mean "lie flat" is only community-documented. The casting orb and its fizzle "sputter" are an approximation of <code>casting_orbs.rs</code>, not a copy.</p>
+      <p class="note">What you sign off is the combination of layer toggles and multipliers for every effect. The constants block collects all of them at once.</p>
+    </div>
+    <div class="panel">
+      <div class="codehead"><h2>Rust constants</h2><button class="copy" id="copy">Copy</button></div>
+      <pre id="code"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+// ============================================================ client data
+// Emitter: kind (glow|flare|ring|rune|smoke|streak), blend ("add"|"alpha"), rate + win [ms0,ms1] or rt [[ms,rate]...],
+// life (s), speed (yd/s; negative converges), grav (yd/s^2, negative rises), area (cube), box [w,h], col/a/s ramps.
+const WHITE=[[0,[253,244,225]],[.5,[255,255,255]],[1,[255,255,255]]];
+const KICK_RING = {kind:"ring", rate:10, win:[0,333], life:.3, speed:.056, area:.056, col:WHITE, a:[[0,.7],[.5,.53],[1,0]], s:[[0,.278],[.5,.556],[1,.972]]};
+const EFFECTS = {
+  kick: {label:"Kick / Pummel", group:"Interrupts", anchor:"chest", caster:{dist:1.8,color:"#fff569",size:1}, interrupt:true, dur:1233,
+    note:"kick_chest_impact.m2: one white shockwave, and the victim plays CombatCritical. Kick and Pummel share it.",
+    layers:{ring:[KICK_RING]}},
+  spelllock: {label:"Spell Lock", group:"Interrupts", anchor:"chest", caster:{dist:8,color:"#3a2f4a",size:.7}, interrupt:true, dur:1666,
+    note:"counterspell_impact_chest.m2, shared with Counterspell: two rune discs shrink into the chest, a seal. The rune mesh is off by default because its animation isn't parsed.",
+    layers:{
+      runes:[{kind:"rune", rate:5.1, win:[0,1000], life:1.235, speed:.056, area:.028, col:[[0,[30,136,235]],[.5,[144,52,230]],[1,[170,30,236]]], a:[[0,0],[.5,.55],[1,.21]], s:[[0,.753],[.5,.456],[1,.167]]},
+             {kind:"rune", rate:6, win:[0,1000], life:1.2, speed:.056, area:.028, col:[[0,[255,221,30]],[.45,[52,227,192]],[1,[170,30,236]]], a:[[0,0],[.45,.65],[1,.36]], s:[[0,.906],[.45,.606],[1,.422]]}],
+      sparkles:[{kind:"flare", rate:30, win:[0,1000], life:1, speed:.297, box:[.417,.833], col:[[0,[172,77,245]],[.5,[255,255,255]],[1,[32,240,66]]], a:[[0,.88],[.5,.68],[1,0]], s:[[0,.031],[.5,.142],[1,0]]}],
+      plate:[{kind:"rune", rate:1.2, win:[0,800], life:1.2, speed:0, col:[[0,[0,235,28]],[1,[0,235,28]]], a:[[0,0],[.3,.45],[1,0]], s:[[0,2.2],[1,2.2]]}],
+    }, off:["plate"]},
+  windshear: {label:"Wind Shear", group:"Interrupts", anchor:"chest", caster:{dist:14,color:"#0070de",size:1}, interrupt:true, dur:1233, tint:[190,225,255],
+    note:"No Classic data exists. This is Kick's shockwave ring in a pale wind-blue (the tint is adjustable below).",
+    layers:{ring:[KICK_RING]}},
+  heroic: {label:"Heroic Strike", group:"One-offs", anchor:"chest", caster:{dist:1.8,color:"#c79c6e",size:1}, swing:true, dur:667,
+    note:"Red weapon trail (0xF82A29, 600 ms) on the ordinary swing arc, plus decisivestrike_impact_chest.m2's ring landing. Mortal Strike keeps its own diagonal stroke.",
+    layers:{
+      ring:[{kind:"ring", burst:1, win:[0,67], life:.5, speed:0, col:[[0,[208,0,0]],[.5,[129,35,189]],[1,[63,0,134]]], a:[[0,0],[.5,1],[1,0]], s:[[0,.028],[.5,.972],[1,1.667]]}],
+      sparks:[{kind:"flare", burst:6, win:[0,67], life:.5, speed:2.778, col:[[0,[114,35,159]],[.5,[190,0,9]],[1,[70,35,142]]], a:[[0,0],[.5,1],[1,0]], s:[[0,.028],[.5,.069],[1,.028]]}],
+      plume:[{kind:"glow", burst:3, win:[0,67], life:.3, speed:5.556, col:[[0,[81,0,144]],[.5,[36,0,171]],[1,[81,0,144]]], a:[[0,1],[1,1]], s:[[0,.028],[.5,.139],[1,.028]]}],
+    }},
+  mindblast: {label:"Mind Blast", group:"One-offs", anchor:"head", caster:{dist:14,color:"#ffffff",size:1}, dur:2000,
+    note:"mindblast_head.m2: violet flame licks rising off the head for about 2 s, with embers and grey smoke. It smoulders rather than bursts.",
+    layers:{
+      flames:[{kind:"glow", rt:[[0,0],[200,75],[1400,75],[2000,0]], life:1, speed:0, grav:-1.25, box:[.069,.139], col:[[0,[79,55,255]],[.5,[126,55,255]],[1,[210,0,255]]], a:[[0,1],[.5,1],[1,0]], s:[[0,.111],[.5,.278],[1,.028]]}],
+      embers:[{kind:"flare", rt:[[0,0],[200,2.5],[1800,2.5],[2000,0]], life:2.25, speed:0, grav:-1.25, area:.083, col:[[0,[150,0,255]],[.6,[90,0,255]],[1,[0,42,255]]], a:[[0,0],[.6,1],[1,0]], s:[[0,.028],[.6,.056],[1,.028]]}],
+      smoke:[{kind:"smoke", blend:"alpha", rt:[[0,0],[200,5],[1600,5],[2000,0]], life:2.25, speed:0, grav:-1.25, box:[0,.181], col:[[0,[60,0,255]],[.5,[58,35,84]],[1,[180,162,192]]], a:[[0,.29],[.5,.59],[1,0]], s:[[0,.167],[.5,.347],[1,.694]]}],
+    }},
+  holyshock: {label:"Holy Shock (damage)", group:"One-offs", anchor:"chest", caster:{dist:14,color:"#f58cba",size:1}, dur:1133,
+    note:"holysmite_low_chest.m2: 13 emitters, grouped here into 7 layers. Nearly all of it happens between 133 and 550 ms.",
+    layers:{
+      flash:[{kind:"glow", rt:[[0,0],[133,0],[200,15],[400,0]], life:.4, speed:.417, col:[[0,[252,255,0]],[.5,[255,255,255]],[1,[255,246,0]]], a:[[0,1],[1,1]], s:[[0,.833],[.5,2.778],[1,.028]]}],
+      converge:[{kind:"flare", rt:[[0,0],[133,0],[200,75],[533,0]], life:.5, speed:-.417, area:.014, col:[[0,[255,255,0]],[.5,[255,255,255]],[1,[254,255,180]]], a:[[0,.29],[.5,1],[1,0]], s:[[0,.167],[.5,1.389],[1,.028]]},
+                {kind:"flare", rate:50, win:[0,333], life:1.5, speed:-.556, area:.278, col:[[0,[255,186,77]],[.75,[255,255,255]],[1,[246,255,0]]], a:[[0,1],[.75,1],[1,0]], s:[[0,.028],[.75,.056],[1,0]]}],
+      sparks:[{kind:"flare", rt:[[0,0],[133,0],[200,30],[333,100],[500,50],[667,2],[900,1],[1000,0]], life:.75, speed:2.2, grav:6.944, area:.014, col:[[0,[255,255,255]],[1,[255,255,255]]], a:[[0,1],[.25,1],[1,0]], s:[[0,.111],[.25,.069],[1,0]]},
+              {kind:"flare", rt:[[0,0],[133,0],[233,5],[400,75],[567,5],[733,2],[967,1],[1067,0]], life:.75, speed:2.0, grav:6.944, area:.014, col:[[0,[255,255,255]],[1,[255,255,255]]], a:[[0,1],[.25,1],[1,0]], s:[[0,.111],[.25,.069],[1,0]]}],
+      ribbons:[{kind:"streak", rt:[[0,0],[133,0],[167,50],[200,150],[233,75],[300,35],[367,50],[467,0]], life:.75, speed:.2, area:.068, col:[[0,[255,236,160]],[1,[255,255,255]]], a:[[0,.84],[.25,.78],[1,0]], s:[[0,.035],[.25,.083],[1,0]]}],
+      dust:[{kind:"smoke", rt:[[0,0],[267,0],[333,75],[433,30],[533,0]], life:1.05, speed:.5, area:.056, col:[[0,[150,145,0]],[.4,[139,88,16]],[1,[212,131,58]]], a:[[0,.2],[.4,.29],[1,0]], s:[[0,.139],[.4,.333],[1,.389]]}],
+      streaks:[{kind:"streak", rt:[[0,0],[133,0],[300,100],[367,50],[467,0]], life:1, speed:1.667, area:.014, col:[[0,[255,255,255]],[.3,[255,186,0]],[1,[255,114,0]]], a:[[0,1],[.3,1],[1,0]], s:[[0,.02],[.3,.03],[1,0]]}],
+      glow:[{kind:"glow", rt:[[0,0],[133,0],[200,40],[633,0]], life:.35, speed:.056, area:.014, col:[[0,[255,222,0]],[.25,[255,255,255]],[1,[252,255,0]]], a:[[0,.29],[.25,1],[1,0]], s:[[0,.278],[.25,.611],[1,.417]]}],
+    }},
+  web: {label:"Web", group:"One-offs", anchor:"chest", caster:{dist:12,color:"#3b3226",size:.6}, missile:"web", dur:0,
+    note:"web_missile.m2: a flat, spinning web disc 1.2 yd across. It has no landing; the root web that follows is already drawn by hard_cc.rs.",
+    layers:{disc:[]}},
+};
+const IDS=Object.keys(EFFECTS);
+const P = {sel:"spelllock", timeScale:1, interval:2.4, zoom:34, fizzle:true, flatRings:false, paused:false,
+  wind:"#bee1ff", trailLife:0.6, trailWidth:0.12, webSpeed:30, webSpin:1.5,
+  fx:{}};
+for (const id of IDS){ const e=EFFECTS[id]; P.fx[id]={size:1, spread:1, time:1, layers:Object.fromEntries(Object.keys(e.layers).map(k=>[k,!(e.off||[]).includes(k)]))}; }
+
+// ============================================================ controls
+const $=id=>document.getElementById(id);
+const fmt=(v,st)=>st>=1?String(Math.round(v)):v.toFixed(2);
+function slider(host,obj,k,label,min,max,step){
+  const row=document.createElement("div"); row.className="row"; const id=`s-${host.id}-${k}`;
+  row.innerHTML=`<label for="${id}">${label}</label><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${obj[k]}"><output>${fmt(obj[k],step)}</output>`;
+  const inp=row.querySelector("input"), out=row.querySelector("output");
+  inp.addEventListener("input",()=>{obj[k]=+inp.value; out.textContent=fmt(obj[k],step); $("code").textContent=rust();});
+  host.appendChild(row);
+}
+let lastGroup=null;
+IDS.forEach(id=>{ const e=EFFECTS[id];
+  if (e.group!==lastGroup){ const s=document.createElement("span"); s.className="sub"; s.textContent=e.group; $("fx").appendChild(s); lastGroup=e.group; }
+  const b=document.createElement("button"); b.type="button"; b.className="chip"; b.textContent=e.label; b.dataset.id=id;
+  b.addEventListener("click",()=>{P.sel=id; resetScene(); buildFx();}); $("fx").appendChild(b); });
+function buildFx(){
+  [...$("fx").querySelectorAll(".chip")].forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.id===P.sel)));
+  const e=EFFECTS[P.sel], f=P.fx[P.sel];
+  $("fxTitle").textContent=e.label; $("fxNote").textContent=e.note;
+  const L=$("layers"); L.innerHTML="";
+  for (const k of Object.keys(e.layers)){ if (P.sel==="web") break;
+    const l=document.createElement("label"); l.innerHTML=`<input type="checkbox" id="l-${P.sel}-${k}" ${f.layers[k]?"checked":""}>${k}`;
+    l.querySelector("input").addEventListener("change",ev=>{f.layers[k]=ev.target.checked; $("code").textContent=rust();}); L.appendChild(l); }
+  const S=$("fxSliders"); S.innerHTML="";
+  if (P.sel!=="web"){ slider(S,f,"size","Size x",.2,2,.05); slider(S,f,"spread","Spread x",.1,1.5,.05); slider(S,f,"time","Duration x",.3,1.5,.05); }
+  if (P.sel==="windshear"){ const row=document.createElement("div"); row.className="row";
+    row.innerHTML=`<label for="wind">Ring tint</label><input id="wind" type="color" value="${P.wind}"><span></span>`;
+    row.querySelector("input").addEventListener("input",ev=>{P.wind=ev.target.value; $("code").textContent=rust();}); S.appendChild(row); }
+  if (P.sel==="heroic"){ slider(S,P,"trailLife","Trail life (s)",.15,1,.05); slider(S,P,"trailWidth","Trail width (yd)",.04,.4,.01); }
+  if (P.sel==="web"){ slider(S,P,"webSpeed","Flight (yd/s)",10,45,1); slider(S,P,"webSpin","Spin (rev/s)",0,4,.1); }
+  $("code").textContent=rust();
+}
+slider($("g-scene"),P,"timeScale","Speed x",.1,1,.05); slider($("g-scene"),P,"interval","Repeat every (s)",1,5,.1); slider($("g-scene"),P,"zoom","Zoom (px/yd)",14,60,1);
+$("g-scene").appendChild($("scene"));
+for (const [k,label] of [["fizzle","Fizzle beside it (interrupts)"],["flatRings","Rings lie flat"],["paused","Pause"]]){
+  const l=document.createElement("label"); l.innerHTML=`<input type="checkbox" id="c-${k}" ${P[k]?"checked":""}>${label}`;
+  l.querySelector("input").addEventListener("change",ev=>{P[k]=ev.target.checked; resetScene();}); $("scene").appendChild(l); }
+function hexRgb(h){const n=parseInt(h.slice(1),16); return [n>>16,(n>>8)&255,n&255];}
+function rust(){
+  const f=(v,d=2)=>Number(v).toFixed(d); const L=["// AS-137 Interrupt Landing Bench — signed-off knobs over the client's emitter tables","// (tables: docs/design/2026-09-26-interrupts-and-one-offs-client-data.md)"];
+  const NAME={kick:"KICK_IMPACT",spelllock:"SPELL_LOCK_IMPACT",windshear:"WIND_SHEAR_IMPACT",heroic:"HEROIC_STRIKE_IMPACT",mindblast:"MIND_BLAST_SMOULDER",holyshock:"HOLY_SHOCK_DAMAGE_IMPACT"};
+  for (const id of IDS){ if (id==="web") continue; const x=P.fx[id]; const kept=Object.entries(x.layers).filter(([,v])=>v).map(([k])=>k); const dropped=Object.entries(x.layers).filter(([,v])=>!v).map(([k])=>k);
+    L.push("",`// ${EFFECTS[id].label}: layers kept [${kept.join(", ")}]${dropped.length?`, dropped [${dropped.join(", ")}]`:""}`);
+    L.push(`const ${NAME[id]}_SIZE: f32 = ${f(x.size)};`,`const ${NAME[id]}_SPREAD: f32 = ${f(x.spread)};`,`const ${NAME[id]}_TIME: f32 = ${f(x.time)};`); }
+  const w=hexRgb(P.wind).map(v=>(v/255).toFixed(2));
+  L.push("",`const WIND_SHEAR_RING_TINT: Color = Color::srgb(${w.join(", ")});`);
+  L.push("","/// Heroic Strike weapon trail (client procedural 356792: 0xF82A29, 600 ms).","const HEROIC_STRIKE_TRAIL_COLOR: Color = Color::srgb(0.97, 0.16, 0.16);",`const HEROIC_STRIKE_TRAIL_LIFETIME: f32 = ${f(P.trailLife)};`,`const HEROIC_STRIKE_TRAIL_WIDTH: f32 = ${f(P.trailWidth)};`);
+  L.push("","/// Web disc (web_missile.m2: 1.2 yd flat disc).","const WEB_DISC_DIAMETER: f32 = 1.2;",`const WEB_DISC_SPIN_REV_PER_SEC: f32 = ${f(P.webSpin,1)};`);
+  L.push("",`// Rings drawn ${P.flatRings?"flat on the ground plane":"facing the camera"}.`);
+  return L.join("\n");
+}
+$("copy").addEventListener("click",()=>{const t=$("code").textContent; navigator.clipboard.writeText(t).then(()=>{$("copy").textContent="Copied";setTimeout(()=>$("copy").textContent="Copy",1200);}).catch(()=>{const r=document.createRange();r.selectNodeContents($("code"));const s=getSelection();s.removeAllRanges();s.addRange(r);});});
+
+// ============================================================ scene
+const cv=$("cv"), ctx=cv.getContext("2d"), W=cv.width, H=cv.height;
+const PITCH=38.7*Math.PI/180, GS=Math.sin(PITCH), HS=Math.cos(PITCH);
+const CHEST_Y=1.35, HEAD_Y=1.85, FLOOR=[201,168,117], TX=6;
+function proj(x,y,z){ const s=P.zoom; return [W*0.42 + x*s, H*0.62 + z*s*GS - y*s*HS]; }
+const floorCv=document.createElement("canvas"); floorCv.width=256; floorCv.height=256;
+{ const g=floorCv.getContext("2d"), id=g.createImageData(256,256); let s=99; const r=()=>{s=(s*1103515245+12345)&0x7fffffff; return s/0x7fffffff;};
+  for(let i=0;i<65536;i++){const n=(r()-.5)*.12*255; id.data[i*4]=FLOOR[0]+n; id.data[i*4+1]=FLOOR[1]+n*.9; id.data[i*4+2]=FLOOR[2]+n*.8; id.data[i*4+3]=255;} g.putImageData(id,0,0); }
+const floorPat=ctx.createPattern(floorCv,"repeat");
+function ramp(r,t){ for(let i=1;i<r.length;i++){ if(t<=r[i][0]){ const [a,va]=r[i-1],[b,vb]=r[i]; const k=(t-a)/((b-a)||1); return Array.isArray(va)?va.map((v,j)=>v+(vb[j]-v)*k):va+(vb-va)*k; } } return r[r.length-1][1]; }
+function rateAt(e,ms){ if (e.rt){ const r=e.rt; if (ms<=r[0][0]) return r[0][1]; for(let i=1;i<r.length;i++){ if(ms<=r[i][0]){ const k=(ms-r[i-1][0])/((r[i][0]-r[i-1][0])||1); return r[i-1][1]+(r[i][1]-r[i-1][1])*k; } } return r[r.length-1][1]; }
+  if (e.win) return (ms>=e.win[0]&&ms<=e.win[1])?e.rate:0; return e.rate; }
+const rgba=(c,a)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${Math.max(0,Math.min(1,a))})`;
+function randDir(){ const u=Math.random()*2-1, th=Math.random()*Math.PI*2, r=Math.sqrt(1-u*u); return [r*Math.cos(th),u,r*Math.sin(th)]; }
+
+let particles=[], impacts=[], orbs=[], missiles=[], swing=null, trail=[], fireT=0.4, simT=0, flinch={};
+function targets(){ const e=EFFECTS[P.sel]; const T=[{z:0,main:true}]; if (e.interrupt&&P.fizzle) T.push({z:-3.4,main:false}); return T; }
+function resetScene(){ particles=[]; impacts=[]; orbs=[]; missiles=[]; swing=null; trail=[]; fireT=0.4; flinch={}; }
+function trigger(){
+  const e=EFFECTS[P.sel];
+  if (e.interrupt){ for (const t of targets()){ orbs.push({z:t.z, age:0, castFor:0.9, sputter:-1, landing:t.main}); } return; }
+  if (e.swing){ swing={age:0, dur:.32, hit:false}; trail=[]; return; }
+  if (e.missile==="web"){ missiles.push({x:TX-e.caster.dist+.4, z:0, spin:0}); return; }
+  land(0);
+}
+function land(z){ const e=EFFECTS[P.sel]; impacts.push({id:P.sel, z, age:0, acc:{}, burstDone:{}}); flinch[z]=0.25; }
+function emitImpact(im,dt){
+  const e=EFFECTS[im.id], f=P.fx[im.id]; const ms=im.age*1000/f.time;
+  const y = e.anchor==="head"?HEAD_Y:CHEST_Y;
+  for (const [lk,list] of Object.entries(e.layers)){ if(!f.layers[lk]) continue;
+    list.forEach((em,i)=>{ const key=lk+i;
+      let n=0;
+      if (em.burst){ if(!im.burstDone[key] && ms>=em.win[0]){ im.burstDone[key]=1; n=em.burst; } }
+      else { im.acc[key]=(im.acc[key]||0)+rateAt(em,ms)*dt/f.time; n=Math.floor(im.acc[key]); im.acc[key]-=n; }
+      for(let j=0;j<n;j++) spawn(em,TX-.35,y,im.z,f,im.id);
+    }); }
+}
+function spawn(em,x,y,z,f,id){
+  const d=randDir(); const sp=Math.abs(em.speed)*f.spread; let px=x,py=y,pz=z;
+  if (em.area){ px+=(Math.random()-.5)*em.area; py+=(Math.random()-.5)*em.area; pz+=(Math.random()-.5)*em.area; }
+  if (em.box){ px+=(Math.random()-.5)*em.box[0]; pz+=(Math.random()-.5)*em.box[0]; py+=(Math.random()-.5)*em.box[1]; }
+  let v=[d[0]*sp,d[1]*sp,d[2]*sp];
+  if (em.speed<0){ const r=sp*em.life*f.time*.9; px+=d[0]*r; py+=d[1]*r; pz+=d[2]*r; v=[-d[0]*sp,-d[1]*sp,-d[2]*sp]; }
+  const tint = id==="windshear" ? hexRgb(P.wind) : null;
+  particles.push({x:px,y:py,z:pz,vx:v[0],vy:v[1],vz:v[2],age:0,life:em.life*f.time,em,size:f.size,grav:(em.grav||0)*f.spread,tint,rot:Math.random()*6.28});
+}
+function step(dt){
+  simT+=dt; fireT-=dt; if(fireT<=0){ trigger(); fireT=P.interval; }
+  for (const o of orbs){ o.age+=dt; if (o.sputter<0 && o.age>=o.castFor){ o.sputter=0; if(o.landing) land(o.z); } if (o.sputter>=0) o.sputter+=dt; }
+  orbs=orbs.filter(o=>o.sputter<0.5);
+  if (swing){ swing.age+=dt; const k=Math.min(1,swing.age/swing.dur);
+    const tip=swingTip(k); trail.push({...tip,t:simT});
+    if (!swing.hit && k>=.62){ swing.hit=true; land(0); }
+    if (swing.age>swing.dur+.05) swing=null; }
+  trail=trail.filter(p=>simT-p.t<P.trailLife);
+  for (const m of missiles){ m.x+=P.webSpeed*dt; m.spin+=P.webSpin*Math.PI*2*dt; if (m.x>=TX-.4){ m.done=true; flinch[0]=.25; } }
+  missiles=missiles.filter(m=>!m.done);
+  for (const im of impacts){ im.age+=dt; emitImpact(im,dt); }
+  impacts=impacts.filter(im=>im.age<EFFECTS[im.id].dur/1000*P.fx[im.id].time+.05);
+  for (const p of particles){ p.age+=dt; p.vy-=p.grav*dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt; }
+  particles=particles.filter(p=>p.age<p.life);
+  for (const z in flinch) flinch[z]=Math.max(0,flinch[z]-dt);
+}
+function swingTip(k){ // ordinary horizontal arc, right to left across the target's front
+  const e=EFFECTS.heroic, cx=TX-e.caster.dist, a=(-1.1+2.2*k); const r=1.3;
+  return {x:cx+Math.cos(a)*r, y:1.25+Math.sin(k*Math.PI)*.15, z:Math.sin(a)*r*.6}; }
+
+function drawFloor(){ ctx.globalCompositeOperation="source-over"; ctx.fillStyle="#2b2620"; ctx.fillRect(0,0,W,H);
+  const [cx,cy]=proj(TX-6,0,0); ctx.save(); ctx.translate(cx,cy); ctx.scale(1,GS); ctx.beginPath(); ctx.arc(0,0,40*P.zoom,0,Math.PI*2); ctx.fillStyle=floorPat; ctx.fill(); ctx.restore(); }
+function capsule(x,z,color,size=1,lean=0){ ctx.globalCompositeOperation="source-over";
+  const [sx,sy]=proj(x+lean,0,z); const w=.8*P.zoom*size, h=1.9*P.zoom*HS*size;
+  ctx.save(); ctx.translate(sx,sy); ctx.scale(1,GS); ctx.beginPath(); ctx.arc(0,0,.5*P.zoom*size,0,Math.PI*2); ctx.fillStyle="rgba(40,28,15,.35)"; ctx.fill(); ctx.restore();
+  const g=ctx.createLinearGradient(sx-w/2,0,sx+w/2,0); g.addColorStop(0,color); g.addColorStop(1,"#0007"); ctx.fillStyle=g; ctx.beginPath(); ctx.roundRect(sx-w/2,sy-h,w,h,w/2); ctx.fill(); }
+function drawOrb(o){ // approximation of casting_orbs.rs: a glowing orb in front of the caster; sputter = flicker + collapse
+  const [sx,sy]=proj(TX-.55,1.55,o.z); let a=.9, r=.22*P.zoom;
+  if (o.sputter>=0){ const k=o.sputter/.5; a=(1-k)*(Math.sin(o.sputter*60)>0?1:.35); r*=1-k*.7; } else r*=.8+.2*Math.sin(o.age*9);
+  ctx.globalCompositeOperation="lighter"; const g=ctx.createRadialGradient(sx,sy,0,sx,sy,r*1.6); g.addColorStop(0,`rgba(255,240,200,${a})`); g.addColorStop(.4,`rgba(200,170,255,${a*.6})`); g.addColorStop(1,"rgba(200,170,255,0)");
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,r*1.6,0,Math.PI*2); ctx.fill(); }
+function drawParticle(p){
+  const e=p.em, t=p.age/p.life; const c=p.tint||ramp(e.col,t), a=ramp(e.a,t), sz=ramp(e.s,t)*p.size;
+  ctx.globalCompositeOperation=e.blend==="alpha"?"source-over":"lighter";
+  const [sx,sy]=proj(p.x,p.y,p.z); const r=Math.max(.6,sz*P.zoom/2);
+  if (e.kind==="glow"||e.kind==="smoke"){ const g=ctx.createRadialGradient(sx,sy,0,sx,sy,r); g.addColorStop(0,rgba(c,a)); g.addColorStop(e.kind==="smoke"?.6:.35,rgba(c,a*.45)); g.addColorStop(1,rgba(c,0)); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.fill(); }
+  else if (e.kind==="flare"){ const g=ctx.createRadialGradient(sx,sy,0,sx,sy,r); g.addColorStop(0,rgba([255,255,255],a)); g.addColorStop(.25,rgba(c,a)); g.addColorStop(1,rgba(c,0)); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.fill();
+    if (r>2){ ctx.strokeStyle=rgba(c,a*.8); ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(sx-r*1.6,sy); ctx.lineTo(sx+r*1.6,sy); ctx.moveTo(sx,sy-r*1.6); ctx.lineTo(sx,sy+r*1.6); ctx.stroke(); } }
+  else if (e.kind==="streak"){ const [ex,ey]=proj(p.x-p.vx*.06,p.y-p.vy*.06,p.z-p.vz*.06); ctx.strokeStyle=rgba(c,a); ctx.lineWidth=Math.max(1,r*.8); ctx.lineCap="round"; ctx.beginPath(); ctx.moveTo(ex,ey); ctx.lineTo(sx,sy); ctx.stroke(); }
+  else if (e.kind==="ring"||e.kind==="rune"){ ctx.save(); ctx.translate(sx,sy); if (P.flatRings) ctx.scale(1,GS);
+    ctx.strokeStyle=rgba(c,a); ctx.lineWidth=Math.max(1,r*.12); ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke();
+    if (e.kind==="rune"){ ctx.rotate(p.rot+p.age*1.5); ctx.lineWidth=Math.max(1,r*.07); ctx.beginPath(); ctx.arc(0,0,r*.72,0,Math.PI*2); ctx.stroke();
+      for(let i=0;i<6;i++){ const an=i*Math.PI/3; ctx.beginPath(); ctx.moveTo(Math.cos(an)*r*.72,Math.sin(an)*r*.72); ctx.lineTo(Math.cos(an+.5)*r*.95,Math.sin(an+.5)*r*.95); ctx.stroke(); } }
+    ctx.restore(); }
+}
+function drawTrail(){ if (trail.length<2) return; ctx.globalCompositeOperation="lighter"; ctx.lineCap="round";
+  for (let i=1;i<trail.length;i++){ const a=trail[i-1], b=trail[i], k=(simT-b.t)/P.trailLife; const [x1,y1]=proj(a.x,a.y,a.z), [x2,y2]=proj(b.x,b.y,b.z);
+    ctx.strokeStyle=`rgba(248,42,41,${.85*(1-k)})`; ctx.lineWidth=Math.max(1,P.trailWidth*P.zoom*(1-k*.6)); ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); } }
+function drawWeapon(){ if(!swing) return; const k=Math.min(1,swing.age/swing.dur), tip=swingTip(k), e=EFFECTS.heroic;
+  const [hx,hy]=proj(TX-e.caster.dist+.25,1.25,0), [tx,ty]=proj(tip.x,tip.y,tip.z); ctx.globalCompositeOperation="source-over"; ctx.strokeStyle="#cfd3d8"; ctx.lineWidth=Math.max(2,.08*P.zoom); ctx.beginPath(); ctx.moveTo(hx,hy); ctx.lineTo(tx,ty); ctx.stroke(); }
+function drawWeb(m){ const [sx,sy]=proj(m.x,CHEST_Y,0); const r=.6*P.zoom; ctx.save(); ctx.translate(sx,sy); ctx.scale(.35,1); ctx.rotate(m.spin);
+  ctx.globalCompositeOperation="lighter"; ctx.strokeStyle="rgba(235,235,230,.85)"; ctx.lineWidth=1.4;
+  for(let i=0;i<8;i++){ const an=i*Math.PI/4; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(Math.cos(an)*r,Math.sin(an)*r); ctx.stroke(); }
+  for (const f of [.35,.62,.9]){ ctx.beginPath(); for(let i=0;i<=8;i++){ const an=i*Math.PI/4; const x=Math.cos(an)*r*f, y=Math.sin(an)*r*f; i?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke(); }
+  ctx.restore(); }
+
+let last=performance.now();
+function frame(now){
+  let dt=Math.min(.05,(now-last)/1000); last=now; if(P.paused) dt=0; step(dt*P.timeScale);
+  drawFloor(); const e=EFFECTS[P.sel];
+  const T=[...targets()].sort((a,b)=>a.z-b.z);
+  for (const t of T){
+    capsule(TX-e.caster.dist, t.z, e.caster.color, e.caster.size);
+    capsule(TX, t.z, "#8b8f96", 1, (flinch[t.z]||0)*.5);
+    orbs.filter(o=>o.z===t.z).forEach(drawOrb);
+    if (!t.main){ const [lx,ly]=proj(TX,0,t.z); ctx.globalCompositeOperation="source-over"; ctx.font=`500 ${Math.max(11,P.zoom*.42)}px Barlow, sans-serif`; ctx.textAlign="center"; ctx.fillStyle="rgba(40,28,15,.75)"; ctx.fillText("fizzle only",lx,ly+.95*P.zoom); }
+  }
+  drawTrail(); drawWeapon(); missiles.forEach(drawWeb);
+  particles.filter(p=>p.em.blend==="alpha").forEach(drawParticle); particles.filter(p=>p.em.blend!=="alpha").forEach(drawParticle);
+  ctx.globalCompositeOperation="source-over";
+  $("hud1").textContent=`${e.label}${e.interrupt&&P.fizzle?" (front) vs fizzle (back)":""}`; $("hud2").textContent=`time x${P.timeScale.toFixed(2)}, ${particles.length} particles`;
+  requestAnimationFrame(frame);
+}
+buildFx(); requestAnimationFrame(frame);
+})();
+</script>
+

@@ -1,0 +1,403 @@
+<title>Hunter Shot Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --ink:#1b2530; --muted:#5b6978; --line:#d5dce4;
+  --accent:#2f6fb3; --accent-ink:#ffffff; --chip:#e4eaf1; --code-bg:#f5f7fa;
+  --font:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#11161c; --panel:#18202a; --ink:#e3e9f0; --muted:#8e9cab; --line:#2a3542;
+    --accent:#6aa8ec; --accent-ink:#0c1420; --chip:#222d3a; --code-bg:#0e141a; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#11161c; --panel:#18202a; --ink:#e3e9f0; --muted:#8e9cab; --line:#2a3542;
+  --accent:#6aa8ec; --accent-ink:#0c1420; --chip:#222d3a; --code-bg:#0e141a; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.45;padding-inline:16px;padding-block:18px 32px}
+.wrap{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px}
+h1{font-size:22px;font-weight:700;margin:0;text-wrap:balance}
+header p{margin:0;color:var(--muted);max-width:80ch}
+.card-id{font-family:var(--mono);font-size:12px;color:var(--muted);border:1px solid var(--line);padding:1px 7px;border-radius:4px}
+.main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;align-items:start}
+@media (max-width:900px){.main{grid-template-columns:1fr}}
+.stage{background:#2b2620;border-radius:8px;overflow:hidden;position:relative}
+canvas{display:block;width:100%;height:auto;aspect-ratio:16/10;max-width:100%}
+.hud{position:absolute;left:10px;top:8px;font-family:var(--mono);font-size:12px;color:#f3ead9;text-shadow:0 1px 2px #000a;pointer-events:none;display:flex;flex-direction:column;gap:2px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:12px}
+.panel h2{margin:0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:999px;padding:4px 10px;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.chip:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;border:1px solid #0003}
+.row{display:grid;grid-template-columns:128px minmax(0,1fr) 46px;gap:8px;align-items:center;font-size:13px}
+.row output{font-family:var(--mono);font-size:12px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.row input[type=range]{width:100%;accent-color:var(--accent)}
+.checks{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px}
+.checks label{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.group{display:flex;flex-direction:column;gap:6px;padding-top:10px;border-top:1px solid var(--line)}
+.group h3{margin:0;font-size:13px;font-weight:600}
+.below{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+@media (max-width:900px){.below{grid-template-columns:1fr}}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+tr.sel td{background:var(--chip)}
+code{font-family:var(--mono);font-size:12px}
+.tablewrap{overflow-x:auto}
+pre{margin:0;background:var(--code-bg);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-family:var(--mono);font-size:12px;line-height:1.5;overflow-x:auto;max-height:360px}
+.codehead{display:flex;justify-content:space-between;align-items:center}
+button.copy{font:inherit;font-size:13px;background:var(--accent);color:var(--accent-ink);border:0;border-radius:5px;padding:4px 12px;cursor:pointer}
+.note{font-size:13px;color:var(--muted);margin:0}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Hunter Shot Bench</h1><span class="card-id">AS-136</span>
+    <p>The Hunter's shots as the Classic client draws them. Aimed, Arcane and Concussive Shot share one violet shot and one landing. Serpent Sting is the green, dripping variant with a lingering cloud. Auto Shot is the only real arrow. Switch to "Now" to see what ships today.</p>
+  </header>
+
+  <div class="main">
+    <div class="stage">
+      <canvas id="cv" width="1280" height="800" aria-label="Arena preview of Hunter shots"></canvas>
+      <div class="hud"><span id="hud1"></span><span id="hud2"></span></div>
+    </div>
+
+    <div class="panel">
+      <div><h2>Shot</h2><div class="chips" id="shots" role="group" aria-label="Shot"></div></div>
+      <div><h2>Rendering</h2><div class="chips" id="modes" role="group" aria-label="Rendering"></div></div>
+      <div class="group" id="g-missile"><h3>Missile</h3></div>
+      <div class="group" id="g-impact"><h3>Landing</h3><div class="checks" id="layers"></div></div>
+      <div class="group" id="g-scene"><h3>Scene</h3><div class="checks" id="scene"></div></div>
+    </div>
+  </div>
+
+  <div class="below">
+    <div class="panel">
+      <h2>What the client draws</h2>
+      <div class="tablewrap"><table id="srcTable">
+        <thead><tr><th>Shot</th><th>Missile</th><th>Landing</th><th>Speed</th></tr></thead><tbody></tbody>
+      </table></div>
+      <p class="note">Emitter rates, lives, speeds, gravity and colour ramps are from the parsed M2 files. Two things are inferred: the missile core's tint (from its texture, <code>purple_glow.blp</code>), and which emitters lie flat (from particle flags documented by the community). Flight speed is our RON <code>projectile_speed</code>; the client leaves it as an engine constant.</p>
+    </div>
+    <div class="panel">
+      <div class="codehead"><h2>Rust constants</h2><button class="copy" id="copy">Copy</button></div>
+      <pre id="code"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+// ================================================================ client data
+// ramps: [[t, value]...]  colours 0-255
+const ARCANE_MISSILE = [ // arcaneshot_missile.m2 (165592)
+  {name:"puffs", kind:"glow", rate:6.7, life:0.75, speed:0.056, grav:0,
+   col:[[0,[22,34,168]],[.5,[78,33,201]],[1,[203,103,255]]], a:[[0,.59],[.5,.98],[1,0]], s:[[0,.142],[.5,.264],[1,.142]]},
+  {name:"sparks", kind:"flare", rate:20, life:1.1, speed:0.333, grav:0,
+   col:[[0,[77,15,207]],[.5,[114,59,190]],[1,[165,222,255]]], a:[[0,1],[.5,1],[1,0]], s:[[0,.083],[.5,.028],[1,.014]]},
+  {name:"sparks2", kind:"flare", rate:10, life:1.1, speed:0.333, grav:0,
+   col:[[0,[84,0,237]],[.5,[131,94,237]],[1,[183,227,255]]], a:[[0,.39],[.5,1],[1,0]], s:[[0,.083],[.5,.028],[1,.014]]},
+  {name:"stream", kind:"flare", rate:100, life:0.5, speed:1.111, grav:0, area:0.028,
+   col:[[0,[0,0,154]],[.5,[97,67,207]],[1,[245,245,236]]], a:[[0,.39],[.5,1],[1,.2]], s:[[0,.194],[.5,.139],[1,.028]]},
+];
+const POISON_MISSILE = [ // poisonshot_missile.m2 (166648): same template, green, dripping sparks
+  {name:"puffs", kind:"glow", rate:6.7, life:0.75, speed:0.056, grav:0,
+   col:[[0,[119,201,2]],[.5,[141,207,12]],[1,[209,234,92]]], a:[[0,.19],[.5,.77],[1,0]], s:[[0,.142],[.5,.264],[1,.142]]},
+  {name:"sparks", kind:"flare", rate:20, life:1.1, speed:0.333, grav:1.389,
+   col:[[0,[109,183,55]],[.5,[144,208,106]],[1,[230,255,92]]], a:[[0,1],[.5,1],[1,0]], s:[[0,.056],[.5,.028],[1,.014]]},
+  {name:"sparks2", kind:"flare", rate:10, life:1.1, speed:0.333, grav:1.389,
+   col:[[0,[109,201,0]],[.5,[161,237,52]],[1,[202,255,127]]], a:[[0,.39],[.5,1],[1,0]], s:[[0,.056],[.5,.028],[1,.014]]},
+  {name:"stream", kind:"flare", rate:100, life:0.5, speed:1.111, grav:0, area:0.028,
+   col:[[0,[158,255,64]],[.5,[109,201,0]],[1,[91,169,0]]], a:[[0,.39],[.5,1],[1,.2]], s:[[0,.139],[.5,.083],[1,.028]]},
+];
+const MAGIC_IMPACT = [ // magic_impact_chest.m2 (166525), 1600 ms
+  {name:"streaks", kind:"streak", rate:60, t0:.133, t1:1.6, life:.37, speed:6.111, grav:0, area:.111,
+   col:[[0,[58,0,247]],[.5,[255,255,255]],[1,[255,255,255]]], a:[[0,1],[.5,1],[1,0]], s:[[0,.103],[.5,.136],[1,.028]]},
+  {name:"ring", kind:"ring", rate:19.3, t0:0, t1:.3, life:.5, speed:.261, grav:0,
+   col:[[0,[37,249,82]],[.5,[117,0,226]],[1,[255,255,255]]], a:[[0,.53],[.5,.78],[1,0]], s:[[0,.225],[.5,.836],[1,1.367]]},
+  {name:"sparks", kind:"glow", rate:73, t0:0, t1:.3, life:.705, speed:5.292, grav:6.667, area:.139,
+   col:[[0,[8,248,132]],[.5,[255,255,255]],[1,[255,255,255]]], a:[[0,1],[.5,1],[1,0]], s:[[0,.167],[.5,.094],[1,.028]]},
+  {name:"smoke", kind:"glow", rate:40, t0:0, t1:.2, life:.5, speed:1.636, grav:0, area:.028,
+   col:[[0,[35,123,233]],[.5,[188,188,188]],[1,[145,81,205]]], a:[[0,1],[.5,1],[1,0]], s:[[0,.4],[.5,.6],[1,.828]]},
+  {name:"stars", kind:"flare", rate:24.3, t0:0, t1:.433, life:.75, speed:1.161, grav:0, area:.19,
+   col:[[0,[35,123,233]],[.5,[163,55,239]],[1,[255,255,255]]], a:[[0,1],[.5,1],[1,0]], s:[[0,.15],[.5,.217],[1,.031]]},
+  {name:"rune", kind:"rune", rate:21.4, t0:0, t1:.2, life:.4, speed:.261, grav:0,
+   col:[[0,[37,249,82]],[.5,[151,64,233]],[1,[255,255,255]]], a:[[0,.53],[.5,.78],[1,0]], s:[[0,.197],[.5,.925],[1,1.764]]},
+];
+const DISEASE_IMPACT = [ // bestowdisease_impact_chest.m2 (165679), 3000 ms
+  {name:"glints", kind:"glow", rate:10, t0:0, t1:3, life:1.5, speed:0, grav:0, column:[.278,1.111],
+   col:[[0,[0,119,38]],[.5,[171,214,0]],[1,[194,196,0]]], a:[[0,0],[.5,1],[1,0]], s:[[0,.028],[.5,.556],[1,.028]]},
+  {name:"smoke", kind:"smoke", blend:"alpha", rate:20, t0:0, t1:3, life:2.5, speed:.278, up:true, grav:0, column:[0,.278],
+   col:[[0,[18,55,0]],[.5,[106,146,0]],[1,[163,196,64]]], a:[[0,.39],[.5,1],[1,0]], s:[[0,.222],[.5,.306],[1,.694]]},
+  {name:"spray", kind:"flare", blend:"alpha", rate:150, t0:0, t1:.167, life:.6, speed:3.333, grav:0, area:.278,
+   col:[[0,[49,102,1]],[.5,[99,136,20]],[1,[115,152,1]]], a:[[0,1],[.5,1],[1,0]], s:[[0,.111],[.5,.056],[1,.028]]},
+];
+const SHOTS = [
+  {id:"Aimed Shot", kind:"arcane", speed:45, ron:[255,217,102], note:"2.5 s cast"},
+  {id:"Arcane Shot", kind:"arcane", speed:45, ron:[255,204,77], note:"instant"},
+  {id:"Concussive Shot", kind:"arcane", speed:40, ron:[204,153,77], note:"instant, slows"},
+  {id:"Serpent Sting", kind:"poison", speed:45, ron:[128,255,102], note:"instant, DoT"},
+  {id:"Auto Shot", kind:"arrow", speed:45, ron:[140,100,60], note:"bow auto attack"},
+];
+const P = {
+  shot:1, mode:"client",
+  coreSize:0.6, coreGlow:1.0, rateMul:1.0, sizeMul:1.0, trailAlpha:0.25, trailHeight:0.11, trailLife:0.2,
+  impactScale:0.8, impactSpread:0.6, impactTime:1.0, streakEnd:0.3, diseaseLinger:3.0,
+  layers:{streaks:false, ring:false, sparks:false, smoke:true, stars:true, rune:true},
+  timeScale:1.0, interval:1.6, distance:20, zoom:30, compare:false, cycle:false, paused:false,
+};
+const SLIDERS = {
+  "g-missile":[["coreSize","Core size (yd)",0.2,1.2,0.01],["coreGlow","Core brightness",0.2,2,0.05],["rateMul","Particle rate x",0,2,0.05],
+    ["sizeMul","Particle size x",0.5,2.5,0.05],["trailAlpha","Trail opacity",0,1,0.01],["trailHeight","Trail height (yd)",0.02,0.4,0.01],["trailLife","Trail life (s)",0.05,0.6,0.01]],
+  "g-impact":[["impactScale","Landing size x",0.2,2.5,0.05],["impactSpread","Spread x",0.1,1.5,0.05],["impactTime","Duration x",0.2,1.5,0.05],["streakEnd","Streaks end (s)",0.15,1.6,0.01],["diseaseLinger","Serpent cloud (s)",0.5,3,0.1]],
+  "g-scene":[["timeScale","Speed x (slow-mo)",0.05,1,0.05],["interval","Fire every (s)",0.6,4,0.1],["distance","Range (yd)",8,35,1],["zoom","Zoom (px/yd)",14,60,1]],
+};
+
+// ================================================================ controls
+const $ = id => document.getElementById(id);
+const fmt = (v,step) => step>=1 ? String(Math.round(v)) : v.toFixed(2);
+for (const [gid,list] of Object.entries(SLIDERS)){
+  const g=$(gid);
+  for (const [k,label,min,max,step] of list){
+    const row=document.createElement("div"); row.className="row";
+    row.innerHTML=`<label for="s-${k}">${label}</label><input id="s-${k}" type="range" min="${min}" max="${max}" step="${step}" value="${P[k]}"><output id="o-${k}">${fmt(P[k],step)}</output>`;
+    const inp=row.querySelector("input");
+    inp.addEventListener("input",()=>{P[k]=+inp.value; $("o-"+k).textContent=fmt(P[k],step); refresh();});
+    if (gid==="g-scene") g.insertBefore(row,$("scene")); else g.appendChild(row);
+  }
+}
+const kindColor = {arcane:"#4e21c9", poison:"#8dcf0c", arrow:"#8c643c"};
+SHOTS.forEach((s,i)=>{ const b=document.createElement("button"); b.type="button"; b.className="chip";
+  b.innerHTML=`<span class="dot" style="background:${kindColor[s.kind]}"></span>${s.id}`;
+  b.addEventListener("click",()=>{P.shot=i; resetScene(); refresh();}); $("shots").appendChild(b); });
+[["client","Client-faithful"],["now","Now (arrow cuboids)"]].forEach(([v,l])=>{ const b=document.createElement("button"); b.type="button"; b.className="chip";
+  b.textContent=l; b.dataset.v=v; b.addEventListener("click",()=>{P.mode=v; resetScene(); refresh();}); $("modes").appendChild(b); });
+for (const [k,label] of [["compare","Shadow Bolt lane (colour check)"],["cycle","Cycle all shots"],["paused","Pause"]]){
+  const l=document.createElement("label"); l.innerHTML=`<input type="checkbox" id="c-${k}">${label}`;
+  l.querySelector("input").addEventListener("change",e=>{P[k]=e.target.checked; resetScene(); refresh();}); $("scene").appendChild(l);
+}
+for (const k of Object.keys(P.layers)){
+  const l=document.createElement("label"); l.innerHTML=`<input type="checkbox" id="l-${k}" ${P.layers[k]?"checked":""}>${k}`;
+  l.querySelector("input").addEventListener("change",e=>{P.layers[k]=e.target.checked; refresh();}); $("layers").appendChild(l);
+}
+function refresh(){
+  [...$("shots").children].forEach((b,i)=>b.setAttribute("aria-pressed",String(i===P.shot)));
+  [...$("modes").children].forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.v===P.mode)));
+  const tb=$("srcTable").tBodies[0]; tb.innerHTML="";
+  const M={arcane:"<code>arcaneshot_missile</code>: violet mote, white trail",poison:"<code>poisonshot_missile</code>: green mote, dripping sparks",arrow:"<code>arrowflight_01</code>: 1.52 yd shaft, white trail"};
+  const L={arcane:"<code>magic_impact_chest</code>, 1.6 s",poison:"<code>bestowdisease_impact_chest</code>, 3 s cloud",arrow:"none (wound anim + sound)"};
+  SHOTS.forEach((s,i)=>{ const tr=document.createElement("tr"); if(i===P.shot) tr.className="sel";
+    tr.innerHTML=`<td>${s.id}<br><span style="color:var(--muted)">${s.note}</span></td><td>${M[s.kind]}</td><td>${L[s.kind]}</td><td>${s.speed} yd/s</td>`; tb.appendChild(tr); });
+  $("code").textContent=rust();
+}
+function rust(){
+  const f=(v,d=2)=>v.toFixed(d);
+  return [
+`// rendering/effects/hunter_shots.rs — tuned in the AS-136 Hunter Shot Bench.`,
+`// Emitter tables (rates, lives, speeds, gravity, colour ramps) transcribe`,
+`// docs/design/2026-09-26-hunter-shot-client-data.md verbatim; these are the`,
+`// bench's knobs on top of them.`,
+``,
+`/// Billboard core of the shared shot (client extent ~0.6 yd).`,
+`const HUNTER_SHOT_CORE_DIAMETER: f32 = ${f(P.coreSize)};`,
+`const HUNTER_SHOT_CORE_BRIGHTNESS: f32 = ${f(P.coreGlow)};`,
+`/// Multipliers over the client's per-emitter rates and sizes (1.0 = client).`,
+`const HUNTER_SHOT_RATE_SCALE: f32 = ${f(P.rateMul)};`,
+`const HUNTER_SHOT_SIZE_SCALE: f32 = ${f(P.sizeMul)};`,
+``,
+`/// The white ribbon every Hunter missile and the arrow share (client: 0.25 / 0.11 / 0.2).`,
+`const HUNTER_TRAIL_ALPHA: f32 = ${f(P.trailAlpha)};`,
+`const HUNTER_TRAIL_HEIGHT: f32 = ${f(P.trailHeight)};`,
+`const HUNTER_TRAIL_LIFETIME: f32 = ${f(P.trailLife)};`,
+``,
+`/// Landing scale over the client's sizes (1.0 = client).`,
+`const HUNTER_IMPACT_SCALE: f32 = ${f(P.impactScale)};`,
+`/// Particle speed (and gravity) scale on the landing: how far it throws.`,
+`const HUNTER_IMPACT_SPREAD: f32 = ${f(P.impactSpread)};`,
+`/// Emission windows and particle lives on the landing (1.0 = client).`,
+`const HUNTER_IMPACT_TIME_SCALE: f32 = ${f(P.impactTime)};`,
+`/// magic_impact_chest layers kept: ${Object.entries(P.layers).filter(([k,v])=>v).map(([k])=>k).join(", ")}`,
+`/// Streak emitter window end. The data has no enabled track; 1.6 s (the sequence end) read as far too long.`,
+`const HUNTER_IMPACT_STREAK_END: f32 = ${f(P.streakEnd)};`,
+`/// bestowdisease_impact_chest emission window (client: 3.0 s).`,
+`const SERPENT_IMPACT_LINGER: f32 = ${f(P.diseaseLinger,1)};`,
+``,
+`/// Auto Shot arrow (arrowflight_01.m2): 1.52 yd shaft, 0.14 yd across.`,
+`const AUTO_ARROW_LENGTH: f32 = 1.52;`,
+`const AUTO_ARROW_WIDTH: f32 = 0.14;`].join("\n");
+}
+$("copy").addEventListener("click",()=>{ const t=$("code").textContent;
+  navigator.clipboard.writeText(t).then(()=>{$("copy").textContent="Copied";setTimeout(()=>$("copy").textContent="Copy",1200);})
+  .catch(()=>{const r=document.createRange();r.selectNodeContents($("code"));const s=getSelection();s.removeAllRanges();s.addRange(r);}); });
+
+// ================================================================ scene
+const cv=$("cv"), ctx=cv.getContext("2d"), W=cv.width, H=cv.height;
+const PITCH=38.7*Math.PI/180, GS=Math.sin(PITCH), HS=Math.cos(PITCH);
+const CHEST_Y=1.35, FLOOR=[201,168,117];
+function proj(x,y,z){ const s=P.zoom; return [W/2 + x*s, H*0.66 + z*s*GS - y*s*HS]; }
+const floorCv=document.createElement("canvas"); floorCv.width=256; floorCv.height=256;
+{ const f=floorCv.getContext("2d"), id=f.createImageData(256,256); let s=777; const r=()=>{s=(s*1103515245+12345)&0x7fffffff; return s/0x7fffffff;};
+  for(let i=0;i<65536;i++){const n=(r()-.5)*.12*255; id.data[i*4]=FLOOR[0]+n; id.data[i*4+1]=FLOOR[1]+n*.9; id.data[i*4+2]=FLOOR[2]+n*.8; id.data[i*4+3]=255;} f.putImageData(id,0,0); }
+const floorPat=ctx.createPattern(floorCv,"repeat");
+
+function ramp(r,t){ for(let i=1;i<r.length;i++){ if(t<=r[i][0]){ const [a,va]=r[i-1],[b,vb]=r[i]; const k=(t-a)/((b-a)||1);
+  return Array.isArray(va)? va.map((v,j)=>v+(vb[j]-v)*k) : va+(vb-va)*k; } } return r[r.length-1][1]; }
+const rgba=(c,a)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${Math.max(0,Math.min(1,a))})`;
+function randDir(){ const u=Math.random()*2-1, th=Math.random()*Math.PI*2, r=Math.sqrt(1-u*u); return [r*Math.cos(th),u,r*Math.sin(th)]; }
+
+let missiles=[], particles=[], impacts=[], units=[], fireT=0, simT=0, cycleIdx=0;
+function lanes(){ const L=[{z:0, kind:"shot"}]; if(P.compare) L.push({z:-3.2, kind:"shadow"}); return L; }
+function resetScene(){ missiles=[]; particles=[]; impacts=[]; fireT=0.2; }
+function shooterX(){ return -P.distance/2; } function targetX(){ return P.distance/2; }
+
+function fire(){
+  const shot = SHOTS[P.cycle ? (cycleIdx++ % SHOTS.length) : P.shot];
+  if (P.cycle) { P.shot = SHOTS.indexOf(shot); refresh(); }
+  for (const lane of lanes()){
+    const kind = lane.kind==="shadow" ? "shadow" : shot.kind;
+    const speed = lane.kind==="shadow" ? 30 : shot.speed;
+    missiles.push({x:shooterX()+0.5, y:CHEST_Y, z:lane.z, tx:targetX(), speed, kind, ron:shot.ron, trail:[], acc:{}, lane:lane.z});
+  }
+}
+function emit(list, src, dt, age, bag, scaleSpace=1){
+  const isImpact = list===MAGIC_IMPACT || list===DISEASE_IMPACT;
+  for (const e of list){
+    if (list===MAGIC_IMPACT && !P.layers[e.name]) continue;
+    if (e.t0!==undefined){ const end = e.name==="streaks" ? P.streakEnd : (list===DISEASE_IMPACT && e.t1===3 ? P.diseaseLinger : e.t1*P.impactTime);
+      if (age<e.t0*P.impactTime || age>end) continue; }
+    bag[e.name]=(bag[e.name]||0) + e.rate*P.rateMul*dt;
+    while (bag[e.name]>=1){ bag[e.name]-=1;
+      const d=randDir(); let px=src.x, py=src.y, pz=src.z;
+      if (e.area){ px+=(Math.random()-.5)*e.area*scaleSpace; py+=(Math.random()-.5)*e.area*scaleSpace; pz+=(Math.random()-.5)*e.area*scaleSpace; }
+      if (e.column){ px+=(Math.random()-.5)*e.column[0]; pz+=(Math.random()-.5)*e.column[0]; py+=(Math.random()-.5)*e.column[1]; }
+      const sp=e.speed*scaleSpace*(isImpact?P.impactSpread:1); const v = e.up ? [d[0]*.2*sp, sp, d[2]*.2*sp] : [d[0]*sp,d[1]*sp,d[2]*sp];
+      particles.push({x:px,y:py,z:pz,vx:v[0],vy:v[1],vz:v[2],age:0,e,scale:scaleSpace,life:e.life*(isImpact?P.impactTime:1)});
+    }
+  }
+}
+function step(dt){
+  simT+=dt; fireT-=dt; if (fireT<=0){ fire(); fireT=P.interval; }
+  for (const m of missiles){
+    m.x += m.speed*dt;
+    m.trail.push({x:m.x,y:m.y,z:m.z,t:simT}); m.trail = m.trail.filter(p=>simT-p.t<P.trailLife);
+    if (P.mode==="client"){
+      if (m.kind==="arcane") emit(ARCANE_MISSILE,m,dt,0,m.acc);
+      if (m.kind==="poison") emit(POISON_MISSILE,m,dt,0,m.acc);
+    }
+    if (m.x>=m.tx-0.4){ m.done=true;
+      if (P.mode==="now") impacts.push({kind:"now", x:m.tx-.4,y:m.y,z:m.z,age:0,ron:m.ron});
+      else if (m.kind==="arcane") impacts.push({kind:"magic",x:m.tx-.4,y:m.y,z:m.z,age:0,acc:{}});
+      else if (m.kind==="poison") impacts.push({kind:"disease",x:m.tx-.4,y:m.y,z:m.z,age:0,acc:{}});
+      else if (m.kind==="shadow") impacts.push({kind:"shadowhit",x:m.tx-.4,y:m.y,z:m.z,age:0});
+      units.forEach(u=>{ if(Math.abs(u.z-m.z)<.1) u.flinch=0.25; });
+    }
+  }
+  missiles=missiles.filter(m=>!m.done);
+  for (const im of impacts){ im.age+=dt;
+    if (im.kind==="magic") emit(MAGIC_IMPACT,im,dt,im.age,im.acc,P.impactScale);
+    if (im.kind==="disease") emit(DISEASE_IMPACT,im,dt,im.age,im.acc,P.impactScale); }
+  impacts=impacts.filter(im=>im.age<(im.kind==="disease"?P.diseaseLinger+2.6:im.kind==="magic"?2.4:0.4));
+  for (const p of particles){ p.age+=dt; p.vy-=(p.e.grav||0)*(p.scale!==1?P.impactSpread:1)*dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt; }
+  particles=particles.filter(p=>p.age<p.life);
+  units.forEach(u=>{ u.flinch=Math.max(0,(u.flinch||0)-dt); });
+}
+
+// ---------------------------------------------------------------- drawing
+function drawFloor(){
+  ctx.globalCompositeOperation="source-over"; ctx.fillStyle="#2b2620"; ctx.fillRect(0,0,W,H);
+  const [cx,cy]=proj(0,0,0); ctx.save(); ctx.translate(cx,cy); ctx.scale(1,GS);
+  ctx.beginPath(); ctx.arc(0,0,40*P.zoom,0,Math.PI*2); ctx.fillStyle=floorPat; ctx.fill(); ctx.restore();
+}
+function capsule(x,z,color,lean=0){
+  ctx.globalCompositeOperation="source-over";
+  const [sx,sy]=proj(x+lean,0,z); const w=.8*P.zoom, h=1.9*P.zoom*HS;
+  ctx.save(); ctx.translate(sx,sy); ctx.scale(1,GS); ctx.beginPath(); ctx.arc(0,0,.5*P.zoom,0,Math.PI*2); ctx.fillStyle="rgba(40,28,15,.35)"; ctx.fill(); ctx.restore();
+  const g=ctx.createLinearGradient(sx-w/2,0,sx+w/2,0); g.addColorStop(0,color); g.addColorStop(1,"#0007");
+  ctx.fillStyle=g; ctx.beginPath(); ctx.roundRect(sx-w/2,sy-h,w,h,w/2); ctx.fill();
+}
+function drawParticle(p){
+  const e=p.e, t=p.age/p.life; const c=ramp(e.col,t), a=ramp(e.a,t), size=ramp(e.s,t)*P.sizeMul*p.scale;
+  ctx.globalCompositeOperation = e.blend==="alpha" ? "source-over" : "lighter";
+  const [sx,sy]=proj(p.x,p.y,p.z); const r=Math.max(.6,size*P.zoom/2);
+  if (e.kind==="glow" || e.kind==="smoke"){
+    const g=ctx.createRadialGradient(sx,sy,0,sx,sy,r); g.addColorStop(0,rgba(c,a)); g.addColorStop(e.kind==="smoke"?.6:.35,rgba(c,a*.45)); g.addColorStop(1,rgba(c,0));
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.fill();
+  } else if (e.kind==="flare"){
+    const g=ctx.createRadialGradient(sx,sy,0,sx,sy,r); g.addColorStop(0,rgba([255,255,255],a)); g.addColorStop(.25,rgba(c,a)); g.addColorStop(1,rgba(c,0));
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.fill();
+    if (r>2){ ctx.strokeStyle=rgba(c,a*.8); ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(sx-r*1.6,sy); ctx.lineTo(sx+r*1.6,sy); ctx.moveTo(sx,sy-r*1.6); ctx.lineTo(sx,sy+r*1.6); ctx.stroke(); }
+  } else if (e.kind==="streak"){
+    const [ex,ey]=proj(p.x-p.vx*.045,p.y-p.vy*.045,p.z-p.vz*.045);
+    ctx.strokeStyle=rgba(c,a); ctx.lineWidth=Math.max(1,r*.7); ctx.lineCap="round"; ctx.beginPath(); ctx.moveTo(ex,ey); ctx.lineTo(sx,sy); ctx.stroke();
+  } else if (e.kind==="ring" || e.kind==="rune"){
+    ctx.save(); ctx.translate(sx,sy); ctx.scale(1,GS);
+    ctx.strokeStyle=rgba(c,a); ctx.lineWidth=Math.max(1,r*.14); ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke();
+    if (e.kind==="rune"){ ctx.lineWidth=Math.max(1,r*.08); for(let i=0;i<8;i++){ const an=i*Math.PI/4+p.age*2; ctx.beginPath(); ctx.moveTo(Math.cos(an)*r*.72,Math.sin(an)*r*.72); ctx.lineTo(Math.cos(an)*r*.9,Math.sin(an)*r*.9); ctx.stroke(); } }
+    ctx.restore();
+  }
+}
+function drawTrail(m, color=[255,255,255]){
+  if (m.trail.length<2) return; ctx.globalCompositeOperation="lighter"; ctx.lineCap="round";
+  for (let i=1;i<m.trail.length;i++){ const a=m.trail[i-1], b=m.trail[i]; const k=(simT-b.t)/P.trailLife;
+    const [x1,y1]=proj(a.x,a.y,a.z), [x2,y2]=proj(b.x,b.y,b.z);
+    ctx.strokeStyle=rgba(color,P.trailAlpha*(1-k)); ctx.lineWidth=Math.max(1,P.trailHeight*P.zoom*HS); ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); }
+}
+function drawMissile(m){
+  const [sx,sy]=proj(m.x,m.y,m.z);
+  if (P.mode==="now" && m.kind!=="shadow"){ // arrow cuboid 0.08 x 0.08 x 0.6, RON tint, emissive
+    ctx.globalCompositeOperation="source-over"; const [tx,ty]=proj(m.x-.6,m.y,m.z);
+    ctx.strokeStyle=rgba(m.ron,1); ctx.lineWidth=Math.max(2,.08*P.zoom*1.4); ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(sx,sy); ctx.stroke(); return; }
+  if (m.kind==="arrow"){ drawTrail(m);
+    ctx.globalCompositeOperation="source-over"; const [tx,ty]=proj(m.x-1.52,m.y,m.z);
+    ctx.strokeStyle="#6b4a2b"; ctx.lineWidth=Math.max(1.5,.07*P.zoom); ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(sx,sy); ctx.stroke();
+    ctx.fillStyle="#d8d2c4"; ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(tx+.25*P.zoom,ty-.07*P.zoom); ctx.lineTo(tx+.25*P.zoom,ty+.07*P.zoom); ctx.fill();
+    ctx.fillStyle="#9aa0a6"; ctx.beginPath(); ctx.moveTo(sx+.12*P.zoom,sy); ctx.lineTo(sx-.05*P.zoom,sy-.05*P.zoom); ctx.lineTo(sx-.05*P.zoom,sy+.05*P.zoom); ctx.fill(); return; }
+  if (m.kind==="shadow"){ // spell_bolts.rs: violet halo, dark opaque core
+    const r=.49*.85*P.zoom; ctx.globalCompositeOperation="lighter"; const g=ctx.createRadialGradient(sx,sy,0,sx,sy,r*1.4);
+    g.addColorStop(0,"rgba(98,63,188,.9)"); g.addColorStop(1,"rgba(98,63,188,0)"); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,r*1.4,0,Math.PI*2); ctx.fill();
+    ctx.globalCompositeOperation="source-over"; ctx.fillStyle="rgb(23,13,38)"; ctx.beginPath(); ctx.arc(sx,sy,.33*.85*P.zoom,0,Math.PI*2); ctx.fill(); return; }
+  drawTrail(m);
+  const core = m.kind==="arcane" ? [[255,255,255],[120,70,235],[60,20,190]] : [[245,255,220],[161,255,28],[90,170,0]];
+  const r=P.coreSize/2*P.zoom; ctx.globalCompositeOperation="lighter"; const g=ctx.createRadialGradient(sx,sy,0,sx,sy,r);
+  g.addColorStop(0,rgba(core[0],.95*P.coreGlow)); g.addColorStop(.25,rgba(core[1],.85*P.coreGlow)); g.addColorStop(.6,rgba(core[2],.35*P.coreGlow)); g.addColorStop(1,rgba(core[2],0));
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.fill();
+}
+function drawNowImpact(im){ const k=im.age/.4; const [sx,sy]=proj(im.x,im.y,im.z); ctx.globalCompositeOperation="lighter";
+  const r=(.3+k*.5)*P.zoom; const g=ctx.createRadialGradient(sx,sy,0,sx,sy,r); g.addColorStop(0,rgba(im.ron,1-k)); g.addColorStop(1,rgba(im.ron,0));
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.fill(); }
+function drawShadowHit(im){ const k=im.age/.4; const [sx,sy]=proj(im.x,im.y,im.z); ctx.globalCompositeOperation="lighter";
+  const r=(.4+k*.6)*P.zoom; const g=ctx.createRadialGradient(sx,sy,0,sx,sy,r); g.addColorStop(0,`rgba(98,63,188,${1-k})`); g.addColorStop(1,"rgba(98,63,188,0)");
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.fill(); }
+
+let last=performance.now();
+function frame(now){
+  let dt=Math.min(.05,(now-last)/1000); last=now; if(P.paused) dt=0;
+  const sub=dt*P.timeScale; step(sub);
+  drawFloor();
+  units = lanes().flatMap(l=>[{x:shooterX(),z:l.z,color:"#abd473",flinch:0},{x:targetX(),z:l.z,color:l.kind==="shadow"?"#8b8f96":"#c79c6e",flinch:(units.find(u=>u.z===l.z&&u.x===targetX())||{}).flinch||0}]);
+  const order=[...lanes()].sort((a,b)=>a.z-b.z);
+  for (const l of order){
+    units.filter(u=>u.z===l.z).forEach(u=>capsule(u.x,u.z,u.color,u.x===targetX()?u.flinch*.6:0));
+    missiles.filter(m=>m.z===l.z).forEach(drawMissile);
+    impacts.filter(i=>i.z===l.z).forEach(i=>{ if(i.kind==="now") drawNowImpact(i); if(i.kind==="shadowhit") drawShadowHit(i); });
+  }
+  particles.filter(p=>p.e.blend==="alpha").forEach(drawParticle);
+  particles.filter(p=>p.e.blend!=="alpha").forEach(drawParticle);
+  ctx.globalCompositeOperation="source-over";
+  const s=SHOTS[P.shot];
+  $("hud1").textContent=`${s.id} (${P.mode==="client"?"client-faithful":"now"})${P.compare?" vs Shadow Bolt (back lane)":""}`;
+  $("hud2").textContent=`time x${P.timeScale.toFixed(2)}, ${particles.length} particles`;
+  requestAnimationFrame(frame);
+}
+resetScene(); refresh(); requestAnimationFrame(frame);
+})();
+</script>
+
