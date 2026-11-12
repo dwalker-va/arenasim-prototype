@@ -100,8 +100,7 @@
             armor_type: Plate,
             armor: 280.0,
             max_health: 10.0,
-            attack_power: 3.0,
-            movement_speed: 0.1,
+            attack_power: 5.0,
         ),
 
         WaistguardOfHeroism: (
@@ -234,8 +233,7 @@
             armor: 280.0,
             max_health: 10.0,
             max_mana: 6.0,
-            spell_power: 4.0,
-            movement_speed: 0.1,
+            spell_power: 6.0,
         ),
 
         // ====================================================================
@@ -301,8 +299,7 @@
             armor: 151.0,
             max_health: 8.0,
             max_mana: 6.0,
-            attack_power: 3.0,
-            movement_speed: 0.1,
+            attack_power: 5.0,
         ),
 
         BeaststalkerBelt: (
@@ -408,8 +405,7 @@
             armor: 151.0,
             max_health: 8.0,
             max_mana: 10.0,
-            spell_power: 6.0,
-            movement_speed: 0.1,
+            spell_power: 8.0,
         ),
 
         EarthfuryBelt: (
@@ -515,8 +511,7 @@
             armor: 95.0,
             max_health: 8.0,
             max_mana: 10.0,
-            spell_power: 6.0,
-            movement_speed: 0.1,
+            spell_power: 8.0,
         ),
 
         CenarionBelt: (
@@ -613,8 +608,7 @@
             armor_type: Leather,
             armor: 95.0,
             max_health: 6.0,
-            attack_power: 3.0,
-            movement_speed: 0.15,
+            attack_power: 6.0,
         ),
 
         NightstalkerBelt: (
@@ -712,8 +706,7 @@
             armor: 45.0,
             max_health: 5.0,
             max_mana: 8.0,
-            spell_power: 4.0,
-            movement_speed: 0.1,
+            spell_power: 6.0,
         ),
 
         MagistersBelt: (
@@ -1409,9 +1402,8 @@
             armor_type: Plate,
             armor: 390.0,
             max_health: 24.0,
-            attack_power: 8.0,
+            attack_power: 11.0,
             crit_chance: 0.01,
-            movement_speed: 0.15,
         ),
 
         WarlordsGirdle: (
@@ -1536,9 +1528,8 @@
             armor_type: Plate,
             armor: 390.0,
             max_health: 17.0,
-            spell_power: 8.0,
+            spell_power: 10.0,
             max_mana: 11.0,
-            movement_speed: 0.1,
         ),
 
         JudgementBracers: (
@@ -1633,9 +1624,8 @@
             armor_type: Mail,
             armor: 207.0,
             max_health: 21.0,
-            attack_power: 9.0,
+            attack_power: 11.0,
             crit_chance: 0.02,
-            movement_speed: 0.1,
         ),
 
         GiantstalkerBelt: (
@@ -1742,9 +1732,8 @@
             armor_type: Leather,
             armor: 132.0,
             max_health: 16.0,
-            attack_power: 9.0,
+            attack_power: 12.0,
             crit_chance: 0.03,
-            movement_speed: 0.15,
         ),
 
         DeathdealerBelt: (
@@ -1855,8 +1844,7 @@
             armor: 62.0,
             max_health: 12.0,
             max_mana: 15.0,
-            spell_power: 9.0,
-            movement_speed: 0.1,
+            spell_power: 11.0,
         ),
 
         ArcanistBelt: (
@@ -2325,8 +2313,7 @@
             armor: 73.0,
             max_health: 14.0,
             max_mana: 18.0,
-            spell_power: 10.0,
-            movement_speed: 0.15,
+            spell_power: 13.0,
         ),
 
         FrostfireBelt: (
@@ -2436,9 +2423,8 @@
             armor_type: Leather,
             armor: 157.0,
             max_health: 21.0,
-            attack_power: 11.0,
+            attack_power: 14.0,
             crit_chance: 0.03,
-            movement_speed: 0.15,
         ),
 
         BonescytheWaistguard: (
@@ -2550,8 +2536,7 @@
             armor: 157.0,
             max_health: 14.0,
             max_mana: 18.0,
-            spell_power: 10.0,
-            movement_speed: 0.15,
+            spell_power: 13.0,
         ),
 
         DreamwalkerGirdle: (
@@ -2667,9 +2652,8 @@
             armor: 245.0,
             max_health: 18.0,
             max_mana: 7.0,
-            attack_power: 10.0,
+            attack_power: 13.0,
             crit_chance: 0.02,
-            movement_speed: 0.15,
         ),
 
         CryptstalkerGirdle: (
@@ -2786,8 +2770,7 @@
             armor: 245.0,
             max_health: 14.0,
             max_mana: 16.0,
-            spell_power: 11.0,
-            movement_speed: 0.15,
+            spell_power: 14.0,
         ),
 
         EarthshatterGirdle: (
@@ -2897,9 +2880,8 @@
             armor_type: Plate,
             armor: 465.0,
             max_health: 26.0,
-            attack_power: 10.0,
+            attack_power: 13.0,
             crit_chance: 0.02,
-            movement_speed: 0.15,
         ),
 
         DreadnaughtWaistguard: (
@@ -3014,8 +2996,7 @@
             armor: 465.0,
             max_health: 15.0,
             max_mana: 17.0,
-            spell_power: 10.0,
-            movement_speed: 0.15,
+            spell_power: 13.0,
         ),
 
         RedemptionGirdle: (

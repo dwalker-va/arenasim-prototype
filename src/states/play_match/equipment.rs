@@ -931,9 +931,12 @@ pub struct ItemConfig {
     pub spell_power: f32,
     #[serde(default)]
     pub crit_chance: f32,
-    /// Movement speed as a FRACTION of the wearer's base speed: `0.1` is
-    /// +10%, as the item's label reads. Every worn item's fraction is summed
-    /// and the base scaled once ([`geared_movement_speed`]).
+    /// Movement speed as a FRACTION of the wearer's natural speed: `0.05` is
+    /// +5%, as the item's label reads. A PASSIVE source: the strongest worn
+    /// item's, or a talent's, is the one passive term, capped at
+    /// `PASSIVE_SPEED_CAP` (`components::passive_movement_speed`). An item
+    /// above the cap is refused at load. No shipped item carries it: it is
+    /// for a boot enchant or a meta gem.
     #[serde(default)]
     pub movement_speed: f32,
     /// Armor rating (reduces incoming Physical damage)
@@ -1594,16 +1597,10 @@ pub fn validate_unique_equipped(loadout: &Loadout, items: &ItemDefinitions) -> R
 
 use super::constants::{
     held_budget_multiplier, slot_budget_multiplier, BUDGET_PER_ILVL, BUDGET_TOLERANCE,
-    WEIGHT_ATTACK_POWER, WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN, WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA,
-    WEIGHT_MOVEMENT_SPEED, WEIGHT_RESISTANCE, WEIGHT_SPELL_POWER,
+    PASSIVE_SPEED_CAP, WEIGHT_ATTACK_POWER, WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN,
+    WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA, WEIGHT_MOVEMENT_SPEED, WEIGHT_RESISTANCE,
+    WEIGHT_SPELL_POWER,
 };
-
-/// A combatant's movement speed with its gear on: its base speed raised by
-/// the summed `movement_speed` fraction of every item it wears (`0.1` is
-/// +10%). The one rule the spawn and the View Combatant sheet both apply.
-pub fn geared_movement_speed(base: f32, bonus: f32) -> f32 {
-    base * (1.0 + bonus)
-}
 
 /// Calculate the total budget usage for an item based on its budgeted stats.
 /// Free stats (armor, attack_damage_min/max, weapon_speed) are excluded.
@@ -1967,7 +1964,32 @@ pub fn parse_item_definitions(contents: &str, origin: &str) -> Result<ItemDefini
         .map_err(|e| format!("{} has malformed on-use items:\n{}", origin, e))?;
     validate_triggered_absorbs(&definitions)
         .map_err(|e| format!("{} has malformed triggered absorbs:\n{}", origin, e))?;
+    validate_movement_speeds(&definitions)
+        .map_err(|e| format!("{} has items above the passive speed cap:\n{}", origin, e))?;
     Ok(definitions)
+}
+
+/// Every item's `movement_speed` within `[0, PASSIVE_SPEED_CAP]`, every
+/// offender at once, in item order. Passive speed is one capped term, so an
+/// item above the cap would be priced for speed it can never give.
+pub fn validate_movement_speeds(items: &ItemDefinitions) -> Result<(), String> {
+    let mut errors: Vec<String> = items
+        .iter()
+        .filter(|(_, item)| !(0.0..=PASSIVE_SPEED_CAP).contains(&item.movement_speed))
+        .map(|(id, item)| {
+            format!(
+                "{id:?}: movement_speed {} is outside 0 to {PASSIVE_SPEED_CAP}, the passive \
+                 speed cap",
+                item.movement_speed
+            )
+        })
+        .collect();
+    errors.sort();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("\n"))
+    }
 }
 
 /// [`validate_on_use`](super::on_use_items::validate_on_use) over every item
@@ -2316,12 +2338,13 @@ mod tests {
         }
     }
 
-    /// An item's `movement_speed` is a fraction of the base, as its "+10%"
-    /// label reads: the gear's fractions are summed and the base scaled once,
-    /// so +10% and +5% on a 5 yd/s Warrior is 5.75 — not 5.15 (yards added),
-    /// nor 5.775 (each percentage compounding on the last).
+    /// An item's `movement_speed` is a passive source, a fraction of natural
+    /// speed: the strongest worn item's applies, never the sum, and never
+    /// above the 8% cap. On a 5 yd/s Warrior, +5% and +3% is 5.25 (not 5.4),
+    /// and an item above the cap (built here past the loader, which refuses
+    /// it) gives 5.4, not more. The control: one +3% item alone is 5.15.
     #[test]
-    fn apply_equipment_scales_movement_speed_by_the_summed_fraction() {
+    fn apply_equipment_takes_the_strongest_passive_speed_up_to_the_cap() {
         let speedy = |name: &str, slot, movement_speed| ItemConfig {
             movement_speed,
             ..armor_item(name, slot, ArmorType::Plate)
@@ -2329,30 +2352,59 @@ mod tests {
         let items = make_item_defs(vec![
             (
                 ItemId::SabatonsBattleBorn,
-                speedy("Boots", ItemSlotType::Feet, 0.1),
+                speedy("Boots", ItemSlotType::Feet, 0.05),
             ),
             (
                 ItemId::LionheartHelm,
-                speedy("Helm", ItemSlotType::Head, 0.05),
+                speedy("Helm", ItemSlotType::Head, 0.03),
+            ),
+            (
+                ItemId::WarlordsGreaves,
+                speedy("Greaves", ItemSlotType::Feet, 0.2),
             ),
         ]);
         let new =
             || super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Warrior);
-        let base = new().base_movement_speed;
-        assert_eq!(base, 5.0, "the fixture's arithmetic assumes it");
+        let natural = new().base_movement_speed;
+        assert_eq!(natural, 5.0, "the fixture's arithmetic assumes it");
+        let wearing = |pieces: &[(ItemSlot, ItemId)]| {
+            let loadout: Loadout = pieces.iter().copied().collect();
+            let mut combatant = new();
+            combatant.apply_equipment(&loadout, &items);
+            combatant.base_movement_speed
+        };
+        let helm = (ItemSlot::Head, ItemId::LionheartHelm);
+        assert_eq!(wearing(&[helm]), natural * (1.0 + 0.03));
+        assert_eq!(
+            wearing(&[(ItemSlot::Feet, ItemId::SabatonsBattleBorn), helm]),
+            natural * (1.0 + 0.05),
+            "the strongest source, not the sum"
+        );
+        assert_eq!(
+            wearing(&[(ItemSlot::Feet, ItemId::WarlordsGreaves), helm]),
+            natural * (1.0 + PASSIVE_SPEED_CAP),
+            "never above the cap"
+        );
+        assert!((wearing(&[(ItemSlot::Feet, ItemId::WarlordsGreaves)]) - 5.4).abs() < 1e-5);
+    }
 
-        let mut boots = Loadout::new();
-        boots.insert(ItemSlot::Feet, ItemId::SabatonsBattleBorn);
-        let mut combatant = new();
-        combatant.apply_equipment(&boots, &items);
-        assert_eq!(combatant.base_movement_speed, base * 1.1);
-
-        let mut both = boots.clone();
-        both.insert(ItemSlot::Head, ItemId::LionheartHelm);
-        let mut combatant = new();
-        combatant.apply_equipment(&both, &items);
-        assert_eq!(combatant.base_movement_speed, base * (1.0 + (0.1 + 0.05)));
-        assert!((combatant.base_movement_speed - 5.75).abs() < 1e-5);
+    /// `items.ron` refuses an item whose `movement_speed` is above the 8%
+    /// passive cap, naming it; one at the cap loads.
+    #[test]
+    fn an_item_above_the_passive_speed_cap_fails_to_load() {
+        let ron = |speed: &str| {
+            format!(
+                "(items: {{ SabatonsBattleBorn: (name: \"Sabatons of Battle\", item_level: 56, \
+                 slot: Feet, movement_speed: {speed}) }})"
+            )
+        };
+        assert!(parse_item_definitions(&ron("0.08"), "test").is_ok());
+        let err = parse_item_definitions(&ron("0.09"), "test")
+            .err()
+            .expect("0.09 is above the cap");
+        assert!(err.contains("SabatonsBattleBorn"), "{err}");
+        assert!(err.contains("passive speed cap"), "{err}");
+        assert!(parse_item_definitions(&ron("-0.01"), "test").is_err());
     }
 
     #[test]

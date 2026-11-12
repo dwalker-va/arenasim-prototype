@@ -143,8 +143,8 @@ mod pursuit {
 }
 
 /// The window the pursuit is read over: the Warrior's walk round the pillar,
-/// inside the Paladin's stun.
-const PURSUIT: f32 = 4.5;
+/// about 23yd at its 5 yd/s, inside the Paladin's stun.
+const PURSUIT: f32 = 4.6;
 
 #[test]
 fn a_hurt_warrior_rounds_the_pillar_on_its_healers_side() {

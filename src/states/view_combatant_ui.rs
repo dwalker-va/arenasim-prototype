@@ -28,11 +28,13 @@
 
 use super::configure_match_ui::ClassIcons;
 use super::play_match::ability_config::AbilityDefinitions;
-use super::play_match::components::{class_base_stats, ClassBaseStats, PetType, ResourceType};
+use super::play_match::components::{
+    class_base_stats, passive_movement_speed, ClassBaseStats, PetType, ResourceType,
+};
 use super::play_match::equipment::{
-    enforce_two_hand_conflicts, find_one_handed_mainhand, geared_movement_speed,
-    resolve_equipped_loadout, resolve_loadout, DefaultLoadouts, HeldSlot, ItemConfig,
-    ItemDefinitions, ItemId, ItemSlot, Loadout,
+    enforce_two_hand_conflicts, find_one_handed_mainhand, resolve_equipped_loadout,
+    resolve_loadout, DefaultLoadouts, HeldSlot, ItemConfig, ItemDefinitions, ItemId, ItemSlot,
+    Loadout,
 };
 use super::play_match::rendering::{icon_load_settled, item_aura_icons, GENERIC_AURA_ICONS};
 use super::play_match::AbilityType;
@@ -145,8 +147,8 @@ struct EquipmentBonuses {
     attack_power: f32,
     spell_power: f32,
     crit_chance: f32,
-    /// The summed `movement_speed` FRACTION of the gear (`0.1` is +10%), not
-    /// yards a second: the sheet scales the base by it as the spawn does.
+    /// The strongest `movement_speed` FRACTION in the gear (`0.05` is +5%), not
+    /// yards a second: one passive source, as the spawn takes it.
     move_speed_bonus: f32,
     armor: f32,
     fire_resistance: f32,
@@ -175,7 +177,7 @@ impl EquipmentBonuses {
                 bonuses.attack_power += item.attack_power;
                 bonuses.spell_power += item.spell_power;
                 bonuses.crit_chance += item.crit_chance;
-                bonuses.move_speed_bonus += item.movement_speed;
+                bonuses.move_speed_bonus = bonuses.move_speed_bonus.max(item.movement_speed);
                 bonuses.armor += item.armor;
                 bonuses.fire_resistance += item.fire_resistance;
                 bonuses.frost_resistance += item.frost_resistance;
@@ -1023,6 +1025,10 @@ struct StatLine<'a> {
     /// reduction, a resistance's damage reduction. Read off the TALENTED
     /// total, the one the spawn fights with.
     mitigation: Option<&'a dyn Fn(f32) -> String>,
+    /// The talented total, for a stat the build does not change by
+    /// [`StatChange::applied`] (movement speed, one capped passive term);
+    /// `None` reads it off `base + gear` by that rule.
+    total: Option<f32>,
 }
 
 impl StatLine<'_> {
@@ -1034,7 +1040,9 @@ impl StatLine<'_> {
         talents: &std::collections::BTreeMap<TalentStat, StatChange>,
     ) {
         let geared = self.base + self.gear;
-        let total = talented(geared, talents, self.stat);
+        let total = self
+            .total
+            .unwrap_or_else(|| talented(geared, talents, self.stat));
         if total == 0.0 {
             return;
         }
@@ -1346,6 +1354,7 @@ fn render_stats_panel(
                                 value: &pct,
                                 amount: &pct,
                                 mitigation: None,
+                                total: None,
                             },
                             StatLine {
                                 key: "Mana Regen",
@@ -1355,18 +1364,29 @@ fn render_stats_panel(
                                 value: &|v| format!("+{v:.1} MP5"),
                                 amount: &one,
                                 mitigation: None,
+                                total: None,
                             },
                             StatLine {
                                 key: "Move Speed",
                                 stat: TalentStat::MovementSpeed,
                                 base: stats.movement_speed,
-                                gear: geared_movement_speed(
+                                gear: passive_movement_speed(
                                     stats.movement_speed,
                                     equip.move_speed_bonus,
                                 ) - stats.movement_speed,
                                 value: &|v| format!("{v:.1}/s"),
                                 amount: &one,
                                 mitigation: None,
+                                // The strongest passive source, the gear's
+                                // or the build's, capped: as the spawn.
+                                total: Some(passive_movement_speed(
+                                    stats.movement_speed,
+                                    equip.move_speed_bonus.max(
+                                        talents
+                                            .get(&TalentStat::MovementSpeed)
+                                            .map_or(0.0, |c| c.points),
+                                    ),
+                                )),
                             },
                             StatLine {
                                 key: "Armor",
@@ -1376,6 +1396,7 @@ fn render_stats_panel(
                                 value: &whole,
                                 amount: &whole,
                                 mitigation: Some(&armor_reduction),
+                                total: None,
                             },
                         ];
                         for (i, line) in lines.iter().enumerate() {
@@ -1433,6 +1454,7 @@ fn render_stats_panel(
                                 value: &whole,
                                 amount: &whole,
                                 mitigation: Some(&resistance_reduction),
+                                total: None,
                             }
                             .draw(ui, talents);
                         }

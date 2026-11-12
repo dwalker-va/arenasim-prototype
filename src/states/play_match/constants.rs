@@ -404,10 +404,18 @@ pub const EXTRA_SWING_HASTE_RATIO: f32 = 1.5;
 pub const WEIGHT_EXTRA_SWING: f32 = EXTRA_SWING_HASTE_RATIO * WEIGHT_ATTACK_SPEED;
 
 /// Cost weight per fraction-point of movement_speed in the item budget.
-/// An item's movement_speed is a fraction of its wearer's base speed (0.1 is
-/// +10%, `equipment::geared_movement_speed`), so this weight is large: 0.1
-/// costs 3.0 budget points, the price of 1% crit chance.
+/// An item's movement_speed is a fraction of its wearer's natural speed
+/// (0.05 is +5%, `components::passive_movement_speed`), so this weight is
+/// large: 0.05 costs 1.5 budget points. A talent's `MovementSpeed` points are
+/// the same fraction and are priced at the same weight.
 pub const WEIGHT_MOVEMENT_SPEED: f32 = 30.0;
+
+/// The cap on PASSIVE movement speed, as a fraction of natural speed: TBC's
+/// 8%. Every passive source — an item's `movement_speed` (boots, an enchant,
+/// a meta gem), a talent's — feeds ONE term; the strongest applies, never
+/// their sum, and never above this. A temporary speed aura (Travel Form, a
+/// sprint) is outside the cap. `items.ron` refuses an item above it.
+pub const PASSIVE_SPEED_CAP: f32 = 0.08;
 
 /// Cost weight per point of elemental resistance in the item budget.
 /// Applied equally to all six resistance types (fire, frost, shadow, arcane, nature, holy).

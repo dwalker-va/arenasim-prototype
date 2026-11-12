@@ -45,7 +45,7 @@ use super::ability_config::{AbilityConfig, AbilityDefinitions};
 use super::components::{AuraType, Combatant};
 use super::constants::{
     WEIGHT_ATTACK_POWER, WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN, WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA,
-    WEIGHT_RESISTANCE, WEIGHT_SPELL_POWER,
+    WEIGHT_MOVEMENT_SPEED, WEIGHT_RESISTANCE, WEIGHT_SPELL_POWER,
 };
 use super::equipment::{
     resolve_equipped_loadout, validate_class_restrictions, DefaultLoadouts, ItemDefinitions,
@@ -189,6 +189,9 @@ pub struct TreeConfig {
 /// ([`StatChange::applied`] is the one rule). A chance or a haste that is 0
 /// for every class (dodge, parry, melee attack speed) takes points only
 /// ([`TalentStat::takes_points_only`]): a percentage of 0 would be nothing.
+/// So does movement speed, whose points are already a fraction of natural
+/// speed: a passive source, offered to the one capped passive term
+/// ([`Combatant::offer_passive_speed`]) as an item's is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TalentStat {
     MaxHealth,
@@ -229,11 +232,6 @@ impl TalentStat {
     /// even for haste, which the budget prices only as a proc
     /// (`WEIGHT_ATTACK_SPEED`). Giving such a stat a weight here would
     /// re-price every item that carries it.
-    ///
-    /// Movement speed is `None` too, though items carry it: the item weight
-    /// is per FRACTION of base speed (`0.1` is +10%), while this stat's points
-    /// and total are yards a second, so the item weight would misprice it
-    /// about fivefold. Its node declares its price.
     pub fn item_weight(self) -> Option<f32> {
         match self {
             TalentStat::MaxHealth => Some(WEIGHT_MAX_HEALTH),
@@ -242,14 +240,14 @@ impl TalentStat {
             TalentStat::AttackPower => Some(WEIGHT_ATTACK_POWER),
             TalentStat::SpellPower => Some(WEIGHT_SPELL_POWER),
             TalentStat::CritChance => Some(WEIGHT_CRIT_CHANCE),
+            TalentStat::MovementSpeed => Some(WEIGHT_MOVEMENT_SPEED),
             TalentStat::FireResistance
             | TalentStat::FrostResistance
             | TalentStat::ShadowResistance
             | TalentStat::ArcaneResistance
             | TalentStat::NatureResistance
             | TalentStat::HolyResistance => Some(WEIGHT_RESISTANCE),
-            TalentStat::MovementSpeed
-            | TalentStat::Armor
+            TalentStat::Armor
             | TalentStat::WeaponDamage
             | TalentStat::OffHandDamage
             | TalentStat::DodgeChance
@@ -259,20 +257,21 @@ impl TalentStat {
     }
 
     /// Whether only a `StatAdd` may raise this stat: a chance or haste every
-    /// class has at 0, so a percentage of its total would be nothing. A
-    /// `StatPercent` of one is refused at load.
+    /// class has at 0, so a percentage of its total would be nothing, or
+    /// movement speed, whose points are already a percentage. A `StatPercent`
+    /// of one is refused at load.
     pub fn takes_points_only(self) -> bool {
         match self {
-            TalentStat::DodgeChance | TalentStat::ParryChance | TalentStat::MeleeAttackSpeed => {
-                true
-            }
+            TalentStat::DodgeChance
+            | TalentStat::ParryChance
+            | TalentStat::MeleeAttackSpeed
+            | TalentStat::MovementSpeed => true,
             TalentStat::MaxHealth
             | TalentStat::MaxMana
             | TalentStat::ManaRegen
             | TalentStat::AttackPower
             | TalentStat::SpellPower
             | TalentStat::CritChance
-            | TalentStat::MovementSpeed
             | TalentStat::Armor
             | TalentStat::FireResistance
             | TalentStat::FrostResistance
@@ -286,7 +285,7 @@ impl TalentStat {
     }
 
     /// The combatant's total of this stat (for a weapon, its live swing's
-    /// damage).
+    /// damage; for movement speed, its strongest passive source).
     pub fn total(self, c: &Combatant) -> f32 {
         match self {
             TalentStat::MaxHealth => c.max_health,
@@ -295,7 +294,7 @@ impl TalentStat {
             TalentStat::AttackPower => c.attack_power,
             TalentStat::SpellPower => c.spell_power,
             TalentStat::CritChance => c.crit_chance,
-            TalentStat::MovementSpeed => c.base_movement_speed,
+            TalentStat::MovementSpeed => c.passive_speed,
             TalentStat::Armor => c.armor,
             TalentStat::FireResistance => c.fire_resistance,
             TalentStat::FrostResistance => c.frost_resistance,
@@ -311,7 +310,8 @@ impl TalentStat {
         }
     }
 
-    /// Apply `change` to this stat of the combatant ([`StatChange::applied`]).
+    /// Apply `change` to this stat of the combatant ([`StatChange::applied`]);
+    /// movement speed's points are offered as a passive source instead.
     fn apply(self, c: &mut Combatant, change: StatChange) {
         let stat = |value: &mut f32| *value = change.applied(*value);
         match self {
@@ -321,7 +321,7 @@ impl TalentStat {
             TalentStat::AttackPower => stat(&mut c.attack_power),
             TalentStat::SpellPower => stat(&mut c.spell_power),
             TalentStat::CritChance => stat(&mut c.crit_chance),
-            TalentStat::MovementSpeed => stat(&mut c.base_movement_speed),
+            TalentStat::MovementSpeed => c.offer_passive_speed(change.points),
             TalentStat::Armor => stat(&mut c.armor),
             TalentStat::FireResistance => stat(&mut c.fire_resistance),
             TalentStat::FrostResistance => stat(&mut c.frost_resistance),
@@ -1063,9 +1063,12 @@ impl TalentDefinitions {
                     return Err(format!("a stat percentage of {fraction} is not positive"));
                 }
                 if stat.takes_points_only() {
+                    let why = match stat {
+                        TalentStat::MovementSpeed => "whose points are already a percentage",
+                        _ => "which every class has at 0",
+                    };
                     return Err(format!(
-                        "takes a percentage of {stat:?}, which every class has at 0: a \
-                         StatAdd adds it in points"
+                        "takes a percentage of {stat:?}, {why}: a StatAdd adds it in points"
                     ));
                 }
                 if matches!(effect, TalentEffect::PetStatPercent(..)) && !has_pet(talent.class) {

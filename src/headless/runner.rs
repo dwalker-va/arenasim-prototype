@@ -1196,6 +1196,31 @@ fn observe_frame(world: &World) -> FrameObservation {
     }
 }
 
+/// [`build_headless_app`] with `stage` landed on it as the gates open, the
+/// way [`run_headless_match_staged`] lands one: for a test that drives the
+/// app itself and reads its world at the end (`tests/results_damage_totals.rs`).
+pub fn build_headless_app_staged(
+    config: &HeadlessMatchConfig,
+    suppress_log: bool,
+    preloaded: Option<&PreloadedConfigs>,
+    stage: Stage,
+) -> App {
+    let mut app = build_headless_app(config, suppress_log, preloaded);
+    add_stage(&mut app, stage);
+    app
+}
+
+/// Land `stage` between `update_countdown` and every other combat system of
+/// its frame, so nothing runs on a half-built world.
+fn add_stage(app: &mut App, stage: Stage) {
+    app.insert_resource(PendingStage(Some(stage))).add_systems(
+        FixedUpdate,
+        land_stage
+            .after(systems::update_countdown)
+            .before(systems::update_dampening),
+    );
+}
+
 /// Build the headless match [`App`] for `config`: minimal plugins, the fixed
 /// 1/60s clock, the game configs (preloaded or from disk), the
 /// [`HeadlessPlugin`], and a single-threaded executor on every schedule.
@@ -1298,12 +1323,7 @@ fn run_match_impl(
 
     let mut app = build_headless_app(&config, suppress_log, preloaded);
     if let Some(stage) = stage {
-        app.insert_resource(PendingStage(Some(stage))).add_systems(
-            FixedUpdate,
-            land_stage
-                .after(systems::update_countdown)
-                .before(systems::update_dampening),
-        );
+        add_stage(&mut app, stage);
     }
 
     // Registration guard (debug builds / cargo test only): movement config

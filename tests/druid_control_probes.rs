@@ -2195,13 +2195,94 @@ fn a_root_is_broken_on_the_next_global_cooldown() {
         from_the_form >= 15,
         "only {from_the_form} roots landed in the form — the seeds moved"
     );
-    // The hand-picked list this floor was set on (10) chose matches FOR their
-    // emergency heals; the bank does not, and holds 7 (AS-249). Five keeps
-    // the exemption exercised several times over without re-picking seeds.
+    // The bank does not choose matches for their emergency heals: it held 7
+    // (AS-249), then 3 once every unit's speed moved 2% (AS-464). The
+    // exemption itself is pinned by a stage of its own
+    // (`a_rooted_druid_heals_a_dying_teammate_once_then_shifts`); here it
+    // need only still occur in play, and be judged where it does.
     assert!(
-        exempted >= 5,
+        exempted >= 1,
         "only {exempted} emergency heals went before a shift — the exemption is untested"
     );
+}
+
+/// The emergency-heal exemption, STAGED: the Druid rooted with the enemy
+/// Hunter's pet on it, and its Rogue in reach below [`DRUID_EMERGENCY_HP`].
+/// Its first cast is the emergency heal on the Rogue (Rejuvenation, which arms
+/// Swiftmend) and its second is Travel Form: ONE heal goes first, though the
+/// Rogue is still dying after it. The control is the same stage with the Rogue
+/// healthy: the first cast is the shift.
+#[test]
+fn a_rooted_druid_heals_a_dying_teammate_once_then_shifts() {
+    use arenasim::headless::{run_headless_match_staged, Stage, Unit};
+    const ROGUE: Unit = Unit::new(1, 0);
+    const DRUID: Unit = Unit::new(1, 1);
+    const HUNTER: Unit = Unit::new(2, 0);
+    let casts = |seed: u64, rogue_health: f32| -> Vec<String> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log_path = dir.path().join("match.txt");
+        let config = HeadlessMatchConfig {
+            team1: vec!["Rogue".into(), "Druid".into()],
+            team2: vec!["Hunter".into(), "Shaman".into()],
+            map: "BasicArena".into(),
+            max_duration_secs: 6.0,
+            random_seed: Some(seed),
+            output_path: Some(log_path.to_string_lossy().to_string()),
+            ..Default::default()
+        };
+        let stage = Stage::new()
+            .place(DRUID, -20.0, 0.0)
+            .aura(
+                DRUID,
+                Aura {
+                    effect_type: AuraType::Root,
+                    duration: 4.0,
+                    break_on_damage_threshold: -1.0,
+                    ..Default::default()
+                },
+            )
+            .place(Unit::pet_of(2, 0), -18.0, 0.0)
+            .target(Unit::pet_of(2, 0), DRUID)
+            .place(HUNTER, 0.0, 0.0)
+            .target(HUNTER, DRUID)
+            .place(ROGUE, -16.0, 6.0)
+            .health(ROGUE, rogue_health);
+        run_headless_match_staged(config, false, None, stage, |_| {}).expect("match runs");
+        let log = std::fs::read_to_string(&log_path).expect("match log written");
+        let gates = log
+            .lines()
+            .find(|l| l.contains("Gates open"))
+            .and_then(log_time)
+            .expect("the gates open");
+        log.lines()
+            .filter(|l| l.contains("Team 1 Druid #2 casts "))
+            .filter(|l| log_time(l).is_some_and(|t| t >= gates))
+            .take(2)
+            .map(|l| l.split_once("casts ").unwrap().1.to_string())
+            .collect()
+    };
+    for seed in [1u64, 2] {
+        let dying = casts(seed, DRUID_EMERGENCY_HP * 0.5);
+        assert_eq!(dying.len(), 2, "seed {seed}: {dying:?}");
+        assert!(
+            dying[0].starts_with("Rejuvenation on Team 1 Rogue")
+                || dying[0].starts_with("Swiftmend on Team 1 Rogue"),
+            "seed {seed}: the first cast was {:?}, not the emergency heal",
+            dying[0]
+        );
+        assert!(
+            dying[1].starts_with("Travel Form"),
+            "seed {seed}: after one emergency heal the second cast was {:?}",
+            dying[1]
+        );
+        let healthy = casts(seed, 1.0);
+        assert!(
+            healthy
+                .first()
+                .is_some_and(|c| c.starts_with("Travel Form")),
+            "seed {seed}: with the Rogue healthy the first cast was {healthy:?}"
+        );
+    }
 }
 
 /// A root's shift goes before a Mark of the Wild the Druid has lost, STAGED:

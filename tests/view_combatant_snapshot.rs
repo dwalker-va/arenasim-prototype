@@ -41,7 +41,8 @@ use arenasim::states::match_config::{CharacterClass, MatchConfig, PaladinAura};
 use arenasim::states::play_match::ability_config::load_ability_definitions;
 use arenasim::states::play_match::components::Combatant;
 use arenasim::states::play_match::equipment::{
-    load_default_loadouts, load_item_definitions, resolve_equipped_loadout, Loadout,
+    load_default_loadouts, load_item_definitions, parse_item_definitions, resolve_equipped_loadout,
+    Loadout,
 };
 use arenasim::states::play_match::talents::{Build, TalentDefinitions, TalentId};
 use arenasim::states::view_combatant_ui::{
@@ -633,52 +634,93 @@ fn the_sheet_draws_the_slots_build_and_its_stats_read_it() {
     );
 }
 
-/// Every class's Move Speed row reads the speed its spawn moves at: the base
-/// scaled by the gear's `movement_speed` fraction ("+10%" boots), never the
-/// fraction added to the base as yards. Every default loadout's boots carry
-/// the stat, so each row is raised by gear (asserted, so the check is never
-/// one of an unraised base against itself).
+/// The Move Speed row reads the speed the spawn moves at: the natural speed
+/// raised by the one capped passive term, the strongest of the gear's and the
+/// build's sources. A fixture makes Demonic Embrace +5% movement speed a rank,
+/// and another gives the Warlock's boots +5% and its crown +3%. The Warlock
+/// (4.5 yd/s) reads, bare: 4.5, then 4.7 (+5%), then 4.9 at two ranks (+10%
+/// offered, capped at +8%; uncapped would read 5.0). Geared: 4.7 (the boots'
+/// +5%, not +8%), and 4.7 with one rank (+5% beside +5%, not +10%). Each value
+/// is the spawn's own, equipped, resolved and applied.
 #[test]
-fn move_speed_row_reads_the_spawns_geared_speed() {
+fn move_speed_row_reads_the_spawns_capped_passive_speed() {
     let abilities = load_ability_definitions().expect("abilities.ron must load");
     let items = load_item_definitions().expect("items.ron must load");
+    let speedy = {
+        let text = std::fs::read_to_string(arenasim::paths::asset_path("config/items.ron"))
+            .expect("items.ron reads");
+        let boots = "name: \"Magister's Boots\",";
+        let crown = "name: \"Magister's Crown\",";
+        assert!(text.contains(boots) && text.contains(crown));
+        parse_item_definitions(
+            &text
+                .replacen(boots, &format!("{boots} movement_speed: 0.05,"), 1)
+                .replacen(crown, &format!("{crown} movement_speed: 0.03,"), 1),
+            "fixture",
+        )
+        .expect("the fixture loads")
+    };
     let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
     let class_icons = ClassIcons::default();
-    for &class in CharacterClass::all() {
-        let loadout = resolve_equipped_loadout(class, &defaults, &Loadout::new(), &items);
-        let mut spawn = Combatant::new(1, 0, class);
-        let base = spawn.base_movement_speed;
-        spawn.apply_equipment(&loadout, &items);
-        assert!(
-            spawn.base_movement_speed > base,
-            "{class:?}: its default gear carries movement speed"
-        );
+    let text = std::fs::read_to_string(arenasim::paths::asset_path("config/talents.ron"))
+        .expect("talents.ron reads");
+    let health = "per_rank: [StatPercent(MaxHealth, 0.03)],";
+    assert!(text.contains(health));
+    let fixture = TalentDefinitions::from_ron(
+        &text.replacen(health, "per_rank: [StatAdd(MovementSpeed, 0.05)],", 1),
+        &abilities,
+    )
+    .expect("the fixture validates");
+    let mut rows = Vec::new();
+    for (items, ranks) in [
+        (&items, 0u8),
+        (&items, 1),
+        (&items, 2),
+        (&speedy, 0),
+        (&speedy, 1),
+    ] {
+        let build = if ranks == 0 {
+            Build::default()
+        } else {
+            Build::of(&[(TalentId::DemonicEmbrace, ranks)])
+        };
+        let loadout =
+            resolve_equipped_loadout(CharacterClass::Warlock, &defaults, &Loadout::new(), items);
+        let mut spawn = Combatant::new(1, 0, CharacterClass::Warlock);
+        spawn.apply_equipment(&loadout, items);
+        fixture
+            .resolve(&abilities, CharacterClass::Warlock, &build)
+            .expect("the build resolves")
+            .apply(&mut spawn);
 
         let mut config = MatchConfig::default();
-        config.team1[0] = Some(class);
+        config.team1[0] = Some(CharacterClass::Warlock);
+        config.team1_builds[0] = build;
         let sheet = Sheet::open(
-            class,
+            CharacterClass::Warlock,
             config,
             ViewCombatantData {
                 abilities: &abilities,
-                items: &items,
+                items,
                 default_loadouts: &defaults,
                 class_icons: &class_icons,
                 ability_icons: None,
                 item_icons: None,
                 pet_icons: None,
-                talents: TalentDefinitions::shipped(),
+                talents: &fixture,
             },
         );
         let row = note_value(&sheet.last.notes, "stat", "Move Speed")
-            .unwrap_or_else(|| panic!("{class:?}: no Move Speed row"));
+            .unwrap_or_else(|| panic!("{ranks} ranks: no Move Speed row"));
         let (value, _) = row.split_once(" hover=").expect("a hover");
         assert_eq!(
             value,
             format!("{:.1}/s", spawn.base_movement_speed),
-            "{class:?}: base {base}"
+            "{ranks} ranks: the sheet against the spawn"
         );
+        rows.push(value.to_string());
     }
+    assert_eq!(rows, ["4.5/s", "4.7/s", "4.9/s", "4.7/s", "4.7/s"]);
 }
 
 /// A build's flat crit reads on the sheet as the spawn applies it: the Crit

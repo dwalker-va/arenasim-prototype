@@ -19,7 +19,7 @@ use arenasim::headless::runner::{build_headless_app, PreloadedConfigs};
 use arenasim::headless::{Stage, Unit};
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
-use arenasim::states::play_match::components::{Combatant, Pet};
+use arenasim::states::play_match::components::{passive_movement_speed, Combatant, Pet};
 use arenasim::states::play_match::talents::{
     Build, StatChange, TalentDefinitions, TalentEffect, TalentId, TalentStat,
 };
@@ -63,6 +63,7 @@ fn totals(c: &Combatant) -> Vec<(&'static str, f32)> {
         ("spell_power", c.spell_power),
         ("crit_chance", c.crit_chance),
         ("base_movement_speed", c.base_movement_speed),
+        ("passive_speed", c.passive_speed),
         ("armor", c.armor),
         ("fire_resistance", c.fire_resistance),
         ("frost_resistance", c.frost_resistance),
@@ -82,7 +83,9 @@ fn totals(c: &Combatant) -> Vec<(&'static str, f32)> {
 
 /// Two ranks of `StatAdd(stat, points)` on a Warlock add `2 × points` to
 /// exactly the totals named in `fields`, and to nothing else; the pools refill
-/// to their new pre-combat levels.
+/// to their new pre-combat levels. Movement speed's points are a passive
+/// source, so its speed is the natural speed raised by them
+/// (`passive_movement_speed`), not the points added in yards.
 fn assert_stat_add(stat: TalentStat, points: f32, fields: &[&str]) {
     let budget = stat.item_weight().is_none();
     let talents = embrace_doing(&format!("StatAdd({stat:?}, {points:?})"), budget);
@@ -116,10 +119,12 @@ fn assert_stat_add(stat: TalentStat, points: f32, fields: &[&str]) {
     resolved.apply(&mut c);
     let after = totals(&c);
     for ((name, was), (_, is)) in before.iter().zip(&after) {
-        let want = if fields.contains(name) {
-            *was + points * 2.0
-        } else {
-            *was
+        let want = match (stat, *name) {
+            (TalentStat::MovementSpeed, "base_movement_speed") => {
+                passive_movement_speed(c.natural_movement_speed, points * 2.0)
+            }
+            _ if fields.contains(name) => *was + points * 2.0,
+            _ => *was,
         };
         assert_eq!(
             is.to_bits(),
@@ -162,7 +167,7 @@ stat_add_reaches! {
     stat_add_attack_power: AttackPower, 7.0 => ["attack_power"];
     stat_add_spell_power: SpellPower, 7.0 => ["spell_power"];
     stat_add_crit_chance: CritChance, 0.01 => ["crit_chance"];
-    stat_add_movement_speed: MovementSpeed, 0.1 => ["base_movement_speed"];
+    stat_add_movement_speed: MovementSpeed, 0.03 => ["passive_speed", "base_movement_speed"];
     stat_add_armor: Armor, 40.0 => ["armor"];
     stat_add_fire_resistance: FireResistance, 5.0 => ["fire_resistance"];
     stat_add_frost_resistance: FrostResistance, 5.0 => ["frost_resistance"];
@@ -251,8 +256,8 @@ fn stat_add_prose_reads_in_each_stats_unit() {
     assert_eq!(text(TalentStat::MaxHealth, 10.0, 2), "+20 maximum health");
     assert_eq!(text(TalentStat::SpellPower, 7.0, 1), "+7 spell power");
     assert_eq!(
-        text(TalentStat::MovementSpeed, 0.1, 1),
-        "+0.1 yd/sec movement speed"
+        text(TalentStat::MovementSpeed, 0.04, 2),
+        "+8% movement speed"
     );
 }
 
