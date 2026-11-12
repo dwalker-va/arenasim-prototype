@@ -755,8 +755,7 @@ pub fn spawn_client_particle(
         },
         Mesh3d(quad.clone()),
         MeshMaterial3d(palette[0].clone()),
-        Transform::from_translation(at + offset)
-            .with_scale(Vec3::splat(e.size.diameter_keys()[0].max(1e-4))),
+        Transform::from_translation(at + offset),
         NotShadowCaster,
     ));
     if !owned {

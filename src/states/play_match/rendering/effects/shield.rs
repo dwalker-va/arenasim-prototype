@@ -1740,12 +1740,11 @@ fn spawn_shield_particle(
     particle: ClientParticle,
     at: Vec3,
 ) {
-    let size = particle.size.diameter_keys()[0].max(1e-4);
     commands.spawn((
         particle,
         Mesh3d(assets.particle_quad.clone()),
         MeshMaterial3d(palette[0].clone()),
-        Transform::from_translation(at).with_scale(Vec3::splat(size)),
+        Transform::from_translation(at),
         NotShadowCaster,
         PlayMatchEntity,
     ));

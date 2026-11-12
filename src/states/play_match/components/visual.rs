@@ -2,6 +2,8 @@ use super::super::abilities::{AbilityType, SpellSchool};
 use super::super::match_config::CharacterClass;
 use super::auras::AuraType;
 use super::combatant::AutoAttackKind;
+use bevy::ecs::component::HookContext;
+use bevy::ecs::world::DeferredWorld;
 use bevy::prelude::*;
 use bevy_egui::egui;
 
@@ -2715,6 +2717,27 @@ impl ParticleSize {
     pub const fn diameter_keys(self) -> [f32; 3] {
         self.0
     }
+
+    /// The quad's scale on the frame it is born: its birth diameter, never
+    /// quite zero (a singular matrix breaks normals).
+    pub fn birth_scale(self) -> Vec3 {
+        Vec3::splat(self.0[0].max(1e-4))
+    }
+}
+
+/// Sets a newly spawned [`ClientParticle`]'s scale to its birth size.
+///
+/// The one place a particle's birth scale is written. Spawners do not order
+/// themselves before `animate_client_particles`, so a particle can be drawn
+/// for a frame at the scale it was spawned with; this hook makes that scale
+/// the size ramp's first key whatever the spawner's `Transform` said.
+fn scale_at_birth(mut world: DeferredWorld, ctx: HookContext) {
+    let Some(size) = world.get::<ClientParticle>(ctx.entity).map(|p| p.size) else {
+        return;
+    };
+    if let Some(mut transform) = world.get_mut::<Transform>(ctx.entity) {
+        transform.scale = size.birth_scale();
+    }
 }
 
 /// One particle of a transcribed client emitter
@@ -2723,8 +2746,10 @@ impl ParticleSize {
 /// Its colour and alpha ramp is carried by swapping between the emitter's
 /// pre-built palette materials as it ages — one material per ramp step, shared
 /// by every particle of that emitter — and its size ramp by scale, so nothing
-/// per-particle is ever written to an asset.
+/// per-particle is ever written to an asset. Its birth scale is set when it
+/// is spawned (`scale_at_birth`), so a spawner places it without one.
 #[derive(Component)]
+#[component(on_add = scale_at_birth)]
 pub struct ClientParticle {
     pub age: f32,
     pub life: f32,

@@ -945,9 +945,7 @@ pub fn update_totem_visuals(
                     },
                     Mesh3d(rig.quad.clone()),
                     MeshMaterial3d(palette[0].clone()),
-                    Transform::from_translation(at)
-                        .with_rotation(facing)
-                        .with_scale(Vec3::splat(e.size.diameter_keys()[0].max(1e-4))),
+                    Transform::from_translation(at).with_rotation(facing),
                     NotShadowCaster,
                     PlayMatchEntity,
                 ));

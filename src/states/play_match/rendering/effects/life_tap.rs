@@ -547,8 +547,7 @@ pub fn update_life_tap_glows(
                     },
                     Mesh3d(quad.clone()),
                     MeshMaterial3d(palette[0].clone()),
-                    Transform::from_translation(chest + offset)
-                        .with_scale(Vec3::splat(e.size.diameter_keys()[0].max(1e-4))),
+                    Transform::from_translation(chest + offset),
                     NotShadowCaster,
                     PlayMatchEntity,
                 ));
