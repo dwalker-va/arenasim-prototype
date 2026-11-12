@@ -281,7 +281,18 @@ not healing, so arena dampening does not cut it. The mana is capped at the
 pool. The AI taps when it needs the mana and is healthy enough to pay — below
 30% of the pool, and the tap leaves it at or above `urgency_hp_threshold` —
 under both AI profiles, with or without a healer on its team
-(`class_ai::warlock::life_tap_hold`, each hold traced `TapHeld`).
+(`class_ai::warlock::life_tap_hold`, each hold traced `TapHeld`). Improved
+Life Tap (Affliction) raises the mana a point of health gives
+(`HealthToMana::mana_per_health`, 1.0 untalented): 10% a rank, the same
+health spent.
+
+### Curses (Warlock)
+One curse per Warlock on a target at a time, chosen per enemy before the
+match: Agony, Weakness, Tongues, and Curse of Exhaustion (30% slower for 12s)
+for a build with its Affliction talent. A curse whose effect diminishes
+(Exhaustion's slow, on the Slows bucket) is not cast on a target immune to
+it. Amplify Curse (Affliction) makes the next Curse of Agony or Weakness 50%
+stronger; it is off the global cooldown, so the curse follows at once.
 
 ### Rage (Warrior)
 - Max: 100

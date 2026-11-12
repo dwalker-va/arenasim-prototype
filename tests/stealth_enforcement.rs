@@ -827,7 +827,8 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
         | LesserHealingWave | Purge | WindShear | AirTotem | WaterTotem | EarthTotem
         | FireTotem | Rejuvenation | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild
         | Innervate | EntanglingRoots | Cyclone | TravelForm | ShadowWordPain | ExposeArmor
-        | DivineProtection | BlessingOfSacrifice | SacredShield | Shadowform => false,
+        | DivineProtection | BlessingOfSacrifice | SacredShield | Shadowform | SiphonLife
+        | AmplifyCurse | CurseOfExhaustion => false,
         // A Paladin aura on allies: its damage answers a melee attacker that
         // struck one, and that hit has revealed the attacker already.
         RetributionAura => false,

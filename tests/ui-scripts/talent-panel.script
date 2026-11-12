@@ -13,8 +13,13 @@
 #   7. Esc -> back on View Combatant, the build still spent;
 #   8. Esc -> Configure Match, whose slot row reads the spec;
 #   9. Reset clears the build, and the slot reads its class again;
-#  10. one point back, a match started: the Warlock's team frame names the
+#  10. Affliction's Curse of Exhaustion adds a fourth curse tile, which goes
+#      away when the talent is taken back;
+#  11. one point back, a match started: the Warlock's team frame names the
 #      spec (awaited on the frame's own note, not a frame count).
+#
+# The Warlock's trees read Affliction first, so a Demonology build's
+# shorthand is "0/N".
 #
 # Every wait is the driver's own (hover settles on egui's tooltip gate, a
 # click on the click): there is no frame count here.
@@ -38,24 +43,24 @@ assert-note tooltip:Talent(UnholyPower)
 
 # Spend three points in tier 1.
 click talent:DemonicEmbrace
-assert-note talents:t1s0 points=1 spec=Demonology Warlock 1
+assert-note talents:t1s0 points=1 spec=Demonology Warlock 0/1
 click talent:DemonicEmbrace
 click talent:FelStamina
-assert-note talents:t1s0 points=3 spec=Demonology Warlock 3
+assert-note talents:t1s0 points=3 spec=Demonology Warlock 0/3
 
 # Two points in the tiers above open tier 2.
 assert-enabled talent:UnholyPower true
 click talent:UnholyPower
-assert-note talents:t1s0 points=4 spec=Demonology Warlock 4
+assert-note talents:t1s0 points=4 spec=Demonology Warlock 0/4
 
 # A maxed node takes no more.
 assert-enabled talent:DemonicEmbrace false
 
 # Shift-click takes a rank back; a plain click learns it again.
 click talent:UnholyPower left shift
-assert-note talents:t1s0 points=3 spec=Demonology Warlock 3
+assert-note talents:t1s0 points=3 spec=Demonology Warlock 0/3
 click talent:UnholyPower
-assert-note talents:t1s0 points=4 spec=Demonology Warlock 4
+assert-note talents:t1s0 points=4 spec=Demonology Warlock 0/4
 
 # The deep link: right-click opens the talent's page.
 click talent:UnholyPower right
@@ -65,11 +70,11 @@ assert-view Talent(UnholyPower)
 # Back to the same combatant, the build still spent.
 key Escape
 assert-state ViewCombatant
-assert-note talents:t1s0 points=4 spec=Demonology Warlock 4
+assert-note talents:t1s0 points=4 spec=Demonology Warlock 0/4
 
 key Escape
 assert-state ConfigureMatch
-assert-note slot:t1s0 subtitle=Demonology Warlock 4
+assert-note slot:t1s0 subtitle=Demonology Warlock 0/4
 
 # Reset clears the build, and the slot reads its class again.
 click slot:t1s0
@@ -81,11 +86,25 @@ key Escape
 assert-state ConfigureMatch
 assert-note slot:t1s0 subtitle=Shadow magic and curses
 
-# A talented match: the Warlock's team frame reads the spec its build names.
+# Curse of Exhaustion: a fourth curse tile, only while the talent is learned.
 click slot:t1s0
 assert-state ViewCombatant
+assert-absent strategic:CurseOfExhaustion:e0
+click talent:ImprovedDrainLife
+click talent:ImprovedDrainLife
+click talent:AmplifyCurse
+click talent:CurseOfExhaustion
+assert-note talents:t1s0 points=4 spec=Affliction Warlock 4/0
+assert-enabled strategic:CurseOfExhaustion:e0 true
+click talent:CurseOfExhaustion left shift
+assert-note talents:t1s0 points=3 spec=Affliction Warlock 3/0
+assert-absent strategic:CurseOfExhaustion:e0
+click talents:reset
+assert-note talents:t1s0 points=0 spec=No talents learned
+
+# A talented match: the Warlock's team frame reads the spec its build names.
 click talent:DemonicEmbrace
-assert-note talents:t1s0 points=1 spec=Demonology Warlock 1
+assert-note talents:t1s0 points=1 spec=Demonology Warlock 0/1
 key Escape
 assert-state ConfigureMatch
 click slot:t2s0
@@ -93,5 +112,5 @@ click class:Warrior
 assert-enabled configure:start true
 click configure:start
 assert-state PlayMatch
-await-note 30 frame-spec Warlock: Demonology Warlock 1
+await-note 30 frame-spec Warlock: Demonology Warlock 0/1
 dump

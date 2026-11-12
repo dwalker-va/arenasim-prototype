@@ -390,20 +390,34 @@ pub struct AbilityConfig {
     pub health_to_mana: Option<HealthToMana>,
 }
 
-/// A conversion of the caster's own health into mana, one for one (TBC Life
-/// Tap). The amount is `base + spell power × spell_power_coefficient`.
+/// A conversion of the caster's own health into mana (TBC Life Tap). The
+/// health it takes is `base + spell power × spell_power_coefficient`, and it
+/// gives `mana_per_health` mana for each point: one for one, unless a talent
+/// raises it (Improved Life Tap).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub struct HealthToMana {
     /// Health converted before spell-power scaling.
     pub base: f32,
     /// Coefficient applied to the caster's spell power.
     pub spell_power_coefficient: f32,
+    /// Mana given per point of health taken. `1.0`, the default.
+    #[serde(default = "one")]
+    pub mana_per_health: f32,
+}
+
+fn one() -> f32 {
+    1.0
 }
 
 impl HealthToMana {
-    /// The health a cast converts, and the mana it gives, at `spell_power`.
+    /// The health a cast converts at `spell_power`.
     pub fn amount(&self, spell_power: f32) -> f32 {
         self.base + spell_power * self.spell_power_coefficient
+    }
+
+    /// The mana a cast that converts `health` gives.
+    pub fn mana_for(&self, health: f32) -> f32 {
+        health * self.mana_per_health
     }
 }
 
@@ -744,6 +758,10 @@ impl AbilityDefinitions {
             AbilityType::Cyclone,
             AbilityType::TravelForm,
             AbilityType::ExposeArmor,
+            // Warlock: the Affliction tree
+            AbilityType::SiphonLife,
+            AbilityType::AmplifyCurse,
+            AbilityType::CurseOfExhaustion,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -1528,6 +1546,9 @@ mod tests {
                     AbilityType::CurseOfWeakness,
                     AbilityType::CurseOfTongues,
                     AbilityType::LifeTap,
+                    AbilityType::SiphonLife,
+                    AbilityType::AmplifyCurse,
+                    AbilityType::CurseOfExhaustion,
                 ],
             ),
             (
@@ -1773,7 +1794,12 @@ mod tests {
         curses.sort_unstable();
         assert_eq!(
             curses,
-            ["Curse of Agony", "Curse of Tongues", "Curse of Weakness"],
+            [
+                "Curse of Agony",
+                "Curse of Exhaustion",
+                "Curse of Tongues",
+                "Curse of Weakness"
+            ],
             "the curse family changed; check the new member is classified and that the \
              encyclopedia's curse test covers it"
         );

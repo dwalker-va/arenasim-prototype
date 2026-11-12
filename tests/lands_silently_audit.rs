@@ -571,11 +571,15 @@ const DOT_MEMBERS: &[AbilityType] = &[
     Rend,
     SerpentSting,
     ShadowWordPain,
+    SiphonLife,
     UnstableAffliction,
 ];
 
 /// DoTs that land with nothing drawn yet.
-const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
+const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
+    SiphonLife,
+    "AS-347 (Siphon Life, the Affliction drain; its heal-back is icon-only by ruling)",
+)];
 
 /// The DoT STATE a member's aura routes to. The aura carries the ability's
 /// RON `name:`, so this sweeps the config name through the very router every
@@ -687,6 +691,7 @@ const CONTROL_MEMBERS: &[AbilityType] = &[
     CheapShot,
     ConcussiveShot,
     CripplingPoison,
+    CurseOfExhaustion,
     Cyclone,
     DeathCoil,
     EntanglingRoots,
@@ -740,7 +745,10 @@ fn control_finds_every_member() {
     assert_finds("crowd-control", is_control, CONTROL_MEMBERS);
 }
 
-const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
+const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
+    CurseOfExhaustion,
+    "AS-334 (the talent visuals: Curse of Exhaustion's slow)",
+)];
 
 #[test]
 fn control_lands_nothing_silently() {
@@ -761,6 +769,7 @@ fn is_status(a: AbilityType, c: &AbilityConfig) -> bool {
 const STATUS_MEMBERS: &[AbilityType] = &[
     AimedShot,
     AirTotem,
+    AmplifyCurse,
     ArcaneIntellect,
     BattleShout,
     BerserkerRage,
@@ -882,6 +891,10 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
 const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     // A totem's OBJECT is drawn; the buff it pulses onto allies is not.
     (AirTotem, "AS-134 (aura application — totem pulse)"),
+    (
+        AmplifyCurse,
+        "AS-346 (Amplify Curse and Shadow Trance, the primed casts)",
+    ),
     (ArcaneIntellect, "AS-134 (aura application)"),
     (BattleShout, "AS-134 (aura application)"),
     (BlessingOfSacrifice, "AS-374 (Blessing of Sacrifice impact)"),

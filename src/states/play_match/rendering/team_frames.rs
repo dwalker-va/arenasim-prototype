@@ -978,7 +978,8 @@ mod tests {
             Build::of(&[(TalentId::DemonicEmbrace, 2), (TalentId::FelStamina, 1)]);
         let spec = frame_spec(&config, talents, 2, 0, CharacterClass::Warlock, false)
             .expect("a talented slot names a spec");
-        assert_eq!(spec.line(), "Demonology Warlock 3");
+        // Affliction is the Warlock's first tree, so its 0 leads.
+        assert_eq!(spec.line(), "Demonology Warlock 0/3");
         assert_eq!(
             frame_spec(&config, talents, 2, 1, CharacterClass::Warlock, false),
             None

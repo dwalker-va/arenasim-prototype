@@ -202,6 +202,15 @@ fn the_class_page_lists_a_talent_ability_from_talents_not_in_the_kit() {
     };
     let (base, from_talents) = (listed("base"), listed("talent"));
     assert!(base.iter().any(|a| a == "Corruption"), "{base:?}");
-    assert_eq!(from_talents, vec![format!("{GRANTED:?}")]);
+    // Every Warlock talent ability is listed there: the fixture's, and the
+    // shipped Warlock trees' own.
+    let warlock_talents: Vec<String> = abilities
+        .talent_abilities()
+        .into_iter()
+        .filter(|a| abilities.get_unchecked(a).class == CharacterClass::Warlock)
+        .map(|a| format!("{a:?}"))
+        .collect();
+    assert!(warlock_talents.contains(&format!("{GRANTED:?}")));
+    assert_eq!(from_talents, warlock_talents);
     assert!(!base.contains(&format!("{GRANTED:?}")), "{base:?}");
 }

@@ -247,6 +247,10 @@ pub enum AbilityType {
     BlessingOfSacrifice, // talent: 30% of an ally's damage goes to the Paladin for 12s
     SacredShield,        // talent: arms a triggered absorb on an ally for 30s
     RetributionAura,     // team aura a talent offers: Holy damage to melee attackers
+    // Warlock: the Affliction tree (AS-409). Appended for the same reason.
+    SiphonLife,        // talent: Shadow DoT whose ticks heal the Warlock
+    AmplifyCurse,      // talent: the next Curse of Weakness or Agony +50%
+    CurseOfExhaustion, // a curse a talent offers: 30% movement slow for 12s
 }
 
 impl AbilityType {
@@ -287,7 +291,9 @@ impl AbilityType {
             | WindShear | AirTotem | WaterTotem | EarthTotem | FireTotem | Rejuvenation
             | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild | Innervate | EntanglingRoots
             | Cyclone | TravelForm | Shadowform | DivineProtection | BlessingOfSacrifice
-            | SacredShield | RetributionAura => false,
+            | SacredShield | RetributionAura | SiphonLife | AmplifyCurse | CurseOfExhaustion => {
+                false
+            }
         }
     }
 
