@@ -1913,6 +1913,7 @@ pub fn decide_abilities(
         let ability_name = ability_def.name.clone();
         let ability_spell_school = ability_def.spell_school;
         let mut actual_damage = 0.0;
+        let mut absorbed_damage = 0.0;
         let mut landed = false;
 
         // Apply Divine Shield outgoing damage penalty (50%) if attacker has DamageImmunity
@@ -1961,6 +1962,7 @@ pub fn decide_abilities(
                     &mut combat_log,
                 );
                 actual_damage = dmg;
+                absorbed_damage = absorbed;
                 // Pet-aware ids for structured fields + message/trace text.
                 let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
                 let attacker_id = combatant_id(attacker_team, attacker_slot, attacker_class);
@@ -2064,7 +2066,7 @@ pub fn decide_abilities(
                     attacker_id.clone(),
                     target_id.clone(),
                     ability_name.to_string(),
-                    actual_damage,
+                    super::combat_core::credited_damage(actual_damage, absorbed),
                     is_killing_blow,
                     is_crit,
                     message,
@@ -2104,7 +2106,7 @@ pub fn decide_abilities(
 
         // Update attacker's damage dealt
         if let Ok((_, mut attacker, _, _, _, _)) = combatants.get_mut(attacker_entity) {
-            attacker.damage_dealt += actual_damage;
+            super::combat_core::credit_damage_dealt(&mut attacker, actual_damage, absorbed_damage);
             // The strike's `SpellHit` for its attacker.
             if landed {
                 super::talent_procs::push_for(
@@ -2136,6 +2138,7 @@ pub fn decide_abilities(
             is_crit,
         } = aoe;
         let mut actual_damage = 0.0;
+        let mut absorbed_damage = 0.0;
         let mut nova_landed = false;
 
         // Skip if caster died from an instant attack earlier this frame (or entity is gone)
@@ -2174,6 +2177,7 @@ pub fn decide_abilities(
                     &mut combat_log,
                 );
                 actual_damage = dmg;
+                absorbed_damage = absorbed;
                 nova_landed = true;
                 // Pet-aware target id (structured fields + message text).
                 let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
@@ -2256,7 +2260,7 @@ pub fn decide_abilities(
                     caster_id.clone(),
                     target_id.clone(),
                     "Frost Nova".to_string(),
-                    actual_damage,
+                    super::combat_core::credited_damage(actual_damage, absorbed),
                     is_killing_blow,
                     is_crit,
                     message,
@@ -2276,7 +2280,7 @@ pub fn decide_abilities(
 
         // Update caster's damage dealt
         if let Ok((_, mut caster, _, _, _, _)) = combatants.get_mut(caster_entity) {
-            caster.damage_dealt += actual_damage;
+            super::combat_core::credit_damage_dealt(&mut caster, actual_damage, absorbed_damage);
             // The nova's hit on this target is its caster's `SpellHit`.
             if nova_landed {
                 super::talent_procs::push_for(

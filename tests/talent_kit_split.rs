@@ -172,7 +172,9 @@ fn the_class_page_lists_a_talent_ability_from_talents_not_in_the_kit() {
     let talents = granting(&abilities);
     let items = load_item_definitions().expect("items.ron must load");
     let mut state = EncyclopediaState::default();
-    state.rebuild_registry(&items, &abilities, &talents);
+    state.rebuild_registry(&arenasim::states::encyclopedia::CatalogSource::new(
+        &abilities, &items, &talents,
+    ));
     state.apply(EncyclopediaAction::Navigate(View::topic(Topic::Class(
         CharacterClass::Warlock,
     ))));
@@ -186,6 +188,7 @@ fn the_class_page_lists_a_talent_ability_from_talents_not_in_the_kit() {
             class_icons: None,
             ability_icons: None,
             talents: &talents,
+            engine_auras: arenasim::states::encyclopedia::EngineFamily::ALL,
         };
         let _ = draw_encyclopedia(ctx, &mut state, &data, GameState::MainMenu);
     });

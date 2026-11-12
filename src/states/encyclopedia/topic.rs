@@ -121,7 +121,7 @@ impl Topic {
                 .get(&ability)
                 .map(|config| config.name.clone())
                 .unwrap_or_else(|| spaced_debug(&ability)),
-            Topic::Aura(id) => super::auras::name_of(id, data.abilities, data.items)
+            Topic::Aura(id) => super::auras::name_of(id, &data.catalog_source())
                 .unwrap_or_else(|| "Unknown aura".to_string()),
             Topic::Talent(id) => crate::states::talent_text::talent_name(data.talents, id),
         }
@@ -143,7 +143,7 @@ impl Topic {
             // An aura's subtitle is its polarity and mechanic ("Debuff ·
             // Damage over Time").
             Topic::Aura(id) => {
-                super::auras::subtitle_of(id, data.abilities, data.items).unwrap_or_default()
+                super::auras::subtitle_of(id, &data.catalog_source()).unwrap_or_default()
             }
             Topic::Talent(id) => super::talents::subtitle(id, data),
         }
@@ -180,12 +180,10 @@ impl Topic {
                 data.ability_icons
                     .and_then(|icons| icons.textures.get(name).copied())
             }
-            Topic::Aura(id) => {
-                super::auras::icon_key(id, data.abilities, data.items).and_then(|key| {
-                    data.ability_icons
-                        .and_then(|icons| icons.textures.get(&key).copied())
-                })
-            }
+            Topic::Aura(id) => super::auras::icon_key(id, &data.catalog_source()).and_then(|key| {
+                data.ability_icons
+                    .and_then(|icons| icons.textures.get(&key).copied())
+            }),
             // Talent art is registered in the same map, under its own key.
             Topic::Talent(id) => data.ability_icons.and_then(|icons| {
                 icons

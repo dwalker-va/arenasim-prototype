@@ -56,6 +56,7 @@
 pub mod abilities;
 pub mod auras;
 pub mod classes;
+pub mod engine_auras;
 pub mod items;
 pub mod search;
 pub mod talents;
@@ -77,7 +78,7 @@ use crate::ui::widgets::panel::margin_xy;
 use crate::ui::widgets::{screen_header, Button, Nav, NavAction, Tab, Variant};
 
 pub use abilities::AbilityFilters;
-pub use auras::{AuraArt, AuraId, AuraSource, EngineAura};
+pub use auras::{AuraArt, AuraId, AuraSource, CatalogSource, EngineAura, EngineFamily, EngineKey};
 pub use items::ItemFilters;
 pub use search::{build_registry, SearchEntry};
 pub use topic::{Section, Topic};
@@ -265,14 +266,9 @@ impl EncyclopediaState {
         }
     }
 
-    /// Rebuild the search registry from the live data sources.
-    pub fn rebuild_registry(
-        &mut self,
-        items: &ItemDefinitions,
-        abilities: &AbilityDefinitions,
-        talents: &TalentDefinitions,
-    ) {
-        self.registry = build_registry(items, abilities, talents);
+    /// Rebuild the search registry from the data sources.
+    pub fn rebuild_registry(&mut self, source: &CatalogSource) {
+        self.registry = build_registry(source);
     }
 }
 
@@ -291,6 +287,22 @@ pub struct EncyclopediaData<'a> {
     /// Every class's talent trees. Talent art is in `ability_icons`, under
     /// [`talents::talent_icon_key`].
     pub talents: &'a TalentDefinitions,
+    /// The engine aura families Buffs & Debuffs lists: every one in the game
+    /// ([`EngineFamily::ALL`]), or the pinned few a snapshot harness draws, so
+    /// a family added later moves none of its pixels.
+    pub engine_auras: &'a [EngineFamily],
+}
+
+impl<'a> EncyclopediaData<'a> {
+    /// The tables the Buffs & Debuffs catalogue is read from.
+    pub fn catalog_source(&self) -> CatalogSource<'a> {
+        CatalogSource {
+            abilities: self.abilities,
+            items: self.items,
+            talents: self.talents,
+            families: self.engine_auras,
+        }
+    }
 }
 
 // ============================================================================
@@ -333,7 +345,11 @@ pub fn encyclopedia_ui(
     // The registry is derived purely from the data sources, so building it once
     // per session is enough — nothing hand-authored, nothing to invalidate.
     if state.registry.is_empty() {
-        state.rebuild_registry(&item_definitions, &ability_definitions, &talent_definitions);
+        state.rebuild_registry(&CatalogSource::new(
+            &ability_definitions,
+            &item_definitions,
+            &talent_definitions,
+        ));
     }
 
     let data = EncyclopediaData {
@@ -343,6 +359,7 @@ pub fn encyclopedia_ui(
         class_icons: class_icons.as_deref(),
         ability_icons: ability_icons.as_deref(),
         talents: &talent_definitions,
+        engine_auras: crate::states::encyclopedia::EngineFamily::ALL,
     };
 
     if let Some(action) = draw_encyclopedia(ctx, &mut state, &data, return_to) {
@@ -1013,7 +1030,7 @@ mod tests {
             .expect("abilities.ron must load");
         let talents = crate::states::play_match::talents::TalentDefinitions::shipped();
         let mut state = EncyclopediaState::default();
-        state.rebuild_registry(&items, &abilities, talents);
+        state.rebuild_registry(&CatalogSource::new(&abilities, &items, talents));
 
         let ctx = egui::Context::default();
         let field = egui::Id::new(SEARCH_FIELD_ID);
@@ -1035,6 +1052,7 @@ mod tests {
                     class_icons: None,
                     ability_icons: None,
                     talents,
+                    engine_auras: crate::states::encyclopedia::EngineFamily::ALL,
                 };
                 let _ = draw_encyclopedia(ctx, state, &data, GameState::MainMenu);
             });

@@ -262,6 +262,7 @@ fn the_results_screen_names_the_profile() {
         class_icons: None,
         ability_icons: None,
         talents: arenasim::states::play_match::talents::TalentDefinitions::shipped(),
+        engine_auras: arenasim::states::encyclopedia::EngineFamily::ALL,
     };
     for (profiles, want) in [
         (AiProfiles::client_default(), "TeamPlan"),

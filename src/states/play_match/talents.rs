@@ -839,6 +839,42 @@ impl TalentDefinitions {
         self.reference.keys().copied()
     }
 
+    /// This table with only the nodes `keep` names, and only the trees that
+    /// still hold one: a catalogue whose membership does not grow when
+    /// `talents.ron` does. The encyclopedia snapshots draw one
+    /// (`tests/common/pinned_catalogue.rs`), so a node or a tree added later
+    /// moves none of their pixels. Not validated again: it is for drawing,
+    /// never for resolving a build.
+    pub fn restricted_to(&self, keep: &[TalentId]) -> Self {
+        let talents: BTreeMap<TalentId, TalentConfig> = keep
+            .iter()
+            .filter_map(|id| self.talents.get(id).map(|node| (*id, node.clone())))
+            .collect();
+        let trees = self
+            .trees
+            .iter()
+            .map(|(class, trees)| {
+                let kept: Vec<TreeConfig> = trees
+                    .iter()
+                    .filter(|tree| {
+                        talents
+                            .values()
+                            .any(|node| node.class == *class && node.tree == tree.id)
+                    })
+                    .cloned()
+                    .collect();
+                (*class, kept)
+            })
+            .filter(|(_, kept)| !kept.is_empty())
+            .collect();
+        Self {
+            trees,
+            talents,
+            reference: self.reference.clone(),
+            choice_rules: self.choice_rules.clone(),
+        }
+    }
+
     /// The choice rules (`talent_choices::ChoiceRule`).
     pub(super) fn rules(&self) -> &[ChoiceRule] {
         &self.choice_rules

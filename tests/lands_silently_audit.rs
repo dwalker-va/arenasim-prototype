@@ -29,6 +29,11 @@
 //!    a member the design rules silent, is a permanent [`SilentByDesign`]
 //!    entry citing the design doc that ruled it (which must exist).
 //!
+//! Every list a family keeps — its members, its known-silent and by-design
+//! entries — is in name order, one row per member (`check_sorted` fails it
+//! otherwise), so two changes that each add a member add it in different
+//! places instead of both appending to the end, where they would conflict.
+//!
 //! On top of the families, `every_ability_belongs_to_a_family` makes the
 //! families a cover of the whole config: an ability that no family scans is
 //! a failure unless it is named in `NO_FAMILY` with the visual that covers it.
@@ -55,24 +60,50 @@
 
 use std::collections::BTreeSet;
 
+// One `use` per item, never a braced group: rustfmt keeps separate `use`s
+// separate and sorts them, so an import a change adds is one new line at its
+// own place, where a braced group reflows and two changes that each add an
+// import conflict in it.
 use arenasim::states::play_match::abilities::AbilityType;
-use arenasim::states::play_match::ability_config::{AbilityConfig, AbilityDefinitions};
+use arenasim::states::play_match::ability_config::AbilityConfig;
+use arenasim::states::play_match::ability_config::AbilityDefinitions;
+use arenasim::states::play_match::bolt_kind_for;
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
+use arenasim::states::play_match::client_landing_style;
 use arenasim::states::play_match::combat_core::ExtraSwingSource;
-use arenasim::states::play_match::components::{
-    AuraApplyRoute, AuraLandingKind, AuraType, CurseKind, HealImpact, HealImpactKind, HotVisual,
-    InstantAbilityFired, LifeTapGlow, RootStyle, SchoolImpact, ShieldKind, TotemElement,
-};
-use arenasim::states::play_match::equipment::{load_item_definitions, ItemDefinitions, ItemId};
+use arenasim::states::play_match::components::AuraApplyRoute;
+use arenasim::states::play_match::components::AuraLandingKind;
+use arenasim::states::play_match::components::AuraType;
+use arenasim::states::play_match::components::CurseKind;
+use arenasim::states::play_match::components::HealImpact;
+use arenasim::states::play_match::components::HealImpactKind;
+use arenasim::states::play_match::components::HotVisual;
+use arenasim::states::play_match::components::InstantAbilityFired;
+use arenasim::states::play_match::components::LifeTapGlow;
+use arenasim::states::play_match::components::RootStyle;
+use arenasim::states::play_match::components::SchoolImpact;
+use arenasim::states::play_match::components::ShieldKind;
+use arenasim::states::play_match::components::TotemElement;
+use arenasim::states::play_match::curse_spec;
+use arenasim::states::play_match::equipment::load_item_definitions;
+use arenasim::states::play_match::equipment::ItemDefinitions;
+use arenasim::states::play_match::equipment::ItemId;
+use arenasim::states::play_match::hunter_shot_for;
+use arenasim::states::play_match::is_live_shield;
+use arenasim::states::play_match::lands_poison_cloud;
 use arenasim::states::play_match::on_use_items::OnUseEffect;
 use arenasim::states::play_match::proc_trinkets::ProcEffect;
+use arenasim::states::play_match::root_style_for;
 use arenasim::states::play_match::talent_mechanics::MechanicKind;
-use arenasim::states::play_match::talents::{TalentDefinitions, TalentEffect, TalentId};
-use arenasim::states::play_match::{
-    bolt_kind_for, client_landing_style, curse_spec, hunter_shot_for, is_live_shield,
-    lands_poison_cloud, root_style_for, DotStateVisual, InterruptLanding, SlowTint,
-    DIVINE_SHIELD_AURA_NAME, ICE_BARRIER_AURA_NAME, PW_SHIELD_AURA_NAME,
-};
+use arenasim::states::play_match::talents::TalentDefinitions;
+use arenasim::states::play_match::talents::TalentEffect;
+use arenasim::states::play_match::talents::TalentId;
+use arenasim::states::play_match::DotStateVisual;
+use arenasim::states::play_match::InterruptLanding;
+use arenasim::states::play_match::SlowTint;
+use arenasim::states::play_match::DIVINE_SHIELD_AURA_NAME;
+use arenasim::states::play_match::ICE_BARRIER_AURA_NAME;
+use arenasim::states::play_match::PW_SHIELD_AURA_NAME;
 
 use AbilityType::*;
 
@@ -87,12 +118,35 @@ const POISON_CLOUD: &str = "weapon poison cloud on every application (poison_lan
 /// if it lands silently.
 type Judge = fn(AbilityType, &AbilityConfig) -> Option<&'static str>;
 
+/// Every list a family keeps is in name order, one row per member, so two
+/// changes that each add a member add it in different places rather than
+/// both at the end of the list, where they would conflict.
+fn check_sorted<T: std::fmt::Debug>(
+    family: &str,
+    list: &str,
+    keys: impl IntoIterator<Item = T>,
+) -> Result<(), String> {
+    let names: Vec<String> = keys.into_iter().map(|key| format!("{key:?}")).collect();
+    let mut sorted = names.clone();
+    sorted.sort();
+    if names == sorted {
+        Ok(())
+    } else {
+        Err(format!(
+            "the {family} {list} is not in name order — keep it sorted, one row per member:\n  \
+             {}",
+            sorted.join(", ")
+        ))
+    }
+}
+
 /// Claim 1: the scan found exactly the named members.
 fn check_finds<T: Ord + Copy + std::fmt::Debug>(
     family: &str,
     scanned: &BTreeSet<T>,
     named: &[T],
 ) -> Result<(), String> {
+    check_sorted(family, "member list", named.iter())?;
     let named: BTreeSet<T> = named.iter().copied().collect();
     let mut problems = Vec::new();
     for lost in named.difference(scanned) {
@@ -122,6 +176,11 @@ fn check_judged<T: Ord + Copy + std::fmt::Debug>(
     judge: impl Fn(T) -> Option<&'static str>,
     known_silent: &[(T, &str)],
 ) -> Result<(), String> {
+    check_sorted(
+        family,
+        "known-silent list",
+        known_silent.iter().map(|(member, _)| member),
+    )?;
     let mut problems = Vec::new();
     let mut listed = BTreeSet::new();
     for (ability, card) in known_silent {
@@ -247,11 +306,23 @@ fn assert_judged_with_rulings(
     known_silent: &[(AbilityType, &str)],
     rulings: &[SilentByDesign],
 ) {
-    if let Err(e) = check_rulings(family, rulings) {
+    if let Err(e) = check_rulings(family, rulings)
+        .and(check_sorted(
+            family,
+            "known-silent list",
+            known_silent.iter().map(|(member, _)| member),
+        ))
+        .and(check_sorted(
+            family,
+            "silent-by-design list",
+            rulings.iter().map(|r| r.ability),
+        ))
+    {
         panic!("{e}");
     }
     let mut listed: Vec<(AbilityType, &str)> = known_silent.to_vec();
     listed.extend(rulings.iter().map(|r| (r.ability, r.doc)));
+    listed.sort_by_key(|(member, _)| format!("{member:?}"));
     assert_judged(family, pred, judge, &listed);
 }
 
@@ -809,30 +880,33 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
 }
 
 const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
+    // A totem's OBJECT is drawn; the buff it pulses onto allies is not.
+    (AirTotem, "AS-134 (aura application — totem pulse)"),
     (ArcaneIntellect, "AS-134 (aura application)"),
     (BattleShout, "AS-134 (aura application)"),
+    (BlessingOfSacrifice, "AS-374 (Blessing of Sacrifice impact)"),
     (CommandingShout, "AS-134 (aura application)"),
     (ConcentrationAura, "AS-134 (aura application)"),
     (DemoralizingShout, "AS-134 (aura application)"),
     (DevotionAura, "AS-134 (aura application)"),
+    (DivineProtection, "AS-376 (Divine Protection globe)"),
+    (EarthTotem, "AS-134 (aura application — totem pulse)"),
+    (
+        ExposeArmor,
+        "AS-366 (Expose Armor, the Combat capstone's armor rend)",
+    ),
+    (FireTotem, "AS-134 (aura application — totem pulse)"),
     (FrostArmor, "AS-134 (aura application)"),
     (MageArmorSpell, "AS-134 (aura application)"),
     (MoltenArmor, "AS-134 (aura application)"),
     (PowerWordFortitude, "AS-134 (aura application)"),
-    (ShadowResistanceAura, "AS-134 (aura application)"),
-    // The totem OBJECT is drawn; the buff it pulses onto allies is not.
-    (AirTotem, "AS-134 (aura application — totem pulse)"),
-    (EarthTotem, "AS-134 (aura application — totem pulse)"),
-    (FireTotem, "AS-134 (aura application — totem pulse)"),
-    // The Protection talents (AS-421), drawn by AS-337's build cards.
-    (BlessingOfSacrifice, "AS-374 (Blessing of Sacrifice impact)"),
     (RetributionAura, "AS-374 (Retribution Aura rune disc)"),
     (SacredShield, "AS-375 (Sacred Shield disc and absorb card)"),
-    (DivineProtection, "AS-376 (Divine Protection globe)"),
-    // The Combat capstone's armor rend on its target.
-    (ExposeArmor, "AS-366 (Expose Armor)"),
-    // The form on the Priest all match: AS-333 scoped it, AS-343 draws it.
-    (Shadowform, "AS-343 (Shadowform)"),
+    (ShadowResistanceAura, "AS-134 (aura application)"),
+    (
+        Shadowform,
+        "AS-343 (Shadowform, the form on the Priest all match)",
+    ),
 ];
 
 #[test]
@@ -1000,11 +1074,11 @@ fn health_to_mana_lands_nothing_silently() {
 // `items.ron` rather than `abilities.ron` and names its members by item.
 
 const ON_USE_MEMBERS: &[ItemId] = &[
+    ItemId::DiamondFlask,
+    ItemId::Earthstrike,
+    ItemId::KissOfTheSpider,
     ItemId::MedallionOfTheAlliance,
     ItemId::TalismanOfEphemeralPower,
-    ItemId::Earthstrike,
-    ItemId::DiamondFlask,
-    ItemId::KissOfTheSpider,
 ];
 
 /// What a buff on-use's landing draws when nothing bespoke owns it: the
@@ -1041,9 +1115,9 @@ fn on_use_visual(items: &ItemDefinitions, id: ItemId) -> Option<&'static str> {
 /// [`ON_USE_BAND_BY_RULING`], so a new buff on the bare band fails until it
 /// is listed, and an entry whose item gains a one-shot fails until removed.
 const ON_USE_GENERIC_UNTIL: &[(ItemId, &str)] = &[
-    (ItemId::TalismanOfEphemeralPower, "AS-433"),
     (ItemId::Earthstrike, "AS-433"),
     (ItemId::KissOfTheSpider, "AS-433"),
+    (ItemId::TalismanOfEphemeralPower, "AS-433"),
 ];
 
 /// On-use buffs that keep the generic band by ruling, not pending a card:
@@ -1064,6 +1138,16 @@ fn check_generic_band(
     until: &[(ItemId, &str)],
     ruled: &[(ItemId, &str, &str)],
 ) -> Result<(), String> {
+    check_sorted(
+        "on-use",
+        "generic-band debt",
+        until.iter().map(|(id, _)| id),
+    )?;
+    check_sorted(
+        "on-use",
+        "band-by-ruling list",
+        ruled.iter().map(|(id, _, _)| id),
+    )?;
     let mut problems = Vec::new();
     let generic: BTreeSet<ItemId> = members
         .iter()
@@ -1260,16 +1344,16 @@ const NO_FAMILY: &[(AbilityType, &str)] = &[
     (Charge, "a dash — charge trail (movement_trails.rs)"),
     (Disengage, "a leap — disengage trail (movement_trails.rs)"),
     (
-        FrostTrap,
-        "a placement — trap, trigger burst and slow-zone decal (traps.rs, ice_block.rs); \
-         its slow is applied by the zone, not declared in the RON, and a body it slows \
-         carries the bind ring (slow_ring.rs)",
-    ),
-    (
         Flare,
         "a placement — the client's flare burning on the ground in a pulsing pool of \
          light, a rim at its radius (flare.rs), for as long as the Flare burns; it \
          lands nothing on anyone",
+    ),
+    (
+        FrostTrap,
+        "a placement — trap, trigger burst and slow-zone decal (traps.rs, ice_block.rs); \
+         its slow is applied by the zone, not declared in the RON, and a body it slows \
+         carries the bind ring (slow_ring.rs)",
     ),
 ];
 
@@ -1381,8 +1465,8 @@ fn talent_mechanic_judge(talent: TalentId) -> Option<&'static str> {
 }
 
 const TALENT_MECHANIC_MEMBERS: &[TalentId] = &[
-    TalentId::MasterDemonologist,
     TalentId::DemonicSacrifice,
+    TalentId::MasterDemonologist,
     TalentId::SoulLink,
 ];
 
@@ -1420,12 +1504,22 @@ fn talent_mechanic_lands_nothing_silently() {
     if let Err(e) = check_rulings("talent-mechanic", TALENT_MECHANIC_SILENT_BY_DESIGN) {
         panic!("{e}");
     }
+    if let Err(e) = check_sorted(
+        "talent-mechanic",
+        "known-silent list",
+        TALENT_MECHANIC_KNOWN_SILENT
+            .iter()
+            .map(|(member, _)| member),
+    ) {
+        panic!("{e}");
+    }
     let mut listed: Vec<(TalentId, &str)> = TALENT_MECHANIC_KNOWN_SILENT.to_vec();
     listed.extend(
         TALENT_MECHANIC_SILENT_BY_DESIGN
             .iter()
             .map(|r| (r.ability, r.doc)),
     );
+    listed.sort_by_key(|(member, _)| format!("{member:?}"));
     if let Err(e) = check_judged(
         "talent-mechanic",
         &talent_mechanic_nodes(),
@@ -1571,8 +1665,25 @@ fn harness_holds_a_ruling_to_a_doc_that_exists() {
 }
 
 #[test]
+fn harness_fails_an_unsorted_list() {
+    let err = check_finds("planted", &set(&[Fear, Frostbolt]), &[Frostbolt, Fear]).unwrap_err();
+    assert!(err.contains("member list is not in name order"), "{err}");
+    let err = check_judged(
+        "planted",
+        &set(&[Fear, Frostbolt]),
+        |_| None,
+        &[(Frostbolt, "AS-1"), (Fear, "AS-1")],
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("known-silent list is not in name order"),
+        "{err}"
+    );
+}
+
+#[test]
 fn harness_fails_a_scan_that_lost_a_member() {
-    let err = check_finds("planted", &set(&[Frostbolt]), &[Frostbolt, Fear]).unwrap_err();
+    let err = check_finds("planted", &set(&[Frostbolt]), &[Fear, Frostbolt]).unwrap_err();
     assert!(err.contains("no longer finds Fear"), "{err}");
 }
 
