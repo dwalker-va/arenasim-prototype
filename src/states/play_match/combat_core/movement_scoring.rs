@@ -62,10 +62,12 @@
 use bevy::prelude::*;
 
 use super::super::arena_bounds::{ArenaBounds, EDGE_PENALTY_ONSET_FRACTION};
-use super::super::map_geometry::{has_line_of_sight, position_blocked, ObstacleVolume, EYE_HEIGHT};
+use super::super::map_geometry::{
+    has_line_of_sight, position_blocked, resolve_movement, ObstacleVolume, EYE_HEIGHT,
+};
 use super::super::movement_config::MovementWeights;
 use super::super::ARENA_CORNER_SUM;
-use super::is_in_arena_bounds;
+use super::{clamp_to_arena, is_in_arena_bounds};
 
 /// Mask bit: candidate's lookahead position is out of arena bounds.
 pub const MASK_BOUNDARY: u16 = 1 << 0;
@@ -214,31 +216,39 @@ pub struct ScorerInputs {
     /// carries a unit straight away from its chaser, and from the bowl that is
     /// often down a starting room, whose back wall ends the run.
     pub avoid_dead_ends: bool,
-    /// Yards of open ground ahead the `flee` term looks for (`0.0`: it does
-    /// not look). With a reach, a heading's flee counts in proportion to the
-    /// open run it has up to this far ([`open_run`]), so a chased unit with a
-    /// wall or a pillar at its back runs along it, away from the chaser,
-    /// instead of into it. Set by the chaser escape (AS-241).
+    /// Yards of running the `flee` term looks ahead (`0.0`: it does not
+    /// look). With a reach, a heading's flee counts the distance from the
+    /// chaser it gains over that much running, walked as the unit would walk
+    /// it ([`run_end`]): a heading into a wall or a pillar gains only the
+    /// ground before it, so a chased unit with one at its back runs along it,
+    /// away from the chaser (AS-241); and a heading that grazes a wall is
+    /// carried along it and round the corner the wall turns, so a cornered unit
+    /// takes the run that leaves the corner (AS-468). Set by the chaser escape.
     pub flee_reach: f32,
 }
 
-/// Step at which [`open_run`] marches a heading.
-const OPEN_RUN_STEP: f32 = 0.5;
+/// Step at which [`run_end`] walks a heading.
+const RUN_STEP: f32 = 0.5;
 
-/// Yards of open ground along `candidate` from the unit, up to `reach`: how far
-/// it can run that way before leaving the arena or meeting an obstacle.
-pub fn open_run(candidate: Vec2, inputs: &ScorerInputs, reach: f32) -> f32 {
+/// Where `reach` yards of running along `candidate` carry the unit, walked
+/// the way the movement executor walks a `Direction` goal: each step slid off
+/// any obstacle it would enter, then clamped into the arena. A heading into a
+/// wall or a pillar ends where the slide leaves it — at the wall, or along it
+/// and round the corner it turns — rather than where the straight line first
+/// meets it.
+pub fn run_end(candidate: Vec2, inputs: &ScorerInputs, reach: f32) -> Vec2 {
     let dir = Vec3::new(candidate.x, 0.0, candidate.y);
+    let mut at = inputs.my_pos;
     let mut run = 0.0;
     while run < reach {
-        let next = (run + OPEN_RUN_STEP).min(reach);
-        let p = inputs.my_pos + dir * next;
-        if !is_in_arena_bounds(&inputs.bounds, p) || position_blocked(&inputs.obstacles, p) {
-            break;
-        }
-        run = next;
+        let step = RUN_STEP.min(reach - run);
+        at = clamp_to_arena(
+            &inputs.bounds,
+            resolve_movement(&inputs.obstacles, at, at + dir * step),
+        );
+        run += step;
     }
-    run
+    xz(at)
 }
 
 /// Yards past `trap_setup_range` over which the `trap_setup` pull ramps to its
@@ -433,12 +443,14 @@ pub fn score_direction(candidate: Vec2, inputs: &ScorerInputs, weights: &Movemen
         if let Some(threat) = inputs.nearest_threat {
             if inputs.flee_reach > 0.0 {
                 // With a reach, a heading scores the distance from the chaser
-                // it would gain by running the open ground it has, up to the
-                // reach (as a fraction of the reach): a heading into a wall or
-                // a pillar a few yards off gains those few yards and no more.
-                // In the open this orders headings exactly as the plain term
-                // does; it differs only where the ground runs out.
-                let end = my_xz + candidate * open_run(candidate, inputs, inputs.flee_reach);
+                // it would gain by running the reach, walked as the executor
+                // walks it (as a fraction of the reach): a heading into a wall
+                // or a pillar a few yards off gains those few yards and no
+                // more, and one that grazes a wall gains the ground the slide
+                // along it covers. In the open this orders headings exactly as
+                // the plain term does; it differs only where a wall or a
+                // pillar meets the run.
+                let end = run_end(candidate, inputs, inputs.flee_reach);
                 let gained = end.distance(xz(threat)) - my_xz.distance(xz(threat));
                 score += weights.flee * gained / inputs.flee_reach;
             } else {
@@ -1873,6 +1885,23 @@ mod tests {
         );
     }
 
+    /// Yards of open ground along `candidate`, up to `reach`: how far the
+    /// unit runs that way in a straight line before it leaves the arena or
+    /// meets an obstacle.
+    fn open_run(candidate: Vec2, inputs: &ScorerInputs, reach: f32) -> f32 {
+        let dir = Vec3::new(candidate.x, 0.0, candidate.y);
+        let mut run = 0.0;
+        while run < reach {
+            let next = (run + RUN_STEP).min(reach);
+            let p = inputs.my_pos + dir * next;
+            if !is_in_arena_bounds(&inputs.bounds, p) || position_blocked(&inputs.obstacles, p) {
+                break;
+            }
+            run = next;
+        }
+        run
+    }
+
     /// A chased unit with a wall or a pillar a few yards behind it: the escape
     /// inputs on `bounds` with `obstacles`, with or without the flee's reach.
     fn backed(
@@ -1960,6 +1989,193 @@ mod tests {
         );
         let away = Vec2::new(at.x - chaser.x, at.z - chaser.z).normalize();
         assert!(ran.dot(away) > 0.0, "and still opens the gap, got {ran:?}");
+    }
+
+    /// Where `reach` yards along `dir` carry a unit at `inputs.my_pos`, walked
+    /// in steps of a tenth of a yard (finer than [`run_end`]'s, near the
+    /// executor's per-frame step), each slid off obstacles and clamped into
+    /// the arena: the oracle the `run_end` tests compare against.
+    fn walked(dir: Vec2, inputs: &ScorerInputs, reach: f32) -> Vec2 {
+        let step = Vec3::new(dir.x, 0.0, dir.y) * 0.1;
+        let steps = (reach / 0.1).round() as usize;
+        let end = (0..steps).fold(inputs.my_pos, |at, _| {
+            clamp_to_arena(
+                &inputs.bounds,
+                resolve_movement(&inputs.obstacles, at, at + step),
+            )
+        });
+        xz(end)
+    }
+
+    /// A run that grazes a pillar is slid round it, not stopped where its
+    /// straight line first meets the pillar's footprint: for a cylinder and an
+    /// octagonal prism (Nagrand's shape), a heading 1.5yd off the pillar's
+    /// centre line runs on past the meeting point, ends outside the footprint
+    /// and within half a yard of where the fine walk ends.
+    #[test]
+    fn a_run_slides_round_a_pillar_it_grazes() {
+        let pillars = [
+            ObstacleVolume::Cylinder {
+                center_xz: Vec2::new(6.0, 0.0),
+                radius: 2.5,
+                base_y: 0.0,
+                height: 10.0,
+            },
+            ObstacleVolume::Prism {
+                center_xz: Vec2::new(6.0, 0.0),
+                circumradius: 3.0,
+                sides: 8,
+                rotation: 0.0,
+                base_y: 0.0,
+                height: 10.0,
+            },
+        ];
+        for pillar in pillars {
+            let inputs = backed(
+                ArenaBounds::default(),
+                vec![pillar],
+                Vec3::new(0.0, 1.0, 1.5),
+                Vec3::new(-5.0, 1.0, 1.5),
+                8.0,
+            );
+            let straight = open_run(Vec2::X, &inputs, 8.0);
+            assert!(
+                straight < 8.0,
+                "{pillar:?}: the straight line meets the pillar ({straight}yd)"
+            );
+            let end = super::run_end(Vec2::X, &inputs, 8.0);
+            assert!(
+                end.x > straight + 1.0,
+                "{pillar:?}: the run ends at {end:?}, no further than the straight line \
+                 met the pillar ({straight}yd)"
+            );
+            assert!(
+                !position_blocked(&inputs.obstacles, Vec3::new(end.x, 1.0, end.y)),
+                "{pillar:?}: the run ends outside the footprint, not at {end:?}"
+            );
+            // The half-yard steps cut the curve a little shorter than the
+            // fine walk does.
+            let oracle = walked(Vec2::X, &inputs, 8.0);
+            assert!(
+                end.distance(oracle) < 0.5,
+                "{pillar:?}: the run ends at {end:?}, the fine walk at {oracle:?}"
+            );
+        }
+    }
+
+    /// A run is clamped into the arena at every step, as the executor clamps
+    /// each frame, so it follows a wall round a vertex and stops in one. On
+    /// the octagon's south-west corner (the west wall meets the diagonal at
+    /// (-36.5, -12.38)): run due west from the diagonal wall's middle, the
+    /// unit slides up the diagonal into the vertex and stays there; run
+    /// straight into the vertex from 1yd out, it stays in the vertex. Clamping
+    /// only the run's straight end would put either 2-3yd down the diagonal.
+    /// And a run at a Nagrand starting room's side wall stops at it.
+    #[test]
+    fn a_run_follows_the_walls_round_a_vertex() {
+        let vertex = Vec2::new(-36.5, -12.38);
+        let west = Vec2::NEG_X;
+        let into_vertex = Vec2::new(-1.0, -1.0).normalize();
+        for (from, dir) in [
+            (Vec3::new(-31.233, 1.0, -16.233), west),
+            (Vec3::new(-35.576, 1.0, -12.0), into_vertex),
+        ] {
+            let inputs = backed(ArenaBounds::default(), vec![], from, Vec3::ZERO, 8.0);
+            let end = super::run_end(dir, &inputs, 8.0);
+            assert!(
+                end.distance(vertex) < 1.0,
+                "from {from:?} along {dir:?}: the run ends at {end:?}, not in the vertex"
+            );
+            let oracle = walked(dir, &inputs, 8.0);
+            assert!(
+                end.distance(oracle) < 0.3,
+                "from {from:?} along {dir:?}: the run ends at {end:?}, the fine walk at \
+                 {oracle:?}"
+            );
+        }
+        // Nagrand: inside a starting room, running at its side wall, the run
+        // stops at the wall, still in the room. Clamping only its straight
+        // end would put it 9yd away, out in the bowl past the room's wall.
+        let bounds = nagrand_bounds();
+        let room = backed(bounds, vec![], Vec3::new(-65.0, 1.0, 7.5), Vec3::ZERO, 8.0);
+        let end = super::run_end(Vec2::Y, &room, 8.0);
+        assert!(
+            end.distance(Vec2::new(-65.0, 8.0)) < 0.01 && bounds.dead_end_depth(end.x, end.y) > 0.0,
+            "in the room: the run ends at {end:?}, not at the side wall it ran into"
+        );
+        assert!(end.distance(walked(Vec2::Y, &room, 8.0)) < 0.01);
+    }
+
+    /// A run is walked as the executor walks it: straight in the open, slid
+    /// along a wall it meets at a slant, and stopped by a wall it meets head
+    /// on. Octagon: the +x wall is at 36.5, 3.5yd from the unit.
+    #[test]
+    fn a_run_slides_along_the_wall_it_meets() {
+        let inputs = backed(
+            ArenaBounds::default(),
+            vec![],
+            Vec3::new(33.0, 1.0, 0.0),
+            Vec3::new(28.0, 1.0, 0.0),
+            8.0,
+        );
+        let along = super::run_end(Vec2::Y, &inputs, 8.0);
+        assert!(along.distance(Vec2::new(33.0, 8.0)) < 1e-3, "{along:?}");
+        let head_on = super::run_end(Vec2::X, &inputs, 8.0);
+        assert!(head_on.distance(Vec2::new(36.5, 0.0)) < 1e-3, "{head_on:?}");
+        // 45 degrees into the wall: on the wall, and further along it than
+        // the straight line ran before meeting it.
+        let slant = compass_directions_16()[2];
+        let slid = super::run_end(slant, &inputs, 8.0);
+        let straight = open_run(slant, &inputs, 8.0);
+        assert!((slid.x - 36.5).abs() < 1e-3, "slid onto the wall: {slid:?}");
+        assert!(
+            slid.y > slant.y * straight + 1.0,
+            "and along it: {slid:?}, the straight line met the wall {straight}yd out"
+        );
+    }
+
+    /// AS-468: a corner. The unit has run 4yd along the octagon's short
+    /// diagonal wall, 1yd off it, and is 2yd short of the vertex where the
+    /// west wall begins; the chaser is on its flank toward the arena, and its
+    /// last heading (along the diagonal) is still committed. The run that
+    /// leaves the corner GRAZES the west wall — its straight line meets the
+    /// wall inside the reach, and the slide carries it up the wall, away from
+    /// the chaser. The escape takes it, and its run ends farther from the
+    /// chaser than any heading with the full reach of straight open ground
+    /// (the runs walked here by the arena's own clamp, as the executor walks
+    /// them).
+    #[test]
+    fn a_cornered_flee_takes_the_run_that_leaves_the_corner() {
+        let weights = druid_weights();
+        let dirs = compass_directions_16();
+        let bounds = ArenaBounds::default();
+        let at = Vec3::new(-34.26, 1.0, -13.2);
+        let chaser = Vec3::new(-28.22, 1.0, -12.02);
+        let inputs = ScorerInputs {
+            committed_direction: Some(Vec2::new(-1.0, 1.0).normalize()),
+            ..backed(bounds, vec![], at, chaser, 8.0)
+        };
+        let walked = |dir: Vec2| {
+            let step = Vec3::new(dir.x, 0.0, dir.y) * 0.25;
+            let end = (0..32).fold(at, |p, _| bounds.clamp(p + step));
+            xz(end).distance(xz(chaser))
+        };
+        let ran = score_directions(&dirs, &inputs, &weights);
+        let straight = open_run(ran, &inputs, 8.0);
+        assert!(
+            straight < 8.0,
+            "it takes a heading that grazes the wall ({ran:?}, {straight:.1}yd straight)"
+        );
+        let open_best = dirs
+            .iter()
+            .filter(|d| open_run(**d, &inputs, 8.0) >= 8.0)
+            .map(|d| walked(*d))
+            .fold(f32::MIN, f32::max);
+        assert!(
+            walked(ran) > open_best,
+            "its run ends {:.2}yd from the chaser, the best straight one {open_best:.2}yd",
+            walked(ran)
+        );
     }
 
     /// Without a reach the flee term is the plain `flee * dot`, so a

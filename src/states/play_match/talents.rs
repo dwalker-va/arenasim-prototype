@@ -154,11 +154,20 @@ talent_ids! {
     Toughness,
     BlessingOfSacrifice,
     SacredShield,
+    // Warlock: Affliction
+    ImprovedDrainLife,
+    ImprovedLifeTap,
+    AmplifyCurse,
+    Nightfall,
+    SiphonLife,
+    CurseOfExhaustion,
+    ShadowMastery,
 }
 
 /// A talent tree. A tree is named per class: `(class, TreeId)` is the key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TreeId {
+    Affliction,
     Demonology,
     Combat,
     Shadow,
@@ -423,6 +432,18 @@ pub enum AbilityField {
     /// Poison's damage, Mind-numbing's +60% cast time). Present only on an
     /// ability that applies an aura. Vile Poisons' field.
     AuraStrength,
+    /// The damage of the applied aura's periodic ticks: its magnitude and its
+    /// spell-power coefficient together ([`Self::parts`]). Present only on an
+    /// ability whose aura deals damage over time (Corruption, Curse of Agony,
+    /// Siphon Life), so a school-wide patch of it leaves every other aura's
+    /// magnitude alone (Curse of Weakness's cut, Curse of Tongues' slowing).
+    /// Takes only a `Mul`, as `Damage` does. Shadow Mastery's field, with
+    /// `Damage`.
+    PeriodicDamage,
+    /// The mana a health-to-mana conversion gives per point of health it
+    /// takes (Life Tap: 1.0). Present only on an ability that converts.
+    /// Improved Life Tap's field.
+    ManaPerHealth,
 }
 
 impl AbilityField {
@@ -460,6 +481,12 @@ impl AbilityField {
             // A derived value, not a stored one: read and written through
             // `get` / `set`.
             AbilityField::AuraStrength => None,
+            // A composite: patched through its `parts`.
+            AbilityField::PeriodicDamage => None,
+            AbilityField::ManaPerHealth => config
+                .health_to_mana
+                .as_mut()
+                .map(|conversion| &mut conversion.mana_per_health),
         }
     }
 
@@ -467,7 +494,7 @@ impl AbilityField {
     pub fn get(self, config: &AbilityConfig) -> Option<f32> {
         match self {
             // A composite names several values, so no one of them.
-            AbilityField::Damage => None,
+            AbilityField::Damage | AbilityField::PeriodicDamage => None,
             AbilityField::AuraStrength => config.applies_aura.as_ref().map(|a| {
                 if strength_is_remainder(a.aura_type) {
                     1.0 - a.magnitude
@@ -495,7 +522,7 @@ impl AbilityField {
                 }
             }
             // A composite is written through its `parts`, never as one value.
-            AbilityField::Damage => {}
+            AbilityField::Damage | AbilityField::PeriodicDamage => {}
             stored => {
                 if let Some(v) = stored.of(config) {
                     *v = value;
@@ -513,6 +540,11 @@ impl AbilityField {
                 AbilityField::DamageBaseMax,
                 AbilityField::DamageCoefficient,
             ],
+            AbilityField::PeriodicDamage => &[
+                AbilityField::AuraMagnitude,
+                AbilityField::AuraMagnitudeCoefficient,
+            ],
+            AbilityField::ManaPerHealth => &[AbilityField::ManaPerHealth],
             AbilityField::CastTime => &[AbilityField::CastTime],
             AbilityField::Range => &[AbilityField::Range],
             AbilityField::MinRange => &[AbilityField::MinRange],
@@ -543,7 +575,19 @@ impl AbilityField {
     /// Whether `config` has this field: a value through [`Self::get`], or,
     /// for a composite, one for every part of it.
     pub fn present_on(self, config: &AbilityConfig) -> bool {
-        self.parts().iter().all(|part| part.get(config).is_some())
+        let dot = || {
+            config
+                .applies_aura
+                .as_ref()
+                .is_some_and(|a| a.aura_type == AuraType::DamageOverTime)
+        };
+        let parts = || self.parts().iter().all(|part| part.get(config).is_some());
+        match self {
+            // Its parts are any aura's: it is present only where they are a
+            // damage over time's.
+            AbilityField::PeriodicDamage => dot() && parts(),
+            _ => parts(),
+        }
     }
 }
 
@@ -842,6 +886,42 @@ impl TalentDefinitions {
     /// Every class with a reference combatant.
     pub fn reference_classes(&self) -> impl Iterator<Item = CharacterClass> + '_ {
         self.reference.keys().copied()
+    }
+
+    /// This table with only the nodes `keep` names, and only the trees that
+    /// still hold one: a catalogue whose membership does not grow when
+    /// `talents.ron` does. The encyclopedia snapshots draw one
+    /// (`tests/common/pinned_catalogue.rs`), so a node or a tree added later
+    /// moves none of their pixels. Not validated again: it is for drawing,
+    /// never for resolving a build.
+    pub fn restricted_to(&self, keep: &[TalentId]) -> Self {
+        let talents: BTreeMap<TalentId, TalentConfig> = keep
+            .iter()
+            .filter_map(|id| self.talents.get(id).map(|node| (*id, node.clone())))
+            .collect();
+        let trees = self
+            .trees
+            .iter()
+            .map(|(class, trees)| {
+                let kept: Vec<TreeConfig> = trees
+                    .iter()
+                    .filter(|tree| {
+                        talents
+                            .values()
+                            .any(|node| node.class == *class && node.tree == tree.id)
+                    })
+                    .cloned()
+                    .collect();
+                (*class, kept)
+            })
+            .filter(|(_, kept)| !kept.is_empty())
+            .collect();
+        Self {
+            trees,
+            talents,
+            reference: self.reference.clone(),
+            choice_rules: self.choice_rules.clone(),
+        }
     }
 
     /// The choice rules (`talent_choices::ChoiceRule`).

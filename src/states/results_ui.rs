@@ -223,6 +223,7 @@ pub fn results_ui(
         class_icons: Some(&class_icons),
         ability_icons: ability_icons.as_deref(),
         talents: &talent_definitions,
+        engine_auras: crate::states::encyclopedia::EngineFamily::ALL,
     };
 
     let action = draw_results_screen(ctx, results.as_deref(), &combat_log, &data, screen_nav);
@@ -934,6 +935,7 @@ mod tests {
             class_icons: None,
             ability_icons: None,
             talents: crate::states::play_match::talents::TalentDefinitions::shipped(),
+            engine_auras: crate::states::encyclopedia::EngineFamily::ALL,
         };
         f(&Links::new(&data));
     }

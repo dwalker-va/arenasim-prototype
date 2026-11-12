@@ -178,7 +178,8 @@ fn effect_parts(ability: AbilityType, config: &AbilityConfig, stats: &ClassBaseS
         let amount = conversion.amount(stats.spell_power);
         parts.push(format!(
             "Converts {:.0} health into {:.0} mana.",
-            amount, amount
+            amount,
+            conversion.mana_for(amount)
         ));
     }
 

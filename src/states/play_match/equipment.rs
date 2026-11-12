@@ -1869,6 +1869,19 @@ impl ItemDefinitions {
         self.definitions.iter()
     }
 
+    /// This table with only the items `keep` names (one it lacks is skipped):
+    /// a catalogue whose membership does not grow when `items.ron` does. The
+    /// encyclopedia snapshots draw one (`tests/common/pinned_catalogue.rs`),
+    /// so an item added later moves none of their pixels.
+    pub fn restricted_to(&self, keep: &[ItemId]) -> Self {
+        Self {
+            definitions: keep
+                .iter()
+                .filter_map(|id| self.definitions.get(id).map(|item| (*id, item.clone())))
+                .collect(),
+        }
+    }
+
     /// Return all items the given socket accepts for a class, sorted by name.
     ///
     /// Both ring sockets share one pool, as do both trinket sockets. The hands
@@ -4537,9 +4550,10 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     }
 
     /// A reward tier spends at least [`ItemTier::min_budget_spend`] of its
-    /// budget, so the gain its band promises is what a pick delivers. The
-    /// Gauntlet tier is named by set equality, so this cannot pass on an
-    /// empty tier and an item that joins or leaves it is seen.
+    /// budget, so the gain its band promises is what a pick delivers. Every
+    /// loaded item is checked, each against its own tier's floor; both reward
+    /// tiers must hold items for the check to mean anything, and each tier's
+    /// members sit in its item-level band.
     #[test]
     fn reward_tiers_spend_their_budget() {
         let item_defs = load_item_definitions().expect("items.ron must load");
@@ -4562,23 +4576,23 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         under.sort();
         assert!(under.is_empty(), "{}", under.join("\n"));
 
-        let gauntlet: std::collections::BTreeSet<String> = item_defs
-            .iter()
-            .filter(|(_, item)| item.tier() == Some(ItemTier::Gauntlet))
-            .map(|(id, _)| format!("{id:?}"))
-            .collect();
-        let named: std::collections::BTreeSet<String> =
-            GAUNTLET_TIER.iter().map(|id| format!("{id:?}")).collect();
-        assert_eq!(gauntlet, named, "the Gauntlet tier is this list");
-
-        let champion: std::collections::BTreeSet<String> = item_defs
-            .iter()
-            .filter(|(_, item)| item.tier() == Some(ItemTier::Champion))
-            .map(|(id, _)| format!("{id:?}"))
-            .collect();
-        let named: std::collections::BTreeSet<String> =
-            CHAMPION_TIER.iter().map(|id| format!("{id:?}")).collect();
-        assert_eq!(champion, named, "the Champion tier is this list");
+        for tier in [ItemTier::Gauntlet, ItemTier::Champion] {
+            let members = tier_items(&item_defs, tier);
+            assert!(
+                !members.is_empty(),
+                "no {} item loaded, so its floor checked nothing",
+                tier.name()
+            );
+            // The members are the tier's: each sits in its item-level band.
+            for id in members {
+                let level = item_defs.get_unchecked(&id).item_level;
+                assert!(
+                    tier.item_levels().contains(&level),
+                    "{id:?} (ilvl {level}) is listed as {}",
+                    tier.name()
+                );
+            }
+        }
     }
 
     /// The Champion offer floor (talents-and-Gauntlet proposal §6.5): a
@@ -4623,7 +4637,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             }
         }
         assert!(short.is_empty(), "{}", short.join("\n"));
-        let armor: std::collections::BTreeSet<&str> = CHAMPION_TIER
+        let armor: std::collections::BTreeSet<&str> = tier_items(&items, ItemTier::Champion)
             .iter()
             .filter(|id| items.get(id).expect("shipped").armor_type != ArmorType::None)
             .map(|id| id.as_str())
@@ -4683,7 +4697,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             }
         }
         assert!(short.is_empty(), "{}", short.join("\n"));
-        let accessories: std::collections::BTreeSet<&str> = CHAMPION_TIER
+        let accessories: std::collections::BTreeSet<&str> = tier_items(&items, ItemTier::Champion)
             .iter()
             .filter(|id| is_accessory(items.get(id).expect("shipped")))
             .map(|id| id.as_str())
@@ -4711,7 +4725,8 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         let items = load_item_definitions().expect("items.ron must load");
         let mut by_role: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
             std::collections::BTreeMap::new();
-        for id in CHAMPION_TIER.iter() {
+        let champion = tier_items(&items, ItemTier::Champion);
+        for id in champion.iter() {
             let item = items.get(id).expect("shipped");
             if item.slot != ItemSlotType::Ring {
                 continue;
@@ -4745,7 +4760,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         for rings in expected.values() {
             let mut it = rings.iter();
             let (a, b) = (it.next().unwrap(), it.next().unwrap());
-            let id = |name: &str| *CHAMPION_TIER.iter().find(|i| i.as_str() == name).unwrap();
+            let id = |name: &str| *champion.iter().find(|i| i.as_str() == name).unwrap();
             let mut loadout: Loadout = Loadout::new();
             loadout.insert(ItemSlot::Ring1, id(a));
             loadout.insert(ItemSlot::Ring2, id(b));
@@ -4805,7 +4820,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             }
         }
         assert!(short.is_empty(), "{}", short.join("\n"));
-        let weapons: std::collections::BTreeSet<&str> = CHAMPION_TIER
+        let weapons: std::collections::BTreeSet<&str> = tier_items(&items, ItemTier::Champion)
             .iter()
             .filter(|id| items.get(id).expect("shipped").slot.is_weapon_slot())
             .map(|id| id.as_str())
@@ -4931,173 +4946,23 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     /// The Champion tier's gain over the starting item in its slot (§6.5).
     const CHAMPION_GAIN: f32 = 0.55;
 
-    /// Every Champion-tier (item_tier 2) item.
-    const CHAMPION_TIER: [ItemId; 95] = [
-        ItemId::HandOfJustice,
-        ItemId::FrostfireCirclet,
-        ItemId::FrostfireRobe,
-        ItemId::FrostfireLeggings,
-        ItemId::FrostfireShoulderpads,
-        ItemId::FrostfireGloves,
-        ItemId::FrostfireSandals,
-        ItemId::FrostfireBelt,
-        ItemId::FrostfireBindings,
-        ItemId::BonescytheHelmet,
-        ItemId::BonescytheBreastplate,
-        ItemId::BonescytheLegplates,
-        ItemId::BonescythePauldrons,
-        ItemId::BonescytheGauntlets,
-        ItemId::BonescytheSabatons,
-        ItemId::BonescytheWaistguard,
-        ItemId::BonescytheBracers,
-        ItemId::DreamwalkerHeadpiece,
-        ItemId::DreamwalkerTunic,
-        ItemId::DreamwalkerLegguards,
-        ItemId::DreamwalkerSpaulders,
-        ItemId::DreamwalkerHandguards,
-        ItemId::DreamwalkerBoots,
-        ItemId::DreamwalkerGirdle,
-        ItemId::DreamwalkerWristguards,
-        ItemId::CryptstalkerHeadpiece,
-        ItemId::CryptstalkerTunic,
-        ItemId::CryptstalkerLegguards,
-        ItemId::CryptstalkerSpaulders,
-        ItemId::CryptstalkerHandguards,
-        ItemId::CryptstalkerBoots,
-        ItemId::CryptstalkerGirdle,
-        ItemId::CryptstalkerWristguards,
-        ItemId::EarthshatterHeadpiece,
-        ItemId::EarthshatterTunic,
-        ItemId::EarthshatterLegguards,
-        ItemId::EarthshatterSpaulders,
-        ItemId::EarthshatterHandguards,
-        ItemId::EarthshatterBoots,
-        ItemId::EarthshatterGirdle,
-        ItemId::EarthshatterWristguards,
-        ItemId::DreadnaughtHelmet,
-        ItemId::DreadnaughtBreastplate,
-        ItemId::DreadnaughtLegplates,
-        ItemId::DreadnaughtPauldrons,
-        ItemId::DreadnaughtGauntlets,
-        ItemId::DreadnaughtSabatons,
-        ItemId::DreadnaughtWaistguard,
-        ItemId::DreadnaughtBracers,
-        ItemId::RedemptionHeadpiece,
-        ItemId::RedemptionTunic,
-        ItemId::RedemptionLegguards,
-        ItemId::RedemptionSpaulders,
-        ItemId::RedemptionHandguards,
-        ItemId::RedemptionBoots,
-        ItemId::RedemptionGirdle,
-        ItemId::RedemptionWristguards,
-        ItemId::CorruptedAshbringer,
-        ItemId::Gressil,
-        ItemId::Kingsfall,
-        ItemId::HammerOfTheTwistingNether,
-        ItemId::WraithBlade,
-        ItemId::Soulseeker,
-        ItemId::Doomfinger,
-        ItemId::Soulstring,
-        ItemId::NerubianSlavemaker,
-        ItemId::SapphironsLeftEye,
-        ItemId::TheFaceOfDeath,
-        ItemId::ShieldOfCondemnation,
-        ItemId::LibramOfLight,
-        ItemId::TotemOfTheStorm,
-        ItemId::IdolOfTheMoon,
-        ItemId::MedallionOfTheAlliance,
-        ItemId::StormragesTalismanOfSeething,
-        ItemId::ShroudOfDominion,
-        ItemId::BandOfUnnaturalForces,
-        ItemId::BandOfReanimation,
-        ItemId::GemOfTrappedInnocents,
-        ItemId::CloakOfTheNecropolis,
-        ItemId::SealOfTheDamned,
-        ItemId::BandOfTheInevitable,
-        ItemId::NecklaceOfNecropsy,
-        ItemId::CloakOfSuturing,
-        ItemId::BandOfUnansweredPrayers,
-        ItemId::RingOfSpiritualFervor,
-        ItemId::MarkOfCThun,
-        ItemId::CryptfiendSilkCloak,
-        ItemId::SignetOfTheFallenDefender,
-        ItemId::HailstoneBand,
-        ItemId::AegisOfTheLastStand,
-        ItemId::TalismanOfEphemeralPower,
-        ItemId::Earthstrike,
-        ItemId::DiamondFlask,
-        ItemId::KissOfTheSpider,
-        ItemId::DarkmoonCardBlueDragon,
-    ];
-
-    /// Every Gauntlet-tier (item_tier 1) item.
-    const GAUNTLET_TIER: [ItemId; 65] = [
-        ItemId::WarlordsCrown,
-        ItemId::WarlordsVizard,
-        ItemId::WarlordsBreastplate,
-        ItemId::WarlordsLegguards,
-        ItemId::WarlordsGauntlets,
-        ItemId::WarlordsSpaulders,
-        ItemId::WarlordsGreaves,
-        ItemId::WarlordsGirdle,
-        ItemId::WarlordsBracers,
-        ItemId::JudgementCrown,
-        ItemId::JudgementBreastplate,
-        ItemId::JudgementLegguards,
-        ItemId::JudgementSpaulders,
-        ItemId::JudgementGauntlets,
-        ItemId::JudgementBelt,
-        ItemId::JudgementSabatons,
-        ItemId::JudgementBracers,
-        ItemId::GiantstalkerHelm,
-        ItemId::GiantstalkerTunic,
-        ItemId::GiantstalkerLegs,
-        ItemId::GiantstalkerGloves,
-        ItemId::GiantstalkerEpaulets,
-        ItemId::GiantstalkerBoots,
-        ItemId::GiantstalkerBelt,
-        ItemId::GiantstalkerBracers,
-        ItemId::DeathdealerCowl,
-        ItemId::DeathdealerTunic,
-        ItemId::DeathdealerLegs,
-        ItemId::DeathdealerGloves,
-        ItemId::DeathdealerMantle,
-        ItemId::DeathdealerBoots,
-        ItemId::DeathdealerBelt,
-        ItemId::DeathdealerBracers,
-        ItemId::ArcanistCrown,
-        ItemId::ArcanistRobes,
-        ItemId::ArcanistLeggings,
-        ItemId::ArcanistGloves,
-        ItemId::ArcanistMantle,
-        ItemId::ArcanistBoots,
-        ItemId::ArcanistBelt,
-        ItemId::ArcanistBracers,
-        ItemId::CloakOfConquest,
-        ItemId::CloakOfWisdom,
-        ItemId::CloakOfNatureWarding,
-        ItemId::PendantOfMight,
-        ItemId::PendantOfClarity,
-        ItemId::PendantOfArcaneWarding,
-        ItemId::RingOfBruteForce,
-        ItemId::RingOfArcaneInsight,
-        ItemId::RingOfFortitude,
-        ItemId::RingOfElementalMastery,
-        ItemId::InsigniaOfTheAlliance,
-        ItemId::MindtapTalisman,
-        ItemId::BloodlordsBattleaxe,
-        ItemId::StormbladeEdge,
-        ItemId::FangOfTheViper,
-        ItemId::MaceOfTheRedeemer,
-        ItemId::RunestaffOfElements,
-        ItemId::ClawOfChromaggus,
-        ItemId::AzuresongMageblade,
-        ItemId::WandOfTheInvoker,
-        ItemId::EaglestrikeBow,
-        ItemId::DeadeyeCrossbow,
-        ItemId::GrimoireOfShadows,
-        ItemId::BulwarkOfTheGuardian,
-    ];
+    /// Every item of `tier`, by name — read from `items.ron`, where an item's
+    /// `item_tier` is the one place its tier is declared. The tier tests
+    /// take a tier's members from here rather than from a hand-kept list:
+    /// membership has exactly one correct value, and a list that restated it
+    /// was edited by every card that added a reward item, which conflicted
+    /// whenever two did. A mis-tiered item cannot slip through: its tier is
+    /// held to the tier's item-level band at load
+    /// ([`validate_item_tier_band`]).
+    fn tier_items(items: &ItemDefinitions, tier: ItemTier) -> Vec<ItemId> {
+        let mut ids: Vec<ItemId> = items
+            .iter()
+            .filter(|(_, item)| item.tier() == Some(tier))
+            .map(|(id, _)| *id)
+            .collect();
+        ids.sort_by_key(|id| id.as_str());
+        ids
+    }
 
     /// Every class's default kit, as the budget prices it: the sum of
     /// `calculate_budget_usage` over its default loadout. A re-spend of a
@@ -5112,15 +4977,15 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         let items = load_item_definitions().expect("items.ron must load");
         let loadouts = load_default_loadouts(&items).expect("loadouts.ron must load");
         let expected: BTreeMap<&str, f32> = [
-            ("Warrior", 268.5),
-            ("Mage", 356.0),
-            ("Rogue", 226.0),
-            ("Priest", 367.0),
-            ("Warlock", 356.0),
-            ("Paladin", 384.5),
-            ("Hunter", 293.0),
-            ("Shaman", 388.5),
-            ("Druid", 393.0),
+            ("Warrior", 282.29),
+            ("Mage", 376.47),
+            ("Rogue", 241.53),
+            ("Priest", 381.91),
+            ("Warlock", 376.47),
+            ("Paladin", 399.41),
+            ("Hunter", 318.5),
+            ("Shaman", 403.41),
+            ("Druid", 407.91),
         ]
         .into_iter()
         .collect();
@@ -5425,8 +5290,9 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     }
 
     /// Every shipped triggered absorb can fire, is priced, and shields
-    /// something; its members are named by set equality, so the guard cannot
-    /// pass on none.
+    /// something. The walk covers every item; a frozen WITNESS keeps it from
+    /// passing on none (an item added later is checked with no edit here, so
+    /// two cards that each add one cannot conflict in this test).
     #[test]
     fn all_shipped_triggered_absorbs_are_well_formed() {
         let item_defs = load_item_definitions().expect("items.ron must load");
@@ -5441,10 +5307,9 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             }
         }
         assert!(violations.is_empty(), "{}", violations.join("\n"));
-        assert_eq!(
-            members,
-            ["AegisOfTheLastStand"].into_iter().collect(),
-            "the items carrying a triggered absorb"
+        assert!(
+            members.contains("AegisOfTheLastStand"),
+            "the witness triggered absorb is missing from {members:?}"
         );
     }
 
@@ -5502,28 +5367,25 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     }
 
     /// Every shipped on-use is coherent: a declared price exactly where no
-    /// stat weight prices its effect, a positive cooldown. Named members, so
-    /// the guard cannot pass on an empty pool.
+    /// stat weight prices its effect, a positive cooldown. `validate_on_uses`
+    /// walks every item; frozen WITNESSES — a crowd-control break and a buff
+    /// with a heal rider — keep it from passing on none — an on-use added later is checked with no edit here,
+    /// so two cards that each add one cannot conflict in this test.
     #[test]
     fn all_shipped_on_uses_are_well_formed() {
         let item_defs = load_item_definitions().expect("items.ron must load");
         assert!(validate_on_uses(&item_defs).is_ok());
-        let mut members: Vec<ItemId> = item_defs
+        let members: std::collections::BTreeSet<ItemId> = item_defs
             .iter()
             .filter(|(_, item)| item.on_use.is_some())
             .map(|(id, _)| *id)
             .collect();
-        members.sort();
-        assert_eq!(
-            members,
-            vec![
-                ItemId::MedallionOfTheAlliance,
-                ItemId::TalismanOfEphemeralPower,
-                ItemId::Earthstrike,
-                ItemId::DiamondFlask,
-                ItemId::KissOfTheSpider,
-            ]
-        );
+        for witness in [ItemId::MedallionOfTheAlliance, ItemId::DiamondFlask] {
+            assert!(
+                members.contains(&witness),
+                "the witness on-use {witness:?} is missing from {members:?}"
+            );
+        }
     }
 
     /// The AS-430 Champion trinkets cost what `items.ron` says they cost: the

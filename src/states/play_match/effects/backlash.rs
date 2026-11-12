@@ -29,7 +29,9 @@ use bevy::prelude::*;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::abilities::SpellSchool;
-use crate::states::play_match::combat_core::{apply_damage_with_absorb, DamageFollowUps, Hit};
+use crate::states::play_match::combat_core::{
+    apply_damage_with_absorb, credit_damage_dealt, credited_damage, DamageFollowUps, Hit,
+};
 use crate::states::play_match::components::*;
 
 /// How long the dispeller is silenced. `process_dispels` stamps this onto every
@@ -153,13 +155,9 @@ pub fn process_backlash(
         };
         // Dispeller borrow ends here so we can credit the caster (different entity)
         // without aliasing on the `combatants` query.
-        // Credit the caster's damage_dealt the same way casting.rs:344-350 and
-        // auto_attack.rs:283 do: actual_damage + absorbed. Damage that hit absorbs
-        // still counts as "dealt" — only the target's damage_taken intentionally
-        // omits absorbed amounts (see apply_damage_with_absorb).
         let killer_id = match combatants.get_mut(event.caster) {
             Ok((mut caster_combatant, _)) => {
-                caster_combatant.damage_dealt += actual_damage + absorbed;
+                credit_damage_dealt(&mut caster_combatant, actual_damage, absorbed);
                 Some(crate::states::play_match::utils::combat_log_id_for(
                     &caster_combatant,
                     pet_query.get(event.caster).ok(),
@@ -168,13 +166,25 @@ pub fn process_backlash(
             Err(_) => None,
         };
 
-        combat_log.log(
-            CombatLogEventType::Damage,
-            format!(
-                "[BACKLASH] {} takes {:.0} Shadow damage and is Silenced by Unstable Affliction",
-                dispeller_id, actual_damage
-            ),
+        let message = format!(
+            "[BACKLASH] {} takes {:.0} Shadow damage and is Silenced by Unstable Affliction",
+            dispeller_id, actual_damage
         );
+        // The Warlock's breakdown row, beside its Unstable Affliction ticks.
+        // A Warlock already gone is credited nothing, so its line is a row
+        // of no one's.
+        match &killer_id {
+            Some(warlock_id) => combat_log.log_damage(
+                warlock_id.clone(),
+                dispeller_id.clone(),
+                "Unstable Affliction".to_string(),
+                credited_damage(actual_damage, absorbed),
+                is_first_death,
+                false,
+                message,
+            ),
+            None => combat_log.log(CombatLogEventType::Damage, message),
+        }
 
         if is_first_death {
             // Cancel any in-progress cast or channel so a dead dispeller cannot
@@ -321,6 +331,15 @@ mod tests {
                 Some("Team 2 Warlock #3".to_string())
             )]
         );
+        // The Warlock's breakdown row carries the kill, and the whole hit.
+        let log = world.resource::<CombatLog>();
+        assert_eq!(log.killing_blows("Team 2 Warlock #3"), 1);
+        assert_eq!(
+            log.damage_by_ability("Team 2 Warlock #3")
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![("Unstable Affliction".to_string(), 50.0)]
+        );
     }
 
     /// The control: a backlash the Priest survives logs no death.
@@ -333,5 +352,53 @@ mod tests {
         assert!(!combatant.is_dead);
         assert!(world.get::<CastingState>(priest).is_some());
         assert_eq!(deaths(&world), vec![]);
+        let log = world.resource::<CombatLog>();
+        assert_eq!(log.killing_blows("Team 2 Warlock #3"), 0);
+        assert_eq!(
+            world.get::<Combatant>(priest).unwrap().damage_taken,
+            log.total_damage_dealt("Team 2 Warlock #3")
+        );
+    }
+
+    /// A backlash into a shield credits its Warlock with what the shield took
+    /// too, in its total and in its breakdown row alike.
+    #[test]
+    fn a_backlash_into_a_shield_credits_the_whole_hit() {
+        let mut world = World::new();
+        world.insert_resource(CombatLog::default());
+        let priest = world
+            .spawn((
+                Combatant::new(1, 1, CharacterClass::Priest),
+                ActiveAuras {
+                    auras: vec![Aura {
+                        effect_type: AuraType::Absorb,
+                        duration: 30.0,
+                        magnitude: 30.0,
+                        ability_name: "Power Word: Shield".into(),
+                        ..Default::default()
+                    }],
+                },
+            ))
+            .id();
+        let warlock = world
+            .spawn(Combatant::new(2, 2, CharacterClass::Warlock))
+            .id();
+        world.spawn(BacklashPending {
+            dispeller: priest,
+            damage: 100.0,
+            silence_duration: DISPEL_BACKLASH_SILENCE_DURATION,
+            caster: warlock,
+        });
+        world.run_system_once(process_backlash).expect("system ran");
+        let shadow_taken = world.get::<Combatant>(priest).unwrap().damage_taken;
+        assert!(shadow_taken < 100.0, "the shield took part of it");
+        let credited = world.get::<Combatant>(warlock).unwrap().damage_dealt;
+        assert_eq!(credited, shadow_taken + 30.0);
+        assert_eq!(
+            world
+                .resource::<CombatLog>()
+                .total_damage_dealt("Team 2 Warlock #3"),
+            credited
+        );
     }
 }

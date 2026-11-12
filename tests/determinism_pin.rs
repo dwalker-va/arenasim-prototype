@@ -136,10 +136,18 @@ fn seeded_2v2_matches_its_recorded_identity() {
     //
     // The two landed together (AS-303 merging `main` @ e68c9a82), and neither
     // branch's figure survives: on the merged tree this cell is Some(1) @ 62.282555s.
+    //
+    // Re-recorded for AS-460, every class's default Trinket2 filled. Took this
+    // cell to Some(2) @ 59.61593s from Some(1) @ 62.282555s. The first line
+    // that differs from `main` @ f0831492 is at 15.37s (log clock): the Mage's
+    // first Frostbolt into the Warrior's shield, 16 (73 absorbed) -> 19 (73
+    // absorbed), from the Sigil of Arcane Surge's 3 spell power. A single
+    // seed's winner is not a balance claim; the change's effect is measured
+    // at the milestone sweep.
     assert_pinned(
         &result,
-        Some(1),
-        1_115_234_646,
+        Some(2),
+        1_114_535_606,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }
@@ -175,6 +183,12 @@ fn seeded_1v1_matches_its_recorded_identity() {
     // lands on the same bits as before AS-167 is the overkill blindness noted
     // above, not a revert: the log's Frostbolt and Wand Shot damage still
     // carry AS-167's numbers.
+    //
+    // AS-460 (every default Trinket2 filled) left this pin where it was, and
+    // for the same reason: its log moves from the Mage's first Frostbolt at
+    // 15.37s (log clock), 89 -> 91 with the Sigil of Arcane Surge's 3 spell
+    // power, and the Warrior's Dragonspine Trophy rolls on its swings, but the
+    // Mage's killing blow still lands on the same frame.
     assert_pinned(
         &result,
         Some(1),

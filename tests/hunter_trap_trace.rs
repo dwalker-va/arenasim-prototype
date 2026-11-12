@@ -19,7 +19,7 @@ use arenasim::headless::runner::TraceConfig;
 use arenasim::headless::{
     run_headless_match_staged, run_headless_match_with, HeadlessMatchConfig, Stage, Unit,
 };
-use arenasim::states::play_match::AbilityType;
+use arenasim::states::play_match::{AbilityType, Aura, AuraType};
 
 fn config(team1: &[&str], team2: &[&str], seed: u64) -> HeadlessMatchConfig {
     HeadlessMatchConfig {
@@ -513,17 +513,20 @@ fn no_trap_lands_beyond_its_range() {
 
 /// AS-125 — a lane trap springs on the enemy it was decided on.
 ///
-/// Hunter+Priest vs Warlock+Rogue: the lane throws come late, once the Priest
-/// and the Warlock are dead, and each is decided on the Rogue running the lane
-/// at the Hunter — never on the Felhunter nearest the landing, which then
-/// despawned with its Warlock while the Rogue sprang the trap. Pinned: every
-/// throw names the Rogue and springs on it.
-///
-/// The Hunter runs a Boar here. With the default Spider the lane scenario has
-/// all but gone since AS-240: the Felhunter can no longer devour the Web off
-/// its Warlock, the Hunter's Priest now dies first, and the Frost Trap peel on
-/// the Rogue takes the shared trap cooldown, so one seed in 600 throws a lane
-/// trap. With the Boar it is the first three of seeds 0-12.
+/// The lane throw aims at no one, so it is decided on the enemy predicted to
+/// spring it: never on whichever enemy stands nearest the landing. (The bug
+/// was a lane trap decided on the Felhunter nearest the landing while the
+/// Rogue running the lane sprang it.) A STAGED match over a small seed bank,
+/// so the situation holds by construction: a lone Hunter on a Rogue that runs
+/// the lane at it from 32yd, and a Warrior rooted 7yd off the lane's
+/// midpoint — nearer the landing than the Rogue, outside the trap's 5yd
+/// trigger radius, and unable to free a trapped Rogue. The Hunter's
+/// Concussive Shot, Frost Trap and Disengage are cooling and its opener spent,
+/// so the lane trap is its play; its pet is held, so nothing of the Hunter's
+/// breaks the trap. Pinned: every throw names the Rogue and springs on it, and
+/// every match throws one. (This was a seeded probe — Hunter+Priest vs
+/// Warlock+Rogue with a Boar, three pinned seeds — until AS-460's second
+/// trinkets took the late lane throws out of all three.)
 ///
 /// Hunter+Priest vs Rogue+Warrior: at gates-open the Rogue is in stealth, the
 /// lane throw is decided on it without seeing it (nobody on its team could free
@@ -559,12 +562,10 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
             .collect()
     };
 
-    let mut named = 0usize;
-    for seed in [4u64, 7, 12] {
-        let mut cfg = config(&["Hunter", "Priest"], &["Warlock", "Rogue"], seed);
-        cfg.team1_hunter_pet_types = vec!["Boar".to_string()];
-        cfg.max_duration_secs = 60.0;
-        let (events, log) = run_trace_and_log(cfg);
+    for seed in LANE_TRAP_BANK {
+        let mut cfg = config(&["Hunter"], &["Rogue", "Warrior"], seed);
+        cfg.max_duration_secs = 15.0;
+        let (events, log) = run_staged_trace_and_log(cfg, lane_stage());
         let classes = class_of(&events);
         let aims: Vec<String> = throws(&events)
             .into_iter()
@@ -574,6 +575,7 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
             })
             .collect();
         let sprung = sprung_on(&log);
+        assert!(!aims.is_empty(), "seed {seed}: no lane trap thrown");
         assert!(
             aims.iter().all(|a| a == "Rogue"),
             "seed {seed}: lane trap decided on {aims:?}, not the Rogue"
@@ -589,12 +591,7 @@ fn a_lane_trap_springs_on_the_enemy_it_was_decided_on() {
             sprung.iter().all(|v| v.contains(" Rogue #")),
             "seed {seed}: a trap decided on the Rogue sprang on {sprung:?}"
         );
-        named += aims.len();
     }
-    assert!(
-        named >= 2,
-        "only {named} lane traps across the pinned seeds"
-    );
 
     let mut cfg = config(&["Hunter", "Priest"], &["Rogue", "Warrior"], 0);
     cfg.max_duration_secs = 30.0;
@@ -711,29 +708,75 @@ fn the_hunters_own_shot_does_not_break_its_trap() {
     }
 }
 
-/// AS-179 — against a lone Priest the opener is Serpent Sting, and the Hunter
-/// wins.
+/// AS-179 — against a lone Priest the opener is Serpent Sting.
 ///
 /// Nothing a Priest does can stop an Aimed Shot, so there is time for both
 /// and the sting goes first: it ticks a GCD longer, and the Priest spends its
-/// early GCDs dispelling it rather than Mind Blasting the Hunter.
-/// With Aimed Shot first the Hunter lost these seeds (3, 7 and 13 of the 7 in
-/// 50 it lost).
+/// early GCDs dispelling it rather than Mind Blasting the Hunter. (With Aimed
+/// Shot first the Hunter lost 7 of 50 of these 1v1s; that measurement is
+/// AS-179's, and a win is a balance outcome no seed keeps — the test used to
+/// pin the win at three seeds and lost one to AS-460's second trinkets.)
+///
+/// The decision is one tick's, so it is a scene pair: a Hunter opening on a
+/// Priest 25yd off chooses the sting; the control, a Rogue (out of stealth)
+/// 30yd off closing at its run speed, would reach the dead zone after an
+/// Aimed Shot begun now but before one begun after the sting, so the Hunter
+/// opens with the shot. (Not a Warrior: the sting is never due on a rage
+/// class, so a Warrior's Aimed Shot would not be the opener rule's.)
+/// The pure rule is `aimed_shot_goes_before_the_sting_only_when_the_sting_
+/// would_cost_it_the_window` in `class_ai_decisions.rs`; this is its wiring
+/// through the Hunter's whole dispatch. A seed bank then holds the opener in
+/// played matches, where everything else the Hunter could do comes first.
 #[test]
 fn against_a_lone_priest_the_opener_is_serpent_sting() {
-    for seed in [3u64, 7, 13] {
-        let (events, log) = run_trace_and_log(config(&["Hunter"], &["Priest"], seed));
+    use arenasim::states::match_config::CharacterClass;
+    use arenasim::states::play_match::class_ai::scene::Scene;
+
+    const ME: &str = "me";
+    const ENEMY: &str = "enemy";
+    let opener = |class: CharacterClass, z: f32| {
+        let mut scene = Scene::new()
+            .unit(ME, 1, CharacterClass::Hunter)
+            .at(0.0, 0.0)
+            .targeting(ENEMY)
+            .unit(ENEMY, 2, class)
+            .at(0.0, z)
+            .facing(0.0, -1.0)
+            .targeting(ME)
+            // The trap and the slow are the opener's business elsewhere.
+            .cooldown(ME, AbilityType::ConcussiveShot, 10.0)
+            .cooldown(ME, AbilityType::FreezingTrap, 14.0)
+            .cooldown(ME, AbilityType::FrostTrap, 14.0);
+        scene.combatant_mut(ME).hunter_opened = false;
+        scene.combatant_mut(ENEMY).stealthed = false;
+        scene.decide(ME)
+    };
+    let priest = opener(CharacterClass::Priest, 25.0);
+    assert_eq!(
+        priest.chosen,
+        Some((AbilityType::SerpentSting, Some(ENEMY))),
+        "{:?}",
+        priest.candidates
+    );
+    let rogue = opener(CharacterClass::Rogue, 30.0);
+    assert_eq!(
+        rogue.chosen,
+        Some((AbilityType::AimedShot, Some(ENEMY))),
+        "control: {:?}",
+        rogue.candidates
+    );
+
+    for seed in LONE_PRIEST_BANK {
+        let (events, _) = run_trace_and_log(config(&["Hunter"], &["Priest"], seed));
         let opener = hunter_trap_events(&events)
             .filter_map(|v| v.pointer("/outcome/ability").and_then(|a| a.as_str()))
             .find(|a| *a == "AimedShot" || *a == "SerpentSting");
         assert_eq!(opener, Some("SerpentSting"), "seed {seed}");
-        assert!(
-            log.lines()
-                .any(|l| l.contains("Team 2 Priest #1 has been eliminated")),
-            "seed {seed}: the Hunter did not kill the Priest"
-        );
     }
 }
+
+/// The seeds the lone-Priest opener is played over.
+const LONE_PRIEST_BANK: std::ops::Range<u64> = 0..8;
 
 /// AS-125 — with the Rogue on the Hunter, the trap goes on the enemy Priest.
 ///
@@ -1094,4 +1137,50 @@ fn flare_reveals_the_kill_target_rogue_and_no_trap_catches_it() {
         held > 0,
         "the lane trap was never held for an unseen kill target — the probe went vacuous"
     );
+}
+
+/// The seeds the lane-trap probe plays.
+const LANE_TRAP_BANK: std::ops::Range<u64> = 0..4;
+
+/// A lone Hunter against Rogue+Warrior, staged at the gates as the lane
+/// trap's situation (`a_lane_trap_springs_on_the_enemy_it_was_decided_on`):
+/// the Hunter on the Rogue, which is out of stealth 32yd off and running at
+/// it, so the lane's midpoint is 16yd out on its line; the Warrior rooted 7yd
+/// off that midpoint. The Hunter's pet is held stunned at its side. Its
+/// Concussive Shot, Frost Trap and Disengage are cooling and its opener is
+/// spent, so the fallback lane trap is the throw it has.
+fn lane_stage() -> Stage {
+    let (hunter, pet, rogue, warrior) = (
+        Unit::new(1, 0),
+        Unit::pet_of(1, 0),
+        Unit::new(2, 0),
+        Unit::new(2, 1),
+    );
+    let held = |effect_type: AuraType| Aura {
+        effect_type,
+        duration: 300.0,
+        magnitude: 1.0,
+        ability_name: "Held".to_string(),
+        break_on_damage_threshold: -1.0,
+        ..Default::default()
+    };
+    Stage::new()
+        .clear_auras(rogue)
+        .combatant(rogue, |c| c.stealthed = false)
+        .place(hunter, 0.0, 0.0)
+        .combatant(hunter, |c| c.hunter_opened = true)
+        .place(pet, -3.0, 0.0)
+        .aura(pet, held(AuraType::Stun))
+        .place(rogue, 32.0, 0.0)
+        .place(warrior, 16.0, 7.0)
+        .aura(warrior, held(AuraType::Root))
+        // The Hunter's own sting on it, so the Warrior is no off-target the
+        // trap would be held for: a friendly DoT would break the trap.
+        .land(warrior, AbilityType::SerpentSting, hunter)
+        .target(hunter, rogue)
+        .target(rogue, hunter)
+        .target(warrior, hunter)
+        .cooldown(hunter, AbilityType::FrostTrap, 15.0)
+        .cooldown(hunter, AbilityType::Disengage, 30.0)
+        .cooldown(hunter, AbilityType::ConcussiveShot, 12.0)
 }

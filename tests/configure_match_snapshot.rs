@@ -117,7 +117,7 @@ fn configure_match_picker_open() {
 }
 
 /// A talented slot: Team 2's second slot is a Warlock with a Demonology
-/// build, so its row reads the spec ("Demonology Warlock 3") where an
+/// build, so its row reads the spec ("Demonology Warlock 0/3") where an
 /// untalented row reads its class's line.
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
@@ -190,7 +190,7 @@ fn a_talented_slot_reads_its_spec() {
         last = registry::snapshot(&ctx).expect("armed");
     }
     assert!(
-        last.has_note("slot:t2s1 subtitle=Demonology Warlock 3"),
+        last.has_note("slot:t2s1 subtitle=Demonology Warlock 0/3"),
         "{:?}",
         last.notes
     );

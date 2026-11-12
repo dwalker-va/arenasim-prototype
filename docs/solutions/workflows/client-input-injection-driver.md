@@ -257,6 +257,29 @@ one wheel line. The click landed on *something*, which is the worst failure
 mode available. `Micro::Move` now requires the target rect to be identical on
 two consecutive frames before it aims.
 
+**Two still frames are not enough on their own.** Mid-animation the content can
+hold still for a pass, and the target then slides on. In View Combatant,
+`hover strategic:CheapShot` after `hover kit:Ambush` wheels back up the sheet;
+in half the 720p runs the driver aimed above the tile's final rect and hovered
+nothing (AS-470). `Move` also waits until the last pass did not scroll at all:
+`runner::scrolled_last_pass`, read from egui's `time_since_last_scroll`.
+egui stamps that in `begin_pass` whenever a delta is played out, so it means
+the animation is over. Do not read `smooth_scroll_delta` for this. The scroll area
+that applies a pass's share zeroes it in that same pass, so a read after the
+pass sees zero mid-animation. `tooltip_gate` waits for a scroll to finish by
+the same signal.
+
+**A tooltip under the parked pointer takes the wheel.** The driver scrolls with
+the pointer parked mid-screen. egui hides tooltips while content scrolls only
+when the scroll is younger than `tooltip_delay`, and the theme's delay was
+zero. So a choice tile scrolling past the parked pointer could open its
+tooltip beneath it, and the wheel then went to the tooltip layer, not the
+sheet. The sheet never moved again, and the step timed out with "laid out but
+never scrolled into view" (AS-470, about one run in four). The theme's delay is
+now 0.05s, which turns that guard back on. egui counts that delay from the
+end of the stillness wait, so a first tooltip shows about 0.05s later than it
+did, and `tooltip_gate` waits that much longer per first tooltip.
+
 **And aim only at a rect that is wholly on screen** — `Widget::aim_point`,
 never `visible`. `visible` is egui's `is_rect_visible`: true once any point of
 the rect is inside its clip rect. In a 1280x720 window the Warrior's shout
@@ -274,7 +297,7 @@ FRAMES.** This one was got wrong twice, and the second time is the more
 useful lesson.
 
 egui will not show a tooltip until several **wall-clock** conditions hold. With
-`tooltip_delay` zeroed (which both instrumented screens do), the binding ones
+`tooltip_delay` at the theme's 0.05s (counted from the end of the stillness wait below, so it adds to it), the binding ones
 are `pointer.is_still()` — velocity over a **0.1 second** position history —
 `smooth_scroll_delta == 0`, an animation that decays over **time**, and
 `clicked_more_recently_than_moved`, which wants the move at least **0.1s**
@@ -330,6 +353,20 @@ two-frame rect check, about 0.1s at 60fps; in a 1280x720 window a long frame
 after it failed the hover intermittently, at a different class's first hover
 each run (AS-289). `hover` now starts with `AwaitClickRest`, which holds the
 move until egui's own click clock is past 0.1s, whatever the frames do.
+
+Waiting out the click is not enough on its own, because the move then has to
+be COUNTED. egui 0.31 computes velocity only from three or more position
+samples inside its 0.1s window (`input_state/mod.rs`, `pos_history`), takes
+one sample per pass, and keeps two once frames run past 50ms. A hover's one
+move gets two chances to land in a window of three, and a slow stretch across
+both left it uncounted; by the time the frames sped up the pointer was still,
+so there was no move left to count and the tooltip was withheld for good
+(AS-453, about 1 run in 3 at load 90-110). After aiming, `hover` now runs
+`RegisterMove`, which nudges the pointer a point at a time along a sawtooth
+across the widget's centre until `move_counted_gate` (the click gate alone)
+opens; on a pass that already counted the aim it moves nothing. While EVERY
+frame is longer than 50ms nothing can open it, for the driver or for a person
+with a mouse, and the step fails saying so rather than naming the symptom.
 
 All three traps share a shape: the driver observed a state that was still
 changing. When a new assertion is flaky, suspect that before suspecting the
@@ -408,11 +445,12 @@ anything under `src/ui/driver/`.
 inertness), and the runner's three PURE seams: `expand`, which decides what a
 step costs in frames, `evaluate`, which decides every `assert-*` verb, and
 `pointer_step`, which decides each frame of a pointer action — the aim, the
-scroll-to-reveal, the rect-stability gate and the two waits (`AwaitClickRest`,
-`tooltip_gate`). `run_ui_script` only injects what `pointer_step` returns and
+scroll-to-reveal, the rect-stability gate, the move nudge (`RegisterMove`) and
+the two waits (`AwaitClickRest`, `tooltip_gate`). `run_ui_script` only injects what `pointer_step` returns and
 counts frames, so `tests/view_combatant_snapshot.rs` drives the real decision
 code over a bare `egui::Context`, and `tests/ui_driver.rs` shows the click-rest
-wait is in seconds at 240 and 20 frames a second.
+wait is in seconds at 240 and 20 frames a second, and that a hover after a
+click opens the tooltip gate through a second of 0.1s frames.
 
 **The rest of the frame loop is not covered by any test.** It needs a window,
 so the event injection itself, the timeout counting and the step sequencing are

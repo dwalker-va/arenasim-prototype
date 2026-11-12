@@ -1,8 +1,11 @@
 //! Offscreen visual snapshot of View Combatant's equipment picker.
 //!
 //! Renders the real `draw_item_picker` — the kit modal View Combatant opens
-//! as "Select: <socket>" — for a Warrior's Trinket 2 socket, over the real
-//! `items.ron`, so a new item or a changed proc sentence shows up here.
+//! as "Select: <socket>" — for a Warrior's Trinket 2 socket, over the live
+//! `items.ron` restricted to the pinned catalogue
+//! (`tests/common/pinned_catalogue.rs`): a changed proc sentence shows up
+//! here, and a trinket added since does not, so two cards that each add one
+//! do not both re-bless this PNG.
 //!
 //! The thing this pins: a PROC trinket's row carries a second, quieter line
 //! saying what the proc does (trigger, effect, duration, cooldown — the
@@ -19,6 +22,8 @@
 //! has no Bevy textures, so every item icon draws the kit's fallback tile —
 //! layout, wrapping and colour are faithful; icon art is not.
 
+mod common;
+
 use std::collections::BTreeMap;
 
 use egui_kittest::Harness;
@@ -30,7 +35,7 @@ use arenasim::states::view_combatant_ui::draw_item_picker;
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn item_picker_trinket_socket() {
-    let items = load_item_definitions().expect("items.ron must load");
+    let items = common::pinned_catalogue::items();
     let mut harness = Harness::builder().with_size([640.0, 900.0]).build(|ctx| {
         arenasim::ui::install(ctx);
         let valid = items.selectable_items_for_slot(

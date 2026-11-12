@@ -8,6 +8,8 @@
 //! lands on the right book: the one the match's spawn resolved, and, for a
 //! question about another unit, that unit's.
 
+mod common;
+
 use bevy::prelude::*;
 
 use arenasim::headless::runner::{run_headless_match_prepared, PreloadedConfigs};
@@ -93,17 +95,53 @@ fn a_match_casts_from_the_books_its_spawn_resolved() {
 }
 
 /// A channel ticks from its channeller's book: Drain Life ticks for what the
-/// match's table says. The control plays the same seed on the shipped table.
+/// match's table says. The control plays the same stage on the shipped table.
+///
+/// A staged match, so the channel is owed by construction: Drain Life goes
+/// only below 80% health on a target carrying a DoT, and only once the
+/// Warlock's Immolate and Fear are spent. So the Warlock stands at half
+/// health, the Priest carries its Immolate and is held silenced (no dispel,
+/// no heal), and the Immolate recast and the Fear are held on cooldown.
 #[test]
 fn a_match_channels_from_the_books_its_spawn_resolved() {
+    use arenasim::headless::{Stage, Unit};
+    use arenasim::states::play_match::{Aura, AuraType};
+
     const TICK: f32 = 77.0;
+    const WARLOCK: Unit = Unit::new(1, 0);
+    const PRIEST: Unit = Unit::new(2, 0);
     let config = || HeadlessMatchConfig {
-        team1: vec!["Warlock".into(), "Paladin".into()],
-        team2: vec!["Hunter".into(), "Druid".into()],
-        team2_hunter_pet_types: vec!["Spider".into(); 2],
+        team1: vec!["Warlock".into()],
+        team2: vec!["Priest".into()],
         random_seed: Some(12),
-        max_duration_secs: 90.0,
+        max_duration_secs: 30.0,
         ..Default::default()
+    };
+    let stage = || {
+        Stage::new()
+            .health(WARLOCK, 0.5)
+            .cooldown(WARLOCK, AbilityType::Immolate, 1000.0)
+            .cooldown(WARLOCK, AbilityType::Fear, 1000.0)
+            .clear_auras(PRIEST)
+            .land(PRIEST, AbilityType::Immolate, WARLOCK)
+            .aura(
+                PRIEST,
+                Aura {
+                    effect_type: AuraType::Silence,
+                    duration: 300.0,
+                    magnitude: 1.0,
+                    ability_name: "Held".to_string(),
+                    break_on_damage_threshold: -1.0,
+                    ..Default::default()
+                },
+            )
+    };
+    let staged = |table: Option<AbilityDefinitions>| {
+        let mut configs = PreloadedConfigs::load().expect("configs");
+        if let Some(table) = table {
+            configs.abilities = table;
+        }
+        common::staged::play_prepared(config(), &configs, stage()).log
     };
     let patched = table_with(|c| {
         c.abilities
@@ -114,12 +152,12 @@ fn a_match_channels_from_the_books_its_spawn_resolved() {
     // The tick line reports what landed (resistance shaves a little; a
     // lethal tick is capped at the health left), so read its largest.
     let max = |v: &[f32]| v.iter().copied().fold(0.0f32, f32::max);
-    let ticks = amounts(&play(Some(patched), config()), "'s Drain Life ticks");
+    let ticks = amounts(&staged(Some(patched)), "'s Drain Life ticks");
     assert!(
         max(&ticks) >= TICK * 0.6,
         "Drain Life ticked for the match table's damage: {ticks:?}"
     );
-    let ticks = amounts(&play(None, config()), "'s Drain Life ticks");
+    let ticks = amounts(&staged(None), "'s Drain Life ticks");
     assert!(
         !ticks.is_empty() && max(&ticks) < TICK * 0.5,
         "control: the shipped table's damage: {ticks:?}"

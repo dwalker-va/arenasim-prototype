@@ -135,14 +135,19 @@ pub enum WarlockCurse {
     Weakness,
     /// Curse of Tongues - increases target's cast time by 50% for 30 seconds
     Tongues,
+    /// Curse of Exhaustion - slows the target's movement by 30% for 12
+    /// seconds. Offered only to a build with the Curse of Exhaustion talent
+    /// (`talents.ron` widens it).
+    Exhaustion,
 }
 
 impl WarlockCurse {
     /// Every option, in display order.
-    pub const ALL: [WarlockCurse; 3] = [
+    pub const ALL: [WarlockCurse; 4] = [
         WarlockCurse::Agony,
         WarlockCurse::Weakness,
         WarlockCurse::Tongues,
+        WarlockCurse::Exhaustion,
     ];
 
     /// Get a short description for UI display
@@ -151,6 +156,7 @@ impl WarlockCurse {
             WarlockCurse::Agony => "84 damage over 24s",
             WarlockCurse::Weakness => "-20% physical damage",
             WarlockCurse::Tongues => "+50% cast time",
+            WarlockCurse::Exhaustion => "-30% movement speed",
         }
     }
 
@@ -161,6 +167,7 @@ impl WarlockCurse {
             WarlockCurse::Agony => AbilityType::CurseOfAgony,
             WarlockCurse::Weakness => AbilityType::CurseOfWeakness,
             WarlockCurse::Tongues => AbilityType::CurseOfTongues,
+            WarlockCurse::Exhaustion => AbilityType::CurseOfExhaustion,
         }
     }
 }
@@ -971,7 +978,8 @@ impl MatchConfig {
     /// option a talent widens (Retribution Aura), chosen while the build took
     /// that talent, and kept after the talent was unlearned, would otherwise
     /// make the slot's choices illegal and refuse its spawn (a Priest form or
-    /// the Warlock's Sacrifice a talent offers, likewise). Covers every one-option menu; a choice the
+    /// the Warlock's Sacrifice a talent offers, likewise). Covers every one-option menu, and each
+    /// of a Warlock's per-enemy curses (Curse of Exhaustion); a choice the
     /// build still offers is left alone.
     pub fn keep_choices_offered(
         &mut self,
@@ -1025,6 +1033,18 @@ impl MatchConfig {
         keep(auras, slot, ChoiceOption::PaladinAura, &offered);
         keep(forms, slot, ChoiceOption::PriestForm, &offered);
         keep(demons, slot, ChoiceOption::WarlockDemon, &offered);
+        let curses = if team == 1 {
+            &mut self.team1_warlock_curse_prefs
+        } else {
+            &mut self.team2_warlock_curse_prefs
+        };
+        if let Some(prefs) = curses.get_mut(slot) {
+            for curse in prefs.iter_mut() {
+                if !offered(ChoiceOption::WarlockCurse(*curse)) {
+                    *curse = WarlockCurse::default();
+                }
+            }
+        }
     }
 
     /// Assign a class to a team slot, dropping that slot's equipment overrides
