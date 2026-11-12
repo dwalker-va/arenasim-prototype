@@ -346,14 +346,18 @@ pub enum PaladinAura {
     ShadowResistanceAura,
     /// Concentration Aura — reduces cast time of nearby allies
     ConcentrationAura,
+    /// Retribution Aura — Holy damage to a melee attacker of a nearby ally.
+    /// Offered only to a build with the Retribution Aura talent.
+    RetributionAura,
 }
 
 impl PaladinAura {
     /// Every option, in display order.
-    pub const ALL: [PaladinAura; 3] = [
+    pub const ALL: [PaladinAura; 4] = [
         PaladinAura::DevotionAura,
         PaladinAura::ShadowResistanceAura,
         PaladinAura::ConcentrationAura,
+        PaladinAura::RetributionAura,
     ];
 
     /// Get the display name
@@ -362,6 +366,7 @@ impl PaladinAura {
             PaladinAura::DevotionAura => "Devotion Aura",
             PaladinAura::ShadowResistanceAura => "Shadow Resistance Aura",
             PaladinAura::ConcentrationAura => "Concentration Aura",
+            PaladinAura::RetributionAura => "Retribution Aura",
         }
     }
 
@@ -373,6 +378,7 @@ impl PaladinAura {
             PaladinAura::ConcentrationAura => {
                 "Reduces interrupt lockout duration for nearby allies"
             }
+            PaladinAura::RetributionAura => "Deals Holy damage to melee attackers of nearby allies",
         }
     }
 
@@ -383,6 +389,7 @@ impl PaladinAura {
             PaladinAura::DevotionAura => AbilityType::DevotionAura,
             PaladinAura::ShadowResistanceAura => AbilityType::ShadowResistanceAura,
             PaladinAura::ConcentrationAura => AbilityType::ConcentrationAura,
+            PaladinAura::RetributionAura => AbilityType::RetributionAura,
         }
     }
 }
@@ -959,11 +966,14 @@ impl MatchConfig {
         }
     }
 
-    /// Return `team`'s `slot` to no form when its build no longer offers the
-    /// form it holds: the talent that offered it was unlearned. The slot then
-    /// never carries a choice its build cannot make, which the match would
-    /// refuse at the gates.
-    pub fn drop_unoffered_priest_form(
+    /// Put back to its menu's default any per-match choice of `team`'s `slot`
+    /// that its build no longer offers (`TalentDefinitions::offers`): an
+    /// option a talent widens (Retribution Aura), chosen while the build took
+    /// that talent, and kept after the talent was unlearned, would otherwise
+    /// make the slot's choices illegal and refuse its spawn (a Priest form or
+    /// the Warlock's Sacrifice a talent offers, likewise). Covers every one-option menu; a choice the
+    /// build still offers is left alone.
+    pub fn keep_choices_offered(
         &mut self,
         team: u8,
         slot: usize,
@@ -971,16 +981,50 @@ impl MatchConfig {
     ) {
         use crate::states::play_match::talent_choices::ChoiceOption;
         let build = self.build(team, slot).cloned().unwrap_or_default();
-        let forms = if team == 1 {
-            &mut self.team1_priest_forms
-        } else {
-            &mut self.team2_priest_forms
-        };
-        if let Some(form) = forms.get_mut(slot) {
-            if !talents.offers(&build, ChoiceOption::PriestForm(*form)) {
-                *form = PriestForm::default();
+        let offered = |option: ChoiceOption| talents.offers(&build, option);
+        fn keep<T: Copy + Default>(
+            list: &mut [T],
+            slot: usize,
+            option: impl Fn(T) -> ChoiceOption,
+            offered: &impl Fn(ChoiceOption) -> bool,
+        ) {
+            if let Some(value) = list.get_mut(slot) {
+                if !offered(option(*value)) {
+                    *value = T::default();
+                }
             }
         }
+        let (openers, poisons, pets, shouts, armors, auras, forms, demons) = if team == 1 {
+            (
+                &mut self.team1_rogue_openers,
+                &mut self.team1_rogue_poisons,
+                &mut self.team1_hunter_pet_types,
+                &mut self.team1_warrior_shouts,
+                &mut self.team1_mage_armors,
+                &mut self.team1_paladin_auras,
+                &mut self.team1_priest_forms,
+                &mut self.team1_warlock_demons,
+            )
+        } else {
+            (
+                &mut self.team2_rogue_openers,
+                &mut self.team2_rogue_poisons,
+                &mut self.team2_hunter_pet_types,
+                &mut self.team2_warrior_shouts,
+                &mut self.team2_mage_armors,
+                &mut self.team2_paladin_auras,
+                &mut self.team2_priest_forms,
+                &mut self.team2_warlock_demons,
+            )
+        };
+        keep(openers, slot, ChoiceOption::RogueOpener, &offered);
+        keep(poisons, slot, ChoiceOption::RoguePoison, &offered);
+        keep(pets, slot, ChoiceOption::HunterPet, &offered);
+        keep(shouts, slot, ChoiceOption::WarriorShout, &offered);
+        keep(armors, slot, ChoiceOption::MageArmor, &offered);
+        keep(auras, slot, ChoiceOption::PaladinAura, &offered);
+        keep(forms, slot, ChoiceOption::PriestForm, &offered);
+        keep(demons, slot, ChoiceOption::WarlockDemon, &offered);
     }
 
     /// Assign a class to a team slot, dropping that slot's equipment overrides
@@ -1002,22 +1046,23 @@ impl MatchConfig {
     /// Each is a typed per-class enum that only its own class reads, so a stale
     /// one is inert and comes back intact if the user changes their mind;
     /// equipment is the only per-slot state where one class's choice occupies a
-    /// socket another class can see. The priest form is the exception among
-    /// them: a talent offers it, so it is dropped with the build.
+    /// socket another class can see. The exception is a choice a talent
+    /// offers (Retribution Aura, Shadowform, Sacrifice): the build that
+    /// offered it is dropped, so [`Self::keep_choices_offered`] puts it back to
+    /// its default, against the shipped talent table (the one the client and
+    /// every config load).
     pub fn set_class(&mut self, team: u8, slot: usize, class: CharacterClass) {
-        let (classes, equipment, builds, forms) = if team == 1 {
+        let (classes, equipment, builds) = if team == 1 {
             (
                 &mut self.team1,
                 &mut self.team1_equipment,
                 &mut self.team1_builds,
-                &mut self.team1_priest_forms,
             )
         } else {
             (
                 &mut self.team2,
                 &mut self.team2_equipment,
                 &mut self.team2_builds,
-                &mut self.team2_priest_forms,
             )
         };
         let Some(current) = classes.get_mut(slot) else {
@@ -1033,10 +1078,11 @@ impl MatchConfig {
         if let Some(build) = builds.get_mut(slot) {
             *build = Build::default();
         }
-        // A form is offered only by a talent, so it goes with the build.
-        if let Some(form) = forms.get_mut(slot) {
-            *form = PriestForm::default();
-        }
+        self.keep_choices_offered(
+            team,
+            slot,
+            crate::states::play_match::talents::TalentDefinitions::shipped(),
+        );
     }
 
     /// Get the curse preference for a specific warlock slot and enemy target
@@ -1120,6 +1166,50 @@ mod tests {
             config.team2_equipment[0].get(&ItemSlot::MainHand),
             Some(&ItemId::BloodlordsBattleaxe)
         );
+    }
+
+    /// A class change drops the build, and with it every choice a talent
+    /// offered: a Paladin's Retribution Aura and a Warlock's Sacrifice come
+    /// back as Devotion Aura and the Felhunter, so the slot's spawn stays
+    /// legal. Control: re-picking the same class keeps the build and the
+    /// choice.
+    #[test]
+    fn a_class_round_trip_drops_the_choices_its_build_offered() {
+        use crate::states::play_match::talents::TalentId;
+        let mut config = MatchConfig::default();
+        config.set_class(1, 0, CharacterClass::Paladin);
+        config.team1_builds[0] =
+            Build::of(&[(TalentId::SacredDuty, 2), (TalentId::RetributionAura, 1)]);
+        config.team1_paladin_auras[0] = PaladinAura::RetributionAura;
+        config.set_class(1, 0, CharacterClass::Paladin);
+        assert_eq!(config.team1_paladin_auras[0], PaladinAura::RetributionAura);
+        assert!(!config.team1_builds[0].is_empty());
+        config.set_class(1, 0, CharacterClass::Warrior);
+        config.set_class(1, 0, CharacterClass::Paladin);
+        assert!(config.team1_builds[0].is_empty());
+        assert_eq!(config.team1_paladin_auras[0], PaladinAura::DevotionAura);
+
+        let talents = crate::states::play_match::talents::TalentDefinitions::shipped();
+        let sacrifice = talents
+            .legal_builds(CharacterClass::Warlock, 8)
+            .into_iter()
+            .find(|b| {
+                talents.offers(
+                    b,
+                    crate::states::play_match::talent_choices::ChoiceOption::WarlockDemon(
+                        WarlockDemon::Sacrifice,
+                    ),
+                )
+            })
+            .expect("some build offers Sacrifice");
+        config.set_class(2, 0, CharacterClass::Warlock);
+        config.team2_builds[0] = sacrifice;
+        config.team2_warlock_demons[0] = WarlockDemon::Sacrifice;
+        config.set_class(2, 0, CharacterClass::Warlock);
+        assert_eq!(config.team2_warlock_demons[0], WarlockDemon::Sacrifice);
+        config.set_class(2, 0, CharacterClass::Mage);
+        config.set_class(2, 0, CharacterClass::Warlock);
+        assert_eq!(config.team2_warlock_demons[0], WarlockDemon::Felhunter);
     }
 
     /// A slot index past the team's size is a no-op, not a panic.

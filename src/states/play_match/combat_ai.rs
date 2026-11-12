@@ -787,6 +787,9 @@ pub struct DispatchAccumulators {
     pub fortified_this_frame: std::collections::HashSet<Entity>,
     pub battle_shouted_this_frame: std::collections::HashSet<Entity>,
     pub paladin_aura_this_frame: std::collections::HashSet<Entity>,
+    /// Allies a Paladin put Sacred Shield on this frame: a second Paladin
+    /// deciding later in the frame sees no shield there yet.
+    pub sacred_shielded_this_frame: std::collections::HashSet<Entity>,
     pub marked_this_frame: std::collections::HashSet<Entity>,
     pub frost_nova_damage: Vec<class_ai::QueuedAoeDamage>,
     pub same_frame_cc_queue: Vec<(Entity, Aura)>,
@@ -964,6 +967,7 @@ pub fn dispatch_class_decision(
         fortified_this_frame,
         battle_shouted_this_frame,
         paladin_aura_this_frame,
+        sacred_shielded_this_frame,
         marked_this_frame,
         frost_nova_damage,
         same_frame_cc_queue,
@@ -1402,6 +1406,7 @@ pub fn dispatch_class_decision(
                 auras,
                 ctx,
                 paladin_aura_this_frame,
+                sacred_shielded_this_frame,
                 same_frame_cc_queue,
                 &plan,
                 decision_trace,

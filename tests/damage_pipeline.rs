@@ -182,6 +182,7 @@ fn the_strongest_damage_taken_increase_in_scope_applies_per_stack() {
         count: 5,
         max: 5,
         scope: StackScope::PerTarget,
+        one_target: false,
     });
     let rider = aura(AuraType::DamageTakenIncrease, 0.05);
     let mut target_auras = auras(vec![hemo, rider]);

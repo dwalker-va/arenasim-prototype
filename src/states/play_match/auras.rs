@@ -239,6 +239,7 @@ pub fn apply_pending_auras(
     dampening: Res<ArenaDampening>,
     pending_auras: Query<(Entity, &AuraPending)>,
     mut combatants: Query<(
+        Entity,
         &mut Combatant,
         Option<&mut ActiveAuras>,
         &Transform,
@@ -264,6 +265,11 @@ pub fn apply_pending_auras(
     // when both teams apply pending auras simultaneously.
     let mut new_auras_map: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
 
+    // One-target auras that landed this frame, as (target, caster, aura):
+    // each takes its caster's same aura off every other unit once the frame's
+    // pendings are in (`AuraStacks::one_target`). Empty without one.
+    let mut one_target_landed: Vec<(Entity, Entity, AuraType, String)> = Vec::new();
+
     // Reflective Shield's one site (`talent_mechanics`): the casters of this
     // frame's shields that reflect a share of what they absorb, read before
     // the targets are borrowed. Empty without the talent.
@@ -275,7 +281,7 @@ pub fn apply_pending_auras(
             combatants
                 .get(caster)
                 .ok()
-                .and_then(|(c, ..)| c.talent_mechanics.reflective_shield())
+                .and_then(|(_, c, ..)| c.talent_mechanics.reflective_shield())
                 .map(|share| (caster, share))
         })
         .collect();
@@ -298,7 +304,7 @@ pub fn apply_pending_auras(
         );
 
         // Get target combatant
-        let Ok((mut target_combatant, mut active_auras, target_transform, mut dr_tracker)) =
+        let Ok((_, mut target_combatant, mut active_auras, target_transform, mut dr_tracker)) =
             combatants.get_mut(pending.target)
         else {
             commands.entity(pending_entity).despawn();
@@ -594,6 +600,20 @@ pub fn apply_pending_auras(
                 };
                 combat_log.log(CombatLogEventType::Buff, message);
                 spawn_aura_landing(&mut commands, pending.target, &pending.aura);
+                // A one-target aura is its caster's here now, refreshed or
+                // not (a refresh takes the new caster): the caster's copy
+                // anywhere else comes off.
+                if let (Some(caster), true) = (
+                    pending.aura.caster,
+                    pending.aura.stacks.is_some_and(|s| s.one_target),
+                ) {
+                    one_target_landed.push((
+                        pending.target,
+                        caster,
+                        pending.aura.effect_type,
+                        pending.aura.ability_name.clone(),
+                    ));
+                }
                 commands.entity(pending_entity).despawn();
                 continue;
             }
@@ -884,6 +904,28 @@ pub fn apply_pending_auras(
             }
         }
 
+        // A triggered absorb's arming aura (Sacred Shield) gives its bearer
+        // the slot that raises the shield (`triggered_absorbs`). A refresh of
+        // a refresh-only arming aura never reaches this line, so it keeps the
+        // slot, and its limit, as they were.
+        if let Some(config) = aura_to_add.damage_mods.triggered_absorb {
+            let name = aura_to_add.ability_name.clone();
+            target_combatant
+                .triggered_absorbs
+                .retain(|slot| slot.name != name);
+            let slot = super::triggered_absorbs::TriggeredAbsorbSlot::new(
+                &name,
+                super::triggered_absorbs::AbsorbSource::Aura,
+                config,
+                target_combatant.damage_taken,
+            );
+            target_combatant.triggered_absorbs.push(slot);
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!("{} gains {}", target_id, name),
+            );
+        }
+
         // Log DR info for CC auras
         if let Some(category) = dr_category {
             let dr_pct = (dr_multiplier * 100.0) as i32;
@@ -940,6 +982,17 @@ pub fn apply_pending_auras(
                 })
         });
         spawn_aura_landing(&mut commands, pending.target, &aura_to_add);
+        if let (Some(caster), true) = (
+            aura_to_add.caster,
+            aura_to_add.stacks.is_some_and(|s| s.one_target),
+        ) {
+            one_target_landed.push((
+                pending.target,
+                caster,
+                aura_to_add.effect_type,
+                aura_to_add.ability_name.clone(),
+            ));
+        }
         let to_add = std::iter::once(aura_to_add).chain(riders.into_iter().flatten());
 
         // Add aura to target
@@ -957,6 +1010,36 @@ pub fn apply_pending_auras(
 
         // Remove the pending aura entity
         commands.entity(pending_entity).despawn();
+    }
+
+    // One target per caster: the caster's same aura comes off every unit but
+    // the one it just landed on.
+    for (target, caster, effect, name) in one_target_landed {
+        let theirs = |a: &Aura| {
+            a.effect_type == effect && a.ability_name == name && a.caster == Some(caster)
+        };
+        for (entity, holder, auras, ..) in combatants.iter_mut() {
+            let Some(mut auras) = auras else {
+                continue;
+            };
+            if entity == target || !auras.auras.iter().any(theirs) {
+                continue;
+            }
+            auras.auras.retain(|a| !theirs(a));
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!(
+                    "{}'s {} fades (it moved to another target)",
+                    combat_log_id_for(&holder, pet_query.get(entity).ok()),
+                    name
+                ),
+            );
+        }
+        for (entity, auras) in new_auras_map.iter_mut() {
+            if *entity != target {
+                auras.retain(|a| !theirs(a));
+            }
+        }
     }
 
     // Now insert ActiveAuras components for entities that didn't have them

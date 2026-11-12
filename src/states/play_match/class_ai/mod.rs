@@ -33,6 +33,7 @@ pub mod mage;
 pub mod on_use;
 pub mod paladin;
 pub(crate) mod paladin_postures;
+pub mod paladin_protection;
 pub mod peel;
 pub mod pet_ai;
 pub mod pillar_mode;
@@ -1203,6 +1204,7 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         | AuraType::DamageDealtIncrease
         | AuraType::ArmorPercentIncrease
         | AuraType::DamageTransfer
+        | AuraType::TriggeredAbsorb
         | AuraType::KillingBlowSave
         | AuraType::DamageReflect
         | AuraType::TravelForm => 0,
@@ -1437,6 +1439,7 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         AuraType::KillingBlowSave => 100,     // a death prevented (Guardian Spirit)
         AuraType::DamageTakenReduction => 90, // flat damage cut (Devotion Aura is untyped)
         AuraType::DamageTransfer => 80,       // damage moved off the holder (Blessing of Sacrifice)
+        AuraType::TriggeredAbsorb => 80,      // shields that keep coming (Sacred Shield)
         AuraType::HealingOverTime => 70,      // ongoing sustain (Rejuvenation)
         // Offensive throughput buffs.
         AuraType::AttackPowerIncrease => 60,
@@ -1555,6 +1558,7 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
         | AuraType::ArmorPercentIncrease
         | AuraType::ArmorPercentReduction
         | AuraType::DamageTransfer
+        | AuraType::TriggeredAbsorb
         | AuraType::KillingBlowSave
         | AuraType::DamageReflect
         | AuraType::TravelForm => false,
@@ -1655,6 +1659,7 @@ pub const fn grants_damage_immunity(aura: AuraType) -> bool {
         | AuraType::ArmorPercentIncrease
         | AuraType::ArmorPercentReduction
         | AuraType::DamageTransfer
+        | AuraType::TriggeredAbsorb
         | AuraType::KillingBlowSave
         | AuraType::DamageReflect
         | AuraType::TravelForm => false,

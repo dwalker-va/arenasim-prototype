@@ -358,7 +358,7 @@ pub fn render_detail(ui: &mut egui::Ui, id: ItemId, data: &EncyclopediaData) -> 
         widget::section_heading(ui, "EFFECT");
         widget::prose(
             ui,
-            &triggered_absorb_description(absorb),
+            &triggered_absorb_description(&absorb.absorb),
             text::BODY,
             color::TEXT,
         );

@@ -90,7 +90,9 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::FireTotem
         | A::TravelForm
         | A::Shadowform
-        | A::LifeTap => Aim::Caster,
+        | A::LifeTap
+        | A::DivineProtection
+        | A::RetributionAura => Aim::Caster,
         A::Frostbolt
         | A::FlashHeal
         | A::HeroicStrike
@@ -152,7 +154,9 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::MarkOfTheWild
         | A::Innervate
         | A::EntanglingRoots
-        | A::Cyclone => Aim::Unit,
+        | A::Cyclone
+        | A::BlessingOfSacrifice
+        | A::SacredShield => Aim::Unit,
     }
 }
 

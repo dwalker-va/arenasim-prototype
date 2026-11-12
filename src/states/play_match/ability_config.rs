@@ -131,6 +131,12 @@ pub struct AuraEffect {
     /// (a minor re-buff). `None`, the default, leaves the type's value.
     #[serde(default)]
     pub purge_priority: Option<i32>,
+    /// The absorb a `TriggeredAbsorb` aura arms: what raises it, how big it
+    /// is, how often, and how long the shield lasts (Sacred Shield). Required
+    /// on a `TriggeredAbsorb` aura and refused on any other (`validate()`).
+    /// See [`triggered_absorbs`](super::triggered_absorbs).
+    #[serde(default)]
+    pub triggered_absorb: Option<super::triggered_absorbs::TriggeredAbsorbConfig>,
     /// Makes the aura LEECH: a share of its ability's damage, or of its
     /// caster's damage of one school to the bearer, heals the caster or the
     /// caster's party (Death Coil, Siphon Life, Vampiric Embrace). See
@@ -146,14 +152,15 @@ pub struct AuraEffect {
 }
 
 impl AuraEffect {
-    /// The damage-pipeline data the configured aura carries: its scope and
-    /// hit charges. A reflect share is never configured; it is set as a
-    /// shield lands (`talent_mechanics`).
+    /// The damage-pipeline data the configured aura carries: its scope, hit
+    /// charges and triggered absorb. A reflect share is never configured; it
+    /// is set as a shield lands (`talent_mechanics`).
     pub fn damage_mods(&self) -> AuraDamageMods {
         AuraDamageMods {
             scope: self.scope,
             charges: self.charges,
             reflect_absorbed: None,
+            triggered_absorb: self.triggered_absorb,
         }
     }
 }
@@ -164,6 +171,10 @@ pub struct AuraStackingConfig {
     /// At least 1. `1` means the aura refreshes on reapplication but never
     /// deepens.
     pub max_stacks: u8,
+    /// The caster holds it on one target at a time: landing it on another
+    /// unit takes the caster's from the first (Sacred Shield). Default false.
+    #[serde(default)]
+    pub one_target: bool,
 }
 
 /// A blooming aura's heal, per stack: `heal_base + caster spell power ×
@@ -665,6 +676,11 @@ impl AbilityDefinitions {
             AbilityType::PaladinCleanse,
             AbilityType::DevotionAura,
             AbilityType::DivineShield,
+            AbilityType::RetributionAura,
+            // Paladin talent abilities
+            AbilityType::DivineProtection,
+            AbilityType::BlessingOfSacrifice,
+            AbilityType::SacredShield,
             // Pet abilities (Felhunter)
             AbilityType::SpellLock,
             AbilityType::DevourMagic,
@@ -836,6 +852,38 @@ impl AbilityDefinitions {
                         ability, other, category, def.cooldown, other_def.cooldown
                     );
                 }
+            }
+        }
+
+        // A triggered absorb rides on exactly the aura that arms it, and
+        // must be able to fire.
+        for (ability, def) in &self.definitions {
+            let Some(aura) = &def.applies_aura else {
+                continue;
+            };
+            match (
+                aura.aura_type == AuraType::TriggeredAbsorb,
+                &aura.triggered_absorb,
+            ) {
+                (true, None) => panic!(
+                    "abilities.ron: {:?} applies a TriggeredAbsorb aura with no \
+                     `triggered_absorb` config: it would arm nothing",
+                    ability
+                ),
+                (false, Some(_)) => panic!(
+                    "abilities.ron: {:?} sets `triggered_absorb` on a {:?} aura. Only a \
+                     TriggeredAbsorb aura arms one.",
+                    ability, aura.aura_type
+                ),
+                (true, Some(config)) => {
+                    if let Err(e) = super::triggered_absorbs::validate_triggered_absorb(
+                        &format!("{ability:?}"),
+                        config,
+                    ) {
+                        panic!("abilities.ron: {e}");
+                    }
+                }
+                (false, None) => {}
             }
         }
 
@@ -1360,6 +1408,10 @@ mod tests {
                     AbilityType::HolyShock,
                     AbilityType::HammerOfJustice,
                     AbilityType::PaladinCleanse,
+                    AbilityType::RetributionAura,
+                    AbilityType::DivineProtection,
+                    AbilityType::BlessingOfSacrifice,
+                    AbilityType::SacredShield,
                 ],
             ),
             (

@@ -241,6 +241,7 @@ pub fn proc_clause(proc: &TalentProc, abilities: &AbilityDefinitions) -> String 
                 purge_priority: None,
                 leech: None,
                 next_cast: None,
+                triggered_absorb: None,
             });
             format!("{} (on {whom})", in_clause(&sentence))
         }
@@ -636,7 +637,7 @@ mod tests {
                 "Unlocks Bird as a pet choice",
                 "Unlocks Commanding Shout as a shout choice",
                 "Unlocks Molten Armor as an armor choice",
-                "Unlocks Concentration Aura as an aura choice",
+                "Unlocks Retribution Aura as an aura choice",
                 "Unlocks Shadowform as a form choice",
             ]
         );

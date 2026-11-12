@@ -80,7 +80,7 @@ fn an_effect_row_carries_the_shared_sentence_and_nothing_else_grows() {
             }
             (None, None, Some(absorb)) => {
                 absorb_rows += 1;
-                Some(triggered_absorb_description(absorb))
+                Some(triggered_absorb_description(&absorb.absorb))
             }
             (None, None, None) => None,
             _ => panic!("{}: no shipped item carries two effects", item.name),
