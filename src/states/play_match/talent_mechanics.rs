@@ -137,6 +137,19 @@ impl TalentMechanic {
         Ok(())
     }
 
+    /// Whether the mechanic's site lands an aura that carries its talent
+    /// (`Aura::source_talent`), so the talent's icon is registered for it.
+    pub fn applies_talent_aura(&self) -> bool {
+        match self {
+            TalentMechanic::MasterDemonologist { .. } | TalentMechanic::DemonicSacrifice { .. } => {
+                true
+            }
+            TalentMechanic::SoulLink { .. }
+            | TalentMechanic::ReflectiveShield { .. }
+            | TalentMechanic::CheatDeath { .. } => false,
+        }
+    }
+
     /// The mechanic at `rank` ranks: shares scale by the rank.
     pub fn at_rank(self, rank: u8) -> TalentMechanic {
         let r = f32::from(rank);

@@ -32,7 +32,9 @@ use arenasim::states::play_match::demonology::{
     demonic_bonds, master_demonologist_aura, touch_of_shadow_aura, MASTER_DEMONOLOGIST_NAME,
     TOUCH_OF_SHADOW_NAME,
 };
-use arenasim::states::play_match::rendering::{get_aura_icon_key, GENERIC_AURA_ICONS};
+use arenasim::states::play_match::rendering::{
+    get_aura_icon_key, talent_aura_icon_key, talent_aura_icons,
+};
 use arenasim::states::play_match::talent_choices::{ChoiceOption, SlotChoices};
 use arenasim::states::play_match::talent_mechanics::{TalentMechanic, TalentMechanics};
 use arenasim::states::play_match::talents::{Build, TalentDefinitions, TalentId};
@@ -268,23 +270,32 @@ fn a_talent_aura_leaves_the_type_slot_free_and_cannot_be_removed() {
 
 #[test]
 fn the_talent_auras_wear_their_nodes_icons() {
-    for (aura, icon) in [
+    let registered = talent_aura_icons(talents());
+    for (aura, talent, icon) in [
         (
             master_demonologist_aura(0.04, Entity::PLACEHOLDER),
+            MasterDemonologist,
             "icons/talents/spell_shadow_shadowpact.jpg",
         ),
         (
             touch_of_shadow_aura(0.15, Entity::PLACEHOLDER),
+            DemonicSacrifice,
             "icons/talents/spell_shadow_psychicscream.jpg",
         ),
     ] {
+        assert_eq!(aura.source_talent, Some(talent), "{}", aura.ability_name);
         let key = get_aura_icon_key(&aura, abilities());
-        let path = GENERIC_AURA_ICONS
+        assert_eq!(key, talent_aura_icon_key(talent));
+        let path = registered
             .iter()
             .find(|(k, _)| *k == key)
-            .map(|(_, p)| *p);
+            .map(|(_, p)| p.as_str());
         assert_eq!(path, Some(icon), "{}", aura.ability_name);
     }
+    // Control: Soul Link lands no aura of its own, so no icon is registered.
+    assert!(!registered
+        .iter()
+        .any(|(k, _)| *k == talent_aura_icon_key(SoulLink)));
 }
 
 // ---------------------------------------------------------------------------

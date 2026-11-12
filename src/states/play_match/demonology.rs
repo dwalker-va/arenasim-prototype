@@ -25,7 +25,8 @@
 //! of `combat_core::apply_damage_with_absorb`, and the `Sacrifice` choice
 //! switches it off for the match (`talents.ron`'s `choice_rules`).
 //!
-//! Both auras are TALENT auras ([`talent_aura`]): source-keyed, so each sits
+//! Both auras are TALENT auras ([`talent_aura`]): source-keyed by their
+//! talent, so each sits
 //! beside a same-type aura from anywhere else (Devotion Aura beside Master
 //! Demonologist) and the damage pipeline takes the strongest; undispellable;
 //! and outlasting the match. A build without these talents meets none of
@@ -37,11 +38,11 @@ use bevy::prelude::*;
 
 use super::abilities::SpellSchool;
 use super::components::{
-    ActiveAuras, Aura, AuraDamageMods, AuraPending, AuraStacks, AuraType, CastingState,
-    ChannelingState, Combatant, DamageScope, DispelType, MatchCountdown, Pet, StackScope,
+    ActiveAuras, Aura, AuraDamageMods, AuraPending, AuraType, CastingState, ChannelingState,
+    Combatant, DamageScope, DispelType, MatchCountdown, Pet,
 };
 use super::talent_mechanics::TalentMechanic;
-use super::talents::{TalentDefinitions, TalentEffect};
+use super::talents::{TalentDefinitions, TalentEffect, TalentId};
 use super::utils::{combatant_id, pet_combatant_id};
 use crate::combat::log::{CombatLog, CombatLogEventType};
 
@@ -55,25 +56,16 @@ pub const TOUCH_OF_SHADOW_NAME: &str = "Touch of Shadow";
 /// countdown), as Devotion Aura's 600s is.
 pub const TALENT_AURA_DURATION: f32 = 600.0;
 
-/// The `GENERIC_AURA_ICONS` key each talent aura draws under — the icon of
-/// the node that grants it — or `None` for any other aura.
-pub fn talent_aura_icon_key(aura_name: &str) -> Option<&'static str> {
-    match aura_name {
-        MASTER_DEMONOLOGIST_NAME => Some("talent_master_demonologist"),
-        TOUCH_OF_SHADOW_NAME => Some("talent_touch_of_shadow"),
-        _ => None,
-    }
-}
-
-/// A talent's passive aura: `kind` at `magnitude`, reaching the hits in
+/// `talent`'s passive aura: `kind` at `magnitude`, reaching the hits in
 /// `scope`, for the match.
 ///
-/// Keyed by its SOURCE rather than its type — a one-stack [`AuraStacks`],
-/// which is what makes an aura `distinct_by_source` — so it neither refuses
-/// nor is refused by a same-type aura from elsewhere: a Paladin's Devotion
-/// Aura lands beside Master Demonologist, and the pipeline applies the
-/// stronger. Untyped, so no dispel or purge takes it.
+/// It carries its talent ([`Aura::source_talent`]), which keys it by its
+/// SOURCE rather than its type, so it neither refuses nor is refused by a
+/// same-type aura from elsewhere (a Paladin's Devotion Aura lands beside
+/// Master Demonologist, and the pipeline applies the stronger), and wears the
+/// talent's icon. Untyped, so no dispel or purge takes it.
 pub fn talent_aura(
+    talent: TalentId,
     name: &str,
     kind: AuraType,
     magnitude: f32,
@@ -92,7 +84,7 @@ pub fn talent_aura(
         },
         ability_name: name.to_string(),
         dispel_type: DispelType::Untyped,
-        stacks: Some(AuraStacks::new(1, StackScope::PerTarget)),
+        source_talent: Some(talent),
         ..Default::default()
     }
 }
@@ -100,6 +92,7 @@ pub fn talent_aura(
 /// Master Demonologist's aura: `reduction` less spell damage taken.
 pub fn master_demonologist_aura(reduction: f32, caster: Entity) -> Aura {
     talent_aura(
+        TalentId::MasterDemonologist,
         MASTER_DEMONOLOGIST_NAME,
         AuraType::DamageTakenReduction,
         reduction,
@@ -111,6 +104,7 @@ pub fn master_demonologist_aura(reduction: f32, caster: Entity) -> Aura {
 /// Touch of Shadow: `bonus` more Shadow damage dealt.
 pub fn touch_of_shadow_aura(bonus: f32, caster: Entity) -> Aura {
     talent_aura(
+        TalentId::DemonicSacrifice,
         TOUCH_OF_SHADOW_NAME,
         AuraType::DamageDealtIncrease,
         bonus,

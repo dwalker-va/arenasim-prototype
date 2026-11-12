@@ -783,6 +783,7 @@ impl HealImpact {
             | AuraType::FearImmunity
             | AuraType::Cyclone
             | AuraType::AttackSpeedIncrease
+            | AuraType::NextCast
             | AuraType::DamageTakenIncrease
             | AuraType::DamageDealtIncrease
             | AuraType::ArmorPercentIncrease
@@ -1579,7 +1580,8 @@ impl AuraApplyRoute {
             | AuraType::SpellPowerIncrease
             | AuraType::HealingOverTime
             | AuraType::WindfuryBuff
-            | AuraType::AttackSpeedIncrease => AuraApplyRoute::Band,
+            | AuraType::AttackSpeedIncrease
+            | AuraType::NextCast => AuraApplyRoute::Band,
 
             // The damage-pipeline modifiers (AS-408) have no bespoke apply
             // treatment yet: the family cue draws each, buff or debuff by
