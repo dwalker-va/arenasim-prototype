@@ -41,8 +41,9 @@ reaches 7 wins or 3 losses. Between fights the player makes three kinds of decis
     open by the end of a run.
   - Stat talents are percentages of the total, gear included. Resistance talents reduce
     magnitude and never roll to ignore.
-  - Every legal 8-point build costs within one rank of every other, and `cargo test` checks
-    that by enumerating them all (§3, §4).
+  - Every rank has an item-budget price, read against 11 a rank. It is a sanity check, not a
+    boundary: the value a node states is what ships, and `cargo test` prints every rank's and
+    every legal build's price and fails only on an absurd one (§3, §4).
   - The talent lists in §5 are mocks that fix the shape. Each class's real trees are a card of
     their own.
 - **Gear.**
@@ -213,7 +214,7 @@ Three corollaries keep the line from blurring:
 Each class has **three trees**, named as in WoW, each with **five to seven nodes in four
 tiers**. A class ships two when its kit cannot yet carry the third (§5.3).
 
-| Tier | Opens at (points already in this tree) | Nodes | Ranks per node | Price per rank |
+| Tier | Opens at (points already in this tree) | Nodes | Ranks per node | Reference price per rank |
 |---|---|---|---|---|
 | 1 | 0 | 2 | 2 | 11 |
 | 2 | 2 | 1-3 | 1-2 | 11 |
@@ -223,7 +224,7 @@ tiers**. A class ships two when its kit cannot yet carry the third (§5.3).
 - **Prerequisites** are WoW's arrows. A capstone usually needs one tier-3 node. Classic's own
   arrows are used where they exist (Shadow Mastery needs Siphon Life; Conflagrate needs
   Improved Immolate), and the rest are marked *here*.
-- **The capstone is the only node worth two ranks of budget.** It is the spec's identity: a new
+- **The capstone is the only node read against two ranks of budget.** It is the spec's identity: a new
   button, a mechanic or the tree's signature number. It is the sixth point in a tree.
 - **A run gives 2 points at the draft and 8 at most.** The two starting points buy a coherent
   start: two ranks of one tier-1 node, or one rank each of a tree's tier-1 pair. At the cap,
@@ -325,17 +326,23 @@ every existing config, baseline and replay is unchanged.
   prerequisite is in the same tree and a lower tier.
 - `StatPercent`-only nodes have no declared budget (it is computed at the reference
   combatant); every other node declares one.
-- **Rank parity:** every rank prices at 11 ±15%, and every capstone at 22 ±15%.
-- **Build parity:** the test enumerates **every legal build** at each point count from 2 to
-  8. It fails if the dearest build at a count costs more than one rank (11) above the cheapest.
-  The run takes well under a second a class. For the two mock classes:
-  - the spread is zero up to 5 points;
-  - from 6 points it is exactly one rank, the capstone's premium;
-  - at the cap of 8, the 8,119 Warlock builds and 11,433 Priest builds cost 88-99.
+- **Prices are a sanity check, not a boundary** (user ruling, 2026-11-12). The value a node
+  states is what ships; its price is reported for a designer to read, and is never a reason
+  to change a value. Pricing every rank at 11 was the starting point the trees were sized at,
+  and it stays the reference a price is read against (22 for a capstone).
+  - **The report:** a test prints every rank's price beside its reference, and enumerates
+    **every legal build** at each point count from 2 to 8 to print the cheapest, the dearest
+    and the spread between them. The run takes well under a second a class. For the two mock
+    classes, at the cap of 8 there are 8,119 Warlock builds and 11,433 Priest builds.
+  - **The bound:** `cargo test` fails only on an absurd rank price: one that is not a
+    positive number, or is more than 5x off its reference either way. That catches a slipped
+    decimal, which moves a price tenfold, and admits every value a design states: +1% crit
+    chance prices at 3 (0.27 of a rank) and +5% health on the reference Rogue at about 20.
 - A `Grant` names a `talent: true` ability, and each such ability is granted by exactly one
   node.
 
-**What talents are worth.** A capped build is 88-99 budget points. A combatant's starting kit
+**What talents are worth.** A capped build is about 90 budget points; the price report gives
+each class's range. A combatant's starting kit
 is about 334 (the default Warlock), about 360 once the TBC slot multipliers re-spend it (§6.1), and the run's gear adds about as much again as its talents
 (§6.2).
 
@@ -373,8 +380,9 @@ The trace header records the build, so a trace explains itself.
 No sweep tries to cover 8,119 builds. Four instruments do the work, each sized by the tiers in
 `sweep-tiers.md`.
 
-1. **The price model** (`cargo test`): build parity above. It bounds what any build can
-   *cost*. The sweeps then test whether price predicts power.
+1. **The price model** (`cargo test`): the price report above. It says what each build
+   *costs* on the item budget, and the sweeps then test whether price predicts power. A
+   build's price is evidence a designer weighs, never a bound a value is fitted to.
 2. **Reference builds.** Three per class, one deep in each tree at 8 points, written in
    `talents.ron`. They are:
    - what authored opponents carry;
@@ -613,7 +621,7 @@ abilities it has, and the role change it allows is a per-match form (§1).
 | Shaman | Enhancement | **Deferred** | Stormstrike and its synergies need a melee kit the Shaman does not have |
 
 A tree that waits on a kit is not padded with filler nodes. Its class ships two trees, and
-build parity (§3) is checked over the trees that exist.
+the price report (§3) covers the trees that exist.
 
 ## 6. Gear
 
@@ -691,7 +699,7 @@ Trinkets and weapons, whose value is mostly their effect, take the Champion tier
   reward for winning.
 - **What a capped combatant gains.** With offers weighted by multiplier, an average Gauntlet
   pick adds about 12 and an average Champion pick about 20, plus effects. A capped combatant
-  therefore gains about **+90**, about the same as its talents (88-99). Together they add about
+  therefore gains about **+90**, about the same as its talents (about 90). Together they add about
   +180 to the starting kit, **roughly +50% by the final match.**
 
 ### 6.4 Trinkets worth winning
@@ -1194,7 +1202,7 @@ slot multipliers: it re-spends the starting kit on purpose, and is an AUTHORITY 
 
 | Card | Delivers |
 |---|---|
-| T1 Talent engine | `talents.ron` (trees, tiers, ranks, prerequisites) and a validating loader; `Build` per slot in `MatchConfig` and headless; the `AbilityBook` and the migration of the cast, channel, aura-tick and AI paths; rank and build parity tests; `talent_ai_audit`; the `[TALENTS]` line and the build in the trace header. The general mechanisms the trees need: the `leech` aura field, the proc triggers (`DotTick`, `SpellHit`, `HealCrit`, `CritTaken`) and effects (`NextCastInstant`, `NextCastFree`), `WidenChoice`, and the `Mechanic` hook |
+| T1 Talent engine | `talents.ron` (trees, tiers, ranks, prerequisites) and a validating loader; `Build` per slot in `MatchConfig` and headless; the `AbilityBook` and the migration of the cast, channel, aura-tick and AI paths; the price report and its sanity bound; `talent_ai_audit`; the `[TALENTS]` line and the build in the trace header. The general mechanisms the trees need: the `leech` aura field, the proc triggers (`DotTick`, `SpellHit`, `HealCrit`, `CritTaken`) and effects (`NextCastInstant`, `NextCastFree`), `WidenChoice`, and the `Mechanic` hook |
 | T2 Talent panel and encyclopedia | The tree in View Combatant and Custom Match (8 points); `Topic::Talent` and a Talents section; spec labels on frames and Results |
 | **Per class: "define and build class X's trees"** | One card per class, in this order: **Warlock, Priest, Rogue, Paladin** (the slice's four), then Warrior, Mage, Hunter, Shaman, Druid. Each card does five things: research the class's Classic and TBC trees from the client's `TalentTab` / `Talent` tables, and later expansions where §5 diverges; write its trees under §1, §3, §4 and §5.3 (the mocks in §5 are its starting point for the first two); implement them; write its reference builds; run a DIRECTIONAL node-arm sweep for its grants, procs and mechanics. The **Priest** card also adds Shadow Word: Pain to the base kit, and builds the Form choice and the Shadowform damage-dealer AI. The **Druid** card ships Balance and Restoration, with Wrath and Starfire as Balance grants; Feral waits for a melee kit |
 | E0 Slot multipliers (TBC) | `slot_budget_multiplier` moves to TBC's groups (legs 1.0, waist 0.75 with shoulders, hands and feet, wrists 0.5625, trinket 0.70; ranged stays 0.5625), after confirming TBC's modifiers; its unit test and the list in `CLAUDE.md` follow. Starting-kit legs, waists, wrists and trinkets are re-spent. **Not byte-identical: an AUTHORITY re-baseline** |
@@ -1252,7 +1260,7 @@ Milestone review: **play three runs.**
 > **Talents 1: the engine.** Add `assets/config/talents.ron` with a validating loader, `Build`
 > per slot in `MatchConfig` and the headless config, and a per-combatant `AbilityBook` built
 > at spawn, migrating the cast, channel, aura-tick and AI reads. Add the general mechanisms the
-> trees need, the rank and build parity tests, `talent_ai_audit` and the `[TALENTS]` log line.
+> trees need, the price report and its sanity bound, `talent_ai_audit` and the `[TALENTS]` log line.
 > Prove it on the Warlock's Demonology tier 1-2 nodes (StatPercent and PetStatPercent only).
 >
 > **Success condition:** empty build by default, so `Legacy` and BasicArena are

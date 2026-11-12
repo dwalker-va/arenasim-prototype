@@ -19,12 +19,16 @@
 //! aura. An empty build resolves to the untalented book and applies nothing,
 //! so a match without talents is the match it was before talents existed.
 //!
-//! **Prices.** Every rank costs 11 item-budget points and a capstone 22
-//! ([`RANK_PRICE`], [`CAPSTONE_PRICE`], ±[`PRICE_TOLERANCE`]). A node whose
-//! every effect is a `StatPercent` on a stat the item budget weighs is priced
-//! by that weight at its class's reference combatant ([`rank_price`]); every
-//! other node declares its price. The parity tests hold every rank, and every
-//! legal build at each point count, to those prices (`tests/talents.rs`).
+//! **Prices are a sanity check, not a boundary.** A node's stated value is
+//! what ships. Each rank still has an item-budget price: a node whose every
+//! effect is a `StatPercent` on a stat the item budget weighs is priced by that
+//! weight at its class's reference combatant ([`rank_price`]), and every other
+//! node declares its price. `tests/talents.rs` prints every rank's price and
+//! every legal build's for a designer to read, against the reference of 11 a
+//! rank and 22 a capstone ([`REFERENCE_RANK_PRICE`],
+//! [`REFERENCE_CAPSTONE_PRICE`]), and fails only on an absurd one
+//! ([`TalentConfig::price_sanity`]). A value is never derived to make a rank
+//! cost 11.
 //!
 //! [`rank_price`]: TalentDefinitions::rank_price
 
@@ -61,14 +65,19 @@ pub const TIER_OPENS_AT: [u32; 4] = [0, 2, 3, 5];
 /// The capstone's tier: the one node a tree prices at two ranks.
 pub const CAPSTONE_TIER: u8 = 4;
 
-/// What one rank of a node costs, in item-budget points.
-pub const RANK_PRICE: f32 = 11.0;
+/// The item-budget price a rank of a node is read against: the starting
+/// point the trees were sized at, not a price any rank must hit.
+pub const REFERENCE_RANK_PRICE: f32 = 11.0;
 
-/// What a capstone costs.
-pub const CAPSTONE_PRICE: f32 = 22.0;
+/// The price a capstone is read against: two ranks.
+pub const REFERENCE_CAPSTONE_PRICE: f32 = 22.0;
 
-/// How far a rank's price may stray from [`RANK_PRICE`] or [`CAPSTONE_PRICE`].
-pub const PRICE_TOLERANCE: f32 = 0.15;
+/// How far a rank's price may stray from its reference, as a factor either
+/// way, before it is absurd rather than a design choice. Wide on purpose: a
+/// stated +1% crit chance prices at 3 (0.27x of a rank) and Vitality's +5%
+/// health at about 20 (1.8x), and both are values the design states. What it
+/// catches is a slipped decimal, which moves a price tenfold.
+pub const PRICE_SANITY_FACTOR: f32 = 5.0;
 
 /// Declare [`TalentId`] and everything derived from it: [`TalentId::all`],
 /// [`TalentId::as_str`] and its [`FromStr`](std::str::FromStr) impl — the
@@ -655,13 +664,37 @@ impl TalentConfig {
         self.per_rank.iter().all(TalentEffect::is_computed)
     }
 
-    /// The price a rank of this node is held to: the capstone's or a rank's.
-    pub fn target_price(&self) -> f32 {
+    /// The price a rank of this node is read against: the capstone's or a
+    /// rank's reference.
+    pub fn reference_price(&self) -> f32 {
         if self.tier == CAPSTONE_TIER {
-            CAPSTONE_PRICE
+            REFERENCE_CAPSTONE_PRICE
         } else {
-            RANK_PRICE
+            REFERENCE_RANK_PRICE
         }
+    }
+
+    /// Whether `price`, one rank of this node, is sane: finite, positive and
+    /// within [`PRICE_SANITY_FACTOR`] of its [`reference_price`] either way.
+    /// The only failure a price can cause; any sane price is the design's.
+    ///
+    /// [`reference_price`]: Self::reference_price
+    pub fn price_sanity(&self, price: f32) -> Result<(), String> {
+        let reference = self.reference_price();
+        let (low, high) = (
+            reference / PRICE_SANITY_FACTOR,
+            reference * PRICE_SANITY_FACTOR,
+        );
+        if !price.is_finite() || price <= 0.0 {
+            return Err(format!("price {price} is not a positive number"));
+        }
+        if price < low || price > high {
+            return Err(format!(
+                "price {price:.2} is outside {low:.2} to {high:.2} \
+                 ({PRICE_SANITY_FACTOR}x either way of {reference})"
+            ));
+        }
+        Ok(())
     }
 }
 
