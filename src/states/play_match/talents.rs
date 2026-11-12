@@ -142,6 +142,14 @@ talent_ids! {
     Deflection,
     SwiftBlades,
     ExposeArmor,
+    // Priest: Discipline
+    UnbreakableWill,
+    ImprovedPowerWordShield,
+    InnerFocus,
+    MentalAgility,
+    PowerInfusion,
+    ReflectiveShield,
+    PainSuppression,
     // Priest: Shadow
     ImprovedMindBlast,
     ImprovedPsychicScream,
@@ -180,6 +188,7 @@ pub enum TreeId {
     Combat,
     Shadow,
     Protection,
+    Discipline,
     Assassination,
 }
 

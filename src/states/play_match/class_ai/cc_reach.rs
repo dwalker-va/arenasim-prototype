@@ -93,7 +93,8 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::LifeTap
         | A::DivineProtection
         | A::RetributionAura
-        | A::AmplifyCurse => Aim::Caster,
+        | A::AmplifyCurse
+        | A::InnerFocus => Aim::Caster,
         A::Frostbolt
         | A::FlashHeal
         | A::HeroicStrike
@@ -132,6 +133,8 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::DispelMagic
         | A::ManaBurn
         | A::ShadowWordPain
+        | A::PowerInfusion
+        | A::PainSuppression
         | A::FlashOfLight
         | A::HolyLight
         | A::HolyShock

@@ -178,6 +178,10 @@ fn mechanic_text(mechanic: TalentMechanic) -> String {
              match",
             percent(shadow_damage)
         ),
+        TalentMechanic::UnbreakableWill { reduction } => format!(
+            "Stuns, fears and silences on you last {} shorter",
+            unsigned_percent(reduction)
+        ),
     }
 }
 
@@ -768,6 +772,11 @@ mod tests {
             effect_text(&sacrifice, 1, abilities()),
             "Sacrificing your pet at the gates grants Touch of Shadow: +15% Shadow damage for \
              the match"
+        );
+        let will = TalentEffect::Mechanic(TalentMechanic::UnbreakableWill { reduction: 0.1 });
+        assert_eq!(
+            effect_text(&will, 2, abilities()),
+            "Stuns, fears and silences on you last 20% shorter"
         );
     }
 

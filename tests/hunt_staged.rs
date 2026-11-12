@@ -280,3 +280,61 @@ fn hunters_on_one_side_fan_out_each_to_its_own_hand() {
         }
     }
 }
+
+/// A station walk takes the healer off its formation point, so the formation
+/// memory does not outlive it (AS-469): our Priest is staged carrying a
+/// formation heading, a kept exit and a reach repair's stay, and from its
+/// first walk to a station its memory is empty. The control: with the play
+/// excepted, the same staged Priest plays FREE and is still turning the
+/// staged heading on that frame.
+#[test]
+fn a_station_walk_forgets_the_formation_memory() {
+    use arenasim::states::play_match::class_ai::formation::ReachKept;
+    use arenasim::states::play_match::{FormationHeading, FormationMemory, HealerPosture};
+    let mut posture = HealerPosture::new(0.0);
+    posture.formation = FormationMemory {
+        heading: Some(FormationHeading {
+            dir: Vec2::Y,
+            at: 10.0,
+        }),
+        exit: Some(Vec2::new(10.0, -23.0)),
+        reach: Some(ReachKept::Stay { blind_since: None }),
+        seed_from_healer: false,
+    };
+    let staged = || stage().healer_posture(PRIEST, posture);
+    let memory = |played: &Played, frame: usize| {
+        find(&played.frames[frame], PRIEST)
+            .formation
+            .expect("the Priest has a healer posture")
+    };
+    for seed in [1, 2, 3] {
+        let on = play(config(seed, true), staged());
+        let walk = on
+            .staged_trace()
+            .find(|e| {
+                e["kind"] == "movement_decision"
+                    && e["trigger"] == "Hunt"
+                    && e["actor"]["team"] == 1
+                    && e["actor"]["class"] == "Priest"
+            })
+            .and_then(|e| e["frame"].as_u64())
+            .unwrap_or_else(|| panic!("seed {seed}: the Priest never walked to a station"))
+            as usize;
+        // The observation a trace frame names is taken as that frame
+        // begins; the walk's own frame ends on the next one.
+        assert_eq!(
+            memory(&on, walk + 1),
+            FormationMemory::default(),
+            "seed {seed}: the formation memory outlived the station walk"
+        );
+        // The staged heading points north (+z), across the "behind the line"
+        // direction (west, away from the hider): only the staged memory,
+        // turned for a frame, still points north.
+        let off = play(config(seed, false), staged());
+        let heading = memory(&off, walk + 1).heading.expect("a FREE heading");
+        assert!(
+            heading.dir.dot(Vec2::Y) > 0.9,
+            "seed {seed}: excepted, the staged heading never landed ({heading:?})"
+        );
+    }
+}

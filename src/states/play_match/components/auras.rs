@@ -347,6 +347,12 @@ pub enum DispelType {
     /// slow). Unlike `Curse`,
     /// this is not a class waiting for a server: no removal is meant to take it.
     Untyped,
+    /// MAGIC, declared: a spell TBC gives `DispelType` 1 whose school would
+    /// read otherwise. The inverse of the Spider's Web's declared `Physical`:
+    /// Inner Focus (14751) is a Physical-school spell, and its buff is still
+    /// magic a purge takes. Magic whatever the school says, so the school's
+    /// physical backstops below do not apply to it.
+    Magic,
 }
 
 impl DispelType {
@@ -356,9 +362,9 @@ impl DispelType {
     ///
     /// An explicit declaration wins so a magic-school ability can still be a
     /// poison (Crippling Poison is `Nature` + `Poison`) or a curse (the three
-    /// Warlock curses are `Shadow` + `Curse`); nothing in the RON declares a
-    /// type on a physical ability today, and if one ever does it means the
-    /// author knew better than the school.
+    /// Warlock curses are `Shadow` + `Curse`), and a physical-school ability
+    /// can be magic (Inner Focus is `Physical` + `Magic`): a declaration means
+    /// the author knew better than the school.
     ///
     /// Note what is NOT here: no school maps to `Curse`. Curses are Shadow, and
     /// so is Corruption — the school cannot separate them, so the RON must.
@@ -374,6 +380,7 @@ impl DispelType {
             DispelType::Curse => DispelType::Curse,
             DispelType::Physical => DispelType::Physical,
             DispelType::Untyped => DispelType::Untyped,
+            DispelType::Magic => DispelType::Magic,
             DispelType::Auto => match school {
                 SpellSchool::Physical => DispelType::Physical,
                 // Schoolless is NOT physical. `SpellSchool::None` means "no
@@ -1320,7 +1327,7 @@ impl Aura {
             | DispelType::Curse
             | DispelType::Physical
             | DispelType::Untyped => return false,
-            DispelType::Auto => {}
+            DispelType::Auto | DispelType::Magic => {}
         }
 
         // Inherently magic-dispellable aura types
@@ -1333,6 +1340,9 @@ impl Aura {
         // the school check stays as the backstop for a DoT built by hand in
         // engine code, which never passes through `DispelType::for_ability`.
         if matches!(self.effect_type, AuraType::DamageOverTime) {
+            if self.dispel_type == DispelType::Magic {
+                return true;
+            }
             if let Some(school) = self.spell_school {
                 return school != SpellSchool::Physical;
             }
@@ -1399,6 +1409,7 @@ impl Aura {
             // No dispel type is the class's whole content; there is no word
             // for a removal to be served by.
             DispelType::Untyped => None,
+            DispelType::Magic => Some("Magic"),
             // `Auto` means "derived from the school", and the only school that
             // derives to anything but magic is Physical — which
             // `DispelType::for_ability` has already turned into the arm above.
@@ -1477,7 +1488,7 @@ impl Aura {
             | DispelType::Curse
             | DispelType::Physical
             | DispelType::Untyped => return false,
-            DispelType::Auto => {}
+            DispelType::Auto | DispelType::Magic => {}
         }
 
         match self.effect_type {
@@ -2760,6 +2771,33 @@ mod tests {
             DispelType::for_ability(DispelType::Curse, SpellSchool::Shadow),
             DispelType::Curse
         );
+        // The inverse of the Spider's Web: a Physical-school spell declared
+        // Magic (Inner Focus) stays magic.
+        assert_eq!(
+            DispelType::for_ability(DispelType::Magic, SpellSchool::Physical),
+            DispelType::Magic
+        );
+    }
+
+    /// A declared-Magic aura on a Physical-school spell is magic to every
+    /// removal predicate: purgeable, named "Magic", and (a DoT) dispellable,
+    /// where the same aura derived from the Physical school is none of these.
+    #[test]
+    fn a_declared_magic_aura_is_magic_whatever_its_school() {
+        let aura = |effect_type, dispel_type| Aura {
+            effect_type,
+            spell_school: Some(SpellSchool::Physical),
+            dispel_type,
+            ..Default::default()
+        };
+        let buff = aura(AuraType::NextCast, DispelType::Magic);
+        assert!(buff.can_be_purged());
+        assert_eq!(buff.removal_class_name(), Some("Magic"));
+        assert!(aura(AuraType::DamageOverTime, DispelType::Magic).can_be_dispelled());
+        let physical = aura(AuraType::NextCast, DispelType::Physical);
+        assert!(!physical.can_be_purged());
+        assert_eq!(physical.removal_class_name(), Some("Physical"));
+        assert!(!aura(AuraType::DamageOverTime, DispelType::Auto).can_be_dispelled());
     }
 
     /// No school derives to `Curse`. Curses are Shadow and so is Corruption, so

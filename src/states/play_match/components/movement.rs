@@ -248,11 +248,12 @@ pub struct FormationMemory {
     /// `Legacy`.
     pub exit: Option<Vec2>,
     /// `TeamPlan` only: the spot the point was last moved to out of enemy
-    /// crowd-control reach (AS-362, `formation::reach_repaired_point`). While
-    /// set, the repair is live: the point is judged by the outer disc and the
-    /// spot nearest it counts `formation::KEEP_MARGIN` nearer. `None` when the
-    /// last point needed no reach repair; always `None` under `Legacy`.
-    pub reach: Option<Vec2>,
+    /// crowd-control reach (AS-362, `formation::reach_repaired_point`), or the
+    /// stay that holds it where the healer stands (AS-469). While set, the
+    /// repair is live: the point is judged by the outer disc and the spot
+    /// nearest it counts `formation::KEEP_MARGIN` nearer. `None` when the last
+    /// point needed no reach repair; always `None` under `Legacy`.
+    pub reach: Option<crate::states::play_match::class_ai::formation::ReachKept>,
     /// `TeamPlan` only: the next heading starts from the bearing of the
     /// healer off the centroid instead of the "behind the line" target. Set
     /// when the healer stops hugging a pillar (AS-373), so the open point
