@@ -185,6 +185,14 @@ const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
          `named_auras_built_from_helpers_also_resolve`.",
     ),
     (
+        "src/states/play_match/on_use_items.rs",
+        "ability_name: source_name.to_string()",
+        "an on-use item's buff and the heal over time it may carry, both named after the \
+         item. `EngineAura::OnUseBuff` is derived from the buff `on_use:` blocks in items.ron \
+         (the heal its rider); asserted per shipped item by \
+         `named_auras_built_from_helpers_also_resolve`.",
+    ),
+    (
         "src/states/play_match/triggered_absorbs.rs",
         "ability_name: name.to_string()",
         "a triggered absorb's shield, named after its item. \
@@ -594,6 +602,45 @@ fn named_auras_built_from_helpers_also_resolve() {
         );
     }
 
+    // `OnUseConfig::aura` / `heal_aura` name an on-use's buff, and the heal
+    // over time beside it, after the item, through the constructors
+    // `process_on_use_items` lands them with. Every pair must resolve.
+    let mut on_use_names: Vec<&str> = Vec::new();
+    for id in ItemId::all() {
+        let Some(item) = items.get(id) else { continue };
+        let Some(on_use) = item.on_use_buff() else {
+            continue;
+        };
+        on_use_names.push(item.name.as_str());
+        let samples = std::iter::once(on_use.aura(*id, &item.name)).chain(on_use.heal_aura(
+            *id,
+            &item.name,
+            bevy::prelude::Entity::PLACEHOLDER,
+        ));
+        for sample in samples {
+            let mechanic = format!("{:?}", sample.effect_type);
+            assert!(
+                known.contains(&(sample.ability_name.clone(), mechanic.clone())),
+                "the on-use item \"{}\" grants a ({}) aura the frames call \"{}\", and the \
+                 catalog has no entry for it",
+                item.name,
+                mechanic,
+                sample.ability_name
+            );
+        }
+    }
+    on_use_names.sort_unstable();
+    assert_eq!(
+        on_use_names,
+        [
+            "Diamond Flask",
+            "Earthstrike",
+            "Kiss of the Spider",
+            "Talisman of Ephemeral Power"
+        ],
+        "the on-use buffs"
+    );
+
     // `TriggeredAbsorbConfig::aura` names a triggered absorb's shield after
     // its item, through the constructor `fire_triggered_absorbs` calls.
     let mut absorbs = 0;
@@ -640,6 +687,7 @@ fn at_least_one_proc_trinket_ships() {
         vec![
             // Champion weapons (AS-425) carry procs too.
             "Corrupted Ashbringer",
+            "Darkmoon Card: Blue Dragon",
             "Doomfinger",
             "Dragonspine Trophy",
             "Hammer of the Twisting Nether",

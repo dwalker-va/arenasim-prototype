@@ -737,7 +737,7 @@ item_ids! {
 
     // === Tier 1: Trinkets (all classes) ===
     InsigniaOfTheAlliance,
-    TalismanOfEphemeralPower,
+    MindtapTalisman,
 
     // === Tier 1: Melee Weapons ===
     BloodlordsBattleaxe,
@@ -871,6 +871,12 @@ item_ids! {
     // === Champion: Trinkets ===
     HandOfJustice,
     AegisOfTheLastStand,
+    // On use (see the `on_use_items` module), and one proc.
+    TalismanOfEphemeralPower,
+    Earthstrike,
+    DiamondFlask,
+    KissOfTheSpider,
+    DarkmoonCardBlueDragon,
 }
 
 // ============================================================================
@@ -1024,6 +1030,22 @@ impl ItemConfig {
     /// (Hand of Justice), which lands an attack rather than an aura.
     pub fn proc_buff(&self) -> Option<&ProcConfig> {
         self.proc.as_ref().filter(|p| p.buff().is_some())
+    }
+
+    /// The item's on-use when it grants a BUFF (a stat burst or haste, and the
+    /// heal over time one may carry). `None` for no on-use, and for a
+    /// crowd-control break, which removes auras rather than granting one.
+    pub fn on_use_buff(&self) -> Option<&OnUseConfig> {
+        self.on_use.as_ref().filter(|u| u.buff().is_some())
+    }
+
+    /// Whether the item can APPLY an aura to its wearer — a proc's buff, an
+    /// on-use's buff, or a triggered absorb's shield. Every such aura wears
+    /// the item's icon (`item_aura_icons`).
+    pub fn applies_aura(&self) -> bool {
+        self.proc_buff().is_some()
+            || self.on_use_buff().is_some()
+            || self.triggered_absorb.is_some()
     }
 
     /// What the item DOES beyond its stats, as the player reads it: its
@@ -4854,7 +4876,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     const CHAMPION_GAIN: f32 = 0.55;
 
     /// Every Champion-tier (item_tier 2) item.
-    const CHAMPION_TIER: [ItemId; 90] = [
+    const CHAMPION_TIER: [ItemId; 95] = [
         ItemId::HandOfJustice,
         ItemId::FrostfireCirclet,
         ItemId::FrostfireRobe,
@@ -4945,6 +4967,11 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         ItemId::SignetOfTheFallenDefender,
         ItemId::HailstoneBand,
         ItemId::AegisOfTheLastStand,
+        ItemId::TalismanOfEphemeralPower,
+        ItemId::Earthstrike,
+        ItemId::DiamondFlask,
+        ItemId::KissOfTheSpider,
+        ItemId::DarkmoonCardBlueDragon,
     ];
 
     /// Every Gauntlet-tier (item_tier 1) item.
@@ -5001,7 +5028,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         ItemId::RingOfFortitude,
         ItemId::RingOfElementalMastery,
         ItemId::InsigniaOfTheAlliance,
-        ItemId::TalismanOfEphemeralPower,
+        ItemId::MindtapTalisman,
         ItemId::BloodlordsBattleaxe,
         ItemId::StormbladeEdge,
         ItemId::FangOfTheViper,
@@ -5432,7 +5459,85 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             .map(|(id, _)| *id)
             .collect();
         members.sort();
-        assert_eq!(members, vec![ItemId::MedallionOfTheAlliance]);
+        assert_eq!(
+            members,
+            vec![
+                ItemId::MedallionOfTheAlliance,
+                ItemId::TalismanOfEphemeralPower,
+                ItemId::Earthstrike,
+                ItemId::DiamondFlask,
+                ItemId::KissOfTheSpider,
+            ]
+        );
+    }
+
+    /// The AS-430 Champion trinkets cost what `items.ron` says they cost: the
+    /// effect at its own pricing rule (an on-use at its uses in a 37.8s arena
+    /// life, Blue Dragon's proc at its long-run bound), and the item in all.
+    /// Each figure is the one its `items.ron` comment derives, so a price
+    /// that moves fails here before it reaches a sweep.
+    #[test]
+    fn the_as430_trinkets_cost_what_their_comments_derive() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let cases = [
+            // (item, its effect's price, the whole item's)
+            (ItemId::TalismanOfEphemeralPower, 23.81, 47.81),
+            (ItemId::Earthstrike, 47.62, 47.62),
+            (ItemId::DiamondFlask, 47.81, 47.81),
+            (ItemId::KissOfTheSpider, 17.01, 47.01),
+            (ItemId::DarkmoonCardBlueDragon, 10.0, 48.0),
+        ];
+        for (id, effect, whole) in cases {
+            let item = items.get_unchecked(&id);
+            let effect_cost = item
+                .on_use
+                .as_ref()
+                .map(|u| u.budget_cost())
+                .or_else(|| item.proc.as_ref().map(|p| p.budget_cost()))
+                .expect("an effect");
+            assert!(
+                (effect_cost - effect).abs() < 0.01,
+                "{id:?}: effect costs {effect_cost}, not {effect}"
+            );
+            let usage = calculate_budget_usage(item);
+            assert!(
+                (usage - whole).abs() < 0.01,
+                "{id:?}: costs {usage}, not {whole}"
+            );
+            assert_eq!(item.tier(), Some(ItemTier::Champion));
+            assert_eq!(item.slot, ItemSlotType::Trinket);
+            assert!(validate_item_budget(item.name.as_str(), item).is_ok());
+        }
+        // The Diamond Flask's price is the buff and the heal: 23.81 + 24.
+        let flask = items
+            .get_unchecked(&ItemId::DiamondFlask)
+            .on_use
+            .as_ref()
+            .unwrap();
+        let hot = flask.heal_over_time.expect("the Flask heals");
+        let heal = super::super::on_use_items::on_use_heal_cost(
+            hot.rate(),
+            flask.duration,
+            flask.cooldown,
+        );
+        assert!((heal - 24.0).abs() < 0.01, "{heal}");
+    }
+
+    /// The Gauntlet tier's stats-only health-and-mana trinket is the Mindtap
+    /// Talisman; the name Talisman of Ephemeral Power belongs to the Champion
+    /// on-use alone.
+    #[test]
+    fn only_the_champion_talisman_is_called_talisman_of_ephemeral_power() {
+        let items = load_item_definitions().expect("items.ron must load");
+        let named: Vec<ItemId> = items
+            .iter()
+            .filter(|(_, item)| item.name == "Talisman of Ephemeral Power")
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(named, vec![ItemId::TalismanOfEphemeralPower]);
+        let mindtap = items.get_unchecked(&ItemId::MindtapTalisman);
+        assert_eq!(mindtap.tier(), Some(ItemTier::Gauntlet));
+        assert!(mindtap.on_use.is_none());
     }
 
     /// The Medallion is a Champion trinket whose break is priced into its
@@ -5471,6 +5576,9 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             effect: OnUseEffect::CcBreak,
             cooldown: OnUseCooldown::OncePerMatch,
             price: Some(40.0),
+            magnitude: 0.0,
+            duration: 0.0,
+            heal_over_time: None,
         });
         let err = validate_item_budget("Dear Break", &item).expect_err("over budget");
         assert!(err.contains("over budget"), "{err}");
@@ -5480,6 +5588,9 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             effect: OnUseEffect::CcBreak,
             cooldown: OnUseCooldown::Seconds(15.0),
             price: Some(10.0),
+            magnitude: 0.0,
+            duration: 0.0,
+            heal_over_time: None,
         });
         assert!(validate_item_budget("Cheap Break", &item).is_ok());
         item.on_use.as_mut().unwrap().price = Some(12.0);

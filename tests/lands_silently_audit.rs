@@ -58,7 +58,7 @@ use arenasim::states::play_match::ability_config::{AbilityConfig, AbilityDefinit
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::combat_core::ExtraSwingSource;
 use arenasim::states::play_match::components::{
-    AuraLandingKind, AuraType, CurseKind, HealImpact, HealImpactKind, HotVisual,
+    AuraApplyRoute, AuraLandingKind, AuraType, CurseKind, HealImpact, HealImpactKind, HotVisual,
     InstantAbilityFired, LifeTapGlow, RootStyle, SchoolImpact, ShieldKind, TotemElement,
 };
 use arenasim::states::play_match::equipment::{load_item_definitions, ItemDefinitions, ItemId};
@@ -974,14 +974,36 @@ fn health_to_mana_lands_nothing_silently() {
 // (effects/on_use.rs), not through an ability, so this family scans
 // `items.ron` rather than `abilities.ron` and names its members by item.
 
-const ON_USE_MEMBERS: &[ItemId] = &[ItemId::MedallionOfTheAlliance];
+const ON_USE_MEMBERS: &[ItemId] = &[
+    ItemId::MedallionOfTheAlliance,
+    ItemId::TalismanOfEphemeralPower,
+    ItemId::Earthstrike,
+    ItemId::DiamondFlask,
+    ItemId::KissOfTheSpider,
+];
 
-/// The visual an on-use's landing reaches, by its effect kind. None yet: the
-/// Medallion's break (a self-cast gold dispel ribbon, the Holy launch hands,
-/// the broken CC's own visual scattering) is AS-432's.
-fn on_use_visual(effect: OnUseEffect) -> Option<&'static str> {
-    match effect {
+/// The visual an on-use's landing reaches, by its effect kind. The
+/// Medallion's break draws nothing yet (a self-cast gold dispel ribbon, the
+/// Holy launch hands, the broken CC's own visual scattering is AS-432's).
+///
+/// A buff lands through `apply_pending_auras`, built by the constructor
+/// `process_on_use_items` lands it with, so the family's aura band draws it
+/// wherever the router sends that aura to the band — and with it the heal
+/// over time a buff may carry. The band draws the Talisman of Ephemeral
+/// Power, Earthstrike and Kiss of the Spider until AS-433 gives each its own
+/// trinket one-shot (as it draws the Dragonspine Trophy's haste); the Diamond
+/// Flask keeps the band by ruling (AS-338).
+fn on_use_visual(items: &ItemDefinitions, id: ItemId) -> Option<&'static str> {
+    let item = items.get_unchecked(&id);
+    let on_use = item.on_use.as_ref().expect("a member has an on-use");
+    match on_use.effect {
         OnUseEffect::CcBreak => None,
+        OnUseEffect::Buff(_) => {
+            let buff = on_use.aura(id, &item.name);
+            (AuraApplyRoute::for_instance(buff.effect_type, &buff.ability_name)
+                == AuraApplyRoute::Band)
+                .then_some("aura band on landing (aura_band.rs)")
+        }
     }
 }
 
@@ -1011,14 +1033,7 @@ fn on_use_lands_nothing_silently() {
     let judged = check_judged(
         "on-use",
         &members,
-        |id| {
-            let on_use = items
-                .get_unchecked(&id)
-                .on_use
-                .as_ref()
-                .expect("a member has an on-use");
-            on_use_visual(on_use.effect)
-        },
+        |id| on_use_visual(&items, id),
         ON_USE_KNOWN_SILENT,
     );
     if let Err(e) = judged {

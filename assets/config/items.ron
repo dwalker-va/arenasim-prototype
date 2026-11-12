@@ -2020,11 +2020,13 @@
             spell_power: 11.0,
         ),
 
-        TalismanOfEphemeralPower: (
-            name: "Talisman of Ephemeral Power",
+        // Classic's Mindtap Talisman (18371, mana regeneration). The Champion
+        // tier's on-use Talisman of Ephemeral Power is a different item.
+        MindtapTalisman: (
+            name: "Mindtap Talisman",
             item_level: 77,
             item_tier: 1,
-            icon: "icons/items/inv_misc_root_02.jpg",
+            icon: "icons/items/inv_battery_02.jpg",
             slot: Trinket,
             max_health: 30.0,
             mana_regen: 2.0,
@@ -3578,6 +3580,119 @@
         // bot measures it (G4/G5), when the shield or threshold is sized to it.
         // Offered at a QUARTER of the other Champion trinkets' weight: rare by
         // weight, not by tier (for G2's reward tables).
+        // ====================================================================
+        // CHAMPION TIER (2): ON-USE AND PROC TRINKETS
+        //
+        // A Champion trinket's budget is 92 x 0.75 x 0.70 = 48.3, and each
+        // below spends close to all of it. An on-use is priced at its uses in
+        // a mean arena life (37.8s,
+        // `on_use_items::ARENA_LIFE_SECS`, re-measured by AS-305 on 2026-10-31):
+        // weight x magnitude x seconds up / 37.8. A 45-60s cooldown is one use.
+        // PROVISIONAL until the milestone sweep.
+        // ====================================================================
+
+        // Classic's Talisman of Ephemeral Power (18820: +175 spell damage and
+        // healing for 15s, 90s): +40 spell power for 15s, 45s. The burst is
+        // 1.5 x 40 x 15/37.8 = 23.81; spell power spends the rest:
+        // 16 x 1.5 = 24, 47.81 in all.
+        TalismanOfEphemeralPower: (
+            name: "Talisman of Ephemeral Power",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_misc_stonetablet_11.jpg",
+            slot: Trinket,
+            spell_power: 16.0,
+            on_use: Some((
+                effect: Buff(SpellPowerIncrease),
+                magnitude: 40.0,
+                duration: 15.0,
+                cooldown: Seconds(45.0),
+            )),
+        ),
+
+        // Classic's Earthstrike (21180: +280 attack power for 20s, 2 min): the
+        // proposal's +70 attack power for 20s on 60s was sized against a 43s
+        // life; at 37.8s it costs 55.56, over the 48.3. +60 for 20s is
+        // 1.5 x 60 x 20/37.8 = 47.62, the whole budget.
+        Earthstrike: (
+            name: "Earthstrike",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/spell_nature_abolishmagic.jpg",
+            slot: Trinket,
+            on_use: Some((
+                effect: Buff(AttackPowerIncrease),
+                magnitude: 60.0,
+                duration: 20.0,
+                cooldown: Seconds(60.0),
+            )),
+        ),
+
+        // Classic's Diamond Flask (20130: 9 health every 5s and +75 strength
+        // for 60s, 6 min): +20 attack power and 4 health every 5s for 30s,
+        // once a match. The attack power is 1.5 x 20 x 30/37.8 = 23.81; the
+        // heal, 24 health in the life at 1.0 a point (the unit an absorb is
+        // priced in), is 24; 47.81 in all. Its heal ticks through
+        // `apply_healing`, so healing reduction and dampening cut it.
+        DiamondFlask: (
+            name: "Diamond Flask",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_drink_01.jpg",
+            slot: Trinket,
+            on_use: Some((
+                effect: Buff(AttackPowerIncrease),
+                magnitude: 20.0,
+                duration: 30.0,
+                cooldown: OncePerMatch,
+                heal_over_time: Some((heal_per_tick: 4.0, tick_interval: 5.0)),
+            )),
+        ),
+
+        // Classic's Kiss of the Spider (22954: +1% crit and hit; on use, +20%
+        // attack speed for 15s, 2 min): haste speeds melee and ranged attacks
+        // alike, as TBC's trinket does. +20% for 15s on 60s is
+        // 214.27 x 0.20 x 15/37.8 = 17.01; +1% crit is 3.0 and 18 attack
+        // power 27.0: 47.01 in all.
+        KissOfTheSpider: (
+            name: "Kiss of the Spider",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_trinket_naxxramas04.jpg",
+            slot: Trinket,
+            attack_power: 18.0,
+            crit_chance: 0.01,
+            on_use: Some((
+                effect: Buff(AttackSpeedIncrease),
+                magnitude: 0.20,
+                duration: 15.0,
+                cooldown: Seconds(60.0),
+            )),
+        ),
+
+        // Classic's Darkmoon Card: Blue Dragon (19288: 2% chance on a cast of
+        // full mana regeneration while casting for 15s): 5% on a completed
+        // cast of +8 mana a second for 15s, on a 45s internal cooldown. The
+        // proc is priced at its long-run bound, 5 x 8 x 15/60 = 10.0; spell
+        // power and mana spend the rest: 24 + 14 = 38, 48.0 in all.
+        DarkmoonCardBlueDragon: (
+            name: "Darkmoon Card: Blue Dragon",
+            item_level: 92,
+            item_tier: 2,
+            icon: "icons/items/inv_misc_ticket_tarot_bluedragon_01.jpg",
+            slot: Trinket,
+            spell_power: 16.0,
+            max_mana: 14.0,
+            proc: Some((
+                trigger: SpellCast,
+                chance: 0.05,
+                effect: Buff(ManaRegenIncrease),
+                magnitude: 8.0,
+                duration: 15.0,
+                internal_cooldown: 45.0,
+            )),
+        ),
+
         AegisOfTheLastStand: (
             name: "Aegis of the Last Stand",
             item_level: 92,
