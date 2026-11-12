@@ -13,8 +13,8 @@ use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::SpellSchool;
 use arenasim::states::play_match::combat_core::{
     apply_damage_with_absorb, damage_dealt_multiplier, effective_armor, end_transfers_to_the_dead,
-    process_damage_follow_ups, DamageFollowUp, DamageFollowUps, DealtMods, Hit, HitKind,
-    KillingBlowPrevented, PendingDamageFollowUp, TransferReceiver, CHEAT_DEATH_NAME,
+    process_damage_follow_ups, share_to_health, DamageFollowUp, DamageFollowUps, DealtMods, Hit,
+    HitKind, KillingBlowPrevented, PendingDamageFollowUp, TransferReceiver, CHEAT_DEATH_NAME,
 };
 use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, Aura, AuraDamageMods, AuraStacks, AuraType, Combatant,
@@ -1449,6 +1449,157 @@ fn a_share_its_receiver_could_not_survive_raised_returns() {
     assert_eq!((paladin, holder, holds), (40.0, 370.0, false));
     let (paladin, holder, holds, _, _) = sacrifice_onto(40.0, None);
     assert_eq!((paladin, holder, holds), (10.0, 400.0, true));
+}
+
+/// A share equal to its receiver's health is one it could not survive: it
+/// returns to the holder and the blessing ends. One point of health more and
+/// the receiver bears it. Judged on what the share would put on its health,
+/// so a 10 absorb moves the line from 30 to 20.
+#[test]
+fn a_share_equal_to_its_receivers_health_returns_to_the_holder() {
+    assert_eq!(
+        drop_last(sacrifice_onto(30.0, None)),
+        (30.0, 370.0, false),
+        "plain, at 30"
+    );
+    assert_eq!(
+        drop_last(sacrifice_onto(31.0, None)),
+        (1.0, 400.0, true),
+        "plain, at 31"
+    );
+    let shield = || Some(named(AuraType::Absorb, 10.0, "Power Word: Shield"));
+    assert_eq!(
+        drop_last(sacrifice_onto(20.0, shield())),
+        (20.0, 370.0, false),
+        "shielded, at 20"
+    );
+    assert_eq!(
+        drop_last(sacrifice_onto(21.0, shield())),
+        (1.0, 400.0, true),
+        "shielded, at 21"
+    );
+}
+
+/// (receiver health, holder health, the holder still holds the transfer).
+fn drop_last(
+    (receiver, holder, holds, _, _): (f32, f32, bool, Vec<String>, Vec<Aura>),
+) -> (f32, f32, bool) {
+    (receiver, holder, holds)
+}
+
+/// The preview the bearability check trusts (`share_to_health`) is exactly
+/// what the funnel takes from a receiver's health, for both kinds of share,
+/// over every combination of the receiver's defences: an immunity, a Cyclone,
+/// a reduction, a spell-scoped reduction, an uncharged and a charged
+/// increase, and two absorbs, against a Physical and a Shadow share.
+#[test]
+fn share_to_health_is_what_the_funnel_takes() {
+    let (_, v, _) = entities();
+    let mut charged = aura(AuraType::DamageTakenIncrease, 0.5);
+    charged.damage_mods.charges = Some(2);
+    let pieces = [
+        aura(AuraType::DamageImmunity, 1.0),
+        aura(AuraType::Cyclone, 1.0),
+        aura(AuraType::DamageTakenReduction, 0.3),
+        scoped(AuraType::DamageTakenReduction, 0.5, DamageScope::Spells),
+        aura(AuraType::DamageTakenIncrease, 0.2),
+        charged,
+        aura(AuraType::Absorb, 10.0),
+        aura(AuraType::Absorb, 25.0),
+    ];
+    let mut cases = 0;
+    let mut previews = std::collections::BTreeSet::new();
+    for mask in 0u32..(1 << pieces.len()) {
+        let set = auras(
+            pieces
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| mask >> i & 1 == 1)
+                .map(|(_, a)| a.clone())
+                .collect(),
+        );
+        for kind in [HitKind::Transferred, HitKind::TransferredUnpreventable] {
+            for school in [SpellSchool::Physical, SpellSchool::Shadow] {
+                let preview = share_to_health(kind, 30.0, school, Some(&set));
+                let mut landed = auras(set.auras.clone());
+                let hit = direct(30.0, school, None, v).of_kind(kind);
+                let (to_health, _, _) = land(hit, &mut bare(1000.0), Some(&mut landed));
+                assert_eq!(
+                    preview.to_bits(),
+                    to_health.to_bits(),
+                    "{kind:?} {school:?} over {:?}: preview {preview}, funnel {to_health}",
+                    set.auras
+                        .iter()
+                        .map(|a| (a.effect_type, a.magnitude))
+                        .collect::<Vec<_>>()
+                );
+                previews.insert(preview.to_bits());
+                cases += 1;
+            }
+        }
+    }
+    assert_eq!(cases, 1024);
+    // Not vacuous: the defences move the number, from nothing to all of it.
+    assert!(previews.contains(&0.0f32.to_bits()) && previews.contains(&30.0f32.to_bits()));
+    assert!(previews.len() > 10, "{} distinct previews", previews.len());
+}
+
+/// A Soul Link share cannot be prevented, so the Felhunter's own defences do
+/// not make one it could not survive bearable: at 10 health, under a 100
+/// absorb and Master Demonologist, its 12 share returns to the Warlock.
+/// Control: at 20 health the Felhunter takes all 12 through the same
+/// defences, and the absorb is untouched.
+#[test]
+fn a_soul_link_share_the_felhunter_cannot_survive_returns_whatever_it_wears() {
+    use arenasim::states::play_match::demonology::master_demonologist_aura;
+    let link = |hp: f32| {
+        let Units {
+            mut world,
+            holder,
+            attacker,
+            ..
+        } = units();
+        let mut felhunter = bare(150.0);
+        felhunter.current_health = hp;
+        felhunter.team = 1;
+        felhunter.slot = 10;
+        felhunter.class = CharacterClass::Warlock;
+        let pet = world
+            .spawn((
+                felhunter,
+                ActiveAuras {
+                    auras: vec![
+                        named(AuraType::Absorb, 100.0, "Sacrifice"),
+                        master_demonologist_aura(0.2, holder),
+                    ],
+                },
+                Pet {
+                    owner: holder,
+                    pet_type: PetType::Felhunter,
+                },
+            ))
+            .id();
+        run(
+            &mut world,
+            DamageFollowUp::Transfer {
+                holder,
+                receiver: TransferReceiver::OwnPet,
+                amount: 12.0,
+                school: SpellSchool::Shadow,
+                preventable: false,
+                dealer: Some(attacker),
+                by: "Soul Link".into(),
+            },
+        );
+        let shield = world.get::<ActiveAuras>(pet).unwrap().auras[0].magnitude;
+        (health(&world, pet), health(&world, holder), shield)
+    };
+    assert_eq!(link(10.0), (10.0, 388.0, 100.0), "returned to the Warlock");
+    assert_eq!(
+        link(20.0),
+        (8.0, 400.0, 100.0),
+        "taken through its defences"
+    );
 }
 
 /// Soul Link's share cannot be prevented (TBC tooltip 19028): the Felhunter's

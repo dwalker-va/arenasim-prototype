@@ -290,21 +290,36 @@ fn a_transfer_that_crosses_the_line_raises_the_shield_that_frame() {
             .any(|l| l.contains("[TRANSFER] Team 1 Warrior #1 takes")),
         "no transfer reached the Warrior"
     );
-    // Only shares reached the Warrior before it crossed.
-    let direct_before: Vec<&str> = played
+    // Only shares reached the Warrior before it crossed: every drop in its
+    // health up to the crossing is, to the log's rounding, the shares logged
+    // on that frame.
+    let shares: Vec<(f32, f32)> = played
         .log
         .lines()
-        .filter(|l| {
-            log_stamp(l) <= crossed
-                && !l.contains("[TRANSFER]")
-                && (l.contains(" on Team 1 Warrior #1") || l.contains("Team 1 Warrior #1 for "))
-                && (l.contains(" hits ") || l.contains(" CRITS ") || l.contains(" ticks for "))
+        .filter_map(|l| {
+            let rest = l.split("[TRANSFER] Team 1 Warrior #1 takes ").nth(1)?;
+            Some((log_stamp(l), rest.split(' ').next()?.parse().ok()?))
         })
         .collect();
-    assert!(
-        direct_before.is_empty(),
-        "a hit of its own: {direct_before:#?}"
-    );
+    let track = warrior_track(&played);
+    let drops: Vec<(f32, f32)> = track
+        .windows(2)
+        .filter(|w| w[1].0 <= crossed && w[1].1 < w[0].1)
+        .map(|w| (w[1].0, w[0].1 - w[1].1))
+        .collect();
+    assert!(!drops.is_empty(), "the Warrior's health never dropped");
+    for (at, drop) in &drops {
+        let logged: Vec<f32> = shares
+            .iter()
+            .filter(|(stamp, _)| (stamp - at).abs() <= 0.006)
+            .map(|(_, n)| *n)
+            .collect();
+        let sum: f32 = logged.iter().sum();
+        assert!(
+            !logged.is_empty() && (sum - drop).abs() <= 0.5 * logged.len() as f32,
+            "a drop of {drop} at {at} is not the shares logged there ({logged:?})"
+        );
+    }
     let aegis = aegis_lines(&played);
     assert_eq!(aegis.len(), 1);
     assert!(
