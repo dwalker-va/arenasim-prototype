@@ -46,11 +46,18 @@ pub enum HitKind {
     /// reflecting shield). It meets its victim's own mitigation, absorbs and
     /// saves, and begets nothing: it is never reflected or transferred again.
     Reflected,
-    /// A share of another unit's damage ([`AuraType::DamageTransfer`], Soul
-    /// Link). It was mitigated on the unit it left, and it cannot be prevented:
-    /// it skips its receiver's immunity, mitigation, modifiers and absorbs, and
-    /// begets nothing.
+    /// A share of another unit's damage that its receiver takes as its own
+    /// (an [`AuraType::DamageTransfer`]: Blessing of Sacrifice). Its
+    /// receiver's immunity, damage-taken modifiers and absorbs apply, so a
+    /// Paladin under Divine Shield takes none of it. Its attacker's
+    /// damage-dealt increase and its receiver's armor and resistance do not:
+    /// the share met those on the unit it left. It begets nothing.
     Transferred,
+    /// A share of another unit's damage that cannot be prevented (Soul Link:
+    /// TBC's tooltip, spell 19028, "That damage cannot be prevented"). It
+    /// skips its receiver's immunity, mitigation, modifiers and absorbs, and
+    /// begets nothing.
+    TransferredUnpreventable,
     /// A transferred share handed back to its holder because its receiver
     /// could not take it (dead, gone, or too low to survive it). It was
     /// mitigated on the holder already, so it skips immunity, mitigation and
@@ -65,8 +72,21 @@ impl HitKind {
     pub fn is_secondary(self) -> bool {
         matches!(
             self,
-            HitKind::Reflected | HitKind::Transferred | HitKind::Returned
+            HitKind::Reflected
+                | HitKind::Transferred
+                | HitKind::TransferredUnpreventable
+                | HitKind::Returned
         )
+    }
+
+    /// The hit a transferred share lands as on its receiver: one its receiver
+    /// may prevent, or one it may not.
+    pub fn share(preventable: bool) -> Self {
+        if preventable {
+            HitKind::Transferred
+        } else {
+            HitKind::TransferredUnpreventable
+        }
     }
 }
 
@@ -278,12 +298,16 @@ pub fn armor_reduction(armor: f32) -> f32 {
 /// 9. **Retaliation**: a melee hit on a holder of [`AuraType::DamageReflect`]
 ///    returns its strongest one's damage to the attacker.
 ///
-/// A [`HitKind::Transferred`] hit skips 0-5 and 9: it was mitigated where it
-/// came from. A [`HitKind::Returned`] share skips 0-4 and 9, and meets its
-/// holder's absorbs. A secondary hit (reflected or transferred) never transfers or
-/// reflects. Every follow-up a hit makes is pushed to `follow_ups` and lands
-/// later in the frame; with no modifier aura and no talent, nothing is pushed
-/// and the pipeline is the one that was here before it.
+/// A [`HitKind::Transferred`] share (Blessing of Sacrifice) skips 1-2, which
+/// it met on the unit it left, 4 and 9: its receiver's immunity, damage-taken
+/// modifiers and absorbs apply, though a charged increase spends no charge on
+/// it. A [`HitKind::TransferredUnpreventable`] share (Soul Link) skips 0-5
+/// and 9. A [`HitKind::Returned`] share skips 0-4 and 9, and meets its
+/// holder's absorbs. A secondary hit (reflected, transferred or returned)
+/// never transfers or reflects. Every follow-up a hit makes is pushed to
+/// `follow_ups` and lands later in the frame; with no modifier aura and no
+/// talent, nothing is pushed and the pipeline is the one that was here before
+/// it.
 ///
 /// This is the one site every damage source funnels through — direct hits,
 /// auto-attacks, projectiles, DoT ticks, area effects, backlash, follow-ups —
@@ -320,69 +344,29 @@ pub fn apply_damage_with_absorb(
         target.current_health
     );
 
-    let transferred = hit.kind == HitKind::Transferred;
-    // Already past steps 0-4 on its holder: a transferred share, or one handed
-    // back to it.
-    let premitigated = transferred || hit.kind == HitKind::Returned;
+    // A share that met everything up to the transfer on its holder: one handed
+    // back to it, or one its receiver cannot prevent (Soul Link).
+    let premitigated = matches!(
+        hit.kind,
+        HitKind::Returned | HitKind::TransferredUnpreventable
+    );
+    // A share its receiver takes as its own (Blessing of Sacrifice): it met
+    // the attacker's increase, armor and resistance on its holder, but this
+    // unit's immunity, damage-taken modifiers and absorbs apply.
+    let shared = hit.kind == HitKind::Transferred;
 
     // Check for damage immunity (Divine Shield, or a Cyclone) — blocks all
     // incoming damage
-    if !premitigated {
-        if let Some(ref auras) = active_auras {
-            if auras.is_cycloned()
-                || auras
-                    .auras
-                    .iter()
-                    .any(|a| a.effect_type == AuraType::DamageImmunity)
-            {
-                return (0.0, 0.0);
-            }
-        }
+    if !premitigated && blocks_all_damage(active_auras.as_deref()) {
+        return (0.0, 0.0);
     }
 
     let mut remaining_damage = damage;
     let mut total_absorbed = 0.0;
 
     if !premitigated {
-        // The attacker's damage-dealt increase.
-        if hit.dealt != 1.0 {
-            remaining_damage *= hit.dealt;
-        }
-
-        // Apply armor reduction for Physical damage. Equipment armor plus any
-        // `ArmorIncrease` aura (Mark of the Wild), scaled by the percentage
-        // armor auras — exactly `target.armor` when there is none.
-        let armor = effective_armor(target, active_auras.as_deref());
-        if spell_school == SpellSchool::Physical && armor > 0.0 {
-            let pre_armor = remaining_damage;
-            let reduction = armor_reduction(armor);
-            remaining_damage *= 1.0 - reduction;
-            target.damage_mitigated_by_armor += pre_armor - remaining_damage;
-        }
-
-        // Apply spell resistance for magical damage
-        if spell_school != SpellSchool::Physical && spell_school != SpellSchool::None {
-            let mut resistance = target.get_resistance(spell_school);
-
-            // Sum SpellResistanceBuff auras matching this school
-            if let Some(ref auras) = active_auras {
-                for aura in auras.auras.iter() {
-                    if aura.effect_type == AuraType::SpellResistanceBuff
-                        && aura.spell_school == Some(spell_school)
-                    {
-                        resistance += aura.magnitude;
-                    }
-                }
-            }
-
-            if resistance > 0.0 {
-                let pre_resist = remaining_damage;
-                let reduction = resistance / (resistance * 5.0 / 3.0 + 300.0);
-                remaining_damage *= 1.0 - reduction;
-                if let Some(slot) = resistance_school_index(spell_school) {
-                    target.damage_mitigated_by_resistance[slot] += pre_resist - remaining_damage;
-                }
-            }
+        if !shared {
+            mitigate(target, active_auras.as_deref(), &hit, &mut remaining_damage);
         }
 
         // Damage taken reduction (Devotion Aura, Pain Suppression, Cheat
@@ -419,9 +403,9 @@ pub fn apply_damage_with_absorb(
         }
     }
 
-    // Absorbs soak everything but a transferred share, a returned one
-    // included.
-    if !transferred {
+    // Absorbs soak everything but a share that cannot be prevented: a share
+    // its receiver takes, and a returned one, included.
+    if hit.kind != HitKind::TransferredUnpreventable {
         // Check for absorb shields and consume them
         if let Some(auras) = active_auras.as_deref_mut() {
             for aura in auras.auras.iter_mut() {
@@ -499,6 +483,107 @@ pub fn apply_damage_with_absorb(
     (actual_damage, total_absorbed)
 }
 
+/// Step 0: whether `auras` block every hit — a damage immunity (Divine
+/// Shield) or a Cyclone.
+pub fn blocks_all_damage(auras: Option<&ActiveAuras>) -> bool {
+    auras.is_some_and(|a| {
+        a.is_cycloned()
+            || a.auras
+                .iter()
+                .any(|aura| aura.effect_type == AuraType::DamageImmunity)
+    })
+}
+
+/// Steps 1-2: the attacker's damage-dealt increase, then the target's armor
+/// (Physical) or resistance (magic). A transferred share skips them on its
+/// receiver: it met them on the unit it left.
+fn mitigate(target: &mut Combatant, auras: Option<&ActiveAuras>, hit: &Hit, damage: &mut f32) {
+    let spell_school = hit.school;
+    // The attacker's damage-dealt increase.
+    if hit.dealt != 1.0 {
+        *damage *= hit.dealt;
+    }
+
+    // Apply armor reduction for Physical damage. Equipment armor plus any
+    // `ArmorIncrease` aura (Mark of the Wild), scaled by the percentage armor
+    // auras — exactly `target.armor` when there is none.
+    let armor = effective_armor(target, auras);
+    if spell_school == SpellSchool::Physical && armor > 0.0 {
+        let pre_armor = *damage;
+        let reduction = armor_reduction(armor);
+        *damage *= 1.0 - reduction;
+        target.damage_mitigated_by_armor += pre_armor - *damage;
+    }
+
+    // Apply spell resistance for magical damage
+    if spell_school != SpellSchool::Physical && spell_school != SpellSchool::None {
+        let mut resistance = target.get_resistance(spell_school);
+
+        // Sum SpellResistanceBuff auras matching this school
+        if let Some(auras) = auras {
+            for aura in auras.auras.iter() {
+                if aura.effect_type == AuraType::SpellResistanceBuff
+                    && aura.spell_school == Some(spell_school)
+                {
+                    resistance += aura.magnitude;
+                }
+            }
+        }
+
+        if resistance > 0.0 {
+            let pre_resist = *damage;
+            let reduction = resistance / (resistance * 5.0 / 3.0 + 300.0);
+            *damage *= 1.0 - reduction;
+            if let Some(slot) = resistance_school_index(spell_school) {
+                target.damage_mitigated_by_resistance[slot] += pre_resist - *damage;
+            }
+        }
+    }
+}
+
+/// What a transferred share of `amount` `school` damage, landing as `kind`
+/// ([`HitKind::share`]), would put on the health of a receiver wearing
+/// `auras`: exactly what [`apply_damage_with_absorb`] takes from it, read
+/// without spending anything. A share that cannot be prevented is all of
+/// `amount`; one its receiver takes as its own meets the receiver's immunity,
+/// its damage-taken modifiers (an uncharged increase only, as the funnel
+/// applies) and its absorbs. `process_damage_follow_ups` judges by it whether
+/// the receiver can bear the share.
+pub fn share_to_health(
+    kind: HitKind,
+    amount: f32,
+    school: SpellSchool,
+    auras: Option<&ActiveAuras>,
+) -> f32 {
+    if kind != HitKind::Transferred {
+        return amount;
+    }
+    if blocks_all_damage(auras) {
+        return 0.0;
+    }
+    let mut damage = amount;
+    if damage > 0.0 {
+        if let Some((_, value)) =
+            strongest_in_scope(auras, AuraType::DamageTakenReduction, school, false)
+        {
+            damage *= 1.0 - value;
+        }
+    }
+    if damage > 0.0 {
+        if let Some((_, value)) =
+            strongest_in_scope(auras, AuraType::DamageTakenIncrease, school, true)
+        {
+            damage *= 1.0 + value;
+        }
+    }
+    for aura in auras.map_or(&[][..], |a| a.auras.as_slice()) {
+        if aura.effect_type == AuraType::Absorb && damage > 0.0 {
+            damage -= aura.magnitude.min(damage);
+        }
+    }
+    damage
+}
+
 /// Step 9: the strongest [`AuraType::DamageReflect`] on the holder returns its
 /// damage to the melee attacker, credited to the aura's caster.
 fn retaliate(
@@ -535,18 +620,19 @@ fn retaliate(
 }
 
 /// Step 3's increase: the strongest [`AuraType::DamageTakenIncrease`] in scope
-/// raises the hit. A charged one raises only direct hits (not periodic ones),
-/// spends a charge each time, and ends at zero charges.
+/// raises the hit. A charged one raises only direct hits (not periodic ones,
+/// nor a transferred share), spends a charge each time, and ends at zero
+/// charges.
 fn take_damage_increase(auras: &mut ActiveAuras, hit: &Hit, damage: &mut f32) {
     if *damage <= 0.0 {
         return;
     }
-    let periodic = hit.kind == HitKind::Periodic;
+    let uncharged_only = matches!(hit.kind, HitKind::Periodic | HitKind::Transferred);
     let Some((i, value)) = strongest_in_scope(
         Some(auras),
         AuraType::DamageTakenIncrease,
         hit.school,
-        periodic,
+        uncharged_only,
     ) else {
         return;
     };
@@ -562,7 +648,8 @@ fn take_damage_increase(auras: &mut ActiveAuras, hit: &Hit, damage: &mut f32) {
 
 /// Step 4: the strongest transfer on the holder — a [`AuraType::DamageTransfer`]
 /// (to its caster) or the holder's Soul Link (to its pet) — takes its share
-/// of the hit for its receiver.
+/// of the hit for its receiver. A transfer aura's share is one its receiver
+/// may prevent; Soul Link's is not ([`HitKind::TransferredUnpreventable`]).
 fn transfer_share(
     target: &Combatant,
     auras: Option<&ActiveAuras>,
@@ -575,33 +662,41 @@ fn transfer_share(
             .iter()
             .filter(|aura| aura.effect_type == AuraType::DamageTransfer)
             .filter_map(|aura| {
-                aura.caster.map(|c| {
-                    (
-                        TransferReceiver::Unit(c),
-                        aura.magnitude,
-                        aura.ability_name.as_str(),
-                    )
+                aura.caster.map(|c| Share {
+                    receiver: TransferReceiver::Unit(c),
+                    share: aura.magnitude,
+                    by: aura.ability_name.as_str(),
+                    preventable: true,
                 })
             })
-            .fold(
-                None,
-                |best: Option<(TransferReceiver, f32, &str)>, t| match best {
-                    Some((_, b, _)) if b >= t.1 => best,
-                    _ => Some(t),
-                },
-            )
+            .fold(None, |best: Option<Share>, t| match best {
+                Some(b) if b.share >= t.share => best,
+                _ => Some(t),
+            })
     });
     // A severed link (its pet is dead) takes no share.
     let link = target
         .talent_mechanics
         .soul_link()
         .filter(|_| !target.soul_link_severed)
-        .map(|share| (TransferReceiver::OwnPet, share, SOUL_LINK_NAME));
+        .map(|share| Share {
+            receiver: TransferReceiver::OwnPet,
+            share,
+            by: SOUL_LINK_NAME,
+            // TBC's tooltip (spell 19028): "That damage cannot be prevented."
+            preventable: false,
+        });
     let best = match (aura, link) {
-        (Some(a), Some(l)) => Some(if l.1 > a.1 { l } else { a }),
+        (Some(a), Some(l)) => Some(if l.share > a.share { l } else { a }),
         (a, l) => a.or(l),
     };
-    let Some((receiver, share, by)) = best else {
+    let Some(Share {
+        receiver,
+        share,
+        by,
+        preventable,
+    }) = best
+    else {
         return;
     };
     let amount = *damage * share.clamp(0.0, 1.0);
@@ -613,9 +708,20 @@ fn transfer_share(
         holder: hit.victim,
         receiver,
         amount,
+        school: hit.school,
+        preventable,
         dealer: hit.attacker,
         by: by.to_string(),
     });
+}
+
+/// One transfer a holder carries, as step 4 weighs it.
+#[derive(Clone, Copy)]
+struct Share<'a> {
+    receiver: TransferReceiver,
+    share: f32,
+    by: &'a str,
+    preventable: bool,
 }
 
 /// The name Soul Link's transfers log.

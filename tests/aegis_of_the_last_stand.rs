@@ -225,13 +225,14 @@ fn dampening_scales_the_shield_where_it_lands() {
 
 const PRIEST: Unit = Unit::new(1, 1);
 
-/// The crossing comes by a TRANSFER: the Warrior is immune to every hit, and
-/// half of what its Priest takes is sent to it (a `DamageTransfer` whose
-/// caster it is, Blessing of Sacrifice's shape). A transfer lands in
-/// `process_damage_follow_ups`, after the frame's hits, so this pins that the
-/// trigger runs after it: the shield is up on the frame the transfer crossed
-/// the line, not the frame after. And transferred damage cannot be prevented,
-/// so the shield it raised soaks none of the transfers that follow it.
+/// The crossing comes by a TRANSFER: the Warrior stands out of the fight, no
+/// hit of its own landing before the crossing, and half of what its Priest
+/// takes is sent to it (a `DamageTransfer` whose caster it is, Blessing of
+/// Sacrifice's shape). A transfer lands in `process_damage_follow_ups`, after
+/// the frame's hits, so this pins that the trigger runs after it: the shield
+/// is up on the frame the transfer crossed the line, not the frame after. And
+/// a Blessing of Sacrifice share is damage its receiver takes (AS-459), so the
+/// shield it raised soaks the shares that follow it.
 #[test]
 fn a_transfer_that_crosses_the_line_raises_the_shield_that_frame() {
     let mut trinket = HashMap::new();
@@ -258,18 +259,6 @@ fn a_transfer_that_crosses_the_line_raises_the_shield_that_frame() {
         .clear_auras(WARRIOR)
         // No mana: the Priest cannot heal the Warrior back over the line.
         .mana(PRIEST, 0.0)
-        .aura(
-            WARRIOR,
-            Aura {
-                effect_type: AuraType::DamageImmunity,
-                duration: 100.0,
-                magnitude: 1.0,
-                break_on_damage_threshold: -1.0,
-                ability_name: "Staged immunity".into(),
-                dispel_type: DispelType::Untyped,
-                ..Default::default()
-            },
-        )
         .world(|world| {
             let warrior = WARRIOR.entity(world);
             let priest = PRIEST.entity(world);
@@ -301,15 +290,48 @@ fn a_transfer_that_crosses_the_line_raises_the_shield_that_frame() {
             .any(|l| l.contains("[TRANSFER] Team 1 Warrior #1 takes")),
         "no transfer reached the Warrior"
     );
-    assert_eq!(aegis_lines(&played).len(), 1);
+    // Only shares reached the Warrior before it crossed.
+    let direct_before: Vec<&str> = played
+        .log
+        .lines()
+        .filter(|l| {
+            log_stamp(l) <= crossed
+                && !l.contains("[TRANSFER]")
+                && (l.contains(" on Team 1 Warrior #1") || l.contains("Team 1 Warrior #1 for "))
+                && (l.contains(" hits ") || l.contains(" CRITS ") || l.contains(" ticks for "))
+        })
+        .collect();
+    assert!(
+        direct_before.is_empty(),
+        "a hit of its own: {direct_before:#?}"
+    );
+    let aegis = aegis_lines(&played);
+    assert_eq!(aegis.len(), 1);
     assert!(
         shield_appears_at(&played, crossed),
         "the shield did not appear on the frame the transfer crossed the line"
     );
-    let shielded_transfers = played
+    let soaked_shares = played
         .log
         .lines()
-        .filter(|l| l.contains("Team 1 Warrior") && l.contains("absorbed"))
+        .filter(|l| {
+            log_stamp(l) > aegis[0].0
+                && l.contains("[TRANSFER] Team 1 Warrior #1 takes")
+                && l.contains("absorbed)")
+        })
         .count();
-    assert_eq!(shielded_transfers, 0, "the shield soaked a transfer");
+    assert!(
+        soaked_shares > 0,
+        "the shield soaked no share:\n{}",
+        played.log
+    );
+}
+
+/// A log line's stamp ("[ 13.80s] ...").
+fn log_stamp(line: &str) -> f32 {
+    line.trim_start_matches('[')
+        .split('s')
+        .next()
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or(f32::MAX)
 }

@@ -669,10 +669,16 @@ carrying every slot's build.
   (the stacking simplification: Cheat Death's 90% cut under Devotion Aura is
   90%, not 91%); different kinds multiply. What a hit sets off on another
   unit is a `DamageFollowUp`, spawned by its site and landed at the end of the
-  frame by `process_damage_follow_ups`: a transfer cannot be prevented and
-  never kills its receiver (a share it could not survive stays with the
-  holder and ends the transfer aura), reflected and transferred damage never
-  reflects or transfers again, and a save's heal goes through `apply_healing`.
+  frame by `process_damage_follow_ups`. A transfer's share is damage its
+  receiver takes, by its source as TBC has it: a `DamageTransfer` aura's
+  (Blessing of Sacrifice) meets the receiver's immunity, damage-taken
+  modifiers and absorbs, so Divine Shield blocks it; Soul Link's cannot be
+  prevented (tooltip 19028) and meets none of them; neither meets the
+  receiver's armor or resistance, which it met on the holder. A transfer
+  never kills its receiver, judged on what the share would put on its health
+  (`share_to_health`: a share it could not survive stays with the holder and
+  ends the transfer aura). Reflected and transferred damage never reflects or
+  transfers again, and a save's heal goes through `apply_healing`.
   A save is checked per blow, so it spares the first lethal blow of a frame;
   a mutual lethal where one side holds a save is that side's survival, not a
   draw.
@@ -905,7 +911,8 @@ any ring fits either ring socket, and the same item may not occupy both
      (`DispelType::Physical`), as for procs.
    - **In the damage pipeline** it is an ordinary absorb (the funnel's step 5):
      it soaks a hit after the damage-taken modifiers and a transfer's share,
-     before the killing-blow save, and never a transferred hit. Because it
+     before the killing-blow save, and never a Soul Link share (one that
+     cannot be prevented); a Blessing of Sacrifice share it soaks. Because it
      fires after the follow-ups, a transfer that crosses the line raises it
      that frame, and a save is judged first: Cheat Death leaving its Rogue
      below the line raises it on the frame of the blow
