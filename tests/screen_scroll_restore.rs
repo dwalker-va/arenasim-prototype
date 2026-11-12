@@ -362,9 +362,10 @@ fn every_document_screen_keeps_its_own_scroll_offset() {
         while client.scrolling() {
             passes += 1;
             assert!(passes < 600, "{screen:?}: the smooth scroll never ended");
-            frame = client.frame(Vec::new(), |ctx| draw(screen, ctx));
+            client.frame(Vec::new(), |ctx| draw(screen, ctx));
         }
-        frame = client.frame(Vec::new(), |ctx| draw(screen, ctx));
+        // One pass more, laid out at the offset the scroll ended on.
+        let frame = client.frame(Vec::new(), |ctx| draw(screen, ctx));
         let scrolled = layout(&frame);
         // The encyclopedia's body marks no widgets for the driver, so its
         // own offset is not visible here; it is still drawn, so a body it
