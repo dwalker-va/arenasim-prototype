@@ -404,8 +404,9 @@ pub const EXTRA_SWING_HASTE_RATIO: f32 = 1.5;
 pub const WEIGHT_EXTRA_SWING: f32 = EXTRA_SWING_HASTE_RATIO * WEIGHT_ATTACK_SPEED;
 
 /// Cost weight per fraction-point of movement_speed in the item budget.
-/// Since movement_speed is stored as a fraction (0.1 = 10% speed),
-/// this weight is large so that 0.1 speed costs 3.0 budget points.
+/// An item's movement_speed is a fraction of its wearer's base speed (0.1 is
+/// +10%, `equipment::geared_movement_speed`), so this weight is large: 0.1
+/// costs 3.0 budget points, the price of 1% crit chance.
 pub const WEIGHT_MOVEMENT_SPEED: f32 = 30.0;
 
 /// Cost weight per point of elemental resistance in the item budget.

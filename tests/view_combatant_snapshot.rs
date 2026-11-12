@@ -32,7 +32,10 @@ use egui_kittest::Harness;
 use arenasim::states::configure_match_ui::ClassIcons;
 use arenasim::states::match_config::{CharacterClass, MatchConfig, PaladinAura};
 use arenasim::states::play_match::ability_config::load_ability_definitions;
-use arenasim::states::play_match::equipment::{load_default_loadouts, load_item_definitions};
+use arenasim::states::play_match::components::Combatant;
+use arenasim::states::play_match::equipment::{
+    load_default_loadouts, load_item_definitions, resolve_equipped_loadout, Loadout,
+};
 use arenasim::states::play_match::talents::{Build, TalentDefinitions, TalentId};
 use arenasim::states::view_combatant_ui::{
     draw_view_combatant, EquipmentPickerState, ViewCombatantData, ViewCombatantState,
@@ -573,6 +576,54 @@ fn the_sheet_draws_the_slots_build_and_its_stats_read_it() {
             .any(|w| w.id.starts_with("talent:")),
         "a class without trees draws no talent panel"
     );
+}
+
+/// Every class's Move Speed row reads the speed its spawn moves at: the base
+/// scaled by the gear's `movement_speed` fraction ("+10%" boots), never the
+/// fraction added to the base as yards. Every default loadout's boots carry
+/// the stat, so each row is raised by gear (asserted, so the check is never
+/// one of an unraised base against itself).
+#[test]
+fn move_speed_row_reads_the_spawns_geared_speed() {
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+    let class_icons = ClassIcons::default();
+    for &class in CharacterClass::all() {
+        let loadout = resolve_equipped_loadout(class, &defaults, &Loadout::new(), &items);
+        let mut spawn = Combatant::new(1, 0, class);
+        let base = spawn.base_movement_speed;
+        spawn.apply_equipment(&loadout, &items);
+        assert!(
+            spawn.base_movement_speed > base,
+            "{class:?}: its default gear carries movement speed"
+        );
+
+        let mut config = MatchConfig::default();
+        config.team1[0] = Some(class);
+        let sheet = Sheet::open(
+            class,
+            config,
+            ViewCombatantData {
+                abilities: &abilities,
+                items: &items,
+                default_loadouts: &defaults,
+                class_icons: &class_icons,
+                ability_icons: None,
+                item_icons: None,
+                pet_icons: None,
+                talents: TalentDefinitions::shipped(),
+            },
+        );
+        let row = note_value(&sheet.last.notes, "stat", "Move Speed")
+            .unwrap_or_else(|| panic!("{class:?}: no Move Speed row"));
+        let (value, _) = row.split_once(" hover=").expect("a hover");
+        assert_eq!(
+            value,
+            format!("{:.1}/s", spawn.base_movement_speed),
+            "{class:?}: base {base}"
+        );
+    }
 }
 
 /// A build's flat crit reads on the sheet as the spawn applies it: the Crit

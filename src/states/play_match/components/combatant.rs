@@ -2,7 +2,7 @@ use super::super::abilities::{AbilityType, ScalingStat, SpellSchool};
 use super::super::ability_book::AbilityBook;
 use super::super::ability_config::AbilityConfig;
 use super::super::constants::{OFFHAND_DAMAGE_MULTIPLIER, UNARMED_WEAPON_SPEED};
-use super::super::equipment::{ItemDefinitions, ItemSlot, Loadout};
+use super::super::equipment::{geared_movement_speed, ItemDefinitions, ItemSlot, Loadout};
 use super::super::match_config::{
     self, MageArmor, PaladinAura, PriestForm, RogueOpener, RoguePoison, WarlockCurse, WarriorShout,
 };
@@ -1127,6 +1127,9 @@ impl Combatant {
         // weapon" — an empty or relic-filled live socket must end here, and
         // that is the case the class ladder cannot express.
         self.auto_attack_kind = AutoAttackKind::None;
+        // Movement speed is a percentage of the base, so the items' fractions
+        // are summed here and the base scaled once after the loop.
+        let mut movement_speed_bonus = 0.0;
 
         for (slot, item_id) in loadout {
             let Some(item) = items.get(item_id) else {
@@ -1140,7 +1143,7 @@ impl Combatant {
             self.attack_power += item.attack_power;
             self.spell_power += item.spell_power;
             self.crit_chance += item.crit_chance;
-            self.base_movement_speed += item.movement_speed;
+            movement_speed_bonus += item.movement_speed;
             self.armor += item.armor;
             self.fire_resistance += item.fire_resistance;
             self.frost_resistance += item.frost_resistance;
@@ -1228,6 +1231,9 @@ impl Combatant {
                 self.offhand_weapon_speed = item.weapon_speed;
             }
         }
+
+        self.base_movement_speed =
+            geared_movement_speed(self.base_movement_speed, movement_speed_bonus);
 
         // The off hand accompanies the main hand. A main-hand class's empty
         // main hand already leaves it no auto-attack at all (its live kind is

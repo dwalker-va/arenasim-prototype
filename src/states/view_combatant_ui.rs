@@ -30,9 +30,9 @@ use super::configure_match_ui::ClassIcons;
 use super::play_match::ability_config::AbilityDefinitions;
 use super::play_match::components::{class_base_stats, ClassBaseStats, PetType, ResourceType};
 use super::play_match::equipment::{
-    enforce_two_hand_conflicts, find_one_handed_mainhand, resolve_equipped_loadout,
-    resolve_loadout, DefaultLoadouts, HeldSlot, ItemConfig, ItemDefinitions, ItemId, ItemSlot,
-    Loadout,
+    enforce_two_hand_conflicts, find_one_handed_mainhand, geared_movement_speed,
+    resolve_equipped_loadout, resolve_loadout, DefaultLoadouts, HeldSlot, ItemConfig,
+    ItemDefinitions, ItemId, ItemSlot, Loadout,
 };
 use super::play_match::rendering::{icon_load_settled, item_aura_icons, GENERIC_AURA_ICONS};
 use super::play_match::AbilityType;
@@ -145,7 +145,9 @@ struct EquipmentBonuses {
     attack_power: f32,
     spell_power: f32,
     crit_chance: f32,
-    move_speed: f32,
+    /// The summed `movement_speed` FRACTION of the gear (`0.1` is +10%), not
+    /// yards a second: the sheet scales the base by it as the spawn does.
+    move_speed_bonus: f32,
     armor: f32,
     fire_resistance: f32,
     frost_resistance: f32,
@@ -173,7 +175,7 @@ impl EquipmentBonuses {
                 bonuses.attack_power += item.attack_power;
                 bonuses.spell_power += item.spell_power;
                 bonuses.crit_chance += item.crit_chance;
-                bonuses.move_speed += item.movement_speed;
+                bonuses.move_speed_bonus += item.movement_speed;
                 bonuses.armor += item.armor;
                 bonuses.fire_resistance += item.fire_resistance;
                 bonuses.frost_resistance += item.frost_resistance;
@@ -1340,7 +1342,10 @@ fn render_stats_panel(
                                 key: "Move Speed",
                                 stat: TalentStat::MovementSpeed,
                                 base: stats.movement_speed,
-                                gear: equip.move_speed,
+                                gear: geared_movement_speed(
+                                    stats.movement_speed,
+                                    equip.move_speed_bonus,
+                                ) - stats.movement_speed,
                                 value: &|v| format!("{v:.1}/s"),
                                 amount: &one,
                                 mitigation: None,

@@ -160,6 +160,10 @@ fn the_loader_rejects_each_broken_rule() {
         (EMBRACE, "per_rank: [StatPercent(MaxHealth, 0.0)],", "not positive"),
         // Nor has a StatAdd on one; a StatAdd on a weighted stat has.
         (EMBRACE, "per_rank: [StatAdd(Armor, 30.0)],", "declares no budget"),
+        // Movement speed is weighted on items per fraction of base speed, and
+        // in talents in yards a second: the item weight cannot price it.
+        (EMBRACE, "per_rank: [StatPercent(MovementSpeed, 0.05)],", "declares no budget"),
+        (EMBRACE, "per_rank: [StatAdd(MovementSpeed, 0.2)],", "declares no budget"),
         (EMBRACE, "budget: Some(11.0), per_rank: [StatAdd(CritChance, 0.01)],", "declares a budget"),
         (EMBRACE, "per_rank: [StatAdd(CritChance, 0.0)],", "not positive"),
         (EMBRACE, "per_rank: [StatAdd(CritChance, -0.01)],", "not positive"),

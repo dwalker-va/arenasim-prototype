@@ -149,7 +149,8 @@ impl Run {
 
 /// With its back to its own starting room's mouth — the Warrior on the bowl
 /// side, so straight away from it is straight down the room — the shifted
-/// Druid never sets foot in the room, and still pulls away from the Warrior.
+/// Druid never sets foot in the room, and still pulls away from the Warrior
+/// over its run.
 #[test]
 fn a_shifted_druid_does_not_run_down_a_starting_room() {
     let bounds = bounds();
@@ -166,10 +167,14 @@ fn a_shifted_druid_does_not_run_down_a_starting_room() {
             deepest <= GRAZE_YARDS,
             "seed {seed}: the shifted Druid ran {deepest:.1}yd down the starting room"
         );
-        let (start, after) = (run.gap_at(0.0), run.gap_at(1.5));
+        // Judged over the whole run, not at one instant: running along the
+        // bowl wall past the mouth, the Druid turns the corner the Warrior
+        // cuts, and the gap dips there before it opens.
+        let end = run.frames.last().unwrap().0;
+        let (start, after) = (run.gap_at(0.0), run.gap_at(end));
         assert!(
             after > start,
-            "seed {seed}: no ground gained on the chaser ({start:.1} -> {after:.1}yd)"
+            "seed {seed}: no ground gained on the chaser over {end:.2}s ({start:.1} -> {after:.1}yd)"
         );
     }
 }

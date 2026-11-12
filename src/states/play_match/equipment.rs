@@ -931,6 +931,9 @@ pub struct ItemConfig {
     pub spell_power: f32,
     #[serde(default)]
     pub crit_chance: f32,
+    /// Movement speed as a FRACTION of the wearer's base speed: `0.1` is
+    /// +10%, as the item's label reads. Every worn item's fraction is summed
+    /// and the base scaled once ([`geared_movement_speed`]).
     #[serde(default)]
     pub movement_speed: f32,
     /// Armor rating (reduces incoming Physical damage)
@@ -1594,6 +1597,13 @@ use super::constants::{
     WEIGHT_ATTACK_POWER, WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN, WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA,
     WEIGHT_MOVEMENT_SPEED, WEIGHT_RESISTANCE, WEIGHT_SPELL_POWER,
 };
+
+/// A combatant's movement speed with its gear on: its base speed raised by
+/// the summed `movement_speed` fraction of every item it wears (`0.1` is
+/// +10%). The one rule the spawn and the View Combatant sheet both apply.
+pub fn geared_movement_speed(base: f32, bonus: f32) -> f32 {
+    base * (1.0 + bonus)
+}
 
 /// Calculate the total budget usage for an item based on its budgeted stats.
 /// Free stats (armor, attack_damage_min/max, weapon_speed) are excluded.
@@ -2291,6 +2301,45 @@ mod tests {
             };
             assert_eq!(combatant.current_mana, expected, "{class:?}");
         }
+    }
+
+    /// An item's `movement_speed` is a fraction of the base, as its "+10%"
+    /// label reads: the gear's fractions are summed and the base scaled once,
+    /// so +10% and +5% on a 5 yd/s Warrior is 5.75 — not 5.15 (yards added),
+    /// nor 5.775 (each percentage compounding on the last).
+    #[test]
+    fn apply_equipment_scales_movement_speed_by_the_summed_fraction() {
+        let speedy = |name: &str, slot, movement_speed| ItemConfig {
+            movement_speed,
+            ..armor_item(name, slot, ArmorType::Plate)
+        };
+        let items = make_item_defs(vec![
+            (
+                ItemId::SabatonsBattleBorn,
+                speedy("Boots", ItemSlotType::Feet, 0.1),
+            ),
+            (
+                ItemId::LionheartHelm,
+                speedy("Helm", ItemSlotType::Head, 0.05),
+            ),
+        ]);
+        let new =
+            || super::super::components::combatant::Combatant::new(1, 0, CharacterClass::Warrior);
+        let base = new().base_movement_speed;
+        assert_eq!(base, 5.0, "the fixture's arithmetic assumes it");
+
+        let mut boots = Loadout::new();
+        boots.insert(ItemSlot::Feet, ItemId::SabatonsBattleBorn);
+        let mut combatant = new();
+        combatant.apply_equipment(&boots, &items);
+        assert_eq!(combatant.base_movement_speed, base * 1.1);
+
+        let mut both = boots.clone();
+        both.insert(ItemSlot::Head, ItemId::LionheartHelm);
+        let mut combatant = new();
+        combatant.apply_equipment(&both, &items);
+        assert_eq!(combatant.base_movement_speed, base * (1.0 + (0.1 + 0.05)));
+        assert!((combatant.base_movement_speed - 5.75).abs() < 1e-5);
     }
 
     #[test]
