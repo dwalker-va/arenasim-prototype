@@ -438,10 +438,13 @@ fn restore(world: &mut World, snap: Snapshot) {
 }
 
 /// The first quiet frame at or after `from` seconds of combat in `config`'s
-/// match: its combat time and the state on it.
-fn quiet_state(config: impl Fn() -> HeadlessMatchConfig, from: f32) -> (f32, Snapshot) {
-    for step in 0..200 {
-        let at = from + step as f32 * 0.1;
+/// match, on a 0.1s grid: its combat time and the state on it. Each probe is
+/// its own short match, so they are independent and run a batch at a time in
+/// parallel; the first quiet one in grid order wins, as a scan in order would
+/// pick it.
+fn quiet_state(config: impl Fn() -> HeadlessMatchConfig + Sync, from: f32) -> (f32, Snapshot) {
+    const BATCH: usize = 8;
+    let probe = |at: f32| -> Option<Snapshot> {
         let found = Arc::new(Mutex::new(None));
         let keep = found.clone();
         // Each probe ends just past T: the timeout is all the cap changes.
@@ -456,8 +459,25 @@ fn quiet_state(config: impl Fn() -> HeadlessMatchConfig, from: f32) -> (f32, Sna
                 *keep.lock().unwrap() = Some(quiet.then(|| capture(w)));
             }),
         );
-        let snap = found.lock().unwrap().take().expect("the stage landed");
-        if let Some(snap) = snap {
+        let snap = found.lock().unwrap().take();
+        snap.expect("the stage landed")
+    };
+    for batch in (0..200).collect::<Vec<usize>>().chunks(BATCH) {
+        let found: Vec<(f32, Option<Snapshot>)> = std::thread::scope(|scope| {
+            let handles: Vec<_> = batch
+                .iter()
+                .map(|&step| {
+                    let at = from + step as f32 * 0.1;
+                    let probe = &probe;
+                    scope.spawn(move || (at, probe(at)))
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("a probe"))
+                .collect()
+        });
+        if let Some((at, Some(snap))) = found.into_iter().find(|(_, snap)| snap.is_some()) {
             return (at, snap);
         }
     }
