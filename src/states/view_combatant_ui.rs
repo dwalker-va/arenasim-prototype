@@ -2372,6 +2372,47 @@ mod tests {
         }
     }
 
+    /// The same mechanism keeps the Warlock's demon choice legal: Sacrifice
+    /// without the talent that offers it goes back to the Felhunter.
+    #[test]
+    fn unlearning_sacrifice_drops_the_demon_choice() {
+        use super::super::match_config::WarlockDemon;
+        use super::super::play_match::talents::{Build, TalentDefinitions};
+        let talents = TalentDefinitions::shipped();
+        let sacrifice_build = talents
+            .legal_builds(CharacterClass::Warlock, 8)
+            .into_iter()
+            .find(|b| {
+                talents.offers(
+                    b,
+                    super::super::play_match::talent_choices::ChoiceOption::WarlockDemon(
+                        WarlockDemon::Sacrifice,
+                    ),
+                )
+            })
+            .expect("some build offers Sacrifice");
+        for keep_node in [true, false] {
+            let mut config = MatchConfig::default();
+            config.set_class(1, 0, CharacterClass::Warlock);
+            config.team1_warlock_demons[0] = WarlockDemon::Sacrifice;
+            *config.build_mut(1, 0).unwrap() = if keep_node {
+                sacrifice_build.clone()
+            } else {
+                Build::default()
+            };
+            config.keep_choices_offered(1, 0, talents);
+            let want = if keep_node {
+                WarlockDemon::Sacrifice
+            } else {
+                WarlockDemon::Felhunter
+            };
+            assert_eq!(
+                config.team1_warlock_demons[0], want,
+                "keep_node {keep_node}"
+            );
+        }
+    }
+
     /// Retribution Aura is offered only to a build that takes its talent;
     /// every other aura to every build.
     #[test]

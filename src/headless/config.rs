@@ -11,7 +11,7 @@ use crate::states::play_match::talents::{Build, TalentDefinitions};
 
 use crate::states::match_config::{
     ArenaMap, CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, PriestForm,
-    RogueOpener, RoguePoison, WarlockCurse, WarriorShout,
+    RogueOpener, RoguePoison, WarlockCurse, WarlockDemon, WarriorShout,
 };
 use crate::states::play_match::equipment::{
     load_item_definitions, validate_class_restrictions, ItemId, ItemSlot, Loadout,
@@ -172,6 +172,13 @@ pub struct HeadlessMatchConfig {
     /// Team 2's warlock curse preferences: outer vec indexed by slot, inner vec indexed by enemy target
     #[serde(default)]
     pub team2_warlock_curse_prefs: Vec<Option<Vec<String>>>,
+    /// Team 1's warlock demon choices (one per slot: "Felhunter", or
+    /// "Sacrifice" for a build with Demonic Sacrifice). Defaults to Felhunter.
+    #[serde(default)]
+    pub team1_warlock_demons: Vec<String>,
+    /// Team 2's warlock demon choices.
+    #[serde(default)]
+    pub team2_warlock_demons: Vec<String>,
     /// Team 1's hunter pet type preferences (one per slot: "Spider", "Boar", "Bird")
     #[serde(default)]
     pub team1_hunter_pet_types: Vec<String>,
@@ -275,6 +282,8 @@ impl Default for HeadlessMatchConfig {
             team2_rogue_offhand_poisons: Vec::new(),
             team1_warlock_curse_prefs: Vec::new(),
             team2_warlock_curse_prefs: Vec::new(),
+            team1_warlock_demons: Vec::new(),
+            team2_warlock_demons: Vec::new(),
             team1_hunter_pet_types: Vec::new(),
             team2_hunter_pet_types: Vec::new(),
             team1_equipment: Vec::new(),
@@ -824,6 +833,11 @@ impl HeadlessMatchConfig {
             team1.len(),
         );
 
+        let team1_warlock_demons =
+            Self::parse_warlock_demons(1, &team1, &self.team1_warlock_demons)?;
+        let team2_warlock_demons =
+            Self::parse_warlock_demons(2, &team2, &self.team2_warlock_demons)?;
+
         // Parse hunter pet types, defaulting to Spider for missing entries
         let mut team1_hunter_pet_types: Vec<HunterPetType> = self
             .team1_hunter_pet_types
@@ -914,6 +928,8 @@ impl HeadlessMatchConfig {
             team2_rogue_offhand_poisons,
             team1_warlock_curse_prefs,
             team2_warlock_curse_prefs,
+            team1_warlock_demons,
+            team2_warlock_demons,
             team1_hunter_pet_types,
             team2_hunter_pet_types,
             team1_warrior_shouts,
@@ -955,6 +971,39 @@ impl HeadlessMatchConfig {
             .map(|name| name.as_deref().map(Self::parse_rogue_poison).transpose())
             .collect::<Result<Vec<_>, _>>()?;
         parsed.resize(classes.len(), None);
+        Ok(parsed)
+    }
+
+    /// One demon choice per slot of `team`, padded with the default
+    /// (Felhunter). Whether a slot may choose Sacrifice is its build's
+    /// question, asked by `validate_config_choices`.
+    fn parse_warlock_demons(
+        team: u8,
+        classes: &[Option<CharacterClass>],
+        names: &[String],
+    ) -> Result<Vec<WarlockDemon>, String> {
+        if names.len() > classes.len() {
+            return Err(format!(
+                "team{team}_warlock_demons has {} entries but team{team} has only {} members",
+                names.len(),
+                classes.len()
+            ));
+        }
+        let mut parsed = names
+            .iter()
+            .map(|name| {
+                WarlockDemon::ALL
+                    .into_iter()
+                    .find(|demon| name.eq_ignore_ascii_case(demon.name()))
+                    .ok_or_else(|| {
+                        format!(
+                            "Unknown warlock demon choice: {name:?} (expected Felhunter or \
+                             Sacrifice)"
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        parsed.resize(classes.len(), WarlockDemon::default());
         Ok(parsed)
     }
 

@@ -45,6 +45,10 @@ const HEALTH_DROPS: &[(&str, &str)] = &[
         "src/states/play_match/combat_core/death.rs",
         "despawn_pets_of_dead_owners",
     ),
+    // Not damage: a Demonic Sacrifice kills the Warlock's Felhunter at the
+    // gates, and logs its own `[DEATH]` line ("is sacrificed by"), with no
+    // killer — no kill.
+    ("src/states/play_match/demonology.rs", "demonic_bonds"),
     // Not damage: Life Tap's health-for-mana conversion, floored at 1 health
     // so it never kills.
     (
