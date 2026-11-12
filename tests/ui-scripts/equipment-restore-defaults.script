@@ -33,6 +33,9 @@ assert-note equip-row Ring2 item=RingOfProtection override=false
 
 # --- (a) Ring 1 -> Signet of Focus -------------------------------------------
 click equip:Ring1
+# hover scrolls it into view: at the 1280 x 720 default the list runs past
+# the fold, and an assertion does not scroll.
+hover pick:SignetOfFocus
 assert-visible pick:SignetOfFocus
 click pick:SignetOfFocus
 assert-note Ring1=SignetOfFocus
@@ -40,6 +43,7 @@ assert-note equip-row Ring1 item=SignetOfFocus override=true
 
 # --- (b) Ring 2 -> Band of Accuria, now that Ring 1 has let go of it ---------
 click equip:Ring2
+hover pick:BandOfAccuria
 assert-visible pick:BandOfAccuria
 click pick:BandOfAccuria
 assert-note Ring1=SignetOfFocus
