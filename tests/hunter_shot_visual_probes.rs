@@ -25,7 +25,7 @@ use arenasim::states::play_match::abilities::{AbilityType, SpellSchool};
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
     BoltTrail, ClientParticle, Combatant, CosmeticArrow, HunterShotCore, ImpactAnchor,
-    ImpactSprite, ParticleFacing, Projectile, SchoolImpact,
+    ImpactSprite, ParticleFacing, ParticleSize, Projectile, SchoolImpact,
 };
 use arenasim::states::play_match::{
     animate_client_particles, animate_hunter_shots, animate_school_impacts, hunter_shot_for,
@@ -207,7 +207,7 @@ fn the_shared_landing_keeps_only_smoke_stars_and_rune() {
     );
     let smoke = emitters.iter().find(|e| e.name.ends_with("smoke")).unwrap();
     // Client 0.4 -> 0.83 puff, 1.636 yd/s.
-    assert!((smoke.size[0] - 0.4 * 0.8).abs() < 1e-5);
+    assert!((smoke.size.diameter_keys()[0] - 0.4 * 0.8).abs() < 1e-5);
     assert!((smoke.speed - 1.636 * 0.8 * 0.6).abs() < 1e-5);
     // Duration x1.0: the client's windows.
     assert_eq!(smoke.window, Some((0.0, 0.2)));
@@ -229,7 +229,10 @@ fn the_serpent_landing_is_the_clients_and_lingers() {
     assert_eq!(by("spray").window, Some((0.0, 0.167)));
     assert!(!by("spray").additive);
     assert!(by("glints").additive);
-    assert!((by("smoke").size[2] - 0.694).abs() < 1e-5, "client size");
+    assert!(
+        (by("smoke").size.diameter_keys()[2] - 0.694).abs() < 1e-5,
+        "client size"
+    );
     let life = landing_style(AbilityType::SerpentSting, SpellSchool::Nature).life();
     assert!(
         (life - 5.5).abs() < 1e-4,
@@ -321,7 +324,7 @@ fn the_rune_lies_flat_under_any_yaw() {
         life: 0.4,
         velocity: Vec3::ZERO,
         gravity: 0.0,
-        size: [0.2, 0.9, 1.7],
+        size: ParticleSize::diameters([0.2, 0.9, 1.7]),
         mid: 0.5,
         palette: std::sync::Arc::from(Vec::<Handle<StandardMaterial>>::new()),
         step: 0,

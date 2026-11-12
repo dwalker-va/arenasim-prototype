@@ -159,7 +159,7 @@ pub const FLARE_SPARKS: ClientEmitter = ClientEmitter {
     color: [[250, 5, 0], [255, 120, 0], [255, 252, 176]],
     alpha: [1.0, 1.0, 1.0],
     // Sized up for the match camera; its throw and gravity stay the client's.
-    size: [0.139 * FLARE_SPARK_SIZE, 0.028 * FLARE_SPARK_SIZE, 0.0],
+    size: ParticleSize::diameters([0.139, 0.028, 0.0]).scaled(FLARE_SPARK_SIZE),
     mid: 0.8,
     track: Some(SPARK_TRACK),
 };
@@ -631,9 +631,7 @@ pub fn update_flare_visuals(
                 },
                 Mesh3d(rig.quad.clone()),
                 MeshMaterial3d(rig.spark_palette[0].clone()),
-                Transform::from_translation(foot)
-                    .with_rotation(facing)
-                    .with_scale(Vec3::splat(e.size[0].max(1e-4))),
+                Transform::from_translation(foot).with_rotation(facing),
                 NotShadowCaster,
                 PlayMatchEntity,
             ));
@@ -657,6 +655,16 @@ fn spark_launch(seed: u32) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The sparks are drawn at the AS-222 bench's width: it draws a key as the
+    /// sprite's full width (`r = size * q.s * 0.5`), times its spark-size knob.
+    #[test]
+    fn the_sparks_are_drawn_at_the_benchs_width() {
+        let drawn = FLARE_SPARKS.size.diameter_keys();
+        for (got, key) in drawn.iter().zip([0.139, 0.028, 0.0]) {
+            assert!((got - key * FLARE_SPARK_SIZE).abs() < 1e-6, "{drawn:?}");
+        }
+    }
 
     #[test]
     fn the_clock_runs_the_client_sequence_over_the_flares_burn() {

@@ -99,16 +99,9 @@ const EMIT_EPSILON: f32 = 1e-4;
 const PUFF_COLOR: [[u8; 3]; 3] = [[18, 55, 0], [106, 146, 0], [163, 196, 64]];
 const PUFF_WINDOW: (f32, f32) = (0.0, 3.0);
 
-/// The scale track is a RADIUS; the quad is a unit diameter. The client's
-/// (and the bench's) size keys are each sprite's radius in yards — the bench
-/// draws `r = scale * size * 2 * 0.5` — while `ClientEmitter::size` is the
-/// quad's diameter, so every key below is written as the radius the source
-/// gives and doubled here.
-const fn diameters(radius: [f32; 3]) -> [f32; 3] {
-    [radius[0] * 2.0, radius[1] * 2.0, radius[2] * 2.0]
-}
-
-/// `poison_impact_chest.m2` (kit 3031, fdid 166643) at the CHEST.
+/// `poison_impact_chest.m2` (kit 3031, fdid 166643) at the CHEST. The bench
+/// draws a scale key as the sprite's radius (`r = scale * size * 2 * 0.5`), so
+/// the sizes are `ParticleSize::radii`, the keys as the bench gives them.
 const POISON_IMPACT_CHEST: [ClientEmitter; 3] = [
     // P1: the burst — 150/s for 167 ms (about 25 flares), alpha-blended.
     ClientEmitter {
@@ -125,7 +118,7 @@ const POISON_IMPACT_CHEST: [ClientEmitter; 3] = [
         rise: false,
         color: [[49, 102, 1], [99, 136, 20], [115, 152, 1]],
         alpha: [1.0, 1.0, 0.0],
-        size: diameters([0.11, 0.06, 0.03]),
+        size: ParticleSize::radii([0.11, 0.06, 0.03]),
         mid: 0.5,
         track: None,
     },
@@ -146,7 +139,7 @@ const POISON_IMPACT_CHEST: [ClientEmitter; 3] = [
         color: PUFF_COLOR,
         // The bench's "Olive cloud puffs" layer: 0.39 -> 0.85 -> 0.
         alpha: [0.39, 0.85, 0.0],
-        size: diameters([0.22, 0.31, 0.69]),
+        size: ParticleSize::radii([0.22, 0.31, 0.69]),
         mid: 0.5,
         track: None,
     },
@@ -166,7 +159,7 @@ const POISON_IMPACT_CHEST: [ClientEmitter; 3] = [
         rise: false,
         color: PUFF_COLOR,
         alpha: [0.39, 1.0, 0.0],
-        size: diameters([0.056, 0.056, 0.056]),
+        size: ParticleSize::radii([0.056, 0.056, 0.056]),
         mid: 0.5,
         track: None,
     },
@@ -453,7 +446,7 @@ mod tests {
             assert!(e.name.ends_with(name), "{} is not the {name}", e.name);
             for k in 0..3 {
                 assert!(
-                    (e.size[k] - 2.0 * radius[k]).abs() < 1e-6,
+                    (e.size.diameter_keys()[k] - 2.0 * radius[k]).abs() < 1e-6,
                     "{} size",
                     e.name
                 );
