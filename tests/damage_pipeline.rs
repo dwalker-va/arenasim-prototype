@@ -12,9 +12,9 @@ use arenasim::combat::log::{CombatLog, StructuredEventData};
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::SpellSchool;
 use arenasim::states::play_match::combat_core::{
-    apply_damage_with_absorb, damage_dealt_multiplier, effective_armor, process_damage_follow_ups,
-    DamageFollowUp, DamageFollowUps, DealtMods, Hit, HitKind, KillingBlowPrevented,
-    PendingDamageFollowUp, TransferReceiver, CHEAT_DEATH_NAME,
+    apply_damage_with_absorb, damage_dealt_multiplier, effective_armor, end_transfers_to_the_dead,
+    process_damage_follow_ups, DamageFollowUp, DamageFollowUps, DealtMods, Hit, HitKind,
+    KillingBlowPrevented, PendingDamageFollowUp, TransferReceiver, CHEAT_DEATH_NAME,
 };
 use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, Aura, AuraDamageMods, AuraStacks, AuraType, Combatant,
@@ -765,6 +765,208 @@ fn an_unbearable_transfer_returns_to_the_holder_and_ends_the_aura() {
         "the transfer ends"
     );
     assert!(deaths(&world).is_empty());
+}
+
+/// A share handed back to its holder meets the holder's absorbs, for every
+/// kind of transfer: a Blessing of Sacrifice whose caster is dead, and a Soul
+/// Link with no living pet. Control: a living receiver takes it.
+#[test]
+fn a_returned_share_is_soaked_by_the_holders_absorbs() {
+    let shield = || {
+        let mut s = aura(AuraType::Absorb, 1000.0);
+        s.ability_name = "Power Word: Shield".into();
+        s
+    };
+    for receiver_kind in ["Blessing of Sacrifice", "Soul Link"] {
+        let Units {
+            mut world,
+            holder,
+            receiver,
+            attacker,
+        } = units();
+        world
+            .get_mut::<ActiveAuras>(holder)
+            .unwrap()
+            .auras
+            .push(shield());
+        let to = if receiver_kind == "Soul Link" {
+            // Its only pet is dead.
+            let mut felhunter = bare(150.0);
+            felhunter.current_health = 0.0;
+            felhunter.is_dead = true;
+            world.spawn((
+                felhunter,
+                Pet {
+                    owner: holder,
+                    pet_type: PetType::Felhunter,
+                },
+            ));
+            TransferReceiver::OwnPet
+        } else {
+            let mut paladin = world.get_mut::<Combatant>(receiver).unwrap();
+            paladin.current_health = 0.0;
+            paladin.is_dead = true;
+            TransferReceiver::Unit(receiver)
+        };
+        run(
+            &mut world,
+            DamageFollowUp::Transfer {
+                holder,
+                receiver: to,
+                amount: 30.0,
+                dealer: Some(attacker),
+                by: receiver_kind.into(),
+            },
+        );
+        assert_eq!(health(&world, holder), 400.0, "{receiver_kind}: soaked");
+        let left = world.get::<ActiveAuras>(holder).unwrap().auras[0].magnitude;
+        assert_eq!(left, 970.0, "{receiver_kind}: the shield took it");
+    }
+    // Control: a living receiver takes the share; the holder's shield is
+    // untouched.
+    let Units {
+        mut world,
+        holder,
+        receiver,
+        attacker,
+    } = units();
+    world
+        .get_mut::<ActiveAuras>(holder)
+        .unwrap()
+        .auras
+        .push(shield());
+    run(
+        &mut world,
+        DamageFollowUp::Transfer {
+            holder,
+            receiver: TransferReceiver::Unit(receiver),
+            amount: 30.0,
+            dealer: Some(attacker),
+            by: "Blessing of Sacrifice".into(),
+        },
+    );
+    assert_eq!(health(&world, receiver), 370.0);
+    assert_eq!(
+        world.get::<ActiveAuras>(holder).unwrap().auras[0].magnitude,
+        1000.0
+    );
+}
+
+/// A returned share was mitigated on its holder already: neither immunity
+/// nor a damage-taken reduction meets it again.
+#[test]
+fn a_returned_share_is_not_mitigated_twice() {
+    for (label, holder_aura) in [
+        ("immune", aura(AuraType::DamageImmunity, 1.0)),
+        ("reduced", aura(AuraType::DamageTakenReduction, 0.5)),
+    ] {
+        let Units {
+            mut world,
+            holder,
+            receiver,
+            attacker,
+        } = units();
+        world
+            .get_mut::<ActiveAuras>(holder)
+            .unwrap()
+            .auras
+            .push(holder_aura);
+        world.get_mut::<Combatant>(receiver).unwrap().current_health = 0.0;
+        run(
+            &mut world,
+            DamageFollowUp::Transfer {
+                holder,
+                receiver: TransferReceiver::Unit(receiver),
+                amount: 30.0,
+                dealer: Some(attacker),
+                by: "Blessing of Sacrifice".into(),
+            },
+        );
+        assert_eq!(health(&world, holder), 370.0, "{label}");
+    }
+}
+
+/// A severed Soul Link takes no share; the control with the link intact does.
+#[test]
+fn a_severed_soul_link_takes_no_share() {
+    let (attacker, holder, _) = entities();
+    let mut warlock = bare(500.0);
+    warlock.talent_mechanics = TalentMechanics::of(&[TalentMechanic::SoulLink { share: 0.12 }]);
+    warlock.soul_link_severed = true;
+    let (to_health, _, follow_ups) = land(
+        direct(100.0, SpellSchool::Fire, Some(attacker), holder),
+        &mut warlock,
+        None,
+    );
+    assert_eq!((to_health, follow_ups.len()), (100.0, 0));
+    warlock.soul_link_severed = false;
+    let (to_health, _, follow_ups) = land(
+        direct(100.0, SpellSchool::Fire, Some(attacker), holder),
+        &mut warlock,
+        None,
+    );
+    assert!((to_health - 88.0).abs() < 1e-3);
+    assert_eq!(follow_ups.len(), 1);
+}
+
+/// `end_transfers_to_the_dead`: a transfer aura whose caster is dead ends, and
+/// a Soul Link whose pet is dead is severed. Controls: a living caster's aura
+/// stays, and a living pet keeps the link.
+#[test]
+fn transfers_to_the_dead_end_before_the_frames_damage() {
+    let run_end = |world: &mut World| {
+        world
+            .run_system_once(end_transfers_to_the_dead)
+            .expect("ran");
+    };
+    for caster_dead in [true, false] {
+        let Units {
+            mut world,
+            holder,
+            receiver,
+            ..
+        } = units();
+        let mut sac = aura(AuraType::DamageTransfer, 0.3);
+        sac.caster = Some(receiver);
+        world
+            .get_mut::<ActiveAuras>(holder)
+            .unwrap()
+            .auras
+            .push(sac);
+        if caster_dead {
+            world.get_mut::<Combatant>(receiver).unwrap().current_health = 0.0;
+        }
+        run_end(&mut world);
+        let kept = world.get::<ActiveAuras>(holder).unwrap().auras.len();
+        assert_eq!(
+            kept,
+            usize::from(!caster_dead),
+            "caster dead: {caster_dead}"
+        );
+    }
+    for pet_dead in [true, false] {
+        let Units {
+            mut world, holder, ..
+        } = units();
+        world.get_mut::<Combatant>(holder).unwrap().talent_mechanics =
+            TalentMechanics::of(&[TalentMechanic::SoulLink { share: 0.12 }]);
+        let mut felhunter = bare(150.0);
+        if pet_dead {
+            felhunter.current_health = 0.0;
+        }
+        world.spawn((
+            felhunter,
+            Pet {
+                owner: holder,
+                pet_type: PetType::Felhunter,
+            },
+        ));
+        run_end(&mut world);
+        assert_eq!(
+            world.get::<Combatant>(holder).unwrap().soul_link_severed,
+            pet_dead
+        );
+    }
 }
 
 #[test]

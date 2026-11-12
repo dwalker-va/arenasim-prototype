@@ -487,6 +487,9 @@ pub struct Combatant {
     pub talent_mechanics: crate::states::play_match::talent_mechanics::TalentMechanics,
     /// Whether a once-a-match killing-blow save (Cheat Death) has been spent.
     pub killing_blow_save_spent: bool,
+    /// Soul Link's pet is dead, so the link takes no more shares
+    /// (`combat_core::end_transfers_to_the_dead`).
+    pub soul_link_severed: bool,
     /// Warlock-specific: the slot chose to sacrifice its demon (Demonic
     /// Sacrifice), and the gates have not opened yet. Cleared the frame
     /// `demonology::demonic_bonds` lands the sacrifice.
@@ -733,6 +736,7 @@ impl Combatant {
             rogue_offhand_poison: None,
             talent_mechanics: Default::default(),
             killing_blow_save_spent: false,
+            soul_link_severed: false,
             sacrifice_pending: false,
             warlock_curse_prefs: Vec::new(),
             warrior_shout: WarriorShout::default(),

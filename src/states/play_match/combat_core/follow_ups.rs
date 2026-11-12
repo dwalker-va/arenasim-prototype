@@ -189,7 +189,12 @@ pub fn process_damage_follow_ups(
                     attacker: dealer,
                     victim: lands_on,
                     dealt: 1.0,
-                    kind: HitKind::Transferred,
+                    // A share handed back meets its holder's absorbs.
+                    kind: if returned {
+                        HitKind::Returned
+                    } else {
+                        HitKind::Transferred
+                    },
                 };
                 let landed = land(
                     hit,
@@ -377,5 +382,87 @@ fn credit_damage(
 ) {
     if let Some(Ok((mut c, _, _))) = dealer.map(|d| combatants.get_mut(d)) {
         c.damage_dealt += amount;
+    }
+}
+
+/// End every damage transfer whose receiver can no longer take a share, so
+/// the holder's hits stop splitting one off at step 4 of
+/// `apply_damage_with_absorb`: a [`AuraType::DamageTransfer`] whose caster is
+/// dead or gone ends, and a Soul Link whose pet is dead or gone is severed
+/// (`Combatant::soul_link_severed`). Runs before the frame's damage; a
+/// receiver that dies mid-frame is caught by [`process_damage_follow_ups`],
+/// which hands the share back as a [`HitKind::Returned`] hit the holder's
+/// absorbs soak. A no-op when no unit holds a transfer.
+pub fn end_transfers_to_the_dead(
+    mut combat_log: ResMut<CombatLog>,
+    mut combatants: Query<(
+        Entity,
+        &mut Combatant,
+        Option<&mut ActiveAuras>,
+        Option<&Pet>,
+    )>,
+) {
+    let holds_transfer = |c: &Combatant, auras: Option<&ActiveAuras>| {
+        (c.talent_mechanics.soul_link().is_some() && !c.soul_link_severed)
+            || auras.is_some_and(|a| {
+                a.auras
+                    .iter()
+                    .any(|aura| aura.effect_type == AuraType::DamageTransfer)
+            })
+    };
+    if !combatants
+        .iter()
+        .any(|(_, c, auras, _)| c.is_alive() && holds_transfer(c, auras))
+    {
+        return;
+    }
+    let alive: std::collections::BTreeSet<Entity> = combatants
+        .iter()
+        .filter(|(_, c, _, _)| c.is_alive())
+        .map(|(e, ..)| e)
+        .collect();
+    let living_pet_owners: std::collections::BTreeSet<Entity> = combatants
+        .iter()
+        .filter(|(_, c, _, _)| c.is_alive())
+        .filter_map(|(_, _, _, pet)| pet.map(|p| p.owner))
+        .collect();
+    let mut holders: Vec<(u8, u8, Entity)> = combatants
+        .iter()
+        .filter(|(_, c, auras, _)| c.is_alive() && holds_transfer(c, *auras))
+        .map(|(e, c, _, _)| (c.team, c.slot, e))
+        .collect();
+    holders.sort();
+    for (_, _, entity) in holders {
+        let Ok((_, mut holder, auras, pet)) = combatants.get_mut(entity) else {
+            continue;
+        };
+        let holder_id = combat_log_id_for(&holder, pet);
+        if holder.talent_mechanics.soul_link().is_some()
+            && !holder.soul_link_severed
+            && !living_pet_owners.contains(&entity)
+        {
+            holder.soul_link_severed = true;
+            combat_log.log(
+                CombatLogEventType::MatchEvent,
+                format!("[TALENTS] {holder_id}'s Soul Link ends: its demon is dead"),
+            );
+        }
+        if let Some(mut auras) = auras {
+            let mut ended: Vec<String> = Vec::new();
+            auras.auras.retain(|a| {
+                let orphaned = a.effect_type == AuraType::DamageTransfer
+                    && !a.caster.is_some_and(|c| alive.contains(&c));
+                if orphaned {
+                    ended.push(a.ability_name.clone());
+                }
+                !orphaned
+            });
+            for name in ended {
+                combat_log.log(
+                    CombatLogEventType::Buff,
+                    format!("[TRANSFER] {holder_id}'s {name} ends: its caster is dead"),
+                );
+            }
+        }
     }
 }

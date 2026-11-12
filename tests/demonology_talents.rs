@@ -345,6 +345,19 @@ impl Bonds {
         names
     }
 
+    /// The magnitude of the one aura named `name` queued for `target`.
+    fn pending_magnitude(&mut self, target: Entity, name: &str) -> f32 {
+        let found: Vec<f32> = self
+            .world
+            .query::<&AuraPending>()
+            .iter(&self.world)
+            .filter(|p| p.target == target && p.aura.ability_name == name)
+            .map(|p| p.aura.magnitude)
+            .collect();
+        assert_eq!(found.len(), 1, "{name} queued once");
+        found[0]
+    }
+
     fn log(&self) -> &CombatLog {
         self.world.resource::<CombatLog>()
     }
@@ -363,6 +376,7 @@ fn the_sacrifice_kills_the_felhunter_at_the_gates_and_grants_touch_of_shadow() {
     assert!(!b.world.get::<Combatant>(b.owner).unwrap().sacrifice_pending);
     let owner = b.owner;
     assert_eq!(b.pending_for(owner), vec![TOUCH_OF_SHADOW_NAME.to_string()]);
+    assert!((b.pending_magnitude(owner, TOUCH_OF_SHADOW_NAME) - 0.15).abs() < 1e-6);
     assert!(
         b.log()
             .entries
@@ -438,6 +452,10 @@ fn master_demonologist_lands_on_both_while_the_felhunter_lives() {
         b.pending_for(pet),
         vec![MASTER_DEMONOLOGIST_NAME.to_string()]
     );
+    // At the talent's own numbers, on both.
+    for who in [owner, pet] {
+        assert!((b.pending_magnitude(who, MASTER_DEMONOLOGIST_NAME) - 0.04).abs() < 1e-6);
+    }
     // A dead Warlock's bonds do nothing.
     let mut dead = bonds(&[MD], true, true);
     let (owner, pet) = (dead.owner, dead.pet);
@@ -607,4 +625,75 @@ fn the_link_moves_its_share_to_the_felhunter_unless_it_was_sacrificed() {
     ]);
     let control = play_seeded(config("Warrior", unlinked, "Felhunter", 7, 20.0));
     assert_eq!(transfers(&control), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Soul Link with a dead Felhunter
+// ---------------------------------------------------------------------------
+
+/// A Soul Link whose Felhunter is dead takes no share, so a Warlock behind an
+/// absorb loses no health and nothing is transferred. Control: with the
+/// Felhunter alive the link still passes shares.
+#[test]
+fn a_dead_felhunter_takes_no_share_and_the_absorb_holds() {
+    use arenasim::headless::{Stage, Unit};
+    use arenasim::states::play_match::components::AuraDamageMods;
+    let warlock = Unit::new(1, 0);
+    let warrior = Unit::new(2, 0);
+    let felhunter = Unit::pet_of(1, 0);
+    let stage = |pet_dead: bool| {
+        let shield = Aura {
+            effect_type: AuraType::Absorb,
+            duration: 600.0,
+            magnitude: 100_000.0,
+            break_on_damage_threshold: -1.0,
+            ability_name: "Staged Shield".into(),
+            damage_mods: AuraDamageMods::default(),
+            ..Default::default()
+        };
+        let s = Stage::new()
+            .place(warlock, 0.0, 0.0)
+            .place(felhunter, -6.0, 0.0)
+            .place(warrior, 2.0, 0.0)
+            .target(warrior, warlock)
+            .aura(warlock, shield);
+        if pet_dead {
+            s.combatant(felhunter, |c| {
+                c.current_health = 0.0;
+                c.is_dead = true;
+            })
+        } else {
+            s
+        }
+    };
+    let transfers = |played: &Played| {
+        played
+            .log
+            .lines()
+            .filter(|l| l.contains("[TRANSFER]"))
+            .count()
+    };
+    let dead = common::staged::play(
+        config("Warrior", linked(), "Felhunter", 7, 10.0),
+        stage(true),
+    );
+    let full = dead
+        .staged_frames()
+        .filter_map(|f| f.combatants.values().find(|c| c.team == 1 && !c.is_pet))
+        .all(|w| w.current_health == w.max_health);
+    assert!(full, "the absorb holds every hit");
+    assert!(dead
+        .log
+        .contains("[TALENTS] Team 1 Warlock #1's Soul Link ends"));
+    assert_eq!(transfers(&dead), 0, "{}", dead.log);
+    // Not vacuous: the Warrior hit the shielded Warlock.
+    assert!(dead
+        .log
+        .contains("Team 2 Warrior #1's Auto Attack hits Team 1 Warlock #1"));
+
+    let alive = common::staged::play(
+        config("Warrior", linked(), "Felhunter", 7, 10.0),
+        stage(false),
+    );
+    assert!(transfers(&alive) > 0, "{}", alive.log);
 }

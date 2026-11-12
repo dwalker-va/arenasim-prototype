@@ -32,6 +32,7 @@ pub use super::auras::apply_pending_auras;
 pub use super::auras::process_dot_ticks;
 pub use super::auras::process_hot_ticks;
 pub use super::auras::update_auras;
+pub use super::combat_core::end_transfers_to_the_dead;
 pub use super::combat_core::regenerate_resources;
 pub use super::demonology::demonic_bonds;
 pub use super::match_flow::update_countdown;
@@ -205,7 +206,9 @@ pub fn add_core_combat_systems<M, N>(
             // and its Touch of Shadow meets `apply_pending_auras` below. A
             // nested chain, because the outer tuple is at Bevy's 20-system
             // limit.
-            (update_countdown, demonic_bonds)
+            // Then every damage transfer whose receiver is dead ends, so no
+            // hit this frame splits a share off for it.
+            (update_countdown, demonic_bonds, end_transfers_to_the_dead)
                 .chain()
                 .run_if(decide.clone()),
             // Ramp heal/absorb dampening BEFORE any healing applies this frame
