@@ -386,6 +386,42 @@ fn sacred_shield_stays_on_its_holder_while_it_is_pressured() {
     );
 }
 
+/// Two Paladins deciding in one frame: the first shields the pressured Mage,
+/// and the second, seeing that shield queued this frame, does not spend a
+/// global cooldown refreshing it. Control: the second Paladin alone shields
+/// the Mage.
+#[test]
+fn a_second_paladin_does_not_refresh_a_shield_cast_this_frame() {
+    const PALADIN_2: &str = "paladin 2";
+    let scene = mage_under_attack(0.8)
+        .grant(PALADIN, AbilityType::SacredShield)
+        .unit(PALADIN_2, 1, Paladin)
+        .at(-5.0, 0.0)
+        .grant(PALADIN_2, AbilityType::SacredShield);
+    let views = scene.decide_in_one_frame(&[PALADIN, PALADIN_2]);
+    assert_eq!(
+        views[0].chose(),
+        Some((AbilityType::SacredShield, Some(MAGE))),
+        "{}",
+        describe(&views[0])
+    );
+    assert!(
+        matches!(
+            views[1].rejected(AbilityType::SacredShield),
+            Some(RejectionReason::AlreadyApplied)
+        ),
+        "{}",
+        describe(&views[1])
+    );
+    let alone = scene.decide(PALADIN_2);
+    assert_eq!(
+        alone.chose(),
+        Some((AbilityType::SacredShield, Some(MAGE))),
+        "{}",
+        describe(&alone)
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The tree, as the card writes it.
 // ---------------------------------------------------------------------------

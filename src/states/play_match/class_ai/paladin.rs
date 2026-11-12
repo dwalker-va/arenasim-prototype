@@ -159,6 +159,7 @@ pub fn decide_paladin_action(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     paladin_aura_this_frame: &mut std::collections::HashSet<Entity>,
+    sacred_shielded_this_frame: &mut std::collections::HashSet<Entity>,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
     plan: &PaladinMovementPlan,
     decision_trace: &mut DecisionTrace,
@@ -450,6 +451,7 @@ pub fn decide_paladin_action(
         my_pos,
         auras,
         ctx,
+        sacred_shielded_this_frame,
         &mut builder,
     ) {
         builder.finish();

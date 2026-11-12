@@ -353,3 +353,48 @@ fn a_killing_blow_raises_no_shield() {
         assert_eq!(shields(&w, bearer).is_empty(), lethal, "lethal: {lethal}");
     }
 }
+
+fn shield_caster(world: &World, who: Entity) -> Vec<Option<Entity>> {
+    world
+        .get::<ActiveAuras>(who)
+        .map(|a| {
+            a.auras
+                .iter()
+                .filter(|a| a.effect_type == AuraType::TriggeredAbsorb && a.ability_name == SHIELD)
+                .map(|a| a.caster)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Two Paladins: P2 shields Z and P1 shields X, then P2 casts on X. The cast
+/// refreshes X's shield, which becomes P2's, and P2's on Z comes off — one
+/// target a Paladin even through a refresh. Control: P1 recasting on X leaves
+/// P2's on Z.
+#[test]
+fn a_refresh_by_another_paladin_still_moves_its_shield() {
+    for p2_recasts in [true, false] {
+        let mut w = world();
+        let (p1, x) = units(&mut w);
+        let p2 = w
+            .spawn((
+                Combatant::new(1, 2, CharacterClass::Paladin),
+                Transform::default(),
+            ))
+            .id();
+        let z = w
+            .spawn((
+                Combatant::new(1, 3, CharacterClass::Mage),
+                Transform::default(),
+                ActiveAuras { auras: Vec::new() },
+            ))
+            .id();
+        cast(&mut w, AbilityType::SacredShield, z, p2);
+        cast(&mut w, AbilityType::SacredShield, x, p1);
+        let recaster = if p2_recasts { p2 } else { p1 };
+        cast(&mut w, AbilityType::SacredShield, x, recaster);
+        assert_eq!(shield_caster(&w, x), vec![Some(recaster)], "X holds one");
+        let z_holds = if p2_recasts { vec![] } else { vec![Some(p2)] };
+        assert_eq!(shield_caster(&w, z), z_holds, "p2 recasts: {p2_recasts}");
+    }
+}

@@ -800,7 +800,7 @@ fn draw_sheet(
             // An aura a talent widens (Retribution Aura) is offered only to a
             // build that takes that talent.
             let build = slot_build(match_config, view_state);
-            let talents = super::play_match::talents::TalentDefinitions::shipped();
+            let talents = data.talents;
             let options: Vec<(PaladinAura, Option<egui::TextureId>)> =
                 offered_paladin_auras(talents, &build)
                     .into_iter()
@@ -857,6 +857,9 @@ fn draw_sheet(
                 &key,
             ));
         }
+        // A talent unlearned this frame may have widened the option the slot
+        // chose (Retribution Aura): put that choice back to its default.
+        match_config.keep_choices_offered(view_state.team, view_state.slot, data.talents);
     }
 
     // Read after the panel, so a rank learned this frame shows in the stats
@@ -2280,6 +2283,31 @@ fn enemy_label(
 mod tests {
     use super::super::play_match::equipment::{enforce_unique_equipped, LoadoutsConfig};
     use super::*;
+
+    /// A chosen aura the build stops offering (its talent unlearned) goes
+    /// back to the default; one it still offers stays.
+    #[test]
+    fn unlearning_retribution_aura_drops_the_choice() {
+        use super::super::play_match::talents::{Build, TalentDefinitions, TalentId};
+        let talents = TalentDefinitions::shipped();
+        for keep_node in [true, false] {
+            let mut config = MatchConfig::default();
+            config.set_class(1, 0, CharacterClass::Paladin);
+            config.team1_paladin_auras[0] = PaladinAura::RetributionAura;
+            *config.build_mut(1, 0).unwrap() = if keep_node {
+                Build::of(&[(TalentId::SacredDuty, 2), (TalentId::RetributionAura, 1)])
+            } else {
+                Build::of(&[(TalentId::SacredDuty, 2)])
+            };
+            config.keep_choices_offered(1, 0, talents);
+            let want = if keep_node {
+                PaladinAura::RetributionAura
+            } else {
+                PaladinAura::DevotionAura
+            };
+            assert_eq!(config.team1_paladin_auras[0], want, "keep_node {keep_node}");
+        }
+    }
 
     /// Retribution Aura is offered only to a build that takes its talent;
     /// every other aura to every build.

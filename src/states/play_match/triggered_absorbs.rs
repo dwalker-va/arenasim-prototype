@@ -599,12 +599,14 @@ mod tests {
             caster: Some(Entity::from_raw(7)),
             spell_school: Some(super::super::abilities::SpellSchool::Holy),
             ability_name: "Sacred Shield".into(),
+            // Not the default, so a shield that drops it is seen to.
+            dispel_type: DispelType::Untyped,
             ..Default::default()
         };
         let aura = sacred_shield().shield_aura("Sacred Shield", ShieldFrom::Aura(&arming), 40.0);
         assert_eq!(aura.caster, arming.caster);
         assert_eq!(aura.spell_school, arming.spell_school);
-        assert_eq!(aura.dispel_type, arming.dispel_type);
+        assert_eq!(aura.dispel_type, DispelType::Untyped);
         assert_eq!(aura.source_item, None);
     }
 

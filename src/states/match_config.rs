@@ -869,6 +869,60 @@ impl MatchConfig {
         }
     }
 
+    /// Put back to its menu's default any per-match choice of `team`'s `slot`
+    /// that its build no longer offers (`TalentDefinitions::offers`): an
+    /// option a talent widens (Retribution Aura), chosen while the build took
+    /// that talent, and kept after the talent was unlearned, would otherwise
+    /// make the slot's choices illegal and refuse its spawn. Covers every
+    /// one-option menu; a choice the build still offers is left alone.
+    pub fn keep_choices_offered(
+        &mut self,
+        team: u8,
+        slot: usize,
+        talents: &crate::states::play_match::talents::TalentDefinitions,
+    ) {
+        use crate::states::play_match::talent_choices::ChoiceOption;
+        let build = self.build(team, slot).cloned().unwrap_or_default();
+        let offered = |option: ChoiceOption| talents.offers(&build, option);
+        fn keep<T: Copy + Default>(
+            list: &mut [T],
+            slot: usize,
+            option: impl Fn(T) -> ChoiceOption,
+            offered: &impl Fn(ChoiceOption) -> bool,
+        ) {
+            if let Some(value) = list.get_mut(slot) {
+                if !offered(option(*value)) {
+                    *value = T::default();
+                }
+            }
+        }
+        let (openers, poisons, pets, shouts, armors, auras) = if team == 1 {
+            (
+                &mut self.team1_rogue_openers,
+                &mut self.team1_rogue_poisons,
+                &mut self.team1_hunter_pet_types,
+                &mut self.team1_warrior_shouts,
+                &mut self.team1_mage_armors,
+                &mut self.team1_paladin_auras,
+            )
+        } else {
+            (
+                &mut self.team2_rogue_openers,
+                &mut self.team2_rogue_poisons,
+                &mut self.team2_hunter_pet_types,
+                &mut self.team2_warrior_shouts,
+                &mut self.team2_mage_armors,
+                &mut self.team2_paladin_auras,
+            )
+        };
+        keep(openers, slot, ChoiceOption::RogueOpener, &offered);
+        keep(poisons, slot, ChoiceOption::RoguePoison, &offered);
+        keep(pets, slot, ChoiceOption::HunterPet, &offered);
+        keep(shouts, slot, ChoiceOption::WarriorShout, &offered);
+        keep(armors, slot, ChoiceOption::MageArmor, &offered);
+        keep(auras, slot, ChoiceOption::PaladinAura, &offered);
+    }
+
     /// Assign a class to a team slot, dropping that slot's equipment overrides
     /// and talent build when the class actually changes (a build is one
     /// class's talents).

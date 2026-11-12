@@ -600,6 +600,20 @@ pub fn apply_pending_auras(
                 };
                 combat_log.log(CombatLogEventType::Buff, message);
                 spawn_aura_landing(&mut commands, pending.target, &pending.aura);
+                // A one-target aura is its caster's here now, refreshed or
+                // not (a refresh takes the new caster): the caster's copy
+                // anywhere else comes off.
+                if let (Some(caster), true) = (
+                    pending.aura.caster,
+                    pending.aura.stacks.is_some_and(|s| s.one_target),
+                ) {
+                    one_target_landed.push((
+                        pending.target,
+                        caster,
+                        pending.aura.effect_type,
+                        pending.aura.ability_name.clone(),
+                    ));
+                }
                 commands.entity(pending_entity).despawn();
                 continue;
             }

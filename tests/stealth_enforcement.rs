@@ -498,6 +498,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     auras,
                     &ctx,
                     &mut set_a,
+                    &mut Default::default(),
                     &mut same_frame_cc,
                     &PaladinMovementPlan::default(),
                     &mut trace,

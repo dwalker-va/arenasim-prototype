@@ -765,6 +765,22 @@ impl Scene {
     /// is not changed: the decision runs on copies, and its commands are
     /// discarded, so a second `decide` sees the same scene.
     pub fn decide(&self, who: Who) -> DecisionView {
+        self.decide_with(who, &mut DispatchAccumulators::default())
+    }
+
+    /// Run `whos`' decisions one after another in ONE frame, in that order:
+    /// each decides from the same scene, as every unit of a frame decides
+    /// from the frame's snapshot, and they share the frame's accumulators, so
+    /// a later unit sees what an earlier one queued this frame (a buff it
+    /// cast, a shield it put up). The scene is not changed.
+    pub fn decide_in_one_frame(&self, whos: &[Who]) -> Vec<DecisionView> {
+        let mut acc = DispatchAccumulators::default();
+        whos.iter()
+            .map(|&who| self.decide_with(who, &mut acc))
+            .collect()
+    }
+
+    fn decide_with(&self, who: Who, acc: &mut DispatchAccumulators) -> DecisionView {
         let unit = self.find(who);
         assert!(
             !unit.auras.iter().any(|a| is_incapacitating(&a.effect_type)),
@@ -857,7 +873,7 @@ impl Scene {
         let mut commands = Commands::new(&mut queue, &exec_world);
         let mut combat_log = CombatLog::default();
         let mut game_rng = GameRng::from_seed(0);
-        let mut acc = DispatchAccumulators::default();
+        let attacks_before = acc.instant_attacks.len();
         let acted = dispatch_class_decision(
             DispatchIo {
                 commands: &mut commands,
@@ -866,7 +882,7 @@ impl Scene {
                 decision_trace: &mut trace,
             },
             &frame,
-            &mut acc,
+            acc,
             unit.entity,
             &mut combatant,
             unit.position,
@@ -896,11 +912,14 @@ impl Scene {
                 target: m.target.map(|t| self.who(t.index())),
                 ability: m.ability,
             }));
-        view.landed
-            .extend(acc.instant_attacks.iter().map(|a| SceneLanded {
-                ability: a.ability,
-                target: self.who(a.target.index()),
-            }));
+        view.landed.extend(
+            acc.instant_attacks[attacks_before..]
+                .iter()
+                .map(|a| SceneLanded {
+                    ability: a.ability,
+                    target: self.who(a.target.index()),
+                }),
+        );
         self.read_landings(&mut exec_world, &mut view);
         view
     }

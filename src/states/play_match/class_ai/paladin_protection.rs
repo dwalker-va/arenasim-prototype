@@ -241,6 +241,7 @@ pub fn try_sacred_shield(
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    shielded_this_frame: &mut std::collections::HashSet<Entity>,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::SacredShield;
@@ -313,7 +314,10 @@ pub fn try_sacred_shield(
         return false;
     };
     let theirs = ctx.active_auras.get(&target).map(Vec::as_slice);
-    if holds(theirs, AuraType::TriggeredAbsorb, &def.name) {
+    // Another Paladin's shield put there earlier this frame is not in the
+    // snapshot yet: a second cast would only refresh it.
+    if holds(theirs, AuraType::TriggeredAbsorb, &def.name) || shielded_this_frame.contains(&target)
+    {
         builder.reject(ability, RejectionReason::AlreadyApplied);
         return false;
     }
@@ -339,6 +343,7 @@ pub fn try_sacred_shield(
     };
 
     builder.choose(cleared, Some(target), true);
+    shielded_this_frame.insert(target);
     combatant.current_mana -= def.mana_cost;
     combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;
