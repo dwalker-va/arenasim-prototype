@@ -530,7 +530,7 @@ pub fn draw_view_combatant(
             }
             ui.add_space(space::LG);
 
-            GameState::ViewCombatant.body_scroll().show(ui, |ui| {
+            GameState::ViewCombatant.show_body(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.set_max_width(CONTENT_MAX_W);
                     ui.with_layout(

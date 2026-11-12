@@ -184,7 +184,7 @@ pub fn draw_keybindings(
             }
             ui.add_space(space::LG);
 
-            GameState::Keybindings.body_scroll().show(ui, |ui| {
+            GameState::Keybindings.show_body(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.set_max_width(CONTENT_MAX_W);
                     ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {

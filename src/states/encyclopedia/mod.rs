@@ -511,7 +511,7 @@ pub fn draw_encyclopedia(
                 .inner_margin(margin_xy(space::XL, space::LG)),
         )
         .show(ctx, |ui| {
-            GameState::Encyclopedia.body_scroll().show(ui, |ui| {
+            GameState::Encyclopedia.show_body(ui, |ui| {
                 let needle = search.trim().to_lowercase();
                 if !needle.is_empty() {
                     // Results TAKE OVER the content area. The blessed mockup

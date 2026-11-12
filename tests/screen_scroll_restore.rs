@@ -1,12 +1,17 @@
-//! A screen comes back where it was left: View Combatant, scrolled down to a
-//! kit row, opens that ability's encyclopedia page, and on the way back the
-//! row is where it was.
+//! A screen comes back where it was left, and a fresh visit starts at the
+//! top: View Combatant, scrolled down to a kit row, opens that ability's
+//! encyclopedia page, and on the way back the row is where it was; opened
+//! again from Match Setup, the sheet is back at the top.
 //!
 //! egui keeps a scroll offset per widget id, and every Document screen's body
 //! is a `ScrollArea` inside a `CentralPanel`. Left at egui's default id, those
 //! bodies all shared ONE offset, so an encyclopedia page short enough to fit
 //! the window clamped it to zero and the sheet came back at the top (AS-470).
-//! `GameState::body_scroll` keys each body by its screen.
+//! `GameState::show_body` keys each body by its screen. Keyed, the offset
+//! would also outlive a visit, so a screen opened forward
+//! (`ScreenContext::open_from`, which `ScreenNav::open` writes) is handed to
+//! egui by `chrome::open_fresh_bodies` and its body starts at the top; a
+//! return (`ScreenNav::leave`) records nothing and restores.
 //!
 //! Both screens are the real pure draws, in one bare `egui::Context` as the
 //! client's single egui context holds them, with no GPU, so the default
@@ -14,6 +19,7 @@
 
 use bevy_egui::egui;
 
+use arenasim::states::chrome::{open_fresh_bodies, ScreenContext};
 use arenasim::states::configure_match_ui::ClassIcons;
 use arenasim::states::encyclopedia::{
     draw_encyclopedia, EncyclopediaData, EncyclopediaState, Topic,
@@ -86,7 +92,7 @@ impl Client {
 }
 
 #[test]
-fn view_combatant_comes_back_from_the_encyclopedia_where_it_was_left() {
+fn view_combatant_comes_back_where_it_was_left_and_opens_fresh_at_the_top() {
     let abilities = load_ability_definitions().expect("abilities.ron must load");
     let items = load_item_definitions().expect("items.ron must load");
     let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
@@ -123,6 +129,10 @@ fn view_combatant_comes_back_from_the_encyclopedia_where_it_was_left() {
     };
 
     let mut client = Client::new();
+    let mut nav = ScreenContext::default();
+    // Match Setup opens the sheet.
+    nav.open_from(GameState::ViewCombatant, GameState::ConfigureMatch);
+    open_fresh_bodies(&mut nav, &client.ctx);
     let mut frame = registry::Frame::default();
     for _ in 0..4 {
         frame = client.frame(Vec::new(), &mut sheet);
@@ -173,6 +183,8 @@ fn view_combatant_comes_back_from_the_encyclopedia_where_it_was_left() {
     let mut encyclopedia = EncyclopediaState::default();
     encyclopedia.rebuild_registry(&items, &abilities, talents);
     encyclopedia.open_at(Topic::Ability(AbilityType::Ambush));
+    nav.open_from(GameState::Encyclopedia, GameState::ViewCombatant);
+    open_fresh_bodies(&mut nav, &client.ctx);
     for _ in 0..4 {
         client.frame(Vec::new(), |ctx| {
             let _ = draw_encyclopedia(
@@ -184,7 +196,8 @@ fn view_combatant_comes_back_from_the_encyclopedia_where_it_was_left() {
         });
     }
 
-    // And back.
+    // And back: a leave, which records nothing.
+    open_fresh_bodies(&mut nav, &client.ctx);
     for _ in 0..4 {
         frame = client.frame(Vec::new(), &mut sheet);
     }
@@ -194,5 +207,19 @@ fn view_combatant_comes_back_from_the_encyclopedia_where_it_was_left() {
         "View Combatant came back from the encyclopedia scrolled elsewhere: {ROW} \
          was left at {left_at:?} and came back at {came_back_at:?} (unscrolled: \
          {unscrolled:?})"
+    );
+
+    // Out to Match Setup, which has no body, and the sheet opened again: a
+    // fresh visit, at the top.
+    nav.open_from(GameState::ViewCombatant, GameState::ConfigureMatch);
+    open_fresh_bodies(&mut nav, &client.ctx);
+    for _ in 0..4 {
+        frame = client.frame(Vec::new(), &mut sheet);
+    }
+    let reopened_at = frame.widget(ROW).expect("the kit row is drawn").rect;
+    assert_eq!(
+        reopened_at, unscrolled,
+        "View Combatant opened fresh where the last visit left it: {ROW} at \
+         {reopened_at:?}, at the top it is {unscrolled:?}"
     );
 }

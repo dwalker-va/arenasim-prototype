@@ -17,7 +17,7 @@
 //! A screen nobody opened — `--replay` boots straight into a match — falls
 //! back to the destination its [`Exit`] declares.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -136,24 +136,73 @@ impl GameState {
         }
     }
 
-    /// A [`Template::Document`] screen's scrolling body, keyed by the screen.
+    /// Show a [`Template::Document`] screen's scrolling body, keyed by the
+    /// screen.
     ///
     /// egui keeps a scroll offset per widget id, and every Document body sits
     /// in a `CentralPanel`, so a body left at egui's default id would share
     /// ONE offset with every other screen's. Leaving View Combatant for an
     /// encyclopedia page that fits the window clamped that shared offset to
     /// zero, and the sheet came back at the top instead of where it was left.
-    /// Keyed by its screen, each body keeps its own offset across a round
-    /// trip.
-    pub fn body_scroll(self) -> egui::ScrollArea {
+    /// Keyed by its screen, each body keeps its own offset.
+    ///
+    /// Kept, that offset would also greet the next FRESH visit, so a sheet
+    /// opened for another combatant would land where the last one was left.
+    /// A screen opened forward ([`ScreenNav::open`]) starts at the top: its
+    /// first draw after [`open_fresh_bodies`] flags it scrolls to zero. A
+    /// return ([`ScreenNav::leave`]) flags nothing, and the body comes back
+    /// where it was.
+    pub fn show_body<R>(
+        self,
+        ui: &mut egui::Ui,
+        add_contents: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> egui::scroll_area::ScrollAreaOutput<R> {
         debug_assert_eq!(
             self.chrome().template,
             Template::Document,
             "{self:?} has no Document body"
         );
-        egui::ScrollArea::vertical()
+        let fresh = ui
+            .ctx()
+            .data_mut(|d| d.remove_temp::<bool>(fresh_body_flag(self)))
+            .is_some();
+        let mut body = egui::ScrollArea::vertical()
             .id_salt(("document-body", self))
-            .auto_shrink(false)
+            .auto_shrink(false);
+        if fresh {
+            body = body.vertical_scroll_offset(0.0);
+        }
+        body.show(ui, add_contents)
+    }
+}
+
+/// The egui memory key of "`screen` was opened fresh; its body starts at the
+/// top", set by [`open_fresh_bodies`] and taken by [`GameState::show_body`].
+fn fresh_body_flag(screen: GameState) -> egui::Id {
+    egui::Id::new(("document-body-fresh", screen))
+}
+
+/// Hand every screen opened since the last call to egui: each Document body
+/// among them starts at the top on its next draw. The one bridge between the
+/// nav, which knows a screen was opened, and egui, which keeps its offset.
+pub fn open_fresh_bodies(context: &mut ScreenContext, ctx: &egui::Context) {
+    for screen in context.fresh.drain() {
+        if screen.chrome().template == Template::Document {
+            ctx.data_mut(|d| d.insert_temp(fresh_body_flag(screen), true));
+        }
+    }
+}
+
+/// [`open_fresh_bodies`] each frame, for the client.
+pub fn open_fresh_bodies_system(
+    mut contexts: bevy_egui::EguiContexts,
+    mut context: ResMut<ScreenContext>,
+) {
+    if context.fresh.is_empty() {
+        return;
+    }
+    if let Some(ctx) = contexts.try_ctx_mut() {
+        open_fresh_bodies(&mut context, ctx);
     }
 }
 
@@ -165,12 +214,17 @@ impl GameState {
 #[derive(Resource, Debug, Default, Clone)]
 pub struct ScreenContext {
     openers: HashMap<GameState, GameState>,
+    /// Screens opened since [`open_fresh_bodies`] last ran: a forward open
+    /// is a fresh visit, so its body starts at the top.
+    fresh: HashSet<GameState>,
 }
 
 impl ScreenContext {
-    /// Record that `from` opened `screen`: its exit returns there.
+    /// Record that `from` opened `screen`: its exit returns there, and the
+    /// visit is a fresh one.
     pub fn open_from(&mut self, screen: GameState, from: GameState) {
         self.openers.insert(screen, from);
+        self.fresh.insert(screen);
     }
 
     /// Where `screen`'s exit goes: its recorded opener, else the fallback its
@@ -395,7 +449,7 @@ mod tests {
         for state in &documents {
             let _ = ctx.run(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    ids.insert(state.body_scroll().show(ui, |_| {}).id);
+                    ids.insert(state.show_body(ui, |_| {}).id);
                 });
             });
         }
@@ -407,6 +461,10 @@ mod tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "MainMenu has no Document body")]
     fn a_screen_without_a_document_body_has_no_body_scroll() {
-        let _ = GameState::MainMenu.body_scroll();
+        let _ = egui::Context::default().run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let _ = GameState::MainMenu.show_body(ui, |_| {});
+            });
+        });
     }
 }
