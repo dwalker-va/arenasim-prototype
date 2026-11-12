@@ -407,6 +407,7 @@ pub const fn cc_break_breaks(aura: AuraType) -> bool {
         | AuraType::DamageDealtIncrease
         | AuraType::ArmorPercentIncrease
         | AuraType::DamageTransfer
+        | AuraType::TriggeredAbsorb
         | AuraType::KillingBlowSave
         | AuraType::DamageReflect => false,
     }

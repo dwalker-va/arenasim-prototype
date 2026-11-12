@@ -1275,10 +1275,11 @@ pub fn process_casting(
 /// Process channeling: update channel timers and apply tick effects.
 ///
 /// When a channel tick occurs:
-/// 1. Deal damage to target (with absorb shield handling)
+/// 1. Deal damage to target (with absorb shield handling), and log the
+///    damage that landed — after the pipeline's modifiers and absorbs, as
+///    every other damage line does
 /// 2. Heal caster (reduced by healing reduction auras)
 /// 3. Spawn floating combat text (yellow for damage, green for heal)
-/// 4. Log to combat log
 ///
 /// Channel ends when duration expires or either caster/target dies.
 pub fn process_channeling(
@@ -1312,7 +1313,8 @@ pub fn process_channeling(
     let mut remove_channel: Vec<Entity> = Vec::new();
     let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
     // (caster_entity, target_entity, damage, caster_team, caster_slot,
-    // caster_class, spell_school, ability, the caster's book)
+    // caster_class, spell_school, ability, the caster's book, the heal the
+    // tick's log line names — 0 for none)
     let mut damage_to_apply: Vec<(
         Entity,
         Entity,
@@ -1323,6 +1325,7 @@ pub fn process_channeling(
         SpellSchool,
         AbilityType,
         AbilityBook,
+        f32,
     )> = Vec::new();
 
     // Build a snapshot of positions and health for lookups
@@ -1330,28 +1333,11 @@ pub fn process_channeling(
         .iter()
         .map(|(entity, transform, _, _, _)| (entity, transform.translation))
         .collect();
-    // (is_alive, team, slot, class, pet_type) — all `Copy`, so this per-frame
-    // snapshot allocates nothing; the pet-aware id `String` is resolved lazily
-    // below only for the one target that actually ticks (Drain Life is the sole
-    // channel, so most frames tick nothing).
-    let health_info: std::collections::HashMap<
-        Entity,
-        (bool, u8, u8, match_config::CharacterClass, Option<PetType>),
-    > = combatants
+    // Who is alive as the frame's channels start: a channel on a dead target
+    // ends.
+    let alive: std::collections::HashMap<Entity, bool> = combatants
         .iter()
-        .map(|(entity, _, combatant, _, _)| {
-            let pet_type = pet_query.get(entity).ok().map(|p| p.pet_type);
-            (
-                entity,
-                (
-                    combatant.is_alive(),
-                    combatant.team,
-                    combatant.slot,
-                    combatant.class,
-                    pet_type,
-                ),
-            )
-        })
+        .map(|(entity, _, combatant, _, _)| (entity, combatant.is_alive()))
         .collect();
     // Snapshot target immunity status for Drain Life healing suppression
     let immunity_info: std::collections::HashSet<Entity> = combatants
@@ -1444,10 +1430,7 @@ pub fn process_channeling(
         }
 
         // Check if target died or no longer exists
-        let target_alive = health_info
-            .get(&channeling.target)
-            .map(|(alive, ..)| *alive)
-            .unwrap_or(false);
+        let target_alive = alive.get(&channeling.target).copied().unwrap_or(false);
         if !target_alive {
             remove_channel.push(caster_entity);
             continue;
@@ -1464,7 +1447,15 @@ pub fn process_channeling(
             // Calculate damage (flat damage per tick for Drain Life)
             let damage = ability_def.damage_base_min;
 
-            // Track damage to apply later (includes target entity and caster info for death logging)
+            // Track healing for caster (Drain Life heals 0 if target has DamageImmunity)
+            let healing = ability_def.channel_healing_per_tick;
+            let target_immune = immunity_info.contains(&channeling.target);
+            if healing > 0.0 && !target_immune {
+                caster_healing_updates.push((caster_entity, healing));
+            }
+
+            // Track damage to apply later; the tick is logged as it lands,
+            // with the damage that landed.
             damage_to_apply.push((
                 caster_entity,
                 channeling.target,
@@ -1475,54 +1466,8 @@ pub fn process_channeling(
                 ability_def.spell_school,
                 channeling.ability,
                 book.clone(),
+                healing.max(0.0),
             ));
-
-            // Track healing for caster (Drain Life heals 0 if target has DamageImmunity)
-            let healing = ability_def.channel_healing_per_tick;
-            let target_immune = immunity_info.contains(&channeling.target);
-            if healing > 0.0 && !target_immune {
-                caster_healing_updates.push((caster_entity, healing));
-            }
-
-            // Log the tick
-            if let Some(&(_, t_team, t_slot, t_class, t_pet)) = health_info.get(&channeling.target)
-            {
-                // Pet-aware for consistency with the rest of the sweep (a channel
-                // caster is always a Warlock today, but reachability isn't a
-                // load-bearing assumption). Must match the death-block back-patch
-                // id built the same way below.
-                let caster_id = combat_log_id_for(&caster, pet_query.get(caster_entity).ok());
-                let target_id =
-                    super::super::utils::log_id_from_parts(t_team, t_slot, t_class, t_pet);
-                let damage_message = format!(
-                    "{}'s {} ticks on {} for {:.0} damage",
-                    caster_id, ability_def.name, target_id, damage
-                );
-                combat_log.log_damage(
-                    caster_id.clone(),
-                    target_id.clone(),
-                    format!("{} (tick)", ability_def.name),
-                    damage,
-                    false, // Not a killing blow check here - will be handled when applying damage
-                    false, // is_crit - channel ticks never crit
-                    damage_message,
-                );
-
-                if healing > 0.0 {
-                    let heal_message = format!(
-                        "{}'s {} heals for {:.0}",
-                        caster_id, ability_def.name, healing
-                    );
-                    combat_log.log_healing(
-                        caster_id.clone(),
-                        caster_id.clone(),
-                        format!("{} (tick)", ability_def.name),
-                        healing,
-                        false, // is_crit - channel ticks never crit
-                        heal_message,
-                    );
-                }
-            }
 
             // Spawn floating combat text for damage on target
             if let Some(&target_pos) = positions.get(&channeling.target) {
@@ -1578,8 +1523,21 @@ pub fn process_channeling(
         spell_school,
         channel_ability,
         caster_book,
+        heal_logged,
     ) in damage_to_apply
     {
+        // Pet-aware for consistency with the rest of the sweep (a channel
+        // caster is always a Warlock today, but reachability isn't a
+        // load-bearing assumption).
+        let caster_id = super::super::utils::log_id_from_parts(
+            caster_team,
+            caster_slot,
+            caster_class,
+            pet_query.get(caster_entity).ok().map(|p| p.pet_type),
+        );
+        let channel_name = caster_book.get_unchecked(&channel_ability).name.clone();
+        // The target this tick killed, for the death line after the tick's.
+        let mut killed: Option<String> = None;
         // The channeler's damage-dealt increases, read before the target is
         // borrowed.
         let dealt = combatants
@@ -1681,32 +1639,60 @@ pub fn process_channeling(
                     target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
                 }
 
+                // The tick, as it landed: after the pipeline's modifiers and
+                // absorbs, with its killing blow known here.
+                let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
+                let is_killing_blow = !target.is_alive();
+                let message = if absorbed > 0.0 {
+                    format!(
+                        "{}'s {} ticks on {} for {:.0} damage ({:.0} absorbed)",
+                        caster_id, channel_name, target_id, actual_damage, absorbed
+                    )
+                } else {
+                    format!(
+                        "{}'s {} ticks on {} for {:.0} damage",
+                        caster_id, channel_name, target_id, actual_damage
+                    )
+                };
+                combat_log.log_damage(
+                    caster_id.clone(),
+                    target_id.clone(),
+                    format!("{} (tick)", channel_name),
+                    actual_damage,
+                    is_killing_blow,
+                    false, // is_crit - channel ticks never crit
+                    message,
+                );
+
                 // Check for killing blow
-                if !target.is_alive() && !target.is_dead {
+                if is_killing_blow && !target.is_dead {
                     target.is_dead = true;
 
                     // Cancel any in-progress cast or channel so dead combatants can't finish spells
                     commands.entity(target_entity).remove::<CastingState>();
                     commands.entity(target_entity).remove::<ChannelingState>();
-
-                    let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
-                    // Pet-aware, matching the tick-site source id above so the
-                    // back-patch actually finds the entry to flag.
-                    let caster_id = super::super::utils::log_id_from_parts(
-                        caster_team,
-                        caster_slot,
-                        caster_class,
-                        pet_query.get(caster_entity).ok().map(|p| p.pet_type),
-                    );
-                    // Credit the kill: this tick's Damage event was logged with
-                    // is_killing_blow=false in the pass above (death is only known
-                    // here), so back-patch it — else the Warlock's K column
-                    // undercounts Drain Life finishes.
-                    combat_log.mark_last_damage_killing_blow(&caster_id, &target_id);
-                    let death_message = format!("{} has been eliminated", target_id);
-                    combat_log.log_death(target_id, Some(caster_id), death_message);
+                    killed = Some(target_id);
                 }
             }
+        }
+
+        if heal_logged > 0.0 {
+            let heal_message = format!(
+                "{}'s {} heals for {:.0}",
+                caster_id, channel_name, heal_logged
+            );
+            combat_log.log_healing(
+                caster_id.clone(),
+                caster_id.clone(),
+                format!("{} (tick)", channel_name),
+                heal_logged,
+                false, // is_crit - channel ticks never crit
+                heal_message,
+            );
+        }
+        if let Some(target_id) = killed {
+            let death_message = format!("{} has been eliminated", target_id);
+            combat_log.log_death(target_id, Some(caster_id), death_message);
         }
 
         // Update caster damage dealt stats

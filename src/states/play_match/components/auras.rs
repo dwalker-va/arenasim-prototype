@@ -191,6 +191,11 @@ pub enum AuraType {
     /// never reflects again. Only the strongest applies. User: Retribution
     /// Aura.
     DamageReflect,
+    /// Arms a triggered absorb on the holder while it lasts: its config
+    /// (`AuraDamageMods::triggered_absorb`) says what raises an `Absorb`
+    /// shield, how big and how often (`triggered_absorbs`). The aura itself
+    /// changes no number; its magnitude is unread. User: Sacred Shield.
+    TriggeredAbsorb,
 }
 
 /// Which hits a damage modifier aura reaches: one school, or every school but
@@ -219,7 +224,7 @@ impl DamageScope {
 }
 
 /// The damage-pipeline data an aura may carry beyond its magnitude. Inert by
-/// default: no scope (every hit), no charges, no reflect.
+/// default: no scope (every hit), no charges, no reflect, no triggered absorb.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct AuraDamageMods {
     /// The hits a `DamageTakenIncrease`, `DamageDealtIncrease` or
@@ -233,6 +238,10 @@ pub struct AuraDamageMods {
     /// back to the attacker, credited to the shield's caster (Reflective
     /// Shield, set as the shield lands). `None`: no reflect.
     pub reflect_absorbed: Option<f32>,
+    /// On a `TriggeredAbsorb`: the absorb it arms (`triggered_absorbs`).
+    /// `None` on every other aura.
+    pub triggered_absorb:
+        Option<crate::states::play_match::triggered_absorbs::TriggeredAbsorbConfig>,
 }
 
 /// A debuff's REMOVAL CLASS — what kind of thing it is for the purpose of
@@ -396,7 +405,7 @@ impl AuraType {
     /// DOES cost is coverage: a guard that sweeps `ALL` quietly stops covering
     /// whatever `ALL` forgot, while still reading like a whole-enum sweep.
     /// `aura_type_tests::all_lists_every_aura_type` is what stops that.
-    pub const ALL: [AuraType; 44] = [
+    pub const ALL: [AuraType; 45] = [
         AuraType::MovementSpeedSlow,
         AuraType::Root,
         AuraType::Stun,
@@ -441,6 +450,7 @@ impl AuraType {
         AuraType::DamageTransfer,
         AuraType::KillingBlowSave,
         AuraType::DamageReflect,
+        AuraType::TriggeredAbsorb,
     ];
 
     /// Player-facing name of this MECHANIC, as the encyclopedia's mechanic
@@ -499,6 +509,7 @@ impl AuraType {
             AuraType::ArmorPercentIncrease => "Armor Boost",
             AuraType::ArmorPercentReduction => "Armor Reduction",
             AuraType::DamageTransfer => "Damage Transfer",
+            AuraType::TriggeredAbsorb => "Triggered Shield",
             AuraType::KillingBlowSave => "Death Prevention",
             AuraType::DamageReflect => "Damage Reflection",
         }
@@ -632,6 +643,9 @@ impl AuraType {
             AuraType::DamageReflect => {
                 "Melee attackers who strike the holder take damage in return."
             }
+            AuraType::TriggeredAbsorb => {
+                "Taking damage raises an absorb shield on the holder, at most once in a while."
+            }
         }
     }
 
@@ -755,6 +769,7 @@ impl AuraType {
             | AuraType::DamageDealtIncrease
             | AuraType::ArmorPercentIncrease
             | AuraType::DamageTransfer
+            | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
             | AuraType::DamageReflect
             | AuraType::TravelForm => false,
@@ -831,6 +846,7 @@ impl AuraType {
             | AuraType::DamageDealtIncrease
             | AuraType::ArmorPercentIncrease
             | AuraType::DamageTransfer
+            | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
             | AuraType::DamageReflect
             | AuraType::TravelForm => false,
@@ -1076,6 +1092,12 @@ pub struct AuraStacks {
     pub max: u8,
     /// Whose stack it is — see [`StackScope`].
     pub scope: StackScope,
+    /// One target per caster: a caster holds this aura on one unit at a time,
+    /// so landing it on a new one takes the caster's from every other
+    /// (`apply_pending_auras`; Sacred Shield, as in TBC's one-target
+    /// blessings). Declared as `stacking: Some((max_stacks: 1, one_target:
+    /// true))`.
+    pub one_target: bool,
 }
 
 impl AuraStacks {
@@ -1085,7 +1107,13 @@ impl AuraStacks {
             count: 1,
             max,
             scope,
+            one_target: false,
         }
+    }
+
+    /// This aura, held on one target per caster ([`Self::one_target`]).
+    pub fn one_target(self, one_target: bool) -> Self {
+        Self { one_target, ..self }
     }
 
     /// One more application: a stack more, never past `max`.
@@ -1460,6 +1488,7 @@ impl Aura {
             | AuraType::DamageDealtIncrease
             | AuraType::ArmorPercentIncrease
             | AuraType::DamageTransfer
+            | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
             | AuraType::DamageReflect => true,
 
@@ -1769,6 +1798,7 @@ impl AuraPending {
                         stacking.max_stacks,
                         StackScope::for_aura(aura_effect.aura_type),
                     )
+                    .one_target(stacking.one_target)
                 }),
                 bloom: aura_effect
                     .bloom
@@ -1831,6 +1861,7 @@ impl AuraPending {
                         stacking.max_stacks,
                         StackScope::for_aura(aura_effect.aura_type),
                     )
+                    .one_target(stacking.one_target)
                 }),
                 // This constructor takes no spell power, so a bloom is its base.
                 bloom: aura_effect.bloom.map(|bloom| bloom.heal_base),
@@ -1892,6 +1923,7 @@ impl AuraPending {
                         stacking.max_stacks,
                         StackScope::for_aura(aura_effect.aura_type),
                     )
+                    .one_target(stacking.one_target)
                 }),
                 // This constructor takes no spell power, so a bloom is its base.
                 bloom: aura_effect.bloom.map(|bloom| bloom.heal_base),
@@ -2063,6 +2095,7 @@ impl DRCategory {
             | AuraType::DamageDealtIncrease
             | AuraType::ArmorPercentIncrease
             | AuraType::DamageTransfer
+            | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
             | AuraType::DamageReflect
             | AuraType::TravelForm => None,

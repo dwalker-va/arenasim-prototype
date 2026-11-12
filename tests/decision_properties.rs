@@ -1463,6 +1463,27 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
              (tests/shadow_word_pain_scenes.rs builds it)",
         ),
     ),
+    // The Protection tree (AS-421). The grid plays untalented books, so a
+    // talent's grant is never in them; tests/paladin_protection.rs grants
+    // each in its scene pairs, and tests/talent_ai_audit.rs holds each rule.
+    (
+        AbilityType::DivineProtection,
+        Unreached::NeedsKnob("a build that takes Divine Protection"),
+    ),
+    (
+        AbilityType::BlessingOfSacrifice,
+        Unreached::NeedsKnob("a build that takes Blessing of Sacrifice"),
+    ),
+    (
+        AbilityType::SacredShield,
+        Unreached::NeedsKnob("a build that takes Sacred Shield"),
+    ),
+    (
+        AbilityType::RetributionAura,
+        Unreached::NeedsKnob(
+            "the Retribution Aura choice, which only a build with its talent is offered",
+        ),
+    ),
     (
         AbilityType::ExposeArmor,
         Unreached::NeedsKnob(

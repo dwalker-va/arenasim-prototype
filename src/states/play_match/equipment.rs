@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use super::on_use_items::OnUseConfig;
 use super::proc_trinkets::ProcConfig;
-use super::triggered_absorbs::TriggeredAbsorbConfig;
+use super::triggered_absorbs::ItemTriggeredAbsorb;
 use crate::states::match_config::CharacterClass;
 
 /// What a character wears: one item per equip socket.
@@ -997,11 +997,11 @@ pub struct ItemConfig {
     /// A shield a condition on the wearer raises — Aegis of the Last Stand's
     /// "below 35% health, a shield of 20% of maximum health, once a match".
     /// `None` for every ordinary item. Priced into the budget at value times
-    /// its declared trigger rate ([`TriggeredAbsorbConfig::budget_cost`]) and
+    /// its declared trigger rate ([`ItemTriggeredAbsorb::budget_cost`]) and
     /// checked by `all_shipped_triggered_absorbs_are_well_formed`. See the
     /// `triggered_absorbs` module.
     #[serde(default)]
-    pub triggered_absorb: Option<TriggeredAbsorbConfig>,
+    pub triggered_absorb: Option<ItemTriggeredAbsorb>,
 }
 
 impl ItemConfig {
@@ -1066,7 +1066,7 @@ impl ItemConfig {
             .chain(
                 self.triggered_absorb
                     .iter()
-                    .map(super::triggered_absorbs::triggered_absorb_description),
+                    .map(|t| super::triggered_absorbs::triggered_absorb_description(&t.absorb)),
             )
             .collect()
     }
@@ -1600,7 +1600,7 @@ use super::constants::{
 ///
 /// A PROC is charged too, at its expected value — see
 /// [`ProcConfig::budget_cost`] — and a TRIGGERED ABSORB at its value times its
-/// declared trigger rate ([`TriggeredAbsorbConfig::budget_cost`]). Without
+/// declared trigger rate ([`ItemTriggeredAbsorb::budget_cost`]). Without
 /// those terms a trigger-and-effect would be invisible to the budget, because
 /// it is not a stat field, and a proc of any magnitude would pass this check.
 ///
@@ -1982,7 +1982,7 @@ pub fn validate_triggered_absorbs(items: &ItemDefinitions) -> Result<(), String>
         .iter()
         .filter_map(|(id, item)| {
             let absorb = item.triggered_absorb.as_ref()?;
-            super::triggered_absorbs::validate_triggered_absorb(&format!("{id:?}"), absorb).err()
+            absorb.validate(&format!("{id:?}")).err()
         })
         .collect();
     errors.sort();
@@ -5380,14 +5380,13 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     /// pass on none.
     #[test]
     fn all_shipped_triggered_absorbs_are_well_formed() {
-        use super::super::triggered_absorbs::validate_triggered_absorb;
         let item_defs = load_item_definitions().expect("items.ron must load");
         let mut violations: Vec<String> = Vec::new();
         let mut members = std::collections::BTreeSet::new();
         for (item_id, item) in &item_defs.definitions {
             if let Some(absorb) = &item.triggered_absorb {
                 members.insert(item_id.as_str());
-                if let Err(msg) = validate_triggered_absorb(item_id.as_str(), absorb) {
+                if let Err(msg) = absorb.validate(item_id.as_str()) {
                     violations.push(msg);
                 }
             }
@@ -5649,8 +5648,11 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
             AegisOfTheLastStand: (
                 name: "Never", item_level: 92, item_tier: 2, slot: Trinket,
                 triggered_absorb: Some((
-                    trigger: HealthBelow(1.0), shield: MaxHealthFraction(0.2),
-                    limit: OncePerMatch, duration: 30.0, trigger_rate: 0.575,
+                    absorb: (
+                        trigger: HealthBelow(1.0), shield: MaxHealthFraction(0.2),
+                        limit: OncePerMatch, duration: 30.0,
+                    ),
+                    trigger_rate: 0.575,
                 )),
             ),
         })"#;

@@ -224,9 +224,12 @@ const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
     (
         "src/states/play_match/triggered_absorbs.rs",
         "ability_name: name.to_string()",
-        "a triggered absorb's shield, named after its item. \
-         `EngineAura::TriggeredAbsorbShield` is derived from the `triggered_absorb:` blocks in \
-         items.ron; asserted per shipped item by `named_auras_built_from_helpers_also_resolve`.",
+        "a triggered absorb's shield (`TriggeredAbsorbConfig::shield_aura`), named after its \
+         source. An item's (Aegis of the Last Stand): `EngineAura::TriggeredAbsorbShield` is \
+         derived from the `triggered_absorb:` blocks in items.ron; asserted per shipped item by \
+         `named_auras_built_from_helpers_also_resolve`. An aura's (Sacred Shield): named after \
+         the aura that arms it, whose abilities.ron entry carries an `applies_aura` block, so \
+         the catalog's RON half already has the page.",
     ),
 ];
 
@@ -694,7 +697,11 @@ fn named_auras_built_from_helpers_also_resolve() {
             continue;
         };
         absorbs += 1;
-        let sample = absorb.aura(&item.name, Some(*id), 1.0);
+        let sample = absorb.absorb.shield_aura(
+            &item.name,
+            arenasim::states::play_match::triggered_absorbs::ShieldFrom::Item(*id),
+            1.0,
+        );
         let mechanic = format!("{:?}", sample.effect_type);
         assert!(
             known.contains(&(sample.ability_name.clone(), mechanic.clone())),

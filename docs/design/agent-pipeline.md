@@ -402,12 +402,12 @@ here because a card broke it and cost a review round in the 0.9 build wave.
   say so. AS-340 and AS-341 paraphrased their bench, got a mote shell and a puff alpha
   wrong, and the testers rejected the code for matching the card. **When a card and
   its source disagree, the source wins.**
-- **Talent values under the price rule are targets, not promises.** Every talent
-  rank costs exactly 11 budget points (`talents.rs`, *Prices*). A percent-stat node
-  therefore gets whatever fraction costs 11 at its class's reference combatant, which
-  is often not the round number the design names: Sacred Duty came out at +2.46%, not
-  +3%, and Vitality at +2.78%, not +5%. Write such a value as "about +3% (priced to
-  one rank)". The milestone sweep tunes values.
+- **A talent's stated value wins; its item-budget price is a sanity check.** The
+  card's number is the value that ships, e.g. Sacred Duty +3% and Vitality +5% (user
+  ruling, 2026-11-12, AS-462). The price that `talents.rs` computes at the class's
+  reference combatant is reported for a designer to read. It is never a reason to
+  change a value, and an engineer never derives a fraction to make a rank cost 11.
+  The milestone sweep tunes values.
 - **Known-silent visual tags name the BUILD card that will draw the visual**, never
   the scoping card that designed it. The audit's tag says who owes the visual.
 - **A mechanism two cards need is one card's job, on the board.** When two cards

@@ -25,7 +25,7 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::equipment::{load_item_definitions, ItemId};
 use arenasim::states::play_match::talent_mechanics::{TalentMechanic, TalentMechanics};
 use arenasim::states::play_match::triggered_absorbs::{
-    fire_triggered_absorbs, TriggeredAbsorbConfig, TriggeredAbsorbSlot,
+    fire_triggered_absorbs, AbsorbSource, ShieldFrom, TriggeredAbsorbConfig, TriggeredAbsorbSlot,
 };
 
 const AEGIS: &str = "Aegis of the Last Stand";
@@ -36,13 +36,13 @@ fn aegis() -> TriggeredAbsorbConfig {
         .expect("items.ron loads")
         .get_unchecked(&ItemId::AegisOfTheLastStand)
         .triggered_absorb
-        .clone()
         .expect("Aegis carries a triggered absorb")
+        .absorb
 }
 
 /// The shield Aegis raises, `points` strong.
 fn shield(points: f32) -> Aura {
-    aegis().aura(AEGIS, Some(ItemId::AegisOfTheLastStand), points)
+    aegis().shield_aura(AEGIS, ShieldFrom::Item(ItemId::AegisOfTheLastStand), points)
 }
 
 /// A Rogue with `health` of 400 and no armor or resistance, so a hit's number
@@ -71,12 +71,13 @@ fn with_cheat_death(mut c: Combatant) -> Combatant {
 }
 
 fn wearing_aegis(mut c: Combatant) -> Combatant {
-    c.triggered_absorbs.push(TriggeredAbsorbSlot {
-        name: AEGIS.into(),
-        source_item: Some(ItemId::AegisOfTheLastStand),
-        config: aegis(),
-        spent: false,
-    });
+    let slot = TriggeredAbsorbSlot::new(
+        AEGIS,
+        AbsorbSource::Item(ItemId::AegisOfTheLastStand),
+        aegis(),
+        c.damage_taken,
+    );
+    c.triggered_absorbs.push(slot);
     c
 }
 
@@ -266,7 +267,7 @@ fn lethal_blow_from_above_the_line(cheat_death: bool) -> (f32, Option<f32>, bool
 
     let bearer = world.get::<Combatant>(victim).unwrap();
     let health = bearer.current_health;
-    let spent = bearer.triggered_absorbs[0].spent;
+    let spent = bearer.triggered_absorbs[0].spent();
     let shield = world.get::<ActiveAuras>(victim).and_then(the_shield);
     (health, shield, spent)
 }
@@ -364,7 +365,7 @@ fn a_fully_dampened_shield_is_spent_but_lands_nothing() {
             .spawn((wearing_aegis(rogue(100.0)), ActiveAuras::default()))
             .id();
         world.run_system_once(fire_triggered_absorbs).expect("ran");
-        assert!(world.get::<Combatant>(e).unwrap().triggered_absorbs[0].spent);
+        assert!(world.get::<Combatant>(e).unwrap().triggered_absorbs[0].spent());
         let auras = world.get::<ActiveAuras>(e).unwrap();
         assert_eq!(the_shield(auras), want, "reduction {reduction}");
         assert_eq!(auras.auras.len(), usize::from(want.is_some()));

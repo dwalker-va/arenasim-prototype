@@ -173,10 +173,10 @@ fn unlearning_the_talent_drops_the_form() {
     config.set_class(1, 0, Priest);
     config.team1_builds[0] = shadow_build();
     config.team1_priest_forms[0] = PriestForm::Shadowform;
-    config.drop_unoffered_priest_form(1, 0, t);
+    config.keep_choices_offered(1, 0, t);
     assert_eq!(config.team1_priest_forms[0], PriestForm::Shadowform);
     config.team1_builds[0] = Build::of(&[(TalentId::ImprovedMindBlast, 2)]);
-    config.drop_unoffered_priest_form(1, 0, t);
+    config.keep_choices_offered(1, 0, t);
     assert_eq!(config.team1_priest_forms[0], PriestForm::NoForm);
 }
 

@@ -242,6 +242,11 @@ pub enum AbilityType {
     ShadowWordPain, // Priest instant Shadow DoT
     ExposeArmor,    // Rogue Combat capstone (talent): halves the target's armor
     Shadowform,     // Priest form, held all match: a talent's Form choice (AS-413)
+    // Paladin: the Protection tree (AS-421). Appended for the same reason.
+    DivineProtection,    // talent: the Paladin takes 30% less damage for 8s
+    BlessingOfSacrifice, // talent: 30% of an ally's damage goes to the Paladin for 12s
+    SacredShield,        // talent: arms a triggered absorb on an ally for 30s
+    RetributionAura,     // team aura a talent offers: Holy damage to melee attackers
 }
 
 impl AbilityType {
@@ -281,7 +286,8 @@ impl AbilityType {
             | ConcentrationAura | LightningBolt | FrostShock | LesserHealingWave | Purge
             | WindShear | AirTotem | WaterTotem | EarthTotem | FireTotem | Rejuvenation
             | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild | Innervate | EntanglingRoots
-            | Cyclone | TravelForm | Shadowform => false,
+            | Cyclone | TravelForm | Shadowform | DivineProtection | BlessingOfSacrifice
+            | SacredShield | RetributionAura => false,
         }
     }
 

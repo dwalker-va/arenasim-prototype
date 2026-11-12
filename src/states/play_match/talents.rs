@@ -135,6 +135,14 @@ talent_ids! {
     ImprovedMindBlast,
     ImprovedPsychicScream,
     Shadowform,
+    // Paladin: Protection
+    SacredDuty,
+    ImprovedHammerOfJustice,
+    DivineProtection,
+    RetributionAura,
+    Toughness,
+    BlessingOfSacrifice,
+    SacredShield,
 }
 
 /// A talent tree. A tree is named per class: `(class, TreeId)` is the key.
@@ -143,6 +151,7 @@ pub enum TreeId {
     Demonology,
     Combat,
     Shadow,
+    Protection,
 }
 
 /// One tree of a class, as `talents.ron` lists it. A class's trees are in
@@ -570,7 +579,8 @@ pub fn strength_is_remainder(aura: AuraType) -> bool {
         | AuraType::ArmorPercentReduction
         | AuraType::DamageTransfer
         | AuraType::KillingBlowSave
-        | AuraType::DamageReflect => false,
+        | AuraType::DamageReflect
+        | AuraType::TriggeredAbsorb => false,
     }
 }
 

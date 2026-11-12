@@ -321,6 +321,8 @@ fn aura_family(t: AuraType) -> AuraFamily {
         | AuraType::DamageTransfer
         | AuraType::KillingBlowSave
         | AuraType::DamageReflect
+        // Sacred Shield's arming buff (AS-421): a buff like any other.
+        | AuraType::TriggeredAbsorb
         | AuraType::TravelForm => AuraFamily::Status,
     }
 }
@@ -691,12 +693,14 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     ArcaneIntellect,
     BattleShout,
     BerserkerRage,
+    BlessingOfSacrifice,
     CommandingShout,
     ConcentrationAura,
     CurseOfTongues,
     CurseOfWeakness,
     DemoralizingShout,
     DevotionAura,
+    DivineProtection,
     DivineShield,
     EarthTotem,
     ExposeArmor,
@@ -713,6 +717,8 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     PowerWordFortitude,
     PowerWordShield,
     Rejuvenation,
+    RetributionAura,
+    SacredShield,
     ShadowResistanceAura,
     Shadowform,
     TravelForm,
@@ -818,6 +824,11 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (AirTotem, "AS-134 (aura application — totem pulse)"),
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
+    // The Protection talents (AS-421), drawn by AS-337's build cards.
+    (BlessingOfSacrifice, "AS-374 (Blessing of Sacrifice impact)"),
+    (RetributionAura, "AS-374 (Retribution Aura rune disc)"),
+    (SacredShield, "AS-375 (Sacred Shield disc and absorb card)"),
+    (DivineProtection, "AS-376 (Divine Protection globe)"),
     // The Combat capstone's armor rend on its target.
     (ExposeArmor, "AS-366 (Expose Armor)"),
     // The form on the Priest all match: AS-333 scoped it, AS-343 draws it.
@@ -1196,7 +1207,11 @@ const TRIGGERED_ABSORB_MEMBERS: &[ItemId] = &[ItemId::AegisOfTheLastStand];
 fn triggered_absorb_visual(items: &ItemDefinitions, id: ItemId) -> Option<&'static str> {
     let item = items.get_unchecked(&id);
     let absorb = item.triggered_absorb.as_ref().expect("a member has one");
-    let shield = absorb.aura(&item.name, Some(id), 1.0);
+    let shield = absorb.absorb.shield_aura(
+        &item.name,
+        arenasim::states::play_match::triggered_absorbs::ShieldFrom::Item(id),
+        1.0,
+    );
     ShieldKind::ALL
         .into_iter()
         .any(|kind| is_live_shield(kind, &shield))

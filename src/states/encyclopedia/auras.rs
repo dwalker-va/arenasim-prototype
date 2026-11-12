@@ -1107,11 +1107,15 @@ fn engine_entry_with(
         }
         EngineAura::TriggeredAbsorbShield(item) => {
             let def = items.get(&item)?;
-            let absorb = def.triggered_absorb.as_ref()?;
+            let absorb = &def.triggered_absorb.as_ref()?.absorb;
             // The aura the simulation raises, before dampening: its size on a
             // reference combatant is the item's to state, so the page reads
             // its mechanic, removal and duration off the real constructor.
-            let sample = absorb.aura(&def.name, Some(item), 0.0);
+            let sample = absorb.shield_aura(
+                &def.name,
+                crate::states::play_match::triggered_absorbs::ShieldFrom::Item(item),
+                0.0,
+            );
             EngineSpec {
                 name: def.name.clone(),
                 frame_name: None,
@@ -2220,6 +2224,7 @@ mod tests {
                 "Mage Armor",
                 "Molten Armor",
                 "Healing Stream Totem",
+                "Retribution Aura",
                 "Shadow Resistance Aura",
                 "Shadowform",
                 "Strength of Earth Totem",

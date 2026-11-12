@@ -5,7 +5,12 @@
 //! through [`apply_healing`]. The rules that apply to ALL healing received live
 //! here and nowhere else, so a new heal site cannot forget one of them:
 //!
-//! 0. A CYCLONED target takes no healing at all ([`AuraType::Cyclone`]).
+//! 0. A DEAD target takes no healing at all, and a CYCLONED one none either
+//!    ([`AuraType::Cyclone`]). A heal can resolve a frame or more after it was
+//!    chosen (a save's follow-up, a Drain Life tick's heal to a channeler its
+//!    victim's own tick killed in the same pass), and a dead unit is never
+//!    healed back above 0: every reader of a corpse's health may rely on it
+//!    staying at 0.
 //! 1. [`AuraType::HealingReduction`] (Mortal Strike's Mortal Wound and the
 //!    other healing debuffs): Classic cuts all healing received, heal over time
 //!    ticks included.
@@ -79,6 +84,13 @@ pub fn apply_healing(
     dampening: &ArenaDampening,
     amount: f32,
 ) -> f32 {
+    // A dead target is not healed, whatever heal resolves on it. At 0 health
+    // it is dead even before a site marks it (`is_alive`), so a heal landing
+    // later in the frame of a killing blow cannot raise it either.
+    if !target.is_alive() {
+        return 0.0;
+    }
+
     // Healing immunity: nothing heals a cycloned target — no direct heal, no
     // tick, no bloom, no drain. First, so no tell and no dampening either.
     if target_auras.is_some_and(ActiveAuras::is_cycloned) {
