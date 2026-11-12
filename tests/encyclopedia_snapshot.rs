@@ -584,6 +584,53 @@ fn every_pinned_member_is_still_in_the_game() {
     );
 }
 
+/// A restricted table holds exactly the members it was restricted to — the
+/// mechanism the pinned catalogue rests on — and a talent table keeps only the
+/// trees that still hold a node.
+#[test]
+fn a_restricted_table_holds_exactly_its_members() {
+    use arenasim::states::play_match::ability_config::load_ability_definitions;
+    use arenasim::states::play_match::equipment::load_item_definitions;
+    use arenasim::states::play_match::talents::TalentDefinitions;
+    use std::collections::BTreeSet;
+
+    let keep = [ItemId::DragonspineTrophy, ItemId::AegisOfTheLastStand];
+    let items = load_item_definitions()
+        .expect("items.ron must load")
+        .restricted_to(&keep);
+    let held: BTreeSet<ItemId> = items.iter().map(|(id, _)| *id).collect();
+    assert_eq!(held, keep.into_iter().collect());
+
+    let keep = [AbilityType::Frostbolt, AbilityType::SpellLock];
+    let abilities = load_ability_definitions()
+        .expect("abilities.ron must load")
+        .restricted_to(&keep);
+    let held: BTreeSet<String> = abilities.iter().map(|(id, _)| format!("{id:?}")).collect();
+    let expected: BTreeSet<String> = keep.iter().map(|id| format!("{id:?}")).collect();
+    assert_eq!(held, expected);
+
+    let shipped = TalentDefinitions::shipped();
+    let talents = shipped.restricted_to(&[TalentId::UnholyPower]);
+    let held: Vec<TalentId> = talents.iter().map(|(id, _)| id).collect();
+    assert_eq!(held, vec![TalentId::UnholyPower]);
+    let node = shipped.get(TalentId::UnholyPower).expect("shipped");
+    for class in CharacterClass::all() {
+        let trees: Vec<_> = talents.trees(*class).iter().map(|tree| tree.id).collect();
+        let expected = if *class == node.class {
+            vec![node.tree]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(trees, expected, "{class:?}'s trees");
+    }
+    assert!(
+        CharacterClass::all()
+            .iter()
+            .any(|class| *class != node.class && !shipped.trees(*class).is_empty()),
+        "the shipped table has a tree the restriction must drop"
+    );
+}
+
 // ============================================================================
 // Harness
 // ============================================================================

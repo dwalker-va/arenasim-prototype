@@ -1348,6 +1348,97 @@ mod tests {
         );
     }
 
+    /// A catalogue lists the engine aura families its source names and no
+    /// other — the game passes every one, a snapshot harness the pinned few —
+    /// and the search registry and a single address both follow it.
+    #[test]
+    fn a_catalogue_lists_only_its_sources_families() {
+        use std::collections::BTreeSet;
+        let abilities = abilities();
+        let item_defs = items();
+        let full = shipped(&abilities, &item_defs);
+        let source = CatalogSource {
+            families: &[EngineFamily::ShadowSight, EngineFamily::WeakenedSoul],
+            ..full
+        };
+        let engine_names = |entries: Vec<NamedAura>| -> BTreeSet<String> {
+            entries
+                .into_iter()
+                .filter(|entry| matches!(entry.id, AuraId::Engine(_)))
+                .map(|entry| entry.name)
+                .collect()
+        };
+        let expected: BTreeSet<String> = ["Shadow Sight", "Weakened Soul"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(engine_names(catalog_from(&source)), expected);
+        assert!(engine_names(catalog_from(&full)).len() > expected.len());
+
+        let lockout = AuraId::Engine(EngineAura::new(
+            EngineFamily::InterruptLockout,
+            EngineKey::Ability(AbilityType::Kick),
+        ));
+        assert!(entry_of(lockout, &full).is_some());
+        assert!(entry_of(lockout, &source).is_none());
+        assert!(name_of(lockout, &source).is_none());
+
+        let searched: BTreeSet<String> = super::super::search::build_registry(&source)
+            .into_iter()
+            .filter(|hit| matches!(hit.topic, Topic::Aura(AuraId::Engine(_))))
+            .map(|hit| hit.name)
+            .collect();
+        assert_eq!(searched, expected);
+
+        let data = EncyclopediaData {
+            items: &item_defs,
+            abilities: &abilities,
+            item_icons: None,
+            class_icons: None,
+            ability_icons: None,
+            talents: TalentDefinitions::shipped(),
+            engine_auras: &[EngineFamily::ShadowSight, EngineFamily::WeakenedSoul],
+        };
+        assert_eq!(engine_names(catalog_from(&data.catalog_source())), expected);
+    }
+
+    /// Each family lists only the auras of a source its tables hold, so a
+    /// catalogue over tables that lack the source lacks the aura. Over EMPTY
+    /// tables only Shadow Sight is left — the arena orb's buff, the one engine
+    /// aura no table is the source of — and every other address the shipped
+    /// tables hold resolves to nothing.
+    #[test]
+    fn engine_auras_follow_their_sources() {
+        let abilities = abilities();
+        let item_defs = items();
+        let none_abilities = abilities.restricted_to(&[]);
+        let none_items = item_defs.restricted_to(&[]);
+        let none_talents = TalentDefinitions::shipped().restricted_to(&[]);
+        let empty = CatalogSource::new(&none_abilities, &none_items, &none_talents);
+        assert_eq!(
+            EngineAura::all(&empty),
+            vec![EngineAura::unit(EngineFamily::ShadowSight)]
+        );
+        let shipped_auras = EngineAura::all(&shipped(&abilities, &item_defs));
+        let families: std::collections::BTreeSet<EngineFamily> =
+            shipped_auras.iter().map(|aura| aura.family).collect();
+        for aura in shipped_auras {
+            if aura.family != EngineFamily::ShadowSight {
+                assert!(
+                    aura.spec(&empty).is_none(),
+                    "{aura:?} resolves over tables without its source"
+                );
+            }
+        }
+        // Every family but the talent procs (none ships yet; the fixture test
+        // above covers it) has a member to check.
+        let missing: Vec<&EngineFamily> = EngineFamily::ALL
+            .iter()
+            .filter(|family| !families.contains(family))
+            .collect();
+        assert_eq!(missing, vec![&EngineFamily::TalentProcAura]);
+    }
+
     /// The same address check for the other half of the catalog. [`entry_of`]
     /// is infallible for an engine aura today; this pins that every listed
     /// [`EngineAura`] stays reachable if it ever stops being.
