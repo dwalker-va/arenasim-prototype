@@ -731,28 +731,6 @@ mod tests {
         );
     }
 
-    /// Every ability in `abilities.ron` produces player-facing text, and every
-    /// applied aura produces its own sentence — the property the encyclopedia's
-    /// zero-marginal-cost rule depends on. Ability N+1 gets prose for free, or
-    /// this fails.
-    ///
-    /// An ability whose whole effect is its aura returns nothing HERE by
-    /// design; the aura sentence is its text. So the invariant is that one of
-    /// the two speaks — never neither.
-    ///
-    /// "Produces text" is otherwise judged against the generator's own filler,
-    /// not against `""`: an ability with no aura falls back to
-    /// [`UTILITY_FALLBACK`], so a bare non-empty check would pass for it no
-    /// matter what broke. The assertions that carry weight are the two around
-    /// the filler:
-    ///
-    /// - an ability whose config declares an effect (damage, healing, an
-    ///   interrupt, …) must NOT fall back — or say nothing. That is the
-    ///   regression that would silently empty the EFFECT half of a
-    ///   two-sentence ability — Frostbolt, Mortal Strike — while its aura
-    ///   sentence kept the tooltip looking populated;
-    /// - an ability that DOES fall back must carry an aura, so the filler is
-    ///   never the whole story on any surface ("never neither").
     /// Drain Life says it heals off the damage it deals (AS-461), and a
     /// partial or party leech reads as such.
     #[test]
@@ -776,6 +754,28 @@ mod tests {
         );
     }
 
+    /// Every ability in `abilities.ron` produces player-facing text, and every
+    /// applied aura produces its own sentence — the property the encyclopedia's
+    /// zero-marginal-cost rule depends on. Ability N+1 gets prose for free, or
+    /// this fails.
+    ///
+    /// An ability whose whole effect is its aura returns nothing HERE by
+    /// design; the aura sentence is its text. So the invariant is that one of
+    /// the two speaks — never neither.
+    ///
+    /// "Produces text" is otherwise judged against the generator's own filler,
+    /// not against `""`: an ability with no aura falls back to
+    /// [`UTILITY_FALLBACK`], so a bare non-empty check would pass for it no
+    /// matter what broke. The assertions that carry weight are the two around
+    /// the filler:
+    ///
+    /// - an ability whose config declares an effect (damage, healing, an
+    ///   interrupt, …) must NOT fall back — or say nothing. That is the
+    ///   regression that would silently empty the EFFECT half of a
+    ///   two-sentence ability — Frostbolt, Mortal Strike — while its aura
+    ///   sentence kept the tooltip looking populated;
+    /// - an ability that DOES fall back must carry an aura, so the filler is
+    ///   never the whole story on any surface ("never neither").
     #[test]
     fn every_ability_and_aura_generates_text() {
         let abilities = load_ability_definitions().expect("abilities.ron must load");
