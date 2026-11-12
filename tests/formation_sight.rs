@@ -20,15 +20,22 @@
 //!   distant pillars — and bounds its formation goal's jumps over 10yd by a
 //!   bound calibrated on six blocks of the shipped kit;
 //! - `kept_exit_reset::leaving_free_forgets_the_kept_exit` holds the kept exit,
-//!   and the formation heading (AS-370), to FREE.
+//!   and the formation heading (AS-370), to FREE;
+//! - `reach_stay` drives both formation machines through a stay out of a
+//!   Fear's reach (AS-362) while the healer's sight of its teammate flickers
+//!   past a pillar's edge, and pins that the stay holds through the flicker
+//!   and lets go once sight has been lost for `STAY_SIGHT_GRACE` (AS-469).
 //!
 //! `measure_formation_goal_jumps` (`#[ignore]`d) counts formation-goal jumps,
-//! attributes each to its cause, and counts frames out of sight, over five
-//! comps, for comparing two binaries.
+//! attributes each to the stage of the formation machine that made it (or,
+//! for a move of the raw point, the change in the world behind it), and counts
+//! frames out of sight, over five comps, for comparing two binaries.
 
 use arenasim::headless::{FrameObservation, HeadlessMatchConfig, ObservedCombatant};
+use arenasim::states::play_match::class_ai::formation::ReachKept;
 use arenasim::states::play_match::map_config::load_map_geometry_config;
 use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT};
+use arenasim::states::play_match::FormationMemory;
 use arenasim::ArenaMap;
 use bevy::prelude::{Entity, Vec3};
 
@@ -220,7 +227,7 @@ const FORMATION_HEALERS: [&str; 3] = ["Priest", "Druid", "Shaman"];
 struct GoalTrack {
     jumps: Vec<(f32, f32)>,
     pairs: usize,
-    causes: Vec<&'static str>,
+    causes: Vec<(f32, &'static str)>,
     /// Of the `pairs` frames, those on which the goal, and those on which the
     /// healer itself, had no line of sight to the anchor (the most injured
     /// living teammate).
@@ -228,18 +235,60 @@ struct GoalTrack {
     blind_healer: usize,
 }
 
-/// What changed in the frames leading up to frame `i` (the three before it,
-/// the decision's snapshot lagging the observation by up to a frame or two)
-/// that a formation goal over 5yd away from the last one answers to, checked
-/// in this order:
+/// What made the formation goal jump `yards` onto frame `i`. First the stage
+/// of the formation machine that moved it, read off the healer's formation
+/// memory on the two frames (`ObservedCombatant::formation`):
+/// - `reach stay`: the crowd-control reach repair took or left a stay, the
+///   healer held where it stands (AS-362's stay, held by AS-469);
+/// - `reach`: the reach repair started, let go, or changed its spot (AS-362:
+///   a crowd control came ready or was spent, a caster stepped, the kept spot
+///   stopped being a repair);
+/// - `exit`: the sight repair took up an exit, let one go, or changed it by
+///   at least half the jump (AS-206).
+///
+/// Otherwise the raw point moved, and what changed in the frames leading up to
+/// frame `i` (the three before it, the decision's snapshot lagging the
+/// observation by up to a frame or two) answers for it, checked in this order:
 /// - `engaged`: a teammate died, or which teammates have a target changed, so
 ///   the centroid's membership changed;
 /// - `target`: the healer's own target changed (the wand-range clamp's anchor);
 /// - `crossing`: the enemy nearest the centroid (as the formation machine takes
 ///   it: any visible enemy, pets included) turned more than 90 degrees about
 ///   it — the "behind the line" direction flipping (AS-370);
-/// - `other`: none of those (a change of repair exit, a clamp, ...).
-fn jump_cause(frames: &[FrameObservation], healer: Entity, i: usize) -> &'static str {
+/// - `other`: none of those — unexplained.
+fn jump_cause(frames: &[FrameObservation], healer: Entity, i: usize, yards: f32) -> &'static str {
+    let memory = |j: usize| {
+        frames[j]
+            .combatants
+            .get(&healer)
+            .and_then(|c| c.formation)
+            .unwrap_or_default()
+    };
+    let (before, now) = (memory(i - 1), memory(i));
+    let stay = |m: &FormationMemory| matches!(m.reach, Some(ReachKept::Stay { .. }));
+    if stay(&before) != stay(&now) {
+        return "reach stay";
+    }
+    let spot = |m: &FormationMemory| match m.reach {
+        Some(ReachKept::Spot(s)) => Some(s),
+        _ => None,
+    };
+    // A kept spot holds exactly (the goal stands on it, or part of the way to
+    // it), so any change of spot is a re-pick. A live repair that is not
+    // still a repair re-picks every evaluation, so an exit change or a turn of
+    // the heading on the same frame is labelled `reach`: the stages are
+    // checked in order, and the first that changed takes the jump.
+    if spot(&before) != spot(&now) {
+        return "reach";
+    }
+    // The kept exit slides with the teammate and the point every evaluation.
+    let exit_changed = match (before.exit, now.exit) {
+        (Some(a), Some(b)) => a.distance(b) >= yards / 2.0,
+        (a, b) => a.is_some() != b.is_some(),
+    };
+    if exit_changed {
+        return "exit";
+    }
     let window = &frames[i.saturating_sub(3)..=i];
     let Some(me) = frames[i].combatants.get(&healer) else {
         return "other";
@@ -476,7 +525,9 @@ fn formation_tracks(
                 if d > 0.0 {
                     track.jumps.push((t, d));
                     if d > 5.0 {
-                        track.causes.push(jump_cause(&played.frames, healer, i));
+                        track
+                            .causes
+                            .push((t, jump_cause(&played.frames, healer, i, d)));
                     }
                 }
             }
@@ -502,45 +553,52 @@ const FLIP_BANK: [(&[&str], &[&str]); 3] = [
 
 /// The formation goal's jumps stay within the shipped kit's calibrated rate.
 /// A JUMP is a frame-to-frame move of a FREE formation healer's goal over
-/// 10yd: the goal sent across a shadow (AS-206's repair changing exit) or
-/// round the centroid (the heading AS-370 turns instead of flipping). Counted
-/// over the bank's comps, both team orders, the first 30s (the walk out of the
-/// room, the camp release and first contact) and seeds [`JUMP_SEEDS`]: one
-/// block of 100 seeds, 1000 healer tracks (one formation healer in one match).
+/// 10yd: the goal sent across a shadow (AS-206's repair changing exit), round
+/// the centroid (the heading AS-370 turns instead of flipping), or out of an
+/// enemy crowd control's reach (AS-362's repair taking up, changing or
+/// leaving its spot or its stay). Counted over the bank's comps, both team
+/// orders, the first 30s (the walk out of the room, the camp release and first
+/// contact) and seeds [`JUMP_SEEDS`]: one block of 100 seeds, 1000 healer
+/// tracks (one formation healer in one match).
 ///
 /// [`MAX_JUMPS_OVER_10`] is a one-sided 99% prediction bound for one new block,
 /// mean + t(0.99, 5) x sd x sqrt(1 + 1/6), calibrated on SIX blocks of the
-/// shipped kit (AS-460, every class's Trinket2 filled), seeds 0-599:
+/// shipped kit (AS-469), seeds 0-599 (`FORMATION_JUMPS_BLOCK` plays another
+/// block, `FORMATION_JUMPS_WORKERS` sets the threads):
 ///
 /// | seeds    | jumps > 10yd | jumps > 25yd | returns (tracks) |
 /// |----------|--------------|--------------|------------------|
-/// | 0-99     | 91           | 3            | 3 (3)            |
-/// | 100-199  | 74           | 2            | 4 (4)            |
-/// | 200-299  | 109          | 6            | 13 (5)           |
-/// | 300-399  | 79           | 0            | 4 (3)            |
-/// | 400-499  | 108          | 6            | 13 (8)           |
-/// | 500-599  | 90           | 3            | 12 (4)           |
+/// | 0-99     | 75           | 1            | 0 (0)            |
+/// | 100-199  | 61           | 2            | 0 (0)            |
+/// | 200-299  | 84           | 3            | 2 (2)            |
+/// | 300-399  | 64           | 0            | 0 (0)            |
+/// | 400-499  | 85           | 2            | 3 (3)            |
+/// | 500-599  | 65           | 1            | 0 (0)            |
 ///
-/// Mean 91.8, sd 14.4: the bound is 144. With AS-370's turn limit removed
-/// (the heading flips with the line again) block 0-99 jumps 394 times, 250
+/// Mean 72.3, sd 10.5: the bound is 110. With AS-370's turn limit removed
+/// (the heading flips with the line again) block 0-99 jumps 312 times, 202
 /// over the bound.
 ///
-/// The kit before AS-460 jumped less on the same seeds: 465 jumps over 10yd
-/// against 551 (74, 66, 74, 91, 69, 91 a block), 9 over 25yd against 20, and
-/// 34 returns in 19 tracks against 49 in 27. AS-460 changes no movement code;
-/// the formation machinery is sensitive to the match dynamics a kit sets, and
-/// that rate, with the jumps over 25yd no cause names and the returns (a jump
-/// undone inside a second), is recorded on AS-469. When AS-469 fixes the
-/// cause, RE-CALIBRATE this bound on six fresh blocks; never loosen it ad hoc.
-/// Neither the long jumps nor the returns are asserted: a return clusters
-/// (up to 9 in one track on the old kit), so its count has no stable tail.
+/// `measure_formation_goal_jumps` names the stage behind each jump. Neither
+/// the long jumps nor the returns (a jump undone inside a second) are
+/// asserted: a return clusters, so its count has no stable tail.
 #[test]
 fn formation_goal_jumps_stay_within_the_calibrated_rate() {
+    // Calibration knobs: another block's first seed, and fewer workers.
+    let env = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<u64>().ok());
+    let seeds = env("FORMATION_JUMPS_BLOCK").map_or(JUMP_SEEDS, |first| first..first + 100);
     let jobs: Vec<(&[&str], &[&str], u64)> = FLIP_BANK
         .iter()
-        .flat_map(|&(a, b)| JUMP_SEEDS.flat_map(move |seed| [(a, b, seed), (b, a, seed)]))
+        .flat_map(|&(a, b)| {
+            seeds
+                .clone()
+                .flat_map(move |seed| [(a, b, seed), (b, a, seed)])
+        })
         .collect();
-    let workers = std::thread::available_parallelism().map_or(4, |n| n.get().min(6));
+    let workers = env("FORMATION_JUMPS_WORKERS").map_or_else(
+        || std::thread::available_parallelism().map_or(4, |n| n.get().min(6)),
+        |n| n as usize,
+    );
     let chunk = jobs.len().div_ceil(workers);
     // Per worker: frame pairs, tracks, jumps over 10yd, the returns and the
     // jumps over 25yd (both reported, not asserted).
@@ -586,7 +644,7 @@ fn formation_goal_jumps_stay_within_the_calibrated_rate() {
     });
     println!(
         "{pairs} formation-goal frame pairs, {tracks} tracks, {over10} jumps over 10yd; \
-         reported only (AS-469): returns {returns:#?}, jumps over 25yd {big:#?}"
+         reported only: returns {returns:#?}, jumps over 25yd {big:#?}"
     );
     assert!(
         pairs > 50_000,
@@ -604,17 +662,20 @@ const JUMP_SEEDS: std::ops::Range<u64> = 0..100;
 
 /// The most formation-goal jumps over 10yd one block may hold: the shipped
 /// kit's 99% prediction bound (see the test).
-const MAX_JUMPS_OVER_10: usize = 144;
+const MAX_JUMPS_OVER_10: usize = 110;
 
 /// Measurement, not a gate: per comp, the formation goals' frame-to-frame jumps
 /// over 5yd, 10yd and 25yd, their returns, the half-second spans over which a
 /// goal moves more than 10yd, the jumps over 5yd by cause ([`jump_cause`]), and
 /// the frames on which the goal, and the healer, had no sight of the most
 /// injured teammate. Run on two binaries to compare; set
-/// `FORMATION_JUMPS_SEEDS` for the seed count (default 10),
+/// `FORMATION_JUMPS_SEEDS` for the seed count (default 10) and
+/// `FORMATION_JUMPS_SEED0` for the first seed (default 0),
+/// `FORMATION_JUMPS_COMP` to play one comp (its index in the list),
 /// `FORMATION_JUMPS_PROFILE` for the AI profile both teams run (default
-/// `TeamPlan`), `FORMATION_JUMPS_LIST` to print every jump over 10yd and
-/// `FORMATION_JUMPS_BLIND` to print every frame whose goal is out of sight.
+/// `TeamPlan`), `FORMATION_JUMPS_LIST` to print every jump over 10yd with its
+/// cause and `FORMATION_JUMPS_BLIND` to print every frame whose goal is out of
+/// sight.
 #[test]
 #[ignore = "measurement: run with --release -- --ignored --nocapture"]
 fn measure_formation_goal_jumps() {
@@ -634,17 +695,30 @@ fn measure_formation_goal_jumps() {
         .unwrap_or(10);
     let profile =
         std::env::var("FORMATION_JUMPS_PROFILE").unwrap_or_else(|_| "TeamPlan".to_string());
-    for (a, b) in comps {
+    let only: Option<usize> = std::env::var("FORMATION_JUMPS_COMP")
+        .ok()
+        .and_then(|v| v.parse().ok());
+    let first: u64 = std::env::var("FORMATION_JUMPS_SEED0")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    for (k, (a, b)) in comps.into_iter().enumerate() {
+        if only.is_some_and(|o| o != k) {
+            continue;
+        }
         let (mut over5, mut over10, mut over25, mut ret, mut pairs) = (0, 0, 0, 0, 0);
         let mut spans = 0;
         let mut causes: std::collections::BTreeMap<&str, usize> = Default::default();
         let (mut blind_goal, mut blind_healer) = (0, 0);
-        for seed in 0..seeds {
+        for seed in first..first + seeds {
             for (t1, t2) in [(a, b), (b, a)] {
                 for (class, track, goals) in formation_tracks(t1, t2, seed, 120.0, &profile) {
                     if std::env::var("FORMATION_JUMPS_LIST").is_ok() {
                         for &(t, d) in track.jumps.iter().filter(|j| j.1 > 10.0) {
-                            println!("  {t1:?} v {t2:?} s{seed} {class}: {d:.1}yd at {t:.2}s");
+                            let cause = track.causes.iter().find(|c| c.0 == t).map_or("-", |c| c.1);
+                            println!(
+                                "  {t1:?} v {t2:?} s{seed} {class}: {d:.1}yd at {t:.2}s ({cause})"
+                            );
                         }
                     }
                     pairs += track.pairs;
@@ -655,7 +729,7 @@ fn measure_formation_goal_jumps() {
                     spans += half_second_spans_over(10.0, &goals);
                     blind_goal += track.blind_goal;
                     blind_healer += track.blind_healer;
-                    for c in &track.causes {
+                    for (_, c) in &track.causes {
                         *causes.entry(c).or_default() += 1;
                     }
                 }
@@ -693,7 +767,13 @@ mod kept_exit_reset {
     static NO_DR: BTreeMap<Entity, DRTracker> = BTreeMap::new();
     static NO_CD: BTreeMap<Entity, BTreeMap<AbilityType, f32>> = BTreeMap::new();
 
-    fn info(entity: Entity, team: u8, class: CharacterClass, x: f32, z: f32) -> CombatantInfo {
+    pub(super) fn info(
+        entity: Entity,
+        team: u8,
+        class: CharacterClass,
+        x: f32,
+        z: f32,
+    ) -> CombatantInfo {
         CombatantInfo {
             entity,
             team,
@@ -832,6 +912,240 @@ mod kept_exit_reset {
                 free.formation.heading.is_some(),
                 "{class:?}: the control turns its heading"
             );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The reach repair's stay holds through a flicker of sight (AS-469)
+// ---------------------------------------------------------------------------
+
+/// The posture machines carry a stay from one tick to the next. A Warlock at
+/// the origin, Fear ready, fights a Warrior at (3, 0); the FREE formation
+/// point behind the Warrior stands in the Fear's reach, and the healer at
+/// (-34, 0) is out of it, with no spot out of reach it could walk to without
+/// crossing the Warlock's reach — so it stays where it stands (AS-362's
+/// stay). A pillar at (-17, 2.5) stands beside its line to the Warrior: the
+/// Warrior at (3, 2) is behind its edge. Driven through
+/// `evaluate_priest_posture` and `evaluate_caster_healer_posture`, the
+/// production entries, so the test sees the memory and the clock the machines
+/// hand the repair.
+mod reach_stay {
+    use std::collections::BTreeMap;
+
+    use arenasim::states::match_config::CharacterClass;
+    use arenasim::states::play_match::ai_profile::AiProfile;
+    use arenasim::states::play_match::class_ai::caster_healer_posture::evaluate_caster_healer_posture;
+    use arenasim::states::play_match::class_ai::formation::{ReachKept, STAY_SIGHT_GRACE};
+    use arenasim::states::play_match::class_ai::priest::evaluate_priest_posture;
+    use arenasim::states::play_match::class_ai::{CombatContext, CombatantInfo};
+    use arenasim::states::play_match::decision_trace::DecisionTrace;
+    use arenasim::states::play_match::map_geometry::{
+        has_line_of_sight, ObstacleVolume, EYE_HEIGHT,
+    };
+    use arenasim::states::play_match::situation::{MatchClock, SituationConfig};
+    use arenasim::states::play_match::{
+        AbilityType, Combatant, DRTracker, HealerPosture, MovementConfig, MovementDirective,
+        MovementGoal, Posture,
+    };
+    use bevy::ecs::world::CommandQueue;
+    use bevy::prelude::*;
+
+    use super::kept_exit_reset::info;
+
+    static NO_DR: BTreeMap<Entity, DRTracker> = BTreeMap::new();
+    static NO_CD: BTreeMap<Entity, BTreeMap<AbilityType, f32>> = BTreeMap::new();
+
+    const ME: Vec2 = Vec2::new(-34.0, 0.0);
+
+    fn pillar() -> [ObstacleVolume; 1] {
+        [ObstacleVolume::Cylinder {
+            center_xz: Vec2::new(-17.0, 2.5),
+            radius: 2.0,
+            base_y: 0.0,
+            height: 10.0,
+        }]
+    }
+
+    /// A healer of `class` and what it carries between ticks.
+    struct Healer {
+        class: CharacterClass,
+        world: World,
+        healer: Entity,
+        warrior: Entity,
+        warlock: Entity,
+        state: HealerPosture,
+    }
+
+    impl Healer {
+        fn new(class: CharacterClass) -> Self {
+            let mut world = World::new();
+            let healer = world.spawn_empty().id();
+            let warrior = world.spawn_empty().id();
+            let warlock = world.spawn_empty().id();
+            Healer {
+                class,
+                world,
+                healer,
+                warrior,
+                warlock,
+                state: HealerPosture::new(0.0),
+            }
+        }
+
+        /// One posture tick at `now`, the Warrior seen past the pillar's edge
+        /// or hidden behind it. Returns the healer's walk goal after the tick.
+        fn tick(&mut self, hidden: bool, now: f32) -> Option<Vec2> {
+            let obstacles = pillar();
+            let mut ally = info(
+                self.warrior,
+                1,
+                CharacterClass::Warrior,
+                3.0,
+                if hidden { 2.0 } else { 0.0 },
+            );
+            ally.target = Some(self.warlock);
+            let mut enemy = info(self.warlock, 2, CharacterClass::Warlock, 0.0, 0.0);
+            enemy.target = Some(self.warrior);
+            let roster: BTreeMap<Entity, CombatantInfo> =
+                [info(self.healer, 1, self.class, ME.x, ME.y), ally, enemy]
+                    .into_iter()
+                    .map(|u| (u.entity, u))
+                    .collect();
+            let auras = BTreeMap::new();
+            let ctx = CombatContext::new(
+                self.healer,
+                1,
+                &roster,
+                &auras,
+                &NO_DR,
+                &NO_CD,
+                &obstacles,
+                Default::default(),
+                AiProfile::TeamPlan,
+            )
+            .classified(&SituationConfig::default(), MatchClock::after_gates(now));
+            let combatant = Combatant::new(1, 0, self.class);
+            let movement = MovementConfig::default();
+            let directive = self.world.get::<MovementDirective>(self.healer).copied();
+            let mut queue = CommandQueue::default();
+            let mut commands = Commands::new(&mut queue, &self.world);
+            let mut trace = DecisionTrace::default();
+            let pos = Vec3::new(ME.x, 1.0, ME.y);
+            match self.class {
+                CharacterClass::Priest => {
+                    evaluate_priest_posture(
+                        &mut commands,
+                        self.healer,
+                        &combatant,
+                        pos,
+                        &ctx,
+                        combatant.book(),
+                        None,
+                        Some(&mut self.state),
+                        directive.as_ref(),
+                        &movement,
+                        now,
+                        &mut trace,
+                    );
+                }
+                _ => {
+                    evaluate_caster_healer_posture(
+                        &mut commands,
+                        self.healer,
+                        &combatant,
+                        pos,
+                        &ctx,
+                        Some(&mut self.state),
+                        directive.as_ref(),
+                        &movement,
+                        &movement.druid,
+                        false,
+                        now,
+                        &mut trace,
+                    );
+                }
+            }
+            queue.apply(&mut self.world);
+            assert_eq!(self.state.posture, Posture::Free, "the scene keeps it FREE");
+            self.world
+                .get::<MovementDirective>(self.healer)
+                .and_then(|d| match d.goal {
+                    MovementGoal::Point(p) => Some(Vec2::new(p.x, p.z)),
+                    _ => None,
+                })
+        }
+
+        fn stays(&self) -> bool {
+            matches!(self.state.formation.reach, Some(ReachKept::Stay { .. }))
+        }
+    }
+
+    fn eye(p: Vec2) -> Vec3 {
+        Vec3::new(p.x, EYE_HEIGHT, p.y)
+    }
+
+    /// The scene holds what it claims: the healer sees the Warrior at (3, 0)
+    /// and not at (3, 2).
+    fn check_scene() {
+        let obstacles = pillar();
+        assert!(has_line_of_sight(
+            &obstacles,
+            eye(ME),
+            eye(Vec2::new(3.0, 0.0))
+        ));
+        assert!(!has_line_of_sight(
+            &obstacles,
+            eye(ME),
+            eye(Vec2::new(3.0, 2.0))
+        ));
+    }
+
+    const FRAME: f32 = 1.0 / 60.0;
+    const T0: f32 = 5.0;
+
+    /// The Warrior steps behind the pillar's edge for a frame and back: the
+    /// stay holds, and the goal stays where the healer stands. The pair: a
+    /// healer meeting the same blind frame with no stay live is sent over
+    /// 20yd off.
+    #[test]
+    fn a_stay_holds_through_a_flicker_of_sight() {
+        check_scene();
+        for class in [CharacterClass::Priest, CharacterClass::Druid] {
+            let mut h = Healer::new(class);
+            assert_eq!(h.tick(false, T0), Some(ME), "{class:?}: the scene stays");
+            assert!(h.stays(), "{class:?}");
+            assert_eq!(h.tick(true, T0 + FRAME), Some(ME), "{class:?}: blind frame");
+            assert_eq!(h.tick(false, T0 + 2.0 * FRAME), Some(ME), "{class:?}");
+
+            let mut fresh = Healer::new(class);
+            let goal = fresh.tick(true, T0).expect("a formation goal");
+            assert!(
+                goal.distance(ME) > 20.0,
+                "{class:?}: the blind frame alone no longer moves the goal ({goal})"
+            );
+        }
+    }
+
+    /// Hidden for `STAY_SIGHT_GRACE`, the stay lets go and the goal leaves
+    /// the healer's spot; hidden for less, it holds.
+    #[test]
+    fn a_stay_lets_go_once_sight_is_lost_for_the_grace() {
+        check_scene();
+        for class in [CharacterClass::Priest, CharacterClass::Druid] {
+            let mut h = Healer::new(class);
+            h.tick(false, T0);
+            let mut t = T0 + FRAME;
+            while t < T0 + FRAME + STAY_SIGHT_GRACE - FRAME / 2.0 {
+                assert_eq!(h.tick(true, t), Some(ME), "{class:?}: let go at {t}");
+                t += FRAME;
+            }
+            let gone = h.tick(true, T0 + FRAME + STAY_SIGHT_GRACE + FRAME / 2.0);
+            assert!(
+                gone.is_some_and(|g| g.distance(ME) > 20.0),
+                "{class:?}: still held after the grace ({gone:?})"
+            );
+            assert!(!h.stays(), "{class:?}");
         }
     }
 }

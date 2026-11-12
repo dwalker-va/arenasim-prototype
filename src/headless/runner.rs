@@ -25,8 +25,9 @@ use crate::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementCo
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::components::{
-    ActiveAuras, AuraType, DRTracker, HealingRefused, MovementDirective, MovementGoal, Pet,
-    PetType, Totem, TotemElement, TrapLaunchProjectile, TrapType,
+    ActiveAuras, AuraType, DRTracker, FormationMemory, HealerPosture, HealingRefused,
+    MovementDirective, MovementGoal, Pet, PetType, Totem, TotemElement, TrapLaunchProjectile,
+    TrapType,
 };
 use crate::states::play_match::constants::PET_SLOT_BASE;
 use crate::states::play_match::decision_trace::{DecisionTrace, TraceWriter};
@@ -91,6 +92,11 @@ pub struct ObservedCombatant {
     /// only where it ends up — the executor stops short of a spot it cannot
     /// reach, which hides a bad goal from the position track.
     pub point_goal: Option<Vec3>,
+    /// A healer's FREE formation memory (`HealerPosture::formation`): the
+    /// heading, the kept sight exit and the reach repair's kept spot or stay.
+    /// Lets probes name which stage of the formation machine moved its goal.
+    /// `None` for a unit with no healer posture.
+    pub formation: Option<FormationMemory>,
 }
 
 /// A read-only snapshot of one Shaman totem on a frame. Totems are NOT
@@ -1177,6 +1183,7 @@ fn observe_frame(world: &World) -> FrameObservation {
                         MovementGoal::Point(p) => Some(p),
                         _ => None,
                     }),
+                formation: entity_ref.get::<HealerPosture>().map(|p| p.formation),
             },
         );
     }

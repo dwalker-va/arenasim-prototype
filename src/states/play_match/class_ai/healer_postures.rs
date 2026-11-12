@@ -688,6 +688,12 @@ pub(super) fn hunt_station_tick(
     match posture_live.then(|| ctx.hunt_station()).flatten() {
         Some(station) => {
             state.hunt_station = Some(station);
+            // The station walk takes the healer off its formation point, as
+            // the medic chase and a dispel hold do: the formation point starts
+            // afresh when the hunt ends (a reach repair's stay, which carries
+            // no position, would otherwise hold it wherever the station left
+            // it).
+            state.formation.forget();
             Some(super::hunt::walk_to_station(
                 commands,
                 entity,
