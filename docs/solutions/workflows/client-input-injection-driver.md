@@ -257,6 +257,29 @@ one wheel line. The click landed on *something*, which is the worst failure
 mode available. `Micro::Move` now requires the target rect to be identical on
 two consecutive frames before it aims.
 
+**Two still frames are not enough on their own.** Mid-animation the content can
+hold still for a pass, and the target then slides on. In View Combatant,
+`hover strategic:CheapShot` after `hover kit:Ambush` wheels back up the sheet;
+in half the 720p runs the driver aimed above the tile's final rect and hovered
+nothing (AS-470). `Move` also waits until the last pass did not scroll at all:
+`runner::scrolled_last_pass`, read from egui's `time_since_last_scroll`.
+egui stamps that in `begin_pass` whenever a delta is played out, so it means
+the animation is over. Do not read `smooth_scroll_delta` for this. The scroll area
+that applies a pass's share zeroes it in that same pass, so a read after the
+pass sees zero mid-animation. `tooltip_gate` waits for a scroll to finish by
+the same signal.
+
+**A tooltip under the parked pointer takes the wheel.** The driver scrolls with
+the pointer parked mid-screen. egui hides tooltips while content scrolls only
+when the scroll is younger than `tooltip_delay`, and the theme's delay was
+zero. So a choice tile scrolling past the parked pointer could open its
+tooltip beneath it, and the wheel then went to the tooltip layer, not the
+sheet. The sheet never moved again, and the step timed out with "laid out but
+never scrolled into view" (AS-470, about one run in four). The theme's delay is
+now 0.05s, which turns that guard back on. egui counts that delay from the
+end of the stillness wait, so a first tooltip shows about 0.05s later than it
+did, and `tooltip_gate` waits that much longer per first tooltip.
+
 **And aim only at a rect that is wholly on screen** — `Widget::aim_point`,
 never `visible`. `visible` is egui's `is_rect_visible`: true once any point of
 the rect is inside its clip rect. In a 1280x720 window the Warrior's shout
@@ -274,7 +297,7 @@ FRAMES.** This one was got wrong twice, and the second time is the more
 useful lesson.
 
 egui will not show a tooltip until several **wall-clock** conditions hold. With
-`tooltip_delay` zeroed (which both instrumented screens do), the binding ones
+`tooltip_delay` at the theme's 0.05s (counted from the end of the stillness wait below, so it adds to it), the binding ones
 are `pointer.is_still()` — velocity over a **0.1 second** position history —
 `smooth_scroll_delta == 0`, an animation that decays over **time**, and
 `clicked_more_recently_than_moved`, which wants the move at least **0.1s**

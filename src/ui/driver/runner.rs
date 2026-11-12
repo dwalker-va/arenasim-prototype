@@ -337,6 +337,9 @@ pub fn is_retryable(step: &Step) -> bool {
 ///   settle would need grows with the frame rate rather than staying put.
 /// * `smooth_scroll_delta` is an animation that decays over time, so a target
 ///   the driver had to SCROLL to needs strictly longer than one it did not.
+///   egui reads it inside the pass; the driver, after it, reads whether the
+///   last pass scrolled at all ([`scrolled_last_pass`]), since the scroll
+///   area has zeroed the delta by then.
 /// * `clicked_more_recently_than_moved` wants the move to land at least 0.1s
 ///   after the last click, and to have been COUNTED as a move — which a slow
 ///   frame can prevent; see [`move_counted_gate`].
@@ -360,13 +363,12 @@ fn tooltip_gate(ctx: &egui::Context) -> Result<(), &'static str> {
         )
     };
 
-    let (since_scroll, since_click, since_move, still, smooth_scroll) = ctx.input(|i| {
+    let (since_scroll, since_click, since_move, still) = ctx.input(|i| {
         (
             i.time_since_last_scroll(),
             i.pointer.time_since_last_click(),
             i.pointer.time_since_last_movement(),
             i.pointer.is_still(),
-            i.smooth_scroll_delta,
         )
     });
 
@@ -379,13 +381,29 @@ fn tooltip_gate(ctx: &egui::Context) -> Result<(), &'static str> {
     if only_when_still && !still {
         return Err("the pointer is not still yet (egui's 0.1s velocity window)");
     }
-    if only_when_still && smooth_scroll != egui::Vec2::ZERO {
+    if only_when_still && scrolled_last_pass(ctx) {
         return Err("a smooth scroll is still animating");
     }
     if delay - since_scroll.min(since_move).min(since_click) > 0.0 {
         return Err("still inside tooltip_delay");
     }
     Ok(())
+}
+
+/// Whether egui's last pass scrolled: a wheel's raw delta arrived, or its
+/// smooth scroll played some of a queued delta out.
+///
+/// egui stamps `last_scroll_time` in `InputState::begin_pass` whenever either
+/// delta is non-zero (egui 0.31.1, `src/input_state/mod.rs:402-407`), before
+/// anything reads it, and a pass with any delta still queued always plays
+/// some of it out. So a pass with no scroll means the animation is over.
+/// `smooth_scroll_delta` itself cannot say so once the pass has run: the
+/// `ScrollArea` that applies it zeroes it in the same pass
+/// (`src/containers/scroll_area.rs:970-978`), so the driver, which reads after
+/// the pass, would see zero mid-animation. Inside the pass, before the scroll
+/// area consumes it, egui's own tooltip check sees the delta.
+pub fn scrolled_last_pass(ctx: &egui::Context) -> bool {
+    ctx.input(|i| i.time_since_last_scroll()) == 0.0
 }
 
 /// How soon after a click egui reads a pointer move as the pointer RESTING
@@ -837,10 +855,23 @@ pub fn pointer_step(
                 // of the equipment script clicked Trinket1 because Ring1 had
                 // slid exactly one wheel line — the worst failure mode, since
                 // the click lands on SOMETHING and looks like it worked.
+                //
+                // And a rect that held still for one frame has not stopped if
+                // egui is still playing a wheel's delta out: mid-animation the
+                // content can pause for a pass, and the target then slides on
+                // from under the aim. View Combatant's `hover strategic:` after
+                // a `hover kit:` aimed above the tile that way (AS-470).
                 let seen = (id.clone(), widget.rect);
                 if last_seen.as_ref() != Some(&seen) {
                     *last_seen = Some(seen);
                     again(format!("widget `{id}` never stopped moving"), Vec::new())
+                } else if scrolled_last_pass(ctx) {
+                    again(
+                        format!(
+                            "widget `{id}` never stopped moving: a scroll is still playing out"
+                        ),
+                        Vec::new(),
+                    )
                 } else {
                     let to = widget.rect.center();
                     let delta = to - *cursor;
