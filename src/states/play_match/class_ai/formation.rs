@@ -731,6 +731,32 @@ fn reach_repair_weight(dist: f32) -> f32 {
     ((REACH_REPAIR_LIMIT - dist) / (REACH_REPAIR_LIMIT - REACH_REPAIR_FULL)).clamp(0.0, 1.0)
 }
 
+/// How long a STAY ([`ReachKept::Stay`]) holds through its healer's loss of
+/// sight of a teammate before it is let go (AS-469).
+///
+/// A healer standing where it is, out of a caster's reach behind a pillar,
+/// often sees its teammate past that pillar's edge, and as the teammate moves
+/// the line grazes the edge: sight comes and goes frame to frame, in blind
+/// spells of one frame to about 0.4s. Re-judged afresh each evaluation, the
+/// stay went with every spell, the goal jumping 20-45yd to a far rim spot and
+/// straight back. A loss that lasts the grace is real, and lets the stay go.
+/// The commit window's span (`shared.commit_window`, the anti-zigzag band
+/// 0.4-0.8s): a spell shorter than a committed walk is no reason to walk.
+pub const STAY_SIGHT_GRACE: f32 = 0.6;
+
+/// What the reach repair keeps from one evaluation to the next
+/// ([`FormationMemory::reach`](crate::states::play_match::FormationMemory::reach)).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ReachKept {
+    /// The point was moved to this spot out of reach.
+    Spot(Vec2),
+    /// The point is where the healer stands: already out of reach, with no
+    /// spot it could reach without walking through a disc. `blind_since` is
+    /// when the healer's spot last stopped seeing the teammates as well as
+    /// the formation point does, while it still does not ([`STAY_SIGHT_GRACE`]).
+    Stay { blind_since: Option<f32> },
+}
+
 /// Whether walking straight from `from` to `to` takes a mover deeper into the
 /// disc `(center, radius)` than `from` already is: through it from outside, or
 /// further in from inside. A walk that starts inside and only moves outward
@@ -780,9 +806,10 @@ fn circle_crossings(c1: Vec2, r1: f32, c2: Vec2, r2: f32) -> Vec<Vec2> {
 /// point nearest `point`, the rim point nearest the healer, where each rim
 /// crosses each teammate's heal circle, and where two rims cross. The nearest
 /// feasible one to `point` wins, the one nearest the spot last chosen (`kept`)
-/// counting [`KEEP_MARGIN`] nearer. Each candidate slides continuously as the
-/// caster and the teammates move, so the point does too; only a change of
-/// candidate is a step, and the band covers that. Like the sight repair, the
+/// counting [`KEEP_MARGIN`] nearer, at [`REACH_REPAIR_LIMIT`] as well as in
+/// the ranking. Each candidate slides continuously as the caster and the
+/// teammates move, so the point does too; only a change of candidate is a
+/// step, and the band covers that. Like the sight repair, the
 /// spot is taken in full to [`REPAIR_FULL`] from `point`, part of the way to
 /// [`REPAIR_LIMIT`], and not at all beyond ([`repair_weight`]): a disc the
 /// formation sits deep inside is the PRESSURED solve's business, not a reason
@@ -795,8 +822,20 @@ fn circle_crossings(c1: Vec2, r1: f32, c2: Vec2, r2: f32) -> Vec<Vec2> {
 /// disc. With no feasible spot (the teammates' heal circles lie wholly in
 /// reach — a 3v3 with casters on both flanks) `point` stands: heal first.
 ///
+/// **The stay.** With no spot it can reach without walking through a disc, a
+/// healer already out of reach stays where it stands ([`ReachKept::Stay`]):
+/// it begins out of every inner disc (the spot a healer stands on is judged
+/// by the inner disc, as the solve judges it), in heal reach of the
+/// teammates, seeing them no worse than `point` does. It holds while those
+/// hold, and through a loss of that sight shorter than [`STAY_SIGHT_GRACE`];
+/// while it holds, no spot is sought, as a kept spot holds while it is still
+/// a repair. Re-judging it from scratch each evaluation flipped the goal
+/// between the healer's spot and a rim spot 20-45yd off whenever its sight of
+/// a teammate past a pillar's edge flickered (AS-469).
+///
 /// An empty `field` — every map, every `Legacy` call, a healer no ready crowd
 /// control reaches — returns `point` unchanged.
+#[allow(clippy::too_many_arguments)]
 pub fn reach_repaired_point(
     ctx: &CombatContext,
     healer: Entity,
@@ -804,7 +843,8 @@ pub fn reach_repaired_point(
     point: Vec3,
     field: &CcField,
     heal_reach: f32,
-    kept: &mut Option<Vec2>,
+    now: f32,
+    kept: &mut Option<ReachKept>,
 ) -> Vec3 {
     let origin = xz(point);
     let live = kept.is_some();
@@ -832,13 +872,38 @@ pub fn reach_repaired_point(
     };
     let origin_sight =
         (!ctx.obstacles.is_empty()).then(|| sight_from(ctx.obstacles, origin, &allies));
+    let me = xz(my_pos);
+    let me_sees = || origin_sight.is_none_or(|at| sight_from(ctx.obstacles, me, &allies) >= at);
+
+    // A live stay holds on the terms it began on, and through a short loss of
+    // sight.
+    if let Some(ReachKept::Stay { blind_since }) = *kept {
+        let blind_since = if me_sees() {
+            None
+        } else {
+            Some(blind_since.unwrap_or(now))
+        };
+        let holds = blind_since.is_none_or(|since| now - since < STAY_SIGHT_GRACE)
+            && field
+                .covering(ctx.obstacles, me, Disc::Inner)
+                .next()
+                .is_none()
+            && held.iter().all(|a| a.distance(me) <= heal_reach);
+        if holds {
+            *kept = Some(ReachKept::Stay { blind_since });
+            return Vec3::new(me.x, point.y, me.y);
+        }
+    }
+    let kept_spot = match *kept {
+        Some(ReachKept::Spot(k)) => Some(k),
+        _ => None,
+    };
 
     let mut raw: Vec<Vec2> = Vec::new();
     let rims: Vec<(Vec2, f32)> = covering
         .iter()
         .map(|t| (t.center, field.radius(t, Disc::Outer) + RIM_CLEARANCE))
         .collect();
-    let me = xz(my_pos);
     for &(center, rim) in &rims {
         for from in [origin, me] {
             let away = (from - center).normalize_or_zero();
@@ -872,7 +937,7 @@ pub fn reach_repaired_point(
         .filter(|&c| origin_sight.is_none_or(|at| sight_from(ctx.obstacles, c, &allies) >= at))
         .collect();
     let rank = |c: Vec2| {
-        let band = if kept.is_some_and(|k| k.distance(c) <= KEEP_RADIUS) {
+        let band = if kept_spot.is_some_and(|k| k.distance(c) <= KEEP_RADIUS) {
             KEEP_MARGIN
         } else {
             0.0
@@ -895,7 +960,7 @@ pub fn reach_repaired_point(
     // solve stands still. Re-picking the nearest spot every evaluation made
     // the point follow the caster's every step: back in when it stepped back,
     // out when it stepped in, and the healer's heading reversed with it.
-    if let Some(k) = *kept {
+    if let Some(k) = kept_spot {
         let still = k.distance(origin) < REACH_REPAIR_FULL
             && field
                 .covering(ctx.obstacles, k, Disc::Outer)
@@ -908,9 +973,16 @@ pub fn reach_repaired_point(
             return Vec3::new(k.x, point.y, k.y);
         }
     }
+    // The kept spot keeps its band at the limit too (AS-469): judged by its
+    // plain distance there, a spot riding the limit dropped out and came back
+    // frame by frame, and each time the choice fell to a spot in another tier
+    // — a far rim the healer would walk through the disc to reach — the goal
+    // went 20yd and straight back. Past the limit the kept spot moves the
+    // point nowhere ([`reach_repair_weight`]), so holding it there is the
+    // repair letting go without a step.
     let best = feasible
         .into_iter()
-        .filter(|c| c.distance(origin) < REACH_REPAIR_LIMIT)
+        .filter(|&c| rank(c) < REACH_REPAIR_LIMIT)
         .min_by(|a, b| {
             through(*a)
                 .cmp(&through(*b))
@@ -930,12 +1002,12 @@ pub fn reach_repaired_point(
             .next()
             .is_none()
         && held.iter().all(|a| a.distance(me) <= heal_reach)
-        && origin_sight.is_none_or(|at| sight_from(ctx.obstacles, me, &allies) >= at);
+        && me_sees();
     if stays {
-        *kept = Some(me);
+        *kept = Some(ReachKept::Stay { blind_since: None });
         return Vec3::new(me.x, point.y, me.y);
     }
-    *kept = best;
+    *kept = best.map(ReachKept::Spot);
     let Some(spot) = best else {
         return point;
     };
@@ -1727,7 +1799,7 @@ mod tests {
     const HEAL_REACH: f32 = 39.0;
 
     impl Fixture {
-        fn reach_from(&self, field: &CcField, point: Vec2, kept: &mut Option<Vec2>) -> Vec2 {
+        fn reach_from(&self, field: &CcField, point: Vec2, kept: &mut Option<ReachKept>) -> Vec2 {
             xz(reach_repaired_point(
                 &self.ctx(&[]),
                 self.healer,
@@ -1735,6 +1807,7 @@ mod tests {
                 Vec3::new(point.x, 1.0, point.y),
                 field,
                 HEAL_REACH,
+                0.0,
                 kept,
             ))
         }
@@ -1767,7 +1840,7 @@ mod tests {
             "moved further than reach needs: {fixed}"
         );
         assert!(fixed.distance(Vec2::ZERO) <= HEAL_REACH, "{fixed}");
-        assert_eq!(kept, Some(fixed));
+        assert_eq!(kept, Some(ReachKept::Spot(fixed)));
     }
 
     /// Heal first: when every spot in heal reach of the Warrior is in reach of
@@ -1793,7 +1866,7 @@ mod tests {
         let field = fear_from(24.0);
         let mut idle = None;
         assert_eq!(f.reach_from(&field, point, &mut idle), point);
-        let mut live = Some(Vec2::new(-8.5, 0.0));
+        let mut live = Some(ReachKept::Spot(Vec2::new(-8.5, 0.0)));
         let moved = f.reach_from(&field, point, &mut live);
         assert!(moved.distance(Vec2::new(24.0, 0.0)) > 33.0, "{moved}");
     }
@@ -1842,6 +1915,7 @@ mod tests {
             Vec3::new(point.x, 1.0, point.y),
             &field,
             HEAL_REACH,
+            0.0,
             &mut kept,
         ));
         assert!(sees(&pillar(), fixed, MAGE_XZ), "{fixed} lost the Mage");
@@ -1868,6 +1942,7 @@ mod tests {
             Vec3::new(point.x, 1.0, point.y),
             field,
             HEAL_REACH,
+            0.0,
             &mut None,
         ))
     }
@@ -1904,6 +1979,191 @@ mod tests {
         );
     }
 
+    /// AS-469's stay scene: `a_healer_out_of_reach_stays_rather_than_walk_through_it`
+    /// with a pillar beside the healer's line to its teammate. The healer at
+    /// (-34, 0) sees a teammate at the origin past the pillar's edge (0.5yd
+    /// clear), and loses it once the teammate steps to (0, 2); the formation
+    /// point at (6, 0) sees the teammate either way.
+    struct StayScene {
+        seen: Fixture,
+        hidden: Fixture,
+        obstacles: [ObstacleVolume; 1],
+    }
+
+    const STAY_ME: Vec2 = Vec2::new(-34.0, 0.0);
+    const STAY_POINT: Vec2 = Vec2::new(6.0, 0.0);
+    const STAY_HIDDEN: (f32, f32, f32) = (0.0, 2.0, 1.0);
+
+    impl StayScene {
+        fn new() -> Self {
+            let scene = StayScene {
+                seen: fixture(&[WARRIOR_AT]),
+                hidden: fixture(&[STAY_HIDDEN]),
+                obstacles: [cylinder(-17.0, 2.5, 2.0)],
+            };
+            let hidden_at = Vec2::new(STAY_HIDDEN.0, STAY_HIDDEN.1);
+            assert!(sees(&scene.obstacles, STAY_ME, Vec2::ZERO));
+            assert!(!sees(&scene.obstacles, STAY_ME, hidden_at));
+            assert!(sees(&scene.obstacles, STAY_POINT, hidden_at));
+            scene
+        }
+
+        /// One evaluation at `now`, the teammate seen or hidden.
+        fn at(&self, hidden: bool, now: f32, kept: &mut Option<ReachKept>) -> Vec2 {
+            let f = if hidden { &self.hidden } else { &self.seen };
+            self.with(f, &fear_from(1.0), now, kept)
+        }
+
+        /// One evaluation with teammates `f` and crowd control `field`.
+        fn with(
+            &self,
+            f: &Fixture,
+            field: &CcField,
+            now: f32,
+            kept: &mut Option<ReachKept>,
+        ) -> Vec2 {
+            xz(reach_repaired_point(
+                &f.ctx(&self.obstacles),
+                f.healer,
+                Vec3::new(STAY_ME.x, 1.0, STAY_ME.y),
+                Vec3::new(STAY_POINT.x, 1.0, STAY_POINT.y),
+                field,
+                HEAL_REACH,
+                now,
+                kept,
+            ))
+        }
+    }
+
+    /// A live stay still answers to the rest of what began it: it lets go
+    /// once its healer's spot comes into the caster's reach (the inner disc,
+    /// 31.5yd), or its teammate walks out of heal reach. The controls: a
+    /// caster 33yd off, and the teammate a step nearer, leave it standing.
+    #[test]
+    fn a_stay_lets_go_once_its_spot_is_in_reach_or_out_of_heal_reach() {
+        let scene = StayScene::new();
+        let start = || {
+            let mut kept = None;
+            scene.at(false, 0.0, &mut kept);
+            kept
+        };
+        let mut kept = start();
+        assert_eq!(
+            scene.with(&scene.seen, &fear_from(-1.0), 0.1, &mut kept),
+            STAY_ME
+        );
+        let mut kept = start();
+        let reached = scene.with(&scene.seen, &fear_from(-3.0), 0.1, &mut kept);
+        assert_ne!(reached, STAY_ME);
+        assert!(!matches!(kept, Some(ReachKept::Stay { .. })), "{kept:?}");
+
+        let near = fixture(&[(4.0, 0.0, 1.0)]);
+        let mut kept = start();
+        assert_eq!(scene.with(&near, &fear_from(1.0), 0.1, &mut kept), STAY_ME);
+        let away = fixture(&[(6.0, 0.0, 1.0)]);
+        assert!(STAY_ME.distance(Vec2::new(6.0, 0.0)) > HEAL_REACH);
+        let mut kept = start();
+        assert_ne!(scene.with(&away, &fear_from(1.0), 0.1, &mut kept), STAY_ME);
+        assert!(!matches!(kept, Some(ReachKept::Stay { .. })), "{kept:?}");
+    }
+
+    /// A live stay holds through a flicker of its healer's sight: the teammate
+    /// steps behind the pillar's edge for a frame and back, and the goal stays
+    /// where the healer stands. The pair: the same blind frame with no stay
+    /// live sends the goal over 20yd off — the jump the flicker made, and made
+    /// again on the frame sight came back.
+    #[test]
+    fn a_stay_holds_through_a_flicker_of_sight() {
+        let scene = StayScene::new();
+        let mut kept = None;
+        assert_eq!(scene.at(false, 0.0, &mut kept), STAY_ME);
+        assert!(matches!(kept, Some(ReachKept::Stay { .. })), "{kept:?}");
+        assert_eq!(scene.at(true, 1.0 / 60.0, &mut kept), STAY_ME);
+        assert_eq!(scene.at(false, 2.0 / 60.0, &mut kept), STAY_ME);
+        assert_eq!(kept, Some(ReachKept::Stay { blind_since: None }));
+
+        let mut fresh = None;
+        let blind = scene.at(true, 1.0 / 60.0, &mut fresh);
+        assert!(blind.distance(STAY_ME) > 20.0, "{blind}");
+        assert!(matches!(fresh, Some(ReachKept::Spot(_))), "{fresh:?}");
+    }
+
+    /// A loss of sight that lasts `STAY_SIGHT_GRACE` lets the stay go; one
+    /// broken by a sighted frame starts the grace afresh.
+    #[test]
+    fn a_stay_lets_go_once_sight_is_lost_for_the_grace() {
+        let scene = StayScene::new();
+        let mut kept = None;
+        scene.at(false, 0.0, &mut kept);
+        assert_eq!(scene.at(true, 1.0, &mut kept), STAY_ME);
+        assert_eq!(
+            scene.at(true, 1.0 + STAY_SIGHT_GRACE - 0.01, &mut kept),
+            STAY_ME
+        );
+        let gone = scene.at(true, 1.0 + STAY_SIGHT_GRACE, &mut kept);
+        assert!(gone.distance(STAY_ME) > 20.0, "{gone}");
+        assert!(matches!(kept, Some(ReachKept::Spot(_))), "{kept:?}");
+
+        // The control: the same total span, broken by one sighted frame.
+        let mut kept = None;
+        scene.at(false, 0.0, &mut kept);
+        scene.at(true, 1.0, &mut kept);
+        scene.at(false, 1.3, &mut kept);
+        assert_eq!(scene.at(true, 1.0 + STAY_SIGHT_GRACE, &mut kept), STAY_ME);
+    }
+
+    /// AS-469's limit scene, from a 3v3 on Nagrand: a Fear and a Cyclone
+    /// ready, the healer inside the Fear's reach with its two teammates either
+    /// side. Its spot out of reach that it can walk to without crossing the
+    /// disc, the Fear's rim nearest it, stands about 30yd from the formation
+    /// point, at `REACH_REPAIR_LIMIT`; the other spot, the rim nearest the
+    /// point, is 25yd off and across the disc. One evaluation with the point
+    /// at `x`, carrying `kept`.
+    fn limit_scene(x: f32, kept: &mut Option<ReachKept>) -> Vec2 {
+        let f = fixture(&[(10.95, 3.34, 1.0), (-19.95, -7.5, 1.0)]);
+        let mut field = fear_from(7.99);
+        field.threats[0].center.y = -7.5;
+        let mut cyclone = field.threats[0];
+        cyclone.ability = AbilityType::Cyclone;
+        cyclone.center = Vec2::new(13.03, -13.03);
+        cyclone.reach = 20.0;
+        field.threats.push(cyclone);
+        xz(reach_repaired_point(
+            &f.ctx(&[]),
+            f.healer,
+            Vec3::new(-16.44, 1.0, -9.44),
+            Vec3::new(x, 1.0, -1.05),
+            &field,
+            HEAL_REACH,
+            0.0,
+            kept,
+        ))
+    }
+
+    /// The kept spot keeps its band at the limit: the point steps 0.1yd and
+    /// carries the near rim just past `REACH_REPAIR_LIMIT`, and the goal
+    /// stays by the point. The pair: met with no spot kept, the same step
+    /// sends the goal 18yd across the disc — and, as the near rim came back
+    /// under the limit, straight back.
+    #[test]
+    fn the_kept_spot_keeps_its_band_at_the_limit() {
+        let mut kept = None;
+        let before = limit_scene(3.8, &mut kept);
+        let Some(ReachKept::Spot(near)) = kept else {
+            panic!("the scene repairs to a spot: {kept:?}");
+        };
+        let origin = |x: f32| Vec2::new(x, -1.05);
+        assert!(before.distance(origin(3.8)) < 1.0, "{before}");
+        assert!(near.distance(origin(3.9)) > REACH_REPAIR_LIMIT, "{near}");
+
+        let after = limit_scene(3.9, &mut kept);
+        assert!(after.distance(before) < 1.0, "{after} jumped from {before}");
+        assert!(matches!(kept, Some(ReachKept::Spot(s)) if s.distance(near) <= KEEP_RADIUS));
+
+        let fresh = limit_scene(3.9, &mut None);
+        assert!(fresh.distance(before) > 15.0, "{fresh}");
+    }
+
     /// Feasibility's hysteresis: a repair STARTS only where a spot has
     /// `REACH_SLACK` of heal reach to spare, and a live one keeps a spot with
     /// less. With a 20yd heal reach the disc leaves a sliver 19.5yd from the
@@ -1914,7 +2174,7 @@ mod tests {
         let mut field = fear_from(5.0);
         field.threats[0].reach = 21.25;
         let point = Vec2::new(-10.0, 0.0);
-        let repair = |kept: &mut Option<Vec2>| {
+        let repair = |kept: &mut Option<ReachKept>| {
             xz(reach_repaired_point(
                 &f.ctx(&[]),
                 f.healer,
@@ -1922,13 +2182,14 @@ mod tests {
                 Vec3::new(point.x, 1.0, point.y),
                 &field,
                 20.0,
+                0.0,
                 kept,
             ))
         };
         let mut idle = None;
         assert_eq!(repair(&mut idle), point);
         assert_eq!(idle, None);
-        let mut live = Some(Vec2::new(-19.0, 0.0));
+        let mut live = Some(ReachKept::Spot(Vec2::new(-19.0, 0.0)));
         let moved = repair(&mut live);
         assert!(moved.distance(Vec2::new(5.0, 0.0)) > 24.25, "{moved}");
         assert!(moved.distance(Vec2::ZERO) <= 20.0 + 1e-3, "{moved}");

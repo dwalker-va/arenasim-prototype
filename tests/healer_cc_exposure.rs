@@ -241,6 +241,7 @@ fn the_caster_filter_counts_only_pets_that_reach() {
         target: None,
         stealthed: false,
         point_goal: None,
+        formation: None,
     };
     use CharacterClass::{Hunter, Mage, Warlock, Warrior};
     assert!(counts_as_caster(&unit(Mage, None)));

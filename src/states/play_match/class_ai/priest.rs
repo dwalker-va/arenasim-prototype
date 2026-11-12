@@ -3050,6 +3050,7 @@ fn compute_formation_point(
             point,
             &field,
             shared.heal_range - crate::states::play_match::team_solve::HEAL_REACH_MARGIN,
+            now,
             &mut memory.reach,
         )
     } else {
