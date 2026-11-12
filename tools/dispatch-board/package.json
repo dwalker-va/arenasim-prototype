@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "serve": "node dist/cli.js serve",
+    "serve": "tsc && node dist/cli.js serve",
     "test": "node --test test/*.test.mjs",
     "test:mutation": "node test/mutation/run.mjs"
   },

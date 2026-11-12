@@ -193,8 +193,13 @@ has no `node:sqlite`).
 ## Run
 
 ```bash
-node dist/cli.js serve            # default DB: <main checkout>/.dispatch/board.db
+npm run serve                     # rebuilds dist/ (tsc), then serves
+                                  # default DB: <main checkout>/.dispatch/board.db
 ```
+
+Start it through `npm run serve` rather than `node dist/cli.js serve`. That way the
+daemon never serves a `dist/` older than its source after a pull. On 2026-11-07 one was
+a month stale and refused `blocked_by`, which its source had gained since.
 
 The daemon must be running before a session starts (or reconnect with `/mcp`
 afterwards): an `http` MCP server that is down simply shows as failed.
