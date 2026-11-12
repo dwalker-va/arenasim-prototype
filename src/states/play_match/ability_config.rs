@@ -620,6 +620,20 @@ impl AbilityDefinitions {
         self.definitions.get(ability)
     }
 
+    /// This table with only the abilities `keep` names (one it lacks is
+    /// skipped): a catalogue whose membership does not grow when
+    /// `abilities.ron` does. The encyclopedia snapshots draw one
+    /// (`tests/common/pinned_catalogue.rs`), so an ability added later moves
+    /// none of their pixels.
+    pub fn restricted_to(&self, keep: &[AbilityType]) -> Self {
+        Self {
+            definitions: keep
+                .iter()
+                .filter_map(|id| self.definitions.get(id).map(|config| (*id, config.clone())))
+                .collect(),
+        }
+    }
+
     /// Get the configuration for an ability type, panicking if not found.
     /// Use this when you know the ability must exist (validated at startup).
     pub fn get_unchecked(&self, ability: &AbilityType) -> &AbilityConfig {
