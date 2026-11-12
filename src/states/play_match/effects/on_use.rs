@@ -1,7 +1,10 @@
 //! On-use item resolution.
 //!
 //! The AI decides a use (`class_ai::on_use`) and spawns an [`OnUsePending`];
-//! this system carries it out, one arm per [`OnUseEffect`]. The deferred
+//! this system carries it out, one arm per [`OnUseEffect`]. A buff is handed
+//! to `apply_pending_auras` as an [`AuraPending`], with the heal over time it
+//! carries (the Diamond Flask), which `process_hot_ticks` then ticks through
+//! `combat_core::apply_healing`. The deferred
 //! pattern Divine Shield and Berserker Rage use, for the same reason: the AI
 //! holds no mutable auras. Runs beside them, BEFORE `apply_pending_auras`, so
 //! a CC queued for the frame the wearer breaks free lands after the break,
@@ -34,7 +37,7 @@ pub fn process_on_use_items(
             CombatLogEventType::Buff,
             format!("[ITEM] {} uses {}", wearer_id, pending.item_name),
         );
-        match pending.effect {
+        match pending.config.effect {
             OnUseEffect::CcBreak => {
                 let broken = active_auras
                     .map(|mut auras| auras.break_debuffs_where(cc_break_breaks))
@@ -49,6 +52,22 @@ pub fn process_on_use_items(
                             broken.join(", ")
                         ),
                     );
+                }
+            }
+            OnUseEffect::Buff(_) => {
+                commands.spawn(AuraPending {
+                    target: pending.wearer,
+                    aura: pending.config.aura(pending.item, &pending.item_name),
+                });
+                if let Some(heal) =
+                    pending
+                        .config
+                        .heal_aura(pending.item, &pending.item_name, pending.wearer)
+                {
+                    commands.spawn(AuraPending {
+                        target: pending.wearer,
+                        aura: heal,
+                    });
                 }
             }
         }

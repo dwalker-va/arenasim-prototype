@@ -75,6 +75,7 @@ use crate::states::play_match::effects::backlash::{
     dispel_backlash_silence_aura, DISPEL_BACKLASH_SILENCE_DURATION,
 };
 use crate::states::play_match::equipment::{ItemDefinitions, ItemId};
+use crate::states::play_match::on_use_items::on_use_description;
 use crate::states::play_match::proc_trinkets::proc_description;
 use crate::states::play_match::rendering::{
     is_buff_aura, item_aura_icon_key, talent_aura_icon_key,
@@ -192,6 +193,11 @@ pub enum EngineAura {
     /// a `proc:` block gets an entry, so trinket N+1 (the whole point of
     /// AS-61) needs no variant here.
     ProcTrinketBuff(ItemId),
+    /// The buff an item's ON-USE grants its wearer (a stat burst or haste,
+    /// with the heal over time one may carry as a rider: the Diamond Flask),
+    /// named after the item. Derived from the buff `on_use:` blocks in
+    /// `items.ron`, as the proc buffs are from `proc:`.
+    OnUseBuff(ItemId),
     /// Master Demonologist's spell damage cut, which the talent keeps on the
     /// Warlock and its Felhunter while the Felhunter lives.
     MasterDemonologist,
@@ -267,6 +273,13 @@ impl EngineAura {
                 .count();
             all.extend((0..procs as u8).map(|i| EngineAura::TalentProcAura(talent, i)));
         }
+        all.extend(
+            ItemId::all()
+                .iter()
+                .filter(|id| items.get(id).is_some_and(|i| i.on_use_buff().is_some()))
+                .copied()
+                .map(EngineAura::OnUseBuff),
+        );
         all.extend(
             ItemId::all()
                 .iter()
@@ -755,9 +768,9 @@ fn engine_art(engine: EngineAura) -> AuraArt {
         // No ability applies it; the TRINKET does, and the buff wears the
         // trinket's own icon — as it does in the buff bar, which reads the
         // same key off the aura's `source_item`.
-        EngineAura::ProcTrinketBuff(item) | EngineAura::TriggeredAbsorbShield(item) => {
-            AuraArt::Item(item)
-        }
+        EngineAura::ProcTrinketBuff(item)
+        | EngineAura::OnUseBuff(item)
+        | EngineAura::TriggeredAbsorbShield(item) => AuraArt::Item(item),
         // A talent's proc wears its talent's icon, as in the buff bar, which
         // reads the same key off the aura's `source_talent`.
         EngineAura::TalentProcAura(talent, _) => AuraArt::Talent(talent),
@@ -773,8 +786,9 @@ fn engine_art(engine: EngineAura) -> AuraArt {
 /// Every value here is read from the constant, shared constructor or spec the
 /// apply site reads, so the page cannot state a number the simulation does not
 /// use.
-/// `None` only for a `ProcTrinketBuff` (or `TriggeredAbsorbShield`) address
-/// whose item no longer carries a proc (or a triggered absorb) — an address that `EngineAura::all` cannot produce, but that a stale
+/// `None` only for a `ProcTrinketBuff` (or `OnUseBuff`, or
+/// `TriggeredAbsorbShield`) address whose item no longer carries a proc (or an
+/// on-use buff, or a triggered absorb) — an address that `EngineAura::all` cannot produce, but that a stale
 /// navigation stack can still hold.
 fn engine_entry(
     engine: EngineAura,
@@ -989,6 +1003,31 @@ fn engine_entry_with(
                 // cooldown the trinket does not have. The trinket is not named
                 // again here — the page header IS its name.
                 provenance: proc_description(proc),
+            }
+        }
+        EngineAura::OnUseBuff(item) => {
+            let def = items.get(&item)?;
+            let on_use = def.on_use_buff()?;
+            // The auras the simulation lands, through its own constructors:
+            // the buff is the face, and a heal over time beside it a rider,
+            // so the page states both and the catalog keys both.
+            let face = on_use.aura(item, &def.name);
+            let riders = on_use
+                .heal_aura(item, &def.name, bevy::prelude::Entity::PLACEHOLDER)
+                .into_iter()
+                .collect();
+            EngineSpec {
+                name: def.name.clone(),
+                frame_name: None,
+                mechanic: face.effect_type,
+                source: AuraSource::Mechanic("a trinket you are wearing, when you use it"),
+                magnitude: face.magnitude,
+                school: None,
+                break_on_damage: face.break_on_damage_threshold,
+                dispel_type: face.dispel_type,
+                persistence: Persistence::Seconds(face.duration),
+                riders,
+                provenance: on_use_description(on_use),
             }
         }
         EngineAura::MasterDemonologist => {
@@ -1765,7 +1804,7 @@ mod tests {
         ItemId::all()
             .iter()
             .filter_map(|id| items.get(id))
-            .filter(|item| item.proc_buff().is_some() || item.triggered_absorb.is_some())
+            .filter(|item| item.applies_aura())
             .map(|item| item.name.clone())
             .collect()
     }
@@ -2579,7 +2618,7 @@ mod tests {
         expected.sort();
         assert_eq!(
             ability_less, expected,
-            "an arena orb pickup, the proc trinkets and the talent auras are the only auras no \
+            "an arena orb pickup, the item auras and the talent auras are the only auras no \
              ability applies — a new one here is either a genuine mechanic or a `source` nobody \
              filled in"
         );
@@ -2748,7 +2787,8 @@ mod tests {
         expected.sort();
         assert_eq!(
             item_art, expected,
-            "every proc trinket buff, and nothing else, wears its item's icon"
+            "every item aura (proc, on-use, triggered absorb), and nothing else, wears its \
+             item's icon"
         );
 
         // The encyclopedia's loader opens this whole table. A missing file no

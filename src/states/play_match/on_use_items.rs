@@ -19,6 +19,14 @@
 //! talents proposal §6.5 item 3, which wrote it against the 43s life measured
 //! before the 0.9 changes).
 //!
+//! A STAT BUFF on use ([`OnUseEffect::Buff`]: the Talisman, Earthstrike,
+//! Kiss of the Spider's haste) is priced that way, at the same weight the item
+//! budget charges for its stat ([`proc_effect_budget_weight`], the one table a
+//! proc's buff is priced by too). A HEAL OVER TIME riding the buff (the Diamond
+//! Flask's, [`OnUseHot`]) is priced at the health it heals inside the life, at
+//! the weight of a point of health ([`on_use_heal_cost`]) — the unit Aegis of
+//! the Last Stand's absorb is priced in.
+//!
 //! An effect no stat weight can price — the crowd-control break — carries a
 //! DECLARED price per use (`price:` in `items.ron`), sweep-checked like a
 //! talent mechanic (§6.5 item 4): the item is played against an item of the
@@ -36,8 +44,10 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::components::AuraType;
+use super::components::{Aura, AuraType, DispelType};
+use super::constants::WEIGHT_MAX_HEALTH;
 use super::equipment::ItemId;
+use super::proc_trinkets::proc_effect_budget_weight;
 
 /// The mean arena life after the gates, in seconds: how long a wearer is
 /// alive to use an on-use item, on average. Measured over 60 Warrior+Priest
@@ -57,6 +67,18 @@ pub enum OnUseCooldown {
     OncePerMatch,
     /// Again once this many seconds have passed since the last use.
     Seconds(f32),
+}
+
+/// The seconds of a mean arena life an effect lasting `duration` is up, when
+/// it is used at once and again every time `cooldown` allows: every use an
+/// item that starts ready gets in that life, each cut off where the life ends.
+fn seconds_up_in_arena_life(duration: f32, cooldown: OnUseCooldown) -> f32 {
+    // A once-a-match item has one use, at 0s; it has no gap to multiply (an
+    // infinite one would make the first use's start `0 x inf`, NaN).
+    let gap = cooldown.seconds().unwrap_or(0.0);
+    (0..cooldown.uses_in_arena_life())
+        .map(|k| duration.min(ARENA_LIFE_SECS - k as f32 * gap).max(0.0))
+        .sum()
 }
 
 impl OnUseCooldown {
@@ -81,12 +103,19 @@ impl OnUseCooldown {
 
 /// What using the item does. Each kind has ONE AI rule that decides when to
 /// fire it, and one resolution site (`effects::on_use`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum OnUseEffect {
     /// Break every loss of control and movement impairment on the wearer —
     /// stun, fear (horror included), polymorph, incapacitate, Cyclone, root and
     /// slow ([`cc_break_breaks`]). Grants no immunity: the next CC lands.
     CcBreak,
+    /// Grant the wearer a buff of this aura type, for the on-use's `duration`,
+    /// at its `magnitude` — a stat burst (+spell power, +attack power) or haste
+    /// (`AttackSpeedIncrease`, which speeds melee and ranged alike). Restricted
+    /// to the stat auras [`proc_effect_budget_weight`] prices. It may carry a
+    /// heal over time beside it ([`OnUseConfig::heal_over_time`], the Diamond
+    /// Flask).
+    Buff(AuraType),
 }
 
 impl OnUseEffect {
@@ -95,7 +124,25 @@ impl OnUseEffect {
     pub fn needs_declared_price(self) -> bool {
         match self {
             OnUseEffect::CcBreak => true,
+            OnUseEffect::Buff(_) => false,
         }
+    }
+}
+
+/// A heal over time an on-use buff carries beside it (the Diamond Flask):
+/// `heal_per_tick` every `tick_interval` seconds for the buff's `duration`,
+/// landed on the wearer as a `HealingOverTime` aura, so every tick heals
+/// through `combat_core::apply_healing` (healing reduction and dampening).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OnUseHot {
+    pub heal_per_tick: f32,
+    pub tick_interval: f32,
+}
+
+impl OnUseHot {
+    /// Health healed per second.
+    pub fn rate(&self) -> f32 {
+        self.heal_per_tick / self.tick_interval
     }
 }
 
@@ -110,13 +157,99 @@ pub struct OnUseConfig {
     /// prices ([`OnUseEffect::needs_declared_price`]); absent otherwise.
     #[serde(default)]
     pub price: Option<f32>,
+    /// A buff's magnitude, in its aura's own units (flat points for attack or
+    /// spell power, a fraction for haste). `0.0` for a crowd-control break,
+    /// which leaves it out of `items.ron`.
+    #[serde(default)]
+    pub magnitude: f32,
+    /// How long a buff, and the heal over time beside it, lasts, in seconds.
+    /// `0.0` for a crowd-control break.
+    #[serde(default)]
+    pub duration: f32,
+    /// A heal over time landed with the buff (the Diamond Flask). A buff only.
+    #[serde(default)]
+    pub heal_over_time: Option<OnUseHot>,
 }
 
 impl OnUseConfig {
-    /// The item-budget cost of carrying this on-use: its per-use price times
-    /// its uses in a mean arena life. See the module docs.
+    /// The item-budget cost of carrying this on-use. A declared price is
+    /// charged per use, times its uses in a mean arena life; a buff at
+    /// [`on_use_buff_cost`], and a heal over time beside it at
+    /// [`on_use_heal_cost`]. See the module docs.
     pub fn budget_cost(&self) -> f32 {
-        self.price.unwrap_or(0.0) * self.cooldown.uses_in_arena_life() as f32
+        match self.effect {
+            OnUseEffect::CcBreak => {
+                self.price.unwrap_or(0.0) * self.cooldown.uses_in_arena_life() as f32
+            }
+            OnUseEffect::Buff(aura) => {
+                on_use_buff_cost(
+                    proc_effect_budget_weight(aura).unwrap_or(0.0),
+                    self.magnitude,
+                    self.duration,
+                    self.cooldown,
+                ) + self.heal_over_time.map_or(0.0, |hot| {
+                    on_use_heal_cost(hot.rate(), self.duration, self.cooldown)
+                })
+            }
+        }
+    }
+
+    /// The aura type this on-use's buff carries, or `None` when it is not a
+    /// buff. Every consumer that lists, draws or describes on-use BUFFS asks
+    /// this, so a crowd-control break is never mistaken for one.
+    pub fn buff(&self) -> Option<AuraType> {
+        match self.effect {
+            OnUseEffect::Buff(aura) => Some(aura),
+            OnUseEffect::CcBreak => None,
+        }
+    }
+
+    /// The buff this on-use grants, ready to hand to `AuraPending` — the
+    /// shape a proc trinket's buff has (`ProcConfig::aura`): named after the
+    /// item, wearing its icon (`source_item`, so it coexists with a same-stat
+    /// buff from an ability or another trinket), never broken by damage, and
+    /// `DispelType::Physical` — an item's effect is not a spell, so no purge
+    /// or dispel takes it.
+    ///
+    /// Panics on an on-use that is not a buff; the resolution site asks only
+    /// a buff for it.
+    pub fn aura(&self, item: ItemId, source_name: &str) -> Aura {
+        let effect_type = self
+            .buff()
+            .unwrap_or_else(|| panic!("{source_name}: a crowd-control break grants no aura"));
+        Aura {
+            effect_type,
+            duration: self.duration,
+            magnitude: self.magnitude,
+            break_on_damage_threshold: -1.0,
+            ability_name: source_name.to_string(),
+            dispel_type: DispelType::Physical,
+            source_item: Some(item),
+            ..Default::default()
+        }
+    }
+
+    /// The heal over time this on-use lands beside its buff, cast by its
+    /// `wearer` (whose healing done it credits), or `None` when it carries
+    /// none. Ticks `heal_per_tick` every `tick_interval`, the last on the
+    /// frame it runs out, through `process_hot_ticks` and so through
+    /// `combat_core::apply_healing`. Named after the item, like the buff, and
+    /// as undispellable.
+    pub fn heal_aura(&self, item: ItemId, source_name: &str, wearer: Entity) -> Option<Aura> {
+        let hot = self.heal_over_time?;
+        Some(Aura {
+            effect_type: AuraType::HealingOverTime,
+            duration: self.duration,
+            magnitude: hot.heal_per_tick,
+            break_on_damage_threshold: -1.0,
+            tick_interval: hot.tick_interval,
+            time_until_next_tick: hot.tick_interval,
+            caster: Some(wearer),
+            ability_name: source_name.to_string(),
+            dispel_type: DispelType::Physical,
+            source_item: Some(item),
+            ..Default::default()
+        })
     }
 }
 
@@ -134,12 +267,17 @@ pub fn on_use_buff_cost(
     duration: f32,
     cooldown: OnUseCooldown,
 ) -> f32 {
-    let uses = cooldown.uses_in_arena_life();
-    let gap = cooldown.seconds().unwrap_or(f32::INFINITY);
-    let up: f32 = (0..uses)
-        .map(|k| duration.min(ARENA_LIFE_SECS - k as f32 * gap).max(0.0))
-        .sum();
-    weight * magnitude * up / ARENA_LIFE_SECS
+    weight * magnitude * seconds_up_in_arena_life(duration, cooldown) / ARENA_LIFE_SECS
+}
+
+/// The budget cost of an on-use HEAL OVER TIME healing `rate` health a second
+/// for `duration` seconds, on `cooldown`: the health it heals inside a mean
+/// arena life, counted as [`on_use_buff_cost`] counts a buff's time, at the
+/// weight of a point of maximum health — the unit an absorb is priced in
+/// (Aegis of the Last Stand). A point healed and a point of health more are
+/// the same point of damage survived.
+pub fn on_use_heal_cost(rate: f32, duration: f32, cooldown: OnUseCooldown) -> f32 {
+    WEIGHT_MAX_HEALTH * rate * seconds_up_in_arena_life(duration, cooldown)
 }
 
 /// Reject an on-use that cannot be priced or cannot be used.
@@ -151,6 +289,48 @@ pub fn validate_on_use(item_name: &str, on_use: &OnUseConfig) -> Result<(), Stri
                  single use"
             ));
         }
+    }
+    if let OnUseEffect::Buff(aura) = on_use.effect {
+        if proc_effect_budget_weight(aura).is_none() {
+            return Err(format!(
+                "{item_name}: on_use buff {aura:?} has no budget price — an on-use may only \
+                 grant an effect `proc_effect_budget_weight` prices"
+            ));
+        }
+        if on_use.magnitude <= 0.0 || on_use.duration <= 0.0 {
+            return Err(format!(
+                "{item_name}: on_use buff needs a positive magnitude and duration (got {} for \
+                 {}s)",
+                on_use.magnitude, on_use.duration
+            ));
+        }
+        if let OnUseCooldown::Seconds(s) = on_use.cooldown {
+            if s < on_use.duration {
+                return Err(format!(
+                    "{item_name}: on_use cooldown {s} is shorter than its buff's duration {} — \
+                     a use while the buff is up would be wasted",
+                    on_use.duration
+                ));
+            }
+        }
+        if let Some(hot) = on_use.heal_over_time {
+            if hot.heal_per_tick <= 0.0
+                || hot.tick_interval <= 0.0
+                || hot.tick_interval > on_use.duration
+            {
+                return Err(format!(
+                    "{item_name}: on_use heal over time needs a positive heal and a tick \
+                     interval within the buff's {}s (got {} every {}s)",
+                    on_use.duration, hot.heal_per_tick, hot.tick_interval
+                ));
+            }
+        }
+    } else if on_use.magnitude != 0.0 || on_use.duration != 0.0 || on_use.heal_over_time.is_some() {
+        return Err(format!(
+            "{item_name}: on_use effect {:?} has no magnitude, duration or heal over time — \
+             leave them out",
+            on_use.effect
+        ));
     }
     match (on_use.effect.needs_declared_price(), on_use.price) {
         (true, None) => Err(format!(
@@ -277,6 +457,16 @@ impl OnUseSlot {
     }
 }
 
+/// Whether `item` is one of `slots` whose use grants a BUFF: an aura the
+/// item lands because its wearer USED it, not because it procced.
+/// `apply_pending_auras` asks it, so an on-use buff does not log the `procs`
+/// line a proc-rate count reads.
+pub fn grants_buff(slots: &[OnUseSlot], item: ItemId) -> bool {
+    slots
+        .iter()
+        .any(|slot| slot.item == item && slot.config.buff().is_some())
+}
+
 /// Tick every equipped on-use's cooldown down by `dt`. Called from
 /// `regenerate_resources`, beside the proc cooldown tick it mirrors.
 pub fn tick_on_use_cooldowns(slots: &mut [OnUseSlot], dt: f32) {
@@ -294,12 +484,29 @@ pub struct OnUsePending {
     pub wearer: Entity,
     pub item: ItemId,
     pub item_name: String,
-    pub effect: OnUseEffect,
+    /// The on-use's declaration: its effect, and a buff's numbers.
+    pub config: OnUseConfig,
 }
 
 // ============================================================================
 // PRESENTATION
 // ============================================================================
+
+/// "+40 spell power", "+20% attack speed": a buff's effect, in its aura's own
+/// units. Exhaustive over the priced effects; falls back to the aura's
+/// mechanic name for the rest, which validation keeps off every item.
+fn buff_phrase(aura: AuraType, magnitude: f32) -> String {
+    match aura {
+        AuraType::AttackPowerIncrease => format!("+{magnitude:.0} attack power"),
+        AuraType::SpellPowerIncrease => format!("+{magnitude:.0} spell power"),
+        AuraType::CritChanceIncrease => format!("+{:.0}% crit chance", magnitude * 100.0),
+        AuraType::ManaRegenIncrease => format!("+{magnitude:.0} mana per second"),
+        AuraType::MaxHealthIncrease => format!("+{magnitude:.0} maximum health"),
+        AuraType::MaxManaIncrease => format!("+{magnitude:.0} maximum mana"),
+        AuraType::AttackSpeedIncrease => format!("+{:.0}% attack speed", magnitude * 100.0),
+        other => format!("{} ({magnitude:.0})", other.display_name()),
+    }
+}
 
 /// The player-facing sentence for an on-use, shared by every surface that
 /// shows the item, so they cannot drift.
@@ -313,6 +520,21 @@ pub fn on_use_sentence(on_use: &OnUseConfig) -> String {
     let effect = match on_use.effect {
         OnUseEffect::CcBreak => {
             "Breaks every stun, fear, polymorph, incapacitate, cyclone, root and slow on you"
+                .to_string()
+        }
+        OnUseEffect::Buff(aura) => {
+            let buff = format!(
+                "Grants {} for {:.0}s",
+                buff_phrase(aura, on_use.magnitude),
+                on_use.duration
+            );
+            match on_use.heal_over_time {
+                Some(hot) => format!(
+                    "{buff}, and heals you for {:.0} every {:.0}s while it lasts",
+                    hot.heal_per_tick, hot.tick_interval
+                ),
+                None => buff,
+            }
         }
     };
     let cooldown = match on_use.cooldown {
@@ -332,7 +554,235 @@ mod tests {
             effect: OnUseEffect::CcBreak,
             cooldown,
             price,
+            magnitude: 0.0,
+            duration: 0.0,
+            heal_over_time: None,
         }
+    }
+
+    fn buff(aura: AuraType, magnitude: f32, duration: f32, cooldown: OnUseCooldown) -> OnUseConfig {
+        OnUseConfig {
+            effect: OnUseEffect::Buff(aura),
+            cooldown,
+            price: None,
+            magnitude,
+            duration,
+            heal_over_time: None,
+        }
+    }
+
+    #[test]
+    fn a_buff_is_priced_at_its_stat_weight_over_its_uses_in_a_life() {
+        use crate::states::play_match::constants::{WEIGHT_ATTACK_POWER, WEIGHT_ATTACK_SPEED};
+        let talisman = buff(
+            AuraType::SpellPowerIncrease,
+            40.0,
+            15.0,
+            OnUseCooldown::Seconds(45.0),
+        );
+        let expected =
+            on_use_buff_cost(WEIGHT_SPELL_POWER, 40.0, 15.0, OnUseCooldown::Seconds(45.0));
+        assert_eq!(talisman.budget_cost(), expected);
+        assert!((expected - 23.81).abs() < 0.01, "{expected}");
+        // Each term moves the price: the stat's weight, the magnitude, the
+        // duration and the cooldown's uses.
+        let ap = buff(
+            AuraType::AttackPowerIncrease,
+            40.0,
+            15.0,
+            OnUseCooldown::Seconds(45.0),
+        );
+        assert_eq!(WEIGHT_ATTACK_POWER, WEIGHT_SPELL_POWER);
+        assert_eq!(ap.budget_cost(), talisman.budget_cost());
+        let haste = buff(
+            AuraType::AttackSpeedIncrease,
+            0.2,
+            15.0,
+            OnUseCooldown::Seconds(60.0),
+        );
+        assert!((haste.budget_cost() - WEIGHT_ATTACK_SPEED * 0.2 * 15.0 / 37.8).abs() < 1e-4);
+        assert!(
+            buff(
+                AuraType::SpellPowerIncrease,
+                80.0,
+                15.0,
+                OnUseCooldown::Seconds(45.0)
+            )
+            .budget_cost()
+                > talisman.budget_cost()
+        );
+        assert!(
+            buff(
+                AuraType::SpellPowerIncrease,
+                40.0,
+                20.0,
+                OnUseCooldown::Seconds(45.0)
+            )
+            .budget_cost()
+                > talisman.budget_cost()
+        );
+        assert!(
+            buff(
+                AuraType::SpellPowerIncrease,
+                40.0,
+                15.0,
+                OnUseCooldown::Seconds(30.0)
+            )
+            .budget_cost()
+                > talisman.budget_cost()
+        );
+    }
+
+    #[test]
+    fn a_heal_over_time_is_priced_at_the_health_it_heals_in_a_life() {
+        // 4 every 5s for 30s, once: 24 health, at 1.0 a point.
+        let mut flask = buff(
+            AuraType::AttackPowerIncrease,
+            20.0,
+            30.0,
+            OnUseCooldown::OncePerMatch,
+        );
+        let bare = flask.budget_cost();
+        flask.heal_over_time = Some(OnUseHot {
+            heal_per_tick: 4.0,
+            tick_interval: 5.0,
+        });
+        assert!((on_use_heal_cost(0.8, 30.0, OnUseCooldown::OncePerMatch) - 24.0).abs() < 1e-4);
+        assert!(
+            (flask.budget_cost() - bare - 24.0).abs() < 1e-4,
+            "{}",
+            flask.budget_cost()
+        );
+        // A heal outlasting the life is charged only what lands inside it.
+        assert!((on_use_heal_cost(1.0, 60.0, OnUseCooldown::OncePerMatch) - 37.8).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_buff_validates_its_shape() {
+        let ok = buff(
+            AuraType::SpellPowerIncrease,
+            40.0,
+            15.0,
+            OnUseCooldown::Seconds(45.0),
+        );
+        assert!(validate_on_use("ok", &ok).is_ok());
+        // An unpriceable buff.
+        let mut bad = ok.clone();
+        bad.effect = OnUseEffect::Buff(AuraType::Stun);
+        assert!(validate_on_use("stun", &bad)
+            .unwrap_err()
+            .contains("no budget price"));
+        // No magnitude, no duration.
+        let mut bad = ok.clone();
+        bad.magnitude = 0.0;
+        assert!(validate_on_use("flat", &bad).is_err());
+        let mut bad = ok.clone();
+        bad.duration = 0.0;
+        assert!(validate_on_use("instant", &bad).is_err());
+        // A cooldown shorter than the buff.
+        let mut bad = ok.clone();
+        bad.cooldown = OnUseCooldown::Seconds(10.0);
+        assert!(validate_on_use("overlap", &bad)
+            .unwrap_err()
+            .contains("shorter"));
+        // A buff may not declare a price.
+        let mut bad = ok.clone();
+        bad.price = Some(5.0);
+        assert!(validate_on_use("priced", &bad).is_err());
+        // A heal over time needs a heal and a tick inside the buff.
+        let mut hot = ok.clone();
+        hot.heal_over_time = Some(OnUseHot {
+            heal_per_tick: 4.0,
+            tick_interval: 5.0,
+        });
+        assert!(validate_on_use("hot", &hot).is_ok());
+        hot.heal_over_time = Some(OnUseHot {
+            heal_per_tick: 4.0,
+            tick_interval: 20.0,
+        });
+        assert!(validate_on_use("slow hot", &hot).is_err());
+        hot.heal_over_time = Some(OnUseHot {
+            heal_per_tick: 0.0,
+            tick_interval: 5.0,
+        });
+        assert!(validate_on_use("empty hot", &hot).is_err());
+        // A break carries none of a buff's numbers.
+        let mut bad = cc_break(OnUseCooldown::OncePerMatch, Some(30.0));
+        bad.duration = 5.0;
+        assert!(validate_on_use("break", &bad).is_err());
+    }
+
+    #[test]
+    fn a_buff_lands_as_an_undispellable_item_aura_and_its_heal_beside_it() {
+        let wearer = Entity::from_raw(3);
+        let mut flask = buff(
+            AuraType::AttackPowerIncrease,
+            20.0,
+            30.0,
+            OnUseCooldown::OncePerMatch,
+        );
+        assert!(flask
+            .heal_aura(ItemId::DiamondFlask, "Diamond Flask", wearer)
+            .is_none());
+        flask.heal_over_time = Some(OnUseHot {
+            heal_per_tick: 4.0,
+            tick_interval: 5.0,
+        });
+        let aura = flask.aura(ItemId::DiamondFlask, "Diamond Flask");
+        assert_eq!(aura.effect_type, AuraType::AttackPowerIncrease);
+        assert_eq!((aura.magnitude, aura.duration), (20.0, 30.0));
+        assert_eq!(aura.dispel_type, DispelType::Physical);
+        assert_eq!(aura.source_item, Some(ItemId::DiamondFlask));
+        assert_eq!(aura.break_on_damage_threshold, -1.0);
+        assert!(!aura.can_be_dispelled());
+        let heal = flask
+            .heal_aura(ItemId::DiamondFlask, "Diamond Flask", wearer)
+            .expect("the Flask heals");
+        assert_eq!(heal.effect_type, AuraType::HealingOverTime);
+        assert_eq!((heal.magnitude, heal.duration), (4.0, 30.0));
+        assert_eq!((heal.tick_interval, heal.time_until_next_tick), (5.0, 5.0));
+        assert_eq!(heal.caster, Some(wearer));
+        assert_eq!(heal.dispel_type, DispelType::Physical);
+        assert_eq!(heal.source_item, Some(ItemId::DiamondFlask));
+        // The two coexist: same item, different effects.
+        assert!(!heal.same_source_as(&aura));
+    }
+
+    #[test]
+    fn a_buff_describes_its_stat_its_heal_and_its_cooldown() {
+        assert_eq!(
+            on_use_description(&buff(
+                AuraType::SpellPowerIncrease,
+                40.0,
+                15.0,
+                OnUseCooldown::Seconds(45.0)
+            )),
+            "Use: Grants +40 spell power for 15s. 45s cooldown."
+        );
+        assert_eq!(
+            on_use_description(&buff(
+                AuraType::AttackSpeedIncrease,
+                0.2,
+                15.0,
+                OnUseCooldown::Seconds(60.0)
+            )),
+            "Use: Grants +20% attack speed for 15s. 60s cooldown."
+        );
+        let mut flask = buff(
+            AuraType::AttackPowerIncrease,
+            20.0,
+            30.0,
+            OnUseCooldown::OncePerMatch,
+        );
+        flask.heal_over_time = Some(OnUseHot {
+            heal_per_tick: 4.0,
+            tick_interval: 5.0,
+        });
+        assert_eq!(
+            on_use_description(&flask),
+            "Use: Grants +20 attack power for 30s, and heals you for 4 every 5s while it \
+             lasts. Once per match."
+        );
     }
 
     #[test]
