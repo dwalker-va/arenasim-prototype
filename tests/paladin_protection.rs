@@ -452,7 +452,7 @@ fn the_protection_tree_is_as_specified() {
     );
     assert_eq!(
         talents.get(SacredDuty).unwrap().per_rank,
-        vec![TalentEffect::StatPercent(TalentStat::MaxHealth, 0.024554)]
+        vec![TalentEffect::StatPercent(TalentStat::MaxHealth, 0.03)]
     );
     assert_eq!(
         talents.get(Toughness).unwrap().per_rank,

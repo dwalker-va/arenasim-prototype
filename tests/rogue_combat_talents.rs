@@ -24,11 +24,10 @@ use arenasim::states::play_match::class_ai::rogue::{expose_armor_gain, EXPOSE_AR
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::{Aura, AuraType, Combatant, Pet};
 use arenasim::states::play_match::decision_trace::RejectionReason;
-use arenasim::states::play_match::equipment::{load_default_loadouts, load_item_definitions};
 use arenasim::states::play_match::situation::{Play, PlaySet, CHAIN};
 use arenasim::states::play_match::talents::{
     AbilityField, Build, PatchOp, PatchTarget, TalentDefinitions, TalentEffect, TalentId,
-    TalentStat, TreeId, RANK_PRICE,
+    TalentStat, TreeId,
 };
 use arenasim::states::play_match::AbilityType;
 use bevy::prelude::*;
@@ -40,8 +39,8 @@ use TalentId::*;
 // ---------------------------------------------------------------------------
 
 /// Every Combat node as the card writes it: its place, its ranks, what a
-/// rank does, its declared price and its prerequisite. Vitality's fraction is
-/// the one that prices it at exactly a rank, and is held to that below.
+/// rank does, its declared price and its prerequisite. Vitality's price is
+/// computed, so it declares none.
 #[test]
 fn the_combat_tree_is_as_specified() {
     let talents = TalentDefinitions::shipped();
@@ -160,16 +159,7 @@ fn the_combat_tree_is_as_specified() {
         ),
         (2, 1, 1, None)
     );
-    let items = load_item_definitions().unwrap();
-    let loadouts = load_default_loadouts(&items).unwrap();
-    let reference = talents
-        .reference_combatant(Rogue, abilities(), &items, &loadouts)
-        .unwrap();
-    let price = talents.rank_price(Vitality, Some(&reference)).unwrap();
-    assert!(
-        (price - RANK_PRICE).abs() < 1e-3,
-        "Vitality prices at {price}, not a rank"
-    );
+    assert_eq!(vitality.per_rank, stat(TalentStat::MaxHealth, 0.05));
 }
 
 fn abilities() -> &'static arenasim::states::play_match::ability_config::AbilityDefinitions {
