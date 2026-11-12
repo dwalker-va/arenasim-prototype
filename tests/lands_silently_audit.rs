@@ -696,6 +696,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     DivineProtection,
     DivineShield,
     EarthTotem,
+    ExposeArmor,
     FireTotem,
     FrostArmor,
     IceBarrier,
@@ -820,6 +821,8 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (RetributionAura, "AS-374 (Retribution Aura rune disc)"),
     (SacredShield, "AS-375 (Sacred Shield disc and absorb card)"),
     (DivineProtection, "AS-376 (Divine Protection globe)"),
+    // The Combat capstone's armor rend on its target.
+    (ExposeArmor, "AS-366 (Expose Armor)"),
 ];
 
 #[test]

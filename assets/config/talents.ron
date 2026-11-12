@@ -13,11 +13,16 @@
 //     effect kind: two ranks of +3% are +6%, and two ranks of Mul(1.15) scale
 //     by 1.30 (10 -> 11.5 -> 13), never compound.
 //       StatPercent(stat, fraction)     a percentage of the combatant's total,
-//                                       gear included
+//                                       gear included; for a chance or haste
+//                                       every class has at 0 (DodgeChance,
+//                                       ParryChance, MeleeAttackSpeed), the
+//                                       fraction added in points
 //       PetStatPercent(stat, fraction)  the same, on the combatant's pet
 //       Patch(on: Ability(X) | School(S), field: <AbilityField>, op: Add(n) | Mul(n))
 //                                       rewrites a numeric field of its
-//                                       book's configs; adds before multiplies
+//                                       book's configs; adds before multiplies.
+//                                       `Damage` is the base range and the
+//                                       coefficient together (Mul only)
 //       Grant(X)                        adds the `talent: true` ability X
 //       Proc((trigger: .., chance: Chance(c) | PerMinute(r), ranks_add: Chance | Effect,
 //             effect: ApplyAura(..) | NextCast(..) | HealBack(..)))
@@ -46,6 +51,9 @@
     trees: {
         Warlock: [
             (id: Demonology, name: "Demonology", icon: "icons/talents/spell_shadow_metamorphosis.jpg"),
+        ],
+        Rogue: [
+            (id: Combat, name: "Combat", icon: "icons/talents/ability_backstab.jpg"),
         ],
         Paladin: [
             (id: Protection, name: "Protection", icon: "icons/talents/spell_holy_devotionaura.jpg"),
@@ -81,6 +89,84 @@
             budget: Some(11.0),
             // Felhunter melee +10% a rank.
             per_rank: [PetStatPercent(WeaponDamage, 0.10)],
+        ),
+
+        // ---- Rogue: Combat (AS-418) ----
+        // The anti-melee specialist: avoidance, melee haste, and a capstone
+        // that opens an armored target up. Dodge, parry and melee haste carry
+        // no item-budget weight, so their nodes declare a rank's price.
+        // Values provisional: tuning is the milestone sweep's (AS-302).
+        LightningReflexes: (
+            name: "Lightning Reflexes",
+            class: Rogue, tree: Combat, tier: 1, column: 0,
+            icon: "icons/talents/spell_nature_invisibilty.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // +4% dodge chance a rank, in points: 0 -> 4% -> 8%.
+            per_rank: [StatPercent(DodgeChance, 0.04)],
+        ),
+        DualWieldSpecialization: (
+            name: "Dual Wield Specialization",
+            class: Rogue, tree: Combat, tier: 1, column: 2,
+            icon: "icons/talents/ability_dualwield.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Off-hand weapon damage +10% a rank.
+            per_rank: [StatPercent(OffHandDamage, 0.10)],
+        ),
+        Aggression: (
+            name: "Aggression",
+            class: Rogue, tree: Combat, tier: 2, column: 0,
+            icon: "icons/talents/ability_racial_avatar.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Sinister Strike damage +6% a rank.
+            per_rank: [Patch(on: Ability(SinisterStrike), field: Damage, op: Mul(1.06))],
+        ),
+        Vitality: (
+            name: "Vitality",
+            class: Rogue, tree: Combat, tier: 2, column: 1,
+            icon: "icons/talents/ability_warrior_revenge.jpg",
+            max_rank: 1,
+            // About +2.8% maximum health, gear included: 396 -> 407 at the
+            // reference Rogue. Its price is computed there, and the fraction
+            // is the one that prices it at exactly a rank (11 / 396): a tree
+            // with a capstone holds every legal build within one rank only if
+            // each rank costs 11.
+            per_rank: [StatPercent(MaxHealth, 0.027778)],
+        ),
+        Deflection: (
+            name: "Deflection",
+            class: Rogue, tree: Combat, tier: 2, column: 2,
+            icon: "icons/talents/ability_parry.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // +4% parry chance a rank, in points: 0 -> 4% -> 8%. The Rogue is
+            // the first class that can parry.
+            per_rank: [StatPercent(ParryChance, 0.04)],
+        ),
+        SwiftBlades: (
+            name: "Swift Blades",
+            class: Rogue, tree: Combat, tier: 3, column: 1,
+            icon: "icons/talents/ability_warrior_punishingblow.jpg",
+            max_rank: 1,
+            // A declared rank, not `WEIGHT_ATTACK_SPEED` (which prices haste
+            // procs on items).
+            budget: Some(11.0),
+            // +10% melee attack speed: both hands swing 10% faster; a bow or
+            // a wand would not.
+            per_rank: [StatPercent(MeleeAttackSpeed, 0.10)],
+        ),
+        ExposeArmor: (
+            name: "Expose Armor",
+            class: Rogue, tree: Combat, tier: 4, column: 1,
+            icon: "icons/talents/ability_warrior_riposte.jpg",
+            max_rank: 1,
+            budget: Some(22.0),
+            requires: Some((SwiftBlades, 1)),
+            // Removes 50% of the target's armor for 15s: 25 energy, 20s
+            // cooldown.
+            per_rank: [Grant(ExposeArmor)],
         ),
 
         // ---- Paladin: Protection (AS-421) ----
@@ -175,6 +261,11 @@
             Head: ArcanistCrown,
             Chest: ArcanistRobes,
             Legs: ArcanistLeggings,
+        },
+        Rogue: {
+            Head: DeathdealerCowl,
+            Chest: DeathdealerTunic,
+            Legs: DeathdealerLegs,
         },
         Paladin: {
             Head: JudgementCrown,

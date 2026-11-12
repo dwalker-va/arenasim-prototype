@@ -240,6 +240,7 @@ pub enum AbilityType {
     // the enum's derived `Ord` keys every `BTreeMap<AbilityType, _>`, so a
     // variant inserted mid-list would reorder what existing ones iterate.
     ShadowWordPain, // Priest instant Shadow DoT
+    ExposeArmor,    // Rogue Combat capstone (talent): halves the target's armor
     // Paladin: the Protection tree (AS-421). Appended for the same reason.
     DivineProtection,    // talent: the Paladin takes 30% less damage for 8s
     BlessingOfSacrifice, // talent: 30% of an ally's damage goes to the Paladin for 12s
@@ -262,7 +263,7 @@ impl AbilityType {
             // Weapon strikes, at melee range. Heroic Strike rides the next
             // auto-attack swing, so it is rolled where that swing is.
             HeroicStrike | MortalStrike | Rend | Pummel | Ambush | CheapShot | SinisterStrike
-            | KidneyShot | Kick => true,
+            | KidneyShot | Kick | ExposeArmor => true,
             // A charge closes the gap; what it lands on arrival is not a
             // weapon strike, and it is cast from 25 yards.
             Charge | BoarCharge => false,
