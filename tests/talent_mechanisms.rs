@@ -42,8 +42,22 @@ fn config(team1: &[&str], team2: &[&str], secs: f32) -> HeadlessMatchConfig {
         team2: team2.iter().map(|s| s.to_string()).collect(),
         random_seed: Some(7),
         max_duration_secs: secs,
+        team1_equipment: proc_free_trinkets(team1.len()),
+        team2_equipment: proc_free_trinkets(team2.len()),
         ..Default::default()
     }
+}
+
+/// Both trinket sockets of every member filled with the starting kit's two
+/// stats-only trinkets. The mechanisms here are read off the combat log —
+/// "procs" lines, crits, heals — so no unit may carry a proc trinket of its
+/// own, whatever the default loadouts put in its trinket sockets.
+fn proc_free_trinkets(members: usize) -> Vec<std::collections::HashMap<String, String>> {
+    let sockets = std::collections::HashMap::from([
+        ("Trinket1".to_string(), "MarkOfTheChampion".to_string()),
+        ("Trinket2".to_string(), "EssenceOfEternalLife".to_string()),
+    ]);
+    vec![sockets; members]
 }
 
 /// The combat log's lines that contain `needle`.
@@ -1201,10 +1215,7 @@ fn a_crit_taken_heal_back_reads_the_damage_past_a_triggered_absorb() {
         name: Some("Blessed Recovery".to_string()),
     };
     let mut cfg = config(&["Warrior"], &["Priest"], 40.0);
-    cfg.team2_equipment = vec![std::collections::HashMap::from([(
-        "Trinket1".to_string(),
-        "AegisOfTheLastStand".to_string(),
-    )])];
+    cfg.team2_equipment[0].insert("Trinket1".to_string(), "AegisOfTheLastStand".to_string());
     let held = Aura {
         effect_type: AuraType::Silence,
         duration: 300.0,
@@ -1457,6 +1468,31 @@ fn only(stage: Stage, who: Unit, keep: AbilityType) -> Stage {
         .fold(stage, |s, a| s.cooldown(who, *a, 1000.0))
 }
 
+/// A silence held for the whole match.
+fn held_silenced() -> Aura {
+    Aura {
+        effect_type: AuraType::Silence,
+        duration: 300.0,
+        magnitude: 1.0,
+        ability_name: "Held".to_string(),
+        break_on_damage_threshold: -1.0,
+        ..Default::default()
+    }
+}
+
+/// Drain Life owed by `warlock` to `target` from the gates on, by
+/// construction: it channels only below 80% health on a target carrying a
+/// DoT, below its Immolate and its Fear. So the target carries the
+/// Warlock's Immolate (a FIRE DoT, which no Shadow leech reads), and the
+/// Immolate recast and the Fear are held on cooldown. The Warlock's own
+/// health, and a target that cannot dispel the Immolate, are the caller's.
+fn drain_life_owed(stage: Stage, warlock: Unit, target: Unit) -> Stage {
+    stage
+        .cooldown(warlock, AbilityType::Immolate, 1000.0)
+        .cooldown(warlock, AbilityType::Fear, 1000.0)
+        .land(target, AbilityType::Immolate, warlock)
+}
+
 /// A Vampiric Embrace from `caster` on `bearer`.
 fn embrace(stage: Stage, caster: Unit, bearer: Unit, school: SpellSchool) -> Stage {
     stage.world(move |w| {
@@ -1495,14 +1531,17 @@ fn every_damage_site_feeds_a_caster_school_leech() {
         AbilityType::Corruption,
         AbilityType::DrainLife,
     ] {
-        let stage = embrace(
-            only(Stage::new(), T1, keep)
-                .health(T1, 0.5)
-                .health(PET1, 0.5),
-            T1,
-            T2,
-            SpellSchool::Shadow,
-        );
+        // The Priest bare (no pre-match shield to eat a tick whole) and held
+        // silenced, so it can neither shield, dispel nor heal what lands.
+        let mut stage = only(Stage::new(), T1, keep)
+            .health(T1, 0.5)
+            .health(PET1, 0.5)
+            .clear_auras(T2)
+            .aura(T2, held_silenced());
+        if keep == AbilityType::DrainLife {
+            stage = drain_life_owed(stage, T1, T2);
+        }
+        let stage = embrace(stage, T1, T2, SpellSchool::Shadow);
         let played = play(config(&["Warlock"], &["Priest"], 30.0), stage);
         let shadow = match keep {
             AbilityType::Shadowbolt => "Shadow Bolt",
@@ -2033,7 +2072,13 @@ fn a_hunters_melee_hand_procs_at_its_melee_weapons_speed() {
             )
             .place(T1, 0.0, 0.0)
             .place(T2, 1.5, 0.0)
-            .target(T1, T2),
+            .target(T1, T2)
+            // Rooted beside a Warrior, the Hunter must live long enough for
+            // three 4.0s melee swings.
+            .combatant(T1, |c| {
+                c.max_health *= 3.0;
+                c.current_health = c.max_health;
+            }),
     );
     let proc_at: std::collections::BTreeSet<&str> = stamps(&played.log, "Test Talent procs Fury")
         .into_iter()

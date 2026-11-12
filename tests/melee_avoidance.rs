@@ -791,6 +791,15 @@ fn a_swing_held_off_a_friendly_fear_is_not_avoided() {
 /// without avoidance, so the evidence was a scratch build of the merged tree
 /// with `roll_avoidance` returning before any draw. Each cell's match log was
 /// byte-identical between that build and the merged tree.
+///
+/// Re-recorded for AS-460, every class's default Trinket2 filled: the proc
+/// trinkets roll on swings, casts and heals, so these matches draw more and
+/// play differently (Warrior+Rogue v Hunter+Priest 102 -> 107, the 3v3
+/// 229 -> 302, Rogue v Warrior 53 -> 65). The evidence is the same: a scratch
+/// build of AS-460's tree with `roll_avoidance` returning before any draw
+/// plays each cell's match log byte-identically to the tree itself, so zero
+/// avoidance still draws exactly what a pre-avoidance build of the same kit
+/// draws. (The logs carry 24 crits, 7 eliminations and six trinket procs.)
 #[test]
 fn a_match_without_avoidance_draws_what_it_drew_before() {
     for (team1, team2, map, profile, seed, recorded) in ZERO_AVOIDANCE_DRAWS {
@@ -826,7 +835,7 @@ const ZERO_AVOIDANCE_DRAWS: &[DrawPin] = &[
         "BasicArena",
         "Legacy",
         11,
-        102,
+        107,
     ),
     (
         &["Rogue", "Warrior", "Paladin"],
@@ -834,9 +843,9 @@ const ZERO_AVOIDANCE_DRAWS: &[DrawPin] = &[
         "PillaredArena",
         "TeamPlan",
         5,
-        229,
+        302,
     ),
-    (&["Rogue"], &["Warrior"], "BasicArena", "Legacy", 3, 53),
+    (&["Rogue"], &["Warrior"], "BasicArena", "Legacy", 3, 65),
 ];
 
 // ---------------------------------------------------------------------------

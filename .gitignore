@@ -27,6 +27,11 @@ Thumbs.db
 # Match logs (for debugging)
 match_logs/
 
+# The client's saved options and keybindings. A checkout keeps them here
+# (`paths::settings_path`); with no file the client starts on
+# `GameSettings::default()`, so there is nothing to track.
+/settings.ron
+
 # PM-session handoff outbox (working files, not repo content — see docs/design/agent-pipeline.md)
 .claude/pm-outbox/
 

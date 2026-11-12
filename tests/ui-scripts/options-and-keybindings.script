@@ -4,10 +4,11 @@
 #
 # Run:  cargo run --release -- --ui-script tests/ui-scripts/options-and-keybindings.script
 #
-# Run it at the client's default window (Windowed, 1280 x 720 in settings.ron)
-# as well as at the checked-in size: every control asserted visible below is
-# one a 720p player must reach without scrolling. The script writes
-# settings.ron as it goes (that is the point of a setting); restore it after.
+# Run it at the client's default window (Windowed, 1280 x 720, what a
+# checkout with no settings.ron starts at) as well as fullscreen: every control
+# asserted visible below is one a 720p player must reach without scrolling.
+# The script writes settings.ron as it goes (that is the point of a setting),
+# and ends with every keybinding at its default; the file is untracked.
 #
 # `options window=... vsync=...` and `keybind <Action> primary=... secondary=...`
 # are noted by the screens as they draw, so every value is read back off the
