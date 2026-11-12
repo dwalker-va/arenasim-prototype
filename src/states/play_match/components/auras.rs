@@ -1,7 +1,10 @@
 use super::super::abilities::SpellSchool;
 use super::super::ability_config::AbilityConfig;
+use super::super::combat_core::leech::Leech;
 use super::super::constants::{DR_IMMUNE_LEVEL, DR_MULTIPLIERS, DR_RESET_TIMER};
 use super::super::equipment::ItemId;
+use super::super::next_cast::NextCastModifier;
+use super::super::talents::TalentId;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -140,6 +143,12 @@ pub enum AuraType {
     /// Dragonspine Trophy grants, speeds melee and ranged attacks alike.
     /// Used by the Dragonspine Trophy's proc.
     AttackSpeedIncrease,
+    /// A NEXT-CAST MODIFIER: the holder's next cast of an ability it covers is
+    /// changed — instant, free, a sure crit, faster, cheaper or stronger — and
+    /// spends the aura (`next_cast.rs`). The change is [`Aura::next_cast`];
+    /// magnitude unused (1.0 by convention). Shadow Trance, Divine Favor,
+    /// Inner Focus and the rest of the talents' "your next X" effects.
+    NextCast,
     /// The holder takes MORE damage: a fraction (magnitude = increase per
     /// stack, e.g. 0.10 = 10% more), within the aura's [`DamageScope`]
     /// (`Aura::damage_mods`; none = every school). May stack (`stacking`) and
@@ -387,7 +396,7 @@ impl AuraType {
     /// DOES cost is coverage: a guard that sweeps `ALL` quietly stops covering
     /// whatever `ALL` forgot, while still reading like a whole-enum sweep.
     /// `aura_type_tests::all_lists_every_aura_type` is what stops that.
-    pub const ALL: [AuraType; 43] = [
+    pub const ALL: [AuraType; 44] = [
         AuraType::MovementSpeedSlow,
         AuraType::Root,
         AuraType::Stun,
@@ -424,6 +433,7 @@ impl AuraType {
         AuraType::Cyclone,
         AuraType::TravelForm,
         AuraType::AttackSpeedIncrease,
+        AuraType::NextCast,
         AuraType::DamageTakenIncrease,
         AuraType::DamageDealtIncrease,
         AuraType::ArmorPercentIncrease,
@@ -464,6 +474,7 @@ impl AuraType {
             AuraType::AttackPowerReduction => "Attack Power Reduction",
             AuraType::AttackSpeedSlow => "Attack Speed Slow",
             AuraType::AttackSpeedIncrease => "Haste",
+            AuraType::NextCast => "Next Cast",
             AuraType::Absorb => "Absorb Shield",
             AuraType::DamageTakenReduction => "Damage Reduction",
             AuraType::DamageImmunity => "Damage Immunity",
@@ -548,6 +559,9 @@ impl AuraType {
             AuraType::AttackSpeedSlow => "Slows how often the target swings its weapon.",
             AuraType::AttackSpeedIncrease => {
                 "Speeds up the holder's attacks, melee and ranged alike."
+            }
+            AuraType::NextCast => {
+                "Changes the holder's next cast of the abilities it names, and is spent by it."
             }
             AuraType::Absorb => {
                 "Soaks incoming damage until the shield is spent or expires. Absorbed damage never \
@@ -737,6 +751,7 @@ impl AuraType {
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
             | AuraType::AttackSpeedIncrease
+            | AuraType::NextCast
             | AuraType::DamageDealtIncrease
             | AuraType::ArmorPercentIncrease
             | AuraType::DamageTransfer
@@ -812,6 +827,7 @@ impl AuraType {
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
             | AuraType::AttackSpeedIncrease
+            | AuraType::NextCast
             | AuraType::DamageDealtIncrease
             | AuraType::ArmorPercentIncrease
             | AuraType::DamageTransfer
@@ -1012,6 +1028,19 @@ pub struct Aura {
     /// application, like `backlash_damage`. `None` for every aura that does
     /// not bloom.
     pub bloom: Option<f32>,
+    /// The TALENT that applied this aura, when a talent's proc rather than an
+    /// ability or an item did (`talent_procs.rs`). `None` for every other
+    /// aura. The talent counterpart of [`Aura::source_item`]: the buff bar,
+    /// the team frames and the encyclopedia draw the talent's icon from it,
+    /// and it makes the aura [`Aura::distinct_by_source`].
+    pub source_talent: Option<TalentId>,
+    /// What a [`AuraType::NextCast`] aura does to its holder's next matching
+    /// cast (`next_cast.rs`). `None` on every other aura.
+    pub next_cast: Option<NextCastModifier>,
+    /// The LEECH this aura carries (`combat_core/leech.rs`): a share of the
+    /// damage its caster deals heals the caster or the caster's party. Copied
+    /// from its ability's `applies_aura` block; `None` on every other aura.
+    pub leech: Option<Leech>,
 }
 
 /// How many times a STACKING aura has been applied, and how many it can hold.
@@ -1131,8 +1160,15 @@ impl Aura {
     /// `true` as well for a STACKING aura ([`AuraStacks`]), for the same
     /// reason: a Druid's Rejuvenation is not a Shaman's Healing Stream, and a
     /// target may be healed by both.
+    ///
+    /// `true` for a TALENT's proc buff ([`Aura::source_talent`]), as for an
+    /// item's, and for every [`AuraType::NextCast`]: Shadow Trance and
+    /// Infusion of Light prime different casts and are both up at once.
     pub fn distinct_by_source(&self) -> bool {
-        self.source_item.is_some() || self.stacks.is_some()
+        self.source_item.is_some()
+            || self.source_talent.is_some()
+            || self.stacks.is_some()
+            || self.effect_type == AuraType::NextCast
     }
 
     /// The caster this aura's identity includes: its caster when it is a
@@ -1420,6 +1456,7 @@ impl Aura {
             | AuraType::SpellResistanceBuff
             | AuraType::ArmorIncrease
             | AuraType::AttackSpeedIncrease
+            | AuraType::NextCast
             | AuraType::DamageDealtIncrease
             | AuraType::ArmorPercentIncrease
             | AuraType::DamageTransfer
@@ -1724,6 +1761,9 @@ impl AuraPending {
                 // See `CompoundDebuff`.
                 compound: aura_effect.compound,
                 source_item: None,
+                source_talent: None,
+                next_cast: aura_effect.next_cast.clone(),
+                leech: aura_effect.leech,
                 stacks: aura_effect.stacking.map(|stacking| {
                     AuraStacks::new(
                         stacking.max_stacks,
@@ -1783,6 +1823,9 @@ impl AuraPending {
                 // `CompoundDebuff`.
                 compound: aura_effect.compound,
                 source_item: None,
+                source_talent: None,
+                next_cast: aura_effect.next_cast.clone(),
+                leech: aura_effect.leech,
                 stacks: aura_effect.stacking.map(|stacking| {
                     AuraStacks::new(
                         stacking.max_stacks,
@@ -1841,6 +1884,9 @@ impl AuraPending {
                 // `CompoundDebuff`.
                 compound: aura_effect.compound,
                 source_item: None,
+                source_talent: None,
+                next_cast: aura_effect.next_cast.clone(),
+                leech: aura_effect.leech,
                 stacks: aura_effect.stacking.map(|stacking| {
                     AuraStacks::new(
                         stacking.max_stacks,
@@ -2013,6 +2059,7 @@ impl DRCategory {
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
             | AuraType::AttackSpeedIncrease
+            | AuraType::NextCast
             | AuraType::DamageDealtIncrease
             | AuraType::ArmorPercentIncrease
             | AuraType::DamageTransfer
@@ -2214,6 +2261,9 @@ mod compound_tests {
             duration: 5.0,
             compound: Some(CompoundDebuff::FrostArmorChill),
             source_item: None,
+            source_talent: None,
+            next_cast: None,
+            leech: None,
             stacks: None,
             bloom: None,
             ..Default::default()
@@ -2503,6 +2553,7 @@ mod tests {
             AuraType::SpellResistanceBuff,
             AuraType::ArmorIncrease,
             AuraType::AttackSpeedIncrease,
+            AuraType::NextCast,
         ] {
             assert!(
                 aura(ty).can_be_purged(),

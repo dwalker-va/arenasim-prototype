@@ -81,6 +81,7 @@ pub use super::totems::totem_pulse_system;
 pub use super::combat_core::combat_auto_attack;
 pub use super::combat_core::process_damage_follow_ups;
 pub use super::combat_core::resolve_melee_avoidances;
+pub use super::talent_procs::resolve_talent_procs;
 pub use super::triggered_absorbs::fire_triggered_absorbs;
 
 // === Decision Trace ===
@@ -194,6 +195,9 @@ pub fn add_core_combat_systems<M, N>(
     // Initialize DecisionTrace resource (idempotent — safe to call from both
     // headless and graphical setup paths).
     app.init_resource::<super::decision_trace::DecisionTrace>();
+    // The frame's talent proc events (`talent_procs.rs`), drained at the end
+    // of Phase 3. Empty in every match without a talent proc.
+    app.init_resource::<super::talent_procs::TalentProcEvents>();
 
     // Phase 1: Resources and Auras
     app.add_systems(
@@ -332,6 +336,12 @@ pub fn add_core_combat_systems<M, N>(
             // health threshold raises (Aegis of the Last Stand) is up for all
             // of the next frame's damage. A no-op for a combatant carrying none.
             fire_triggered_absorbs,
+            // Every talent proc event pushed this frame (by the phases above,
+            // through their commands) rolled at one site, in event order.
+            // AFTER a flush, so the pushes queued by `combat_auto_attack` are
+            // in. Draws nothing in a match without a talent proc.
+            ApplyDeferred,
+            resolve_talent_procs,
             flush_decision_trace_system.run_if(decide),
         )
             .chain()

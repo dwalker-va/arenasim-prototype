@@ -1196,6 +1196,7 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         | AuraType::ArmorIncrease
         | AuraType::FearImmunity
         | AuraType::AttackSpeedIncrease
+        | AuraType::NextCast
         | AuraType::DamageDealtIncrease
         | AuraType::ArmorPercentIncrease
         | AuraType::DamageTransfer
@@ -1438,6 +1439,9 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         AuraType::AttackPowerIncrease => 60,
         AuraType::SpellPowerIncrease => 60,
         AuraType::AttackSpeedIncrease => 60,
+        // A primed next cast (Shadow Trance, Divine Favor): a burst or a save
+        // in waiting.
+        AuraType::NextCast => 60,
         AuraType::DamageDealtIncrease => 60,
         AuraType::WindfuryBuff => 55,
         AuraType::CritChanceIncrease => 50,
@@ -1542,6 +1546,7 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
         | AuraType::AttackSpeedIncrease
+        | AuraType::NextCast
         | AuraType::DamageTakenIncrease
         | AuraType::DamageDealtIncrease
         | AuraType::ArmorPercentIncrease
@@ -1641,6 +1646,7 @@ pub const fn grants_damage_immunity(aura: AuraType) -> bool {
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
         | AuraType::AttackSpeedIncrease
+        | AuraType::NextCast
         | AuraType::DamageTakenIncrease
         | AuraType::DamageDealtIncrease
         | AuraType::ArmorPercentIncrease

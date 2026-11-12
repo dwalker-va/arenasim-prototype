@@ -13,6 +13,7 @@ use crate::states::play_match::combat_core::{
 };
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
+use crate::states::play_match::talent_procs::{self, ProcEvent, TalentTrigger};
 use crate::states::play_match::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
 
 /// Process pending Holy Shock heals.
@@ -120,6 +121,21 @@ pub fn process_holy_shock_heals(
                 is_crit,
                 message,
             );
+
+            // A critical Holy Shock heal is its Paladin's `HealCrit`.
+            if is_crit {
+                if let Ok((caster, _, _)) = combatants.get(pending.caster) {
+                    talent_procs::push_for(
+                        &mut commands,
+                        &caster.talent_procs,
+                        ProcEvent::new(pending.caster, TalentTrigger::HealCrit)
+                            .ability(AbilityType::HolyShock)
+                            .crit(true)
+                            .amount(actual_heal)
+                            .other(pending.target),
+                    );
+                }
+            }
         }
 
         // Remove the pending heal entity
@@ -140,6 +156,7 @@ pub fn process_holy_shock_damage(
     pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
 ) {
+    let mut hits: Vec<ProcEvent> = Vec::new();
     // What the shocks set off on other units, spawned once they land.
     let mut follow_ups = DamageFollowUps::default();
     for (pending_entity, pending) in pending_damage.iter() {
@@ -273,6 +290,14 @@ pub fn process_holy_shock_damage(
                 ));
             }
 
+            // Its Paladin's `SpellHit` (read after the target's borrow).
+            let hit = ProcEvent::new(pending.caster, TalentTrigger::SpellHit)
+                .ability(AbilityType::HolyShock)
+                .crit(is_crit)
+                .amount(actual_damage)
+                .other(pending.target);
+            hits.push(hit);
+
             // Log damage with caster attribution
             let caster_id = combatant_id(
                 pending.caster_team,
@@ -322,6 +347,11 @@ pub fn process_holy_shock_damage(
 
         // Remove the pending damage entity
         commands.entity(pending_entity).despawn();
+    }
+    for hit in hits {
+        if let Ok((caster, _, _)) = combatants.get(hit.unit) {
+            talent_procs::push_for(&mut commands, &caster.talent_procs, hit);
+        }
     }
     follow_ups.spawn(&mut commands);
 }

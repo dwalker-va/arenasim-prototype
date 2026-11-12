@@ -230,7 +230,9 @@ pub fn load_ability_icons(
             icon_handles.handles.push((key, handle));
         }
         // Talent and talent-tree art, under the keys the talent panel and the
-        // encyclopedia's Talents section ask for.
+        // encyclopedia's Talents section ask for. A talent's proc buff draws
+        // under the same key (`talent_aura_icon_key` equals `talent_icon_key`,
+        // pinned in `encyclopedia::talents`), so this registers its art too.
         for (key, path) in encyclopedia_talents::icon_paths(&talent_definitions) {
             let handle: Handle<Image> = asset_server.load(path);
             icon_handles.handles.push((key, handle));

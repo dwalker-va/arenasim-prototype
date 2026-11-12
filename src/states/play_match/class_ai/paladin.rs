@@ -1110,9 +1110,13 @@ fn try_holy_shock_heal(
     );
 
     commands.spawn(HolyShockHealPending {
-        caster_book: combatant.book().clone(),
+        caster: ctx.self_entity,
+        // The book the decision read: a next-cast modifier Holy Shock spent
+        // is in it, and lands with the pending effect.
+        caster_book: abilities.clone(),
         caster_spell_power: combatant.spell_power,
-        caster_crit_chance: combatant.crit_chance,
+        // Its own crit chance too (a talent's, or a next-cast modifier's).
+        caster_crit_chance: combatant.crit_chance + def.crit_chance,
         caster_team: combatant.team,
         caster_slot: combatant.slot,
         caster_class: combatant.class,
@@ -1217,9 +1221,12 @@ fn try_holy_shock_damage(
 
     commands.spawn(HolyShockDamagePending {
         caster: ctx.self_entity,
-        caster_book: combatant.book().clone(),
+        // The book the decision read: a next-cast modifier Holy Shock spent
+        // is in it, and lands with the pending effect.
+        caster_book: abilities.clone(),
         caster_spell_power: combatant.spell_power,
-        caster_crit_chance: combatant.crit_chance,
+        // Its own crit chance too (a talent's, or a next-cast modifier's).
+        caster_crit_chance: combatant.crit_chance + def.crit_chance,
         caster_team: combatant.team,
         caster_slot: combatant.slot,
         caster_class: combatant.class,
@@ -1548,6 +1555,9 @@ fn cast_hammer_of_justice(
             dispel_type: DispelType::Auto,
             compound: None,
             source_item: None,
+            source_talent: None,
+            next_cast: None,
+            leech: None,
             stacks: None,
             bloom: None,
         };

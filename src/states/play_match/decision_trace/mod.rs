@@ -53,9 +53,40 @@ pub struct DecisionTrace {
     pub ai_profile: &'static str,
     pub pending_events: Vec<DecisionEvent>,
     pub writer: Option<TraceWriter>,
+    /// Every cast chosen through [`DecisionEventBuilder::choose`] since
+    /// `decide_abilities` last took them, as `(actor entity index, ability)`:
+    /// what a unit's turn USED, whether or not a trace is written. The talent
+    /// effects of a turn read it (`talent_procs::after_turn`: a next-cast
+    /// modifier spent, an `AbilityUsed` proc).
+    pub casts: Vec<(u32, crate::states::play_match::abilities::AbilityType)>,
+    /// The next-cast overlay of the unit deciding now
+    /// (`next_cast::effective_book`), set by `dispatch_class_decision` for the
+    /// length of its turn: `choose` spends it on the first covered cast.
+    pub next_cast: Option<std::sync::Arc<crate::states::play_match::ability_book::NextCastOverlay>>,
+    /// The covered ability the last dispatched turn spent its next-cast
+    /// modifiers on, if any; taken by `decide_abilities` after the turn.
+    pub turn_spent: Option<crate::states::play_match::abilities::AbilityType>,
 }
 
 impl DecisionTrace {
+    /// Take the casts `entity` chose since they were last taken, in order.
+    pub fn take_casts_of(
+        &mut self,
+        entity: Entity,
+    ) -> Vec<crate::states::play_match::abilities::AbilityType> {
+        let index = entity.index();
+        let mut taken = Vec::new();
+        self.casts.retain(|(actor, ability)| {
+            if *actor == index {
+                taken.push(*ability);
+                false
+            } else {
+                true
+            }
+        });
+        taken
+    }
+
     /// Start an `ability_decision` event. Caller fills the builder via `reject`
     /// / `choose` and calls `finish`/`finish_no_action`.
     pub fn start_ability_decision(
