@@ -92,9 +92,14 @@ impl GameSettings {
 
     /// Load settings from file, or return default if file doesn't exist
     pub fn load() -> Self {
-        let path = Self::settings_path();
+        Self::load_from(&Self::settings_path())
+    }
+
+    /// Load settings from an explicit path, or return default if the file
+    /// doesn't exist or doesn't parse.
+    fn load_from(path: &Path) -> Self {
         if path.exists() {
-            match fs::read_to_string(&path) {
+            match fs::read_to_string(path) {
                 Ok(contents) => match ron::from_str::<GameSettings>(&contents) {
                     Ok(mut settings) => {
                         // Fill in any missing keybindings (for newly added actions)
@@ -339,6 +344,161 @@ mod tests {
             "an unwritable destination should report an error"
         );
     }
+
+    /// An unchanged load followed by a save writes the file back byte for
+    /// byte (AS-471). The keybindings were a `HashMap`, whose order is
+    /// reseeded in every map, so each save listed them in a new order and a
+    /// client run that saved nothing new still rewrote the file. The chain
+    /// runs a few times so a hash order cannot match by luck.
+    #[test]
+    fn an_unchanged_load_saves_byte_identical() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let first = dir.path().join("settings-0.ron");
+        GameSettings::default()
+            .save_to(&first)
+            .expect("save settings");
+        let original = fs::read(&first).expect("read settings back");
+
+        let mut path = first;
+        for round in 1..=4 {
+            let next = dir.path().join(format!("settings-{round}.ron"));
+            GameSettings::load_from(&path)
+                .save_to(&next)
+                .expect("save settings");
+            assert_eq!(
+                fs::read(&next).expect("read settings back"),
+                original,
+                "load + save round {round} rewrote an unchanged settings file"
+            );
+            path = next;
+        }
+    }
+
+    /// A file saved in another order (here, a `HashMap`-ordered file from
+    /// before AS-471, with a rebind and without the actions added since) keeps
+    /// its values, gains the missing defaults, and is saved in `GameAction`
+    /// order — after which it round-trips unchanged.
+    #[test]
+    fn a_file_in_another_order_is_saved_in_action_order() {
+        use crate::keybindings::{GameAction, KeyBinding};
+        use bevy::input::keyboard::KeyCode;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let legacy = dir.path().join("legacy.ron");
+        fs::write(&legacy, HASH_ORDERED_SETTINGS).expect("write legacy settings");
+
+        let loaded = GameSettings::load_from(&legacy);
+        assert_eq!(loaded.window_mode, WindowModeOption::BorderlessFullscreen);
+        assert_eq!(
+            loaded.keybindings.get(GameAction::Confirm),
+            Some(&KeyBinding::new(KeyCode::Backspace)),
+            "a rebind survives the load"
+        );
+
+        let saved = dir.path().join("saved.ron");
+        loaded.save_to(&saved).expect("save settings");
+        let text = fs::read_to_string(&saved).expect("read settings back");
+
+        let mut actions = GameAction::all();
+        actions.sort();
+        let positions: Vec<usize> = actions
+            .iter()
+            .map(|action| {
+                text.find(&format!("\n            {action:?}: ("))
+                    .unwrap_or_else(|| panic!("{action:?} missing from the saved file"))
+            })
+            .collect();
+        assert!(
+            positions.windows(2).all(|pair| pair[0] < pair[1]),
+            "bindings are not saved in GameAction order:\n{text}"
+        );
+
+        let again = dir.path().join("again.ron");
+        GameSettings::load_from(&saved)
+            .save_to(&again)
+            .expect("save settings");
+        assert_eq!(
+            fs::read_to_string(&again).expect("read settings back"),
+            text
+        );
+    }
+
+    /// The `settings.ron` this repository tracked before AS-471, in the
+    /// `HashMap` order one run wrote it in, with Confirm rebound to Backspace.
+    const HASH_ORDERED_SETTINGS: &str = r#"(
+    window_mode: BorderlessFullscreen,
+    resolution: HD720,
+    vsync: true,
+    keybindings: (
+        bindings: {
+            CameraZoomIn: (
+                primary: "Equal",
+                secondary: Some("NumpadAdd"),
+            ),
+            CameraMoveLeft: (
+                primary: "KeyA",
+                secondary: None,
+            ),
+            SpeedVeryFast: (
+                primary: "Digit4",
+                secondary: None,
+            ),
+            ToggleAuraIcons: (
+                primary: "KeyV",
+                secondary: None,
+            ),
+            SpeedNormal: (
+                primary: "Digit2",
+                secondary: None,
+            ),
+            Back: (
+                primary: "Escape",
+                secondary: None,
+            ),
+            PausePlay: (
+                primary: "Space",
+                secondary: None,
+            ),
+            SpeedFast: (
+                primary: "Digit3",
+                secondary: None,
+            ),
+            CycleCameraMode: (
+                primary: "Tab",
+                secondary: None,
+            ),
+            CameraMoveRight: (
+                primary: "KeyD",
+                secondary: None,
+            ),
+            Confirm: (
+                primary: "Backspace",
+                secondary: None,
+            ),
+            CameraMoveBackward: (
+                primary: "KeyS",
+                secondary: None,
+            ),
+            SpeedSlow: (
+                primary: "Digit1",
+                secondary: None,
+            ),
+            CameraZoomOut: (
+                primary: "Minus",
+                secondary: Some("NumpadSubtract"),
+            ),
+            ResetCamera: (
+                primary: "KeyC",
+                secondary: None,
+            ),
+            CameraMoveForward: (
+                primary: "KeyW",
+                secondary: None,
+            ),
+        },
+    ),
+    show_aura_icons: true,
+)"#;
 
     /// A settings file written before the field existed must still load — the
     /// `#[serde(default)]` path. Emulated by stripping the field back out of a
