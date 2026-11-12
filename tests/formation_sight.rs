@@ -274,7 +274,10 @@ fn jump_cause(frames: &[FrameObservation], healer: Entity, i: usize, yards: f32)
         _ => None,
     };
     // A kept spot holds exactly (the goal stands on it, or part of the way to
-    // it), so any change of spot is a re-pick.
+    // it), so any change of spot is a re-pick. A live repair that is not
+    // still a repair re-picks every evaluation, so an exit change or a turn of
+    // the heading on the same frame is labelled `reach`: the stages are
+    // checked in order, and the first that changed takes the jump.
     if spot(&before) != spot(&now) {
         return "reach";
     }

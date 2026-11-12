@@ -2035,6 +2035,29 @@ mod tests {
         }
     }
 
+    /// The stay's spot is judged by the inner disc, as the spot a healer
+    /// stands on always is: a healer 32yd from the caster, between the inner
+    /// disc (31.5yd) and the outer (33yd), holds its stay through a blind
+    /// frame. The control: the caster 31yd off, inside the inner disc, and
+    /// the stay lets go.
+    #[test]
+    fn a_stay_in_the_ring_between_the_discs_holds_through_a_flicker() {
+        let scene = StayScene::new();
+        let ring = fear_from(-2.0);
+        let mut kept = None;
+        assert_eq!(scene.with(&scene.seen, &ring, 0.0, &mut kept), STAY_ME);
+        assert!(matches!(kept, Some(ReachKept::Stay { .. })), "{kept:?}");
+        assert_eq!(
+            scene.with(&scene.hidden, &ring, 1.0 / 60.0, &mut kept),
+            STAY_ME
+        );
+
+        let mut kept = None;
+        scene.at(false, 0.0, &mut kept);
+        let inside = scene.with(&scene.hidden, &fear_from(-3.0), 1.0 / 60.0, &mut kept);
+        assert!(inside.distance(STAY_ME) > 20.0, "{inside}");
+    }
+
     /// A live stay still answers to the rest of what began it: it lets go
     /// once its healer's spot comes into the caster's reach (the inner disc,
     /// 31.5yd), or its teammate walks out of heal reach. The controls: a
