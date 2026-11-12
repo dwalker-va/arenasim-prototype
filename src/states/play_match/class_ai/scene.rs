@@ -276,6 +276,13 @@ impl Scene {
         self
     }
 
+    /// The last unit's armor stat, as its gear would give it (a scene unit
+    /// wears none).
+    pub fn armor(mut self, armor: f32) -> Self {
+        self.last().combatant.armor = armor;
+        self
+    }
+
     /// The last unit's rage, in points (a Warrior's resource is its mana pool).
     pub fn rage(mut self, points: f32) -> Self {
         self.last().combatant.current_mana = points;

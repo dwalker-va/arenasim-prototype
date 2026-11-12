@@ -308,6 +308,26 @@ fn sinister_strike_is_avoided_and_deals_nothing() {
     );
 }
 
+/// Expose Armor (the Combat capstone) on a plate-armored defender: avoided,
+/// it exposes nothing.
+#[test]
+fn expose_armor_is_avoided_and_exposes_nothing() {
+    assert_avoidable(
+        AbilityType::ExposeArmor,
+        "Expose Armor",
+        |a| {
+            rogue_scene(None, a)
+                .armor(2300.0)
+                .grant(ATTACKER, AbilityType::ExposeArmor)
+                .cooldown(ATTACKER, AbilityType::KidneyShot, 10.0)
+        },
+        |v| {
+            v.auras_queued
+                .contains(&(DEFENDER, AuraType::ArmorPercentReduction))
+        },
+    );
+}
+
 /// An interrupter of `class` in melee of the defender, a Mage mid-Frostbolt.
 fn interrupt_scene(class: CharacterClass, avoidance: (f32, f32)) -> Scene {
     let scene = Scene::new().unit(ATTACKER, 1, class).targeting(DEFENDER);
@@ -889,6 +909,45 @@ fn an_attack_speed_bonus_swings_more_often_in_a_match() {
     );
 }
 
+/// A melee-only haste (`melee_attack_speed_bonus`, Swift Blades) divides
+/// every MELEE swing's interval — main hand holding a melee weapon, off hand,
+/// a Hunter's melee hand — after the haste every attack shares, and never a
+/// bow's or a wand's; at 0 no interval moves by a bit.
+#[test]
+fn a_melee_haste_shortens_melee_swings_only() {
+    let mut rogue = Combatant::new(1, 0, CharacterClass::Rogue);
+    rogue.weapon_speed = 2.5;
+    rogue.offhand_weapon_speed = 1.5;
+    rogue.offhand_damage = 10.0;
+    rogue.melee_attack_speed_bonus = 0.1;
+    assert_eq!(effective_attack_interval(&rogue, None), 2.5 / 1.1);
+    assert_eq!(effective_offhand_interval(&rogue, None), 1.5 / 1.1);
+    // After the shared haste, each dividing in turn.
+    rogue.attack_speed_bonus = 0.25;
+    assert_eq!(effective_attack_interval(&rogue, None), 2.5 / 1.25 / 1.1);
+
+    // A Hunter's bow is not a melee swing; its melee hand is.
+    let mut hunter = Combatant::new(1, 0, CharacterClass::Hunter);
+    hunter.weapon_speed = 3.0;
+    hunter.melee_weapon_speed = 2.0;
+    hunter.melee_damage = 10.0;
+    hunter.melee_attack_speed_bonus = 0.1;
+    assert_eq!(
+        effective_attack_interval(&hunter, None).to_bits(),
+        3.0f32.to_bits()
+    );
+    assert_eq!(effective_melee_interval(&hunter, None), 2.0 / 1.1);
+
+    // Nor is a wand.
+    let mut mage = Combatant::new(1, 0, CharacterClass::Mage);
+    mage.weapon_speed = 1.5;
+    mage.melee_attack_speed_bonus = 0.1;
+    assert_eq!(
+        effective_attack_interval(&mage, None).to_bits(),
+        1.5f32.to_bits()
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The haste aura (AS-428): `AttackSpeedIncrease`, the mirror of
 // `AttackSpeedSlow`, on top of the attack-speed stat.
@@ -1000,6 +1059,7 @@ fn every_melee_attack_is_a_pacify_ability_at_melee_range() {
         AbilityType::SinisterStrike,
         AbilityType::KidneyShot,
         AbilityType::Kick,
+        AbilityType::ExposeArmor,
     ]
     .into_iter()
     .collect();

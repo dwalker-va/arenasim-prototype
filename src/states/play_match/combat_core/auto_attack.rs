@@ -1452,18 +1452,27 @@ pub fn frost_armor_attack_speed_aura() -> Aura {
 
 /// Effective auto-attack interval for a combatant: its weapon's speed,
 /// shortened by its permanent attack-speed bonus
-/// ([`Combatant::attack_speed_bonus`]), shortened again by each
+/// ([`Combatant::attack_speed_bonus`]) and, while the live socket holds a
+/// melee weapon, its melee-only bonus
+/// ([`Combatant::melee_attack_speed_bonus`], [`HasteScope::Melee`]),
+/// shortened again by each
 /// `AttackSpeedIncrease` (haste) aura and stretched by each `AttackSpeedSlow`
-/// aura (magnitude clamped at 0.75 to prevent division by near-zero). Haste
-/// and slows apply to every interval here — melee hands, a Hunter's melee
-/// hand, its bow and a wand alike — as TBC's haste rating does.
+/// aura (magnitude clamped at 0.75 to prevent division by near-zero). The
+/// shared bonus, the haste aura and slows apply to every interval here —
+/// melee hands, a Hunter's melee hand, its bow and a wand alike — as TBC's
+/// haste rating does; only the melee-only bonus picks its swings.
 ///
 /// Shared by the swing timer in `combat_auto_attack` above AND the graphical
 /// windup animation (`rendering/effects.rs`), so the anticipation window can
 /// never drift from the sim's real cadence. Pure — safe to call from graphical
 /// systems without touching sim state.
 pub fn effective_attack_interval(combatant: &Combatant, auras: Option<&ActiveAuras>) -> f32 {
-    swing_interval(combatant.weapon_speed, combatant.attack_speed_bonus, auras)
+    swing_interval(
+        combatant.weapon_speed,
+        combatant,
+        combatant.auto_attack_kind == AutoAttackKind::Melee,
+        auras,
+    )
 }
 
 /// The same, for the OFF hand, off its own weapon's speed.
@@ -1471,22 +1480,38 @@ pub fn effective_attack_interval(combatant: &Combatant, auras: Option<&ActiveAur
 /// Only meaningful while [`Combatant::is_dual_wielding`] — that predicate is
 /// what guarantees there is an off-hand weapon, and so a non-zero speed.
 pub fn effective_offhand_interval(combatant: &Combatant, auras: Option<&ActiveAuras>) -> f32 {
-    swing_interval(
-        combatant.offhand_weapon_speed,
-        combatant.attack_speed_bonus,
-        auras,
-    )
+    swing_interval(combatant.offhand_weapon_speed, combatant, true, auras)
 }
 
 /// The same, for a Hunter's MELEE main hand, off that weapon's own speed.
 ///
 /// Only meaningful while [`Combatant::has_melee_main_hand`].
 pub fn effective_melee_interval(combatant: &Combatant, auras: Option<&ActiveAuras>) -> f32 {
-    swing_interval(
-        combatant.melee_weapon_speed,
-        combatant.attack_speed_bonus,
-        auras,
-    )
+    swing_interval(combatant.melee_weapon_speed, combatant, true, auras)
+}
+
+/// Which swings a haste reaches, asked of each swing by [`swing_interval`].
+/// The permanent bonuses name theirs there; the `AttackSpeedIncrease` aura
+/// reaches `Every`. A melee-only haste aura (Flurry) asks `Melee` of the same
+/// swing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HasteScope {
+    /// Every auto-attack: melee hands, a bow and a wand alike, as TBC's haste
+    /// rating (`Combatant::attack_speed_bonus`, `AttackSpeedIncrease`).
+    Every,
+    /// Melee swings only: TBC's Swift Blades and Flurry
+    /// (`Combatant::melee_attack_speed_bonus`).
+    Melee,
+}
+
+impl HasteScope {
+    /// Whether this haste reaches a swing, `melee` or not.
+    pub fn reaches(self, melee: bool) -> bool {
+        match self {
+            HasteScope::Every => true,
+            HasteScope::Melee => melee,
+        }
+    }
 }
 
 /// Which main-hand swing `combat_auto_attack` is resolving: the live weapon
@@ -1507,7 +1532,9 @@ enum MainArm {
 /// swings in the same time, so the interval is divided by `1.10`. It is
 /// applied FIRST, and only when it is not 0 — so every combatant without one
 /// (all of them, until a talent or item grants it) computes its interval in
-/// exactly the operations it did before the stat existed.
+/// exactly the operations it did before the stat existed. The melee-only
+/// bonus follows it, on a `melee` swing only and under the same not-0 rule:
+/// haste effects multiply, as TBC's do.
 ///
 /// The two hands share this rather than each spelling out the arithmetic,
 /// **and the operation order below is load-bearing**: it multiplies the
@@ -1517,10 +1544,20 @@ enum MainArm {
 /// multiplying once is algebraically the same and is NOT the same in `f32`,
 /// which would shift the main hand's interval by an ULP and, through the
 /// timer comparison, potentially every match in the project's baselines.
-fn swing_interval(weapon_speed: f32, attack_speed_bonus: f32, auras: Option<&ActiveAuras>) -> f32 {
+fn swing_interval(
+    weapon_speed: f32,
+    combatant: &Combatant,
+    melee: bool,
+    auras: Option<&ActiveAuras>,
+) -> f32 {
     let mut attack_interval = weapon_speed;
-    if attack_speed_bonus != 0.0 {
-        attack_interval /= 1.0 + attack_speed_bonus;
+    for (bonus, scope) in [
+        (combatant.attack_speed_bonus, HasteScope::Every),
+        (combatant.melee_attack_speed_bonus, HasteScope::Melee),
+    ] {
+        if bonus != 0.0 && scope.reaches(melee) {
+            attack_interval /= 1.0 + bonus;
+        }
     }
     if let Some(auras) = auras {
         for aura in auras.auras.iter() {
