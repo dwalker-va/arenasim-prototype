@@ -1463,6 +1463,13 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
              (tests/shadow_word_pain_scenes.rs builds it)",
         ),
     ),
+    (
+        AbilityType::ExposeArmor,
+        Unreached::NeedsKnob(
+            "the Combat talent that grants it, and an armored target: the grid grants no \
+             talent and wears no gear (tests/rogue_combat_talents.rs builds it)",
+        ),
+    ),
 ];
 
 /// Every ability of every class's own kit is chosen somewhere in the grid, or

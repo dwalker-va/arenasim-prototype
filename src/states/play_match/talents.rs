@@ -120,12 +120,21 @@ talent_ids! {
     DemonicEmbrace,
     FelStamina,
     UnholyPower,
+    // Rogue: Combat
+    LightningReflexes,
+    DualWieldSpecialization,
+    Aggression,
+    Vitality,
+    Deflection,
+    SwiftBlades,
+    ExposeArmor,
 }
 
 /// A talent tree. A tree is named per class: `(class, TreeId)` is the key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TreeId {
     Demonology,
+    Combat,
 }
 
 /// One tree of a class, as `talents.ron` lists it. A class's trees are in
@@ -137,8 +146,14 @@ pub struct TreeConfig {
     pub icon: String,
 }
 
-/// A stat a `StatPercent` scales: one of the combatant totals the item stats
+/// A stat a `StatPercent` raises: one of the combatant totals the item stats
 /// feed, read after equipment.
+///
+/// Most are SCALED: the fraction is a percentage of the total, gear included.
+/// A chance or a haste that is 0 for every class (dodge, parry, melee attack
+/// speed) is RAISED instead: the fraction is added in points, as Classic
+/// writes "+4% dodge chance" — a percentage of 0 would be nothing.
+/// [`TalentStat::applied`] is the one rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TalentStat {
     MaxHealth,
@@ -158,14 +173,27 @@ pub enum TalentStat {
     /// The damage of every weapon swing the combatant takes: its live
     /// auto-attack, a Hunter's melee main hand and an off hand.
     WeaponDamage,
+    /// The damage of the off-hand weapon's swing only.
+    OffHandDamage,
+    /// Chance to dodge a melee attack (`Combatant::dodge_chance`). Raised in
+    /// points.
+    DodgeChance,
+    /// Chance to parry a melee attack (`Combatant::parry_chance`). Raised in
+    /// points.
+    ParryChance,
+    /// Haste on melee swings only (`Combatant::melee_attack_speed_bonus`).
+    /// Raised in points: `0.10` swings 10% faster.
+    MeleeAttackSpeed,
 }
 
 impl TalentStat {
     /// The item budget's weight for this stat, per point: what a point of it
     /// costs on an item. `None` for a stat items carry for free (armor, weapon
-    /// damage): a percentage of one has no computed price, so its node
-    /// declares one. Giving such a stat a weight here would re-price every
-    /// item that carries it.
+    /// damage), or that no item carries at all (dodge, parry, melee haste):
+    /// a percentage of one has no computed price, so its node declares one —
+    /// even for haste, which the budget prices only as a proc
+    /// (`WEIGHT_ATTACK_SPEED`). Giving such a stat a weight here would
+    /// re-price every item that carries it.
     pub fn item_weight(self) -> Option<f32> {
         match self {
             TalentStat::MaxHealth => Some(WEIGHT_MAX_HEALTH),
@@ -181,7 +209,49 @@ impl TalentStat {
             | TalentStat::ArcaneResistance
             | TalentStat::NatureResistance
             | TalentStat::HolyResistance => Some(WEIGHT_RESISTANCE),
-            TalentStat::Armor | TalentStat::WeaponDamage => None,
+            TalentStat::Armor
+            | TalentStat::WeaponDamage
+            | TalentStat::OffHandDamage
+            | TalentStat::DodgeChance
+            | TalentStat::ParryChance
+            | TalentStat::MeleeAttackSpeed => None,
+        }
+    }
+
+    /// Whether a fraction of this stat is added in points rather than taken
+    /// as a percentage of its total: a chance or haste every class has at 0.
+    pub fn is_raised(self) -> bool {
+        match self {
+            TalentStat::DodgeChance | TalentStat::ParryChance | TalentStat::MeleeAttackSpeed => {
+                true
+            }
+            TalentStat::MaxHealth
+            | TalentStat::MaxMana
+            | TalentStat::ManaRegen
+            | TalentStat::AttackPower
+            | TalentStat::SpellPower
+            | TalentStat::CritChance
+            | TalentStat::MovementSpeed
+            | TalentStat::Armor
+            | TalentStat::FireResistance
+            | TalentStat::FrostResistance
+            | TalentStat::ShadowResistance
+            | TalentStat::ArcaneResistance
+            | TalentStat::NatureResistance
+            | TalentStat::HolyResistance
+            | TalentStat::WeaponDamage
+            | TalentStat::OffHandDamage => false,
+        }
+    }
+
+    /// `value` of this stat with `fraction` applied: scaled by `1 + fraction`,
+    /// or, for a raised stat ([`Self::is_raised`]), `fraction` added. The one
+    /// rule a spawn and every display of a talented stat use.
+    pub fn applied(self, value: f32, fraction: f32) -> f32 {
+        if self.is_raised() {
+            value + fraction
+        } else {
+            value * (1.0 + fraction)
         }
     }
 
@@ -204,31 +274,40 @@ impl TalentStat {
             TalentStat::NatureResistance => c.nature_resistance,
             TalentStat::HolyResistance => c.holy_resistance,
             TalentStat::WeaponDamage => c.attack_damage,
+            TalentStat::OffHandDamage => c.offhand_damage,
+            TalentStat::DodgeChance => c.dodge_chance,
+            TalentStat::ParryChance => c.parry_chance,
+            TalentStat::MeleeAttackSpeed => c.melee_attack_speed_bonus,
         }
     }
 
-    /// Multiply the combatant's total of this stat by `factor`.
-    fn scale(self, c: &mut Combatant, factor: f32) {
+    /// Apply `fraction` of this stat to the combatant ([`Self::applied`]).
+    fn apply(self, c: &mut Combatant, fraction: f32) {
+        let stat = |value: &mut f32| *value = self.applied(*value, fraction);
         match self {
-            TalentStat::MaxHealth => c.max_health *= factor,
-            TalentStat::MaxMana => c.max_mana *= factor,
-            TalentStat::ManaRegen => c.mana_regen *= factor,
-            TalentStat::AttackPower => c.attack_power *= factor,
-            TalentStat::SpellPower => c.spell_power *= factor,
-            TalentStat::CritChance => c.crit_chance *= factor,
-            TalentStat::MovementSpeed => c.base_movement_speed *= factor,
-            TalentStat::Armor => c.armor *= factor,
-            TalentStat::FireResistance => c.fire_resistance *= factor,
-            TalentStat::FrostResistance => c.frost_resistance *= factor,
-            TalentStat::ShadowResistance => c.shadow_resistance *= factor,
-            TalentStat::ArcaneResistance => c.arcane_resistance *= factor,
-            TalentStat::NatureResistance => c.nature_resistance *= factor,
-            TalentStat::HolyResistance => c.holy_resistance *= factor,
+            TalentStat::MaxHealth => stat(&mut c.max_health),
+            TalentStat::MaxMana => stat(&mut c.max_mana),
+            TalentStat::ManaRegen => stat(&mut c.mana_regen),
+            TalentStat::AttackPower => stat(&mut c.attack_power),
+            TalentStat::SpellPower => stat(&mut c.spell_power),
+            TalentStat::CritChance => stat(&mut c.crit_chance),
+            TalentStat::MovementSpeed => stat(&mut c.base_movement_speed),
+            TalentStat::Armor => stat(&mut c.armor),
+            TalentStat::FireResistance => stat(&mut c.fire_resistance),
+            TalentStat::FrostResistance => stat(&mut c.frost_resistance),
+            TalentStat::ShadowResistance => stat(&mut c.shadow_resistance),
+            TalentStat::ArcaneResistance => stat(&mut c.arcane_resistance),
+            TalentStat::NatureResistance => stat(&mut c.nature_resistance),
+            TalentStat::HolyResistance => stat(&mut c.holy_resistance),
             TalentStat::WeaponDamage => {
-                c.attack_damage *= factor;
-                c.melee_damage *= factor;
-                c.offhand_damage *= factor;
+                stat(&mut c.attack_damage);
+                stat(&mut c.melee_damage);
+                stat(&mut c.offhand_damage);
             }
+            TalentStat::OffHandDamage => stat(&mut c.offhand_damage),
+            TalentStat::DodgeChance => stat(&mut c.dodge_chance),
+            TalentStat::ParryChance => stat(&mut c.parry_chance),
+            TalentStat::MeleeAttackSpeed => stat(&mut c.melee_attack_speed_bonus),
         }
     }
 }
@@ -288,6 +367,11 @@ pub enum AbilityField {
     AuraMagnitudeCoefficient,
     AuraBreakOnDamage,
     AuraTickInterval,
+    /// The ability's whole damage: its base range and its coefficient
+    /// ([`Self::parts`]), so `Mul(1.06)` makes every hit 6% harder. Takes
+    /// only a `Mul`: one number cannot be added to a range and a coefficient
+    /// alike.
+    Damage,
     /// The ability's own crit chance, added to its caster's for every crit
     /// roll the ability makes (Conviction, Malice, Improved Ambush, Holy
     /// Specialization). `0.0` on every shipped ability.
@@ -331,6 +415,9 @@ impl AbilityField {
             AbilityField::AuraMagnitudeCoefficient => aura.map(|a| &mut a.magnitude_coefficient),
             AbilityField::AuraBreakOnDamage => aura.map(|a| &mut a.break_on_damage),
             AbilityField::AuraTickInterval => aura.map(|a| &mut a.tick_interval),
+            // A composite: it names several values, so no one of them. A patch
+            // of it resolves onto its `parts`.
+            AbilityField::Damage => None,
             AbilityField::CritChance => Some(&mut config.crit_chance),
             // A derived value, not a stored one: read and written through
             // `get` / `set`.
@@ -341,6 +428,8 @@ impl AbilityField {
     /// The value of this field on `config`, or `None` when it has none.
     pub fn get(self, config: &AbilityConfig) -> Option<f32> {
         match self {
+            // A composite names several values, so no one of them.
+            AbilityField::Damage => None,
             AbilityField::AuraStrength => config.applies_aura.as_ref().map(|a| {
                 if strength_is_remainder(a.aura_type) {
                     1.0 - a.magnitude
@@ -367,6 +456,8 @@ impl AbilityField {
                     };
                 }
             }
+            // A composite is written through its `parts`, never as one value.
+            AbilityField::Damage => {}
             stored => {
                 if let Some(v) = stored.of(config) {
                     *v = value;
@@ -375,9 +466,47 @@ impl AbilityField {
         }
     }
 
-    /// Whether `config` has this field.
+    /// The plain fields a patch of this field rewrites: itself, or a
+    /// composite's members.
+    pub fn parts(self) -> &'static [AbilityField] {
+        match self {
+            AbilityField::Damage => &[
+                AbilityField::DamageBaseMin,
+                AbilityField::DamageBaseMax,
+                AbilityField::DamageCoefficient,
+            ],
+            AbilityField::CastTime => &[AbilityField::CastTime],
+            AbilityField::Range => &[AbilityField::Range],
+            AbilityField::MinRange => &[AbilityField::MinRange],
+            AbilityField::ManaCost => &[AbilityField::ManaCost],
+            AbilityField::Cooldown => &[AbilityField::Cooldown],
+            AbilityField::DamageBaseMin => &[AbilityField::DamageBaseMin],
+            AbilityField::DamageBaseMax => &[AbilityField::DamageBaseMax],
+            AbilityField::DamageCoefficient => &[AbilityField::DamageCoefficient],
+            AbilityField::HealingBaseMin => &[AbilityField::HealingBaseMin],
+            AbilityField::HealingBaseMax => &[AbilityField::HealingBaseMax],
+            AbilityField::HealingCoefficient => &[AbilityField::HealingCoefficient],
+            AbilityField::ApplicationChance => &[AbilityField::ApplicationChance],
+            AbilityField::ProjectileSpeed => &[AbilityField::ProjectileSpeed],
+            AbilityField::LockoutDuration => &[AbilityField::LockoutDuration],
+            AbilityField::ChannelDuration => &[AbilityField::ChannelDuration],
+            AbilityField::ChannelTickInterval => &[AbilityField::ChannelTickInterval],
+            AbilityField::ChannelHealingPerTick => &[AbilityField::ChannelHealingPerTick],
+            AbilityField::ManaBurnAmount => &[AbilityField::ManaBurnAmount],
+            AbilityField::AuraDuration => &[AbilityField::AuraDuration],
+            AbilityField::AuraMagnitude => &[AbilityField::AuraMagnitude],
+            AbilityField::AuraMagnitudeCoefficient => &[AbilityField::AuraMagnitudeCoefficient],
+            AbilityField::AuraBreakOnDamage => &[AbilityField::AuraBreakOnDamage],
+            AbilityField::AuraTickInterval => &[AbilityField::AuraTickInterval],
+            AbilityField::CritChance => &[AbilityField::CritChance],
+            AbilityField::AuraStrength => &[AbilityField::AuraStrength],
+        }
+    }
+
+    /// Whether `config` has this field: a value through [`Self::get`], or,
+    /// for a composite, one for every part of it.
     pub fn present_on(self, config: &AbilityConfig) -> bool {
-        self.get(config).is_some()
+        self.parts().iter().all(|part| part.get(config).is_some())
     }
 }
 
@@ -851,6 +980,11 @@ impl TalentDefinitions {
                     PatchOp::Mul(n) if !n.is_finite() || *n <= 0.0 => {
                         return Err(format!("multiplies by {n}, which is not positive"))
                     }
+                    PatchOp::Add(_) if field.parts().len() > 1 => {
+                        return Err(format!(
+                            "adds to {field:?}, which names several values: it takes only Mul"
+                        ))
+                    }
                     _ => {}
                 }
                 let reachable = self.reachable_abilities(talent.class, abilities);
@@ -1054,11 +1188,13 @@ impl TalentDefinitions {
                 .map(|(a, _)| *a)
                 .collect();
             for ability in targets {
-                let entry = patches.entry((ability, field)).or_insert((0.0, 0.0));
-                let ranks = f32::from(rank);
-                match op {
-                    PatchOp::Add(n) => entry.0 += n * ranks,
-                    PatchOp::Mul(n) => entry.1 += (n - 1.0) * ranks,
+                for part in field.parts() {
+                    let entry = patches.entry((ability, *part)).or_insert((0.0, 0.0));
+                    let ranks = f32::from(rank);
+                    match op {
+                        PatchOp::Add(n) => entry.0 += n * ranks,
+                        PatchOp::Mul(n) => entry.1 += (n - 1.0) * ranks,
+                    }
                 }
             }
         }
@@ -1537,7 +1673,7 @@ fn apply_percents(percents: &BTreeMap<TalentStat, f32>, combatant: &mut Combatan
         return;
     }
     for (stat, fraction) in percents {
-        stat.scale(combatant, 1.0 + fraction);
+        stat.apply(combatant, *fraction);
     }
     combatant.current_health = combatant.max_health;
     combatant.current_mana = combatant.pre_combat_resource();

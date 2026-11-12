@@ -276,6 +276,7 @@ mod scenes {
             max_health: 100.0,
             current_mana: 100.0,
             max_mana: 100.0,
+            armor: 0.0,
             position: Vec3::new(x, 1.0, z),
             velocity: Vec3::ZERO,
             is_alive: true,
