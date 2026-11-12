@@ -35,9 +35,10 @@ use arenasim::combat::CombatPlugin;
 use arenasim::states::configure_match_ui::ClassIconHandles;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::equipment::{EquipmentPlugin, ItemDefinitions};
+use arenasim::states::play_match::talents::TalentDefinitions;
 use arenasim::states::play_match::{
-    item_aura_icons, AbilityConfigPlugin, MapConfigPlugin, MovementConfigPlugin, SpellIconHandles,
-    GENERIC_AURA_ICONS,
+    item_aura_icons, talent_aura_icons, AbilityConfigPlugin, MapConfigPlugin, MovementConfigPlugin,
+    SpellIconHandles, GENERIC_AURA_ICONS,
 };
 use arenasim::states::{GameState, StatesPlugin};
 
@@ -169,6 +170,10 @@ fn a_replay_match_loads_the_spell_icons() {
         expected.insert(key.to_string(), path.to_string());
     }
     for (key, path) in item_aura_icons(items) {
+        expected.insert(key, path);
+    }
+    // ...and the art of every talent that lands an aura.
+    for (key, path) in talent_aura_icons(TalentDefinitions::shipped()) {
         expected.insert(key, path);
     }
 

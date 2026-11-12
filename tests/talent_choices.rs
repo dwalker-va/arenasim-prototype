@@ -8,7 +8,9 @@
 //! shipped talent ids, every case paired with its control.
 
 use arenasim::headless::HeadlessMatchConfig;
-use arenasim::states::match_config::{CharacterClass, PriestForm, RoguePoison, WarlockCurse};
+use arenasim::states::match_config::{
+    CharacterClass, PriestForm, RoguePoison, WarlockCurse, WarlockDemon,
+};
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::class_ai::cast_guard::{
@@ -29,7 +31,7 @@ fn abilities() -> &'static AbilityDefinitions {
     AbilityDefinitions::shipped()
 }
 
-/// The fixture: Demonic Embrace widens Curse of Tongues at rank 1 and patches
+/// The fixture (with Mage fillers for the other ids): Demonic Embrace widens Curse of Tongues at rank 1 and patches
 /// it at rank 2 (Retribution Aura's shape); Fel Stamina is a ROGUE node here,
 /// opening the off-hand poison slot and carrying Cheat Death; Unholy Power
 /// carries Soul Link. Tongues switches Unholy Power off and forbids Drain
@@ -38,6 +40,7 @@ const FIXTURE: &str = r#"(
     trees: {
         Warlock: [(id: Demonology, name: "Demonology", icon: "x.jpg")],
         Rogue: [(id: Demonology, name: "Fixture", icon: "x.jpg")],
+        Mage: [(id: Demonology, name: "Filler", icon: "x.jpg")],
         Priest: [(id: Shadow, name: "Shadow", icon: "x.jpg")],
     },
     talents: {
@@ -61,6 +64,22 @@ const FIXTURE: &str = r#"(
             name: "Unholy Power", class: Warlock, tree: Demonology, tier: 1, column: 2,
             icon: "x.jpg", max_rank: 2, budget: Some(11.0),
             per_rank: [Mechanic(SoulLink(share: 0.06))],
+        ),
+        // Fillers for the ids the cases do not use: every id has an entry.
+        MasterDemonologist: (
+            name: "Filler 1", class: Mage, tree: Demonology, tier: 1, column: 0,
+            icon: "x.jpg", max_rank: 1, budget: Some(11.0),
+            per_rank: [StatPercent(WeaponDamage, 0.01)],
+        ),
+        DemonicSacrifice: (
+            name: "Filler 2", class: Mage, tree: Demonology, tier: 1, column: 1,
+            icon: "x.jpg", max_rank: 1, budget: Some(11.0),
+            per_rank: [StatPercent(WeaponDamage, 0.01)],
+        ),
+        SoulLink: (
+            name: "Filler 3", class: Mage, tree: Demonology, tier: 1, column: 2,
+            icon: "x.jpg", max_rank: 1, budget: Some(11.0),
+            per_rank: [StatPercent(WeaponDamage, 0.01)],
         ),
         // Every shipped talent id needs an entry, and Expose Armor's grant
         // its one node: the Combat tree's ids, inert here.
@@ -174,19 +193,21 @@ fn a_widened_option_is_offered_only_to_a_build_that_takes_its_node() {
     assert!(t
         .validate_choices(CharacterClass::Warlock, &embrace, &warlock(&[TONGUES]))
         .is_ok());
-    // The shipped table widens one option, the Priest's Shadowform (AS-413):
-    // every other option is offered to every build.
+    // The shipped table widens two options, the Warlock's Sacrifice (AS-410)
+    // and the Priest's Shadowform (AS-413): every other option is offered to
+    // every build.
     let shipped = TalentDefinitions::shipped();
+    let sacrifice = ChoiceOption::WarlockDemon(WarlockDemon::Sacrifice);
     let shadowform = ChoiceOption::PriestForm(PriestForm::Shadowform);
     assert_eq!(
         shipped.widened_options(),
-        std::collections::BTreeSet::from([shadowform])
+        std::collections::BTreeSet::from([sacrifice, shadowform])
     );
     for menu in ChoiceMenu::ALL {
         let all_but: Vec<ChoiceOption> = menu
             .options()
             .into_iter()
-            .filter(|o| *o != shadowform)
+            .filter(|o| *o != sacrifice && *o != shadowform)
             .collect();
         assert_eq!(shipped.offered(&empty, menu), all_but, "{menu:?}");
     }

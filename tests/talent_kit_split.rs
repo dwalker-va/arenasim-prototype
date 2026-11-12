@@ -42,7 +42,8 @@ fn flagged() -> AbilityDefinitions {
     AbilityDefinitions::new(config)
 }
 
-/// The shipped trees with Fel Stamina a one-rank node granting Death Coil.
+/// The shipped trees with Fel Stamina a one-rank node granting Death Coil
+/// (and Soul Link needing that one rank).
 fn granting(abilities: &AbilityDefinitions) -> TalentDefinitions {
     let text = std::fs::read_to_string(arenasim::paths::asset_path("config/talents.ron"))
         .expect("talents.ron reads");
@@ -55,7 +56,13 @@ fn granting(abilities: &AbilityDefinitions) -> TalentDefinitions {
             "max_rank: 1,\n            budget: Some(11.0),\n            // Felhunter +10%",
             1,
         )
-        .replacen(effect, "per_rank: [Grant(DeathCoil)],", 1);
+        .replacen(effect, "per_rank: [Grant(DeathCoil)],", 1)
+        // Soul Link needs every Fel Stamina rank: now one.
+        .replacen(
+            "requires: Some((FelStamina, 2)),",
+            "requires: Some((FelStamina, 1)),",
+            1,
+        );
     TalentDefinitions::from_ron(&text, abilities).expect("the fixture validates")
 }
 

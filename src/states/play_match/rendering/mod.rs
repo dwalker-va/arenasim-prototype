@@ -93,7 +93,7 @@ pub fn talent_aura_icon_key(talent: TalentId) -> String {
 }
 
 /// `(key, path)` for every talent that can APPLY an aura — every node with a
-/// `Proc` effect — keyed by [`talent_aura_icon_key`], from the shipped
+/// `Proc` effect, or a `Mechanic` that lands its own aura — keyed by [`talent_aura_icon_key`], from the shipped
 /// `talents.ron`. Registered beside [`item_aura_icons`] in both aura icon
 /// loaders, so talent N+1's proc buff gets its icon with no code change.
 pub fn talent_aura_icons(talents: &TalentDefinitions) -> Vec<(String, String)> {
@@ -101,9 +101,11 @@ pub fn talent_aura_icons(talents: &TalentDefinitions) -> Vec<(String, String)> {
         .iter()
         .filter(|(_, t)| {
             !t.icon.is_empty()
-                && t.per_rank
-                    .iter()
-                    .any(|e| matches!(e, TalentEffect::Proc(_)))
+                && t.per_rank.iter().any(|e| match e {
+                    TalentEffect::Proc(_) => true,
+                    TalentEffect::Mechanic(m) => m.applies_talent_aura(),
+                    _ => false,
+                })
         })
         .map(|(id, t)| (talent_aura_icon_key(id), t.icon.clone()))
         .collect()
@@ -138,7 +140,8 @@ pub fn icon_load_settled(state: &bevy::asset::LoadState) -> bool {
 
 /// Get the icon key for an aura.
 ///
-/// An aura an ITEM applied draws the item's icon ([`item_aura_icon_key`]).
+/// An aura an ITEM applied draws the item's icon ([`item_aura_icon_key`]); a
+/// talent's aura, its node's icon ([`talent_aura_icon_key`]).
 /// Otherwise: the applying ability's name if it has a specific icon, else a
 /// generic per-type key.
 pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) -> String {
@@ -425,7 +428,19 @@ mod tests {
             get_aura_icon_key(&aura, AbilityDefinitions::shipped()),
             talent_aura_icon_key(TalentId::FelStamina)
         );
-        assert!(talent_aura_icons(TalentDefinitions::shipped()).is_empty());
+        // Shipped: the two Demonology talents whose mechanics land an aura.
+        let keys = |icons: Vec<(String, String)>| -> Vec<String> {
+            let mut k: Vec<String> = icons.into_iter().map(|(k, _)| k).collect();
+            k.sort();
+            k
+        };
+        assert_eq!(
+            keys(talent_aura_icons(TalentDefinitions::shipped())),
+            vec![
+                talent_aura_icon_key(TalentId::DemonicSacrifice),
+                talent_aura_icon_key(TalentId::MasterDemonologist),
+            ]
+        );
         let shipped =
             std::fs::read_to_string(crate::paths::asset_path("config/talents.ron")).unwrap();
         let text = shipped.replacen(
@@ -436,12 +451,18 @@ mod tests {
             1,
         );
         let talents = TalentDefinitions::from_ron(&text, AbilityDefinitions::shipped()).unwrap();
+        let icons = talent_aura_icons(&talents);
+        assert!(icons.contains(&(
+            talent_aura_icon_key(TalentId::FelStamina),
+            talents.get(TalentId::FelStamina).unwrap().icon.clone()
+        )));
         assert_eq!(
-            talent_aura_icons(&talents),
-            vec![(
+            keys(icons),
+            vec![
+                talent_aura_icon_key(TalentId::DemonicSacrifice),
                 talent_aura_icon_key(TalentId::FelStamina),
-                talents.get(TalentId::FelStamina).unwrap().icon.clone()
-            )]
+                talent_aura_icon_key(TalentId::MasterDemonologist),
+            ]
         );
     }
 
