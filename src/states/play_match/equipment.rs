@@ -1955,6 +1955,13 @@ pub fn validate_on_uses(items: &ItemDefinitions) -> Result<(), String> {
         .iter()
         .filter_map(|(id, item)| {
             let on_use = item.on_use.as_ref()?;
+            if item.proc_buff().is_some() && item.on_use_buff().is_some() {
+                // Their auras share the item's name and icon, and the log
+                // could not tell a proc from a use.
+                return Some(format!(
+                    "{id:?}: an item may grant a buff by its proc or by its on-use, not both"
+                ));
+            }
             super::on_use_items::validate_on_use(&format!("{id:?}"), on_use).err()
         })
         .collect();
@@ -5595,6 +5602,28 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         assert!(validate_item_budget("Cheap Break", &item).is_ok());
         item.on_use.as_mut().unwrap().price = Some(12.0);
         assert!(validate_item_budget("Frequent Break", &item).is_err());
+    }
+
+    /// The loader refuses an item granting a buff both by its proc and by
+    /// its on-use; either alone loads.
+    #[test]
+    fn the_loader_refuses_a_buff_by_proc_and_by_use_on_one_item() {
+        let ron = r#"(items: {
+            TalismanOfEphemeralPower: (
+                name: "Both", item_level: 92, item_tier: 2, slot: Trinket,
+                on_use: Some((effect: Buff(SpellPowerIncrease), magnitude: 10.0,
+                    duration: 10.0, cooldown: Seconds(60.0))),
+                PROC
+            ),
+        })"#;
+        let proc = "proc: Some((trigger: SpellCast, chance: 0.1, \
+                    effect: Buff(SpellPowerIncrease), magnitude: 10.0, duration: 10.0, \
+                    internal_cooldown: 60.0)),";
+        let err = parse_item_definitions(&ron.replace("PROC", proc), "test")
+            .err()
+            .expect("refused");
+        assert!(err.contains("not both"), "{err}");
+        assert!(parse_item_definitions(&ron.replace("PROC", ""), "test").is_ok());
     }
 
     /// The loader refuses an on-use with no declared price.

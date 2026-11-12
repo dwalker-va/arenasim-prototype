@@ -986,6 +986,11 @@ const ON_USE_MEMBERS: &[ItemId] = &[
     ItemId::KissOfTheSpider,
 ];
 
+/// What a buff on-use's landing draws when nothing bespoke owns it: the
+/// family's aura band. A label of its own, so the debt it stands for can be
+/// told apart from a real visual ([`ON_USE_GENERIC_UNTIL`]).
+const GENERIC_BAND: &str = "aura band on landing (aura_band.rs) — the generic cue";
+
 /// The visual an on-use's landing reaches, by its effect kind. The
 /// Medallion's break draws nothing yet (a self-cast gold dispel ribbon, the
 /// Holy launch hands, the broken CC's own visual scattering is AS-432's).
@@ -993,10 +998,8 @@ const ON_USE_MEMBERS: &[ItemId] = &[
 /// A buff lands through `apply_pending_auras`, built by the constructor
 /// `process_on_use_items` lands it with, so the family's aura band draws it
 /// wherever the router sends that aura to the band — and with it the heal
-/// over time a buff may carry. The band draws the Talisman of Ephemeral
-/// Power, Earthstrike and Kiss of the Spider until AS-433 gives each its own
-/// trinket one-shot (as it draws the Dragonspine Trophy's haste); the Diamond
-/// Flask keeps the band by ruling (AS-338).
+/// over time a buff may carry. That is [`GENERIC_BAND`], and every member it
+/// is all of is named in [`ON_USE_GENERIC_UNTIL`] or [`ON_USE_BAND_BY_RULING`].
 fn on_use_visual(items: &ItemDefinitions, id: ItemId) -> Option<&'static str> {
     let item = items.get_unchecked(&id);
     let on_use = item.on_use.as_ref().expect("a member has an on-use");
@@ -1006,9 +1009,133 @@ fn on_use_visual(items: &ItemDefinitions, id: ItemId) -> Option<&'static str> {
             let buff = on_use.aura(id, &item.name);
             (AuraApplyRoute::for_instance(buff.effect_type, &buff.ability_name)
                 == AuraApplyRoute::Band)
-                .then_some("aura band on landing (aura_band.rs)")
+                .then_some(GENERIC_BAND)
         }
     }
+}
+
+/// On-use buffs the generic band draws only UNTIL their card gives each its
+/// own one-shot: (item, card). Shrink-only, like a known-silent list — the
+/// set of members drawn by the bare band must equal this list plus
+/// [`ON_USE_BAND_BY_RULING`], so a new buff on the bare band fails until it
+/// is listed, and an entry whose item gains a one-shot fails until removed.
+const ON_USE_GENERIC_UNTIL: &[(ItemId, &str)] = &[
+    (ItemId::TalismanOfEphemeralPower, "AS-433"),
+    (ItemId::Earthstrike, "AS-433"),
+    (ItemId::KissOfTheSpider, "AS-433"),
+];
+
+/// On-use buffs that keep the generic band by ruling, not pending a card:
+/// (item, the card that ruled it, why). No design doc records these rulings,
+/// so each cites its card.
+const ON_USE_BAND_BY_RULING: &[(ItemId, &str, &str)] = &[(
+    ItemId::DiamondFlask,
+    "AS-338",
+    "the user ruled the Flask keeps the aura band rather than a one-shot of its own",
+)];
+
+/// The generic-band debt: the members `judge` draws with [`GENERIC_BAND`]
+/// alone are exactly `until` plus `ruled`, which overlap nowhere, and every
+/// entry names its card (and a ruling its reason).
+fn check_generic_band(
+    members: &BTreeSet<ItemId>,
+    judge: impl Fn(ItemId) -> Option<&'static str>,
+    until: &[(ItemId, &str)],
+    ruled: &[(ItemId, &str, &str)],
+) -> Result<(), String> {
+    let mut problems = Vec::new();
+    let generic: BTreeSet<ItemId> = members
+        .iter()
+        .copied()
+        .filter(|id| judge(*id) == Some(GENERIC_BAND))
+        .collect();
+    let owed: BTreeSet<ItemId> = until.iter().map(|(id, _)| *id).collect();
+    let kept: BTreeSet<ItemId> = ruled.iter().map(|(id, _, _)| *id).collect();
+    for id in owed.intersection(&kept) {
+        problems.push(format!(
+            "{id:?} is both owed a one-shot and ruled to keep the band — pick one"
+        ));
+    }
+    let listed: BTreeSet<ItemId> = owed.union(&kept).copied().collect();
+    for id in generic.difference(&listed) {
+        problems.push(format!(
+            "{id:?} is drawn only by the generic aura band — give it its own visual, or add \
+             ({id:?}, \"<the card that will>\") to ON_USE_GENERIC_UNTIL"
+        ));
+    }
+    for id in listed.difference(&generic) {
+        problems.push(format!(
+            "{id:?} is no longer drawn by the generic band alone — remove it from \
+             ON_USE_GENERIC_UNTIL / ON_USE_BAND_BY_RULING"
+        ));
+    }
+    for (id, card) in until {
+        if !card.starts_with("AS-") {
+            problems.push(format!("{id:?} names no card ({card:?})"));
+        }
+    }
+    for (id, card, why) in ruled {
+        if !card.starts_with("AS-") || why.trim().is_empty() {
+            problems.push(format!("{id:?}'s ruling names no card or reason"));
+        }
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("\n"))
+    }
+}
+
+#[test]
+fn on_use_generic_band_debt_is_listed() {
+    let (members, items) = scan_on_use();
+    if let Err(e) = check_generic_band(
+        &members,
+        |id| on_use_visual(&items, id),
+        ON_USE_GENERIC_UNTIL,
+        ON_USE_BAND_BY_RULING,
+    ) {
+        panic!("{e}");
+    }
+}
+
+/// The guard fails on each way the debt can drift: a buff on the bare band
+/// that nobody listed, an entry whose item gained its own visual, and an item
+/// both owed and ruled.
+#[test]
+fn the_generic_band_guard_catches_planted_offenders() {
+    use ItemId::{DiamondFlask, Earthstrike, KissOfTheSpider};
+    let members: BTreeSet<ItemId> = [Earthstrike, KissOfTheSpider, DiamondFlask]
+        .into_iter()
+        .collect();
+    let all_generic = |_| Some(GENERIC_BAND);
+    let ruled: &[(ItemId, &str, &str)] = &[(DiamondFlask, "AS-338", "ruled")];
+    let until: &[(ItemId, &str)] = &[(Earthstrike, "AS-433"), (KissOfTheSpider, "AS-433")];
+    assert_eq!(
+        check_generic_band(&members, all_generic, until, ruled),
+        Ok(())
+    );
+    // An unlisted buff on the bare band.
+    let err = check_generic_band(&members, all_generic, &until[..1], ruled).unwrap_err();
+    assert!(
+        err.contains("KissOfTheSpider is drawn only by the generic"),
+        "{err}"
+    );
+    // An entry whose item now draws its own one-shot.
+    let bespoke = |id| {
+        (id != Earthstrike)
+            .then_some(GENERIC_BAND)
+            .or(Some("one-shot"))
+    };
+    let err = check_generic_band(&members, bespoke, until, ruled).unwrap_err();
+    assert!(err.contains("Earthstrike is no longer drawn"), "{err}");
+    // Owed and ruled at once.
+    let both: &[(ItemId, &str, &str)] = &[
+        (DiamondFlask, "AS-338", "ruled"),
+        (Earthstrike, "AS-338", "x"),
+    ];
+    let err = check_generic_band(&members, all_generic, until, both).unwrap_err();
+    assert!(err.contains("Earthstrike is both owed"), "{err}");
 }
 
 const ON_USE_KNOWN_SILENT: &[(ItemId, &str)] = &[(ItemId::MedallionOfTheAlliance, "AS-432")];

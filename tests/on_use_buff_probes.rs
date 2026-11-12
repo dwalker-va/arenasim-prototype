@@ -71,6 +71,11 @@ fn the_diamond_flask_is_used_once_and_heals_over_time() {
             log.contains("Team 1 Warrior #1 gains Diamond Flask (+20 attack power)"),
             "seed {seed}: the Flask's attack power never landed"
         );
+        // A use is logged as a use, never as a proc a proc-rate count reads.
+        assert!(
+            !log.contains("procs Diamond Flask"),
+            "seed {seed}: the Flask's use was logged as a proc"
+        );
         let heals: Vec<f32> = log
             .lines()
             .filter_map(|l| l.split("Diamond Flask heals Team 1 Warrior #1 for ").nth(1))

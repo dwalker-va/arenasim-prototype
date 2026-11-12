@@ -457,6 +457,16 @@ impl OnUseSlot {
     }
 }
 
+/// Whether `item` is one of `slots` whose use grants a BUFF: an aura the
+/// item lands because its wearer USED it, not because it procced.
+/// `apply_pending_auras` asks it, so an on-use buff does not log the `procs`
+/// line a proc-rate count reads.
+pub fn grants_buff(slots: &[OnUseSlot], item: ItemId) -> bool {
+    slots
+        .iter()
+        .any(|slot| slot.item == item && slot.config.buff().is_some())
+}
+
 /// Tick every equipped on-use's cooldown down by `dt`. Called from
 /// `regenerate_resources`, beside the proc cooldown tick it mirrors.
 pub fn tick_on_use_cooldowns(slots: &mut [OnUseSlot], dt: f32) {
