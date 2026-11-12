@@ -17,7 +17,9 @@ as the Druid's standing.
     obstacle's.
   - `flee_reach` (`SHIFT_FLEE_REACH`, 8yd): `flee` scores a heading by the
     distance from the chaser it gains over the open ground it has up to the
-    reach (`open_run`), as a fraction of the reach. In the open this orders
+    reach (`open_run`, a straight-line march; AS-468 replaced it with
+    `movement_scoring::run_end`, which walks the run as the executor does,
+    slid along walls and pillars), as a fraction of the reach. In the open this orders
     headings as the plain `flee * dot` does. With a wall or a pillar at the
     Druid's back, a heading along the obstacle beats one into it.
 - With neither field set the scorer is unchanged: the 80 control matches of

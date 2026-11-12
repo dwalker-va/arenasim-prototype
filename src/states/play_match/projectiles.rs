@@ -405,7 +405,7 @@ pub fn process_projectile_hits(
                     commands.entity(projectile_entity).despawn();
                     continue;
                 };
-                caster.damage_dealt += actual_damage + absorbed;
+                super::combat_core::credit_damage_dealt(&mut caster, actual_damage, absorbed);
 
                 // Leech to the caster (Death Coil: the damage that reached
                 // health, every point of it): through `apply_healing`, so
@@ -513,7 +513,7 @@ pub fn process_projectile_hits(
                 caster_id.clone(),
                 target_id.clone(),
                 def.name.to_string(),
-                actual_damage + absorbed, // Total damage dealt (including absorbed)
+                super::combat_core::credited_damage(actual_damage, absorbed),
                 // Credit the killing blow only on the FIRST lethal hit. Without
                 // an alive-gate here (unlike auto_attack/casting), a second
                 // projectile already in flight lands on the same-frame corpse
