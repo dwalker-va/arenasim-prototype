@@ -1498,6 +1498,23 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
              Shadowform, before it holds the form (tests/shadowform_scenes.rs builds it)",
         ),
     ),
+    // The Affliction tree (AS-409): the grid grants no talent and offers no
+    // widened curse; tests/affliction_talents.rs builds each in its scene
+    // pairs.
+    (
+        AbilityType::SiphonLife,
+        Unreached::NeedsKnob("a build that takes Siphon Life"),
+    ),
+    (
+        AbilityType::AmplifyCurse,
+        Unreached::NeedsKnob("a build that takes Amplify Curse"),
+    ),
+    (
+        AbilityType::CurseOfExhaustion,
+        Unreached::NeedsKnob(
+            "the Curse of Exhaustion choice, which only a build with its talent is offered",
+        ),
+    ),
 ];
 
 /// Every ability of every class's own kit is chosen somewhere in the grid, or

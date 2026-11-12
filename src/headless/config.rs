@@ -166,7 +166,7 @@ pub struct HeadlessMatchConfig {
     #[serde(default)]
     pub team2_rogue_offhand_poisons: Vec<Option<String>>,
     /// Team 1's warlock curse preferences: outer vec indexed by slot, inner vec indexed by enemy target
-    /// Values: "Agony", "Weakness", "Tongues" (defaults to Agony)
+    /// Values: "Agony", "Weakness", "Tongues", "Exhaustion" (defaults to Agony)
     #[serde(default)]
     pub team1_warlock_curse_prefs: Vec<Option<Vec<String>>>,
     /// Team 2's warlock curse preferences: outer vec indexed by slot, inner vec indexed by enemy target
@@ -683,6 +683,7 @@ impl HeadlessMatchConfig {
         match name {
             "Weakness" | "CurseOfWeakness" | "Curse of Weakness" => WarlockCurse::Weakness,
             "Tongues" | "CurseOfTongues" | "Curse of Tongues" => WarlockCurse::Tongues,
+            "Exhaustion" | "CurseOfExhaustion" | "Curse of Exhaustion" => WarlockCurse::Exhaustion,
             _ => WarlockCurse::Agony, // Default to Agony for unknown values
         }
     }

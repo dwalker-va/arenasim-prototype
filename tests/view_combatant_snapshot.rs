@@ -517,6 +517,54 @@ fn mitigation_rows_say_what_their_total_buys() {
     );
 }
 
+/// The curse panel offers Curse of Exhaustion only to a slot whose build
+/// takes its talent: an untalented Warlock is offered the three base curses,
+/// a talented one the fourth beside them.
+#[test]
+fn the_curse_panel_offers_exhaustion_only_with_its_talent() {
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+    let class_icons = ClassIcons::default();
+    let data = || ViewCombatantData {
+        abilities: &abilities,
+        items: &items,
+        default_loadouts: &defaults,
+        class_icons: &class_icons,
+        ability_icons: None,
+        item_icons: None,
+        pet_icons: None,
+        talents: TalentDefinitions::shipped(),
+    };
+    let mut config = MatchConfig::default();
+    config.team1[0] = Some(CharacterClass::Warlock);
+    let untalented = Sheet::open(CharacterClass::Warlock, config.clone(), data());
+    for curse in ["CurseOfAgony", "CurseOfWeakness", "CurseOfTongues"] {
+        assert!(
+            untalented
+                .last
+                .widget(&format!("strategic:{curse}:e0"))
+                .is_some(),
+            "{curse}"
+        );
+    }
+    assert!(untalented
+        .last
+        .widget("strategic:CurseOfExhaustion:e0")
+        .is_none());
+
+    config.team1_builds[0] = Build::of(&[
+        (TalentId::ImprovedDrainLife, 2),
+        (TalentId::AmplifyCurse, 1),
+        (TalentId::CurseOfExhaustion, 1),
+    ]);
+    let talented = Sheet::open(CharacterClass::Warlock, config, data());
+    assert!(talented
+        .last
+        .widget("strategic:CurseOfExhaustion:e0")
+        .is_some());
+}
+
 /// The sheet spends THIS combatant's build: a class with trees draws its
 /// talent panel over the slot's build, which the stats read back (Demonic
 /// Embrace 2/2 is +6% health); a class without trees draws no panel.
@@ -558,7 +606,7 @@ fn the_sheet_draws_the_slots_build_and_its_stats_read_it() {
     assert!(
         talented
             .last
-            .has_note("talents:t1s0 points=2 spec=Demonology Warlock 2"),
+            .has_note("talents:t1s0 points=2 spec=Demonology Warlock 0/2"),
         "{:?}",
         talented.last.notes
     );

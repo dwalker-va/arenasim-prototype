@@ -59,6 +59,7 @@
 (
     trees: {
         Warlock: [
+            (id: Affliction, name: "Affliction", icon: "icons/talents/spell_shadow_deathcoil.jpg"),
             (id: Demonology, name: "Demonology", icon: "icons/talents/spell_shadow_metamorphosis.jpg"),
         ],
         Rogue: [
@@ -73,6 +74,100 @@
     },
 
     talents: {
+        // ---- Warlock: Affliction (AS-409) ----
+        // The attrition tree: drains and DoTs that keep the Warlock alive,
+        // and Shadow Trance turning a DoT spread into instant Shadow Bolts.
+        ImprovedDrainLife: (
+            name: "Improved Drain Life",
+            class: Warlock, tree: Affliction, tier: 1, column: 0,
+            icon: "icons/talents/spell_shadow_lifedrain02.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Drain Life +15% a rank, its heal with it: 10 -> 11.5 -> 13 a
+            // tick (Classic 17804 drains 2% more a rank).
+            per_rank: [Patch(on: Ability(DrainLife), field: Damage, op: Mul(1.15))],
+        ),
+        ImprovedLifeTap: (
+            name: "Improved Life Tap",
+            class: Warlock, tree: Affliction, tier: 1, column: 2,
+            icon: "icons/talents/spell_shadow_burningspirit.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Life Tap gives 10% more mana a rank for the same health (TBC
+            // 18182).
+            per_rank: [Patch(on: Ability(LifeTap), field: ManaPerHealth, op: Mul(1.10))],
+        ),
+        AmplifyCurse: (
+            name: "Amplify Curse",
+            class: Warlock, tree: Affliction, tier: 2, column: 0,
+            icon: "icons/talents/spell_shadow_contagion.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // The next Curse of Weakness or Curse of Agony is 50% stronger;
+            // 45s cooldown (Classic 18288: 3 min).
+            per_rank: [Grant(AmplifyCurse)],
+        ),
+        Nightfall: (
+            name: "Nightfall",
+            class: Warlock, tree: Affliction, tier: 2, column: 2,
+            icon: "icons/talents/spell_shadow_twilight.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // A 5% chance a rank on each damage tick of Corruption or Drain
+            // Life (Classic 18095: 4%) to enter Shadow Trance for 10s: the
+            // next Shadow Bolt is instant. TBC 17941's Shadow Trance is Magic.
+            per_rank: [
+                Proc((
+                    trigger: DotTick,
+                    abilities: [Corruption, DrainLife],
+                    chance: Chance(0.05),
+                    ranks_add: Chance,
+                    effect: NextCast(
+                        modifier: (applies_to: Abilities([Shadowbolt]), instant: true),
+                        duration: 10.0,
+                        dispel_type: Auto,
+                        name: Some("Shadow Trance"),
+                    ),
+                )),
+            ],
+        ),
+        SiphonLife: (
+            name: "Siphon Life",
+            class: Warlock, tree: Affliction, tier: 3, column: 0,
+            icon: "icons/talents/spell_shadow_requiem.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // A Shadow DoT, 4 every 3s for 30s, each tick healing the
+            // Warlock for what it dealt; 25 mana.
+            per_rank: [Grant(SiphonLife)],
+        ),
+        CurseOfExhaustion: (
+            name: "Curse of Exhaustion",
+            class: Warlock, tree: Affliction, tier: 3, column: 1,
+            icon: "icons/talents/spell_shadow_grimward.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // Adds Curse of Exhaustion to the curse choice: 30% slower
+            // movement for 12s (TBC's magnitude).
+            per_rank: [WidenChoice(WarlockCurse(Exhaustion))],
+        ),
+        ShadowMastery: (
+            name: "Shadow Mastery",
+            class: Warlock, tree: Affliction, tier: 4, column: 1,
+            icon: "icons/talents/spell_shadow_shadetruesight.jpg",
+            max_rank: 1,
+            budget: Some(22.0),
+            requires: Some((SiphonLife, 1)),
+            // +10% damage dealt and life drained by every Shadow spell
+            // (Classic 18275): the direct damage, and the ticks of the
+            // damage over time. Drain Life's, Death Coil's and Siphon Life's
+            // heals are their damage, so they drain 10% more too.
+            per_rank: [
+                Patch(on: School(Shadow), field: Damage, op: Mul(1.10)),
+                Patch(on: School(Shadow), field: PeriodicDamage, op: Mul(1.10)),
+            ],
+        ),
+
         // ---- Warlock: Demonology ----
         DemonicEmbrace: (
             name: "Demonic Embrace",

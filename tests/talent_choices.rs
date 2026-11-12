@@ -234,13 +234,16 @@ fn a_widened_option_is_offered_only_to_a_build_that_takes_its_node() {
         t.offers(&empty, AGONY) && t.offers(&empty, WEAKNESS),
         "the rest are not hidden"
     );
+    // No fixture node widens Curse of Exhaustion, so the fixture offers it
+    // to every build.
+    let exhaustion = ChoiceOption::WarlockCurse(WarlockCurse::Exhaustion);
     assert_eq!(
         t.offered(&empty, ChoiceMenu::WarlockCurse),
-        vec![AGONY, WEAKNESS]
+        vec![AGONY, WEAKNESS, exhaustion]
     );
     assert_eq!(
         t.offered(&embrace, ChoiceMenu::WarlockCurse),
-        vec![AGONY, WEAKNESS, TONGUES]
+        vec![AGONY, WEAKNESS, TONGUES, exhaustion]
     );
     // A slot that picks the hidden option without the talent is refused.
     assert!(t
@@ -249,11 +252,13 @@ fn a_widened_option_is_offered_only_to_a_build_that_takes_its_node() {
     assert!(t
         .validate_choices(CharacterClass::Warlock, &embrace, &warlock(&[TONGUES]))
         .is_ok());
-    // The shipped table widens three options: the Warlock's Sacrifice
-    // (AS-410), the Priest's Shadowform (AS-413) and the Paladin's
-    // Retribution Aura (AS-421). Every other option is offered to every build.
+    // The shipped table widens four options: the Warlock's Sacrifice
+    // (AS-410) and Curse of Exhaustion (AS-409), the Priest's Shadowform
+    // (AS-413) and the Paladin's Retribution Aura (AS-421). Every other option
+    // is offered to every build.
     let shipped = TalentDefinitions::shipped();
     let widened = [
+        ChoiceOption::WarlockCurse(WarlockCurse::Exhaustion),
         ChoiceOption::WarlockDemon(WarlockDemon::Sacrifice),
         ChoiceOption::PriestForm(PriestForm::Shadowform),
         ChoiceOption::PaladinAura(PaladinAura::RetributionAura),
