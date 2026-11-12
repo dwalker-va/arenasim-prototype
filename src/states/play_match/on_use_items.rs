@@ -403,6 +403,7 @@ pub const fn cc_break_breaks(aura: AuraType) -> bool {
         | AuraType::WindfuryBuff
         | AuraType::SpellResistanceBuff
         | AuraType::LockoutDurationReduction
+        | AuraType::NextCast
         | AuraType::DamageDealtIncrease
         | AuraType::ArmorPercentIncrease
         | AuraType::DamageTransfer
