@@ -1,14 +1,11 @@
-//! Build parity over the four slice classes' trees AS THEIR CARDS WRITE THEM
-//! (AS-409..AS-422), before any of them is in `talents.ron`.
+//! The shape of the four slice classes' trees AS THEIR CARDS WRITE THEM
+//! (AS-409..AS-422), before all of them are in `talents.ron`.
 //!
-//! The shipped table carries only the Demonology tier 1-2 proof, so
-//! `tests/talents.rs`'s parity test cannot see the trees the mechanisms of
-//! AS-331 and AS-408 serve. This holds their SHAPE to the §3 rules — tier
-//! sizes, ranks per tier, prerequisites below their node in the same tree — and
-//! every legal build at 2 to 8 points to within one rank (11) of the cheapest,
-//! with every rank at its target price (11, a capstone 22): the rank-parity
-//! test holds each shipped rank within 15% of that, and the tree cards ship
-//! them.
+//! This holds their SHAPE to the §3 rules — tier sizes, ranks per tier,
+//! prerequisites below their node in the same tree — and enumerates their legal
+//! builds: every point count from 2 to 8 has one, and no capstone opens before
+//! 6. What a build costs is not held here: a talent's price is a sanity check
+//! on the shipped table (`tests/talents.rs`), not a rule a tree is drawn to.
 //!
 //! The enumeration mirrors `TalentDefinitions::legal_builds`: a node's tier
 //! opens at 0 / 2 / 3 / 5 points in its tree's tiers below it, a prerequisite
@@ -163,8 +160,6 @@ const PALADIN: &[Node] = &[
 
 const TIER_OPENS_AT: [u32; 4] = [0, 2, 3, 5];
 const MAX_POINTS: u32 = 8;
-const RANK: f32 = 11.0;
-const CAPSTONE: f32 = 22.0;
 
 /// The §3 shape rules, on one class's nodes.
 fn check_shape(class: &str, nodes: &[Node]) {
@@ -215,25 +210,21 @@ fn legal(nodes: &[Node], ranks: &[u8]) -> bool {
     })
 }
 
-/// Every legal build's cost at each point count, as (count, costs).
-fn costs(nodes: &[Node]) -> BTreeMap<u32, Vec<f32>> {
-    let mut out: BTreeMap<u32, Vec<f32>> = BTreeMap::new();
+/// Every legal build at each point count, as (count, builds); a build is a
+/// rank for each node, in the order `nodes` lists them.
+fn builds(nodes: &[Node]) -> BTreeMap<u32, Vec<Vec<u8>>> {
+    let mut out: BTreeMap<u32, Vec<Vec<u8>>> = BTreeMap::new();
     let mut ranks = vec![0u8; nodes.len()];
     fn walk(
         nodes: &[Node],
         i: usize,
         spent: u32,
         ranks: &mut Vec<u8>,
-        out: &mut BTreeMap<u32, Vec<f32>>,
+        out: &mut BTreeMap<u32, Vec<Vec<u8>>>,
     ) {
         if i == nodes.len() {
             if spent >= 2 && legal(nodes, ranks) {
-                let cost = nodes
-                    .iter()
-                    .zip(ranks.iter())
-                    .map(|(n, r)| f32::from(*r) * if n.2 == 4 { CAPSTONE } else { RANK })
-                    .sum();
-                out.entry(spent).or_default().push(cost);
+                out.entry(spent).or_default().push(ranks.clone());
             }
             return;
         }
@@ -250,8 +241,13 @@ fn costs(nodes: &[Node]) -> BTreeMap<u32, Vec<f32>> {
     out
 }
 
+/// Whether a build takes a capstone.
+fn takes_capstone(nodes: &[Node], ranks: &[u8]) -> bool {
+    nodes.iter().zip(ranks).any(|(n, r)| n.2 == 4 && *r > 0)
+}
+
 #[test]
-fn every_slice_class_tree_holds_build_parity_as_its_cards_write_it() {
+fn every_slice_class_tree_has_its_shape_as_its_cards_write_it() {
     for (class, nodes) in [
         ("Warlock", WARLOCK),
         ("Priest", PRIEST),
@@ -259,25 +255,19 @@ fn every_slice_class_tree_holds_build_parity_as_its_cards_write_it() {
         ("Paladin", PALADIN),
     ] {
         check_shape(class, nodes);
-        let by_count = costs(nodes);
+        let by_count = builds(nodes);
         assert_eq!(
             by_count.keys().copied().collect::<Vec<_>>(),
             (2..=MAX_POINTS).collect::<Vec<_>>(),
             "{class}: a legal build at every count"
         );
-        for (points, costs) in by_count {
-            let (lo, hi) = costs
-                .iter()
-                .fold((f32::MAX, f32::MIN), |(lo, hi), c| (lo.min(*c), hi.max(*c)));
-            assert!(
-                hi - lo <= RANK + 1e-3,
-                "{class} at {points} points: {lo} to {hi} over {} builds",
-                costs.len()
+        for (points, builds) in by_count {
+            // A capstone opens at 5 points below it: the sixth point.
+            assert_eq!(
+                builds.iter().any(|b| takes_capstone(nodes, b)),
+                points >= 6,
+                "{class} at {points}: a capstone opens at 6 points"
             );
-            // Up to 5 points no capstone opens, so every build costs the same.
-            if points <= 5 {
-                assert_eq!(hi, lo, "{class} at {points}");
-            }
         }
     }
 }
@@ -317,10 +307,16 @@ fn the_enumeration_opens_capstones_and_enforces_prerequisites() {
         !legal(WARLOCK, &early),
         "the capstone opens at 5 points below it"
     );
-    let six = costs(WARLOCK).remove(&6).unwrap();
+    let six = builds(WARLOCK).remove(&6).unwrap();
+    let earliest = at(&[
+        ("Demonic Embrace", 2),
+        ("Fel Stamina", 2),
+        ("Demonic Sacrifice", 1),
+        ("Soul Link", 1),
+    ]);
+    assert!(six.contains(&earliest), "a capstone build at 6");
     assert!(
-        six.contains(&(5.0 * RANK + CAPSTONE)),
-        "a capstone build at 6"
+        six.iter().any(|b| !takes_capstone(WARLOCK, b)),
+        "a build without one"
     );
-    assert!(six.contains(&(6.0 * RANK)));
 }

@@ -267,7 +267,7 @@ const FIXTURE_CRIT: f32 = 0.25;
 /// The shipped configs with Vitality (Rogue Combat, tier 2) adding
 /// [`FIXTURE_CRIT`] crit chance in points instead of its health.
 fn crit_fixture() -> PreloadedConfigs {
-    let from = "per_rank: [StatPercent(MaxHealth, 0.027778)],";
+    let from = "per_rank: [StatPercent(MaxHealth, 0.05)],";
     let text = shipped_text();
     assert!(text.contains(from), "Vitality's effect moved");
     let text = text.replacen(
