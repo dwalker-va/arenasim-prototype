@@ -500,6 +500,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     auras,
                     &ctx,
                     &mut set_a,
+                    &mut Default::default(),
                     &mut same_frame_cc,
                     &PaladinMovementPlan::default(),
                     &mut trace,
@@ -826,7 +827,10 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
         | LesserHealingWave | Purge | WindShear | AirTotem | WaterTotem | EarthTotem
         | FireTotem | Rejuvenation | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild
         | Innervate | EntanglingRoots | Cyclone | TravelForm | ShadowWordPain | ExposeArmor
-        | Shadowform => false,
+        | DivineProtection | BlessingOfSacrifice | SacredShield | Shadowform => false,
+        // A Paladin aura on allies: its damage answers a melee attacker that
+        // struck one, and that hit has revealed the attacker already.
+        RetributionAura => false,
     }
 }
 

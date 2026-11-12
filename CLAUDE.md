@@ -519,6 +519,9 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
   `Aura::stack_owner` / `Aura::same_source_as` carry the key, and every lookup
   of a source-keyed aura goes through them — the refresh and the already-applied
   gate.
+  `stacking: Some((max_stacks: 1, one_target: true))` makes the caster hold the
+  aura on ONE unit at a time (`AuraStacks::one_target`; Sacred Shield): when it
+  lands on another, `apply_pending_auras` takes the caster's off the first.
   Swiftmend eats its caster's own Rejuvenation first, and the Druid AI reads
   only its own heals over time. Two Druids marking in one frame never mark the
   same ally (`marked_this_frame`, the Paladin's `paladin_aura_this_frame` guard).
@@ -537,6 +540,19 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
   is the first compound BUFF: a purge that takes it takes all of it, and a purged
   or expired `MaxHealthIncrease` gives its health back either way
   (`Combatant::reverse_stat_mutation`).
+
+- `triggered_absorb: Some((trigger: DamageTaken, shield: Flat(N), limit:
+  Cooldown(S), duration: D))` on a `TriggeredAbsorb` aura arms a TRIGGERED
+  ABSORB (`triggered_absorbs.rs`; Sacred Shield): while the aura lasts, damage
+  that reaches the holder's health raises an `Absorb` of N for D seconds, at
+  most once every S. The hit that sets it off is not absorbed; the shield waits
+  for the next. Its slot (`Combatant::triggered_absorbs`) is pushed as the aura
+  lands and dropped once the aura is gone; a refresh keeps it, cooldown and
+  all. `fire_triggered_absorbs` raises the shield at the end of Phase 3 from
+  the bearer's own state, never inside the damage funnel, and applies
+  `ArenaDampening` there. It is the system an item's triggered absorb runs on
+  too (Aegis of the Last Stand, `AbsorbSource::Item`; see *Adding a New
+  Item*): trigger, size, limit and source are each matched exhaustively.
 
 `process_casting` applies every aura it lands through
 `AuraPending::from_ability_scaled`, so an instant routed through a zero-length
@@ -866,11 +882,13 @@ any ring fits either ring socket, and the same item may not occupy both
    of the Last Stand is the first):
    ```ron
    triggered_absorb: Some((
-       trigger: HealthBelow(0.35),       // the wearer alive below 35% health
-       shield: MaxHealthFraction(0.20),  // 20% of its maximum health
-       limit: OncePerMatch,
-       duration: 30.0,
-       trigger_rate: 0.575,              // the price's assumed rate
+       absorb: (
+           trigger: HealthBelow(0.35),       // the wearer alive below 35% health
+           shield: MaxHealthFraction(0.20),  // 20% of its maximum health
+           limit: OncePerMatch,
+           duration: 30.0,
+       ),
+       trigger_rate: 0.575,                  // the price's assumed rate
    )),
    ```
    - **Where it fires:** `fire_triggered_absorbs`, at the end of Phase 3,
@@ -895,8 +913,12 @@ any ring fits either ring socket, and the same item may not occupy both
      is `triggered_absorb_description`, through `ItemConfig::effect_lines`),
      and is a member of `tests/lands_silently_audit.rs`'s triggered-absorb
      family: its shield must reach a `ShieldKind` (`is_live_shield`, keyed on
-     the aura's name). New variants of trigger, size and limit (Sacred Shield,
-     AS-421) are exhaustive matches in that module.
+     the aura's name). The shared `absorb` config is the one a talent's
+     triggered absorb uses too (Sacred Shield's `DamageTaken` / `Flat` /
+     `Cooldown`, armed by an aura; see *Stacking, refreshing and blooming
+     auras*): one firing system, one dampening site; trigger, size, limit and
+     source (`AbsorbSource::Item` / `Aura`) are exhaustive matches in that
+     module, and `trigger_rate` lives on the item's wrapper alone.
 
 3. **Add to a class loadout** in `loadouts.ron` if it should be default equipment
 

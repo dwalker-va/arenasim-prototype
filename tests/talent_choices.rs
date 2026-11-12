@@ -9,7 +9,7 @@
 
 use arenasim::headless::HeadlessMatchConfig;
 use arenasim::states::match_config::{
-    CharacterClass, PriestForm, RoguePoison, WarlockCurse, WarlockDemon,
+    CharacterClass, PaladinAura, PriestForm, RoguePoison, WarlockCurse, WarlockDemon,
 };
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
@@ -40,6 +40,7 @@ const FIXTURE: &str = r#"(
     trees: {
         Warlock: [(id: Demonology, name: "Demonology", icon: "x.jpg")],
         Rogue: [(id: Demonology, name: "Fixture", icon: "x.jpg")],
+        Paladin: [(id: Protection, name: "Protection", icon: "x.jpg")],
         Mage: [(id: Demonology, name: "Filler", icon: "x.jpg")],
         Priest: [(id: Shadow, name: "Shadow", icon: "x.jpg")],
     },
@@ -64,6 +65,43 @@ const FIXTURE: &str = r#"(
             name: "Unholy Power", class: Warlock, tree: Demonology, tier: 1, column: 2,
             icon: "x.jpg", max_rank: 2, budget: Some(11.0),
             per_rank: [Mechanic(SoulLink(share: 0.06))],
+        ),
+        // The shipped Paladin nodes, inert here: every table names every
+        // talent, and grants each talent ability once.
+        SacredDuty: (
+            name: "Sacred Duty", class: Paladin, tree: Protection, tier: 1, column: 0,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [Patch(on: Ability(HammerOfJustice), field: Cooldown, op: Add(-1.0))],
+        ),
+        ImprovedHammerOfJustice: (
+            name: "Improved Hammer of Justice", class: Paladin, tree: Protection, tier: 1,
+            column: 2, icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [Patch(on: Ability(HammerOfJustice), field: Cooldown, op: Add(-10.0))],
+        ),
+        DivineProtection: (
+            name: "Divine Protection", class: Paladin, tree: Protection, tier: 2, column: 0,
+            icon: "x.jpg", max_rank: 1, budget: Some(11.0),
+            per_rank: [Grant(DivineProtection)],
+        ),
+        RetributionAura: (
+            name: "Retribution Aura", class: Paladin, tree: Protection, tier: 2, column: 1,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [WidenChoice(PaladinAura(RetributionAura))],
+        ),
+        Toughness: (
+            name: "Toughness", class: Paladin, tree: Protection, tier: 2, column: 2,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [StatPercent(Armor, 0.10)],
+        ),
+        BlessingOfSacrifice: (
+            name: "Blessing of Sacrifice", class: Paladin, tree: Protection, tier: 3, column: 1,
+            icon: "x.jpg", max_rank: 1, budget: Some(11.0),
+            per_rank: [Grant(BlessingOfSacrifice)],
+        ),
+        SacredShield: (
+            name: "Sacred Shield", class: Paladin, tree: Protection, tier: 4, column: 1,
+            icon: "x.jpg", max_rank: 1, budget: Some(22.0),
+            per_rank: [Grant(SacredShield)],
         ),
         // Fillers for the ids the cases do not use: every id has an entry.
         MasterDemonologist: (
@@ -193,21 +231,24 @@ fn a_widened_option_is_offered_only_to_a_build_that_takes_its_node() {
     assert!(t
         .validate_choices(CharacterClass::Warlock, &embrace, &warlock(&[TONGUES]))
         .is_ok());
-    // The shipped table widens two options, the Warlock's Sacrifice (AS-410)
-    // and the Priest's Shadowform (AS-413): every other option is offered to
-    // every build.
+    // The shipped table widens three options: the Warlock's Sacrifice
+    // (AS-410), the Priest's Shadowform (AS-413) and the Paladin's
+    // Retribution Aura (AS-421). Every other option is offered to every build.
     let shipped = TalentDefinitions::shipped();
-    let sacrifice = ChoiceOption::WarlockDemon(WarlockDemon::Sacrifice);
-    let shadowform = ChoiceOption::PriestForm(PriestForm::Shadowform);
+    let widened = [
+        ChoiceOption::WarlockDemon(WarlockDemon::Sacrifice),
+        ChoiceOption::PriestForm(PriestForm::Shadowform),
+        ChoiceOption::PaladinAura(PaladinAura::RetributionAura),
+    ];
     assert_eq!(
         shipped.widened_options(),
-        std::collections::BTreeSet::from([sacrifice, shadowform])
+        std::collections::BTreeSet::from(widened)
     );
     for menu in ChoiceMenu::ALL {
         let all_but: Vec<ChoiceOption> = menu
             .options()
             .into_iter()
-            .filter(|o| *o != sacrifice && *o != shadowform)
+            .filter(|o| !widened.contains(o))
             .collect();
         assert_eq!(shipped.offered(&empty, menu), all_but, "{menu:?}");
     }

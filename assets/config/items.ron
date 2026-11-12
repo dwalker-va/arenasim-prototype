@@ -3587,10 +3587,12 @@
             icon: "icons/items/inv_jewelry_talisman_05.jpg",
             slot: Trinket,
             triggered_absorb: Some((
-                trigger: HealthBelow(0.35),
-                shield: MaxHealthFraction(0.20),
-                limit: OncePerMatch,
-                duration: 30.0,
+                absorb: (
+                    trigger: HealthBelow(0.35),
+                    shield: MaxHealthFraction(0.20),
+                    limit: OncePerMatch,
+                    duration: 30.0,
+                ),
                 trigger_rate: 0.575,
             )),
         ),

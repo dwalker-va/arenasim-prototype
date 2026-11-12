@@ -563,10 +563,13 @@ pub struct Combatant {
     /// carries none, and every on-use hook returns on that emptiness, so such
     /// a match runs and traces exactly as it did before on-use items existed.
     pub on_use_items: Vec<crate::states::play_match::on_use_items::OnUseSlot>,
-    /// Triggered absorbs this combatant carries (Aegis of the Last Stand), and
-    /// whether each is spent. Filled by [`Combatant::apply_equipment`]; read
-    /// by `triggered_absorbs::fire_triggered_absorbs`, which returns on an
-    /// empty list before touching anything.
+    /// Triggered absorbs this combatant carries, and where each one's trigger
+    /// and limit stand: an item's (Aegis of the Last Stand), pushed by
+    /// [`Combatant::apply_equipment`] for the match, and an aura-armed one's
+    /// (Sacred Shield), pushed by `apply_pending_auras` as its arming aura
+    /// lands, for as long as that aura lives. Read by
+    /// `triggered_absorbs::fire_triggered_absorbs`, which skips a combatant
+    /// with none before touching anything.
     pub triggered_absorbs: Vec<crate::states::play_match::triggered_absorbs::TriggeredAbsorbSlot>,
 }
 
@@ -1186,14 +1189,15 @@ impl Combatant {
             // A triggered absorb (Aegis of the Last Stand), named after its
             // item, which is what its shield aura and visual are keyed on.
             if let Some(absorb) = &item.triggered_absorb {
-                self.triggered_absorbs.push(
-                    crate::states::play_match::triggered_absorbs::TriggeredAbsorbSlot {
-                        name: item.name.clone(),
-                        source_item: Some(*item_id),
-                        config: absorb.clone(),
-                        spent: false,
-                    },
-                );
+                use crate::states::play_match::triggered_absorbs::{
+                    AbsorbSource, TriggeredAbsorbSlot,
+                };
+                self.triggered_absorbs.push(TriggeredAbsorbSlot::new(
+                    &item.name,
+                    AbsorbSource::Item(*item_id),
+                    absorb.absorb,
+                    self.damage_taken,
+                ));
             }
 
             // For the primary weapon slot, replace attack_damage and weapon_speed

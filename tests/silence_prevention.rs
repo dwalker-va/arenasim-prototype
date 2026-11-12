@@ -182,6 +182,7 @@ fn a_silence_never_stops_a_free_ability() {
         AbilityType::DevotionAura,
         AbilityType::ConcentrationAura,
         AbilityType::ShadowResistanceAura,
+        AbilityType::RetributionAura,
         AbilityType::DivineShield,
         AbilityType::FrostArmor,
         AbilityType::MageArmorSpell,

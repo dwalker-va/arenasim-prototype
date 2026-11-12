@@ -22,6 +22,7 @@ use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::{AbilitiesConfig, AbilityDefinitions};
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene, Who};
+use arenasim::states::play_match::components::{Aura, AuraType};
 use arenasim::states::play_match::movement_config::load_movement_config;
 
 /// A scene builder for one talent ability: its class's unit (the `Who`)
@@ -32,7 +33,61 @@ type SceneFor = fn(&AbilityDefinitions) -> (Scene, Who);
 const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::ExposeArmor, expose_armor_scene),
     (AbilityType::Shadowform, shadowform_scene),
+    (AbilityType::DivineProtection, paladin_under_attack),
+    (AbilityType::BlessingOfSacrifice, paladin_ally_under_attack),
+    (AbilityType::SacredShield, paladin_ally_pressured),
 ];
+
+const PALADIN: Who = "paladin";
+const MAGE: Who = "mage";
+
+/// Devotion Aura already up, so the Paladin's aura step is out of the way.
+fn devotion() -> Aura {
+    Aura {
+        effect_type: AuraType::DamageTakenReduction,
+        duration: 600.0,
+        magnitude: 0.10,
+        ability_name: "Devotion Aura".into(),
+        ..Default::default()
+    }
+}
+
+/// A Paladin at 40% health with an enemy Warrior on it: Divine Protection's
+/// moment.
+fn paladin_under_attack(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PALADIN, 1, CharacterClass::Paladin)
+        .health(0.4)
+        .aura_full(PALADIN, devotion())
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(2.0, 0.0)
+        .targeting(PALADIN);
+    (scene, PALADIN)
+}
+
+/// A healthy Paladin whose Mage, at `health`, has an enemy Warrior on it.
+fn paladin_ally_at(defs: &AbilityDefinitions, health: f32) -> (Scene, Who) {
+    let scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PALADIN, 1, CharacterClass::Paladin)
+        .aura_full(PALADIN, devotion())
+        .unit(MAGE, 1, CharacterClass::Mage)
+        .at(15.0, 0.0)
+        .health(health)
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(17.0, 0.0)
+        .targeting(MAGE);
+    (scene, PALADIN)
+}
+
+/// The Mage dying under the Warrior: Blessing of Sacrifice's moment.
+fn paladin_ally_under_attack(defs: &AbilityDefinitions) -> (Scene, Who) {
+    paladin_ally_at(defs, 0.3)
+}
+
+/// The Mage pressured but healthy: Sacred Shield's moment.
+fn paladin_ally_pressured(defs: &AbilityDefinitions) -> (Scene, Who) {
+    paladin_ally_at(defs, 0.8)
+}
 
 /// A Rogue in melee of its kill target, a plate-armored Warrior: Expose
 /// Armor's moment (`class_ai::rogue::try_expose_armor`).

@@ -343,9 +343,10 @@ pub fn add_core_combat_systems<M, N>(
             // hit of the frame, through the same damage funnel. Inert unless a
             // modifier aura or a talent queued one.
             process_damage_follow_ups,
-            // After the frame's last damage (the follow-ups above): a shield a
-            // health threshold raises (Aegis of the Last Stand) is up for all
-            // of the next frame's damage. A no-op for a combatant carrying none.
+            // Triggered absorbs (Aegis of the Last Stand, Sacred Shield):
+            // raised after the frame's last damage (the follow-ups above), from
+            // each bearer's own state, so a shield is up for all of the next
+            // frame's damage. A no-op for a combatant carrying none.
             fire_triggered_absorbs,
             // Every talent proc event pushed this frame (by the phases above,
             // through their commands) rolled at one site, in event order.
