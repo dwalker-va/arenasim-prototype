@@ -939,12 +939,13 @@ any ring fits either ring socket, and the same item may not occupy both
      the item picker, tooltips and encyclopedia show it with no code change. Every
      shipped item has one; the field defaults to empty, which draws no icon.
 
-6. **Run `cargo test`** to verify the item passes budget validation. Nothing
-   else is edited: the tests that check a tier or a mechanism walk every item
-   in `items.ron` (a frozen witness keeps each walk from passing on none), and
-   the encyclopedia and equipment-picker snapshots draw a pinned catalogue
-   (`tests/common/pinned_catalogue.rs`), so a new item re-blesses no PNG. Two
-   cards that add different items touch only their own entries.
+6. **Run `cargo test`** to verify the item passes budget validation. The
+   item's `items.ron` entry and its `ItemId` line are the only edits: the
+   tests that check a tier or a mechanism walk every item in `items.ron` (a
+   frozen witness keeps each walk from passing on none), and the snapshots
+   draw a pinned catalogue (`tests/common/pinned_catalogue.rs`), so a new item
+   re-blesses no PNG. Two cards that each append an item at the same place in
+   `items.ron` and the `ItemId` list still conflict there.
 
 **Tip**: Use the Wowhead MCP to look up WoW Classic item stats as a reference:
 ```
@@ -2217,8 +2218,8 @@ actions) from a pure `draw_*(ctx, &data...) -> Action` function, then drive
 that function from a kittest harness with mock data.
 `tests/main_menu_snapshot.rs` and `tests/encyclopedia_snapshot.rs` follow it.
 **A snapshot over game content pins LAYOUT, not the catalogue:** the
-encyclopedia and equipment-picker harnesses draw the live tables restricted to
-`tests/common/pinned_catalogue.rs`, the items, abilities and talents that
+encyclopedia, equipment-picker and View Combatant harnesses draw the live
+tables restricted to `tests/common/pinned_catalogue.rs`, the items, abilities and talents that
 existed when they were last pinned. A change to a pinned entry's own text or
 numbers still shows; content added since does not, so a card that adds an
 item, an ability, an aura or a talent moves no pixel there, and two such cards
@@ -2334,12 +2335,16 @@ old standalone Armory. It is a navigation FRAMEWORK plus per-section content:
   proc item's buff, a talent's proc aura, …). The build script lists the
   directory and generates `EngineFamily` and its dispatch, so a new family is a
   new file — `members` (the auras of that family the tables hold, read from
-  their source) and `entry` (its page, read from the apply site's own
-  constructor) — and never an edit to a shared list. `cargo fmt` cannot see
-  these files (they are declared in generated code); `rustfmt --edition 2021
-  src/states/encyclopedia/engine_auras/*.rs` formats them, and a unit test
-  holds them to it. `tests/aura_catalog_audit.rs` fails an aura applied in code
-  that no entry covers.
+  their source), `entry` (its page, read from the apply site's own
+  constructor), and two declarations the compiler asks for: `SOURCE` (an
+  ability, an item, a talent or the arena applies it) and `ART` (whose icon
+  it wears). The tests derive their expected sets from those declarations, so
+  a new family is never an edit to a shared list. Lint's `cargo fmt --check`
+  cannot see these files (they are declared in generated code): run
+  `rustfmt --edition 2021 src/states/encyclopedia/engine_auras/*.rs`, and the
+  default `cargo test` holds them to it (`family_files_are_rustfmt_clean`).
+  `tests/aura_catalog_audit.rs` fails an aura applied in code that no entry
+  covers.
 - **Ability and aura PROSE is `src/states/ability_text.rs`** — one generator, shared
   with View Combatant, so an ability's description reads the same wherever the
   player meets it. Totem text wins over a hand-written `abilities.ron`

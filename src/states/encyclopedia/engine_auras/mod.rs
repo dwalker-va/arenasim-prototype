@@ -26,8 +26,20 @@
 //!   number the simulation does not use. `None` for a key that is not a
 //!   member (a stale navigation stack can still hold one).
 //!
-//! A missing function, or one with the wrong signature, fails the build at
-//! the generated dispatch, naming the file.
+//! And it DECLARES two judgements, as two constants, which the tests read
+//! instead of keeping lists of names:
+//!
+//! - `pub const SOURCE: SourceKind` — what applies its auras: an ability, an
+//!   item, a talent, or the arena itself. Every entry it builds must agree
+//!   (an ability-applied family names its ability as the page's
+//!   [`AuraSource`]; the others name a mechanic).
+//! - `pub const ART: ArtKind` — where its icon comes from: the applying
+//!   ability's, art of its own, the item's or the talent's. Every entry it
+//!   builds must wear that kind of [`AuraArt`].
+//!
+//! A missing function or constant, or one of the wrong type, fails the build
+//! at the generated dispatch, naming the file — the compiler asks each new
+//! family both questions.
 //!
 //! ## Name collisions
 //!
@@ -90,6 +102,53 @@ pub enum EngineKey {
     Poison(RoguePoison),
     /// A talent's proc, by its index among the talent's `Proc` effects.
     TalentProc(TalentId, u8),
+}
+
+/// What applies a family's auras — the `SOURCE` every family file declares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SourceKind {
+    /// An ability with a page of its own; entries name it as
+    /// [`AuraSource::Ability`].
+    Ability,
+    /// An item the wearer carries; entries name a mechanic.
+    Item,
+    /// A talent node; entries name a mechanic.
+    Talent,
+    /// The arena itself (an orb pickup); entries name a mechanic.
+    Arena,
+}
+
+impl SourceKind {
+    /// Whether an entry's [`AuraSource`] is the kind this declares.
+    pub fn admits(self, source: AuraSource) -> bool {
+        match self {
+            SourceKind::Ability => matches!(source, AuraSource::Ability(_)),
+            SourceKind::Item | SourceKind::Talent | SourceKind::Arena => {
+                matches!(source, AuraSource::Mechanic(_))
+            }
+        }
+    }
+}
+
+/// Where a family's icons come from — the `ART` every family file declares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ArtKind {
+    FromSource,
+    Own,
+    Item,
+    Talent,
+}
+
+impl ArtKind {
+    /// The kind an entry's [`AuraArt`] is.
+    pub fn of(art: AuraArt) -> Self {
+        match art {
+            AuraArt::FromSource => ArtKind::FromSource,
+            AuraArt::Own(_) => ArtKind::Own,
+            AuraArt::Item(_) => ArtKind::Item,
+            AuraArt::Talent(_) => ArtKind::Talent,
+        }
+    }
 }
 
 /// Everything a family's `entry` answers. A struct rather than a long tuple

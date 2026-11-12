@@ -2,12 +2,15 @@
 //! aura no ability, item or talent applies, so it is listed whatever the
 //! tables hold.
 
-use super::{unit_if, EngineKey, EngineSpec};
+use super::{unit_if, ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
 use crate::states::play_match::components::{AuraType, DispelType};
 use crate::states::play_match::shadow_sight::{
     SHADOW_SIGHT_BREAK_ON_DAMAGE, SHADOW_SIGHT_DURATION, SHADOW_SIGHT_SPAWN_TIME,
 };
+
+pub const SOURCE: SourceKind = SourceKind::Arena;
+pub const ART: ArtKind = ArtKind::Own;
 
 pub fn members(_source: &CatalogSource) -> Vec<EngineKey> {
     unit_if(true)

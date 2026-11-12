@@ -1,4 +1,5 @@
-//! The PINNED catalogue the snapshot harnesses draw: the items, abilities and
+//! The PINNED catalogue the snapshot harnesses draw (the encyclopedia, the
+//! equipment picker and View Combatant): the items, abilities and
 //! talents that existed when the snapshots were last pinned (AS-456), read
 //! from the live tables but restricted to these members.
 //!

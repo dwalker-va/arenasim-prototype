@@ -1,12 +1,15 @@
 //! The silence Unstable Affliction's dispel backlash puts on the dispeller,
 //! which shares the damage-over-time's name.
 
-use super::{has_ability, unit_if, EngineKey, EngineSpec};
+use super::{has_ability, unit_if, ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::effects::backlash::{
     dispel_backlash_silence_aura, DISPEL_BACKLASH_SILENCE_DURATION,
 };
+
+pub const SOURCE: SourceKind = SourceKind::Ability;
+pub const ART: ArtKind = ArtKind::FromSource;
 
 pub fn members(source: &CatalogSource) -> Vec<EngineKey> {
     unit_if(has_ability(source, AbilityType::UnstableAffliction))

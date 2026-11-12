@@ -2,10 +2,13 @@
 //! Stand), named after the item. One per item carrying a `triggered_absorb:`
 //! block.
 
-use super::{EngineKey, EngineSpec};
+use super::{ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
 use crate::states::play_match::equipment::ItemId;
 use crate::states::play_match::triggered_absorbs::{triggered_absorb_description, ShieldFrom};
+
+pub const SOURCE: SourceKind = SourceKind::Item;
+pub const ART: ArtKind = ArtKind::Item;
 
 pub fn members(source: &CatalogSource) -> Vec<EngineKey> {
     ItemId::all()

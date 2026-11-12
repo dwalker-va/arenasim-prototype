@@ -2,12 +2,15 @@
 //! whose totem the ability table holds — so a fifth element needs no code
 //! here.
 
-use super::{has_ability, EngineKey, EngineSpec};
+use super::{has_ability, ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
 use crate::states::play_match::class_ai::shaman::totem_spec;
 use crate::states::play_match::components::TotemElement;
 use crate::states::play_match::constants::TOTEM_DURATION;
 use crate::states::play_match::totems::make_totem_aura;
+
+pub const SOURCE: SourceKind = SourceKind::Ability;
+pub const ART: ArtKind = ArtKind::FromSource;
 
 pub fn members(source: &CatalogSource) -> Vec<EngineKey> {
     TotemElement::ALL

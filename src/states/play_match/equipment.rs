@@ -4503,8 +4503,8 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
     /// A reward tier spends at least [`ItemTier::min_budget_spend`] of its
     /// budget, so the gain its band promises is what a pick delivers. Every
     /// loaded item is checked, each against its own tier's floor; both reward
-    /// tiers must hold items for the check to mean anything, and the tiers
-    /// partition the items.
+    /// tiers must hold items for the check to mean anything, and each tier's
+    /// members sit in its item-level band.
     #[test]
     fn reward_tiers_spend_their_budget() {
         let item_defs = load_item_definitions().expect("items.ron must load");
@@ -4528,18 +4528,22 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         assert!(under.is_empty(), "{}", under.join("\n"));
 
         for tier in [ItemTier::Gauntlet, ItemTier::Champion] {
+            let members = tier_items(&item_defs, tier);
             assert!(
-                !tier_items(&item_defs, tier).is_empty(),
+                !members.is_empty(),
                 "no {} item loaded, so its floor checked nothing",
                 tier.name()
             );
+            // The members are the tier's: each sits in its item-level band.
+            for id in members {
+                let level = item_defs.get_unchecked(&id).item_level;
+                assert!(
+                    tier.item_levels().contains(&level),
+                    "{id:?} (ilvl {level}) is listed as {}",
+                    tier.name()
+                );
+            }
         }
-        // The tiers partition the items: each is in exactly one.
-        let in_a_tier: usize = ItemTier::ALL
-            .iter()
-            .map(|tier| tier_items(&item_defs, *tier).len())
-            .sum();
-        assert_eq!(in_a_tier, item_defs.item_count());
     }
 
     /// The Champion offer floor (talents-and-Gauntlet proposal §6.5): a

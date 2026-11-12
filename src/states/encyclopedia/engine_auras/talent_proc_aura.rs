@@ -3,11 +3,14 @@
 //! Derived from the talent table, so talent N+1's proc gets an entry with no
 //! code here.
 
-use super::{EngineKey, EngineSpec};
+use super::{ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
 use crate::states::play_match::talent_procs::{effect_aura, ProcEvent, TalentProcSlot};
 use crate::states::play_match::talents::TalentEffect;
 use crate::states::talent_text::talent_proc_description;
+
+pub const SOURCE: SourceKind = SourceKind::Talent;
+pub const ART: ArtKind = ArtKind::Talent;
 
 pub fn members(source: &CatalogSource) -> Vec<EngineKey> {
     // Every talent proc that lands an aura, in `TalentId` order.

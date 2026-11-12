@@ -414,11 +414,14 @@ mod tests {
     use crate::states::play_match::equipment::load_item_definitions;
 
     /// A talent proc's aura draws under its TALENT's key, and the loaders
-    /// register that key at the talent's icon for every talent with a proc —
-    /// none in the shipped table yet, one in a fixture that gives Fel Stamina
-    /// a proc.
+    /// register that key at the talent's icon for every talent whose aura the
+    /// encyclopedia lists wearing its talent's art — read off the catalogue's
+    /// own engine aura families, a different path from `talent_aura_icons`, so
+    /// neither can lose a talent alone. A fixture that gives Fel Stamina a
+    /// proc adds exactly Fel Stamina's key, whatever the shipped table holds.
     #[test]
     fn a_talent_proc_aura_wears_its_talents_icon() {
+        use crate::states::encyclopedia::auras::{catalog_with, AuraArt};
         let aura = Aura {
             effect_type: AuraType::NextCast,
             ability_name: "Test".to_string(),
@@ -429,42 +432,47 @@ mod tests {
             get_aura_icon_key(&aura, AbilityDefinitions::shipped()),
             talent_aura_icon_key(TalentId::FelStamina)
         );
-        // Shipped: the two Demonology talents whose mechanics land an aura.
-        let keys = |icons: Vec<(String, String)>| -> Vec<String> {
-            let mut k: Vec<String> = icons.into_iter().map(|(k, _)| k).collect();
-            k.sort();
-            k
+        let keys = |icons: Vec<(String, String)>| -> std::collections::BTreeSet<String> {
+            icons.into_iter().map(|(k, _)| k).collect()
         };
-        assert_eq!(
-            keys(talent_aura_icons(TalentDefinitions::shipped())),
-            vec![
-                talent_aura_icon_key(TalentId::DemonicSacrifice),
-                talent_aura_icon_key(TalentId::MasterDemonologist),
-            ]
+        let items = load_item_definitions().expect("items.ron must load");
+        let worn = |talents: &TalentDefinitions| -> std::collections::BTreeSet<String> {
+            catalog_with(AbilityDefinitions::shipped(), &items, talents)
+                .into_iter()
+                .filter_map(|entry| match entry.art {
+                    AuraArt::Talent(talent) => Some(talent_aura_icon_key(talent)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let shipped = keys(talent_aura_icons(TalentDefinitions::shipped()));
+        assert!(
+            worn(TalentDefinitions::shipped()).is_subset(&shipped),
+            "every talent art the encyclopedia draws is registered"
         );
-        let shipped =
-            std::fs::read_to_string(crate::paths::asset_path("config/talents.ron")).unwrap();
-        let text = shipped.replacen(
+        // Witness: the Demonology talents whose mechanics land an aura.
+        assert!(shipped.contains(&talent_aura_icon_key(TalentId::MasterDemonologist)));
+
+        let text = std::fs::read_to_string(crate::paths::asset_path("config/talents.ron")).unwrap();
+        let fixture = text.replacen(
             "per_rank: [PetStatPercent(MaxHealth, 0.10)],",
             "per_rank: [Proc((trigger: StealthBreak, chance: Chance(1.0), ranks_add: Effect, \
              effect: ApplyAura(on: Owner, aura_type: AttackPowerIncrease, magnitude: 5.0, \
              duration: 6.0, dispel_type: Physical)))],",
             1,
         );
-        let talents = TalentDefinitions::from_ron(&text, AbilityDefinitions::shipped()).unwrap();
+        assert_ne!(fixture, text, "the fixture's anchor moved");
+        let talents = TalentDefinitions::from_ron(&fixture, AbilityDefinitions::shipped()).unwrap();
         let icons = talent_aura_icons(&talents);
         assert!(icons.contains(&(
             talent_aura_icon_key(TalentId::FelStamina),
             talents.get(TalentId::FelStamina).unwrap().icon.clone()
         )));
-        assert_eq!(
-            keys(icons),
-            vec![
-                talent_aura_icon_key(TalentId::DemonicSacrifice),
-                talent_aura_icon_key(TalentId::FelStamina),
-                talent_aura_icon_key(TalentId::MasterDemonologist),
-            ]
-        );
+        let mut expected = shipped.clone();
+        expected.insert(talent_aura_icon_key(TalentId::FelStamina));
+        assert_eq!(keys(icons), expected);
+        assert!(worn(&talents).is_subset(&expected));
+        assert!(worn(&talents).contains(&talent_aura_icon_key(TalentId::FelStamina)));
     }
 
     /// The buff bar and team frames draw a proc buff under its TRINKET's key,

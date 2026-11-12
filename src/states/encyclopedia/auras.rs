@@ -72,7 +72,7 @@ use crate::states::play_match::rendering::{
 use crate::states::play_match::talents::{TalentDefinitions, TalentId};
 
 use super::engine_auras::EngineSpec;
-pub use super::engine_auras::{EngineAura, EngineFamily, EngineKey};
+pub use super::engine_auras::{ArtKind, EngineAura, EngineFamily, EngineKey, SourceKind};
 use super::search::SearchEntry;
 use super::widget;
 use super::{EncyclopediaData, Topic};
@@ -1159,18 +1159,8 @@ mod tests {
     /// off the proc.
     #[test]
     fn a_talent_proc_has_an_entry_wearing_its_talent() {
-        use crate::states::play_match::talents::TalentDefinitions;
         let abilities = AbilityDefinitions::shipped();
-        let shipped =
-            std::fs::read_to_string(crate::paths::asset_path("config/talents.ron")).unwrap();
-        let text = shipped.replacen(
-            "per_rank: [PetStatPercent(MaxHealth, 0.10)],",
-            "per_rank: [Proc((trigger: DotTick, abilities: [Corruption], chance: Chance(0.5), \
-             ranks_add: Chance, effect: NextCast(modifier: (applies_to: Abilities([Shadowbolt]), \
-             instant: true), duration: 10.0, dispel_type: Auto, name: Some(\"Shadow Trance\"))))],",
-            1,
-        );
-        let talents = TalentDefinitions::from_ron(&text, abilities).unwrap();
+        let talents = talents_with_a_proc();
         let items = items();
         let source = CatalogSource::new(abilities, &items, &talents);
         let engine = EngineAura::all(&source);
@@ -1192,11 +1182,21 @@ mod tests {
             .provenance
             .as_deref()
             .is_some_and(|p| p.starts_with("Fel Stamina: A 50% chance on each damage tick")));
-        // The shipped table has no proc yet, and so no such entry.
-        let shipped = CatalogSource::new(abilities, &items, TalentDefinitions::shipped());
-        assert!(!EngineAura::all(&shipped)
-            .iter()
-            .any(|e| e.family == EngineFamily::TalentProcAura));
+        // The fixture's proc is the only talent proc entry it adds to what
+        // the shipped table lists, whatever procs that ships.
+        let procs = |talents: &TalentDefinitions| -> Vec<EngineAura> {
+            EngineAura::all(&CatalogSource::new(abilities, &items, talents))
+                .into_iter()
+                .filter(|e| e.family == EngineFamily::TalentProcAura)
+                .collect()
+        };
+        let mut expected = procs(TalentDefinitions::shipped());
+        expected.push(address);
+        let mut added = procs(&talents);
+        let order = |e: &EngineAura| format!("{e:?}");
+        expected.sort_by_key(order);
+        added.sort_by_key(order);
+        assert_eq!(added, expected);
     }
     use super::*;
     use crate::states::play_match::ability_config::load_ability_definitions;
@@ -1208,6 +1208,64 @@ mod tests {
 
     fn abilities() -> AbilityDefinitions {
         load_ability_definitions().expect("abilities.ron must load")
+    }
+
+    /// The shipped talent table with Fel Stamina given a proc that lands an
+    /// aura (Shadow Trance), so every engine aura family has a member to check
+    /// whatever the shipped table holds.
+    fn talents_with_a_proc() -> TalentDefinitions {
+        let shipped =
+            std::fs::read_to_string(crate::paths::asset_path("config/talents.ron")).unwrap();
+        let text = shipped.replacen(
+            "per_rank: [PetStatPercent(MaxHealth, 0.10)],",
+            "per_rank: [Proc((trigger: DotTick, abilities: [Corruption], chance: Chance(0.5), \
+             ranks_add: Chance, effect: NextCast(modifier: (applies_to: Abilities([Shadowbolt]), \
+             instant: true), duration: 10.0, dispel_type: Auto, name: Some(\"Shadow Trance\"))))],",
+            1,
+        );
+        assert_ne!(text, shipped, "the fixture's anchor moved");
+        TalentDefinitions::from_ron(&text, AbilityDefinitions::shipped()).unwrap()
+    }
+
+    /// The family an entry came from, or `None` for an `applies_aura` entry.
+    fn family_of(entry: &NamedAura) -> Option<EngineFamily> {
+        match entry.id {
+            AuraId::Engine(engine) => Some(engine.family),
+            AuraId::Ability(_) => None,
+        }
+    }
+
+    /// Every entry its family builds keeps the family's declared `SOURCE` and
+    /// `ART` — the declarations the tests below derive their expected sets
+    /// from in place of lists of names. Checked over a talent table with a
+    /// proc, so every family has members.
+    #[test]
+    fn every_family_keeps_its_declarations() {
+        let abilities = abilities();
+        let item_defs = items();
+        let talents = talents_with_a_proc();
+        let source = CatalogSource::new(&abilities, &item_defs, &talents);
+        let mut families = std::collections::BTreeSet::new();
+        for aura in EngineAura::all(&source) {
+            let spec = aura.spec(&source).expect("a listed aura resolves");
+            assert!(
+                aura.family.source_kind().admits(spec.source),
+                "{aura:?} declares {:?} but names {:?}",
+                aura.family.source_kind(),
+                spec.source
+            );
+            assert_eq!(
+                ArtKind::of(spec.art),
+                aura.family.art_kind(),
+                "{aura:?} wears art of another kind than it declares"
+            );
+            families.insert(aura.family);
+        }
+        assert_eq!(
+            families,
+            EngineFamily::ALL.iter().copied().collect(),
+            "every family has a member to check"
+        );
     }
 
     /// Haste reads as a gain in attack speed, in percent — the mirror of the
@@ -1235,9 +1293,9 @@ mod tests {
     /// Every shipped item that applies an aura of its own — a proc trinket's
     /// buff, a triggered absorb's shield — by display name, which is also the
     /// aura's name. DERIVED from `items.ron` rather than listed, so the
-    /// content pass can add trinket N+1 without editing a guard; the guards
-    /// below still NAME every non-proc member, so an ordinary entry losing its
-    /// source or its art is caught exactly as before.
+    /// content pass can add trinket N+1 without editing a guard. Read
+    /// through `ItemConfig::applies_aura`, a different path from the item
+    /// families' own filters, so the two cross-check.
     fn item_aura_names() -> Vec<String> {
         let items = items();
         ItemId::all()
@@ -1463,7 +1521,7 @@ mod tests {
     /// Each family lists only the auras of a source its tables hold, so a
     /// catalogue over tables that lack the source lacks the aura. Over EMPTY
     /// tables only Shadow Sight is left — the arena orb's buff, the one engine
-    /// aura no table is the source of — and every other address the shipped
+    /// aura no table is the source of — and every other address the full
     /// tables hold resolves to nothing.
     #[test]
     fn engine_auras_follow_their_sources() {
@@ -1477,10 +1535,11 @@ mod tests {
             EngineAura::all(&empty),
             vec![EngineAura::unit(EngineFamily::ShadowSight)]
         );
-        let shipped_auras = EngineAura::all(&shipped(&abilities, &item_defs));
+        let talents = talents_with_a_proc();
+        let full_auras = EngineAura::all(&CatalogSource::new(&abilities, &item_defs, &talents));
         let families: std::collections::BTreeSet<EngineFamily> =
-            shipped_auras.iter().map(|aura| aura.family).collect();
-        for aura in shipped_auras {
+            full_auras.iter().map(|aura| aura.family).collect();
+        for aura in full_auras {
             if aura.family != EngineFamily::ShadowSight {
                 assert!(
                     aura.spec(&empty).is_none(),
@@ -1488,13 +1547,9 @@ mod tests {
                 );
             }
         }
-        // Every family but the talent procs (none ships yet; the fixture test
-        // above covers it) has a member to check.
-        let missing: Vec<&EngineFamily> = EngineFamily::ALL
-            .iter()
-            .filter(|family| !families.contains(family))
-            .collect();
-        assert_eq!(missing, vec![&EngineFamily::TalentProcAura]);
+        // Over the full tables (with a talent proc) every family had a
+        // member to check.
+        assert_eq!(families, EngineFamily::ALL.iter().copied().collect());
     }
 
     /// The same address check for the other half of the catalog. [`entry_of`]
@@ -1804,18 +1859,48 @@ mod tests {
     }
 
     /// The absolute rung is for what genuinely nothing touches: the deliberately
-    /// unpurgeable self-buffs, every proc trinket's physical buff, and the
-    /// mechanical markers. Anything else on it is a page overclaiming.
+    /// unpurgeable self-buffs, every item's physical aura, and the mechanical
+    /// markers. Anything else on it is a page overclaiming.
+    ///
+    /// The ability- and arena-applied entries are named, because whether one
+    /// can be removed is a judgement about that ability. Every item's aura is
+    /// on the rung by rule (an item's effect is not a spell), and a talent's
+    /// aura is wherever the dispel type its own node declares, or its
+    /// constructor builds, puts it — the family builds the sample with that
+    /// constructor, so there is no second answer to pin.
     #[test]
     fn cannot_be_removed_is_reserved_for_the_untouchable_set() {
-        let untouchable: Vec<String> = catalog(&abilities(), &items())
-            .into_iter()
+        let entries = catalog(&abilities(), &items());
+        let mut item_sourced: Vec<String> = Vec::new();
+        for entry in &entries {
+            if family_of(entry).is_some_and(|f| f.source_kind() == SourceKind::Item) {
+                assert_eq!(
+                    entry.removal().0,
+                    "Cannot be removed",
+                    "{} is an item's aura, which nothing removes",
+                    entry.name
+                );
+                item_sourced.push(entry.name.clone());
+            }
+        }
+        // The families declaring an item source cover exactly the items
+        // `ItemConfig::applies_aura` says put an aura on their wearer.
+        item_sourced.sort();
+        let mut applying = item_aura_names();
+        applying.sort();
+        assert_eq!(item_sourced, applying);
+        let mut sorted: Vec<String> = entries
+            .iter()
+            .filter(|e| {
+                family_of(e).is_none_or(|f| {
+                    matches!(f.source_kind(), SourceKind::Ability | SourceKind::Arena)
+                })
+            })
             .filter(|e| e.removal().0 == "Cannot be removed")
             .map(|e| e.name.clone())
             .collect();
-        let mut sorted = untouchable.clone();
         sorted.sort();
-        let mut expected = item_aura_names();
+        let mut expected: Vec<String> = Vec::new();
         expected.extend(
             [
                 "Berserker Rage",
@@ -1841,9 +1926,6 @@ mod tests {
                 "Travel Form",
                 "Windfury Totem",
                 "Weakened Soul",
-                // The Demonology talents' auras: untyped, for the match.
-                "Master Demonologist",
-                "Touch of Shadow",
             ]
             .map(String::from),
         );
@@ -2228,7 +2310,13 @@ mod tests {
     fn every_entry_names_what_applies_it() {
         let abilities = abilities();
         let mut ability_less: Vec<String> = Vec::new();
+        let mut expected: Vec<String> = Vec::new();
         for entry in catalog(&abilities, &items()) {
+            // Ability-applied unless its family declares otherwise: an
+            // `applies_aura` entry always is.
+            if family_of(&entry).is_some_and(|f| f.source_kind() != SourceKind::Ability) {
+                expected.push(entry.name.clone());
+            }
             match entry.source {
                 AuraSource::Ability(ability) => {
                     assert!(
@@ -2265,18 +2353,16 @@ mod tests {
             }
         }
         ability_less.sort();
-        let mut expected = item_aura_names();
-        expected.push("Shadow Sight".to_string());
-        // Talents, not abilities, apply these.
-        expected.push("Master Demonologist".to_string());
-        expected.push("Touch of Shadow".to_string());
         expected.sort();
         assert_eq!(
             ability_less, expected,
-            "an arena orb pickup, the item auras and the talent auras are the only auras no \
-             ability applies — a new one here is either a genuine mechanic or a `source` nobody \
-             filled in"
+            "the auras no ability applies are exactly those whose family declares an item, a \
+             talent or the arena as their `SOURCE` — another is a `source` nobody filled in"
         );
+        // Witnesses: the arena orb, an item's aura and a talent's.
+        for name in ["Shadow Sight", "Dragonspine Trophy", "Master Demonologist"] {
+            assert!(ability_less.iter().any(|n| n == name), "{name}");
+        }
     }
 
     /// The other direction of the same field: an ability can ask which auras it
@@ -2424,29 +2510,36 @@ mod tests {
                 }
             }
         }
-        own_art.sort();
-        assert_eq!(
-            own_art,
-            vec!["Shadow Sight".to_string(), "Weakened Soul".to_string()],
-            "the auras whose own art beats a borrowed icon"
-        );
-        talent_art.sort();
-        assert_eq!(
-            talent_art,
-            vec![
-                "Master Demonologist".to_string(),
-                "Touch of Shadow".to_string()
-            ],
-            "the auras that wear their talent's icon (no shipped talent procs yet)"
-        );
-        item_art.sort();
-        let mut expected = item_aura_names();
-        expected.sort();
-        assert_eq!(
-            item_art, expected,
-            "every item aura (proc, on-use, triggered absorb), and nothing else, wears its \
-             item's icon"
-        );
+        // Each art kind is worn by exactly the entries whose family declares
+        // it — and a borrowed icon by every `applies_aura` entry.
+        for (kind, mut worn) in [
+            (ArtKind::Own, own_art),
+            (ArtKind::Item, item_art),
+            (ArtKind::Talent, talent_art),
+        ] {
+            let mut expected: Vec<String> = catalog_from(&source)
+                .into_iter()
+                .filter(|entry| family_of(entry).is_some_and(|f| f.art_kind() == kind))
+                .map(|entry| entry.name)
+                .collect();
+            worn.sort();
+            expected.sort();
+            assert_eq!(worn, expected, "the auras that wear {kind:?} art");
+        }
+        // Witnesses: the two auras whose own art beats a borrowed icon (the
+        // reason this test exists), an item's and a talent's.
+        for (name, kind) in [
+            ("Shadow Sight", ArtKind::Own),
+            ("Weakened Soul", ArtKind::Own),
+            ("Dragonspine Trophy", ArtKind::Item),
+            ("Master Demonologist", ArtKind::Talent),
+        ] {
+            let entry = catalog_from(&source)
+                .into_iter()
+                .find(|entry| entry.name == name)
+                .unwrap_or_else(|| panic!("{name} is listed"));
+            assert_eq!(ArtKind::of(entry.art), kind, "{name}");
+        }
 
         // The encyclopedia's loader opens this whole table. A missing file no
         // longer holds the other icons back (`icon_load_settled` counts a

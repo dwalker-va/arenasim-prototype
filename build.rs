@@ -147,7 +147,36 @@ fn generate_engine_aura_families() {
             camel(stem)
         );
     }
-    out.push_str("        }\n    }\n}\n");
+    out.push_str("        }\n    }\n\n");
+    for (function, constant, kind, doc) in [
+        (
+            "source_kind",
+            "SOURCE",
+            "SourceKind",
+            "What applies this family's auras",
+        ),
+        (
+            "art_kind",
+            "ART",
+            "ArtKind",
+            "Where this family's icons come from",
+        ),
+    ] {
+        let _ = writeln!(out, "    /// {doc} (the file's `{constant}`).");
+        let _ = writeln!(
+            out,
+            "    pub fn {function}(self) -> {kind} {{\n        match self {{"
+        );
+        for stem in &stems {
+            let _ = writeln!(
+                out,
+                "            EngineFamily::{} => {stem}::{constant},",
+                camel(stem)
+            );
+        }
+        out.push_str("        }\n    }\n\n");
+    }
+    out.push_str("}\n");
 
     let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("set by cargo"));
     let target = out_dir.join("engine_aura_families.rs");

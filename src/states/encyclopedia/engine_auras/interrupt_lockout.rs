@@ -3,10 +3,13 @@
 //! ability carrying the interrupt flags, so interrupt N+1 gets a lockout entry
 //! with no code here.
 
-use super::{EngineKey, EngineSpec};
+use super::{ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::{AuraType, DispelType};
+
+pub const SOURCE: SourceKind = SourceKind::Ability;
+pub const ART: ArtKind = ArtKind::FromSource;
 
 pub fn members(source: &CatalogSource) -> Vec<EngineKey> {
     let mut interrupts: Vec<AbilityType> = source

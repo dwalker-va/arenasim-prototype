@@ -2,12 +2,15 @@
 //! places a zone rather than carrying an `applies_aura` block, so the slow is
 //! the engine's.
 
-use super::{has_ability, unit_if, EngineKey, EngineSpec};
+use super::{has_ability, unit_if, ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
 use crate::states::play_match::abilities::{AbilityType, SpellSchool};
 use crate::states::play_match::components::AuraType;
 use crate::states::play_match::constants::{FROST_TRAP_SLOW_MAGNITUDE, FROST_TRAP_ZONE_DURATION};
 use crate::states::play_match::traps::frost_trap_slow_aura;
+
+pub const SOURCE: SourceKind = SourceKind::Ability;
+pub const ART: ArtKind = ArtKind::FromSource;
 
 pub fn members(source: &CatalogSource) -> Vec<EngineKey> {
     unit_if(has_ability(source, AbilityType::FrostTrap))

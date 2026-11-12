@@ -2,10 +2,13 @@
 //! the heal over time one may carry as a rider: the Diamond Flask), named
 //! after the item. One per item whose `on_use:` block grants a buff.
 
-use super::{EngineKey, EngineSpec};
+use super::{ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
 use crate::states::play_match::equipment::ItemId;
 use crate::states::play_match::on_use_items::on_use_description;
+
+pub const SOURCE: SourceKind = SourceKind::Item;
+pub const ART: ArtKind = ArtKind::Item;
 
 pub fn members(source: &CatalogSource) -> Vec<EngineKey> {
     ItemId::all()

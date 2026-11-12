@@ -2,10 +2,13 @@
 //! Warlock and its Felhunter while the Felhunter lives. Listed while the
 //! talent table holds a node with the mechanic.
 
-use super::{unit_if, EngineKey, EngineSpec};
+use super::{unit_if, ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
 use crate::states::play_match::demonology;
 use crate::states::play_match::talents::TalentId;
+
+pub const SOURCE: SourceKind = SourceKind::Talent;
+pub const ART: ArtKind = ArtKind::Talent;
 
 pub fn members(source: &CatalogSource) -> Vec<EngineKey> {
     unit_if(demonology::master_demonologist_in(source.talents).is_some())

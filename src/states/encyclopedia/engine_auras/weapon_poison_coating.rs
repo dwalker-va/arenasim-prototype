@@ -2,10 +2,13 @@
 //! poison, distinct from the debuff that poison applies on hit. One per poison
 //! whose ability the table holds, so poison N+1 needs no code here.
 
-use super::{has_ability, EngineKey, EngineSpec};
+use super::{has_ability, ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
 use crate::states::match_config::RoguePoison;
 use crate::states::play_match::components::weapon_poison_marker_aura;
+
+pub const SOURCE: SourceKind = SourceKind::Ability;
+pub const ART: ArtKind = ArtKind::FromSource;
 
 pub fn members(source: &CatalogSource) -> Vec<EngineKey> {
     RoguePoison::ALL
