@@ -22,7 +22,7 @@ use std::collections::BTreeSet;
 use arenasim::headless::config::HeadlessMatchConfig;
 use arenasim::headless::runner::build_headless_app;
 use arenasim::headless::{Stage, Unit};
-use arenasim::states::match_config::CharacterClass::{Warlock, Warrior};
+use arenasim::states::match_config::CharacterClass::{self, Warlock, Warrior};
 use arenasim::states::match_config::WarlockCurse;
 use arenasim::states::play_match::abilities::SpellSchool;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene, Who};
@@ -1056,6 +1056,138 @@ fn curse_of_exhaustion_is_held_off_a_target_immune_to_slows() {
     assert_eq!(
         control.chose(),
         Some((AbilityType::CurseOfExhaustion, Some(FOE))),
+        "{}",
+        describe(&control)
+    );
+}
+
+/// A Divine Shield on the kill target: immune to damage.
+fn divine_shield() -> Aura {
+    Aura {
+        effect_type: AuraType::DamageImmunity,
+        duration: 10.0,
+        magnitude: 1.0,
+        ability_name: "Divine Shield".into(),
+        break_on_damage_threshold: -1.0,
+        ..Default::default()
+    }
+}
+
+/// Shadow Trance does not spend its instant Shadow Bolt on a target immune
+/// to damage: the bolt would land nothing and waste the trance. Its control,
+/// the same trance on a target that is not immune, is the bolt
+/// (`shadow_trance_puts_shadow_bolt_next`).
+#[test]
+fn shadow_trance_holds_its_bolt_off_an_immune_target() {
+    let view = warlock_scene(&[], WarlockCurse::Agony)
+        .aura_full(ME, shadow_trance())
+        .aura_full(FOE, divine_shield())
+        .decide(ME);
+    assert!(
+        !chose(&view, AbilityType::Shadowbolt),
+        "{}",
+        describe(&view)
+    );
+    assert!(
+        matches!(
+            view.rejected(AbilityType::Shadowbolt),
+            Some(RejectionReason::TargetImmune)
+        ),
+        "{}",
+        describe(&view)
+    );
+    let control = warlock_scene(&[], WarlockCurse::Agony)
+        .aura_full(ME, shadow_trance())
+        .decide(ME);
+    assert_eq!(
+        control.chose(),
+        Some((AbilityType::Shadowbolt, Some(FOE))),
+        "{}",
+        describe(&control)
+    );
+}
+
+/// Siphon Life is not cast on a target immune to damage: its ticks would land
+/// nothing, and the Warlock would recast it every global cooldown. Its
+/// control is the same target without the immunity.
+#[test]
+fn siphon_life_is_held_off_an_immune_target() {
+    let dots = ["Corruption", "Unstable Affliction"];
+    let view = warlock_scene(&dots, WarlockCurse::Agony)
+        .grant(ME, AbilityType::SiphonLife)
+        .aura_full(FOE, divine_shield())
+        .decide(ME);
+    assert!(
+        !chose(&view, AbilityType::SiphonLife),
+        "{}",
+        describe(&view)
+    );
+    assert!(
+        matches!(
+            view.rejected(AbilityType::SiphonLife),
+            Some(RejectionReason::TargetImmune)
+        ),
+        "{}",
+        describe(&view)
+    );
+    let control = warlock_scene(&dots, WarlockCurse::Agony)
+        .grant(ME, AbilityType::SiphonLife)
+        .decide(ME);
+    assert_eq!(
+        control.chose(),
+        Some((AbilityType::SiphonLife, Some(FOE))),
+        "{}",
+        describe(&control)
+    );
+}
+
+/// Siphon Life is not cast on a target the Warlock's team holds in crowd
+/// control that breaks on any damage (a teammate's Polymorph): its first
+/// tick would break it. Its control is the same Polymorph cast by nobody on
+/// the Warlock's team (an enemy's own), which Siphon Life may break.
+#[test]
+fn siphon_life_does_not_break_its_teams_crowd_control() {
+    let dots = ["Corruption", "Unstable Affliction"];
+    let polymorphed = |by_teammate: bool| {
+        let mut scene = warlock_scene(&dots, WarlockCurse::Agony)
+            .grant(ME, AbilityType::SiphonLife)
+            .unit("mage", 1, CharacterClass::Mage)
+            .at(0.0, 5.0)
+            .unit("enemy mage", 2, CharacterClass::Mage)
+            .at(25.0, 5.0);
+        let caster = scene.entity(if by_teammate { "mage" } else { "enemy mage" });
+        scene = scene.aura_full(
+            FOE,
+            Aura {
+                effect_type: AuraType::Polymorph,
+                duration: 8.0,
+                magnitude: 1.0,
+                ability_name: "Polymorph".into(),
+                caster: Some(caster),
+                break_on_damage_threshold: 0.0,
+                ..Default::default()
+            },
+        );
+        scene.decide(ME)
+    };
+    let view = polymorphed(true);
+    assert!(
+        !chose(&view, AbilityType::SiphonLife),
+        "{}",
+        describe(&view)
+    );
+    assert!(
+        matches!(
+            view.rejected(AbilityType::SiphonLife),
+            Some(RejectionReason::FriendlyBreakableCC)
+        ),
+        "{}",
+        describe(&view)
+    );
+    let control = polymorphed(false);
+    assert_eq!(
+        control.chose(),
+        Some((AbilityType::SiphonLife, Some(FOE))),
         "{}",
         describe(&control)
     );
