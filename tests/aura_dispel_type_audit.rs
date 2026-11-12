@@ -249,6 +249,12 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::UnstableAffliction => config(S::Magic, T::Magic),
         AbilityType::DeathCoil => config(S::Magic, T::Magic),
         AbilityType::LifeTap => Row::NoAura,
+        // 18265 .. 30911, every rank DispelType 1 (Magic).
+        AbilityType::SiphonLife => config(S::Magic, T::Magic),
+        // 18288: DispelType 1 (Magic).
+        AbilityType::AmplifyCurse => config(S::Magic, T::Magic),
+        // 18223, 29539: DispelType 2 (Curse).
+        AbilityType::CurseOfExhaustion => config(S::Curse, T::Curse),
         AbilityType::SpellLock => Row::NoAura,
         AbilityType::DevourMagic => Row::NoAura,
 

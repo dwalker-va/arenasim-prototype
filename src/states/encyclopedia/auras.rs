@@ -1762,7 +1762,12 @@ mod tests {
                 .find(|e| e.name == name)
                 .unwrap_or_else(|| panic!("{} missing", name))
         };
-        for name in ["Curse of Agony", "Curse of Weakness", "Curse of Tongues"] {
+        for name in [
+            "Curse of Agony",
+            "Curse of Weakness",
+            "Curse of Tongues",
+            "Curse of Exhaustion",
+        ] {
             let entry = by_name(name);
             let (badge, tooltip) = entry.removal();
             assert_eq!(badge, "Curse", "{name} badge");

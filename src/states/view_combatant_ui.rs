@@ -642,6 +642,24 @@ fn offered_paladin_auras(
         .collect()
 }
 
+/// The Warlock curses a slot with `build` may choose, in display order: every
+/// curse but one a talent widens and `build` does not take
+/// (`TalentDefinitions::offers`).
+fn offered_warlock_curses(
+    talents: &super::play_match::talents::TalentDefinitions,
+    build: &super::play_match::talents::Build,
+) -> Vec<WarlockCurse> {
+    WarlockCurse::ALL
+        .into_iter()
+        .filter(|curse| {
+            talents.offers(
+                build,
+                super::play_match::talent_choices::ChoiceOption::WarlockCurse(*curse),
+            )
+        })
+        .collect()
+}
+
 /// The talent build of the slot being viewed (empty when it has none).
 fn slot_build(
     match_config: &MatchConfig,
@@ -2278,11 +2296,19 @@ fn render_warlock_curse_panel(
             .unwrap_or_default()
     };
 
-    let curses = [
-        (WarlockCurse::Agony, "Curse of Agony", "Agony"),
-        (WarlockCurse::Weakness, "Curse of Weakness", "Weakness"),
-        (WarlockCurse::Tongues, "Curse of Tongues", "Tongues"),
-    ];
+    // A curse a talent widens (Curse of Exhaustion) is offered only to a
+    // build that takes that talent.
+    let build = slot_build(match_config, view_state);
+    let talents = super::play_match::talents::TalentDefinitions::shipped();
+    let curses: Vec<(WarlockCurse, &str, &str)> = offered_warlock_curses(talents, &build)
+        .into_iter()
+        .map(|curse| match curse {
+            WarlockCurse::Agony => (curse, "Curse of Agony", "Agony"),
+            WarlockCurse::Weakness => (curse, "Curse of Weakness", "Weakness"),
+            WarlockCurse::Tongues => (curse, "Curse of Tongues", "Tongues"),
+            WarlockCurse::Exhaustion => (curse, "Curse of Exhaustion", "Exhaustion"),
+        })
+        .collect();
     let tiles: Vec<ChoiceOption> = curses
         .iter()
         .map(|(curse, icon_key, label)| ChoiceOption {
@@ -2410,6 +2436,42 @@ mod tests {
         }
     }
 
+    /// The same mechanism keeps the Warlock's curses legal: a Curse of
+    /// Exhaustion chosen for an enemy, without the talent that offers it,
+    /// goes back to Curse of Agony; every other curse is kept.
+    #[test]
+    fn unlearning_curse_of_exhaustion_drops_the_curse() {
+        use super::super::play_match::talents::{Build, TalentDefinitions, TalentId};
+        let talents = TalentDefinitions::shipped();
+        for keep_node in [true, false] {
+            let mut config = MatchConfig::default();
+            config.set_class(1, 0, CharacterClass::Warlock);
+            config.set_team2_size(2);
+            config.team1_warlock_curse_prefs[0] =
+                vec![WarlockCurse::Exhaustion, WarlockCurse::Tongues];
+            *config.build_mut(1, 0).unwrap() = if keep_node {
+                Build::of(&[
+                    (TalentId::ImprovedDrainLife, 2),
+                    (TalentId::AmplifyCurse, 1),
+                    (TalentId::CurseOfExhaustion, 1),
+                ])
+            } else {
+                Build::of(&[(TalentId::ImprovedDrainLife, 2)])
+            };
+            config.keep_choices_offered(1, 0, talents);
+            let first = if keep_node {
+                WarlockCurse::Exhaustion
+            } else {
+                WarlockCurse::Agony
+            };
+            assert_eq!(
+                config.team1_warlock_curse_prefs[0],
+                vec![first, WarlockCurse::Tongues],
+                "keep_node {keep_node}"
+            );
+        }
+    }
+
     /// The same mechanism keeps the Warlock's demon choice legal: Sacrifice
     /// without the talent that offers it goes back to the Felhunter.
     #[test]
@@ -2449,6 +2511,28 @@ mod tests {
                 "keep_node {keep_node}"
             );
         }
+    }
+
+    /// Curse of Exhaustion is offered only to a build that takes its talent;
+    /// every other curse to every build.
+    #[test]
+    fn curse_of_exhaustion_is_offered_only_with_its_talent() {
+        use super::super::play_match::talents::{Build, TalentDefinitions, TalentId};
+        let talents = TalentDefinitions::shipped();
+        let base = vec![
+            WarlockCurse::Agony,
+            WarlockCurse::Weakness,
+            WarlockCurse::Tongues,
+        ];
+        assert_eq!(offered_warlock_curses(talents, &Build::default()), base);
+        let talented = Build::of(&[
+            (TalentId::ImprovedDrainLife, 2),
+            (TalentId::AmplifyCurse, 1),
+            (TalentId::CurseOfExhaustion, 1),
+        ]);
+        let mut all = base;
+        all.push(WarlockCurse::Exhaustion);
+        assert_eq!(offered_warlock_curses(talents, &talented), all);
     }
 
     /// Retribution Aura is offered only to a build that takes its talent;

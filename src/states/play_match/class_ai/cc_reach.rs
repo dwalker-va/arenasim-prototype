@@ -93,6 +93,7 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::LifeTap
         | A::DivineProtection
         | A::RetributionAura
+        | A::AmplifyCurse
         | A::InnerFocus => Aim::Caster,
         A::Frostbolt
         | A::FlashHeal
@@ -121,6 +122,8 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::CurseOfAgony
         | A::CurseOfWeakness
         | A::CurseOfTongues
+        | A::CurseOfExhaustion
+        | A::SiphonLife
         | A::UnstableAffliction
         | A::DeathCoil
         | A::ArcaneIntellect

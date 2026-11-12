@@ -983,6 +983,81 @@
             spell_school: Shadow,
         ),
 
+        // Curse of Exhaustion: a fourth curse, offered only to a build with
+        // the Curse of Exhaustion talent (Affliction, AS-409). TBC 18223's
+        // magnitude: 30% slower movement for 12s (Classic's was 10%). Instant,
+        // 30yd, Shadow; a curse, so only curse removal takes it. Its mana is
+        // the other curses' low-rank scale.
+        CurseOfExhaustion: (
+            name: "Curse of Exhaustion",
+            class: Warlock,
+            prevention: Silence,
+            icon: "icons/abilities/spell_shadow_grimward.jpg",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 25.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: MovementSpeedSlow,
+                duration: 12.0,
+                magnitude: 0.7,  // 30% slower: the speed left
+                dispel_type: Curse,
+            )),
+            spell_school: Shadow,
+        ),
+
+        // Siphon Life (talent, Affliction tier 3): a Shadow DoT whose every
+        // tick heals the Warlock for what it dealt (TBC 18265: instant, 30yd,
+        // 30s, a tick every 3s; Magic). 4 a tick, 40 over its 30s, at the
+        // book's low-rank scale; 25 mana.
+        SiphonLife: (
+            name: "Siphon Life",
+            class: Warlock,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_shadow_requiem.jpg",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 25.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: DamageOverTime,
+                duration: 30.0,
+                magnitude: 4.0,
+                tick_interval: 3.0,
+                // Every point a tick lands heals the Warlock
+                // (`combat_core/leech.rs`).
+                leech: Some((fraction: 1.0)),
+            )),
+            spell_school: Shadow,
+        ),
+
+        // Amplify Curse (talent, Affliction tier 2): the Warlock's next Curse
+        // of Weakness or Curse of Agony is 50% stronger (TBC 18288; its
+        // cooldown 45s here, not 3 min). Instant, no mana, no target; the
+        // primed curse lasts 30s, and a curse cast spends it.
+        AmplifyCurse: (
+            name: "Amplify Curse",
+            class: Warlock,
+            talent: true,
+            prevention: None,
+            icon: "icons/abilities/spell_shadow_contagion.jpg",
+            cast_time: 0.0,
+            range: 0.0,  // Self-cast
+            mana_cost: 0.0,
+            cooldown: 45.0,
+            applies_aura: Some((
+                aura_type: NextCast,
+                duration: 30.0,
+                magnitude: 1.0,
+                next_cast: Some((
+                    applies_to: Abilities([CurseOfWeakness, CurseOfAgony]),
+                    power: 0.5,
+                )),
+            )),
+            spell_school: Shadow,
+        ),
+
         // ============================================================================
         // PALADIN ABILITIES
         // ============================================================================

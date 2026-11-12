@@ -228,19 +228,19 @@ fn the_conversion_never_moves_the_wrong_way() {
     let mut c = fresh();
     c.current_mana = 10.0;
     let (h, m) = (c.current_health, c.current_mana);
-    convert_health_to_mana(&mut c, 50.0);
+    convert_health_to_mana(&mut c, 50.0, 50.0);
     assert_eq!((c.current_health, c.current_mana), (h - 50.0, m + 50.0));
 
     // A tap larger than the health left stops at 1.
     let mut c = fresh();
     c.current_health = 20.0;
-    convert_health_to_mana(&mut c, 50.0);
+    convert_health_to_mana(&mut c, 50.0, 50.0);
     assert_eq!(c.current_health, 1.0);
 
     // Already below 1: the floor does not raise it.
     let mut c = fresh();
     c.current_health = 0.5;
-    convert_health_to_mana(&mut c, 50.0);
+    convert_health_to_mana(&mut c, 50.0, 50.0);
     assert!(
         c.current_health <= 0.5,
         "health rose to {}",
@@ -250,13 +250,13 @@ fn the_conversion_never_moves_the_wrong_way() {
     // Mana is capped at the pool ...
     let mut c = fresh();
     c.current_mana = c.max_mana - 10.0;
-    convert_health_to_mana(&mut c, 50.0);
+    convert_health_to_mana(&mut c, 50.0, 50.0);
     assert_eq!(c.current_mana, c.max_mana);
 
     // ... and the cap never lowers mana already above it.
     let mut c = fresh();
     c.current_mana = c.max_mana + 20.0;
     let above = c.current_mana;
-    convert_health_to_mana(&mut c, 50.0);
+    convert_health_to_mana(&mut c, 50.0, 50.0);
     assert!(c.current_mana >= above, "mana fell to {}", c.current_mana);
 }

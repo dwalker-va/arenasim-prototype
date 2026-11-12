@@ -1371,15 +1371,23 @@ against a chaser 10yd off, so the edge and cover terms flipped the heading back
 toward the chaser every window (AS-200). `escape_tick` reads both only for a
 chaser escape, so the Priest's, Paladin's and Shaman's impairment windows are
 unchanged. The run keeps room to run (AS-241): its `flee` scores a heading by
-the distance from the chaser it gains over the open ground it has, up to
-`SHIFT_FLEE_REACH` (8yd, `ScorerInputs::flee_reach`), so a Druid with a wall
-or a pillar at its back runs along it rather than into it; and it never steps
+the distance from the chaser it gains over `SHIFT_FLEE_REACH` (8yd,
+`ScorerInputs::flee_reach`) of running, walked as the executor walks it
+(`movement_scoring::run_end`: slid off obstacles, clamped into the arena), so
+a Druid with a wall or a pillar at its back runs along it rather than into it,
+and a Druid in a corner takes the heading that grazes a wall and is carried
+round the vertex (AS-468); and it never steps
 deeper into a dead end (`MASK_DEAD_END`, `ArenaBounds::dead_end_depth` —
 Nagrand's starting rooms), a mask kept past the anchor's on the fallback
 ladder. On the AS-164 Nagrand Druid panel a shifted Druid entered a starting
 room in 2.1% of `Legacy` and 2.0% of `TeamPlan` matches, from 23.1% and 21.6%
 (`docs/design/balance/2026-10-31-as241-travel-form-escape.md`); staged in
-`tests/druid_escape_room_to_run.rs`. The shift and the shift out
+`tests/druid_escape_room_to_run.rs`. A corner cannot be escaped at once: with
+the chaser out in front, no heading gains ground over the first 1.5s; at the
+octagon's vertex and its diagonal-wall pocket, 6-10yd out, the run ends within
+0.5yd of the best a straight heading does
+(`a_cornered_druid_runs_as_far_as_the_corner_allows` in
+`tests/druid_control_probes.rs`; staged spots only, not a bound elsewhere). The shift and the shift out
 are the Druid AI's (`class_ai/druid.rs` — `shift_trigger`, `should_leave_form`);
 rules in `docs/design/wow-mechanics.md` (Travel Form). A shift that breaks a
 root or snare takes the Druid's next global cooldown: an emergency heal may

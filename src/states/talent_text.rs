@@ -504,6 +504,8 @@ fn field_name(field: AbilityField) -> &'static str {
         AbilityField::Damage => "damage",
         AbilityField::CritChance => "critical strike chance",
         AbilityField::AuraStrength => "effect strength",
+        AbilityField::PeriodicDamage => "damage over time",
+        AbilityField::ManaPerHealth => "mana gained",
     }
 }
 
@@ -534,8 +536,10 @@ fn field_is_fraction(field: AbilityField) -> bool {
         | AbilityField::AuraBreakOnDamage
         | AbilityField::AuraTickInterval
         | AbilityField::AuraStrength
-        // Takes only a Mul, which is written as a percentage.
-        | AbilityField::Damage => false,
+        | AbilityField::ManaPerHealth
+        // Take only a Mul, which is written as a percentage.
+        | AbilityField::Damage
+        | AbilityField::PeriodicDamage => false,
     }
 }
 
@@ -564,8 +568,10 @@ fn field_unit(field: AbilityField) -> &'static str {
         | AbilityField::AuraBreakOnDamage
         | AbilityField::CritChance
         | AbilityField::AuraStrength
-        // Takes only a Mul, which is written as a percentage.
-        | AbilityField::Damage => "",
+        | AbilityField::ManaPerHealth
+        // Take only a Mul, which is written as a percentage.
+        | AbilityField::Damage
+        | AbilityField::PeriodicDamage => "",
     }
 }
 
@@ -663,7 +669,7 @@ mod tests {
             vec![
                 "Unlocks Ambush as a stealth opener choice",
                 "Unlocks Mind-numbing Poison as a weapon poison choice",
-                "Unlocks Curse of Tongues as a curse choice",
+                "Unlocks Curse of Exhaustion as a curse choice",
                 "Unlocks Sacrifice as a demon choice",
                 "Unlocks Bird as a pet choice",
                 "Unlocks Commanding Shout as a shout choice",
