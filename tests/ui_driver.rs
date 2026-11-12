@@ -836,10 +836,12 @@ fn a_hover_waits_on_eguis_gates_rather_than_counting_frames() {
     let at = |want: fn(&Micro) -> bool| hover.iter().position(want);
     let rest = at(|m| matches!(m, Micro::AwaitClickRest));
     let aim = at(|m| matches!(m, Micro::Move { .. }));
+    let register = at(|m| matches!(m, Micro::RegisterMove { .. }));
     let settle = at(|m| matches!(m, Micro::SettleForTooltip));
     assert!(
-        rest.is_some() && rest < aim && aim < settle,
-        "wait out the click rest, then aim, then wait on the gates: {hover:?}"
+        rest.is_some() && rest < aim && aim < register && register < settle,
+        "wait out the click rest, aim, keep the move registering until egui \
+         counts it, then wait on the gates: {hover:?}"
     );
     // The trailing Idle is legitimately frame-shaped: it lets the pass draw
     // and the registry snapshot catch up. It is NOT the wait.
@@ -857,9 +859,10 @@ fn a_hover_waits_on_eguis_gates_rather_than_counting_frames() {
         3,
     );
     assert!(
-        !click
-            .iter()
-            .any(|m| matches!(m, Micro::SettleForTooltip | Micro::AwaitClickRest)),
+        !click.iter().any(|m| matches!(
+            m,
+            Micro::SettleForTooltip | Micro::AwaitClickRest | Micro::RegisterMove { .. }
+        )),
         "a click has no tooltip to wait for: {click:?}"
     );
     assert_eq!(
@@ -1499,6 +1502,220 @@ fn a_hover_waits_out_the_click_rest_in_seconds_at_any_frame_rate() {
              the 0.1s it waits for"
         );
     }
+}
+
+// ===========================================================================
+// A HOVER AFTER A CLICK, AT ANY FRAME INTERVAL
+// ===========================================================================
+
+/// The driver's whole `hover` after a click, over a bare `egui::Context`, with
+/// the frame interval of pass `n` given by `dt(n)`: one click at the centre of
+/// the screen, then every action `runner::expand` makes of the hover, each
+/// decided by `runner::pointer_step` as `run_ui_script` decides it in the
+/// client. What it injects becomes egui events, which bevy_egui does there.
+///
+/// `Ok` when every action finished and `tooltip_gate` therefore opened; `Err`
+/// with the driver's own stuck message when one waited `WAIT_LIMIT_SECS` of
+/// egui time without finishing.
+fn hover_after_click(dt: impl Fn(u32) -> f32) -> Result<(), String> {
+    use arenasim::ui::driver::runner::{Inject, Micro, PointerStep, Progress};
+
+    /// A ceiling in egui seconds, not a settle: every wait ends on its
+    /// condition, and one still waiting after this long never will.
+    const WAIT_LIMIT_SECS: f64 = 10.0;
+
+    let ctx = egui::Context::default();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let click_at = screen.center();
+    let mut time = 0.0_f64;
+    let mut passes = 0_u32;
+    let mut pass = |events: Vec<egui::Event>| {
+        time += f64::from(dt(passes));
+        passes += 1;
+        let input = egui::RawInput {
+            screen_rect: Some(screen),
+            time: Some(time),
+            predicted_dt: 1.0 / 60.0,
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |_| {});
+        });
+        time
+    };
+    let button = |pressed| egui::Event::PointerButton {
+        pos: click_at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    pass(vec![egui::Event::PointerMoved(click_at)]);
+    pass(vec![button(true)]);
+    pass(vec![button(false)]);
+    assert!(
+        ctx.input(|i| i.pointer.time_since_last_click()) < 1.0,
+        "the release must register as a click, or there is no click to hover after"
+    );
+
+    // The hovered widget, well away from the click.
+    let frame = frame_with(vec![("kit:Ambush", true, true)], vec![]);
+    let mut cursor = click_at;
+    let mut last_seen = None;
+    let hover = Step::Hover {
+        id: "kit:Ambush".into(),
+    };
+    for action in runner::expand(&hover, 3) {
+        if let Micro::Idle(n) = action {
+            for _ in 0..n {
+                pass(Vec::new());
+            }
+            continue;
+        }
+        let mut waited_from = None;
+        loop {
+            let PointerStep { progress, inject } =
+                runner::pointer_step(&action, &frame, &ctx, &mut cursor, &mut last_seen)
+                    .unwrap_or_else(|| panic!("a hover expanded into {action:?}"));
+            let events = inject
+                .into_iter()
+                .map(|event| match event {
+                    Inject::Pointer { to, .. } => {
+                        assert!(
+                            rect().contains(to),
+                            "{action:?} moved the pointer off the widget, to {to:?}"
+                        );
+                        egui::Event::PointerMoved(to)
+                    }
+                    Inject::Wheel { .. } => panic!("the widget is on screen: nothing to scroll"),
+                })
+                .collect();
+            let now = pass(events);
+            match progress {
+                Progress::Done => break,
+                Progress::Again { stuck } => {
+                    if now - *waited_from.get_or_insert(now) > WAIT_LIMIT_SECS {
+                        return Err(stuck);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A hover after a click opens egui's tooltip gate when a stretch of 0.1s
+/// frames covers the click, the pointer move and a second after it (AS-453).
+///
+/// egui 0.31 dates the last movement to the last pass whose pointer VELOCITY
+/// was non-zero, and its velocity needs three position samples inside a 0.1s
+/// window (`History::new(2..1000, 0.1)` keeps two once frames run past 50ms).
+/// A move made among 0.1s frames is therefore never counted, the click stays
+/// "more recent than the last move", and no tooltip ever follows — even after
+/// the frames speed up again, because by then the pointer is still. The driver
+/// keeps the move registering until egui counts it, so it counts as soon as
+/// frames allow. A single move, as before, waits out the step timeout.
+///
+/// Frames of 0.04s after the slow stretch hold exactly three samples in egui's
+/// window, so a nudge that only toggled between two points would read as still
+/// there (first and last sample equal); 60 frames a second is the easy case.
+#[test]
+fn a_hover_after_a_click_opens_the_tooltip_gate_after_a_run_of_slow_frames() {
+    // The click is passes 0-2; the hover's first pass is 3. A second of 0.1s
+    // frames from the start covers the click, the 0.1s click rest, the aim and
+    // well past it.
+    for fast in [1.0 / 60.0, 0.04] {
+        let slow_then_fast = |n: u32| if n < 25 { 0.1 } else { fast };
+        assert_eq!(
+            hover_after_click(slow_then_fast),
+            Ok(()),
+            "0.1s frames, then {fast}s frames"
+        );
+    }
+}
+
+/// The control: at 60 frames a second a hover after a click opens the gate.
+#[test]
+fn a_hover_after_a_click_opens_the_tooltip_gate_at_sixty_frames_a_second() {
+    assert_eq!(hover_after_click(|_| 0.0167), Ok(()));
+}
+
+/// While EVERY frame is 0.1s long, no pointer input can make egui 0.31 count a
+/// move: its velocity window holds two samples, and it needs three. So no
+/// tooltip shows after a click, for a person or for the driver, and the driver
+/// says why rather than timing out on the symptom.
+#[test]
+fn a_hover_after_a_click_names_eguis_limit_while_every_frame_is_slow() {
+    let stuck = hover_after_click(|_| 0.1).expect_err("egui cannot count a move at 0.1s frames");
+    assert!(
+        stuck.contains("50ms"),
+        "the stuck message should name the frame interval egui needs: {stuck}"
+    );
+}
+
+/// One frame of `RegisterMove` while egui has not counted a move since a
+/// click: it moves the pointer to a point on the widget other than where it
+/// is, and moves nothing over a widget that is not on screen, since a point
+/// there would be over whatever is drawn in its place.
+#[test]
+fn register_move_nudges_only_over_a_widget_on_screen() {
+    use arenasim::ui::driver::runner::{Inject, Micro, Progress};
+
+    let ctx = egui::Context::default();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let at = rect().center();
+    let mut time = 0.0_f64;
+    let mut pass = |events: Vec<egui::Event>| {
+        time += 0.1;
+        let input = egui::RawInput {
+            screen_rect: Some(screen),
+            time: Some(time),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |_| {});
+        });
+    };
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    pass(vec![egui::Event::PointerMoved(at)]);
+    pass(vec![button(true)]);
+    pass(vec![button(false)]);
+    pass(Vec::new());
+    assert!(
+        runner::move_counted_gate(&ctx).is_err(),
+        "the pointer has rested since the click, so no move is counted"
+    );
+
+    let id = "kit:Ambush";
+    let register = Micro::RegisterMove { id: id.into() };
+    let mut last_seen = None;
+    let mut cursor = at;
+    let on_screen = frame_with(vec![(id, true, true)], vec![]);
+    let step = runner::pointer_step(&register, &on_screen, &ctx, &mut cursor, &mut last_seen)
+        .expect("a pointer action");
+    assert!(matches!(step.progress, Progress::Again { .. }), "{step:?}");
+    match step.inject.as_slice() {
+        [Inject::Pointer { to, delta }] => {
+            assert!(rect().contains(*to) && *to != at, "{step:?}");
+            assert_eq!(*delta, *to - at);
+            assert_eq!(cursor, *to, "the driver tracks where it put the pointer");
+        }
+        other => panic!("expected one pointer move, got {other:?}"),
+    }
+
+    let mut cursor = at;
+    let off_screen = frame_with(vec![(id, true, false)], vec![]);
+    let step = runner::pointer_step(&register, &off_screen, &ctx, &mut cursor, &mut last_seen)
+        .expect("a pointer action");
+    assert!(matches!(step.progress, Progress::Again { .. }), "{step:?}");
+    assert!(step.inject.is_empty(), "{step:?}");
+    assert_eq!(cursor, at);
 }
 
 /// `click <id> <button> shift` holds Shift across the whole press: the key
