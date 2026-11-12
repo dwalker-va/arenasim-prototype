@@ -55,8 +55,9 @@ button.copy{font:inherit;font-size:13px;background:var(--accent);color:var(--acc
 
 <div class="wrap">
   <header>
-    <h1>Interrupt Landing Bench</h1><span class="card-id">AS-137</span>
+    <h1>Interrupt Landing Bench</h1><span class="card-id">AS-137 · AS-463</span>
     <p>Every effect in the AS-137 batch, built from the Classic client's models. The interrupts land on a target that is mid-cast, and "Fizzle beside it" plays a plain fizzle on a second target at the same moment, so you can judge whether each interrupt now reads differently. The layer toggles and multipliers are per effect.</p>
+    <p class="note"><b>AS-463, particle size:</b> the client draws an M2 particle at twice its scale key (the key is a radius); this bench was signed off drawing it at the key (half size). "Client size" (default) draws every particle at 2 × key with the Size x knobs at 1.0; "Signed off" is the bench as signed off. Every other knob is the same in both, and the Spell Lock plate (a mesh, not a particle) and the Web disc do not change. The floor is a flat sRGB sand disc, not the calibrated sand through the game's tonemap, so additive glows read a little stronger here than in a match.</p>
   </header>
 
   <div class="main">
@@ -65,6 +66,8 @@ button.copy{font:inherit;font-size:13px;background:var(--accent);color:var(--acc
       <div class="hud"><span id="hud1"></span><span id="hud2"></span></div>
     </div>
     <div class="panel">
+      <div><h2>Particle size</h2><div class="chips" id="sizemodes" role="group" aria-label="Particle size"></div>
+        <p class="note" id="sizeNote" style="margin-top:6px"></p></div>
       <div><h2>Effect</h2><div class="chips" id="fx" role="group" aria-label="Effect"></div></div>
       <div class="group"><h3 id="fxTitle">Layers</h3><p class="note" id="fxNote"></p><div class="checks" id="layers"></div><div id="fxSliders"></div></div>
       <div class="group" id="g-scene"><h3>Scene</h3><div class="checks" id="scene"></div></div>
@@ -101,7 +104,7 @@ const EFFECTS = {
       runes:[{kind:"rune", rate:5.1, win:[0,1000], life:1.235, speed:.056, area:.028, col:[[0,[30,136,235]],[.5,[144,52,230]],[1,[170,30,236]]], a:[[0,0],[.5,.55],[1,.21]], s:[[0,.753],[.5,.456],[1,.167]]},
              {kind:"rune", rate:6, win:[0,1000], life:1.2, speed:.056, area:.028, col:[[0,[255,221,30]],[.45,[52,227,192]],[1,[170,30,236]]], a:[[0,0],[.45,.65],[1,.36]], s:[[0,.906],[.45,.606],[1,.422]]}],
       sparkles:[{kind:"flare", rate:30, win:[0,1000], life:1, speed:.297, box:[.417,.833], col:[[0,[172,77,245]],[.5,[255,255,255]],[1,[32,240,66]]], a:[[0,.88],[.5,.68],[1,0]], s:[[0,.031],[.5,.142],[1,0]]}],
-      plate:[{kind:"rune", rate:1.2, win:[0,800], life:1.2, speed:0, col:[[0,[0,235,28]],[1,[0,235,28]]], a:[[0,0],[.3,.45],[1,0]], s:[[0,2.2],[1,2.2]]}],
+      plate:[{kind:"rune", rate:1.2, win:[0,800], life:1.2, speed:0, col:[[0,[0,235,28]],[1,[0,235,28]]], a:[[0,0],[.3,.45],[1,0]], s:[[0,2.2],[1,2.2]], mesh:true}],
     }, off:["plate"]},
   windshear: {label:"Wind Shear", group:"Interrupts", anchor:"chest", caster:{dist:14,color:"#0070de",size:1}, interrupt:true, dur:1233, tint:[190,225,255],
     note:"No Classic data exists. This is Kick's shockwave ring in a pale wind-blue (the tint is adjustable below).",
@@ -140,8 +143,17 @@ const EFFECTS = {
 const IDS=Object.keys(EFFECTS);
 const P = {sel:"spelllock", timeScale:1, interval:2.4, zoom:34, fizzle:true, flatRings:false, paused:false,
   wind:"#bee1ff", trailLife:0.6, trailWidth:0.12, webSpeed:30, webSpin:1.5,
-  fx:{}};
+  fx:{}, sizeMode:"client"};
 for (const id of IDS){ const e=EFFECTS[id]; P.fx[id]={size:1, spread:1, time:1, layers:Object.fromEntries(Object.keys(e.layers).map(k=>[k,!(e.off||[]).includes(k)]))}; }
+// AS-463: the two particle-size readings. Each keeps its own per-effect Size x.
+// "signed": a scale key is drawn as the particle's full width, at the values
+// signed off on 2026-09-26 (every effect x1.0). "client": a key is a radius, so
+// a particle is 2 x key across, as the client draws it; Size x starts at 1.0.
+const SIZE_SETS = {signed:Object.fromEntries(IDS.map(id=>[id,1])), client:Object.fromEntries(IDS.map(id=>[id,1]))};
+const SIZE_MODES = [["client","Client size"],["signed","Signed off"]];
+for (const id of IDS) P.fx[id].size=SIZE_SETS[P.sizeMode][id];
+/** Drawn width per unit of scale key; a mesh's extent (the Spell Lock plate) is not a key. */
+const keyToWidth = e => (P.sizeMode==="client" && !e.mesh) ? 2 : 1;
 
 // ============================================================ controls
 const $=id=>document.getElementById(id);
@@ -158,8 +170,20 @@ IDS.forEach(id=>{ const e=EFFECTS[id];
   if (e.group!==lastGroup){ const s=document.createElement("span"); s.className="sub"; s.textContent=e.group; $("fx").appendChild(s); lastGroup=e.group; }
   const b=document.createElement("button"); b.type="button"; b.className="chip"; b.textContent=e.label; b.dataset.id=id;
   b.addEventListener("click",()=>{P.sel=id; resetScene(); buildFx();}); $("fx").appendChild(b); });
+SIZE_MODES.forEach(([v,l])=>{ const b=document.createElement("button"); b.type="button"; b.className="chip";
+  b.textContent=l; b.dataset.v=v; b.addEventListener("click",()=>setSizeMode(v)); $("sizemodes").appendChild(b); });
+function setSizeMode(m){
+  if (m===P.sizeMode) return;
+  for (const id of IDS) SIZE_SETS[P.sizeMode][id]=P.fx[id].size;
+  P.sizeMode=m; for (const id of IDS) P.fx[id].size=SIZE_SETS[m][id];
+  resetScene(); buildFx();
+}
 function buildFx(){
   [...$("fx").querySelectorAll(".chip")].forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.id===P.sel)));
+  [...$("sizemodes").children].forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.v===P.sizeMode)));
+  $("sizeNote").textContent = P.sizeMode==="client"
+    ? "Each particle is 2 × its key × Size x (1.0 = the client)."
+    : "Each particle is its key × Size x, as signed off on 2026-09-26: half the client's size at 1.0.";
   const e=EFFECTS[P.sel], f=P.fx[P.sel];
   $("fxTitle").textContent=e.label; $("fxNote").textContent=e.note;
   const L=$("layers"); L.innerHTML="";
@@ -182,7 +206,9 @@ for (const [k,label] of [["fizzle","Fizzle beside it (interrupts)"],["flatRings"
   l.querySelector("input").addEventListener("change",ev=>{P[k]=ev.target.checked; resetScene();}); $("scene").appendChild(l); }
 function hexRgb(h){const n=parseInt(h.slice(1),16); return [n>>16,(n>>8)&255,n&255];}
 function rust(){
-  const f=(v,d=2)=>Number(v).toFixed(d); const L=["// AS-137 Interrupt Landing Bench — signed-off knobs over the client's emitter tables","// (tables: docs/design/2026-09-26-interrupts-and-one-offs-client-data.md)"];
+  const f=(v,d=2)=>Number(v).toFixed(d); const L=["// AS-137 Interrupt Landing Bench — signed-off knobs over the client's emitter tables","// (tables: docs/design/2026-09-26-interrupts-and-one-offs-client-data.md)",
+    P.sizeMode==="client" ? "// Particle sizes (AS-463): every size key is a RADIUS, `ParticleSize::radii`: drawn at 2 x key, as the client draws it."
+                          : "// Particle sizes (as signed off): a size key is the particle's full width, `ParticleSize::diameters`."];
   const NAME={kick:"KICK_IMPACT",spelllock:"SPELL_LOCK_IMPACT",windshear:"WIND_SHEAR_IMPACT",heroic:"HEROIC_STRIKE_IMPACT",mindblast:"MIND_BLAST_SMOULDER",holyshock:"HOLY_SHOCK_DAMAGE_IMPACT"};
   for (const id of IDS){ if (id==="web") continue; const x=P.fx[id]; const kept=Object.entries(x.layers).filter(([,v])=>v).map(([k])=>k); const dropped=Object.entries(x.layers).filter(([,v])=>!v).map(([k])=>k);
     L.push("",`// ${EFFECTS[id].label}: layers kept [${kept.join(", ")}]${dropped.length?`, dropped [${dropped.join(", ")}]`:""}`);
@@ -275,7 +301,7 @@ function drawOrb(o){ // approximation of casting_orbs.rs: a glowing orb in front
   ctx.globalCompositeOperation="lighter"; const g=ctx.createRadialGradient(sx,sy,0,sx,sy,r*1.6); g.addColorStop(0,`rgba(255,240,200,${a})`); g.addColorStop(.4,`rgba(200,170,255,${a*.6})`); g.addColorStop(1,"rgba(200,170,255,0)");
   ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,r*1.6,0,Math.PI*2); ctx.fill(); }
 function drawParticle(p){
-  const e=p.em, t=p.age/p.life; const c=p.tint||ramp(e.col,t), a=ramp(e.a,t), sz=ramp(e.s,t)*p.size;
+  const e=p.em, t=p.age/p.life; const c=p.tint||ramp(e.col,t), a=ramp(e.a,t), sz=ramp(e.s,t)*p.size*keyToWidth(e);
   ctx.globalCompositeOperation=e.blend==="alpha"?"source-over":"lighter";
   const [sx,sy]=proj(p.x,p.y,p.z); const r=Math.max(.6,sz*P.zoom/2);
   if (e.kind==="glow"||e.kind==="smoke"){ const g=ctx.createRadialGradient(sx,sy,0,sx,sy,r); g.addColorStop(0,rgba(c,a)); g.addColorStop(e.kind==="smoke"?.6:.35,rgba(c,a*.45)); g.addColorStop(1,rgba(c,0)); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.fill(); }
@@ -313,7 +339,7 @@ function frame(now){
   drawTrail(); drawWeapon(); missiles.forEach(drawWeb);
   particles.filter(p=>p.em.blend==="alpha").forEach(drawParticle); particles.filter(p=>p.em.blend!=="alpha").forEach(drawParticle);
   ctx.globalCompositeOperation="source-over";
-  $("hud1").textContent=`${e.label}${e.interrupt&&P.fizzle?" (front) vs fizzle (back)":""}`; $("hud2").textContent=`time x${P.timeScale.toFixed(2)}, ${particles.length} particles`;
+  $("hud1").textContent=`${e.label}${e.interrupt&&P.fizzle?" (front) vs fizzle (back)":""}, ${P.sizeMode==="client"?"client size":"signed-off size"}`; $("hud2").textContent=`time x${P.timeScale.toFixed(2)}, ${particles.length} particles`;
   requestAnimationFrame(frame);
 }
 buildFx(); requestAnimationFrame(frame);

@@ -60,8 +60,9 @@ button.copy{font:inherit;font-size:13px;background:var(--accent);color:var(--acc
 
 <div class="wrap">
   <header>
-    <h1>Hunter Shot Bench</h1><span class="card-id">AS-136</span>
+    <h1>Hunter Shot Bench</h1><span class="card-id">AS-136 · AS-463</span>
     <p>The Hunter's shots as the Classic client draws them. Aimed, Arcane and Concussive Shot share one violet shot and one landing. Serpent Sting is the green, dripping variant with a lingering cloud. Auto Shot is the only real arrow. Switch to "Now" to see what ships today.</p>
+    <p class="note"><b>AS-463, particle size:</b> the client draws an M2 particle at twice its scale key (the key is a radius); this bench was signed off drawing it at the key (half size). "Client size" (default) draws every particle at 2 × key with the size knobs at 1.0; "Signed off" is the bench as signed off. Every other knob is the same in both. The floor is a flat sRGB sand disc, not the calibrated sand through the game's tonemap, so additive glows read a little stronger here than in a match.</p>
   </header>
 
   <div class="main">
@@ -73,6 +74,8 @@ button.copy{font:inherit;font-size:13px;background:var(--accent);color:var(--acc
     <div class="panel">
       <div><h2>Shot</h2><div class="chips" id="shots" role="group" aria-label="Shot"></div></div>
       <div><h2>Rendering</h2><div class="chips" id="modes" role="group" aria-label="Rendering"></div></div>
+      <div><h2>Particle size</h2><div class="chips" id="sizemodes" role="group" aria-label="Particle size"></div>
+        <p class="note" id="sizeNote" style="margin-top:6px"></p></div>
       <div class="group" id="g-missile"><h3>Missile</h3></div>
       <div class="group" id="g-impact"><h3>Landing</h3><div class="checks" id="layers"></div></div>
       <div class="group" id="g-scene"><h3>Scene</h3><div class="checks" id="scene"></div></div>
@@ -153,7 +156,19 @@ const P = {
   impactScale:0.8, impactSpread:0.6, impactTime:1.0, streakEnd:0.3, diseaseLinger:3.0,
   layers:{streaks:false, ring:false, sparks:false, smoke:true, stars:true, rune:true},
   timeScale:1.0, interval:1.6, distance:20, zoom:30, compare:false, cycle:false, paused:false,
+  sizeMode:"client",
 };
+// AS-463: the two particle-size readings. Each keeps its own size knobs.
+// "signed": a scale key is drawn as the particle's full width, at the values
+// signed off on 2026-09-26. "client": a key is a radius, so a particle is
+// 2 x key across, as the client draws it; its size knobs start at 1.0.
+const SIZE_SETS = {signed:{sizeMul:1.0, impactScale:0.8}, client:{sizeMul:1.0, impactScale:1.0}};
+const SIZE_MODES = [["client","Client size"],["signed","Signed off"]];
+Object.assign(P, SIZE_SETS[P.sizeMode]);
+/** Drawn width per unit of scale key. */
+const keyToWidth = () => P.sizeMode==="client" ? 2 : 1;
+/** The landing's model scale on spawn area and speed: the signed-off value in both modes. */
+const landingSpace = () => P.sizeMode==="client" ? SIZE_SETS.signed.impactScale : P.impactScale;
 const SLIDERS = {
   "g-missile":[["coreSize","Core size (yd)",0.2,1.2,0.01],["coreGlow","Core brightness",0.2,2,0.05],["rateMul","Particle rate x",0,2,0.05],
     ["sizeMul","Particle size x",0.5,2.5,0.05],["trailAlpha","Trail opacity",0,1,0.01],["trailHeight","Trail height (yd)",0.02,0.4,0.01],["trailLife","Trail life (s)",0.05,0.6,0.01]],
@@ -180,6 +195,15 @@ SHOTS.forEach((s,i)=>{ const b=document.createElement("button"); b.type="button"
   b.addEventListener("click",()=>{P.shot=i; resetScene(); refresh();}); $("shots").appendChild(b); });
 [["client","Client-faithful"],["now","Now (arrow cuboids)"]].forEach(([v,l])=>{ const b=document.createElement("button"); b.type="button"; b.className="chip";
   b.textContent=l; b.dataset.v=v; b.addEventListener("click",()=>{P.mode=v; resetScene(); refresh();}); $("modes").appendChild(b); });
+SIZE_MODES.forEach(([v,l])=>{ const b=document.createElement("button"); b.type="button"; b.className="chip";
+  b.textContent=l; b.dataset.v=v; b.addEventListener("click",()=>setSizeMode(v)); $("sizemodes").appendChild(b); });
+function setSizeMode(m){
+  if (m===P.sizeMode) return;
+  for (const k of Object.keys(SIZE_SETS[P.sizeMode])) SIZE_SETS[P.sizeMode][k]=P[k];
+  P.sizeMode=m; Object.assign(P, SIZE_SETS[m]);
+  for (const k of Object.keys(SIZE_SETS[m])){ $("s-"+k).value=P[k]; $("o-"+k).textContent=fmt(P[k],0.05); }
+  resetScene(); refresh();
+}
 for (const [k,label] of [["compare","Shadow Bolt lane (colour check)"],["cycle","Cycle all shots"],["paused","Pause"]]){
   const l=document.createElement("label"); l.innerHTML=`<input type="checkbox" id="c-${k}">${label}`;
   l.querySelector("input").addEventListener("change",e=>{P[k]=e.target.checked; resetScene(); refresh();}); $("scene").appendChild(l);
@@ -191,6 +215,10 @@ for (const k of Object.keys(P.layers)){
 function refresh(){
   [...$("shots").children].forEach((b,i)=>b.setAttribute("aria-pressed",String(i===P.shot)));
   [...$("modes").children].forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.v===P.mode)));
+  [...$("sizemodes").children].forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.v===P.sizeMode)));
+  $("sizeNote").textContent = P.sizeMode==="client"
+    ? `Each particle is 2 × its key × the size knobs (1.0 = the client). Landing size x moves particle size only; the landing's spawn area and throw stay at the signed-off ${SIZE_SETS.signed.impactScale.toFixed(2)}.`
+    : `Each particle is its key × the size knobs, as signed off on 2026-09-26: half the client's size at 1.0.`;
   const tb=$("srcTable").tBodies[0]; tb.innerHTML="";
   const M={arcane:"<code>arcaneshot_missile</code>: violet mote, white trail",poison:"<code>poisonshot_missile</code>: green mote, dripping sparks",arrow:"<code>arrowflight_01</code>: 1.52 yd shaft, white trail"};
   const L={arcane:"<code>magic_impact_chest</code>, 1.6 s",poison:"<code>bestowdisease_impact_chest</code>, 3 s cloud",arrow:"none (wound anim + sound)"};
@@ -209,6 +237,11 @@ function rust(){
 `/// Billboard core of the shared shot (client extent ~0.6 yd).`,
 `const HUNTER_SHOT_CORE_DIAMETER: f32 = ${f(P.coreSize)};`,
 `const HUNTER_SHOT_CORE_BRIGHTNESS: f32 = ${f(P.coreGlow)};`,
+...(P.sizeMode==="client" ? [
+`/// Particle sizes (AS-463): every emitter's size keys are RADII, \`ParticleSize::radii\`,`,
+`/// so a particle is drawn at 2 x key, as the client draws it.`] : [
+`/// Particle sizes (as signed off): a size key is the particle's full width,`,
+`/// \`ParticleSize::diameters\`.`]),
 `/// Multipliers over the client's per-emitter rates and sizes (1.0 = client).`,
 `const HUNTER_SHOT_RATE_SCALE: f32 = ${f(P.rateMul)};`,
 `const HUNTER_SHOT_SIZE_SCALE: f32 = ${f(P.sizeMul)};`,
@@ -218,8 +251,13 @@ function rust(){
 `const HUNTER_TRAIL_HEIGHT: f32 = ${f(P.trailHeight)};`,
 `const HUNTER_TRAIL_LIFETIME: f32 = ${f(P.trailLife)};`,
 ``,
+...(P.sizeMode==="client" ? [
+`/// Landing particle size over the client's (1.0 = client).`,
+`const HUNTER_IMPACT_SIZE: f32 = ${f(P.impactScale)};`,
+`/// Landing model scale on spawn area and speed (as signed off).`,
+`const HUNTER_IMPACT_SCALE: f32 = ${f(landingSpace())};`] : [
 `/// Landing scale over the client's sizes (1.0 = client).`,
-`const HUNTER_IMPACT_SCALE: f32 = ${f(P.impactScale)};`,
+`const HUNTER_IMPACT_SCALE: f32 = ${f(P.impactScale)};`]),
 `/// Particle speed (and gravity) scale on the landing: how far it throws.`,
 `const HUNTER_IMPACT_SPREAD: f32 = ${f(P.impactSpread)};`,
 `/// Emission windows and particle lives on the landing (1.0 = client).`,
@@ -279,7 +317,7 @@ function emit(list, src, dt, age, bag, scaleSpace=1){
       if (e.area){ px+=(Math.random()-.5)*e.area*scaleSpace; py+=(Math.random()-.5)*e.area*scaleSpace; pz+=(Math.random()-.5)*e.area*scaleSpace; }
       if (e.column){ px+=(Math.random()-.5)*e.column[0]; pz+=(Math.random()-.5)*e.column[0]; py+=(Math.random()-.5)*e.column[1]; }
       const sp=e.speed*scaleSpace*(isImpact?P.impactSpread:1); const v = e.up ? [d[0]*.2*sp, sp, d[2]*.2*sp] : [d[0]*sp,d[1]*sp,d[2]*sp];
-      particles.push({x:px,y:py,z:pz,vx:v[0],vy:v[1],vz:v[2],age:0,e,scale:scaleSpace,life:e.life*(isImpact?P.impactTime:1)});
+      particles.push({x:px,y:py,z:pz,vx:v[0],vy:v[1],vz:v[2],age:0,e,scale:scaleSpace,sz:isImpact?P.impactScale:1,life:e.life*(isImpact?P.impactTime:1)});
     }
   }
 }
@@ -302,8 +340,8 @@ function step(dt){
   }
   missiles=missiles.filter(m=>!m.done);
   for (const im of impacts){ im.age+=dt;
-    if (im.kind==="magic") emit(MAGIC_IMPACT,im,dt,im.age,im.acc,P.impactScale);
-    if (im.kind==="disease") emit(DISEASE_IMPACT,im,dt,im.age,im.acc,P.impactScale); }
+    if (im.kind==="magic") emit(MAGIC_IMPACT,im,dt,im.age,im.acc,landingSpace());
+    if (im.kind==="disease") emit(DISEASE_IMPACT,im,dt,im.age,im.acc,landingSpace()); }
   impacts=impacts.filter(im=>im.age<(im.kind==="disease"?P.diseaseLinger+2.6:im.kind==="magic"?2.4:0.4));
   for (const p of particles){ p.age+=dt; p.vy-=(p.e.grav||0)*(p.scale!==1?P.impactSpread:1)*dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt; }
   particles=particles.filter(p=>p.age<p.life);
@@ -324,7 +362,7 @@ function capsule(x,z,color,lean=0){
   ctx.fillStyle=g; ctx.beginPath(); ctx.roundRect(sx-w/2,sy-h,w,h,w/2); ctx.fill();
 }
 function drawParticle(p){
-  const e=p.e, t=p.age/p.life; const c=ramp(e.col,t), a=ramp(e.a,t), size=ramp(e.s,t)*P.sizeMul*p.scale;
+  const e=p.e, t=p.age/p.life; const c=ramp(e.col,t), a=ramp(e.a,t), size=ramp(e.s,t)*P.sizeMul*p.sz*keyToWidth();
   ctx.globalCompositeOperation = e.blend==="alpha" ? "source-over" : "lighter";
   const [sx,sy]=proj(p.x,p.y,p.z); const r=Math.max(.6,size*P.zoom/2);
   if (e.kind==="glow" || e.kind==="smoke"){
@@ -393,7 +431,7 @@ function frame(now){
   particles.filter(p=>p.e.blend!=="alpha").forEach(drawParticle);
   ctx.globalCompositeOperation="source-over";
   const s=SHOTS[P.shot];
-  $("hud1").textContent=`${s.id} (${P.mode==="client"?"client-faithful":"now"})${P.compare?" vs Shadow Bolt (back lane)":""}`;
+  $("hud1").textContent=`${s.id} (${P.mode==="client"?"client-faithful":"now"}, ${P.sizeMode==="client"?"client size":"signed-off size"})${P.compare?" vs Shadow Bolt (back lane)":""}`;
   $("hud2").textContent=`time x${P.timeScale.toFixed(2)}, ${particles.length} particles`;
   requestAnimationFrame(frame);
 }

@@ -47,11 +47,13 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.5;background:#0c0b09;bo
 .row{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px}
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
 .graph{width:100%;height:84px;display:block;margin-top:6px}
+button.btn[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
 </style>
 
 <header>
   <div>
-    <h1>Flare Bench <span style="color:var(--muted);font-weight:400">· AS-222 / AS-232</span></h1>
+    <h1>Flare Bench <span style="color:var(--muted);font-weight:400">· AS-222 / AS-232 · AS-463</span></h1>
+    <div class="sub"><b style="color:var(--text);font-weight:500">AS-463, particle size:</b> the client draws an M2 particle at twice its scale key (the key is a radius). "Client size" (default) reads every key that way, with spark size at 1.0; "Signed off" is the bench as signed off, a key drawn as the full width with spark size 2.0. The sparks are the same size in both, because the signed-off 2.0 already put them at the client's size; only the burn-out smoke (off by default) doubles. The core, halo, pool and rim are sized in yards, not by a key, and do not change. The floor is a flat sRGB sand tone, not the calibrated sand through the game's tonemap.</div>
     <div class="sub">Classic Era 1.15.9 <code>flare_state_base.m2</code>, the area model of Flare (spell 1543, visual 112198). Its sequence is exactly 30 s, the length of the Flare, so the bench keys every track to the Flare's own clock. Playback is real time. Untick layers you don't want, tune the multipliers, then copy the constants block. <b style="color:var(--text);font-weight:500">AS-232:</b> the dashed white circle is the gameplay reveal radius (10 yd, bench-only). The lit floor must reach past it, the gold rim must sit on it, and the walking Rogue turns solid at the moment the sim reveals it.</div>
   </div>
   <div class="legend"><span>drag = orbit</span><span>wheel = zoom</span><span>capsules ±1.25 about y=1.0</span></div>
@@ -86,6 +88,7 @@ pre{font-family:var(--mono);font-size:12px;line-height:1.5;background:#0c0b09;bo
   </div>
   <div class="side">
     <div class="card"><h2>Layers</h2><div id="layers"></div></div>
+    <div class="card"><h2>Particle size</h2><div class="row" id="sizemodes" role="group" aria-label="Particle size" style="justify-content:flex-start"></div><div class="ds" id="sizeNote" style="color:var(--muted);font-size:12px;line-height:1.35"></div></div>
     <div class="card"><h2>Knobs</h2><div id="knobs"></div></div>
     <div class="card"><h2>What the client data says</h2>
       <ul class="notes">
@@ -187,6 +190,29 @@ const LAYERS=[
   {id:'walker',nm:'Rogue walk-in', ds:'Bench only: a stealthed Rogue walks in and out; it turns solid when the sim would reveal it.', on:true, bench:true},
 ];
 const K={}; for(const k of KNOBS) K[k.key]=k.def;
+// AS-463: the two particle-size readings. Each keeps its own spark size.
+// 'signed': a scale key is drawn as the particle's full width, spark size 2.0
+// as signed off. 'client': a key is a radius, so a particle is 2 x key across,
+// as the client draws it; spark size 1.0 is then the client's own size.
+const SIZE_SETS={signed:{sparkSize:2.0},client:{sparkSize:1.0}};
+const SIZE_MODES=[['client','Client size'],['signed','Signed off']];
+let sizeMode='client';
+Object.assign(K,SIZE_SETS[sizeMode]);
+/** Drawn width per unit of scale key. */
+const keyToWidth=()=>sizeMode==='client'?2:1;
+function setSizeMode(m){
+  if(m===sizeMode) return;
+  for(const k of Object.keys(SIZE_SETS[sizeMode])) SIZE_SETS[sizeMode][k]=K[k];
+  sizeMode=m; Object.assign(K,SIZE_SETS[m]);
+  for(const k of Object.keys(SIZE_SETS[m])){document.getElementById('K_'+k).value=K[k];document.getElementById('O_'+k).textContent=K[k];}
+  sparks=[];smoke=[];showSizeMode();emit();
+}
+function showSizeMode(){
+  for(const b of document.getElementById('sizemodes').children) b.setAttribute('aria-pressed',String(b.dataset.v===sizeMode));
+  document.getElementById('sizeNote').textContent=sizeMode==='client'
+    ?'Each particle is 2 × its key × spark size (1.0 = the client).'
+    :'Each particle is its key × spark size, as signed off: half the client\'s size at 1.0.';
+}
 const ON={}; for(const L of LAYERS) ON[L.id]=L.on;
 const CORE_SPRITES=4;
 
@@ -337,9 +363,9 @@ function render(){
     }
   }
   for(const p of sparks){const t=p.age/1.0;
-    star(p.x,ramp3([0.139,0.028,0.0],0.8,t)*K.sparkSize,rampColor([[250,5,0],[255,120,0],[255,252,176]],0.8,t),1,0);}
+    star(p.x,ramp3([0.139,0.028,0.0],0.8,t)*K.sparkSize*keyToWidth(),rampColor([[250,5,0],[255,120,0],[255,252,176]],0.8,t),1,0);}
   for(const p of smoke){const t=p.age/3.0;
-    softDot(p.x,ramp3([0.014,0.111,0.0],0.25,t),rampColor([[37,0,0],[0,5,102],[180,180,227]],0.25,t),ramp3([1,0.39,0],0.25,t));}
+    softDot(p.x,ramp3([0.014,0.111,0.0],0.25,t)*keyToWidth(),rampColor([[37,0,0],[0,5,102],[180,180,227]],0.25,t),ramp3([1,0.39,0],0.25,t));}
   g.globalCompositeOperation='source-over';
   // The lit floor's visible edge now, and at the pulse's low (weight 0.10) — the worst case in the steady burn.
   const edgeNow=alive?visibleEdge(poolWeight(clock,age)*K.poolGain):0, edgeLow=visibleEdge(0.10*K.poolGain);
@@ -378,10 +404,13 @@ function buildUI(){
   const KN=document.getElementById('knobs');
   for(const k of KNOBS){
     const d=document.createElement('div');d.className='knob';
-    d.innerHTML=`<span title="${k.note||''}">${k.label}</span><input type="range" id="K_${k.key}" min="${k.min}" max="${k.max}" step="${k.step}" value="${k.def}"><output id="O_${k.key}">${k.def}</output>`;
+    d.innerHTML=`<span title="${k.note||''}">${k.label}</span><input type="range" id="K_${k.key}" min="${k.min}" max="${k.max}" step="${k.step}" value="${K[k.key]}"><output id="O_${k.key}">${K[k.key]}</output>`;
     KN.appendChild(d);
     d.querySelector('input').addEventListener('input',e=>{K[k.key]=parseFloat(e.target.value);document.getElementById('O_'+k.key).textContent=e.target.value;emit();});
   }
+  const SM=document.getElementById('sizemodes');
+  for(const [v,l] of SIZE_MODES){const b=document.createElement('button');b.type='button';b.className='btn';b.textContent=l;b.dataset.v=v;b.onclick=()=>setSizeMode(v);SM.appendChild(b);}
+  showSizeMode();
   document.getElementById('replay').onclick=()=>{relight();paused=false;document.getElementById('pause').textContent='Pause';};
   document.getElementById('pause').onclick=e=>{paused=!paused;e.target.textContent=paused?'Play':'Pause';};
   document.getElementById('end').onclick=()=>{relight();remaining=3;age=27;sparks=[];};
@@ -398,6 +427,9 @@ function emit(){
   const lines=['// AS-222/AS-232 Flare Bench: flare_state_base.m2 (166196), spell 1543'];
   const offShipped=LAYERS.filter(l=>!l.bench&&!ON[l.id]).map(l=>l.nm);
   if(offShipped.length) lines.push('// layers off: '+offShipped.join(', '));
+  lines.push(sizeMode==='client'
+    ?'// particle sizes (AS-463): size keys are RADII, `ParticleSize::radii`; FLARE_SPARK_SIZE is over the client\'s own size'
+    :'// particle sizes (as signed off): a size key is the full width, `ParticleSize::diameters`');
   for(const k of KNOBS) lines.push(`pub const ${k.rust}: f32 = ${fmt(K[k.key])};`);
   document.getElementById('out').textContent=lines.join('\n');
 }
