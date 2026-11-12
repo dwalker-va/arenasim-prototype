@@ -269,6 +269,15 @@ that applies a pass's share zeroes it in that same pass, so a read after the
 pass sees zero mid-animation. `tooltip_gate` waits for a scroll to finish by
 the same signal.
 
+**A tooltip under the parked pointer takes the wheel.** The driver scrolls with
+the pointer parked mid-screen. egui hides tooltips while content scrolls only
+when the scroll is younger than `tooltip_delay`, and the theme's delay was
+zero. So a choice tile scrolling past the parked pointer could open its
+tooltip beneath it, and the wheel then went to the tooltip layer, not the
+sheet. The sheet never moved again, and the step timed out with "laid out but
+never scrolled into view" (AS-470, about one run in four). The theme's delay is
+now 0.05s, which turns that guard back on.
+
 **And aim only at a rect that is wholly on screen** — `Widget::aim_point`,
 never `visible`. `visible` is egui's `is_rect_visible`: true once any point of
 the rect is inside its clip rect. In a 1280x720 window the Warrior's shout
@@ -286,7 +295,7 @@ FRAMES.** This one was got wrong twice, and the second time is the more
 useful lesson.
 
 egui will not show a tooltip until several **wall-clock** conditions hold. With
-`tooltip_delay` zeroed (which both instrumented screens do), the binding ones
+`tooltip_delay` at the theme's 0.05s (inside the stillness wait below), the binding ones
 are `pointer.is_still()` — velocity over a **0.1 second** position history —
 `smooth_scroll_delta == 0`, an animation that decays over **time**, and
 `clicked_more_recently_than_moved`, which wants the move at least **0.1s**

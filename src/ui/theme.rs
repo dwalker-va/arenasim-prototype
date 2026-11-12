@@ -739,8 +739,15 @@ pub fn style() -> egui::Style {
     style.spacing.tooltip_width = size::TOOLTIP_MAX_WIDTH;
 
     // One tooltip delay, set once: a linked icon answers the moment it is
-    // hovered — that immediacy is the point of the widget.
-    style.interaction.tooltip_delay = 0.0;
+    // hovered — that immediacy is the point of the widget. Not ZERO, though:
+    // egui hides every tooltip while the content is scrolling only when a
+    // scroll is younger than this delay, so zero let one show over a sheet
+    // scrolling under a resting pointer, and a tooltip under the pointer
+    // takes the wheel, which stopped the sheet for good (AS-470). A first
+    // tooltip already waits for a still pointer (egui's 0.1s velocity
+    // window), and moving between icons skips the delay, so 0.05s is spent
+    // inside a wait that was already there.
+    style.interaction.tooltip_delay = 0.05;
 
     style
 }
