@@ -319,6 +319,7 @@ fn expose_armor_is_avoided_and_exposes_nothing() {
             rogue_scene(None, a)
                 .armor(2300.0)
                 .grant(ATTACKER, AbilityType::ExposeArmor)
+                .cooldown(ATTACKER, AbilityType::KidneyShot, 10.0)
         },
         |v| {
             v.auras_queued

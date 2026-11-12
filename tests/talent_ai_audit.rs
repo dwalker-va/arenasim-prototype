@@ -41,7 +41,9 @@ fn expose_armor_scene(defs: &AbilityDefinitions) -> (Scene, Who) {
         .targeting("plate warrior")
         .unit("plate warrior", 2, CharacterClass::Warrior)
         .at(1.5, 0.0)
-        .armor(2300.0);
+        .armor(2300.0)
+        // Below the Kidney Shot planner: a ready stun would take the turn.
+        .cooldown(ROGUE, AbilityType::KidneyShot, 10.0);
     scene.combatant_mut(ROGUE).stealthed = false;
     (scene, ROGUE)
 }

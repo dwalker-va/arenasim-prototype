@@ -330,7 +330,8 @@ const PLATE: f32 = 2300.0;
 const LEATHER: f32 = 770.0;
 
 /// A Rogue with Expose Armor in melee of an enemy `class` wearing `armor`,
-/// its target.
+/// its target, with Kidney Shot on cooldown: the planner above Expose Armor
+/// leaves the turn to it.
 fn expose_scene(class: CharacterClass, armor: f32) -> Scene {
     let mut s = Scene::new()
         .unit(ME, 1, Rogue)
@@ -339,7 +340,8 @@ fn expose_scene(class: CharacterClass, armor: f32) -> Scene {
         .unit(FOE, 2, class)
         .at(1.5, 0.0)
         .armor(armor)
-        .grant(ME, AbilityType::ExposeArmor);
+        .grant(ME, AbilityType::ExposeArmor)
+        .cooldown(ME, AbilityType::KidneyShot, 10.0);
     s.combatant_mut(ME).stealthed = false;
     s
 }
@@ -459,7 +461,9 @@ fn window_scene() -> Scene {
         .at(0.0, 1.5)
         .unit(ENEMY_HEALER, 2, Priest)
         .at(1.5, 30.0)
-        .grant(ME, AbilityType::ExposeArmor);
+        .grant(ME, AbilityType::ExposeArmor)
+        // So the control's planner leaves its turn to Expose Armor's rule.
+        .cooldown(ME, AbilityType::KidneyShot, 10.0);
     s.combatant_mut(ME).stealthed = false;
     s.aura(ENEMY_HEALER, AuraType::Stun, 4.0)
 }
@@ -553,4 +557,149 @@ fn expose_armor_lands_on_a_warrior_in_a_match_for_fifteen_seconds() {
     }
     assert!(*last <= 15.0 + 0.05, "{talented:?}");
     assert!(runs(&Build::default()).is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Expose Armor and the Kidney Shot planner
+// ---------------------------------------------------------------------------
+
+/// A Rogue (`Legacy`) at `energy` in melee of its target, a plate Paladin
+/// whose Holy school is locked out for `lockout` more seconds, with Expose
+/// Armor granted or not; Kidney Shot ready.
+fn kidney_scene(expose: bool, energy: f32, lockout: Option<f32>) -> Scene {
+    let mut s = Scene::new()
+        .unit(ME, 1, Rogue)
+        .mana(energy)
+        .targeting(FOE)
+        .unit(FOE, 2, CharacterClass::Paladin)
+        .at(1.5, 0.0)
+        .armor(PLATE);
+    if let Some(secs) = lockout {
+        s = s.aura_full(
+            FOE,
+            Aura {
+                effect_type: AuraType::SpellSchoolLockout,
+                magnitude: arenasim::states::play_match::abilities::SpellSchool::Holy
+                    .to_lockout_magnitude(),
+                duration: secs,
+                break_on_damage_threshold: -1.0,
+                ..Default::default()
+            },
+        );
+    }
+    if expose {
+        s = s.grant(ME, AbilityType::ExposeArmor);
+    }
+    s.combatant_mut(ME).stealthed = false;
+    s
+}
+
+/// The planner's FIRE moment is Kidney Shot's: as a Holy lockout lapses, the
+/// Rogue extends the denial with the stun whether it has Expose Armor or not.
+#[test]
+fn expose_armor_never_takes_the_kidney_shot_planners_moment() {
+    let control = kidney_scene(false, 1.0, Some(0.3)).decide(ME);
+    assert_eq!(
+        control.chose(),
+        Some((AbilityType::KidneyShot, Some(FOE))),
+        "{}",
+        describe(&control)
+    );
+    let view = kidney_scene(true, 1.0, Some(0.3)).decide(ME);
+    assert_eq!(
+        view.chose(),
+        Some((AbilityType::KidneyShot, Some(FOE))),
+        "{}",
+        describe(&view)
+    );
+}
+
+/// The energy the planner POOLS is Kidney Shot's: two seconds out from the
+/// lockout's end at 50 energy the Rogue holds everything, Expose Armor
+/// included, so the stun is affordable when the lockout lapses.
+#[test]
+fn expose_armor_never_spends_energy_pooled_for_kidney_shot() {
+    let control = kidney_scene(false, 0.5, Some(2.0)).decide(ME);
+    assert_eq!(control.chose(), None, "{}", describe(&control));
+    let view = kidney_scene(true, 0.5, Some(2.0)).decide(ME);
+    assert_eq!(view.chose(), None, "{}", describe(&view));
+    assert!(
+        view.candidates
+            .iter()
+            .all(|c| c.ability != AbilityType::ExposeArmor),
+        "{}",
+        describe(&view)
+    );
+}
+
+/// Where the planner leaves the turn to the strike — the lockout's denial
+/// still running, the stun held — Expose Armor takes it ahead of Sinister
+/// Strike; without the talent the Rogue strikes.
+#[test]
+fn expose_armor_goes_ahead_of_sinister_strike_when_the_planner_holds() {
+    let control = kidney_scene(false, 1.0, Some(3.0)).decide(ME);
+    assert_eq!(
+        control.chose(),
+        Some((AbilityType::SinisterStrike, Some(FOE))),
+        "{}",
+        describe(&control)
+    );
+    assert!(control.rejected(AbilityType::KidneyShot).is_some());
+    let view = kidney_scene(true, 1.0, Some(3.0)).decide(ME);
+    assert_eq!(
+        view.chose(),
+        Some((AbilityType::ExposeArmor, Some(FOE))),
+        "{}",
+        describe(&view)
+    );
+    assert!(view.rejected(AbilityType::KidneyShot).is_some());
+}
+
+/// While a burst is called, Expose Armor is the kill window's alone: with
+/// that enemy out of reach, the Rogue does not expose its own plate target
+/// instead (it strikes it), and Expose Armor is decided once, on the window's
+/// enemy.
+#[test]
+fn under_a_burst_expose_armor_is_for_the_window_enemy_only() {
+    let mut s = Scene::new()
+        .ai_profile(1, AiProfile::TeamPlan)
+        .except_everywhere(1, PlaySet::of(&[CHAIN]))
+        .unit(ME, 1, Rogue)
+        .mana(1.0)
+        .targeting(OTHER)
+        .unit(FOE, 2, Warrior)
+        .at(6.0, 0.0)
+        .health(0.2)
+        .armor(PLATE)
+        .unit(OTHER, 2, Warrior)
+        .at(0.0, 1.5)
+        .armor(PLATE)
+        .unit(ENEMY_HEALER, 2, Priest)
+        .at(6.0, 30.0)
+        .grant(ME, AbilityType::ExposeArmor)
+        .cooldown(ME, AbilityType::KidneyShot, 10.0);
+    s.combatant_mut(ME).stealthed = false;
+    let view = s.aura(ENEMY_HEALER, AuraType::Stun, 4.0).decide(ME);
+    assert!(
+        view.situation
+            .as_ref()
+            .is_some_and(|s| s.kill_window.is_some()),
+        "{}",
+        describe(&view)
+    );
+    assert_eq!(
+        view.chose(),
+        Some((AbilityType::SinisterStrike, Some(OTHER))),
+        "{}",
+        describe(&view)
+    );
+    assert_eq!(
+        view.candidates
+            .iter()
+            .filter(|c| c.ability == AbilityType::ExposeArmor)
+            .count(),
+        1,
+        "{}",
+        describe(&view)
+    );
 }

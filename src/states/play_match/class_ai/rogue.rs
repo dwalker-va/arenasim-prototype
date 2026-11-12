@@ -17,9 +17,11 @@
 //!    - **Aggressive** (Warrior/Rogue/Hunter): opportunistic stun whenever up.
 //! 2. Sinister Strike (combo point builder)
 //!
-//! Expose Armor (the Combat capstone, a talent) goes ahead of both, after the
-//! Peel and Chain plays: on the kill target — the kill window's enemy while a
-//! burst is called — when halving its armor makes a Physical hit land at least
+//! Expose Armor (the Combat capstone, a talent) goes between the two: below
+//! the Kidney Shot planner, so it never takes the stun's moment or the energy
+//! pooled for it, and ahead of Sinister Strike. While a burst is called it goes
+//! on the kill window's enemy ahead of the burst instead. Either way, only when
+//! halving the target's armor makes a Physical hit land at least
 //! [`EXPOSE_ARMOR_MIN_GAIN`] harder ([`try_expose_armor`]).
 #![allow(clippy::too_many_arguments)]
 
@@ -211,33 +213,34 @@ pub fn decide_rogue_action(
         }
     }
 
-    // Expose Armor (a talent): the kill target's armor halved, ahead of the
-    // burst on it. A Rogue without the talent has no rule here.
-    if abilities.get(&AbilityType::ExposeArmor).is_some() {
-        let subject = super::burst::burst_call(ctx).map_or(target_entity, |call| call.subject);
-        if try_expose_armor(
-            commands,
-            combat_log,
-            game_rng,
-            abilities,
-            entity,
-            combatant,
-            my_pos,
-            auras,
-            subject,
-            ctx,
-            &mut builder,
-        ) {
-            builder.finish();
-            return true;
-        }
-    }
+    // Expose Armor (a talent). A Rogue without the talent has no rule here.
+    let has_expose_armor = abilities.get(&AbilityType::ExposeArmor).is_some();
 
     // The Burst play (TeamPlan): a kill window is open, so Sinister Strike on
     // its enemy heads the chain — ahead of the Kidney Shot planner, whose holds
-    // and pooling would otherwise keep the energy back.
-    if let Some(call) = super::burst::burst_call(ctx) {
+    // and pooling would otherwise keep the energy back. Expose Armor on that
+    // enemy goes first, ahead of the burst it opens up.
+    let burst = super::burst::burst_call(ctx);
+    if let Some(call) = burst.as_ref() {
         if let Some(pos) = ctx.combatants.get(&call.subject).map(|i| i.position) {
+            if has_expose_armor
+                && try_expose_armor(
+                    commands,
+                    combat_log,
+                    game_rng,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    auras,
+                    call.subject,
+                    ctx,
+                    &mut builder,
+                )
+            {
+                builder.finish();
+                return true;
+            }
             if try_sinister_strike(
                 commands,
                 combat_log,
@@ -359,6 +362,29 @@ pub fn decide_rogue_action(
                 }
             }
         }
+    }
+
+    // Expose Armor on the kill target, BELOW the Kidney Shot planner: it never
+    // takes a moment the planner fires the stun in, nor energy it is pooling
+    // (each of those returned above). Under a burst it was decided there.
+    if has_expose_armor
+        && burst.is_none()
+        && try_expose_armor(
+            commands,
+            combat_log,
+            game_rng,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            ctx,
+            &mut builder,
+        )
+    {
+        builder.finish();
+        return true;
     }
 
     // Priority 2: Sinister Strike
