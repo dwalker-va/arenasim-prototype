@@ -274,6 +274,8 @@ fn the_damage_number_is_what_landed() {
 
 /// The channeler's damage and healing totals — what the Results screen's row
 /// shows — are the sums of its per-ability breakdown, shield or no shield.
+/// The damage counts what the shield soaked, as every damage site's does
+/// (`combat_core::credited_damage`); the heal is what landed.
 #[test]
 fn the_results_totals_are_the_breakdowns_sums() {
     for (auras, landed) in [
@@ -282,8 +284,8 @@ fn the_results_totals_are_the_breakdowns_sums() {
         (vec![], TICK),
     ] {
         let t = tick(HURT, auras);
-        assert_eq!(t.warlock.damage_dealt, landed);
-        assert_eq!(t.log.total_damage_dealt(WARLOCK), landed);
+        assert_eq!(t.warlock.damage_dealt, TICK);
+        assert_eq!(t.log.total_damage_dealt(WARLOCK), TICK);
         assert_eq!(t.warlock.healing_done, landed);
         assert_eq!(t.log.total_healing_done(WARLOCK), landed);
         // The target took what the Warlock was credited with.

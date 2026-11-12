@@ -111,7 +111,8 @@ fn a_tick_logs_the_damage_its_modifiers_left() {
 }
 
 /// A shield soaks part of the tick: the line names what reached health and
-/// what the shield took, as a DoT tick's does.
+/// what the shield took, as a DoT tick's does, and the breakdown row counts
+/// both (`combat_core::credited_damage`).
 #[test]
 fn a_tick_logs_the_damage_past_an_absorb() {
     let log = tick(400.0, vec![aura(AuraType::Absorb, 4.0)]);
@@ -119,7 +120,7 @@ fn a_tick_logs_the_damage_past_an_absorb() {
         messages(&log)[0],
         format!("{WARLOCK}'s Drain Life ticks on {WARRIOR} for 6 damage (4 absorbed)")
     );
-    assert_eq!(tick_damage(&log), (6.0, false));
+    assert_eq!(tick_damage(&log), (10.0, false));
 }
 
 /// A lethal tick is the killing blow on the tick's own entry, and the death

@@ -97,7 +97,8 @@ pub struct Hit<'a> {
     /// modifier yet.
     pub amount: f32,
     pub school: SpellSchool,
-    /// What dealt it, for the stealth reveal's log line ("Frostbolt").
+    /// What dealt it ("Frostbolt"): named in the stealth reveal's log line, and
+    /// the breakdown row a transferred share of it is credited to.
     pub source: &'a str,
     /// The unit that dealt it, when there is one.
     pub attacker: Option<Entity>,
@@ -483,6 +484,27 @@ pub fn apply_damage_with_absorb(
     (actual_damage, total_absorbed)
 }
 
+/// The damage a hit credits its dealer with: what reached health plus what
+/// absorbs soaked, as WoW's damage meters count it. Damage an immunity
+/// blocked reached neither and is credited nothing.
+///
+/// The one rule for "damage dealt", at every damage site: direct hits,
+/// periodic ticks, channels, the dispel backlash, reflects and transferred
+/// shares alike. A site credits its dealer through [`credit_damage_dealt`]
+/// and logs its combat-log damage row (`CombatLog::log_damage`, the Results
+/// screen's per-ability breakdown) with this amount, so a combatant's Results
+/// total is the sum of its breakdown rows. `tests/damage_site_audit.rs` holds
+/// every site to it; `tests/results_damage_totals.rs` plays it.
+pub fn credited_damage(landed: f32, absorbed: f32) -> f32 {
+    landed + absorbed
+}
+
+/// Credit `dealer` with one hit, under [`credited_damage`]'s rule: the only
+/// write to `Combatant::damage_dealt`.
+pub fn credit_damage_dealt(dealer: &mut Combatant, landed: f32, absorbed: f32) {
+    dealer.damage_dealt += credited_damage(landed, absorbed);
+}
+
 /// Step 0: whether `auras` block every hit — a damage immunity (Divine
 /// Shield) or a Cyclone.
 pub fn blocks_all_damage(auras: Option<&ActiveAuras>) -> bool {
@@ -711,6 +733,7 @@ fn transfer_share(
         school: hit.school,
         preventable,
         dealer: hit.attacker,
+        ability: hit.source.to_string(),
         by: by.to_string(),
     });
 }
