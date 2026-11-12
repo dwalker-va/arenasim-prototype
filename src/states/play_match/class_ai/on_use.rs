@@ -354,7 +354,8 @@ pub fn try_buffs(
     let Some(actor) = ctx.self_info().map(ActorView::from_info) else {
         return;
     };
-    let role = Role::of(combatant.class);
+    // The unit's part, not its class's: a Shadowform Priest deals damage.
+    let role = combatant.role();
     for slot in combatant.on_use_items.iter_mut() {
         if slot.config.buff().is_none() || !slot.ready() {
             continue;
