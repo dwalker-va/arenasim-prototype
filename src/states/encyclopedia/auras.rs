@@ -70,6 +70,7 @@ use crate::states::play_match::constants::{
     DR_MULTIPLIERS, DR_RESET_TIMER, FROST_TRAP_SLOW_MAGNITUDE, FROST_TRAP_ZONE_DURATION,
     TOTEM_DURATION, WEAKENED_SOUL_DURATION,
 };
+use crate::states::play_match::demonology;
 use crate::states::play_match::effects::backlash::{
     dispel_backlash_silence_aura, DISPEL_BACKLASH_SILENCE_DURATION,
 };
@@ -197,6 +198,11 @@ pub enum EngineAura {
     /// named after the item. Derived from the buff `on_use:` blocks in
     /// `items.ron`, as the proc buffs are from `proc:`.
     OnUseBuff(ItemId),
+    /// Master Demonologist's spell damage cut, which the talent keeps on the
+    /// Warlock and its Felhunter while the Felhunter lives.
+    MasterDemonologist,
+    /// Touch of Shadow, the buff a Demonic Sacrifice grants for the match.
+    TouchOfShadow,
     /// The aura a TALENT's proc applies (Shadow Trance, Blackout's stun),
     /// named after its effect: the talent and the proc's index among its
     /// `Proc` effects. Derived from `talents.ron`, so talent N+1's proc gets
@@ -230,6 +236,8 @@ impl EngineAura {
             EngineAura::FrostTrapSlow,
             EngineAura::DispelBacklashSilence,
             EngineAura::FrostArmorChill,
+            EngineAura::MasterDemonologist,
+            EngineAura::TouchOfShadow,
         ];
         all.extend(TotemElement::ALL.iter().copied().map(EngineAura::TotemBuff));
         all.extend(
@@ -766,6 +774,10 @@ fn engine_art(engine: EngineAura) -> AuraArt {
         // A talent's proc wears its talent's icon, as in the buff bar, which
         // reads the same key off the aura's `source_talent`.
         EngineAura::TalentProcAura(talent, _) => AuraArt::Talent(talent),
+        // A Demonology talent's aura wears its node's icon, keyed off the
+        // aura's `source_talent` as in the buff bar.
+        EngineAura::MasterDemonologist => AuraArt::Talent(TalentId::MasterDemonologist),
+        EngineAura::TouchOfShadow => AuraArt::Talent(TalentId::DemonicSacrifice),
     }
 }
 
@@ -1016,6 +1028,50 @@ fn engine_entry_with(
                 persistence: Persistence::Seconds(face.duration),
                 riders,
                 provenance: on_use_description(on_use),
+            }
+        }
+        EngineAura::MasterDemonologist => {
+            let reduction = demonology::shipped_master_demonologist().unwrap_or_default();
+            let sample =
+                demonology::master_demonologist_aura(reduction, bevy::prelude::Entity::PLACEHOLDER);
+            EngineSpec {
+                name: sample.ability_name.clone(),
+                frame_name: None,
+                mechanic: sample.effect_type,
+                source: AuraSource::Mechanic("the Warlock's Master Demonologist talent"),
+                magnitude: sample.magnitude,
+                school: None,
+                break_on_damage: sample.break_on_damage_threshold,
+                dispel_type: sample.dispel_type,
+                persistence: Persistence::WholeMatch,
+                riders: EngineSpec::no_riders(),
+                provenance: format!(
+                    "The Warlock and its Felhunter each take {:.0}% less spell damage while the \
+                     Felhunter lives. The Warlock's ends when the Felhunter dies.",
+                    reduction * 100.0
+                ),
+            }
+        }
+        EngineAura::TouchOfShadow => {
+            let bonus = demonology::shipped_demonic_sacrifice().unwrap_or_default();
+            let sample =
+                demonology::touch_of_shadow_aura(bonus, bevy::prelude::Entity::PLACEHOLDER);
+            EngineSpec {
+                name: sample.ability_name.clone(),
+                frame_name: None,
+                mechanic: sample.effect_type,
+                source: AuraSource::Mechanic("the Warlock's Demonic Sacrifice talent"),
+                magnitude: sample.magnitude,
+                school: Some(SpellSchool::Shadow),
+                break_on_damage: sample.break_on_damage_threshold,
+                dispel_type: sample.dispel_type,
+                persistence: Persistence::WholeMatch,
+                riders: EngineSpec::no_riders(),
+                provenance: format!(
+                    "Granted at the gates to a Warlock that sacrifices its Felhunter: {:.0}% more \
+                     Shadow damage for the match.",
+                    bonus * 100.0
+                ),
             }
         }
         EngineAura::TalentProcAura(talent, index) => {
@@ -2165,10 +2221,14 @@ mod tests {
                 "Molten Armor",
                 "Healing Stream Totem",
                 "Shadow Resistance Aura",
+                "Shadowform",
                 "Strength of Earth Totem",
                 "Travel Form",
                 "Windfury Totem",
                 "Weakened Soul",
+                // The Demonology talents' auras: untyped, for the match.
+                "Master Demonologist",
+                "Touch of Shadow",
             ]
             .map(String::from),
         );
@@ -2552,11 +2612,15 @@ mod tests {
         ability_less.sort();
         let mut expected = item_aura_names();
         expected.push("Shadow Sight".to_string());
+        // Talents, not abilities, apply these.
+        expected.push("Master Demonologist".to_string());
+        expected.push("Touch of Shadow".to_string());
         expected.sort();
         assert_eq!(
             ability_less, expected,
-            "an arena orb pickup and the item auras are the only auras no ability applies \
-             — a new one here is either a genuine mechanic or a `source` nobody filled in"
+            "an arena orb pickup, the item auras and the talent auras are the only auras no \
+             ability applies — a new one here is either a genuine mechanic or a `source` nobody \
+             filled in"
         );
     }
 
@@ -2617,6 +2681,7 @@ mod tests {
         let abilities = abilities();
         let mut own_art: Vec<String> = Vec::new();
         let mut item_art: Vec<String> = Vec::new();
+        let mut talent_art: Vec<String> = Vec::new();
         for entry in catalog(&abilities, &items()) {
             let key = icon_key(entry.id, &abilities, &items())
                 .unwrap_or_else(|| panic!("{} has no icon key — a placeholder tile", entry.name));
@@ -2691,6 +2756,7 @@ mod tests {
                         "{} points at {path}, which is not in the asset tree",
                         entry.name
                     );
+                    talent_art.push(entry.name.clone());
                 }
                 AuraArt::FromSource => {
                     let ability = entry
@@ -2706,6 +2772,15 @@ mod tests {
             own_art,
             vec!["Shadow Sight".to_string(), "Weakened Soul".to_string()],
             "the auras whose own art beats a borrowed icon"
+        );
+        talent_art.sort();
+        assert_eq!(
+            talent_art,
+            vec![
+                "Master Demonologist".to_string(),
+                "Touch of Shadow".to_string()
+            ],
+            "the auras that wear their talent's icon (no shipped talent procs yet)"
         );
         item_art.sort();
         let mut expected = item_aura_names();

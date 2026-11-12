@@ -32,8 +32,10 @@
 //! On top of the families, `every_ability_belongs_to_a_family` makes the
 //! families a cover of the whole config: an ability that no family scans is
 //! a failure unless it is named in `NO_FAMILY` with the visual that covers it.
-//! One family is not an ability's: an item proc's EXTRA SWING (Hand of
-//! Justice) lands an attack too, so `extra_swing_*` scans `items.ron` for it.
+//! Two families are not an ability's: an item proc's EXTRA SWING (Hand of
+//! Justice) lands an attack too, so `extra_swing_*` scans `items.ron` for it;
+//! and a talent's `Mechanic` lands at its own site (Soul Link's transfer, the
+//! Demonic Sacrifice), so `talent_mechanic_*` scans `talents.ron`.
 //! The harness's own failure modes are proved by planted offenders at the
 //! bottom of the file.
 //!
@@ -64,6 +66,8 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::equipment::{load_item_definitions, ItemDefinitions, ItemId};
 use arenasim::states::play_match::on_use_items::OnUseEffect;
 use arenasim::states::play_match::proc_trinkets::ProcEffect;
+use arenasim::states::play_match::talent_mechanics::MechanicKind;
+use arenasim::states::play_match::talents::{TalentDefinitions, TalentEffect, TalentId};
 use arenasim::states::play_match::{
     bolt_kind_for, client_landing_style, curse_spec, hunter_shot_for, is_live_shield,
     lands_poison_cloud, root_style_for, DotStateVisual, InterruptLanding, SlowTint,
@@ -158,15 +162,18 @@ fn check_judged<T: Ord + Copy + std::fmt::Debug>(
 /// card: the client gives it none and a design doc rules it stays that way.
 /// Permanent where a known-silent entry is temporary, so it names the doc that
 /// ruled it instead of a card — and the doc must exist.
-struct SilentByDesign {
-    ability: AbilityType,
+struct SilentByDesign<T = AbilityType> {
+    ability: T,
     /// Repo-relative path of the design doc that rules it silent.
     doc: &'static str,
     reason: &'static str,
 }
 
 /// A by-design entry must cite a design doc that exists, and give a reason.
-fn check_rulings(family: &str, rulings: &[SilentByDesign]) -> Result<(), String> {
+fn check_rulings<T: std::fmt::Debug>(
+    family: &str,
+    rulings: &[SilentByDesign<T>],
+) -> Result<(), String> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut problems = Vec::new();
     for r in rulings {
@@ -707,6 +714,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     PowerWordShield,
     Rejuvenation,
     ShadowResistanceAura,
+    Shadowform,
     TravelForm,
     WaterTotem,
     WoundPoison,
@@ -812,6 +820,8 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (FireTotem, "AS-134 (aura application — totem pulse)"),
     // The Combat capstone's armor rend on its target.
     (ExposeArmor, "AS-366 (Expose Armor)"),
+    // The form on the Priest all match: AS-333 scoped it, AS-343 draws it.
+    (Shadowform, "AS-343 (Shadowform)"),
 ];
 
 #[test]
@@ -1302,6 +1312,110 @@ fn extra_swing_lands_nothing_silently() {
         &extra_swing_items(),
         extra_swing_judge,
         EXTRA_SWING_KNOWN_SILENT,
+    ) {
+        panic!("{e}");
+    }
+}
+
+// ── family: talent mechanics ────────────────────────────────────────────────
+//
+// A talent's `Mechanic` lands at its own code site (`talent_mechanics`), not
+// through an ability, so this family scans `talents.ron` and names its members
+// by node. The judge asks for the mechanic's OWN visual: what the generic
+// channels every aura shares (the band as an aura lands, its buff-bar icon)
+// and a unit's ordinary death animation draw does not tell the player this
+// talent fired.
+
+/// Every node of `talents.ron` carrying a `Mechanic`.
+fn talent_mechanic_nodes() -> BTreeSet<TalentId> {
+    TalentDefinitions::shipped()
+        .iter()
+        .filter(|(_, node)| node.per_rank.iter().any(|e| mechanic_of(e).is_some()))
+        .map(|(id, _)| id)
+        .collect()
+}
+
+fn mechanic_of(effect: &TalentEffect) -> Option<MechanicKind> {
+    match effect {
+        TalentEffect::Mechanic(m) => Some(m.kind()),
+        TalentEffect::FromRank(_, inner) => mechanic_of(inner),
+        _ => None,
+    }
+}
+
+/// The bespoke visual a mechanic lands with. Exhaustive, so mechanic N+1
+/// must answer it.
+fn mechanic_visual(kind: MechanicKind) -> Option<&'static str> {
+    match kind {
+        MechanicKind::SoulLink
+        | MechanicKind::ReflectiveShield
+        | MechanicKind::CheatDeath
+        | MechanicKind::MasterDemonologist
+        | MechanicKind::DemonicSacrifice => None,
+    }
+}
+
+/// A node draws when every mechanic it carries does.
+fn talent_mechanic_judge(talent: TalentId) -> Option<&'static str> {
+    let node = TalentDefinitions::shipped().get(talent)?;
+    let mut visual = None;
+    for kind in node.per_rank.iter().filter_map(mechanic_of) {
+        visual = Some(mechanic_visual(kind)?);
+    }
+    visual
+}
+
+const TALENT_MECHANIC_MEMBERS: &[TalentId] = &[
+    TalentId::MasterDemonologist,
+    TalentId::DemonicSacrifice,
+    TalentId::SoulLink,
+];
+
+const TALENT_MECHANIC_KNOWN_SILENT: &[(TalentId, &str)] = &[
+    (
+        TalentId::DemonicSacrifice,
+        "AS-350 (the sacrifice triad; the Felhunter's death is the ordinary one)",
+    ),
+    (
+        TalentId::SoulLink,
+        "AS-350 (the Soul Link rune column; the transfer shows only on the Felhunter's bar)",
+    ),
+];
+
+const TALENT_MECHANIC_SILENT_BY_DESIGN: &[SilentByDesign<TalentId>] = &[SilentByDesign {
+    ability: TalentId::MasterDemonologist,
+    doc: "docs/design/proposals/2026-10-11-talents-and-gauntlet.md",
+    reason: "icon-only by ruling: its footprint is the aura icon on the Warlock and the \
+             Felhunter (§5.1)",
+}];
+
+#[test]
+fn talent_mechanic_finds_every_member() {
+    if let Err(e) = check_finds(
+        "talent-mechanic",
+        &talent_mechanic_nodes(),
+        TALENT_MECHANIC_MEMBERS,
+    ) {
+        panic!("{e}");
+    }
+}
+
+#[test]
+fn talent_mechanic_lands_nothing_silently() {
+    if let Err(e) = check_rulings("talent-mechanic", TALENT_MECHANIC_SILENT_BY_DESIGN) {
+        panic!("{e}");
+    }
+    let mut listed: Vec<(TalentId, &str)> = TALENT_MECHANIC_KNOWN_SILENT.to_vec();
+    listed.extend(
+        TALENT_MECHANIC_SILENT_BY_DESIGN
+            .iter()
+            .map(|r| (r.ability, r.doc)),
+    );
+    if let Err(e) = check_judged(
+        "talent-mechanic",
+        &talent_mechanic_nodes(),
+        talent_mechanic_judge,
+        &listed,
     ) {
         panic!("{e}");
     }

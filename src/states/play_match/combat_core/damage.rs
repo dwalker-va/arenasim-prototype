@@ -51,13 +51,22 @@ pub enum HitKind {
     /// it skips its receiver's immunity, mitigation, modifiers and absorbs, and
     /// begets nothing.
     Transferred,
+    /// A transferred share handed back to its holder because its receiver
+    /// could not take it (dead, gone, or too low to survive it). It was
+    /// mitigated on the holder already, so it skips immunity, mitigation and
+    /// modifiers, but the holder's absorbs soak it, as they would have had it
+    /// never left; and it begets nothing.
+    Returned,
 }
 
 impl HitKind {
     /// Whether the hit is a secondary one: damage another hit caused, which
     /// is never reflected or transferred again.
     pub fn is_secondary(self) -> bool {
-        matches!(self, HitKind::Reflected | HitKind::Transferred)
+        matches!(
+            self,
+            HitKind::Reflected | HitKind::Transferred | HitKind::Returned
+        )
     }
 }
 
@@ -270,7 +279,8 @@ pub fn armor_reduction(armor: f32) -> f32 {
 ///    returns its strongest one's damage to the attacker.
 ///
 /// A [`HitKind::Transferred`] hit skips 0-5 and 9: it was mitigated where it
-/// came from. A secondary hit (reflected or transferred) never transfers or
+/// came from. A [`HitKind::Returned`] share skips 0-4 and 9, and meets its
+/// holder's absorbs. A secondary hit (reflected or transferred) never transfers or
 /// reflects. Every follow-up a hit makes is pushed to `follow_ups` and lands
 /// later in the frame; with no modifier aura and no talent, nothing is pushed
 /// and the pipeline is the one that was here before it.
@@ -311,10 +321,13 @@ pub fn apply_damage_with_absorb(
     );
 
     let transferred = hit.kind == HitKind::Transferred;
+    // Already past steps 0-4 on its holder: a transferred share, or one handed
+    // back to it.
+    let premitigated = transferred || hit.kind == HitKind::Returned;
 
     // Check for damage immunity (Divine Shield, or a Cyclone) — blocks all
     // incoming damage
-    if !transferred {
+    if !premitigated {
         if let Some(ref auras) = active_auras {
             if auras.is_cycloned()
                 || auras
@@ -330,7 +343,7 @@ pub fn apply_damage_with_absorb(
     let mut remaining_damage = damage;
     let mut total_absorbed = 0.0;
 
-    if !transferred {
+    if !premitigated {
         // The attacker's damage-dealt increase.
         if hit.dealt != 1.0 {
             remaining_damage *= hit.dealt;
@@ -404,7 +417,11 @@ pub fn apply_damage_with_absorb(
                 follow_ups,
             );
         }
+    }
 
+    // Absorbs soak everything but a transferred share, a returned one
+    // included.
+    if !transferred {
         // Check for absorb shields and consume them
         if let Some(auras) = active_auras.as_deref_mut() {
             for aura in auras.auras.iter_mut() {
@@ -574,9 +591,11 @@ fn transfer_share(
                 },
             )
     });
+    // A severed link (its pet is dead) takes no share.
     let link = target
         .talent_mechanics
         .soul_link()
+        .filter(|_| !target.soul_link_severed)
         .map(|share| (TransferReceiver::OwnPet, share, SOUL_LINK_NAME));
     let best = match (aura, link) {
         (Some(a), Some(l)) => Some(if l.1 > a.1 { l } else { a }),

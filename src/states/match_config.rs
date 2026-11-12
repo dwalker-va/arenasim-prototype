@@ -165,6 +165,32 @@ impl WarlockCurse {
     }
 }
 
+/// The Warlock's demon choice: what becomes of its Felhunter for the match.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub enum WarlockDemon {
+    /// The Felhunter fights beside the Warlock.
+    #[default]
+    Felhunter,
+    /// The Felhunter is sacrificed at the gates for Touch of Shadow. Offered
+    /// only to a build with Demonic Sacrifice (`talents.ron` widens it).
+    Sacrifice,
+}
+
+impl WarlockDemon {
+    /// Every option, in display order.
+    pub const ALL: [WarlockDemon; 2] = [WarlockDemon::Felhunter, WarlockDemon::Sacrifice];
+
+    /// The display name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            WarlockDemon::Felhunter => "Felhunter",
+            WarlockDemon::Sacrifice => "Sacrifice",
+        }
+    }
+}
+
 /// Hunter pet type choice
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
@@ -357,6 +383,56 @@ impl PaladinAura {
             PaladinAura::DevotionAura => AbilityType::DevotionAura,
             PaladinAura::ShadowResistanceAura => AbilityType::ShadowResistanceAura,
             PaladinAura::ConcentrationAura => AbilityType::ConcentrationAura,
+        }
+    }
+}
+
+/// The Priest's Form: a role, chosen per match and held for the whole of it
+/// (the talents proposal §1 and §5.2). Only a build that takes the Shadowform
+/// talent is offered `Shadowform` (`talents.ron`, a `WidenChoice`); every
+/// other Priest plays without a form, as every Priest did before the choice
+/// existed.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+pub enum PriestForm {
+    /// No form: the healing Priest.
+    #[default]
+    NoForm,
+    /// Shadowform: a damage dealer. +15% Shadow damage, -15% Physical damage
+    /// taken, and no healing spells (`talents.ron`'s choice rules lock them).
+    Shadowform,
+}
+
+impl PriestForm {
+    /// Every option, in display order.
+    pub const ALL: [PriestForm; 2] = [PriestForm::NoForm, PriestForm::Shadowform];
+
+    /// Get the display name
+    pub fn name(&self) -> &'static str {
+        match self {
+            PriestForm::NoForm => "No Form",
+            PriestForm::Shadowform => "Shadowform",
+        }
+    }
+
+    /// Get a short description
+    pub fn description(&self) -> &'static str {
+        match self {
+            PriestForm::NoForm => "Heals its team",
+            PriestForm::Shadowform => {
+                "Deals damage: +15% Shadow damage, 15% less Physical damage taken, no healing \
+                 spells"
+            }
+        }
+    }
+
+    /// The ability that takes the form, if it has one.
+    pub fn ability(&self) -> Option<super::play_match::abilities::AbilityType> {
+        use super::play_match::abilities::AbilityType;
+        match self {
+            PriestForm::NoForm => None,
+            PriestForm::Shadowform => Some(AbilityType::Shadowform),
         }
     }
 }
@@ -704,6 +780,11 @@ pub struct MatchConfig {
     pub team1_warlock_curse_prefs: Vec<Vec<WarlockCurse>>,
     /// Team 2's warlock curse preferences: [warlock_slot][enemy_target_index] -> curse
     pub team2_warlock_curse_prefs: Vec<Vec<WarlockCurse>>,
+    /// Team 1's warlock demon choices (one per slot, defaults to Felhunter).
+    /// Sacrifice needs Demonic Sacrifice in the slot's build.
+    pub team1_warlock_demons: Vec<WarlockDemon>,
+    /// Team 2's warlock demon choices (one per slot, defaults to Felhunter).
+    pub team2_warlock_demons: Vec<WarlockDemon>,
     /// Team 1's hunter pet type preferences (one per slot, defaults to Spider)
     pub team1_hunter_pet_types: Vec<HunterPetType>,
     /// Team 2's hunter pet type preferences (one per slot, defaults to Spider)
@@ -720,6 +801,12 @@ pub struct MatchConfig {
     pub team1_paladin_auras: Vec<PaladinAura>,
     /// Team 2's paladin aura preferences (one per slot, defaults to DevotionAura)
     pub team2_paladin_auras: Vec<PaladinAura>,
+    /// Team 1's priest forms (one per slot, defaults to no form). A form other
+    /// than the default is legal only for a build that takes the talent
+    /// offering it.
+    pub team1_priest_forms: Vec<PriestForm>,
+    /// Team 2's priest forms (one per slot, defaults to no form).
+    pub team2_priest_forms: Vec<PriestForm>,
     /// Team 1's equipment overrides per slot (one HashMap per team slot)
     pub team1_equipment: Vec<Loadout>,
     /// Team 2's equipment overrides per slot (one HashMap per team slot)
@@ -752,6 +839,8 @@ impl Default for MatchConfig {
             // One vec per slot, inner vec has curse pref per enemy (defaults to Agony)
             team1_warlock_curse_prefs: vec![vec![WarlockCurse::default()]],
             team2_warlock_curse_prefs: vec![vec![WarlockCurse::default()]],
+            team1_warlock_demons: vec![WarlockDemon::default()],
+            team2_warlock_demons: vec![WarlockDemon::default()],
             team1_hunter_pet_types: vec![HunterPetType::default()],
             team2_hunter_pet_types: vec![HunterPetType::default()],
             team1_warrior_shouts: vec![WarriorShout::default()],
@@ -760,6 +849,8 @@ impl Default for MatchConfig {
             team2_mage_armors: vec![MageArmor::default()],
             team1_paladin_auras: vec![PaladinAura::default()],
             team2_paladin_auras: vec![PaladinAura::default()],
+            team1_priest_forms: vec![PriestForm::default()],
+            team2_priest_forms: vec![PriestForm::default()],
             team1_equipment: vec![Loadout::new()],
             team2_equipment: vec![Loadout::new()],
             team1_builds: vec![Build::default()],
@@ -792,11 +883,14 @@ impl MatchConfig {
         for prefs in &mut self.team1_warlock_curse_prefs {
             prefs.resize(enemy_size, WarlockCurse::default());
         }
+        self.team1_warlock_demons
+            .resize(size, WarlockDemon::default());
         self.team1_warrior_shouts
             .resize(size, WarriorShout::default());
         self.team1_mage_armors.resize(size, MageArmor::default());
         self.team1_paladin_auras
             .resize(size, PaladinAura::default());
+        self.team1_priest_forms.resize(size, PriestForm::default());
         self.team1_equipment.resize(size, Loadout::new());
         self.team1_builds.resize(size, Build::default());
     }
@@ -828,11 +922,14 @@ impl MatchConfig {
         for prefs in &mut self.team1_warlock_curse_prefs {
             prefs.resize(size, WarlockCurse::default());
         }
+        self.team2_warlock_demons
+            .resize(size, WarlockDemon::default());
         self.team2_warrior_shouts
             .resize(size, WarriorShout::default());
         self.team2_mage_armors.resize(size, MageArmor::default());
         self.team2_paladin_auras
             .resize(size, PaladinAura::default());
+        self.team2_priest_forms.resize(size, PriestForm::default());
         self.team2_equipment.resize(size, Loadout::new());
         self.team2_builds.resize(size, Build::default());
     }
@@ -862,6 +959,30 @@ impl MatchConfig {
         }
     }
 
+    /// Return `team`'s `slot` to no form when its build no longer offers the
+    /// form it holds: the talent that offered it was unlearned. The slot then
+    /// never carries a choice its build cannot make, which the match would
+    /// refuse at the gates.
+    pub fn drop_unoffered_priest_form(
+        &mut self,
+        team: u8,
+        slot: usize,
+        talents: &crate::states::play_match::talents::TalentDefinitions,
+    ) {
+        use crate::states::play_match::talent_choices::ChoiceOption;
+        let build = self.build(team, slot).cloned().unwrap_or_default();
+        let forms = if team == 1 {
+            &mut self.team1_priest_forms
+        } else {
+            &mut self.team2_priest_forms
+        };
+        if let Some(form) = forms.get_mut(slot) {
+            if !talents.offers(&build, ChoiceOption::PriestForm(*form)) {
+                *form = PriestForm::default();
+            }
+        }
+    }
+
     /// Assign a class to a team slot, dropping that slot's equipment overrides
     /// and talent build when the class actually changes (a build is one
     /// class's talents).
@@ -881,19 +1002,22 @@ impl MatchConfig {
     /// Each is a typed per-class enum that only its own class reads, so a stale
     /// one is inert and comes back intact if the user changes their mind;
     /// equipment is the only per-slot state where one class's choice occupies a
-    /// socket another class can see.
+    /// socket another class can see. The priest form is the exception among
+    /// them: a talent offers it, so it is dropped with the build.
     pub fn set_class(&mut self, team: u8, slot: usize, class: CharacterClass) {
-        let (classes, equipment, builds) = if team == 1 {
+        let (classes, equipment, builds, forms) = if team == 1 {
             (
                 &mut self.team1,
                 &mut self.team1_equipment,
                 &mut self.team1_builds,
+                &mut self.team1_priest_forms,
             )
         } else {
             (
                 &mut self.team2,
                 &mut self.team2_equipment,
                 &mut self.team2_builds,
+                &mut self.team2_priest_forms,
             )
         };
         let Some(current) = classes.get_mut(slot) else {
@@ -908,6 +1032,10 @@ impl MatchConfig {
         }
         if let Some(build) = builds.get_mut(slot) {
             *build = Build::default();
+        }
+        // A form is offered only by a talent, so it goes with the build.
+        if let Some(form) = forms.get_mut(slot) {
+            *form = PriestForm::default();
         }
     }
 

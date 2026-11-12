@@ -102,10 +102,12 @@ fn option_name(option: ChoiceOption, abilities: &AbilityDefinitions) -> String {
         ChoiceOption::WarlockCurse(c) => abilities
             .get(&c.ability())
             .map_or_else(|| format!("{c:?}"), |a| a.name.clone()),
+        ChoiceOption::WarlockDemon(d) => d.name().to_string(),
         ChoiceOption::HunterPet(p) => p.name().to_string(),
         ChoiceOption::WarriorShout(s) => s.name().to_string(),
         ChoiceOption::MageArmor(a) => a.name().to_string(),
         ChoiceOption::PaladinAura(a) => a.name().to_string(),
+        ChoiceOption::PriestForm(f) => f.name().to_string(),
     }
 }
 
@@ -116,10 +118,12 @@ fn menu_phrase(menu: ChoiceMenu) -> &'static str {
         ChoiceMenu::RogueOpener => "a stealth opener",
         ChoiceMenu::RoguePoison => "a weapon poison",
         ChoiceMenu::WarlockCurse => "a curse",
+        ChoiceMenu::WarlockDemon => "a demon",
         ChoiceMenu::HunterPet => "a pet",
         ChoiceMenu::WarriorShout => "a shout",
         ChoiceMenu::MageArmor => "an armor",
         ChoiceMenu::PaladinAura => "an aura",
+        ChoiceMenu::PriestForm => "a form",
     }
 }
 
@@ -143,6 +147,15 @@ fn mechanic_text(mechanic: TalentMechanic) -> String {
             unsigned_percent(health),
             unsigned_percent(reduction),
             unsigned(duration, "sec")
+        ),
+        TalentMechanic::MasterDemonologist { reduction } => format!(
+            "You and your pet take {} less spell damage while it lives",
+            unsigned_percent(reduction)
+        ),
+        TalentMechanic::DemonicSacrifice { shadow_damage } => format!(
+            "Sacrificing your pet at the gates grants Touch of Shadow: {} Shadow damage for the \
+             match",
+            percent(shadow_damage)
         ),
     }
 }
@@ -600,7 +613,7 @@ mod tests {
             "Unlocks Wound Poison as a weapon poison choice"
         );
         // Every menu reads with its own article: the last option that is
-        // not its default, all seven named.
+        // not its default, all nine named.
         let unlocks: Vec<String> = ChoiceMenu::ALL
             .iter()
             .map(|menu| {
@@ -619,10 +632,12 @@ mod tests {
                 "Unlocks Ambush as a stealth opener choice",
                 "Unlocks Mind-numbing Poison as a weapon poison choice",
                 "Unlocks Curse of Tongues as a curse choice",
+                "Unlocks Sacrifice as a demon choice",
                 "Unlocks Bird as a pet choice",
                 "Unlocks Commanding Shout as a shout choice",
                 "Unlocks Molten Armor as an armor choice",
                 "Unlocks Concentration Aura as an aura choice",
+                "Unlocks Shadowform as a form choice",
             ]
         );
         let slot = TalentEffect::AddChoiceSlot(ChoiceSlot::OffHandPoison);
@@ -650,6 +665,19 @@ mod tests {
             effect_text(&cheat, 1, abilities()),
             "The first blow that would kill you leaves you at 10% health, \
              and you take 90% less damage for 3 sec"
+        );
+        let master = TalentEffect::Mechanic(TalentMechanic::MasterDemonologist { reduction: 0.04 });
+        assert_eq!(
+            effect_text(&master, 1, abilities()),
+            "You and your pet take 4% less spell damage while it lives"
+        );
+        let sacrifice = TalentEffect::Mechanic(TalentMechanic::DemonicSacrifice {
+            shadow_damage: 0.15,
+        });
+        assert_eq!(
+            effect_text(&sacrifice, 1, abilities()),
+            "Sacrificing your pet at the gates grants Touch of Shadow: +15% Shadow damage for \
+             the match"
         );
     }
 

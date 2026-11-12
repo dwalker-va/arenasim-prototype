@@ -80,6 +80,7 @@ use arenasim::states::match_config::RoguePoison;
 use arenasim::states::play_match::ability_config::load_ability_definitions;
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::components::{weapon_poison_marker_aura, TotemElement};
+use arenasim::states::play_match::demonology;
 use arenasim::states::play_match::equipment::ItemId;
 
 use common::source_audit::{brace_body, load_sources};
@@ -175,6 +176,14 @@ const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
         "ability_name: buff_name.to_string()",
         "a totem's pulsed buff; asserted per element by \
          `named_auras_built_from_helpers_also_resolve`.",
+    ),
+    (
+        "src/states/play_match/demonology.rs",
+        "ability_name: name.to_string()",
+        "`talent_aura`, the constructor of the Demonology talents' auras (Master \
+         Demonologist, Touch of Shadow), each named by its constant. \
+         `EngineAura::MasterDemonologist` and `::TouchOfShadow` build their entries with the \
+         same constructors; asserted by `named_auras_built_from_helpers_also_resolve`.",
     ),
     (
         "src/states/play_match/talent_procs.rs",
@@ -591,6 +600,21 @@ fn named_auras_built_from_helpers_also_resolve() {
             sample.ability_name,
             mechanic,
             sample.ability_name
+        );
+    }
+
+    // `demonology::talent_aura` names each Demonology talent aura by its
+    // constant; built here through the same constructors the site calls.
+    for sample in [
+        demonology::master_demonologist_aura(0.04, bevy::prelude::Entity::PLACEHOLDER),
+        demonology::touch_of_shadow_aura(0.15, bevy::prelude::Entity::PLACEHOLDER),
+    ] {
+        let mechanic = format!("{:?}", sample.effect_type);
+        assert!(
+            known.contains(&(sample.ability_name.clone(), mechanic.clone())),
+            "the talent aura \"{}\" ({}) has no catalog entry",
+            sample.ability_name,
+            mechanic
         );
     }
 

@@ -645,6 +645,7 @@ mod kept_exit_reset {
             pet_type: None,
             pet: None,
             book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+            role: arenasim::states::play_match::situation::Role::of(class),
         }
     }
 

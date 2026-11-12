@@ -33,8 +33,8 @@ use serde::{Deserialize, Serialize};
 use super::abilities::AbilityType;
 use super::talents::{Build, TalentDefinitions, TalentEffect, TalentId};
 use crate::states::match_config::{
-    CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, RogueOpener, RoguePoison,
-    WarlockCurse, WarriorShout,
+    CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, PriestForm, RogueOpener,
+    RoguePoison, WarlockCurse, WarlockDemon, WarriorShout,
 };
 
 /// One per-match menu.
@@ -43,10 +43,14 @@ pub enum ChoiceMenu {
     RogueOpener,
     RoguePoison,
     WarlockCurse,
+    /// What becomes of the Warlock's Felhunter: it fights, or it is
+    /// sacrificed at the gates (Demonic Sacrifice widens that option).
+    WarlockDemon,
     HunterPet,
     WarriorShout,
     MageArmor,
     PaladinAura,
+    PriestForm,
 }
 
 impl ChoiceMenu {
@@ -54,11 +58,12 @@ impl ChoiceMenu {
     pub fn class(self) -> CharacterClass {
         match self {
             ChoiceMenu::RogueOpener | ChoiceMenu::RoguePoison => CharacterClass::Rogue,
-            ChoiceMenu::WarlockCurse => CharacterClass::Warlock,
+            ChoiceMenu::WarlockCurse | ChoiceMenu::WarlockDemon => CharacterClass::Warlock,
             ChoiceMenu::HunterPet => CharacterClass::Hunter,
             ChoiceMenu::WarriorShout => CharacterClass::Warrior,
             ChoiceMenu::MageArmor => CharacterClass::Mage,
             ChoiceMenu::PaladinAura => CharacterClass::Paladin,
+            ChoiceMenu::PriestForm => CharacterClass::Priest,
         }
     }
 
@@ -68,10 +73,12 @@ impl ChoiceMenu {
             ChoiceMenu::RogueOpener => ChoiceOption::RogueOpener(RogueOpener::default()),
             ChoiceMenu::RoguePoison => ChoiceOption::RoguePoison(RoguePoison::default()),
             ChoiceMenu::WarlockCurse => ChoiceOption::WarlockCurse(WarlockCurse::default()),
+            ChoiceMenu::WarlockDemon => ChoiceOption::WarlockDemon(WarlockDemon::default()),
             ChoiceMenu::HunterPet => ChoiceOption::HunterPet(HunterPetType::default()),
             ChoiceMenu::WarriorShout => ChoiceOption::WarriorShout(WarriorShout::default()),
             ChoiceMenu::MageArmor => ChoiceOption::MageArmor(MageArmor::default()),
             ChoiceMenu::PaladinAura => ChoiceOption::PaladinAura(PaladinAura::default()),
+            ChoiceMenu::PriestForm => ChoiceOption::PriestForm(PriestForm::default()),
         }
     }
 
@@ -81,22 +88,26 @@ impl ChoiceMenu {
             ChoiceMenu::RogueOpener => RogueOpener::ALL.map(ChoiceOption::RogueOpener).to_vec(),
             ChoiceMenu::RoguePoison => RoguePoison::ALL.map(ChoiceOption::RoguePoison).to_vec(),
             ChoiceMenu::WarlockCurse => WarlockCurse::ALL.map(ChoiceOption::WarlockCurse).to_vec(),
+            ChoiceMenu::WarlockDemon => WarlockDemon::ALL.map(ChoiceOption::WarlockDemon).to_vec(),
             ChoiceMenu::HunterPet => HunterPetType::ALL.map(ChoiceOption::HunterPet).to_vec(),
             ChoiceMenu::WarriorShout => WarriorShout::ALL.map(ChoiceOption::WarriorShout).to_vec(),
             ChoiceMenu::MageArmor => MageArmor::ALL.map(ChoiceOption::MageArmor).to_vec(),
             ChoiceMenu::PaladinAura => PaladinAura::ALL.map(ChoiceOption::PaladinAura).to_vec(),
+            ChoiceMenu::PriestForm => PriestForm::ALL.map(ChoiceOption::PriestForm).to_vec(),
         }
     }
 
     /// Every menu.
-    pub const ALL: [ChoiceMenu; 7] = [
+    pub const ALL: [ChoiceMenu; 9] = [
         ChoiceMenu::RogueOpener,
         ChoiceMenu::RoguePoison,
         ChoiceMenu::WarlockCurse,
+        ChoiceMenu::WarlockDemon,
         ChoiceMenu::HunterPet,
         ChoiceMenu::WarriorShout,
         ChoiceMenu::MageArmor,
         ChoiceMenu::PaladinAura,
+        ChoiceMenu::PriestForm,
     ];
 }
 
@@ -107,10 +118,12 @@ pub enum ChoiceOption {
     RogueOpener(RogueOpener),
     RoguePoison(RoguePoison),
     WarlockCurse(WarlockCurse),
+    WarlockDemon(WarlockDemon),
     HunterPet(HunterPetType),
     WarriorShout(WarriorShout),
     MageArmor(MageArmor),
     PaladinAura(PaladinAura),
+    PriestForm(PriestForm),
 }
 
 impl ChoiceOption {
@@ -120,10 +133,12 @@ impl ChoiceOption {
             ChoiceOption::RogueOpener(_) => ChoiceMenu::RogueOpener,
             ChoiceOption::RoguePoison(_) => ChoiceMenu::RoguePoison,
             ChoiceOption::WarlockCurse(_) => ChoiceMenu::WarlockCurse,
+            ChoiceOption::WarlockDemon(_) => ChoiceMenu::WarlockDemon,
             ChoiceOption::HunterPet(_) => ChoiceMenu::HunterPet,
             ChoiceOption::WarriorShout(_) => ChoiceMenu::WarriorShout,
             ChoiceOption::MageArmor(_) => ChoiceMenu::MageArmor,
             ChoiceOption::PaladinAura(_) => ChoiceMenu::PaladinAura,
+            ChoiceOption::PriestForm(_) => ChoiceMenu::PriestForm,
         }
     }
 
@@ -252,6 +267,13 @@ impl SlotChoices {
                     chosen.insert(ChoiceOption::WarlockCurse(WarlockCurse::default()));
                 }
                 chosen.extend(curses.into_iter().map(ChoiceOption::WarlockCurse));
+                let demon = pick_for(
+                    team,
+                    slot,
+                    &config.team1_warlock_demons,
+                    &config.team2_warlock_demons,
+                );
+                chosen.insert(ChoiceOption::WarlockDemon(demon.unwrap_or_default()));
             }
             CharacterClass::Hunter => {
                 let pet = pick_for(
@@ -289,9 +311,30 @@ impl SlotChoices {
                 );
                 chosen.insert(ChoiceOption::PaladinAura(aura.unwrap_or_default()));
             }
-            CharacterClass::Priest | CharacterClass::Shaman | CharacterClass::Druid => {}
+            CharacterClass::Priest => {
+                let form = pick_for(
+                    team,
+                    slot,
+                    &config.team1_priest_forms,
+                    &config.team2_priest_forms,
+                );
+                chosen.insert(ChoiceOption::PriestForm(form.unwrap_or_default()));
+            }
+            CharacterClass::Shaman | CharacterClass::Druid => {}
         }
         Self { chosen, second }
+    }
+
+    /// The Priest form the slot chose (no form for a slot that chose none,
+    /// and for every other class).
+    pub fn priest_form(&self) -> PriestForm {
+        self.chosen
+            .iter()
+            .find_map(|o| match o {
+                ChoiceOption::PriestForm(form) => Some(*form),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     /// Whether the slot chose `option`, in a menu or in a second slot.
@@ -365,6 +408,18 @@ impl TalentDefinitions {
                     return Err(format!("{id:?}: already taken: {clash}"));
                 }
             }
+        }
+        // The Sacrifice option and the mechanic that lands it come together,
+        // on one node: an option with no sacrifice behind it would kill
+        // nothing, and a sacrifice no build could choose would never land.
+        let sacrifice = ChoiceOption::WarlockDemon(WarlockDemon::Sacrifice);
+        let by_mechanic = mechanics.get(&super::talent_mechanics::MechanicKind::DemonicSacrifice);
+        if widened.get(&sacrifice) != by_mechanic {
+            return Err(format!(
+                "{sacrifice:?} is widened by {:?} and the DemonicSacrifice mechanic carried by \
+                 {by_mechanic:?}: one node carries both",
+                widened.get(&sacrifice)
+            ));
         }
         for rule in self.rules() {
             // Forbidden with the option AND required to have it: locked
@@ -576,6 +631,21 @@ impl TalentDefinitions {
                 {
                     return Err(format!(
                         "team{team} slot {slot} ({class:?}): an off-hand poison is a Rogue's \
+                         choice"
+                    ));
+                }
+                let demons = if team == 1 {
+                    &config.team1_warlock_demons
+                } else {
+                    &config.team2_warlock_demons
+                };
+                if *class != CharacterClass::Warlock
+                    && demons
+                        .get(slot)
+                        .is_some_and(|d| *d != WarlockDemon::default())
+                {
+                    return Err(format!(
+                        "team{team} slot {slot} ({class:?}): a demon sacrifice is a Warlock's \
                          choice"
                     ));
                 }

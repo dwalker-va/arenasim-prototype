@@ -4,7 +4,7 @@ use super::super::ability_config::AbilityConfig;
 use super::super::constants::{OFFHAND_DAMAGE_MULTIPLIER, UNARMED_WEAPON_SPEED};
 use super::super::equipment::{ItemDefinitions, ItemSlot, Loadout};
 use super::super::match_config::{
-    self, MageArmor, PaladinAura, RogueOpener, RoguePoison, WarlockCurse, WarriorShout,
+    self, MageArmor, PaladinAura, PriestForm, RogueOpener, RoguePoison, WarlockCurse, WarriorShout,
 };
 use super::auras::AuraType;
 use super::pets::PetType;
@@ -494,6 +494,13 @@ pub struct Combatant {
     pub talent_mechanics: crate::states::play_match::talent_mechanics::TalentMechanics,
     /// Whether a once-a-match killing-blow save (Cheat Death) has been spent.
     pub killing_blow_save_spent: bool,
+    /// Soul Link's pet is dead, so the link takes no more shares
+    /// (`combat_core::end_transfers_to_the_dead`).
+    pub soul_link_severed: bool,
+    /// Warlock-specific: the slot chose to sacrifice its demon (Demonic
+    /// Sacrifice), and the gates have not opened yet. Cleared the frame
+    /// `demonology::demonic_bonds` lands the sacrifice.
+    pub sacrifice_pending: bool,
     /// Warlock-specific: which curse to apply to each enemy target (indexed by enemy slot)
     pub warlock_curse_prefs: Vec<WarlockCurse>,
     /// Warrior-specific: which shout to use (Battle Shout, Demoralizing Shout, or Commanding Shout)
@@ -502,6 +509,9 @@ pub struct Combatant {
     pub mage_armor: MageArmor,
     /// Paladin-specific: which aura to apply (Devotion Aura, Shadow Resistance Aura, or Concentration Aura)
     pub paladin_aura: PaladinAura,
+    /// Priest-specific: the form held for the whole match (no form, or
+    /// Shadowform). It decides the Priest's role ([`Combatant::role`]).
+    pub priest_form: PriestForm,
     /// Hunter-specific: whether the opener is over — set by the Hunter's
     /// first Aimed Shot or Serpent Sting. In the opener, Aimed Shot goes
     /// before the sting when it has time to finish.
@@ -752,10 +762,13 @@ impl Combatant {
             rogue_offhand_poison: None,
             talent_mechanics: Default::default(),
             killing_blow_save_spent: false,
+            soul_link_severed: false,
+            sacrifice_pending: false,
             warlock_curse_prefs: Vec::new(),
             warrior_shout: WarriorShout::default(),
             mage_armor: MageArmor::default(),
             paladin_aura: PaladinAura::default(),
+            priest_form: PriestForm::default(),
             hunter_opened: false,
             trap_retarget: None,
             druid_emergency_heal_spent: false,
@@ -868,6 +881,24 @@ impl Combatant {
     /// a non-zero speed for the same reason [`Self::is_dual_wielding`] does.
     pub fn has_melee_main_hand(&self) -> bool {
         self.melee_damage > 0.0 && self.melee_weapon_speed > 0.0
+    }
+
+    /// The part this combatant plays for its team: its class's
+    /// ([`Role::of`](crate::states::play_match::situation::Role::of)), unless
+    /// its per-match choices change it. A Shadowform Priest heals no one, so
+    /// it is a ranged damage dealer for every role question.
+    pub fn role(&self) -> crate::states::play_match::situation::Role {
+        use crate::states::play_match::situation::Role;
+        match self.priest_form {
+            PriestForm::Shadowform => Role::RangedDps,
+            PriestForm::NoForm => Role::of(self.class),
+        }
+    }
+
+    /// Whether this combatant heals its team: its [`Self::role`], never its
+    /// class alone.
+    pub fn is_healer(&self) -> bool {
+        self.role() == crate::states::play_match::situation::Role::Healer
     }
 
     /// Check if this combatant is alive (health > 0 and not marked dead).

@@ -426,6 +426,7 @@ fn headless_setup_match(
             combatant.warrior_shout = warrior_shout;
             combatant.mage_armor = mage_armor;
             combatant.paladin_aura = paladin_aura;
+            combatant.priest_form = choices.priest_form();
             combatant.apply_equipment(&loadout, &item_defs);
             resolved.apply(&mut combatant);
             let combatant_clone = combatant.clone();
@@ -593,6 +594,7 @@ fn headless_setup_match(
             combatant.warrior_shout = warrior_shout;
             combatant.mage_armor = mage_armor;
             combatant.paladin_aura = paladin_aura;
+            combatant.priest_form = choices.priest_form();
             combatant.apply_equipment(&loadout, &item_defs);
             resolved.apply(&mut combatant);
             let combatant_clone = combatant.clone();

@@ -78,6 +78,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> Comb
         pet_type: None,
         pet: None,
         book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+        role: arenasim::states::play_match::situation::Role::of(class),
     }
 }
 
@@ -824,9 +825,8 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
         | ShadowResistanceAura | ConcentrationAura | LightningBolt | FrostShock
         | LesserHealingWave | Purge | WindShear | AirTotem | WaterTotem | EarthTotem
         | FireTotem | Rejuvenation | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild
-        | Innervate | EntanglingRoots | Cyclone | TravelForm | ShadowWordPain | ExposeArmor => {
-            false
-        }
+        | Innervate | EntanglingRoots | Cyclone | TravelForm | ShadowWordPain | ExposeArmor
+        | Shadowform => false,
     }
 }
 

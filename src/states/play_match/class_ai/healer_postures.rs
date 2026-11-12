@@ -1769,6 +1769,7 @@ mod tests {
             pet_type: None,
             pet: None,
             book: crate::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+            role: crate::states::play_match::situation::Role::of(class),
         };
         let roster: BTreeMap<Entity, CombatantInfo> = [
             (paladin, unit(paladin, CharacterClass::Paladin, Vec3::ZERO)),
@@ -1879,6 +1880,7 @@ mod tests {
             pet_type: None,
             pet: None,
             book: crate::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+            role: crate::states::play_match::situation::Role::of(class),
         };
         let trap = freezing_trap_aura(Entity::from_raw(9));
         let mut silence = trap.clone();

@@ -132,7 +132,7 @@ pub fn dip_target_candidate(
 ) -> Option<Entity> {
     ctx.alive_enemies()
         .into_iter()
-        .filter(|e| e.class.is_healer())
+        .filter(|e| e.is_healer())
         .filter(|e| hoj_target_eligible(ctx, my_team, e.entity))
         .filter(|e| my_pos.distance(e.position) <= reach)
         .min_by(|a, b| {
@@ -1267,12 +1267,7 @@ fn try_hammer_of_justice(
     // excludes pets, but the id is resolved via log_id so this can't silently
     // break if that changes); class is kept only for the healer-preferring pick.
     let mut occluded = false;
-    let enemies_in_reach: Vec<(
-        Entity,
-        Vec3,
-        CharacterClass,
-        crate::combat::log::CombatantId,
-    )> = ctx
+    let enemies_in_reach: Vec<(Entity, Vec3, Role, crate::combat::log::CombatantId)> = ctx
         .combatants
         .iter()
         .filter(|(e, _)| {
@@ -1280,7 +1275,7 @@ fn try_hammer_of_justice(
         })
         .filter_map(
             |(e, info)| match super::cast_reach(ctx, def.range, my_pos, info.position) {
-                super::CastReach::Reaches => Some((*e, info.position, info.class, info.log_id())),
+                super::CastReach::Reaches => Some((*e, info.position, info.role, info.log_id())),
                 super::CastReach::LosBlocked => {
                     occluded = true;
                     None
@@ -1292,11 +1287,11 @@ fn try_hammer_of_justice(
 
     let stun_target = enemies_in_reach
         .iter()
-        .find(|(_, _, class, _)| class.is_healer())
+        .find(|(_, _, role, _)| *role == Role::Healer)
         .or_else(|| enemies_in_reach.first())
         .cloned();
 
-    let Some((target_entity, target_pos, _target_class, target_id)) = stun_target else {
+    let Some((target_entity, target_pos, _target_role, target_id)) = stun_target else {
         builder.reject(
             ability,
             if occluded {
@@ -1829,6 +1824,7 @@ mod tests {
             pet_type: None,
             pet: None,
             book: crate::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+            role: crate::states::play_match::situation::Role::of(class),
         };
         let (paladin, warrior, mage) = (
             Entity::from_raw(1),
