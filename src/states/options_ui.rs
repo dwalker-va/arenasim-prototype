@@ -133,23 +133,23 @@ pub fn draw_options(ctx: &egui::Context, data: &OptionsData, nav: Nav) -> Option
             );
 
             GameState::Options.show_body(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.set_max_width(CONTENT_MAX_W);
-                        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                            if let Some(a) = display_panel(ui, data) {
-                                action = Some(a);
-                            }
-                            ui.add_space(space::MD);
-                            if let Some(a) = interface_panel(ui, settings) {
-                                action = Some(a);
-                            }
-                            ui.add_space(space::MD);
-                            if let Some(a) = controls_panel(ui) {
-                                action = Some(a);
-                            }
-                        });
+                ui.vertical_centered(|ui| {
+                    ui.set_max_width(CONTENT_MAX_W);
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                        if let Some(a) = display_panel(ui, data) {
+                            action = Some(a);
+                        }
+                        ui.add_space(space::MD);
+                        if let Some(a) = interface_panel(ui, settings) {
+                            action = Some(a);
+                        }
+                        ui.add_space(space::MD);
+                        if let Some(a) = controls_panel(ui) {
+                            action = Some(a);
+                        }
                     });
                 });
+            });
         });
 
     action

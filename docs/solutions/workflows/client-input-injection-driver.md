@@ -276,7 +276,9 @@ zero. So a choice tile scrolling past the parked pointer could open its
 tooltip beneath it, and the wheel then went to the tooltip layer, not the
 sheet. The sheet never moved again, and the step timed out with "laid out but
 never scrolled into view" (AS-470, about one run in four). The theme's delay is
-now 0.05s, which turns that guard back on.
+now 0.05s, which turns that guard back on. egui counts that delay from the
+end of the stillness wait, so a first tooltip shows about 0.05s later than it
+did, and `tooltip_gate` waits that much longer per first tooltip.
 
 **And aim only at a rect that is wholly on screen** — `Widget::aim_point`,
 never `visible`. `visible` is egui's `is_rect_visible`: true once any point of
@@ -295,7 +297,7 @@ FRAMES.** This one was got wrong twice, and the second time is the more
 useful lesson.
 
 egui will not show a tooltip until several **wall-clock** conditions hold. With
-`tooltip_delay` at the theme's 0.05s (inside the stillness wait below), the binding ones
+`tooltip_delay` at the theme's 0.05s (counted from the end of the stillness wait below, so it adds to it), the binding ones
 are `pointer.is_still()` — velocity over a **0.1 second** position history —
 `smooth_scroll_delta == 0`, an animation that decays over **time**, and
 `clicked_more_recently_than_moved`, which wants the move at least **0.1s**

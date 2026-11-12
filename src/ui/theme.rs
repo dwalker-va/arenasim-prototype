@@ -743,10 +743,11 @@ pub fn style() -> egui::Style {
     // egui hides every tooltip while the content is scrolling only when a
     // scroll is younger than this delay, so zero let one show over a sheet
     // scrolling under a resting pointer, and a tooltip under the pointer
-    // takes the wheel, which stopped the sheet for good (AS-470). A first
-    // tooltip already waits for a still pointer (egui's 0.1s velocity
-    // window), and moving between icons skips the delay, so 0.05s is spent
-    // inside a wait that was already there.
+    // takes the wheel, which stopped the sheet for good (AS-470). The cost:
+    // egui counts the delay from the last frame the pointer was still moving
+    // by its 0.1s velocity window, so it is added AFTER the stillness wait,
+    // and a first tooltip shows about 0.05s later (two to three frames at
+    // 60fps). Moving between icons skips the delay, as before.
     style.interaction.tooltip_delay = 0.05;
 
     style
