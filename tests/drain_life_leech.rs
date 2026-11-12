@@ -26,6 +26,8 @@ use bevy::prelude::*;
 use arenasim::combat::log::CombatLog;
 use arenasim::headless::{HeadlessMatchConfig, Stage, Unit};
 use arenasim::states::match_config::CharacterClass;
+use arenasim::states::play_match::abilities::SpellSchool;
+use arenasim::states::play_match::combat_core::leech::{Leech, LeechRecipient, LeechSource};
 use arenasim::states::play_match::combat_core::process_channeling;
 use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, Aura, AuraType, ChannelingState, Combatant, FloatingCombatText,
@@ -80,6 +82,16 @@ impl Ticked {
 /// One Drain Life tick from a Warlock at `warlock_health` on a Warrior at 400
 /// health carrying `auras`.
 fn tick(warlock_health: f32, auras: Vec<Aura>) -> Ticked {
+    tick_with(warlock_health, auras, |_| Vec::new())
+}
+
+/// [`tick`], with `caster_auras` building auras on the target that name the
+/// Warlock as their caster.
+fn tick_with(
+    warlock_health: f32,
+    auras: Vec<Aura>,
+    caster_auras: impl FnOnce(Entity) -> Vec<Aura>,
+) -> Ticked {
     let mut world = World::new();
     world.insert_resource(CombatLog::default());
     world.insert_resource(ArenaDampening::default());
@@ -114,6 +126,12 @@ fn tick(warlock_health: f32, auras: Vec<Aura>) -> Ticked {
             },
         ))
         .id();
+    let mut more = caster_auras(caster);
+    world
+        .get_mut::<ActiveAuras>(target)
+        .unwrap()
+        .auras
+        .append(&mut more);
     world.run_system_once(process_channeling).unwrap();
     let warlock = world.get::<Combatant>(caster).unwrap().clone();
     let mut q = world.query::<&FloatingCombatText>();
@@ -196,6 +214,29 @@ fn a_tick_into_an_immune_target_heals_nothing() {
         );
     }
     // Control: a target without the immunity is drained.
+    assert_eq!(tick(HURT, vec![]).warlock.current_health, HURT + TICK);
+}
+
+/// A leech the Warlock placed on its target that its Shadow damage feeds (a
+/// Vampiric Embrace's shape) is fed by the tick too, beside the channel's
+/// own: both heal the Warlock off the damage that landed.
+#[test]
+fn a_tick_feeds_its_casters_leech_on_the_target_too() {
+    let embrace = |caster| {
+        vec![Aura {
+            caster: Some(caster),
+            leech: Some(Leech {
+                fraction: 0.2,
+                to: LeechRecipient::Caster,
+                of: LeechSource::CasterSchool(SpellSchool::Shadow),
+            }),
+            ..aura(AuraType::DamageTakenIncrease, 0.0)
+        }]
+    };
+    let t = tick_with(HURT, vec![], embrace);
+    assert_eq!(t.warlock.current_health, HURT + TICK + 2.0);
+    assert_eq!(t.warlock.healing_done, TICK + 2.0);
+    // Control: the tick's own leech alone.
     assert_eq!(tick(HURT, vec![]).warlock.current_health, HURT + TICK);
 }
 
