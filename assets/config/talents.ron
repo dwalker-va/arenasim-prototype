@@ -12,11 +12,15 @@
 //     applies its `per_rank` effects once per rank. Ranks ADD, for every
 //     effect kind: two ranks of +3% are +6%, and two ranks of Mul(1.15) scale
 //     by 1.30 (10 -> 11.5 -> 13), never compound.
+//       StatAdd(stat, points)           points added to the combatant's total,
+//                                       as an item's stat adds them:
+//                                       StatAdd(CritChance, 0.01) is +1% crit
+//                                       chance, on every roll that reads it
 //       StatPercent(stat, fraction)     a percentage of the combatant's total,
-//                                       gear included; for a chance or haste
-//                                       every class has at 0 (DodgeChance,
-//                                       ParryChance, MeleeAttackSpeed), the
-//                                       fraction added in points
+//                                       gear and StatAdd points included. Not
+//                                       for a chance or haste every class has
+//                                       at 0 (DodgeChance, ParryChance,
+//                                       MeleeAttackSpeed): those take StatAdd
 //       PetStatPercent(stat, fraction)  the same, on the combatant's pet
 //       Patch(on: Ability(X) | School(S), field: <AbilityField>, op: Add(n) | Mul(n))
 //                                       rewrites a numeric field of its
@@ -42,12 +46,14 @@
 //       Requires(ability: A, option: O)    A is locked unless O is chosen
 //   - has an item-budget price, as a SANITY CHECK: the value a node states
 //     is what ships, and its price is read against 11 a rank and 22 the
-//     capstone (tier 4). A node whose every effect is a StatPercent on a stat
-//     the item budget weighs has its price COMPUTED, at the class's reference
-//     combatant below, and declares no `budget`; every other node declares
-//     its `budget` (per rank). `cargo test` prints every price and fails only
-//     on an absurd one (more than 5x off its reference either way); never
-//     derive a value to make a rank cost 11.
+//     capstone (tier 4). A node whose every effect is a StatPercent or a
+//     StatAdd on a stat the item budget weighs has its price COMPUTED and
+//     declares no `budget`: a StatAdd at the item weight of its points (+1%
+//     crit is 300 x 0.01 = 3), a StatPercent at its share of the class's
+//     reference combatant below. Every other node declares its `budget` (per
+//     rank). `cargo test` prints every price and fails only on an absurd one
+//     (more than 5x off its reference either way); never derive a value to
+//     make a rank cost 11.
 //   - may `requires: Some((Talent, rank))`, a node of the same tree at a
 //     lower tier.
 (
@@ -144,7 +150,7 @@
             max_rank: 2,
             budget: Some(11.0),
             // +4% dodge chance a rank, in points: 0 -> 4% -> 8%.
-            per_rank: [StatPercent(DodgeChance, 0.04)],
+            per_rank: [StatAdd(DodgeChance, 0.04)],
         ),
         DualWieldSpecialization: (
             name: "Dual Wield Specialization",
@@ -181,7 +187,7 @@
             budget: Some(11.0),
             // +4% parry chance a rank, in points: 0 -> 4% -> 8%. The Rogue is
             // the first class that can parry.
-            per_rank: [StatPercent(ParryChance, 0.04)],
+            per_rank: [StatAdd(ParryChance, 0.04)],
         ),
         SwiftBlades: (
             name: "Swift Blades",
@@ -193,7 +199,7 @@
             budget: Some(11.0),
             // +10% melee attack speed: both hands swing 10% faster; a bow or
             // a wand would not.
-            per_rank: [StatPercent(MeleeAttackSpeed, 0.10)],
+            per_rank: [StatAdd(MeleeAttackSpeed, 0.10)],
         ),
         ExposeArmor: (
             name: "Expose Armor",

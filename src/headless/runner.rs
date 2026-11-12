@@ -1071,6 +1071,30 @@ where
     )
 }
 
+/// [`run_headless_match_staged`] on `preloaded` configs rather than the files
+/// on disk: a staged match that plays a fixture, such as a talents file a test
+/// has edited to carry an effect no shipped node uses yet.
+pub fn run_headless_match_staged_prepared<F>(
+    config: HeadlessMatchConfig,
+    preloaded: &PreloadedConfigs,
+    suppress_log: bool,
+    trace_config: Option<TraceConfig>,
+    stage: Stage,
+    mut observer: F,
+) -> Result<MatchResult, String>
+where
+    F: FnMut(&FrameObservation),
+{
+    run_match_impl(
+        config,
+        suppress_log,
+        trace_config,
+        Some(preloaded),
+        Some(&mut observer),
+        Some(stage),
+    )
+}
+
 /// Build a [`FrameObservation`] from read-only world access. Uses
 /// `World::iter_entities` + `EntityRef::get` (no `&mut World`, no query-state
 /// caching) so observation cannot mutate anything the simulation reads.
