@@ -762,6 +762,10 @@ impl AbilityDefinitions {
             AbilityType::SiphonLife,
             AbilityType::AmplifyCurse,
             AbilityType::CurseOfExhaustion,
+            // Priest talent abilities
+            AbilityType::InnerFocus,
+            AbilityType::PowerInfusion,
+            AbilityType::PainSuppression,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -1530,6 +1534,9 @@ mod tests {
                     AbilityType::ManaBurn,
                     AbilityType::ShadowWordPain,
                     AbilityType::Shadowform,
+                    AbilityType::InnerFocus,
+                    AbilityType::PowerInfusion,
+                    AbilityType::PainSuppression,
                 ],
             ),
             (

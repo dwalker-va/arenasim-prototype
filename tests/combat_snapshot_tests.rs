@@ -81,6 +81,7 @@ fn empty_snapshot_with(caster: Entity, target: Entity) -> CombatSnapshot {
     combatants.insert(target, target_info(target, 2, CharacterClass::Warrior));
     CombatSnapshot {
         melee_defense: Default::default(),
+        talent_mechanics: Default::default(),
         ai_profile: Default::default(),
         bounds: Default::default(),
         combatants,
@@ -422,4 +423,66 @@ fn build_includes_channeling_combatant_with_auras() {
     assert!(auras
         .iter()
         .any(|a| a.effect_type == AuraType::MovementSpeedSlow));
+}
+
+// ---------------------------------------------------------------------------
+// Unbreakable Will in the same-frame mirror (AS-414)
+//
+// `reflect_instant_cc` mirrors `apply_pending_auras`, so a crowd control on a
+// holder of Unbreakable Will is as short in the snapshot later units decide
+// from (the healer lock's `until`, `lock_ending`, `fits_window`) as it will
+// be once it lands.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reflect_instant_cc_shortens_a_stun_on_an_unbreakable_will_holder() {
+    use arenasim::states::play_match::talent_mechanics::{TalentMechanic, TalentMechanics};
+    let mut world = World::new();
+    let priest = spawn_combatant(&mut world, 1, 0, CharacterClass::Priest, Vec3::ZERO);
+    let warrior = spawn_combatant(
+        &mut world,
+        1,
+        1,
+        CharacterClass::Warrior,
+        Vec3::new(5.0, 0.0, 0.0),
+    );
+    world
+        .entity_mut(priest)
+        .get_mut::<Combatant>()
+        .unwrap()
+        .talent_mechanics =
+        TalentMechanics::of(&[TalentMechanic::UnbreakableWill { reduction: 0.2 }]);
+
+    let mut snapshot = build_snapshot_from_world(&mut world);
+    // The build carries the holder's mechanics, and only the holder's.
+    assert_eq!(
+        snapshot
+            .talent_mechanics
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![priest]
+    );
+
+    let duration = |snapshot: &CombatSnapshot, who: Entity, name: &str| {
+        snapshot.active_auras[&who]
+            .iter()
+            .find(|a| a.ability_name == name)
+            .unwrap_or_else(|| panic!("{name} was not reflected"))
+            .duration
+    };
+    let mut stun = make_aura(AuraType::Stun, "Hammer of Justice");
+    stun.duration = 6.0;
+    let mut horror = make_aura(AuraType::Fear, "Death Coil");
+    horror.duration = 3.0;
+    horror.dr_category_override = Some(DRCategory::Horror);
+
+    snapshot.reflect_instant_cc(priest, &stun);
+    snapshot.reflect_instant_cc(priest, &horror);
+    snapshot.reflect_instant_cc(warrior, &stun);
+    assert!((duration(&snapshot, priest, "Hammer of Justice") - 4.8).abs() < 1e-5);
+    // A horror is not a fear: Unbreakable Will leaves it whole.
+    assert_eq!(duration(&snapshot, priest, "Death Coil"), 3.0);
+    // The control: the same stun on a teammate without the talent.
+    assert_eq!(duration(&snapshot, warrior, "Hammer of Justice"), 6.0);
 }

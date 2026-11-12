@@ -142,6 +142,14 @@ talent_ids! {
     Deflection,
     SwiftBlades,
     ExposeArmor,
+    // Priest: Discipline
+    UnbreakableWill,
+    ImprovedPowerWordShield,
+    InnerFocus,
+    MentalAgility,
+    PowerInfusion,
+    ReflectiveShield,
+    PainSuppression,
     // Priest: Shadow
     ImprovedMindBlast,
     ImprovedPsychicScream,
@@ -172,6 +180,7 @@ pub enum TreeId {
     Combat,
     Shadow,
     Protection,
+    Discipline,
 }
 
 /// One tree of a class, as `talents.ron` lists it. A class's trees are in

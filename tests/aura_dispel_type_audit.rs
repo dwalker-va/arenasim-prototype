@@ -207,6 +207,11 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::ShadowWordPain => config(S::Magic, T::Magic),
         // 15473: DispelType 0. A form, held all match: nothing removes it.
         AbilityType::Shadowform => config(S::Untyped, T::NoType),
+        // The Discipline talents (AS-414), each DispelType 1 in TBC.
+        // 14751 is Physical-school; its buff is declared Magic.
+        AbilityType::InnerFocus => config(S::Magic, T::Magic), // 14751
+        AbilityType::PowerInfusion => config(S::Magic, T::Magic), // 10060
+        AbilityType::PainSuppression => config(S::Magic, T::Magic), // 33206
 
         // ---- Warrior ----
         AbilityType::HeroicStrike => Row::NoAura,

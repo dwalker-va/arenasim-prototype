@@ -787,6 +787,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     FireTotem,
     FrostArmor,
     IceBarrier,
+    InnerFocus,
     Innervate,
     Lifebloom,
     MageArmorSpell,
@@ -794,6 +795,8 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     MindNumbingPoison,
     MoltenArmor,
     MortalStrike,
+    PainSuppression,
+    PowerInfusion,
     PowerWordFortitude,
     PowerWordShield,
     Rejuvenation,
@@ -910,8 +913,17 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     ),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
     (FrostArmor, "AS-134 (aura application)"),
+    (InnerFocus, "AS-352 (Inner Focus, the focus on the Priest)"),
     (MageArmorSpell, "AS-134 (aura application)"),
     (MoltenArmor, "AS-134 (aura application)"),
+    (
+        PainSuppression,
+        "AS-353 (Pain Suppression, the save on the ally)",
+    ),
+    (
+        PowerInfusion,
+        "AS-353 (Power Infusion, the infusion on the ally)",
+    ),
     (PowerWordFortitude, "AS-134 (aura application)"),
     (RetributionAura, "AS-374 (Retribution Aura rune disc)"),
     (SacredShield, "AS-375 (Sacred Shield disc and absorb card)"),
@@ -1463,7 +1475,8 @@ fn mechanic_visual(kind: MechanicKind) -> Option<&'static str> {
         | MechanicKind::ReflectiveShield
         | MechanicKind::CheatDeath
         | MechanicKind::MasterDemonologist
-        | MechanicKind::DemonicSacrifice => None,
+        | MechanicKind::DemonicSacrifice
+        | MechanicKind::UnbreakableWill => None,
     }
 }
 
@@ -1480,7 +1493,9 @@ fn talent_mechanic_judge(talent: TalentId) -> Option<&'static str> {
 const TALENT_MECHANIC_MEMBERS: &[TalentId] = &[
     TalentId::DemonicSacrifice,
     TalentId::MasterDemonologist,
+    TalentId::ReflectiveShield,
     TalentId::SoulLink,
+    TalentId::UnbreakableWill,
 ];
 
 const TALENT_MECHANIC_KNOWN_SILENT: &[(TalentId, &str)] = &[
@@ -1489,17 +1504,29 @@ const TALENT_MECHANIC_KNOWN_SILENT: &[(TalentId, &str)] = &[
         "AS-350 (the sacrifice triad; the Felhunter's death is the ordinary one)",
     ),
     (
+        TalentId::ReflectiveShield,
+        "AS-355 (Reflective Shield's reflect; it shows only as the attacker's damage taken)",
+    ),
+    (
         TalentId::SoulLink,
         "AS-350 (the Soul Link rune column; the transfer shows only on the Felhunter's bar)",
     ),
 ];
 
-const TALENT_MECHANIC_SILENT_BY_DESIGN: &[SilentByDesign<TalentId>] = &[SilentByDesign {
-    ability: TalentId::MasterDemonologist,
-    doc: "docs/design/proposals/2026-10-11-talents-and-gauntlet.md",
-    reason: "icon-only by ruling: its footprint is the aura icon on the Warlock and the \
-             Felhunter (§5.1)",
-}];
+const TALENT_MECHANIC_SILENT_BY_DESIGN: &[SilentByDesign<TalentId>] = &[
+    SilentByDesign {
+        ability: TalentId::MasterDemonologist,
+        doc: "docs/design/proposals/2026-10-11-talents-and-gauntlet.md",
+        reason: "icon-only by ruling: its footprint is the aura icon on the Warlock and the \
+                 Felhunter (§5.1)",
+    },
+    SilentByDesign {
+        ability: TalentId::UnbreakableWill,
+        doc: "docs/design/proposals/2026-10-11-talents-and-gauntlet.md",
+        reason: "its footprint is the shorter crowd-control bar and the logged reduction \
+                 (§5.2): the crowd control it shortens draws as it always has",
+    },
+];
 
 #[test]
 fn talent_mechanic_finds_every_member() {

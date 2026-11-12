@@ -251,6 +251,10 @@ pub enum AbilityType {
     SiphonLife,        // talent: Shadow DoT whose ticks heal the Warlock
     AmplifyCurse,      // talent: the next Curse of Weakness or Agony +50%
     CurseOfExhaustion, // a curse a talent offers: 30% movement slow for 12s
+    // Priest: the Discipline tree (AS-414). Appended for the same reason.
+    InnerFocus,      // talent: the Priest's next spell is free, +25% crit
+    PowerInfusion,   // talent: an ally gains 24 spell power for 15s
+    PainSuppression, // talent: an ally takes 40% less damage for 8s
 }
 
 impl AbilityType {
@@ -291,9 +295,8 @@ impl AbilityType {
             | WindShear | AirTotem | WaterTotem | EarthTotem | FireTotem | Rejuvenation
             | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild | Innervate | EntanglingRoots
             | Cyclone | TravelForm | Shadowform | DivineProtection | BlessingOfSacrifice
-            | SacredShield | RetributionAura | SiphonLife | AmplifyCurse | CurseOfExhaustion => {
-                false
-            }
+            | SacredShield | RetributionAura | SiphonLife | AmplifyCurse | CurseOfExhaustion
+            | InnerFocus | PowerInfusion | PainSuppression => false,
         }
     }
 

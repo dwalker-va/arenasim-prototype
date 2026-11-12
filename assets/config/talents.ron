@@ -69,6 +69,7 @@
             (id: Protection, name: "Protection", icon: "icons/talents/spell_holy_devotionaura.jpg"),
         ],
         Priest: [
+            (id: Discipline, name: "Discipline", icon: "icons/talents/spell_holy_wordfortitude.jpg"),
             (id: Shadow, name: "Shadow", icon: "icons/talents/spell_shadow_shadowwordpain.jpg"),
         ],
     },
@@ -384,6 +385,89 @@
             // An ally gains Sacred Shield for 30s: when it takes damage it
             // gains a shield absorbing 40, at most once every 6s.
             per_rank: [Grant(SacredShield)],
+        ),
+
+        // ---- Priest: Discipline (AS-414; the talents proposal §5.2) ----
+        // Shields and saves. Values provisional: tuning is the milestone
+        // sweep's (AS-302).
+        UnbreakableWill: (
+            name: "Unbreakable Will",
+            class: Priest, tree: Discipline, tier: 1, column: 0,
+            icon: "icons/talents/spell_magic_magearmor.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Stuns, fears and silences on the Priest last 10% shorter a
+            // rank: 20% at 2/2. Classic 14791 rolls +15% to resist them;
+            // here resistance is magnitude, never a roll. A horror (Death
+            // Coil) is not a fear, as in TBC.
+            per_rank: [Mechanic(UnbreakableWill(reduction: 0.10))],
+        ),
+        ImprovedPowerWordShield: (
+            name: "Improved Power Word: Shield",
+            class: Priest, tree: Discipline, tier: 1, column: 2,
+            icon: "icons/talents/spell_holy_powerwordshield.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Classic 14769's per-rank value: +5% absorb a rank, base and
+            // spell-power share alike: 73 -> 77 -> 81 on the starting kit.
+            per_rank: [
+                Patch(on: Ability(PowerWordShield), field: AuraMagnitude, op: Mul(1.05)),
+                Patch(on: Ability(PowerWordShield), field: AuraMagnitudeCoefficient, op: Mul(1.05)),
+            ],
+        ),
+        InnerFocus: (
+            name: "Inner Focus",
+            class: Priest, tree: Discipline, tier: 2, column: 0,
+            icon: "icons/talents/spell_frost_windwalkon.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // The Priest's next spell is free and has +25% crit chance; 45s.
+            per_rank: [Grant(InnerFocus)],
+        ),
+        MentalAgility: (
+            name: "Mental Agility",
+            class: Priest, tree: Discipline, tier: 2, column: 1,
+            icon: "icons/talents/ability_hibernation.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // -5% mana a rank on the Priest's instants (Classic 14783's
+            // per-rank value): Shield, Scream, Dispel and Fortitude.
+            per_rank: [
+                Patch(on: Ability(PowerWordShield), field: ManaCost, op: Mul(0.95)),
+                Patch(on: Ability(PsychicScream), field: ManaCost, op: Mul(0.95)),
+                Patch(on: Ability(DispelMagic), field: ManaCost, op: Mul(0.95)),
+                Patch(on: Ability(PowerWordFortitude), field: ManaCost, op: Mul(0.95)),
+            ],
+        ),
+        PowerInfusion: (
+            name: "Power Infusion",
+            class: Priest, tree: Discipline, tier: 3, column: 0,
+            icon: "icons/talents/spell_holy_powerinfusion.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // An ally gains 24 spell power for 15s; 45s.
+            per_rank: [Grant(PowerInfusion)],
+        ),
+        ReflectiveShield: (
+            name: "Reflective Shield",
+            class: Priest, tree: Discipline, tier: 3, column: 1,
+            icon: "icons/talents/spell_holy_powerwordshield.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // 30% of the damage the Priest's shields absorb is dealt to the
+            // attacker (TBC: 10% a rank, five ranks, on Power Word: Shield).
+            // Deep on purpose: low in the tree every Priest would take it.
+            per_rank: [Mechanic(ReflectiveShield(share: 0.30))],
+        ),
+        PainSuppression: (
+            name: "Pain Suppression",
+            class: Priest, tree: Discipline, tier: 4, column: 1,
+            icon: "icons/talents/spell_holy_painsupression.jpg",
+            max_rank: 1,
+            budget: Some(22.0),
+            requires: Some((ReflectiveShield, 1)),
+            // An ally takes 40% less damage for 8s; 45s.
+            per_rank: [Grant(PainSuppression)],
         ),
 
         // ---- Priest: Shadow (the talents proposal §5.2) ----
