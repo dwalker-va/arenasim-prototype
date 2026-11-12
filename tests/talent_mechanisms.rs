@@ -192,6 +192,12 @@ fn heal_back_run(attacker: &str, stage: Stage) -> String {
 
 /// [`heal_back_run`] with the attacker's own crit chance set to `crit`.
 fn heal_back_run_at(attacker: &str, crit: f32, stage: Stage) -> String {
+    heal_back_run_with(attacker, crit, stage, None)
+}
+
+/// [`heal_back_run_at`], with `shield` staged on the Priest after its auras
+/// are cleared.
+fn heal_back_run_with(attacker: &str, crit: f32, stage: Stage, shield: Option<Aura>) -> String {
     let mut recovery = certain(TalentTrigger::CritTaken, "");
     recovery.effect = ProcEffect::HealBack {
         fraction: 1.0,
@@ -207,8 +213,7 @@ fn heal_back_run_at(attacker: &str, crit: f32, stage: Stage) -> String {
         break_on_damage_threshold: -1.0,
         ..Default::default()
     };
-    play(
-        config(&[attacker], &["Priest"], 25.0),
+    let staged = {
         with_proc(stage, T2, recovery)
             .combatant(T1, move |c| c.crit_chance = crit)
             .combatant(T2, |c| {
@@ -217,9 +222,13 @@ fn heal_back_run_at(attacker: &str, crit: f32, stage: Stage) -> String {
             })
             .clear_auras(T2)
             .aura(T2, held(AuraType::Silence, "Held"))
-            .aura(T2, held(AuraType::DamageTakenIncrease, "Vulnerable")),
-    )
-    .log
+            .aura(T2, held(AuraType::DamageTakenIncrease, "Vulnerable"))
+    };
+    let staged = match shield {
+        Some(shield) => staged.aura(T2, shield),
+        None => staged,
+    };
+    play(config(&[attacker], &["Priest"], 25.0), staged).log
 }
 
 const RECOVERED: &str = "Priest #1's Blessed Recovery heals Team 2 Priest #1 for";
@@ -1178,7 +1187,10 @@ fn a_crit_from_an_instant_attack_is_a_crit_taken() {
 /// (AS-429): a Priest wearing Aegis of the Last Stand, staged just above its
 /// 35% line, is crit below it and raises the shield; the crit that breaks
 /// through the shield lands part of its damage, and the heal-back heals that
-/// part, not the crit as rolled. Mortal Strike held, so no healing cut.
+/// part, not the crit as rolled. Mortal Strike held, so no healing cut. The
+/// crits here land at the auto-attack site (Heroic Strike rides the swing);
+/// a queued strike's crit through an absorb is
+/// `a_queued_strikes_crit_heal_back_reads_the_damage_past_an_absorb`.
 #[test]
 fn a_crit_taken_heal_back_reads_the_damage_past_a_triggered_absorb() {
     let mut recovery = certain(TalentTrigger::CritTaken, "");
@@ -1221,7 +1233,7 @@ fn a_crit_taken_heal_back_reads_the_damage_past_a_triggered_absorb() {
     let log_lines: Vec<&str> = log.lines().collect();
     let mut broke_through = 0;
     for (i, line) in log_lines.iter().enumerate() {
-        // An auto-attack's crit or a queued strike's (Heroic Strike).
+        // A swing's crit, or Heroic Strike's, which lands with the swing.
         if !(line.contains("Team 1 Warrior #1's ")
             && line.contains(" CRITS Team 2 Priest")
             && line.contains(" absorbed)"))
@@ -1243,6 +1255,114 @@ fn a_crit_taken_heal_back_reads_the_damage_past_a_triggered_absorb() {
         broke_through >= 1,
         "no crit broke through the shield: {log}"
     );
+}
+
+/// A queued strike's crit heal-back reads what the strike landed past an
+/// absorb: a Rogue whose only crit is one Sinister Strike (a sure-crit
+/// modifier on it, no crit chance of its own) strikes a Priest behind a
+/// shield the strike only partly eats, and the heal-back heals the part that
+/// landed, not the strike as rolled. The Priest is held silenced and takes
+/// double damage; nothing else heals it or cuts its healing (a Rogue, not a
+/// Warrior: Mortal Strike's healing cut would shrink the heal).
+#[test]
+fn a_queued_strikes_crit_heal_back_reads_the_damage_past_an_absorb() {
+    let shield = Aura {
+        effect_type: AuraType::Absorb,
+        duration: 300.0,
+        magnitude: ABSORB_SIZE,
+        ability_name: "Staged Shield".to_string(),
+        break_on_damage_threshold: -1.0,
+        ..Default::default()
+    };
+    let log = heal_back_run_with(
+        "Rogue",
+        0.0,
+        // In reach with full energy, so the strike comes before the swings
+        // can spend the shield.
+        Stage::new()
+            .aura(T1, sure_crit_on(AbilityType::SinisterStrike))
+            .place(T1, 0.0, 0.0)
+            .place(T2, 2.0, 0.0)
+            .combatant(T1, |c| c.current_mana = c.max_mana),
+        Some(shield),
+    );
+    let strikes = lines(&log, "Rogue #1's Sinister Strike CRITS Team 2 Priest");
+    assert_eq!(strikes.len(), 1, "{log}");
+    let strike = strikes[0];
+    assert!(strike.contains(" absorbed)"), "the shield took none: {log}");
+    let landed = amounts(strike, "CRITS", " for ")[0];
+    assert!(landed > 0.0, "the shield took it all: {strike}");
+    let after = log.split(strike).nth(1).expect("the strike's line");
+    let healed = after
+        .lines()
+        .find(|l| l.contains(RECOVERED))
+        .map(|l| amounts(l, RECOVERED, " for ")[0]);
+    assert_eq!(healed, Some(landed), "{strike}\n{log}");
+}
+
+/// The shield the queued-strike case stages: smaller than a sure-crit
+/// Sinister Strike on a Priest taking double damage, larger than nothing.
+const ABSORB_SIZE: f32 = 60.0;
+
+/// A `CritTaken` proc's aura `on: Other` lands on the ATTACKER whose crit set
+/// it off, never on the struck owner, at each site that pushes it: a Hunter's
+/// shot (one sure-crit Arcane Shot), a Warrior's swing (every swing a crit,
+/// Mortal Strike held) and a Warrior's queued strike (one sure-crit Mortal
+/// Strike, no crit chance of its own).
+#[test]
+fn a_crit_taken_proc_lands_its_aura_on_the_attacker() {
+    let mut marked = certain(TalentTrigger::CritTaken, "");
+    marked.effect = ProcEffect::ApplyAura {
+        on: ProcTarget::Other,
+        aura_type: AuraType::AttackPowerIncrease,
+        magnitude: 1.0,
+        duration: 5.0,
+        tick_interval: 0.0,
+        dispel_type: DispelType::Physical,
+        name: Some("Marked".to_string()),
+    };
+    let cases: [(&str, &str, Stage); 3] = [
+        (
+            "Hunter",
+            "Arcane Shot CRITS",
+            Stage::new()
+                .aura(T1, sure_crit_on(AbilityType::ArcaneShot))
+                .cooldown(T1, AbilityType::AimedShot, 1000.0)
+                .combatant(T1, |c| c.crit_chance = 0.0)
+                .combatant(Unit::pet_of(1, 0), |c| c.crit_chance = 0.0),
+        ),
+        (
+            "Warrior",
+            "Auto Attack CRITS",
+            Stage::new()
+                .cooldown(T1, AbilityType::MortalStrike, 1000.0)
+                .combatant(T1, |c| c.crit_chance = 1.0),
+        ),
+        (
+            "Warrior",
+            "Mortal Strike CRITS",
+            Stage::new()
+                .aura(T1, sure_crit_on(AbilityType::MortalStrike))
+                .combatant(T1, |c| c.crit_chance = 0.0),
+        ),
+    ];
+    for (attacker, crit, stage) in cases {
+        let log = play(
+            config(&[attacker], &["Priest"], 30.0),
+            with_proc(stage, T2, marked.clone()),
+        )
+        .log;
+        assert!(!lines(&log, crit).is_empty(), "{crit}: {log}");
+        assert!(!procs(&log, "Marked").is_empty(), "{crit}: {log}");
+        assert!(
+            !lines(&log, &format!("Team 1 {attacker} #1 gains Marked")).is_empty(),
+            "{crit}: {log}"
+        );
+        assert!(
+            lines(&log, "Team 2 Priest #1 gains Marked").is_empty(),
+            "{crit}: {log}"
+        );
+    }
 }
 
 /// A shot's crit is a ranged crit, so its target's `CritTaken`, and the
