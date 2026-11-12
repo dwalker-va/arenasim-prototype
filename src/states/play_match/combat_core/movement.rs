@@ -530,7 +530,6 @@ pub fn move_to_target(
             // "does anyone need healing?" — if yes, break cover for the cast; if
             // no, hide.
             let keep_sighted = combatant
-                .class
                 .is_healer()
                 .then(|| {
                     // Most-injured living HEALABLE ally, and how hurt it is. Pets are
@@ -797,7 +796,7 @@ pub fn move_to_target(
         // positions), so the walk ends exactly where a cast at the target
         // stops being refused `LosBlocked`. Always sighted on an obstacle-free
         // map, so BasicArena pursuit is unchanged.
-        let walks_for_sight = !combatant.class.is_healer();
+        let walks_for_sight = !combatant.is_healer();
         if pursuit_closes(distance, stop_distance, walks_for_sight, || {
             has_line_of_sight(&map_geometry.volumes, my_pos, target_pos)
         }) {

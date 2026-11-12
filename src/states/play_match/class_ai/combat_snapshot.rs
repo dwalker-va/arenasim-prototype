@@ -73,6 +73,7 @@ impl CombatantInfo {
             pet_type: pet.map(|p| p.pet_type),
             pet: owned_pet,
             book: combatant.book().clone(),
+            role: combatant.role(),
         }
     }
 }

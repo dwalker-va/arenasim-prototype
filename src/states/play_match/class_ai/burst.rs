@@ -123,7 +123,9 @@ pub fn burst_call(ctx: &CombatContext) -> Option<BurstCall> {
 /// The hard hitters `class` bursts with, in the order its burst step tries
 /// them. Exhaustive: a new class answers here. A healer has none — the play is
 /// a DPS's — and reads its fallback chain. Read by the play's probe to tell a
-/// burst from any other cast.
+/// burst from any other cast. These are each class's tools in its own role: a
+/// Priest that chose Shadowform plays a ranged damage dealer, and bursts with
+/// Mind Blast (`priest::decide_shadow_priest_action`).
 pub fn burst_tools(class: CharacterClass) -> &'static [AbilityType] {
     match class {
         // Mortal Strike, then a Heroic Strike that spends the rage the

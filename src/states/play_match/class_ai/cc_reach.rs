@@ -89,6 +89,7 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::EarthTotem
         | A::FireTotem
         | A::TravelForm
+        | A::Shadowform
         | A::LifeTap => Aim::Caster,
         A::Frostbolt
         | A::FlashHeal

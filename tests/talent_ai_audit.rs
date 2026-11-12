@@ -29,7 +29,10 @@ use arenasim::states::play_match::movement_config::load_movement_config;
 type SceneFor = fn(&AbilityDefinitions) -> (Scene, Who);
 
 /// Every talent ability, with the scene its rule is decided in.
-const SCENES: &[(AbilityType, SceneFor)] = &[(AbilityType::ExposeArmor, expose_armor_scene)];
+const SCENES: &[(AbilityType, SceneFor)] = &[
+    (AbilityType::ExposeArmor, expose_armor_scene),
+    (AbilityType::Shadowform, shadowform_scene),
+];
 
 /// A Rogue in melee of its kill target, a plate-armored Warrior: Expose
 /// Armor's moment (`class_ai::rogue::try_expose_armor`).
@@ -46,6 +49,20 @@ fn expose_armor_scene(defs: &AbilityDefinitions) -> (Scene, Who) {
         .cooldown(ROGUE, AbilityType::KidneyShot, 10.0);
     scene.combatant_mut(ROGUE).stealthed = false;
     (scene, ROGUE)
+}
+
+const PRIEST: Who = "priest";
+
+/// A Priest whose Form choice is Shadowform, before the gates and not yet in
+/// the form: the moment it takes it.
+fn shadowform_scene(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let mut scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .before_gates()
+        .unit(PRIEST, 1, CharacterClass::Priest)
+        .at(0.0, 0.0);
+    scene.combatant_mut(PRIEST).priest_form =
+        arenasim::states::match_config::PriestForm::Shadowform;
+    (scene, PRIEST)
 }
 
 fn considered(view: &DecisionView, ability: AbilityType) -> bool {

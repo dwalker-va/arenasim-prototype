@@ -128,6 +128,10 @@ talent_ids! {
     Deflection,
     SwiftBlades,
     ExposeArmor,
+    // Priest: Shadow
+    ImprovedMindBlast,
+    ImprovedPsychicScream,
+    Shadowform,
 }
 
 /// A talent tree. A tree is named per class: `(class, TreeId)` is the key.
@@ -135,6 +139,7 @@ talent_ids! {
 pub enum TreeId {
     Demonology,
     Combat,
+    Shadow,
 }
 
 /// One tree of a class, as `talents.ron` lists it. A class's trees are in

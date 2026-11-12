@@ -255,6 +255,35 @@
             spell_school: Shadow,
         ),
 
+        // Shadowform: TBC spell 15473 — +15% Shadow damage done (aura 79,
+        // school mask 32) and -15% Physical damage taken (aura 87, school mask
+        // 1), no dispel type and no prevention type. A TALENT ability: only
+        // the Shadowform node grants it, and `talents.ron`'s choice rules lock
+        // it unless the slot chose the form. The Priest takes it before the
+        // gates and holds it all match: it lasts past the match cap and no
+        // dispel, purge or cleanse removes it. The Physical reduction is its
+        // compound rider (`combat_core::shadowform_riders`).
+        Shadowform: (
+            name: "Shadowform",
+            class: Priest,
+            talent: true,
+            prevention: None,
+            icon: "icons/abilities/spell_shadow_shadowform.jpg",
+            cast_time: 0.0,
+            range: 0.0,
+            mana_cost: 35.0,
+            cooldown: 0.0,
+            applies_aura: Some((
+                aura_type: DamageDealtIncrease,
+                duration: 600.0,
+                magnitude: 0.15,
+                scope: Some(School(Shadow)),
+                dispel_type: Untyped,  // TBC: DispelType 0; a form, not a spell on the holder
+                compound: Some(Shadowform),
+            )),
+            spell_school: Shadow,
+        ),
+
         // ============================================================================
         // WARRIOR ABILITIES
         // ============================================================================

@@ -55,6 +55,9 @@
         Rogue: [
             (id: Combat, name: "Combat", icon: "icons/talents/ability_backstab.jpg"),
         ],
+        Priest: [
+            (id: Shadow, name: "Shadow", icon: "icons/talents/spell_shadow_shadowwordpain.jpg"),
+        ],
     },
 
     talents: {
@@ -165,7 +168,54 @@
             // cooldown.
             per_rank: [Grant(ExposeArmor)],
         ),
+        // ---- Priest: Shadow (the talents proposal §5.2) ----
+        ImprovedMindBlast: (
+            name: "Improved Mind Blast",
+            class: Priest, tree: Shadow, tier: 1, column: 0,
+            icon: "icons/talents/spell_shadow_unholyfrenzy.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Classic 15312: -1s a rank, 8 -> 7 -> 6.
+            per_rank: [Patch(on: Ability(MindBlast), field: Cooldown, op: Add(-1.0))],
+        ),
+        ImprovedPsychicScream: (
+            name: "Improved Psychic Scream",
+            class: Priest, tree: Shadow, tier: 1, column: 2,
+            icon: "icons/talents/spell_shadow_psychicscream.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Classic 15448's per-rank value: -2s a rank, 30 -> 28 -> 26.
+            per_rank: [Patch(on: Ability(PsychicScream), field: Cooldown, op: Add(-2.0))],
+        ),
+        Shadowform: (
+            name: "Shadowform",
+            class: Priest, tree: Shadow, tier: 2, column: 1,
+            icon: "icons/talents/spell_shadow_shadowform.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // Adds Shadowform to the Priest's Form choice (the proposal §1): a
+            // role, chosen in Prepare and held the whole match. The form is
+            // the Shadowform spell, which the Priest takes before the gates;
+            // the choice rules below lock it without the form, and lock the
+            // heals with it.
+            per_rank: [WidenChoice(PriestForm(Shadowform)), Grant(Shadowform)],
+        ),
     },
+
+    // Choices that are exclusive (talent_choices.rs).
+    choice_rules: [
+        // Shadowform: no healing spells. TBC's client (2.5.6.69795,
+        // SpellShapeshift) excludes form 28 from Flash Heal, Holy Nova and
+        // every other heal, and lists Power Word: Shield, Power Word:
+        // Fortitude, Dispel Magic, Mind Blast, Mana Burn, Psychic Scream,
+        // Shadow Word: Pain and Silence as castable in it. Holy Nova's rule
+        // lands with Holy Nova (AS-415).
+        Forbids(option: PriestForm(Shadowform), ability: FlashHeal),
+        // The form is the spell: castable only with the form chosen. Silence
+        // (AS-416) takes the same rule: Requires(ability: Silence, option:
+        // PriestForm(Shadowform)).
+        Requires(ability: Shadowform, option: PriestForm(Shadowform)),
+    ],
 
     // Each class's reference combatant at mid-run, which prices its computed
     // nodes: the starting kit with three Gauntlet picks in place, named here as

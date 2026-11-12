@@ -175,8 +175,9 @@ impl PlayStage for PillarStage {
     /// A unit with an executor for its half: a healer that hugs (not one
     /// `pillar_mode::HUG_EXCEPTIONS` names), or a kiter ([`is_kiter`]).
     fn admits(&self, ctx: &CombatContext, _play: &Play) -> bool {
-        own_class(ctx).is_some_and(|class| {
-            if class.is_healer() {
+        ctx.self_info().is_some_and(|me| {
+            let class = me.class;
+            if me.is_healer() {
                 !HUG_EXCEPTIONS.iter().any(|(c, _)| *c == class)
             } else {
                 is_kiter(class)
@@ -212,7 +213,7 @@ pub fn stance_healer(snapshot: &CombatSnapshot, team: u8) -> Option<Entity> {
             c.team == team
                 && c.is_alive
                 && !c.is_pet
-                && c.class.is_healer()
+                && c.is_healer()
                 && !HUG_EXCEPTIONS.iter().any(|(e, _)| *e == c.class)
         })
         .map(|c| c.entity)
@@ -445,7 +446,7 @@ impl CombatContext<'_> {
     /// stage of the pipeline does). `None` on a context nobody classified.
     pub fn pillar_stance(&self) -> Option<StanceWindow> {
         let stance = self.situation.as_ref()?.pillar_stance?;
-        let role = Role::of(self.self_info()?.class);
+        let role = self.self_info()?.role;
         (self.play(role) == Play::Pillar).then_some(stance)
     }
 }
