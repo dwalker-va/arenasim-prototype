@@ -461,7 +461,6 @@ fn field_name(field: AbilityField) -> &'static str {
         AbilityField::LockoutDuration => "lockout",
         AbilityField::ChannelDuration => "channel duration",
         AbilityField::ChannelTickInterval => "time between ticks",
-        AbilityField::ChannelHealingPerTick => "healing per tick",
         AbilityField::ManaBurnAmount => "mana burned",
         AbilityField::AuraDuration => "effect duration",
         AbilityField::AuraMagnitude => "effect magnitude",
@@ -494,7 +493,6 @@ fn field_is_fraction(field: AbilityField) -> bool {
         | AbilityField::LockoutDuration
         | AbilityField::ChannelDuration
         | AbilityField::ChannelTickInterval
-        | AbilityField::ChannelHealingPerTick
         | AbilityField::ManaBurnAmount
         | AbilityField::AuraDuration
         | AbilityField::AuraMagnitude
@@ -527,7 +525,6 @@ fn field_unit(field: AbilityField) -> &'static str {
         | AbilityField::HealingCoefficient
         | AbilityField::ApplicationChance
         | AbilityField::ProjectileSpeed
-        | AbilityField::ChannelHealingPerTick
         | AbilityField::AuraMagnitude
         | AbilityField::AuraMagnitudeCoefficient
         | AbilityField::AuraBreakOnDamage
@@ -589,12 +586,12 @@ mod tests {
         );
         let drain = TalentEffect::Patch {
             on: PatchTarget::Ability(AbilityType::DrainLife),
-            field: AbilityField::ChannelHealingPerTick,
+            field: AbilityField::ChannelDuration,
             op: PatchOp::Mul(1.15),
         };
         assert_eq!(
             effect_text(&drain, 1, abilities()),
-            "+15% Drain Life healing per tick"
+            "+15% Drain Life channel duration"
         );
         let grant = TalentEffect::Grant(AbilityType::DeathCoil);
         assert_eq!(effect_text(&grant, 1, abilities()), "Learn Death Coil");

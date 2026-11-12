@@ -692,10 +692,14 @@ fn stat_rows(config: &AbilityConfig) -> Vec<(String, String)> {
             ),
         ));
     }
-    if config.channel_healing_per_tick > 0.0 {
+    if let Some(leech) = config.channel_leech {
         rows.push((
-            "Health per tick".to_string(),
-            format!("+{:.0} to the caster", config.channel_healing_per_tick),
+            "Leech".to_string(),
+            format!(
+                "{} each tick's damage, to {}",
+                crate::states::ability_text::leech_share(leech.fraction),
+                crate::states::ability_text::leech_recipient(leech.to)
+            ),
         ));
     }
     if config.mana_burn_amount > 0.0 {
@@ -1064,6 +1068,20 @@ mod tests {
                 assert!(!key.is_empty() && !value.is_empty());
             }
         }
+    }
+
+    /// Drain Life's stat block names its leech, not a fixed heal (AS-461).
+    #[test]
+    fn a_leeching_channel_names_its_leech() {
+        let abilities = load_ability_definitions().expect("abilities.ron must load");
+        let rows = stat_rows(abilities.get_unchecked(&AbilityType::DrainLife));
+        assert!(
+            rows.contains(&(
+                "Leech".to_string(),
+                "all of each tick's damage, to the caster".to_string()
+            )),
+            "{rows:?}"
+        );
     }
 
     /// Interrupts say they are off the GCD; everything else pays it.

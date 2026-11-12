@@ -385,7 +385,6 @@ pub enum AbilityField {
     /// Present only on a channel.
     ChannelDuration,
     ChannelTickInterval,
-    ChannelHealingPerTick,
     ManaBurnAmount,
     /// The applied aura's fields: present only on an ability that applies one.
     AuraDuration,
@@ -434,7 +433,6 @@ impl AbilityField {
             AbilityField::LockoutDuration => Some(&mut config.lockout_duration),
             AbilityField::ChannelDuration => config.channel_duration.as_mut(),
             AbilityField::ChannelTickInterval => Some(&mut config.channel_tick_interval),
-            AbilityField::ChannelHealingPerTick => Some(&mut config.channel_healing_per_tick),
             AbilityField::ManaBurnAmount => Some(&mut config.mana_burn_amount),
             AbilityField::AuraDuration => aura.map(|a| &mut a.duration),
             AbilityField::AuraMagnitude => aura.map(|a| &mut a.magnitude),
@@ -517,7 +515,6 @@ impl AbilityField {
             AbilityField::LockoutDuration => &[AbilityField::LockoutDuration],
             AbilityField::ChannelDuration => &[AbilityField::ChannelDuration],
             AbilityField::ChannelTickInterval => &[AbilityField::ChannelTickInterval],
-            AbilityField::ChannelHealingPerTick => &[AbilityField::ChannelHealingPerTick],
             AbilityField::ManaBurnAmount => &[AbilityField::ManaBurnAmount],
             AbilityField::AuraDuration => &[AbilityField::AuraDuration],
             AbilityField::AuraMagnitude => &[AbilityField::AuraMagnitude],

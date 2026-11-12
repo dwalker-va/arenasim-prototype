@@ -32,9 +32,10 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::AbilityType;
 use common::staged::{play, Played};
 
-/// Drain Life's tick damage and its heal to the channeler (`abilities.ron`).
+/// Drain Life's tick damage (`abilities.ron`), and its heal to the channeler:
+/// every point of the tick that landed (AS-461).
 const DRAIN_TICK: f32 = 10.0;
-const DRAIN_HEAL: f32 = 10.0;
+const DRAIN_HEAL: f32 = DRAIN_TICK;
 
 /// The save's heal, as a fraction of the holder's maximum health.
 const SAVE_HEAL: f32 = 0.25;
@@ -158,7 +159,8 @@ fn priest_result(played: &Played) -> (f32, bool) {
 
 /// Two lethal ticks in one frame: the save takes the first, the second kills
 /// the Priest, and the save's heal — landed at the frame's end — finds a
-/// corpse and lands nothing.
+/// corpse and lands nothing. Its line says the holder died anyway, and no
+/// "heals for 0" follows (AS-461).
 #[test]
 fn a_saves_heal_on_a_holder_killed_in_its_frame_lands_nothing() {
     let played = play(
@@ -167,9 +169,10 @@ fn a_saves_heal_on_a_holder_killed_in_its_frame_lands_nothing() {
     );
     // The situation: the save fired, and the Priest still died that frame.
     assert!(
-        played
-            .log
-            .contains("[SAVED] Guardian Spirit prevents a killing blow on Team 1 Priest #1"),
+        played.log.contains(
+            "[SAVED] Guardian Spirit prevents a killing blow on Team 1 Priest #1, who is killed \
+             by another blow"
+        ),
         "the save fired:\n{}",
         played.log
     );
@@ -177,9 +180,7 @@ fn a_saves_heal_on_a_holder_killed_in_its_frame_lands_nothing() {
     assert_eq!(on_tick_frame(&played, 1, 0), (0.0, false));
     assert_eq!(priest_result(&played), (0.0, false));
     assert!(
-        played
-            .log
-            .contains("[SAVED] Guardian Spirit heals Team 1 Priest #1 for 0"),
+        !played.log.contains("[SAVED] Guardian Spirit heals"),
         "{}",
         played.log
     );
@@ -194,9 +195,12 @@ fn a_saves_heal_on_a_living_holder_lands() {
         config(&["Priest"], &["Warlock", "Warlock"]),
         save_stage(&[LOCK_A]),
     );
+    assert!(played.log.lines().any(
+        |l| l.ends_with("[SAVED] Guardian Spirit prevents a killing blow on Team 1 Priest #1")
+    ));
     assert!(played
         .log
-        .contains("[SAVED] Guardian Spirit prevents a killing blow on Team 1 Priest #1"));
+        .contains("[SAVED] Guardian Spirit heals Team 1 Priest #1 for"));
     let frame = played.staged_frames().next().expect("a staged frame");
     let max = frame
         .combatants

@@ -1039,7 +1039,6 @@ fn every_numeric_ability_field_is_decided() {
         lockout_duration: _,
         channel_duration: _,
         channel_tick_interval: _,
-        channel_healing_per_tick: _,
         mana_burn_amount: _,
         crit_chance: _,
         // Not numbers, or not patchable yet (a tree card adds the field it needs):
@@ -1061,6 +1060,7 @@ fn every_numeric_ability_field_is_decided() {
         is_dispel: _,
         dispel_backlash: _,
         health_to_mana: _,
+        channel_leech: _,
     } = config;
     // And every patchable field reads the field it names.
     let mut c = defs.get_unchecked(&AbilityType::Shadowbolt).clone();

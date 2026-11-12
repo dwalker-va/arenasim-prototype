@@ -351,9 +351,13 @@ pub struct AbilityConfig {
     /// How often channel ticks occur (in seconds, default 1.0)
     #[serde(default = "default_channel_tick_interval")]
     pub channel_tick_interval: f32,
-    /// Healing applied to caster per tick (for Drain Life style abilities)
+    /// Makes the channel LEECH: each tick heals a share of the damage that
+    /// tick landed (Drain Life — TBC's periodic leech, aura 53, multiplier 1).
+    /// Its source must be `Ability`, and only a channel may declare it; a
+    /// channel's own leech is declared here, never on its `applies_aura`. See
+    /// [`Leech`](super::combat_core::leech::Leech).
     #[serde(default)]
-    pub channel_healing_per_tick: f32,
+    pub channel_leech: Option<super::combat_core::leech::Leech>,
 
     // === Dispel ===
     /// Whether this ability removes magic debuffs from the target
@@ -915,6 +919,31 @@ impl AbilityDefinitions {
                 if let Err(e) = leech.validate() {
                     panic!("abilities.ron: {ability:?}: {e}");
                 }
+                if def.is_channel() {
+                    panic!(
+                        "abilities.ron: {ability:?} is a channel with a leech on its aura; a \
+                         channel's ticks read only its `channel_leech`"
+                    );
+                }
+            }
+        }
+
+        // A channel's own leech: only on a channel, fed by its own ticks.
+        for (ability, def) in &self.definitions {
+            let Some(leech) = def.channel_leech else {
+                continue;
+            };
+            if !def.is_channel() {
+                panic!("abilities.ron: {ability:?} sets `channel_leech` but is not a channel");
+            }
+            if leech.of != super::combat_core::leech::LeechSource::Ability {
+                panic!(
+                    "abilities.ron: {ability:?}'s `channel_leech` must be fed by its own ticks \
+                     (`of: Ability`)"
+                );
+            }
+            if let Err(e) = leech.validate() {
+                panic!("abilities.ron: {ability:?}: {e}");
             }
         }
 
@@ -1193,6 +1222,97 @@ mod tests {
         });
     }
 
+    /// The shipped table with `edit` made to Drain Life, validated.
+    fn validate_drain_life(edit: impl FnOnce(&mut AbilityConfig)) {
+        let path = crate::paths::asset_path_str("config/abilities.ron");
+        let mut config: AbilitiesConfig =
+            ron::from_str(&std::fs::read_to_string(path).expect("abilities.ron")).expect("parses");
+        edit(
+            config
+                .abilities
+                .get_mut(&AbilityType::DrainLife)
+                .expect("Drain Life"),
+        );
+        let _ = AbilityDefinitions::new(config).validate();
+    }
+
+    fn drain_leech() -> crate::states::play_match::combat_core::leech::Leech {
+        crate::states::play_match::combat_core::leech::Leech {
+            fraction: 1.0,
+            to: Default::default(),
+            of: Default::default(),
+        }
+    }
+
+    /// Drain Life leeches every point its ticks land (TBC: aura 53,
+    /// multiplier 1), to its caster.
+    #[test]
+    fn drain_life_leeches_all_it_lands() {
+        let defs = AbilityDefinitions::new(
+            ron::from_str(
+                &std::fs::read_to_string(crate::paths::asset_path_str("config/abilities.ron"))
+                    .expect("abilities.ron"),
+            )
+            .expect("parses"),
+        );
+        assert_eq!(
+            defs.get_unchecked(&AbilityType::DrainLife).channel_leech,
+            Some(drain_leech())
+        );
+    }
+
+    /// A channel's leech is a share...
+    #[test]
+    #[should_panic(expected = "outside (0, 1]")]
+    fn a_channel_leech_fraction_is_a_share() {
+        validate_drain_life(|d| {
+            d.channel_leech = Some(crate::states::play_match::combat_core::leech::Leech {
+                fraction: 1.5,
+                ..drain_leech()
+            })
+        });
+    }
+
+    /// ...fed by the channel's own ticks...
+    #[test]
+    #[should_panic(expected = "must be fed by its own ticks")]
+    fn a_channel_leech_is_fed_by_its_own_ticks() {
+        validate_drain_life(|d| {
+            d.channel_leech = Some(crate::states::play_match::combat_core::leech::Leech {
+                of: crate::states::play_match::combat_core::leech::LeechSource::CasterSchool(
+                    SpellSchool::Shadow,
+                ),
+                ..drain_leech()
+            })
+        });
+    }
+
+    /// ...declared only on a channel...
+    #[test]
+    #[should_panic(expected = "is not a channel")]
+    fn a_channel_leech_needs_a_channel() {
+        validate_drain_life(|d| d.channel_duration = None);
+    }
+
+    /// ...and never on a channel's aura, which its ticks do not read.
+    #[test]
+    #[should_panic(expected = "a channel with a leech on its aura")]
+    fn a_channels_aura_carries_no_leech() {
+        let path = crate::paths::asset_path_str("config/abilities.ron");
+        let mut config: AbilitiesConfig =
+            ron::from_str(&std::fs::read_to_string(path).expect("abilities.ron")).expect("parses");
+        let coil_aura = config.abilities[&AbilityType::DeathCoil]
+            .applies_aura
+            .clone();
+        let drain = config
+            .abilities
+            .get_mut(&AbilityType::DrainLife)
+            .expect("Drain Life");
+        drain.channel_leech = None;
+        drain.applies_aura = coil_aura;
+        let _ = AbilityDefinitions::new(config).validate();
+    }
+
     fn base_test_config() -> AbilityConfig {
         AbilityConfig {
             name: "Test".to_string(),
@@ -1228,7 +1348,7 @@ mod tests {
             is_charge: false,
             channel_duration: None,
             channel_tick_interval: 1.0,
-            channel_healing_per_tick: 0.0,
+            channel_leech: None,
             is_dispel: false,
             mana_burn_amount: 0.0,
             dispel_backlash: None,

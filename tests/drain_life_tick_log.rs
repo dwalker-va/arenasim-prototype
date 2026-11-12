@@ -123,7 +123,8 @@ fn a_tick_logs_the_damage_past_an_absorb() {
 }
 
 /// A lethal tick is the killing blow on the tick's own entry, and the death
-/// follows the tick's heal line.
+/// follows it. (The Warlock is at full health, so its heal lands nothing and
+/// logs no line: `tests/drain_life_leech.rs`.)
 #[test]
 fn a_lethal_tick_is_its_own_killing_blow() {
     let log = tick(5.0, vec![]);
@@ -131,7 +132,6 @@ fn a_lethal_tick_is_its_own_killing_blow() {
         messages(&log),
         vec![
             format!("{WARLOCK}'s Drain Life ticks on {WARRIOR} for 5 damage"),
-            format!("{WARLOCK}'s Drain Life heals for 10"),
             format!("{WARRIOR} has been eliminated"),
         ]
     );
