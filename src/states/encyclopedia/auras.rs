@@ -21,20 +21,21 @@
 //!    break-on-damage come from the aura block. Entry N+1 appears the moment
 //!    the RON gains an `applies_aura`, which is the encyclopedia's
 //!    zero-marginal-cost rule.
-//! 2. **[`EngineAura`]** — the short, explicit registry of auras the engine
-//!    applies from code with a hardcoded name, which the RON walk cannot see:
-//!    Weakened Soul, Shadow Sight, the Frost Trap zone's slow, the totem
-//!    pulses, the school lockout every interrupt leaves behind, the Rogue's
-//!    weapon-coating marker, Unstable Affliction's dispel-backlash silence and
-//!    the Frost Armor chill. The nested variants EXPAND from their own
-//!    sources (`TotemElement::ALL`, `RoguePoison::ALL`, the interrupt flags),
-//!    so they stay zero-marginal-cost too.
+//! 2. **The engine aura registry** ([`super::engine_auras`]) — the auras the
+//!    engine applies from code, which the RON walk cannot see: Weakened Soul,
+//!    Shadow Sight, the Frost Trap zone's slow, the totem pulses, the school
+//!    lockout every interrupt leaves behind, a proc item's buff, and the rest.
+//!    One FILE per family in `engine_auras/`, which the build script lists, so
+//!    a new family is a new file and no shared list is edited. Families that
+//!    EXPAND from a source (`TotemElement::ALL`, the interrupt flags, the
+//!    `proc:` blocks in `items.ron`) stay zero-marginal-cost: trinket N+1 needs
+//!    no code at all.
 //!
 //!    `tests/aura_catalog_audit.rs` is what stops that registry rotting: it
 //!    scans every `Aura { .. }` literal under `src/` and fails unless its
 //!    `(ability_name, effect_type)` pair resolves to a catalog entry. The key
 //!    is a PAIR because the engine reuses three names across six distinct
-//!    auras — see [`EngineAura`]'s collision note.
+//!    auras — see [`CatalogSource`]'s collision note.
 //!
 //! ## Where the per-entry facts come from
 //!
@@ -58,36 +59,20 @@ use crate::ui::fonts::body_family;
 use bevy_egui::egui;
 
 use crate::states::ability_text::build_aura_description;
-use crate::states::match_config::RoguePoison;
-use crate::states::play_match::abilities::{AbilityType, SpellSchool};
+use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::ability_config::AbilityDefinitions;
-use crate::states::play_match::combat_core::frost_armor_chill_auras;
 use crate::states::play_match::components::{
-    weapon_poison_marker_aura, Aura, AuraPending, AuraType, DRCategory, DispelType, TotemElement,
-    WEAPON_POISON_MARKER_DURATION,
+    Aura, AuraPending, AuraType, DRCategory, WEAPON_POISON_MARKER_DURATION,
 };
-use crate::states::play_match::constants::{
-    DR_MULTIPLIERS, DR_RESET_TIMER, FROST_TRAP_SLOW_MAGNITUDE, FROST_TRAP_ZONE_DURATION,
-    TOTEM_DURATION, WEAKENED_SOUL_DURATION,
-};
-use crate::states::play_match::demonology;
-use crate::states::play_match::effects::backlash::{
-    dispel_backlash_silence_aura, DISPEL_BACKLASH_SILENCE_DURATION,
-};
+use crate::states::play_match::constants::{DR_MULTIPLIERS, DR_RESET_TIMER};
 use crate::states::play_match::equipment::{ItemDefinitions, ItemId};
-use crate::states::play_match::on_use_items::on_use_description;
-use crate::states::play_match::proc_trinkets::proc_description;
 use crate::states::play_match::rendering::{
     is_buff_aura, item_aura_icon_key, talent_aura_icon_key,
 };
-use crate::states::play_match::shadow_sight::{
-    SHADOW_SIGHT_BREAK_ON_DAMAGE, SHADOW_SIGHT_DURATION, SHADOW_SIGHT_SPAWN_TIME,
-};
-use crate::states::play_match::talent_procs::{effect_aura, ProcEvent, TalentProcSlot};
-use crate::states::play_match::talents::{TalentDefinitions, TalentEffect, TalentId};
-use crate::states::play_match::triggered_absorbs::triggered_absorb_description;
-use crate::states::talent_text::talent_proc_description;
+use crate::states::play_match::talents::{TalentDefinitions, TalentId};
 
+use super::engine_auras::EngineSpec;
+pub use super::engine_auras::{EngineAura, EngineFamily, EngineKey};
 use super::search::SearchEntry;
 use super::widget;
 use super::{EncyclopediaData, Topic};
@@ -123,24 +108,19 @@ pub enum AuraId {
     Engine(EngineAura),
 }
 
-/// Auras applied in code rather than through an `applies_aura` block.
+/// What a catalogue is read from: the ability, item and talent tables.
 ///
-/// Deliberately explicit and deliberately SHORT. Adding to it is a decision, so
-/// the drift risk is the opposite one — an engine aura that exists but is not
-/// listed — and `tests/aura_catalog_audit.rs` is the guard against exactly that.
-///
-/// Some of these share a NAME with a real `abilities.ron` entry that carries no
-/// `applies_aura` of its own (Frost Trap places a zone; the totems pulse their
-/// buff). Those borrow the ability's icon and link back to it as the applying
-/// ability. Weakened Soul links back to Power Word: Shield but keeps art of its
-/// own — see [`AuraArt`] — and only Shadow Sight has no applying ability at
-/// all, which [`AuraSource::Mechanic`] makes it say out loud.
+/// The RON half of the catalogue walks `abilities`; the engine half asks each
+/// [`EngineFamily`](super::engine_auras::EngineFamily) which of its auras these
+/// tables hold. The game builds one over its loaded tables and every family;
+/// the encyclopedia snapshots build one over PINNED tables and families, so
+/// content a later card adds cannot move their pixels.
 ///
 /// ## Name collisions
 ///
-/// Three of these carry a `frame_name` that is NOT their catalog name, because
-/// the engine hangs two distinct DEBUFFS under one name and a player reading
-/// their frames cannot tell which is which:
+/// Three engine auras carry a `frame_name` that is NOT their catalog name,
+/// because the engine hangs two distinct DEBUFFS under one name and a player
+/// reading their frames cannot tell which is which:
 ///
 /// - "Crippling Poison" is both the Rogue's own coating marker and the slow it
 ///   puts on the target.
@@ -159,135 +139,29 @@ pub enum AuraId {
 /// one thing. That is fixed upstream in the engine rather than papered over
 /// here: the chill's effects are bound into a [`CompoundDebuff`](crate::states::play_match::components::CompoundDebuff), so it is one
 /// entry that states both (see [`NamedAura::riders`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EngineAura {
-    /// The Power Word: Shield cooldown marker, applied alongside the shield.
-    WeakenedSoul,
-    /// Granted by picking up an arena Shadow Sight orb.
-    ShadowSight,
-    /// The slow a triggered Frost Trap's zone re-applies each tick.
-    FrostTrapSlow,
-    /// The buff one element's totem pulses onto nearby allies. Nested on
-    /// [`TotemElement`] so a fifth element needs no variant here.
-    TotemBuff(TotemElement),
-    /// The school lockout a successful interrupt leaves behind, named after the
-    /// interrupting ability (`combat_core::damage` builds it that way). Nested
-    /// on [`AbilityType`] and DERIVED from the interrupt flags, so interrupt
-    /// N+1 gets a lockout entry with no code here.
-    InterruptLockout(AbilityType),
-    /// The Rogue's weapon-coating marker — a permanent SELF-BUFF named after
-    /// the poison, distinct from the debuff that poison applies on hit. Nested
-    /// on [`RoguePoison`] so poison N+1 needs no variant here.
-    WeaponPoisonCoating(RoguePoison),
-    /// The silence Unstable Affliction's dispel backlash puts on the dispeller,
-    /// which shares the DoT's name.
-    DispelBacklashSilence,
-    /// The chill a Frost Armor proc hangs on a melee attacker — ONE debuff
-    /// doing two things (a movement slow and an attack-speed slow), so ONE
-    /// entry. It was two entries wearing different removal badges until the
-    /// engine learned to bind the two effects into one debuff; see
-    /// [`CompoundDebuff`](crate::states::play_match::components::CompoundDebuff).
-    FrostArmorChill,
-    /// The stat buff a PROC TRINKET grants its wearer, named after the trinket.
-    /// Nested on [`ItemId`] and derived from `items.ron` — every item carrying
-    /// a `proc:` block gets an entry, so trinket N+1 (the whole point of
-    /// AS-61) needs no variant here.
-    ProcTrinketBuff(ItemId),
-    /// The buff an item's ON-USE grants its wearer (a stat burst or haste,
-    /// with the heal over time one may carry as a rider: the Diamond Flask),
-    /// named after the item. Derived from the buff `on_use:` blocks in
-    /// `items.ron`, as the proc buffs are from `proc:`.
-    OnUseBuff(ItemId),
-    /// Master Demonologist's spell damage cut, which the talent keeps on the
-    /// Warlock and its Felhunter while the Felhunter lives.
-    MasterDemonologist,
-    /// Touch of Shadow, the buff a Demonic Sacrifice grants for the match.
-    TouchOfShadow,
-    /// The aura a TALENT's proc applies (Shadow Trance, Blackout's stun),
-    /// named after its effect: the talent and the proc's index among its
-    /// `Proc` effects. Derived from `talents.ron`, so talent N+1's proc gets
-    /// an entry with no variant here.
-    TalentProcAura(TalentId, u8),
-    /// The absorb shield an item's TRIGGERED ABSORB raises (Aegis of the Last
-    /// Stand), named after the item. Derived from the `triggered_absorb:`
-    /// blocks in `items.ron`, as the proc buffs are from `proc:`.
-    TriggeredAbsorbShield(ItemId),
+#[derive(Clone, Copy)]
+pub struct CatalogSource<'a> {
+    pub abilities: &'a AbilityDefinitions,
+    pub items: &'a ItemDefinitions,
+    pub talents: &'a TalentDefinitions,
+    /// The engine aura families listed: every one in the game, or the pinned
+    /// few a snapshot harness draws.
+    pub families: &'a [EngineFamily],
 }
 
-impl EngineAura {
-    /// Every engine-originated aura, in display order.
-    ///
-    /// The two nested variants expand from their own sources, so this list only
-    /// has to name the genuinely one-off auras.
-    pub fn all(abilities: &AbilityDefinitions, items: &ItemDefinitions) -> Vec<EngineAura> {
-        Self::all_with(abilities, items, TalentDefinitions::shipped())
-    }
-
-    /// [`Self::all`] under the given talent table rather than the shipped
-    /// one.
-    pub fn all_with(
-        abilities: &AbilityDefinitions,
-        items: &ItemDefinitions,
-        talents: &TalentDefinitions,
-    ) -> Vec<EngineAura> {
-        let mut all = vec![
-            EngineAura::WeakenedSoul,
-            EngineAura::ShadowSight,
-            EngineAura::FrostTrapSlow,
-            EngineAura::DispelBacklashSilence,
-            EngineAura::FrostArmorChill,
-            EngineAura::MasterDemonologist,
-            EngineAura::TouchOfShadow,
-        ];
-        all.extend(TotemElement::ALL.iter().copied().map(EngineAura::TotemBuff));
-        all.extend(
-            RoguePoison::ALL
-                .iter()
-                .copied()
-                .map(EngineAura::WeaponPoisonCoating),
-        );
-        let mut interrupts: Vec<AbilityType> = abilities
-            .iter()
-            .filter(|(_, def)| def.is_interrupt && def.lockout_duration > 0.0)
-            .map(|(ability, _)| *ability)
-            .collect();
-        interrupts.sort_unstable();
-        all.extend(interrupts.into_iter().map(EngineAura::InterruptLockout));
-        // Walked in `ItemId::all()` order rather than `items.iter()` order:
-        // `ItemDefinitions` is backed by a `HashMap`, and the catalog's sort is
-        // by NAME, so two items sharing a name would otherwise come out in a
-        // per-process order.
-        all.extend(
-            ItemId::all()
-                .iter()
-                .filter(|id| items.get(id).is_some_and(|i| i.proc_buff().is_some()))
-                .copied()
-                .map(EngineAura::ProcTrinketBuff),
-        );
-        // Every talent proc that lands an aura, in `TalentId` order.
-        for (talent, config) in talents.iter() {
-            let procs = config
-                .per_rank
-                .iter()
-                .filter(|e| matches!(e, TalentEffect::Proc(_)))
-                .count();
-            all.extend((0..procs as u8).map(|i| EngineAura::TalentProcAura(talent, i)));
+impl<'a> CatalogSource<'a> {
+    /// Over these tables, with every engine aura family.
+    pub fn new(
+        abilities: &'a AbilityDefinitions,
+        items: &'a ItemDefinitions,
+        talents: &'a TalentDefinitions,
+    ) -> Self {
+        Self {
+            abilities,
+            items,
+            talents,
+            families: EngineFamily::ALL,
         }
-        all.extend(
-            ItemId::all()
-                .iter()
-                .filter(|id| items.get(id).is_some_and(|i| i.on_use_buff().is_some()))
-                .copied()
-                .map(EngineAura::OnUseBuff),
-        );
-        all.extend(
-            ItemId::all()
-                .iter()
-                .filter(|id| items.get(id).is_some_and(|i| i.triggered_absorb.is_some()))
-                .copied()
-                .map(EngineAura::TriggeredAbsorbShield),
-        );
-        all
     }
 }
 
@@ -568,15 +442,22 @@ pub fn catalog_with(
     items: &ItemDefinitions,
     talents: &TalentDefinitions,
 ) -> Vec<NamedAura> {
-    let mut entries: Vec<NamedAura> = abilities
+    catalog_from(&CatalogSource::new(abilities, items, talents))
+}
+
+/// The catalog `source` holds: one entry per `applies_aura` block in its
+/// ability table, and one per engine aura its tables hold.
+pub fn catalog_from(source: &CatalogSource) -> Vec<NamedAura> {
+    let mut entries: Vec<NamedAura> = source
+        .abilities
         .iter()
-        .filter_map(|(ability, _)| ron_entry(*ability, abilities))
+        .filter_map(|(ability, _)| ron_entry(*ability, source.abilities))
         .collect();
 
     entries.extend(
-        EngineAura::all_with(abilities, items, talents)
+        EngineAura::all(source)
             .into_iter()
-            .filter_map(|engine| engine_entry_with(engine, abilities, items, talents)),
+            .filter_map(|engine| engine_entry(engine, source)),
     );
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     entries
@@ -585,14 +466,10 @@ pub fn catalog_with(
 /// Build the ONE entry an address names, without walking the catalog. Used
 /// where only a single aura is on screen (a tooltip); the index and the
 /// sibling cross-links still need the whole thing.
-pub fn entry_of(
-    id: AuraId,
-    abilities: &AbilityDefinitions,
-    items: &ItemDefinitions,
-) -> Option<NamedAura> {
+pub fn entry_of(id: AuraId, source: &CatalogSource) -> Option<NamedAura> {
     match id {
-        AuraId::Ability(ability) => ron_entry(ability, abilities),
-        AuraId::Engine(engine) => engine_entry(engine, abilities, items),
+        AuraId::Ability(ability) => ron_entry(ability, source.abilities),
+        AuraId::Engine(engine) => engine_entry(engine, source),
     }
 }
 
@@ -704,439 +581,20 @@ pub fn find(catalog: &[NamedAura], id: AuraId) -> Option<&NamedAura> {
 // ENGINE REGISTRY
 // ============================================================================
 
-/// Everything an [`EngineAura`] arm has to answer. A struct rather than a
-/// seven-slot tuple because two of the fields (the sample's break-on-damage
-/// threshold, and the frame name) are exactly the ones a wrong default gets
-/// silently wrong.
-struct EngineSpec {
-    /// The catalog's name for the entry.
-    name: String,
-    /// What the actor frames call it. `None` means "same as `name`".
-    frame_name: Option<String>,
-    mechanic: AuraType,
-    source: AuraSource,
-    magnitude: f32,
-    school: Option<SpellSchool>,
-    /// Read from the constant the apply site reads. NOT defaulted: Shadow Sight
-    /// once applied `0.0` (breaks on any damage) where every other engine aura
-    /// applies `-1.0`, and a shared default printed "Never" on a page for an
-    /// aura the first hit removed. Every entry names its own value so the page
-    /// can only ever say what the engine does.
-    break_on_damage: f32,
-    /// The removal class, read from the constructor the apply site uses
-    /// wherever there is one. Not defaulted, for the same reason as
-    /// `break_on_damage`: a proc trinket's buff is `Physical`, and a page
-    /// defaulting it to `Auto` would advertise a purge that cannot happen.
-    dispel_type: DispelType,
-    persistence: Persistence,
-    /// The RIDER effects of a compound debuff — the effects this entry covers
-    /// beyond its face. Empty for every ordinary aura. See
-    /// [`CompoundDebuff`](crate::states::play_match::components::CompoundDebuff); the arm builds these from the same constructor the
-    /// apply site uses, so the page lists exactly what lands.
-    riders: Vec<Aura>,
-    provenance: String,
-}
-
-impl EngineSpec {
-    /// The default for every arm that is not a compound debuff. Spelled out as
-    /// a helper rather than a `Default` impl so the other eight fields stay
-    /// mandatory — `break_on_damage` in particular must never default.
-    fn no_riders() -> Vec<Aura> {
-        Vec::new()
-    }
-}
-
-/// Which engine auras carry art of their own, and which borrow their ability's.
+/// Resolve one engine-originated aura into a catalog entry: its family's
+/// [`EngineSpec`], finished the same way for every family.
 ///
-/// Exhaustive on purpose — no `_` arm. Engine aura N+1 has to state which it is,
-/// because the failure mode is silent: a wrong borrow renders a plausible icon
-/// that means something else, and a missing one renders the placeholder tile
-/// that sent this card here in the first place.
-fn engine_art(engine: EngineAura) -> AuraArt {
-    match engine {
-        // Applied by Power Word: Shield, but it is the debuff that BLOCKS the
-        // next shield — borrowing the shield's icon would say the opposite.
-        EngineAura::WeakenedSoul => AuraArt::Own("aura_weakened_soul"),
-        // An arena orb pickup: no ability icon exists to borrow.
-        EngineAura::ShadowSight => AuraArt::Own("aura_shadow_sight"),
-        EngineAura::FrostTrapSlow
-        | EngineAura::TotemBuff(_)
-        | EngineAura::InterruptLockout(_)
-        | EngineAura::WeaponPoisonCoating(_)
-        | EngineAura::DispelBacklashSilence
-        | EngineAura::FrostArmorChill => AuraArt::FromSource,
-        // No ability applies it; the TRINKET does, and the buff wears the
-        // trinket's own icon — as it does in the buff bar, which reads the
-        // same key off the aura's `source_item`.
-        EngineAura::ProcTrinketBuff(item)
-        | EngineAura::OnUseBuff(item)
-        | EngineAura::TriggeredAbsorbShield(item) => AuraArt::Item(item),
-        // A talent's proc wears its talent's icon, as in the buff bar, which
-        // reads the same key off the aura's `source_talent`.
-        EngineAura::TalentProcAura(talent, _) => AuraArt::Talent(talent),
-        // A Demonology talent's aura wears its node's icon, keyed off the
-        // aura's `source_talent` as in the buff bar.
-        EngineAura::MasterDemonologist => AuraArt::Talent(TalentId::MasterDemonologist),
-        EngineAura::TouchOfShadow => AuraArt::Talent(TalentId::DemonicSacrifice),
-    }
-}
-
-/// Resolve one engine-originated aura into a catalog entry.
-///
-/// Every value here is read from the constant, shared constructor or spec the
-/// apply site reads, so the page cannot state a number the simulation does not
-/// use.
-/// `None` only for a `ProcTrinketBuff` (or `OnUseBuff`, or
-/// `TriggeredAbsorbShield`) address whose item no longer carries a proc (or an
-/// on-use buff, or a triggered absorb) — an address that `EngineAura::all` cannot produce, but that a stale
-/// navigation stack can still hold.
-fn engine_entry(
-    engine: EngineAura,
-    abilities: &AbilityDefinitions,
-    items: &ItemDefinitions,
-) -> Option<NamedAura> {
-    engine_entry_with(engine, abilities, items, TalentDefinitions::shipped())
-}
-
-/// [`engine_entry`] under the given talent table.
-fn engine_entry_with(
-    engine: EngineAura,
-    abilities: &AbilityDefinitions,
-    items: &ItemDefinitions,
-    talents: &TalentDefinitions,
-) -> Option<NamedAura> {
-    let spec = match engine {
-        EngineAura::WeakenedSoul => EngineSpec {
-            name: "Weakened Soul".to_string(),
-            frame_name: None,
-            mechanic: AuraType::WeakenedSoul,
-            source: AuraSource::Ability(AbilityType::PowerWordShield),
-            magnitude: 0.0,
-            school: None,
-            break_on_damage: -1.0,
-            dispel_type: DispelType::Auto,
-            persistence: Persistence::Seconds(WEAKENED_SOUL_DURATION),
-            riders: EngineSpec::no_riders(),
-            provenance: "Placed on the ally the moment the shield lands: one cast applies both."
-                .to_string(),
-        },
-        EngineAura::ShadowSight => EngineSpec {
-            name: "Shadow Sight".to_string(),
-            frame_name: None,
-            mechanic: AuraType::ShadowSight,
-            source: AuraSource::Mechanic("a Shadow Sight orb"),
-            magnitude: 1.0,
-            school: None,
-            break_on_damage: SHADOW_SIGHT_BREAK_ON_DAMAGE,
-            dispel_type: DispelType::Auto,
-            persistence: Persistence::Seconds(SHADOW_SIGHT_DURATION),
-            riders: EngineSpec::no_riders(),
-            provenance: format!(
-                "Granted by picking up one of the two orbs that spawn in mid-arena {:.0} sec \
-                 after the gates open.",
-                SHADOW_SIGHT_SPAWN_TIME
-            ),
-        },
-        EngineAura::FrostTrapSlow => EngineSpec {
-            name: "Frost Trap".to_string(),
-            frame_name: None,
-            mechanic: AuraType::MovementSpeedSlow,
-            source: AuraSource::Ability(AbilityType::FrostTrap),
-            magnitude: FROST_TRAP_SLOW_MAGNITUDE,
-            school: Some(SpellSchool::Frost),
-            break_on_damage: -1.0,
-            // The engine's own constructor decides the class, as for the
-            // totem buffs below.
-            dispel_type: crate::states::play_match::traps::frost_trap_slow_aura(
-                bevy::prelude::Entity::PLACEHOLDER,
-                FROST_TRAP_SLOW_MAGNITUDE,
-            )
-            .dispel_type,
-            persistence: Persistence::WhileSourceActive("while you stand in the zone"),
-            riders: EngineSpec::no_riders(),
-            provenance: format!(
-                "Re-applied every tick by a triggered Frost Trap's slow zone, which itself \
-                 lasts {:.0} sec.",
-                FROST_TRAP_ZONE_DURATION
-            ),
-        },
-        EngineAura::TotemBuff(element) => {
-            let (ability, aura_type, magnitude, school) =
-                crate::states::play_match::class_ai::shaman::totem_spec(element);
-            EngineSpec {
-                name: element.buff_name().to_string(),
-                frame_name: None,
-                mechanic: aura_type,
-                source: AuraSource::Ability(ability),
-                magnitude,
-                school: Some(school),
-                break_on_damage: -1.0,
-                // The engine's own constructor decides the class, so the page
-                // cannot disagree with the buff a totem actually pulses.
-                dispel_type: crate::states::play_match::totems::make_totem_aura(
-                    aura_type,
-                    magnitude,
-                    bevy::prelude::Entity::PLACEHOLDER,
-                    school,
-                    element.buff_name(),
-                )
-                .dispel_type,
-                persistence: Persistence::WhileSourceActive("while you stand near the totem"),
-                riders: EngineSpec::no_riders(),
-                provenance: format!(
-                    "Pulsed onto nearby allies by a dropped totem, which itself lasts {:.0} sec.",
-                    TOTEM_DURATION
-                ),
-            }
-        }
-        EngineAura::InterruptLockout(ability) => {
-            let def = abilities.get(&ability);
-            EngineSpec {
-                name: def
-                    .map(|d| d.name.clone())
-                    .unwrap_or_else(|| format!("{:?}", ability)),
-                frame_name: None,
-                mechanic: AuraType::SpellSchoolLockout,
-                source: AuraSource::Ability(ability),
-                // The magnitude encodes WHICH school was locked and depends on
-                // what the interrupt caught, so it is not a fact about this
-                // aura; `magnitude_row` prints nothing for this mechanic.
-                magnitude: 0.0,
-                school: None,
-                break_on_damage: -1.0,
-                dispel_type: DispelType::Auto,
-                persistence: Persistence::Seconds(
-                    def.map(|d| d.lockout_duration).unwrap_or_default(),
-                ),
-                riders: EngineSpec::no_riders(),
-                provenance: "Left behind when this interrupt lands. Only the school of the \
-                             interrupted spell is locked — the target's other schools keep \
-                             working."
-                    .to_string(),
-            }
-        }
-        EngineAura::WeaponPoisonCoating(poison) => {
-            let sample = weapon_poison_marker_aura(poison);
-            EngineSpec {
-                name: format!("{} (weapon coating)", poison.name()),
-                frame_name: Some(sample.ability_name.clone()),
-                mechanic: sample.effect_type,
-                source: AuraSource::Ability(poison.ability()),
-                magnitude: sample.magnitude,
-                school: sample.spell_school,
-                break_on_damage: sample.break_on_damage_threshold,
-                dispel_type: sample.dispel_type,
-                persistence: Persistence::WholeMatch,
-                riders: EngineSpec::no_riders(),
-                provenance: "A Rogue carries this from the opening bell — it marks the coated \
-                             weapon. The poison's effect comes from the coating's on-hit proc, \
-                             not from this mark."
-                    .to_string(),
-            }
-        }
-        EngineAura::DispelBacklashSilence => {
-            let sample = dispel_backlash_silence_aura(None, DISPEL_BACKLASH_SILENCE_DURATION);
-            EngineSpec {
-                name: "Unstable Affliction (dispel backlash)".to_string(),
-                frame_name: Some(sample.ability_name.clone()),
-                mechanic: sample.effect_type,
-                source: AuraSource::Ability(AbilityType::UnstableAffliction),
-                magnitude: sample.magnitude,
-                school: sample.spell_school,
-                break_on_damage: sample.break_on_damage_threshold,
-                dispel_type: sample.dispel_type,
-                persistence: Persistence::Seconds(sample.duration),
-                riders: EngineSpec::no_riders(),
-                provenance: "Punishes whoever lifts an Unstable Affliction off an ally, \
-                             alongside the backlash damage. Dispelling it on your own team \
-                             costs nothing."
-                    .to_string(),
-            }
-        }
-        EngineAura::FrostArmorChill => {
-            // Built from the simulation's own constructor for the whole
-            // debuff, so the page cannot list an effect the proc does not
-            // apply — or miss one it does.
-            let [face, rider] = frost_armor_chill_auras();
-            EngineSpec {
-                // No disambiguating qualifier on the mechanic: there is one
-                // chill now, and the only other "Frost Armor" is the Mage's
-                // self-buff, which is a BUFF and files on the other side of
-                // the catalog.
-                name: "Frost Armor (chill)".to_string(),
-                frame_name: Some(face.ability_name.clone()),
-                mechanic: face.effect_type,
-                source: AuraSource::Ability(AbilityType::FrostArmor),
-                magnitude: face.magnitude,
-                school: face.spell_school,
-                break_on_damage: face.break_on_damage_threshold,
-                dispel_type: face.dispel_type,
-                persistence: Persistence::Seconds(face.duration),
-                riders: vec![rider],
-                provenance: "Hung on any melee attacker who strikes a Mage wearing Frost Armor. \
-                             One debuff doing two things — a dispel that lifts it takes both. It \
-                             does not stack with itself: a second hit while it is up refreshes \
-                             nothing."
-                    .to_string(),
-            }
-        }
-        EngineAura::ProcTrinketBuff(item) => {
-            let def = items.get(&item)?;
-            let proc = def.proc_buff()?;
-            EngineSpec {
-                name: def.name.clone(),
-                frame_name: None,
-                mechanic: proc.buff()?,
-                // The trinket is not an ability and has no page of its own to
-                // link to from here; the ITEM's page is where its numbers live,
-                // and the provenance line below names it.
-                source: AuraSource::Mechanic("a proc trinket you are wearing"),
-                magnitude: proc.magnitude,
-                school: None,
-                // A proc buff is never broken by damage — see `ProcConfig::aura`.
-                break_on_damage: -1.0,
-                dispel_type: proc.aura(item, &def.name).dispel_type,
-                persistence: Persistence::Seconds(proc.duration),
-                riders: EngineSpec::no_riders(),
-                // Read straight off the same `ProcConfig` the simulation rolls
-                // against, so the page cannot state a chance, a duration or a
-                // cooldown the trinket does not have. The trinket is not named
-                // again here — the page header IS its name.
-                provenance: proc_description(proc),
-            }
-        }
-        EngineAura::OnUseBuff(item) => {
-            let def = items.get(&item)?;
-            let on_use = def.on_use_buff()?;
-            // The auras the simulation lands, through its own constructors:
-            // the buff is the face, and a heal over time beside it a rider,
-            // so the page states both and the catalog keys both.
-            let face = on_use.aura(item, &def.name);
-            let riders = on_use
-                .heal_aura(item, &def.name, bevy::prelude::Entity::PLACEHOLDER)
-                .into_iter()
-                .collect();
-            EngineSpec {
-                name: def.name.clone(),
-                frame_name: None,
-                mechanic: face.effect_type,
-                source: AuraSource::Mechanic("a trinket you are wearing, when you use it"),
-                magnitude: face.magnitude,
-                school: None,
-                break_on_damage: face.break_on_damage_threshold,
-                dispel_type: face.dispel_type,
-                persistence: Persistence::Seconds(face.duration),
-                riders,
-                provenance: on_use_description(on_use),
-            }
-        }
-        EngineAura::MasterDemonologist => {
-            let reduction = demonology::shipped_master_demonologist().unwrap_or_default();
-            let sample =
-                demonology::master_demonologist_aura(reduction, bevy::prelude::Entity::PLACEHOLDER);
-            EngineSpec {
-                name: sample.ability_name.clone(),
-                frame_name: None,
-                mechanic: sample.effect_type,
-                source: AuraSource::Mechanic("the Warlock's Master Demonologist talent"),
-                magnitude: sample.magnitude,
-                school: None,
-                break_on_damage: sample.break_on_damage_threshold,
-                dispel_type: sample.dispel_type,
-                persistence: Persistence::WholeMatch,
-                riders: EngineSpec::no_riders(),
-                provenance: format!(
-                    "The Warlock and its Felhunter each take {:.0}% less spell damage while the \
-                     Felhunter lives. The Warlock's ends when the Felhunter dies.",
-                    reduction * 100.0
-                ),
-            }
-        }
-        EngineAura::TouchOfShadow => {
-            let bonus = demonology::shipped_demonic_sacrifice().unwrap_or_default();
-            let sample =
-                demonology::touch_of_shadow_aura(bonus, bevy::prelude::Entity::PLACEHOLDER);
-            EngineSpec {
-                name: sample.ability_name.clone(),
-                frame_name: None,
-                mechanic: sample.effect_type,
-                source: AuraSource::Mechanic("the Warlock's Demonic Sacrifice talent"),
-                magnitude: sample.magnitude,
-                school: Some(SpellSchool::Shadow),
-                break_on_damage: sample.break_on_damage_threshold,
-                dispel_type: sample.dispel_type,
-                persistence: Persistence::WholeMatch,
-                riders: EngineSpec::no_riders(),
-                provenance: format!(
-                    "Granted at the gates to a Warlock that sacrifices its Felhunter: {:.0}% more \
-                     Shadow damage for the match.",
-                    bonus * 100.0
-                ),
-            }
-        }
-        EngineAura::TalentProcAura(talent, index) => {
-            let config = talents.get(talent)?;
-            let proc = config
-                .per_rank
-                .iter()
-                .filter_map(|e| match e {
-                    TalentEffect::Proc(p) => Some(p),
-                    _ => None,
-                })
-                .nth(usize::from(index))?;
-            // Built by the constructor the resolver lands it with, so the page
-            // states the aura that lands.
-            let slot = TalentProcSlot::new(talent, &config.name, proc.clone());
-            let event = ProcEvent::new(bevy::prelude::Entity::PLACEHOLDER, proc.trigger)
-                .other(bevy::prelude::Entity::PLACEHOLDER)
-                .amount(1.0);
-            let landed = effect_aura(&slot, bevy::prelude::Entity::PLACEHOLDER, &event)?.aura;
-            EngineSpec {
-                name: landed.ability_name.clone(),
-                frame_name: None,
-                mechanic: landed.effect_type,
-                source: AuraSource::Mechanic("a talent"),
-                magnitude: landed.magnitude,
-                school: None,
-                break_on_damage: landed.break_on_damage_threshold,
-                dispel_type: landed.dispel_type,
-                persistence: Persistence::Seconds(landed.duration),
-                riders: EngineSpec::no_riders(),
-                provenance: talent_proc_description(&config.name, proc, abilities),
-            }
-        }
-        EngineAura::TriggeredAbsorbShield(item) => {
-            let def = items.get(&item)?;
-            let absorb = &def.triggered_absorb.as_ref()?.absorb;
-            // The aura the simulation raises, before dampening: its size on a
-            // reference combatant is the item's to state, so the page reads
-            // its mechanic, removal and duration off the real constructor.
-            let sample = absorb.shield_aura(
-                &def.name,
-                crate::states::play_match::triggered_absorbs::ShieldFrom::Item(item),
-                0.0,
-            );
-            EngineSpec {
-                name: def.name.clone(),
-                frame_name: None,
-                mechanic: sample.effect_type,
-                source: AuraSource::Mechanic("a trinket you are wearing"),
-                magnitude: 0.0,
-                school: None,
-                break_on_damage: sample.break_on_damage_threshold,
-                dispel_type: sample.dispel_type,
-                persistence: Persistence::Seconds(absorb.duration),
-                riders: EngineSpec::no_riders(),
-                provenance: triggered_absorb_description(absorb),
-            }
-        }
-    };
+/// `None` for an address `source` does not hold — one `EngineAura::all` cannot
+/// produce, but that a stale navigation stack can still hold.
+fn engine_entry(engine: EngineAura, source: &CatalogSource) -> Option<NamedAura> {
+    let spec = engine.spec(source)?;
 
     let EngineSpec {
         name,
         frame_name,
         mechanic,
-        source,
+        source: applied_by,
+        art,
         magnitude,
         school,
         break_on_damage,
@@ -1198,8 +656,8 @@ fn engine_entry_with(
         name,
         frame_name,
         mechanic,
-        source,
-        art: engine_art(engine),
+        source: applied_by,
+        art,
         sample,
         riders,
         persistence,
@@ -1214,12 +672,8 @@ fn engine_entry_with(
 // ============================================================================
 
 /// Contribute every named aura to the search registry.
-pub fn search_entries(
-    abilities: &AbilityDefinitions,
-    items: &ItemDefinitions,
-    out: &mut Vec<SearchEntry>,
-) {
-    for entry in catalog(abilities, items) {
+pub fn search_entries(source: &CatalogSource, out: &mut Vec<SearchEntry>) {
+    for entry in catalog_from(source) {
         out.push(SearchEntry::new(
             Topic::Aura(entry.id),
             entry.name.clone(),
@@ -1233,8 +687,8 @@ pub fn search_entries(
 ///
 /// The linked-icon widget asks a `Topic` for its name and icon once per widget
 /// it draws, and the index draws fifty of them, so this path has to stay cheap.
-/// Resolving one engine aura through [`engine_entry`] is fine — that builds a
-/// single entry, not the catalog.
+/// Resolving one engine aura through its family's spec is fine — that builds
+/// a single entry, not the catalog.
 struct Identity {
     name: String,
     mechanic: AuraType,
@@ -1242,14 +696,10 @@ struct Identity {
     art: AuraArt,
 }
 
-fn identity(
-    id: AuraId,
-    abilities: &AbilityDefinitions,
-    items: &ItemDefinitions,
-) -> Option<Identity> {
+fn identity(id: AuraId, source: &CatalogSource) -> Option<Identity> {
     match id {
         AuraId::Ability(ability) => {
-            let def = abilities.get(&ability)?;
+            let def = source.abilities.get(&ability)?;
             let effect = def.applies_aura.as_ref()?;
             Some(Identity {
                 name: def.name.clone(),
@@ -1259,52 +709,40 @@ fn identity(
             })
         }
         AuraId::Engine(engine) => {
-            let entry = engine_entry(engine, abilities, items)?;
+            let spec = engine.spec(source)?;
             Some(Identity {
-                name: entry.name,
-                mechanic: entry.mechanic,
-                source: entry.source,
-                art: entry.art,
+                name: spec.name,
+                mechanic: spec.mechanic,
+                source: spec.source,
+                art: spec.art,
             })
         }
     }
 }
 
 /// The display name of one aura address, for [`Topic::name`].
-pub fn name_of(
-    id: AuraId,
-    abilities: &AbilityDefinitions,
-    items: &ItemDefinitions,
-) -> Option<String> {
-    identity(id, abilities, items).map(|identity| identity.name)
+pub fn name_of(id: AuraId, source: &CatalogSource) -> Option<String> {
+    identity(id, source).map(|identity| identity.name)
 }
 
 /// The `Buff · Mechanic` subtitle of one aura address, for [`Topic::subtitle`].
-pub fn subtitle_of(
-    id: AuraId,
-    abilities: &AbilityDefinitions,
-    items: &ItemDefinitions,
-) -> Option<String> {
-    identity(id, abilities, items).map(|identity| subtitle_for(identity.mechanic))
+pub fn subtitle_of(id: AuraId, source: &CatalogSource) -> Option<String> {
+    identity(id, source).map(|identity| subtitle_for(identity.mechanic))
 }
 
 /// The icon key of one aura address, in the keyspace `AbilityIcons` uses: an
 /// ability's display NAME for a borrowed icon, or a `GENERIC_AURA_ICONS` key
 /// for an aura with art of its own. `None` only if the address resolves to
 /// nothing — every catalog entry has an icon.
-pub fn icon_key(
-    id: AuraId,
-    abilities: &AbilityDefinitions,
-    items: &ItemDefinitions,
-) -> Option<String> {
-    let identity = identity(id, abilities, items)?;
+pub fn icon_key(id: AuraId, source: &CatalogSource) -> Option<String> {
+    let identity = identity(id, source)?;
     match identity.art {
         AuraArt::Own(key) => Some(key.to_string()),
         AuraArt::Item(item) => Some(item_aura_icon_key(item)),
         AuraArt::Talent(talent) => Some(talent_aura_icon_key(talent)),
         AuraArt::FromSource => {
             let ability = identity.source.ability()?;
-            abilities.get(&ability).map(|def| def.name.clone())
+            source.abilities.get(&ability).map(|def| def.name.clone())
         }
     }
 }
@@ -1315,7 +753,7 @@ pub fn icon_key(
 
 /// The buff/debuff index. Returns the aura whose row was clicked.
 pub fn render_index(ui: &mut egui::Ui, data: &EncyclopediaData) -> Option<Topic> {
-    let catalog = catalog(data.abilities, data.items);
+    let catalog = catalog_from(&data.catalog_source());
 
     widget::prose(
         ui,
@@ -1370,7 +808,7 @@ pub fn render_index(ui: &mut egui::Ui, data: &EncyclopediaData) -> Option<Topic>
 
 /// One named aura's page. Returns the topic a link on it opened.
 pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> Option<Topic> {
-    let catalog = catalog(data.abilities, data.items);
+    let catalog = catalog_from(&data.catalog_source());
     let Some(entry) = find(&catalog, id) else {
         ui.label(
             egui::RichText::new("Unknown aura")
@@ -1517,7 +955,7 @@ pub fn render_detail(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) -> 
 
 /// The tooltip shown wherever a named aura's icon is hovered.
 pub fn render_tooltip(ui: &mut egui::Ui, id: AuraId, data: &EncyclopediaData) {
-    let Some(entry) = entry_of(id, data.abilities, data.items) else {
+    let Some(entry) = entry_of(id, &data.catalog_source()) else {
         ui.label(
             egui::RichText::new("Unknown aura")
                 .size(text::BODY)
@@ -1757,11 +1195,19 @@ mod tests {
             1,
         );
         let talents = TalentDefinitions::from_ron(&text, abilities).unwrap();
-        let engine = EngineAura::all_with(abilities, &items(), &talents);
-        let address = EngineAura::TalentProcAura(TalentId::FelStamina, 0);
+        let items = items();
+        let source = CatalogSource::new(abilities, &items, &talents);
+        let engine = EngineAura::all(&source);
+        let address = EngineAura::new(
+            EngineFamily::TalentProcAura,
+            EngineKey::TalentProc(TalentId::FelStamina, 0),
+        );
         assert!(engine.contains(&address));
-        assert_eq!(engine_art(address), AuraArt::Talent(TalentId::FelStamina));
-        let entry = catalog_with(abilities, &items(), &talents)
+        assert_eq!(
+            address.spec(&source).map(|spec| spec.art),
+            Some(AuraArt::Talent(TalentId::FelStamina))
+        );
+        let entry = catalog_with(abilities, &items, &talents)
             .into_iter()
             .find(|e| e.name == "Shadow Trance")
             .expect("an entry for the proc's aura");
@@ -1771,13 +1217,18 @@ mod tests {
             .as_deref()
             .is_some_and(|p| p.starts_with("Fel Stamina: A 50% chance on each damage tick")));
         // The shipped table has no proc yet, and so no such entry.
-        assert!(!EngineAura::all(abilities, &items())
+        let shipped = CatalogSource::new(abilities, &items, TalentDefinitions::shipped());
+        assert!(!EngineAura::all(&shipped)
             .iter()
-            .any(|e| matches!(e, EngineAura::TalentProcAura(..))));
+            .any(|e| e.family == EngineFamily::TalentProcAura));
     }
     use super::*;
     use crate::states::play_match::ability_config::load_ability_definitions;
+    use crate::states::play_match::combat_core::frost_armor_chill_auras;
+    use crate::states::play_match::constants::{FROST_TRAP_SLOW_MAGNITUDE, WEAKENED_SOUL_DURATION};
+    use crate::states::play_match::effects::backlash::DISPEL_BACKLASH_SILENCE_DURATION;
     use crate::states::play_match::rendering::{item_aura_icons, GENERIC_AURA_ICONS};
+    use crate::states::play_match::shadow_sight::SHADOW_SIGHT_BREAK_ON_DAMAGE;
 
     fn abilities() -> AbilityDefinitions {
         load_ability_definitions().expect("abilities.ron must load")
@@ -1795,6 +1246,14 @@ mod tests {
 
     fn items() -> ItemDefinitions {
         crate::states::play_match::equipment::load_item_definitions().expect("items.ron must load")
+    }
+
+    /// The catalogue's source over the shipped talent table.
+    fn shipped<'a>(
+        abilities: &'a AbilityDefinitions,
+        items: &'a ItemDefinitions,
+    ) -> CatalogSource<'a> {
+        CatalogSource::new(abilities, items, TalentDefinitions::shipped())
     }
 
     /// Every shipped item that applies an aura of its own — a proc trinket's
@@ -1838,7 +1297,7 @@ mod tests {
         );
         assert_eq!(
             entries.len(),
-            from_ron + EngineAura::all(&abilities, &items()).len(),
+            from_ron + EngineAura::all(&shipped(&abilities, &items())).len(),
             "every engine-registry aura must also produce an entry"
         );
     }
@@ -1862,8 +1321,8 @@ mod tests {
                 continue;
             }
             checked += 1;
-            let entry =
-                entry_of(AuraId::Ability(*ability), &abilities, &items()).unwrap_or_else(|| {
+            let entry = entry_of(AuraId::Ability(*ability), &shipped(&abilities, &items()))
+                .unwrap_or_else(|| {
                     panic!(
                         "{:?}'s ability page links to Topic::Aura(AuraId::Ability({:?})), \
                      which resolves to nothing — a dead link",
@@ -1890,15 +1349,17 @@ mod tests {
     }
 
     /// The same address check for the other half of the catalog. [`entry_of`]
-    /// is infallible for an engine aura today; this pins that every registered
+    /// is infallible for an engine aura today; this pins that every listed
     /// [`EngineAura`] stays reachable if it ever stops being.
     #[test]
     fn every_engine_aura_address_resolves() {
         let abilities = abilities();
-        let engine = EngineAura::all(&abilities, &items());
+        let items = items();
+        let source = shipped(&abilities, &items);
+        let engine = EngineAura::all(&source);
         assert!(!engine.is_empty(), "the engine registry went empty");
         for aura in engine {
-            let entry = entry_of(AuraId::Engine(aura), &abilities, &items())
+            let entry = entry_of(AuraId::Engine(aura), &source)
                 .unwrap_or_else(|| panic!("{:?} has no catalog entry — a dead link", aura));
             assert_eq!(
                 entry.id,
@@ -2687,8 +2148,10 @@ mod tests {
         let mut own_art: Vec<String> = Vec::new();
         let mut item_art: Vec<String> = Vec::new();
         let mut talent_art: Vec<String> = Vec::new();
-        for entry in catalog(&abilities, &items()) {
-            let key = icon_key(entry.id, &abilities, &items())
+        let item_defs = items();
+        let source = shipped(&abilities, &item_defs);
+        for entry in catalog_from(&source) {
+            let key = icon_key(entry.id, &source)
                 .unwrap_or_else(|| panic!("{} has no icon key — a placeholder tile", entry.name));
             match entry.art {
                 AuraArt::Own(expected) => {

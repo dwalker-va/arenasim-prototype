@@ -2,7 +2,7 @@
 //!
 //! The Buffs & Debuffs section enumerates NAMED auras: one entry per ability
 //! carrying an `applies_aura` block in `abilities.ron`, plus a short explicit
-//! registry (`encyclopedia::auras::EngineAura`) for the ones the engine applies
+//! registry (`encyclopedia::engine_auras`, one file per family) for the ones the engine applies
 //! from code with a hardcoded name.
 //!
 //! The RON half is self-maintaining — entry N+1 appears the moment the RON
@@ -34,7 +34,7 @@
 //! while the catalog was sending a player from their own gold-bordered buff to
 //! the enemy debuff's page — wrong polarity, wrong mechanic, wrong duration,
 //! wrong removal rule. The pair key makes each of the six resolvable
-//! separately (see `EngineAura`'s collision note), and blocks a seventh.
+//! separately (see `CatalogSource`'s collision note), and blocks a seventh.
 //!
 //! Six auras, but only FIVE entries: the chill's two effects are one COMPOUND
 //! debuff, so they share an entry (and a dispel takes both). An entry
@@ -76,12 +76,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use regex::Regex;
 
 use arenasim::states::encyclopedia::auras::catalog;
+use arenasim::states::encyclopedia::{AuraId, EngineAura, EngineFamily, EngineKey};
 use arenasim::states::match_config::RoguePoison;
 use arenasim::states::play_match::ability_config::load_ability_definitions;
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::components::{weapon_poison_marker_aura, TotemElement};
 use arenasim::states::play_match::demonology;
 use arenasim::states::play_match::equipment::ItemId;
+use arenasim::states::play_match::on_use_items::OnUseEffect;
+use arenasim::states::play_match::proc_trinkets::ProcEffect;
 
 use common::source_audit::{brace_body, load_sources};
 
@@ -118,20 +121,11 @@ const ALLOWLIST: &[(&str, &str)] = &[
 ///
 /// Kept short on purpose. If this grows past the handful of shared constructors
 /// below, the scan needs to get smarter rather than the list longer.
+///
+/// Sorted by file, then binding (`every_unreadable_aura_name_is_accounted_for`
+/// holds it), so two changes that each add a site add it in different places
+/// rather than both at the end.
 const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
-    (
-        "src/states/play_match/combat_core/damage.rs",
-        "ability_name: CHEAT_DEATH_NAME.to_string()",
-        "Cheat Death's damage cut (`cheat_death_aura`), named by its constant. No shipped \
-         talent carries the Cheat Death mechanic yet, so no match applies it; the Subtlety \
-         tree card (AS-419) that adds the node gives it its catalog entry.",
-    ),
-    (
-        "src/states/play_match/effects/divine_shield.rs",
-        "ability_name: ds_name.to_string()",
-        "Divine Shield's damage immunity, named after its own abilities.ron entry — which \
-         carries an `applies_aura` block, so the catalog's RON half already has the page.",
-    ),
     (
         "src/states/play_match/class_ai/paladin.rs",
         "ability_name: def.name.to_string()",
@@ -140,10 +134,17 @@ const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
     ),
     (
         "src/states/play_match/combat_core/damage.rs",
+        "ability_name: CHEAT_DEATH_NAME.to_string()",
+        "Cheat Death's damage cut (`cheat_death_aura`), named by its constant. No shipped \
+         talent carries the Cheat Death mechanic yet, so no match applies it; the Subtlety \
+         tree card (AS-419) that adds the node gives it its catalog entry.",
+    ),
+    (
+        "src/states/play_match/combat_core/damage.rs",
         "ability_name: interrupt_name",
         "the school lockout a successful interrupt leaves behind. \
-         `EngineAura::InterruptLockout` is derived from the same interrupt flags this site \
-         reads, so interrupt N+1 is catalogued with no code in either place.",
+         The `interrupt_lockout` engine aura family is derived from the same interrupt flags \
+         this site reads, so interrupt N+1 is catalogued with no code in either place.",
     ),
     (
         "src/states/play_match/combat_core/mod.rs",
@@ -153,17 +154,17 @@ const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
     ),
     (
         "src/states/play_match/components/auras.rs",
-        "ability_name: ability_def.name.clone()",
-        "`AuraPending::from_ability_scaled` and `::from_ability_dot`, the constructors every \
-         RON-defined aura passes through. The catalog's RON half reads the same `applies_aura` \
-         blocks, so these two are covered wholesale.",
-    ),
-    (
-        "src/states/play_match/components/auras.rs",
         "ability_name,",
         "`AuraPending::from_ability_with_name` — the one constructor that takes a name the RON \
          does not carry. It has NO production caller, and \
          `the_custom_name_constructor_has_no_production_caller` is what keeps that true.",
+    ),
+    (
+        "src/states/play_match/components/auras.rs",
+        "ability_name: ability_def.name.clone()",
+        "`AuraPending::from_ability_scaled` and `::from_ability_dot`, the constructors every \
+         RON-defined aura passes through. The catalog's RON half reads the same `applies_aura` \
+         blocks, so these two are covered wholesale.",
     ),
     (
         "src/states/play_match/components/combatant.rs",
@@ -172,32 +173,18 @@ const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
          `named_auras_built_from_helpers_also_resolve`.",
     ),
     (
-        "src/states/play_match/totems.rs",
-        "ability_name: buff_name.to_string()",
-        "a totem's pulsed buff; asserted per element by \
-         `named_auras_built_from_helpers_also_resolve`.",
-    ),
-    (
         "src/states/play_match/demonology.rs",
         "ability_name: name.to_string()",
         "`talent_aura`, the constructor of the Demonology talents' auras (Master \
          Demonologist, Touch of Shadow), each named by its constant. \
-         `EngineAura::MasterDemonologist` and `::TouchOfShadow` build their entries with the \
-         same constructors; asserted by `named_auras_built_from_helpers_also_resolve`.",
+         The `master_demonologist` and `touch_of_shadow` engine aura families build their \
+         entries with the same constructors; asserted by `named_auras_built_from_helpers_also_resolve`.",
     ),
     (
-        "src/states/play_match/talent_procs.rs",
-        "ability_name: name.clone()",
-        "a talent proc's aura, named after its effect or its talent \
-         (`talent_procs::effect_aura`). `EngineAura::TalentProcAura` is derived from the \
-         `Proc` effects in talents.ron and builds its entry with this same constructor, so \
-         talent N+1's proc is catalogued with no code in either place.",
-    ),
-    (
-        "src/states/play_match/talent_procs.rs",
-        "..base",
-        "a talent proc's next-cast modifier, built on the named aura above (`..base(..)`); \
-         covered by `EngineAura::TalentProcAura` the same way.",
+        "src/states/play_match/effects/divine_shield.rs",
+        "ability_name: ds_name.to_string()",
+        "Divine Shield's damage immunity, named after its own abilities.ron entry — which \
+         carries an `applies_aura` block, so the catalog's RON half already has the page.",
     ),
     (
         "src/states/play_match/next_cast.rs",
@@ -206,27 +193,48 @@ const INDIRECT_NAME_SITES: &[(&str, &str, &str)] = &[
          match.",
     ),
     (
+        "src/states/play_match/on_use_items.rs",
+        "ability_name: source_name.to_string()",
+        "an on-use item's buff and the heal over time it may carry, both named after the \
+         item. The `on_use_buff` engine aura family is derived from the buff `on_use:` blocks in items.ron \
+         (the heal its rider); asserted per shipped item by \
+         `named_auras_built_from_helpers_also_resolve`.",
+    ),
+    (
         "src/states/play_match/proc_trinkets.rs",
         "ability_name: source_name.to_string()",
-        "a proc trinket's buff, named after the trinket. `EngineAura::ProcTrinketBuff` is \
-         derived from the `proc:` blocks in items.ron, so trinket N+1 is catalogued with no \
+        "a proc trinket's buff, named after the trinket. The `proc_trinket_buff` engine aura \
+         family is derived from the `proc:` blocks in items.ron, so trinket N+1 is catalogued with no \
          code in either place; asserted per shipped trinket by \
          `named_auras_built_from_helpers_also_resolve`.",
     ),
     (
-        "src/states/play_match/on_use_items.rs",
-        "ability_name: source_name.to_string()",
-        "an on-use item's buff and the heal over time it may carry, both named after the \
-         item. `EngineAura::OnUseBuff` is derived from the buff `on_use:` blocks in items.ron \
-         (the heal its rider); asserted per shipped item by \
+        "src/states/play_match/talent_procs.rs",
+        "..base",
+        "a talent proc's next-cast modifier, built on the named aura of this file's \
+         `ability_name: name.clone()` entry (`..base(..)`); \
+         covered by the `talent_proc_aura` family the same way.",
+    ),
+    (
+        "src/states/play_match/talent_procs.rs",
+        "ability_name: name.clone()",
+        "a talent proc's aura, named after its effect or its talent \
+         (`talent_procs::effect_aura`). The `talent_proc_aura` engine aura family is derived \
+         from the `Proc` effects in talents.ron and builds its entry with this same constructor, so \
+         talent N+1's proc is catalogued with no code in either place.",
+    ),
+    (
+        "src/states/play_match/totems.rs",
+        "ability_name: buff_name.to_string()",
+        "a totem's pulsed buff; asserted per element by \
          `named_auras_built_from_helpers_also_resolve`.",
     ),
     (
         "src/states/play_match/triggered_absorbs.rs",
         "ability_name: name.to_string()",
         "a triggered absorb's shield (`TriggeredAbsorbConfig::shield_aura`), named after its \
-         source. An item's (Aegis of the Last Stand): `EngineAura::TriggeredAbsorbShield` is \
-         derived from the `triggered_absorb:` blocks in items.ron; asserted per shipped item by \
+         source. An item's (Aegis of the Last Stand): the `triggered_absorb_shield` engine \
+         aura family is derived from the `triggered_absorb:` blocks in items.ron; asserted per shipped item by \
          `named_auras_built_from_helpers_also_resolve`. An aura's (Sacred Shield): named after \
          the aura that arms it, whose abilities.ron entry carries an `applies_aura` block, so \
          the catalog's RON half already has the page.",
@@ -410,9 +418,9 @@ fn every_named_aura_in_the_engine_has_a_catalog_entry() {
              for it. Do ONE of:\n\
              \x20 - Give the applying ability an `applies_aura` block in assets/config/abilities.ron\n\
              \x20   (preferred — the catalog entry then derives itself)\n\
-             \x20 - Add a variant to `EngineAura` in src/states/encyclopedia/auras.rs and resolve\n\
-             \x20   it in `engine_entry`, reading its values from the constant or shared\n\
-             \x20   constructor the apply site reads. If the name is already taken by another\n\
+             \x20 - Add an engine aura family: a file in src/states/encyclopedia/engine_auras/\n\
+             \x20   whose `entry` reads its values from the constant or shared constructor\n\
+             \x20   the apply site reads (that directory's module docs say how). If the name is already taken by another\n\
              \x20   aura, give the entry a disambiguated `name` and set `frame_name` to what the\n\
              \x20   frames show.\n\
              \x20 - Add it to ALLOWLIST in tests/aura_catalog_audit.rs with a one-line\n\
@@ -469,6 +477,17 @@ fn every_file_that_hardcodes_an_aura_name_still_contributes() {
 /// a custom hardcoded name was the one path the guard could not see.
 #[test]
 fn every_unreadable_aura_name_is_accounted_for() {
+    let keys: Vec<(&str, &str)> = INDIRECT_NAME_SITES
+        .iter()
+        .map(|(file, binding, _)| (*file, *binding))
+        .collect();
+    let mut sorted = keys.clone();
+    sorted.sort_unstable();
+    assert_eq!(
+        keys, sorted,
+        "keep INDIRECT_NAME_SITES sorted by file, then binding"
+    );
+
     let scanned = scan_aura_literals();
     let justified: BTreeSet<(&str, &str)> = INDIRECT_NAME_SITES
         .iter()
@@ -497,7 +516,7 @@ fn every_unreadable_aura_name_is_accounted_for() {
          A name the scan cannot read is a name the catalog cannot be checked against. Do ONE of:\n\
          \x20 - Write the name as a string literal at the apply site, so the guard reads it\n\
          \x20 - Add the site to INDIRECT_NAME_SITES in tests/aura_catalog_audit.rs, saying what\n\
-         \x20   DOES cover the names it produces (a derived `EngineAura` variant, the RON half,\n\
+         \x20   DOES cover the names it produces (a derived engine aura family, the RON half,\n\
          \x20   or an explicit assertion in `named_auras_built_from_helpers_also_resolve`)\n\n",
         unjustified.len(),
         unjustified.join("\n"),
@@ -553,7 +572,7 @@ fn the_custom_name_constructor_has_no_production_caller() {
         "\n\n`AuraPending::from_ability_with_name` now has {} production caller(s):\n\n{}\n\n\
          It stamps an aura with a name that is in NO config and NO registry, so the encyclopedia \
          cannot derive a page for it and this file's source scan cannot read it. Before keeping \
-         the call: add an `EngineAura` variant for the name it produces, say so in \
+         the call: add an engine aura family for the name it produces, say so in \
          INDIRECT_NAME_SITES (the `ability_name,` entry), and relax this test to allow that \
          caller.\n\n",
         callers.len(),
@@ -621,137 +640,124 @@ fn named_auras_built_from_helpers_also_resolve() {
         );
     }
 
-    // `proc_trinkets::ProcConfig::aura` names a proc's buff after the trinket.
-    // Only a BUFF proc has one: Hand of Justice's extra swing lands an attack,
-    // not an aura, so `proc_buff` passes over it.
-    // Built through the SIMULATION's own constructor — the one `roll_procs`
-    // calls — so a trinket whose buff the catalog does not cover fails here
-    // rather than showing the player a frame with no page behind it.
+    // Every item that can put an aura on its wearer — a proc's buff, an
+    // on-use's buff and the heal over time beside it, a triggered absorb's
+    // shield — each built through the SIMULATION's own constructor (the one
+    // `roll_procs`, `process_on_use_items` and `fire_triggered_absorbs` call),
+    // so an item whose aura the catalog does not cover fails here rather than
+    // showing the player a frame with no page behind it.
     //
-    // Two claims, deliberately separate: this walks every shipped proc and
-    // checks each resolves; `at_least_one_proc_trinket_ships` below is what
-    // stops the loop going vacuous if the pool ever empties.
+    // The walk is over EVERY item, and each effect kind is matched here,
+    // exhaustively — not through `proc_buff` / `on_use_buff`, the predicates
+    // the catalog's own families select with — so a predicate that started
+    // skipping a kind cannot take the entries and this check down together,
+    // and a new effect kind does not compile until it says whether it lands
+    // an aura. It names no item: trinket N+1 is checked with no edit here.
+    // `every_item_aura_mechanism_keeps_its_witnesses` below is what stops the
+    // walk going vacuous.
     let items = shipped_items();
     for id in ItemId::all() {
         let Some(item) = items.get(id) else { continue };
-        let Some(proc) = item.proc_buff() else {
-            continue;
-        };
-        let sample = proc.aura(*id, &item.name);
-        let mechanic = format!("{:?}", sample.effect_type);
-        assert!(
-            known.contains(&(sample.ability_name.clone(), mechanic.clone())),
-            "the proc trinket \"{}\" grants a ({}) buff the frames call \"{}\", and the \
-             catalog has no entry for it",
-            item.name,
-            mechanic,
-            sample.ability_name
-        );
-    }
-
-    // `OnUseConfig::aura` / `heal_aura` name an on-use's buff, and the heal
-    // over time beside it, after the item, through the constructors
-    // `process_on_use_items` lands them with. Every pair must resolve.
-    let mut on_use_names: Vec<&str> = Vec::new();
-    for id in ItemId::all() {
-        let Some(item) = items.get(id) else { continue };
-        let Some(on_use) = item.on_use_buff() else {
-            continue;
-        };
-        on_use_names.push(item.name.as_str());
-        let samples = std::iter::once(on_use.aura(*id, &item.name)).chain(on_use.heal_aura(
-            *id,
-            &item.name,
-            bevy::prelude::Entity::PLACEHOLDER,
-        ));
+        let mut samples = Vec::new();
+        if let Some(proc) = &item.proc {
+            match proc.effect {
+                ProcEffect::Buff(_) => samples.push(proc.aura(*id, &item.name)),
+                // An extra swing (Hand of Justice) lands an attack, not an
+                // aura.
+                ProcEffect::ExtraSwing => {}
+            }
+        }
+        if let Some(on_use) = &item.on_use {
+            match on_use.effect {
+                OnUseEffect::Buff(_) => {
+                    samples.push(on_use.aura(*id, &item.name));
+                    samples.extend(on_use.heal_aura(
+                        *id,
+                        &item.name,
+                        bevy::prelude::Entity::PLACEHOLDER,
+                    ));
+                }
+                // A crowd-control break removes auras; it grants none.
+                OnUseEffect::CcBreak => {}
+            }
+        }
+        if let Some(absorb) = &item.triggered_absorb {
+            samples.push(absorb.absorb.shield_aura(
+                &item.name,
+                arenasim::states::play_match::triggered_absorbs::ShieldFrom::Item(*id),
+                1.0,
+            ));
+        }
         for sample in samples {
             let mechanic = format!("{:?}", sample.effect_type);
             assert!(
                 known.contains(&(sample.ability_name.clone(), mechanic.clone())),
-                "the on-use item \"{}\" grants a ({}) aura the frames call \"{}\", and the \
-                 catalog has no entry for it",
+                "the item \"{}\" puts a ({}) aura the frames call \"{}\" on its wearer, and \
+                 the catalog has no entry for it",
                 item.name,
                 mechanic,
                 sample.ability_name
             );
         }
     }
-    on_use_names.sort_unstable();
-    assert_eq!(
-        on_use_names,
-        [
-            "Diamond Flask",
-            "Earthstrike",
-            "Kiss of the Spider",
-            "Talisman of Ephemeral Power"
-        ],
-        "the on-use buffs"
-    );
-
-    // `TriggeredAbsorbConfig::aura` names a triggered absorb's shield after
-    // its item, through the constructor `fire_triggered_absorbs` calls.
-    let mut absorbs = 0;
-    for id in ItemId::all() {
-        let Some(item) = items.get(id) else { continue };
-        let Some(absorb) = item.triggered_absorb.as_ref() else {
-            continue;
-        };
-        absorbs += 1;
-        let sample = absorb.absorb.shield_aura(
-            &item.name,
-            arenasim::states::play_match::triggered_absorbs::ShieldFrom::Item(*id),
-            1.0,
-        );
-        let mechanic = format!("{:?}", sample.effect_type);
-        assert!(
-            known.contains(&(sample.ability_name.clone(), mechanic.clone())),
-            "the triggered absorb \"{}\" raises a ({}) shield the frames call \"{}\", and the \
-             catalog has no entry for it",
-            item.name,
-            mechanic,
-            sample.ability_name
-        );
-    }
-    assert_eq!(
-        absorbs, 1,
-        "Aegis of the Last Stand is the one triggered absorb"
-    );
 }
 
-/// The companion claim to the proc-trinket loop above: it walks a pool, so an
-/// empty pool would pass it silently. This says the pool is not empty and names
-/// what it should contain — the proof set AS-140 shipped, one per trigger.
-/// BUFF procs only, the pool the loop walks: an extra swing (Hand of Justice,
-/// Gressil) lands an attack, not an aura.
+/// The companion claim to the item walk above, which names no item: a walk
+/// over items that had silently lost their effects (a field renamed out from
+/// under `items.ron`, say) would check nothing and pass. Each item here is a
+/// shape one mechanism shipped with — a buff proc per trigger (AS-140's proof
+/// set), an on-use buff with and without a heal rider, a triggered absorb —
+/// and each must still reach its own catalog entry, through its family.
+///
+/// A WITNESS set, frozen, not the membership: a card that adds an item does
+/// not edit it (the walk above covers the new one), so two such cards cannot
+/// conflict here. Replace a witness only when its item is removed or stops
+/// being that shape.
 #[test]
-fn at_least_one_proc_trinket_ships() {
+fn every_item_aura_mechanism_keeps_its_witnesses() {
+    let witnesses = [
+        (EngineFamily::ProcTrinketBuff, ItemId::DragonspineTrophy),
+        (EngineFamily::ProcTrinketBuff, ItemId::SigilOfArcaneSurge),
+        (EngineFamily::ProcTrinketBuff, ItemId::ReliquaryOfRenewal),
+        (EngineFamily::OnUseBuff, ItemId::Earthstrike),
+        (EngineFamily::OnUseBuff, ItemId::DiamondFlask),
+        (
+            EngineFamily::TriggeredAbsorbShield,
+            ItemId::AegisOfTheLastStand,
+        ),
+    ];
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
     let items = shipped_items();
-    let mut with_procs: Vec<&str> = ItemId::all()
+    let entries = catalog(&abilities, &items);
+    for (family, id) in witnesses {
+        let address = AuraId::Engine(EngineAura::new(family, EngineKey::Item(id)));
+        let entry = entries
+            .iter()
+            .find(|entry| entry.id == address)
+            .unwrap_or_else(|| panic!("{id:?} has no {family:?} entry in the catalog"));
+        assert_eq!(entry.name, items.get_unchecked(&id).name);
+    }
+    // The proof set is one buff proc per trigger.
+    let triggers: BTreeSet<String> = witnesses
         .iter()
-        .filter_map(|id| items.get(id))
-        .filter(|item| item.proc_buff().is_some())
-        .map(|item| item.name.as_str())
+        .filter(|(family, _)| *family == EngineFamily::ProcTrinketBuff)
+        .map(|(_, id)| {
+            let proc = items.get_unchecked(id).proc.as_ref().expect("a proc");
+            format!("{:?}", proc.trigger)
+        })
         .collect();
-    with_procs.sort_unstable();
     assert_eq!(
-        with_procs,
-        vec![
-            // Champion weapons (AS-425) carry procs too.
-            "Corrupted Ashbringer",
-            "Darkmoon Card: Blue Dragon",
-            "Doomfinger",
-            "Dragonspine Trophy",
-            "Hammer of the Twisting Nether",
-            "Kingsfall",
-            "Reliquary of Renewal",
-            "Sigil of Arcane Surge",
-            "Soulseeker",
-            "Whetstone of Fury",
-            "Wraith Blade",
-        ],
-        "the shipped proc-trinket set changed — extend this list deliberately, and check \
-         `named_auras_built_from_helpers_also_resolve` still covers every member"
+        triggers.len(),
+        3,
+        "one witness per proc trigger: {triggers:?}"
     );
+    // And the Diamond Flask's buff carries its heal over time as a rider.
+    let flask = AuraId::Engine(EngineAura::new(
+        EngineFamily::OnUseBuff,
+        EngineKey::Item(ItemId::DiamondFlask),
+    ));
+    let flask = entries.iter().find(|entry| entry.id == flask).unwrap();
+    assert!(!flask.riders.is_empty(), "the Diamond Flask's heal rider");
 }
 
 /// Every allowlist entry must still correspond to a literal in the sources —
@@ -790,7 +796,7 @@ fn the_catalog_disambiguates_every_reused_engine_name() {
         assert!(
             sharing.len() > 1,
             "\"{}\" is documented as a reused engine name but only {} entry(s) carry it: {:?}. \
-             If the engine renamed one, update the module doc and EngineAura's collision note.",
+             If the engine renamed one, update the module doc and `CatalogSource`'s collision note.",
             reused,
             sharing.len(),
             sharing
@@ -843,7 +849,7 @@ fn catalog_display_names_are_unique() {
         "\n\n{} catalog name(s) are carried by more than one entry:\n\n{}\n\n\
          The index rows, the search results and the page headers all print this name, so two \
          entries sharing one are two rows a player cannot tell apart. Give each a disambiguating \
-         parenthetical in its `EngineAura` entry, and set `frame_name` to what the actor frames \
+         parenthetical in its engine aura family's entry, and set `frame_name` to what the actor frames \
          actually show.\n\n",
         collisions.len(),
         collisions.join("\n"),

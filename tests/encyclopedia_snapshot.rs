@@ -21,6 +21,17 @@
 //! filters, generated text) is covered by plain unit tests inside the module
 //! itself.
 //!
+//! ## What is pinned: layout, over a pinned catalogue
+//!
+//! Every screen here is drawn over `common::pinned_catalogue` — the live
+//! item, ability and talent tables restricted to the members that existed when
+//! the snapshots were last pinned. A grid, a count line, an aura index or a
+//! search result over the LIVE catalogue grew with every content card, so two
+//! cards that each added an item conflicted in these PNGs. Content added since
+//! moves no pixel here; which content exists is checked by content tests over
+//! the live tables, never by pixels. The values are live, so a change to a
+//! pinned item's or ability's own text or numbers still shows in its page.
+//!
 //! Fidelity caveat, shared with the other egui snapshot loops: kittest has no
 //! Bevy textures, so every item, class and ability icon renders as the widget's
 //! placeholder tile. Fonts are the client's own stack (`arenasim::ui::install`),
@@ -29,20 +40,21 @@
 //! colour, type and copy iterate faithfully; icon fidelity still needs the
 //! client.
 
+mod common;
+
 use egui_kittest::Harness;
 
 use arenasim::states::encyclopedia::{
-    draw_encyclopedia, AbilityFilters, AuraId, EncyclopediaData, EncyclopediaState, ItemFilters,
-    Section, Topic, View,
+    draw_encyclopedia, AbilityFilters, AuraId, CatalogSource, EncyclopediaData, EncyclopediaState,
+    EngineAura, EngineFamily, EngineKey, ItemFilters, Section, Topic, View,
 };
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::SpellSchool;
-use arenasim::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
-use arenasim::states::play_match::equipment::{
-    load_item_definitions, ArmorType, ItemDefinitions, ItemId, ItemSlotType,
-};
-use arenasim::states::play_match::talents::{TalentDefinitions, TalentId};
+use arenasim::states::play_match::equipment::{ArmorType, ItemId, ItemSlotType};
+use arenasim::states::play_match::talents::TalentId;
+
 use arenasim::states::play_match::AbilityType;
+use common::pinned_catalogue;
 
 const SIZE: [f32; 2] = [1400.0, 900.0];
 
@@ -66,7 +78,7 @@ fn encyclopedia_class_detail() {
     );
 }
 
-/// The Abilities index: both filter chip rows over the full 70-ability grid.
+/// The Abilities index: both filter chip rows over the pinned ability grid.
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_abilities_grid() {
@@ -123,7 +135,7 @@ fn encyclopedia_pet_ability_detail() {
     );
 }
 
-/// The Items index: chip-bar filters over the full 145-item grid.
+/// The Items index: chip-bar filters over the pinned item grid.
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
 fn encyclopedia_items_grid() {
@@ -341,7 +353,7 @@ fn encyclopedia_aura_detail_engine() {
     let mut state = state_at_root();
     state.apply(
         arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
-            AuraId::Engine(arenasim::states::encyclopedia::EngineAura::FrostTrapSlow),
+            AuraId::Engine(EngineAura::unit(EngineFamily::FrostTrapSlow)),
         ))),
     );
     snapshot("encyclopedia_aura_detail_engine", state);
@@ -361,8 +373,9 @@ fn encyclopedia_aura_detail_proc_trinket() {
     let mut state = state_at_root();
     state.apply(
         arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
-            AuraId::Engine(arenasim::states::encyclopedia::EngineAura::ProcTrinketBuff(
-                arenasim::states::play_match::equipment::ItemId::DragonspineTrophy,
+            AuraId::Engine(EngineAura::new(
+                EngineFamily::ProcTrinketBuff,
+                EngineKey::Item(ItemId::DragonspineTrophy),
             )),
         ))),
     );
@@ -385,7 +398,7 @@ fn encyclopedia_aura_detail_compound() {
     let mut state = state_at_root();
     state.apply(
         arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
-            AuraId::Engine(arenasim::states::encyclopedia::EngineAura::FrostArmorChill),
+            AuraId::Engine(EngineAura::unit(EngineFamily::FrostArmorChill)),
         ))),
     );
     snapshot("encyclopedia_aura_detail_compound", state);
@@ -404,11 +417,10 @@ fn encyclopedia_aura_detail_name_collision() {
     let mut state = state_at_root();
     state.apply(
         arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
-            AuraId::Engine(
-                arenasim::states::encyclopedia::EngineAura::WeaponPoisonCoating(
-                    arenasim::states::match_config::RoguePoison::Crippling,
-                ),
-            ),
+            AuraId::Engine(EngineAura::new(
+                EngineFamily::WeaponPoisonCoating,
+                EngineKey::Poison(arenasim::states::match_config::RoguePoison::Crippling),
+            )),
         ))),
     );
     snapshot("encyclopedia_aura_detail_name_collision", state);
@@ -426,7 +438,7 @@ fn encyclopedia_aura_detail_weakened_soul() {
     let mut state = state_at_root();
     state.apply(
         arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
-            AuraId::Engine(arenasim::states::encyclopedia::EngineAura::WeakenedSoul),
+            AuraId::Engine(EngineAura::unit(EngineFamily::WeakenedSoul)),
         ))),
     );
     snapshot("encyclopedia_aura_detail_weakened_soul", state);
@@ -441,7 +453,7 @@ fn encyclopedia_aura_detail_orb() {
     let mut state = state_at_root();
     state.apply(
         arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
-            AuraId::Engine(arenasim::states::encyclopedia::EngineAura::ShadowSight),
+            AuraId::Engine(EngineAura::unit(EngineFamily::ShadowSight)),
         ))),
     );
     snapshot("encyclopedia_aura_detail_orb", state);
@@ -525,23 +537,69 @@ fn encyclopedia_nav_cluster_from_view_combatant() {
     );
 }
 
+/// Every pinned member is still in the live tables. `restricted_to` skips a
+/// member a table lacks, so a deleted item or ability would otherwise drop out
+/// of these screens in silence; this says so instead, without a GPU. (Re-pin
+/// in `tests/common/pinned_catalogue.rs`, and re-bless what moved.)
+#[test]
+fn every_pinned_member_is_still_in_the_game() {
+    use arenasim::states::play_match::ability_config::load_ability_definitions;
+    use arenasim::states::play_match::equipment::load_item_definitions;
+    use arenasim::states::play_match::talents::TalentDefinitions;
+
+    let items = load_item_definitions().expect("items.ron must load");
+    let gone: Vec<&ItemId> = pinned_catalogue::ITEMS
+        .iter()
+        .filter(|id| items.get(id).is_none())
+        .collect();
+    assert!(
+        gone.is_empty(),
+        "pinned items gone from items.ron: {gone:?}"
+    );
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let gone: Vec<&AbilityType> = pinned_catalogue::ABILITIES
+        .iter()
+        .filter(|id| abilities.get(id).is_none())
+        .collect();
+    assert!(
+        gone.is_empty(),
+        "pinned abilities gone from abilities.ron: {gone:?}"
+    );
+    let gone: Vec<&TalentId> = pinned_catalogue::TALENTS
+        .iter()
+        .filter(|id| TalentDefinitions::shipped().get(**id).is_none())
+        .collect();
+    assert!(
+        gone.is_empty(),
+        "pinned talents gone from talents.ron: {gone:?}"
+    );
+
+    assert_eq!(
+        pinned_catalogue::items().item_count(),
+        pinned_catalogue::ITEMS.len()
+    );
+    assert_eq!(
+        pinned_catalogue::talents().iter().count(),
+        pinned_catalogue::TALENTS.len()
+    );
+}
+
 // ============================================================================
 // Harness
 // ============================================================================
 
-fn items() -> ItemDefinitions {
-    load_item_definitions().expect("items.ron must load")
-}
-
-fn abilities() -> AbilityDefinitions {
-    load_ability_definitions().expect("abilities.ron must load")
-}
-
-/// A fresh state with its registry built — the same thing the Bevy wrapper does
-/// on its first frame.
+/// A fresh state with its registry built over the pinned catalogue — the same
+/// thing the Bevy wrapper does on its first frame.
 fn state_at_root() -> EncyclopediaState {
     let mut state = EncyclopediaState::default();
-    state.rebuild_registry(&items(), &abilities(), TalentDefinitions::shipped());
+    let items = pinned_catalogue::items();
+    let abilities = pinned_catalogue::abilities();
+    state.rebuild_registry(&CatalogSource {
+        abilities: &abilities,
+        items: &items,
+        talents: pinned_catalogue::talents(),
+        families: pinned_catalogue::ENGINE_AURAS,
+    });
     state
 }
 
@@ -565,8 +623,8 @@ fn snapshot_opened_from(
 ) {
     // `Harness::build` takes a 'static closure, so the definitions are moved in
     // rather than borrowed from the caller's frame.
-    let items = items();
-    let abilities = abilities();
+    let items = pinned_catalogue::items();
+    let abilities = pinned_catalogue::abilities();
     let mut harness = Harness::builder().with_size(SIZE).build(move |ctx| {
         arenasim::ui::install(ctx);
         let data = EncyclopediaData {
@@ -576,7 +634,8 @@ fn snapshot_opened_from(
             item_icons: None,
             class_icons: None,
             ability_icons: None,
-            talents: TalentDefinitions::shipped(),
+            talents: pinned_catalogue::talents(),
+            engine_auras: pinned_catalogue::ENGINE_AURAS,
         };
         let _ = draw_encyclopedia(ctx, &mut state, &data, return_to);
     });

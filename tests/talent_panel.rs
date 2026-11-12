@@ -321,6 +321,7 @@ fn data(items: &arenasim::states::play_match::equipment::ItemDefinitions) -> Enc
         class_icons: None,
         ability_icons: None,
         talents: talents(),
+        engine_auras: arenasim::states::encyclopedia::EngineFamily::ALL,
     }
 }
 
