@@ -105,7 +105,7 @@ const KICK_CHEST_IMPACT: [ClientEmitter; 1] = [ClientEmitter {
     rise: false,
     color: [[253, 244, 225], WHITE, WHITE],
     alpha: [0.7, 0.53, 0.0],
-    size: [0.278, 0.556, 0.972],
+    size: ParticleSize::diameters([0.278, 0.556, 0.972]),
     mid: 0.5,
     track: None,
 }];
@@ -137,7 +137,7 @@ const COUNTERSPELL_IMPACT_CHEST: [ClientEmitter; 3] = [
         rise: false,
         color: [[30, 136, 235], [144, 52, 230], [170, 30, 236]],
         alpha: [0.0, 0.55, 0.21],
-        size: [0.753, 0.456, 0.167],
+        size: ParticleSize::diameters([0.753, 0.456, 0.167]),
         mid: 0.5,
         track: None,
     },
@@ -155,7 +155,7 @@ const COUNTERSPELL_IMPACT_CHEST: [ClientEmitter; 3] = [
         rise: false,
         color: [[255, 221, 30], [52, 227, 192], [170, 30, 236]],
         alpha: [0.0, 0.65, 0.36],
-        size: [0.906, 0.606, 0.422],
+        size: ParticleSize::diameters([0.906, 0.606, 0.422]),
         mid: 0.45,
         track: None,
     },
@@ -173,7 +173,7 @@ const COUNTERSPELL_IMPACT_CHEST: [ClientEmitter; 3] = [
         rise: false,
         color: [[172, 77, 245], WHITE, [32, 240, 66]],
         alpha: [0.88, 0.68, 0.0],
-        size: [0.031, 0.142, 0.0],
+        size: ParticleSize::diameters([0.031, 0.142, 0.0]),
         mid: 0.5,
         track: None,
     },
@@ -201,7 +201,7 @@ const DECISIVESTRIKE_IMPACT_CHEST: [ClientEmitter; 3] = [
         rise: false,
         color: [[208, 0, 0], [129, 35, 189], [63, 0, 134]],
         alpha: [0.0, 1.0, 0.0],
-        size: [0.028, 0.972, 1.667],
+        size: ParticleSize::diameters([0.028, 0.972, 1.667]),
         mid: 0.5,
         track: None,
     },
@@ -219,7 +219,7 @@ const DECISIVESTRIKE_IMPACT_CHEST: [ClientEmitter; 3] = [
         rise: false,
         color: [[114, 35, 159], [190, 0, 9], [70, 35, 142]],
         alpha: [0.0, 1.0, 0.0],
-        size: [0.028, 0.069, 0.028],
+        size: ParticleSize::diameters([0.028, 0.069, 0.028]),
         mid: 0.5,
         track: None,
     },
@@ -237,7 +237,7 @@ const DECISIVESTRIKE_IMPACT_CHEST: [ClientEmitter; 3] = [
         rise: false,
         color: [[81, 0, 144], [36, 0, 171], [81, 0, 144]],
         alpha: [1.0, 1.0, 1.0],
-        size: [0.028, 0.139, 0.028],
+        size: ParticleSize::diameters([0.028, 0.139, 0.028]),
         mid: 0.5,
         track: None,
     },
@@ -264,7 +264,7 @@ const MINDBLAST_HEAD: [ClientEmitter; 3] = [
         rise: false,
         color: [[79, 55, 255], [126, 55, 255], [210, 0, 255]],
         alpha: [1.0, 1.0, 0.0],
-        size: [0.111, 0.278, 0.028],
+        size: ParticleSize::diameters([0.111, 0.278, 0.028]),
         mid: 0.5,
         track: Some(MIND_BLAST_FLAME_TRACK),
     },
@@ -282,7 +282,7 @@ const MINDBLAST_HEAD: [ClientEmitter; 3] = [
         rise: false,
         color: [[150, 0, 255], [90, 0, 255], [0, 42, 255]],
         alpha: [0.0, 1.0, 0.0],
-        size: [0.028, 0.056, 0.028],
+        size: ParticleSize::diameters([0.028, 0.056, 0.028]),
         mid: 0.6,
         track: Some(MIND_BLAST_EMBER_TRACK),
     },
@@ -301,7 +301,7 @@ const MINDBLAST_HEAD: [ClientEmitter; 3] = [
         rise: false,
         color: [[60, 0, 255], [58, 35, 84], [180, 162, 192]],
         alpha: [0.29, 0.59, 0.0],
-        size: [0.167, 0.347, 0.694],
+        size: ParticleSize::diameters([0.167, 0.347, 0.694]),
         mid: 0.5,
         track: Some(MIND_BLAST_SMOKE_TRACK),
     },
@@ -371,7 +371,7 @@ const fn holy_spark(name: &'static str, speed: f32, track: &'static [(f32, f32)]
         rise: false,
         color: [WHITE; 3],
         alpha: [1.0, 1.0, 0.0],
-        size: [0.111, 0.069, 0.0],
+        size: ParticleSize::diameters([0.111, 0.069, 0.0]),
         mid: 0.25,
         track: Some(track),
     }
@@ -396,7 +396,7 @@ const HOLYSMITE_LOW_CHEST: [ClientEmitter; 9] = [
         rise: false,
         color: [[252, 255, 0], WHITE, [255, 246, 0]],
         alpha: [1.0, 1.0, 1.0],
-        size: [0.833, 2.778, 0.028],
+        size: ParticleSize::diameters([0.833, 2.778, 0.028]),
         mid: 0.5,
         track: Some(HOLY_FLASH_TRACK),
     },
@@ -415,7 +415,7 @@ const HOLYSMITE_LOW_CHEST: [ClientEmitter; 9] = [
         rise: false,
         color: [[255, 255, 0], WHITE, [254, 255, 180]],
         alpha: [0.29, 1.0, 0.0],
-        size: [0.167, 1.389, 0.028],
+        size: ParticleSize::diameters([0.167, 1.389, 0.028]),
         mid: 0.5,
         track: Some(HOLY_CONVERGE_TRACK),
     },
@@ -434,7 +434,7 @@ const HOLYSMITE_LOW_CHEST: [ClientEmitter; 9] = [
         rise: false,
         color: [[255, 186, 77], WHITE, [246, 255, 0]],
         alpha: [1.0, 1.0, 0.0],
-        size: [0.028, 0.056, 0.0],
+        size: ParticleSize::diameters([0.028, 0.056, 0.0]),
         mid: 0.75,
         track: None,
     },
@@ -458,7 +458,7 @@ const HOLYSMITE_LOW_CHEST: [ClientEmitter; 9] = [
         // sampled at the emitter's 0.25.
         color: [[255, 236, 160], [255, 241, 184], WHITE],
         alpha: [0.84, 0.78, 0.0],
-        size: [0.035, 0.083, 0.0],
+        size: ParticleSize::diameters([0.035, 0.083, 0.0]),
         mid: 0.25,
         track: Some(HOLY_RIBBON_TRACK),
     },
@@ -477,7 +477,7 @@ const HOLYSMITE_LOW_CHEST: [ClientEmitter; 9] = [
         rise: false,
         color: [[150, 145, 0], [139, 88, 16], [212, 131, 58]],
         alpha: [0.2, 0.29, 0.0],
-        size: [0.139, 0.333, 0.389],
+        size: ParticleSize::diameters([0.139, 0.333, 0.389]),
         mid: 0.4,
         track: Some(HOLY_DUST_TRACK),
     },
@@ -496,7 +496,7 @@ const HOLYSMITE_LOW_CHEST: [ClientEmitter; 9] = [
         rise: false,
         color: [WHITE, [255, 186, 0], [255, 114, 0]],
         alpha: [1.0, 1.0, 0.0],
-        size: [0.02, 0.03, 0.0],
+        size: ParticleSize::diameters([0.02, 0.03, 0.0]),
         mid: 0.3,
         track: Some(HOLY_STREAK_TRACK),
     },
@@ -515,7 +515,7 @@ const HOLYSMITE_LOW_CHEST: [ClientEmitter; 9] = [
         rise: false,
         color: [[255, 222, 0], WHITE, [252, 255, 0]],
         alpha: [0.29, 1.0, 0.0],
-        size: [0.278, 0.611, 0.417],
+        size: ParticleSize::diameters([0.278, 0.611, 0.417]),
         mid: 0.25,
         track: Some(HOLY_GLOW_TRACK),
     },
@@ -698,6 +698,76 @@ mod tests {
             &MIND_BLAST_LANDING,
             &HOLY_SHOCK_LANDING,
         ]
+    }
+
+    /// Every particle is drawn at the AS-137 bench's width. The bench draws a
+    /// size key as the sprite's full width (`r = sz * zoom / 2`), so the quad
+    /// is each key, times the effect's size knob.
+    #[test]
+    fn every_particle_is_drawn_at_the_benchs_widths() {
+        let bench: [(&[ClientEmitter], f32, &[[f32; 3]]); 6] = [
+            (&KICK_LANDING, KICK_IMPACT_SIZE, &[[0.278, 0.556, 0.972]]),
+            (
+                &WIND_SHEAR_LANDING,
+                WIND_SHEAR_IMPACT_SIZE,
+                &[[0.278, 0.556, 0.972]],
+            ),
+            (
+                &SPELL_LOCK_LANDING,
+                SPELL_LOCK_IMPACT_SIZE,
+                &[
+                    [0.753, 0.456, 0.167],
+                    [0.906, 0.606, 0.422],
+                    [0.031, 0.142, 0.0],
+                ],
+            ),
+            (
+                &HEROIC_STRIKE_LANDING,
+                HEROIC_STRIKE_IMPACT_SIZE,
+                &[
+                    [0.028, 0.972, 1.667],
+                    [0.028, 0.069, 0.028],
+                    [0.028, 0.139, 0.028],
+                ],
+            ),
+            (
+                &MIND_BLAST_LANDING,
+                MIND_BLAST_SMOULDER_SIZE,
+                &[
+                    [0.111, 0.278, 0.028],
+                    [0.028, 0.056, 0.028],
+                    [0.167, 0.347, 0.694],
+                ],
+            ),
+            (
+                &HOLY_SHOCK_LANDING,
+                HOLY_SHOCK_DAMAGE_IMPACT_SIZE,
+                &[
+                    [0.833, 2.778, 0.028],
+                    [0.167, 1.389, 0.028],
+                    [0.028, 0.056, 0.0],
+                    [0.111, 0.069, 0.0],
+                    [0.111, 0.069, 0.0],
+                    [0.035, 0.083, 0.0],
+                    [0.139, 0.333, 0.389],
+                    [0.02, 0.03, 0.0],
+                    [0.278, 0.611, 0.417],
+                ],
+            ),
+        ];
+        for (table, knob, widths) in bench {
+            assert_eq!(table.len(), widths.len(), "{}", table[0].name);
+            for (e, width) in table.iter().zip(widths) {
+                let drawn = e.size.diameter_keys();
+                for k in 0..3 {
+                    assert!(
+                        (drawn[k] - width[k] * knob).abs() < 1e-6,
+                        "{}: {drawn:?} against {width:?}",
+                        e.name
+                    );
+                }
+            }
+        }
     }
 
     #[test]

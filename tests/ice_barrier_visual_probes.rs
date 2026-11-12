@@ -31,8 +31,9 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::{
     animate_client_particles, place_shield_cards, shield_card_extent, shield_layer_rgb,
-    spawn_instant_cast_hands, update_heal_cast_glows, update_shield_visuals, IB_RIM_GAIN,
-    ICE_BARRIER_AURA_NAME, PWS_CLIENT_TO_RIG, PWS_RIM_QUAD, PWS_STREAK_QUAD, PW_SHIELD_AURA_NAME,
+    spawn_instant_cast_hands, update_heal_cast_glows, update_shield_visuals, IB_MIST_SIZE,
+    IB_RIM_GAIN, ICE_BARRIER_AURA_NAME, PWS_CLIENT_TO_RIG, PWS_RIM_QUAD, PWS_STREAK_QUAD,
+    PW_SHIELD_AURA_NAME,
 };
 use arenasim::CharacterClass;
 
@@ -576,6 +577,45 @@ fn break_and_expiry_share_one_swell_and_fade() {
     h.expire(purged);
     let seq = ending_frames(&mut h, purged);
     assert!(seq.iter().any(|s| s.0 > 1.2) && seq.last().unwrap().1 < 0.01);
+}
+
+/// A linear ramp over birth, `mid` and death keys, at `t` of the life.
+fn ramp3(keys: [f32; 3], mid: f32, t: f32) -> f32 {
+    if t < mid {
+        keys[0] + (keys[1] - keys[0]) * (t / mid)
+    } else {
+        keys[1] + (keys[2] - keys[1]) * ((t - mid) / (1.0 - mid))
+    }
+}
+
+/// Every mist puff is drawn at the Ice Barrier bench's width: the bench draws
+/// the client's size key as the puff's RADIUS on our rig (`r = key *
+/// CLIENT_TO_RIG * mistSize`), so the quad is twice it.
+#[test]
+fn the_mist_is_drawn_at_twice_the_benchs_radius_keys() {
+    const BENCH_RADIUS: [f32; 3] = [0.278, 0.417, 0.556];
+    let (mut h, bearer, _) = standard_harness();
+    h.give(bearer, ICE_BARRIER_AURA_NAME);
+    let mut measured = 0;
+    for _ in 0..90 {
+        h.tick(1);
+        let mut q = h
+            .app
+            .world_mut()
+            .query::<(&ClientParticle, &GlobalTransform)>();
+        for (p, g) in q.iter(h.app.world()) {
+            let radius = ramp3(BENCH_RADIUS, 0.5, p.age / p.life);
+            let want = 2.0 * radius * PWS_CLIENT_TO_RIG * IB_MIST_SIZE;
+            let width = g.compute_transform().scale.x;
+            assert!(
+                (width - want).abs() < 1e-4,
+                "a puff {:.2} of the way through its life is {width:.3} yd across, not {want:.3}",
+                p.age / p.life
+            );
+            measured += 1;
+        }
+    }
+    assert!(measured > 100, "only {measured} puff samples");
 }
 
 /// The frost mist: from the cast, puffs appear above the head and fall at the

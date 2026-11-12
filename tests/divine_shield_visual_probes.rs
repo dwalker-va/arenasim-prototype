@@ -34,8 +34,8 @@ use arenasim::states::play_match::systems::process_divine_shield;
 use arenasim::states::play_match::{
     animate_client_particles, ds_halo_on, ds_sparkle_rate, particle_rotation, place_shield_cards,
     shield_card_extent, shield_layer_rgb, spawn_divine_shield_cast_hands, update_shield_visuals,
-    HaloMode, DIVINE_SHIELD_AURA_NAME, DS_FILL_GAIN, DS_HALO_MODE, DS_SPARKLE_HEIGHT,
-    PWS_CLIENT_TO_RIG, PW_SHIELD_AURA_NAME,
+    HaloMode, DIVINE_SHIELD_AURA_NAME, DS_FILL_GAIN, DS_HALO_MODE, DS_HALO_SIZE, DS_SIZE,
+    DS_SPARKLE_HEIGHT, DS_SPARKLE_SIZE, PWS_CLIENT_TO_RIG, PW_SHIELD_AURA_NAME,
 };
 use arenasim::CharacterClass;
 
@@ -524,6 +524,69 @@ fn gold_sparkles_pour_off_the_bubble_and_none_off_pws() {
         0.3,
     );
     assert!(control.particles().is_empty(), "PW:S threw particles");
+}
+
+/// A linear ramp over birth, `mid` and death keys, at `t` of the life.
+fn ramp3(keys: [f32; 3], mid: f32, t: f32) -> f32 {
+    if t < mid {
+        keys[0] + (keys[1] - keys[0]) * (t / mid)
+    } else {
+        keys[1] + (keys[2] - keys[1]) * ((t - mid) / (1.0 - mid))
+    }
+}
+
+/// The sparkles and the halo rings are drawn at the Divine Shield bench's
+/// widths. The bench keys each as a HALF-size and draws it as the sprite's
+/// radius on our rig (`r = half * CLIENT_TO_RIG * size * knob`), so the quad
+/// is twice the key.
+#[test]
+fn the_sparkles_and_halo_are_drawn_at_twice_the_benchs_half_sizes() {
+    const SPARKLE_HALF: [f32; 3] = [0.056, 0.083, 0.0];
+    const HALO_HALF: [f32; 3] = [0.139, 1.389, 0.139];
+    let rig = PWS_CLIENT_TO_RIG * DS_SIZE;
+    let mut h = Harness::new();
+    let paladin = h.paladin(BODY);
+    h.give(paladin, divine_shield());
+    h.run_to(paladin, ShieldKind::DivineShield, ShieldPhase::Loop, 0.0);
+    let (mut sparkles, mut halos) = (0, 0);
+    let mut measure = |h: &mut Harness| {
+        let mut q = h
+            .app
+            .world_mut()
+            .query::<(&ClientParticle, &GlobalTransform)>();
+        for (p, g) in q.iter(h.app.world()) {
+            let t = p.age / p.life;
+            let want = match p.facing {
+                ParticleFacing::Spin { .. } => {
+                    sparkles += 1;
+                    2.0 * ramp3(SPARKLE_HALF, 0.75, t) * rig * DS_SPARKLE_SIZE
+                }
+                ParticleFacing::Camera => {
+                    halos += 1;
+                    2.0 * ramp3(HALO_HALF, 0.5, t) * rig * DS_HALO_SIZE
+                }
+                other => panic!("an unexpected {other:?} particle"),
+            };
+            let width = g.compute_transform().scale.x;
+            assert!(
+                (width - want).abs() < 1e-4,
+                "{:?} at {t:.2} of its life is {width:.3} yd across, not {want:.3}",
+                p.facing
+            );
+        }
+    };
+    for _ in 0..30 {
+        h.tick(1);
+        measure(&mut h);
+    }
+    // The halo falls only in the death.
+    h.remove(paladin, DIVINE_SHIELD_AURA_NAME);
+    for _ in 0..40 {
+        h.tick(1);
+        measure(&mut h);
+    }
+    assert!(sparkles > 100, "only {sparkles} sparkle samples");
+    assert!(halos > 10, "only {halos} halo samples");
 }
 
 /// The sparkles thin out across the 1.1 s death, as the client's rate track

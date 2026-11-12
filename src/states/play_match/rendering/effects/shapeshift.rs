@@ -322,8 +322,9 @@ pub fn dress_travel_form(
 
 // ── The shift puff: druidmorph_impact_base.m2 (kit 3610) ────────────────────
 
-/// The four emitters, transcribed as the bench carries them. Sizes are
-/// diameters (the bench draws a particle at twice its M2 scale).
+/// The four emitters, transcribed as the bench carries them. The bench draws a
+/// particle at twice its M2 scale, so the sizes are `ParticleSize::radii`, the
+/// bench's scale keys as it gives them.
 const DRUIDMORPH_IMPACT_BASE: [ClientEmitter; 4] = [
     // P0 genericglow2c: the swelling violet → sky-blue flash.
     ClientEmitter {
@@ -340,7 +341,7 @@ const DRUIDMORPH_IMPACT_BASE: [ClientEmitter; 4] = [
         rise: true,
         color: [[69, 0, 210], [106, 180, 243], [69, 0, 210]],
         alpha: [0.22, 0.36, 0.0],
-        size: [0.306, 1.488, 3.688],
+        size: ParticleSize::radii([0.153, 0.744, 1.844]),
         mid: 0.5,
         track: None,
     },
@@ -359,7 +360,7 @@ const DRUIDMORPH_IMPACT_BASE: [ClientEmitter; 4] = [
         rise: false,
         color: [[255, 255, 255]; 3],
         alpha: [0.7, 1.0, 0.0],
-        size: [1.1, 1.0, 0.52],
+        size: ParticleSize::radii([0.55, 0.5, 0.26]),
         mid: 0.5,
         track: None,
     },
@@ -378,7 +379,7 @@ const DRUIDMORPH_IMPACT_BASE: [ClientEmitter; 4] = [
         rise: false,
         color: [[115, 121, 255], [112, 210, 255], [244, 252, 255]],
         alpha: [0.0, 0.59, 0.0],
-        size: [0.006, 0.556, 0.056],
+        size: ParticleSize::radii([0.003, 0.278, 0.028]),
         mid: 0.5,
         track: None,
     },
@@ -397,7 +398,7 @@ const DRUIDMORPH_IMPACT_BASE: [ClientEmitter; 4] = [
         rise: false,
         color: [[61, 0, 187], [119, 196, 255], [255, 255, 255]],
         alpha: [1.0, 1.0, 0.0],
-        size: [0.388, 0.388, 0.388],
+        size: ParticleSize::radii([0.194, 0.194, 0.194]),
         mid: 0.5,
         track: None,
     },
@@ -508,6 +509,28 @@ mod tests {
             .collect();
         for (got, want) in counts.iter().zip([7.0, 125.8, 28.0, 28.0]) {
             assert!((got - want).abs() < 1e-3, "{counts:?}");
+        }
+    }
+
+    /// Each layer is drawn at the AS-160 bench's width: the bench keys a
+    /// particle's RADIUS (`sc = keys(scale, t) * size * 2`, drawn at
+    /// `r = sc * q.s * 0.5`), so the quad is twice each key.
+    #[test]
+    fn the_puff_is_drawn_at_twice_the_benchs_radius_keys() {
+        let bench: [(&str, [f32; 3]); 4] = [
+            ("flash", [0.153, 0.744, 1.844]),
+            ("smoke", [0.55, 0.5, 0.26]),
+            ("streaks", [0.003, 0.278, 0.028]),
+            ("motes", [0.194, 0.194, 0.194]),
+        ];
+        for (i, (layer, radius)) in bench.into_iter().enumerate() {
+            let e = shift_puff_emitter(i);
+            assert!(e.name.ends_with(layer), "{} is not the {layer}", e.name);
+            let drawn = e.size.diameter_keys();
+            for k in 0..3 {
+                let want = 2.0 * radius[k] * SHIFT_PUFF_SIZE_MUL;
+                assert!((drawn[k] - want).abs() < 1e-6, "{layer}: {drawn:?}");
+            }
         }
     }
 

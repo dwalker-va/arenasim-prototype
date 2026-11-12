@@ -37,8 +37,8 @@ use crate::states::play_match::components::*;
 // - **P1 green sparks** — 34-334 ms, 100/s, 1.0 s life, 1.39 yd/s. Additive,
 //   as the signed-off bench draws them (the client table lists blend 2).
 //
-// The bench's `scale` keys are sprite RADII; a particle's quad is a unit
-// DIAMETER, so every size ramp below is twice the bench's keys.
+// The bench's `scale` keys are sprite RADII, so every size ramp below is
+// `ParticleSize::radii`, the keys as the bench gives them.
 //
 // The values are the AS-333 Baseline Kit Visuals Bench's Life Tap tab at its
 // defaults, which the user signed off (version 1792202136-e9a0): every layer
@@ -170,16 +170,6 @@ const fn alpha3(a: [f32; 3]) -> [f32; 3] {
     ]
 }
 
-/// A size ramp from the bench's `scale` keys, which are RADII: the quad is a
-/// unit diameter, so it is drawn at twice the key.
-const fn diameter(radius: [f32; 3]) -> [f32; 3] {
-    [
-        radius[0] * 2.0 * LIFE_TAP_SIZE_MUL,
-        radius[1] * 2.0 * LIFE_TAP_SIZE_MUL,
-        radius[2] * 2.0 * LIFE_TAP_SIZE_MUL,
-    ]
-}
-
 /// The four layers at the signed-off knobs, in [`LifeTapGlow::carry`] order.
 static LAYERS: [Layer; 4] = [
     // P3 `blue_glow2`: the converging motes.
@@ -199,7 +189,7 @@ static LAYERS: [Layer; 4] = [
             rise: false,
             color: [RED, lerp_rgb(RED, MANA_BLUE, 0.3), MANA_BLUE],
             alpha: alpha3([0.2, 1.0, 0.9]),
-            size: diameter([0.03, 0.14, 0.28]),
+            size: ParticleSize::radii([0.03, 0.14, 0.28]).scaled(LIFE_TAP_SIZE_MUL),
             mid: 0.3,
             track: None,
         },
@@ -228,7 +218,7 @@ static LAYERS: [Layer; 4] = [
             rise: false,
             color: [CYAN, lerp_rgb(CYAN, PALE, 0.5), PALE],
             alpha: alpha3([1.0, 0.9, 0.8]),
-            size: diameter([0.014, 0.11, 0.014]),
+            size: ParticleSize::radii([0.014, 0.11, 0.014]).scaled(LIFE_TAP_SIZE_MUL),
             mid: 0.5,
             track: None,
         },
@@ -255,7 +245,7 @@ static LAYERS: [Layer; 4] = [
             rise: false,
             color: [PUFF_GREEN, PUFF_GREEN, PUFF_END],
             alpha: alpha3([0.7, 0.45, 0.0]),
-            size: diameter([0.11, 0.44, 1.11]),
+            size: ParticleSize::radii([0.11, 0.44, 1.11]).scaled(LIFE_TAP_SIZE_MUL),
             mid: 0.5,
             track: None,
         },
@@ -286,7 +276,7 @@ static LAYERS: [Layer; 4] = [
                 SPARK_END,
             ],
             alpha: alpha3([1.0, 0.5, 0.0]),
-            size: diameter([0.08, 0.06, 0.03]),
+            size: ParticleSize::radii([0.08, 0.06, 0.03]).scaled(LIFE_TAP_SIZE_MUL),
             mid: 0.5,
             track: None,
         },
@@ -558,7 +548,7 @@ pub fn update_life_tap_glows(
                     Mesh3d(quad.clone()),
                     MeshMaterial3d(palette[0].clone()),
                     Transform::from_translation(chest + offset)
-                        .with_scale(Vec3::splat(e.size[0].max(1e-4))),
+                        .with_scale(Vec3::splat(e.size.diameter_keys()[0].max(1e-4))),
                     NotShadowCaster,
                     PlayMatchEntity,
                 ));
