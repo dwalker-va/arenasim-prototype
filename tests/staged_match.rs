@@ -17,6 +17,7 @@ use bevy::prelude::*;
 use regex::Regex;
 
 use arenasim::headless::{HeadlessMatchConfig, HeadlessMatchState, Stage, Unit};
+use arenasim::states::play_match::components::{HealingRefused, PlayMatchEntity};
 use arenasim::states::play_match::decision_trace::DecisionTrace;
 use arenasim::states::play_match::situation::Situations;
 use arenasim::states::play_match::team_plan::TeamPlans;
@@ -229,6 +230,10 @@ struct Snapshot {
     plans: TeamPlans,
     elapsed: f32,
     trace_clock: (u64, f32),
+    /// The Mortal Wounds tells in the world, as (who was healed, the share
+    /// refused), in entity order. Headless never consumes one, so they
+    /// accumulate, and every frame's observation counts them per target.
+    tells: Vec<(Entity, f32)>,
 }
 
 struct UnitSnapshot {
@@ -336,7 +341,24 @@ fn capture(world: &mut World) -> Snapshot {
             let trace = world.resource::<DecisionTrace>();
             (trace.current_frame, trace.current_sim_time)
         },
+        tells: tells(world)
+            .into_iter()
+            .map(|e| {
+                let tell = world.get::<HealingRefused>(e).unwrap();
+                (tell.target, tell.refused_fraction)
+            })
+            .collect(),
     }
+}
+
+/// The Mortal Wounds tells in the world, in entity order.
+fn tells(world: &mut World) -> Vec<Entity> {
+    let mut tells: Vec<Entity> = world
+        .query_filtered::<Entity, With<HealingRefused>>()
+        .iter(world)
+        .collect();
+    tells.sort();
+    tells
 }
 
 fn put<C: Component>(world: &mut World, e: Entity, c: Option<C>) {
@@ -384,6 +406,18 @@ fn restore(world: &mut World, snap: Snapshot) {
         put(world, e, u.flare);
         put(world, e, u.pet_command);
     }
+    for e in tells(world) {
+        world.despawn(e);
+    }
+    for (target, refused_fraction) in snap.tells {
+        world.spawn((
+            HealingRefused {
+                target,
+                refused_fraction,
+            },
+            PlayMatchEntity,
+        ));
+    }
     *world.resource_mut::<GameRng>() = snap.rng;
     {
         let mut d = world.resource_mut::<ArenaDampening>();
@@ -410,8 +444,13 @@ fn quiet_state(config: impl Fn() -> HeadlessMatchConfig, from: f32) -> (f32, Sna
         let at = from + step as f32 * 0.1;
         let found = Arc::new(Mutex::new(None));
         let keep = found.clone();
+        // Each probe ends just past T: the timeout is all the cap changes.
+        let probe = HeadlessMatchConfig {
+            max_duration_secs: at + 0.5,
+            ..config()
+        };
         play(
-            config(),
+            probe,
             Stage::new().after_gates(at).world(move |w| {
                 let quiet = busy(w).is_empty();
                 *keep.lock().unwrap() = Some(quiet.then(|| capture(w)));
@@ -482,12 +521,29 @@ fn first_difference(a: &[String], b: &[String]) -> String {
 fn a_stage_built_to_a_seeded_state_plays_on_as_the_seed_does() {
     const SEEDED: u64 = 3;
     const OTHER: u64 = 11;
-    // The first quiet frame from 15s: late enough that the two seeds have
-    // diverged, early enough that a long fight follows it. (From 18s, AS-362's
-    // crowd-control reach left too little of seed 3's fight after T for the
-    // non-vacuity floor below.)
-    let (at, snap) = quiet_state(|| nagrand(SEEDED), 15.0);
+    // The first quiet frame 2s after the two seeds first play differently:
+    // late enough that they have diverged, early enough that a long fight
+    // follows it. Found, not fixed: on pillars the two can play identically
+    // for a long while before either rolls anything that differs (after
+    // AS-460's second trinkets, 15.8s of combat), so a fixed T — it was 15s,
+    // and 18s before AS-362 — goes stale with any change to the opening.
     let seeded = play_seeded(nagrand(SEEDED));
+    let other = play_seeded(nagrand(OTHER));
+    let gates = seeded
+        .frames
+        .iter()
+        .find(|f| f.gates_open)
+        .expect("the gates open")
+        .sim_time;
+    let parted = seeded
+        .frames
+        .iter()
+        .zip(&other.frames)
+        .find(|(a, b)| format!("{a:?}") != format!("{b:?}"))
+        .expect("the two seeds play differently")
+        .0
+        .sim_time;
+    let (at, snap) = quiet_state(|| nagrand(SEEDED), parted - gates + 2.0);
     let staged = play(
         nagrand(OTHER),
         Stage::new()

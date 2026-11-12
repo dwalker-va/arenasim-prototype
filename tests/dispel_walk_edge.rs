@@ -89,44 +89,48 @@ struct Played {
     events: Vec<serde_json::Value>,
 }
 
-fn play(config: HeadlessMatchConfig) -> Played {
+/// Play `config`, as its seed plays it or with `stage` landed on it at the
+/// gates.
+fn play(config: HeadlessMatchConfig, stage: Option<arenasim::headless::Stage>) -> Played {
     let tmp = tempfile::NamedTempFile::new().unwrap();
     let path = tmp.path().to_path_buf();
     drop(tmp);
+    let trace = Some(TraceConfig {
+        output_path: path.clone(),
+    });
     let mut frames = Vec::new();
-    run_headless_match_observed(
-        config,
-        true,
-        Some(TraceConfig {
-            output_path: path.clone(),
-        }),
-        |obs: &FrameObservation| {
-            if !obs.gates_open {
-                return;
-            }
-            frames.push(Frame {
-                t: f64::from(obs.sim_time),
-                units: obs
-                    .combatants
-                    .iter()
-                    .map(|(e, c)| {
-                        (
-                            u64::from(e.index()),
-                            Unit {
-                                team: c.team,
-                                class: c.class,
-                                is_pet: c.is_pet,
-                                alive: c.alive,
-                                hp: c.current_health / c.max_health,
-                                pos: c.position,
-                                auras: c.aura_types.clone(),
-                            },
-                        )
-                    })
-                    .collect(),
-            });
-        },
-    )
+    let observe = |obs: &FrameObservation| {
+        if !obs.gates_open {
+            return;
+        }
+        frames.push(Frame {
+            t: f64::from(obs.sim_time),
+            units: obs
+                .combatants
+                .iter()
+                .map(|(e, c)| {
+                    (
+                        u64::from(e.index()),
+                        Unit {
+                            team: c.team,
+                            class: c.class,
+                            is_pet: c.is_pet,
+                            alive: c.alive,
+                            hp: c.current_health / c.max_health,
+                            pos: c.position,
+                            auras: c.aura_types.clone(),
+                        },
+                    )
+                })
+                .collect(),
+        });
+    };
+    match stage {
+        Some(stage) => {
+            arenasim::headless::run_headless_match_staged(config, true, trace, stage, observe)
+        }
+        None => run_headless_match_observed(config, true, trace, observe),
+    }
     .expect("headless match");
     // The trace's clock starts at the gates; the observer's includes the
     // countdown. Put every event on the observer's clock.
@@ -295,13 +299,6 @@ fn legacy(team1: &[&str], team2: &[&str], map: &str, seed: u64) -> HeadlessMatch
     }
 }
 
-/// The probes' matches, cut off once their dispel windows are over.
-fn probe(team1: &[&str], team2: &[&str], map: &str, seed: u64) -> Played {
-    let mut config = legacy(team1, team2, map, seed);
-    config.max_duration_secs = 45.0;
-    play(config)
-}
-
 impl Played {
     /// Walks a `class` healer traced that carried it into reach of the
     /// teammate while the dispel was still owed — the non-vacuity count for
@@ -394,44 +391,74 @@ fn a_paladin_that_cannot_cleanse_does_not_walk_for_it() {
     }
 }
 
-/// Rule 2, played, for each walk: a healer that walked into reach of a teammate
-/// in urgent crowd control holds there while the dispel is owed — it never
-/// steps from inside the dispel's range to outside it. Before AS-197 a walk
-/// released on reach and the posture could step the healer back out while the
-/// GCD ran — the Paladin in `Rogue+Paladin vs Warlock+Rogue` (Nagrand, seed 2)
-/// did at 34.7-35.0s. The Priest's match, `Hunter+Priest vs Mage+Warlock`
-/// (BasicArena, seed 6), carries two walks that reach their teammate while the
-/// dispel is owed.
+/// Rule 2, STAGED (tier 3), for each walk: a healer that walked into reach of
+/// a teammate in urgent crowd control holds there while the dispel is owed —
+/// it never steps from inside the dispel's range to outside it. Before AS-197
+/// a walk released on reach and the posture could step the healer back out
+/// while the GCD ran — the Paladin in `Rogue+Paladin vs Warlock+Rogue`
+/// (Nagrand, seed 2) did at 34.7-35.0s.
+///
+/// A 3v3: the healer's Warrior is fighting the enemy Rogue at the west edge,
+/// and its Mage, which the enemy Warlock has just feared, stands 45yd east of
+/// the healer, beyond its dispel's 30yd, with the Warlock and the enemy
+/// Priest round it. So the walk is owed from the gates and carries the healer
+/// away from where its own posture puts it — the Priest's formation point
+/// behind its Warrior, the Paladin's pursuit of the Rogue — and the moment a
+/// walk lets go on reaching, that posture walks it straight back out of range
+/// (a build whose walk releases on reach fails here). Played for the Priest
+/// and the Paladin over two seeds each. (This was a pair of seeded
+/// matches, `Hunter+Priest vs Mage+Warlock` on BasicArena at seed 6 and the
+/// Paladin's above at seed 2, until AS-460's second trinkets took both
+/// walks out of them.)
 #[test]
 fn a_healer_that_walked_into_dispel_reach_holds_there_while_the_dispel_is_owed() {
-    for (class, team1, team2, map, seed) in [
-        (
-            CharacterClass::Priest,
-            ["Hunter", "Priest"],
-            ["Mage", "Warlock"],
-            "BasicArena",
-            6,
-        ),
-        (
-            CharacterClass::Paladin,
-            ["Rogue", "Paladin"],
-            ["Warlock", "Rogue"],
-            "PillaredArena",
-            2,
-        ),
-    ] {
-        let played = probe(&team1, &team2, map, seed);
-        let reaching = played.walks_reaching_while_owed(class);
-        assert!(
-            reaching >= 1,
-            "vacuous: no {class:?} walk reached its teammate while the dispel was owed"
-        );
-        let b = played.breaches(urgency_hp());
-        assert!(
-            b.stepped_out_while_owed.is_empty(),
-            "the {class:?} stepped out of dispel range while the dispel was owed, at {:?}",
-            b.stepped_out_while_owed
-        );
+    use arenasim::headless::{Stage, Unit};
+
+    const WARRIOR: Unit = Unit::new(1, 0);
+    const MAGE: Unit = Unit::new(1, 1);
+    const HEALER: Unit = Unit::new(1, 2);
+    const WARLOCK: Unit = Unit::new(2, 0);
+    const ROGUE: Unit = Unit::new(2, 1);
+    const PRIEST: Unit = Unit::new(2, 2);
+    for class in [CharacterClass::Priest, CharacterClass::Paladin] {
+        for seed in [1, 2] {
+            let config = HeadlessMatchConfig {
+                max_duration_secs: 15.0,
+                ..legacy(
+                    &["Warrior", "Mage", class.name()],
+                    &["Warlock", "Rogue", "Priest"],
+                    "BasicArena",
+                    seed,
+                )
+            };
+            let stage = Stage::new()
+                .place(WARRIOR, -30.0, 0.0)
+                .clear_auras(ROGUE)
+                .combatant(ROGUE, |c| c.stealthed = false)
+                .place(ROGUE, -33.0, 0.0)
+                .target(WARRIOR, ROGUE)
+                .target(ROGUE, WARRIOR)
+                .target(HEALER, ROGUE)
+                .place(HEALER, -20.0, 0.0)
+                .place(MAGE, 25.0, 0.0)
+                .land(MAGE, AbilityType::Fear, WARLOCK)
+                .place(WARLOCK, 30.0, 12.0)
+                .place(PRIEST, 34.0, -12.0);
+            let played = play(config, Some(stage));
+            let reaching = played.walks_reaching_while_owed(class);
+            assert!(
+                reaching >= 1,
+                "seed {seed}: vacuous: no {class:?} walk reached its teammate while the dispel \
+                 was owed"
+            );
+            let b = played.breaches(urgency_hp());
+            assert!(
+                b.stepped_out_while_owed.is_empty(),
+                "seed {seed}: the {class:?} stepped out of dispel range while the dispel was \
+                 owed, at {:?}",
+                b.stepped_out_while_owed
+            );
+        }
     }
 }
 
@@ -506,7 +533,7 @@ fn scan_dispel_walk_breaches() {
                 let Some((h, c, map, seed)) = jobs.lock().unwrap().pop() else {
                     break;
                 };
-                let b = play(legacy(&h, &c, map, seed)).breaches(urgency_hp());
+                let b = play(legacy(&h, &c, map, seed), None).breaches(urgency_hp());
                 if !b.walked_unable_to_cast.is_empty()
                     || !b.stepped_out_while_owed.is_empty()
                     || !b.walked_off_the_dying.is_empty()
@@ -535,7 +562,7 @@ fn debug_dispel_walk_match() {
     let t1: Vec<&str> = p[0].split(',').collect();
     let t2: Vec<&str> = p[1].split(',').collect();
     let (from, to): (f64, f64) = (p[4].parse().unwrap(), p[5].parse().unwrap());
-    let played = play(legacy(&t1, &t2, p[2], p[3].parse().unwrap()));
+    let played = play(legacy(&t1, &t2, p[2], p[3].parse().unwrap()), None);
     for e in &played.events {
         let t = e["sim_time"].as_f64().unwrap_or(0.0);
         if t < from || t > to {
