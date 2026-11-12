@@ -1191,8 +1191,8 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
     const CHASER: Unit = Unit::new(2, 0);
     const SCENES: [(&str, &str, (f32, f32), (f32, f32)); 3] = [
         ("open ground", "BasicArena", (0.0, 0.0), (5.0, 0.0)),
-        // BasicArena's octagon runs to z = -23: the Druid stands 2.5yd off
-        // the south wall with the Warrior due north of it.
+        // BasicArena's walkable edge is z = -21.5 (`ARENA_HALF_Z`): the Druid
+        // stands 1yd from it, the Warrior due north of it.
         ("back to a wall", "BasicArena", (0.0, -20.5), (0.0, -15.5)),
         // TwinPillars' east pillar is a 2.5yd cylinder at (9, 0): the Druid
         // stands at its skin with the Warrior due east of it.
@@ -1202,6 +1202,11 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
     for (scene, map, druid, chaser) in SCENES {
         for seed in [1, 2, 3] {
             let run = outrun_scene(map, druid, chaser, seed, false);
+            assert!(
+                run.len() >= 2,
+                "{scene} #{seed}: the shift did not free the Druid (it shifted with a root, \
+                 slow or hold still on it, or did not shift)"
+            );
             let (t, start, end) = (run.secs(), run.gap(0), run.gap(run.len() - 1));
             assert!(
                 t >= OUTRUN_WINDOW_SECS - 0.05,

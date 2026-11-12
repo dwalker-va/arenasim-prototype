@@ -127,7 +127,10 @@ fn without_the_trinket_the_warrior_carries_no_haste() {
 /// until any change moves the RNG stream (770_141 lost it to AS-167's weapon
 /// speeds, 770_142 to AS-460's second trinkets). The claim is that an overlap
 /// CAN happen, so the bank asserts it happens in at least one match, and names
-/// each trinket that never fired anywhere.
+/// each trinket that never fired anywhere. It plays seeds in order and stops at
+/// the first match with an overlap. At AS-460 a quarter of the seeds hold one
+/// (770_140, 770_144 and 770_146 of the first twelve), so a bank of 60 goes
+/// empty by chance about once in 30 million.
 #[test]
 fn two_different_proc_trinkets_are_live_at_the_same_time() {
     let mut overlap_frames = 0;
@@ -164,6 +167,9 @@ fn two_different_proc_trinkets_are_live_at_the_same_time() {
             overlapping_seeds.push(seed);
         }
         overlap_frames += overlap_here;
+        if overlap_frames > 0 {
+            break;
+        }
     }
     eprintln!("overlap in seeds {overlapping_seeds:?} ({overlap_frames} frames)");
 
@@ -185,7 +191,7 @@ fn two_different_proc_trinkets_are_live_at_the_same_time() {
 }
 
 /// The seeds the overlap probe plays.
-const OVERLAP_BANK: std::ops::Range<u64> = 770_140..770_152;
+const OVERLAP_BANK: std::ops::Range<u64> = 770_140..770_200;
 
 /// A caster proc fires off a completed cast, and a healer proc off a completed
 /// heal — the two trigger kinds the melee tests above cannot reach.
