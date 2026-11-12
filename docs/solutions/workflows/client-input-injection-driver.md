@@ -257,6 +257,18 @@ one wheel line. The click landed on *something*, which is the worst failure
 mode available. `Micro::Move` now requires the target rect to be identical on
 two consecutive frames before it aims.
 
+**Two still frames are not enough on their own.** Mid-animation the content can
+hold still for a pass, and the target then slides on. In View Combatant,
+`hover strategic:CheapShot` after `hover kit:Ambush` wheels back up the sheet;
+in half the 720p runs the driver aimed above the tile's final rect and hovered
+nothing (AS-470). `Move` also waits until the last pass did not scroll at all:
+`runner::scrolled_last_pass`, read from egui's `time_since_last_scroll`.
+egui stamps that in `begin_pass` whenever a delta is played out, so it means
+the animation is over. Do not read `smooth_scroll_delta` for this. The scroll area
+that applies a pass's share zeroes it in that same pass, so a read after the
+pass sees zero mid-animation. `tooltip_gate` waits for a scroll to finish by
+the same signal.
+
 **And aim only at a rect that is wholly on screen** — `Widget::aim_point`,
 never `visible`. `visible` is egui's `is_rect_visible`: true once any point of
 the rect is inside its clip rect. In a 1280x720 window the Warrior's shout

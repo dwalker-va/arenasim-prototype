@@ -371,6 +371,37 @@ mod tests {
         assert_eq!(context.nav(GameState::MainMenu, false), None);
     }
 
+    /// Every Document screen's body scrolls under its own egui id when drawn
+    /// where every screen draws it, in a `CentralPanel`: a shared id is a
+    /// shared scroll offset.
+    #[test]
+    fn every_document_body_scrolls_under_its_own_id() {
+        let documents: Vec<GameState> = ALL
+            .into_iter()
+            .filter(|state| state.chrome().template == Template::Document)
+            .collect();
+        assert_eq!(
+            documents,
+            vec![
+                GameState::Options,
+                GameState::Keybindings,
+                GameState::ViewCombatant,
+                GameState::Encyclopedia,
+            ]
+        );
+
+        let ctx = egui::Context::default();
+        let mut ids = std::collections::HashSet::new();
+        for state in &documents {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ids.insert(state.body_scroll().show(ui, |_| {}).id);
+                });
+            });
+        }
+        assert_eq!(ids.len(), documents.len(), "{ids:?}");
+    }
+
     /// Only a Document screen has a scrolling body to key.
     #[test]
     #[cfg(debug_assertions)]

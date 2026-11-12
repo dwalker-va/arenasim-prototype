@@ -1899,3 +1899,178 @@ fn a_shift_click_holds_shift_across_the_press() {
         "{plain:?}"
     );
 }
+
+// ===========================================================================
+// A SCROLL STILL PLAYING OUT (AS-470)
+//
+// egui plays a wheel's delta out over several passes, and the scroll area
+// that applies a pass's share zeroes `smooth_scroll_delta` in that same pass.
+// The driver reads after the pass, so it must ask whether the pass scrolled
+// (`runner::scrolled_last_pass`), never whether a delta is left over.
+// ===========================================================================
+
+/// A bare context with a tall scroll area under a resting pointer, driven
+/// one pass at a time.
+struct Scrolling {
+    ctx: egui::Context,
+    time: f64,
+}
+
+impl Scrolling {
+    const DT: f64 = 1.0 / 60.0;
+    const POINTER: egui::Pos2 = egui::pos2(400.0, 300.0);
+
+    /// The pointer moved over the scroll area and rested long enough to be
+    /// still (egui's 0.1s velocity window), then one wheel line and ONE pass
+    /// more: the scroll is mid-animation, with no wheel event in the last
+    /// pass and the last pass's share consumed by the scroll area.
+    fn mid_animation() -> Self {
+        let mut s = Scrolling {
+            ctx: egui::Context::default(),
+            time: 0.0,
+        };
+        s.ctx
+            .style_mut(|style| style.interaction.tooltip_delay = 0.0);
+        s.pass(vec![egui::Event::PointerMoved(Self::POINTER)]);
+        for _ in 0..12 {
+            s.pass(Vec::new());
+        }
+        s.pass(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, -1.0),
+            modifiers: egui::Modifiers::default(),
+        }]);
+        s.pass(Vec::new());
+        s
+    }
+
+    fn pass(&mut self, events: Vec<egui::Event>) {
+        self.time += Self::DT;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            time: Some(self.time),
+            predicted_dt: Self::DT as f32,
+            events,
+            ..Default::default()
+        };
+        let _ = self.ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // Not shrunk to its content, so the pointer is over it.
+                egui::ScrollArea::vertical()
+                    .auto_shrink(false)
+                    .show(ui, |ui| {
+                        ui.allocate_space(egui::vec2(100.0, 5000.0));
+                    });
+            });
+        });
+    }
+
+    /// Run passes until one does not scroll: the animation is over.
+    fn finish(&mut self) {
+        let mut passes = 0;
+        while runner::scrolled_last_pass(&self.ctx) {
+            passes += 1;
+            assert!(passes < 600, "the scroll never finished");
+            self.pass(Vec::new());
+        }
+    }
+
+    /// The mid-animation state the driver must not mistake for a rest: the
+    /// last pass scrolled, but every delta it can read after the pass is zero.
+    fn assert_mid_animation(&self) {
+        let (raw, smooth) = self
+            .ctx
+            .input(|i| (i.raw_scroll_delta, i.smooth_scroll_delta));
+        assert!(
+            runner::scrolled_last_pass(&self.ctx)
+                && raw == egui::Vec2::ZERO
+                && smooth == egui::Vec2::ZERO,
+            "setup: a pass that scrolled with no delta left to read \
+             (raw {raw:?}, smooth {smooth:?})"
+        );
+    }
+}
+
+/// `Move` aims only once the target has stopped. A rect that held still for
+/// two frames while the last pass was still scrolling has not: in the client,
+/// View Combatant's `hover strategic:CheapShot` after `hover kit:Ambush` aimed
+/// above the tile that way and hovered nothing. Control: the same rect once
+/// the scroll has finished is aimed at its centre.
+#[test]
+fn move_waits_for_a_scroll_to_finish_before_aiming() {
+    use arenasim::ui::driver::runner::{Inject, Micro, Progress};
+
+    let id = "strategic:CheapShot";
+    let aim = Micro::Move { id: id.into() };
+    let frame = frame_with(vec![(id, true, true)], vec![]);
+    let stable = || Some((id.to_string(), rect()));
+
+    let mut scrolling = Scrolling::mid_animation();
+    scrolling.assert_mid_animation();
+    let mut cursor = Scrolling::POINTER;
+    let mut last_seen = stable();
+    let step = runner::pointer_step(&aim, &frame, &scrolling.ctx, &mut cursor, &mut last_seen)
+        .expect("a pointer action");
+    match &step.progress {
+        Progress::Again { stuck } => assert!(stuck.contains("scroll"), "{stuck}"),
+        Progress::Done => panic!("aimed while a scroll was still playing out: {step:?}"),
+    }
+    assert!(step.inject.is_empty(), "{step:?}");
+    assert_eq!(cursor, Scrolling::POINTER, "the pointer stays put");
+
+    scrolling.finish();
+    let mut last_seen = stable();
+    let step = runner::pointer_step(&aim, &frame, &scrolling.ctx, &mut cursor, &mut last_seen)
+        .expect("a pointer action");
+    assert!(matches!(step.progress, Progress::Done), "{step:?}");
+    match step.inject.as_slice() {
+        [Inject::Pointer { to, .. }] => assert_eq!(*to, rect().center()),
+        other => panic!("expected the aim, got {other:?}"),
+    }
+}
+
+/// The tooltip gate waits out a scroll by the same signal: egui withholds a
+/// tooltip while a smooth scroll is still animating, which it reads inside
+/// the pass, before the scroll area consumes the delta. Control: once the
+/// scroll has finished, with the pointer still and no click, the gate opens.
+#[test]
+fn the_tooltip_gate_waits_for_a_scroll_to_finish() {
+    use arenasim::ui::driver::runner::{Micro, Progress};
+
+    let frame = frame_with(vec![], vec![]);
+    let mut cursor = Scrolling::POINTER;
+    let mut last_seen = None;
+
+    let mut scrolling = Scrolling::mid_animation();
+    scrolling.assert_mid_animation();
+    assert!(
+        scrolling.ctx.input(|i| i.pointer.is_still()),
+        "setup: the pointer is still, so only the scroll can hold the gate"
+    );
+    let step = runner::pointer_step(
+        &Micro::SettleForTooltip,
+        &frame,
+        &scrolling.ctx,
+        &mut cursor,
+        &mut last_seen,
+    )
+    .expect("a pointer action");
+    match &step.progress {
+        Progress::Again { stuck } => assert!(stuck.contains("smooth scroll"), "{stuck}"),
+        Progress::Done => panic!("the gate opened mid-scroll: {step:?}"),
+    }
+
+    scrolling.finish();
+    let step = runner::pointer_step(
+        &Micro::SettleForTooltip,
+        &frame,
+        &scrolling.ctx,
+        &mut cursor,
+        &mut last_seen,
+    )
+    .expect("a pointer action");
+    assert!(matches!(step.progress, Progress::Done), "{step:?}");
+}
