@@ -78,6 +78,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> Comb
         pet_type: None,
         pet: None,
         book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+        role: arenasim::states::play_match::situation::Role::of(class),
     }
 }
 
@@ -826,7 +827,7 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
         | LesserHealingWave | Purge | WindShear | AirTotem | WaterTotem | EarthTotem
         | FireTotem | Rejuvenation | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild
         | Innervate | EntanglingRoots | Cyclone | TravelForm | ShadowWordPain | ExposeArmor
-        | DivineProtection | BlessingOfSacrifice | SacredShield => false,
+        | DivineProtection | BlessingOfSacrifice | SacredShield | Shadowform => false,
         // A Paladin aura on allies: its damage answers a melee attacker that
         // struck one, and that hit has revealed the attacker already.
         RetributionAura => false,

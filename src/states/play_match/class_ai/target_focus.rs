@@ -38,10 +38,10 @@ use bevy::prelude::*;
 use smallvec::SmallVec;
 
 use super::{grants_damage_immunity, stealth_visible, CombatantInfo};
-use crate::states::match_config::CharacterClass;
 use crate::states::play_match::components::{Aura, AuraType};
 use crate::states::play_match::decision_trace::SituationChangeKind;
 use crate::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume};
+use crate::states::play_match::situation::Role;
 
 /// Seconds a ranged DPS's target must have been out of its sight before the
 /// focus may move off it. The prototype measured a 0.5s and a 2.0s delay
@@ -58,9 +58,10 @@ pub const FOCUS_DWELL: f32 = 2.0;
 /// (Frostbolt and Shadow Bolt reach 40).
 pub const FOCUS_REACH: f32 = 35.0;
 
-/// Whether `class` follows the team's focus: the ranged DPS.
-pub fn follows_focus(class: CharacterClass) -> bool {
-    !class.is_healer() && !class.is_melee()
+/// Whether a unit playing `role` follows the team's focus: the ranged DPS
+/// (a Shadowform Priest among them).
+pub fn follows_focus(role: Role) -> bool {
+    role == Role::RangedDps
 }
 
 /// One ranged DPS's sight of its own target, carried frame to frame.
@@ -162,7 +163,7 @@ pub fn classify(
     }
     let dps: SmallVec<[&CombatantInfo; 3]> = roster
         .values()
-        .filter(|i| i.team == team && i.is_alive && !i.is_pet && follows_focus(i.class))
+        .filter(|i| i.team == team && i.is_alive && !i.is_pet && follows_focus(i.role))
         .collect();
     let sight: SmallVec<[TargetSight; 3]> = dps
         .iter()
@@ -246,7 +247,7 @@ pub fn change(prev: Option<Focus>, next: Option<Focus>) -> Option<(SituationChan
 pub fn retarget(
     focus: Option<Focus>,
     me: Entity,
-    class: CharacterClass,
+    role: Role,
     my_pos: Vec3,
     current: Option<Entity>,
     kill_subject: Option<Entity>,
@@ -255,7 +256,7 @@ pub fn retarget(
     position: impl Fn(Entity) -> Option<Vec3>,
 ) -> Option<Entity> {
     let focus = focus?;
-    if !follows_focus(class) || current == Some(focus.subject) || focus.subject == me {
+    if !follows_focus(role) || current == Some(focus.subject) || focus.subject == me {
         return None;
     }
     if current.is_some() && current == kill_subject {

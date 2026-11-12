@@ -713,6 +713,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     RetributionAura,
     SacredShield,
     ShadowResistanceAura,
+    Shadowform,
     TravelForm,
     WaterTotem,
     WoundPoison,
@@ -823,6 +824,8 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (DivineProtection, "AS-376 (Divine Protection globe)"),
     // The Combat capstone's armor rend on its target.
     (ExposeArmor, "AS-366 (Expose Armor)"),
+    // The form on the Priest all match: AS-333 scoped it, AS-343 draws it.
+    (Shadowform, "AS-343 (Shadowform)"),
 ];
 
 #[test]

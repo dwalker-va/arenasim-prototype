@@ -224,9 +224,10 @@ pub const HUNT_EXCEPTIONS: &[HuntException] = &[
     },
 ];
 
-/// Whether `class` can hold a station: a healer or a ranged DPS.
-pub fn can_station(class: CharacterClass) -> bool {
-    class.is_healer() || !class.is_melee()
+/// Whether a unit playing `role` can hold a station: a healer or a ranged
+/// DPS (a Shadowform Priest is the second).
+pub fn can_station(role: Role) -> bool {
+    role != Role::MeleeDps
 }
 
 /// The Hunt play, as a stage of the pipeline (`plays::PLAY_ORDER`).
@@ -483,7 +484,7 @@ pub fn classify(
         .values()
         .filter(|c| c.team != team && c.is_alive && !c.is_pet);
     let healer = enemies.next()?;
-    if enemies.next().is_some() || !healer.class.is_healer() {
+    if enemies.next().is_some() || !healer.is_healer() {
         return None;
     }
     let mates: Vec<&CombatantInfo> = roster
@@ -522,7 +523,7 @@ pub fn classify(
             .of(PlayId::Hunt)
             .contains(ExceptionKey::class(class))
     };
-    let own_healer = mates.iter().find(|m| m.class.is_healer()).map(|m| m.entity);
+    let own_healer = mates.iter().find(|m| m.is_healer()).map(|m| m.entity);
     let owed = own_healer.is_some_and(|h| {
         sight_owed(
             &mates,
@@ -533,10 +534,10 @@ pub fn classify(
     });
     let ranged = mates
         .iter()
-        .filter(|m| !m.class.is_healer() && can_station(m.class) && !excepted(m.class));
+        .filter(|m| !m.is_healer() && can_station(m.role) && !excepted(m.class));
     let healers = mates
         .iter()
-        .filter(|m| m.class.is_healer() && !owed && !excepted(m.class));
+        .filter(|m| m.is_healer() && !owed && !excepted(m.class));
     let units: SmallVec<[(Entity, Vec2); 2]> = ranged
         .chain(healers)
         .take(2)
@@ -595,7 +596,7 @@ impl CombatContext<'_> {
     /// does). `None` on a context nobody classified.
     pub fn hunt_station(&self) -> Option<Vec2> {
         let hunt = self.situation.as_ref()?.hunt.as_ref()?;
-        let role = Role::of(self.self_info()?.class);
+        let role = self.self_info()?.role;
         (self.play(role) == Play::Hunt)
             .then(|| hunt.station_of(self.self_entity))
             .flatten()

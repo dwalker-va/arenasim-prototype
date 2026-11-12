@@ -1489,7 +1489,7 @@ impl DruidTurn<'_, '_, '_, '_, '_> {
             .ctx
             .alive_enemies()
             .into_iter()
-            .filter(|e| e.class.is_healer())
+            .filter(|e| e.is_healer())
             .find(|h| {
                 let blocked = super::sight_blocks(self.ctx, cyclone_range, self.my_pos, h.position);
                 healer_occluded |= blocked && usable(self, h, DRCategory::Cyclone);

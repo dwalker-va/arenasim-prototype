@@ -205,6 +205,8 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::ManaBurn => Row::NoAura,
         // 589 .. 25368, every rank DispelType 1 (Magic).
         AbilityType::ShadowWordPain => config(S::Magic, T::Magic),
+        // 15473: DispelType 0. A form, held all match: nothing removes it.
+        AbilityType::Shadowform => config(S::Untyped, T::NoType),
 
         // ---- Warrior ----
         AbilityType::HeroicStrike => Row::NoAura,

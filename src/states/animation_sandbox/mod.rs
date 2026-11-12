@@ -332,6 +332,7 @@ fn spawn_staged_unit(
         WarriorShout::default(),
         MageArmor::default(),
         PaladinAura::default(),
+        crate::states::match_config::PriestForm::default(),
         &loadout,
         item_defs,
         // The sandbox stages the shipped, untalented kit.

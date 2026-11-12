@@ -641,6 +641,7 @@ impl AbilityDefinitions {
             AbilityType::PsychicScream,
             AbilityType::ManaBurn,
             AbilityType::ShadowWordPain,
+            AbilityType::Shadowform,
             AbilityType::Rend,
             AbilityType::MortalStrike,
             AbilityType::Pummel,
@@ -1376,6 +1377,7 @@ mod tests {
                     AbilityType::PsychicScream,
                     AbilityType::ManaBurn,
                     AbilityType::ShadowWordPain,
+                    AbilityType::Shadowform,
                 ],
             ),
             (

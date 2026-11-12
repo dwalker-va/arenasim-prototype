@@ -106,6 +106,7 @@ fn option_name(option: ChoiceOption, abilities: &AbilityDefinitions) -> String {
         ChoiceOption::WarriorShout(s) => s.name().to_string(),
         ChoiceOption::MageArmor(a) => a.name().to_string(),
         ChoiceOption::PaladinAura(a) => a.name().to_string(),
+        ChoiceOption::PriestForm(f) => f.name().to_string(),
     }
 }
 
@@ -120,6 +121,7 @@ fn menu_phrase(menu: ChoiceMenu) -> &'static str {
         ChoiceMenu::WarriorShout => "a shout",
         ChoiceMenu::MageArmor => "an armor",
         ChoiceMenu::PaladinAura => "an aura",
+        ChoiceMenu::PriestForm => "a form",
     }
 }
 
@@ -601,7 +603,7 @@ mod tests {
             "Unlocks Wound Poison as a weapon poison choice"
         );
         // Every menu reads with its own article: the last option that is
-        // not its default, all seven named.
+        // not its default, all eight named.
         let unlocks: Vec<String> = ChoiceMenu::ALL
             .iter()
             .map(|menu| {
@@ -624,6 +626,7 @@ mod tests {
                 "Unlocks Commanding Shout as a shout choice",
                 "Unlocks Molten Armor as an armor choice",
                 "Unlocks Retribution Aura as an aura choice",
+                "Unlocks Shadowform as a form choice",
             ]
         );
         let slot = TalentEffect::AddChoiceSlot(ChoiceSlot::OffHandPoison);

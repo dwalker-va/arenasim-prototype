@@ -128,6 +128,10 @@ talent_ids! {
     Deflection,
     SwiftBlades,
     ExposeArmor,
+    // Priest: Shadow
+    ImprovedMindBlast,
+    ImprovedPsychicScream,
+    Shadowform,
     // Paladin: Protection
     SacredDuty,
     ImprovedHammerOfJustice,
@@ -143,6 +147,7 @@ talent_ids! {
 pub enum TreeId {
     Demonology,
     Combat,
+    Shadow,
     Protection,
 }
 

@@ -906,6 +906,10 @@ pub enum CompoundDebuff {
     /// damage over time, one debuff. Whatever ends the root — a damage break,
     /// a dispel, a Travel Form shift, its duration — ends the damage with it.
     EntanglingRoots,
+    /// The Priest's Shadowform: more Shadow damage dealt (the face) and less
+    /// Physical damage taken, one buff. Nothing removes it: it has no dispel
+    /// type, and it is held the whole match.
+    Shadowform,
 }
 
 impl CompoundDebuff {
@@ -917,10 +921,11 @@ impl CompoundDebuff {
     /// exhaustive match is.** What it buys is COVERAGE: the guards below sweep
     /// it, so compound N+1 is checked the moment it is declared here, instead
     /// of a test quietly continuing to check only the one it was written for.
-    pub const ALL: [CompoundDebuff; 3] = [
+    pub const ALL: [CompoundDebuff; 4] = [
         CompoundDebuff::FrostArmorChill,
         CompoundDebuff::MarkOfTheWild,
         CompoundDebuff::EntanglingRoots,
+        CompoundDebuff::Shadowform,
     ];
 
     /// The effect that REPRESENTS this debuff: the icon the frames draw, the
@@ -945,6 +950,7 @@ impl CompoundDebuff {
             CompoundDebuff::FrostArmorChill => AuraType::MovementSpeedSlow,
             CompoundDebuff::MarkOfTheWild => AuraType::MaxHealthIncrease,
             CompoundDebuff::EntanglingRoots => AuraType::Root,
+            CompoundDebuff::Shadowform => AuraType::DamageDealtIncrease,
         }
     }
 }
@@ -2335,6 +2341,15 @@ mod compound_tests {
                 })
                 .chain(crate::states::play_match::combat_core::compound_riders(
                     CompoundDebuff::EntanglingRoots,
+                ))
+                .collect(),
+                CompoundDebuff::Shadowform => std::iter::once(Aura {
+                    effect_type: AuraType::DamageDealtIncrease,
+                    compound: Some(CompoundDebuff::Shadowform),
+                    ..Default::default()
+                })
+                .chain(crate::states::play_match::combat_core::compound_riders(
+                    CompoundDebuff::Shadowform,
                 ))
                 .collect(),
             };

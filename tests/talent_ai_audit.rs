@@ -32,6 +32,7 @@ type SceneFor = fn(&AbilityDefinitions) -> (Scene, Who);
 /// Every talent ability, with the scene its rule is decided in.
 const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::ExposeArmor, expose_armor_scene),
+    (AbilityType::Shadowform, shadowform_scene),
     (AbilityType::DivineProtection, paladin_under_attack),
     (AbilityType::BlessingOfSacrifice, paladin_ally_under_attack),
     (AbilityType::SacredShield, paladin_ally_pressured),
@@ -103,6 +104,20 @@ fn expose_armor_scene(defs: &AbilityDefinitions) -> (Scene, Who) {
         .cooldown(ROGUE, AbilityType::KidneyShot, 10.0);
     scene.combatant_mut(ROGUE).stealthed = false;
     (scene, ROGUE)
+}
+
+const PRIEST: Who = "priest";
+
+/// A Priest whose Form choice is Shadowform, before the gates and not yet in
+/// the form: the moment it takes it.
+fn shadowform_scene(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let mut scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .before_gates()
+        .unit(PRIEST, 1, CharacterClass::Priest)
+        .at(0.0, 0.0);
+    scene.combatant_mut(PRIEST).priest_form =
+        arenasim::states::match_config::PriestForm::Shadowform;
+    (scene, PRIEST)
 }
 
 fn considered(view: &DecisionView, ability: AbilityType) -> bool {

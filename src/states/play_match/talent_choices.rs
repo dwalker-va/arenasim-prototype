@@ -33,8 +33,8 @@ use serde::{Deserialize, Serialize};
 use super::abilities::AbilityType;
 use super::talents::{Build, TalentDefinitions, TalentEffect, TalentId};
 use crate::states::match_config::{
-    CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, RogueOpener, RoguePoison,
-    WarlockCurse, WarriorShout,
+    CharacterClass, HunterPetType, MageArmor, MatchConfig, PaladinAura, PriestForm, RogueOpener,
+    RoguePoison, WarlockCurse, WarriorShout,
 };
 
 /// One per-match menu.
@@ -47,6 +47,7 @@ pub enum ChoiceMenu {
     WarriorShout,
     MageArmor,
     PaladinAura,
+    PriestForm,
 }
 
 impl ChoiceMenu {
@@ -59,6 +60,7 @@ impl ChoiceMenu {
             ChoiceMenu::WarriorShout => CharacterClass::Warrior,
             ChoiceMenu::MageArmor => CharacterClass::Mage,
             ChoiceMenu::PaladinAura => CharacterClass::Paladin,
+            ChoiceMenu::PriestForm => CharacterClass::Priest,
         }
     }
 
@@ -72,6 +74,7 @@ impl ChoiceMenu {
             ChoiceMenu::WarriorShout => ChoiceOption::WarriorShout(WarriorShout::default()),
             ChoiceMenu::MageArmor => ChoiceOption::MageArmor(MageArmor::default()),
             ChoiceMenu::PaladinAura => ChoiceOption::PaladinAura(PaladinAura::default()),
+            ChoiceMenu::PriestForm => ChoiceOption::PriestForm(PriestForm::default()),
         }
     }
 
@@ -85,11 +88,12 @@ impl ChoiceMenu {
             ChoiceMenu::WarriorShout => WarriorShout::ALL.map(ChoiceOption::WarriorShout).to_vec(),
             ChoiceMenu::MageArmor => MageArmor::ALL.map(ChoiceOption::MageArmor).to_vec(),
             ChoiceMenu::PaladinAura => PaladinAura::ALL.map(ChoiceOption::PaladinAura).to_vec(),
+            ChoiceMenu::PriestForm => PriestForm::ALL.map(ChoiceOption::PriestForm).to_vec(),
         }
     }
 
     /// Every menu.
-    pub const ALL: [ChoiceMenu; 7] = [
+    pub const ALL: [ChoiceMenu; 8] = [
         ChoiceMenu::RogueOpener,
         ChoiceMenu::RoguePoison,
         ChoiceMenu::WarlockCurse,
@@ -97,6 +101,7 @@ impl ChoiceMenu {
         ChoiceMenu::WarriorShout,
         ChoiceMenu::MageArmor,
         ChoiceMenu::PaladinAura,
+        ChoiceMenu::PriestForm,
     ];
 }
 
@@ -111,6 +116,7 @@ pub enum ChoiceOption {
     WarriorShout(WarriorShout),
     MageArmor(MageArmor),
     PaladinAura(PaladinAura),
+    PriestForm(PriestForm),
 }
 
 impl ChoiceOption {
@@ -124,6 +130,7 @@ impl ChoiceOption {
             ChoiceOption::WarriorShout(_) => ChoiceMenu::WarriorShout,
             ChoiceOption::MageArmor(_) => ChoiceMenu::MageArmor,
             ChoiceOption::PaladinAura(_) => ChoiceMenu::PaladinAura,
+            ChoiceOption::PriestForm(_) => ChoiceMenu::PriestForm,
         }
     }
 
@@ -289,9 +296,30 @@ impl SlotChoices {
                 );
                 chosen.insert(ChoiceOption::PaladinAura(aura.unwrap_or_default()));
             }
-            CharacterClass::Priest | CharacterClass::Shaman | CharacterClass::Druid => {}
+            CharacterClass::Priest => {
+                let form = pick_for(
+                    team,
+                    slot,
+                    &config.team1_priest_forms,
+                    &config.team2_priest_forms,
+                );
+                chosen.insert(ChoiceOption::PriestForm(form.unwrap_or_default()));
+            }
+            CharacterClass::Shaman | CharacterClass::Druid => {}
         }
         Self { chosen, second }
+    }
+
+    /// The Priest form the slot chose (no form for a slot that chose none,
+    /// and for every other class).
+    pub fn priest_form(&self) -> PriestForm {
+        self.chosen
+            .iter()
+            .find_map(|o| match o {
+                ChoiceOption::PriestForm(form) => Some(*form),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     /// Whether the slot chose `option`, in a menu or in a second slot.

@@ -965,7 +965,7 @@ fn cc_target(scene: &mut Scene, p: &Point) -> Option<Entity> {
             pos3(who, p),
             c.stealthed,
             false,
-            c.class,
+            (c.class, c.role()),
             c.current_health,
             immune,
             false,
@@ -1489,6 +1489,13 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         Unreached::NeedsKnob(
             "the Combat talent that grants it, and an armored target: the grid grants no \
              talent and wears no gear (tests/rogue_combat_talents.rs builds it)",
+        ),
+    ),
+    (
+        AbilityType::Shadowform,
+        Unreached::NeedsKnob(
+            "a Priest whose build takes the Shadowform talent and whose Form choice is \
+             Shadowform, before it holds the form (tests/shadowform_scenes.rs builds it)",
         ),
     ),
 ];

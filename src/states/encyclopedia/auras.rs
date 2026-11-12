@@ -2131,6 +2131,7 @@ mod tests {
                 "Healing Stream Totem",
                 "Retribution Aura",
                 "Shadow Resistance Aura",
+                "Shadowform",
                 "Strength of Earth Totem",
                 "Travel Form",
                 "Windfury Totem",
