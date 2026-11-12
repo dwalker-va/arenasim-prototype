@@ -38,10 +38,22 @@ use arenasim::HeadlessMatchConfig;
 
 /// One rendered frame at 60 fps.
 const FRAME: Duration = Duration::from_micros(16_667);
-/// Long enough for the review's Divine Shield (25.7 s to 37.7 s, log clock).
-const MAX_FRAMES: usize = 60 * 45;
-/// The review's replay (AS-401).
-const REPLAY: &str = r#"{"team1":["Paladin"],"team2":["Rogue"],"map":"BasicArena","random_seed":1,"ai_profile":"Legacy"}"#;
+/// The longest a match is played looking for its Divine Shield to come and go.
+const MAX_FRAMES: usize = 60 * 120;
+/// Frames played on past the end of the immunity: the bubble's death shows on
+/// the second.
+const AFTER_FRAMES: usize = 3;
+/// The review's replay (AS-401), then the same matchup on the next seeds.
+/// The first that holds a whole Divine Shield is the one read: when the
+/// Paladin bubbles, and whether the match outlasts it, moves with any change
+/// to what the match plays (AS-460's second trinkets moved the review's
+/// bubble from 25.7 s to 36.2 s, past the window the probe used to play).
+const REPLAYS: [&str; 4] = [
+    r#"{"team1":["Paladin"],"team2":["Rogue"],"map":"BasicArena","random_seed":1,"ai_profile":"Legacy"}"#,
+    r#"{"team1":["Paladin"],"team2":["Rogue"],"map":"BasicArena","random_seed":2,"ai_profile":"Legacy"}"#,
+    r#"{"team1":["Paladin"],"team2":["Rogue"],"map":"BasicArena","random_seed":3,"ai_profile":"Legacy"}"#,
+    r#"{"team1":["Paladin"],"team2":["Rogue"],"map":"BasicArena","random_seed":4,"ai_profile":"Legacy"}"#,
+];
 
 /// One frame's view of the Paladin's bubble.
 #[derive(Clone, Debug)]
@@ -59,8 +71,8 @@ struct Frame {
 #[derive(Resource, Default)]
 struct Seen(Vec<Frame>);
 
-fn boot() -> App {
-    let cfg: HeadlessMatchConfig = serde_json::from_str(REPLAY).unwrap();
+fn boot(replay: &str) -> App {
+    let cfg: HeadlessMatchConfig = serde_json::from_str(replay).unwrap();
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .add_plugins(AssetPlugin::default())
@@ -156,24 +168,46 @@ fn observe(
     });
 }
 
-#[test]
-fn the_bubble_is_drawn_for_the_whole_immunity_in_a_real_match() {
-    let mut app = boot();
+/// Play `replay` until its first immunity has ended and [`AFTER_FRAMES`]
+/// more frames have played, or the match ends, or [`MAX_FRAMES`].
+fn play(replay: &str) -> Vec<Frame> {
+    let mut app = boot(replay);
+    let mut ended_at = None;
     for _ in 0..MAX_FRAMES {
         app.update();
         if app.world().resource::<State<GameState>>().get() != &GameState::PlayMatch {
             break;
         }
+        let seen = &app.world().resource::<Seen>().0;
+        let n = seen.len();
+        if ended_at.is_none() && n >= 2 && seen[n - 2].immune && !seen[n - 1].immune {
+            ended_at = Some(n - 1);
+        }
+        if ended_at.is_some_and(|end| n > end + AFTER_FRAMES) {
+            break;
+        }
     }
-    let seen = std::mem::take(&mut app.world_mut().resource_mut::<Seen>().0);
+    std::mem::take(&mut app.world_mut().resource_mut::<Seen>().0)
+}
+
+/// Whether `seen` holds a whole Divine Shield: it began, lasted most of its
+/// 12 s, and ended with the match still on for the frames after it.
+fn holds_a_whole_bubble(seen: &[Frame]) -> bool {
+    let immune: Vec<usize> = (0..seen.len()).filter(|&i| seen[i].immune).collect();
+    immune.len() > 60 * 10 && immune.last().is_some_and(|&last| last + 2 < seen.len())
+}
+
+#[test]
+fn the_bubble_is_drawn_for_the_whole_immunity_in_a_real_match() {
+    // Not vacuous: a bubble of about 12 s, from its first frame to the frames
+    // after it ends, is in the window.
+    let seen = REPLAYS
+        .iter()
+        .map(|replay| play(replay))
+        .find(|seen| holds_a_whole_bubble(seen))
+        .unwrap_or_else(|| panic!("no replay of {REPLAYS:?} held a whole Divine Shield"));
 
     let immune: Vec<usize> = (0..seen.len()).filter(|&i| seen[i].immune).collect();
-    // Not vacuous: the review's bubble, about 12 s of it, is in the window.
-    assert!(
-        immune.len() > 60 * 10,
-        "the replay held Divine Shield for only {} frames",
-        immune.len()
-    );
     let (first, last) = (immune[0], *immune.last().unwrap());
     assert_eq!(
         immune.len(),

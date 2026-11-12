@@ -63,6 +63,9 @@ assert-note nav:exit to=ConfigureMatch label=◀ MATCH SETUP
 
 # The item picker takes the first Esc, and the sheet stays.
 click equip:Ring1
+# hover scrolls it into view: at the 1280 x 720 default the list runs past
+# the fold, and an assertion does not scroll.
+hover pick:SignetOfFocus
 assert-visible pick:SignetOfFocus
 key Escape
 assert-state ViewCombatant

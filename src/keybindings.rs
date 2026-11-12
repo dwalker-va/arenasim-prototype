@@ -4,10 +4,13 @@
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// All possible actions that can be bound to keys
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// `Ord` follows declaration order, and it is what orders the saved
+/// keybindings (see [`Keybindings`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum GameAction {
     // Navigation
     Back,
@@ -267,9 +270,13 @@ impl KeyBinding {
 }
 
 /// Complete keybindings configuration
+///
+/// An ordered map, so `settings.ron` lists the bindings in [`GameAction`]
+/// order on every save and an unchanged load writes back byte-identical
+/// (AS-471). A `HashMap` reseeds its iteration order in every process.
 #[derive(Debug, Clone, Resource, Serialize, Deserialize)]
 pub struct Keybindings {
-    bindings: HashMap<GameAction, KeyBinding>,
+    bindings: BTreeMap<GameAction, KeyBinding>,
 }
 
 impl Default for Keybindings {
@@ -281,7 +288,7 @@ impl Default for Keybindings {
 impl Keybindings {
     /// Create default keybindings
     pub fn create_defaults() -> Self {
-        let mut bindings = HashMap::new();
+        let mut bindings = BTreeMap::new();
 
         // Navigation
         bindings.insert(GameAction::Back, KeyBinding::new(KeyCode::Escape));
@@ -336,7 +343,7 @@ impl Keybindings {
     pub fn fill_missing_defaults(&mut self) {
         let defaults = Self::create_defaults();
         for action in GameAction::all() {
-            if let std::collections::hash_map::Entry::Vacant(e) = self.bindings.entry(action) {
+            if let std::collections::btree_map::Entry::Vacant(e) = self.bindings.entry(action) {
                 if let Some(binding) = defaults.bindings.get(&action) {
                     e.insert(binding.clone());
                 }
@@ -505,7 +512,7 @@ mod tests {
         assert_eq!(binding.primary, KeyCode::KeyK);
     }
 
-    /// The default binding map is a plain `HashMap` too — every action in
+    /// The default binding map is filled by hand too — every action in
     /// `all()` must appear in it, or the action is unreachable by keyboard.
     #[test]
     fn every_action_has_a_default_binding() {
@@ -524,7 +531,8 @@ mod tests {
     #[test]
     fn default_bindings_do_not_collide() {
         let defaults = Keybindings::create_defaults();
-        let mut claimed: HashMap<KeyCode, GameAction> = HashMap::new();
+        let mut claimed: std::collections::HashMap<KeyCode, GameAction> =
+            std::collections::HashMap::new();
 
         for action in GameAction::all() {
             let binding = defaults.get(action).expect("action has no default binding");

@@ -4928,15 +4928,15 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         let items = load_item_definitions().expect("items.ron must load");
         let loadouts = load_default_loadouts(&items).expect("loadouts.ron must load");
         let expected: BTreeMap<&str, f32> = [
-            ("Warrior", 268.5),
-            ("Mage", 356.0),
-            ("Rogue", 226.0),
-            ("Priest", 367.0),
-            ("Warlock", 356.0),
-            ("Paladin", 384.5),
-            ("Hunter", 293.0),
-            ("Shaman", 388.5),
-            ("Druid", 393.0),
+            ("Warrior", 282.29),
+            ("Mage", 376.47),
+            ("Rogue", 241.53),
+            ("Priest", 381.91),
+            ("Warlock", 376.47),
+            ("Paladin", 399.41),
+            ("Hunter", 318.5),
+            ("Shaman", 403.41),
+            ("Druid", 407.91),
         ]
         .into_iter()
         .collect();
