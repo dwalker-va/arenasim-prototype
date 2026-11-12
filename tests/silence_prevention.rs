@@ -191,6 +191,8 @@ fn a_silence_never_stops_a_free_ability() {
         AbilityType::DevourMagic,
         AbilityType::SpiderWeb,
         AbilityType::LifeTap,
+        // Free: the Discipline talent's focus (AS-414) costs no mana.
+        AbilityType::InnerFocus,
     ]
     .into_iter()
     .collect();

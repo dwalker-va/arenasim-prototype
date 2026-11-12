@@ -656,4 +656,8 @@ fn every_mechanic_parses_from_its_ron_shape() {
             duration: 3.0
         }
     );
+    assert_eq!(
+        parse("UnbreakableWill(reduction: 0.1)"),
+        TalentMechanic::UnbreakableWill { reduction: 0.1 }
+    );
 }

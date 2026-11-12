@@ -53,6 +53,32 @@ pub enum TalentMechanic {
     /// damage for the match. Its site: `demonology::demonic_bonds`. The node
     /// that carries it also widens the Sacrifice option (`talents.ron`).
     DemonicSacrifice { shadow_damage: f32 },
+    /// Unbreakable Will: stuns, fears and silences on the holder last
+    /// `reduction` shorter — the resistance as magnitude, never a roll. A
+    /// horror (Death Coil) is not a fear, as in TBC. Its site: the duration
+    /// scale in `apply_pending_auras`, after diminishing returns
+    /// ([`unbreakable_will_scales`]).
+    UnbreakableWill { reduction: f32 },
+}
+
+/// Whether Unbreakable Will shortens a crowd control of `category`: every
+/// stun (Kidney Shot's own bucket included), fear and silence, and never a
+/// horror, an incapacitate, a root or a slow.
+pub fn unbreakable_will_scales(
+    category: crate::states::play_match::components::DRCategory,
+) -> bool {
+    use crate::states::play_match::components::DRCategory;
+    match category {
+        DRCategory::Stuns
+        | DRCategory::KidneyShotStun
+        | DRCategory::Fears
+        | DRCategory::Silence => true,
+        DRCategory::Horror
+        | DRCategory::Incapacitates
+        | DRCategory::Roots
+        | DRCategory::Slows
+        | DRCategory::Cyclone => false,
+    }
 }
 
 /// Which mechanic a variant is, ignoring its numbers: a node names each at
@@ -64,6 +90,7 @@ pub enum MechanicKind {
     CheatDeath,
     MasterDemonologist,
     DemonicSacrifice,
+    UnbreakableWill,
 }
 
 impl TalentMechanic {
@@ -75,6 +102,7 @@ impl TalentMechanic {
             TalentMechanic::CheatDeath { .. } => MechanicKind::CheatDeath,
             TalentMechanic::MasterDemonologist { .. } => MechanicKind::MasterDemonologist,
             TalentMechanic::DemonicSacrifice { .. } => MechanicKind::DemonicSacrifice,
+            TalentMechanic::UnbreakableWill { .. } => MechanicKind::UnbreakableWill,
         }
     }
 
@@ -133,6 +161,13 @@ impl TalentMechanic {
                     return Err(format!("{self:?} has one rank"));
                 }
             }
+            TalentMechanic::UnbreakableWill { reduction } => {
+                // A crowd control shortened to nothing would be immunity.
+                fraction("reduction", reduction * f32::from(max_rank))?;
+                if reduction * f32::from(max_rank) >= 1.0 {
+                    return Err(format!("{self:?}: {max_rank} ranks remove the effect"));
+                }
+            }
         }
         Ok(())
     }
@@ -146,7 +181,8 @@ impl TalentMechanic {
             }
             TalentMechanic::SoulLink { .. }
             | TalentMechanic::ReflectiveShield { .. }
-            | TalentMechanic::CheatDeath { .. } => false,
+            | TalentMechanic::CheatDeath { .. }
+            | TalentMechanic::UnbreakableWill { .. } => false,
         }
     }
 
@@ -163,6 +199,9 @@ impl TalentMechanic {
                     reduction: reduction * r,
                 }
             }
+            TalentMechanic::UnbreakableWill { reduction } => TalentMechanic::UnbreakableWill {
+                reduction: reduction * r,
+            },
             one_rank @ (TalentMechanic::CheatDeath { .. }
             | TalentMechanic::DemonicSacrifice { .. }) => one_rank,
         }
@@ -232,6 +271,14 @@ impl TalentMechanics {
     pub fn demonic_sacrifice(&self) -> Option<f32> {
         self.list.iter().find_map(|m| match m {
             TalentMechanic::DemonicSacrifice { shadow_damage } => Some(*shadow_damage),
+            _ => None,
+        })
+    }
+
+    /// Unbreakable Will's crowd-control reduction, when the combatant has it.
+    pub fn unbreakable_will(&self) -> Option<f32> {
+        self.list.iter().find_map(|m| match m {
+            TalentMechanic::UnbreakableWill { reduction } => Some(*reduction),
             _ => None,
         })
     }

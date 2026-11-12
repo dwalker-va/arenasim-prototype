@@ -284,6 +284,81 @@
             spell_school: Shadow,
         ),
 
+        // Inner Focus (talent, Discipline tier 2): the Priest's next spell
+        // costs no mana and has +25% crit chance. 45s cooldown (Classic 14751's
+        // 3 min, cut by the Death Coil precedent); no cost and no global
+        // cooldown, as in TBC (StartRecoveryTime 0). The buff holds until a
+        // spell spends it. TBC's school is Physical; Holy here, so the buff
+        // stays Magic (TBC DispelType 1) and a purge can take it.
+        InnerFocus: (
+            name: "Inner Focus",
+            class: Priest,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_frost_windwalkon.jpg",
+            cast_time: 0.0,
+            range: 0.0,  // Self-cast
+            mana_cost: 0.0,
+            cooldown: 45.0,
+            applies_aura: Some((
+                aura_type: NextCast,
+                duration: 600.0,
+                magnitude: 0.0,
+                next_cast: Some((applies_to: Any, free: true, crit_chance: 0.25)),
+            )),
+            spell_school: Holy,
+        ),
+
+        // Power Infusion (talent, Discipline tier 3): an ally gains 24 spell
+        // power for 15s, 20% of a caster's ~120 (Classic 10060's +20% spell
+        // damage and healing). 45s cooldown; 45 mana, TBC's 16% of base mana
+        // on the Priest's 280; no global cooldown, as in TBC
+        // (StartRecoveryTime 0). Refresh-only stacking keys it by its source,
+        // so it adds to a Flametongue Totem's spell power instead of being
+        // refused beside it. TBC 10060: Magic.
+        PowerInfusion: (
+            name: "Power Infusion",
+            class: Priest,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_holy_powerinfusion.jpg",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 45.0,
+            cooldown: 45.0,
+            applies_aura: Some((
+                aura_type: SpellPowerIncrease,
+                duration: 15.0,
+                magnitude: 24.0,
+                stacking: Some((max_stacks: 1)),
+            )),
+            spell_school: Holy,
+        ),
+
+        // Pain Suppression (talent, Discipline capstone): an ally takes 40%
+        // less damage for 8s. 45s cooldown (TBC 33206's 2 min); 22 mana, TBC's
+        // 8% of base mana on the Priest's 280. Refresh-only stacking keys it
+        // by its source, so it sits beside Devotion Aura or Divine Protection
+        // (the damage pipeline applies the strongest). TBC 33206: Magic.
+        PainSuppression: (
+            name: "Pain Suppression",
+            class: Priest,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_holy_painsupression.jpg",
+            cast_time: 0.0,
+            range: 40.0,
+            mana_cost: 22.0,
+            cooldown: 45.0,
+            applies_aura: Some((
+                aura_type: DamageTakenReduction,
+                duration: 8.0,
+                magnitude: 0.40,
+                stacking: Some((max_stacks: 1)),
+            )),
+            spell_school: Holy,
+        ),
+
         // ============================================================================
         // WARRIOR ABILITIES
         // ============================================================================

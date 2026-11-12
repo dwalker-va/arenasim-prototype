@@ -1498,6 +1498,20 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
              Shadowform, before it holds the form (tests/shadowform_scenes.rs builds it)",
         ),
     ),
+    // The Discipline tree (AS-414): grants, as the Protection tree's are;
+    // tests/discipline_talents.rs grants each in its scene pairs.
+    (
+        AbilityType::InnerFocus,
+        Unreached::NeedsKnob("a build that takes Inner Focus"),
+    ),
+    (
+        AbilityType::PowerInfusion,
+        Unreached::NeedsKnob("a build that takes Power Infusion"),
+    ),
+    (
+        AbilityType::PainSuppression,
+        Unreached::NeedsKnob("a build that takes Pain Suppression"),
+    ),
 ];
 
 /// Every ability of every class's own kit is chosen somewhere in the grid, or

@@ -654,7 +654,9 @@ carrying every slot's build.
   named rule with its numbers in the RON and ONE code site, carried on the
   combatant as `Combatant::talent_mechanics`. Today: `SoulLink` (the transfer
   step, to the holder's pet), `ReflectiveShield` (`apply_pending_auras` marks
-  the shields its holder casts), `CheatDeath` (the killing-blow step).
+  the shields its holder casts), `CheatDeath` (the killing-blow step),
+  `UnbreakableWill` (`apply_pending_auras` shortens a stun, fear or silence
+  on its holder, after diminishing returns).
 - **The damage pipeline** (`combat_core::apply_damage_with_absorb`, taking a
   `Hit`): immunity, the attacker's `DamageDealtIncrease` (every site passes it
   with `Hit::with_dealt` — `damage_site_audit` checks), armor (with

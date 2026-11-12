@@ -892,6 +892,15 @@ pub fn apply_pending_auras(
         if dr_category.is_some() && dr_multiplier < 1.0 {
             aura_to_add.duration *= dr_multiplier;
         }
+        // Unbreakable Will's one site (`talent_mechanics`): a stun, fear or
+        // silence on its holder runs shorter, after diminishing returns. No
+        // holder without the talent.
+        let will = dr_category
+            .filter(|c| super::talent_mechanics::unbreakable_will_scales(*c))
+            .and(target_combatant.talent_mechanics.unbreakable_will());
+        if let Some(reduction) = will {
+            aura_to_add.duration *= 1.0 - reduction;
+        }
 
         // Arena dampening: absorb shields count as healing — scale the shield
         // size at application (PW:Shield, Ice Barrier)
@@ -929,10 +938,16 @@ pub fn apply_pending_auras(
         // Log DR info for CC auras
         if let Some(category) = dr_category {
             let dr_pct = (dr_multiplier * 100.0) as i32;
-            let message = format!(
+            let mut message = format!(
                 "{} on {} ({:.1}s, DR: {}%)",
                 aura_to_add.ability_name, target_id, aura_to_add.duration, dr_pct,
             );
+            if let Some(reduction) = will {
+                message.push_str(&format!(
+                    " (Unbreakable Will: {}% shorter)",
+                    (reduction * 100.0).round() as i32
+                ));
+            }
             combat_log.log(CombatLogEventType::CrowdControl, message);
 
             // CC replacement: remove existing CC of same DR category before adding new one

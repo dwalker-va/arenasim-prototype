@@ -36,6 +36,9 @@ const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::DivineProtection, paladin_under_attack),
     (AbilityType::BlessingOfSacrifice, paladin_ally_under_attack),
     (AbilityType::SacredShield, paladin_ally_pressured),
+    (AbilityType::InnerFocus, priest_ally_dying),
+    (AbilityType::PowerInfusion, priest_kill_window),
+    (AbilityType::PainSuppression, priest_ally_dying),
 ];
 
 const PALADIN: Who = "paladin";
@@ -117,6 +120,55 @@ fn shadowform_scene(defs: &AbilityDefinitions) -> (Scene, Who) {
         .at(0.0, 0.0);
     scene.combatant_mut(PRIEST).priest_form =
         arenasim::states::match_config::PriestForm::Shadowform;
+    (scene, PRIEST)
+}
+
+/// Power Word: Fortitude, already up, so the Priest's first priority is out
+/// of the way.
+fn fortitude() -> Aura {
+    Aura {
+        effect_type: AuraType::MaxHealthIncrease,
+        duration: 600.0,
+        ability_name: "Power Word: Fortitude".into(),
+        ..Default::default()
+    }
+}
+
+/// A Priest whose Warrior teammate, at 30%, has an enemy Warrior on it and
+/// Weakened Soul (so no shield goes out first): Pain Suppression's moment,
+/// and Inner Focus's ahead of the Flash Heal. The Priest has Weakened Soul
+/// too: it would shield itself first.
+fn priest_ally_dying(defs: &AbilityDefinitions) -> (Scene, Who) {
+    const ALLY: Who = "warrior";
+    let scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PRIEST, 1, CharacterClass::Priest)
+        .aura_full(PRIEST, fortitude())
+        .aura(PRIEST, AuraType::WeakenedSoul, 10.0)
+        .unit(ALLY, 1, CharacterClass::Warrior)
+        .at(10.0, 0.0)
+        .health(0.3)
+        .aura_full(ALLY, fortitude())
+        .aura(ALLY, AuraType::WeakenedSoul, 10.0)
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(11.5, 0.0)
+        .targeting(ALLY);
+    (scene, PRIEST)
+}
+
+/// A Priest whose Mage teammate's enemy, a lone Warrior, is at 20% with no
+/// healer to save it: a kill window, Power Infusion's moment.
+fn priest_kill_window(defs: &AbilityDefinitions) -> (Scene, Who) {
+    const ALLY: Who = "mage";
+    let scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PRIEST, 1, CharacterClass::Priest)
+        .aura_full(PRIEST, fortitude())
+        .unit(ALLY, 1, CharacterClass::Mage)
+        .at(10.0, 0.0)
+        .aura_full(ALLY, fortitude())
+        .targeting(WARRIOR)
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(30.0, 0.0)
+        .health(0.2);
     (scene, PRIEST)
 }
 
