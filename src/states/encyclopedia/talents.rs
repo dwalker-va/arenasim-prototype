@@ -295,4 +295,15 @@ mod tests {
         let keys: std::collections::BTreeSet<&String> = paths.iter().map(|(k, _)| k).collect();
         assert_eq!(keys.len(), paths.len(), "two icons share a key");
     }
+
+    /// A talent's proc buff draws under `talent_aura_icon_key`, and the View
+    /// Combatant icon loader registers only `icon_paths`: the two keys must be
+    /// one, or a proc buff there draws no icon.
+    #[test]
+    fn a_proc_buff_draws_under_its_talents_own_key() {
+        use crate::states::play_match::rendering::talent_aura_icon_key;
+        for &id in TalentId::all() {
+            assert_eq!(talent_aura_icon_key(id), talent_icon_key(id));
+        }
+    }
 }
