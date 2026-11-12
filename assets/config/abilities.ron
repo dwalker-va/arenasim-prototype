@@ -740,7 +740,11 @@
             // Channeling fields
             channel_duration: Some(5.0),
             channel_tick_interval: 1.0,
-            channel_healing_per_tick: 10.0,
+            // Each tick heals the Warlock for every point of it that reached
+            // health (TBC: a periodic leech, aura 53, multiplier 1), so an
+            // absorbed, cut or immune tick heals less or nothing
+            // (`combat_core/leech.rs`).
+            channel_leech: Some((fraction: 1.0)),
         ),
 
         // Curse of Agony: Shadow DoT dealing 84 damage over 24 seconds

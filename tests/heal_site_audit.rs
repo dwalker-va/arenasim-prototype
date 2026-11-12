@@ -54,11 +54,6 @@ const HEALERS: &[(&str, &str)] = &[
         "src/states/play_match/combat_core/casting.rs",
         "process_casting",
     ),
-    // Drain Life's heal to its channeler.
-    (
-        "src/states/play_match/combat_core/casting.rs",
-        "process_channeling",
-    ),
     // Heal over time ticks (Rejuvenation, Lifebloom, Healing Stream).
     ("src/states/play_match/auras.rs", "process_hot_ticks"),
     // The Lifebloom bloom.
@@ -69,8 +64,8 @@ const HEALERS: &[(&str, &str)] = &[
         "process_holy_shock_heals",
     ),
     // Every leech heal (`combat_core/leech.rs`): Death Coil's lifesteal,
-    // Siphon Life and Vampiric Embrace, from the projectile, cast, channel and
-    // DoT tick sites alike.
+    // Siphon Life, Drain Life's heal to its channeler and Vampiric Embrace,
+    // from the projectile, cast, channel and DoT tick sites alike.
     ("src/states/play_match/combat_core/leech.rs", "land"),
     // A killing-blow save's heal (Guardian Spirit's shape, AS-408).
     (

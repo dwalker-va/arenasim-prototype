@@ -1,12 +1,14 @@
 //! Leech: a share of the damage a caster deals heals the caster, or the
 //! caster's party (AS-331).
 //!
-//! The `leech` field of an ability's `applies_aura` block ([`Leech`]). Two
-//! sources ([`LeechSource`]):
+//! The `leech` field of an ability's `applies_aura` block, or a channel's
+//! `channel_leech` ([`Leech`]). Two sources ([`LeechSource`]):
 //!
-//! - **`Ability`** — the ability's OWN damage: the hit that applies the aura
-//!   and the aura's periodic ticks. Death Coil (its direct hit, every point
-//!   back to the Warlock) and Siphon Life (its ticks).
+//! - **`Ability`** — the ability's OWN damage: the hit that applies the aura,
+//!   the aura's periodic ticks, or a channel's ticks. Death Coil (its direct
+//!   hit, every point back to the Warlock), Siphon Life (its ticks) and Drain
+//!   Life (its channel's ticks, every point back — TBC's periodic leech, aura
+//!   53, multiplier 1).
 //! - **`CasterSchool(school)`** — while the aura is on its bearer, every
 //!   damage of that school ITS CASTER deals the bearer. Vampiric Embrace: 20%
 //!   of the Priest's Shadow damage to the target heals the Priest's party.
