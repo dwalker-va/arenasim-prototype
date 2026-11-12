@@ -106,6 +106,9 @@ pub fn update_auras(
 ///   the snapshot is not updated (the real `apply_pending_auras` will also reject it)
 /// - Applies DR duration scaling and advances the snapshot DR tracker so subsequent
 ///   same-frame CCs from other AIs observe the advanced DR level
+/// - Applies the target's Unbreakable Will after DR (`mechanics`, the target's
+///   `Combatant::talent_mechanics`; `None` for a target without talents), through
+///   the same `TalentMechanics::cc_reduction` the real path reads
 /// - Performs CC replacement: existing same-DR-category aura is removed before the new
 ///   one is pushed
 ///
@@ -117,6 +120,7 @@ pub fn reflect_instant_cc_in_snapshot(
     aura: &Aura,
     active_auras_map: &mut std::collections::BTreeMap<Entity, Vec<Aura>>,
     dr_trackers_map: &mut std::collections::BTreeMap<Entity, DRTracker>,
+    mechanics: Option<&super::talent_mechanics::TalentMechanics>,
 ) {
     debug_assert!(
         matches!(
@@ -187,6 +191,9 @@ pub fn reflect_instant_cc_in_snapshot(
             let multiplier = tracker.apply(category);
             aura_to_add.duration *= multiplier;
         }
+    }
+    if let Some(reduction) = mechanics.and_then(|m| m.cc_reduction(dr_category)) {
+        aura_to_add.duration *= 1.0 - reduction;
     }
 
     // CC replacement + push into snapshot auras.
@@ -895,9 +902,7 @@ pub fn apply_pending_auras(
         // Unbreakable Will's one site (`talent_mechanics`): a stun, fear or
         // silence on its holder runs shorter, after diminishing returns. No
         // holder without the talent.
-        let will = dr_category
-            .filter(|c| super::talent_mechanics::unbreakable_will_scales(*c))
-            .and(target_combatant.talent_mechanics.unbreakable_will());
+        let will = target_combatant.talent_mechanics.cc_reduction(dr_category);
         if let Some(reduction) = will {
             aura_to_add.duration *= 1.0 - reduction;
         }
@@ -1854,7 +1859,7 @@ mod tests {
         dr_map.insert(target, DRTracker::default());
 
         let aura = make_cc_aura(AuraType::Stun, 4.0);
-        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map);
+        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map, None);
 
         let target_auras = auras_map.get(&target).unwrap();
         assert_eq!(target_auras.len(), 1);
@@ -1894,12 +1899,12 @@ mod tests {
 
         // Cheap Shot: a plain stun (DRCategory::Stuns).
         let cheap_shot = make_cc_aura(AuraType::Stun, 4.0);
-        reflect_instant_cc_in_snapshot(target, &cheap_shot, &mut auras_map, &mut dr_map);
+        reflect_instant_cc_in_snapshot(target, &cheap_shot, &mut auras_map, &mut dr_map, None);
 
         // Kidney Shot: a stun on its OWN DR category, applied right after.
         let mut kidney = make_cc_aura(AuraType::Stun, 6.0);
         kidney.dr_category_override = Some(DRCategory::KidneyShotStun);
-        reflect_instant_cc_in_snapshot(target, &kidney, &mut auras_map, &mut dr_map);
+        reflect_instant_cc_in_snapshot(target, &kidney, &mut auras_map, &mut dr_map, None);
 
         // Both stuns coexist (different DR buckets → no CC replacement), and
         // Kidney is undiminished at its full 6.0s despite following a stun.
@@ -1959,7 +1964,7 @@ mod tests {
         auras_map.insert(target, vec![make_cc_aura(AuraType::DamageImmunity, 10.0)]);
 
         let aura = make_cc_aura(AuraType::Stun, 4.0);
-        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map);
+        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map, None);
 
         // Should still have only the DamageImmunity aura — stun was blocked
         let target_auras = auras_map.get(&target).unwrap();
@@ -1982,7 +1987,7 @@ mod tests {
         dr_map.insert(target, tracker);
 
         let aura = make_cc_aura(AuraType::Stun, 4.0);
-        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map);
+        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map, None);
 
         // Target should have no auras — DR immune
         assert!(!auras_map.contains_key(&target));
@@ -2000,7 +2005,7 @@ mod tests {
         dr_map.insert(target, tracker);
 
         let aura = make_cc_aura(AuraType::Stun, 4.0);
-        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map);
+        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map, None);
 
         let target_auras = auras_map.get(&target).unwrap();
         assert_eq!(target_auras.len(), 1);
@@ -2020,7 +2025,7 @@ mod tests {
 
         // Apply a new stun — should replace the old one
         let new_stun = make_cc_aura(AuraType::Stun, 6.0);
-        reflect_instant_cc_in_snapshot(target, &new_stun, &mut auras_map, &mut dr_map);
+        reflect_instant_cc_in_snapshot(target, &new_stun, &mut auras_map, &mut dr_map, None);
 
         let target_auras = auras_map.get(&target).unwrap();
         assert_eq!(target_auras.len(), 1);
@@ -2035,7 +2040,7 @@ mod tests {
         // No DRTracker entry for target either — should handle gracefully (no DR applied)
 
         let aura = make_cc_aura(AuraType::Root, 8.0);
-        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map);
+        reflect_instant_cc_in_snapshot(target, &aura, &mut auras_map, &mut dr_map, None);
 
         let target_auras = auras_map.get(&target).unwrap();
         assert_eq!(target_auras.len(), 1);

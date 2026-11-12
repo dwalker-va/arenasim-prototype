@@ -106,6 +106,7 @@ fn snapshot_for(self_entity: Entity, team: u8, class: CharacterClass) -> CombatS
     combatants.insert(self_entity, info(self_entity, team, class));
     CombatSnapshot {
         melee_defense: Default::default(),
+        talent_mechanics: Default::default(),
         ai_profile: Default::default(),
         bounds: Default::default(),
         combatants,
@@ -1253,6 +1254,7 @@ fn snapshot_with(members: &[CombatantInfo]) -> CombatSnapshot {
     }
     CombatSnapshot {
         melee_defense: Default::default(),
+        talent_mechanics: Default::default(),
         ai_profile: Default::default(),
         bounds: Default::default(),
         combatants,

@@ -37,7 +37,7 @@ use crate::states::play_match::decision_trace::{DecisionEventBuilder, RejectionR
 use crate::states::play_match::situation::TeamSituation;
 use crate::states::play_match::utils::log_ability_use;
 
-use super::cast_guard::{cast_gate, unreached_reason, PreCastOpts};
+use super::cast_guard::{cast_gate, own_state_ok, unreached_reason, PreCastOpts};
 use super::{cast_reach, CastReach, CombatContext, CombatantInfo};
 
 /// The teammate Pain Suppression goes on: the teammate in danger, the Priest
@@ -89,10 +89,18 @@ pub fn power_infusion_target(
     situation.dying_allies().next().map(|_| me)
 }
 
-/// Whether Inner Focus is due: the teammate the Priest's Flash Heal would go
-/// on (`heal_target`, the most injured one it reaches) is dying.
-pub fn inner_focus_due(situation: &TeamSituation, heal_target: Option<Entity>) -> bool {
-    heal_target.is_some_and(|t| situation.dying_allies().any(|e| e == t))
+/// Whether Inner Focus is due: the Flash Heal it feeds can be cast
+/// (`heal_castable`: not locked out of its school, silenced or locked by a
+/// choice — its cost does not count, the focus pays it), and the teammate it
+/// would go on (`heal_target`, the most injured one it reaches) is dying. A
+/// focus raised for a heal that cannot go out would be spent on whatever the
+/// Priest casts next.
+pub fn inner_focus_due(
+    situation: &TeamSituation,
+    heal_target: Option<Entity>,
+    heal_castable: bool,
+) -> bool {
+    heal_castable && heal_target.is_some_and(|t| situation.dying_allies().any(|e| e == t))
 }
 
 /// Whether `auras` hold an aura of `effect` named `name`.
@@ -341,17 +349,30 @@ pub fn try_inner_focus(
             return false;
         }
     };
-    let heal_target = abilities.get(&AbilityType::FlashHeal).and_then(|heal| {
+    let heal = abilities.get(&AbilityType::FlashHeal);
+    let heal_target = heal.and_then(|heal| {
         ctx.lowest_health_ally_in_reach(heal_hp, heal.range, my_pos)
             .ok()
             .map(|info| info.entity)
     });
-    if !inner_focus_due(ctx.situation(), heal_target) {
+    let heal_castable = heal.is_some_and(|heal| {
+        own_state_ok(
+            AbilityType::FlashHeal,
+            heal,
+            combatant,
+            auras,
+            PreCastOpts::default(),
+        )
+    });
+    if !inner_focus_due(ctx.situation(), heal_target, heal_castable) {
+        let note = if heal_castable {
+            "no dying teammate for the Flash Heal it would feed"
+        } else {
+            "the Flash Heal it would feed cannot be cast"
+        };
         builder.reject(
             ability,
-            RejectionReason::PreconditionUnmet {
-                note: "no dying teammate for the Flash Heal it would feed".into(),
-            },
+            RejectionReason::PreconditionUnmet { note: note.into() },
         );
         return false;
     }
@@ -448,10 +469,12 @@ mod tests {
         let ally = Entity::from_raw(2);
         let mut s = TeamSituation::default();
         s.allies.push(standing(ally, false));
-        assert!(!inner_focus_due(&s, None));
-        assert!(!inner_focus_due(&s, Some(ally)));
+        assert!(!inner_focus_due(&s, None, true));
+        assert!(!inner_focus_due(&s, Some(ally), true));
         s.allies[0].dying = true;
-        assert!(inner_focus_due(&s, Some(ally)));
-        assert!(!inner_focus_due(&s, None));
+        assert!(inner_focus_due(&s, Some(ally), true));
+        assert!(!inner_focus_due(&s, None, true));
+        // A heal that cannot be cast is fed nothing.
+        assert!(!inner_focus_due(&s, Some(ally), false));
     }
 }

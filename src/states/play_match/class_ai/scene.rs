@@ -744,7 +744,11 @@ impl Scene {
         let mut dr_trackers = BTreeMap::new();
         let mut ability_cooldowns = BTreeMap::new();
         let mut melee_defense = BTreeMap::new();
+        let mut talent_mechanics = BTreeMap::new();
         for u in &self.units {
+            if !u.combatant.talent_mechanics.is_empty() {
+                talent_mechanics.insert(u.entity, u.combatant.talent_mechanics.clone());
+            }
             let defense = u.combatant.melee_defense();
             if !defense.is_none() {
                 melee_defense.insert(u.entity, defense);
@@ -780,6 +784,7 @@ impl Scene {
             bounds: self.bounds,
             ai_profile: self.ai_profile,
             melee_defense,
+            talent_mechanics,
         }
     }
 

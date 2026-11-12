@@ -275,6 +275,20 @@ impl TalentMechanics {
         })
     }
 
+    /// The share Unbreakable Will takes off a crowd control of `category`
+    /// landing on this combatant ([`unbreakable_will_scales`]), when it has
+    /// the talent and the category is one it shortens. The one answer both
+    /// landing sites read: `apply_pending_auras` and its same-frame snapshot
+    /// mirror, `auras::reflect_instant_cc_in_snapshot`.
+    pub fn cc_reduction(
+        &self,
+        category: Option<crate::states::play_match::components::DRCategory>,
+    ) -> Option<f32> {
+        category
+            .filter(|c| unbreakable_will_scales(*c))
+            .and(self.unbreakable_will())
+    }
+
     /// Unbreakable Will's crowd-control reduction, when the combatant has it.
     pub fn unbreakable_will(&self) -> Option<f32> {
         self.list.iter().find_map(|m| match m {

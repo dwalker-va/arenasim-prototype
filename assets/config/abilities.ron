@@ -288,8 +288,9 @@
         // costs no mana and has +25% crit chance. 45s cooldown (Classic 14751's
         // 3 min, cut by the Death Coil precedent); no cost and no global
         // cooldown, as in TBC (StartRecoveryTime 0). The buff holds until a
-        // spell spends it. TBC's school is Physical; Holy here, so the buff
-        // stays Magic (TBC DispelType 1) and a purge can take it.
+        // spell spends it. TBC 14751 is a Physical-school spell (a school
+        // lockout does not stop it) whose buff is Magic (DispelType 1): a
+        // purge takes it.
         InnerFocus: (
             name: "Inner Focus",
             class: Priest,
@@ -305,8 +306,9 @@
                 duration: 600.0,
                 magnitude: 0.0,
                 next_cast: Some((applies_to: Any, free: true, crit_chance: 0.25)),
+                dispel_type: Magic,
             )),
-            spell_school: Holy,
+            spell_school: Physical,
         ),
 
         // Power Infusion (talent, Discipline tier 3): an ally gains 24 spell

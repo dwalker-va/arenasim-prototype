@@ -922,3 +922,267 @@ fn power_infusion_leaves_the_priests_global_cooldown_free() {
         .unwrap_or_else(|| panic!("the Priest cast nothing after:\n{log}"));
     assert!(next - infusion < 0.2, "{infusion} -> {next}\n{log}");
 }
+
+/// Pain Suppression takes a global cooldown (TBC 33206: StartRecoveryTime
+/// 1500): the Flash Heal that follows it waits about a GCD. Its control is
+/// [`power_infusion_leaves_the_priests_global_cooldown_free`], whose next cast
+/// follows at once.
+#[test]
+fn pain_suppression_takes_a_global_cooldown() {
+    let log = play(
+        dying_warrior_config(suppression_build()),
+        dying_warrior_stage(),
+    )
+    .log;
+    let suppression =
+        first_at(&log, "Priest #1 casts Pain Suppression").unwrap_or_else(|| panic!("{log}"));
+    let next = next_priest_cast_after(&log, suppression, "Pain Suppression")
+        .unwrap_or_else(|| panic!("the Priest cast nothing after:\n{log}"));
+    assert!(
+        next - suppression >= 1.4,
+        "{suppression} -> {next}: the next cast did not wait a GCD\n{log}"
+    );
+}
+
+/// A Discipline build down to Pain Suppression with neither Inner Focus nor
+/// Power Infusion: 2 + 2 + 1 points below tier 3, then Reflective Shield and
+/// Pain Suppression.
+fn suppression_build() -> Build {
+    Build::of(&[
+        (UnbreakableWill, 2),
+        (ImprovedPowerWordShield, 2),
+        (MentalAgility, 1),
+        (ReflectiveShield, 1),
+        (PainSuppression, 1),
+    ])
+}
+
+fn dying_warrior_config(build: Build) -> HeadlessMatchConfig {
+    HeadlessMatchConfig {
+        team1: vec!["Priest".into(), "Warrior".into()],
+        team2: vec!["Warrior".into()],
+        random_seed: Some(2),
+        max_duration_secs: 4.0,
+        team1_builds: vec![build],
+        ..Default::default()
+    }
+}
+
+/// The Priest's Warrior at 25% with an enemy Warrior on it; Weakened Soul on
+/// both, so no shield goes out first.
+fn dying_warrior_stage() -> Stage {
+    let weakened = |secs| Aura {
+        effect_type: AuraType::WeakenedSoul,
+        duration: secs,
+        ability_name: "Weakened Soul".into(),
+        ..Default::default()
+    };
+    Stage::new()
+        .place(T1, 0.0, 0.0)
+        .place(T1B, 10.0, 0.0)
+        .place(T2, 11.5, 0.0)
+        .health(T1B, 0.25)
+        .target(T2, T1B)
+        .aura(T1, weakened(15.0))
+        .aura(T1B, weakened(15.0))
+}
+
+/// The time of the Priest's first `[CAST]` line at or after `after` that is
+/// not `ability`'s own.
+fn next_priest_cast_after(log: &str, after: f32, ability: &str) -> Option<f32> {
+    log.lines()
+        .filter(|l| l.contains("[CAST] Team 1 Priest #1") && !l.contains(ability))
+        .filter_map(|l| first_at(l, "Priest #1"))
+        .find(|t| *t >= after)
+}
+
+/// Inner Focus as a live aura, as its cast lands it.
+fn inner_focus_aura() -> Aura {
+    let defs = AbilityDefinitions::shipped();
+    let focus = defs.get_unchecked(&AbilityType::InnerFocus);
+    Aura {
+        effect_type: AuraType::NextCast,
+        duration: 600.0,
+        ability_name: focus.name.clone(),
+        next_cast: focus.applies_aura.as_ref().unwrap().next_cast.clone(),
+        ..Default::default()
+    }
+}
+
+/// The Priest's mana paid for the first cast of `ability`: its largest
+/// one-frame drop within a few frames of the aura `effect` first showing on
+/// `on` (the cast lands its aura a frame after it pays).
+fn mana_paid(played: &common::staged::Played, on: (u8, u8), effect: AuraType) -> f32 {
+    let frames = &played.frames;
+    let observed = |i: usize, team: u8, slot: u8| {
+        frames[i]
+            .combatants
+            .values()
+            .find(|c| !c.is_pet && c.team == team && c.slot == slot)
+            .cloned()
+            .expect("the unit is observed")
+    };
+    let landed = (0..frames.len())
+        .find(|&i| frames[i].gates_open && observed(i, on.0, on.1).aura_types.contains(&effect))
+        .unwrap_or_else(|| panic!("no {effect:?} landed:\n{}", played.log));
+    (landed.saturating_sub(4)..=landed)
+        .filter(|&i| i > 0)
+        .map(|i| observed(i - 1, 1, 0).current_mana - observed(i, 1, 0).current_mana)
+        .fold(f32::MIN, f32::max)
+}
+
+/// Power Infusion and Pain Suppression charge their mana: 45 and 22. With
+/// Inner Focus up (the control) the same cast is free, and spends the focus.
+#[test]
+fn power_infusion_and_pain_suppression_pay_their_mana() {
+    let defs = AbilityDefinitions::shipped();
+    let cost = |a: AbilityType| defs.get_unchecked(&a).mana_cost;
+    assert_eq!(
+        (
+            cost(AbilityType::PowerInfusion),
+            cost(AbilityType::PainSuppression)
+        ),
+        (45.0, 22.0)
+    );
+
+    let infusion = |focused: bool| {
+        let config = HeadlessMatchConfig {
+            team1: vec!["Priest".into(), "Mage".into()],
+            team2: vec!["Warrior".into()],
+            random_seed: Some(2),
+            max_duration_secs: 3.0,
+            team1_builds: vec![Build::of(&[
+                (UnbreakableWill, 2),
+                (ImprovedPowerWordShield, 1),
+                (InnerFocus, 1),
+                (PowerInfusion, 1),
+            ])],
+            ..Default::default()
+        };
+        let stage = Stage::new()
+            .place(T1, 0.0, 0.0)
+            .place(T1B, 10.0, 0.0)
+            .place(T2, 30.0, 0.0)
+            .health(T2, 0.15)
+            .target(T1, T2)
+            .target(T1B, T2)
+            .cooldown(T1, AbilityType::InnerFocus, 40.0);
+        let stage = if focused {
+            stage.aura(T1, inner_focus_aura())
+        } else {
+            stage
+        };
+        play(config, stage)
+    };
+    let paid = infusion(false);
+    let spent = mana_paid(&paid, (1, 1), AuraType::SpellPowerIncrease);
+    assert!((spent - 45.0).abs() < 0.5, "paid {spent}\n{}", paid.log);
+    let free = infusion(true);
+    let spent = mana_paid(&free, (1, 1), AuraType::SpellPowerIncrease);
+    assert!(spent < 0.5, "paid {spent} with the focus up\n{}", free.log);
+    assert!(
+        free.log.contains("Inner Focus is spent on Power Infusion"),
+        "{}",
+        free.log
+    );
+
+    let suppression = |focused: bool| {
+        let stage = dying_warrior_stage();
+        let stage = if focused {
+            stage.aura(T1, inner_focus_aura())
+        } else {
+            stage
+        };
+        play(dying_warrior_config(suppression_build()), stage)
+    };
+    let paid = suppression(false);
+    let spent = mana_paid(&paid, (1, 1), AuraType::DamageTakenReduction);
+    assert!((spent - 22.0).abs() < 0.5, "paid {spent}\n{}", paid.log);
+    let free = suppression(true);
+    let spent = mana_paid(&free, (1, 1), AuraType::DamageTakenReduction);
+    assert!(spent < 0.5, "paid {spent} with the focus up\n{}", free.log);
+}
+
+// ---------------------------------------------------------------------------
+// Inner Focus is a Physical-school spell with a Magic buff (TBC 14751)
+// ---------------------------------------------------------------------------
+
+/// A school lockout on `school`, as an interrupt lands it.
+fn lockout(school: arenasim::states::play_match::abilities::SpellSchool) -> Aura {
+    Aura {
+        effect_type: AuraType::SpellSchoolLockout,
+        duration: 4.0,
+        magnitude: school.to_lockout_magnitude(),
+        ability_name: "Kick".into(),
+        ..Default::default()
+    }
+}
+
+/// Inner Focus is Physical, its buff Magic: a Holy lockout (a Kick on a
+/// Flash Heal) does not lock it out, and a purge takes the buff.
+#[test]
+fn inner_focus_is_physical_and_its_focus_is_magic() {
+    use arenasim::states::play_match::abilities::SpellSchool;
+    use arenasim::states::play_match::class_ai::cast_guard::{own_state_ok, PreCastOpts};
+    use arenasim::states::play_match::components::{ActiveAuras, AuraPending};
+    let defs = AbilityDefinitions::shipped();
+    let focus = defs.get_unchecked(&AbilityType::InnerFocus);
+    assert_eq!(focus.spell_school, SpellSchool::Physical);
+    let landed = AuraPending::from_ability(
+        bevy::prelude::Entity::PLACEHOLDER,
+        bevy::prelude::Entity::PLACEHOLDER,
+        focus,
+    )
+    .unwrap()
+    .aura;
+    assert_eq!(landed.removal_class_name(), Some("Magic"));
+    assert!(landed.can_be_purged());
+
+    let priest = Combatant::new(1, 0, Priest);
+    let holy = ActiveAuras {
+        auras: vec![lockout(SpellSchool::Holy)],
+    };
+    let opts = PreCastOpts::default();
+    assert!(own_state_ok(
+        AbilityType::InnerFocus,
+        focus,
+        &priest,
+        Some(&holy),
+        opts
+    ));
+    // The control: the Holy lockout does lock Flash Heal out.
+    let heal = defs.get_unchecked(&FlashHeal);
+    assert!(!own_state_ok(FlashHeal, heal, &priest, Some(&holy), opts));
+}
+
+/// Under a Holy lockout the Flash Heal Inner Focus would feed cannot be
+/// cast, so the focus is held for it (not refused for the lockout, and not
+/// spent on a Mind Blast); under a Shadow lockout the heal can go out, and
+/// the focus does.
+#[test]
+fn inner_focus_waits_for_a_flash_heal_it_can_feed() {
+    use arenasim::states::play_match::abilities::SpellSchool;
+    let locked = |school| {
+        under_attack(Warrior, 0.3)
+            .aura_full(PRIEST, lockout(school))
+            .grant(PRIEST, FOCUS)
+            .decide(PRIEST)
+    };
+    let holy = locked(SpellSchool::Holy);
+    assert!(
+        matches!(
+            holy.rejected(FOCUS),
+            Some(RejectionReason::PreconditionUnmet { note }) if note.contains("cannot be cast")
+        ),
+        "{}",
+        describe(&holy)
+    );
+    assert_ne!(holy.chose().map(|c| c.0), Some(FOCUS));
+    let shadow = locked(SpellSchool::Shadow);
+    assert_eq!(
+        shadow.chose(),
+        Some((FOCUS, Some(PRIEST))),
+        "{}",
+        describe(&shadow)
+    );
+}

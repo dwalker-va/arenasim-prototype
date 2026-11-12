@@ -369,7 +369,8 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
      poison or curse on a magic-school ability needs `dispel_type: Poison` /
      `Curse` in step 3, or a Priest can dispel it; a spell TBC gives no dispel
      type at all (a Paladin aura, a shapeshift) needs `dispel_type: Untyped`,
-     or a Shaman can purge it
+     or a Shaman can purge it; a Physical-school spell TBC gives Magic needs
+     `dispel_type: Magic` (Inner Focus), or nothing can
 
 3. **Add definition to `abilities.ron`**:
    ```ron
