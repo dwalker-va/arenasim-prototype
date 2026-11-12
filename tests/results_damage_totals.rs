@@ -10,17 +10,19 @@
 //! Unstable Affliction backlash, reflects and transferred shares each used to
 //! pick their own.
 //!
-//! One seeded batch (42 matches), talented and geared so that every one of
+//! One seeded batch (54 matches), talented and geared so that every one of
 //! those sites meets an absorb: Power Word: Shield, Aegis of the Last Stand
 //! and Sacred Shield; Retribution Aura and a Reflective Shield; Soul Link and
 //! Blessing of Sacrifice; Unstable Affliction under a Priest's and a Paladin's
-//! dispels. Three checks over it:
+//! dispels; a Warlock draining a Sacrifice holder. Four checks over it:
 //!
 //! 1. every primary combatant's total equals the sum of its breakdown rows;
 //! 2. every damage row whose line names its numbers counts what reached health
 //!    plus what was absorbed — the rule itself, which agreement alone cannot
 //!    see (a site that dropped the absorb from both would still agree);
-//! 3. the batch is not vacuous: each kind of event it exists for occurred.
+//! 3. every transferred share's row is one of its dealer's own rows — the
+//!    row the hit it was split from was logged under ("Drain Life (tick)");
+//! 4. the batch is not vacuous: each kind of event it exists for occurred.
 //!
 //! And one damage-over-time tick in a world of its own, for the caster no
 //! match reliably stages: one with no auras of its own, as a dead Warlock
@@ -132,6 +134,20 @@ fn nova(seed: u64) -> HeadlessMatchConfig {
         random_seed: Some(seed),
         max_duration_secs: 120.0,
         team2_equipment: vec![aegis()],
+        ..Default::default()
+    }
+}
+
+/// A Warlock + Warrior against a Warrior + Paladin with Blessing of
+/// Sacrifice: a Drain Life tick on a holder passes a share on.
+fn drain(seed: u64) -> HeadlessMatchConfig {
+    HeadlessMatchConfig {
+        team1: vec!["Warlock".into(), "Warrior".into()],
+        team2: vec!["Warrior".into(), "Paladin".into()],
+        map: "BasicArena".into(),
+        random_seed: Some(seed),
+        max_duration_secs: 120.0,
+        team2_builds: vec![Build::default(), protection()],
         ..Default::default()
     }
 }
@@ -253,6 +269,12 @@ fn batch() -> &'static [Played] {
                 configs.push((format!("nova seed {nova_seed}"), nova(nova_seed)));
             }
         }
+        // A bank for the Drain Life share (four of these twelve drain a
+        // Sacrifice holder today). If a change empties it, widen the bank;
+        // the one-tick case is `tests/drain_life_tick_log.rs`.
+        for seed in 19..=30 {
+            configs.push((format!("drain seed {seed}"), drain(seed)));
+        }
         configs
             .into_iter()
             .map(|(label, config)| play(label, config))
@@ -343,10 +365,39 @@ fn every_damage_row_counts_its_absorbed_damage() {
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
+/// A transferred share is credited to the row of the hit it was split from:
+/// every transfer row names a row its dealer logged for a hit of its own,
+/// whatever name that hit's site gave its row ("Drain Life (tick)").
+#[test]
+fn every_transfer_row_is_one_of_its_dealers_own_rows() {
+    let mut shares = 0;
+    let mut bad = Vec::new();
+    for played in batch() {
+        let own: std::collections::BTreeSet<(&str, &str)> = rows(&played.log)
+            .filter(|(_, _, _, m)| !m.starts_with("[TRANSFER]"))
+            .map(|(source, ability, _, _)| (source, ability))
+            .collect();
+        for (source, ability, _, message) in rows(&played.log) {
+            if !message.starts_with("[TRANSFER]") {
+                continue;
+            }
+            shares += 1;
+            if !own.contains(&(source, ability)) {
+                bad.push(format!(
+                    "{}: {source}'s share row {ability:?} is none of its own rows: {message}",
+                    played.label
+                ));
+            }
+        }
+    }
+    assert!(shares > 0, "no transfer rows");
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
 /// The batch saw every kind of event it is for.
 #[test]
 fn the_batch_is_not_vacuous() {
-    let kinds: [(&str, fn(&str, &str, bool) -> bool); 17] = [
+    let kinds: [(&str, fn(&str, &str, bool) -> bool); 18] = [
         ("a hit into an absorb", |m, _, row| {
             row && (m.contains(" hits ") || m.contains(" CRITS ")) && m.ends_with(" absorbed)")
         }),
@@ -397,6 +448,9 @@ fn the_batch_is_not_vacuous() {
             row && ability == "Drain Life (tick)"
         }),
         ("a pet's hit", |_, ability, row| row && ability == "<pet>"),
+        ("a share of a Drain Life tick", |m, ability, row| {
+            row && m.starts_with("[TRANSFER]") && ability == "Drain Life (tick)"
+        }),
     ];
     let mut counts: BTreeMap<&str, usize> = kinds.iter().map(|(k, _)| (*k, 0)).collect();
     for played in batch() {

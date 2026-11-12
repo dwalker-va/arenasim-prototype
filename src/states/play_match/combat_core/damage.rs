@@ -97,9 +97,13 @@ pub struct Hit<'a> {
     /// modifier yet.
     pub amount: f32,
     pub school: SpellSchool,
-    /// What dealt it ("Frostbolt"): named in the stealth reveal's log line, and
-    /// the breakdown row a transferred share of it is credited to.
+    /// What dealt it ("Frostbolt"): named in the stealth reveal's log line.
     pub source: &'a str,
+    /// The breakdown row its dealer's damage is logged under, which a
+    /// transferred share of it is credited to as well: `source`, unless its
+    /// site logs it under another name ([`Hit::row`]; a channel's tick is
+    /// "Drain Life (tick)").
+    pub row: &'a str,
     /// The unit that dealt it, when there is one.
     pub attacker: Option<Entity>,
     /// The unit it lands on.
@@ -125,6 +129,7 @@ impl<'a> Hit<'a> {
             amount,
             school,
             source,
+            row: source,
             attacker,
             victim,
             dealt: damage_dealt_multiplier(attacker_auras, school),
@@ -136,6 +141,13 @@ impl<'a> Hit<'a> {
     /// ahead of time with [`DealtMods`]).
     pub fn with_dealt(mut self, dealt: f32) -> Self {
         self.dealt = dealt;
+        self
+    }
+
+    /// This hit, logged under the breakdown row `row` rather than its
+    /// `source`'s name.
+    pub fn row(mut self, row: &'a str) -> Self {
+        self.row = row;
         self
     }
 
@@ -733,7 +745,7 @@ fn transfer_share(
         school: hit.school,
         preventable,
         dealer: hit.attacker,
-        ability: hit.source.to_string(),
+        ability: hit.row.to_string(),
         by: by.to_string(),
     });
 }

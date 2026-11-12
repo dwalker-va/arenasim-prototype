@@ -1487,6 +1487,9 @@ pub fn process_channeling(
             pet_query.get(caster_entity).ok().map(|p| p.pet_type),
         );
         let channel_name = caster_book.get_unchecked(&channel_ability).name.clone();
+        // The tick's breakdown row, apart from the channel's cast: its own
+        // damage and any share of it a transfer passes on are logged there.
+        let tick_row = format!("{channel_name} (tick)");
         // The target this tick killed, for the death line after the tick's.
         let mut killed: Option<String> = None;
         // The damage the tick landed and the damage a shield took, for the
@@ -1514,6 +1517,7 @@ pub fn process_channeling(
                     None,
                     target_entity,
                 )
+                .row(&tick_row)
                 .with_dealt(dealt)
                 .of_kind(HitKind::Periodic);
                 let (actual_damage, absorbed) = apply_damage_with_absorb(
@@ -1636,7 +1640,7 @@ pub fn process_channeling(
                 combat_log.log_damage(
                     caster_id.clone(),
                     target_id.clone(),
-                    format!("{} (tick)", channel_name),
+                    tick_row.clone(),
                     credited_damage(actual_damage, absorbed),
                     is_killing_blow,
                     false, // is_crit - channel ticks never crit

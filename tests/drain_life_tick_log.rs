@@ -143,3 +143,93 @@ fn a_lethal_tick_is_its_own_killing_blow() {
     assert_eq!(tick_damage(&log), (10.0, false));
     assert_eq!(log.killing_blows(WARLOCK), 0);
 }
+
+/// A Drain Life tick on a holder of Blessing of Sacrifice: the share its
+/// Paladin takes is part of the tick, credited to the tick's own breakdown
+/// row (AS-466), never a second "Drain Life" row. With `sacrifice` false,
+/// the control: the whole tick on the Warrior.
+fn shared_tick(sacrifice: bool) -> (CombatLog, f32) {
+    use arenasim::states::play_match::combat_core::process_damage_follow_ups;
+
+    let mut world = World::new();
+    world.insert_resource(CombatLog::default());
+    world.insert_resource(ArenaDampening::default());
+    let mut time = Time::<()>::default();
+    time.advance_by(Duration::from_secs_f32(1.0 / 60.0));
+    world.insert_resource(time);
+    let paladin = world
+        .spawn((
+            Combatant::new(2, 1, CharacterClass::Paladin),
+            Transform::from_xyz(25.0, 0.0, 0.0),
+            ActiveAuras::default(),
+        ))
+        .id();
+    let mut warrior = Combatant::new(2, 0, CharacterClass::Warrior);
+    warrior.shadow_resistance = 0.0;
+    let mut auras = Vec::new();
+    if sacrifice {
+        auras.push(Aura {
+            effect_type: AuraType::DamageTransfer,
+            duration: 12.0,
+            magnitude: 0.3,
+            caster: Some(paladin),
+            ability_name: "Blessing of Sacrifice".into(),
+            break_on_damage_threshold: -1.0,
+            ..Default::default()
+        });
+    }
+    let target = world
+        .spawn((
+            warrior,
+            Transform::from_xyz(20.0, 0.0, 0.0),
+            ActiveAuras { auras },
+        ))
+        .id();
+    let warlock = world
+        .spawn((
+            Combatant::new(1, 0, CharacterClass::Warlock),
+            Transform::default(),
+            ChannelingState {
+                ability: AbilityType::DrainLife,
+                duration_remaining: 5.0,
+                time_until_next_tick: 0.0,
+                tick_interval: 1.0,
+                target,
+                interrupted: false,
+                interrupted_display_time: 0.0,
+                ticks_applied: 0,
+            },
+        ))
+        .id();
+    world.run_system_once(process_channeling).unwrap();
+    world.run_system_once(process_damage_follow_ups).unwrap();
+    let credited = world.get::<Combatant>(warlock).unwrap().damage_dealt;
+    (world.remove_resource::<CombatLog>().unwrap(), credited)
+}
+
+#[test]
+fn a_shared_tick_is_one_breakdown_row() {
+    let (log, credited) = shared_tick(true);
+    assert!(
+        log.entries
+            .iter()
+            .any(|e| e.message.contains("[TRANSFER]")
+                && e.message.contains("(Blessing of Sacrifice")),
+        "the share was passed on: {:?}",
+        messages(&log)
+    );
+    let rows: Vec<(String, f32)> = log.damage_by_ability(WARLOCK).into_iter().collect();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].0, "Drain Life (tick)");
+    assert!((rows[0].1 - 10.0).abs() < 1e-4, "{rows:?}");
+    assert!((credited - 10.0).abs() < 1e-4, "{credited}");
+    // Control: no Sacrifice, the same single row.
+    let (log, _) = shared_tick(false);
+    assert!(!messages(&log).iter().any(|m| m.contains("[TRANSFER]")));
+    assert_eq!(
+        log.damage_by_ability(WARLOCK)
+            .into_iter()
+            .collect::<Vec<_>>(),
+        vec![("Drain Life (tick)".to_string(), 10.0)]
+    );
+}

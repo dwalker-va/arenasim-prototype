@@ -288,7 +288,7 @@ fn the_results_totals_are_the_breakdowns_sums() {
         assert_eq!(t.log.total_damage_dealt(WARLOCK), TICK);
         assert_eq!(t.warlock.healing_done, landed);
         assert_eq!(t.log.total_healing_done(WARLOCK), landed);
-        // The target took what the Warlock was credited with.
+        // The tick's line names what reached the target's health.
         assert!(t.log.entries.iter().any(|e| e.message.starts_with(&format!(
             "{WARLOCK}'s Drain Life ticks on {WARRIOR} for {landed:.0} damage"
         ))));
