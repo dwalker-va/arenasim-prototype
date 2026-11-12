@@ -273,6 +273,30 @@ mod tests {
         files
     }
 
+    /// A declared source admits exactly its own kind of page source, and an
+    /// art kind is read off the art itself.
+    #[test]
+    fn declarations_read_their_own_kind() {
+        let ability = AuraSource::Ability(AbilityType::Frostbolt);
+        let mechanic = AuraSource::Mechanic("a test");
+        assert!(SourceKind::Ability.admits(ability));
+        assert!(!SourceKind::Ability.admits(mechanic));
+        for kind in [SourceKind::Item, SourceKind::Talent, SourceKind::Arena] {
+            assert!(kind.admits(mechanic), "{kind:?}");
+            assert!(!kind.admits(ability), "{kind:?}");
+        }
+        assert_eq!(ArtKind::of(AuraArt::FromSource), ArtKind::FromSource);
+        assert_eq!(ArtKind::of(AuraArt::Own("key")), ArtKind::Own);
+        assert_eq!(
+            ArtKind::of(AuraArt::Item(ItemId::DragonspineTrophy)),
+            ArtKind::Item
+        );
+        assert_eq!(
+            ArtKind::of(AuraArt::Talent(TalentId::FelStamina)),
+            ArtKind::Talent
+        );
+    }
+
     /// The generated enum has exactly one variant per family file, named
     /// after it — the build script's whole job, checked against the directory
     /// itself rather than against the script's own reading of it.
