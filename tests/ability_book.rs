@@ -111,14 +111,17 @@ fn a_match_channels_from_the_books_its_spawn_resolved() {
             .unwrap()
             .damage_base_min = TICK;
     });
+    // The tick line reports what landed (resistance shaves a little; a
+    // lethal tick is capped at the health left), so read its largest.
+    let max = |v: &[f32]| v.iter().copied().fold(0.0f32, f32::max);
     let ticks = amounts(&play(Some(patched), config()), "'s Drain Life ticks");
     assert!(
-        !ticks.is_empty() && ticks.iter().all(|&t| t == TICK),
+        max(&ticks) >= TICK * 0.6,
         "Drain Life ticked for the match table's damage: {ticks:?}"
     );
     let ticks = amounts(&play(None, config()), "'s Drain Life ticks");
     assert!(
-        !ticks.is_empty() && !ticks.contains(&TICK),
+        !ticks.is_empty() && max(&ticks) < TICK * 0.5,
         "control: the shipped table's damage: {ticks:?}"
     );
 }
