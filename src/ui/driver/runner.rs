@@ -89,6 +89,13 @@ pub enum Micro {
     /// RESTING after a click. See [`click_rest_gate`] — a hover's move made
     /// sooner never gets its tooltip, however long it then waits.
     AwaitClickRest,
+    /// Keep the pointer moving over the named widget, a point at a time, until
+    /// egui has counted it as moving. See [`move_counted_gate`]: egui counts a
+    /// move only on a pass whose velocity window holds three samples, so a
+    /// hover's one move among slow frames is never counted (AS-453).
+    RegisterMove {
+        id: String,
+    },
     /// Wait until egui would actually show a tooltip for whatever the pointer
     /// is over. See [`tooltip_gate`] — this is a WALL-CLOCK wait expressed as
     /// a predicate, not a frame count, because every gate egui applies is.
@@ -232,10 +239,12 @@ pub fn expand(step: &Step, settle: u32) -> VecDeque<Micro> {
         //
         // The move itself waits for the last click to be old enough first:
         // egui reads a move inside that window as resting after the click,
-        // and that verdict does not age away (AS-289).
+        // and that verdict does not age away (AS-289). And it keeps moving
+        // until egui has counted it, which slow frames can put off (AS-453).
         Step::Hover { id } => {
             q.push_back(Micro::AwaitClickRest);
             q.push_back(Micro::Move { id: id.clone() });
+            q.push_back(Micro::RegisterMove { id: id.clone() });
             q.push_back(Micro::SettleForTooltip);
             q.push_back(Micro::Idle(settle));
         }
@@ -328,8 +337,12 @@ pub fn is_retryable(step: &Step) -> bool {
 ///   settle would need grows with the frame rate rather than staying put.
 /// * `smooth_scroll_delta` is an animation that decays over time, so a target
 ///   the driver had to SCROLL to needs strictly longer than one it did not.
+///   egui reads it inside the pass; the driver, after it, reads whether the
+///   last pass scrolled at all ([`scrolled_last_pass`]), since the scroll
+///   area has zeroed the delta by then.
 /// * `clicked_more_recently_than_moved` wants the move to land at least 0.1s
-///   after the last click.
+///   after the last click, and to have been COUNTED as a move — which a slow
+///   frame can prevent; see [`move_counted_gate`].
 ///
 /// Measured on a contended machine, the old 33-frame settle spanned
 /// 0.175-0.242s against a 0.1s window, and the gates opened 10-12 frames
@@ -350,32 +363,47 @@ fn tooltip_gate(ctx: &egui::Context) -> Result<(), &'static str> {
         )
     };
 
-    let (since_scroll, since_click, since_move, still, smooth_scroll) = ctx.input(|i| {
+    let (since_scroll, since_click, since_move, still) = ctx.input(|i| {
         (
             i.time_since_last_scroll(),
             i.pointer.time_since_last_click(),
             i.pointer.time_since_last_movement(),
             i.pointer.is_still(),
-            i.smooth_scroll_delta,
         )
     });
 
     if since_scroll < delay {
         return Err("a scroll is still inside tooltip_delay");
     }
-    if since_click < since_move + EGUI_CLICK_REST_SECS {
+    if clicked_more_recently_than_moved(ctx) {
         return Err("the last click is more recent than the last move (egui suppresses a tooltip right after a click)");
     }
     if only_when_still && !still {
         return Err("the pointer is not still yet (egui's 0.1s velocity window)");
     }
-    if only_when_still && smooth_scroll != egui::Vec2::ZERO {
+    if only_when_still && scrolled_last_pass(ctx) {
         return Err("a smooth scroll is still animating");
     }
     if delay - since_scroll.min(since_move).min(since_click) > 0.0 {
         return Err("still inside tooltip_delay");
     }
     Ok(())
+}
+
+/// Whether egui's last pass scrolled: a wheel's raw delta arrived, or its
+/// smooth scroll played some of a queued delta out.
+///
+/// egui stamps `last_scroll_time` in `InputState::begin_pass` whenever either
+/// delta is non-zero (egui 0.31.1, `src/input_state/mod.rs:402-407`), before
+/// anything reads it, and a pass with any delta still queued always plays
+/// some of it out. So a pass with no scroll means the animation is over.
+/// `smooth_scroll_delta` itself cannot say so once the pass has run: the
+/// `ScrollArea` that applies it zeroes it in the same pass
+/// (`src/containers/scroll_area.rs:970-978`), so the driver, which reads after
+/// the pass, would see zero mid-animation. Inside the pass, before the scroll
+/// area consumes it, egui's own tooltip check sees the delta.
+pub fn scrolled_last_pass(ctx: &egui::Context) -> bool {
+    ctx.input(|i| i.time_since_last_scroll()) == 0.0
 }
 
 /// How soon after a click egui reads a pointer move as the pointer RESTING
@@ -406,6 +434,72 @@ pub fn click_rest_gate(ctx: &egui::Context) -> Result<(), &'static str> {
         return Err("the last click is too recent: egui would read the move as resting after it");
     }
     Ok(())
+}
+
+/// `Response::should_show_hover_ui`'s `clicked_more_recently_than_moved`: the
+/// gate that keeps a tooltip back while egui reads the pointer as resting
+/// after a click.
+fn clicked_more_recently_than_moved(ctx: &egui::Context) -> bool {
+    ctx.input(|i| {
+        i.pointer.time_since_last_click()
+            < i.pointer.time_since_last_movement() + EGUI_CLICK_REST_SECS
+    })
+}
+
+/// Whether egui has counted the pointer as moving since the last click's rest,
+/// so that [`tooltip_gate`]'s click gate is open.
+///
+/// egui 0.31 dates the last movement to the last pass whose pointer velocity
+/// was non-zero, and computes velocity only from three or more position
+/// samples inside a 0.1s window (`input_state/mod.rs`, `pos_history`). It
+/// takes one sample per pass and keeps two once frames run past 50ms, so a
+/// move made among slow frames is never counted, and once the pointer rests
+/// there is nothing left to count: the tooltip is withheld for good. A hover
+/// that has waited out [`click_rest_gate`] moves only after the click's rest,
+/// so the first pass that counts any move of it opens this gate.
+///
+/// Pure and `pub`, so `tests/ui_driver.rs` can drive it at any frame interval.
+pub fn move_counted_gate(ctx: &egui::Context) -> Result<(), &'static str> {
+    if clicked_more_recently_than_moved(ctx) {
+        return Err(
+            "egui has not counted the pointer as moving since the click: its velocity \
+             needs three pointer samples inside 0.1s, so no move counts while frames run \
+             longer than 50ms",
+        );
+    }
+    Ok(())
+}
+
+/// How far, in points, a [`Micro::RegisterMove`] nudge strays from the
+/// widget's centre at most: enough for several distinct positions, little
+/// enough to stay on any widget the scripts hover.
+const NUDGE_POINTS: f32 = 3.0;
+
+/// Where to put the pointer next while keeping a hover's move registering:
+/// one point further along a sawtooth across the widget's centre. egui reads a
+/// window of samples as moving only when its first and last positions differ,
+/// and a sawtooth repeats a position only once a whole period has passed, so
+/// every window shorter than that period reads as moving. Back to the centre
+/// whenever the pointer is anywhere else.
+fn nudge(widget: &registry::Widget, cursor: egui::Pos2) -> egui::Pos2 {
+    let center = widget.rect.center();
+    let room = widget.rect.intersect(widget.clip);
+    let reach = NUDGE_POINTS
+        .min(room.width() / 2.0 - 1.0)
+        .min(room.height() / 2.0 - 1.0)
+        .floor()
+        .max(1.0);
+    let offset = cursor - center;
+    let along = offset.x.round();
+    if offset.y.abs() > 0.5 || along.abs() > reach {
+        return center;
+    }
+    let next = if along + 1.0 > reach {
+        -reach
+    } else {
+        along + 1.0
+    };
+    center + egui::vec2(next, 0.0)
 }
 
 /// Bevy's physical `KeyCode` and logical `Key` for a script key name.
@@ -518,11 +612,11 @@ pub fn run_ui_script(
     // its own pass through bevy_egui and egui.
     let action = run.queue.pop_front().expect("queue is non-empty here");
 
-    // The pointer actions — `Move`, `AwaitClickRest`, `SettleForTooltip` —
-    // decide ENTIRELY in `pointer_step`, asked before anything else, which is
-    // pure so the default tests drive this exact code. All the runner does
-    // with them is inject what it asks for and count the wait; there is no
-    // match arm here that could answer one instead.
+    // The pointer actions — `Move`, `AwaitClickRest`, `RegisterMove`,
+    // `SettleForTooltip` — decide ENTIRELY in `pointer_step`, asked before
+    // anything else, which is pure so the default tests drive this exact
+    // code. All the runner does with them is inject what it asks for and count
+    // the wait; there is no match arm here that could answer one instead.
     let run = &mut *run;
     if let Some(PointerStep { progress, inject }) =
         pointer_step(&action, &frame, &ctx, &mut run.cursor, &mut run.last_seen)
@@ -566,7 +660,10 @@ pub fn run_ui_script(
     match action {
         Micro::Idle(0) => {}
         Micro::Idle(n) => run.queue.push_front(Micro::Idle(n - 1)),
-        Micro::Move { .. } | Micro::AwaitClickRest | Micro::SettleForTooltip => {
+        Micro::Move { .. }
+        | Micro::AwaitClickRest
+        | Micro::RegisterMove { .. }
+        | Micro::SettleForTooltip => {
             unreachable!("pointer_step answered {action:?} above")
         }
         Micro::Press(button) => {
@@ -676,8 +773,9 @@ pub struct PointerStep {
     pub inject: Vec<Inject>,
 }
 
-/// Decide one frame of a pointer action — `Move`, `AwaitClickRest` or
-/// `SettleForTooltip` — against the last drawn `frame` and egui's input state.
+/// Decide one frame of a pointer action — `Move`, `AwaitClickRest`,
+/// `RegisterMove` or `SettleForTooltip` — against the last drawn `frame` and
+/// egui's input state.
 /// `None` for any other action.
 ///
 /// Pure, and `pub` on purpose, like [`evaluate`]: `run_ui_script` only injects
@@ -709,6 +807,34 @@ pub fn pointer_step(
                 Vec::new(),
             ),
         },
+        // The aim was one move, and egui may not have counted it: keep the
+        // pointer moving over the widget until it does. When egui already
+        // counted the aim (at a steady 20 frames a second or more), it moves
+        // nothing.
+        Micro::RegisterMove { id } => match move_counted_gate(ctx) {
+            Ok(()) => done(),
+            // A widget that has left the screen gets no nudge, since a point
+            // there is over whatever is drawn in its place; and the wait then
+            // names that, not the frame interval.
+            Err(shut) => match frame.widget(id).filter(|w| w.aim_point().is_some()) {
+                Some(widget) => {
+                    let to = nudge(widget, *cursor);
+                    let delta = to - *cursor;
+                    *cursor = to;
+                    again(
+                        format!("the hover's move over `{id}` never registered: {shut}"),
+                        vec![Inject::Pointer { to, delta }],
+                    )
+                }
+                None => again(
+                    format!(
+                        "widget `{id}` left the screen while the hover's move waited for \
+                         egui to count it"
+                    ),
+                    Vec::new(),
+                ),
+            },
+        },
         Micro::SettleForTooltip => match tooltip_gate(ctx) {
             Ok(()) => done(),
             Err(shut) => again(
@@ -729,10 +855,23 @@ pub fn pointer_step(
                 // of the equipment script clicked Trinket1 because Ring1 had
                 // slid exactly one wheel line — the worst failure mode, since
                 // the click lands on SOMETHING and looks like it worked.
+                //
+                // And a rect that held still for one frame has not stopped if
+                // egui is still playing a wheel's delta out: mid-animation the
+                // content can pause for a pass, and the target then slides on
+                // from under the aim. View Combatant's `hover strategic:` after
+                // a `hover kit:` aimed above the tile that way (AS-470).
                 let seen = (id.clone(), widget.rect);
                 if last_seen.as_ref() != Some(&seen) {
                     *last_seen = Some(seen);
                     again(format!("widget `{id}` never stopped moving"), Vec::new())
+                } else if scrolled_last_pass(ctx) {
+                    again(
+                        format!(
+                            "widget `{id}` never stopped moving: a scroll is still playing out"
+                        ),
+                        Vec::new(),
+                    )
                 } else {
                     let to = widget.rect.center();
                     let delta = to - *cursor;

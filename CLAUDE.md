@@ -766,6 +766,8 @@ any ring fits either ring socket, and the same item may not occupy both
      (`equipment::ItemTier`): starting kit (0, the default) 54-60, Gauntlet (1)
      76-80, Champion (2) 90-94. A Gauntlet or Champion item also spends at least
      90% of its budget (`reward_tiers_spend_their_budget`), so a reward is felt.
+     A tier's members are read from `item_tier` (`tier_items`); no test names
+     them.
 
    **A trinket may carry a `proc:` block** — a trigger and an effect on that
    trinket's OWN internal cooldown (`src/states/play_match/proc_trinkets.rs`):
@@ -944,7 +946,17 @@ any ring fits either ring socket, and the same item may not occupy both
      the item picker, tooltips and encyclopedia show it with no code change. Every
      shipped item has one; the field defaults to empty, which draws no icon.
 
-6. **Run `cargo test`** to verify the item passes budget validation
+6. **Run `cargo test`** to verify the item passes budget validation. A
+   stat item's `items.ron` entry and its `ItemId` line are its only edits: the
+   tests that check a tier or a mechanism walk every item in `items.ron` (a
+   frozen witness keeps each walk from passing on none), and the snapshots
+   draw a pinned catalogue (`tests/common/pinned_catalogue.rs`), so a new item
+   re-blesses no PNG. An item with an `on_use:`, a `triggered_absorb:` or an
+   extra-swing `proc:` also names itself in its family in
+   `tests/lands_silently_audit.rs` (the member list, and the visual it owes:
+   a judgement, so it is listed, in name order). Two cards that each append an
+   item at the same place in `items.ron` and the `ItemId` list still conflict
+   there.
 
 **Tip**: Use the Wowhead MCP to look up WoW Classic item stats as a reference:
 ```
@@ -1356,15 +1368,23 @@ against a chaser 10yd off, so the edge and cover terms flipped the heading back
 toward the chaser every window (AS-200). `escape_tick` reads both only for a
 chaser escape, so the Priest's, Paladin's and Shaman's impairment windows are
 unchanged. The run keeps room to run (AS-241): its `flee` scores a heading by
-the distance from the chaser it gains over the open ground it has, up to
-`SHIFT_FLEE_REACH` (8yd, `ScorerInputs::flee_reach`), so a Druid with a wall
-or a pillar at its back runs along it rather than into it; and it never steps
+the distance from the chaser it gains over `SHIFT_FLEE_REACH` (8yd,
+`ScorerInputs::flee_reach`) of running, walked as the executor walks it
+(`movement_scoring::run_end`: slid off obstacles, clamped into the arena), so
+a Druid with a wall or a pillar at its back runs along it rather than into it,
+and a Druid in a corner takes the heading that grazes a wall and is carried
+round the vertex (AS-468); and it never steps
 deeper into a dead end (`MASK_DEAD_END`, `ArenaBounds::dead_end_depth` —
 Nagrand's starting rooms), a mask kept past the anchor's on the fallback
 ladder. On the AS-164 Nagrand Druid panel a shifted Druid entered a starting
 room in 2.1% of `Legacy` and 2.0% of `TeamPlan` matches, from 23.1% and 21.6%
 (`docs/design/balance/2026-10-31-as241-travel-form-escape.md`); staged in
-`tests/druid_escape_room_to_run.rs`. The shift and the shift out
+`tests/druid_escape_room_to_run.rs`. A corner cannot be escaped at once: with
+the chaser out in front, no heading gains ground over the first 1.5s; at the
+octagon's vertex and its diagonal-wall pocket, 6-10yd out, the run ends within
+0.5yd of the best a straight heading does
+(`a_cornered_druid_runs_as_far_as_the_corner_allows` in
+`tests/druid_control_probes.rs`; staged spots only, not a bound elsewhere). The shift and the shift out
 are the Druid AI's (`class_ai/druid.rs` — `shift_trigger`, `should_leave_form`);
 rules in `docs/design/wow-mechanics.md` (Travel Form). A shift that breaks a
 root or snare takes the Druid's next global cooldown: an emergency heal may
@@ -2215,9 +2235,16 @@ default `cargo test` if one forgets.
 way: split the Bevy wrapper (grabs `EguiContexts` + resources, applies
 actions) from a pure `draw_*(ctx, &data...) -> Action` function, then drive
 that function from a kittest harness with mock data.
-`tests/main_menu_snapshot.rs` and `tests/encyclopedia_snapshot.rs` follow it;
-the encyclopedia's harness loads the real `items.ron` and `abilities.ron`
-rather than mock data, so a content change shows up in the snapshot.
+`tests/main_menu_snapshot.rs` and `tests/encyclopedia_snapshot.rs` follow it.
+**A snapshot over game content pins LAYOUT, not the catalogue:** the
+encyclopedia, equipment-picker and View Combatant harnesses draw the live
+tables restricted to `tests/common/pinned_catalogue.rs`, the items, abilities and talents that
+existed when they were last pinned. A change to a pinned entry's own text or
+numbers still shows; content added since does not, so a card that adds an
+item, an ability, an aura or a talent moves no pixel there, and two such cards
+cannot conflict in a PNG. Which content exists is a content test's to check,
+by set equality over the live tables. A new harness over game content draws
+the pinned catalogue too.
 
 **UI values come from `ui::theme`.** A colour, text size, gap, radius or icon
 size is chosen once, in `src/ui/theme.rs`, and named by its role (`TEXT_MUTED`,
@@ -2308,18 +2335,42 @@ old standalone Armory. It is a navigation FRAMEWORK plus per-section content:
 - **Zero marginal cost:** every list, page and search hit derives from the RON
   configs / Rust registries. A new item in `items.ron`, or a new ability in
   `abilities.ron`, appears in its index, the filters, search, its owning class's
-  kit and its own detail page with no code change.
+  kit and its own detail page with no code change — and moves no snapshot,
+  which draw a pinned catalogue (*Iterate on an egui screen fast*).
 - **Sections:** `classes.rs` (base stats from `class_base_stats`, kit from
   `AbilityDefinitions::abilities_for_class`, a subsection per pet), `abilities.rs`
-  (all 70, filterable by class and school, grouped by owning class in the derived
-  kit order — do NOT add a second sort), `items.rs`, and `auras.rs` (Buffs &
-  Debuffs: every aura an ability applies, plus the engine-originated ones —
-  totem buffs, interrupt lockouts, one entry per proc trinket, and the rest —
-  each with a removal badge answered by the engine's own dispel predicates),
+  (every ability, filterable by class and school, grouped by owning class in the
+  derived kit order — do NOT add a second sort), `items.rs`, and `auras.rs`
+  (Buffs & Debuffs: every aura an ability applies, plus the engine-originated
+  ones — totem buffs, interrupt lockouts, one entry per proc trinket, and the
+  rest — each with a removal badge answered by the engine's own dispel
+  predicates),
   and `talents.rs` (every class's trees from `talents.ron`, drawn read-only,
   and a page per talent). A class page shows its BASE kit
   (`base_abilities_for_class`), its talent abilities under their own heading,
   and its trees.
+- **Engine-applied auras are one FILE per family** in
+  `src/states/encyclopedia/engine_auras/` (Weakened Soul, the totem buffs, a
+  proc item's buff, a talent's proc aura, …). The build script lists the
+  directory and generates `EngineFamily` and its dispatch, so a new family is a
+  new file — `members` (the auras of that family the tables hold, read from
+  their source), `entry` (its page, read from the apply site's own
+  constructor, with the aura it lands as `landed`), and two declarations the
+  compiler asks for: `SOURCE` (an ability, an item, a talent or the arena
+  applies it) and `ART` (whose icon it wears), which must fit each other
+  (`ArtKind::fits`). The tests derive their expected sets from those
+  declarations, so a new family is never an edit to a shared list, and hold
+  each entry's icon to the key the buff bar draws for its `landed` aura
+  (`rendering::get_aura_icon_key`), an independent path. Lint's
+  `cargo fmt --check` cannot see these files (they are declared in generated
+  code): run `rustfmt --edition 2021 src/states/encyclopedia/engine_auras/*.rs`,
+  and the default `cargo test` holds them to it
+  (`family_files_are_rustfmt_clean`). Two checkouts sharing one
+  `CARGO_TARGET_DIR` can be handed each other's generated registry; the build
+  refuses it (`GENERATED_FOR`), and `touch
+  src/states/encyclopedia/engine_auras` regenerates it.
+  `tests/aura_catalog_audit.rs` fails an aura applied in code that no entry
+  covers.
 - **Ability and aura PROSE is `src/states/ability_text.rs`** — one generator, shared
   with View Combatant, so an ability's description reads the same wherever the
   player meets it. Totem text wins over a hand-written `abilities.ron`

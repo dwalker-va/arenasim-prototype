@@ -260,6 +260,13 @@ pub fn any_live(auras: &ActiveAuras) -> bool {
         .any(|a| a.effect_type == AuraType::NextCast)
 }
 
+/// The strongest live modifier on a holder that covers `ability` — what its
+/// next cast of it would spend — or `None` when none is primed for it. How a
+/// class AI asks "is my next Shadow Bolt instant?" (Shadow Trance).
+pub fn primed(auras: Option<&ActiveAuras>, ability: AbilityType) -> Option<NextCastModifier> {
+    NextCastModifier::strongest(live(auras).filter(|m| m.covers(ability)))
+}
+
 /// Every live next-cast modifier on a holder, in aura order.
 fn live(auras: Option<&ActiveAuras>) -> impl Iterator<Item = &NextCastModifier> {
     auras

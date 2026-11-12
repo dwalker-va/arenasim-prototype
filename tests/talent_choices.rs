@@ -31,20 +31,14 @@ fn abilities() -> &'static AbilityDefinitions {
     AbilityDefinitions::shipped()
 }
 
-/// The fixture (with Mage fillers for the other ids): Demonic Embrace widens Curse of Tongues at rank 1 and patches
-/// it at rank 2 (Retribution Aura's shape); Fel Stamina is a ROGUE node here,
-/// opening the off-hand poison slot and carrying Cheat Death; Unholy Power
-/// carries Soul Link. Tongues switches Unholy Power off and forbids Drain
-/// Life; Death Coil requires Weakness.
-const FIXTURE: &str = r#"(
-    trees: {
-        Warlock: [(id: Demonology, name: "Demonology", icon: "x.jpg")],
-        Rogue: [(id: Demonology, name: "Fixture", icon: "x.jpg")],
-        Paladin: [(id: Protection, name: "Protection", icon: "x.jpg")],
-        Mage: [(id: Demonology, name: "Filler", icon: "x.jpg")],
-        Priest: [(id: Shadow, name: "Shadow", icon: "x.jpg")],
-    },
-    talents: {
+/// The fixture's hand-written nodes: Demonic Embrace widens Curse of Tongues
+/// at rank 1 and patches it at rank 2 (Retribution Aura's shape); Fel Stamina
+/// is a ROGUE node here, opening the off-hand poison slot and carrying Cheat
+/// Death; Unholy Power carries Soul Link. Tongues switches Unholy Power off
+/// and forbids Drain Life; Death Coil requires Weakness. Every other talent
+/// id is a generated filler ([`fixture_text`]), so a talent node added to the
+/// game needs no edit here.
+const NODES: &str = r#"
         DemonicEmbrace: (
             name: "Demonic Embrace", class: Warlock, tree: Demonology, tier: 1, column: 0,
             icon: "x.jpg", max_rank: 2, budget: Some(11.0),
@@ -103,60 +97,6 @@ const FIXTURE: &str = r#"(
             icon: "x.jpg", max_rank: 1, budget: Some(22.0),
             per_rank: [Grant(SacredShield)],
         ),
-        // Fillers for the ids the cases do not use: every id has an entry.
-        MasterDemonologist: (
-            name: "Filler 1", class: Mage, tree: Demonology, tier: 1, column: 0,
-            icon: "x.jpg", max_rank: 1, budget: Some(11.0),
-            per_rank: [StatPercent(WeaponDamage, 0.01)],
-        ),
-        DemonicSacrifice: (
-            name: "Filler 2", class: Mage, tree: Demonology, tier: 1, column: 1,
-            icon: "x.jpg", max_rank: 1, budget: Some(11.0),
-            per_rank: [StatPercent(WeaponDamage, 0.01)],
-        ),
-        SoulLink: (
-            name: "Filler 3", class: Mage, tree: Demonology, tier: 1, column: 2,
-            icon: "x.jpg", max_rank: 1, budget: Some(11.0),
-            per_rank: [StatPercent(WeaponDamage, 0.01)],
-        ),
-        // Every shipped talent id needs an entry, and Expose Armor's grant
-        // its one node: the Combat tree's ids, inert here.
-        LightningReflexes: (
-            name: "LR", class: Rogue, tree: Demonology, tier: 1, column: 1,
-            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
-            per_rank: [StatAdd(DodgeChance, 0.04)],
-        ),
-        DualWieldSpecialization: (
-            name: "DWS", class: Rogue, tree: Demonology, tier: 1, column: 2,
-            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
-            per_rank: [StatPercent(OffHandDamage, 0.1)],
-        ),
-        Aggression: (
-            name: "Ag", class: Rogue, tree: Demonology, tier: 2, column: 0,
-            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
-            per_rank: [Patch(on: Ability(SinisterStrike), field: Damage, op: Mul(1.06))],
-        ),
-        Vitality: (
-            name: "Vi", class: Rogue, tree: Demonology, tier: 2, column: 1,
-            icon: "x.jpg", max_rank: 1,
-            per_rank: [StatPercent(MaxHealth, 0.03)],
-        ),
-        Deflection: (
-            name: "De", class: Rogue, tree: Demonology, tier: 2, column: 2,
-            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
-            per_rank: [StatAdd(ParryChance, 0.04)],
-        ),
-        SwiftBlades: (
-            name: "SB", class: Rogue, tree: Demonology, tier: 3, column: 0,
-            icon: "x.jpg", max_rank: 1, budget: Some(11.0),
-            per_rank: [StatAdd(MeleeAttackSpeed, 0.1)],
-        ),
-        ExposeArmor: (
-            name: "EA", class: Rogue, tree: Demonology, tier: 4, column: 0,
-            icon: "x.jpg", max_rank: 1, budget: Some(22.0),
-            requires: Some((SwiftBlades, 1)),
-            per_rank: [Grant(ExposeArmor)],
-        ),
         // The shipped Priest nodes, which every table must name; inert here.
         ImprovedMindBlast: (
             name: "Improved Mind Blast", class: Priest, tree: Shadow, tier: 1, column: 0,
@@ -173,21 +113,99 @@ const FIXTURE: &str = r#"(
             icon: "x.jpg", max_rank: 1, budget: Some(11.0),
             per_rank: [WidenChoice(PriestForm(Shadowform)), Grant(Shadowform)],
         ),
-    },
-    choice_rules: [
+"#;
+
+/// The trees the hand-written nodes sit in: (class, tree, name).
+const TREES: &[(&str, &str, &str)] = &[
+    ("Warlock", "Demonology", "Demonology"),
+    ("Rogue", "Demonology", "Fixture"),
+    ("Paladin", "Protection", "Protection"),
+    ("Priest", "Shadow", "Shadow"),
+];
+
+const RULES: &str = r#"[
         SwitchesOff(option: WarlockCurse(Tongues), talent: UnholyPower),
         Forbids(option: WarlockCurse(Tongues), ability: DrainLife),
         Requires(ability: DeathCoil, option: WarlockCurse(Weakness)),
-    ],
-)"#;
+    ]"#;
+
+/// The whole fixture table: the hand-written [`NODES`], and an inert filler
+/// for every talent id they do not name — a table must name every id, and
+/// these cases only use a few. A filler sits where its shipped node does and
+/// carries only that node's `Grant`s (each talent ability is granted by
+/// exactly one node); its other effects are left out, so no filler widens a
+/// choice, opens a slot or carries a mechanic the cases do not expect. Read
+/// off the shipped table, so a talent node added to the game is a filler here
+/// with no edit.
+fn fixture_text() -> &'static str {
+    static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TEXT.get_or_init(|| {
+        use arenasim::states::play_match::talents::TalentEffect;
+        let named = |id: &TalentId| NODES.contains(&format!("\n        {id:?}: (\n"));
+        let shipped = TalentDefinitions::shipped();
+        let mut trees: Vec<(String, String, String)> = TREES
+            .iter()
+            .map(|(c, t, n)| (c.to_string(), t.to_string(), n.to_string()))
+            .collect();
+        let mut fillers = String::new();
+        for id in TalentId::all().iter().filter(|id| !named(id)) {
+            let node = shipped.get(*id).expect("every id has a shipped node");
+            let (class, tree) = (format!("{:?}", node.class), format!("{:?}", node.tree));
+            if !trees.iter().any(|(c, t, _)| *c == class && *t == tree) {
+                trees.push((class.clone(), tree.clone(), tree.clone()));
+            }
+            let grants: Vec<String> = node
+                .per_rank
+                .iter()
+                .filter_map(|e| match e {
+                    TalentEffect::Grant(ability) => Some(format!("Grant({ability:?})")),
+                    _ => None,
+                })
+                .collect();
+            let (max_rank, per_rank) = if grants.is_empty() {
+                (node.max_rank, "StatPercent(WeaponDamage, 0.01)".to_string())
+            } else {
+                (1, grants.join(", "))
+            };
+            fillers.push_str(&format!(
+                "        {id:?}: (name: \"Filler {id:?}\", class: {class}, tree: {tree}, \
+                 tier: {}, column: {}, icon: \"x.jpg\", max_rank: {max_rank}, \
+                 budget: Some(11.0), per_rank: [{per_rank}]),\n",
+                node.tier, node.column
+            ));
+        }
+        let mut by_class: Vec<String> = Vec::new();
+        for (class, _, _) in &trees {
+            if by_class.iter().any(|c| c == class) {
+                continue;
+            }
+            by_class.push(class.clone());
+        }
+        let tree_block: String = by_class
+            .iter()
+            .map(|class| {
+                let list: Vec<String> = trees
+                    .iter()
+                    .filter(|(c, _, _)| c == class)
+                    .map(|(_, t, n)| format!("(id: {t}, name: \"{n}\", icon: \"x.jpg\")"))
+                    .collect();
+                format!("        {class}: [{}],\n", list.join(", "))
+            })
+            .collect();
+        format!(
+            "(\n    trees: {{\n{tree_block}    }},\n    talents: {{{NODES}{fillers}    }},\n    \
+             choice_rules: {RULES},\n)"
+        )
+    })
+}
 
 fn fixture() -> TalentDefinitions {
-    TalentDefinitions::from_ron(FIXTURE, abilities()).unwrap_or_else(|e| panic!("{e}"))
+    TalentDefinitions::from_ron(fixture_text(), abilities()).unwrap_or_else(|e| panic!("{e}"))
 }
 
 fn load_err(from: &str, to: &str) -> String {
-    assert!(FIXTURE.contains(from), "the fixture has {from:?}");
-    match TalentDefinitions::from_ron(&FIXTURE.replacen(from, to, 1), abilities()) {
+    assert!(fixture_text().contains(from), "the fixture has {from:?}");
+    match TalentDefinitions::from_ron(&fixture_text().replacen(from, to, 1), abilities()) {
         Ok(_) => panic!("the edit {from:?} -> {to:?} loaded"),
         Err(e) => e,
     }
@@ -216,13 +234,16 @@ fn a_widened_option_is_offered_only_to_a_build_that_takes_its_node() {
         t.offers(&empty, AGONY) && t.offers(&empty, WEAKNESS),
         "the rest are not hidden"
     );
+    // No fixture node widens Curse of Exhaustion, so the fixture offers it
+    // to every build.
+    let exhaustion = ChoiceOption::WarlockCurse(WarlockCurse::Exhaustion);
     assert_eq!(
         t.offered(&empty, ChoiceMenu::WarlockCurse),
-        vec![AGONY, WEAKNESS]
+        vec![AGONY, WEAKNESS, exhaustion]
     );
     assert_eq!(
         t.offered(&embrace, ChoiceMenu::WarlockCurse),
-        vec![AGONY, WEAKNESS, TONGUES]
+        vec![AGONY, WEAKNESS, TONGUES, exhaustion]
     );
     // A slot that picks the hidden option without the talent is refused.
     assert!(t
@@ -231,11 +252,13 @@ fn a_widened_option_is_offered_only_to_a_build_that_takes_its_node() {
     assert!(t
         .validate_choices(CharacterClass::Warlock, &embrace, &warlock(&[TONGUES]))
         .is_ok());
-    // The shipped table widens three options: the Warlock's Sacrifice
-    // (AS-410), the Priest's Shadowform (AS-413) and the Paladin's
-    // Retribution Aura (AS-421). Every other option is offered to every build.
+    // The shipped table widens four options: the Warlock's Sacrifice
+    // (AS-410) and Curse of Exhaustion (AS-409), the Priest's Shadowform
+    // (AS-413) and the Paladin's Retribution Aura (AS-421). Every other option
+    // is offered to every build.
     let shipped = TalentDefinitions::shipped();
     let widened = [
+        ChoiceOption::WarlockCurse(WarlockCurse::Exhaustion),
         ChoiceOption::WarlockDemon(WarlockDemon::Sacrifice),
         ChoiceOption::PriestForm(PriestForm::Shadowform),
         ChoiceOption::PaladinAura(PaladinAura::RetributionAura),

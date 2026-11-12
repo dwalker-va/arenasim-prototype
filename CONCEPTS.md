@@ -86,9 +86,9 @@ one entry per. The engine agrees with the player: every applied `Aura` carries a
 `ability_name`, and the buff-bar icons key off it.
 
 Most named auras come from an ability's `applies_aura` block in `abilities.ron`.
-A handful the engine applies from code with a hardcoded name instead — those are
-listed explicitly in `encyclopedia::auras::EngineAura` and guarded against drift
-by `tests/aura_catalog_audit.rs`.
+The rest the engine applies from code instead — those come from the engine aura
+registry, one file per family in `src/states/encyclopedia/engine_auras/`, and
+are guarded against drift by `tests/aura_catalog_audit.rs`.
 
 ### Frame name
 The string the engine writes into `Aura::ability_name` — literally what the

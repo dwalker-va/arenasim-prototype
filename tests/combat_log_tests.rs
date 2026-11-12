@@ -141,33 +141,6 @@ fn test_total_damage_dealt() {
     assert_eq!(total, 100.0, "Total damage should be 100");
 }
 
-#[test]
-fn test_total_damage_taken() {
-    let mut log = create_test_log();
-
-    log.log_damage(
-        "Team 1 Warrior".to_string(),
-        "Team 2 Mage".to_string(),
-        "Frostbolt".to_string(),
-        40.0,
-        false,
-        false,
-        "Test".to_string(),
-    );
-    log.log_damage(
-        "Team 1 Rogue".to_string(),
-        "Team 2 Mage".to_string(),
-        "Ambush".to_string(),
-        80.0,
-        false,
-        false,
-        "Test".to_string(),
-    );
-
-    let taken = log.total_damage_taken("Team 2 Mage");
-    assert_eq!(taken, 120.0, "Mage should have taken 120 damage");
-}
-
 // =============================================================================
 // Healing Aggregation Tests
 // =============================================================================

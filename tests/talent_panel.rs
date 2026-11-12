@@ -154,8 +154,9 @@ fn the_tree_with_the_most_points_names_the_spec() {
         )
         .expect("a spent build has a spec");
     assert_eq!(spec.label, "Demonology Warlock");
-    assert_eq!(spec.short, "3");
-    assert_eq!(spec.line(), "Demonology Warlock 3");
+    // Affliction is the Warlock's first tree, so its 0 leads the shorthand.
+    assert_eq!(spec.short, "0/3");
+    assert_eq!(spec.line(), "Demonology Warlock 0/3");
     // A class without trees has no spec, whatever it is handed.
     assert_eq!(
         talents().spec(
@@ -305,8 +306,15 @@ fn the_drawn_tree_marks_open_and_locked_nodes_and_pending_ranks() {
     assert_eq!((embrace.rank, embrace.pending, embrace.open), (2, 1, false));
     assert!(node(TalentId::UnholyPower).open, "two points open tier 2");
     assert!(node(TalentId::FelStamina).open);
-    assert_eq!(columns[0].points, 2);
-    assert!(columns[0].leading);
+    // Demonology is the second column, after Affliction.
+    let demonology = talents()
+        .trees(WARLOCK)
+        .iter()
+        .position(|t| t.id == TreeId::Demonology)
+        .expect("a Demonology tree");
+    assert_eq!(columns[demonology].points, 2);
+    assert!(columns[demonology].leading);
+    assert!(!columns[1 - demonology].leading);
 }
 
 // ===========================================================================
@@ -321,6 +329,7 @@ fn data(items: &arenasim::states::play_match::equipment::ItemDefinitions) -> Enc
         class_icons: None,
         ability_icons: None,
         talents: talents(),
+        engine_auras: arenasim::states::encyclopedia::EngineFamily::ALL,
     }
 }
 
@@ -413,7 +422,7 @@ fn a_click_learns_a_rank_and_a_shift_click_takes_it_back() {
     assert!(
         panel
             .last
-            .has_note("talents:test points=2 spec=Demonology Warlock 2"),
+            .has_note("talents:test points=2 spec=Demonology Warlock 0/2"),
         "{:?}",
         panel.last.notes
     );
@@ -572,7 +581,7 @@ fn a_played_match_hands_results_each_combatants_build() {
         talents()
             .spec(WARLOCK, &results.team1_combatants[0].build)
             .map(|s| s.line()),
-        Some("Demonology Warlock 3".to_string())
+        Some("Demonology Warlock 0/3".to_string())
     );
 }
 
@@ -637,5 +646,5 @@ fn results_names_a_talented_combatants_spec() {
         .iter()
         .filter(|n| n.starts_with("results:spec"))
         .collect();
-    assert_eq!(specs, vec!["results:spec t1s0 Demonology Warlock 3"]);
+    assert_eq!(specs, vec!["results:spec t1s0 Demonology Warlock 0/3"]);
 }

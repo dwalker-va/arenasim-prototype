@@ -796,7 +796,7 @@ pub(super) fn ally_walk_tick(
     }
 }
 
-/// Yards of open ground a chaser escape's `flee` looks ahead for
+/// Yards of running a chaser escape's `flee` looks ahead
 /// (`ScorerInputs::flee_reach`): about two commit windows of a Travel Form
 /// run, so a wall or a pillar bends the heading a window before it is reached.
 pub const SHIFT_FLEE_REACH: f32 = 8.0;
@@ -932,8 +932,9 @@ pub(super) fn escape_tick(
         // never down a starting room, whose back wall ends the run (AS-241).
         // An impairment window is one short step back, not a run.
         avoid_dead_ends: chasers_only,
-        // ...and its flee counts the ground a heading has to run before a wall
-        // or a pillar stops it, so its back to one it runs along it.
+        // ...and its flee counts the ground a heading covers, walked as the
+        // run walks it, so its back to a wall or a pillar it runs along it,
+        // and in a corner it takes the heading the slide carries round it.
         flee_reach: if chasers_only { SHIFT_FLEE_REACH } else { 0.0 },
     };
     // Deny posture: use cover to break attacker LoS while escaping, unless a

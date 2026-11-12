@@ -36,7 +36,40 @@ const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::DivineProtection, paladin_under_attack),
     (AbilityType::BlessingOfSacrifice, paladin_ally_under_attack),
     (AbilityType::SacredShield, paladin_ally_pressured),
+    (AbilityType::SiphonLife, warlock_dots_up),
+    (AbilityType::AmplifyCurse, warlock_dots_up),
 ];
+
+/// A Warlock 20 yards from its kill target, a Warrior, with Corruption and
+/// Unstable Affliction of its own already on it and Curse of Agony its curse:
+/// Siphon Life's moment, and then Amplify Curse's ahead of the curse.
+fn warlock_dots_up(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let mut scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(WARLOCK, 1, CharacterClass::Warlock)
+        .at(0.0, 0.0)
+        .targeting(WARRIOR)
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(20.0, 0.0);
+    let me = scene.entity(WARLOCK);
+    for name in ["Corruption", "Unstable Affliction"] {
+        scene = scene.aura_full(
+            WARRIOR,
+            Aura {
+                effect_type: AuraType::DamageOverTime,
+                duration: 15.0,
+                magnitude: 10.0,
+                tick_interval: 3.0,
+                ability_name: name.into(),
+                caster: Some(me),
+                break_on_damage_threshold: -1.0,
+                ..Default::default()
+            },
+        );
+    }
+    scene.combatant_mut(WARLOCK).warlock_curse_prefs =
+        vec![arenasim::states::match_config::WarlockCurse::Agony];
+    (scene, WARLOCK)
+}
 
 const PALADIN: Who = "paladin";
 const MAGE: Who = "mage";

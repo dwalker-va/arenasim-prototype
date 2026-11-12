@@ -4,8 +4,13 @@
 //! This is the fast visual-iteration loop for `src/states/view_combatant_ui.rs`:
 //! it renders the real `draw_view_combatant` to a PNG via `egui_kittest`
 //! (wgpu, no window, no Bevy app) in a fraction of a second, over the real
-//! `abilities.ron`, `items.ron` and `loadouts.ron`, so a kit or loadout change
-//! shows up here.
+//! `items.ron` and `loadouts.ron`, and the real `abilities.ron` and
+//! `talents.ron` restricted to the pinned catalogue
+//! (`tests/common/pinned_catalogue.rs`). A loadout change, or a change to a
+//! pinned ability's or talent node's own text, shows up here; an ability or a
+//! talent node added since does not, so a card that adds one moves no pixel
+//! of these sheets. (Items need no pin: the sheet draws only the equipped
+//! ones, which the loadout names.)
 //!
 //! ## Loop
 //! ```bash
@@ -25,6 +30,8 @@
 //! icon renders as the kit's fallback tile. Fonts are the client's own stack
 //! (`arenasim::ui::install`), so layout, spacing, colour, type and copy
 //! iterate faithfully; icon art still needs the client.
+
+mod common;
 
 use bevy_egui::egui;
 use egui_kittest::Harness;
@@ -510,6 +517,54 @@ fn mitigation_rows_say_what_their_total_buys() {
     );
 }
 
+/// The curse panel offers Curse of Exhaustion only to a slot whose build
+/// takes its talent: an untalented Warlock is offered the three base curses,
+/// a talented one the fourth beside them.
+#[test]
+fn the_curse_panel_offers_exhaustion_only_with_its_talent() {
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+    let class_icons = ClassIcons::default();
+    let data = || ViewCombatantData {
+        abilities: &abilities,
+        items: &items,
+        default_loadouts: &defaults,
+        class_icons: &class_icons,
+        ability_icons: None,
+        item_icons: None,
+        pet_icons: None,
+        talents: TalentDefinitions::shipped(),
+    };
+    let mut config = MatchConfig::default();
+    config.team1[0] = Some(CharacterClass::Warlock);
+    let untalented = Sheet::open(CharacterClass::Warlock, config.clone(), data());
+    for curse in ["CurseOfAgony", "CurseOfWeakness", "CurseOfTongues"] {
+        assert!(
+            untalented
+                .last
+                .widget(&format!("strategic:{curse}:e0"))
+                .is_some(),
+            "{curse}"
+        );
+    }
+    assert!(untalented
+        .last
+        .widget("strategic:CurseOfExhaustion:e0")
+        .is_none());
+
+    config.team1_builds[0] = Build::of(&[
+        (TalentId::ImprovedDrainLife, 2),
+        (TalentId::AmplifyCurse, 1),
+        (TalentId::CurseOfExhaustion, 1),
+    ]);
+    let talented = Sheet::open(CharacterClass::Warlock, config, data());
+    assert!(talented
+        .last
+        .widget("strategic:CurseOfExhaustion:e0")
+        .is_some());
+}
+
 /// The sheet spends THIS combatant's build: a class with trees draws its
 /// talent panel over the slot's build, which the stats read back (Demonic
 /// Embrace 2/2 is +6% health); a class without trees draws no panel.
@@ -551,7 +606,7 @@ fn the_sheet_draws_the_slots_build_and_its_stats_read_it() {
     assert!(
         talented
             .last
-            .has_note("talents:t1s0 points=2 spec=Demonology Warlock 2"),
+            .has_note("talents:t1s0 points=2 spec=Demonology Warlock 0/2"),
         "{:?}",
         talented.last.notes
     );
@@ -802,7 +857,10 @@ fn hover_targets(frame: &registry::Frame) -> Vec<(String, String)> {
 }
 
 fn snapshot(name: &str, view: ViewCombatantState) {
-    let size = if TalentDefinitions::shipped().trees(view.class).is_empty() {
+    let size = if common::pinned_catalogue::talents()
+        .trees(view.class)
+        .is_empty()
+    {
         SIZE
     } else {
         TALENTED_SIZE
@@ -811,7 +869,7 @@ fn snapshot(name: &str, view: ViewCombatantState) {
 }
 
 fn snapshot_with(name: &str, view: ViewCombatantState, config: MatchConfig, size: [f32; 2]) {
-    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let abilities = common::pinned_catalogue::abilities();
     let items = load_item_definitions().expect("items.ron must load");
     let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
     let class_icons = ClassIcons::default();
@@ -828,7 +886,7 @@ fn snapshot_with(name: &str, view: ViewCombatantState, config: MatchConfig, size
             ability_icons: None,
             item_icons: None,
             pet_icons: None,
-            talents: TalentDefinitions::shipped(),
+            talents: common::pinned_catalogue::talents(),
         };
         let _ = draw_view_combatant(
             ctx,

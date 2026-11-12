@@ -1296,7 +1296,7 @@ pub fn process_dot_ticks(
     }
 
     // Track caster damage dealt updates
-    let mut caster_damage_updates: Vec<(Entity, f32)> = Vec::new();
+    let mut caster_damage_updates: Vec<(Entity, f32, f32)> = Vec::new();
     // The ticks' leech heals (Siphon Life's own, a Vampiric Embrace on the
     // target) and `DotTick` events (caster, ability name, target, damage).
     let mut leeches: Vec<super::combat_core::leech::OwedLeech> = Vec::new();
@@ -1366,8 +1366,8 @@ pub fn process_dot_ticks(
             target.current_mana = (target.current_mana + rage_gain).min(target.max_mana);
         }
 
-        // Queue caster damage_dealt update
-        caster_damage_updates.push((caster_entity, actual_damage));
+        // Queue the caster's damage-dealt credit.
+        caster_damage_updates.push((caster_entity, actual_damage, absorbed));
 
         let heals = super::combat_core::leech::owed(
             caster_entity,
@@ -1453,7 +1453,7 @@ pub fn process_dot_ticks(
             caster_id.clone(),
             target_id.clone(),
             ability_name.clone(),
-            actual_damage,
+            super::combat_core::credited_damage(actual_damage, absorbed),
             is_killing_blow,
             false, // is_crit - DoT ticks never crit
             message,
@@ -1471,9 +1471,13 @@ pub fn process_dot_ticks(
     }
 
     // Third pass: update caster damage_dealt stats
-    for (caster_entity, damage_dealt) in caster_damage_updates {
+    // A caster with no auras of its own (a dead one's have all ended) is in
+    // the other query, and is credited all the same.
+    for (caster_entity, landed, absorbed) in caster_damage_updates {
         if let Ok((_, mut caster, _, _)) = combatants_with_auras.get_mut(caster_entity) {
-            caster.damage_dealt += damage_dealt;
+            super::combat_core::credit_damage_dealt(&mut caster, landed, absorbed);
+        } else if let Ok((_, mut caster)) = combatants_without_auras.get_mut(caster_entity) {
+            super::combat_core::credit_damage_dealt(&mut caster, landed, absorbed);
         }
     }
 

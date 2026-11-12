@@ -437,6 +437,7 @@ mod tests {
             class_icons: None,
             ability_icons: None,
             talents: crate::states::play_match::talents::TalentDefinitions::shipped(),
+            engine_auras: crate::states::encyclopedia::EngineFamily::ALL,
         };
         let probe = Probe {
             rect: Cell::new(egui::Rect::NOTHING),
@@ -476,6 +477,7 @@ mod tests {
             class_icons: None,
             ability_icons: None,
             talents: crate::states::play_match::talents::TalentDefinitions::shipped(),
+            engine_auras: crate::states::encyclopedia::EngineFamily::ALL,
         };
         for tier in ItemTier::ALL {
             let (id, item) = items

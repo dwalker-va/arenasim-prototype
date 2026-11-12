@@ -24,8 +24,8 @@ use arenasim::states::play_match::equipment::{
     load_default_loadouts, load_item_definitions, EquipmentPlugin,
 };
 use arenasim::states::play_match::talents::{
-    AbilityField, Build, StatChange, TalentDefinitions, TalentId, TalentStat, MAX_TALENT_POINTS,
-    PRICE_SANITY_FACTOR, REFERENCE_CAPSTONE_PRICE, REFERENCE_RANK_PRICE,
+    AbilityField, Build, StatChange, TalentDefinitions, TalentId, TalentStat, TreeId,
+    MAX_TALENT_POINTS, PRICE_SANITY_FACTOR, REFERENCE_CAPSTONE_PRICE, REFERENCE_RANK_PRICE,
 };
 use arenasim::states::play_match::{
     AbilityConfigPlugin, AbilityType, MapConfigPlugin, MovementConfigPlugin,
@@ -992,14 +992,22 @@ fn talent_price_report() {
 }
 
 /// The enumeration finds every legal build, and only legal ones: the
-/// Demonology tree at its counts, by set equality.
+/// Warlock's builds that spend only in Demonology, at its counts, by set
+/// equality. (A tree's tiers open on its own points, so another tree's nodes
+/// add builds beside these and remove none.)
 #[test]
 fn legal_builds_are_enumerated_exactly() {
     let talents = TalentDefinitions::shipped();
+    let demonology_only = |b: &Build| {
+        b.ranks
+            .keys()
+            .all(|id| talents.get(*id).unwrap().tree == TreeId::Demonology)
+    };
     let names = |points| -> std::collections::BTreeSet<Vec<(TalentId, u8)>> {
         talents
             .legal_builds(CharacterClass::Warlock, points)
             .into_iter()
+            .filter(demonology_only)
             .map(|b| b.ranks.into_iter().collect())
             .collect()
     };
@@ -1202,7 +1210,7 @@ fn assert_talented(s: &Spawned, base: &(Combatant, Combatant), patched: bool) {
         assert_eq!(cast, base_cast);
     }
     let talents_line = "[TALENTS] Team 1 Warlock #1: Demonic Embrace 2/2, Fel Stamina 2/2, \
-                        Unholy Power 2/2 (Demonology 6)"
+                        Unholy Power 2/2 (Affliction 0, Demonology 6)"
         .to_string();
     assert!(
         s.log.contains(&talents_line),

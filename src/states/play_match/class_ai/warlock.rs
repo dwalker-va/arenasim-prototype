@@ -4,10 +4,15 @@
 //!
 //! ## Priority Order
 //! After the plays and the Death Coil peel:
+//! 0. Shadow Bolt while Shadow Trance (Nightfall) makes it instant: see
+//!    [`shadow_trance_up`]
 //! 0. Life Tap (health into mana) — when short of mana and healthy: see
 //!    [`life_tap_hold`]
-//! 1. Corruption (instant Shadow DoT)
-//! 2. Spread curses to enemies (per-target preferences)
+//! 1. Corruption (instant Shadow DoT), then Siphon Life (a talent's draining
+//!    DoT) on the same target
+//! 2. Spread curses to enemies (per-target preferences); Amplify Curse (a
+//!    talent, off the global cooldown) first, when the curse due is one it
+//!    amplifies
 //! 3. Immolate (2s cast Fire DoT) - skipped when being kited
 //! 4. Fear (CC on non-CC'd target)
 //! 5. Drain Life (when HP < 80% and target has DoTs)
@@ -34,6 +39,7 @@ use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, PlayStep, RejectionReason, TapHold,
 };
 use crate::states::play_match::movement_config::MovementConfig;
+use crate::states::play_match::next_cast;
 use crate::states::play_match::situation::Role;
 
 use super::cast_guard::{cast_gate, PreCastOpts};
@@ -383,6 +389,29 @@ pub fn decide_warlock_action(
         }
     }
 
+    // Shadow Trance (Nightfall): a primed instant Shadow Bolt goes next, ahead
+    // of the rotation. It is instant, so being kited does not hold it.
+    if shadow_trance_up(auras) {
+        if target_immune {
+            builder.reject(AbilityType::Shadowbolt, RejectionReason::TargetImmune);
+        } else if try_shadowbolt(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            ctx,
+            &mut builder,
+        ) {
+            builder.finish();
+            return true;
+        }
+    }
+
     // Life Tap: short of mana and healthy enough to pay for it, the Warlock
     // converts health into mana before its rotation asks for any.
     if try_life_tap(
@@ -473,6 +502,27 @@ pub fn decide_warlock_action(
             &mut builder,
         )
     {
+        builder.finish();
+        return true;
+    }
+
+    // Priority 1.6: Siphon Life (Affliction talent) — a third DoT on the kill
+    // target, every tick of it healing the Warlock. Not considered without
+    // the talent.
+    if try_siphon_life(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        target_entity,
+        target_pos,
+        target_immune,
+        ctx,
+        &mut builder,
+    ) {
         builder.finish();
         return true;
     }
@@ -647,6 +697,199 @@ pub fn decide_warlock_action(
     acted
 }
 
+/// Whether Shadow Trance (Nightfall's proc) is up: a live next-cast modifier
+/// makes the Warlock's next Shadow Bolt instant. Shadow Bolt goes next.
+pub fn shadow_trance_up(auras: Option<&ActiveAuras>) -> bool {
+    next_cast::primed(auras, AbilityType::Shadowbolt).is_some_and(|m| m.instant)
+}
+
+/// Siphon Life (Affliction talent) on the kill target, unless this Warlock's
+/// is already on it. A Warlock without the talent does not consider it.
+fn try_siphon_life(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    target_pos: Vec3,
+    target_immune: bool,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::SiphonLife;
+    let Some(def) = abilities.get(&ability) else {
+        return false;
+    };
+    if target_immune {
+        builder.reject(ability, RejectionReason::TargetImmune);
+        return false;
+    }
+    let mine_on_target = ctx.active_auras.get(&target_entity).is_some_and(|list| {
+        list.iter()
+            .any(|a| a.caster == Some(entity) && a.ability_name == def.name)
+    });
+    if mine_on_target {
+        builder.reject(ability, RejectionReason::AlreadyApplied);
+        return false;
+    }
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
+
+    builder.choose(cleared, Some(target_entity), true);
+    combatant.current_mana -= def.mana_cost;
+    combatant.global_cooldown = GCD;
+
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        target_tuple,
+        "casts",
+    );
+    if let Some(pending) = AuraPending::from_ability(target_entity, entity, def) {
+        commands.spawn(pending);
+    }
+    if let Some(aura) = def.applies_aura.as_ref() {
+        combat_log.log(
+            CombatLogEventType::Buff,
+            format!(
+                "{} applies {} to enemy ({:.0} damage per {:.0}s for {:.0}s, drained to the caster)",
+                combatant_id(combatant.team, combatant.slot, combatant.class),
+                def.name,
+                aura.magnitude,
+                aura.tick_interval,
+                aura.duration,
+            ),
+        );
+    }
+    true
+}
+
+/// Amplify Curse (Affliction talent) ahead of a `curse` it amplifies, cast on
+/// `target`: when the curse would go out now (its own cast gate clears it)
+/// and is not already primed. Off the global cooldown (TBC 18288 has no
+/// global-cooldown category), so the curse follows on the next decision,
+/// amplified. A Warlock without the talent does not consider it.
+fn try_amplify_curse(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    curse: AbilityType,
+    target: (Entity, Vec3),
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::AmplifyCurse;
+    let Some(def) = abilities.get(&ability) else {
+        return false;
+    };
+    let amplifies = def
+        .applies_aura
+        .as_ref()
+        .and_then(|a| a.next_cast.as_ref())
+        .is_some_and(|m| m.covers(curse));
+    if !amplifies {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: format!("{curse:?} is not a curse it amplifies"),
+            },
+        );
+        return false;
+    }
+    if next_cast::primed(auras, curse).is_some() {
+        builder.reject(ability, RejectionReason::AlreadyApplied);
+        return false;
+    }
+    // Only for a curse that would go out now: an Amplify Curse spent ahead of
+    // a curse that cannot be cast waits out its 30s for nothing.
+    let curse_opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
+    if cast_gate(
+        curse,
+        abilities.get_unchecked(&curse),
+        combatant,
+        my_pos,
+        auras,
+        Some(target),
+        ctx,
+        curse_opts,
+    )
+    .is_err()
+    {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: format!("{curse:?} cannot be cast now"),
+            },
+        );
+        return false;
+    }
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
+
+    builder.choose(cleared, None, true);
+    combatant.current_mana -= def.mana_cost;
+    combatant.start_cooldown(ability);
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        None,
+        "casts",
+    );
+    if let Some(pending) = AuraPending::from_ability(entity, entity, def) {
+        commands.spawn(pending);
+    }
+    true
+}
+
 /// Below this fraction of its mana pool the Warlock is MANA-STARVED, and a
 /// Life Tap is worth its health. A tap at the shipped spell power gives back
 /// about two fifths of the pool, so a tap from here never overflows it.
@@ -684,19 +927,20 @@ pub fn life_tap_hold(
     Ok(())
 }
 
-/// Life Tap's conversion, its one site: `amount` of health off `combatant`
-/// and `amount` of mana on, capped at the pool. The health is taken outright
+/// Life Tap's conversion, its one site: `health` off `combatant` and
+/// `mana` on (as much as the health, or more under Improved Life Tap),
+/// capped at the pool. The health is taken outright
 /// (not damage) and the mana given outright (not healing).
 ///
 /// Never kills: the death-range gate keeps the AI well clear, and a floor of
 /// 1 health is the backstop. Neither half ever moves the wrong way — a
 /// caster already below 1 health keeps what it has, and one already above
 /// its pool keeps its mana.
-pub fn convert_health_to_mana(combatant: &mut Combatant, amount: f32) {
-    let health = combatant.current_health;
-    combatant.current_health = (health - amount).max(health.min(1.0));
-    let mana = combatant.current_mana;
-    combatant.current_mana = (mana + amount).min(combatant.max_mana.max(mana));
+pub fn convert_health_to_mana(combatant: &mut Combatant, health: f32, mana: f32) {
+    let had = combatant.current_health;
+    combatant.current_health = (had - health).max(had.min(1.0));
+    let pool = combatant.current_mana;
+    combatant.current_mana = (pool + mana).min(combatant.max_mana.max(pool));
 }
 
 /// Life Tap, when [`life_tap_hold`] lets it go and the cast gate clears it:
@@ -721,6 +965,7 @@ fn try_life_tap(
         return false;
     };
     let amount = conversion.amount(combatant.spell_power);
+    let mana = conversion.mana_for(amount);
 
     if let Err(hold) = life_tap_hold(combatant, amount, movement) {
         builder.reject(life_tap, RejectionReason::TapHeld { hold });
@@ -745,7 +990,7 @@ fn try_life_tap(
 
     builder.choose(cleared, None, true);
 
-    convert_health_to_mana(combatant, amount);
+    convert_health_to_mana(combatant, amount, mana);
     combatant.global_cooldown = GCD;
 
     log_ability_use(
@@ -761,7 +1006,7 @@ fn try_life_tap(
         "[LIFE TAP] {} converts {:.0} health into {:.0} mana ({:.0}/{:.0} health, {:.0}/{:.0} mana)",
         combatant_id(combatant.team, combatant.slot, combatant.class),
         amount,
-        amount,
+        mana,
         combatant.current_health,
         combatant.max_health,
         combatant.current_mana,
@@ -1287,7 +1532,12 @@ fn try_shadowbolt(
         }
     };
 
-    builder.choose(cleared, Some(target_entity), false);
+    // Instant only while Shadow Trance primes it.
+    builder.choose(
+        cleared,
+        Some(target_entity),
+        shadowbolt_def.cast_time <= 0.0,
+    );
 
     combatant.global_cooldown = GCD;
     let cast_time = calculate_cast_time(shadowbolt_def.cast_time, auras);
@@ -1477,7 +1727,8 @@ fn try_spread_curses(
                     a.caster == Some(entity)
                         && (a.ability_name == "Curse of Agony"
                             || a.ability_name == "Curse of Weakness"
-                            || a.ability_name == "Curse of Tongues")
+                            || a.ability_name == "Curse of Tongues"
+                            || a.ability_name == "Curse of Exhaustion")
                 })
             })
             .unwrap_or(false);
@@ -1490,7 +1741,24 @@ fn try_spread_curses(
             WarlockCurse::Agony => (AbilityType::CurseOfAgony, "Curse of Agony"),
             WarlockCurse::Weakness => (AbilityType::CurseOfWeakness, "Curse of Weakness"),
             WarlockCurse::Tongues => (AbilityType::CurseOfTongues, "Curse of Tongues"),
+            WarlockCurse::Exhaustion => (AbilityType::CurseOfExhaustion, "Curse of Exhaustion"),
         };
+
+        if try_amplify_curse(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ability,
+            (enemy_entity, enemy_pos),
+            ctx,
+            builder,
+        ) {
+            return true;
+        }
 
         if try_cast_curse(
             commands,
@@ -1514,6 +1782,42 @@ fn try_spread_curses(
     false
 }
 
+/// A curse's effect as the log states it, read off the config the cast
+/// spends (an Amplify Curse's included): "14 damage per 4s for 24s".
+fn curse_effect(
+    ability: AbilityType,
+    def: &crate::states::play_match::ability_config::AbilityConfig,
+) -> String {
+    let Some(aura) = def.applies_aura.as_ref() else {
+        return String::new();
+    };
+    let lasts = if aura.duration >= 60.0 && aura.duration % 60.0 == 0.0 {
+        format!("{:.0} min", aura.duration / 60.0)
+    } else {
+        format!("{:.0}s", aura.duration)
+    };
+    match ability {
+        AbilityType::CurseOfAgony => format!(
+            "{:.0} damage per {:.0}s for {lasts}",
+            aura.magnitude, aura.tick_interval
+        ),
+        AbilityType::CurseOfWeakness => {
+            format!(
+                "-{:.0}% physical damage for {lasts}",
+                aura.magnitude * 100.0
+            )
+        }
+        AbilityType::CurseOfTongues => {
+            format!("+{:.0}% cast time for {lasts}", aura.magnitude * 100.0)
+        }
+        AbilityType::CurseOfExhaustion => format!(
+            "-{:.0}% movement speed for {lasts}",
+            (1.0 - aura.magnitude) * 100.0
+        ),
+        _ => String::new(),
+    }
+}
+
 /// Cast a specific curse on a target.
 fn try_cast_curse(
     commands: &mut Commands,
@@ -1531,6 +1835,20 @@ fn try_cast_curse(
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability_def = abilities.get_unchecked(&ability);
+
+    // A curse whose effect diminishes (Curse of Exhaustion's slow) is held off
+    // a target immune to it: it would land nothing, and the Warlock would
+    // recast it every global cooldown.
+    let diminishes = ability_def.applies_aura.as_ref().and_then(|a| {
+        a.dr_category
+            .or_else(|| DRCategory::from_aura_type(&a.aura_type))
+    });
+    if let Some(category) = diminishes {
+        if ctx.is_dr_immune(target_entity, category) {
+            builder.reject(ability, RejectionReason::DRImmune { category });
+            return false;
+        }
+    }
 
     let opts = PreCastOpts {
         check_friendly_cc: true,
@@ -1573,12 +1891,7 @@ fn try_cast_curse(
         commands.spawn(aura_pending);
     }
 
-    let effect_description = match ability {
-        AbilityType::CurseOfAgony => "14 damage per 4s for 24s",
-        AbilityType::CurseOfWeakness => "-20% physical damage for 2 min",
-        AbilityType::CurseOfTongues => "+50% cast time for 30s",
-        _ => "",
-    };
+    let effect_description = curse_effect(ability, ability_def);
 
     combat_log.log(
         CombatLogEventType::Buff,
