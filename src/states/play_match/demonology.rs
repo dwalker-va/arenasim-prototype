@@ -113,26 +113,31 @@ pub fn touch_of_shadow_aura(bonus: f32, caster: Entity) -> Aura {
     )
 }
 
-/// The reduction the shipped Master Demonologist node grants at its full
-/// rank, read from `talents.ron` (what the encyclopedia's page prints).
-pub fn shipped_master_demonologist() -> Option<f32> {
-    shipped_mechanic(|m| match m {
+/// The reduction `talents`' Master Demonologist node grants at its full rank
+/// (what the encyclopedia's page prints), or `None` for a table without one.
+pub fn master_demonologist_in(talents: &TalentDefinitions) -> Option<f32> {
+    mechanic_in(talents, |m| match m {
         TalentMechanic::MasterDemonologist { reduction } => Some(reduction),
         _ => None,
     })
 }
 
-/// The Shadow damage bonus the shipped Demonic Sacrifice node grants.
-pub fn shipped_demonic_sacrifice() -> Option<f32> {
-    shipped_mechanic(|m| match m {
+/// The Shadow damage bonus `talents`' Demonic Sacrifice node grants, or
+/// `None` for a table without one.
+pub fn demonic_sacrifice_in(talents: &TalentDefinitions) -> Option<f32> {
+    mechanic_in(talents, |m| match m {
         TalentMechanic::DemonicSacrifice { shadow_damage } => Some(shadow_damage),
         _ => None,
     })
 }
 
-/// The first shipped node's mechanic `pick` reads, at the node's full rank.
-fn shipped_mechanic(pick: impl Fn(TalentMechanic) -> Option<f32>) -> Option<f32> {
-    TalentDefinitions::shipped().iter().find_map(|(_, node)| {
+/// The first of `talents`' nodes whose mechanic `pick` reads, at the node's
+/// full rank.
+fn mechanic_in(
+    talents: &TalentDefinitions,
+    pick: impl Fn(TalentMechanic) -> Option<f32>,
+) -> Option<f32> {
+    talents.iter().find_map(|(_, node)| {
         node.per_rank.iter().find_map(|effect| match effect {
             TalentEffect::Mechanic(m) => pick(m.at_rank(node.max_rank)),
             _ => None,

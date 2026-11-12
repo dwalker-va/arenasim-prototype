@@ -163,11 +163,12 @@ fn effect_parts(ability: AbilityType, config: &AbilityConfig, stats: &ClassBaseS
         parts.push(format!("Heals for {:.0}-{:.0}.", min_heal, max_heal));
     }
 
-    // Channel healing (Drain Life style)
-    if config.channel_healing_per_tick > 0.0 {
+    // A leeching channel (Drain Life)
+    if let Some(leech) = config.channel_leech {
         parts.push(format!(
-            "Restores {:.0} health to the caster per tick.",
-            config.channel_healing_per_tick
+            "Each tick heals {} for {} the damage it deals.",
+            leech_recipient(leech.to),
+            leech_share(leech.fraction)
         ));
     }
 
@@ -691,6 +692,27 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
     }
 }
 
+/// Who a leech heals, as an effect sentence names them.
+pub fn leech_recipient(
+    to: crate::states::play_match::combat_core::leech::LeechRecipient,
+) -> &'static str {
+    use crate::states::play_match::combat_core::leech::LeechRecipient;
+    match to {
+        LeechRecipient::Caster => "the caster",
+        LeechRecipient::CasterParty => "the caster's party",
+    }
+}
+
+/// A leech's share of the damage, as an effect sentence names it: "all of" or
+/// "N% of".
+pub fn leech_share(fraction: f32) -> String {
+    if fraction >= 1.0 {
+        "all of".to_string()
+    } else {
+        format!("{:.0}% of", fraction * 100.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -706,6 +728,29 @@ mod tests {
         assert_eq!(
             build_aura_description(&aura),
             "Increases attack speed by 20% for 10 sec."
+        );
+    }
+
+    /// Drain Life says it heals off the damage it deals (AS-461), and a
+    /// partial or party leech reads as such.
+    #[test]
+    fn a_leeching_channel_says_what_it_heals() {
+        use crate::states::play_match::combat_core::leech::LeechRecipient;
+        let abilities = load_ability_definitions().expect("abilities.ron must load");
+        let drain = abilities.get_unchecked(&AbilityType::DrainLife);
+        let text = build_ability_description(
+            AbilityType::DrainLife,
+            drain,
+            &class_base_stats(drain.class),
+        );
+        assert!(
+            text.contains("Each tick heals the caster for all of the damage it deals."),
+            "{text}"
+        );
+        assert_eq!(leech_share(0.5), "50% of");
+        assert_eq!(
+            leech_recipient(LeechRecipient::CasterParty),
+            "the caster's party"
         );
     }
 
@@ -742,7 +787,7 @@ mod tests {
             // `requirement_sentence`, not an effect.
             let declares_an_effect = config.damage_base_max > 0.0
                 || config.healing_base_max > 0.0
-                || config.channel_healing_per_tick > 0.0
+                || config.channel_leech.is_some()
                 || config.health_to_mana.is_some()
                 || config.is_interrupt
                 || config.is_charge

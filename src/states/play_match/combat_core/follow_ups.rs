@@ -26,7 +26,10 @@ use bevy::prelude::*;
 use super::super::abilities::SpellSchool;
 use super::super::components::*;
 use super::super::utils::combat_log_id_for;
-use super::{apply_damage_with_absorb, apply_healing, Hit, HitKind};
+use super::{
+    apply_damage_with_absorb, apply_healing, blocks_all_damage, credit_damage_dealt,
+    credited_damage, share_to_health, Hit, HitKind,
+};
 use crate::combat::log::{CombatLog, CombatLogEventType};
 
 /// Who receives a transferred share.
@@ -46,8 +49,18 @@ pub enum DamageFollowUp {
         holder: Entity,
         receiver: TransferReceiver,
         amount: f32,
+        /// The school of the hit it was split from: what the receiver's
+        /// scoped damage-taken modifiers read.
+        school: SpellSchool,
+        /// Whether the receiver's own immunity, damage-taken modifiers and
+        /// absorbs apply to it (Blessing of Sacrifice), or it cannot be
+        /// prevented (Soul Link). See [`HitKind::share`].
+        preventable: bool,
         /// The unit that dealt the hit, credited with the share.
         dealer: Option<Entity>,
+        /// The ability that dealt the hit ("Mortal Strike"): the share is
+        /// part of its damage, and is credited to its row.
+        ability: String,
         /// What transferred it ("Blessing of Sacrifice", "Soul Link").
         by: String,
     },
@@ -126,7 +139,9 @@ pub struct KillingBlowPrevented {
 ///
 /// A transfer never kills its receiver: a share it could not survive (or one
 /// whose receiver is dead or gone) stays with the holder, and a transfer
-/// aura that could not pass its share on ends.
+/// aura that could not pass its share on ends. What it could survive is what
+/// the share would put on its health ([`share_to_health`]): a receiver immune
+/// to it bears any share.
 pub fn process_damage_follow_ups(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
@@ -152,9 +167,13 @@ pub fn process_damage_follow_ups(
                 holder,
                 receiver,
                 amount,
+                school,
+                preventable,
                 dealer,
+                ability,
                 by,
             } => {
+                let kind = HitKind::share(preventable);
                 let receiver_entity = match receiver {
                     TransferReceiver::Unit(e) => Some(e),
                     TransferReceiver::OwnPet => pets
@@ -164,9 +183,10 @@ pub fn process_damage_follow_ups(
                         .find(|e| combatants.get(*e).is_ok_and(|(c, _, _)| c.is_alive())),
                 };
                 let bearable = receiver_entity.is_some_and(|e| {
-                    combatants
-                        .get(e)
-                        .is_ok_and(|(c, _, _)| c.is_alive() && c.current_health > amount)
+                    combatants.get(e).is_ok_and(|(c, auras, _)| {
+                        c.is_alive()
+                            && c.current_health > share_to_health(kind, amount, school, auras)
+                    })
                 });
                 let (lands_on, returned) = match receiver_entity {
                     Some(e) if bearable => (e, false),
@@ -182,19 +202,23 @@ pub fn process_damage_follow_ups(
                         });
                     }
                 }
+                // Whether the receiver's immunity blocks the share, read
+                // before it lands, for its log line.
+                let immune = !returned
+                    && kind == HitKind::Transferred
+                    && combatants
+                        .get(lands_on)
+                        .is_ok_and(|(_, auras, _)| blocks_all_damage(auras));
                 let hit = Hit {
                     amount,
-                    school: SpellSchool::None,
+                    school,
                     source: &by,
+                    row: &by,
                     attacker: dealer,
                     victim: lands_on,
                     dealt: 1.0,
                     // A share handed back meets its holder's absorbs.
-                    kind: if returned {
-                        HitKind::Returned
-                    } else {
-                        HitKind::Transferred
-                    },
+                    kind: if returned { HitKind::Returned } else { kind },
                 };
                 let landed = land(
                     hit,
@@ -204,7 +228,13 @@ pub fn process_damage_follow_ups(
                     &pet_of,
                     &mut more,
                 );
-                if let Some((actual, _, victim_id)) = landed {
+                if let Some(landed) = landed {
+                    let Landed {
+                        actual,
+                        absorbed,
+                        ref victim_id,
+                        ..
+                    } = landed;
                     let holder_id = combatants
                         .get(holder)
                         .map(|(c, _, _)| combat_log_id_for(c, pet_of(holder)))
@@ -213,11 +243,24 @@ pub fn process_damage_follow_ups(
                         format!(
                             "[TRANSFER] {by} cannot pass on {actual:.0} damage: {victim_id} takes it"
                         )
+                    } else if immune && actual == 0.0 && absorbed == 0.0 {
+                        format!("[TRANSFER] {victim_id} is immune to {holder_id}'s damage ({by})")
+                    } else if absorbed > 0.0 {
+                        format!(
+                            "[TRANSFER] {victim_id} takes {actual:.0} of {holder_id}'s damage \
+                             ({by}, {absorbed:.0} absorbed)"
+                        )
                     } else {
                         format!("[TRANSFER] {victim_id} takes {actual:.0} of {holder_id}'s damage ({by})")
                     };
-                    combat_log.log(CombatLogEventType::Damage, message);
-                    credit_damage(&mut combatants, dealer, actual);
+                    record(
+                        &mut combat_log,
+                        &mut combatants,
+                        dealer,
+                        &landed,
+                        &ability,
+                        message,
+                    );
                 }
             }
             DamageFollowUp::Reflect {
@@ -232,6 +275,7 @@ pub fn process_damage_follow_ups(
                     amount,
                     school,
                     source: &source,
+                    row: &source,
                     attacker: dealer,
                     victim: to,
                     dealt: 1.0,
@@ -245,19 +289,23 @@ pub fn process_damage_follow_ups(
                     &pet_of,
                     &mut more,
                 );
-                if let Some((actual, absorbed, victim_id)) = landed {
+                if let Some(landed) = landed {
                     let from_id = combatants
                         .get(from)
                         .map(|(c, _, _)| combat_log_id_for(c, pet_of(from)))
                         .unwrap_or_default();
-                    combat_log.log(
-                        CombatLogEventType::Damage,
-                        format!(
-                            "[REFLECT] {victim_id} takes {actual:.0} {school:?} damage from \
-                             {from_id}'s {source}"
-                        ),
+                    let message = format!(
+                        "[REFLECT] {} takes {:.0} {school:?} damage from {from_id}'s {source}",
+                        landed.victim_id, landed.actual
                     );
-                    credit_damage(&mut combatants, dealer, actual + absorbed);
+                    record(
+                        &mut combat_log,
+                        &mut combatants,
+                        dealer,
+                        &landed,
+                        &source,
+                        message,
+                    );
                 }
             }
             DamageFollowUp::Saved {
@@ -271,10 +319,19 @@ pub fn process_damage_follow_ups(
                     continue;
                 };
                 let holder_id = combat_log_id_for(&combatant, pet_of(holder));
-                combat_log.log(
-                    CombatLogEventType::MatchEvent,
-                    format!("[SAVED] {by} prevents a killing blow on {holder_id}"),
-                );
+                // A later blow in the save's own frame can still kill its
+                // holder: the save prevented one blow and then has no one to
+                // heal, so its line says so and no heal line follows.
+                let survived = combatant.is_alive();
+                let message = if survived {
+                    format!("[SAVED] {by} prevents a killing blow on {holder_id}")
+                } else {
+                    format!(
+                        "[SAVED] {by} prevents a killing blow on {holder_id}, who is killed by \
+                         another blow"
+                    )
+                };
+                combat_log.log(CombatLogEventType::MatchEvent, message);
                 commands.spawn((
                     KillingBlowPrevented {
                         holder,
@@ -283,7 +340,7 @@ pub fn process_damage_follow_ups(
                     PlayMatchEntity,
                 ));
                 let mut healed = 0.0;
-                if let Some(fraction) = heal_fraction {
+                if let Some(fraction) = heal_fraction.filter(|_| survived) {
                     let amount = combatant.max_health * fraction;
                     healed = apply_healing(
                         &mut commands,
@@ -313,9 +370,22 @@ pub fn process_damage_follow_ups(
     }
 }
 
+/// One follow-up hit, as it landed.
+struct Landed {
+    /// The damage to health.
+    actual: f32,
+    /// The damage absorbs soaked.
+    absorbed: f32,
+    /// The victim's log id.
+    victim_id: String,
+    /// The dealer's log id, while it is still in the match.
+    dealer_id: Option<String>,
+    /// Whether this hit killed its victim.
+    killed: bool,
+}
+
 /// Land one follow-up hit on its victim through the funnel, with every damage
-/// site's bookkeeping: rage, the aura-break tally and the death. Returns the
-/// damage to health, the damage absorbed and the victim's log id; `None` when
+/// site's bookkeeping: rage, the aura-break tally and the death. `None` when
 /// the victim is gone or already dead.
 fn land<'p>(
     hit: Hit,
@@ -328,7 +398,7 @@ fn land<'p>(
     )>,
     pet_of: &impl Fn(Entity) -> Option<&'p Pet>,
     follow_ups: &mut DamageFollowUps,
-) -> Option<(f32, f32, String)> {
+) -> Option<Landed> {
     let killer_id = hit.attacker.and_then(|a| {
         combatants
             .get(a)
@@ -357,31 +427,55 @@ fn land<'p>(
         });
     }
     let victim_id = combat_log_id_for(&victim, pet_of(hit.victim));
-    if !victim.is_alive() && !victim.is_dead {
+    let killed = !victim.is_alive() && !victim.is_dead;
+    if killed {
         victim.is_dead = true;
         commands.entity(hit.victim).remove::<CastingState>();
         commands.entity(hit.victim).remove::<ChannelingState>();
         combat_log.log_death(
             victim_id.clone(),
-            killer_id,
+            killer_id.clone(),
             format!("{victim_id} has been eliminated"),
         );
     }
-    Some((actual, absorbed, victim_id))
+    Some(Landed {
+        actual,
+        absorbed,
+        victim_id,
+        dealer_id: killer_id,
+        killed,
+    })
 }
 
-/// Credit `dealer` with `amount` dealt.
-fn credit_damage(
+/// Credit a follow-up hit to `dealer` and log its line: a breakdown row of
+/// the dealer's `ability` when the dealer is still in the match, a plain
+/// line of no one's otherwise.
+fn record(
+    combat_log: &mut CombatLog,
     combatants: &mut Query<(
         &mut Combatant,
         Option<&mut ActiveAuras>,
         Option<&DamageTakenThisFrame>,
     )>,
     dealer: Option<Entity>,
-    amount: f32,
+    landed: &Landed,
+    ability: &str,
+    message: String,
 ) {
     if let Some(Ok((mut c, _, _))) = dealer.map(|d| combatants.get_mut(d)) {
-        c.damage_dealt += amount;
+        credit_damage_dealt(&mut c, landed.actual, landed.absorbed);
+    }
+    match &landed.dealer_id {
+        Some(dealer_id) => combat_log.log_damage(
+            dealer_id.clone(),
+            landed.victim_id.clone(),
+            ability.to_string(),
+            credited_damage(landed.actual, landed.absorbed),
+            landed.killed,
+            false,
+            message,
+        ),
+        None => combat_log.log(CombatLogEventType::Damage, message),
     }
 }
 

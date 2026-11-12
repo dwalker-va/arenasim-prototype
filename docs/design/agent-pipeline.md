@@ -416,9 +416,11 @@ here because a card broke it and cost a review round in the 0.9 build wave.
   sentence like "whichever lands second reuses the first" is not enough: both ran at
   once and both built `triggered_absorbs.rs` (AS-421, AS-429).
 - **Say which shared seams the card touches.** Name the shared files the card will
-  edit: the encyclopedia lists and snapshots, `CHAMPION_TIER`, `talent_text.rs`'s
-  exhaustive matches, `lands_silently_audit`. The orchestrator orders merges by them
-  (*Merging*).
+  edit: `talent_text.rs`'s exhaustive matches, `lands_silently_audit`'s rows, the
+  `ItemId` enum and `items.ron` section a card appends to. The orchestrator orders
+  merges by them (*Merging*). Adding content touches no encyclopedia snapshot, aura
+  list or tier list: those draw a pinned catalogue, a file per engine aura family,
+  and `item_tier`.
 
 ## The orchestrator
 

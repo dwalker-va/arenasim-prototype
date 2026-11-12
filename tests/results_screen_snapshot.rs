@@ -221,6 +221,7 @@ fn sized_harness(
             class_icons: None,
             ability_icons: None,
             talents: arenasim::states::play_match::talents::TalentDefinitions::shipped(),
+            engine_auras: arenasim::states::encyclopedia::EngineFamily::ALL,
         };
         let _ = draw_results_screen(
             ctx,

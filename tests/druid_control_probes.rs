@@ -16,6 +16,7 @@
 //!   shift empties them.
 
 use std::collections::BTreeMap;
+use std::f32::consts::FRAC_1_SQRT_2;
 use std::time::Duration;
 
 use bevy::ecs::system::RunSystemOnce;
@@ -856,6 +857,34 @@ fn xz(v: Vec3) -> Vec2 {
     Vec2::new(v.x, v.z)
 }
 
+/// Whether every root and snare `druid` carries after its shift LANDED after
+/// it: for each such aura type in `remaining`, a `[CC] <ability> on <druid>
+/// (...)` line, logged in `(from, to]` after the shift's own line, whose
+/// ability applies that aura type.
+fn landed_after_shift(log: &str, druid: &str, from: f32, to: f32, remaining: &[AuraType]) -> bool {
+    let at = |line: &&str| log_time(line).is_some_and(|t| t > from - 0.005 && t <= to + 0.005);
+    let shift = format!("{druid} shifts into Travel Form");
+    let landing = format!(" on {druid} (");
+    let landed: Vec<AuraType> = log
+        .lines()
+        .filter(at)
+        .skip_while(|line| !line.contains(&shift))
+        .filter_map(|line| {
+            let name = line.split("[CC] ").nth(1)?.split(&landing).next()?;
+            line.contains(&landing).then_some(name)?;
+            AbilityDefinitions::shipped()
+                .iter()
+                .find(|(_, config)| config.name == name)
+                .and_then(|(_, config)| config.applies_aura.as_ref())
+                .map(|aura| aura.aura_type)
+        })
+        .collect();
+    remaining
+        .iter()
+        .filter(|t| matches!(t, AuraType::Root | AuraType::MovementSpeedSlow))
+        .all(|t| landed.contains(t))
+}
+
 /// The matches the smoke run found shifts out of roots and snares in, and
 /// Cyclones in — fixed seeds, so each probe below has its occurrences.
 const SHIFT_MATCHES: &[(&[&str], &[&str], &str, u64)] = &[
@@ -1002,16 +1031,21 @@ const OUTRUN_WINDOW_SECS: f32 = 1.5;
 /// reason to turn once.
 const MAX_HEADING_REVERSALS: usize = 1;
 
-/// A shift out of a root or snare frees the Druid and it pulls away: in the
-/// window after EVERY shift the Druid's path is longer than its unshifted
-/// speed could cover, and the gap to the nearest melee or pet chaser GROWS —
-/// with its back to a wall or a pillar too, since the run counts the open
-/// ground a heading has and runs along the obstacle (AS-241; AS-164 found
-/// those shifts pinned). And for the whole stay in the form the Druid holds
-/// its heading: it turns back on itself at most [`MAX_HEADING_REVERSALS`]
-/// times, one commit window to the next (AS-200).
+/// A shift out of a root or snare frees the Druid, and the shifted Druid
+/// holds its heading, over the matches of a seed bank: every shift leaves no
+/// root or snare on it; a stay cut short inside [`OUTRUN_WINDOW_SECS`] ends
+/// only on a death or a new root, snare or stun; and for the whole stay in the
+/// form it turns back on itself at most [`MAX_HEADING_REVERSALS`] times, one
+/// commit window to the next (AS-200).
+///
+/// That it then OUTRUNS its chaser is proved where the scene is built, not
+/// here: `a_shift_frees_the_druid_and_it_outruns_the_chaser` stages the shift
+/// in the open, with a wall at its back and with a pillar at its back, and
+/// `a_cornered_druid_runs_as_far_as_the_corner_allows` stages it in a corner,
+/// where no heading gains ground. A shift's geometry is the seed's, so a bank
+/// cannot say which of those it holds.
 #[test]
-fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
+fn a_shift_frees_the_druid_and_it_holds_its_heading() {
     let mut shifts = 0;
     let mut heading_turns = 0;
     let commit_window = load_movement_config()
@@ -1046,8 +1080,22 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
             // The outrun claim is for a shift out of a root or a snare; the
             // heading claim below is for every shift with a chaser on it.
             let out_of_impairment = impaired(&before.aura_types);
+            // A root or snare that LANDS on the frame of the shift lands after
+            // the break (`process_travel_form` runs before
+            // `apply_pending_auras`): it is new, not one the shift left. The
+            // log shows an ability that applies it landing on the Druid after
+            // the shift, at that time.
+            let druid_id = log_id(after.team, after.slot, after.class);
             assert!(
-                !out_of_impairment || !impaired(&after.aura_types),
+                !out_of_impairment
+                    || !impaired(&after.aura_types)
+                    || landed_after_shift(
+                        &played.log,
+                        &druid_id,
+                        pair[0].sim_time,
+                        pair[1].sim_time,
+                        &after.aura_types,
+                    ),
                 "{t1:?} v {t2:?} {map} #{seed} at {:.2}s: the shift left {:?}",
                 pair[1].sim_time,
                 after.aura_types
@@ -1145,39 +1193,12 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
                 );
                 continue;
             }
-            let gap = |f: &FrameObservation| {
-                xz(f.combatants[&druid].position).distance(xz(f.combatants[&chaser].position))
-            };
-            assert!(
-                gap(end_frame) > gap(&pair[1]),
-                "{t1:?} v {t2:?} {map} #{seed} at {start:.2}s: no ground gained on the chaser \
-                 ({:.1} -> {:.1} yd)",
-                gap(&pair[1]),
-                gap(end_frame)
-            );
-            // Path length, frame by frame: a Druid sliding along a wall is
-            // still moving at its full shifted speed.
-            let travelled: f32 = played
-                .frames
-                .iter()
-                .filter(|f| f.sim_time >= start && f.sim_time <= end_frame.sim_time)
-                .map(|f| xz(f.combatants[&druid].position))
-                .collect::<Vec<_>>()
-                .windows(2)
-                .map(|w| w[0].distance(w[1]))
-                .sum();
-            let base = Combatant::new(1, 0, CharacterClass::Druid).base_movement_speed;
-            assert!(
-                travelled > base * elapsed * 1.05,
-                "{t1:?} v {t2:?} {map} #{seed} at {start:.2}s: {travelled:.1} yd in \
-                 {elapsed:.2}s is no faster than an unshifted Druid"
-            );
             shifts += 1;
         }
     }
     eprintln!(
-        "{shifts} shifts out of a root or snare, each with a full window and each \
-         gaining ground on the chaser; {heading_turns} window-to-window turns checked"
+        "{shifts} shifts out of a root or snare with a full window; {heading_turns} \
+         window-to-window turns checked"
     );
     assert!(
         heading_turns >= 50,
@@ -1188,6 +1209,407 @@ fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
         shifts >= 6,
         "only {shifts} shifts out of a root or snare with a full window — the seeds moved"
     );
+}
+
+/// A shift out of a root frees the Druid, and it pulls away from a chaser
+/// that is not impaired: over [`OUTRUN_WINDOW_SECS`] from the shift the gap
+/// to the chaser GROWS, and the Druid covers more ground than an unshifted
+/// Druid could. STAGED (tier 3): the Druid rooted, an enemy Warrior on it 5yd
+/// off, so it shifts out of the root on its next global cooldown and runs —
+/// in the open; with a wall at its back (the Warrior on the arena side, so
+/// straight away from it is into the wall); and with a pillar at its back.
+/// The run counts the open ground a heading has and runs along the obstacle
+/// (AS-241; AS-164 found those shifts pinned). Each scene over three seeds.
+///
+/// The control is the open-ground scene with Travel Form on cooldown: the
+/// Druid stays rooted, and the Warrior closes. So the gain is the shift's.
+///
+/// A Druid with walls on TWO sides (a corner) and its chaser out in front
+/// cannot gain ground at all: `a_cornered_druid_runs_as_far_as_the_corner_allows`
+/// stages that case and holds it to the best a straight heading does.
+#[test]
+fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
+    const DRUID: Unit = Unit::new(1, 1);
+    const CHASER: Unit = Unit::new(2, 0);
+    const SCENES: [(&str, &str, (f32, f32), (f32, f32)); 3] = [
+        ("open ground", "BasicArena", (0.0, 0.0), (5.0, 0.0)),
+        // BasicArena's walkable edge is z = -21.5 (`ARENA_HALF_Z`): the Druid
+        // stands 1yd from it, the Warrior due north of it.
+        ("back to a wall", "BasicArena", (0.0, -20.5), (0.0, -15.5)),
+        // TwinPillars' east pillar is a 2.5yd cylinder at (9, 0): the Druid
+        // stands at its skin with the Warrior due east of it.
+        ("back to a pillar", "TwinPillars", (12.6, 0.0), (17.6, 0.0)),
+    ];
+    let base = Combatant::new(1, 0, CharacterClass::Druid).base_movement_speed;
+    for (scene, map, druid, chaser) in SCENES {
+        for seed in [1, 2, 3] {
+            let run = outrun_scene(map, druid, chaser, seed, false);
+            assert!(
+                run.len() >= 2,
+                "{scene} #{seed}: the shift did not free the Druid (it shifted with a root, \
+                 slow or hold still on it, or did not shift)"
+            );
+            let (t, start, end) = (run.secs(), run.gap(0), run.gap(run.len() - 1));
+            assert!(
+                t >= OUTRUN_WINDOW_SECS - 0.05,
+                "{scene} #{seed}: the run was cut short at {t:.2}s"
+            );
+            assert!(
+                end > start,
+                "{scene} #{seed}: no ground gained on the chaser ({start:.1} -> {end:.1} yd)"
+            );
+            let travelled = run.travelled();
+            assert!(
+                travelled > base * t * 1.05,
+                "{scene} #{seed}: {travelled:.1} yd in {t:.2}s is no faster than an \
+                 unshifted Druid"
+            );
+        }
+    }
+    // The control: no shift, so no gain.
+    let (_, map, druid, chaser) = SCENES[0];
+    for seed in [1, 2, 3] {
+        let run = outrun_scene(map, druid, chaser, seed, true);
+        let (start, end) = (run.gap(0), run.gap(run.len() - 1));
+        assert!(
+            !run.shifted && end <= start,
+            "control #{seed}: a Druid that cannot shift gained ground ({start:.1} -> \
+             {end:.1} yd, shifted: {})",
+            run.shifted
+        );
+    }
+
+    /// The Druid's run after the shift (or, with `no_shift`, from the stage):
+    /// frames over [`OUTRUN_WINDOW_SECS`], while the Druid and the chaser live,
+    /// the Druid stays in the form and nothing roots, slows or holds it.
+    struct Run {
+        frames: Vec<(f32, Vec2, Vec2)>,
+        shifted: bool,
+    }
+    impl Run {
+        fn len(&self) -> usize {
+            self.frames.len()
+        }
+        fn secs(&self) -> f32 {
+            self.frames.last().unwrap().0 - self.frames[0].0
+        }
+        fn gap(&self, i: usize) -> f32 {
+            self.frames[i].1.distance(self.frames[i].2)
+        }
+        fn travelled(&self) -> f32 {
+            self.frames
+                .windows(2)
+                .map(|w| w[0].1.distance(w[1].1))
+                .sum()
+        }
+    }
+    fn outrun_scene(
+        map: &str,
+        druid: (f32, f32),
+        chaser: (f32, f32),
+        seed: u64,
+        no_shift: bool,
+    ) -> Run {
+        let config = HeadlessMatchConfig {
+            team1: vec!["Mage".into(), "Druid".into()],
+            team2: vec!["Warrior".into(), "Priest".into()],
+            map: map.to_string(),
+            // The enemy Warrior is after the Druid.
+            team2_kill_target: Some(1),
+            random_seed: Some(seed),
+            max_duration_secs: 8.0,
+            ..Default::default()
+        };
+        let mut stage = Stage::new()
+            .place(DRUID, druid.0, druid.1)
+            .clear_auras(DRUID)
+            .aura(
+                DRUID,
+                Aura {
+                    effect_type: AuraType::Root,
+                    duration: 4.0,
+                    break_on_damage_threshold: -1.0,
+                    ..Default::default()
+                },
+            )
+            .place(CHASER, chaser.0, chaser.1)
+            .target(CHASER, DRUID)
+            // No Charge: its stun would hold the Druid, not outrun it.
+            .cooldown(CHASER, AbilityType::Charge, 60.0)
+            .place(Unit::new(1, 0), -30.0, 15.0)
+            .place(Unit::new(2, 1), 30.0, 15.0);
+        if no_shift {
+            stage = stage.cooldown(DRUID, AbilityType::TravelForm, 60.0);
+        }
+        let mut frames: Vec<FrameObservation> = Vec::new();
+        run_headless_match_staged(config, true, None, stage, |f| frames.push(f.clone()))
+            .expect("match runs");
+        let unit = |f: &FrameObservation, team: u8, slot: u8| {
+            f.combatants
+                .values()
+                .find(|c| c.team == team && c.slot == slot && !c.is_pet)
+                .cloned()
+                .expect("the unit")
+        };
+        let frames: Vec<&FrameObservation> = frames.iter().filter(|f| f.gates_open).collect();
+        let shift = frames
+            .iter()
+            .position(|f| unit(f, 1, 1).aura_types.contains(&AuraType::TravelForm));
+        let from = if no_shift {
+            0
+        } else {
+            shift.expect("the rooted Druid shifts")
+        };
+        let start = frames[from].sim_time;
+        Run {
+            frames: frames[from..]
+                .iter()
+                .take_while(|f| {
+                    let (d, c) = (unit(f, 1, 1), unit(f, 2, 0));
+                    f.sim_time <= start + OUTRUN_WINDOW_SECS
+                        && d.alive
+                        && c.alive
+                        && (no_shift || d.aura_types.contains(&AuraType::TravelForm))
+                        && (no_shift || !hindered(&d.aura_types))
+                })
+                .map(|f| {
+                    (
+                        f.sim_time,
+                        xz(unit(f, 1, 1).position),
+                        xz(unit(f, 2, 0).position),
+                    )
+                })
+                .collect(),
+            shifted: shift.is_some(),
+        }
+    }
+}
+
+/// A shifted Druid in a corner, its chaser out on the way out of it: it
+/// cannot gain ground, and it runs as well as the corner allows. STAGED (tier
+/// 3): the Druid already in Travel Form 1yd in from the walls, an enemy
+/// Warrior that is not impaired [`CORNER_GAPS`] off along the way out of the
+/// corner, after it. Two corners of BasicArena's octagon (`ARENA_HALF_X`
+/// 36.5, `ARENA_HALF_Z` 21.5, `ARENA_CORNER_SUM` 48.88), each over three seeds:
+///
+/// - the 135-degree vertex where the west wall meets the diagonal wall, the
+///   chaser on its bisector;
+/// - the middle of the 12.9yd diagonal wall, a pocket with a vertex 6.5yd
+///   either side, the chaser on its normal.
+///
+/// **The corner cannot be escaped in the window.** Straight away from the
+/// chaser is into the walls; every open heading starts across the chaser's
+/// line, and the chaser runs straight at the Druid, cutting the chord of
+/// whatever turn the walls force. The gap grows only once the Druid's heading
+/// is within about 44 degrees of straight away (the speed ratio, 5.1 over 7.14,
+/// is cos 44), and a Druid running along a wall reaches that bearing only once
+/// it is past the chaser. Over [`OUTRUN_WINDOW_SECS`] the best ANY straight
+/// heading does — computed here from the arena's own clamp and the speeds the
+/// run shows ([`best_straight_run`]) — still loses ground: from 6 / 8 / 10yd it
+/// ends 4.6 / 5.2 / 6.0yd off at the vertex and 4.7 / 5.4 / 6.2yd off in the
+/// pocket. That is asserted, so the scene is a corner by measurement.
+///
+/// What is asserted of the Druid is that best: it ends within
+/// [`CORNER_SLACK`] of the gap the best straight heading ends at. Before
+/// AS-468 it ended 0.8 and 1.3yd short in the pocket from 6 and 8yd: its flee
+/// read a heading that grazes the diagonal wall as stopping where the line met
+/// the wall, so it ran parallel to the wall to the vertex and turned there.
+/// Its flee now reads where the run really goes — slid along the wall and
+/// round the vertex (`movement_scoring::run_end`) — and it takes the grazing
+/// heading that carries it round.
+///
+/// The control is the same chaser offset in the open, where the Druid gains
+/// ground and also ends within the slack of the best heading.
+#[test]
+fn a_cornered_druid_runs_as_far_as_the_corner_allows() {
+    use arenasim::states::match_config::ArenaMap;
+    use arenasim::states::play_match::map_config::load_map_geometry_config;
+    let bounds = load_map_geometry_config()
+        .expect("maps.ron loads")
+        .active_for(ArenaMap::BasicArena)
+        .bounds;
+    for (corner, at, out) in CORNERS {
+        for gap in CORNER_GAPS {
+            for seed in [1, 2, 3] {
+                for cornered in [true, false] {
+                    let druid = if cornered { at } else { (0.0, 0.0) };
+                    let chaser = (druid.0 + out.0 * gap, druid.1 + out.1 * gap);
+                    let scene = if cornered { "corner" } else { "open control" };
+                    let run = cornered_run(druid, chaser, seed);
+                    let (t0, d0, c0) = run.frames[0];
+                    let (t1, d1, c1) = *run.frames.last().unwrap();
+                    assert!(
+                        t1 - t0 >= OUTRUN_WINDOW_SECS - 0.05,
+                        "{corner} {scene} {gap}yd #{seed}: the run was cut short at {:.2}s",
+                        t1 - t0
+                    );
+                    let (start, end) = (d0.distance(c0), d1.distance(c1));
+                    let (vd, vc) = run.speeds();
+                    let best = best_straight_run(&bounds, d0, c0, vd, vc, t1 - t0);
+                    if cornered {
+                        assert!(
+                            best < start,
+                            "{corner} {gap}yd #{seed}: a straight heading gains ground from \
+                             the corner ({start:.2} -> {best:.2} yd), so the scene is no corner"
+                        );
+                    } else {
+                        assert!(
+                            end > start,
+                            "{corner} {scene} {gap}yd #{seed}: no ground gained in the open \
+                             ({start:.2} -> {end:.2} yd)"
+                        );
+                    }
+                    assert!(
+                        end >= best - CORNER_SLACK,
+                        "{corner} {scene} {gap}yd #{seed}: the Druid ended {end:.2} yd off its \
+                         chaser, where the best straight heading ends {best:.2} yd off \
+                         ({start:.2} yd at the start)"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The corners of [`a_cornered_druid_runs_as_far_as_the_corner_allows`]: where
+/// the shifted Druid stands, 1yd in from the walls, and the unit vector along
+/// the way out of the corner that its chaser stands on.
+const CORNERS: [(&str, (f32, f32), (f32, f32)); 2] = [
+    // The vertex (-36.5, -12.38); its bisector points into the arena.
+    ("vertex", (-35.576, -12.0), (0.9239, 0.3827)),
+    // The diagonal wall's middle (-31.94, -16.94); its normal.
+    ("pocket", (-31.233, -16.233), (FRAC_1_SQRT_2, FRAC_1_SQRT_2)),
+];
+
+/// How far out along the way out of the corner the chaser stands at the start.
+const CORNER_GAPS: [f32; 3] = [6.0, 8.0, 10.0];
+
+/// How far short of the best straight heading's gap the Druid may end. Its
+/// scorer chooses among 16 headings and re-chooses each commit window; the
+/// best is found among 360 held for the whole window. Measured shortfalls are
+/// 0.1-0.45yd; before AS-468 the pocket's were 0.8 and 1.3yd.
+const CORNER_SLACK: f32 = 0.5;
+
+/// The gap the best straight heading ends at: the Druid at `vd`, holding one of
+/// 360 headings for `secs`, slid along the walls by the arena's own clamp; the
+/// chaser at `vc` running straight at it each frame and stopping at melee
+/// range, as `move_to_target` pursues on an obstacle-free map.
+fn best_straight_run(
+    bounds: &arenasim::states::play_match::arena_bounds::ArenaBounds,
+    druid: Vec2,
+    chaser: Vec2,
+    vd: f32,
+    vc: f32,
+    secs: f32,
+) -> f32 {
+    const DT: f32 = 1.0 / 60.0;
+    const HEADINGS: usize = 360;
+    (0..HEADINGS)
+        .map(|i| {
+            let angle = i as f32 * std::f32::consts::TAU / HEADINGS as f32;
+            let dir = Vec2::new(angle.cos(), angle.sin());
+            let (mut d, mut c) = (druid, chaser);
+            let mut t = 0.0;
+            while t < secs - 1e-4 {
+                let to = d - c;
+                c += to.normalize_or_zero() * (vc * DT).min((to.length() - 2.5).max(0.0));
+                let next = d + dir * vd * DT;
+                let p = bounds.clamp(Vec3::new(next.x, 0.0, next.y));
+                d = Vec2::new(p.x, p.z);
+                t += DT;
+            }
+            d.distance(c)
+        })
+        .fold(f32::MIN, f32::max)
+}
+
+/// A shifted Druid's run from a staged start: `(sim_time, druid, chaser)` on
+/// the ground plane, frame by frame.
+struct CorneredRun {
+    frames: Vec<(f32, Vec2, Vec2)>,
+}
+
+impl CorneredRun {
+    /// The fastest each ran, in yards a second: the Druid's form speed and
+    /// the chaser's run.
+    fn speeds(&self) -> (f32, f32) {
+        self.frames
+            .windows(2)
+            .filter(|w| w[1].0 > w[0].0)
+            .fold((0.0f32, 0.0f32), |(vd, vc), w| {
+                let dt = w[1].0 - w[0].0;
+                (
+                    vd.max(w[0].1.distance(w[1].1) / dt),
+                    vc.max(w[0].2.distance(w[1].2) / dt),
+                )
+            })
+    }
+}
+
+/// The Druid, already in Travel Form, at `druid` with an enemy Warrior at
+/// `chaser` after it (its Charge on cooldown: a stun would hold the Druid, not
+/// outrun it); the run from the gates for [`OUTRUN_WINDOW_SECS`], while both
+/// live and the Druid stays in the form, unhindered.
+fn cornered_run(druid: (f32, f32), chaser: (f32, f32), seed: u64) -> CorneredRun {
+    const DRUID: Unit = Unit::new(1, 1);
+    const CHASER: Unit = Unit::new(2, 0);
+    let config = HeadlessMatchConfig {
+        team1: vec!["Mage".into(), "Druid".into()],
+        team2: vec!["Warrior".into(), "Priest".into()],
+        map: "BasicArena".into(),
+        // The enemy Warrior is after the Druid.
+        team2_kill_target: Some(1),
+        random_seed: Some(seed),
+        max_duration_secs: 8.0,
+        ..Default::default()
+    };
+    let stage = Stage::new()
+        .place(DRUID, druid.0, druid.1)
+        .clear_auras(DRUID)
+        .land(DRUID, AbilityType::TravelForm, DRUID)
+        .place(CHASER, chaser.0, chaser.1)
+        .target(CHASER, DRUID)
+        .cooldown(CHASER, AbilityType::Charge, 60.0)
+        .place(Unit::new(1, 0), -30.0, 15.0)
+        .place(Unit::new(2, 1), 30.0, 15.0);
+    let mut frames: Vec<FrameObservation> = Vec::new();
+    run_headless_match_staged(config, true, None, stage, |f| frames.push(f.clone()))
+        .expect("match runs");
+    let unit = |f: &FrameObservation, team: u8, slot: u8| {
+        f.combatants
+            .values()
+            .find(|c| c.team == team && c.slot == slot && !c.is_pet)
+            .cloned()
+            .expect("the unit")
+    };
+    let frames: Vec<&FrameObservation> = frames.iter().filter(|f| f.gates_open).collect();
+    assert!(
+        unit(frames[0], 1, 1)
+            .aura_types
+            .contains(&AuraType::TravelForm),
+        "the staged Druid starts in Travel Form"
+    );
+    let start = frames[0].sim_time;
+    CorneredRun {
+        frames: frames
+            .iter()
+            .take_while(|f| {
+                let (d, c) = (unit(f, 1, 1), unit(f, 2, 0));
+                f.sim_time <= start + OUTRUN_WINDOW_SECS
+                    && d.alive
+                    && c.alive
+                    && d.aura_types.contains(&AuraType::TravelForm)
+                    && !hindered(&d.aura_types)
+            })
+            .map(|f| {
+                (
+                    f.sim_time,
+                    xz(unit(f, 1, 1).position),
+                    xz(unit(f, 2, 0).position),
+                )
+            })
+            .collect(),
+    }
 }
 
 /// A cycloned unit cannot act: it does not move, its health does not change

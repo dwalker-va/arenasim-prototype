@@ -12,8 +12,8 @@ use super::super::match_config;
 use super::super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
 use super::super::FCT_HEIGHT;
 use super::damage::{
-    apply_damage_with_absorb, damage_dealt_multiplier, get_divine_shield_damage_penalty,
-    get_physical_damage_reduction, roll_crit, Hit, HitKind,
+    apply_damage_with_absorb, credit_damage_dealt, credited_damage, damage_dealt_multiplier,
+    get_divine_shield_damage_penalty, get_physical_damage_reduction, roll_crit, Hit, HitKind,
 };
 use super::follow_ups::DamageFollowUps;
 use super::healing::apply_healing;
@@ -446,7 +446,7 @@ pub fn process_casting(
     }
 
     // Track damage_dealt updates for casters (to apply after processing all casts)
-    let mut caster_damage_updates: Vec<(Entity, f32)> = Vec::new();
+    let mut caster_damage_updates: Vec<(Entity, f32, f32)> = Vec::new();
     // Track healing_done updates for healers (to apply after processing all casts)
     let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
     // Track ability cooldowns to apply (caster_entity, ability, cooldown_duration)
@@ -755,14 +755,13 @@ pub fn process_casting(
                     .other(target_entity),
             );
 
-            // Track damage dealt for caster (include absorbed - caster dealt it)
-            let total_damage_dealt = actual_damage + absorbed;
+            // The caster's damage-dealt credit.
             if is_self_target {
                 // Self-damage: target IS caster, so update now
-                target.damage_dealt += total_damage_dealt;
+                credit_damage_dealt(&mut target, actual_damage, absorbed);
             } else {
                 // Different target: collect for later update
-                caster_damage_updates.push((caster_entity, total_damage_dealt));
+                caster_damage_updates.push((caster_entity, actual_damage, absorbed));
             }
 
             // Spawn floating combat text (yellow for damage abilities)
@@ -888,7 +887,7 @@ pub fn process_casting(
                 caster_id.clone(),
                 target_id.clone(),
                 def.name.to_string(),
-                total_damage_dealt, // Total damage including absorbed
+                credited_damage(actual_damage, absorbed),
                 is_killing_blow,
                 is_crit_damage,
                 message,
@@ -1237,9 +1236,9 @@ pub fn process_casting(
     }
 
     // Apply collected caster damage updates
-    for (caster_entity, damage) in caster_damage_updates {
+    for (caster_entity, landed, absorbed) in caster_damage_updates {
         if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {
-            caster.damage_dealt += damage;
+            credit_damage_dealt(&mut caster, landed, absorbed);
         }
     }
 
@@ -1275,11 +1274,13 @@ pub fn process_casting(
 /// Process channeling: update channel timers and apply tick effects.
 ///
 /// When a channel tick occurs:
-/// 1. Deal damage to target (with absorb shield handling), and log the
-///    damage that landed — after the pipeline's modifiers and absorbs, as
-///    every other damage line does
-/// 2. Heal caster (reduced by healing reduction auras)
-/// 3. Spawn floating combat text (yellow for damage, green for heal)
+/// 1. Deal damage to target (with absorb shield handling), and log, credit
+///    and float the damage that landed — after the pipeline's modifiers and
+///    absorbs, as every other damage site does
+/// 2. Heal the caster through the channel's leech (`channel_leech`): its share
+///    of the damage that landed, through `leech::land`, so an absorbed, cut or
+///    immune tick heals less or nothing, and a dead channeler nothing
+/// 3. Float the heal that landed over the caster (green), and nothing for 0
 ///
 /// Channel ends when duration expires or either caster/target dies.
 pub fn process_channeling(
@@ -1305,16 +1306,17 @@ pub fn process_channeling(
 
     let dt = time.delta_secs();
 
-    // Talent proc events (`DotTick`) and leech heals the ticks owe.
+    // Talent proc events (`DotTick`), the channels' own leech heals (Drain
+    // Life's), and the other leech heals the ticks owe (a Vampiric Embrace on
+    // the target).
     let mut talent_events: Vec<ProcEvent> = Vec::new();
+    let mut channel_leeches: Vec<OwedLeech> = Vec::new();
     let mut leeches: Vec<OwedLeech> = Vec::new();
 
     // Track updates to apply after the loop
     let mut remove_channel: Vec<Entity> = Vec::new();
-    let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
     // (caster_entity, target_entity, damage, caster_team, caster_slot,
-    // caster_class, spell_school, ability, the caster's book, the heal the
-    // tick's log line names — 0 for none)
+    // caster_class, spell_school, ability, the caster's book)
     let mut damage_to_apply: Vec<(
         Entity,
         Entity,
@@ -1325,34 +1327,14 @@ pub fn process_channeling(
         SpellSchool,
         AbilityType,
         AbilityBook,
-        f32,
     )> = Vec::new();
 
-    // Build a snapshot of positions and health for lookups
-    let positions: std::collections::HashMap<Entity, Vec3> = combatants
-        .iter()
-        .map(|(entity, transform, _, _, _)| (entity, transform.translation))
-        .collect();
     // Who is alive as the frame's channels start: a channel on a dead target
     // ends.
     let alive: std::collections::HashMap<Entity, bool> = combatants
         .iter()
         .map(|(entity, _, combatant, _, _)| (entity, combatant.is_alive()))
         .collect();
-    // Snapshot target immunity status for Drain Life healing suppression
-    let immunity_info: std::collections::HashSet<Entity> = combatants
-        .iter()
-        .filter(|(_, _, _, _, auras)| {
-            auras.as_ref().is_some_and(|a| {
-                a.is_cycloned()
-                    || a.auras
-                        .iter()
-                        .any(|aura| aura.effect_type == AuraType::DamageImmunity)
-            })
-        })
-        .map(|(entity, _, _, _, _)| entity)
-        .collect();
-
     for (caster_entity, _caster_transform, caster, channeling_state, caster_auras) in
         combatants.iter_mut()
     {
@@ -1447,15 +1429,8 @@ pub fn process_channeling(
             // Calculate damage (flat damage per tick for Drain Life)
             let damage = ability_def.damage_base_min;
 
-            // Track healing for caster (Drain Life heals 0 if target has DamageImmunity)
-            let healing = ability_def.channel_healing_per_tick;
-            let target_immune = immunity_info.contains(&channeling.target);
-            if healing > 0.0 && !target_immune {
-                caster_healing_updates.push((caster_entity, healing));
-            }
-
-            // Track damage to apply later; the tick is logged as it lands,
-            // with the damage that landed.
+            // Track damage to apply later; the tick is logged, credited,
+            // floated and leeched as it lands, with the damage that landed.
             damage_to_apply.push((
                 caster_entity,
                 channeling.target,
@@ -1466,30 +1441,7 @@ pub fn process_channeling(
                 ability_def.spell_school,
                 channeling.ability,
                 book.clone(),
-                healing.max(0.0),
             ));
-
-            // Spawn floating combat text for damage on target
-            if let Some(&target_pos) = positions.get(&channeling.target) {
-                let text_position = target_pos + Vec3::new(0.0, FCT_HEIGHT, 0.0);
-                let (offset_x, offset_y) =
-                    if let Ok(mut fct_state) = fct_states.get_mut(channeling.target) {
-                        get_next_fct_offset(&mut fct_state)
-                    } else {
-                        (0.0, 0.0)
-                    };
-                commands.spawn((
-                    FloatingCombatText {
-                        world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
-                        text: format!("{:.0}", damage),
-                        color: crate::ui::theme::fct::DAMAGE,
-                        lifetime: 1.5,
-                        vertical_offset: offset_y,
-                        is_crit: false,
-                    },
-                    PlayMatchEntity,
-                ));
-            }
 
             // Reset tick timer
             channeling.time_until_next_tick = channeling.tick_interval;
@@ -1523,7 +1475,6 @@ pub fn process_channeling(
         spell_school,
         channel_ability,
         caster_book,
-        heal_logged,
     ) in damage_to_apply
     {
         // Pet-aware for consistency with the rest of the sweep (a channel
@@ -1536,8 +1487,15 @@ pub fn process_channeling(
             pet_query.get(caster_entity).ok().map(|p| p.pet_type),
         );
         let channel_name = caster_book.get_unchecked(&channel_ability).name.clone();
+        // The tick's breakdown row, apart from the channel's cast: its own
+        // damage and any share of it a transfer passes on are logged there.
+        let tick_row = format!("{channel_name} (tick)");
         // The target this tick killed, for the death line after the tick's.
         let mut killed: Option<String> = None;
+        // The damage the tick landed and the damage a shield took, for the
+        // channeler's `damage_dealt`.
+        let mut landed = 0.0;
+        let mut soaked = 0.0;
         // The channeler's damage-dealt increases, read before the target is
         // borrowed.
         let dealt = combatants
@@ -1559,6 +1517,7 @@ pub fn process_channeling(
                     None,
                     target_entity,
                 )
+                .row(&tick_row)
                 .with_dealt(dealt)
                 .of_kind(HitKind::Periodic);
                 let (actual_damage, absorbed) = apply_damage_with_absorb(
@@ -1569,32 +1528,39 @@ pub fn process_channeling(
                     &mut combat_log,
                 );
 
-                // The tick's leeches (a leeching channel, a Vampiric Embrace
-                // on its target) and its `DotTick`.
+                landed = actual_damage;
+                soaked = absorbed;
+
+                // The tick's leeches: the channel's own (Drain Life's, off the
+                // damage that landed), and a Vampiric Embrace on its target.
                 let own = channel_def
-                    .applies_aura
+                    .channel_leech
                     .as_ref()
-                    .and_then(|a| a.leech.as_ref())
                     .map(|l| (l, channel_def.name.as_str()));
-                let heals = leech::owed(
-                    caster_entity,
-                    own,
-                    target_auras.as_deref(),
-                    spell_school,
-                    actual_damage,
-                );
-                if !heals.is_empty() {
-                    leeches.push(OwedLeech {
-                        caster: caster_entity,
-                        caster_team,
-                        caster_id: super::super::utils::log_id_from_parts(
-                            caster_team,
-                            caster_slot,
-                            caster_class,
-                            pet_query.get(caster_entity).ok().map(|p| p.pet_type),
+                for (heals, owed_to) in [
+                    (
+                        leech::owed(caster_entity, own, None, spell_school, actual_damage),
+                        &mut channel_leeches,
+                    ),
+                    (
+                        leech::owed(
+                            caster_entity,
+                            None,
+                            target_auras.as_deref(),
+                            spell_school,
+                            actual_damage,
                         ),
-                        heals,
-                    });
+                        &mut leeches,
+                    ),
+                ] {
+                    if !heals.is_empty() {
+                        owed_to.push(OwedLeech {
+                            caster: caster_entity,
+                            caster_team,
+                            caster_id: caster_id.clone(),
+                            heals,
+                        });
+                    }
                 }
                 talent_events.push(
                     ProcEvent::new(caster_entity, TalentTrigger::DotTick)
@@ -1610,10 +1576,27 @@ pub fn process_channeling(
                     });
                 }
 
-                // Spawn absorbed text if any
+                // The tick's damage over the target, as it landed, then what a
+                // shield took.
+                let text_position = target_transform.translation + Vec3::new(0.0, FCT_HEIGHT, 0.0);
+                let (offset_x, offset_y) =
+                    if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+                        get_next_fct_offset(&mut fct_state)
+                    } else {
+                        (0.0, 0.0)
+                    };
+                commands.spawn((
+                    FloatingCombatText {
+                        world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
+                        text: format!("{:.0}", actual_damage),
+                        color: crate::ui::theme::fct::DAMAGE,
+                        lifetime: 1.5,
+                        vertical_offset: offset_y,
+                        is_crit: false,
+                    },
+                    PlayMatchEntity,
+                ));
                 if absorbed > 0.0 {
-                    let text_position =
-                        target_transform.translation + Vec3::new(0.0, FCT_HEIGHT, 0.0);
                     let (offset_x, offset_y) =
                         if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
                             get_next_fct_offset(&mut fct_state)
@@ -1657,8 +1640,8 @@ pub fn process_channeling(
                 combat_log.log_damage(
                     caster_id.clone(),
                     target_id.clone(),
-                    format!("{} (tick)", channel_name),
-                    actual_damage,
+                    tick_row.clone(),
+                    credited_damage(actual_damage, absorbed),
                     is_killing_blow,
                     false, // is_crit - channel ticks never crit
                     message,
@@ -1676,52 +1659,58 @@ pub fn process_channeling(
             }
         }
 
-        if heal_logged > 0.0 {
-            let heal_message = format!(
-                "{}'s {} heals for {:.0}",
-                caster_id, channel_name, heal_logged
-            );
-            combat_log.log_healing(
-                caster_id.clone(),
-                caster_id.clone(),
-                format!("{} (tick)", channel_name),
-                heal_logged,
-                false, // is_crit - channel ticks never crit
-                heal_message,
-            );
-        }
         if let Some(target_id) = killed {
             let death_message = format!("{} has been eliminated", target_id);
             combat_log.log_death(target_id, Some(caster_id), death_message);
         }
 
-        // Update caster damage dealt stats
+        // Credit the channeler with the tick, as its log row counts it.
         if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {
-            caster.damage_dealt += damage;
+            credit_damage_dealt(&mut caster, landed, soaked);
         }
     }
 
     follow_ups.spawn(&mut commands);
 
-    // Apply healing to casters and spawn healing FCT
-    for (caster_entity, healing) in caster_healing_updates {
-        if let Ok((_, caster_transform, mut caster, _, caster_auras)) =
-            combatants.get_mut(caster_entity)
-        {
-            let effective_healing = apply_healing(
-                &mut commands,
-                caster_entity,
-                &mut caster,
-                caster_auras.as_deref(),
-                &dampening,
-                healing,
-            );
-            caster.healing_done += effective_healing;
-
-            // Spawn floating combat text for healing
-            let text_position = caster_transform.translation + Vec3::new(0.0, FCT_HEIGHT, 0.0);
-            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(caster_entity)
-            {
+    // The channels' own leech heals (Drain Life's), each through `leech::land`
+    // once every tick of the frame has landed, so a channeler its victim's
+    // tick killed this frame is healed for nothing. The heal that landed
+    // floats over its recipient; one that landed nothing draws nothing.
+    for owed in &channel_leeches {
+        let members: Vec<(Entity, u8, bool, bool)> = if owed.needs_party() {
+            combatants
+                .iter()
+                .map(|(e, _, c, _, _)| (e, c.team, pet_query.get(e).is_ok(), c.is_alive()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut healed: Vec<(Entity, Vec3, f32)> = Vec::new();
+        let credited = leech::land_owed(
+            &mut commands,
+            &mut combat_log,
+            &dampening,
+            owed,
+            &members,
+            |e, land| match combatants.get_mut(e) {
+                Ok((_, transform, mut c, _, auras)) => {
+                    let id = combat_log_id_for(&c, pet_query.get(e).ok());
+                    let effective = land(&mut c, auras.as_deref(), &id);
+                    healed.push((e, transform.translation, effective));
+                    effective
+                }
+                Err(_) => 0.0,
+            },
+        );
+        if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(owed.caster) {
+            caster.healing_done += credited;
+        }
+        for (recipient, position, effective) in healed {
+            if effective <= 0.0 {
+                continue;
+            }
+            let text_position = position + Vec3::new(0.0, FCT_HEIGHT, 0.0);
+            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(recipient) {
                 get_next_fct_offset(&mut fct_state)
             } else {
                 (0.0, 0.0)
@@ -1729,7 +1718,7 @@ pub fn process_channeling(
             commands.spawn((
                 FloatingCombatText {
                     world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
-                    text: format!("+{:.0}", effective_healing),
+                    text: format!("+{:.0}", effective),
                     color: crate::ui::theme::fct::HEAL,
                     lifetime: 1.5,
                     vertical_offset: offset_y,

@@ -394,7 +394,6 @@ pub enum AbilityField {
     /// Present only on a channel.
     ChannelDuration,
     ChannelTickInterval,
-    ChannelHealingPerTick,
     ManaBurnAmount,
     /// The applied aura's fields: present only on an ability that applies one.
     AuraDuration,
@@ -443,7 +442,6 @@ impl AbilityField {
             AbilityField::LockoutDuration => Some(&mut config.lockout_duration),
             AbilityField::ChannelDuration => config.channel_duration.as_mut(),
             AbilityField::ChannelTickInterval => Some(&mut config.channel_tick_interval),
-            AbilityField::ChannelHealingPerTick => Some(&mut config.channel_healing_per_tick),
             AbilityField::ManaBurnAmount => Some(&mut config.mana_burn_amount),
             AbilityField::AuraDuration => aura.map(|a| &mut a.duration),
             AbilityField::AuraMagnitude => aura.map(|a| &mut a.magnitude),
@@ -526,7 +524,6 @@ impl AbilityField {
             AbilityField::LockoutDuration => &[AbilityField::LockoutDuration],
             AbilityField::ChannelDuration => &[AbilityField::ChannelDuration],
             AbilityField::ChannelTickInterval => &[AbilityField::ChannelTickInterval],
-            AbilityField::ChannelHealingPerTick => &[AbilityField::ChannelHealingPerTick],
             AbilityField::ManaBurnAmount => &[AbilityField::ManaBurnAmount],
             AbilityField::AuraDuration => &[AbilityField::AuraDuration],
             AbilityField::AuraMagnitude => &[AbilityField::AuraMagnitude],
@@ -840,6 +837,42 @@ impl TalentDefinitions {
     /// Every class with a reference combatant.
     pub fn reference_classes(&self) -> impl Iterator<Item = CharacterClass> + '_ {
         self.reference.keys().copied()
+    }
+
+    /// This table with only the nodes `keep` names, and only the trees that
+    /// still hold one: a catalogue whose membership does not grow when
+    /// `talents.ron` does. The encyclopedia snapshots draw one
+    /// (`tests/common/pinned_catalogue.rs`), so a node or a tree added later
+    /// moves none of their pixels. Not validated again: it is for drawing,
+    /// never for resolving a build.
+    pub fn restricted_to(&self, keep: &[TalentId]) -> Self {
+        let talents: BTreeMap<TalentId, TalentConfig> = keep
+            .iter()
+            .filter_map(|id| self.talents.get(id).map(|node| (*id, node.clone())))
+            .collect();
+        let trees = self
+            .trees
+            .iter()
+            .map(|(class, trees)| {
+                let kept: Vec<TreeConfig> = trees
+                    .iter()
+                    .filter(|tree| {
+                        talents
+                            .values()
+                            .any(|node| node.class == *class && node.tree == tree.id)
+                    })
+                    .cloned()
+                    .collect();
+                (*class, kept)
+            })
+            .filter(|(_, kept)| !kept.is_empty())
+            .collect();
+        Self {
+            trees,
+            talents,
+            reference: self.reference.clone(),
+            choice_rules: self.choice_rules.clone(),
+        }
     }
 
     /// The choice rules (`talent_choices::ChoiceRule`).

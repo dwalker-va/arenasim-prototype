@@ -88,12 +88,22 @@ fn a_melee_proc_fires_and_hastes_the_wearer() {
     );
 }
 
-/// The control for the test above: the SAME seed and matchup with no proc
-/// trinket carries no haste at all. So the buff is the proc's.
+/// The control for the test above: the SAME seed and matchup with a
+/// stats-only trinket in that socket carries no haste at all. So the buff is
+/// the proc's. Both trinket sockets are named, so the control does not lean on
+/// what the default loadout happens to put in them.
 #[test]
 fn without_the_trinket_the_warrior_carries_no_haste() {
     let bare = peak_concurrent(
-        config("Warrior", "Priest", 770_140, &[]),
+        config(
+            "Warrior",
+            "Priest",
+            770_140,
+            &[
+                ("Trinket1", "MarkOfTheChampion"),
+                ("Trinket2", "EssenceOfEternalLife"),
+            ],
+        ),
         AuraType::AttackSpeedIncrease,
     );
     assert_eq!(
@@ -111,55 +121,77 @@ fn without_the_trinket_the_warrior_carries_no_haste() {
 /// each fired at some point in the match. Each buff's type has no other source
 /// on a Warrior (module docs), so its presence is unambiguous.
 ///
-/// Seed re-pinned for AS-167 (weapon speed from item data), from 770_141 to
-/// 770_142. The Warrior's Arcanite Reaper now swings every 3.8s, not every
-/// 1.11s, so it lands about a third as many swings. Each swing still rolls a
-/// flat 15% / 10%, so there are fewer proc chances per fight, and at 770_141
-/// Dragonspine never fired. The first line that differs from `main` @ 17cb9f0
-/// is the Priest's opening Wand Shot, 8 -> 10 (the Staff of Dominance fires
-/// every 1.6s for the same DPS). Of 770_141..=770_160, 770_142 is the first
-/// where both trinkets fire with overlapping buffs (Dragonspine at 23.8s,
-/// Whetstone at 31.5s).
+/// Played over a SEED BANK. Whether both trinkets fire close enough together to
+/// overlap is a property of the rolls, and the Arcanite Reaper's 3.8s swing
+/// leaves few of them in one fight, so a single seed carries the situation only
+/// until any change moves the RNG stream (770_141 lost it to AS-167's weapon
+/// speeds, 770_142 to AS-460's second trinkets). The claim is that an overlap
+/// CAN happen, so the bank asserts it happens in at least one match, and names
+/// each trinket that never fired anywhere. It plays seeds in order and stops at
+/// the first match with an overlap. At AS-460 a quarter of the seeds hold one
+/// (770_140, 770_144 and 770_146 of the first twelve), so a bank of 60 goes
+/// empty by chance about once in 30 million.
 #[test]
 fn two_different_proc_trinkets_are_live_at_the_same_time() {
-    let cfg = config(
-        "Warrior",
-        "Priest",
-        770_142,
-        &[
-            ("Trinket1", "DragonspineTrophy"),
-            ("Trinket2", "WhetstoneOfFury"),
-        ],
-    );
     let mut overlap_frames = 0;
+    let mut overlapping_seeds = Vec::new();
     let mut saw_haste = false;
     let mut saw_crit = false;
-    run_headless_match_observed(cfg, true, None, |frame| {
-        for c in frame.combatants.values() {
-            if c.team != 1 || c.slot != 0 || c.is_pet {
-                continue;
+    for seed in OVERLAP_BANK {
+        let cfg = config(
+            "Warrior",
+            "Priest",
+            seed,
+            &[
+                ("Trinket1", "DragonspineTrophy"),
+                ("Trinket2", "WhetstoneOfFury"),
+            ],
+        );
+        let mut overlap_here = 0;
+        run_headless_match_observed(cfg, true, None, |frame| {
+            for c in frame.combatants.values() {
+                if c.team != 1 || c.slot != 0 || c.is_pet {
+                    continue;
+                }
+                let haste = c.aura_types.contains(&AuraType::AttackSpeedIncrease);
+                let crit = c.aura_types.contains(&AuraType::CritChanceIncrease);
+                saw_haste |= haste;
+                saw_crit |= crit;
+                if haste && crit {
+                    overlap_here += 1;
+                }
             }
-            let haste = c.aura_types.contains(&AuraType::AttackSpeedIncrease);
-            let crit = c.aura_types.contains(&AuraType::CritChanceIncrease);
-            saw_haste |= haste;
-            saw_crit |= crit;
-            if haste && crit {
-                overlap_frames += 1;
-            }
+        })
+        .expect("match runs");
+        if overlap_here > 0 {
+            overlapping_seeds.push(seed);
         }
-    })
-    .expect("match runs");
+        overlap_frames += overlap_here;
+        if overlap_frames > 0 {
+            break;
+        }
+    }
+    eprintln!("overlap in seeds {overlapping_seeds:?} ({overlap_frames} frames)");
 
     // Named separately so a failure says WHICH trinket never fired, rather
     // than only that the overlap was zero.
-    assert!(saw_haste, "Dragonspine Trophy never procced");
-    assert!(saw_crit, "Whetstone of Fury never procced");
+    assert!(
+        saw_haste,
+        "Dragonspine Trophy never procced in {OVERLAP_BANK:?}"
+    );
+    assert!(
+        saw_crit,
+        "Whetstone of Fury never procced in {OVERLAP_BANK:?}"
+    );
     assert!(
         overlap_frames > 0,
-        "both trinkets procced but never overlapped — with per-trinket cooldowns and no \
-         global lock, two buffs of different lengths should share frames"
+        "both trinkets procced but never overlapped in {OVERLAP_BANK:?} — with per-trinket \
+         cooldowns and no global lock, two buffs of different lengths should share frames"
     );
 }
+
+/// The seeds the overlap probe plays.
+const OVERLAP_BANK: std::ops::Range<u64> = 770_140..770_200;
 
 /// A caster proc fires off a completed cast, and a healer proc off a completed
 /// heal — the two trigger kinds the melee tests above cannot reach.
