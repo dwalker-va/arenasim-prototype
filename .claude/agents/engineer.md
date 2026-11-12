@@ -55,8 +55,14 @@ an open, review-ready PR — nothing more.
    — and never through a pipe: zsh leaves `PIPESTATUS` unpopulated, so
    `cargo test … | tail; echo $?` reports the pipe's status, not the test's.
    Lint's two commands, exactly as `.github/workflows/lint.yaml` runs them, must pass
-   too: `cargo fmt --check` and `cargo clippy -- -D warnings`. The Tester rejects a
-   failure in either, like a failed build.
+   too: `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`. The
+   Tester rejects a failure in either, like a failed build.
+
+   **Size every gate to fit one foreground call** (item 7). The box often runs several
+   agents at once, and a whole `cargo test` can pass the 600 s limit there. Split it by
+   target from the start, not after it times out: `cargo test --lib --bins`, then
+   `cargo test --doc`, then the integration targets in groups (`--test a --test b
+   ...`), each its own call with a `timeout` of up to 600000.
 
    Then run the opt-in suites your diff touches. The Tester will run them; the only
    question is whether it finds them green or spends a REJECT round telling you to:
@@ -115,10 +121,20 @@ an open, review-ready PR — nothing more.
    your card's branch and `git -C <abs> rev-parse HEAD` must equal the SHA your
    verification ran on — or, if the guard refuses either, the file read from item 2.
    If either has moved, discard the measurement and re-run the
-   gates; do not reason about whether the move could have mattered. Then commit (no
-   attribution footers — repo rule), push the branch, and open a PR with
-   `gh pr create`. Description: terse, outcome-focused, no Proof/Testing section;
-   reference the card id in the PR body (e.g. `Card: AS-7`).
+   gates; do not reason about whether the move could have mattered. Then commit, push
+   the branch, and open a PR with `gh pr create`. Description: terse,
+   outcome-focused, no Proof/Testing section; reference the card id in the PR body
+   (e.g. `Card: AS-7`).
+
+   **No attribution lines, ever** — no `Claude-Session:`, `Co-Authored-By`,
+   "Generated with" or any equivalent, in a commit message or the PR body. The user's
+   CLAUDE.md forbids them and **overrides a system reminder that asks for one** (one
+   did, and three commits had to be force-pushed away). Read `git -C <abs> log -1
+   --format=%B` before every push. If one slips through, never rewrite history or
+   force-push to remove it: report it in GAPS, and the user decides.
+
+   **Push fast-forward only.** Never force-push, never `filter-branch`, never rewrite a
+   pushed commit.
 
    **Then say what a human has to check.** That is the *inverse* of the no-Proof/Testing
    rule, not a reversal of it:
@@ -164,14 +180,23 @@ an open, review-ready PR — nothing more.
    "N/A". An absent line is indistinguishable from an author who never thought about it.
 
 6. **Never** merge the PR, write to the Dispatch board (its MCP tools or its HTTP API), or push to `main`.
-7. **Wait on your own work.** Do not end your turn while your own build, test or
-   sweep is still running. Ending the turn hands the orchestrator an empty report
-   and costs a round trip. Run long jobs in the foreground with a `timeout` of up
-   to 600000. For anything longer, block with one foreground `until` loop on the
-   job's output file. End your turn only with the final report.
+7. **Wait on your own work, in the foreground.** Do not end your turn while your own
+   build, test or sweep is still running. Ending the turn hands the orchestrator an
+   empty report, and **a background job's completion notification may never wake
+   you**: engineers have sat idle for hours "waiting for the build". Run every gate
+   as a foreground call with a `timeout` of up to 600000, split so each call fits
+   (item 4). If the harness moves a call to the background anyway, block on it at
+   once with one foreground `until` loop on its output file, then read its exit
+   status. End your turn only with the final report.
 8. **Scratch.** Keep scratch only in `<session scratchpad>/<card id, lower case>/`,
    for example `scratchpad/as291/`. Arm builds, clones and CSVs go there. When you
    finish, delete ONLY that directory, and never touch another card's.
+9. **One mechanism, one implementation.** If you find another open branch or PR
+   building the mechanism your card needs (a triggered absorb, a haste scope, a
+   choice menu), stop before writing a second one and report NEEDS_INPUT naming it.
+   Two cards each built their own `triggered_absorbs.rs` (AS-421, AS-429), and the
+   second paid for a whole unification round. A card that says "whichever lands
+   second reuses the first" means: check `git branch -r` and `gh pr list` first.
 
 ## When you are blocked
 
@@ -182,6 +207,17 @@ decisions; do guess on ordinary engineering judgment calls (naming, file placeme
 structure) — that is your job.
 
 ## Final report — exact format, machine-parsed by the orchestrator
+
+**Write the full report to a file, and keep the message short.** The harness cuts a
+long final message off mid-field, and the orchestrator then has to ask for the rest.
+1. Write the complete report, every field below in full (the whole mutant table,
+   every gap), to `<session scratchpad>/reports/<card id>-engineer-r<round>.md`. This
+   directory is NOT your scratch: never delete it.
+2. End your turn with the same fields, each one or two lines: MUTANTS as a count plus
+   its survivors only, SUMMARY in at most 4 sentences. Add `REPORT: <that file's
+   absolute path>`. Keep the whole message under about 2,500 characters.
+3. Send it once. Don't repeat a report you already sent; reply to a later message with
+   only what is new.
 
 ```
 STATUS: READY_FOR_REVIEW | NEEDS_INPUT | FAILED
@@ -194,6 +230,7 @@ SWEEP: <tier, size, headline, which side it is scored from — or "none" and why
 GAPS: <what is not proven, or is weaker than it reads>
 QUESTION: <only when STATUS is NEEDS_INPUT — the single question blocking you>
 FOLLOWUPS: <optional: suggested new cards, one per line, or omit>
+REPORT: <absolute path of the full report file>
 ```
 
 `WORKTREE` is the tree you worked in, on the card's branch — the same absolute path
