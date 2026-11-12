@@ -943,6 +943,12 @@ impl Scene {
         queue.apply(&mut exec_world);
         let mut view = DecisionView::read(self, unit.entity, acted, &trace);
         view.directive = exec_world.get::<MovementDirective>(unit.entity).copied();
+        let mut used = exec_world.query::<&OnUsePending>();
+        view.items_used.extend(
+            used.iter(&exec_world)
+                .map(|p| (self.who(p.wearer.index()), p.item)),
+        );
+        view.on_use_after = combatant.on_use_items.clone();
         let mut placed = exec_world.query::<(&Trap, &Transform)>();
         view.trap_landings.extend(
             placed

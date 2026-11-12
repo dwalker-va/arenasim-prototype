@@ -1642,15 +1642,9 @@ fn every_damage_site_leeches_off_the_damage_it_landed() {
             " heals for ",
         );
         assert!(dealt.len() >= 2, "{name} hardly landed: {}", played.log);
-        // A channel's tick line reports the tick it computed, before the
-        // pipeline doubles it; every other site's line reports what landed.
-        let landed = if keep == AbilityType::DrainLife {
-            2.0
-        } else {
-            1.0
-        };
+        // Every site's line, the channel's included, reports what landed.
         assert_eq!(
-            dealt.iter().sum::<f32>() * landed,
+            dealt.iter().sum::<f32>(),
             healed.iter().sum::<f32>(),
             "{name}: dealt {dealt:?}, healed {healed:?}: {}",
             played.log

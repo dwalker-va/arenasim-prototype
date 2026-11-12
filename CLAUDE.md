@@ -828,12 +828,21 @@ any ring fits either ring socket, and the same item may not occupy both
        cooldown: OncePerMatch,    // or Seconds(60.0)
        price: Some(24.0),         // declared, per use; only where no stat weight prices the effect
    )),
+   on_use: Some((
+       effect: Buff(SpellPowerIncrease), // a stat burst or haste (the Talisman)
+       magnitude: 40.0,           // in the aura's own units
+       duration: 15.0,
+       cooldown: Seconds(45.0),   // at least `duration`
+       // heal_over_time: Some((heal_per_tick: 4.0, tick_interval: 5.0)), // the Diamond Flask
+   )),
    ```
    - **Pricing: uses in an arena life**, not the proc's long-run bound.
      An on-use starts ready, so it is charged per use times the uses it gets in
      `ARENA_LIFE_SECS` (37.8s, the mean life the proc probe measures): a 45s
-     cooldown is one use. A stat burst prices through `on_use_buff_cost` (15s
-     of +40 SP on 45s is about 24). An
+     cooldown is one use. A buff prices through `on_use_buff_cost` (15s
+     of +40 SP on 45s is about 24) at its stat's `proc_effect_budget_weight`,
+     and a heal over time beside it through `on_use_heal_cost` (the health it
+     heals in the life, at 1.0 a point). An
      effect no stat weight prices (the CC break) DECLARES its per-use price,
      sweep-checked against the same budget spent on stats; the loader refuses
      one that declares none.
@@ -856,6 +865,14 @@ any ring fits either ring socket, and the same item may not occupy both
      `item_decision` event (`item`, `status`, `reason` — "short hold" or
      "waiting for <id>'s <dispel>"); `Scene::on_use_item` and
      `Scene::decide_held` test it.
+     A BUFF (`class_ai::on_use::try_buffs`) is asked every tick a free unit
+     decides, ahead of its class chain (it costs no global cooldown): a damage
+     dealer uses it in its team's `kill_window`, a healer when a teammate
+     (itself included) is among `dying_allies`, and a buff carrying a heal
+     over time also when its own wearer is dying (`buff_moment`). It lands as
+     an undispellable item aura (`OnUseConfig::aura` / `heal_aura`), and its
+     heal ticks through `process_hot_ticks` and so `apply_healing`. Scenes:
+     `tests/on_use_buff_scenes.rs`.
    - Its line ("Use: …") is `ItemConfig::effect_description`, shared by the
      encyclopedia page, the tooltip and the equipment picker. Its landing is in
      `tests/lands_silently_audit.rs`'s on-use family.

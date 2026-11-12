@@ -927,6 +927,8 @@ pub fn dispatch_while_held(
 /// a [`Scene`](class_ai::scene::Scene) calls it for the unit under test, so a
 /// scene cannot exercise a path a match never takes.
 ///
+/// A buff on-use item the unit carries is asked first (`class_ai::on_use`).
+///
 /// The match is exhaustive over `CharacterClass`: a new class fails the build
 /// here until it has an arm. Each arm names the per-class accumulators it uses
 /// rather than threading a bag through every class. Returns whether the unit
@@ -970,6 +972,13 @@ pub fn dispatch_class_decision(
         frost_nova_damage,
         same_frame_cc_queue,
     } = acc;
+    // A buff on-use item (a stat burst, haste) costs no global cooldown, so
+    // it is asked ahead of the class chain, which then runs as it would have
+    // (`class_ai::on_use::try_buffs`). Nothing runs, and nothing is traced,
+    // for a unit that carries no on-use.
+    if gates_opened && !combatant.on_use_items.is_empty() {
+        class_ai::on_use::try_buffs(commands, decision_trace, entity, combatant, ctx);
+    }
     // The unit decides from its OWN book. Cloned (a shared handle) so the
     // configs it reads stay borrowable while the unit itself is mutated.
     // A live next-cast modifier (Shadow Trance, Divine Favor) changes the

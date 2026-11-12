@@ -697,7 +697,12 @@ pub fn apply_pending_auras(
             // A proc trinket's buff says so in the log, once per buff that
             // actually LANDED. That line is what a sweep counts to report how
             // often procs fired — a decisive-event count, not an assumption.
-            if pending.aura.source_item.is_some() {
+            // An ON-USE item's buff is not a proc: its use is already logged
+            // ("[ITEM] <wearer> uses <item>", `process_on_use_items`), so it
+            // writes no `procs` line for that count to misread.
+            if pending.aura.source_item.is_some_and(|item| {
+                !super::on_use_items::grants_buff(&target_combatant.on_use_items, item)
+            }) {
                 combat_log.log(
                     CombatLogEventType::Buff,
                     format!("{} procs {}", target_id, pending.aura.ability_name),

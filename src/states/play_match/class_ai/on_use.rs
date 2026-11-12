@@ -19,6 +19,21 @@
 //! what is in reach, and a melee wearer rooted away from its target is the
 //! Paladin's Cleanse's to answer (`ROOT_DISPEL_PRIORITY`), not a once-a-match
 //! break the next stun would want.
+//!
+//! **A buff** ([`OnUseEffect::Buff`]: a stat burst or haste — the Talisman,
+//! Earthstrike, Kiss of the Spider, the Diamond Flask). Asked every tick a
+//! FREE unit decides (`combat_ai::dispatch_class_decision`, before its class
+//! chain: a use costs no global cooldown), once the gates are open. It fires
+//! when its wearer's role has a moment to spend it on ([`buff_moment`]):
+//!
+//! - a damage dealer, in its team's KILL WINDOW (`TeamSituation::kill_window`,
+//!   an enemy low and beyond its healers' help) — the burst a stat or haste
+//!   on-use is for;
+//! - a healer, when a teammate (itself included) DROPS LOW
+//!   (`TeamSituation::dying_allies`, below `urgency_hp_threshold`).
+//!
+//! A buff that carries a heal over time also fires when its WEARER is dying,
+//! whatever its role: the heal is the wearer's own.
 
 use bevy::prelude::*;
 
@@ -31,8 +46,9 @@ use crate::states::play_match::components::{Aura, Combatant};
 use crate::states::play_match::constants::{CC_BREAK_MIN_HOLD_REMAINING, GCD};
 use crate::states::play_match::decision_trace::{ActorView, DecisionTrace, RejectionReason};
 use crate::states::play_match::on_use_items::{
-    cc_break_breaks, OnUseEffect, OnUsePending, WAIT_GAP_SECS,
+    cc_break_breaks, OnUseConfig, OnUseEffect, OnUsePending, WAIT_GAP_SECS,
 };
+use crate::states::play_match::situation::{Role, TeamSituation};
 
 /// How long a held wearer waits for a teammate's dispel before it breaks free
 /// anyway: one global cooldown — the dispeller may be mid-GCD when the hold
@@ -207,6 +223,9 @@ pub fn try_cc_break_while_held(
     for slot in combatant.on_use_items.iter_mut() {
         match slot.config.effect {
             OnUseEffect::CcBreak => {}
+            // A buff is the free unit's, asked by `try_buffs` — never from
+            // inside a hold, which it would not break.
+            OnUseEffect::Buff(_) => continue,
         }
         if slot.spent {
             continue;
@@ -269,13 +288,110 @@ pub fn try_cc_break_while_held(
                     wearer: entity,
                     item: slot.item,
                     item_name: slot.name.clone(),
-                    effect: slot.config.effect,
+                    config: slot.config.clone(),
                 });
                 return true;
             }
         }
     }
     false
+}
+
+/// Why a buff on-use fires now: the moment its rule saw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuffMoment {
+    /// A damage dealer, in its team's kill window.
+    KillWindow,
+    /// A healer, with a teammate low.
+    AllyLow,
+    /// A buff carrying a heal over time, with its wearer low.
+    SelfLow,
+}
+
+/// Pure buff on-use decision: the moment `config` should be used in, for a
+/// wearer `me` playing `role`, from its team's `situation` — `None` while
+/// there is none. One rule for every buff (see the module docs); the heal
+/// over time a buff may carry adds its wearer's own low health.
+pub fn buff_moment(
+    config: &OnUseConfig,
+    role: Role,
+    me: Entity,
+    situation: &TeamSituation,
+) -> Option<BuffMoment> {
+    let OnUseEffect::Buff(_) = config.effect else {
+        return None;
+    };
+    let role_moment = match role {
+        Role::MeleeDps | Role::RangedDps => situation
+            .kill_window
+            .is_some()
+            .then_some(BuffMoment::KillWindow),
+        Role::Healer => situation
+            .dying_allies()
+            .next()
+            .is_some()
+            .then_some(BuffMoment::AllyLow),
+    };
+    role_moment.or_else(|| {
+        (config.heal_over_time.is_some() && situation.dying_allies().any(|e| e == me))
+            .then_some(BuffMoment::SelfLow)
+    })
+}
+
+/// Ask every READY buff on-use the wearer carries whether to fire it, and fire
+/// each that should: put it on its cooldown and spawn its [`OnUsePending`].
+/// Each one asked leaves an `item_decision` in the trace; one waiting out its
+/// cooldown is not asked. Called from `combat_ai::dispatch_class_decision`
+/// before the class chain, only for a wearer that carries an on-use. Never
+/// counts as the unit acting: a use costs no global cooldown.
+pub fn try_buffs(
+    commands: &mut Commands,
+    decision_trace: &mut DecisionTrace,
+    entity: Entity,
+    combatant: &mut Combatant,
+    ctx: &CombatContext,
+) {
+    let Some(actor) = ctx.self_info().map(ActorView::from_info) else {
+        return;
+    };
+    // The unit's part, not its class's: a Shadowform Priest deals damage.
+    let role = combatant.role();
+    for slot in combatant.on_use_items.iter_mut() {
+        if slot.config.buff().is_none() || !slot.ready() {
+            continue;
+        }
+        match buff_moment(&slot.config, role, entity, ctx.situation()) {
+            Some(_) => {
+                decision_trace.record_item_decision(
+                    actor.clone(),
+                    ctx.situation(),
+                    slot.item,
+                    Ok(()),
+                );
+                slot.start_cooldown();
+                commands.spawn(OnUsePending {
+                    wearer: entity,
+                    item: slot.item,
+                    item_name: slot.name.clone(),
+                    config: slot.config.clone(),
+                });
+            }
+            None => {
+                let wants = match role {
+                    Role::MeleeDps | Role::RangedDps => "no kill window",
+                    Role::Healer => "no teammate low",
+                };
+                decision_trace.record_item_decision(
+                    actor.clone(),
+                    ctx.situation(),
+                    slot.item,
+                    Err(RejectionReason::PreconditionUnmet {
+                        note: wants.to_string(),
+                    }),
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
