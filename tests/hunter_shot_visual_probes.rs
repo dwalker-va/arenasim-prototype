@@ -192,7 +192,8 @@ fn the_three_shots_share_one_landing_and_the_sting_has_its_own() {
 }
 
 /// The shared landing is cut to smoke, stars and rune — named, as a set — and
-/// plays at 0.8 size with 0.6 spread over the client's values.
+/// plays its particles at the client's size, its spawn volume and throw at
+/// 0.8 scale with 0.6 spread over the client's values.
 #[test]
 fn the_shared_landing_keeps_only_smoke_stars_and_rune() {
     let emitters = HunterShotKind::Shared.landing_emitters();
@@ -206,8 +207,8 @@ fn the_shared_landing_keeps_only_smoke_stars_and_rune() {
         ])
     );
     let smoke = emitters.iter().find(|e| e.name.ends_with("smoke")).unwrap();
-    // Client 0.4 -> 0.83 puff, 1.636 yd/s.
-    assert!((smoke.size.diameter_keys()[0] - 0.4 * 0.8).abs() < 1e-5);
+    // Client key 0.4 -> a 0.8 yd puff at birth; 1.636 yd/s, scaled and spread.
+    assert!((smoke.size.diameter_keys()[0] - 0.8).abs() < 1e-5);
     assert!((smoke.speed - 1.636 * 0.8 * 0.6).abs() < 1e-5);
     // Duration x1.0: the client's windows.
     assert_eq!(smoke.window, Some((0.0, 0.2)));
@@ -230,8 +231,8 @@ fn the_serpent_landing_is_the_clients_and_lingers() {
     assert!(!by("spray").additive);
     assert!(by("glints").additive);
     assert!(
-        (by("smoke").size.diameter_keys()[2] - 0.694).abs() < 1e-5,
-        "client size"
+        (by("smoke").size.diameter_keys()[2] - 2.0 * 0.694).abs() < 1e-5,
+        "client size: twice the 0.694 key"
     );
     let life = landing_style(AbilityType::SerpentSting, SpellSchool::Nature).life();
     assert!(
@@ -280,6 +281,68 @@ fn the_shared_landing_is_a_compact_burst_on_the_chest() {
         0,
         "parts outlived the rig"
     );
+}
+
+/// The widest any live particle is drawn in WORLD space, sampled every frame
+/// for `frames` frames.
+fn widest_drawn(app: &mut App, frames: u32, mut each: impl FnMut(&mut App)) -> f32 {
+    let mut widest = 0.0_f32;
+    for _ in 0..frames {
+        each(app);
+        app.update();
+        let mut q = app
+            .world_mut()
+            .query::<(&ClientParticle, &GlobalTransform)>();
+        for (p, g) in q.iter(app.world()) {
+            if p.age < p.life {
+                widest = widest.max(g.to_scale_rotation_translation().0.x);
+            }
+        }
+    }
+    widest
+}
+
+/// Every Hunter particle plays at the client's size (AS-463): the widest one
+/// drawn in world space is twice the largest scale key its model carries,
+/// within what frame sampling misses of a ramp's end. Drawn at the key (the
+/// old full-width reading) it would be half that; at the landing's 0.8 model
+/// scale, four fifths.
+#[test]
+fn every_hunter_particle_is_drawn_at_the_clients_size() {
+    // (what, largest key in the model as the bench carries it)
+    let landings = [
+        (AbilityType::AimedShot, 1.764),  // magic_impact_chest rune, death
+        (AbilityType::ArcaneShot, 1.764), // same landing
+        (AbilityType::ConcussiveShot, 1.764),
+        (AbilityType::SerpentSting, 0.694), // bestowdisease smoke, death
+    ];
+    for (ability, key) in landings {
+        let mut app = app();
+        let victim = spawn_victim(&mut app, Vec3::ZERO);
+        land(&mut app, ability, victim);
+        let life = landing_style(ability, SpellSchool::Physical).life();
+        let widest = widest_drawn(&mut app, (life / DT) as u32 + 4, |_| {});
+        let want = 2.0 * key;
+        assert!(
+            widest <= want + 1e-3 && widest > 0.9 * want,
+            "{ability:?} landing: widest particle {widest:.3} yd, client {want:.3}"
+        );
+    }
+    // The missiles: both models' largest key is the puffs' midlife 0.264.
+    for ability in [AbilityType::ArcaneShot, AbilityType::SerpentSting] {
+        let mut app = app();
+        let shot = spawn_shot(&mut app, ability);
+        let widest = widest_drawn(&mut app, 60, |app| {
+            if let Some(mut t) = app.world_mut().get_mut::<Transform>(shot) {
+                t.translation.x += 45.0 * DT;
+            }
+        });
+        let want = 2.0 * 0.264;
+        assert!(
+            widest <= want + 1e-3 && widest > 0.9 * want,
+            "{ability:?} missile: widest particle {widest:.3} yd, client {want:.3}"
+        );
+    }
 }
 
 /// Serpent Sting's cloud keeps emitting well after the hit, its smoke RISES,
