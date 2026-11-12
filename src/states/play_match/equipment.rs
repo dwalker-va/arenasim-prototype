@@ -4502,8 +4502,9 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
 
     /// A reward tier spends at least [`ItemTier::min_budget_spend`] of its
     /// budget, so the gain its band promises is what a pick delivers. Every
-    /// loaded item is checked, each against its own tier's floor, and both
-    /// reward tiers must hold items for the check to mean anything.
+    /// loaded item is checked, each against its own tier's floor; both reward
+    /// tiers must hold items for the check to mean anything, and the tiers
+    /// partition the items.
     #[test]
     fn reward_tiers_spend_their_budget() {
         let item_defs = load_item_definitions().expect("items.ron must load");
