@@ -1991,6 +1991,121 @@ mod tests {
         assert!(ran.dot(away) > 0.0, "and still opens the gap, got {ran:?}");
     }
 
+    /// Where `reach` yards along `dir` carry a unit at `inputs.my_pos`, walked
+    /// in steps of a tenth of a yard (finer than [`run_end`]'s, near the
+    /// executor's per-frame step), each slid off obstacles and clamped into
+    /// the arena: the oracle the `run_end` tests compare against.
+    fn walked(dir: Vec2, inputs: &ScorerInputs, reach: f32) -> Vec2 {
+        let step = Vec3::new(dir.x, 0.0, dir.y) * 0.1;
+        let steps = (reach / 0.1).round() as usize;
+        let end = (0..steps).fold(inputs.my_pos, |at, _| {
+            clamp_to_arena(
+                &inputs.bounds,
+                resolve_movement(&inputs.obstacles, at, at + step),
+            )
+        });
+        xz(end)
+    }
+
+    /// A run that grazes a pillar is slid round it, not stopped where its
+    /// straight line first meets the pillar's footprint: for a cylinder and an
+    /// octagonal prism (Nagrand's shape), a heading 1.5yd off the pillar's
+    /// centre line runs on past the meeting point, ends outside the footprint
+    /// and within half a yard of where the fine walk ends.
+    #[test]
+    fn a_run_slides_round_a_pillar_it_grazes() {
+        let pillars = [
+            ObstacleVolume::Cylinder {
+                center_xz: Vec2::new(6.0, 0.0),
+                radius: 2.5,
+                base_y: 0.0,
+                height: 10.0,
+            },
+            ObstacleVolume::Prism {
+                center_xz: Vec2::new(6.0, 0.0),
+                circumradius: 3.0,
+                sides: 8,
+                rotation: 0.0,
+                base_y: 0.0,
+                height: 10.0,
+            },
+        ];
+        for pillar in pillars {
+            let inputs = backed(
+                ArenaBounds::default(),
+                vec![pillar],
+                Vec3::new(0.0, 1.0, 1.5),
+                Vec3::new(-5.0, 1.0, 1.5),
+                8.0,
+            );
+            let straight = open_run(Vec2::X, &inputs, 8.0);
+            assert!(
+                straight < 8.0,
+                "{pillar:?}: the straight line meets the pillar ({straight}yd)"
+            );
+            let end = super::run_end(Vec2::X, &inputs, 8.0);
+            assert!(
+                end.x > straight + 1.0,
+                "{pillar:?}: the run ends at {end:?}, no further than the straight line \
+                 met the pillar ({straight}yd)"
+            );
+            assert!(
+                !position_blocked(&inputs.obstacles, Vec3::new(end.x, 1.0, end.y)),
+                "{pillar:?}: the run ends outside the footprint, not at {end:?}"
+            );
+            // The half-yard steps cut the curve a little shorter than the
+            // fine walk does.
+            let oracle = walked(Vec2::X, &inputs, 8.0);
+            assert!(
+                end.distance(oracle) < 0.5,
+                "{pillar:?}: the run ends at {end:?}, the fine walk at {oracle:?}"
+            );
+        }
+    }
+
+    /// A run is clamped into the arena at every step, as the executor clamps
+    /// each frame, so it follows a wall round a vertex and stops in one. On
+    /// the octagon's south-west corner (the west wall meets the diagonal at
+    /// (-36.5, -12.38)): run due west from the diagonal wall's middle, the
+    /// unit slides up the diagonal into the vertex and stays there; run
+    /// straight into the vertex from 1yd out, it stays in the vertex. Clamping
+    /// only the run's straight end would put either 2-3yd down the diagonal.
+    /// And a run at a Nagrand starting room's side wall stops at it.
+    #[test]
+    fn a_run_follows_the_walls_round_a_vertex() {
+        let vertex = Vec2::new(-36.5, -12.38);
+        let west = Vec2::NEG_X;
+        let into_vertex = Vec2::new(-1.0, -1.0).normalize();
+        for (from, dir) in [
+            (Vec3::new(-31.233, 1.0, -16.233), west),
+            (Vec3::new(-35.576, 1.0, -12.0), into_vertex),
+        ] {
+            let inputs = backed(ArenaBounds::default(), vec![], from, Vec3::ZERO, 8.0);
+            let end = super::run_end(dir, &inputs, 8.0);
+            assert!(
+                end.distance(vertex) < 1.0,
+                "from {from:?} along {dir:?}: the run ends at {end:?}, not in the vertex"
+            );
+            let oracle = walked(dir, &inputs, 8.0);
+            assert!(
+                end.distance(oracle) < 0.3,
+                "from {from:?} along {dir:?}: the run ends at {end:?}, the fine walk at \
+                 {oracle:?}"
+            );
+        }
+        // Nagrand: inside a starting room, running at its side wall, the run
+        // stops at the wall, still in the room. Clamping only its straight
+        // end would put it 9yd away, out in the bowl past the room's wall.
+        let bounds = nagrand_bounds();
+        let room = backed(bounds, vec![], Vec3::new(-65.0, 1.0, 7.5), Vec3::ZERO, 8.0);
+        let end = super::run_end(Vec2::Y, &room, 8.0);
+        assert!(
+            end.distance(Vec2::new(-65.0, 8.0)) < 0.01 && bounds.dead_end_depth(end.x, end.y) > 0.0,
+            "in the room: the run ends at {end:?}, not at the side wall it ran into"
+        );
+        assert!(end.distance(walked(Vec2::Y, &room, 8.0)) < 0.01);
+    }
+
     /// A run is walked as the executor walks it: straight in the open, slid
     /// along a wall it meets at a slant, and stopped by a wall it meets head
     /// on. Octagon: the +x wall is at 36.5, 3.5yd from the unit.

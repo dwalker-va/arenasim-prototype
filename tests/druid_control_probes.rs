@@ -857,17 +857,32 @@ fn xz(v: Vec3) -> Vec2 {
     Vec2::new(v.x, v.z)
 }
 
-/// Whether a crowd control landed on `druid` after it shifted into Travel
-/// Form, between the observed frames at `from` and `to`: a `[CC] <aura> on
-/// <druid> (...)` line logged in `(from, to]`, after the shift's own line.
-fn landed_after_shift(log: &str, druid: &str, from: f32, to: f32) -> bool {
+/// Whether every root and snare `druid` carries after its shift LANDED after
+/// it: for each such aura type in `remaining`, a `[CC] <ability> on <druid>
+/// (...)` line, logged in `(from, to]` after the shift's own line, whose
+/// ability applies that aura type.
+fn landed_after_shift(log: &str, druid: &str, from: f32, to: f32, remaining: &[AuraType]) -> bool {
     let at = |line: &&str| log_time(line).is_some_and(|t| t > from - 0.005 && t <= to + 0.005);
     let shift = format!("{druid} shifts into Travel Form");
     let landing = format!(" on {druid} (");
-    log.lines()
+    let landed: Vec<AuraType> = log
+        .lines()
         .filter(at)
         .skip_while(|line| !line.contains(&shift))
-        .any(|line| line.contains("[CC]") && line.contains(&landing))
+        .filter_map(|line| {
+            let name = line.split("[CC] ").nth(1)?.split(&landing).next()?;
+            line.contains(&landing).then_some(name)?;
+            AbilityDefinitions::shipped()
+                .iter()
+                .find(|(_, config)| config.name == name)
+                .and_then(|(_, config)| config.applies_aura.as_ref())
+                .map(|aura| aura.aura_type)
+        })
+        .collect();
+    remaining
+        .iter()
+        .filter(|t| matches!(t, AuraType::Root | AuraType::MovementSpeedSlow))
+        .all(|t| landed.contains(t))
 }
 
 /// The matches the smoke run found shifts out of roots and snares in, and
@@ -1068,7 +1083,8 @@ fn a_shift_frees_the_druid_and_it_holds_its_heading() {
             // A root or snare that LANDS on the frame of the shift lands after
             // the break (`process_travel_form` runs before
             // `apply_pending_auras`): it is new, not one the shift left. The
-            // log shows it landing on the Druid after the shift, at that time.
+            // log shows an ability that applies it landing on the Druid after
+            // the shift, at that time.
             let druid_id = log_id(after.team, after.slot, after.class);
             assert!(
                 !out_of_impairment
@@ -1077,7 +1093,8 @@ fn a_shift_frees_the_druid_and_it_holds_its_heading() {
                         &played.log,
                         &druid_id,
                         pair[0].sim_time,
-                        pair[1].sim_time
+                        pair[1].sim_time,
+                        &after.aura_types,
                     ),
                 "{t1:?} v {t2:?} {map} #{seed} at {:.2}s: the shift left {:?}",
                 pair[1].sim_time,
