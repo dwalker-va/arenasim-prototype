@@ -315,6 +315,8 @@ fn build_config(
         team2_mage_armors: vec![],
         team1_paladin_auras: vec![],
         team2_paladin_auras: vec![],
+        team1_priest_forms: vec![],
+        team2_priest_forms: vec![],
         team1_builds: vec![],
         team2_builds: vec![],
     }

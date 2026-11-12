@@ -76,9 +76,7 @@ impl HunterDipPlan {
 /// Hunter must stay free to dip past it); only a non-healer enemy targeting the
 /// Hunter gates the dip off (and aborts a live one).
 fn focused_by_threat(ctx: &CombatContext, entity: Entity) -> bool {
-    ctx.enemies_targeting(entity)
-        .iter()
-        .any(|e| !e.class.is_healer())
+    ctx.enemies_targeting(entity).iter().any(|e| !e.is_healer())
 }
 
 /// The team's current kill targets: entities a living non-pet, non-healer ally
@@ -90,7 +88,7 @@ fn focused_by_threat(ctx: &CombatContext, entity: Entity) -> bool {
 fn team_focus(ctx: &CombatContext, entity: Entity) -> std::collections::BTreeSet<Entity> {
     ctx.alive_allies()
         .into_iter()
-        .filter(|a| a.entity != entity && !a.is_pet && !a.class.is_healer())
+        .filter(|a| a.entity != entity && !a.is_pet && !a.is_healer())
         .filter_map(|a| a.target)
         .collect()
 }
@@ -143,7 +141,7 @@ pub fn trap_victim_worth_it(ctx: &CombatContext, owner: Entity, victim: Entity) 
     let Some(info) = ctx.combatants.get(&victim) else {
         return false;
     };
-    if !info.is_pet && info.class.is_healer() {
+    if !info.is_pet && info.is_healer() {
         return true;
     }
     trap_would_stick(ctx, owner, victim)
@@ -195,7 +193,7 @@ pub fn pressure_trap_healer(
     for healer in ctx
         .alive_enemies()
         .into_iter()
-        .filter(|e| !e.is_pet && e.class.is_healer())
+        .filter(|e| !e.is_pet && e.is_healer())
     {
         let result = if !dip_target_eligible(ctx, my_team, healer.entity) {
             Err(PRESSURE_TRAP_INELIGIBLE)
@@ -607,7 +605,7 @@ pub fn dip_target_candidate(
         .min_by(|a, b| {
             // Healers first (`!is_healer` is false=0 for healers, sorts first),
             // then nearest.
-            (!a.class.is_healer()).cmp(&!b.class.is_healer()).then(
+            (!a.is_healer()).cmp(&!b.is_healer()).then(
                 my_pos
                     .distance(a.position)
                     .partial_cmp(&my_pos.distance(b.position))

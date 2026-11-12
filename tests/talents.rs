@@ -398,6 +398,81 @@ fn stat_percents_refill_pools_and_reach_every_weapon() {
     );
 }
 
+/// A raised stat (a chance or haste every class has at 0) takes its fraction
+/// in POINTS, so two ranks of +4% dodge are 8% from nothing; a scaled stat
+/// still takes a percentage of its total.
+#[test]
+fn a_raised_stat_adds_its_fraction_in_points() {
+    for stat in [
+        TalentStat::DodgeChance,
+        TalentStat::ParryChance,
+        TalentStat::MeleeAttackSpeed,
+    ] {
+        assert!(stat.is_raised(), "{stat:?}");
+        assert_eq!(stat.applied(0.0, 0.08), 0.08);
+        assert_eq!(stat.applied(0.05, 0.08), 0.05 + 0.08);
+        assert_eq!(stat.item_weight(), None, "{stat:?} declares its price");
+    }
+    for stat in [
+        TalentStat::MaxHealth,
+        TalentStat::OffHandDamage,
+        TalentStat::CritChance,
+    ] {
+        assert!(!stat.is_raised(), "{stat:?}");
+        assert_eq!(stat.applied(100.0, 0.1), 100.0 * (1.0 + 0.1));
+    }
+    assert_eq!(TalentStat::OffHandDamage.item_weight(), None);
+}
+
+/// `Damage` names an ability's whole damage: a `Mul` of it reaches the base
+/// range and the coefficient alike, and an `Add` of it is refused.
+#[test]
+fn a_damage_patch_multiplies_every_part_and_refuses_an_add() {
+    const AGGRESSION: &str = "field: Damage, op: Mul(1.06)";
+    let err = load_err(
+        &edited(AGGRESSION, "field: Damage, op: Add(1.0)"),
+        abilities(),
+    );
+    assert!(err.contains("takes only Mul"), "{err}");
+
+    let resolved = TalentDefinitions::shipped()
+        .resolve(
+            abilities(),
+            CharacterClass::Rogue,
+            &Build::of(&[(LightningReflexes, 2), (Aggression, 2)]),
+        )
+        .unwrap();
+    let base = abilities().get_unchecked(&AbilityType::SinisterStrike);
+    let ss = resolved.book().get_unchecked(&AbilityType::SinisterStrike);
+    for (field, was, is) in [
+        (
+            AbilityField::DamageBaseMin,
+            base.damage_base_min,
+            ss.damage_base_min,
+        ),
+        (
+            AbilityField::DamageBaseMax,
+            base.damage_base_max,
+            ss.damage_base_max,
+        ),
+        (
+            AbilityField::DamageCoefficient,
+            base.damage_coefficient,
+            ss.damage_coefficient,
+        ),
+    ] {
+        assert!(AbilityField::Damage.parts().contains(&field));
+        assert!(
+            (is - was * 1.12).abs() <= was.abs() * 1e-5,
+            "{field:?}: {was} -> {is}"
+        );
+    }
+    assert_eq!(AbilityField::Damage.parts().len(), 3);
+    // Nothing else of the strike moved.
+    assert_eq!(ss.mana_cost, base.mana_cost);
+    assert_eq!(ss.cooldown, base.cooldown);
+}
+
 /// A talent ability is in no base book, and is granted by exactly one node.
 #[test]
 fn a_talent_ability_is_granted_by_exactly_one_node() {
@@ -565,6 +640,9 @@ fn stat_bits(c: &Combatant) -> Vec<u32> {
         c.attack_damage,
         c.melee_damage,
         c.offhand_damage,
+        c.dodge_chance,
+        c.parry_chance,
+        c.melee_attack_speed_bonus,
     ]
     .map(f32::to_bits)
     .to_vec()

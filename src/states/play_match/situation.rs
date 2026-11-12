@@ -490,7 +490,14 @@ impl PlayId {
     }
 }
 
-/// The part a unit plays for its team, as far as choosing a play goes.
+/// The part a unit plays for its team: which plays call it, whether it is a
+/// team's healer or an enemy's, whether it follows the team's target focus or
+/// stations for the Hunt. A UNIT's role is
+/// [`Combatant::role`](super::components::Combatant::role) (and
+/// [`CombatantInfo::role`](super::class_ai::CombatantInfo)), which a
+/// per-match choice can change: a Shadowform Priest is a ranged damage dealer.
+/// Ask the unit, never its class, wherever the answer is about the part it
+/// plays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
     MeleeDps,
@@ -499,8 +506,8 @@ pub enum Role {
 }
 
 impl Role {
-    /// The role `class` plays: a healer first (the Paladin is one), then melee
-    /// or ranged.
+    /// The role `class` plays when no choice changes it: a healer first (the
+    /// Paladin is one), then melee or ranged.
     pub fn of(class: crate::states::match_config::CharacterClass) -> Self {
         if class.is_healer() {
             Role::Healer
@@ -1430,7 +1437,7 @@ fn kill_window(
     let open = prev.kill_window;
     let healers: SmallVec<[&CombatantInfo; 2]> = roster
         .values()
-        .filter(|i| i.team != team && i.is_alive && !i.is_pet && i.class.is_healer())
+        .filter(|i| i.team != team && i.is_alive && !i.is_pet && i.is_healer())
         .collect();
     let mut best: Option<(f32, Window)> = None;
     for subject in roster.values().filter(|i| {
@@ -1593,7 +1600,7 @@ fn closing(threat: &CombatantInfo, subject: &CombatantInfo) -> bool {
 /// enemy (and a Paladin, a melee class, by the melee branch). Gated by
 /// [`SituationConfig::healers_close`]: `Legacy` still counts the healer.
 fn closes(threat: &CombatantInfo, cfg: &SituationConfig) -> bool {
-    cfg.healers_close || !threat.class.is_healer()
+    cfg.healers_close || !threat.is_healer()
 }
 
 fn preferred_range(threat: &CombatantInfo) -> f32 {
@@ -1767,7 +1774,7 @@ pub(crate) fn enemy_healer(
             info.team != team
                 && info.is_alive
                 && !info.is_pet
-                && info.class.is_healer()
+                && info.is_healer()
                 // The observer's own Shadow Sight is per-unit and cannot enter
                 // a team classification; it never matters, because only a
                 // Rogue stealths (see the module docs).
@@ -1803,7 +1810,7 @@ fn lock_ending(
         }) else {
             continue;
         };
-        let healer = info.class.is_healer();
+        let healer = info.is_healer();
         let better = best.is_none_or(|(r, h, _)| remaining < r || (remaining == r && healer && !h));
         if better {
             best = Some((remaining, healer, info.entity));
@@ -2138,7 +2145,7 @@ fn classify_sight_yield(
             .values()
             .filter(move |i| i.team == team && i.is_alive && !i.is_pet)
     };
-    let Some(healer) = living().find(|i| i.class.is_healer()) else {
+    let Some(healer) = living().find(|i| i.is_healer()) else {
         return SmallVec::new();
     };
     let in_danger = |e: Entity| ally_in_danger.is_some_and(|w| w.subject == e);
@@ -2147,7 +2154,7 @@ fn classify_sight_yield(
         .any(|a| a.entity == healer.entity && a.pressured)
         || in_danger(healer.entity);
     living()
-        .filter(|d| !d.class.is_healer())
+        .filter(|d| !d.is_healer())
         .map(|dps| {
             let held = prev
                 .sight_yield
@@ -2248,6 +2255,7 @@ mod tests {
             max_health: 100.0,
             current_mana: 100.0,
             max_mana: 100.0,
+            armor: 0.0,
             position: Vec3::ZERO,
             velocity: Vec3::ZERO,
             is_alive: true,
@@ -2259,6 +2267,7 @@ mod tests {
             pet_type: None,
             pet: None,
             book: crate::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+            role: crate::states::play_match::situation::Role::of(class),
         }
     }
 
@@ -2758,8 +2767,16 @@ mod tests {
         f.auras.insert(f.healer, vec![cc(AuraType::Fear, 2.0)]);
         // The healer AFTER the other enemy in entity order, so entity order
         // alone would pick the other one.
-        f.roster.get_mut(&f.healer).unwrap().class = CharacterClass::Mage;
-        f.roster.get_mut(&f.mage).unwrap().class = CharacterClass::Priest;
+        {
+            let unit = f.roster.get_mut(&f.healer).unwrap();
+            unit.class = CharacterClass::Mage;
+            unit.role = Role::of(CharacterClass::Mage);
+        }
+        {
+            let unit = f.roster.get_mut(&f.mage).unwrap();
+            unit.class = CharacterClass::Priest;
+            unit.role = Role::of(CharacterClass::Priest);
+        }
         assert_eq!(
             classify_now(&f, &none, 30.0).lock_ending.map(|w| w.subject),
             Some(f.mage),
@@ -2989,6 +3006,7 @@ mod tests {
             let druid = f.roster.get_mut(&rogue).unwrap();
             druid.team = 2;
             druid.class = CharacterClass::Druid;
+            druid.role = Role::of(CharacterClass::Druid);
         }
         f.auras.insert(healer, vec![cc(AuraType::Stun, 5.0)]);
         assert_eq!(
@@ -3055,7 +3073,11 @@ mod tests {
         let (warrior, healer, mage) = (f.warrior, f.healer, f.mage);
         // An enemy caster (a Warlock, whose preferred range sits between the
         // two radii) targets the Warrior from inside the danger radius.
-        f.roster.get_mut(&mage).unwrap().class = CharacterClass::Warlock;
+        {
+            let unit = f.roster.get_mut(&mage).unwrap();
+            unit.class = CharacterClass::Warlock;
+            unit.role = Role::of(CharacterClass::Warlock);
+        }
         place(&mut f, mage, cfg.danger_radius - 1.0, 0.0, Some(warrior));
         assert!(classify_now(&f, &TeamSituation::default(), 30.0).is_pressured(warrior));
         // From its own preferred range, beyond the danger radius but inside
@@ -3070,7 +3092,11 @@ mod tests {
         // A melee at the same range pressures; beyond the intent radius
         // nothing does.
         place(&mut f, mage, 0.0, 0.0, None);
-        f.roster.get_mut(&healer).unwrap().class = CharacterClass::Paladin;
+        {
+            let unit = f.roster.get_mut(&healer).unwrap();
+            unit.class = CharacterClass::Paladin;
+            unit.role = Role::of(CharacterClass::Paladin);
+        }
         place(&mut f, healer, held, 0.0, Some(warrior));
         assert!(classify_now(&f, &TeamSituation::default(), 30.0).is_pressured(warrior));
         place(
@@ -3120,7 +3146,11 @@ mod tests {
         };
         // A Hunter, whose preferred range (25) leaves a closing band with a
         // middle (26..29), so all three of its parts can be shown.
-        f.roster.get_mut(&mage).unwrap().class = CharacterClass::Hunter;
+        {
+            let unit = f.roster.get_mut(&mage).unwrap();
+            unit.class = CharacterClass::Hunter;
+            unit.role = Role::of(CharacterClass::Hunter);
+        }
         let pref = CharacterClass::Hunter.preferred_range();
         place(&mut f, mage, pref + m * 0.5, 0.0, Some(warrior));
         assert_eq!(
@@ -3139,7 +3169,11 @@ mod tests {
         );
         assert_eq!(at(&f), (true, false), "closing, at the intent-radius edge");
         // A 28yd caster's band is 2yd wide: it never onsets by closing.
-        f.roster.get_mut(&mage).unwrap().class = CharacterClass::Warlock;
+        {
+            let unit = f.roster.get_mut(&mage).unwrap();
+            unit.class = CharacterClass::Warlock;
+            unit.role = Role::of(CharacterClass::Warlock);
+        }
         for d in [28.5, 29.0, 29.5, 30.0] {
             place(&mut f, mage, d, 0.0, Some(warrior));
             assert_eq!(at(&f), (true, false), "a 28yd caster closing at {d}");
@@ -3149,7 +3183,11 @@ mod tests {
         assert_eq!(at(&f), (true, true), "proximity");
         // A melee at the intent radius's very edge: onset unchanged.
         place(&mut f, mage, 0.0, 0.0, None);
-        f.roster.get_mut(&healer).unwrap().class = CharacterClass::Rogue;
+        {
+            let unit = f.roster.get_mut(&healer).unwrap();
+            unit.class = CharacterClass::Rogue;
+            unit.role = Role::of(CharacterClass::Rogue);
+        }
         place(&mut f, healer, cfg.threat_intent_radius, 0.0, Some(warrior));
         assert_eq!(at(&f), (true, true), "melee");
     }
@@ -3184,7 +3222,11 @@ mod tests {
             CharacterClass::Shaman,
             CharacterClass::Druid,
         ] {
-            f.roster.get_mut(&healer).unwrap().class = class;
+            {
+                let unit = f.roster.get_mut(&healer).unwrap();
+                unit.class = class;
+                unit.role = Role::of(class);
+            }
             place(&mut f, healer, band, 0.0, Some(warrior));
             assert_eq!(at(&f, AiProfile::TeamPlan), (false, false), "{class:?}");
             assert!(at(&f, AiProfile::Legacy).0, "{class:?} under Legacy");
@@ -3196,7 +3238,11 @@ mod tests {
             );
         }
         // The control: a ranged DPS in the same spot is closing.
-        f.roster.get_mut(&healer).unwrap().class = CharacterClass::Warlock;
+        {
+            let unit = f.roster.get_mut(&healer).unwrap();
+            unit.class = CharacterClass::Warlock;
+            unit.role = Role::of(CharacterClass::Warlock);
+        }
         place(&mut f, healer, band, 0.0, Some(warrior));
         assert!(at(&f, AiProfile::TeamPlan).0, "a Warlock closing");
     }
@@ -3268,7 +3314,11 @@ mod tests {
     fn edge_threat(f: &mut Fixture, whom: Entity) {
         let at = f.roster[&whom].position;
         let healer = f.healer;
-        f.roster.get_mut(&healer).unwrap().class = CharacterClass::Warlock;
+        {
+            let unit = f.roster.get_mut(&healer).unwrap();
+            unit.class = CharacterClass::Warlock;
+            unit.role = Role::of(CharacterClass::Warlock);
+        }
         place(f, healer, at.x + 29.5, at.z, Some(whom));
     }
 
@@ -3318,7 +3368,11 @@ mod tests {
         // A melee 1.5yd off is firm; one half a yard inside the intent
         // radius is at its edge.
         place(&mut f, healer, 0.0, 0.0, None);
-        f.roster.get_mut(&mage).unwrap().class = CharacterClass::Rogue;
+        {
+            let unit = f.roster.get_mut(&mage).unwrap();
+            unit.class = CharacterClass::Rogue;
+            unit.role = Role::of(CharacterClass::Rogue);
+        }
         place(&mut f, mage, 1.5, 0.0, Some(warrior));
         assert!(firm(&f, warrior));
         place(
@@ -3338,7 +3392,11 @@ mod tests {
         let mut f = fixture();
         let (warrior, mage) = (f.warrior, f.mage);
         let mut frames = Frames::new(&f);
-        f.roster.get_mut(&mage).unwrap().class = CharacterClass::Warrior;
+        {
+            let unit = f.roster.get_mut(&mage).unwrap();
+            unit.class = CharacterClass::Warrior;
+            unit.role = Role::of(CharacterClass::Warrior);
+        }
         place(&mut f, mage, 1.5, 0.0, Some(warrior));
         assert_eq!(frames.step(&f), None, "not dying yet");
         f.roster.get_mut(&warrior).unwrap().current_health = 20.0;
@@ -3562,6 +3620,7 @@ mod sight_yield_tests {
             max_health: 100.0,
             current_mana: 100.0,
             max_mana: 100.0,
+            armor: 0.0,
             position: Vec3::ZERO,
             velocity: Vec3::ZERO,
             is_alive: true,
@@ -3573,6 +3632,7 @@ mod sight_yield_tests {
             pet_type: None,
             pet: None,
             book: crate::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+            role: crate::states::play_match::situation::Role::of(class),
         }
     }
 

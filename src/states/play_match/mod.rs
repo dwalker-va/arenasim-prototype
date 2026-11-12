@@ -874,6 +874,7 @@ pub fn setup_play_match(
                 warrior_shout,
                 mage_armor,
                 paladin_aura,
+                choices.priest_form(),
                 &loadout,
                 &item_defs,
                 &resolved,
@@ -1025,6 +1026,7 @@ pub fn setup_play_match(
                 warrior_shout,
                 mage_armor,
                 paladin_aura,
+                choices.priest_form(),
                 &loadout,
                 &item_defs,
                 &resolved,
@@ -1468,6 +1470,7 @@ pub(crate) fn spawn_combatant(
     warrior_shout: match_config::WarriorShout,
     mage_armor: match_config::MageArmor,
     paladin_aura: match_config::PaladinAura,
+    priest_form: match_config::PriestForm,
     equipment_loadout: &Loadout,
     item_defs: &ItemDefinitions,
     talents: &talents::ResolvedBuild,
@@ -1508,6 +1511,7 @@ pub(crate) fn spawn_combatant(
     combatant.warrior_shout = warrior_shout;
     combatant.mage_armor = mage_armor;
     combatant.paladin_aura = paladin_aura;
+    combatant.priest_form = priest_form;
     combatant.apply_equipment(equipment_loadout, item_defs);
     talents.apply(&mut combatant);
     let combatant_clone = combatant.clone();
@@ -2141,6 +2145,7 @@ mod held_weapon_tests {
                         match_config::WarriorShout::default(),
                         match_config::MageArmor::default(),
                         match_config::PaladinAura::default(),
+                        match_config::PriestForm::default(),
                         &loadout,
                         &item_defs,
                         &talents::ResolvedBuild::untalented(

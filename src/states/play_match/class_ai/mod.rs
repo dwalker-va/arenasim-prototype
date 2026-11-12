@@ -83,6 +83,9 @@ pub struct CombatantInfo {
     pub max_health: f32,
     pub current_mana: f32,
     pub max_mana: f32,
+    /// The armor stat (gear and talents), before any aura: what
+    /// `combat_core::armor_met` reads with the unit's auras.
+    pub armor: f32,
     /// Per-frame snapshot from Transform.
     pub position: Vec3,
     /// Estimated planar velocity (XZ, units/sec): the facing heading (from the
@@ -117,6 +120,11 @@ pub struct CombatantInfo {
     /// what THIS unit can cast — its interrupt's reach, its dispel's scope, the
     /// cast it is in — reads its configs here, never the global table.
     pub book: AbilityBook,
+    /// The part this combatant plays for its team (`Combatant::role`): its
+    /// class's, unless a per-match choice changes it (a Shadowform Priest is a
+    /// ranged damage dealer). Read it through [`Self::is_healer`] for the
+    /// healer question; never ask the class.
+    pub role: Role,
 }
 
 /// Deferred instant melee attack (Mortal Strike, Ambush, Sinister Strike, etc.)
@@ -146,6 +154,12 @@ pub struct QueuedAoeDamage {
 }
 
 impl CombatantInfo {
+    /// Whether this combatant heals its team: its [`Self::role`]. A
+    /// Shadowform Priest does not, whatever its class.
+    pub fn is_healer(&self) -> bool {
+        self.role == Role::Healer
+    }
+
     /// This combatant's combat-log id, pet-aware. A pet resolves to its own
     /// display id keyed to its owner's slot (`"Team 1 Spider #2"`), NOT the raw
     /// `combatant_id` (which for a pet would use the owner's class and the
@@ -438,7 +452,7 @@ impl<'a> CombatContext<'a> {
     /// panic, because the cast gate asks it of every targeted hold.
     pub fn chain_window(&self) -> Option<Window> {
         let situation = self.situation.as_ref()?;
-        let role = Role::of(self.self_info()?.class);
+        let role = self.self_info()?.role;
         match self.play(role) {
             Play::Chain { .. } => situation.chain_window(),
             _ => None,
@@ -459,7 +473,7 @@ impl<'a> CombatContext<'a> {
     /// every targeted cast ([`cast_guard::fits_window`]).
     pub fn burst_window(&self) -> Option<Window> {
         let situation = self.situation.as_ref()?;
-        let role = Role::of(self.self_info()?.class);
+        let role = self.self_info()?.role;
         plays::called(&burst::BurstStage, situation, role, self.self_entity)
             .filter(|play| plays::admitted(self, &burst::BurstStage, play))
             .and(situation.kill_window)
@@ -682,7 +696,7 @@ impl<'a> CombatContext<'a> {
         self.combatants
             .iter()
             .find(|(_, info)| {
-                info.team != my_team && info.is_alive && !info.is_pet && info.class.is_healer()
+                info.team != my_team && info.is_alive && !info.is_pet && info.is_healer()
             })
             .map(|(entity, _)| *entity)
     }
@@ -998,7 +1012,7 @@ impl<'a> CombatContext<'a> {
         my_pos: Vec3,
     ) -> Option<crate::states::play_match::decision_trace::DecisionEventBuilder<'t>> {
         use crate::states::play_match::decision_trace::{ActorView, TargetView};
-        let actor_view_class = self.self_info()?.class;
+        let actor_role = self.self_info()?.role;
         let actor_view = ActorView::from_info(self.self_info()?);
         let target_view = target
             .and_then(|t| self.combatants.get(&t))
@@ -1007,7 +1021,7 @@ impl<'a> CombatContext<'a> {
             Some(situation) => decision_trace
                 .start_ability_decision(actor_view, target_view)
                 .with_situation(situation)
-                .with_play(self.play(Role::of(actor_view_class))),
+                .with_play(self.play(actor_role)),
             None => decision_trace.start_ability_decision(actor_view, target_view),
         })
     }
@@ -2677,6 +2691,7 @@ pub(crate) mod reach_fixture {
             max_health: 100.0,
             current_mana: 100.0,
             max_mana: 100.0,
+            armor: 0.0,
             position,
             velocity: Vec3::ZERO,
             is_alive: true,
@@ -2688,6 +2703,7 @@ pub(crate) mod reach_fixture {
             pet_type: None,
             pet: None,
             book: crate::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+            role: crate::states::play_match::situation::Role::of(class),
         }
     }
 

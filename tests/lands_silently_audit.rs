@@ -699,6 +699,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     DevotionAura,
     DivineShield,
     EarthTotem,
+    ExposeArmor,
     FireTotem,
     FrostArmor,
     IceBarrier,
@@ -713,6 +714,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     PowerWordShield,
     Rejuvenation,
     ShadowResistanceAura,
+    Shadowform,
     TravelForm,
     WaterTotem,
     WoundPoison,
@@ -816,6 +818,10 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (AirTotem, "AS-134 (aura application — totem pulse)"),
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
+    // The Combat capstone's armor rend on its target.
+    (ExposeArmor, "AS-366 (Expose Armor)"),
+    // The form on the Priest all match: AS-333 scoped it, AS-343 draws it.
+    (Shadowform, "AS-343 (Shadowform)"),
 ];
 
 #[test]

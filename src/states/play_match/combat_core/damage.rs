@@ -212,14 +212,12 @@ fn strongest_in_scope(
 }
 
 /// The strongest magnitude among `auras` of `kind`, or 0.0.
-fn strongest(auras: Option<&ActiveAuras>, kind: AuraType) -> f32 {
-    auras.map_or(0.0, |a| {
-        a.auras
-            .iter()
-            .filter(|aura| aura.effect_type == kind)
-            .map(|aura| aura.magnitude)
-            .fold(0.0, f32::max)
-    })
+fn strongest(auras: &[Aura], kind: AuraType) -> f32 {
+    auras
+        .iter()
+        .filter(|aura| aura.effect_type == kind)
+        .map(|aura| aura.magnitude)
+        .fold(0.0, f32::max)
 }
 
 /// The armor a Physical hit meets on a target: its own armor plus every flat
@@ -229,21 +227,30 @@ fn strongest(auras: Option<&ActiveAuras>, kind: AuraType) -> f32 {
 /// kinds multiply). Exactly `target.armor` + the flat sum with no percentage
 /// aura. Never written into the `armor` stat.
 pub fn effective_armor(target: &Combatant, auras: Option<&ActiveAuras>) -> f32 {
-    let flat = target.armor
-        + auras.map_or(0.0, |auras| {
-            auras
-                .auras
-                .iter()
-                .filter(|a| a.effect_type == AuraType::ArmorIncrease)
-                .map(|a| a.magnitude)
-                .sum::<f32>()
-        });
+    armor_met(target.armor, auras.map_or(&[], |a| a.auras.as_slice()))
+}
+
+/// [`effective_armor`] from an armor stat and the auras its holder wears: the
+/// one rule, for a caller that holds a snapshot of the unit rather than its
+/// `Combatant` (an AI judging what a Physical hit would meet).
+pub fn armor_met(armor: f32, auras: &[Aura]) -> f32 {
+    let flat = armor
+        + auras
+            .iter()
+            .filter(|a| a.effect_type == AuraType::ArmorIncrease)
+            .map(|a| a.magnitude)
+            .sum::<f32>();
     let up = strongest(auras, AuraType::ArmorPercentIncrease);
     let down = strongest(auras, AuraType::ArmorPercentReduction);
     if up == 0.0 && down == 0.0 {
         return flat;
     }
     flat * (1.0 + up) * (1.0 - down).max(0.0)
+}
+
+/// The share of a Physical hit that `armor` stops: `armor / (armor + 5500)`.
+pub fn armor_reduction(armor: f32) -> f32 {
+    armor / (armor + 5500.0)
 }
 
 /// Apply damage to a combatant: the one damage pipeline. Returns
@@ -348,7 +355,7 @@ pub fn apply_damage_with_absorb(
         let armor = effective_armor(target, active_auras.as_deref());
         if spell_school == SpellSchool::Physical && armor > 0.0 {
             let pre_armor = remaining_damage;
-            let reduction = armor / (armor + 5500.0);
+            let reduction = armor_reduction(armor);
             remaining_damage *= 1.0 - reduction;
             target.damage_mitigated_by_armor += pre_armor - remaining_damage;
         }

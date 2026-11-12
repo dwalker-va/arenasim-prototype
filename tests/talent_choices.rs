@@ -3,12 +3,14 @@
 //! (`AddChoiceSlot`), exclusive choices (`choice_rules`), and the `Mechanic`
 //! hook's resolution onto the combatant.
 //!
-//! The shipped table names none of these yet (the tree cards do), so each is
-//! pinned on a fixture table over the three shipped talent ids, every case
-//! paired with its control.
+//! The shipped table names few of these yet (the tree cards do; AS-413's
+//! Shadowform is the first), so each is pinned on a fixture table over the
+//! shipped talent ids, every case paired with its control.
 
 use arenasim::headless::HeadlessMatchConfig;
-use arenasim::states::match_config::{CharacterClass, RoguePoison, WarlockCurse, WarlockDemon};
+use arenasim::states::match_config::{
+    CharacterClass, PriestForm, RoguePoison, WarlockCurse, WarlockDemon,
+};
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::class_ai::cast_guard::{
@@ -39,6 +41,7 @@ const FIXTURE: &str = r#"(
         Warlock: [(id: Demonology, name: "Demonology", icon: "x.jpg")],
         Rogue: [(id: Demonology, name: "Fixture", icon: "x.jpg")],
         Mage: [(id: Demonology, name: "Filler", icon: "x.jpg")],
+        Priest: [(id: Shadow, name: "Shadow", icon: "x.jpg")],
     },
     talents: {
         DemonicEmbrace: (
@@ -77,6 +80,60 @@ const FIXTURE: &str = r#"(
             name: "Filler 3", class: Mage, tree: Demonology, tier: 1, column: 2,
             icon: "x.jpg", max_rank: 1, budget: Some(11.0),
             per_rank: [StatPercent(WeaponDamage, 0.01)],
+        ),
+        // Every shipped talent id needs an entry, and Expose Armor's grant
+        // its one node: the Combat tree's ids, inert here.
+        LightningReflexes: (
+            name: "LR", class: Rogue, tree: Demonology, tier: 1, column: 1,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [StatPercent(DodgeChance, 0.04)],
+        ),
+        DualWieldSpecialization: (
+            name: "DWS", class: Rogue, tree: Demonology, tier: 1, column: 2,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [StatPercent(OffHandDamage, 0.1)],
+        ),
+        Aggression: (
+            name: "Ag", class: Rogue, tree: Demonology, tier: 2, column: 0,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [Patch(on: Ability(SinisterStrike), field: Damage, op: Mul(1.06))],
+        ),
+        Vitality: (
+            name: "Vi", class: Rogue, tree: Demonology, tier: 2, column: 1,
+            icon: "x.jpg", max_rank: 1,
+            per_rank: [StatPercent(MaxHealth, 0.03)],
+        ),
+        Deflection: (
+            name: "De", class: Rogue, tree: Demonology, tier: 2, column: 2,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [StatPercent(ParryChance, 0.04)],
+        ),
+        SwiftBlades: (
+            name: "SB", class: Rogue, tree: Demonology, tier: 3, column: 0,
+            icon: "x.jpg", max_rank: 1, budget: Some(11.0),
+            per_rank: [StatPercent(MeleeAttackSpeed, 0.1)],
+        ),
+        ExposeArmor: (
+            name: "EA", class: Rogue, tree: Demonology, tier: 4, column: 0,
+            icon: "x.jpg", max_rank: 1, budget: Some(22.0),
+            requires: Some((SwiftBlades, 1)),
+            per_rank: [Grant(ExposeArmor)],
+        ),
+        // The shipped Priest nodes, which every table must name; inert here.
+        ImprovedMindBlast: (
+            name: "Improved Mind Blast", class: Priest, tree: Shadow, tier: 1, column: 0,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [Patch(on: Ability(MindBlast), field: Cooldown, op: Add(-1.0))],
+        ),
+        ImprovedPsychicScream: (
+            name: "Improved Psychic Scream", class: Priest, tree: Shadow, tier: 1, column: 2,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [Patch(on: Ability(PsychicScream), field: Cooldown, op: Add(-2.0))],
+        ),
+        Shadowform: (
+            name: "Shadowform", class: Priest, tree: Shadow, tier: 2, column: 1,
+            icon: "x.jpg", max_rank: 1, budget: Some(11.0),
+            per_rank: [WidenChoice(PriestForm(Shadowform)), Grant(Shadowform)],
         ),
     },
     choice_rules: [
@@ -136,21 +193,23 @@ fn a_widened_option_is_offered_only_to_a_build_that_takes_its_node() {
     assert!(t
         .validate_choices(CharacterClass::Warlock, &embrace, &warlock(&[TONGUES]))
         .is_ok());
-    // The shipped table widens exactly the Sacrifice: an empty build is
-    // offered every other option.
+    // The shipped table widens two options, the Warlock's Sacrifice (AS-410)
+    // and the Priest's Shadowform (AS-413): every other option is offered to
+    // every build.
     let shipped = TalentDefinitions::shipped();
     let sacrifice = ChoiceOption::WarlockDemon(WarlockDemon::Sacrifice);
+    let shadowform = ChoiceOption::PriestForm(PriestForm::Shadowform);
     assert_eq!(
-        shipped.widened_options().into_iter().collect::<Vec<_>>(),
-        vec![sacrifice]
+        shipped.widened_options(),
+        std::collections::BTreeSet::from([sacrifice, shadowform])
     );
     for menu in ChoiceMenu::ALL {
-        let all_but_sacrifice: Vec<ChoiceOption> = menu
+        let all_but: Vec<ChoiceOption> = menu
             .options()
             .into_iter()
-            .filter(|o| *o != sacrifice)
+            .filter(|o| *o != sacrifice && *o != shadowform)
             .collect();
-        assert_eq!(shipped.offered(&empty, menu), all_but_sacrifice, "{menu:?}");
+        assert_eq!(shipped.offered(&empty, menu), all_but, "{menu:?}");
     }
 }
 
@@ -381,7 +440,7 @@ fn options_lock_the_abilities_they_forbid_or_do_not_allow() {
     assert!(!weakness.is_locked(AbilityType::DeathCoil));
     // A locked ability stays in the book: the AI reads it freely.
     assert!(tongues.get(&AbilityType::DrainLife).is_some());
-    // The shipped table writes no rule: nothing is ever locked.
+    // The shipped table writes no Warlock rule: nothing of its is locked.
     let shipped = TalentDefinitions::shipped()
         .resolve(abilities(), CharacterClass::Warlock, &Build::default())
         .unwrap();

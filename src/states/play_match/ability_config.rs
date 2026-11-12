@@ -630,6 +630,7 @@ impl AbilityDefinitions {
             AbilityType::PsychicScream,
             AbilityType::ManaBurn,
             AbilityType::ShadowWordPain,
+            AbilityType::Shadowform,
             AbilityType::Rend,
             AbilityType::MortalStrike,
             AbilityType::Pummel,
@@ -708,6 +709,7 @@ impl AbilityDefinitions {
             AbilityType::EntanglingRoots,
             AbilityType::Cyclone,
             AbilityType::TravelForm,
+            AbilityType::ExposeArmor,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -1311,6 +1313,9 @@ mod tests {
                     AbilityType::DeadlyPoison,
                     AbilityType::WoundPoison,
                     AbilityType::MindNumbingPoison,
+                    // The Combat capstone (AS-418): a talent ability is in
+                    // its class's own kit, as every kit surface shows it.
+                    AbilityType::ExposeArmor,
                 ],
             ),
             (
@@ -1324,6 +1329,7 @@ mod tests {
                     AbilityType::PsychicScream,
                     AbilityType::ManaBurn,
                     AbilityType::ShadowWordPain,
+                    AbilityType::Shadowform,
                 ],
             ),
             (

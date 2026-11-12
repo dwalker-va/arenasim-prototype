@@ -2865,6 +2865,7 @@ mod paladin_unit {
             max_health: 100.0,
             current_mana: 100.0,
             max_mana: 100.0,
+            armor: 0.0,
             position: pos,
             velocity: Vec3::ZERO,
             is_alive: true,
@@ -2876,6 +2877,7 @@ mod paladin_unit {
             pet_type: None,
             pet: None,
             book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+            role: arenasim::states::play_match::situation::Role::of(class),
         }
     }
 
@@ -3150,6 +3152,7 @@ mod bucket_a_unit {
             max_health: 100.0,
             current_mana: 100.0,
             max_mana: 100.0,
+            armor: 0.0,
             position: Vec3::ZERO,
             velocity: Vec3::ZERO,
             is_alive: hp > 0.0,
@@ -3161,6 +3164,7 @@ mod bucket_a_unit {
             pet_type: None,
             pet: None,
             book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+            role: arenasim::states::play_match::situation::Role::of(class),
         }
     }
 
@@ -4963,6 +4967,7 @@ mod u9_seek_reset {
             max_health: 100.0,
             current_mana: 100.0,
             max_mana: 100.0,
+            armor: 0.0,
             position,
             velocity: Vec3::ZERO,
             is_alive: true,
@@ -4974,6 +4979,7 @@ mod u9_seek_reset {
             pet_type: None,
             pet: None,
             book: arenasim::states::play_match::ability_book::AbilityBook::shipped_for(class, None),
+            role: arenasim::states::play_match::situation::Role::of(class),
         }
     }
 

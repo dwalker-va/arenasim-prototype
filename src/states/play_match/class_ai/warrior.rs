@@ -1169,7 +1169,7 @@ pub fn melee_reset_active(
 fn nearest_healer_ally(ctx: &CombatContext, my_pos: Vec3) -> Option<Vec3> {
     ctx.alive_allies()
         .into_iter()
-        .filter(|i| i.class.is_healer())
+        .filter(|i| i.is_healer())
         .min_by(|a, b| {
             a.position
                 .distance(my_pos)

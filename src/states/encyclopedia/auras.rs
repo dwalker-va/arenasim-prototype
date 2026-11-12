@@ -2135,6 +2135,7 @@ mod tests {
                 // first two have no dispel type, the Web is physical.
                 "Cyclone [—]",
                 "Demoralizing Shout [—]",
+                "Expose Armor [Physical]",
                 "Frost Trap [—]",
                 "Hammer of Justice [Magic]",
                 "Kick [—]",
@@ -2181,6 +2182,7 @@ mod tests {
                 "Molten Armor",
                 "Healing Stream Totem",
                 "Shadow Resistance Aura",
+                "Shadowform",
                 "Strength of Earth Totem",
                 "Travel Form",
                 "Windfury Totem",

@@ -178,6 +178,7 @@ pub fn pet_ai_system(
                     max_health: combatant.max_health,
                     current_mana: combatant.current_mana,
                     max_mana: combatant.max_mana,
+                    armor: combatant.armor,
                     position: transform.translation,
                     velocity: Vec3::ZERO,
                     is_alive: combatant.is_alive(),
@@ -190,6 +191,7 @@ pub fn pet_ai_system(
                     pet_type: None,
                     pet: owner_to_pet.get(&entity).copied(),
                     book: combatant.book().clone(),
+                    role: combatant.role(),
                 },
             )
         })
@@ -1339,6 +1341,7 @@ mod tests {
             max_health: 100.0,
             current_mana: 0.0,
             max_mana: 0.0,
+            armor: 0.0,
             position: Vec3::ZERO,
             velocity: Vec3::ZERO,
             is_alive: true,
@@ -1353,6 +1356,7 @@ mod tests {
                 CharacterClass::Hunter,
                 is_pet.then_some(PetType::Spider),
             ),
+            role: crate::states::play_match::situation::Role::of(CharacterClass::Hunter),
         };
         let between = (PET_HEEL_ENTER_HP + PET_HEEL_RELEASE_HP) / 2.0;
         assert!(row(true, true, between).is_heeled());
@@ -1375,6 +1379,7 @@ mod tests {
             max_health: 100.0,
             current_mana: 100.0,
             max_mana: 100.0,
+            armor: 0.0,
             position,
             velocity: Vec3::ZERO,
             is_alive: true,
@@ -1389,6 +1394,7 @@ mod tests {
                 class,
                 is_pet.then_some(PetType::Felhunter),
             ),
+            role: crate::states::play_match::situation::Role::of(class),
         };
         let (felhunter, warrior) = (Entity::from_raw(1), Entity::from_raw(2));
         let (pet_pos, warrior_pos) = (Vec3::new(0.0, 1.0, 0.0), Vec3::new(16.0, 1.0, 0.0));
@@ -1490,6 +1496,7 @@ mod tests {
             max_health: 100.0,
             current_mana: 100.0,
             max_mana: 100.0,
+            armor: 0.0,
             position,
             velocity: Vec3::ZERO,
             is_alive: true,
@@ -1503,6 +1510,7 @@ mod tests {
             book: crate::states::play_match::ability_book::AbilityBook::shipped_for(
                 class, pet_type,
             ),
+            role: crate::states::play_match::situation::Role::of(class),
         };
         let (bird, hunter) = (Entity::from_raw(1), Entity::from_raw(2));
         let (bird_pos, hunter_pos) = (Vec3::new(0.0, 1.0, 0.0), Vec3::new(16.0, 1.0, 0.0));
@@ -1688,6 +1696,7 @@ mod tests {
                 max_health: 100.0,
                 current_mana: 100.0,
                 max_mana: 100.0,
+                armor: 0.0,
                 position,
                 velocity: Vec3::ZERO,
                 is_alive: true,
@@ -1701,6 +1710,7 @@ mod tests {
                 book: crate::states::play_match::ability_book::AbilityBook::shipped_for(
                     class, pet_type,
                 ),
+                role: crate::states::play_match::situation::Role::of(class),
             };
             let (pet_entity, hunter, enemy) = (
                 Entity::from_raw(1),
@@ -1973,6 +1983,7 @@ mod tests {
                         max_health: 100.0,
                         current_mana: 100.0,
                         max_mana: 100.0,
+                        armor: 0.0,
                         position: Vec3::new(x, 1.0, z),
                         velocity: Vec3::ZERO,
                         is_alive: true,
@@ -1986,6 +1997,7 @@ mod tests {
                         book: crate::states::play_match::ability_book::AbilityBook::shipped_for(
                             class, pet,
                         ),
+                        role: crate::states::play_match::situation::Role::of(class),
                     },
                 )
             };

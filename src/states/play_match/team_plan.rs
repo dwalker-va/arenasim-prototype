@@ -47,6 +47,7 @@ use super::components::{ActiveAuras, AuraType, Combatant, MatchCountdown};
 use super::constants::PET_SLOT_BASE;
 use super::map_config::ActiveMapGeometry;
 use super::map_geometry::{has_line_of_sight, ObstacleVolume, EYE_HEIGHT, MOVER_RADIUS};
+use super::situation::Role;
 use crate::states::match_config::CharacterClass;
 
 /// Where a team wants the fight to happen.
@@ -180,12 +181,15 @@ impl CompProfile {
 
 /// Classify a roster of classes. Pure, so plan selection is testable without a
 /// `World`.
-pub fn classify_comp(classes: &[CharacterClass]) -> CompProfile {
+pub fn classify_comp(units: &[(CharacterClass, Role)]) -> CompProfile {
     CompProfile {
-        has_melee: classes.iter().any(|c| c.is_melee()),
-        has_healer: classes.iter().any(|c| c.is_healer()),
+        has_melee: units.iter().any(|(c, _)| c.is_melee()),
+        // The ROLE: a Shadowform Priest heals no one.
+        has_healer: units.iter().any(|(_, r)| *r == Role::Healer),
         // A healer that is also melee (Paladin) does not make a team "ranged".
-        has_ranged: classes.iter().any(|c| !c.is_melee() && !c.is_healer()),
+        has_ranged: units
+            .iter()
+            .any(|(c, r)| !c.is_melee() && *r != Role::Healer),
     }
 }
 
@@ -564,7 +568,7 @@ pub fn update_team_plans(
                     .any(|aura| aura.effect_type == AuraType::ShadowSight)
             }),
             is_melee: c.class.is_melee(),
-            is_healer: c.class.is_healer(),
+            is_healer: c.is_healer(),
             is_pet: c.slot >= PET_SLOT_BASE,
         })
         .collect();
@@ -648,13 +652,13 @@ pub fn update_team_plans(
         if !profiles.for_team(team).is_team_plan() {
             return None;
         }
-        let classes: Vec<CharacterClass> = combatants
+        let units: Vec<(CharacterClass, Role)> = combatants
             .iter()
             .map(|(_, c, _, _)| c)
             .filter(|c| c.team == team && c.is_alive() && c.slot < PET_SLOT_BASE)
-            .map(|c| c.class)
+            .map(|c| (c.class, c.role()))
             .collect();
-        let comp = classify_comp(&classes);
+        let comp = classify_comp(&units);
 
         // Team 1 spawns at -x, team 2 at +x. Camping the cover nearest our own
         // gate is what makes the enemy walk to us; camping theirs would mean
@@ -1324,6 +1328,92 @@ mod tests {
         assert_eq!(plans.for_team(1).stance, Stance::Press);
     }
 
+    /// The planner, over one frame of `roster` — (team, slot, class, form, x)
+    /// on the z = 0 line — under `TeamPlan`, with Nagrand's pillars and
+    /// bounds. The plans it wrote, and each unit's entity.
+    fn plan_once(
+        roster: &[(
+            u8,
+            u8,
+            CharacterClass,
+            crate::states::match_config::PriestForm,
+            f32,
+        )],
+    ) -> (TeamPlans, Vec<Entity>) {
+        let mut app = App::new();
+        app.insert_resource(MatchCountdown {
+            time_remaining: 0.0,
+            gates_opened: true,
+        });
+        app.insert_resource(TeamPlans::default());
+        app.insert_resource(AiProfiles::uniform(AiProfile::TeamPlan));
+        app.insert_resource(ActiveMapGeometry {
+            bounds: super::super::arena_bounds::ArenaBounds::Bowl {
+                semi_x: 59.72,
+                semi_z: 59.72,
+                alcove_depth: 10.0,
+                alcove_half_width: 8.0,
+            },
+            volumes: nagrand(),
+            cover_anchors: Vec::new(),
+        });
+        let entities = roster
+            .iter()
+            .map(|&(team, slot, class, form, x)| {
+                let mut c = Combatant::new(team, slot, class);
+                c.priest_form = form;
+                app.world_mut()
+                    .spawn((c, Transform::from_xyz(x, 0.0, 0.0)))
+                    .id()
+            })
+            .collect();
+        app.add_systems(Update, update_team_plans);
+        app.update();
+        (app.world().resource::<TeamPlans>().clone(), entities)
+    }
+
+    /// The team's call ranks enemy HEALERS first (`CallCandidate::is_healer`,
+    /// the unit's role): a healing Priest 30yd off is called over a Warrior
+    /// 10yd off. An enemy Shadowform Priest is no healer, so the nearer
+    /// Warrior is called (AS-413).
+    #[test]
+    fn the_call_does_not_take_a_shadowform_priest_for_a_healer() {
+        use crate::states::match_config::PriestForm;
+        let call = |form| {
+            let (plans, e) = plan_once(&[
+                (1, 0, CharacterClass::Warrior, PriestForm::NoForm, -10.0),
+                (2, 0, CharacterClass::Warrior, PriestForm::NoForm, 0.0),
+                (2, 1, CharacterClass::Priest, form, 20.0),
+            ]);
+            (plans.for_team(1).kill_target, e)
+        };
+        let (healer, e) = call(PriestForm::NoForm);
+        assert_eq!(healer, Some(e[2]), "control: the healing Priest is called");
+        let (shadow, e) = call(PriestForm::Shadowform);
+        assert_eq!(shadow, Some(e[1]), "the nearer Warrior is called");
+    }
+
+    /// A melee + healer comp camps on a pillar before contact
+    /// (`classify_comp`, from each unit's role); a Warrior with a Shadowform
+    /// Priest has no healer and does not (AS-413).
+    #[test]
+    fn a_shadowform_priest_makes_no_camping_comp() {
+        use crate::states::match_config::PriestForm;
+        let anchor = |form| {
+            plan_once(&[
+                (1, 0, CharacterClass::Warrior, PriestForm::NoForm, -58.0),
+                (1, 1, CharacterClass::Priest, form, -58.0),
+                (2, 0, CharacterClass::Mage, PriestForm::NoForm, 58.0),
+                (2, 1, CharacterClass::Warlock, PriestForm::NoForm, 58.0),
+            ])
+            .0
+            .for_team(1)
+            .anchor
+        };
+        assert!(anchor(PriestForm::NoForm).is_some(), "control: it camps");
+        assert!(anchor(PriestForm::Shadowform).is_none());
+    }
+
     /// A camp that never releases is a unit refusing to fight — the match would
     /// run to its duration cap. Holding ends when the enemy commits.
     #[test]
@@ -1607,7 +1697,10 @@ mod tests {
 
     #[test]
     fn melee_plus_healer_wants_to_camp() {
-        let comp = classify_comp(&[CharacterClass::Warrior, CharacterClass::Priest]);
+        let comp = classify_comp(&[
+            (CharacterClass::Warrior, Role::of(CharacterClass::Warrior)),
+            (CharacterClass::Priest, Role::of(CharacterClass::Priest)),
+        ]);
         assert!(
             comp.wants_to_camp(),
             "melee + healer is the camping archetype"
@@ -1618,7 +1711,10 @@ mod tests {
     /// enemy walk to it.
     #[test]
     fn double_ranged_does_not_camp() {
-        let comp = classify_comp(&[CharacterClass::Mage, CharacterClass::Warlock]);
+        let comp = classify_comp(&[
+            (CharacterClass::Mage, Role::of(CharacterClass::Mage)),
+            (CharacterClass::Warlock, Role::of(CharacterClass::Warlock)),
+        ]);
         assert!(!comp.wants_to_camp());
         assert!(comp.has_ranged);
     }
@@ -1627,7 +1723,7 @@ mod tests {
     /// and must NOT be counted as ranged.
     #[test]
     fn paladin_counts_as_melee_and_healer_but_not_ranged() {
-        let comp = classify_comp(&[CharacterClass::Paladin]);
+        let comp = classify_comp(&[(CharacterClass::Paladin, Role::of(CharacterClass::Paladin))]);
         assert!(comp.has_melee && comp.has_healer);
         assert!(
             !comp.has_ranged,

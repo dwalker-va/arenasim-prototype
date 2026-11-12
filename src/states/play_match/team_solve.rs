@@ -1518,7 +1518,7 @@ pub fn world_from_context(
             slot: c.slot,
             pos: Vec2::new(c.position.x, c.position.z),
             y: c.position.y,
-            is_healer: c.class.is_healer(),
+            is_healer: c.is_healer(),
             // Pets: by ability reach, not by inherited class — see
             // `enemy_casters_of`.
             is_melee: !is_ranged_threat(c),
