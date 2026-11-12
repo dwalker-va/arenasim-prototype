@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 use super::abilities::{AbilityType, SpellSchool};
 use super::ability_book::AbilityBook;
 use super::ability_config::{AbilityConfig, AbilityDefinitions};
-use super::components::Combatant;
+use super::components::{AuraType, Combatant};
 use super::constants::{
     WEIGHT_ATTACK_POWER, WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN, WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA,
     WEIGHT_MOVEMENT_SPEED, WEIGHT_RESISTANCE, WEIGHT_SPELL_POWER,
@@ -47,6 +47,7 @@ use super::equipment::{
 };
 use super::talent_choices::{ranked_effects, ChoiceOption, ChoiceRule, ChoiceSlot, SlotChoices};
 use super::talent_mechanics::{TalentMechanic, TalentMechanics};
+use super::talent_procs::{TalentProc, TalentProcSlot};
 use crate::states::match_config::CharacterClass;
 
 /// The most points a build may spend: what a Gauntlet run hands out by its
@@ -296,6 +297,18 @@ pub enum AbilityField {
     AuraMagnitudeCoefficient,
     AuraBreakOnDamage,
     AuraTickInterval,
+    /// The ability's own crit chance, added to its caster's for every crit
+    /// roll the ability makes (Conviction, Malice, Improved Ambush, Holy
+    /// Specialization). `0.0` on every shipped ability.
+    CritChance,
+    /// The applied aura's STRENGTH: its magnitude, read the way round that
+    /// grows with the effect. For an aura whose magnitude is the fraction LEFT
+    /// ([`strength_is_remainder`]: a movement slow, a healing cut) the strength
+    /// is `1 - magnitude`, so `Mul(1.1)` on Crippling Poison's 70% slow makes
+    /// it 77%; for every other aura it is the magnitude itself (Deadly
+    /// Poison's damage, Mind-numbing's +60% cast time). Present only on an
+    /// ability that applies an aura. Vile Poisons' field.
+    AuraStrength,
 }
 
 impl AbilityField {
@@ -327,12 +340,110 @@ impl AbilityField {
             AbilityField::AuraMagnitudeCoefficient => aura.map(|a| &mut a.magnitude_coefficient),
             AbilityField::AuraBreakOnDamage => aura.map(|a| &mut a.break_on_damage),
             AbilityField::AuraTickInterval => aura.map(|a| &mut a.tick_interval),
+            AbilityField::CritChance => Some(&mut config.crit_chance),
+            // A derived value, not a stored one: read and written through
+            // `get` / `set`.
+            AbilityField::AuraStrength => None,
+        }
+    }
+
+    /// The value of this field on `config`, or `None` when it has none.
+    pub fn get(self, config: &AbilityConfig) -> Option<f32> {
+        match self {
+            AbilityField::AuraStrength => config.applies_aura.as_ref().map(|a| {
+                if strength_is_remainder(a.aura_type) {
+                    1.0 - a.magnitude
+                } else {
+                    a.magnitude
+                }
+            }),
+            stored => stored.of(&mut config.clone()).map(|v| *v),
+        }
+    }
+
+    /// Write `value` to this field on `config` (a no-op when it has none).
+    pub fn set(self, config: &mut AbilityConfig, value: f32) {
+        match self {
+            // Clamped: a remainder's strength is at most 1 (a 100% slow), so
+            // no patch or power pushes its magnitude below 0; no strength is
+            // below 0.
+            AbilityField::AuraStrength => {
+                if let Some(a) = config.applies_aura.as_mut() {
+                    a.magnitude = if strength_is_remainder(a.aura_type) {
+                        1.0 - value.clamp(0.0, 1.0)
+                    } else {
+                        value.max(0.0)
+                    };
+                }
+            }
+            stored => {
+                if let Some(v) = stored.of(config) {
+                    *v = value;
+                }
+            }
         }
     }
 
     /// Whether `config` has this field.
     pub fn present_on(self, config: &AbilityConfig) -> bool {
-        self.of(&mut config.clone()).is_some()
+        self.get(config).is_some()
+    }
+}
+
+/// Whether an aura's magnitude is the fraction of something LEFT, so its
+/// strength is `1 - magnitude`: a movement slow (0.3 = a 70% slow) and a
+/// healing cut (0.65 = 35% less healing). Every other aura's magnitude grows
+/// with its effect.
+///
+/// **Exhaustive on purpose — do not add a `_ =>` arm.** A new aura type must
+/// say which way its magnitude reads, or a talent strengthening it would
+/// weaken it.
+pub fn strength_is_remainder(aura: AuraType) -> bool {
+    match aura {
+        AuraType::MovementSpeedSlow | AuraType::HealingReduction => true,
+        AuraType::Root
+        | AuraType::Stun
+        | AuraType::MaxHealthIncrease
+        | AuraType::DamageOverTime
+        | AuraType::SpellSchoolLockout
+        | AuraType::Fear
+        | AuraType::MaxManaIncrease
+        | AuraType::AttackPowerIncrease
+        | AuraType::ShadowSight
+        | AuraType::Absorb
+        | AuraType::WeakenedSoul
+        | AuraType::Polymorph
+        | AuraType::DamageReduction
+        | AuraType::CastTimeIncrease
+        | AuraType::DamageTakenReduction
+        | AuraType::DamageImmunity
+        | AuraType::Incapacitate
+        | AuraType::SpellResistanceBuff
+        | AuraType::AttackPowerReduction
+        | AuraType::CritChanceIncrease
+        | AuraType::ManaRegenIncrease
+        | AuraType::AttackSpeedSlow
+        | AuraType::LockoutDurationReduction
+        | AuraType::FrostArmorBuff
+        | AuraType::Silence
+        | AuraType::WeaponPoison
+        | AuraType::SpellPowerIncrease
+        | AuraType::HealingOverTime
+        | AuraType::WindfuryBuff
+        | AuraType::FearImmunity
+        | AuraType::ArmorIncrease
+        | AuraType::Cyclone
+        | AuraType::TravelForm
+        | AuraType::AttackSpeedIncrease
+        | AuraType::NextCast
+        | AuraType::DamageTakenIncrease
+        | AuraType::DamageDealtIncrease
+        | AuraType::ArmorPercentIncrease
+        | AuraType::ArmorPercentReduction
+        | AuraType::DamageTransfer
+        | AuraType::KillingBlowSave
+        | AuraType::DamageReflect
+        | AuraType::TriggeredAbsorb => false,
     }
 }
 
@@ -353,6 +464,9 @@ pub enum TalentEffect {
     },
     /// Adds a `talent: true` ability to the combatant's book.
     Grant(AbilityType),
+    /// A trigger and an effect on the combatant (`talent_procs.rs`). Its
+    /// ranks add to its chance or to its effect, as it declares.
+    Proc(TalentProc),
     /// Makes a per-match option selectable that is hidden without this node
     /// (`talent_choices`): `WidenChoice(WarlockCurse(Tongues))`.
     WidenChoice(ChoiceOption),
@@ -699,6 +813,10 @@ impl TalentDefinitions {
                     return Err("a node that grants an ability has one rank".to_string());
                 }
             }
+            TalentEffect::Proc(proc) => {
+                let reachable = self.reachable_abilities(talent.class, abilities);
+                proc.validate(talent.max_rank, &reachable)?;
+            }
             TalentEffect::WidenChoice(option) => {
                 if option.menu().class() != talent.class {
                     return Err(format!(
@@ -898,6 +1016,7 @@ impl TalentDefinitions {
         // build order. Ranks add, for a Mul as for everything else.
         let mut patches: BTreeMap<(AbilityType, AbilityField), (f32, f32)> = BTreeMap::new();
         let mut patch_effects: Vec<(PatchTarget, AbilityField, PatchOp, u8)> = Vec::new();
+        let mut procs: Vec<TalentProcSlot> = Vec::new();
 
         for (id, rank) in &build.ranks {
             if switched_off.contains(id) {
@@ -916,6 +1035,13 @@ impl TalentDefinitions {
                     }
                     TalentEffect::Patch { on, field, op } => {
                         patch_effects.push((*on, *field, *op, rank));
+                    }
+                    TalentEffect::Proc(proc) => {
+                        procs.push(TalentProcSlot::new(
+                            *id,
+                            &self.talents[id].name,
+                            proc.at_rank(rank),
+                        ));
                     }
                     TalentEffect::Mechanic(mechanic) => {
                         mechanics.insert(mechanic.at_rank(rank));
@@ -950,10 +1076,11 @@ impl TalentDefinitions {
             let mul = 1.0 + bonus;
             let mut negative = None;
             book = book.patching(ability, |config| {
-                let value = field.of(config).expect("a patch's targets have its field");
-                *value = (*value + add) * mul;
-                if *value < 0.0 {
-                    negative = Some(*value);
+                let value = field.get(config).expect("a patch's targets have its field");
+                let patched = (value + add) * mul;
+                field.set(config, patched);
+                if patched < 0.0 {
+                    negative = Some(patched);
                 }
             });
             if let Some(value) = negative {
@@ -973,6 +1100,7 @@ impl TalentDefinitions {
             build: build.clone(),
             stats,
             pet_stats,
+            procs,
             mechanics,
             offhand_poison: match choices.second(ChoiceSlot::OffHandPoison) {
                 Some(ChoiceOption::RoguePoison(poison)) => Some(poison),
@@ -1344,6 +1472,7 @@ pub struct ResolvedBuild {
     build: Build,
     stats: BTreeMap<TalentStat, f32>,
     pet_stats: BTreeMap<TalentStat, f32>,
+    procs: Vec<TalentProcSlot>,
     mechanics: TalentMechanics,
     /// The off-hand poison the slot chose, when its build opens the slot.
     offhand_poison: Option<crate::states::match_config::RoguePoison>,
@@ -1358,6 +1487,7 @@ impl ResolvedBuild {
             build: Build::default(),
             stats: BTreeMap::new(),
             pet_stats: BTreeMap::new(),
+            procs: Vec::new(),
             mechanics: TalentMechanics::default(),
             offhand_poison: None,
         }
@@ -1388,14 +1518,21 @@ impl ResolvedBuild {
         &self.pet_stats
     }
 
-    /// Apply the build's `StatPercent` effects to its combatant: after
+    /// The build's procs, one slot each, in build order.
+    pub fn procs(&self) -> &[TalentProcSlot] {
+        &self.procs
+    }
+
+    /// Apply the build to its combatant: its `StatPercent` effects, after
     /// `apply_equipment` (a percentage of the total, gear included) and
-    /// before the pet spawns from it. Refills the pools to their new
-    /// pre-combat levels, as equipping does.
+    /// before the pet spawns from it, refilling the pools to their new
+    /// pre-combat levels as equipping does; and its procs, which it carries
+    /// from here (`Combatant::talent_procs`).
     pub fn apply(&self, combatant: &mut Combatant) {
         combatant.talent_mechanics = self.mechanics.clone();
         combatant.rogue_offhand_poison = self.offhand_poison;
         apply_percents(&self.stats, combatant);
+        combatant.talent_procs.slots = self.procs.clone();
     }
 
     /// Apply the build's `PetStatPercent` effects to its combatant's pet, once

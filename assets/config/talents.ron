@@ -19,6 +19,11 @@
 //                                       rewrites a numeric field of its
 //                                       book's configs; adds before multiplies
 //       Grant(X)                        adds the `talent: true` ability X
+//       Proc((trigger: .., chance: Chance(c) | PerMinute(r), ranks_add: Chance | Effect,
+//             effect: ApplyAura(..) | NextCast(..) | HealBack(..)))
+//                                       a trigger and an effect on the
+//                                       combatant (`talent_procs.rs`); its
+//                                       ranks add to its chance or its effect
 //       WidenChoice(<Menu>(<Option>))   offers a per-match option that is
 //                                       hidden from every build without this
 //                                       node (talent_choices.rs)

@@ -96,6 +96,7 @@ impl Harness {
                     caster_slot: 0,
                     caster_class: CharacterClass::Mage,
                     caster_pet_type: None,
+                    next_cast: None,
                 },
                 Transform::from_translation(origin)
                     .with_rotation(Quat::from_rotation_arc(Vec3::Z, aim)),

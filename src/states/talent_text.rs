@@ -13,12 +13,16 @@
 //! Pure functions of plain data — no egui, no Bevy — so tests assert on the
 //! strings directly.
 
+use crate::states::ability_text::{build_aura_description, next_cast_sentence};
 use crate::states::match_config::CharacterClass;
-use crate::states::play_match::ability_config::AbilityDefinitions;
+use crate::states::play_match::ability_config::{AbilityDefinitions, AuraEffect};
 use crate::states::play_match::talent_choices::{
     ranked_effects, ChoiceMenu, ChoiceOption, ChoiceSlot,
 };
 use crate::states::play_match::talent_mechanics::TalentMechanic;
+use crate::states::play_match::talent_procs::{
+    ProcChance, ProcEffect, ProcRankScale, ProcTarget, TalentProc, TalentTrigger,
+};
 use crate::states::play_match::talents::{
     AbilityField, LearnBlocker, PatchOp, PatchTarget, TalentConfig, TalentDefinitions,
     TalentEffect, TalentId, TalentStat, TreeId, CAPSTONE_TIER, MAX_TALENT_POINTS, TIER_OPENS_AT,
@@ -42,6 +46,7 @@ pub fn effect_text(effect: &TalentEffect, ranks: u8, abilities: &AbilityDefiniti
                 PatchTarget::School(school) => format!("{school:?} abilities'"),
             };
             let change = match op {
+                PatchOp::Add(value) if field_is_fraction(*field) => percent(value * n),
                 PatchOp::Add(value) => signed(value * n, field_unit(*field)),
                 PatchOp::Mul(m) => percent((m - 1.0) * n),
             };
@@ -64,6 +69,9 @@ pub fn effect_text(effect: &TalentEffect, ranks: u8, abilities: &AbilityDefiniti
             ChoiceSlot::OffHandPoison => "Opens a second poison slot for the off hand".to_string(),
         },
         TalentEffect::Mechanic(mechanic) => mechanic_text(mechanic.at_rank(ranks)),
+        // The proc the engine resolves at this rank (`TalentProc::at_rank`):
+        // its chance or its effect times the rank, as it declares.
+        TalentEffect::Proc(proc) => proc_clause(&proc.at_rank(ranks), abilities),
         // The engine's own rank rule: once per rank from rank `from` on.
         TalentEffect::FromRank(from, inner) => {
             match ranked_effects(std::slice::from_ref(effect), ranks).next() {
@@ -136,6 +144,143 @@ fn mechanic_text(mechanic: TalentMechanic) -> String {
             unsigned_percent(reduction),
             unsigned(duration, "sec")
         ),
+    }
+}
+
+/// A talent proc as a clause, at the numbers it carries (a node's proc is
+/// one rank's worth; [`effect_text`] hands this the proc at its rank): when
+/// it fires, and what it does. "A 4% chance on each damage tick of
+/// Corruption, primes your next cast: Within 10 sec, the next Shadow Bolt is
+/// instant". The one generator for a talent proc's prose, the talent panel's
+/// and the encyclopedia's alike ([`talent_proc_description`]).
+pub fn proc_clause(proc: &TalentProc, abilities: &AbilityDefinitions) -> String {
+    let names = |list: &[crate::states::play_match::AbilityType]| -> String {
+        let names: Vec<String> = list
+            .iter()
+            .map(|a| {
+                abilities
+                    .get(a)
+                    .map_or_else(|| format!("{a:?}"), |d| d.name.clone())
+            })
+            .collect();
+        names.join(" or ")
+    };
+    let of = |what: &str| {
+        if proc.abilities.is_empty() {
+            what.to_string()
+        } else {
+            format!("{what} of {}", names(&proc.abilities))
+        }
+    };
+    let event = match proc.trigger {
+        TalentTrigger::MeleeHit if proc.crit_only => "a melee critical strike".to_string(),
+        TalentTrigger::MeleeHit => "a melee hit".to_string(),
+        TalentTrigger::SpellHit => of("a hit"),
+        TalentTrigger::DotTick => of("each damage tick"),
+        TalentTrigger::HealCrit => of("a critical heal"),
+        TalentTrigger::CritTaken => "being struck by a melee or ranged critical hit".to_string(),
+        TalentTrigger::StealthBreak => "leaving stealth".to_string(),
+        TalentTrigger::AbilityUsed if proc.abilities.is_empty() => "using any ability".to_string(),
+        TalentTrigger::AbilityUsed => format!("using {}", names(&proc.abilities)),
+    };
+    let chance = match proc.chance {
+        ProcChance::Chance(c) if c >= 1.0 => "On".to_string(),
+        ProcChance::Chance(c) => format!("A {} chance on", unsigned_percent(c)),
+        ProcChance::PerMinute(r) => format!(
+            "{} times a minute of melee, whatever the weapon, on",
+            unsigned(r, "")
+        ),
+    };
+    let effect = match &proc.effect {
+        ProcEffect::ApplyAura {
+            on,
+            aura_type,
+            magnitude,
+            duration,
+            tick_interval,
+            dispel_type,
+            ..
+        } => {
+            let whom = match on {
+                ProcTarget::Owner => "you",
+                ProcTarget::Other => match proc.trigger {
+                    TalentTrigger::HealCrit => "the ally healed",
+                    TalentTrigger::CritTaken => "the attacker",
+                    _ => "the target",
+                },
+            };
+            // The aura's own sentence, the one every ability's aura reads
+            // (`build_aura_description`), so its number is in its own unit.
+            let sentence = build_aura_description(&AuraEffect {
+                aura_type: *aura_type,
+                duration: *duration,
+                magnitude: *magnitude,
+                magnitude_coefficient: 0.0,
+                break_on_damage: -1.0,
+                tick_interval: *tick_interval,
+                dr_category: None,
+                scope: None,
+                charges: None,
+                dispel_type: *dispel_type,
+                stacking: None,
+                bloom: None,
+                compound: None,
+                purge_priority: None,
+                leech: None,
+                next_cast: None,
+                triggered_absorb: None,
+            });
+            format!("{} (on {whom})", in_clause(&sentence))
+        }
+        ProcEffect::NextCast {
+            modifier, duration, ..
+        } => format!(
+            "primes your next cast: {}",
+            next_cast_sentence(modifier, *duration).trim_end_matches('.')
+        ),
+        ProcEffect::HealBack {
+            fraction, duration, ..
+        } => format!(
+            "heals you for {} of it over {}",
+            unsigned_percent(*fraction),
+            unsigned(*duration, "sec")
+        ),
+    };
+    let cooldown = if proc.internal_cooldown > 0.0 {
+        format!(
+            " (at most once every {})",
+            unsigned(proc.internal_cooldown, "sec")
+        )
+    } else {
+        String::new()
+    };
+    format!("{chance} {event}, {effect}{cooldown}")
+}
+
+/// One rank of a talent's proc, named `talent`, as a sentence: the
+/// encyclopedia's Buffs & Debuffs entry for the aura it applies. Its numbers
+/// are the first rank's, and it says what each further rank adds to.
+pub fn talent_proc_description(
+    talent: &str,
+    proc: &TalentProc,
+    abilities: &AbilityDefinitions,
+) -> String {
+    let rank = match proc.ranks_add {
+        ProcRankScale::Chance => " The chance is per rank.",
+        ProcRankScale::Effect => " Its effect is per rank.",
+    };
+    format!("{talent}: {}.{rank}", proc_clause(proc, abilities))
+}
+
+/// A sentence made a clause: its first letter lower-cased, its full stops
+/// turned to semicolons. "Roots the target for 4 sec. Breaks after 80
+/// damage." reads "roots the target for 4 sec; breaks after 80 damage".
+fn in_clause(sentence: &str) -> String {
+    let body = sentence.trim().trim_end_matches('.').replace(". ", "; ");
+    let mut chars = body.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => String::new(),
     }
 }
 
@@ -302,10 +447,43 @@ fn field_name(field: AbilityField) -> &'static str {
         AbilityField::ChannelHealingPerTick => "healing per tick",
         AbilityField::ManaBurnAmount => "mana burned",
         AbilityField::AuraDuration => "effect duration",
-        AbilityField::AuraMagnitude => "effect strength",
+        AbilityField::AuraMagnitude => "effect magnitude",
         AbilityField::AuraMagnitudeCoefficient => "effect strength from spell power",
         AbilityField::AuraBreakOnDamage => "damage to break",
         AbilityField::AuraTickInterval => "time between ticks",
+        AbilityField::CritChance => "critical strike chance",
+        AbilityField::AuraStrength => "effect strength",
+    }
+}
+
+/// Whether `field` holds a fraction, so an `Add` patch of it reads as
+/// percentage points ("+3% Shadow Bolt critical strike chance").
+fn field_is_fraction(field: AbilityField) -> bool {
+    match field {
+        AbilityField::CritChance | AbilityField::ApplicationChance => true,
+        AbilityField::CastTime
+        | AbilityField::Range
+        | AbilityField::MinRange
+        | AbilityField::ManaCost
+        | AbilityField::Cooldown
+        | AbilityField::DamageBaseMin
+        | AbilityField::DamageBaseMax
+        | AbilityField::DamageCoefficient
+        | AbilityField::HealingBaseMin
+        | AbilityField::HealingBaseMax
+        | AbilityField::HealingCoefficient
+        | AbilityField::ProjectileSpeed
+        | AbilityField::LockoutDuration
+        | AbilityField::ChannelDuration
+        | AbilityField::ChannelTickInterval
+        | AbilityField::ChannelHealingPerTick
+        | AbilityField::ManaBurnAmount
+        | AbilityField::AuraDuration
+        | AbilityField::AuraMagnitude
+        | AbilityField::AuraMagnitudeCoefficient
+        | AbilityField::AuraBreakOnDamage
+        | AbilityField::AuraTickInterval
+        | AbilityField::AuraStrength => false,
     }
 }
 
@@ -332,7 +510,9 @@ fn field_unit(field: AbilityField) -> &'static str {
         | AbilityField::ChannelHealingPerTick
         | AbilityField::AuraMagnitude
         | AbilityField::AuraMagnitudeCoefficient
-        | AbilityField::AuraBreakOnDamage => "",
+        | AbilityField::AuraBreakOnDamage
+        | AbilityField::CritChance
+        | AbilityField::AuraStrength => "",
     }
 }
 
@@ -442,6 +622,211 @@ mod tests {
             effect_text(&cheat, 1, abilities()),
             "The first blow that would kill you leaves you at 10% health, \
              and you take 90% less damage for 3 sec"
+        );
+    }
+
+    /// A proc that rolls `chance` a rank on `trigger`, giving its owner
+    /// 10 attack power for 6 sec.
+    fn proc_on(trigger: TalentTrigger, chance: ProcChance, ranks_add: ProcRankScale) -> TalentProc {
+        TalentProc {
+            trigger,
+            abilities: vec![],
+            crit_only: false,
+            chance,
+            ranks_add,
+            effect: ProcEffect::ApplyAura {
+                on: ProcTarget::Owner,
+                aura_type: crate::states::play_match::components::AuraType::AttackPowerIncrease,
+                magnitude: 10.0,
+                duration: 6.0,
+                tick_interval: 0.0,
+                dispel_type: crate::states::play_match::components::DispelType::Physical,
+                name: None,
+            },
+            internal_cooldown: 0.0,
+        }
+    }
+
+    /// A proc's ranks add to its CHANCE when it says so: each rank's line
+    /// reads the chance the engine rolls at that rank, and the effect is the
+    /// same at every rank.
+    #[test]
+    fn a_chance_scaled_proc_reads_its_chance_at_each_rank() {
+        let mut nightfall = proc_on(
+            TalentTrigger::DotTick,
+            ProcChance::Chance(0.02),
+            ProcRankScale::Chance,
+        );
+        nightfall.abilities = vec![AbilityType::Corruption, AbilityType::DrainLife];
+        let effect = TalentEffect::Proc(nightfall);
+        assert_eq!(
+            effect_text(&effect, 1, abilities()),
+            "A 2% chance on each damage tick of Corruption or Drain Life, \
+             increases attack power by 10 for 6 sec (on you)"
+        );
+        assert_eq!(
+            effect_text(&effect, 3, abilities()),
+            "A 6% chance on each damage tick of Corruption or Drain Life, \
+             increases attack power by 10 for 6 sec (on you)"
+        );
+        // A per-minute rate is a chance too: The Art of War's 4.8 a rank.
+        let art = TalentEffect::Proc(proc_on(
+            TalentTrigger::MeleeHit,
+            ProcChance::PerMinute(4.8),
+            ProcRankScale::Chance,
+        ));
+        assert_eq!(
+            effect_text(&art, 2, abilities()),
+            "9.6 times a minute of melee, whatever the weapon, on a melee hit, \
+             increases attack power by 10 for 6 sec (on you)"
+        );
+    }
+
+    /// A proc's ranks add to its EFFECT when it says so: the aura's
+    /// magnitude, the heal-back's share and the next-cast modifier's numbers
+    /// each read at the rank, and a certain proc reads "On".
+    #[test]
+    fn an_effect_scaled_proc_reads_its_effect_at_each_rank() {
+        let mut vengeance = proc_on(
+            TalentTrigger::MeleeHit,
+            ProcChance::Chance(1.0),
+            ProcRankScale::Effect,
+        );
+        vengeance.crit_only = true;
+        assert_eq!(
+            effect_text(&TalentEffect::Proc(vengeance), 3, abilities()),
+            "On a melee critical strike, increases attack power by 30 for 6 sec (on you)"
+        );
+
+        let mut recovery = proc_on(
+            TalentTrigger::CritTaken,
+            ProcChance::Chance(1.0),
+            ProcRankScale::Effect,
+        );
+        recovery.effect = ProcEffect::HealBack {
+            fraction: 0.25,
+            duration: 6.0,
+            tick_interval: 2.0,
+            name: None,
+        };
+        assert_eq!(
+            effect_text(&TalentEffect::Proc(recovery), 2, abilities()),
+            "On being struck by a melee or ranged critical hit, heals you for 50% of it \
+             over 6 sec"
+        );
+
+        let mut initiative = proc_on(
+            TalentTrigger::AbilityUsed,
+            ProcChance::Chance(1.0),
+            ProcRankScale::Effect,
+        );
+        initiative.effect = ProcEffect::NextCast {
+            modifier: crate::states::play_match::next_cast::NextCastModifier {
+                applies_to: crate::states::play_match::next_cast::NextCastScope::Any,
+                instant: false,
+                free: false,
+                crit_chance: 0.0,
+                cast_time_reduction: 0.0,
+                cost_reduction: 5.0,
+                power: 0.0,
+            },
+            duration: 10.0,
+            dispel_type: crate::states::play_match::components::DispelType::Physical,
+            name: None,
+        };
+        assert_eq!(
+            effect_text(&TalentEffect::Proc(initiative), 3, abilities()),
+            "On using any ability, primes your next cast: Within 10 sec, the next \
+             ability costs 15 less"
+        );
+    }
+
+    /// An aura on the event's other unit names who it lands on, and an
+    /// internal cooldown is stated.
+    #[test]
+    fn a_proc_names_its_aura_target_and_its_cooldown() {
+        let mut blackout = proc_on(
+            TalentTrigger::SpellHit,
+            ProcChance::Chance(0.02),
+            ProcRankScale::Chance,
+        );
+        blackout.effect = ProcEffect::ApplyAura {
+            on: ProcTarget::Other,
+            aura_type: crate::states::play_match::components::AuraType::Stun,
+            magnitude: 1.0,
+            duration: 3.0,
+            tick_interval: 0.0,
+            dispel_type: crate::states::play_match::components::DispelType::Auto,
+            name: None,
+        };
+        blackout.internal_cooldown = 8.0;
+        assert_eq!(
+            effect_text(&TalentEffect::Proc(blackout.clone()), 1, abilities()),
+            "A 2% chance on a hit, stuns the target for 3 sec (on the target) \
+             (at most once every 8 sec)"
+        );
+        blackout.trigger = TalentTrigger::CritTaken;
+        assert!(effect_text(&TalentEffect::Proc(blackout), 1, abilities())
+            .contains("(on the attacker)"));
+    }
+
+    /// A rank's whole line, proc included, as the panel shows it.
+    #[test]
+    fn a_proc_node_reads_every_rank() {
+        let talent = TalentConfig {
+            per_rank: vec![TalentEffect::Proc(proc_on(
+                TalentTrigger::StealthBreak,
+                ProcChance::Chance(1.0),
+                ProcRankScale::Effect,
+            ))],
+            max_rank: 2,
+            ..TalentDefinitions::shipped()
+                .get(TalentId::DemonicEmbrace)
+                .expect("shipped")
+                .clone()
+        };
+        assert_eq!(
+            rank_lines(&talent, abilities()),
+            vec![
+                "Rank 1: On leaving stealth, increases attack power by 10 for 6 sec (on you)."
+                    .to_string(),
+                "Rank 2: On leaving stealth, increases attack power by 20 for 6 sec (on you)."
+                    .to_string(),
+            ]
+        );
+    }
+
+    /// The ability fields this card adds: a crit chance reads in percentage
+    /// points, an aura's strength as a percentage of it, and an application
+    /// chance (a fraction too) in points.
+    #[test]
+    fn crit_chance_strength_and_application_chance_read_in_their_units() {
+        let conviction = TalentEffect::Patch {
+            on: PatchTarget::Ability(AbilityType::MortalStrike),
+            field: AbilityField::CritChance,
+            op: PatchOp::Add(0.01),
+        };
+        assert_eq!(
+            effect_text(&conviction, 3, abilities()),
+            "+3% Mortal Strike critical strike chance"
+        );
+        let vile = TalentEffect::Patch {
+            on: PatchTarget::Ability(AbilityType::Shadowbolt),
+            field: AbilityField::AuraStrength,
+            op: PatchOp::Mul(1.04),
+        };
+        assert_eq!(
+            effect_text(&vile, 5, abilities()),
+            "+20% Shadow Bolt effect strength"
+        );
+        let improved = TalentEffect::Patch {
+            on: PatchTarget::Ability(AbilityType::Shadowbolt),
+            field: AbilityField::ApplicationChance,
+            op: PatchOp::Add(0.02),
+        };
+        assert_eq!(
+            effect_text(&improved, 5, abilities()),
+            "+10% Shadow Bolt chance to apply"
         );
     }
 
