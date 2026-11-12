@@ -240,6 +240,7 @@ pub enum AbilityType {
     // the enum's derived `Ord` keys every `BTreeMap<AbilityType, _>`, so a
     // variant inserted mid-list would reorder what existing ones iterate.
     ShadowWordPain, // Priest instant Shadow DoT
+    ExposeArmor,    // Rogue Combat capstone (talent): halves the target's armor
     Shadowform,     // Priest form, held all match: a talent's Form choice (AS-413)
 }
 
@@ -258,7 +259,7 @@ impl AbilityType {
             // Weapon strikes, at melee range. Heroic Strike rides the next
             // auto-attack swing, so it is rolled where that swing is.
             HeroicStrike | MortalStrike | Rend | Pummel | Ambush | CheapShot | SinisterStrike
-            | KidneyShot | Kick => true,
+            | KidneyShot | Kick | ExposeArmor => true,
             // A charge closes the gap; what it lands on arrival is not a
             // weapon strike, and it is cast from 25 yards.
             Charge | BoarCharge => false,

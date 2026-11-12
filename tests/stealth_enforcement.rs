@@ -66,6 +66,7 @@ fn info(entity: Entity, team: u8, class: CharacterClass, position: Vec3) -> Comb
         max_health: 100.0,
         current_mana: 100.0,
         max_mana: 100.0,
+        armor: 0.0,
         position,
         velocity: Vec3::ZERO,
         is_alive: true,
@@ -824,7 +825,8 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
         | ShadowResistanceAura | ConcentrationAura | LightningBolt | FrostShock
         | LesserHealingWave | Purge | WindShear | AirTotem | WaterTotem | EarthTotem
         | FireTotem | Rejuvenation | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild
-        | Innervate | EntanglingRoots | Cyclone | TravelForm | ShadowWordPain | Shadowform => false,
+        | Innervate | EntanglingRoots | Cyclone | TravelForm | ShadowWordPain | ExposeArmor
+        | Shadowform => false,
     }
 }
 

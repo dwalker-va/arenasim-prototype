@@ -229,6 +229,8 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::DeadlyPoison => config(S::Poison, T::Poison),
         AbilityType::WoundPoison => config(S::Poison, T::Poison),
         AbilityType::MindNumbingPoison => config(S::Poison, T::Poison),
+        // TBC 26866 (every rank): DispelType 0.
+        AbilityType::ExposeArmor => config(S::Physical, T::NoType),
 
         // ---- Warlock ----
         AbilityType::Corruption => config(S::Magic, T::Magic),

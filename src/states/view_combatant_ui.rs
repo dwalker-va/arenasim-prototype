@@ -1043,7 +1043,7 @@ fn talented(
     percents: &std::collections::BTreeMap<TalentStat, f32>,
     stat: TalentStat,
 ) -> f32 {
-    total * (1.0 + percents.get(&stat).copied().unwrap_or(0.0))
+    stat.applied(total, percents.get(&stat).copied().unwrap_or(0.0))
 }
 
 /// Write this combatant's value into a per-slot `MatchConfig` table. A slot

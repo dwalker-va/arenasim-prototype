@@ -1464,6 +1464,13 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         ),
     ),
     (
+        AbilityType::ExposeArmor,
+        Unreached::NeedsKnob(
+            "the Combat talent that grants it, and an armored target: the grid grants no \
+             talent and wears no gear (tests/rogue_combat_talents.rs builds it)",
+        ),
+    ),
+    (
         AbilityType::Shadowform,
         Unreached::NeedsKnob(
             "a Priest whose build takes the Shadowform talent and whose Form choice is \

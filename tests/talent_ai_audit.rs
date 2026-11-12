@@ -29,7 +29,27 @@ use arenasim::states::play_match::movement_config::load_movement_config;
 type SceneFor = fn(&AbilityDefinitions) -> (Scene, Who);
 
 /// Every talent ability, with the scene its rule is decided in.
-const SCENES: &[(AbilityType, SceneFor)] = &[(AbilityType::Shadowform, shadowform_scene)];
+const SCENES: &[(AbilityType, SceneFor)] = &[
+    (AbilityType::ExposeArmor, expose_armor_scene),
+    (AbilityType::Shadowform, shadowform_scene),
+];
+
+/// A Rogue in melee of its kill target, a plate-armored Warrior: Expose
+/// Armor's moment (`class_ai::rogue::try_expose_armor`).
+fn expose_armor_scene(defs: &AbilityDefinitions) -> (Scene, Who) {
+    const ROGUE: Who = "rogue";
+    let mut scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(ROGUE, 1, CharacterClass::Rogue)
+        .at(0.0, 0.0)
+        .targeting("plate warrior")
+        .unit("plate warrior", 2, CharacterClass::Warrior)
+        .at(1.5, 0.0)
+        .armor(2300.0)
+        // Below the Kidney Shot planner: a ready stun would take the turn.
+        .cooldown(ROGUE, AbilityType::KidneyShot, 10.0);
+    scene.combatant_mut(ROGUE).stealthed = false;
+    (scene, ROGUE)
+}
 
 const PRIEST: Who = "priest";
 
@@ -43,12 +63,6 @@ fn shadowform_scene(defs: &AbilityDefinitions) -> (Scene, Who) {
     scene.combatant_mut(PRIEST).priest_form =
         arenasim::states::match_config::PriestForm::Shadowform;
     (scene, PRIEST)
-}
-
-/// The shipped rows with `extra` added: a fixture's flagged ability beside
-/// the shipped talent abilities, which every table it is audited over has.
-fn with_shipped(extra: &[(AbilityType, SceneFor)]) -> Vec<(AbilityType, SceneFor)> {
-    SCENES.iter().chain(extra).copied().collect()
 }
 
 fn considered(view: &DecisionView, ability: AbilityType) -> bool {
@@ -148,6 +162,12 @@ fn empty_scene(defs: &AbilityDefinitions) -> (Scene, Who) {
     (scene, WARLOCK)
 }
 
+/// The shipped rows with `row` added: the fixture's Death Coil beside the
+/// talent abilities the shipped table already has.
+fn and(row: (AbilityType, SceneFor)) -> Vec<(AbilityType, SceneFor)> {
+    SCENES.iter().copied().chain([row]).collect()
+}
+
 #[test]
 fn a_talent_ability_with_no_row_fails() {
     let defs = flagged(AbilityType::DeathCoil);
@@ -158,7 +178,7 @@ fn a_talent_ability_with_no_row_fails() {
 #[test]
 fn a_row_for_an_ability_that_is_not_a_talent_fails() {
     let defs = AbilityDefinitions::shipped();
-    let err = audit(defs, &with_shipped(&[(AbilityType::DeathCoil, coil_scene)])).unwrap_err();
+    let err = audit(defs, &and((AbilityType::DeathCoil, coil_scene))).unwrap_err();
     assert!(err.contains("not talent abilities: [DeathCoil]"), "{err}");
 }
 
@@ -167,11 +187,7 @@ fn a_row_for_an_ability_that_is_not_a_talent_fails() {
 #[test]
 fn an_ai_that_asks_for_an_ungranted_ability_fails() {
     let defs = flagged(AbilityType::DeathCoil);
-    let err = audit(
-        &defs,
-        &with_shipped(&[(AbilityType::DeathCoil, coil_scene)]),
-    )
-    .unwrap_err();
+    let err = audit(&defs, &and((AbilityType::DeathCoil, coil_scene))).unwrap_err();
     assert_eq!(
         err,
         "DeathCoil: not granted, warlock's AI panics (it asks the book for an ability it lacks)"
@@ -183,11 +199,7 @@ fn an_ai_that_asks_for_an_ungranted_ability_fails() {
 #[test]
 fn a_scene_that_never_reaches_the_rule_fails() {
     let defs = flagged(AbilityType::DeathCoil);
-    let err = audit(
-        &defs,
-        &with_shipped(&[(AbilityType::DeathCoil, empty_scene)]),
-    )
-    .unwrap_err();
+    let err = audit(&defs, &and((AbilityType::DeathCoil, empty_scene))).unwrap_err();
     assert!(
         err.contains("DeathCoil: granted, warlock's AI never decides it"),
         "{err}"
@@ -203,6 +215,6 @@ fn an_ai_that_decides_an_ungranted_ability_fails() {
         (scene.grant(who, AbilityType::DeathCoil), who)
     }
     let defs = flagged(AbilityType::DeathCoil);
-    let err = audit(&defs, &with_shipped(&[(AbilityType::DeathCoil, holding)])).unwrap_err();
+    let err = audit(&defs, &and((AbilityType::DeathCoil, holding))).unwrap_err();
     assert_eq!(err, "DeathCoil: not granted, warlock's AI still decides it");
 }

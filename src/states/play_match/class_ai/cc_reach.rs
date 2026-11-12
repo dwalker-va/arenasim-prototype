@@ -98,6 +98,7 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::CheapShot
         | A::MindBlast
         | A::SinisterStrike
+        | A::ExposeArmor
         | A::Charge
         | A::KidneyShot
         | A::PowerWordFortitude

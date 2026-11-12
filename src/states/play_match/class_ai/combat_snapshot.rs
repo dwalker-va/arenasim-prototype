@@ -61,6 +61,7 @@ impl CombatantInfo {
             max_health: combatant.max_health,
             current_mana: combatant.current_mana,
             max_mana: combatant.max_mana,
+            armor: combatant.armor,
             position: transform.translation,
             velocity,
             is_alive: combatant.is_alive(),

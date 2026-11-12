@@ -62,6 +62,44 @@ const FIXTURE: &str = r#"(
             icon: "x.jpg", max_rank: 2, budget: Some(11.0),
             per_rank: [Mechanic(SoulLink(share: 0.06))],
         ),
+        // Every shipped talent id needs an entry, and Expose Armor's grant
+        // its one node: the Combat tree's ids, inert here.
+        LightningReflexes: (
+            name: "LR", class: Rogue, tree: Demonology, tier: 1, column: 1,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [StatPercent(DodgeChance, 0.04)],
+        ),
+        DualWieldSpecialization: (
+            name: "DWS", class: Rogue, tree: Demonology, tier: 1, column: 2,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [StatPercent(OffHandDamage, 0.1)],
+        ),
+        Aggression: (
+            name: "Ag", class: Rogue, tree: Demonology, tier: 2, column: 0,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [Patch(on: Ability(SinisterStrike), field: Damage, op: Mul(1.06))],
+        ),
+        Vitality: (
+            name: "Vi", class: Rogue, tree: Demonology, tier: 2, column: 1,
+            icon: "x.jpg", max_rank: 1,
+            per_rank: [StatPercent(MaxHealth, 0.03)],
+        ),
+        Deflection: (
+            name: "De", class: Rogue, tree: Demonology, tier: 2, column: 2,
+            icon: "x.jpg", max_rank: 2, budget: Some(11.0),
+            per_rank: [StatPercent(ParryChance, 0.04)],
+        ),
+        SwiftBlades: (
+            name: "SB", class: Rogue, tree: Demonology, tier: 3, column: 0,
+            icon: "x.jpg", max_rank: 1, budget: Some(11.0),
+            per_rank: [StatPercent(MeleeAttackSpeed, 0.1)],
+        ),
+        ExposeArmor: (
+            name: "EA", class: Rogue, tree: Demonology, tier: 4, column: 0,
+            icon: "x.jpg", max_rank: 1, budget: Some(22.0),
+            requires: Some((SwiftBlades, 1)),
+            per_rank: [Grant(ExposeArmor)],
+        ),
         // The shipped Priest nodes, which every table must name; inert here.
         ImprovedMindBlast: (
             name: "Improved Mind Blast", class: Priest, tree: Shadow, tier: 1, column: 0,
