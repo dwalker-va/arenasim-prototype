@@ -886,6 +886,59 @@ fn a_returned_share_is_not_mitigated_twice() {
     }
 }
 
+/// A returned share is secondary: the reflecting shield that soaks it sends
+/// nothing back. Control: the same shield soaking a direct hit reflects.
+#[test]
+fn a_returned_share_is_never_reflected() {
+    let reflecting = || {
+        let mut s = aura(AuraType::Absorb, 1000.0);
+        s.ability_name = "Power Word: Shield".into();
+        s.damage_mods.reflect_absorbed = Some(0.5);
+        s
+    };
+    let Units {
+        mut world,
+        holder,
+        receiver,
+        attacker,
+    } = units();
+    world
+        .get_mut::<ActiveAuras>(holder)
+        .unwrap()
+        .auras
+        .push(reflecting());
+    world.get_mut::<Combatant>(receiver).unwrap().current_health = 0.0;
+    run(
+        &mut world,
+        DamageFollowUp::Transfer {
+            holder,
+            receiver: TransferReceiver::Unit(receiver),
+            amount: 30.0,
+            dealer: Some(attacker),
+            by: "Blessing of Sacrifice".into(),
+        },
+    );
+    assert_eq!(
+        world.get::<ActiveAuras>(holder).unwrap().auras[0].magnitude,
+        970.0,
+        "the shield soaked the share"
+    );
+    assert_eq!(health(&world, attacker), 100.0, "and reflected none of it");
+    // Control: a direct hit on the same shield reflects.
+    let (_, holder_e, _) = entities();
+    let mut shielded = auras(vec![reflecting()]);
+    let (_, absorbed, follow_ups) = land(
+        direct(30.0, SpellSchool::Fire, Some(attacker), holder_e),
+        &mut bare(400.0),
+        Some(&mut shielded),
+    );
+    assert_eq!(absorbed, 30.0);
+    assert!(matches!(
+        follow_ups.as_slice(),
+        [DamageFollowUp::Reflect { .. }]
+    ));
+}
+
 /// A severed Soul Link takes no share; the control with the link intact does.
 #[test]
 fn a_severed_soul_link_takes_no_share() {
