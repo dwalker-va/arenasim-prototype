@@ -372,6 +372,7 @@ fn a_transfer_aura_sends_its_share_to_its_caster() {
             school: SpellSchool::Fire,
             preventable: true,
             dealer: Some(attacker),
+            ability: "Probe".into(),
             by: "Blessing of Sacrifice".into(),
         }]
     );
@@ -932,12 +933,23 @@ fn a_transfer_lands_on_its_receiver_and_credits_the_dealer() {
             school: SpellSchool::Physical,
             preventable: true,
             dealer: Some(attacker),
+            ability: "Probe".into(),
             by: "Blessing of Sacrifice".into(),
         },
     );
     assert_eq!(health(&world, receiver), 370.0);
     assert_eq!(health(&world, holder), 400.0);
     assert_eq!(world.get::<Combatant>(attacker).unwrap().damage_dealt, 30.0);
+    // The share is a part of the hit it was split from, and is the dealer's
+    // row of that hit (AS-466).
+    assert_eq!(
+        world
+            .resource::<CombatLog>()
+            .damage_by_ability("Team 2 Rogue #1")
+            .into_iter()
+            .collect::<Vec<_>>(),
+        vec![("Probe".to_string(), 30.0)]
+    );
     assert!(
         world
             .query::<&PendingDamageFollowUp>()
@@ -945,6 +957,48 @@ fn a_transfer_lands_on_its_receiver_and_credits_the_dealer() {
             .next()
             .is_none(),
         "the follow-up is spent"
+    );
+}
+
+/// A share the receiver's shield soaks is still the dealer's damage, in its
+/// total and in its breakdown row alike: what reached health plus what was
+/// absorbed (`combat_core::credited_damage`), the rule every hit is credited
+/// under.
+#[test]
+fn a_transfer_into_the_receivers_shield_credits_the_whole_share() {
+    let Units {
+        mut world,
+        holder,
+        receiver,
+        attacker,
+    } = units();
+    world
+        .get_mut::<ActiveAuras>(receiver)
+        .unwrap()
+        .auras
+        .push(aura(AuraType::Absorb, 10.0));
+    run(
+        &mut world,
+        DamageFollowUp::Transfer {
+            holder,
+            receiver: TransferReceiver::Unit(receiver),
+            amount: 30.0,
+            school: SpellSchool::Physical,
+            preventable: true,
+            dealer: Some(attacker),
+            ability: "Probe".into(),
+            by: "Blessing of Sacrifice".into(),
+        },
+    );
+    assert_eq!(health(&world, receiver), 380.0, "the shield took 10");
+    assert_eq!(world.get::<Combatant>(attacker).unwrap().damage_dealt, 30.0);
+    assert_eq!(
+        world
+            .resource::<CombatLog>()
+            .damage_by_ability("Team 2 Rogue #1")
+            .into_iter()
+            .collect::<Vec<_>>(),
+        vec![("Probe".to_string(), 30.0)]
     );
 }
 
@@ -975,6 +1029,7 @@ fn an_unbearable_transfer_returns_to_the_holder_and_ends_the_aura() {
             school: SpellSchool::Physical,
             preventable: true,
             dealer: Some(attacker),
+            ability: "Probe".into(),
             by: "Blessing of Sacrifice".into(),
         },
     );
@@ -1037,6 +1092,7 @@ fn a_returned_share_is_soaked_by_the_holders_absorbs() {
                 school: SpellSchool::Physical,
                 preventable: receiver_kind != "Soul Link",
                 dealer: Some(attacker),
+                ability: "Probe".into(),
                 by: receiver_kind.into(),
             },
         );
@@ -1066,6 +1122,7 @@ fn a_returned_share_is_soaked_by_the_holders_absorbs() {
             school: SpellSchool::Physical,
             preventable: true,
             dealer: Some(attacker),
+            ability: "Probe".into(),
             by: "Blessing of Sacrifice".into(),
         },
     );
@@ -1105,6 +1162,7 @@ fn a_returned_share_is_not_mitigated_twice() {
                 school: SpellSchool::Physical,
                 preventable: true,
                 dealer: Some(attacker),
+                ability: "Probe".into(),
                 by: "Blessing of Sacrifice".into(),
             },
         );
@@ -1143,6 +1201,7 @@ fn a_returned_share_is_never_reflected() {
             school: SpellSchool::Physical,
             preventable: true,
             dealer: Some(attacker),
+            ability: "Probe".into(),
             by: "Blessing of Sacrifice".into(),
         },
     );
@@ -1281,6 +1340,7 @@ fn a_soul_link_share_finds_the_holders_pet() {
             school: SpellSchool::Physical,
             preventable: false,
             dealer: Some(attacker),
+            ability: "Probe".into(),
             by: "Soul Link".into(),
         },
     );
@@ -1312,6 +1372,7 @@ fn sacrifice(world: &mut World, holder: Entity, receiver: Entity, attacker: Enti
             school: SpellSchool::Physical,
             preventable: true,
             dealer: Some(attacker),
+            ability: "Probe".into(),
             by: "Blessing of Sacrifice".into(),
         },
     );
@@ -1588,6 +1649,7 @@ fn a_soul_link_share_the_felhunter_cannot_survive_returns_whatever_it_wears() {
                 school: SpellSchool::Shadow,
                 preventable: false,
                 dealer: Some(attacker),
+                ability: "Probe".into(),
                 by: "Soul Link".into(),
             },
         );
@@ -1649,6 +1711,7 @@ fn master_demonologist_does_not_reduce_a_soul_link_share() {
                 school,
                 preventable,
                 dealer: Some(attacker),
+                ability: "Probe".into(),
                 by: if preventable {
                     "Blessing of Sacrifice"
                 } else {
@@ -1713,6 +1776,15 @@ fn a_reflect_reveals_and_can_kill_the_attacker() {
     assert_eq!(
         world.get::<Combatant>(receiver).unwrap().damage_dealt,
         100.0
+    );
+    // The reflect is its dealer's row, and its kill.
+    let log = world.resource::<CombatLog>();
+    assert_eq!(log.killing_blows("Team 1 Paladin #2"), 1);
+    assert_eq!(
+        log.damage_by_ability("Team 1 Paladin #2")
+            .into_iter()
+            .collect::<Vec<_>>(),
+        vec![("Retribution Aura".to_string(), 100.0)]
     );
 }
 

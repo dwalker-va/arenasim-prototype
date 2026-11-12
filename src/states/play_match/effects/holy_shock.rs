@@ -8,8 +8,8 @@ use bevy::prelude::*;
 use crate::combat::log::CombatLog;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::combat_core::{
-    apply_damage_with_absorb, apply_healing, damage_dealt_multiplier, roll_crit, DamageFollowUps,
-    Hit,
+    apply_damage_with_absorb, apply_healing, credit_damage_dealt, credited_damage,
+    damage_dealt_multiplier, roll_crit, DamageFollowUps, Hit,
 };
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
@@ -157,6 +157,9 @@ pub fn process_holy_shock_damage(
     mut fct_states: Query<&mut FloatingTextState>,
 ) {
     let mut hits: Vec<ProcEvent> = Vec::new();
+    // Each shock's damage-dealt credit for its Paladin, as (caster, landed,
+    // absorbed), made once the target's borrow ends.
+    let mut credits: Vec<(Entity, f32, f32)> = Vec::new();
     // What the shocks set off on other units, spawned once they land.
     let mut follow_ups = DamageFollowUps::default();
     for (pending_entity, pending) in pending_damage.iter() {
@@ -297,6 +300,7 @@ pub fn process_holy_shock_damage(
                 .amount(actual_damage)
                 .other(pending.target);
             hits.push(hit);
+            credits.push((pending.caster, actual_damage, absorbed));
 
             // Log damage with caster attribution
             let caster_id = combatant_id(
@@ -325,7 +329,7 @@ pub fn process_holy_shock_damage(
                 caster_id.clone(),
                 target_id.clone(),
                 "Holy Shock".to_string(),
-                actual_damage,
+                credited_damage(actual_damage, absorbed),
                 is_killing_blow,
                 is_crit,
                 message,
@@ -347,6 +351,11 @@ pub fn process_holy_shock_damage(
 
         // Remove the pending damage entity
         commands.entity(pending_entity).despawn();
+    }
+    for (caster, landed, absorbed) in credits {
+        if let Ok((mut caster, _, _)) = combatants.get_mut(caster) {
+            credit_damage_dealt(&mut caster, landed, absorbed);
+        }
     }
     for hit in hits {
         if let Ok((caster, _, _)) = combatants.get(hit.unit) {

@@ -432,22 +432,6 @@ impl CombatLog {
         self.healing_by_ability(combatant_id).values().sum()
     }
 
-    /// Get total damage taken by a combatant
-    pub fn total_damage_taken(&self, combatant_id: &str) -> f32 {
-        let mut total = 0.0;
-
-        for entry in &self.entries {
-            if let Some(StructuredEventData::Damage { target, amount, .. }) = &entry.structured_data
-            {
-                if target == combatant_id {
-                    total += amount;
-                }
-            }
-        }
-
-        total
-    }
-
     /// Get number of killing blows by a combatant. Thin wrapper over
     /// [`Self::killing_blows_including_pets`] with no pet links, so the plain
     /// and pet-aware counts can never drift apart.

@@ -15,8 +15,8 @@ use super::super::utils::{combat_log_id, get_next_fct_offset};
 use super::super::{AUTO_SHOT_RANGE, FCT_HEIGHT, HUNTER_DEAD_ZONE, MELEE_RANGE, WAND_RANGE};
 use super::avoidance::{avoid_melee_attack, MeleeDefense};
 use super::damage::{
-    apply_damage_with_absorb, damage_dealt_multiplier, get_divine_shield_damage_penalty,
-    get_physical_damage_reduction, roll_crit, Hit,
+    apply_damage_with_absorb, credit_damage_dealt, credited_damage, damage_dealt_multiplier,
+    get_divine_shield_damage_penalty, get_physical_damage_reduction, roll_crit, Hit,
 };
 use super::follow_ups::DamageFollowUps;
 use crate::combat::log::{CombatLog, CombatLogEventType};
@@ -718,7 +718,7 @@ pub fn combat_auto_attack(
     // call order determines entity ID allocation and ripples into downstream
     // query iteration — a pre-existing source of self-mirror non-determinism
     // before this fix.
-    let mut damage_dealt_updates: Vec<(Entity, f32)> = Vec::new();
+    let mut damage_dealt_updates: Vec<(Entity, f32, f32)> = Vec::new();
     let mut absorbed_per_target: std::collections::BTreeMap<Entity, f32> =
         std::collections::BTreeMap::new();
 
@@ -909,7 +909,7 @@ pub fn combat_auto_attack(
                 *absorbed_per_target.entry(target_entity).or_insert(0.0) += absorbed;
 
                 // Collect attacker damage for later update (include absorbed damage - attacker dealt it)
-                damage_dealt_updates.push((attacker_entity, actual_damage + absorbed));
+                damage_dealt_updates.push((attacker_entity, actual_damage, absorbed));
 
                 // One landed auto-attack = one swing signal for the graphical
                 // animation layer. Spawned here in the APPLY loop — not at the
@@ -974,7 +974,7 @@ pub fn combat_auto_attack(
                         attacker_id.clone(),
                         target_id.clone(),
                         attack_name.to_string(),
-                        actual_damage + absorbed, // Total damage dealt (including absorbed)
+                        credited_damage(actual_damage, absorbed),
                         is_killing_blow,
                         is_crit,
                         message,
@@ -1054,7 +1054,7 @@ pub fn combat_auto_attack(
         *damage_per_aura_break.entry(target_entity).or_insert(0.0) += actual_damage;
         *damage_per_target.entry(target_entity).or_insert(0.0) += actual_damage;
         *absorbed_per_target.entry(target_entity).or_insert(0.0) += absorbed;
-        damage_dealt_updates.push((attacker_entity, actual_damage + absorbed));
+        damage_dealt_updates.push((attacker_entity, actual_damage, absorbed));
         let (
             Some((attacker_team, attacker_name, _, attacker_slot, _)),
             Some((target_team, target_name, _, target_slot, _)),
@@ -1082,7 +1082,7 @@ pub fn combat_auto_attack(
             attacker_id.clone(),
             target_id.clone(),
             def.name.clone(),
-            actual_damage + absorbed,
+            credited_damage(actual_damage, absorbed),
             is_killing_blow,
             false,
             message,
@@ -1244,9 +1244,9 @@ pub fn combat_auto_attack(
     }
 
     // Update attacker damage dealt stats
-    for (attacker_entity, damage) in damage_dealt_updates {
+    for (attacker_entity, landed, absorbed) in damage_dealt_updates {
         if let Ok((_, _, mut attacker, _, _, _)) = combatants.get_mut(attacker_entity) {
-            attacker.damage_dealt += damage;
+            credit_damage_dealt(&mut attacker, landed, absorbed);
         }
     }
 

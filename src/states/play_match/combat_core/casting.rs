@@ -12,8 +12,8 @@ use super::super::match_config;
 use super::super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
 use super::super::FCT_HEIGHT;
 use super::damage::{
-    apply_damage_with_absorb, damage_dealt_multiplier, get_divine_shield_damage_penalty,
-    get_physical_damage_reduction, roll_crit, Hit, HitKind,
+    apply_damage_with_absorb, credit_damage_dealt, credited_damage, damage_dealt_multiplier,
+    get_divine_shield_damage_penalty, get_physical_damage_reduction, roll_crit, Hit, HitKind,
 };
 use super::follow_ups::DamageFollowUps;
 use super::healing::apply_healing;
@@ -446,7 +446,7 @@ pub fn process_casting(
     }
 
     // Track damage_dealt updates for casters (to apply after processing all casts)
-    let mut caster_damage_updates: Vec<(Entity, f32)> = Vec::new();
+    let mut caster_damage_updates: Vec<(Entity, f32, f32)> = Vec::new();
     // Track healing_done updates for healers (to apply after processing all casts)
     let mut caster_healing_updates: Vec<(Entity, f32)> = Vec::new();
     // Track ability cooldowns to apply (caster_entity, ability, cooldown_duration)
@@ -755,14 +755,13 @@ pub fn process_casting(
                     .other(target_entity),
             );
 
-            // Track damage dealt for caster (include absorbed - caster dealt it)
-            let total_damage_dealt = actual_damage + absorbed;
+            // The caster's damage-dealt credit.
             if is_self_target {
                 // Self-damage: target IS caster, so update now
-                target.damage_dealt += total_damage_dealt;
+                credit_damage_dealt(&mut target, actual_damage, absorbed);
             } else {
                 // Different target: collect for later update
-                caster_damage_updates.push((caster_entity, total_damage_dealt));
+                caster_damage_updates.push((caster_entity, actual_damage, absorbed));
             }
 
             // Spawn floating combat text (yellow for damage abilities)
@@ -888,7 +887,7 @@ pub fn process_casting(
                 caster_id.clone(),
                 target_id.clone(),
                 def.name.to_string(),
-                total_damage_dealt, // Total damage including absorbed
+                credited_damage(actual_damage, absorbed),
                 is_killing_blow,
                 is_crit_damage,
                 message,
@@ -1237,9 +1236,9 @@ pub fn process_casting(
     }
 
     // Apply collected caster damage updates
-    for (caster_entity, damage) in caster_damage_updates {
+    for (caster_entity, landed, absorbed) in caster_damage_updates {
         if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {
-            caster.damage_dealt += damage;
+            credit_damage_dealt(&mut caster, landed, absorbed);
         }
     }
 
@@ -1488,10 +1487,15 @@ pub fn process_channeling(
             pet_query.get(caster_entity).ok().map(|p| p.pet_type),
         );
         let channel_name = caster_book.get_unchecked(&channel_ability).name.clone();
+        // The tick's breakdown row, apart from the channel's cast: its own
+        // damage and any share of it a transfer passes on are logged there.
+        let tick_row = format!("{channel_name} (tick)");
         // The target this tick killed, for the death line after the tick's.
         let mut killed: Option<String> = None;
-        // The damage the tick landed, for the channeler's `damage_dealt`.
+        // The damage the tick landed and the damage a shield took, for the
+        // channeler's `damage_dealt`.
         let mut landed = 0.0;
+        let mut soaked = 0.0;
         // The channeler's damage-dealt increases, read before the target is
         // borrowed.
         let dealt = combatants
@@ -1513,6 +1517,7 @@ pub fn process_channeling(
                     None,
                     target_entity,
                 )
+                .row(&tick_row)
                 .with_dealt(dealt)
                 .of_kind(HitKind::Periodic);
                 let (actual_damage, absorbed) = apply_damage_with_absorb(
@@ -1524,6 +1529,7 @@ pub fn process_channeling(
                 );
 
                 landed = actual_damage;
+                soaked = absorbed;
 
                 // The tick's leeches: the channel's own (Drain Life's, off the
                 // damage that landed), and a Vampiric Embrace on its target.
@@ -1634,8 +1640,8 @@ pub fn process_channeling(
                 combat_log.log_damage(
                     caster_id.clone(),
                     target_id.clone(),
-                    format!("{} (tick)", channel_name),
-                    actual_damage,
+                    tick_row.clone(),
+                    credited_damage(actual_damage, absorbed),
                     is_killing_blow,
                     false, // is_crit - channel ticks never crit
                     message,
@@ -1658,10 +1664,9 @@ pub fn process_channeling(
             combat_log.log_death(target_id, Some(caster_id), death_message);
         }
 
-        // Credit the channeler with the damage that landed: the number its
-        // tick's log line, and so the Results breakdown, names.
+        // Credit the channeler with the tick, as its log row counts it.
         if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(caster_entity) {
-            caster.damage_dealt += landed;
+            credit_damage_dealt(&mut caster, landed, soaked);
         }
     }
 
