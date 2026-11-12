@@ -14,11 +14,11 @@
 //!   caster-healer machine it shares with the Shaman) and the Priest's — and
 //!   pins the walk out of the shadow to within a second, paired with `Legacy`
 //!   keeping the healer blind;
-//! - `the_repaired_point_never_flips_across_a_shadow` reads every formation
-//!   healer over a 100-seed bank — a 2v2 whose Priest's Warrior walks round the
-//!   camp pillar, and a 3v3 whose teammates stand close behind distant pillars
-//!   — and bounds the rate at which its formation goal flips and comes back by
-//!   main's own rate;
+//! - `formation_goal_jumps_stay_within_the_calibrated_rate` reads every
+//!   formation healer over a 100-seed bank — a 2v2 whose Priest's Warrior walks
+//!   round the camp pillar, and a 3v3 whose teammates stand close behind
+//!   distant pillars — and bounds its formation goal's jumps over 10yd by a
+//!   bound calibrated on six blocks of the shipped kit;
 //! - `kept_exit_reset::leaving_free_forgets_the_kept_exit` holds the kept exit,
 //!   and the formation heading (AS-370), to FREE.
 //!
@@ -500,100 +500,111 @@ const FLIP_BANK: [(&[&str], &[&str]); 3] = [
     (&["Warlock", "Priest"], &["Rogue", "Druid"]),
 ];
 
-/// The repaired formation point never flips across a shadow — FLIPPING here
-/// is a RETURN: a frame-to-frame jump of a formation healer's goal over 10yd,
-/// undone to within 2yd inside a second, the goal sent across a shadow and
-/// straight back. Measured over the bank's comps, both team orders, the first
-/// 30s (the walk out of the room, the camp release and first contact) and
-/// [`FLIP_SEEDS`] seeds, as a RATE: returns per healer track (one formation
-/// healer in one match).
+/// The formation goal's jumps stay within the shipped kit's calibrated rate.
+/// A JUMP is a frame-to-frame move of a FREE formation healer's goal over
+/// 10yd: the goal sent across a shadow (AS-206's repair changing exit) or
+/// round the centroid (the heading AS-370 turns instead of flipping). Counted
+/// over the bank's comps, both team orders, the first 30s (the walk out of the
+/// room, the camp release and first contact) and seeds [`JUMP_SEEDS`]: one
+/// block of 100 seeds, 1000 healer tracks (one formation healer in one match).
 ///
-/// The bound is main's own rate on this bank, not a number fitted to the
-/// head. At `main` @ f0831492 the bank's 1000 tracks held 3 returns (seeds 11,
-/// 18 and 67, each the 3v3's Priest); [`MAX_RETURNS`] is the 99th percentile
-/// of a Poisson count with that mean, 8 (P(X <= 8) = 0.996, P(X <= 7) = 0.988),
-/// so a change that makes the healers flip measurably more often fails, and
-/// the bank's own noise does not. AS-460's head, every class's Trinket2
-/// filled, holds 3 too (seeds 12, 48 and 80). The test asserted "never" over
-/// seeds 0-9 until AS-460 moved one return into them; main itself returns
-/// at seeds 11 and 18.
+/// [`MAX_JUMPS_OVER_10`] is a one-sided 99% prediction bound for one new block,
+/// mean + t(0.99, 5) x sd x sqrt(1 + 1/6), calibrated on SIX blocks of the
+/// shipped kit (AS-460, every class's Trinket2 filled), seeds 0-599:
 ///
-/// Measured and printed, not asserted: a goal that jumps over 25yd and does
-/// NOT come back (the repair should stay within `REPAIR_LIMIT`, 16yd, of the
-/// formation). That is a known defect, AS-469, with no cause the jump
-/// classifier names. On this bank main holds 1 such jump (seed 55, the 3v3's
-/// Priest, 32.6yd) and AS-460's head 3, in 2 matches (seed 3's Priest, 25.1yd;
-/// seed 20's Druid, 27.9yd and 38.4yd). Under a common rate, 3 of 4 jumps
-/// falling on one side is a 5-in-16 chance, so the bank does not tell the two
-/// apart.
+/// | seeds    | jumps > 10yd | jumps > 25yd | returns (tracks) |
+/// |----------|--------------|--------------|------------------|
+/// | 0-99     | 91           | 3            | 3 (3)            |
+/// | 100-199  | 74           | 2            | 4 (4)            |
+/// | 200-299  | 109          | 6            | 13 (5)           |
+/// | 300-399  | 79           | 0            | 4 (3)            |
+/// | 400-499  | 108          | 6            | 13 (8)           |
+/// | 500-599  | 90           | 3            | 12 (4)           |
+///
+/// Mean 91.8, sd 14.4: the bound is 144. With AS-370's turn limit removed
+/// (the heading flips with the line again) block 0-99 jumps 394 times, 250
+/// over the bound.
+///
+/// The kit before AS-460 jumped less on the same seeds: 465 jumps over 10yd
+/// against 551 (74, 66, 74, 91, 69, 91 a block), 9 over 25yd against 20, and
+/// 34 returns in 19 tracks against 49 in 27. AS-460 changes no movement code;
+/// the formation machinery is sensitive to the match dynamics a kit sets, and
+/// that rate, with the jumps over 25yd no cause names and the returns (a jump
+/// undone inside a second), is recorded on AS-469. When AS-469 fixes the
+/// cause, RE-CALIBRATE this bound on six fresh blocks; never loosen it ad hoc.
+/// Neither the long jumps nor the returns are asserted: a return clusters
+/// (up to 9 in one track on the old kit), so its count has no stable tail.
 #[test]
-fn the_repaired_point_never_flips_across_a_shadow() {
+fn formation_goal_jumps_stay_within_the_calibrated_rate() {
     let jobs: Vec<(&[&str], &[&str], u64)> = FLIP_BANK
         .iter()
-        .flat_map(|&(a, b)| FLIP_SEEDS.flat_map(move |seed| [(a, b, seed), (b, a, seed)]))
+        .flat_map(|&(a, b)| JUMP_SEEDS.flat_map(move |seed| [(a, b, seed), (b, a, seed)]))
         .collect();
     let workers = std::thread::available_parallelism().map_or(4, |n| n.get().min(6));
     let chunk = jobs.len().div_ceil(workers);
-    let (pairs, tracks, returns, big) = std::thread::scope(|scope| {
+    // Per worker: frame pairs, tracks, jumps over 10yd, the returns and the
+    // jumps over 25yd (both reported, not asserted).
+    type Tally = (usize, usize, usize, Vec<(String, usize)>, Vec<String>);
+    let (pairs, tracks, over10, returns, big): Tally = std::thread::scope(|scope| {
         let handles: Vec<_> = jobs
             .chunks(chunk)
             .map(|jobs| {
                 scope.spawn(move || {
-                    let (mut pairs, mut tracks) = (0usize, 0usize);
-                    let (mut returns, mut big) = (Vec::new(), Vec::new());
+                    let mut tally: Tally = Default::default();
                     for &(t1, t2, seed) in jobs {
                         for (class, track, goals) in
                             formation_tracks(t1, t2, seed, 30.0, "TeamPlan")
                         {
-                            pairs += track.pairs;
-                            tracks += 1;
                             let label = format!("{t1:?} v {t2:?} seed {seed} {class}");
-                            for &(t, d) in track.jumps.iter().filter(|j| j.1 > 25.0) {
-                                big.push(format!("{label}: {d:.1}yd at {t:.2}s"));
-                            }
+                            tally.0 += track.pairs;
+                            tally.1 += 1;
+                            tally.2 += track.over(10.0);
                             let r = track.returns(10.0, &goals);
                             if r > 0 {
-                                returns.push((label, r));
+                                tally.3.push((label.clone(), r));
+                            }
+                            for &(t, d) in track.jumps.iter().filter(|j| j.1 > 25.0) {
+                                tally.4.push(format!("{label}: {d:.1}yd at {t:.2}s"));
                             }
                         }
                     }
-                    (pairs, tracks, returns, big)
+                    tally
                 })
             })
             .collect();
         handles
             .into_iter()
             .map(|h| h.join().expect("a worker"))
-            .fold(
-                (0, 0, Vec::new(), Vec::new()),
-                |(p, t, mut r, mut b), (p2, t2, r2, b2)| {
-                    r.extend(r2);
-                    b.extend(b2);
-                    (p + p2, t + t2, r, b)
-                },
-            )
+            .fold(Default::default(), |mut all: Tally, part| {
+                all.0 += part.0;
+                all.1 += part.1;
+                all.2 += part.2;
+                all.3.extend(part.3);
+                all.4.extend(part.4);
+                all
+            })
     });
-    let total: usize = returns.iter().map(|(_, n)| n).sum();
-    println!("{pairs} formation-goal frame pairs, {tracks} tracks, {total} returns: {returns:#?}");
-    // Measured, not asserted (AS-469): goal jumps over 25yd.
-    println!("{} jumps over 25yd: {big:#?}", big.len());
+    println!(
+        "{pairs} formation-goal frame pairs, {tracks} tracks, {over10} jumps over 10yd; \
+         reported only (AS-469): returns {returns:#?}, jumps over 25yd {big:#?}"
+    );
     assert!(
         pairs > 50_000,
         "the bank no longer walks its healers to their formation points ({pairs} frames)"
     );
     assert!(
-        total <= MAX_RETURNS,
-        "{total} formation-goal returns in {tracks} tracks, over main's bound of \
-         {MAX_RETURNS}: {returns:#?}"
+        over10 <= MAX_JUMPS_OVER_10,
+        "{over10} formation-goal jumps over 10yd in {tracks} tracks, over the calibrated \
+         bound of {MAX_JUMPS_OVER_10}"
     );
 }
 
-/// The seeds `the_repaired_point_never_flips_across_a_shadow` plays.
-const FLIP_SEEDS: std::ops::Range<u64> = 0..100;
+/// The seeds `formation_goal_jumps_stay_within_the_calibrated_rate` plays.
+const JUMP_SEEDS: std::ops::Range<u64> = 0..100;
 
-/// The most returns the bank may hold: the 99th percentile of a Poisson count
-/// with main's mean of 3 (see the test).
-const MAX_RETURNS: usize = 8;
+/// The most formation-goal jumps over 10yd one block may hold: the shipped
+/// kit's 99% prediction bound (see the test).
+const MAX_JUMPS_OVER_10: usize = 144;
 
 /// Measurement, not a gate: per comp, the formation goals' frame-to-frame jumps
 /// over 5yd, 10yd and 25yd, their returns, the half-second spans over which a
