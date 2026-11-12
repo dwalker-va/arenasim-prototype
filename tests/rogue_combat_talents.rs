@@ -703,3 +703,44 @@ fn under_a_burst_expose_armor_is_for_the_window_enemy_only() {
         describe(&view)
     );
 }
+
+/// The planner FIRES on a Warrior (a non-caster takes the stun whenever it is
+/// up), and a Fire refused only for energy pools: at 50 energy, Kidney Shot
+/// ready, the Rogue holds everything, Expose Armor included (it would leave
+/// 25, and Kidney Shot costs 60), with the talent or without.
+#[test]
+fn expose_armor_never_spends_energy_a_refused_kidney_shot_pools() {
+    let scene = |expose: bool| {
+        let mut s = Scene::new()
+            .unit(ME, 1, Rogue)
+            .mana(0.5)
+            .targeting(FOE)
+            .unit(FOE, 2, Warrior)
+            .at(1.5, 0.0)
+            .armor(PLATE);
+        if expose {
+            s = s.grant(ME, AbilityType::ExposeArmor);
+        }
+        s.combatant_mut(ME).stealthed = false;
+        s.decide(ME)
+    };
+    let control = scene(false);
+    assert_eq!(control.chose(), None, "{}", describe(&control));
+    assert!(
+        matches!(
+            control.rejected(AbilityType::KidneyShot),
+            Some(RejectionReason::InsufficientResource { .. })
+        ),
+        "{}",
+        describe(&control)
+    );
+    let view = scene(true);
+    assert_eq!(view.chose(), None, "{}", describe(&view));
+    assert!(
+        view.candidates
+            .iter()
+            .all(|c| c.ability != AbilityType::ExposeArmor),
+        "{}",
+        describe(&view)
+    );
+}
