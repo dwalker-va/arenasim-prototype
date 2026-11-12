@@ -331,6 +331,20 @@ after it failed the hover intermittently, at a different class's first hover
 each run (AS-289). `hover` now starts with `AwaitClickRest`, which holds the
 move until egui's own click clock is past 0.1s, whatever the frames do.
 
+Waiting out the click is not enough on its own, because the move then has to
+be COUNTED. egui 0.31 computes velocity only from three or more position
+samples inside its 0.1s window (`input_state/mod.rs`, `pos_history`), takes
+one sample per pass, and keeps two once frames run past 50ms. A hover's one
+move gets two chances to land in a window of three, and a slow stretch across
+both left it uncounted; by the time the frames sped up the pointer was still,
+so there was no move left to count and the tooltip was withheld for good
+(AS-453, about 1 run in 3 at load 90-110). After aiming, `hover` now runs
+`RegisterMove`, which nudges the pointer a point at a time along a sawtooth
+across the widget's centre until `move_counted_gate` (the click gate alone)
+opens; on a pass that already counted the aim it moves nothing. While EVERY
+frame is longer than 50ms nothing can open it, for the driver or for a person
+with a mouse, and the step fails saying so rather than naming the symptom.
+
 All three traps share a shape: the driver observed a state that was still
 changing. When a new assertion is flaky, suspect that before suspecting the
 UI — and check whether your wait and the thing you are waiting for are
@@ -408,11 +422,12 @@ anything under `src/ui/driver/`.
 inertness), and the runner's three PURE seams: `expand`, which decides what a
 step costs in frames, `evaluate`, which decides every `assert-*` verb, and
 `pointer_step`, which decides each frame of a pointer action — the aim, the
-scroll-to-reveal, the rect-stability gate and the two waits (`AwaitClickRest`,
-`tooltip_gate`). `run_ui_script` only injects what `pointer_step` returns and
+scroll-to-reveal, the rect-stability gate, the move nudge (`RegisterMove`) and
+the two waits (`AwaitClickRest`, `tooltip_gate`). `run_ui_script` only injects what `pointer_step` returns and
 counts frames, so `tests/view_combatant_snapshot.rs` drives the real decision
 code over a bare `egui::Context`, and `tests/ui_driver.rs` shows the click-rest
-wait is in seconds at 240 and 20 frames a second.
+wait is in seconds at 240 and 20 frames a second, and that a hover after a
+click opens the tooltip gate through a second of 0.1s frames.
 
 **The rest of the frame loop is not covered by any test.** It needs a window,
 so the event injection itself, the timeout counting and the step sequencing are
