@@ -530,36 +530,35 @@ pub fn draw_view_combatant(
             }
             ui.add_space(space::LG);
 
-            egui::ScrollArea::vertical()
-                .auto_shrink(false)
-                .show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.set_max_width(CONTENT_MAX_W);
-                        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                            match view_state {
-                                Some(view_state) => {
-                                    open_topic = draw_sheet(
-                                        ui,
-                                        view_state,
-                                        match_config,
-                                        picker_state,
-                                        data,
-                                        &encyclopedia_data,
-                                    );
-                                }
-                                None => {
-                                    empty_state(
-                                        ui,
-                                        "view-combatant:empty",
-                                        "No combatant selected",
-                                        "Open a filled slot from Match Setup to view its combatant.",
-                                        None,
-                                    );
-                                }
+            GameState::ViewCombatant.body_scroll().show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.set_max_width(CONTENT_MAX_W);
+                    ui.with_layout(
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| match view_state {
+                            Some(view_state) => {
+                                open_topic = draw_sheet(
+                                    ui,
+                                    view_state,
+                                    match_config,
+                                    picker_state,
+                                    data,
+                                    &encyclopedia_data,
+                                );
                             }
-                        });
-                    });
+                            None => {
+                                empty_state(
+                                    ui,
+                                    "view-combatant:empty",
+                                    "No combatant selected",
+                                    "Open a filled slot from Match Setup to view its combatant.",
+                                    None,
+                                );
+                            }
+                        },
+                    );
                 });
+            });
         });
 
     // The picker, over the whole screen. Drawn after the sheet so its modal

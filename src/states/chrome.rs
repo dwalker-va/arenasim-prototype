@@ -21,6 +21,7 @@ use std::collections::HashMap;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy_egui::egui;
 
 use super::GameState;
 use crate::keybindings::{GameAction, Keybindings};
@@ -133,6 +134,26 @@ impl GameState {
                 ScreenHarness::Snapshot("tests/animation_sandbox_snapshot.rs")
             }
         }
+    }
+
+    /// A [`Template::Document`] screen's scrolling body, keyed by the screen.
+    ///
+    /// egui keeps a scroll offset per widget id, and every Document body sits
+    /// in a `CentralPanel`, so a body left at egui's default id would share
+    /// ONE offset with every other screen's. Leaving View Combatant for an
+    /// encyclopedia page that fits the window clamped that shared offset to
+    /// zero, and the sheet came back at the top instead of where it was left.
+    /// Keyed by its screen, each body keeps its own offset across a round
+    /// trip.
+    pub fn body_scroll(self) -> egui::ScrollArea {
+        debug_assert_eq!(
+            self.chrome().template,
+            Template::Document,
+            "{self:?} has no Document body"
+        );
+        egui::ScrollArea::vertical()
+            .id_salt(("document-body", self))
+            .auto_shrink(false)
     }
 }
 
@@ -348,5 +369,13 @@ mod tests {
             "\u{25c0} ENCYCLOPEDIA"
         );
         assert_eq!(context.nav(GameState::MainMenu, false), None);
+    }
+
+    /// Only a Document screen has a scrolling body to key.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "MainMenu has no Document body")]
+    fn a_screen_without_a_document_body_has_no_body_scroll() {
+        let _ = GameState::MainMenu.body_scroll();
     }
 }

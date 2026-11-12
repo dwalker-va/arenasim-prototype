@@ -17,6 +17,7 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
 use super::chrome::ScreenNav;
+use super::GameState;
 use crate::keybindings::{GameAction, Keybindings};
 use crate::settings::GameSettings;
 use crate::ui::driver as ui_driver;
@@ -183,21 +184,19 @@ pub fn draw_keybindings(
             }
             ui.add_space(space::LG);
 
-            egui::ScrollArea::vertical()
-                .auto_shrink(false)
-                .show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.set_max_width(CONTENT_MAX_W);
-                        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                            for (i, category) in CATEGORIES.into_iter().enumerate() {
-                                if i > 0 {
-                                    ui.add_space(space::MD);
-                                }
-                                category_panel(ui, category, keybindings, state);
+            GameState::Keybindings.body_scroll().show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.set_max_width(CONTENT_MAX_W);
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                        for (i, category) in CATEGORIES.into_iter().enumerate() {
+                            if i > 0 {
+                                ui.add_space(space::MD);
                             }
-                        });
+                            category_panel(ui, category, keybindings, state);
+                        }
                     });
                 });
+            });
         });
 
     if state.confirm_reset {

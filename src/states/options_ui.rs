@@ -132,8 +132,8 @@ pub fn draw_options(ctx: &egui::Context, data: &OptionsData, nav: Nav) -> Option
                 ),
             );
 
-            egui::ScrollArea::vertical()
-                .auto_shrink(false)
+            GameState::Options
+                .body_scroll()
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.set_max_width(CONTENT_MAX_W);
