@@ -60,7 +60,7 @@ use super::encyclopedia::{
     abilities as encyclopedia_abilities, talents as encyclopedia_talents, widget, EncyclopediaData,
     EncyclopediaState, Topic,
 };
-use super::play_match::talents::{Build, TalentDefinitions, TalentEffect, TalentStat};
+use super::play_match::talents::{Build, StatChange, TalentDefinitions, TalentEffect, TalentStat};
 use super::talent_panel;
 use crate::ui::driver as ui_driver;
 use crate::ui::theme::{class_color, color, data, icon, size, space, text};
@@ -845,12 +845,12 @@ fn draw_sheet(
     // and the kit on the same frame.
     let build = combatant_build(match_config, view_state);
     let granted = granted_abilities(data.talents, &build);
-    // The build's stat percentages, as the spawn applies them (after the
-    // equipment, gear included).
-    let talent_percents = data
+    // The build's stat changes, as the spawn applies them (after the
+    // equipment: its points, then its percentage of the total).
+    let talent_changes = data
         .talents
         .resolve(data.abilities, class, &build)
-        .map(|resolved| resolved.stat_percents().clone())
+        .map(|resolved| resolved.stat_changes().clone())
         .unwrap_or_default();
 
     // The pet whose abilities belong in THIS combatant's kit. View Combatant is
@@ -896,7 +896,7 @@ fn draw_sheet(
                 &mut columns[0],
                 &stats,
                 &equip_bonuses,
-                &talent_percents,
+                &talent_changes,
                 held,
             );
             let (kit_height, clicked) = render_abilities_panel(
@@ -976,7 +976,11 @@ struct StatLine<'a> {
 impl StatLine<'_> {
     /// Draw the row when its total is not zero: in the bonus colour when the
     /// gear or the build raised it, the breakdown on hover.
-    fn draw(&self, ui: &mut egui::Ui, talents: &std::collections::BTreeMap<TalentStat, f32>) {
+    fn draw(
+        &self,
+        ui: &mut egui::Ui,
+        talents: &std::collections::BTreeMap<TalentStat, StatChange>,
+    ) {
         let geared = self.base + self.gear;
         let total = talented(geared, talents, self.stat);
         if total == 0.0 {
@@ -1036,14 +1040,32 @@ fn resistance_reduction(value: f32) -> String {
     )
 }
 
-/// A stat total with the build's percentage of it applied, as the spawn
-/// applies it: `total × (1 + percent)`.
+/// A stat total with the build's change to it applied, as the spawn applies
+/// it ([`StatChange::applied`]): its points added, then its percentage.
 fn talented(
     total: f32,
-    percents: &std::collections::BTreeMap<TalentStat, f32>,
+    changes: &std::collections::BTreeMap<TalentStat, StatChange>,
     stat: TalentStat,
 ) -> f32 {
-    stat.applied(total, percents.get(&stat).copied().unwrap_or(0.0))
+    changes
+        .get(&stat)
+        .copied()
+        .unwrap_or_default()
+        .applied(total)
+}
+
+/// What a build adds to every weapon swing, as the Weapon Damage row prints
+/// it: its points, then its percentage, the order the spawn applies them
+/// ("+3 +10%").
+fn weapon_damage_bonus(change: StatChange) -> String {
+    let mut parts = Vec::new();
+    if change.points != 0.0 {
+        parts.push(format!("+{:.0}", change.points));
+    }
+    if change.fraction != 0.0 {
+        parts.push(format!("+{:.0}%", change.fraction * 100.0));
+    }
+    parts.join(" ")
 }
 
 /// Write this combatant's value into a per-slot `MatchConfig` table. A slot
@@ -1130,7 +1152,7 @@ fn render_stats_panel(
     ui: &mut egui::Ui,
     stats: &ClassBaseStats,
     equip: &EquipmentBonuses,
-    talents: &std::collections::BTreeMap<TalentStat, f32>,
+    talents: &std::collections::BTreeMap<TalentStat, StatChange>,
     min_height: f32,
 ) -> f32 {
     panel(None)
@@ -1344,12 +1366,12 @@ fn render_stats_panel(
 
                         // Weapon damage has no row of its own (the swing is the
                         // weapon's); a build that raises it says so here.
-                        if let Some(bonus) = talents.get(&TalentStat::WeaponDamage) {
+                        if let Some(change) = talents.get(&TalentStat::WeaponDamage) {
                             stat_row(
                                 ui,
                                 "Weapon Damage",
-                                &format!("+{:.0}%", bonus * 100.0),
-                                bonus_color(*bonus),
+                                &weapon_damage_bonus(*change),
+                                bonus_color(change.points + change.fraction),
                             );
                         }
                     });
@@ -2439,5 +2461,15 @@ mod tests {
         for slot in ItemSlot::all() {
             assert!(!is_effective_override(*slot, &overrides, &resolved));
         }
+    }
+
+    /// The Weapon Damage row prints a build's points, then its percentage;
+    /// a percentage alone reads as it always has.
+    #[test]
+    fn weapon_damage_bonus_prints_points_then_percentage() {
+        let change = |points, fraction| StatChange { points, fraction };
+        assert_eq!(weapon_damage_bonus(change(0.0, 0.1)), "+10%");
+        assert_eq!(weapon_damage_bonus(change(3.0, 0.0)), "+3");
+        assert_eq!(weapon_damage_bonus(change(3.0, 0.1)), "+3 +10%");
     }
 }

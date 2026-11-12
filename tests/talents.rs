@@ -24,7 +24,7 @@ use arenasim::states::play_match::equipment::{
     load_default_loadouts, load_item_definitions, EquipmentPlugin,
 };
 use arenasim::states::play_match::talents::{
-    AbilityField, Build, TalentDefinitions, TalentId, TalentStat, CAPSTONE_PRICE,
+    AbilityField, Build, StatChange, TalentDefinitions, TalentId, TalentStat, CAPSTONE_PRICE,
     MAX_TALENT_POINTS, PRICE_TOLERANCE, RANK_PRICE,
 };
 use arenasim::states::play_match::{
@@ -158,6 +158,23 @@ fn the_loader_rejects_each_broken_rule() {
         // StatPercent on an unweighted stat has no computed price.
         (EMBRACE, "per_rank: [StatPercent(Armor, 0.03)],", "declares no budget"),
         (EMBRACE, "per_rank: [StatPercent(MaxHealth, 0.0)],", "not positive"),
+        // Nor has a StatAdd on one; a StatAdd on a weighted stat has.
+        (EMBRACE, "per_rank: [StatAdd(Armor, 30.0)],", "declares no budget"),
+        (EMBRACE, "budget: Some(11.0), per_rank: [StatAdd(CritChance, 0.01)],", "declares a budget"),
+        (EMBRACE, "per_rank: [StatAdd(CritChance, 0.0)],", "not positive"),
+        (EMBRACE, "per_rank: [StatAdd(CritChance, -0.01)],", "not positive"),
+        (EMBRACE, "per_rank: [StatAdd(CritChance, inf)],", "not positive"),
+        // A chance every class has at 0 takes points, never a percentage.
+        (
+            EMBRACE,
+            "budget: Some(11.0), per_rank: [StatPercent(DodgeChance, 0.04)],",
+            "a StatAdd adds it in points",
+        ),
+        (
+            "per_rank: [PetStatPercent(MaxHealth, 0.10)],",
+            "per_rank: [PetStatPercent(ParryChance, 0.04)],",
+            "a StatAdd adds it in points",
+        ),
         (EMBRACE, "per_rank: [],", "per_rank is empty"),
         // A prerequisite: same tree, a lower tier, a rank it has.
         (
@@ -398,19 +415,34 @@ fn stat_percents_refill_pools_and_reach_every_weapon() {
     );
 }
 
-/// A raised stat (a chance or haste every class has at 0) takes its fraction
-/// in POINTS, so two ranks of +4% dodge are 8% from nothing; a scaled stat
-/// still takes a percentage of its total.
+/// A stat change adds its points, as an item does, then takes its
+/// percentage of that total: so a percentage reaches the points too. A chance
+/// or haste every class has at 0 takes points only, and declares its price.
 #[test]
-fn a_raised_stat_adds_its_fraction_in_points() {
+fn a_stat_change_adds_its_points_then_takes_its_percentage() {
+    let points = |points| StatChange {
+        points,
+        fraction: 0.0,
+    };
+    let fraction = |fraction| StatChange {
+        points: 0.0,
+        fraction,
+    };
+    assert_eq!(points(0.08).applied(0.0), 0.08);
+    assert_eq!(points(0.08).applied(0.05), 0.05 + 0.08);
+    assert_eq!(fraction(0.1).applied(100.0), 100.0 * (1.0 + 0.1));
+    let both = StatChange {
+        points: 20.0,
+        fraction: 0.1,
+    };
+    assert_eq!(both.applied(100.0), (100.0 + 20.0) * (1.0 + 0.1));
+    assert_eq!(StatChange::default().applied(123.0), 123.0);
     for stat in [
         TalentStat::DodgeChance,
         TalentStat::ParryChance,
         TalentStat::MeleeAttackSpeed,
     ] {
-        assert!(stat.is_raised(), "{stat:?}");
-        assert_eq!(stat.applied(0.0, 0.08), 0.08);
-        assert_eq!(stat.applied(0.05, 0.08), 0.05 + 0.08);
+        assert!(stat.takes_points_only(), "{stat:?}");
         assert_eq!(stat.item_weight(), None, "{stat:?} declares its price");
     }
     for stat in [
@@ -418,8 +450,7 @@ fn a_raised_stat_adds_its_fraction_in_points() {
         TalentStat::OffHandDamage,
         TalentStat::CritChance,
     ] {
-        assert!(!stat.is_raised(), "{stat:?}");
-        assert_eq!(stat.applied(100.0, 0.1), 100.0 * (1.0 + 0.1));
+        assert!(!stat.takes_points_only(), "{stat:?}");
     }
     assert_eq!(TalentStat::OffHandDamage.item_weight(), None);
 }
@@ -608,7 +639,7 @@ fn an_empty_build_resolves_to_the_untalented_combatant() {
         .unwrap();
     let base = AbilityBook::for_class(defs, CharacterClass::Warlock);
     assert_eq!(books(resolved.book()), books(&base));
-    assert!(resolved.stat_percents().is_empty() && resolved.pet_stat_percents().is_empty());
+    assert!(resolved.stat_changes().is_empty() && resolved.pet_stat_changes().is_empty());
     let mut c = Combatant::new(1, 0, CharacterClass::Warlock);
     c.current_health = 1.0;
     let before = stat_bits(&c);
@@ -689,8 +720,20 @@ fn a_build_resolves_its_ranks_and_patches() {
         };
         assert_eq!(config.cast_time, want, "{ability:?}");
     }
-    assert_eq!(resolved.stat_percents()[&TalentStat::MaxHealth], 0.06);
-    assert_eq!(resolved.pet_stat_percents()[&TalentStat::MaxHealth], 0.10);
+    assert_eq!(
+        resolved.stat_changes()[&TalentStat::MaxHealth],
+        StatChange {
+            points: 0.0,
+            fraction: 0.06
+        }
+    );
+    assert_eq!(
+        resolved.pet_stat_changes()[&TalentStat::MaxHealth],
+        StatChange {
+            points: 0.0,
+            fraction: 0.10
+        }
+    );
     // A patch that drives a field below zero is refused.
     let negative = edited(
         EMBRACE,

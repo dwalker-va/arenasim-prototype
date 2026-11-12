@@ -575,6 +575,67 @@ fn the_sheet_draws_the_slots_build_and_its_stats_read_it() {
     );
 }
 
+/// A build's flat crit reads on the sheet as the spawn applies it: the Crit
+/// Chance row is the geared total plus the points, and its hover names them.
+/// A fixture makes Demonic Embrace +5% crit chance a rank, in points.
+#[test]
+fn a_stat_add_reads_on_the_sheet_in_points() {
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+    let class_icons = ClassIcons::default();
+    let text = std::fs::read_to_string(arenasim::paths::asset_path("config/talents.ron"))
+        .expect("talents.ron reads");
+    let health = "per_rank: [StatPercent(MaxHealth, 0.03)],";
+    assert!(text.contains(health));
+    let fixture = TalentDefinitions::from_ron(
+        &text.replacen(health, "per_rank: [StatAdd(CritChance, 0.05)],", 1),
+        &abilities,
+    )
+    .expect("the fixture validates");
+    let crit = |build: Build| -> (f32, String) {
+        let mut config = MatchConfig::default();
+        config.team1[0] = Some(CharacterClass::Warlock);
+        config.team1_builds[0] = build;
+        let sheet = Sheet::open(
+            CharacterClass::Warlock,
+            config,
+            ViewCombatantData {
+                abilities: &abilities,
+                items: &items,
+                default_loadouts: &defaults,
+                class_icons: &class_icons,
+                ability_icons: None,
+                item_icons: None,
+                pet_icons: None,
+                talents: &fixture,
+            },
+        );
+        let note = sheet
+            .last
+            .notes
+            .iter()
+            .find_map(|n| n.strip_prefix("stat Crit Chance="))
+            .unwrap_or_else(|| panic!("no crit row: {:?}", sheet.last.notes))
+            .to_string();
+        let (value, hover) = note.split_once(" hover=").expect("a hover");
+        let value: f32 = value
+            .strip_suffix('%')
+            .expect("a percentage")
+            .parse()
+            .expect("a number");
+        (value, hover.to_string())
+    };
+    let (geared, hover) = crit(Build::default());
+    assert!(!hover.contains("from talents"), "{hover:?}");
+    let (talented, hover) = crit(Build::of(&[(TalentId::DemonicEmbrace, 2)]));
+    assert!(
+        (talented - (geared + 10.0)).abs() < 0.051,
+        "{geared}% + 2 x 5% is not {talented}%"
+    );
+    assert!(hover.ends_with("+ 10.0% from talents"), "{hover:?}");
+}
+
 /// Every widget on the sheet with a tooltip, and the note its tooltip body
 /// leaves: `kit:X` and `strategic:X[:eN]` show `Ability(X)`, and a worn item's
 /// `equip:<Slot>` row shows `Item(<id>)`. An empty socket has no tooltip.

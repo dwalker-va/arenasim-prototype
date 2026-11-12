@@ -5,10 +5,10 @@ use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 
-use arenasim::headless::runner::TraceConfig;
+use arenasim::headless::runner::{PreloadedConfigs, TraceConfig};
 use arenasim::headless::{
-    run_headless_match_observed, run_headless_match_staged, FrameObservation, HeadlessMatchConfig,
-    MatchResult, Stage,
+    run_headless_match_observed, run_headless_match_staged, run_headless_match_staged_prepared,
+    FrameObservation, HeadlessMatchConfig, MatchResult, Stage,
 };
 use arenasim::states::play_match::decision_trace::DecisionTrace;
 
@@ -76,16 +76,29 @@ impl Played {
 
 /// Play `config` with `stage` landed on it.
 pub fn play(config: HeadlessMatchConfig, stage: Stage) -> Played {
-    play_with(config, Some(stage))
+    play_with(config, Some(stage), None)
+}
+
+/// [`play`] on `preloaded` configs (a fixture) rather than the files on disk.
+pub fn play_prepared(
+    config: HeadlessMatchConfig,
+    preloaded: &PreloadedConfigs,
+    stage: Stage,
+) -> Played {
+    play_with(config, Some(stage), Some(preloaded))
 }
 
 /// Play `config` as its seed plays it, through the plain observed runner (no
 /// stage, no staging system).
 pub fn play_seeded(config: HeadlessMatchConfig) -> Played {
-    play_with(config, None)
+    play_with(config, None, None)
 }
 
-fn play_with(config: HeadlessMatchConfig, stage: Option<Stage>) -> Played {
+fn play_with(
+    config: HeadlessMatchConfig,
+    stage: Option<Stage>,
+    preloaded: Option<&PreloadedConfigs>,
+) -> Played {
     let dir = tempfile::tempdir().expect("a scratch directory");
     let trace_path = dir.path().join("trace.jsonl");
     let log_path = dir.path().join("match.txt");
@@ -103,7 +116,12 @@ fn play_with(config: HeadlessMatchConfig, stage: Option<Stage>) -> Played {
         Some(stage) => {
             let mark = landed.clone();
             let stage = stage.world(move |w| *mark.lock().unwrap() = Some(Landed::now(w)));
-            run_headless_match_staged(config, false, trace, stage, observe)
+            match preloaded {
+                Some(preloaded) => run_headless_match_staged_prepared(
+                    config, preloaded, false, trace, stage, observe,
+                ),
+                None => run_headless_match_staged(config, false, trace, stage, observe),
+            }
         }
         None => run_headless_match_observed(config, false, trace, observe),
     }

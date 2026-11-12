@@ -70,6 +70,7 @@ fn the_combat_tree_is_as_specified() {
     );
 
     let stat = |s, f| vec![TalentEffect::StatPercent(s, f)];
+    let points = |s, p| vec![TalentEffect::StatAdd(s, p)];
     let expected: [(
         TalentId,
         u8,
@@ -84,7 +85,7 @@ fn the_combat_tree_is_as_specified() {
             1,
             0,
             2,
-            stat(TalentStat::DodgeChance, 0.04),
+            points(TalentStat::DodgeChance, 0.04),
             Some(11.0),
             None,
         ),
@@ -115,7 +116,7 @@ fn the_combat_tree_is_as_specified() {
             2,
             2,
             2,
-            stat(TalentStat::ParryChance, 0.04),
+            points(TalentStat::ParryChance, 0.04),
             Some(11.0),
             None,
         ),
@@ -124,7 +125,7 @@ fn the_combat_tree_is_as_specified() {
             3,
             1,
             1,
-            stat(TalentStat::MeleeAttackSpeed, 0.10),
+            points(TalentStat::MeleeAttackSpeed, 0.10),
             Some(11.0),
             None,
         ),
