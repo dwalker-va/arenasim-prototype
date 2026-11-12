@@ -15,6 +15,10 @@
 #   4. Esc                      -> back on View Combatant
 #   5. the same kit row is still on screen -> the SAME combatant, not a reset
 #   6. Esc                      -> Configure Match, ready for the next class
+#
+# And every class after the first opens at the TOP of its sheet, with its
+# pre-match choice on screen: a fresh visit, not the last one's scroll kept
+# (AS-470).
 
 assert-state MainMenu
 click menu:MATCH
@@ -47,6 +51,7 @@ click slot:t1s0:change
 click class:Warrior
 click slot:t1s0
 assert-state ViewCombatant
+assert-visible strategic:DemoralizingShout
 
 hover kit:MortalStrike
 assert-note tooltip:Ability(MortalStrike)
@@ -69,6 +74,7 @@ click slot:t1s0:change
 click class:Mage
 click slot:t1s0
 assert-state ViewCombatant
+assert-visible strategic:MoltenArmor
 
 hover kit:Frostbolt
 assert-note tooltip:Ability(Frostbolt)
@@ -91,6 +97,7 @@ click slot:t1s0:change
 click class:Paladin
 click slot:t1s0
 assert-state ViewCombatant
+assert-visible strategic:ConcentrationAura
 
 hover kit:HolyShock
 assert-note tooltip:Ability(HolyShock)
@@ -113,6 +120,7 @@ click slot:t1s0:change
 click class:Warlock
 click slot:t1s0
 assert-state ViewCombatant
+assert-visible strategic:CurseOfTongues:e0
 
 hover kit:Corruption
 assert-note tooltip:Ability(Corruption)

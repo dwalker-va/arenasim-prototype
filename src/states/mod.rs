@@ -176,6 +176,11 @@ impl Plugin for StatesPlugin {
                 (main_menu::orbit_menu_camera, main_menu::main_menu_ui)
                     .run_if(in_state(GameState::MainMenu)),
             )
+            // A screen opened forward starts its body at the top; a return
+            // finds it where it was (`chrome::GameState::show_body`). Runs
+            // after the frame's screens, so an open made this frame reaches
+            // egui before the opened screen's first draw.
+            .add_systems(PostUpdate, chrome::open_fresh_bodies_system)
             // Options menu systems (now using egui)
             .add_systems(
                 Update,

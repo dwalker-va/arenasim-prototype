@@ -528,35 +528,33 @@ pub fn draw_encyclopedia(
                 .inner_margin(margin_xy(space::XL, space::LG)),
         )
         .show(ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    let needle = search.trim().to_lowercase();
-                    if !needle.is_empty() {
-                        // Results TAKE OVER the content area. The blessed mockup
-                        // floated them in a dropdown; this divergence is deliberate
-                        // and user-endorsed (simpler Esc ladder, snapshot-testable
-                        // state) — see the module docs. Not an egui limitation.
-                        if let Some(topic) = search::render_results(ui, &needle, registry, data) {
-                            action = Some(EncyclopediaAction::Navigate(View::topic(topic)));
-                        }
-                        return;
-                    }
-
-                    let nav = match current.topic {
-                        Some(topic) => render_topic_page(ui, topic, data),
-                        None => render_section_index(
-                            ui,
-                            current.section,
-                            item_filters,
-                            ability_filters,
-                            data,
-                        ),
-                    };
-                    if let Some(topic) = nav {
+            GameState::Encyclopedia.show_body(ui, |ui| {
+                let needle = search.trim().to_lowercase();
+                if !needle.is_empty() {
+                    // Results TAKE OVER the content area. The blessed mockup
+                    // floated them in a dropdown; this divergence is deliberate
+                    // and user-endorsed (simpler Esc ladder, snapshot-testable
+                    // state) — see the module docs. Not an egui limitation.
+                    if let Some(topic) = search::render_results(ui, &needle, registry, data) {
                         action = Some(EncyclopediaAction::Navigate(View::topic(topic)));
                     }
-                });
+                    return;
+                }
+
+                let nav = match current.topic {
+                    Some(topic) => render_topic_page(ui, topic, data),
+                    None => render_section_index(
+                        ui,
+                        current.section,
+                        item_filters,
+                        ability_filters,
+                        data,
+                    ),
+                };
+                if let Some(topic) = nav {
+                    action = Some(EncyclopediaAction::Navigate(View::topic(topic)));
+                }
+            });
         });
 
     action
