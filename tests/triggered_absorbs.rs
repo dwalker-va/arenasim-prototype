@@ -337,3 +337,19 @@ fn sacred_shield_is_one_target_per_paladin() {
     cast(&mut w, AbilityType::SacredShield, second, other);
     assert!(holds_shield(&w, first) && holds_shield(&w, second));
 }
+
+/// A killing blow raises nothing: the bearer is dead when the system runs, and
+/// a corpse gains no shield. Control: the same blow short of lethal raises it.
+#[test]
+fn a_killing_blow_raises_no_shield() {
+    for lethal in [true, false] {
+        let mut w = world();
+        let (caster, bearer) = units(&mut w);
+        cast(&mut w, AbilityType::SacredShield, bearer, caster);
+        let health = w.get::<Combatant>(bearer).unwrap().current_health;
+        let blow = if lethal { health } else { health - 1.0 };
+        take_damage(&mut w, bearer, blow);
+        frame(&mut w, 0.1);
+        assert_eq!(shields(&w, bearer).is_empty(), lethal, "lethal: {lethal}");
+    }
+}
