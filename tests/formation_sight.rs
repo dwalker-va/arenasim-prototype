@@ -518,10 +518,14 @@ const FLIP_BANK: [(&[&str], &[&str]); 3] = [
 /// seeds 0-9 until AS-460 moved one return into them; main itself returns
 /// at seeds 11 and 18.
 ///
-/// Not asserted here: a goal that jumps over 25yd and does NOT come back (the
-/// repair should stay within `REPAIR_LIMIT`, 16yd, of the formation). That is
-/// a known defect, AS-470: seed 3 of the 3v3 sends its Priest's goal 25.1yd on
-/// one `FormationShift` after AS-460, and main's kit does so at other seeds.
+/// Measured and printed, not asserted: a goal that jumps over 25yd and does
+/// NOT come back (the repair should stay within `REPAIR_LIMIT`, 16yd, of the
+/// formation). That is a known defect, AS-469, with no cause the jump
+/// classifier names. On this bank main holds 1 such jump (seed 55, the 3v3's
+/// Priest, 32.6yd) and AS-460's head 3, in 2 matches (seed 3's Priest, 25.1yd;
+/// seed 20's Druid, 27.9yd and 38.4yd). Under a common rate, 3 of 4 jumps
+/// falling on one side is a 5-in-16 chance, so the bank does not tell the two
+/// apart.
 #[test]
 fn the_repaired_point_never_flips_across_a_shadow() {
     let jobs: Vec<(&[&str], &[&str], u64)> = FLIP_BANK
@@ -530,38 +534,49 @@ fn the_repaired_point_never_flips_across_a_shadow() {
         .collect();
     let workers = std::thread::available_parallelism().map_or(4, |n| n.get().min(6));
     let chunk = jobs.len().div_ceil(workers);
-    let (pairs, tracks, returns) = std::thread::scope(|scope| {
+    let (pairs, tracks, returns, big) = std::thread::scope(|scope| {
         let handles: Vec<_> = jobs
             .chunks(chunk)
             .map(|jobs| {
                 scope.spawn(move || {
-                    let (mut pairs, mut tracks, mut returns) = (0usize, 0usize, Vec::new());
+                    let (mut pairs, mut tracks) = (0usize, 0usize);
+                    let (mut returns, mut big) = (Vec::new(), Vec::new());
                     for &(t1, t2, seed) in jobs {
                         for (class, track, goals) in
                             formation_tracks(t1, t2, seed, 30.0, "TeamPlan")
                         {
                             pairs += track.pairs;
                             tracks += 1;
+                            let label = format!("{t1:?} v {t2:?} seed {seed} {class}");
+                            for &(t, d) in track.jumps.iter().filter(|j| j.1 > 25.0) {
+                                big.push(format!("{label}: {d:.1}yd at {t:.2}s"));
+                            }
                             let r = track.returns(10.0, &goals);
                             if r > 0 {
-                                returns.push((format!("{t1:?} v {t2:?} seed {seed} {class}"), r));
+                                returns.push((label, r));
                             }
                         }
                     }
-                    (pairs, tracks, returns)
+                    (pairs, tracks, returns, big)
                 })
             })
             .collect();
         handles
             .into_iter()
             .map(|h| h.join().expect("a worker"))
-            .fold((0, 0, Vec::new()), |(p, t, mut r), (p2, t2, r2)| {
-                r.extend(r2);
-                (p + p2, t + t2, r)
-            })
+            .fold(
+                (0, 0, Vec::new(), Vec::new()),
+                |(p, t, mut r, mut b), (p2, t2, r2, b2)| {
+                    r.extend(r2);
+                    b.extend(b2);
+                    (p + p2, t + t2, r, b)
+                },
+            )
     });
     let total: usize = returns.iter().map(|(_, n)| n).sum();
     println!("{pairs} formation-goal frame pairs, {tracks} tracks, {total} returns: {returns:#?}");
+    // Measured, not asserted (AS-469): goal jumps over 25yd.
+    println!("{} jumps over 25yd: {big:#?}", big.len());
     assert!(
         pairs > 50_000,
         "the bank no longer walks its healers to their formation points ({pairs} frames)"

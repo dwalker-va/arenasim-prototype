@@ -1014,7 +1014,7 @@ const MAX_HEADING_REVERSALS: usize = 1;
 /// in the open, with a wall at its back and with a pillar at its back. This
 /// bank used to assert it of every shift it held, and a shift's geometry is
 /// the seed's: AS-460's second trinkets moved one onto a Druid webbed in a
-/// corner, a known defect (AS-469), and main's own kit loses ground at other
+/// corner, a known defect (AS-468), and main's own kit loses ground at other
 /// seeds of the same comps.
 #[test]
 fn a_shift_frees_the_druid_and_it_holds_its_heading() {
@@ -1184,7 +1184,7 @@ fn a_shift_frees_the_druid_and_it_holds_its_heading() {
 ///
 /// Not staged here: a Druid with walls on TWO sides (a corner), whose run
 /// along one wall bends round the corner while its chaser cuts it and gains
-/// a fraction of a yard. That is a known defect, AS-469.
+/// a fraction of a yard. That is a known defect, AS-468.
 #[test]
 fn a_shift_frees_the_druid_and_it_outruns_the_chaser() {
     const DRUID: Unit = Unit::new(1, 1);
