@@ -18,6 +18,11 @@
 //! 2. **Who deals damage, and does each log its kills?** Every (file,
 //!    enclosing fn) that calls `apply_damage_with_absorb` is named in
 //!    DAMAGERS, and every one of them also calls `CombatLog::log_death`.
+//! 3. **Who credits damage dealt, and under which rule?** (AS-466) Only
+//!    `credit_damage_dealt` writes `Combatant::damage_dealt`; the systems that
+//!    call it are the systems that log damage rows (DAMAGE_CREDITORS); and
+//!    every row's amount is `credited_damage(..)`, the rule the credit
+//!    applies. So the Results total and its breakdown cannot part.
 //!
 //! Lexical, like the other audits built on `tests/common/source_audit.rs`: it
 //! reads comment-, string- and test-module-blanked source. It does not see a
@@ -241,4 +246,120 @@ fn every_damager_raises_by_the_attacker_and_spawns_its_follow_ups() {
         }
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+// ---------------------------------------------------------------------------
+// Damage dealt: one rule for the Results total and its breakdown (AS-466)
+// ---------------------------------------------------------------------------
+
+/// The systems that credit a dealer with damage, as (file, fn). Each credits
+/// through `combat_core::credit_damage_dealt` and logs the breakdown row
+/// (`CombatLog::log_damage`) of the same hit.
+const DAMAGE_CREDITORS: &[(&str, &str)] = &[
+    ("src/states/play_match/combat_ai.rs", "decide_abilities"),
+    ("src/states/play_match/auras.rs", "process_dot_ticks"),
+    (
+        "src/states/play_match/projectiles.rs",
+        "process_projectile_hits",
+    ),
+    (
+        "src/states/play_match/combat_core/casting.rs",
+        "process_casting",
+    ),
+    (
+        "src/states/play_match/combat_core/casting.rs",
+        "process_channeling",
+    ),
+    (
+        "src/states/play_match/combat_core/auto_attack.rs",
+        "combat_auto_attack",
+    ),
+    (
+        "src/states/play_match/effects/holy_shock.rs",
+        "process_holy_shock_damage",
+    ),
+    // Transferred shares and reflects, landed by `land`.
+    ("src/states/play_match/combat_core/follow_ups.rs", "record"),
+    (
+        "src/states/play_match/effects/backlash.rs",
+        "process_backlash",
+    ),
+];
+
+/// `Combatant::damage_dealt` — the Results screen's DMG total — is written in
+/// one place, `credit_damage_dealt`, which applies the one rule
+/// (`credited_damage`). A site that wrote it directly could pick its own
+/// rule, as direct hits and damage-over-time ticks once did.
+#[test]
+fn damage_dealt_is_written_only_by_credit_damage_dealt() {
+    let write = Regex::new(r"\.\s*damage_dealt\s*(\+=|-=|\*=|=[^=])").unwrap();
+    assert_same(
+        "`damage_dealt` is written outside `combat_core::credit_damage_dealt`. Credit a \
+         hit through it, so its total keeps the rule its breakdown row is logged under.",
+        sites(&write, |_, _| true),
+        named(&[(
+            "src/states/play_match/combat_core/damage.rs",
+            "credit_damage_dealt",
+        )]),
+    );
+}
+
+/// The systems that credit damage dealt and the systems that log damage rows
+/// are one set: a site that credits a hit and logs no row (the backlash,
+/// reflects and transfers once did) leaves its total above its breakdown,
+/// and one that logs a row and credits nothing (Holy Shock once did) leaves
+/// it below.
+#[test]
+fn every_damage_credit_has_its_breakdown_row() {
+    assert_same(
+        "The systems that call `credit_damage_dealt` changed. A new damage site names \
+         itself in DAMAGE_CREDITORS.",
+        callers("credit_damage_dealt"),
+        named(DAMAGE_CREDITORS),
+    );
+    let mut loggers = callers("log_damage");
+    // The definition's own module: `CombatLog`'s methods and their tests.
+    loggers.retain(|(file, _)| file != "src/combat/log.rs");
+    assert_same(
+        "The systems that log a damage row are not the systems that credit damage \
+         dealt: a credit with no row leaves the Results total above its breakdown, a \
+         row with no credit leaves it below.",
+        loggers,
+        named(DAMAGE_CREDITORS),
+    );
+}
+
+/// Every damage row's amount is `credited_damage(landed, absorbed)`, the rule
+/// `credit_damage_dealt` applies to the total: a row that counted only what
+/// landed would agree with a total that did the same, and still break the
+/// rule (`tests/results_damage_totals.rs` plays the rows).
+#[test]
+fn every_damage_row_is_logged_under_the_rule() {
+    let call = Regex::new(r"\.\s*log_damage\s*\(").unwrap();
+    let rule = Regex::new(r"^(?:[A-Za-z_][A-Za-z0-9_]*\s*::\s*)*credited_damage\s*\(").unwrap();
+    let mut rows = 0;
+    let mut bad = Vec::new();
+    for file in load_sources(&["src"]).expect("read src/") {
+        let code = blank_test_modules(&blank_comments_and_strings(&file.raw));
+        for m in call.find_iter(&code) {
+            let args =
+                common::source_audit::param_list(&code, m.end() - 1).expect("a balanced call");
+            let args = common::source_audit::split_params(&args);
+            rows += 1;
+            let amount = args.get(3).map(|a| a.trim()).unwrap_or("");
+            if !rule.is_match(amount) {
+                let line = code[..m.start()].lines().count();
+                bad.push(format!("{}:{line}: amount `{amount}`", file.rel_display()));
+            }
+        }
+    }
+    assert!(
+        rows >= DAMAGE_CREDITORS.len(),
+        "only {rows} damage rows found"
+    );
+    assert!(
+        bad.is_empty(),
+        "A damage row's amount is not `credited_damage(landed, absorbed)`:\n{}",
+        bad.join("\n")
+    );
 }

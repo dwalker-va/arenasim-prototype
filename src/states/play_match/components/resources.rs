@@ -298,8 +298,9 @@ pub struct MatchResults {
     /// pet damage the same way the top-line DMG column already does (which rolls
     /// pet damage into the owner — see `match_flow`). The two totals are summed
     /// from independent sources (live per-entity counters vs. `CombatLog`
-    /// amounts), so they track together but are not guaranteed equal to the
-    /// point. Empty when no pets fought.
+    /// amounts) that every damage site credits under one rule
+    /// (`combat_core::credited_damage`), so they agree up to float summation
+    /// order (`tests/results_damage_totals.rs`). Empty when no pets fought.
     pub pet_damage_links: HashMap<String, (String, String)>,
     /// The AI each team played under, shown in the Results header: the client
     /// plays `TeamPlan` (`AiProfiles::client_default`), a replay plays what its

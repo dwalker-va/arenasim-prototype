@@ -516,6 +516,7 @@ pub fn draw_view_combatant(
         class_icons: Some(data.class_icons),
         ability_icons: data.ability_icons,
         talents: data.talents,
+        engine_auras: crate::states::encyclopedia::EngineFamily::ALL,
     };
 
     egui::CentralPanel::default()
