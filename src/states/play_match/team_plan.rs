@@ -1328,6 +1328,92 @@ mod tests {
         assert_eq!(plans.for_team(1).stance, Stance::Press);
     }
 
+    /// The planner, over one frame of `roster` — (team, slot, class, form, x)
+    /// on the z = 0 line — under `TeamPlan`, with Nagrand's pillars and
+    /// bounds. The plans it wrote, and each unit's entity.
+    fn plan_once(
+        roster: &[(
+            u8,
+            u8,
+            CharacterClass,
+            crate::states::match_config::PriestForm,
+            f32,
+        )],
+    ) -> (TeamPlans, Vec<Entity>) {
+        let mut app = App::new();
+        app.insert_resource(MatchCountdown {
+            time_remaining: 0.0,
+            gates_opened: true,
+        });
+        app.insert_resource(TeamPlans::default());
+        app.insert_resource(AiProfiles::uniform(AiProfile::TeamPlan));
+        app.insert_resource(ActiveMapGeometry {
+            bounds: super::super::arena_bounds::ArenaBounds::Bowl {
+                semi_x: 59.72,
+                semi_z: 59.72,
+                alcove_depth: 10.0,
+                alcove_half_width: 8.0,
+            },
+            volumes: nagrand(),
+            cover_anchors: Vec::new(),
+        });
+        let entities = roster
+            .iter()
+            .map(|&(team, slot, class, form, x)| {
+                let mut c = Combatant::new(team, slot, class);
+                c.priest_form = form;
+                app.world_mut()
+                    .spawn((c, Transform::from_xyz(x, 0.0, 0.0)))
+                    .id()
+            })
+            .collect();
+        app.add_systems(Update, update_team_plans);
+        app.update();
+        (app.world().resource::<TeamPlans>().clone(), entities)
+    }
+
+    /// The team's call ranks enemy HEALERS first (`CallCandidate::is_healer`,
+    /// the unit's role): a healing Priest 30yd off is called over a Warrior
+    /// 10yd off. An enemy Shadowform Priest is no healer, so the nearer
+    /// Warrior is called (AS-413).
+    #[test]
+    fn the_call_does_not_take_a_shadowform_priest_for_a_healer() {
+        use crate::states::match_config::PriestForm;
+        let call = |form| {
+            let (plans, e) = plan_once(&[
+                (1, 0, CharacterClass::Warrior, PriestForm::NoForm, -10.0),
+                (2, 0, CharacterClass::Warrior, PriestForm::NoForm, 0.0),
+                (2, 1, CharacterClass::Priest, form, 20.0),
+            ]);
+            (plans.for_team(1).kill_target, e)
+        };
+        let (healer, e) = call(PriestForm::NoForm);
+        assert_eq!(healer, Some(e[2]), "control: the healing Priest is called");
+        let (shadow, e) = call(PriestForm::Shadowform);
+        assert_eq!(shadow, Some(e[1]), "the nearer Warrior is called");
+    }
+
+    /// A melee + healer comp camps on a pillar before contact
+    /// (`classify_comp`, from each unit's role); a Warrior with a Shadowform
+    /// Priest has no healer and does not (AS-413).
+    #[test]
+    fn a_shadowform_priest_makes_no_camping_comp() {
+        use crate::states::match_config::PriestForm;
+        let anchor = |form| {
+            plan_once(&[
+                (1, 0, CharacterClass::Warrior, PriestForm::NoForm, -58.0),
+                (1, 1, CharacterClass::Priest, form, -58.0),
+                (2, 0, CharacterClass::Mage, PriestForm::NoForm, 58.0),
+                (2, 1, CharacterClass::Warlock, PriestForm::NoForm, 58.0),
+            ])
+            .0
+            .for_team(1)
+            .anchor
+        };
+        assert!(anchor(PriestForm::NoForm).is_some(), "control: it camps");
+        assert!(anchor(PriestForm::Shadowform).is_none());
+    }
+
     /// A camp that never releases is a unit refusing to fight — the match would
     /// run to its duration cap. Holding ends when the enemy commits.
     #[test]

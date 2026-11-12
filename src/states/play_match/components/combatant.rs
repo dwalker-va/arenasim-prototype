@@ -866,7 +866,6 @@ impl Combatant {
         self.melee_damage > 0.0 && self.melee_weapon_speed > 0.0
     }
 
-    /// Check if this combatant is alive (health > 0 and not marked dead).
     /// The part this combatant plays for its team: its class's
     /// ([`Role::of`](crate::states::play_match::situation::Role::of)), unless
     /// its per-match choices change it. A Shadowform Priest heals no one, so
@@ -885,6 +884,7 @@ impl Combatant {
         self.role() == crate::states::play_match::situation::Role::Healer
     }
 
+    /// Check if this combatant is alive (health > 0 and not marked dead).
     pub fn is_alive(&self) -> bool {
         self.current_health > 0.0 && !self.is_dead
     }

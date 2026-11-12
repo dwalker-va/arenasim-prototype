@@ -190,3 +190,100 @@ fn an_occluded_shadowform_priest_walks_for_sight() {
         walked(&open)
     );
 }
+
+/// The Hunt (AS-394), with a Shadowform Priest in it: `tests/hunt_staged.rs`'s
+/// endgame, our Priest in Shadowform. A lone enemy Priest is rooted on the
+/// east face of Nagrand's south-east pillar; our Mage and Shadowform Priest
+/// stand west of it. Both are ranged damage dealers, so both take stations,
+/// and the Priest walks to its own (`MovementTrigger::Hunt`) — from the
+/// Shadowform arm of the dispatch, which has no posture machine to do it.
+/// Control: the same endgame with the play excepted everywhere on the team:
+/// the hunt is classified, but the Priest walks to no station.
+#[test]
+fn a_shadowform_priest_takes_a_hunt_station() {
+    use arenasim::states::play_match::class_ai::plays::every_exception_entry;
+    use arenasim::states::play_match::situation::PlayId;
+    use arenasim::states::play_match::{Aura, AuraType};
+
+    const MAGE: Unit = Unit::new(1, 0);
+    const PRIEST: Unit = Unit::new(1, 1);
+    const HIDER: Unit = Unit::new(2, 0);
+
+    let config = |hunt: bool| HeadlessMatchConfig {
+        team1: vec!["Mage".into(), "Priest".into()],
+        team2: vec!["Priest".into()],
+        team1_builds: vec![
+            Build::default(),
+            Build::of(&[(TalentId::ImprovedMindBlast, 2), (TalentId::Shadowform, 1)]),
+        ],
+        team1_priest_forms: vec!["NoForm".into(), "Shadowform".into()],
+        map: "PillaredArena".into(),
+        ai_profile: Some("TeamPlan".into()),
+        team1_exceptions: if hunt {
+            Default::default()
+        } else {
+            [("Hunt".into(), every_exception_entry(PlayId::Hunt))].into()
+        },
+        random_seed: Some(1),
+        max_duration_secs: 30.0,
+        ..Default::default()
+    };
+    let root = || Aura {
+        effect_type: AuraType::Root,
+        duration: 60.0,
+        break_on_damage_threshold: -1.0,
+        ability_name: "Entangling Roots".into(),
+        ..Default::default()
+    };
+    let stage = || {
+        Stage::new()
+            .place(HIDER, 47.0, -20.0)
+            .aura(HIDER, root())
+            .place(MAGE, 16.0, -18.0)
+            .target(MAGE, HIDER)
+            .place(PRIEST, 12.0, -23.0)
+            .target(PRIEST, HIDER)
+            .target(HIDER, MAGE)
+    };
+    // The hunt onsets on team 1, and the Shadowform Priest's station walks.
+    let read = |played: &Played| {
+        let onsets = played
+            .staged_trace()
+            .filter(|e| {
+                e["kind"] == "situation_change"
+                    && e["name"] == "hunt"
+                    && e["change"] == "onset"
+                    && e["team"] == 1
+            })
+            .count();
+        let walks = played
+            .staged_trace()
+            .filter(|e| {
+                e["kind"] == "movement_decision"
+                    && e["trigger"] == "Hunt"
+                    && e["actor"]["team"] == 1
+                    && e["actor"]["class"] == "Priest"
+            })
+            .count();
+        (onsets, walks)
+    };
+
+    let hunting = play(config(true), stage());
+    assert!(
+        hunting.log.contains("Team 1 Priest #2 casts Shadowform"),
+        "the Priest is in Shadowform"
+    );
+    let (onsets, walks) = read(&hunting);
+    assert!(onsets >= 1, "the team never hunted");
+    assert!(
+        walks >= 1,
+        "the Shadowform Priest never walked to a station"
+    );
+
+    let excepted = read(&play(config(false), stage()));
+    assert!(excepted.0 >= 1, "excepted, the hunt never began");
+    assert_eq!(
+        excepted.1, 0,
+        "excepted, the Priest still walked to a station"
+    );
+}

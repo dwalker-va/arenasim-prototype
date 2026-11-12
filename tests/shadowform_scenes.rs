@@ -960,3 +960,96 @@ fn wind_shear_takes_no_shadowform_priest_for_a_healer() {
         describe(&shadow)
     );
 }
+
+/// The sight yield pairs each DPS with its team's healer (`situation`'s
+/// `classify_sight_yield`, by role). A Shadowform Priest beside a Paladin is
+/// the DPS of a pair whose healer is the Paladin. Control: a healing Priest
+/// beside a Paladin — two healers, no DPS, no pair.
+#[test]
+fn the_sight_yield_pairs_a_shadowform_priest_as_a_dps() {
+    use arenasim::states::match_config::CharacterClass::Paladin;
+    const PALADIN: &str = "paladin";
+    let pairs = |shadow: bool| {
+        let mut s = Scene::new()
+            .ai_profile(1, AiProfile::TeamPlan)
+            .unit(PRIEST, 1, Priest)
+            .unit(PALADIN, 1, Paladin)
+            .at(4.0, 0.0)
+            .unit(MAGE, 2, Mage)
+            .at(30.0, 0.0);
+        if shadow {
+            s = s.in_shadowform(PRIEST);
+        }
+        let (priest, paladin) = (s.entity(PRIEST), s.entity(PALADIN));
+        let pairs: Vec<_> = s
+            .reclassify()
+            .for_team(1)
+            .sight_yield
+            .iter()
+            .map(|p| (p.dps, p.healer))
+            .collect();
+        (pairs, priest, paladin)
+    };
+    let (shadow, priest, paladin) = pairs(true);
+    assert_eq!(shadow, vec![(priest, paladin)]);
+    let (healer, _, _) = pairs(false);
+    assert!(healer.is_empty(), "control: {healer:?}");
+}
+
+/// The crowd-control target heuristic (`combat_ai::select_cc_target_heuristic`)
+/// prefers an enemy HEALER that is not the kill target, read from each row's
+/// role: a healing Priest is chosen over a fuller Mage; a Shadowform Priest
+/// is not, and the Mage, with more health, is.
+#[test]
+fn the_cc_target_heuristic_takes_no_shadowform_priest_for_a_healer() {
+    use arenasim::states::play_match::combat_ai::select_cc_target_heuristic;
+    use bevy::prelude::Vec3;
+    let mut world = World::new();
+    let (warrior, mage, priest) = (
+        world.spawn_empty().id(),
+        world.spawn_empty().id(),
+        world.spawn_empty().id(),
+    );
+    let pick = |priest_role: Role| {
+        let rows = vec![
+            (
+                warrior,
+                Vec3::ZERO,
+                false,
+                false,
+                (Warrior, Role::MeleeDps),
+                300.0,
+                false,
+                false,
+            ),
+            (
+                mage,
+                Vec3::ZERO,
+                false,
+                false,
+                (Mage, Role::RangedDps),
+                300.0,
+                false,
+                false,
+            ),
+            (
+                priest,
+                Vec3::ZERO,
+                false,
+                false,
+                (Priest, priest_role),
+                100.0,
+                false,
+                false,
+            ),
+        ];
+        select_cc_target_heuristic(
+            &rows,
+            Some(warrior),
+            &std::collections::HashMap::new(),
+            &|_, _| true,
+        )
+    };
+    assert_eq!(pick(Role::Healer), Some(priest), "control: the healer");
+    assert_eq!(pick(Role::RangedDps), Some(mage));
+}
