@@ -454,6 +454,71 @@ fn the_sim_marks_only_the_swing_that_carries_the_bonus() {
     );
 }
 
+// ── sizes ──────────────────────────────────────────────────────────────────
+
+/// The widest any live particle is drawn in WORLD space, sampled every frame
+/// for `frames` frames.
+fn widest_drawn(app: &mut App, frames: u32) -> f32 {
+    let mut widest = 0.0_f32;
+    for _ in 0..frames {
+        app.update();
+        widest = particles(app).iter().map(|p| p.1).fold(widest, f32::max);
+    }
+    widest
+}
+
+/// Every landing plays at the client's size (AS-463): the widest particle
+/// drawn in world space is twice the largest scale key its model carries,
+/// within what frame sampling misses of a ramp's end. Drawn at the key (the
+/// old full-width reading) it would be half that.
+#[test]
+fn every_landing_is_drawn_at_the_clients_size() {
+    // The interrupts: (ability, largest key in its model as the bench carries it).
+    for (ability, key) in [
+        (AbilityType::Kick, 0.972),      // kick_chest_impact shockwave, death
+        (AbilityType::Pummel, 0.972),    // the same ring
+        (AbilityType::WindShear, 0.972), // the Kick ring, tinted
+        (AbilityType::SpellLock, 0.906), // counterspell rune e1, birth
+    ] {
+        let mut app = app();
+        let victim = spawn_unit(&mut app, CharacterClass::Mage, Vec3::ZERO);
+        let interrupter = spawn_unit(&mut app, CharacterClass::Rogue, Vec3::new(3.0, 0.0, 0.0));
+        interrupt(&mut app, ability, victim, interrupter);
+        let widest = widest_drawn(&mut app, 150);
+        let want = 2.0 * key;
+        assert!(
+            widest <= want + 1e-3 && widest > 0.9 * want,
+            "{ability:?}: widest particle {widest:.3} yd, client {want:.3}"
+        );
+    }
+    // The one-offs that land through the shared impact.
+    for (ability, anchor, key) in [
+        (AbilityType::MindBlast, ImpactAnchor::Head, 0.694), // smoke, death
+        (AbilityType::HolyShock, ImpactAnchor::Chest, 2.778), // flash, midlife
+    ] {
+        let mut app = app();
+        let victim = spawn_unit(&mut app, CharacterClass::Warlock, Vec3::ZERO);
+        land(&mut app, ability, victim, anchor);
+        let widest = widest_drawn(&mut app, 300);
+        let want = 2.0 * key;
+        assert!(
+            widest <= want + 1e-3 && widest > 0.9 * want,
+            "{ability:?}: widest particle {widest:.3} yd, client {want:.3}"
+        );
+    }
+    // Heroic Strike's ring lands off the empowered swing.
+    let mut app = app();
+    let warrior = spawn_unit(&mut app, CharacterClass::Warrior, Vec3::new(-2.0, 0.0, 0.0));
+    let victim = spawn_unit(&mut app, CharacterClass::Mage, Vec3::ZERO);
+    swing(&mut app, warrior, victim, true);
+    let widest = widest_drawn(&mut app, 120);
+    let want = 2.0 * 1.667; // decisivestrike ring, death
+    assert!(
+        widest <= want + 1e-3 && widest > 0.9 * want,
+        "HeroicStrike: widest particle {widest:.3} yd, client {want:.3}"
+    );
+}
+
 // ── Mind Blast ─────────────────────────────────────────────────────────────
 
 fn land(app: &mut App, ability: AbilityType, victim: Entity, anchor: ImpactAnchor) {

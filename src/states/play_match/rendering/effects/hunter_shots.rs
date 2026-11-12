@@ -41,9 +41,11 @@ use crate::states::play_match::components::*;
 // AS-136 Hunter Shot Bench carries them per emitter (the doc's tables merge the
 // two spark emitters and round the ramps; the bench keeps them apart). Knobs
 // the user tuned in the bench sit on top of them as named constants, and the
-// landing's three-of-six cut is the user's sign-off, not a data finding. The
-// bench draws a size key as the sprite's full width (`r = size * zoom / 2`),
-// so the sizes are `ParticleSize::diameters`.
+// landing's three-of-six cut is the user's sign-off, not a data finding. A
+// size key is the sprite's RADIUS, as the client draws it, so the sizes are
+// `ParticleSize::radii` and every particle plays at the client's own size
+// (re-benched at client size in AS-463; the AS-136 bench had drawn a key as
+// the full width, half the client's size).
 //
 // Colour check against Shadow Bolt: the shot's core is close in HUE to the
 // Shadow Bolt halo (`spell_bolts.rs`). They separate on MATERIAL — this is a
@@ -55,6 +57,11 @@ use crate::states::play_match::components::*;
 // registered in `states/mod.rs` only — headless stays byte-identical.
 
 // ── The bench's knobs (AS-136 Hunter Shot Bench, signed off 2026-09-26) ────
+//
+// Particle sizes re-benched at client size (AS-463, signed off 2026-11-12):
+// https://claude.ai/artifact/XjNvDtv8ENgDtxp2rf7af7, version 1794478166-28e1,
+// its "Client size" constants. The source is committed as
+// docs/design/benches/2026-11-12-hunter-shot-client-size-bench.html.
 
 /// Billboard core of the shared shot (client extent ~0.6 yd).
 pub const HUNTER_SHOT_CORE_DIAMETER: f32 = 0.60;
@@ -71,8 +78,11 @@ pub const HUNTER_TRAIL_ALPHA: f32 = 0.25;
 pub const HUNTER_TRAIL_HEIGHT: f32 = 0.11;
 pub const HUNTER_TRAIL_LIFETIME: f32 = 0.20;
 
-/// The shared landing's scale over the client's sizes. A uniformly scaled
-/// model scales its spawn areas and particle speeds with it, as the bench did.
+/// The shared landing's particle size over the client's (1.0 = client).
+pub const HUNTER_IMPACT_SIZE: f32 = 1.0;
+/// The shared landing's model scale on its spawn areas and particle speeds,
+/// as signed off in AS-136. It no longer scales the particles themselves:
+/// those follow `HUNTER_IMPACT_SIZE`.
 pub const HUNTER_IMPACT_SCALE: f32 = 0.8;
 /// Particle speed (and gravity) scale on the shared landing: how far it throws.
 pub const HUNTER_IMPACT_SPREAD: f32 = 0.6;
@@ -250,14 +260,21 @@ impl ClientEmitter {
     /// follow `size` (a scaled model); speed and gravity additionally follow
     /// `spread`; windows and lives follow `time`.
     pub const fn scaled(self, size: f32, spread: f32, time: f32) -> Self {
+        self.scaled_apart(size, size, spread, time)
+    }
+
+    /// [`ClientEmitter::scaled`] with the particles' size apart from the
+    /// model's: spawn volume and speed follow `model`, the particles' drawn
+    /// size follows `particle`.
+    pub const fn scaled_apart(self, model: f32, particle: f32, spread: f32, time: f32) -> Self {
         let mut e = self;
-        e.size = e.size.scaled(size);
-        e.area *= size;
+        e.size = e.size.scaled(particle);
+        e.area *= model;
         if let Some((w, h)) = e.column {
-            e.column = Some((w * size, h * size));
+            e.column = Some((w * model, h * model));
         }
-        e.speed *= size * spread;
-        e.gravity *= size * spread;
+        e.speed *= model * spread;
+        e.gravity *= model * spread;
         if let Some((s, t)) = e.window {
             e.window = Some((s * time, t * time));
         }
@@ -313,7 +330,7 @@ const ARCANESHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[22, 34, 168], [78, 33, 201], [203, 103, 255]],
         alpha: [0.59, 0.98, 0.0],
-        size: ParticleSize::diameters([0.142, 0.264, 0.142]),
+        size: ParticleSize::radii([0.142, 0.264, 0.142]),
         mid: 0.5,
         track: None,
     },
@@ -331,7 +348,7 @@ const ARCANESHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[77, 15, 207], [114, 59, 190], [165, 222, 255]],
         alpha: [1.0, 1.0, 0.0],
-        size: ParticleSize::diameters([0.083, 0.028, 0.014]),
+        size: ParticleSize::radii([0.083, 0.028, 0.014]),
         mid: 0.5,
         track: None,
     },
@@ -349,7 +366,7 @@ const ARCANESHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[84, 0, 237], [131, 94, 237], [183, 227, 255]],
         alpha: [0.39, 1.0, 0.0],
-        size: ParticleSize::diameters([0.083, 0.028, 0.014]),
+        size: ParticleSize::radii([0.083, 0.028, 0.014]),
         mid: 0.5,
         track: None,
     },
@@ -367,7 +384,7 @@ const ARCANESHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[0, 0, 154], [97, 67, 207], [245, 245, 236]],
         alpha: [0.39, 1.0, 0.2],
-        size: ParticleSize::diameters([0.194, 0.139, 0.028]),
+        size: ParticleSize::radii([0.194, 0.139, 0.028]),
         mid: 0.5,
         track: None,
     },
@@ -391,7 +408,7 @@ const POISONSHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[119, 201, 2], [141, 207, 12], [209, 234, 92]],
         alpha: [0.19, 0.77, 0.0],
-        size: ParticleSize::diameters([0.142, 0.264, 0.142]),
+        size: ParticleSize::radii([0.142, 0.264, 0.142]),
         mid: 0.5,
         track: None,
     },
@@ -409,7 +426,7 @@ const POISONSHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[109, 183, 55], [144, 208, 106], [230, 255, 92]],
         alpha: [1.0, 1.0, 0.0],
-        size: ParticleSize::diameters([0.056, 0.028, 0.014]),
+        size: ParticleSize::radii([0.056, 0.028, 0.014]),
         mid: 0.5,
         track: None,
     },
@@ -427,7 +444,7 @@ const POISONSHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[109, 201, 0], [161, 237, 52], [202, 255, 127]],
         alpha: [0.39, 1.0, 0.0],
-        size: ParticleSize::diameters([0.056, 0.028, 0.014]),
+        size: ParticleSize::radii([0.056, 0.028, 0.014]),
         mid: 0.5,
         track: None,
     },
@@ -445,7 +462,7 @@ const POISONSHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[158, 255, 64], [109, 201, 0], [91, 169, 0]],
         alpha: [0.39, 1.0, 0.2],
-        size: ParticleSize::diameters([0.139, 0.083, 0.028]),
+        size: ParticleSize::radii([0.139, 0.083, 0.028]),
         mid: 0.5,
         track: None,
     },
@@ -470,7 +487,7 @@ const MAGIC_IMPACT_KEPT: [ClientEmitter; 3] = [
         rise: false,
         color: [[35, 123, 233], [188, 188, 188], [145, 81, 205]],
         alpha: [1.0, 1.0, 0.0],
-        size: ParticleSize::diameters([0.4, 0.6, 0.828]),
+        size: ParticleSize::radii([0.4, 0.6, 0.828]),
         mid: 0.5,
         track: None,
     },
@@ -488,7 +505,7 @@ const MAGIC_IMPACT_KEPT: [ClientEmitter; 3] = [
         rise: false,
         color: [[35, 123, 233], [163, 55, 239], [255, 255, 255]],
         alpha: [1.0, 1.0, 0.0],
-        size: ParticleSize::diameters([0.15, 0.217, 0.031]),
+        size: ParticleSize::radii([0.15, 0.217, 0.031]),
         mid: 0.5,
         track: None,
     },
@@ -506,7 +523,7 @@ const MAGIC_IMPACT_KEPT: [ClientEmitter; 3] = [
         rise: false,
         color: [[37, 249, 82], [151, 64, 233], [255, 255, 255]],
         alpha: [0.53, 0.78, 0.0],
-        size: ParticleSize::diameters([0.197, 0.925, 1.764]),
+        size: ParticleSize::radii([0.197, 0.925, 1.764]),
         mid: 0.5,
         track: None,
     },
@@ -530,7 +547,7 @@ const BESTOWDISEASE_IMPACT: [ClientEmitter; 3] = [
         rise: false,
         color: [[0, 119, 38], [171, 214, 0], [194, 196, 0]],
         alpha: [0.0, 1.0, 0.0],
-        size: ParticleSize::diameters([0.028, 0.556, 0.028]),
+        size: ParticleSize::radii([0.028, 0.556, 0.028]),
         mid: 0.5,
         track: None,
     },
@@ -548,7 +565,7 @@ const BESTOWDISEASE_IMPACT: [ClientEmitter; 3] = [
         rise: true,
         color: [[18, 55, 0], [106, 146, 0], [163, 196, 64]],
         alpha: [0.39, 1.0, 0.0],
-        size: ParticleSize::diameters([0.222, 0.306, 0.694]),
+        size: ParticleSize::radii([0.222, 0.306, 0.694]),
         mid: 0.5,
         track: None,
     },
@@ -566,7 +583,7 @@ const BESTOWDISEASE_IMPACT: [ClientEmitter; 3] = [
         rise: false,
         color: [[49, 102, 1], [99, 136, 20], [115, 152, 1]],
         alpha: [1.0, 1.0, 0.0],
-        size: ParticleSize::diameters([0.111, 0.056, 0.028]),
+        size: ParticleSize::radii([0.111, 0.056, 0.028]),
         mid: 0.5,
         track: None,
     },
@@ -578,19 +595,32 @@ pub(super) const fn scale_all<const N: usize>(
     spread: f32,
     time: f32,
 ) -> [ClientEmitter; N] {
+    scale_all_apart(table, size, size, spread, time)
+}
+
+/// [`scale_all`] with the particles' size apart from the model's
+/// ([`ClientEmitter::scaled_apart`]).
+pub(super) const fn scale_all_apart<const N: usize>(
+    table: [ClientEmitter; N],
+    model: f32,
+    particle: f32,
+    spread: f32,
+    time: f32,
+) -> [ClientEmitter; N] {
     let mut out = table;
     let mut i = 0;
     while i < N {
-        out[i] = table[i].scaled(size, spread, time);
+        out[i] = table[i].scaled_apart(model, particle, spread, time);
         i += 1;
     }
     out
 }
 
 /// What each landing actually plays.
-static SHOT_LANDING: [ClientEmitter; 3] = scale_all(
+static SHOT_LANDING: [ClientEmitter; 3] = scale_all_apart(
     MAGIC_IMPACT_KEPT,
     HUNTER_IMPACT_SCALE,
+    HUNTER_IMPACT_SIZE,
     HUNTER_IMPACT_SPREAD,
     HUNTER_IMPACT_TIME_SCALE,
 );
@@ -1540,11 +1570,10 @@ mod tests {
         assert_eq!(palette_step(2.0), PALETTE_STEPS - 1);
     }
 
-    /// Every particle is drawn at the AS-136 bench's width. The bench draws a
-    /// size key as the sprite's full width (`r = size * zoom / 2`), so the
-    /// quad is each key.
+    /// Every particle is drawn at the client's size: twice each of the AS-136
+    /// bench's keys, a key being the sprite's radius (the AS-463 re-bench).
     #[test]
-    fn every_table_is_drawn_at_the_benchs_widths() {
+    fn every_table_is_drawn_at_twice_its_client_key() {
         let bench: [(&[ClientEmitter], &[[f32; 3]]); 4] = [
             (
                 &ARCANESHOT_MISSILE,
@@ -1584,9 +1613,38 @@ mod tests {
         for (table, widths) in bench {
             assert_eq!(table.len(), widths.len(), "{}", table[0].name);
             for (e, width) in table.iter().zip(widths) {
-                assert_eq!(e.size.diameter_keys(), *width, "{}", e.name);
+                assert_eq!(e.size.diameter_keys(), width.map(|k| 2.0 * k), "{}", e.name);
             }
         }
+    }
+
+    /// The shared landing plays its particles at the client's size while its
+    /// spawn volume and throw keep the signed-off model scale.
+    #[test]
+    fn the_shared_landing_sizes_its_particles_apart_from_its_model() {
+        for (played, client) in SHOT_LANDING.iter().zip(MAGIC_IMPACT_KEPT.iter()) {
+            assert_eq!(
+                played.size.diameter_keys(),
+                client.size.scaled(HUNTER_IMPACT_SIZE).diameter_keys(),
+                "{}",
+                played.name
+            );
+            assert!((played.area - client.area * HUNTER_IMPACT_SCALE).abs() < 1e-6);
+            assert!(
+                (played.speed - client.speed * HUNTER_IMPACT_SCALE * HUNTER_IMPACT_SPREAD).abs()
+                    < 1e-6
+            );
+        }
+    }
+
+    #[test]
+    fn scaling_apart_matches_scaling_when_model_and_particle_agree() {
+        let e = BESTOWDISEASE_IMPACT[2];
+        assert!(e.area > 0.0, "a spawn volume to scale");
+        assert_eq!(e.scaled(0.8, 0.6, 1.2), e.scaled_apart(0.8, 0.8, 0.6, 1.2));
+        let apart = e.scaled_apart(0.8, 1.0, 0.6, 1.0);
+        assert_eq!(apart.size, e.size);
+        assert!((apart.area - e.area * 0.8).abs() < 1e-6);
     }
 
     #[test]
