@@ -698,6 +698,7 @@ fn the_web_is_a_spinning_disc_facing_its_flight() {
                 caster_slot: 0,
                 caster_class: CharacterClass::Hunter,
                 caster_pet_type: None,
+                next_cast: None,
             },
             Transform::from_translation(Vec3::new(-8.0, 1.0, 0.0))
                 .with_rotation(Quat::from_rotation_arc(Vec3::Z, flight)),

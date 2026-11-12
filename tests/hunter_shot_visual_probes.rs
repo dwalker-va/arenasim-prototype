@@ -352,6 +352,7 @@ fn spawn_shot(app: &mut App, ability: AbilityType) -> Entity {
                 caster_slot: 0,
                 caster_class: CharacterClass::Hunter,
                 caster_pet_type: None,
+                next_cast: None,
             },
             Transform::from_translation(Vec3::new(0.0, 1.0, 0.0))
                 .with_rotation(Quat::from_rotation_arc(Vec3::Z, Vec3::X)),

@@ -809,6 +809,7 @@ fn start_component_entry(
             } else {
                 commands.spawn((
                     HolyShockHealPending {
+                        caster,
                         caster_book: crate::states::play_match::ability_book::AbilityBook::shipped(
                             info.class,
                         ),
