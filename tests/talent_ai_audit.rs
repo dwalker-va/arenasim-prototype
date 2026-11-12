@@ -38,6 +38,9 @@ const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::SacredShield, paladin_ally_pressured),
     (AbilityType::SiphonLife, warlock_dots_up),
     (AbilityType::AmplifyCurse, warlock_dots_up),
+    // Expose Armor's moment: below the Kidney Shot planner, on the kill
+    // target.
+    (AbilityType::Rupture, expose_armor_scene),
 ];
 
 /// A Warlock 20 yards from its kill target, a Warrior, with Corruption and

@@ -889,11 +889,18 @@ pub fn combat_auto_attack(
                                 &mut combat_log,
                             );
                             if let Some((_, tname, _, _, _)) = combatant_info.get(&target_entity) {
+                                // The slow the Rogue's book lands (Vile
+                                // Poisons strengthens it): 70% unpatched.
+                                let slow = book
+                                    .get_unchecked(&AbilityType::CripplingPoison)
+                                    .applies_aura
+                                    .as_ref()
+                                    .map_or(0.0, |a| (1.0 - a.magnitude) * 100.0);
                                 combat_log.log(
                                     CombatLogEventType::CrowdControl,
                                     format!(
                                         "Crippling Poison applied to {} ({:.0}% slow)",
-                                        tname, 70.0
+                                        tname, slow
                                     ),
                                 );
                             }
@@ -1278,7 +1285,26 @@ pub fn compound_riders(compound: CompoundDebuff) -> Vec<Aura> {
         CompoundDebuff::MarkOfTheWild => mark_of_the_wild_riders(),
         CompoundDebuff::EntanglingRoots => entangling_roots_riders(),
         CompoundDebuff::Shadowform => shadowform_riders(),
+        CompoundDebuff::StunVulnerability => stun_vulnerability_riders(),
     }
+}
+
+/// A vulnerable stun's RIDER: its victim takes more damage, from every
+/// source, while the stun holds (Improved Kidney Shot). Its size is the
+/// stun's own (`AuraDamageMods::vulnerability`), and its name the stun's, so
+/// the landing site fills both from the face (`apply_pending_auras`), as it
+/// does every rider's duration and caster. Physical, like the stun: nothing
+/// removes it but what removes the stun.
+pub fn stun_vulnerability_riders() -> Vec<Aura> {
+    vec![Aura {
+        effect_type: AuraType::DamageTakenIncrease,
+        duration: 6.0,  // overwritten with the face's on landing
+        magnitude: 0.0, // overwritten with the face's vulnerability on landing
+        break_on_damage_threshold: -1.0,
+        dispel_type: DispelType::Physical,
+        compound: Some(CompoundDebuff::StunVulnerability),
+        ..Default::default()
+    }]
 }
 
 /// The Physical damage Shadowform takes off: TBC spell 15473's

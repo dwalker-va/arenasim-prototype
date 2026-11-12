@@ -1515,6 +1515,12 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
             "the Curse of Exhaustion choice, which only a build with its talent is offered",
         ),
     ),
+    // The Assassination tree (AS-417): tests/assassination_talents.rs builds
+    // it in its scene pairs.
+    (
+        AbilityType::Rupture,
+        Unreached::NeedsKnob("a build that takes Rupture"),
+    ),
 ];
 
 /// Every ability of every class's own kit is chosen somewhere in the grid, or

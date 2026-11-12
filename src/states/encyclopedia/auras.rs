@@ -1892,6 +1892,8 @@ mod tests {
                 "Mortal Strike [Physical]",
                 "Pummel [—]",
                 "Rend [Physical]",
+                // A bleed, like Rend (AS-417).
+                "Rupture [Physical]",
                 "Spell Lock [—]",
                 "Web [Physical]",
                 "Wind Shear [—]",

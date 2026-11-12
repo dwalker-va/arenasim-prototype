@@ -328,6 +328,24 @@ fn expose_armor_is_avoided_and_exposes_nothing() {
     );
 }
 
+/// Rupture (the Assassination bleed): avoided, it opens no bleed.
+#[test]
+fn rupture_is_avoided_and_bleeds_nothing() {
+    assert_avoidable(
+        AbilityType::Rupture,
+        "Rupture",
+        |a| {
+            rogue_scene(None, a)
+                .grant(ATTACKER, AbilityType::Rupture)
+                .cooldown(ATTACKER, AbilityType::KidneyShot, 10.0)
+        },
+        |v| {
+            v.auras_queued
+                .contains(&(DEFENDER, AuraType::DamageOverTime))
+        },
+    );
+}
+
 /// An interrupter of `class` in melee of the defender, a Mage mid-Frostbolt.
 fn interrupt_scene(class: CharacterClass, avoidance: (f32, f32)) -> Scene {
     let scene = Scene::new().unit(ATTACKER, 1, class).targeting(DEFENDER);
@@ -1069,6 +1087,7 @@ fn every_melee_attack_is_a_pacify_ability_at_melee_range() {
         AbilityType::KidneyShot,
         AbilityType::Kick,
         AbilityType::ExposeArmor,
+        AbilityType::Rupture,
     ]
     .into_iter()
     .collect();

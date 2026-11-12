@@ -251,6 +251,8 @@ pub enum AbilityType {
     SiphonLife,        // talent: Shadow DoT whose ticks heal the Warlock
     AmplifyCurse,      // talent: the next Curse of Weakness or Agony +50%
     CurseOfExhaustion, // a curse a talent offers: 30% movement slow for 12s
+    // Rogue: the Assassination tree (AS-417). Appended for the same reason.
+    Rupture, // talent: a Physical bleed, 60 damage over 12s
 }
 
 impl AbilityType {
@@ -268,7 +270,7 @@ impl AbilityType {
             // Weapon strikes, at melee range. Heroic Strike rides the next
             // auto-attack swing, so it is rolled where that swing is.
             HeroicStrike | MortalStrike | Rend | Pummel | Ambush | CheapShot | SinisterStrike
-            | KidneyShot | Kick | ExposeArmor => true,
+            | KidneyShot | Kick | ExposeArmor | Rupture => true,
             // A charge closes the gap; what it lands on arrival is not a
             // weapon strike, and it is cast from 25 yards.
             Charge | BoarCharge => false,
