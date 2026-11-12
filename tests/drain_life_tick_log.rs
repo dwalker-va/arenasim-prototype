@@ -233,3 +233,54 @@ fn a_shared_tick_is_one_breakdown_row() {
         vec![("Drain Life (tick)".to_string(), 10.0)]
     );
 }
+
+/// The tick's breakdown row is "Drain Life (tick)", but the stealth reveal
+/// names the spell (`Hit::source`, not `Hit::row`): a stealthed Rogue the
+/// tick reaches is revealed by "Drain Life".
+#[test]
+fn a_tick_reveals_by_the_spells_name() {
+    let mut world = World::new();
+    world.insert_resource(CombatLog::default());
+    world.insert_resource(ArenaDampening::default());
+    let mut time = Time::<()>::default();
+    time.advance_by(Duration::from_secs_f32(1.0 / 60.0));
+    world.insert_resource(time);
+    let mut rogue = Combatant::new(2, 0, CharacterClass::Rogue);
+    rogue.shadow_resistance = 0.0;
+    rogue.stealthed = true;
+    let target = world
+        .spawn((
+            rogue,
+            Transform::from_xyz(20.0, 0.0, 0.0),
+            ActiveAuras::default(),
+        ))
+        .id();
+    world.spawn((
+        Combatant::new(1, 0, CharacterClass::Warlock),
+        Transform::default(),
+        ChannelingState {
+            ability: AbilityType::DrainLife,
+            duration_remaining: 5.0,
+            time_until_next_tick: 0.0,
+            tick_interval: 1.0,
+            target,
+            interrupted: false,
+            interrupted_display_time: 0.0,
+            ticks_applied: 0,
+        },
+    ));
+    world.run_system_once(process_channeling).unwrap();
+    assert!(!world.get::<Combatant>(target).unwrap().stealthed);
+    let log = world.remove_resource::<CombatLog>().unwrap();
+    assert!(
+        messages(&log).contains(&"[STEALTH] Team 2 Rogue #1 is revealed by Drain Life"),
+        "{:?}",
+        messages(&log)
+    );
+    assert_eq!(
+        log.damage_by_ability(WARLOCK)
+            .into_keys()
+            .collect::<Vec<_>>(),
+        vec!["Drain Life (tick)".to_string()]
+    );
+}

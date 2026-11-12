@@ -10,7 +10,8 @@
 //! Unstable Affliction backlash, reflects and transferred shares each used to
 //! pick their own.
 //!
-//! One seeded batch (54 matches), talented and geared so that every one of
+//! One seeded batch (42 matches, and a Drain Life bank played until it
+//! has what it is for), talented and geared so that every one of
 //! those sites meets an absorb: Power Word: Shield, Aegis of the Last Stand
 //! and Sacred Shield; Retribution Aura and a Reflective Shield; Soul Link and
 //! Blessing of Sacrifice; Unstable Affliction under a Priest's and a Paladin's
@@ -269,16 +270,32 @@ fn batch() -> &'static [Played] {
                 configs.push((format!("nova seed {nova_seed}"), nova(nova_seed)));
             }
         }
-        // A bank for the Drain Life share (four of these twelve drain a
-        // Sacrifice holder today). If a change empties it, widen the bank;
-        // the one-tick case is `tests/drain_life_tick_log.rs`.
-        for seed in 19..=30 {
-            configs.push((format!("drain seed {seed}"), drain(seed)));
-        }
-        configs
+        let mut played: Vec<Played> = configs
             .into_iter()
             .map(|(label, config)| play(label, config))
-            .collect()
+            .collect();
+        // A bank for the Drain Life share, played until DRAIN_SHARES of its
+        // matches have seen one (stopping on a success leaves the chance of
+        // missing unchanged). Measured on seeds 1-60 (2026-11-12): 13 matches
+        // drain a Sacrifice holder, a rate of 0.22, so the whole bank misses
+        // with probability 0.78^60, about 4e-7; even at 0.13 (well below the
+        // measured rate) it is 0.87^60, about 2e-4. The one-tick case is
+        // `tests/drain_life_tick_log.rs`.
+        const DRAIN_SHARES: usize = 3;
+        let mut shared = 0;
+        for seed in 1..=60 {
+            let match_ = play(format!("drain seed {seed}"), drain(seed));
+            if rows(&match_.log).any(|(_, ability, _, message)| {
+                message.starts_with("[TRANSFER]") && ability == "Drain Life (tick)"
+            }) {
+                shared += 1;
+            }
+            played.push(match_);
+            if shared == DRAIN_SHARES {
+                break;
+            }
+        }
+        played
     })
 }
 
