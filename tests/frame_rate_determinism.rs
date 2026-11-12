@@ -816,35 +816,56 @@ fn same_seed_same_sim_at_every_display_rate() {
 /// a Charge trail), so its query order at the deciding tick is not slot order.
 /// This is where the listing bug was found: built in query order, one display
 /// showed "Warrior, Priest" and a 25Hz one "Priest, Warrior", with every
-/// number identical. The current sim plays this seed differently, and query
-/// order now puts the Priest first at every schedule here. That is exactly the
-/// case where agreement between schedules proves nothing, and why
+/// number identical. The current sim plays these seeds differently, and query
+/// order may put the Priest first at every schedule. That is exactly the case
+/// where agreement between schedules proves nothing, and why
 /// `assert_listed_in_slot_order` checks the order itself.
-const QUERY_ORDER_SENSITIVE: &str = r#"{"team1":["Warrior","Priest"],"team2":["Hunter","Mage"],"map":"TwinPillars","random_seed":7}"#;
+///
+/// Played over a small SEED BANK, with the visuals pinned as the bank's
+/// union, for the reason the crowd-control bank below gives: which crowd
+/// control one seed lands moves with any change to what the match plays
+/// (AS-460's second trinkets took the Fear and the Frost Nova root out of
+/// seed 7, the one seed this was pinned at), and the claim each match
+/// carries is its own frame-rate independence and slot-order listing.
+const QUERY_ORDER_SENSITIVE_BANK: [&str; 4] = [
+    r#"{"team1":["Warrior","Priest"],"team2":["Hunter","Mage"],"map":"TwinPillars","random_seed":7}"#,
+    r#"{"team1":["Warrior","Priest"],"team2":["Hunter","Mage"],"map":"TwinPillars","random_seed":8}"#,
+    r#"{"team1":["Warrior","Priest"],"team2":["Hunter","Mage"],"map":"TwinPillars","random_seed":9}"#,
+    r#"{"team1":["Warrior","Priest"],"team2":["Hunter","Mage"],"map":"TwinPillars","random_seed":10}"#,
+];
 
 #[test]
 fn results_and_report_do_not_depend_on_the_display_rate() {
-    let schedules = vec![
-        (
-            "16667us frames".to_string(),
-            run(QUERY_ORDER_SENSITIVE, fixed_rate(16_667)),
-        ),
-        (
-            "40000us frames".to_string(),
-            run(QUERY_ORDER_SENSITIVE, fixed_rate(40_000)),
-        ),
-    ];
-    // Non-vacuity: both teams listed more than one combatant, so an order
-    // existed to get wrong.
-    let results = schedules[0].1.results.as_deref().expect("results");
-    assert_eq!(results.matches("team 1 slot").count(), 2, "{results}");
-    assert_eq!(results.matches("team 2 slot").count(), 2, "{results}");
-    assert_exercised(
-        QUERY_ORDER_SENSITIVE,
-        &schedules,
-        &QUERY_ORDER_SENSITIVE_VISUALS,
+    let mut union: BTreeSet<String> = BTreeSet::new();
+    for cfg in QUERY_ORDER_SENSITIVE_BANK {
+        let schedules = vec![
+            ("16667us frames".to_string(), run(cfg, fixed_rate(16_667))),
+            ("40000us frames".to_string(), run(cfg, fixed_rate(40_000))),
+        ];
+        // Non-vacuity: both teams listed more than one combatant, so an order
+        // existed to get wrong.
+        let results = schedules[0].1.results.as_deref().expect("results");
+        assert_eq!(results.matches("team 1 slot").count(), 2, "{results}");
+        assert_eq!(results.matches("team 2 slot").count(), 2, "{results}");
+        let seen = |ticks: &Ticks| -> BTreeSet<String> {
+            ticks.changed_off_tick.iter().cloned().collect()
+        };
+        assert_eq!(
+            seen(&schedules[0].1),
+            seen(&schedules[1].1),
+            "{cfg}: the two schedules changed different visuals on the combatants"
+        );
+        union.extend(seen(&schedules[0].1));
+        assert_frame_rate_independent(cfg, schedules);
+    }
+    let expected: BTreeSet<String> = QUERY_ORDER_SENSITIVE_VISUALS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(
+        union, expected,
+        "the query-order bank changed a different set of visuals on the combatants than it pins"
     );
-    assert_frame_rate_independent(QUERY_ORDER_SENSITIVE, schedules);
 }
 
 /// A 3v3 that lands the crowd-control visuals the other two matches do not:
@@ -905,7 +926,7 @@ const FOUND_ON_VISUALS: [&str; 5] = [
     "HealCastPosture",
     "HitFlinch",
 ];
-const QUERY_ORDER_SENSITIVE_VISUALS: [&str; 10] = [
+const QUERY_ORDER_SENSITIVE_VISUALS: [&str; 11] = [
     "ChargeTrailEmitter",
     "DeathAnimation",
     "DisengageTrailEmitter",
@@ -913,6 +934,7 @@ const QUERY_ORDER_SENSITIVE_VISUALS: [&str; 10] = [
     "FearedVisual",
     "HealCastPosture",
     "HitFlinch",
+    "NovaFreezeDelay",
     "PolymorphedVisual",
     "RootedVisual",
     "SlowTrailEmitter",
@@ -972,7 +994,7 @@ fn sweep_matchups_and_schedules() {
         r#"{"team1":["Warrior"],"team2":["Hunter"],"map":"BasicArena","random_seed":3}"#,
         r#"{"team1":["Rogue"],"team2":["Mage"],"map":"BasicArena","random_seed":42}"#,
         r#"{"team1":["Warlock"],"team2":["Priest"],"map":"TwinPillars","random_seed":5}"#,
-        QUERY_ORDER_SENSITIVE,
+        QUERY_ORDER_SENSITIVE_BANK[0],
         r#"{"team1":["Warlock","Rogue"],"team2":["Hunter","Paladin"],"map":"PillaredArena","random_seed":3}"#,
         r#"{"team1":["Rogue","Shaman"],"team2":["Warlock","Priest"],"map":"PillaredArena","random_seed":13}"#,
         r#"{"team1":["Warrior","Priest","Mage"],"team2":["Hunter","Warlock","Shaman"],"map":"TwinPillars","random_seed":21}"#,
