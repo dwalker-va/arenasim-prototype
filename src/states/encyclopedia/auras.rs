@@ -1374,6 +1374,16 @@ mod tests {
             .collect();
         assert_eq!(engine_names(catalog_from(&source)), expected);
         assert!(engine_names(catalog_from(&full)).len() > expected.len());
+        let listed: BTreeSet<EngineFamily> = EngineAura::all(&source)
+            .into_iter()
+            .map(|aura| aura.family)
+            .collect();
+        assert_eq!(
+            listed,
+            [EngineFamily::ShadowSight, EngineFamily::WeakenedSoul]
+                .into_iter()
+                .collect()
+        );
 
         let lockout = AuraId::Engine(EngineAura::new(
             EngineFamily::InterruptLockout,
@@ -1400,6 +1410,78 @@ mod tests {
             engine_auras: &[EngineFamily::ShadowSight, EngineFamily::WeakenedSoul],
         };
         assert_eq!(engine_names(catalog_from(&data.catalog_source())), expected);
+    }
+
+    /// Every string a draw put on screen, read off egui's own output shapes.
+    fn drawn_text(draw: impl FnMut(&mut egui::Ui)) -> Vec<String> {
+        fn collect(shape: &egui::Shape, out: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => out.push(text.galley.text().to_string()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| collect(s, out)),
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        crate::ui::install(&ctx);
+        let mut draw = draw;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let output = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| draw(ui));
+        });
+        let mut out = Vec::new();
+        for clipped in &output.shapes {
+            collect(&clipped.shape, &mut out);
+        }
+        out
+    }
+
+    /// The index and a page draw the catalogue their data names — its tables
+    /// AND its engine aura families — and not the game's: the snapshots pin
+    /// their content through exactly this.
+    #[test]
+    fn the_pages_draw_the_catalogue_their_data_names() {
+        let none_abilities = abilities().restricted_to(&[]);
+        let none_items = items().restricted_to(&[]);
+        let none_talents = TalentDefinitions::shipped().restricted_to(&[]);
+        let data = |families: &'static [EngineFamily]| EncyclopediaData {
+            items: &none_items,
+            abilities: &none_abilities,
+            item_icons: None,
+            class_icons: None,
+            ability_icons: None,
+            talents: &none_talents,
+            engine_auras: families,
+        };
+        // Over empty tables only Shadow Sight (a buff) can be listed, and only
+        // while its family is.
+        let with = drawn_text(|ui| {
+            render_index(ui, &data(&[EngineFamily::ShadowSight]));
+        });
+        assert!(with.iter().any(|t| t == "BUFFS  (1)"), "{with:?}");
+        assert!(with.iter().any(|t| t == "DEBUFFS  (0)"), "{with:?}");
+        let without = drawn_text(|ui| {
+            render_index(ui, &data(&[]));
+        });
+        assert!(without.iter().any(|t| t == "BUFFS  (0)"), "{without:?}");
+
+        // The page's body (its mechanic badge) is drawn only while the family
+        // is listed; without it the page says it knows no such aura.
+        let orb = AuraId::Engine(EngineAura::unit(EngineFamily::ShadowSight));
+        let badge = format!("Mechanic — {}", AuraType::ShadowSight.display_name());
+        let page = drawn_text(|ui| {
+            render_detail(ui, orb, &data(&[EngineFamily::ShadowSight]));
+        });
+        assert!(page.contains(&badge), "{page:?}");
+        let page = drawn_text(|ui| {
+            render_detail(ui, orb, &data(&[]));
+        });
+        assert!(!page.contains(&badge), "{page:?}");
     }
 
     /// Each family lists only the auras of a source its tables hold, so a
@@ -1831,6 +1913,46 @@ mod tests {
             .find(|e| e.name == "Frost Trap")
             .expect("registered");
         assert_eq!(frost_trap.sample.magnitude, FROST_TRAP_SLOW_MAGNITUDE);
+    }
+
+    /// The Demonology talents' entries print the numbers their own nodes
+    /// declare, at full rank — each read here straight off the shipped table,
+    /// so neither page can show the other's number.
+    #[test]
+    fn demonology_entries_carry_their_nodes_numbers() {
+        use crate::states::play_match::talent_mechanics::TalentMechanic;
+        use crate::states::play_match::talents::TalentEffect;
+        let mut reduction = None;
+        let mut shadow_damage = None;
+        for (_, node) in TalentDefinitions::shipped().iter() {
+            for effect in &node.per_rank {
+                if let TalentEffect::Mechanic(mechanic) = effect {
+                    match mechanic.at_rank(node.max_rank) {
+                        TalentMechanic::MasterDemonologist { reduction: r } => reduction = Some(r),
+                        TalentMechanic::DemonicSacrifice { shadow_damage: d } => {
+                            shadow_damage = Some(d)
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let (reduction, shadow_damage) = (
+            reduction.expect("a Master Demonologist node ships"),
+            shadow_damage.expect("a Demonic Sacrifice node ships"),
+        );
+        assert_ne!(reduction, shadow_damage, "the check must tell them apart");
+        let entries = catalog(&abilities(), &items());
+        let magnitude = |name: &str| {
+            entries
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap_or_else(|| panic!("{name} is listed"))
+                .sample
+                .magnitude
+        };
+        assert_eq!(magnitude("Master Demonologist"), reduction);
+        assert_eq!(magnitude("Touch of Shadow"), shadow_damage);
     }
 
     /// `combat_core::damage` names the lockout after the interrupt that caused

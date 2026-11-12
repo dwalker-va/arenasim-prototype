@@ -4533,6 +4533,12 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
                 tier.name()
             );
         }
+        // The tiers partition the items: each is in exactly one.
+        let in_a_tier: usize = ItemTier::ALL
+            .iter()
+            .map(|tier| tier_items(&item_defs, *tier).len())
+            .sum();
+        assert_eq!(in_a_tier, item_defs.item_count());
     }
 
     /// The Champion offer floor (talents-and-Gauntlet proposal §6.5): a
