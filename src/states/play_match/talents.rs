@@ -10,21 +10,27 @@
 //! **Resolution happens once, at spawn** ([`TalentDefinitions::resolve`]):
 //! - the combatant's [`AbilityBook`] starts from its class's base abilities,
 //!   gains every ability a `Grant` names, then takes every `Patch`;
-//! - its `StatPercent` effects scale its totals after its equipment
-//!   ([`ResolvedBuild::apply`]), and its `PetStatPercent` effects its pet's
-//!   ([`ResolvedBuild::apply_to_pet`]), after the pet takes its share of the
-//!   owner's (already talented) stats.
+//! - its `StatAdd` effects add points to its totals after its equipment, as
+//!   an item adds them, and its `StatPercent` effects then scale those totals
+//!   ([`ResolvedBuild::apply`], [`StatChange::applied`]); its `PetStatPercent`
+//!   effects scale its pet's ([`ResolvedBuild::apply_to_pet`]), after the pet
+//!   takes its share of the owner's (already talented) stats.
 //!
 //! Nothing changes a resolved build during a match: anything that does is an
 //! aura. An empty build resolves to the untalented book and applies nothing,
 //! so a match without talents is the match it was before talents existed.
 //!
-//! **Prices.** Every rank costs 11 item-budget points and a capstone 22
-//! ([`RANK_PRICE`], [`CAPSTONE_PRICE`], ±[`PRICE_TOLERANCE`]). A node whose
-//! every effect is a `StatPercent` on a stat the item budget weighs is priced
-//! by that weight at its class's reference combatant ([`rank_price`]); every
-//! other node declares its price. The parity tests hold every rank, and every
-//! legal build at each point count, to those prices (`tests/talents.rs`).
+//! **Prices are a sanity check, not a boundary.** A node's stated value is
+//! what ships. Each rank still has an item-budget price: a node whose every
+//! effect is a `StatPercent` or a `StatAdd` on a stat the item budget weighs
+//! is priced by that weight ([`rank_price`]): a `StatAdd` at its points, as
+//! an item's stat is priced, and a `StatPercent` at its percentage of the
+//! class's reference combatant's total. Every other node declares its price.
+//! `tests/talents.rs` prints every rank's price and every legal build's for a
+//! designer to read, against the reference of 11 a rank and 22 a capstone
+//! ([`REFERENCE_RANK_PRICE`], [`REFERENCE_CAPSTONE_PRICE`]), and fails only on
+//! an absurd one ([`TalentConfig::price_sanity`]). A value is never derived to
+//! make a rank cost 11.
 //!
 //! [`rank_price`]: TalentDefinitions::rank_price
 
@@ -61,14 +67,19 @@ pub const TIER_OPENS_AT: [u32; 4] = [0, 2, 3, 5];
 /// The capstone's tier: the one node a tree prices at two ranks.
 pub const CAPSTONE_TIER: u8 = 4;
 
-/// What one rank of a node costs, in item-budget points.
-pub const RANK_PRICE: f32 = 11.0;
+/// The item-budget price a rank of a node is read against: the starting
+/// point the trees were sized at, not a price any rank must hit.
+pub const REFERENCE_RANK_PRICE: f32 = 11.0;
 
-/// What a capstone costs.
-pub const CAPSTONE_PRICE: f32 = 22.0;
+/// The price a capstone is read against: two ranks.
+pub const REFERENCE_CAPSTONE_PRICE: f32 = 22.0;
 
-/// How far a rank's price may stray from [`RANK_PRICE`] or [`CAPSTONE_PRICE`].
-pub const PRICE_TOLERANCE: f32 = 0.15;
+/// How far a rank's price may stray from its reference, as a factor either
+/// way, before it is absurd rather than a design choice. Wide on purpose: a
+/// stated +1% crit chance prices at 3 (0.27x of a rank) and Vitality's +5%
+/// health at about 20 (1.8x), and both are values the design states. What it
+/// catches is a slipped decimal, which moves a price tenfold.
+pub const PRICE_SANITY_FACTOR: f32 = 5.0;
 
 /// Declare [`TalentId`] and everything derived from it: [`TalentId::all`],
 /// [`TalentId::as_str`] and its [`FromStr`](std::str::FromStr) impl — the
@@ -163,14 +174,12 @@ pub struct TreeConfig {
     pub icon: String,
 }
 
-/// A stat a `StatPercent` raises: one of the combatant totals the item stats
-/// feed, read after equipment.
-///
-/// Most are SCALED: the fraction is a percentage of the total, gear included.
-/// A chance or a haste that is 0 for every class (dodge, parry, melee attack
-/// speed) is RAISED instead: the fraction is added in points, as Classic
-/// writes "+4% dodge chance" — a percentage of 0 would be nothing.
-/// [`TalentStat::applied`] is the one rule.
+/// A stat a talent raises: one of the combatant totals the item stats feed,
+/// read after equipment. A `StatAdd` adds points to it, as an item does; a
+/// `StatPercent` takes a percentage of the total, gear and points included
+/// ([`StatChange::applied`] is the one rule). A chance or a haste that is 0
+/// for every class (dodge, parry, melee attack speed) takes points only
+/// ([`TalentStat::takes_points_only`]): a percentage of 0 would be nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TalentStat {
     MaxHealth,
@@ -192,14 +201,14 @@ pub enum TalentStat {
     WeaponDamage,
     /// The damage of the off-hand weapon's swing only.
     OffHandDamage,
-    /// Chance to dodge a melee attack (`Combatant::dodge_chance`). Raised in
-    /// points.
+    /// Chance to dodge a melee attack (`Combatant::dodge_chance`). Points
+    /// only.
     DodgeChance,
-    /// Chance to parry a melee attack (`Combatant::parry_chance`). Raised in
-    /// points.
+    /// Chance to parry a melee attack (`Combatant::parry_chance`). Points
+    /// only.
     ParryChance,
     /// Haste on melee swings only (`Combatant::melee_attack_speed_bonus`).
-    /// Raised in points: `0.10` swings 10% faster.
+    /// Points only: `0.10` swings 10% faster.
     MeleeAttackSpeed,
 }
 
@@ -235,9 +244,10 @@ impl TalentStat {
         }
     }
 
-    /// Whether a fraction of this stat is added in points rather than taken
-    /// as a percentage of its total: a chance or haste every class has at 0.
-    pub fn is_raised(self) -> bool {
+    /// Whether only a `StatAdd` may raise this stat: a chance or haste every
+    /// class has at 0, so a percentage of its total would be nothing. A
+    /// `StatPercent` of one is refused at load.
+    pub fn takes_points_only(self) -> bool {
         match self {
             TalentStat::DodgeChance | TalentStat::ParryChance | TalentStat::MeleeAttackSpeed => {
                 true
@@ -258,17 +268,6 @@ impl TalentStat {
             | TalentStat::HolyResistance
             | TalentStat::WeaponDamage
             | TalentStat::OffHandDamage => false,
-        }
-    }
-
-    /// `value` of this stat with `fraction` applied: scaled by `1 + fraction`,
-    /// or, for a raised stat ([`Self::is_raised`]), `fraction` added. The one
-    /// rule a spawn and every display of a talented stat use.
-    pub fn applied(self, value: f32, fraction: f32) -> f32 {
-        if self.is_raised() {
-            value + fraction
-        } else {
-            value * (1.0 + fraction)
         }
     }
 
@@ -298,9 +297,9 @@ impl TalentStat {
         }
     }
 
-    /// Apply `fraction` of this stat to the combatant ([`Self::applied`]).
-    fn apply(self, c: &mut Combatant, fraction: f32) {
-        let stat = |value: &mut f32| *value = self.applied(*value, fraction);
+    /// Apply `change` to this stat of the combatant ([`StatChange::applied`]).
+    fn apply(self, c: &mut Combatant, change: StatChange) {
+        let stat = |value: &mut f32| *value = change.applied(*value);
         match self {
             TalentStat::MaxHealth => stat(&mut c.max_health),
             TalentStat::MaxMana => stat(&mut c.max_mana),
@@ -326,6 +325,25 @@ impl TalentStat {
             TalentStat::ParryChance => stat(&mut c.parry_chance),
             TalentStat::MeleeAttackSpeed => stat(&mut c.melee_attack_speed_bonus),
         }
+    }
+}
+
+/// What a build does to one of its combatant's stats: the points its
+/// `StatAdd` ranks add and the fraction its `StatPercent` ranks take.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct StatChange {
+    /// Added to the total as an item's stat is: `0.02` crit chance is +2%.
+    pub points: f32,
+    /// A percentage of the total, gear and points included: `0.06` is +6%.
+    pub fraction: f32,
+}
+
+impl StatChange {
+    /// `value` with this change applied: the points added, as an item adds
+    /// them, then the total scaled by `1 + fraction`. The one rule a spawn and
+    /// every display of a talented stat use.
+    pub fn applied(self, value: f32) -> f32 {
+        (value + self.points) * (1.0 + self.fraction)
     }
 }
 
@@ -376,7 +394,6 @@ pub enum AbilityField {
     /// Present only on a channel.
     ChannelDuration,
     ChannelTickInterval,
-    ChannelHealingPerTick,
     ManaBurnAmount,
     /// The applied aura's fields: present only on an ability that applies one.
     AuraDuration,
@@ -425,7 +442,6 @@ impl AbilityField {
             AbilityField::LockoutDuration => Some(&mut config.lockout_duration),
             AbilityField::ChannelDuration => config.channel_duration.as_mut(),
             AbilityField::ChannelTickInterval => Some(&mut config.channel_tick_interval),
-            AbilityField::ChannelHealingPerTick => Some(&mut config.channel_healing_per_tick),
             AbilityField::ManaBurnAmount => Some(&mut config.mana_burn_amount),
             AbilityField::AuraDuration => aura.map(|a| &mut a.duration),
             AbilityField::AuraMagnitude => aura.map(|a| &mut a.magnitude),
@@ -508,7 +524,6 @@ impl AbilityField {
             AbilityField::LockoutDuration => &[AbilityField::LockoutDuration],
             AbilityField::ChannelDuration => &[AbilityField::ChannelDuration],
             AbilityField::ChannelTickInterval => &[AbilityField::ChannelTickInterval],
-            AbilityField::ChannelHealingPerTick => &[AbilityField::ChannelHealingPerTick],
             AbilityField::ManaBurnAmount => &[AbilityField::ManaBurnAmount],
             AbilityField::AuraDuration => &[AbilityField::AuraDuration],
             AbilityField::AuraMagnitude => &[AbilityField::AuraMagnitude],
@@ -593,6 +608,11 @@ pub enum TalentEffect {
     /// The same, on the combatant's pet, after the pet takes its share of
     /// its owner's stats.
     PetStatPercent(TalentStat, f32),
+    /// Points added to one of the combatant's totals, as an item's stat adds
+    /// them, before any `StatPercent` takes its percentage. Every rank adds
+    /// its points: two ranks of +1% crit chance are +2%. Every roll that
+    /// reads the total reads them (crit: every spell, ability and auto-attack).
+    StatAdd(TalentStat, f32),
     /// Rewrites a numeric field of an ability in the combatant's book.
     Patch {
         on: PatchTarget,
@@ -619,9 +639,13 @@ pub enum TalentEffect {
 
 impl TalentEffect {
     /// Whether this effect is priced by the item budget's weights: a
-    /// `StatPercent` on a weighted stat.
+    /// `StatPercent` or a `StatAdd` on a weighted stat.
     fn is_computed(&self) -> bool {
-        matches!(self, TalentEffect::StatPercent(stat, _) if stat.item_weight().is_some())
+        matches!(
+            self,
+            TalentEffect::StatPercent(stat, _) | TalentEffect::StatAdd(stat, _)
+                if stat.item_weight().is_some()
+        )
     }
 }
 
@@ -638,7 +662,8 @@ pub struct TalentConfig {
     pub icon: String,
     pub max_rank: u8,
     /// The price of one rank, for a node whose price is not computed. `None`
-    /// exactly when every effect is a `StatPercent` on a weighted stat.
+    /// exactly when every effect is a `StatPercent` or a `StatAdd` on a
+    /// weighted stat.
     #[serde(default)]
     pub budget: Option<f32>,
     /// A node of the same tree, at a lower tier, and the rank it needs.
@@ -655,13 +680,37 @@ impl TalentConfig {
         self.per_rank.iter().all(TalentEffect::is_computed)
     }
 
-    /// The price a rank of this node is held to: the capstone's or a rank's.
-    pub fn target_price(&self) -> f32 {
+    /// The price a rank of this node is read against: the capstone's or a
+    /// rank's reference.
+    pub fn reference_price(&self) -> f32 {
         if self.tier == CAPSTONE_TIER {
-            CAPSTONE_PRICE
+            REFERENCE_CAPSTONE_PRICE
         } else {
-            RANK_PRICE
+            REFERENCE_RANK_PRICE
         }
+    }
+
+    /// Whether `price`, one rank of this node, is sane: finite, positive and
+    /// within [`PRICE_SANITY_FACTOR`] of its [`reference_price`] either way.
+    /// The only failure a price can cause; any sane price is the design's.
+    ///
+    /// [`reference_price`]: Self::reference_price
+    pub fn price_sanity(&self, price: f32) -> Result<(), String> {
+        let reference = self.reference_price();
+        let (low, high) = (
+            reference / PRICE_SANITY_FACTOR,
+            reference * PRICE_SANITY_FACTOR,
+        );
+        if !price.is_finite() || price <= 0.0 {
+            return Err(format!("price {price} is not a positive number"));
+        }
+        if price < low || price > high {
+            return Err(format!(
+                "price {price:.2} is outside {low:.2} to {high:.2} \
+                 ({PRICE_SANITY_FACTOR}x either way of {reference})"
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -911,14 +960,14 @@ impl TalentDefinitions {
                 (true, Some(_)) => {
                     return Err(at(
                         "declares a budget, but its price is computed: every effect is a \
-                         StatPercent on a stat the item budget weighs"
+                         StatPercent or a StatAdd on a stat the item budget weighs"
                             .to_string(),
                     ))
                 }
                 (false, None) => {
                     return Err(at(
-                        "declares no budget: only a node of StatPercent effects on weighted \
-                         stats has a computed price"
+                        "declares no budget: only a node of StatPercent and StatAdd effects \
+                         on weighted stats has a computed price"
                             .to_string(),
                     ))
                 }
@@ -959,12 +1008,24 @@ impl TalentDefinitions {
         abilities: &AbilityDefinitions,
     ) -> Result<(), String> {
         match effect {
-            TalentEffect::StatPercent(_, fraction) | TalentEffect::PetStatPercent(_, fraction) => {
+            TalentEffect::StatPercent(stat, fraction)
+            | TalentEffect::PetStatPercent(stat, fraction) => {
                 if !fraction.is_finite() || *fraction <= 0.0 {
                     return Err(format!("a stat percentage of {fraction} is not positive"));
                 }
+                if stat.takes_points_only() {
+                    return Err(format!(
+                        "takes a percentage of {stat:?}, which every class has at 0: a \
+                         StatAdd adds it in points"
+                    ));
+                }
                 if matches!(effect, TalentEffect::PetStatPercent(..)) && !has_pet(talent.class) {
                     return Err(format!("{:?} has no pet", talent.class));
+                }
+            }
+            TalentEffect::StatAdd(_, points) => {
+                if !points.is_finite() || *points <= 0.0 {
+                    return Err(format!("adds {points} points, which is not positive"));
                 }
             }
             TalentEffect::Grant(ability) => {
@@ -1188,8 +1249,8 @@ impl TalentDefinitions {
         let switched_off = self.switched_off(choices);
         let mut mechanics = TalentMechanics::default();
         let mut book = AbilityBook::for_class(abilities, class);
-        let mut stats: BTreeMap<TalentStat, f32> = BTreeMap::new();
-        let mut pet_stats: BTreeMap<TalentStat, f32> = BTreeMap::new();
+        let mut stats: BTreeMap<TalentStat, StatChange> = BTreeMap::new();
+        let mut pet_stats: BTreeMap<TalentStat, StatChange> = BTreeMap::new();
         // (ability, field) -> (Σ adds, Σ multiply bonuses), over every rank in
         // build order. Ranks add, for a Mul as for everything else.
         let mut patches: BTreeMap<(AbilityType, AbilityField), (f32, f32)> = BTreeMap::new();
@@ -1206,10 +1267,13 @@ impl TalentDefinitions {
                         book = book.granting(abilities, *ability);
                     }
                     TalentEffect::StatPercent(stat, fraction) => {
-                        *stats.entry(*stat).or_insert(0.0) += fraction * f32::from(rank);
+                        stats.entry(*stat).or_default().fraction += fraction * f32::from(rank);
+                    }
+                    TalentEffect::StatAdd(stat, points) => {
+                        stats.entry(*stat).or_default().points += points * f32::from(rank);
                     }
                     TalentEffect::PetStatPercent(stat, fraction) => {
-                        *pet_stats.entry(*stat).or_insert(0.0) += fraction * f32::from(rank);
+                        pet_stats.entry(*stat).or_default().fraction += fraction * f32::from(rank);
                     }
                     TalentEffect::Patch { on, field, op } => {
                         patch_effects.push((*on, *field, *op, rank));
@@ -1372,10 +1436,12 @@ impl TalentDefinitions {
     }
 
     /// The price of one rank of `talent`: its declared budget, or — for a
-    /// node of `StatPercent` effects on weighted stats — the item budget's
-    /// weight for each stat times its percentage of `reference`'s total.
-    /// `reference` is the class's [`reference_combatant`]; a node with a
-    /// declared budget does not read it.
+    /// node of `StatPercent` and `StatAdd` effects on weighted stats — the
+    /// item budget's weight for each stat times what the rank adds of it: a
+    /// `StatAdd`'s points, as an item's stat is priced, and a `StatPercent`'s
+    /// percentage of `reference`'s total. `reference` is the class's
+    /// [`reference_combatant`]; a node with a declared budget does not read
+    /// it, and a node of `StatAdd` effects alone prices the same at any.
     ///
     /// [`reference_combatant`]: Self::reference_combatant
     pub fn rank_price(
@@ -1400,6 +1466,7 @@ impl TalentDefinitions {
                 TalentEffect::StatPercent(stat, fraction) => {
                     stat.item_weight().unwrap_or(0.0) * fraction * stat.total(reference)
                 }
+                TalentEffect::StatAdd(stat, points) => stat.item_weight().unwrap_or(0.0) * points,
                 _ => 0.0,
             })
             .sum())
@@ -1648,13 +1715,13 @@ fn patch_reaches(on: PatchTarget, ability: AbilityType, config: &AbilityConfig) 
 }
 
 /// One combatant's build, resolved at its spawn: the book it carries and the
-/// stat percentages its spawn applies to it and to its pet.
+/// stat changes its spawn applies to it and to its pet.
 #[derive(Debug, Clone)]
 pub struct ResolvedBuild {
     book: AbilityBook,
     build: Build,
-    stats: BTreeMap<TalentStat, f32>,
-    pet_stats: BTreeMap<TalentStat, f32>,
+    stats: BTreeMap<TalentStat, StatChange>,
+    pet_stats: BTreeMap<TalentStat, StatChange>,
     procs: Vec<TalentProcSlot>,
     mechanics: TalentMechanics,
     /// The off-hand poison the slot chose, when its build opens the slot.
@@ -1700,13 +1767,15 @@ impl ResolvedBuild {
         &self.build
     }
 
-    /// The summed percentage the build adds to each of the combatant's stats.
-    pub fn stat_percents(&self) -> &BTreeMap<TalentStat, f32> {
+    /// The summed change the build makes to each of the combatant's stats:
+    /// the points its `StatAdd` ranks add and the percentage its
+    /// `StatPercent` ranks take.
+    pub fn stat_changes(&self) -> &BTreeMap<TalentStat, StatChange> {
         &self.stats
     }
 
-    /// The same, for its pet.
-    pub fn pet_stat_percents(&self) -> &BTreeMap<TalentStat, f32> {
+    /// The same, for its pet (`PetStatPercent`: a percentage only).
+    pub fn pet_stat_changes(&self) -> &BTreeMap<TalentStat, StatChange> {
         &self.pet_stats
     }
 
@@ -1715,32 +1784,33 @@ impl ResolvedBuild {
         &self.procs
     }
 
-    /// Apply the build to its combatant: its `StatPercent` effects, after
-    /// `apply_equipment` (a percentage of the total, gear included) and
-    /// before the pet spawns from it, refilling the pools to their new
-    /// pre-combat levels as equipping does; and its procs, which it carries
-    /// from here (`Combatant::talent_procs`).
+    /// Apply the build to its combatant: its `StatAdd` and `StatPercent`
+    /// effects, after `apply_equipment` (points added as an item adds them,
+    /// then a percentage of the total, gear included) and before the pet
+    /// spawns from it, refilling the pools to their new pre-combat levels as
+    /// equipping does; and its procs, which it carries from here
+    /// (`Combatant::talent_procs`).
     pub fn apply(&self, combatant: &mut Combatant) {
         combatant.talent_mechanics = self.mechanics.clone();
         combatant.rogue_offhand_poison = self.offhand_poison;
         combatant.sacrifice_pending = self.sacrifices_pet;
-        apply_percents(&self.stats, combatant);
+        apply_changes(&self.stats, combatant);
         combatant.talent_procs.slots = self.procs.clone();
     }
 
     /// Apply the build's `PetStatPercent` effects to its combatant's pet, once
     /// the pet has taken its share of its owner's stats.
     pub fn apply_to_pet(&self, pet: &mut Combatant) {
-        apply_percents(&self.pet_stats, pet);
+        apply_changes(&self.pet_stats, pet);
     }
 }
 
-fn apply_percents(percents: &BTreeMap<TalentStat, f32>, combatant: &mut Combatant) {
-    if percents.is_empty() {
+fn apply_changes(changes: &BTreeMap<TalentStat, StatChange>, combatant: &mut Combatant) {
+    if changes.is_empty() {
         return;
     }
-    for (stat, fraction) in percents {
-        stat.apply(combatant, *fraction);
+    for (stat, change) in changes {
+        stat.apply(combatant, *change);
     }
     combatant.current_health = combatant.max_health;
     combatant.current_mana = combatant.pre_combat_resource();

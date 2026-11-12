@@ -115,8 +115,8 @@ use bevy::prelude::*;
 use super::hunter_shots::{draw, ramp3, ramp_color, PALETTE_STEPS};
 use super::ice_barrier::{
     ib_glint_mesh, ib_icicle_mesh, ib_mist_emit, ib_mist_texture, ib_view_yaw, IB_MIST_ALPHA_KEYS,
-    IB_MIST_COLOUR, IB_MIST_DIAMETER, IB_MIST_LIFE, IB_MIST_PER_SEC, IB_MIST_ROLL, IB_MIST_STOP_MS,
-    IB_MIST_VARIANTS,
+    IB_MIST_COLOUR, IB_MIST_LIFE, IB_MIST_PER_SEC, IB_MIST_PUFF_SIZE, IB_MIST_ROLL,
+    IB_MIST_STOP_MS, IB_MIST_VARIANTS,
 };
 use super::spell_bolts::star_flash_texture;
 use crate::states::play_match::components::*;
@@ -793,8 +793,9 @@ const SPARKLE_RATE_LOOP: f32 = 30.0;
 const SPARKLE_RATE_DEATH: &[(f32, f32)] = &[(0.0, 30.0), (1100.0, 0.0)];
 const SPARKLE_COLOUR: [[u8; 3]; 3] = [[255, 186, 77], [253, 255, 200], [246, 255, 0]];
 const SPARKLE_ALPHA: [f32; 3] = [0.0, 1.0, 0.0];
-/// Half-size at birth, at `SPARKLE_MID` and at death.
-const SPARKLE_HALF: [f32; 3] = [0.056, 0.083, 0.0];
+/// Half-size at birth, at `SPARKLE_MID` and at death (the bench's `scale`
+/// keys, which it draws as the sprite's radius).
+const SPARKLE_SIZE: ParticleSize = ParticleSize::radii([0.056, 0.083, 0.0]);
 const SPARKLE_MID: f32 = 0.75;
 
 /// P0, `genericglow2c` on bone 6: a point at the crown, falling.
@@ -807,7 +808,8 @@ pub const DS_HALO_RATE: f32 = 15.1;
 pub const DS_HALO_DEATH_OFF_MS: f32 = 300.0;
 const HALO_COLOUR: [[u8; 3]; 3] = [[255, 255, 255], [255, 226, 112], [255, 255, 255]];
 const HALO_ALPHA: [f32; 3] = [0.0, 0.37, 0.0];
-const HALO_HALF: [f32; 3] = [0.139, 1.389, 0.139];
+/// Half-size, as the sparkles'.
+const HALO_SIZE: ParticleSize = ParticleSize::radii([0.139, 1.389, 0.139]);
 const HALO_MID: f32 = 0.5;
 
 // --- The pure model (what the probes test) -----------------------------------
@@ -1628,7 +1630,7 @@ fn emit_divine_shield_particles(
         };
         emitters.emitted = emitters.emitted.wrapping_add(1);
         let (offset, velocity) = ds_sparkle_launch(seed);
-        let size = SPARKLE_HALF.map(|h| 2.0 * h * r * DS_SPARKLE_SIZE);
+        let size = SPARKLE_SIZE.scaled(r).scaled(DS_SPARKLE_SIZE);
         spawn_shield_particle(
             commands,
             assets,
@@ -1660,7 +1662,7 @@ fn emit_divine_shield_particles(
     let crown = feet + Vec3::Y * DS_HALO_HEIGHT * r;
     while emitters.halo_carry >= 1.0 {
         emitters.halo_carry -= 1.0;
-        let size = HALO_HALF.map(|h| 2.0 * h * r * DS_HALO_SIZE);
+        let size = HALO_SIZE.scaled(r).scaled(DS_HALO_SIZE);
         spawn_shield_particle(
             commands,
             assets,
@@ -1716,7 +1718,7 @@ fn emit_ice_barrier_mist(
                 life,
                 velocity,
                 gravity: 0.0,
-                size: IB_MIST_DIAMETER.map(|d| d * r * IB_MIST_SIZE),
+                size: IB_MIST_PUFF_SIZE.scaled(r).scaled(IB_MIST_SIZE),
                 mid: 0.5,
                 palette: palette.clone(),
                 step: 0,
@@ -1738,12 +1740,11 @@ fn spawn_shield_particle(
     particle: ClientParticle,
     at: Vec3,
 ) {
-    let size = particle.size[0].max(1e-4);
     commands.spawn((
         particle,
         Mesh3d(assets.particle_quad.clone()),
         MeshMaterial3d(palette[0].clone()),
-        Transform::from_translation(at).with_scale(Vec3::splat(size)),
+        Transform::from_translation(at),
         NotShadowCaster,
         PlayMatchEntity,
     ));

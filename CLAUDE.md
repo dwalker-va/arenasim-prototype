@@ -616,10 +616,15 @@ carrying every slot's build.
   prerequisite, and a price rule broken: a node of `StatPercent` effects on
   stats the item budget weighs has its price COMPUTED at the class's
   `reference` combatant (starting kit plus three Gauntlet picks) and declares
-  no `budget`; every other node declares one. `tests/talents.rs` holds every
-  rank to 11 ±15% (a capstone to 22) and every legal build at 2-8 points to
-  within one rank of the cheapest. Never give armor or another free stat an
-  item weight to price a talent: that re-prices every item.
+  no `budget`; every other node declares one. **The price is a sanity check,
+  not a boundary** (user ruling, 2026-11-12): the value the design states is
+  what ships, and is never derived to make a rank cost 11.
+  `talent_price_report` in `tests/talents.rs` prints every rank's price
+  against its reference (11 a rank, 22 a capstone) and every legal build's at
+  2-8 points (`-- --nocapture`); `cargo test` fails only on an absurd price,
+  one that is not a positive number or is more than 5x off its reference
+  either way (`TalentConfig::price_sanity`). Never give armor or another free
+  stat an item weight to price a talent: that re-prices every item.
 - **Adding a talent ability:** mark it `talent: true` in `abilities.ron` (it
   leaves its class's base book) and `Grant` it from exactly one node. Its
   class AI decides it with `abilities.get(..)`, never `get_unchecked`: an

@@ -191,7 +191,7 @@ impl Harness {
             .map(|(e, p, t)| {
                 let kind = if (p.life - burst_life).abs() < 1e-4 {
                     Kind::Burst
-                } else if p.size[0] == p.size[2] {
+                } else if p.size.diameter_keys()[0] == p.size.diameter_keys()[2] {
                     Kind::Mote
                 } else {
                     Kind::Puff

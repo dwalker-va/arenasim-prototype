@@ -24,8 +24,8 @@ use arenasim::states::play_match::equipment::{
     load_default_loadouts, load_item_definitions, EquipmentPlugin,
 };
 use arenasim::states::play_match::talents::{
-    AbilityField, Build, TalentDefinitions, TalentId, TalentStat, CAPSTONE_PRICE,
-    MAX_TALENT_POINTS, PRICE_TOLERANCE, RANK_PRICE,
+    AbilityField, Build, StatChange, TalentDefinitions, TalentId, TalentStat, MAX_TALENT_POINTS,
+    PRICE_SANITY_FACTOR, REFERENCE_CAPSTONE_PRICE, REFERENCE_RANK_PRICE,
 };
 use arenasim::states::play_match::{
     AbilityConfigPlugin, AbilityType, MapConfigPlugin, MovementConfigPlugin,
@@ -158,6 +158,23 @@ fn the_loader_rejects_each_broken_rule() {
         // StatPercent on an unweighted stat has no computed price.
         (EMBRACE, "per_rank: [StatPercent(Armor, 0.03)],", "declares no budget"),
         (EMBRACE, "per_rank: [StatPercent(MaxHealth, 0.0)],", "not positive"),
+        // Nor has a StatAdd on one; a StatAdd on a weighted stat has.
+        (EMBRACE, "per_rank: [StatAdd(Armor, 30.0)],", "declares no budget"),
+        (EMBRACE, "budget: Some(11.0), per_rank: [StatAdd(CritChance, 0.01)],", "declares a budget"),
+        (EMBRACE, "per_rank: [StatAdd(CritChance, 0.0)],", "not positive"),
+        (EMBRACE, "per_rank: [StatAdd(CritChance, -0.01)],", "not positive"),
+        (EMBRACE, "per_rank: [StatAdd(CritChance, inf)],", "not positive"),
+        // A chance every class has at 0 takes points, never a percentage.
+        (
+            EMBRACE,
+            "budget: Some(11.0), per_rank: [StatPercent(DodgeChance, 0.04)],",
+            "a StatAdd adds it in points",
+        ),
+        (
+            "per_rank: [PetStatPercent(MaxHealth, 0.10)],",
+            "per_rank: [PetStatPercent(ParryChance, 0.04)],",
+            "a StatAdd adds it in points",
+        ),
         (EMBRACE, "per_rank: [],", "per_rank is empty"),
         // A prerequisite: same tree, a lower tier, a rank it has.
         (
@@ -398,19 +415,34 @@ fn stat_percents_refill_pools_and_reach_every_weapon() {
     );
 }
 
-/// A raised stat (a chance or haste every class has at 0) takes its fraction
-/// in POINTS, so two ranks of +4% dodge are 8% from nothing; a scaled stat
-/// still takes a percentage of its total.
+/// A stat change adds its points, as an item does, then takes its
+/// percentage of that total: so a percentage reaches the points too. A chance
+/// or haste every class has at 0 takes points only, and declares its price.
 #[test]
-fn a_raised_stat_adds_its_fraction_in_points() {
+fn a_stat_change_adds_its_points_then_takes_its_percentage() {
+    let points = |points| StatChange {
+        points,
+        fraction: 0.0,
+    };
+    let fraction = |fraction| StatChange {
+        points: 0.0,
+        fraction,
+    };
+    assert_eq!(points(0.08).applied(0.0), 0.08);
+    assert_eq!(points(0.08).applied(0.05), 0.05 + 0.08);
+    assert_eq!(fraction(0.1).applied(100.0), 100.0 * (1.0 + 0.1));
+    let both = StatChange {
+        points: 20.0,
+        fraction: 0.1,
+    };
+    assert_eq!(both.applied(100.0), (100.0 + 20.0) * (1.0 + 0.1));
+    assert_eq!(StatChange::default().applied(123.0), 123.0);
     for stat in [
         TalentStat::DodgeChance,
         TalentStat::ParryChance,
         TalentStat::MeleeAttackSpeed,
     ] {
-        assert!(stat.is_raised(), "{stat:?}");
-        assert_eq!(stat.applied(0.0, 0.08), 0.08);
-        assert_eq!(stat.applied(0.05, 0.08), 0.05 + 0.08);
+        assert!(stat.takes_points_only(), "{stat:?}");
         assert_eq!(stat.item_weight(), None, "{stat:?} declares its price");
     }
     for stat in [
@@ -418,8 +450,7 @@ fn a_raised_stat_adds_its_fraction_in_points() {
         TalentStat::OffHandDamage,
         TalentStat::CritChance,
     ] {
-        assert!(!stat.is_raised(), "{stat:?}");
-        assert_eq!(stat.applied(100.0, 0.1), 100.0 * (1.0 + 0.1));
+        assert!(!stat.takes_points_only(), "{stat:?}");
     }
     assert_eq!(TalentStat::OffHandDamage.item_weight(), None);
 }
@@ -608,7 +639,7 @@ fn an_empty_build_resolves_to_the_untalented_combatant() {
         .unwrap();
     let base = AbilityBook::for_class(defs, CharacterClass::Warlock);
     assert_eq!(books(resolved.book()), books(&base));
-    assert!(resolved.stat_percents().is_empty() && resolved.pet_stat_percents().is_empty());
+    assert!(resolved.stat_changes().is_empty() && resolved.pet_stat_changes().is_empty());
     let mut c = Combatant::new(1, 0, CharacterClass::Warlock);
     c.current_health = 1.0;
     let before = stat_bits(&c);
@@ -689,8 +720,20 @@ fn a_build_resolves_its_ranks_and_patches() {
         };
         assert_eq!(config.cast_time, want, "{ability:?}");
     }
-    assert_eq!(resolved.stat_percents()[&TalentStat::MaxHealth], 0.06);
-    assert_eq!(resolved.pet_stat_percents()[&TalentStat::MaxHealth], 0.10);
+    assert_eq!(
+        resolved.stat_changes()[&TalentStat::MaxHealth],
+        StatChange {
+            points: 0.0,
+            fraction: 0.06
+        }
+    );
+    assert_eq!(
+        resolved.pet_stat_changes()[&TalentStat::MaxHealth],
+        StatChange {
+            points: 0.0,
+            fraction: 0.10
+        }
+    );
     // A patch that drives a field below zero is refused.
     let negative = edited(
         EMBRACE,
@@ -773,20 +816,70 @@ fn references() -> BTreeMap<CharacterClass, Combatant> {
         .collect()
 }
 
+/// Every shipped rank's price is sane: the one way a price fails the build.
 #[test]
-fn every_rank_prices_at_eleven_and_every_capstone_at_twenty_two() {
+fn every_rank_price_is_sane() {
     let talents = TalentDefinitions::shipped();
     let refs = references();
-    let mut off = Vec::new();
+    let mut absurd = Vec::new();
+    let mut checked = 0;
     for (id, talent) in talents.iter() {
         let price = talents.rank_price(id, refs.get(&talent.class)).unwrap();
-        let target = talent.target_price();
-        if (price - target).abs() > target * PRICE_TOLERANCE {
-            off.push(format!("{id:?}: {price:.2} (target {target})"));
+        if let Err(e) = talent.price_sanity(price) {
+            absurd.push(format!("{id:?}: {e}"));
+        }
+        checked += 1;
+    }
+    assert!(absurd.is_empty(), "{}", absurd.join("\n"));
+    assert_eq!(checked, talents.iter().count());
+    assert!(checked > 0, "no rank was priced");
+}
+
+/// The sanity bound is wide: it refuses a price that is not a positive number,
+/// or one more than [`PRICE_SANITY_FACTOR`] off its reference either way (a
+/// slipped decimal), and admits everything a design states between.
+#[test]
+fn the_price_sanity_bound_refuses_only_the_absurd() {
+    let talents = TalentDefinitions::shipped();
+    let rank = talents.get(FelStamina).unwrap();
+    let capstone = talents.get(SoulLink).unwrap();
+    assert_eq!(
+        (rank.reference_price(), capstone.reference_price()),
+        (REFERENCE_RANK_PRICE, REFERENCE_CAPSTONE_PRICE)
+    );
+    assert_eq!(
+        (
+            REFERENCE_RANK_PRICE,
+            REFERENCE_CAPSTONE_PRICE,
+            PRICE_SANITY_FACTOR
+        ),
+        (11.0, 22.0, 5.0)
+    );
+    for (node, reference) in [(rank, 11.0_f32), (capstone, 22.0)] {
+        let (low, high) = (reference / 5.0, reference * 5.0);
+        for sane in [low, reference, high, low * 1.01, high * 0.99] {
+            assert!(node.price_sanity(sane).is_ok(), "{sane} of {reference}");
+        }
+        for absurd in [
+            f32::NAN,
+            f32::INFINITY,
+            -reference,
+            0.0,
+            low * 0.99,
+            high * 1.01,
+            reference * 10.0,
+            reference / 10.0,
+        ] {
+            assert!(
+                node.price_sanity(absurd).is_err(),
+                "{absurd} of {reference}"
+            );
         }
     }
-    assert!(off.is_empty(), "{}", off.join("\n"));
-    assert_eq!((RANK_PRICE, CAPSTONE_PRICE), (11.0, 22.0));
+    // Two stated values the old ±15% refused: +1% crit chance (3 points) and
+    // Vitality's +5% of a 396-health Rogue (19.8).
+    assert!(rank.price_sanity(0.01 * 300.0).is_ok());
+    assert!(rank.price_sanity(0.05 * 396.0).is_ok());
 }
 
 /// Demonic Embrace's computed price: 3% of the reference Warlock's health at
@@ -803,48 +896,99 @@ fn a_stat_percent_is_priced_at_the_reference_combatant() {
     );
     let price = talents.rank_price(DemonicEmbrace, Some(warlock)).unwrap();
     assert_eq!(price, 0.03 * warlock.max_health);
-    // A declared price ignores the reference.
+    // A declared price ignores the reference, and is the node's stated one:
+    // Soul Link, a capstone, states two ranks.
     assert_eq!(talents.rank_price(FelStamina, None).unwrap(), 11.0);
+    assert_eq!(talents.rank_price(SoulLink, None).unwrap(), 22.0);
     assert!(talents.rank_price(DemonicEmbrace, None).is_err());
 }
 
-/// Every legal build at each point count from 2 to 8 costs within one rank of
-/// every other at that count.
+/// The price report: every rank's price in each tree, against its reference,
+/// and every legal build's at each point count from 2 to 8, cheapest and
+/// dearest named. A designer reads it; nothing in it fails but an empty one.
+/// `cargo test --test talents talent_price_report -- --nocapture` prints it.
 #[test]
-fn every_legal_build_at_a_point_count_costs_within_one_rank() {
+fn talent_price_report() {
     let talents = TalentDefinitions::shipped();
     let refs = references();
-    let mut checked = 0;
+    let mut report = String::new();
+    let mut nodes_reported = std::collections::BTreeSet::new();
+    let mut builds_priced = 0;
     for class in CharacterClass::all() {
+        if talents.trees(*class).is_empty() {
+            continue;
+        }
         let prices: BTreeMap<TalentId, f32> = talents
             .talents_for_class(*class)
             .map(|(id, _)| (id, talents.rank_price(id, refs.get(class)).unwrap()))
             .collect();
+        for tree in talents.trees(*class) {
+            report += &format!("\n{class:?} {}\n", tree.name);
+            report += "  tier  node                          ranks  price/rank  reference  ratio  priced\n";
+            let mut nodes: Vec<_> = talents
+                .talents_for_class(*class)
+                .filter(|(_, t)| t.tree == tree.id)
+                .collect();
+            nodes.sort_by_key(|(_, t)| (t.tier, t.column));
+            for (id, t) in nodes {
+                let price = prices[&id];
+                report += &format!(
+                    "  {:>4}  {:<28}  {:>5}  {:>10.2}  {:>9.0}  {:>5.2}  {}\n",
+                    t.tier,
+                    t.name,
+                    t.max_rank,
+                    price,
+                    t.reference_price(),
+                    price / t.reference_price(),
+                    if t.is_computed() {
+                        "computed"
+                    } else {
+                        "declared"
+                    }
+                );
+                nodes_reported.insert(id);
+            }
+        }
+        report += &format!("\n{class:?} builds\n");
+        report += "  points  builds  cheapest  dearest  spread\n";
+        let mut extremes = Vec::new();
         for points in 2..=MAX_TALENT_POINTS {
-            let costs: Vec<f32> = talents
+            let mut costs: Vec<(f32, Build)> = talents
                 .legal_builds(*class, points)
-                .iter()
+                .into_iter()
                 .map(|b| {
-                    b.ranks
+                    let cost = b
+                        .ranks
                         .iter()
                         .map(|(id, r)| prices[id] * f32::from(*r))
-                        .sum()
+                        .sum();
+                    (cost, b)
                 })
                 .collect();
             if costs.is_empty() {
                 continue;
             }
-            checked += costs.len();
-            let (lo, hi) = costs
-                .iter()
-                .fold((f32::MAX, f32::MIN), |(lo, hi), c| (lo.min(*c), hi.max(*c)));
-            assert!(
-                hi - lo <= RANK_PRICE + 1e-3,
-                "{class:?} at {points} points: builds cost {lo:.2} to {hi:.2}"
+            builds_priced += costs.len();
+            costs.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let (lo, cheapest) = costs.first().unwrap();
+            let (hi, dearest) = costs.last().unwrap();
+            report += &format!(
+                "  {points:>6}  {:>6}  {lo:>8.2}  {hi:>7.2}  {:>6.2}\n",
+                costs.len(),
+                hi - lo
             );
+            extremes.push(format!(
+                "  {points}: cheapest {}\n     dearest  {}\n",
+                talents.describe(*class, cheapest),
+                talents.describe(*class, dearest)
+            ));
         }
+        report += &extremes.concat();
     }
-    assert!(checked > 0, "no legal build was priced");
+    println!("{report}");
+    let every: std::collections::BTreeSet<TalentId> = talents.iter().map(|(id, _)| id).collect();
+    assert_eq!(nodes_reported, every, "every node is in the report");
+    assert!(builds_priced > 0, "no legal build was priced");
 }
 
 /// The enumeration finds every legal build, and only legal ones: the
@@ -938,7 +1082,6 @@ fn every_numeric_ability_field_is_decided() {
         lockout_duration: _,
         channel_duration: _,
         channel_tick_interval: _,
-        channel_healing_per_tick: _,
         mana_burn_amount: _,
         crit_chance: _,
         // Not numbers, or not patchable yet (a tree card adds the field it needs):
@@ -960,6 +1103,7 @@ fn every_numeric_ability_field_is_decided() {
         is_dispel: _,
         dispel_backlash: _,
         health_to_mana: _,
+        channel_leech: _,
     } = config;
     // And every patchable field reads the field it names.
     let mut c = defs.get_unchecked(&AbilityType::Shadowbolt).clone();

@@ -28,6 +28,7 @@ use bevy::render::render_asset::RenderAssetUsages;
 use std::f32::consts::TAU;
 
 use super::shield::{disc_texture, keys, pws_hash, PWS_CLIENT_TO_RIG, PWS_STREAK_QUAD};
+use crate::states::play_match::components::ParticleSize;
 
 // --- The icicles ---------------------------------------------------------------
 
@@ -178,9 +179,9 @@ pub const IB_MIST_PER_SEC: f32 = 11.7;
 const MIST_AREA_LEN: f32 = 1.389;
 const MIST_AREA_WID: f32 = 0.075;
 pub const IB_MIST_STOP_MS: f32 = 767.0;
-/// A puff's diameter at birth, midlife and death, client units (twice the
-/// client's half-size keys 0.278, 0.417, 0.556).
-pub const IB_MIST_DIAMETER: [f32; 3] = [0.556, 0.834, 1.112];
+/// A puff's size at birth, midlife and death, client units: the client's
+/// half-size keys, which the bench draws as the puff's radius.
+pub const IB_MIST_PUFF_SIZE: ParticleSize = ParticleSize::radii([0.278, 0.417, 0.556]);
 /// Its colour, sRGB, at birth, midlife and death: the client track's blue
 /// with white added as it moves toward white, as the bench drew it.
 pub const IB_MIST_COLOUR: [[u8; 3]; 3] = [[81, 172, 243], [138, 229, 255], [234, 255, 255]];

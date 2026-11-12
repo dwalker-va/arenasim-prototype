@@ -271,10 +271,19 @@ pub fn process_damage_follow_ups(
                     continue;
                 };
                 let holder_id = combat_log_id_for(&combatant, pet_of(holder));
-                combat_log.log(
-                    CombatLogEventType::MatchEvent,
-                    format!("[SAVED] {by} prevents a killing blow on {holder_id}"),
-                );
+                // A later blow in the save's own frame can still kill its
+                // holder: the save prevented one blow and then has no one to
+                // heal, so its line says so and no heal line follows.
+                let survived = combatant.is_alive();
+                let message = if survived {
+                    format!("[SAVED] {by} prevents a killing blow on {holder_id}")
+                } else {
+                    format!(
+                        "[SAVED] {by} prevents a killing blow on {holder_id}, who is killed by \
+                         another blow"
+                    )
+                };
+                combat_log.log(CombatLogEventType::MatchEvent, message);
                 commands.spawn((
                     KillingBlowPrevented {
                         holder,
@@ -283,7 +292,7 @@ pub fn process_damage_follow_ups(
                     PlayMatchEntity,
                 ));
                 let mut healed = 0.0;
-                if let Some(fraction) = heal_fraction {
+                if let Some(fraction) = heal_fraction.filter(|_| survived) {
                     let amount = combatant.max_health * fraction;
                     healed = apply_healing(
                         &mut commands,

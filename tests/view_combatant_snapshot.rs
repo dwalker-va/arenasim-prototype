@@ -575,6 +575,161 @@ fn the_sheet_draws_the_slots_build_and_its_stats_read_it() {
     );
 }
 
+/// A build's flat crit reads on the sheet as the spawn applies it: the Crit
+/// Chance row is the geared total plus the points, and its hover names them.
+/// A fixture makes Demonic Embrace +5% crit chance a rank, in points.
+#[test]
+fn a_stat_add_reads_on_the_sheet_in_points() {
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+    let class_icons = ClassIcons::default();
+    let text = std::fs::read_to_string(arenasim::paths::asset_path("config/talents.ron"))
+        .expect("talents.ron reads");
+    let health = "per_rank: [StatPercent(MaxHealth, 0.03)],";
+    assert!(text.contains(health));
+    let fixture = TalentDefinitions::from_ron(
+        &text.replacen(health, "per_rank: [StatAdd(CritChance, 0.05)],", 1),
+        &abilities,
+    )
+    .expect("the fixture validates");
+    let crit = |build: Build| -> (f32, String) {
+        let mut config = MatchConfig::default();
+        config.team1[0] = Some(CharacterClass::Warlock);
+        config.team1_builds[0] = build;
+        let sheet = Sheet::open(
+            CharacterClass::Warlock,
+            config,
+            ViewCombatantData {
+                abilities: &abilities,
+                items: &items,
+                default_loadouts: &defaults,
+                class_icons: &class_icons,
+                ability_icons: None,
+                item_icons: None,
+                pet_icons: None,
+                talents: &fixture,
+            },
+        );
+        let note = sheet
+            .last
+            .notes
+            .iter()
+            .find_map(|n| n.strip_prefix("stat Crit Chance="))
+            .unwrap_or_else(|| panic!("no crit row: {:?}", sheet.last.notes))
+            .to_string();
+        let (value, hover) = note.split_once(" hover=").expect("a hover");
+        let value: f32 = value
+            .strip_suffix('%')
+            .expect("a percentage")
+            .parse()
+            .expect("a number");
+        (value, hover.to_string())
+    };
+    let (geared, hover) = crit(Build::default());
+    assert!(!hover.contains("from talents"), "{hover:?}");
+    let (talented, hover) = crit(Build::of(&[(TalentId::DemonicEmbrace, 2)]));
+    assert!(
+        (talented - (geared + 10.0)).abs() < 0.051,
+        "{geared}% + 2 x 5% is not {talented}%"
+    );
+    assert!(hover.ends_with("+ 10.0% from talents"), "{hover:?}");
+}
+
+/// The notes a Warlock's sheet leaves with `build`, over the shipped talents
+/// with Demonic Embrace doing `per_rank` (and declaring a rank's price).
+fn embrace_sheet_notes(per_rank: &str, build: Build) -> Vec<String> {
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+    let class_icons = ClassIcons::default();
+    let text = std::fs::read_to_string(arenasim::paths::asset_path("config/talents.ron"))
+        .expect("talents.ron reads");
+    let health = "per_rank: [StatPercent(MaxHealth, 0.03)],";
+    assert!(text.contains(health));
+    let fixture = TalentDefinitions::from_ron(
+        &text.replacen(
+            health,
+            &format!("budget: Some(11.0), per_rank: [{per_rank}],"),
+            1,
+        ),
+        &abilities,
+    )
+    .expect("the fixture validates");
+    let mut config = MatchConfig::default();
+    config.team1[0] = Some(CharacterClass::Warlock);
+    config.team1_builds[0] = build;
+    let sheet = Sheet::open(
+        CharacterClass::Warlock,
+        config,
+        ViewCombatantData {
+            abilities: &abilities,
+            items: &items,
+            default_loadouts: &defaults,
+            class_icons: &class_icons,
+            ability_icons: None,
+            item_icons: None,
+            pet_icons: None,
+            talents: &fixture,
+        },
+    );
+    sheet.last.notes.clone()
+}
+
+/// The note `prefix<key>=` left, its value (`None`: no such row).
+fn note_value<'a>(notes: &'a [String], prefix: &str, key: &str) -> Option<&'a str> {
+    let head = format!("{prefix} {key}=");
+    notes.iter().find_map(|n| n.strip_prefix(head.as_str()))
+}
+
+/// A build's points draw every kind of stats row as the spawn applies them,
+/// and in the bonus colour even where the gear added nothing: the Weapon
+/// Damage row ("+3", and "+3 +10%" beside a percentage), a raised row
+/// (Attack Power, which the Warlock's gear leaves alone) and a stat line
+/// (Fire Resist, drawn from zero). Control: the empty build draws no Weapon
+/// Damage or Fire Resist row and Attack Power in plain colour.
+#[test]
+fn stat_add_rows_print_their_points_in_the_bonus_colour() {
+    let points = "StatAdd(WeaponDamage, 3.0), StatAdd(AttackPower, 10.0), \
+                  StatAdd(FireResistance, 5.0)";
+    let untalented = embrace_sheet_notes(points, Build::default());
+    assert_eq!(note_value(&untalented, "stat", "Weapon Damage"), None);
+    assert_eq!(note_value(&untalented, "stat", "Fire Resist"), None);
+    assert_eq!(
+        note_value(&untalented, "tone", "Attack Power"),
+        Some("plain"),
+        "the Warlock's gear adds no attack power"
+    );
+    let base_ap: i32 = note_value(&untalented, "stat", "Attack Power")
+        .expect("an Attack Power row")
+        .parse()
+        .expect("a number");
+
+    let talented = embrace_sheet_notes(points, Build::of(&[(TalentId::DemonicEmbrace, 1)]));
+    assert_eq!(note_value(&talented, "stat", "Weapon Damage"), Some("+3"));
+    assert_eq!(
+        note_value(&talented, "tone", "Weapon Damage"),
+        Some("bonus")
+    );
+    assert_eq!(
+        note_value(&talented, "stat", "Attack Power"),
+        Some((base_ap + 10).to_string().as_str())
+    );
+    assert_eq!(note_value(&talented, "tone", "Attack Power"), Some("bonus"));
+    assert_eq!(
+        note_value(&talented, "stat", "Fire Resist"),
+        Some("5 hover=0 base + 0 from equipment + 5 from talents (1.6% damage reduction)")
+    );
+    assert_eq!(note_value(&talented, "tone", "Fire Resist"), Some("bonus"));
+
+    let both = embrace_sheet_notes(
+        "StatAdd(WeaponDamage, 3.0), StatPercent(WeaponDamage, 0.1)",
+        Build::of(&[(TalentId::DemonicEmbrace, 1)]),
+    );
+    assert_eq!(note_value(&both, "stat", "Weapon Damage"), Some("+3 +10%"));
+    assert_eq!(note_value(&both, "tone", "Weapon Damage"), Some("bonus"));
+}
+
 /// The Paladin's aura choice offers Retribution Aura only to a build that
 /// takes its talent, and a choice of it the build no longer offers goes back
 /// to Devotion Aura as the sheet draws, so the slot's spawn stays legal.

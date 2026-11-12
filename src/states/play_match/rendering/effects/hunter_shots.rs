@@ -41,7 +41,9 @@ use crate::states::play_match::components::*;
 // AS-136 Hunter Shot Bench carries them per emitter (the doc's tables merge the
 // two spark emitters and round the ramps; the bench keeps them apart). Knobs
 // the user tuned in the bench sit on top of them as named constants, and the
-// landing's three-of-six cut is the user's sign-off, not a data finding.
+// landing's three-of-six cut is the user's sign-off, not a data finding. The
+// bench draws a size key as the sprite's full width (`r = size * zoom / 2`),
+// so the sizes are `ParticleSize::diameters`.
 //
 // Colour check against Shadow Bolt: the shot's core is close in HUE to the
 // Shadow Bolt halo (`spell_bolts.rs`). They separate on MATERIAL — this is a
@@ -168,8 +170,8 @@ pub struct ClientEmitter {
     pub rise: bool,
     pub color: [[u8; 3]; 3],
     pub alpha: [f32; 3],
-    /// Diameter, yards.
-    pub size: [f32; 3],
+    /// Size ramp, in the unit its bench keys it in (see [`ParticleSize`]).
+    pub size: ParticleSize,
     /// Where in the life the three ramps' middle key sits, 0..1. The source
     /// keys most emitters at half-life; some earlier (0.25) or later (0.75).
     pub mid: f32,
@@ -249,7 +251,7 @@ impl ClientEmitter {
     /// `spread`; windows and lives follow `time`.
     pub const fn scaled(self, size: f32, spread: f32, time: f32) -> Self {
         let mut e = self;
-        e.size = [e.size[0] * size, e.size[1] * size, e.size[2] * size];
+        e.size = e.size.scaled(size);
         e.area *= size;
         if let Some((w, h)) = e.column {
             e.column = Some((w * size, h * size));
@@ -311,7 +313,7 @@ const ARCANESHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[22, 34, 168], [78, 33, 201], [203, 103, 255]],
         alpha: [0.59, 0.98, 0.0],
-        size: [0.142, 0.264, 0.142],
+        size: ParticleSize::diameters([0.142, 0.264, 0.142]),
         mid: 0.5,
         track: None,
     },
@@ -329,7 +331,7 @@ const ARCANESHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[77, 15, 207], [114, 59, 190], [165, 222, 255]],
         alpha: [1.0, 1.0, 0.0],
-        size: [0.083, 0.028, 0.014],
+        size: ParticleSize::diameters([0.083, 0.028, 0.014]),
         mid: 0.5,
         track: None,
     },
@@ -347,7 +349,7 @@ const ARCANESHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[84, 0, 237], [131, 94, 237], [183, 227, 255]],
         alpha: [0.39, 1.0, 0.0],
-        size: [0.083, 0.028, 0.014],
+        size: ParticleSize::diameters([0.083, 0.028, 0.014]),
         mid: 0.5,
         track: None,
     },
@@ -365,7 +367,7 @@ const ARCANESHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[0, 0, 154], [97, 67, 207], [245, 245, 236]],
         alpha: [0.39, 1.0, 0.2],
-        size: [0.194, 0.139, 0.028],
+        size: ParticleSize::diameters([0.194, 0.139, 0.028]),
         mid: 0.5,
         track: None,
     },
@@ -389,7 +391,7 @@ const POISONSHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[119, 201, 2], [141, 207, 12], [209, 234, 92]],
         alpha: [0.19, 0.77, 0.0],
-        size: [0.142, 0.264, 0.142],
+        size: ParticleSize::diameters([0.142, 0.264, 0.142]),
         mid: 0.5,
         track: None,
     },
@@ -407,7 +409,7 @@ const POISONSHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[109, 183, 55], [144, 208, 106], [230, 255, 92]],
         alpha: [1.0, 1.0, 0.0],
-        size: [0.056, 0.028, 0.014],
+        size: ParticleSize::diameters([0.056, 0.028, 0.014]),
         mid: 0.5,
         track: None,
     },
@@ -425,7 +427,7 @@ const POISONSHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[109, 201, 0], [161, 237, 52], [202, 255, 127]],
         alpha: [0.39, 1.0, 0.0],
-        size: [0.056, 0.028, 0.014],
+        size: ParticleSize::diameters([0.056, 0.028, 0.014]),
         mid: 0.5,
         track: None,
     },
@@ -443,7 +445,7 @@ const POISONSHOT_MISSILE: [ClientEmitter; 4] = [
         rise: false,
         color: [[158, 255, 64], [109, 201, 0], [91, 169, 0]],
         alpha: [0.39, 1.0, 0.2],
-        size: [0.139, 0.083, 0.028],
+        size: ParticleSize::diameters([0.139, 0.083, 0.028]),
         mid: 0.5,
         track: None,
     },
@@ -468,7 +470,7 @@ const MAGIC_IMPACT_KEPT: [ClientEmitter; 3] = [
         rise: false,
         color: [[35, 123, 233], [188, 188, 188], [145, 81, 205]],
         alpha: [1.0, 1.0, 0.0],
-        size: [0.4, 0.6, 0.828],
+        size: ParticleSize::diameters([0.4, 0.6, 0.828]),
         mid: 0.5,
         track: None,
     },
@@ -486,7 +488,7 @@ const MAGIC_IMPACT_KEPT: [ClientEmitter; 3] = [
         rise: false,
         color: [[35, 123, 233], [163, 55, 239], [255, 255, 255]],
         alpha: [1.0, 1.0, 0.0],
-        size: [0.15, 0.217, 0.031],
+        size: ParticleSize::diameters([0.15, 0.217, 0.031]),
         mid: 0.5,
         track: None,
     },
@@ -504,7 +506,7 @@ const MAGIC_IMPACT_KEPT: [ClientEmitter; 3] = [
         rise: false,
         color: [[37, 249, 82], [151, 64, 233], [255, 255, 255]],
         alpha: [0.53, 0.78, 0.0],
-        size: [0.197, 0.925, 1.764],
+        size: ParticleSize::diameters([0.197, 0.925, 1.764]),
         mid: 0.5,
         track: None,
     },
@@ -528,7 +530,7 @@ const BESTOWDISEASE_IMPACT: [ClientEmitter; 3] = [
         rise: false,
         color: [[0, 119, 38], [171, 214, 0], [194, 196, 0]],
         alpha: [0.0, 1.0, 0.0],
-        size: [0.028, 0.556, 0.028],
+        size: ParticleSize::diameters([0.028, 0.556, 0.028]),
         mid: 0.5,
         track: None,
     },
@@ -546,7 +548,7 @@ const BESTOWDISEASE_IMPACT: [ClientEmitter; 3] = [
         rise: true,
         color: [[18, 55, 0], [106, 146, 0], [163, 196, 64]],
         alpha: [0.39, 1.0, 0.0],
-        size: [0.222, 0.306, 0.694],
+        size: ParticleSize::diameters([0.222, 0.306, 0.694]),
         mid: 0.5,
         track: None,
     },
@@ -564,7 +566,7 @@ const BESTOWDISEASE_IMPACT: [ClientEmitter; 3] = [
         rise: false,
         color: [[49, 102, 1], [99, 136, 20], [115, 152, 1]],
         alpha: [1.0, 1.0, 0.0],
-        size: [0.111, 0.056, 0.028],
+        size: ParticleSize::diameters([0.111, 0.056, 0.028]),
         mid: 0.5,
         track: None,
     },
@@ -753,7 +755,7 @@ pub fn spawn_client_particle(
         },
         Mesh3d(quad.clone()),
         MeshMaterial3d(palette[0].clone()),
-        Transform::from_translation(at + offset).with_scale(Vec3::splat(e.size[0].max(1e-4))),
+        Transform::from_translation(at + offset),
         NotShadowCaster,
     ));
     if !owned {
@@ -1013,7 +1015,7 @@ pub fn animate_client_particles(
         let velocity = p.velocity;
         transform.translation += velocity * dt;
         let t = p.age / p.life;
-        let size = ramp3(p.size, p.mid, t).max(1e-4);
+        let size = ramp3(p.size.diameter_keys(), p.mid, t).max(1e-4);
         transform.scale = match p.facing {
             ParticleFacing::Streak => Vec3::new(size, size * STREAK_STRETCH, size),
             _ => Vec3::splat(size),
@@ -1538,11 +1540,60 @@ mod tests {
         assert_eq!(palette_step(2.0), PALETTE_STEPS - 1);
     }
 
+    /// Every particle is drawn at the AS-136 bench's width. The bench draws a
+    /// size key as the sprite's full width (`r = size * zoom / 2`), so the
+    /// quad is each key.
+    #[test]
+    fn every_table_is_drawn_at_the_benchs_widths() {
+        let bench: [(&[ClientEmitter], &[[f32; 3]]); 4] = [
+            (
+                &ARCANESHOT_MISSILE,
+                &[
+                    [0.142, 0.264, 0.142],
+                    [0.083, 0.028, 0.014],
+                    [0.083, 0.028, 0.014],
+                    [0.194, 0.139, 0.028],
+                ],
+            ),
+            (
+                &POISONSHOT_MISSILE,
+                &[
+                    [0.142, 0.264, 0.142],
+                    [0.056, 0.028, 0.014],
+                    [0.056, 0.028, 0.014],
+                    [0.139, 0.083, 0.028],
+                ],
+            ),
+            (
+                &MAGIC_IMPACT_KEPT,
+                &[
+                    [0.4, 0.6, 0.828],
+                    [0.15, 0.217, 0.031],
+                    [0.197, 0.925, 1.764],
+                ],
+            ),
+            (
+                &BESTOWDISEASE_IMPACT,
+                &[
+                    [0.028, 0.556, 0.028],
+                    [0.222, 0.306, 0.694],
+                    [0.111, 0.056, 0.028],
+                ],
+            ),
+        ];
+        for (table, widths) in bench {
+            assert_eq!(table.len(), widths.len(), "{}", table[0].name);
+            for (e, width) in table.iter().zip(widths) {
+                assert_eq!(e.size.diameter_keys(), *width, "{}", e.name);
+            }
+        }
+    }
+
     #[test]
     fn scaling_keeps_the_client_table_and_changes_only_what_it_names() {
         let e = MAGIC_IMPACT_KEPT[1];
         let s = e.scaled(0.8, 0.6, 1.0);
-        assert!((s.size[1] - e.size[1] * 0.8).abs() < 1e-6);
+        assert!((s.size.diameter_keys()[1] - e.size.diameter_keys()[1] * 0.8).abs() < 1e-6);
         assert!((s.area - e.area * 0.8).abs() < 1e-6);
         assert!((s.speed - e.speed * 0.8 * 0.6).abs() < 1e-6);
         assert_eq!(s.window, e.window);

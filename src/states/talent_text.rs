@@ -38,6 +38,9 @@ pub fn effect_text(effect: &TalentEffect, ranks: u8, abilities: &AbilityDefiniti
         TalentEffect::PetStatPercent(stat, fraction) => {
             format!("{} pet {}", percent(fraction * n), stat_name(*stat))
         }
+        TalentEffect::StatAdd(stat, points) => {
+            format!("{} {}", stat_points(*stat, points * n), stat_name(*stat))
+        }
         TalentEffect::Patch { on, field, op } => {
             let target = match on {
                 PatchTarget::Ability(ability) => abilities
@@ -442,6 +445,33 @@ fn stat_name(stat: TalentStat) -> &'static str {
     }
 }
 
+/// Points of a stat in its own unit, signed: a chance or a haste in
+/// percentage points ("+1%" for `0.01` crit chance), movement speed in yards
+/// a second, everything else as a number ("+10" maximum health).
+fn stat_points(stat: TalentStat, points: f32) -> String {
+    match stat {
+        TalentStat::CritChance
+        | TalentStat::DodgeChance
+        | TalentStat::ParryChance
+        | TalentStat::MeleeAttackSpeed => percent(points),
+        TalentStat::MovementSpeed => signed(points, "yd/sec"),
+        TalentStat::MaxHealth
+        | TalentStat::MaxMana
+        | TalentStat::ManaRegen
+        | TalentStat::AttackPower
+        | TalentStat::SpellPower
+        | TalentStat::Armor
+        | TalentStat::FireResistance
+        | TalentStat::FrostResistance
+        | TalentStat::ShadowResistance
+        | TalentStat::ArcaneResistance
+        | TalentStat::NatureResistance
+        | TalentStat::HolyResistance
+        | TalentStat::WeaponDamage
+        | TalentStat::OffHandDamage => signed(points, ""),
+    }
+}
+
 /// A patchable field's name in a sentence ("Shadow Bolt cast time").
 fn field_name(field: AbilityField) -> &'static str {
     match field {
@@ -461,7 +491,6 @@ fn field_name(field: AbilityField) -> &'static str {
         AbilityField::LockoutDuration => "lockout",
         AbilityField::ChannelDuration => "channel duration",
         AbilityField::ChannelTickInterval => "time between ticks",
-        AbilityField::ChannelHealingPerTick => "healing per tick",
         AbilityField::ManaBurnAmount => "mana burned",
         AbilityField::AuraDuration => "effect duration",
         AbilityField::AuraMagnitude => "effect magnitude",
@@ -494,7 +523,6 @@ fn field_is_fraction(field: AbilityField) -> bool {
         | AbilityField::LockoutDuration
         | AbilityField::ChannelDuration
         | AbilityField::ChannelTickInterval
-        | AbilityField::ChannelHealingPerTick
         | AbilityField::ManaBurnAmount
         | AbilityField::AuraDuration
         | AbilityField::AuraMagnitude
@@ -527,7 +555,6 @@ fn field_unit(field: AbilityField) -> &'static str {
         | AbilityField::HealingCoefficient
         | AbilityField::ApplicationChance
         | AbilityField::ProjectileSpeed
-        | AbilityField::ChannelHealingPerTick
         | AbilityField::AuraMagnitude
         | AbilityField::AuraMagnitudeCoefficient
         | AbilityField::AuraBreakOnDamage
@@ -589,12 +616,12 @@ mod tests {
         );
         let drain = TalentEffect::Patch {
             on: PatchTarget::Ability(AbilityType::DrainLife),
-            field: AbilityField::ChannelHealingPerTick,
+            field: AbilityField::ChannelDuration,
             op: PatchOp::Mul(1.15),
         };
         assert_eq!(
             effect_text(&drain, 1, abilities()),
-            "+15% Drain Life healing per tick"
+            "+15% Drain Life channel duration"
         );
         let grant = TalentEffect::Grant(AbilityType::DeathCoil);
         assert_eq!(effect_text(&grant, 1, abilities()), "Learn Death Coil");

@@ -12,11 +12,15 @@
 //     applies its `per_rank` effects once per rank. Ranks ADD, for every
 //     effect kind: two ranks of +3% are +6%, and two ranks of Mul(1.15) scale
 //     by 1.30 (10 -> 11.5 -> 13), never compound.
+//       StatAdd(stat, points)           points added to the combatant's total,
+//                                       as an item's stat adds them:
+//                                       StatAdd(CritChance, 0.01) is +1% crit
+//                                       chance, on every roll that reads it
 //       StatPercent(stat, fraction)     a percentage of the combatant's total,
-//                                       gear included; for a chance or haste
-//                                       every class has at 0 (DodgeChance,
-//                                       ParryChance, MeleeAttackSpeed), the
-//                                       fraction added in points
+//                                       gear and StatAdd points included. Not
+//                                       for a chance or haste every class has
+//                                       at 0 (DodgeChance, ParryChance,
+//                                       MeleeAttackSpeed): those take StatAdd
 //       PetStatPercent(stat, fraction)  the same, on the combatant's pet
 //       Patch(on: Ability(X) | School(S), field: <AbilityField>, op: Add(n) | Mul(n))
 //                                       rewrites a numeric field of its
@@ -40,11 +44,16 @@
 //       SwitchesOff(option: O, talent: T)  O chosen turns T off for the match
 //       Forbids(option: O, ability: A)     O chosen locks A
 //       Requires(ability: A, option: O)    A is locked unless O is chosen
-//   - is priced on the item budget: 11 a rank, 22 the capstone (tier 4),
-//     ±15%. A node whose every effect is a StatPercent on a stat the item
-//     budget weighs has its price COMPUTED, at the class's reference
-//     combatant below, and declares no `budget`; every other node declares
-//     its `budget` (per rank).
+//   - has an item-budget price, as a SANITY CHECK: the value a node states
+//     is what ships, and its price is read against 11 a rank and 22 the
+//     capstone (tier 4). A node whose every effect is a StatPercent or a
+//     StatAdd on a stat the item budget weighs has its price COMPUTED and
+//     declares no `budget`: a StatAdd at the item weight of its points (+1%
+//     crit is 300 x 0.01 = 3), a StatPercent at its share of the class's
+//     reference combatant below. Every other node declares its `budget` (per
+//     rank). `cargo test` prints every price and fails only on an absurd one
+//     (more than 5x off its reference either way); never derive a value to
+//     make a rank cost 11.
 //   - may `requires: Some((Talent, rank))`, a node of the same tree at a
 //     lower tier.
 (
@@ -122,11 +131,7 @@
             class: Warlock, tree: Demonology, tier: 4, column: 2,
             icon: "icons/talents/spell_shadow_gathershadows.jpg",
             max_rank: 1,
-            // A capstone is two ranks' price (22, ±15%). Priced at 20.5 so a
-            // Soul Link build with 2/2 Demonic Embrace (computed, 11.67 a rank
-            // on the reference Warlock) stays within one rank of every other
-            // build at its point count.
-            budget: Some(20.5),
+            budget: Some(22.0),
             requires: Some((FelStamina, 2)),
             // 12% of the Warlock's damage taken goes to the Felhunter while
             // it lives. No damage rider.
@@ -145,7 +150,7 @@
             max_rank: 2,
             budget: Some(11.0),
             // +4% dodge chance a rank, in points: 0 -> 4% -> 8%.
-            per_rank: [StatPercent(DodgeChance, 0.04)],
+            per_rank: [StatAdd(DodgeChance, 0.04)],
         ),
         DualWieldSpecialization: (
             name: "Dual Wield Specialization",
@@ -170,12 +175,9 @@
             class: Rogue, tree: Combat, tier: 2, column: 1,
             icon: "icons/talents/ability_warrior_revenge.jpg",
             max_rank: 1,
-            // About +2.8% maximum health, gear included: 396 -> 407 at the
-            // reference Rogue. Its price is computed there, and the fraction
-            // is the one that prices it at exactly a rank (11 / 396): a tree
-            // with a capstone holds every legal build within one rank only if
-            // each rank costs 11.
-            per_rank: [StatPercent(MaxHealth, 0.027778)],
+            // +5% maximum health, gear included: 396 -> 416 at the reference
+            // Rogue, where its price is computed (about 20, 1.8 ranks).
+            per_rank: [StatPercent(MaxHealth, 0.05)],
         ),
         Deflection: (
             name: "Deflection",
@@ -185,7 +187,7 @@
             budget: Some(11.0),
             // +4% parry chance a rank, in points: 0 -> 4% -> 8%. The Rogue is
             // the first class that can parry.
-            per_rank: [StatPercent(ParryChance, 0.04)],
+            per_rank: [StatAdd(ParryChance, 0.04)],
         ),
         SwiftBlades: (
             name: "Swift Blades",
@@ -197,7 +199,7 @@
             budget: Some(11.0),
             // +10% melee attack speed: both hands swing 10% faster; a bow or
             // a wand would not.
-            per_rank: [StatPercent(MeleeAttackSpeed, 0.10)],
+            per_rank: [StatAdd(MeleeAttackSpeed, 0.10)],
         ),
         ExposeArmor: (
             name: "Expose Armor",
@@ -219,13 +221,10 @@
             class: Paladin, tree: Protection, tier: 1, column: 0,
             icon: "icons/talents/spell_holy_divineintervention.jpg",
             max_rank: 2,
-            // About +2.5% maximum health a rank, gear included: 448 -> 459
-            // -> 470 at the reference Paladin. Its price is computed there,
-            // and the fraction is the one that prices it at exactly a rank
-            // (11 / 448): a tree with a capstone holds every legal build
-            // within one rank only if each rank costs 11, so any other
-            // fraction breaks build parity at 6 points.
-            per_rank: [StatPercent(MaxHealth, 0.024554)],
+            // +3% maximum health a rank, gear included: 448 -> 461 -> 475 at
+            // the reference Paladin, where its price is computed (about 13 a
+            // rank).
+            per_rank: [StatPercent(MaxHealth, 0.03)],
         ),
         ImprovedHammerOfJustice: (
             name: "Improved Hammer of Justice",

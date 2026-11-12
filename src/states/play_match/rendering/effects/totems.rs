@@ -177,12 +177,16 @@ const BIRTH_RISE_FRAC: f32 = 0.7;
 const BIRTH_WOBBLE_DEG: f32 = 6.0;
 const BIRTH_WOBBLE_HALF_CYCLES: f32 = 4.0;
 
-/// The bench drew each particle as a soft disc whose RADIUS was a multiple of
-/// the client size key; these are the diameters that reproduce it.
-const FLAME_SIZE: [f32; 3] = [0.218, 0.398, 0.0];
-const FIRE_FLAME_SIZE: [f32; 3] = [0.451, 0.832, 0.328];
-const DUST_SIZE: [f32; 3] = [0.512, 0.266, 0.112];
-const SMOKE_SIZE: [f32; 3] = [0.656, 0.900, 1.372];
+/// The bench drew each particle as a soft disc whose RADIUS was its client
+/// size key (`r = key * zoom`), the flame's at this multiple of it
+/// (`r = key * zoom * 1.4`). The keys below are the bench's, as it gives them.
+const BENCH_FLAME_RADIUS_PER_KEY: f32 = 1.4;
+const FLAME_SIZE: ParticleSize =
+    ParticleSize::radii([0.078, 0.142, 0.0]).scaled(BENCH_FLAME_RADIUS_PER_KEY);
+const FIRE_FLAME_SIZE: ParticleSize =
+    ParticleSize::radii([0.161, 0.297, 0.117]).scaled(BENCH_FLAME_RADIUS_PER_KEY);
+const DUST_SIZE: ParticleSize = ParticleSize::radii([0.256, 0.133, 0.056]);
+const SMOKE_SIZE: ParticleSize = ParticleSize::radii([0.328, 0.45, 0.686]);
 
 // ── The per-element tables ─────────────────────────────────────────────────
 
@@ -941,9 +945,7 @@ pub fn update_totem_visuals(
                     },
                     Mesh3d(rig.quad.clone()),
                     MeshMaterial3d(palette[0].clone()),
-                    Transform::from_translation(at)
-                        .with_rotation(facing)
-                        .with_scale(Vec3::splat(e.size[0].max(1e-4))),
+                    Transform::from_translation(at).with_rotation(facing),
                     NotShadowCaster,
                     PlayMatchEntity,
                 ));
@@ -1090,5 +1092,33 @@ mod tests {
             )
         };
         assert_eq!(flame_emitter(TotemElement::Fire).size, FIRE_FLAME_SIZE);
+    }
+
+    /// Each particle is drawn at the AS-130 bench's width. The bench draws a
+    /// dust or smoke puff with its client key as the RADIUS (`sz = key *
+    /// zoom`) and a flame at 1.4 times that (`sz = key * zoom * 1.4`); the
+    /// quad is the diameter.
+    #[test]
+    fn the_particles_are_drawn_at_the_benchs_radii() {
+        let check = |what: &str, size: ParticleSize, radius: [f32; 3]| {
+            let drawn = size.diameter_keys();
+            for k in 0..3 {
+                assert!(
+                    (drawn[k] - 2.0 * radius[k]).abs() < 1e-6,
+                    "{what}: {drawn:?} against radii {radius:?}"
+                );
+            }
+        };
+        let flame = |key: [f32; 3]| key.map(|k| k * 1.4);
+        for element in TotemElement::ALL {
+            let want = if element == TotemElement::Fire {
+                flame([0.161, 0.297, 0.117])
+            } else {
+                flame([0.078, 0.142, 0.0])
+            };
+            check("flame", flame_emitter(element).size, want);
+            check("dust", dust_emitter(element).size, [0.256, 0.133, 0.056]);
+        }
+        check("smoke", SMOKE_EMITTER.size, [0.328, 0.45, 0.686]);
     }
 }

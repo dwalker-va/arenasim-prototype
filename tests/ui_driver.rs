@@ -1086,9 +1086,10 @@ const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
     // spelling, one tooltip note, and a `choice:` mark for an option that is
     // not an ability), and the restore button registers through the kit's
     // `driver_id`.
-    // The stats panel notes each total it draws (the four raised rows, and
-    // the rows read through `StatLine`).
-    ("src/states/view_combatant_ui.rs", 13),
+    // The stats panel notes each total it draws (the four raised rows, the
+    // rows read through `StatLine`, and the Weapon Damage row) and the
+    // colour each toned row drew (`toned_row`).
+    ("src/states/view_combatant_ui.rs", 15),
     // A class page notes which list each ability is drawn in: the base kit
     // or the talent abilities.
     ("src/states/encyclopedia/classes.rs", 2),
