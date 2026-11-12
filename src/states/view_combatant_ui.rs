@@ -1168,10 +1168,27 @@ fn bonus_color(bonus: f32) -> egui::Color32 {
     }
 }
 
+/// One stats row drawn in [`bonus_color`] of `bonus`, what the gear and the
+/// build add to it. For a script, it notes the colour it drew
+/// (`tone <key>=bonus|danger|plain`), read off the colour itself.
+fn toned_row(ui: &mut egui::Ui, key: &str, value: &str, bonus: f32) -> egui::Response {
+    let drawn = bonus_color(bonus);
+    let response = stat_row(ui, key, value, drawn);
+    let tone = if drawn == data::ITEM_BONUS {
+        "bonus"
+    } else if drawn == color::DANGER {
+        "danger"
+    } else {
+        "plain"
+    };
+    ui_driver::note(ui, format_args!("tone {key}={tone}"));
+    response
+}
+
 /// One stats row whose value equipment changed: drawn in [`bonus_color`],
 /// and explained on hover.
 fn bonus_row(ui: &mut egui::Ui, key: &str, value: &str, bonus: f32, explain: impl Fn() -> String) {
-    let response = stat_row(ui, key, value, bonus_color(bonus));
+    let response = toned_row(ui, key, value, bonus);
     if bonus != 0.0 {
         response.on_hover_text(explain());
     }
@@ -1290,10 +1307,11 @@ fn render_stats_panel(
                         );
 
                         // The rest read through one rule: base plus gear, then
-                        // the build's share of that sum. A row whose total is
-                        // zero is not drawn (no armor, no resistance), so a
-                        // talent that raises a stat the gear left at zero
-                        // raises nothing, exactly as the spawn applies it.
+                        // the build's points and its share of that sum. A row
+                        // whose total is zero is not drawn (no armor, no
+                        // resistance), so a percentage of a stat the gear left
+                        // at zero raises nothing, exactly as the spawn applies
+                        // it; points raise it from zero, and draw it.
                         let pct = |v: f32| format!("{:.1}%", v * 100.0);
                         let one = |v: f32| format!("{v:.1}");
                         let whole = |v: f32| format!("{v:.0}");
@@ -1399,12 +1417,9 @@ fn render_stats_panel(
                         // Weapon damage has no row of its own (the swing is the
                         // weapon's); a build that raises it says so here.
                         if let Some(change) = talents.get(&TalentStat::WeaponDamage) {
-                            stat_row(
-                                ui,
-                                "Weapon Damage",
-                                &weapon_damage_bonus(*change),
-                                bonus_color(change.points + change.fraction),
-                            );
+                            let value = weapon_damage_bonus(*change);
+                            toned_row(ui, "Weapon Damage", &value, change.points + change.fraction);
+                            ui_driver::note(ui, format_args!("stat Weapon Damage={value}"));
                         }
                     });
                 })
