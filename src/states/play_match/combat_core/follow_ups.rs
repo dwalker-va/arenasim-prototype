@@ -26,7 +26,9 @@ use bevy::prelude::*;
 use super::super::abilities::SpellSchool;
 use super::super::components::*;
 use super::super::utils::combat_log_id_for;
-use super::{apply_damage_with_absorb, apply_healing, Hit, HitKind};
+use super::{
+    apply_damage_with_absorb, apply_healing, blocks_all_damage, share_to_health, Hit, HitKind,
+};
 use crate::combat::log::{CombatLog, CombatLogEventType};
 
 /// Who receives a transferred share.
@@ -46,6 +48,13 @@ pub enum DamageFollowUp {
         holder: Entity,
         receiver: TransferReceiver,
         amount: f32,
+        /// The school of the hit it was split from: what the receiver's
+        /// scoped damage-taken modifiers read.
+        school: SpellSchool,
+        /// Whether the receiver's own immunity, damage-taken modifiers and
+        /// absorbs apply to it (Blessing of Sacrifice), or it cannot be
+        /// prevented (Soul Link). See [`HitKind::share`].
+        preventable: bool,
         /// The unit that dealt the hit, credited with the share.
         dealer: Option<Entity>,
         /// What transferred it ("Blessing of Sacrifice", "Soul Link").
@@ -126,7 +135,9 @@ pub struct KillingBlowPrevented {
 ///
 /// A transfer never kills its receiver: a share it could not survive (or one
 /// whose receiver is dead or gone) stays with the holder, and a transfer
-/// aura that could not pass its share on ends.
+/// aura that could not pass its share on ends. What it could survive is what
+/// the share would put on its health ([`share_to_health`]): a receiver immune
+/// to it bears any share.
 pub fn process_damage_follow_ups(
     mut commands: Commands,
     mut combat_log: ResMut<CombatLog>,
@@ -152,9 +163,12 @@ pub fn process_damage_follow_ups(
                 holder,
                 receiver,
                 amount,
+                school,
+                preventable,
                 dealer,
                 by,
             } => {
+                let kind = HitKind::share(preventable);
                 let receiver_entity = match receiver {
                     TransferReceiver::Unit(e) => Some(e),
                     TransferReceiver::OwnPet => pets
@@ -164,9 +178,10 @@ pub fn process_damage_follow_ups(
                         .find(|e| combatants.get(*e).is_ok_and(|(c, _, _)| c.is_alive())),
                 };
                 let bearable = receiver_entity.is_some_and(|e| {
-                    combatants
-                        .get(e)
-                        .is_ok_and(|(c, _, _)| c.is_alive() && c.current_health > amount)
+                    combatants.get(e).is_ok_and(|(c, auras, _)| {
+                        c.is_alive()
+                            && c.current_health > share_to_health(kind, amount, school, auras)
+                    })
                 });
                 let (lands_on, returned) = match receiver_entity {
                     Some(e) if bearable => (e, false),
@@ -182,19 +197,22 @@ pub fn process_damage_follow_ups(
                         });
                     }
                 }
+                // Whether the receiver's immunity blocks the share, read
+                // before it lands, for its log line.
+                let immune = !returned
+                    && kind == HitKind::Transferred
+                    && combatants
+                        .get(lands_on)
+                        .is_ok_and(|(_, auras, _)| blocks_all_damage(auras));
                 let hit = Hit {
                     amount,
-                    school: SpellSchool::None,
+                    school,
                     source: &by,
                     attacker: dealer,
                     victim: lands_on,
                     dealt: 1.0,
                     // A share handed back meets its holder's absorbs.
-                    kind: if returned {
-                        HitKind::Returned
-                    } else {
-                        HitKind::Transferred
-                    },
+                    kind: if returned { HitKind::Returned } else { kind },
                 };
                 let landed = land(
                     hit,
@@ -204,7 +222,7 @@ pub fn process_damage_follow_ups(
                     &pet_of,
                     &mut more,
                 );
-                if let Some((actual, _, victim_id)) = landed {
+                if let Some((actual, absorbed, victim_id)) = landed {
                     let holder_id = combatants
                         .get(holder)
                         .map(|(c, _, _)| combat_log_id_for(c, pet_of(holder)))
@@ -212,6 +230,13 @@ pub fn process_damage_follow_ups(
                     let message = if returned {
                         format!(
                             "[TRANSFER] {by} cannot pass on {actual:.0} damage: {victim_id} takes it"
+                        )
+                    } else if immune && actual == 0.0 && absorbed == 0.0 {
+                        format!("[TRANSFER] {victim_id} is immune to {holder_id}'s damage ({by})")
+                    } else if absorbed > 0.0 {
+                        format!(
+                            "[TRANSFER] {victim_id} takes {actual:.0} of {holder_id}'s damage \
+                             ({by}, {absorbed:.0} absorbed)"
                         )
                     } else {
                         format!("[TRANSFER] {victim_id} takes {actual:.0} of {holder_id}'s damage ({by})")

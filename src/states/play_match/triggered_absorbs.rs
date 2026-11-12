@@ -39,9 +39,10 @@
 //! with it where it soaks every absorb (its step 5): after the attacker's
 //! damage-dealt increase, armor or resistance, the damage-taken modifiers and
 //! a transfer's share, and before the killing-blow save and health. So it
-//! soaks the hit as the pipeline has made it, not as its source rolled it; a
-//! transferred hit (Blessing of Sacrifice, Soul Link) skips it, as it skips
-//! every absorb; and a blow it soaks below the bearer's health spends no save.
+//! soaks the hit as the pipeline has made it, not as its source rolled it; it
+//! soaks a Blessing of Sacrifice share its bearer is sent, as any hit, while a
+//! Soul Link share, which cannot be prevented, skips it as it skips every
+//! absorb; and a blow it soaks below the bearer's health spends no save.
 //! Because the system runs after the follow-ups, damage a transfer or a
 //! reflect lands raises the shield on the same frame as a direct hit would,
 //! and a killing-blow save is judged before it: Cheat Death, which leaves its

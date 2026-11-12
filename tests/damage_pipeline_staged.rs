@@ -347,3 +347,123 @@ fn a_melee_ability_on_a_reflect_holder_is_answered() {
         .count();
     assert_eq!(reflects, melee_hits, "{}", played.log);
 }
+
+// ---------------------------------------------------------------------------
+// A Blessing of Sacrifice share meets its Paladin's defences (AS-459)
+// ---------------------------------------------------------------------------
+
+const SAC_HOLDER: Unit = Unit::new(1, 0);
+const SAC_PALADIN: Unit = Unit::new(1, 1);
+const SAC_PALADIN_ID: &str = "Team 1 Paladin #2";
+
+/// A Warrior under an enemy Mage's Frostbolts wearing its Paladin's Blessing
+/// of Sacrifice, the Paladin healthy, out of the fight and keeping Concentration
+/// Aura (no damage-taken reduction of its own), `defence` (if any) landed on
+/// the Paladin at the gates. The log's lines for the shares the Paladin was
+/// sent, and the Paladin's lowest health on any staged frame as a fraction of
+/// its maximum.
+fn sacrifice_match(defence: Option<AbilityType>) -> (Vec<String>, f32) {
+    let config = HeadlessMatchConfig {
+        team1: vec!["Warrior".into(), "Paladin".into()],
+        team2: vec!["Mage".into()],
+        team1_paladin_auras: vec!["Devotion".into(), "Concentration".into()],
+        random_seed: Some(5),
+        max_duration_secs: 7.0,
+        ..Default::default()
+    };
+    let mut stage = Stage::new()
+        .place(SAC_HOLDER, 0.0, 0.0)
+        .place(T2, -25.0, 0.0)
+        .target(T2, SAC_HOLDER)
+        .target(SAC_HOLDER, T2)
+        .place(SAC_PALADIN, 25.0, 0.0)
+        .land(SAC_HOLDER, AbilityType::BlessingOfSacrifice, SAC_PALADIN);
+    if let Some(ability) = defence {
+        stage = stage.land(SAC_PALADIN, ability, SAC_PALADIN);
+    }
+    let played = play(config, stage);
+    let lines: Vec<String> = played
+        .log
+        .lines()
+        .filter(|l| l.contains("[TRANSFER]") && l.contains(SAC_PALADIN_ID))
+        .map(str::to_string)
+        .collect();
+    assert!(
+        !lines.is_empty(),
+        "no share reached the Paladin:\n{}",
+        played.log
+    );
+    let lowest = played
+        .staged_frames()
+        .filter_map(|f| {
+            f.combatants
+                .values()
+                .find(|c| c.team == 1 && c.slot == 1 && !c.is_pet)
+                .map(|c| c.current_health / c.max_health)
+        })
+        .fold(1.0, f32::min);
+    (lines, lowest)
+}
+
+/// A share line's whole share: to health plus absorbed ("takes 9 of ...
+/// (Blessing of Sacrifice, 4 absorbed)" is 13).
+fn share_total(line: &str) -> f32 {
+    let rest = &line[line.find(" takes ").expect(line) + 7..];
+    let dealt: f32 = rest.split(' ').next().unwrap().parse().expect(line);
+    let absorbed = rest
+        .rfind(", ")
+        .and_then(|i| rest[i + 2..].split(' ').next()?.parse::<f32>().ok())
+        .unwrap_or(0.0);
+    dealt + absorbed
+}
+
+/// Divine Shield: every share the Paladin is sent is blocked. Control: the
+/// plain Paladin takes them.
+#[test]
+fn a_paladin_under_divine_shield_takes_none_of_its_sacrifice_shares() {
+    let (shielded, lowest) = sacrifice_match(Some(AbilityType::DivineShield));
+    assert!(
+        shielded.iter().all(|l| l.contains("is immune to")),
+        "{shielded:#?}"
+    );
+    assert_eq!(lowest, 1.0, "the shielded Paladin lost health");
+    let (control, lowest) = sacrifice_match(None);
+    assert!(
+        control.iter().all(|l| l.contains(" takes ")) && share_total(&control[0]) > 0.0,
+        "{control:#?}"
+    );
+    assert!(lowest < 1.0, "the plain Paladin lost no health");
+}
+
+/// Divine Protection: every share is cut by its 30%. Control: the plain
+/// Paladin's shares, on the same seed (the Paladin is out of the fight, so
+/// the blows its holder takes are the same in both arms).
+#[test]
+fn a_paladin_under_divine_protection_takes_a_reduced_sacrifice_share() {
+    let (protected, _) = sacrifice_match(Some(AbilityType::DivineProtection));
+    let (control, _) = sacrifice_match(None);
+    assert_eq!(
+        protected.len(),
+        control.len(),
+        "{protected:#?}\n{control:#?}"
+    );
+    for (p, c) in protected.iter().zip(&control) {
+        let (p, c) = (share_total(p), share_total(c));
+        assert!((p - 0.7 * c).abs() <= 1.5, "{p} is not 70% of {c}");
+    }
+    let largest = control.iter().map(|l| share_total(l)).fold(0.0, f32::max);
+    assert!(
+        largest >= 10.0,
+        "no share large enough to show the cut: {control:#?}"
+    );
+}
+
+/// A shield on the Paladin soaks its first share. Control: the plain
+/// Paladin's first share is not absorbed.
+#[test]
+fn a_shield_on_the_paladin_soaks_its_sacrifice_share() {
+    let (shielded, _) = sacrifice_match(Some(AbilityType::PowerWordShield));
+    assert!(shielded[0].contains("absorbed)"), "{shielded:#?}");
+    let (control, _) = sacrifice_match(None);
+    assert!(!control[0].contains("absorbed"), "{control:#?}");
+}
