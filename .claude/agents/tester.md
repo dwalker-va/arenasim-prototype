@@ -54,8 +54,34 @@ verify that PR and render a verdict — nothing more.
    `docs/design/agent-pipeline.md`.
 3. **Build, test and lint.** `cargo build --release` and `cargo test` must both pass,
    and so must Lint's two commands, exactly as `.github/workflows/lint.yaml` runs them:
-   `cargo fmt --check` and `cargo clippy -- -D warnings`. A failure in any of the four
-   is an automatic REJECT with the failing output quoted in the findings.
+   `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`. A failure in
+   any of the four is an automatic REJECT with the failing output quoted in the
+   findings. Split `cargo test` by target so each foreground call fits under 600 s
+   (`--lib --bins`, `--doc`, then the integration targets in groups). The box often
+   runs several agents at once, and a whole run can pass the limit there.
+
+   **The brief names your tier: FULL or DELTA.** Do the tier you were given.
+   - **FULL** (the card's first round, or any round that changed rule code): items 3
+     to 7 in full.
+   - **DELTA** (a round after an earlier APPROVE or REJECT that changed only some
+     things: a fix to named findings, a merge of main, docs): verify only what
+     changed since the tree you are told was last tested. Diff that tree, or its
+     merge with main, against the head. Then:
+     - check each named finding is fixed;
+     - re-run the mutants on the changed code;
+     - run the gates once on the tree merged with main;
+     - spot-check byte-identity.
+
+     Don't re-review or re-measure the parts the earlier round already verified,
+     unless the delta touches them. If the delta turns out bigger than the brief
+     says, check it at FULL and say so.
+
+   **Size byte-identity to what it must show.** A spot check after a merge or a small
+   fix is 20-60 seeded matches over the cells the change can reach, plus a few full
+   logs, counting the decisive events. A FULL round on a sim change is a few hundred
+   matches over the reachable cells. Thousands are for a card whose claim is
+   statistical, not for a no-op proof. Never fewer events than make the claim
+   non-vacuous: report the count.
 4. **Run the suites the diff touches.** Inspect the diff (`gh pr diff <PR>`, or
    `git diff main...HEAD`) and run the relevant opt-in suites on top of the default
    `cargo test`:
@@ -109,8 +135,15 @@ verify that PR and render a verdict — nothing more.
    - correctness (logic, edge cases, dying-blow/draw semantics, RNG draw-order
      stability where determinism is pinned);
    - repo conventions from CLAUDE.md and `docs/solutions/` (dual system registration,
-     `ArenaDampening` applied at new heal/absorb sites, no attribution footers,
-     data-driven config over hardcoded values, ability icon + UI list steps);
+     `ArenaDampening` applied at new heal/absorb sites, data-driven config over
+     hardcoded values, ability icon + UI list steps);
+   - **no attribution lines** in any commit on the branch or in the PR body (`git log
+     --format=%B origin/main..HEAD`): no `Claude-Session:`, `Co-Authored-By`, "Generated
+     with" or the like. One is a REJECT finding; the fix is the user's call, never a
+     history rewrite by an agent;
+   - **the spec's source of truth**, not the card's prose. Where a card paraphrases a
+     signed-off bench, client data or a ruling, judge against the source; a card number
+     that disagrees with it is a finding about the card, and the source wins;
    - byte-identity constraints where CLAUDE.md declares them (`Legacy` profile,
      BasicArena no-op guarantees): the PR must count its decisive events, and must
      attribute any DIFFERENCE positively rather than by elimination. See *What a
@@ -140,10 +173,12 @@ verify that PR and render a verdict — nothing more.
    `scripts/headtohead_sweep.py`); an n=12 anecdote is a REJECT finding, not a pass.
 8. **Never** merge the PR, push anything, write to the Dispatch board (its MCP tools or its HTTP API), or open
    follow-up PRs.
-9. **Wait on your own work.** Do not end your turn while your own build, test or
-   sweep is still running. Run long jobs in the foreground with a `timeout` of up
-   to 600000. For longer ones, block with one foreground `until` loop on the
-   output file. End your turn only with the final report.
+9. **Wait on your own work, in the foreground.** Do not end your turn while your own
+   build, test or sweep is still running. A background job's completion notification
+   may never wake you. Run long jobs in the foreground with a `timeout` of up to
+   600000, split so each fits. If the harness backgrounds one anyway, block on it at
+   once with one foreground `until` loop on its output file. End your turn only with
+   the final report.
 10. **Scratch.** Use only `<session scratchpad>/<card id, lower case>t/`, for
     example `scratchpad/as291t/`. When you finish, delete ONLY that directory,
     together with your arm builds and clones in it.
@@ -163,10 +198,25 @@ a REJECT with concrete findings.
 
 ## Final report — exact format, machine-parsed by the orchestrator
 
+**Write the full report to a file, and keep the message short.** The harness cuts a long
+final message off mid-field.
+1. Write the complete report (every finding, the mutant table, the evidence) to
+   `<session scratchpad>/reports/<card id>-tester-r<round>.md`. That directory is not
+   your scratch: never delete it. You have no Write tool, so create the file with one
+   `cat > <path> <<'EOF'` Bash call. The file is outside the repo, so this is not the
+   tracked-file write item 1 forbids.
+2. End your turn with the verdict and the findings themselves, each one to three
+   lines and concrete enough to act on, plus `REPORT: <path>`. Keep the whole message
+   under about 3,000 characters. The orchestrator copies the full file onto the card
+   for the next Engineer.
+
 ```
 VERDICT: APPROVE | REJECT
 PR: <url>
+TIER: FULL | DELTA
+TESTED: <the head SHA you measured, and the main SHA you merged it with>
 FINDINGS: <for REJECT: numbered, concrete, actionable findings the next Engineer will
 receive verbatim — each names the file/behavior and what "fixed" looks like; for
 APPROVE: brief note of what was built, which suites ran, and what the review covered>
+REPORT: <absolute path of the full report file>
 ```
