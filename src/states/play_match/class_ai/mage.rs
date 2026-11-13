@@ -385,9 +385,9 @@ fn try_mage_armor(
 
     // The armor is a one-per-type buff, so it is held by whatever holds its
     // type's slot (`Aura::holds_type_slot`, the rule `apply_pending_auras`
-    // refuses it by). A proc buff of the same type does not: Sigil of Arcane
-    // Surge's crit is not Molten Armor, nor Darkmoon Card: Blue Dragon's
-    // regeneration Mage Armor.
+    // refuses it by). A proc buff of the same type does not: Doomfinger's crit
+    // is not Molten Armor, nor Darkmoon Card: Blue Dragon's regeneration Mage
+    // Armor.
     let already_buffed = ctx
         .active_auras
         .get(&entity)

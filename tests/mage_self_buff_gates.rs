@@ -6,10 +6,14 @@
 //!   item's shield, and refuses it only while an Ice Barrier is up. So only
 //!   the Mage's own barrier holds it.
 //! - **The armor** (Frost, Mage or Molten) is a one-per-type buff, held by
-//!   whatever holds its type's slot (`Aura::holds_type_slot`). A proc
-//!   trinket's buff of the same type is keyed by its source and holds no
-//!   slot, so Sigil of Arcane Surge's crit does not stand for Molten Armor,
-//!   nor Darkmoon Card: Blue Dragon's regeneration for Mage Armor.
+//!   whatever holds its type's slot (`Aura::holds_type_slot`). A proc buff
+//!   of the same type is keyed by its source and holds no slot, so
+//!   Doomfinger's crit does not stand for Molten Armor, nor Darkmoon Card:
+//!   Blue Dragon's regeneration for Mage Armor; neither does a stacking
+//!   aura of the type (an Innervate). No content reaches this today: the
+//!   armor is cast before any proc can fire and nothing removes it. The
+//!   scenes guard the one state it covers — the armor absent while such a
+//!   buff is up.
 //!
 //! Scenes (tier 1), each a pair: the Mage carrying the other source's aura
 //! (the situation the old gate got wrong), and the control carrying its own.
@@ -19,7 +23,7 @@ use arenasim::states::match_config::MageArmor;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::decision_trace::RejectionReason;
 use arenasim::states::play_match::equipment::ItemId;
-use arenasim::states::play_match::{AbilityType, Aura, AuraType};
+use arenasim::states::play_match::{AbilityType, Aura, AuraStacks, AuraType, StackScope};
 
 const ME: &str = "me";
 const PRIEST: &str = "priest";
@@ -187,8 +191,8 @@ fn with_own_armor(scene: Scene, name: &str, effect: AuraType) -> Scene {
 fn a_crit_proc_does_not_hold_molten_armor() {
     let scene = with_proc(
         armored(MageArmor::MoltenArmor),
-        ItemId::SigilOfArcaneSurge,
-        "Sigil of Arcane Surge",
+        ItemId::Doomfinger,
+        "Doomfinger",
         AuraType::CritChanceIncrease,
     );
     assert_chose_self(&scene.decide(ME), AbilityType::MoltenArmor);
@@ -212,6 +216,29 @@ fn a_regeneration_proc_does_not_hold_mage_armor() {
         ItemId::DarkmoonCardBlueDragon,
         "Darkmoon Card: Blue Dragon",
         AuraType::ManaRegenIncrease,
+    );
+    assert_chose_self(&scene.decide(ME), AbilityType::MageArmorSpell);
+}
+
+/// A stacking regeneration aura (Innervate's shape: refresh-only, keyed by
+/// its source, no item) holds no slot either. Tells `holds_type_slot` apart
+/// from a check on `source_item` alone.
+#[test]
+fn a_stacking_regeneration_aura_does_not_hold_mage_armor() {
+    let scene = armored(MageArmor::MageArmor);
+    let caster = scene.entity(PRIEST);
+    let scene = scene.aura_full(
+        ME,
+        Aura {
+            effect_type: AuraType::ManaRegenIncrease,
+            duration: 20.0,
+            magnitude: 8.0,
+            break_on_damage_threshold: -1.0,
+            caster: Some(caster),
+            ability_name: "Innervate".to_string(),
+            stacks: Some(AuraStacks::new(1, StackScope::PerCaster)),
+            ..Default::default()
+        },
     );
     assert_chose_self(&scene.decide(ME), AbilityType::MageArmorSpell);
 }
