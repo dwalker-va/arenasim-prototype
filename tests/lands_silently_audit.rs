@@ -473,6 +473,7 @@ const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
     Ambush,
     ArcaneShot,
     Conflagrate,
+    CrusaderStrike,
     DeathCoil,
     DrainLife,
     FrostNova,
@@ -535,6 +536,10 @@ const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (
         Conflagrate,
         "AS-348 (Shadowburn and Conflagrate, the Destruction casts; AS-334's talent visuals)",
+    ),
+    (
+        CrusaderStrike,
+        "AS-379 (Crusader Strike, the Retribution capstone's strike)",
     ),
     (
         HolyNova,
@@ -738,6 +743,7 @@ const CONTROL_MEMBERS: &[AbilityType] = &[
     KidneyShot,
     Polymorph,
     PsychicScream,
+    Repentance,
     SpiderWeb,
 ];
 
@@ -779,10 +785,19 @@ fn control_finds_every_member() {
     assert_finds("crowd-control", is_control, CONTROL_MEMBERS);
 }
 
-const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
-    CurseOfExhaustion,
-    "AS-334 (the talent visuals: Curse of Exhaustion's slow)",
-)];
+/// Repentance is an `Incapacitate`, which draws the ice block only for the
+/// Freezing Trap that spawns it: it lands silently until AS-378 gives it its
+/// own visual.
+const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[
+    (
+        CurseOfExhaustion,
+        "AS-334 (the talent visuals: Curse of Exhaustion's slow)",
+    ),
+    (
+        Repentance,
+        "AS-378 (Repentance, the Retribution incapacitate; never Freezing Trap's ice block)",
+    ),
+];
 
 #[test]
 fn control_lands_nothing_silently() {

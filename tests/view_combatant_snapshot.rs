@@ -667,7 +667,11 @@ fn move_speed_row_reads_the_spawns_capped_passive_speed() {
     let health = "per_rank: [StatPercent(MaxHealth, 0.03)],";
     assert!(text.contains(health));
     let fixture = TalentDefinitions::from_ron(
-        &text.replacen(health, "per_rank: [StatAdd(MovementSpeed, 0.05)],", 1),
+        &text.replacen(
+            health,
+            "budget: Some(11.0), per_rank: [StatAdd(MovementSpeed, 0.05)],",
+            1,
+        ),
         &abilities,
     )
     .expect("the fixture validates");

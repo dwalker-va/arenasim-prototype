@@ -9,7 +9,11 @@
 //! 2. Cleanse - Urgent (Polymorph, Freezing Trap, UA Silence, Fear on allies)
 //! 3. Emergency healing (ally < 40% HP) - Holy Shock (heal), Divine Favor
 //!    (Holy talent) first
+//!    3.8. Repentance (Retribution talent: an enemy the team leaves alone,
+//!    the healer first)
 //! 4. Hammer of Justice (stun enemy in melee range)
+//!    4.3. Crusader Strike (Retribution talent: the Paladin's target, no
+//!    teammate low)
 //!    4.5. Holy Light, `TeamPlan` only (ally 50-85% HP and missing a whole
 //!    Holy Light, neither it nor the Paladin pressured)
 //! 5. Standard healing (ally < 90% HP) - Flash of Light
@@ -154,12 +158,14 @@ pub fn dip_target_candidate(
 pub fn decide_paladin_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    game_rng: &mut GameRng,
     abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
     my_pos: Vec3,
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
+    instant_attacks: &mut Vec<super::QueuedInstantAttack>,
     paladin_aura_this_frame: &mut std::collections::HashSet<Entity>,
     sacred_shielded_this_frame: &mut std::collections::HashSet<Entity>,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
@@ -446,6 +452,25 @@ pub fn decide_paladin_action(
         return true;
     }
 
+    // Priority 3.8 (Retribution talent): Repentance on an enemy the team is
+    // leaving alone — the enemy healer first — keeping the emergency heal's
+    // mana.
+    if super::paladin_retribution::try_repentance(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        same_frame_cc_queue,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
     // Priority 4: Hammer of Justice (rotation). Suppressed while the
     // reservation holds (living enemy healer + not PRESSURED) — the cooldown
     // is saved for dips (R8). Released under pressure so self-peel HoJ on
@@ -487,6 +512,25 @@ pub fn decide_paladin_action(
         auras,
         ctx,
         sacred_shielded_this_frame,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // Priority 4.3 (Retribution talent): Crusader Strike on the Paladin's
+    // target, while no teammate is low and the emergency heal's mana is kept.
+    if super::paladin_retribution::try_crusader_strike(
+        commands,
+        combat_log,
+        game_rng,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        instant_attacks,
         &mut builder,
     ) {
         builder.finish();
@@ -946,7 +990,9 @@ fn try_flash_of_light(
     let target_entity = target_info.entity;
     let target_pos = target_info.position;
 
-    if let Some(threshold) = cast_defer {
+    // An instant Flash of Light (The Art of War) locks no movement, so a walk
+    // defers only one with a cast bar.
+    if let Some(threshold) = cast_defer.filter(|_| def.cast_time > 0.0) {
         if target_info.health_pct() > threshold {
             builder.reject(
                 ability,

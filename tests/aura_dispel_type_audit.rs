@@ -308,6 +308,9 @@ fn expected(ability: AbilityType) -> Row {
         // 31821 has no SpellCategories row in TBC (a passive there) or in
         // Wrath 3.4.5.63697 (the active this is): no dispel type.
         AbilityType::AuraMastery => config(S::Untyped, T::NoType),
+        // The Retribution talents (AS-422).
+        AbilityType::Repentance => config(S::Magic, T::Magic), // 20066
+        AbilityType::CrusaderStrike => Row::NoAura,
 
         // ---- Hunter ----
         AbilityType::AimedShot => config(S::Physical, T::NoType),

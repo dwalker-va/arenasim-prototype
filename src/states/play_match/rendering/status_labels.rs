@@ -224,6 +224,9 @@ mod tests {
                 (AbilityType::KidneyShot, "STUN"),
                 (AbilityType::Polymorph, "SHEEPED"),
                 (AbilityType::PsychicScream, "FEAR"),
+                // Repentance's incapacitate reads as itself, never as the
+                // trap's FROZEN.
+                (AbilityType::Repentance, "INCAPACITATED"),
             ],
         );
     }

@@ -823,6 +823,9 @@ impl AbilityDefinitions {
             AbilityType::AuraMastery,
             AbilityType::HolyNova,
             AbilityType::GuardianSpirit,
+            // Paladin: the Retribution tree
+            AbilityType::Repentance,
+            AbilityType::CrusaderStrike,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -1808,6 +1811,8 @@ mod tests {
                     AbilityType::SacredShield,
                     AbilityType::DivineFavor,
                     AbilityType::AuraMastery,
+                    AbilityType::Repentance,
+                    AbilityType::CrusaderStrike,
                 ],
             ),
             (

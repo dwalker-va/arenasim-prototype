@@ -35,6 +35,7 @@ pub mod paladin;
 pub mod paladin_holy;
 pub(crate) mod paladin_postures;
 pub mod paladin_protection;
+pub mod paladin_retribution;
 pub mod peel;
 pub mod pet_ai;
 pub mod pillar_mode;

@@ -63,8 +63,9 @@ fn silence(duration: f32) -> Aura {
 
 /// The abilities a silenced caster may still use, among those a silence could
 /// touch at all (a mana user's mana-costing abilities), are exactly the
-/// Hunter's five Pacify shots, the Druid's Travel Form and the Priest's
-/// Shadowform (TBC PreventionType 0 for both forms) — asked of the same
+/// Hunter's five Pacify shots, the Paladin's Crusader Strike (Pacify, TBC
+/// 35395), the Druid's Travel Form and the Priest's Shadowform (TBC
+/// PreventionType 0 for both forms) — asked of the same
 /// guard every class AI asks, for a silenced caster of the owning class. Every
 /// other such ability is refused, and each is refused for the silence alone:
 /// the same caster unsilenced passes.
@@ -106,6 +107,7 @@ fn a_silence_stops_every_mana_ability_but_the_pacify_shots_and_the_forms() {
         AbilityType::Disengage,
         AbilityType::TravelForm,
         AbilityType::Shadowform,
+        AbilityType::CrusaderStrike,
     ]
     .into_iter()
     .collect();

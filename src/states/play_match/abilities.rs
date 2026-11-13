@@ -133,6 +133,10 @@ pub enum ScalingStat {
     AttackPower,
     /// Scales with Spell Power (magical abilities and healing)
     SpellPower,
+    /// Scales with the weapon: the average damage of the swing the strike
+    /// rides (`Combatant::attack_damage`, after talents), so
+    /// `damage_coefficient: 1.1` is 110% weapon damage (Crusader Strike).
+    WeaponDamage,
     /// Doesn't scale with any stat (CC abilities, utility)
     None,
 }
@@ -266,6 +270,9 @@ pub enum AbilityType {
     // Priest: the Holy tree (AS-415). Appended for the same reason.
     HolyNova,       // talent: Holy damage to enemies and a heal to allies within 10yd
     GuardianSpirit, // talent: +40% healing received and a killing blow prevented, 10s
+    // Paladin: the Retribution tree (AS-422). Appended for the same reason.
+    Repentance,     // talent: a 6s incapacitate any damage breaks, 20yd
+    CrusaderStrike, // talent: an instant 110% weapon strike, 6s cooldown
 }
 
 impl AbilityType {
@@ -283,7 +290,7 @@ impl AbilityType {
             // Weapon strikes, at melee range. Heroic Strike rides the next
             // auto-attack swing, so it is rolled where that swing is.
             HeroicStrike | MortalStrike | Rend | Pummel | Ambush | CheapShot | SinisterStrike
-            | KidneyShot | Kick | ExposeArmor | Rupture => true,
+            | KidneyShot | Kick | ExposeArmor | Rupture | CrusaderStrike => true,
             // A charge closes the gap; what it lands on arrival is not a
             // weapon strike, and it is cast from 25 yards.
             Charge | BoarCharge => false,
@@ -308,7 +315,7 @@ impl AbilityType {
             | Cyclone | TravelForm | Shadowform | DivineProtection | BlessingOfSacrifice
             | SacredShield | RetributionAura | SiphonLife | AmplifyCurse | CurseOfExhaustion
             | InnerFocus | PowerInfusion | PainSuppression | Shadowburn | Conflagrate
-            | DivineFavor | AuraMastery | HolyNova | GuardianSpirit => false,
+            | DivineFavor | AuraMastery | HolyNova | GuardianSpirit | Repentance => false,
         }
     }
 

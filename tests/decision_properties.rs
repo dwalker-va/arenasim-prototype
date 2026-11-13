@@ -1569,6 +1569,16 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         AbilityType::GuardianSpirit,
         Unreached::NeedsKnob("a build that takes Guardian Spirit"),
     ),
+    // The Retribution tree (AS-422): tests/paladin_retribution.rs builds each
+    // in its scene pairs.
+    (
+        AbilityType::Repentance,
+        Unreached::NeedsKnob("a build that takes Repentance"),
+    ),
+    (
+        AbilityType::CrusaderStrike,
+        Unreached::NeedsKnob("a build that takes Crusader Strike"),
+    ),
 ];
 
 /// Every ability of every class's own kit is chosen somewhere in the grid, or

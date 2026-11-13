@@ -77,6 +77,8 @@ const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::AuraMastery, paladin_ally_casting_by_a_rogue),
     (AbilityType::HolyNova, priest_threatened),
     (AbilityType::GuardianSpirit, priest_ally_endangered),
+    (AbilityType::Repentance, paladin_enemy_healer_left_alone),
+    (AbilityType::CrusaderStrike, paladin_in_melee),
 ];
 
 /// A Warlock 20 yards from its kill target, a Warrior, with Corruption and
@@ -199,6 +201,38 @@ fn paladin_ally_casting_by_a_rogue(defs: &AbilityDefinitions) -> (Scene, Who) {
         .at(12.0, 0.0)
         .targeting(MAGE);
     scene.combatant_mut("enemy rogue").stealthed = false;
+    (scene, PALADIN)
+}
+
+/// A healthy Paladin and Mage on an enemy Warrior, its Priest 15 yards off
+/// and left alone: Repentance's moment.
+fn paladin_enemy_healer_left_alone(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PALADIN, 1, CharacterClass::Paladin)
+        .aura_full(PALADIN, devotion())
+        .targeting(WARRIOR)
+        .unit(MAGE, 1, CharacterClass::Mage)
+        .at(-10.0, 0.0)
+        .targeting(WARRIOR)
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(2.0, 0.0)
+        .targeting(PALADIN)
+        .unit("enemy priest", 2, CharacterClass::Priest)
+        .at(15.0, 0.0);
+    (scene, PALADIN)
+}
+
+/// A healthy Paladin in melee of its target, a Warrior, its Hammer of
+/// Justice spent: Crusader Strike's moment.
+fn paladin_in_melee(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PALADIN, 1, CharacterClass::Paladin)
+        .aura_full(PALADIN, devotion())
+        .targeting(WARRIOR)
+        .cooldown(PALADIN, AbilityType::HammerOfJustice, 30.0)
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(2.0, 0.0)
+        .targeting(PALADIN);
     (scene, PALADIN)
 }
 
