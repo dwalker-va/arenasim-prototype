@@ -573,7 +573,12 @@ takes it (`AbilityConfig::has_cast_bar`, read from `cast_time`; see Interrupts i
 `docs/design/wow-mechanics.md`). A cast may also `consumes_aura: Some(<Ability>)`
 — Swiftmend eats the target's Rejuvenation as it lands (its caster's own first,
 another's when it has none); a hit eats only its caster's own, and nothing off
-a target immune to it (Conflagrate eats the Warlock's Immolate).
+a target immune to it (Conflagrate eats the Warlock's Immolate). A CHANNEL's
+`applies_aura` (Mind Flay's slow) is landed by the AI that begins the channel,
+and is the channel's: each frame `process_channeling` takes off every such
+aura whose caster no longer channels it on that unit, whatever ended the
+channel (its end, an interrupt, crowd control, a silence, or a kill site
+stripping the dead caster's `ChannelingState`).
 
 **Every ability declares `prevention`** — TBC's `SpellCategories.PreventionType`:
 `Silence` (a spell), `Pacify` (a physical attack or shot) or `None` (Travel
@@ -739,7 +744,8 @@ carrying every slot's build.
   - The `leech` field on `applies_aura` (`combat_core/leech.rs`): a share of
     the ability's own damage (Death Coil, Siphon Life) or of its caster's
     damage of one school to the bearer (Vampiric Embrace) heals the caster or
-    its party, through `apply_healing`.
+    its party, through `apply_healing`. An aura that is nothing but such a
+    leech is an `AuraType::LeechMark`.
 - **The talent panel** (`src/states/talent_panel.rs`, drawing the kit's
   `ui::widgets::TalentTrees`) spends a build in View Combatant: a click
   learns a rank, shift-click takes one back, right-click opens the talent's

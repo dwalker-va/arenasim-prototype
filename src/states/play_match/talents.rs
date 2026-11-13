@@ -162,6 +162,10 @@ talent_ids! {
     ImprovedMindBlast,
     ImprovedPsychicScream,
     Shadowform,
+    Blackout,
+    MindFlay,
+    VampiricEmbrace,
+    Silence,
     // Paladin: Protection
     SacredDuty,
     ImprovedHammerOfJustice,
@@ -752,7 +756,8 @@ pub fn strength_is_remainder(aura: AuraType) -> bool {
         | AuraType::KillingBlowSave
         | AuraType::HealingReceivedIncrease
         | AuraType::DamageReflect
-        | AuraType::TriggeredAbsorb => false,
+        | AuraType::TriggeredAbsorb
+        | AuraType::LeechMark => false,
     }
 }
 

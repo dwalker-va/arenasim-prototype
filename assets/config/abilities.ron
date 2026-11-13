@@ -426,6 +426,91 @@
             spell_school: Holy,
         ),
 
+        // Mind Flay (talent, Shadow tier 3): a channel, 10 Shadow a second
+        // for 3s (30 in all: Classic 15407's top rank, 426, at the book's
+        // ~0.073 damage scale, as Shadow Word: Pain), and a 50% slow on the
+        // target while it lasts. TBC 15407: Shadow, 20yd, PreventionType
+        // Silence, on the global cooldown (StartRecoveryCategory 133), no
+        // cooldown, DispelType 0 (the slow is the channel's, and nothing
+        // dispels it). Its mana is Mind Blast's 25 at the ratio of their top
+        // ranks (205 to 350). Paid at channel start, as Drain Life's is. The
+        // slow ends with the channel (`process_channeling`).
+        MindFlay: (
+            name: "Mind Flay",
+            class: Priest,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_shadow_siphonmana.jpg",
+            cast_time: 0.0,
+            range: 20.0,
+            mana_cost: 15.0,
+            cooldown: 0.0,
+            damage_base_min: 10.0,
+            damage_base_max: 10.0,
+            damage_coefficient: 0.0,
+            damage_scales_with: None,
+            applies_aura: Some((
+                aura_type: MovementSpeedSlow,
+                duration: 3.0,
+                magnitude: 0.5,  // 50% slower: the speed left
+                dispel_type: Untyped,  // TBC 15407: DispelType 0
+            )),
+            spell_school: Shadow,
+            channel_duration: Some(3.0),
+            channel_tick_interval: 1.0,
+        ),
+
+        // Vampiric Embrace (talent, Shadow tier 3): a 60s debuff on the
+        // target; while it is up, 20% of the Shadow damage the Priest deals
+        // that target heals every living teammate of the Priest, the Priest
+        // included and pets aside, through `apply_healing` (TBC 15286: Shadow,
+        // 30yd, instant, 10s cooldown, on the global cooldown, DispelType 1
+        // Magic, 2% of base mana: 6 on the Priest's 280).
+        VampiricEmbrace: (
+            name: "Vampiric Embrace",
+            class: Priest,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_shadow_unsummonbuilding.jpg",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 6.0,
+            cooldown: 10.0,
+            applies_aura: Some((
+                aura_type: LeechMark,
+                duration: 60.0,
+                magnitude: 0.0,
+                leech: Some((fraction: 0.2, to: CasterParty, of: CasterSchool(Shadow))),
+            )),
+            spell_school: Shadow,
+        ),
+
+        // Silence (talent, Shadow capstone): silences the target for 5s; 45s
+        // cooldown, 20yd, instant (TBC 15487: Shadow, mechanic Silence,
+        // DispelType 1 Magic, PreventionType Silence, on the global cooldown).
+        // Its mana is Mind Blast's: TBC's 225 is what a Mind Blast of Silence's
+        // level (rank 6, level 40) costs. `talents.ron`'s choice rules lock it
+        // unless the slot chose Shadowform, so a healing Priest never silences.
+        // Diminishes in the Silence category, beside the Unstable Affliction
+        // backlash's silence.
+        Silence: (
+            name: "Silence",
+            class: Priest,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_shadow_impphaseshift.jpg",
+            cast_time: 0.0,
+            range: 20.0,
+            mana_cost: 25.0,
+            cooldown: 45.0,
+            applies_aura: Some((
+                aura_type: Silence,
+                duration: 5.0,
+                magnitude: 1.0,
+            )),
+            spell_school: Shadow,
+        ),
+
         // ============================================================================
         // WARRIOR ABILITIES
         // ============================================================================
