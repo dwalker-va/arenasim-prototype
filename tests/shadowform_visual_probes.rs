@@ -21,8 +21,9 @@ use arenasim::states::play_match::components::{
     OriginalMesh, ShadowformLook, ShadowformShroud, VisualBody,
 };
 use arenasim::states::play_match::{
-    animate_client_particles, shadowform_body_color, update_fear_visuals, update_polymorph_visuals,
-    update_shadowform_shrouds, update_shadowform_visuals, update_stealth_visuals,
+    animate_client_particles, billboard_shadowform_shrouds, shadowform_body_color,
+    update_fear_visuals, update_polymorph_visuals, update_shadowform_shrouds,
+    update_shadowform_visuals, update_stealth_visuals,
 };
 use arenasim::CharacterClass;
 use bevy::prelude::*;
@@ -102,6 +103,7 @@ impl Harness {
                 update_fear_visuals,
                 update_shadowform_shrouds,
                 animate_client_particles,
+                billboard_shadowform_shrouds,
             )
                 .chain(),
         );
@@ -554,4 +556,49 @@ fn the_shroud_is_owner_scoped() {
         .iter(h.app.world())
         .count();
     assert_eq!(left, 0, "a shroud without its Priest goes");
+}
+
+/// Every live shroud particle faces the camera, wherever the camera stands:
+/// the rig is unrotated, so each particle's rotation is the camera's own.
+#[test]
+fn the_shroud_particles_face_the_camera() {
+    for cam_at in [Vec3::new(12.0, 8.0, 0.0), Vec3::new(-3.0, 6.0, 14.0)] {
+        let mut h = Harness::new();
+        let cam = Transform::from_translation(cam_at).looking_at(Vec3::ZERO, Vec3::Y);
+        h.app.world_mut().spawn((Camera3d::default(), cam));
+        let priest = h.spawn_priest(1, 0.0);
+        h.set_auras(priest.unit, vec![shadowform_aura()]);
+        for _ in 0..5 {
+            h.tick();
+        }
+        let rig = h.shrouds_of(priest.unit)[0];
+        let children: Vec<Entity> = h
+            .app
+            .world()
+            .get::<Children>(rig)
+            .expect("the shroud has particles")
+            .iter()
+            .collect();
+        let mut checked = 0;
+        for child in children {
+            let world = h.app.world();
+            let Some(particle) = world.get::<ClientParticle>(child) else {
+                continue;
+            };
+            if particle.age >= particle.life {
+                continue;
+            }
+            let rot = world.get::<Transform>(child).unwrap().rotation;
+            assert!(
+                (rot * Vec3::Z).dot(cam.rotation * Vec3::Z) > 0.999,
+                "a shroud particle does not face the camera at {cam_at}"
+            );
+            assert!(
+                (rot * Vec3::Y).dot(cam.rotation * Vec3::Y) > 0.999,
+                "a shroud particle is rolled against the camera at {cam_at}"
+            );
+            checked += 1;
+        }
+        assert!(checked > 20, "too few live particles checked: {checked}");
+    }
 }

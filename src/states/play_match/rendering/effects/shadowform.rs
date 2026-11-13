@@ -455,65 +455,85 @@ mod tests {
         assert_eq!(tinted.alpha, 0.65);
     }
 
+    /// One layer as the signed-off bench carries it.
+    struct Bench {
+        name: &'static str,
+        sprite: EmitterSprite,
+        rate: f32,
+        life: f32,
+        speed: f32,
+        gravity: f32,
+        side: f32,
+        cone: f32,
+        color: [[u8; 3]; 3],
+        radius: [f32; 3],
+        alpha: [f32; 3],
+    }
+
     /// Every layer against the signed-off bench (version 1792202136-e9a0,
-    /// "Shadowform", at its defaults): rate, life, speed, rise, area, cone,
-    /// radii and alpha, with every multiplier at 1.0.
+    /// "Shadowform", at its defaults): sprite, rate, life, speed, rise, area,
+    /// cone, colour keys, radii and alpha, with every multiplier at 1.0.
     #[test]
     fn the_layers_are_the_benchs_values() {
-        #[allow(clippy::type_complexity)]
-        let bench: [(&str, f32, f32, f32, f32, f32, f32, [f32; 3], [f32; 3]); 3] = [
-            (
-                "flames",
-                50.0,
-                1.0,
-                0.56,
-                -1.39,
-                0.69,
-                0.35,
-                [1.39, 0.56, 0.28],
-                [0.0, 0.39, 0.0],
-            ),
-            (
-                "rising flares",
-                50.0,
-                1.0,
-                1.11,
-                -1.39,
-                0.42,
-                0.35,
-                [0.28, 0.28, 0.14],
-                [0.0, 1.0, 0.0],
-            ),
-            (
-                "smoke streaks",
-                1.1,
-                3.0,
-                1.6,
-                0.0,
-                0.1,
-                0.05,
-                [0.42, 0.58, 0.9],
-                [0.0, 1.0, 0.0],
-            ),
+        let bench = [
+            Bench {
+                name: "flames",
+                sprite: EmitterSprite::Glow,
+                rate: 50.0,
+                life: 1.0,
+                speed: 0.56,
+                gravity: -1.39,
+                side: 0.69,
+                cone: 0.35,
+                color: [[0, 104, 7], [24, 0, 86], [34, 0, 119]],
+                radius: [1.39, 0.56, 0.28],
+                alpha: [0.0, 0.39, 0.0],
+            },
+            Bench {
+                name: "rising flares",
+                sprite: EmitterSprite::Flare,
+                rate: 50.0,
+                life: 1.0,
+                speed: 1.11,
+                gravity: -1.39,
+                side: 0.42,
+                cone: 0.35,
+                color: [[0, 104, 7], [24, 0, 86], [34, 0, 119]],
+                radius: [0.28, 0.28, 0.14],
+                alpha: [0.0, 1.0, 0.0],
+            },
+            Bench {
+                name: "smoke streaks",
+                sprite: EmitterSprite::Glow,
+                rate: 1.1,
+                life: 3.0,
+                speed: 1.6,
+                gravity: 0.0,
+                side: 0.1,
+                cone: 0.05,
+                color: [[47, 139, 210], [45, 31, 179], [64, 6, 150]],
+                radius: [0.42, 0.58, 0.9],
+                alpha: [0.0, 1.0, 0.0],
+            },
         ];
-        for (layer, (name, rate, life, speed, gravity, side, cone, radius, alpha)) in
-            SHADOWFORM_SHROUD.iter().zip(bench)
-        {
-            let e = &layer.emitter;
+        for (layer, b) in SHADOWFORM_SHROUD.iter().zip(bench) {
+            let (e, name) = (&layer.emitter, b.name);
             assert!(e.name.ends_with(name), "{} is not the {name}", e.name);
             assert!(e.additive, "{name} is additive");
-            assert_eq!(e.rate, rate, "{name} rate");
-            assert_eq!(e.life, life, "{name} life");
-            assert_eq!(e.speed, speed, "{name} speed");
-            assert_eq!(e.gravity, gravity, "{name} gravity");
-            assert_eq!(e.column, Some((side, 0.0)), "{name} area");
-            assert_eq!(layer.cone, cone, "{name} cone");
+            assert_eq!(e.sprite, b.sprite, "{name} sprite");
+            assert_eq!(e.rate, b.rate, "{name} rate");
+            assert_eq!(e.life, b.life, "{name} life");
+            assert_eq!(e.speed, b.speed, "{name} speed");
+            assert_eq!(e.gravity, b.gravity, "{name} gravity");
+            assert_eq!(e.column, Some((b.side, 0.0)), "{name} area");
+            assert_eq!(layer.cone, b.cone, "{name} cone");
+            assert_eq!(e.color, b.color, "{name} colour keys");
             for k in 0..3 {
                 assert!(
-                    (e.size.diameter_keys()[k] - 2.0 * radius[k]).abs() < 1e-6,
+                    (e.size.diameter_keys()[k] - 2.0 * b.radius[k]).abs() < 1e-6,
                     "{name} size"
                 );
-                assert!((e.alpha[k] - alpha[k]).abs() < 1e-6, "{name} alpha");
+                assert!((e.alpha[k] - b.alpha[k]).abs() < 1e-6, "{name} alpha");
             }
         }
     }
