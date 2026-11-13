@@ -535,6 +535,15 @@ impl<'a> CombatContext<'a> {
         self.ai_profile.is_team_plan() && self.situation.as_ref().is_some_and(|s| s.pillar_modes)
     }
 
+    /// AS-440 prototype: this unit's team's hide rule; the shipped one on a
+    /// context nobody classified, and always under `Legacy`.
+    pub fn hide_rule(&self) -> crate::states::play_match::situation::HideRule {
+        self.situation
+            .as_ref()
+            .filter(|_| self.ai_profile.is_team_plan())
+            .map_or_else(Default::default, |s| s.hide_rule)
+    }
+
     /// The healer this unit must keep in sight: `Some` while it is a DPS whose
     /// team's `sight_yield` says it yields to that healer (AS-386,
     /// `situation::SightPair`). `None` on a context nobody classified, and

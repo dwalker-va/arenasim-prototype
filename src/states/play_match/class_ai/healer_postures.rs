@@ -1177,6 +1177,26 @@ pub(super) fn healer_pressured_tick_shared(
             }
         })
         .with_hug(hug)
+        .with_cover_ignores(match ctx.hide_rule() {
+            crate::states::play_match::situation::HideRule::NoCover => {
+                if handoff_casters(ctx, entity).is_empty() {
+                    Vec::new()
+                } else {
+                    ctx.combatants
+                        .values()
+                        .filter(|c| c.team != ctx.self_info().map_or(0, |s| s.team))
+                        .map(|c| c.entity)
+                        .collect()
+                }
+            }
+            rule if rule.no_handoff() => handoff_casters(ctx, entity),
+            _ => Vec::new(),
+        })
+        .with_ally_leads(if ctx.hide_rule().follow() {
+            melee_leads(ctx, entity)
+        } else {
+            Vec::new()
+        })
     });
     // TeamPlan: a dying teammate the healer does not reach from where it
     // stands (AS-209). The solve walks into reach of it (`C_DYING`); the
@@ -1234,8 +1254,32 @@ pub(super) fn healer_pressured_tick_shared(
     // Under `TeamPlan` it parks only where the heal reaches a dying teammate:
     // while one is out of reach from here, or a dispel is owed, the solve
     // walks the Paladin instead, and the hold resumes once the walk arrives.
-    if let Some(band) =
-        fallback_range.filter(|_| dispel_goal.is_none() && dying_unreached.is_none())
+    // AS-440 prototype (follow): the band-hold does not park blind to the
+    // anchor; the solve walks the Paladin back into its sight.
+    let anchor_blind = ctx.hide_rule().follow()
+        && state
+            .anchor
+            .or_else(|| {
+                ctx.alive_allies()
+                    .iter()
+                    .filter(|a| a.entity != entity && !a.is_pet)
+                    .min_by(|a, b| {
+                        a.position
+                            .distance(my_pos)
+                            .total_cmp(&b.position.distance(my_pos))
+                    })
+                    .map(|a| a.entity)
+            })
+            .and_then(|a| ctx.combatants.get(&a))
+            .is_some_and(|a| {
+                !crate::states::play_match::map_geometry::has_line_of_sight(
+                    ctx.obstacles,
+                    my_pos,
+                    a.position,
+                )
+            });
+    if let Some(band) = fallback_range
+        .filter(|_| dispel_goal.is_none() && dying_unreached.is_none() && !anchor_blind)
     {
         let nearest = threat_positions
             .values()
@@ -1538,6 +1582,67 @@ pub(super) fn start_movement_event_with_target<'t>(
         .get(&goal)
         .map(|info| TargetView::from_info(info, my_pos));
     Some(decision_trace.start_movement_decision(actor, target))
+}
+
+/// AS-440 prototype ("no hand-off cover"): the enemy ranged DPS — the units
+/// that follow a team focus (`target_focus::follows_focus`) — that see a
+/// living non-pet teammate of `healer` within the focus's reach. Hiding from
+/// one only hands its damage to that teammate, so its cover counts for
+/// nothing in the healer's solve.
+fn handoff_casters(ctx: &CombatContext, healer: Entity) -> Vec<Entity> {
+    use crate::states::match_config::CharacterClass;
+    use crate::states::play_match::class_ai::target_focus::FOCUS_REACH;
+    let Some(me) = ctx.combatants.get(&healer) else {
+        return Vec::new();
+    };
+    let mates: Vec<Vec3> = ctx
+        .combatants
+        .values()
+        .filter(|c| c.team == me.team && c.entity != healer && c.is_alive && !c.is_pet)
+        .map(|c| c.position)
+        .collect();
+    ctx.combatants
+        .values()
+        .filter(|c| {
+            c.team != me.team
+                && c.is_alive
+                && !c.is_pet
+                && matches!(
+                    c.class,
+                    CharacterClass::Mage | CharacterClass::Hunter | CharacterClass::Warlock
+                )
+        })
+        .filter(|c| {
+            mates.iter().any(|m| {
+                Vec2::new(m.x, m.z).distance(Vec2::new(c.position.x, c.position.z)) <= FOCUS_REACH
+                    && has_line_of_sight(ctx.obstacles, c.position, *m)
+            })
+        })
+        .map(|c| c.entity)
+        .collect()
+}
+
+/// AS-440 prototype ("follow the partner"): where each living melee teammate
+/// of `healer` is heading — `FOLLOW_LEAD` yards toward its target, or the
+/// target itself when nearer.
+fn melee_leads(ctx: &CombatContext, healer: Entity) -> Vec<(Entity, Vec2)> {
+    const FOLLOW_LEAD: f32 = 5.0;
+    let Some(me) = ctx.combatants.get(&healer) else {
+        return Vec::new();
+    };
+    ctx.combatants
+        .values()
+        .filter(|c| {
+            c.team == me.team && c.entity != healer && c.is_alive && !c.is_pet && c.class.is_melee()
+        })
+        .filter_map(|c| {
+            let target = c.target.and_then(|t| ctx.combatants.get(&t))?;
+            let from = Vec2::new(c.position.x, c.position.z);
+            let to = Vec2::new(target.position.x, target.position.z);
+            let d = from.distance(to);
+            (d > 1e-3).then(|| (c.entity, from + (to - from) / d * d.min(FOLLOW_LEAD)))
+        })
+        .collect()
 }
 
 #[cfg(test)]

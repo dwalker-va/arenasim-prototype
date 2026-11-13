@@ -90,6 +90,13 @@ pub struct HeadlessMatchConfig {
     pub team1_pillar_modes: Option<bool>,
     #[serde(default)]
     pub team2_pillar_modes: Option<bool>,
+    /// AS-440 PROTOTYPE: a `TeamPlan` healer's hide rule for that team
+    /// (`situation::HideRule`: "Shipped", "NoHandoff", "Follow", "Both").
+    /// A measurement control; omitted is the shipped solve.
+    #[serde(default)]
+    pub team1_hide_rule: Option<String>,
+    #[serde(default)]
+    pub team2_hide_rule: Option<String>,
     /// `false` turns the team sight yield off for that team, for measurement
     /// (AS-386, `situation::SightPair`): a `TeamPlan` team without it plays
     /// as `TeamPlan` did before it. Omitted — the default — leaves it on (it
@@ -262,6 +269,8 @@ impl Default for HeadlessMatchConfig {
             team2_withheld_plays: Vec::new(),
             team1_pillar_modes: None,
             team2_pillar_modes: None,
+            team1_hide_rule: None,
+            team2_hide_rule: None,
             team1_sight_yield: None,
             team2_sight_yield: None,
             team1_target_focus: None,
@@ -345,10 +354,18 @@ impl HeadlessMatchConfig {
         &self,
     ) -> Result<crate::states::play_match::situation::WithheldPlays, String> {
         use crate::states::play_match::class_ai::plays::parse_play;
-        use crate::states::play_match::situation::{ExceptionSet, PlayId, WithheldPlays};
+        use crate::states::play_match::situation::{ExceptionSet, HideRule, PlayId, WithheldPlays};
         let mut out = WithheldPlays {
             team1: WithheldPlays::parse_set(&self.team1_withheld_plays)?,
             team2: WithheldPlays::parse_set(&self.team2_withheld_plays)?,
+            team1_hide_rule: self
+                .team1_hide_rule
+                .as_deref()
+                .map_or(Ok(HideRule::Shipped), HideRule::parse)?,
+            team2_hide_rule: self
+                .team2_hide_rule
+                .as_deref()
+                .map_or(Ok(HideRule::Shipped), HideRule::parse)?,
             team1_no_pillar_modes: self.team1_pillar_modes == Some(false),
             team2_no_pillar_modes: self.team2_pillar_modes == Some(false),
             team1_no_sight_yield: self.team1_sight_yield == Some(false),

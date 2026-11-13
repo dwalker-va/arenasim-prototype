@@ -313,6 +313,51 @@ pub struct AllyStanding {
     pub pressure_onset: bool,
 }
 
+/// AS-440 PROTOTYPE (design round, not a shipped behaviour): how a `TeamPlan`
+/// healer's PRESSURED team solve treats cover against a partner left to the
+/// enemy's target focus. A measurement control, set per team from a headless
+/// config (`team{1,2}_hide_rule`); the default is the shipped solve.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HideRule {
+    /// The shipped solve.
+    #[default]
+    Shipped,
+    /// Option A, "no hand-off cover": cover from an enemy ranged DPS that
+    /// sees a teammate of the healer in its focus reach is worth nothing —
+    /// hiding from it only hands its damage to that teammate.
+    NoHandoff,
+    /// Option B, "follow the partner": sight of the anchor counts only where
+    /// the spot also sees where a melee anchor is heading, and the Paladin's
+    /// band-hold does not park blind to its anchor.
+    Follow,
+    /// A and B together.
+    Both,
+    /// Option A', the strong form: while any enemy ranged DPS could hand its
+    /// damage to a teammate, cover from every enemy caster counts for nothing.
+    NoCover,
+}
+
+impl HideRule {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "Shipped" => Ok(Self::Shipped),
+            "NoHandoff" => Ok(Self::NoHandoff),
+            "Follow" => Ok(Self::Follow),
+            "Both" => Ok(Self::Both),
+            "NoCover" => Ok(Self::NoCover),
+            _ => Err(format!("unknown hide rule {s:?}")),
+        }
+    }
+
+    pub fn no_handoff(self) -> bool {
+        matches!(self, Self::NoHandoff | Self::Both)
+    }
+
+    pub fn follow(self) -> bool {
+        matches!(self, Self::Follow | Self::Both)
+    }
+}
+
 /// Everything one team's units know about the situation this frame.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TeamSituation {
@@ -363,6 +408,8 @@ pub struct TeamSituation {
     /// Whether this team's healers play the pillar modes (AS-373,
     /// [`SituationConfig::pillar_modes`]).
     pub pillar_modes: bool,
+    /// AS-440 prototype: the team's [`HideRule`].
+    pub hide_rule: HideRule,
     /// Each DPS–healer pair's sight yield: which of the two must not break
     /// the pair's line of sight (the module docs' `sight_yield`). Empty
     /// unless the team runs it ([`SituationConfig::sight_yield`]).
@@ -893,6 +940,8 @@ pub struct SituationConfig {
     /// `TeamPlan` ([`Self::under`]) unless a measurement turns it off
     /// ([`WithheldPlays::no_target_focus`]).
     pub target_focus: bool,
+    /// AS-440 prototype: the team's [`HideRule`] (`TeamPlan` only).
+    pub hide_rule: HideRule,
 }
 
 impl Default for SituationConfig {
@@ -925,6 +974,7 @@ impl SituationConfig {
             yield_counts_healer_cast: true,
             cc_reach_margin: config.shared.cc_reach_margin,
             target_focus: false,
+            hide_rule: HideRule::Shipped,
         }
     }
 
@@ -976,6 +1026,11 @@ impl SituationConfig {
             pillar_modes: cfg.pillar_modes && !self.withheld.no_pillar_modes(team),
             sight_yield: cfg.sight_yield && !self.withheld.no_sight_yield(team),
             target_focus: cfg.target_focus && !self.withheld.no_target_focus(team),
+            hide_rule: if profile == AiProfile::TeamPlan {
+                self.withheld.hide_rule(team)
+            } else {
+                HideRule::Shipped
+            },
             yield_counts_healer_cast: cfg.yield_counts_healer_cast
                 && !self.withheld.yield_cast_moves(team),
             ..cfg
@@ -1105,9 +1160,22 @@ pub struct WithheldPlays {
     pub team1_no_target_focus: bool,
     /// Team 2's, as [`Self::team1_no_target_focus`].
     pub team2_no_target_focus: bool,
+    /// AS-440 prototype: team 1's [`HideRule`] (`team1_hide_rule`).
+    pub team1_hide_rule: HideRule,
+    /// Team 2's, as [`Self::team1_hide_rule`].
+    pub team2_hide_rule: HideRule,
 }
 
 impl WithheldPlays {
+    /// Team `team`'s AS-440 [`HideRule`]; team 1's outside 1..=2.
+    pub fn hide_rule(&self, team: u8) -> HideRule {
+        if team == 2 {
+            self.team2_hide_rule
+        } else {
+            self.team1_hide_rule
+        }
+    }
+
     /// Whether team `team`'s yield leaves its healer's cast out of rule 1;
     /// team 1's for a team id outside 1..=2.
     pub fn yield_cast_moves(&self, team: u8) -> bool {
@@ -1371,6 +1439,7 @@ fn classify_roster_before_yield(
         danger_attackers,
         runs: cfg.runs,
         pillar_modes: cfg.pillar_modes,
+        hide_rule: cfg.hide_rule,
         pillar_stance: None,
         stance_memory: StanceMemory::default(),
         hunt: None,

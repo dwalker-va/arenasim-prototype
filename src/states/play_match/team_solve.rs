@@ -138,6 +138,14 @@ pub struct SolveWorld {
     /// the ring ([`C_RING`]) and the sight margin ([`C_MARGIN`]). `None` — the
     /// default — when it plays the open.
     pub hug: Option<HugRing>,
+    /// AS-440 prototype ("no hand-off cover"): enemy casters cover from which
+    /// is worth nothing to the unit being solved — each would shoot one of its
+    /// teammates instead. Empty — the default — counts every caster.
+    pub cover_ignores: Vec<Entity>,
+    /// AS-440 prototype ("follow the partner"): per teammate, the point it is
+    /// heading to (a melee's lead toward its target). A spot sees the anchor
+    /// only if it sees this point too. Empty — the default — leads nobody.
+    pub ally_leads: Vec<(Entity, Vec2)>,
 }
 
 /// The pillar ring an `OccupyCover` healer hugs ([`SolveWorld::hug`]).
@@ -216,6 +224,38 @@ impl SolveWorld {
     pub fn with_hug(mut self, hug: Option<HugRing>) -> Self {
         self.hug = hug;
         self
+    }
+
+    /// AS-440 prototype: this world with `ignores` as the casters cover from
+    /// which counts for nothing ([`SolveWorld::cover_ignores`]).
+    pub fn with_cover_ignores(mut self, ignores: Vec<Entity>) -> Self {
+        self.cover_ignores = ignores;
+        self
+    }
+
+    /// AS-440 prototype: this world with `leads` as where each teammate is
+    /// heading ([`SolveWorld::ally_leads`]).
+    pub fn with_ally_leads(mut self, leads: Vec<(Entity, Vec2)>) -> Self {
+        self.ally_leads = leads;
+        self
+    }
+
+    /// The enemy casters cover is FOR ([`Self::enemy_casters_of`], less the
+    /// AS-440 prototype's [`Self::cover_ignores`]).
+    fn cover_casters_of(&self, team: u8) -> impl Iterator<Item = &SolveUnit> {
+        self.enemy_casters_of(team)
+            .filter(|u| !self.cover_ignores.contains(&u.entity))
+    }
+
+    /// Whether `p` sees `ally` and, under the AS-440 prototype's follow rule,
+    /// where it is heading ([`Self::ally_leads`]).
+    fn sees_ally(&self, p: Vec2, ally: &SolveUnit, ally_pos: Vec2) -> bool {
+        self.sees(p, ally_pos)
+            && self
+                .ally_leads
+                .iter()
+                .find(|(e, _)| *e == ally.entity)
+                .is_none_or(|(_, lead)| self.sees(p, *lead))
     }
 
     fn unit(&self, entity: Entity) -> Option<&SolveUnit> {
@@ -467,13 +507,18 @@ impl SolveContext<'_> {
     /// nearest living non-pet teammate. `None` for a lone unit, which makes the
     /// leash vacuous rather than unsatisfiable.
     fn anchor_ally_pos(&self) -> Option<Vec2> {
-        self.dying_ally_pos().or_else(|| {
+        self.anchor_ally().map(|a| self.ally_pos(a))
+    }
+
+    /// The anchor itself, as [`Self::anchor_ally_pos`] picks it.
+    fn anchor_ally(&self) -> Option<&SolveUnit> {
+        self.dying_ally().or_else(|| {
             self.world
                 .allies_of(self.unit.team, self.unit.entity)
-                .map(|a| self.ally_pos(a))
                 .min_by(|a, b| {
-                    a.distance(self.unit.pos)
-                        .partial_cmp(&b.distance(self.unit.pos))
+                    self.ally_pos(a)
+                        .distance(self.unit.pos)
+                        .partial_cmp(&self.ally_pos(b).distance(self.unit.pos))
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
         })
@@ -597,7 +642,7 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
 
     let occluded_from_casters = |p: Vec2| {
         !world
-            .enemy_casters_of(ctx.unit.team)
+            .cover_casters_of(ctx.unit.team)
             .any(|e| world.sees(p, e.pos))
     };
 
@@ -620,7 +665,8 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
                     v |= C_DYING;
                 }
             }
-            if let Some(ally) = ctx.anchor_ally_pos() {
+            if let Some(anchor) = ctx.anchor_ally() {
+                let ally = ctx.ally_pos(anchor);
                 if candidate.distance(ally) > world.heal_range {
                     v |= C_LEASH;
                 }
@@ -641,7 +687,7 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
                 // cannot express that — sight either outranks safety always
                 // (measured: 5.0s of cover, 9.1s of hard CC) or never. It is
                 // temporal, not a tradeoff.
-                if ctx.unit.can_cast_heal && !world.sees(candidate, ally) {
+                if ctx.unit.can_cast_heal && !world.sees_ally(candidate, anchor, ally) {
                     v |= C_SIGHT;
                 }
             }
@@ -855,7 +901,7 @@ pub fn candidates_for(ctx: &SolveContext) -> Vec<Vec2> {
     for obstacle in &world.obstacles {
         let (center, radius) = obstacle.footprint_disc();
         let ring = radius + MOVER_RADIUS + COVER_STANDOFF;
-        for caster in world.enemy_casters_of(ctx.unit.team) {
+        for caster in world.cover_casters_of(ctx.unit.team) {
             let away = (center - caster.pos).normalize_or_zero();
             if away == Vec2::ZERO {
                 continue;
@@ -1006,7 +1052,7 @@ fn infeasibility_parts(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) 
         return (cost, 0.0);
     }
     let mut cost = 0.0;
-    let casters = world.enemy_casters_of(ctx.unit.team).count() as f32;
+    let casters = world.cover_casters_of(ctx.unit.team).count() as f32;
 
     // Binary constraints contribute their full scale — there is no "partly in
     // line of sight". The gradient for these comes from the geometry moving the
@@ -1027,7 +1073,7 @@ fn infeasibility_parts(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) 
         // Graded by HOW MANY casters still see the spot, so a healer breaking one
         // of two sightlines is scored better than breaking neither.
         let seen = world
-            .enemy_casters_of(ctx.unit.team)
+            .cover_casters_of(ctx.unit.team)
             .filter(|e| world.sees(candidate, e.pos))
             .count();
         cost += W_OCCLUDED * seen.max(1) as f32;
@@ -1539,6 +1585,8 @@ pub fn world_from_context(
         urgency_hp_threshold: 0.0,
         cc: CcField::default(),
         hug: None,
+        cover_ignores: Vec::new(),
+        ally_leads: Vec::new(),
     }
 }
 
@@ -1665,6 +1713,8 @@ mod tests {
             urgency_hp_threshold: 0.5,
             cc: CcField::default(),
             hug: None,
+            cover_ignores: Vec::new(),
+            ally_leads: Vec::new(),
         }
     }
 
