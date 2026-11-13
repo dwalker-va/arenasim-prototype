@@ -93,7 +93,11 @@ pub fn update_stealth_visuals(
     // The material moved to the `VisualBody` child, so join through the
     // hierarchy rather than reading it off the combatant.
     combatants: Query<(&Combatant, &Children), Changed<Combatant>>,
-    bodies: Query<&MeshMaterial3d<StandardMaterial>, With<VisualBody>>,
+    // A body wearing the Shadowform look is left alone: its translucency
+    // would read below as this system's own fade, and be "restored" away.
+    // The form puts its recorded values back when it ends, and the
+    // thresholds below take the body up from there (`shadowform.rs`).
+    bodies: Query<&MeshMaterial3d<StandardMaterial>, (With<VisualBody>, Without<ShadowformLook>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for (combatant, children) in combatants.iter() {
