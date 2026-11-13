@@ -5,23 +5,39 @@
 
 use super::{ArtKind, EngineKey, EngineSpec, SourceKind};
 use crate::states::encyclopedia::auras::{AuraArt, AuraSource, CatalogSource, Persistence};
-use crate::states::play_match::talent_procs::{effect_aura, ProcEvent, TalentProcSlot};
-use crate::states::play_match::talents::TalentEffect;
-use crate::states::talent_text::talent_proc_description;
+use crate::states::play_match::talent_procs::{effect_aura, ProcEvent, TalentProc, TalentProcSlot};
+use crate::states::play_match::talents::{TalentConfig, TalentEffect};
+use crate::states::talent_text::talent_procs_description;
 
 pub const SOURCE: SourceKind = SourceKind::Talent;
 pub const ART: ArtKind = ArtKind::Talent;
 
+/// A talent's procs, in its `per_rank` order.
+fn procs_of(config: &TalentConfig) -> Vec<&TalentProc> {
+    config
+        .per_rank
+        .iter()
+        .filter_map(|e| match e {
+            TalentEffect::Proc(p) => Some(p),
+            _ => None,
+        })
+        .collect()
+}
+
 pub fn members(source: &CatalogSource) -> Vec<EngineKey> {
-    // Every talent proc that lands an aura, in `TalentId` order.
+    // Every aura a talent proc lands, in `TalentId` order. Procs of one talent
+    // that land the same aura on different events (Vengeance) are one entry,
+    // keyed by the first of them.
     let mut keys = Vec::new();
     for (talent, config) in source.talents.iter() {
-        let procs = config
-            .per_rank
-            .iter()
-            .filter(|e| matches!(e, TalentEffect::Proc(_)))
-            .count();
-        keys.extend((0..procs as u8).map(|i| EngineKey::TalentProc(talent, i)));
+        let procs = procs_of(config);
+        keys.extend(
+            procs
+                .iter()
+                .enumerate()
+                .filter(|(i, p)| !procs[..*i].iter().any(|q| q.effect == p.effect))
+                .map(|(i, _)| EngineKey::TalentProc(talent, i as u8)),
+        );
     }
     keys
 }
@@ -31,14 +47,15 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
         return None;
     };
     let config = source.talents.get(talent)?;
-    let proc = config
-        .per_rank
+    let procs = procs_of(config);
+    let proc = *procs.get(usize::from(index))?;
+    // Every proc of the talent landing this aura, so the page names each
+    // event that lands it.
+    let landing: Vec<&TalentProc> = procs
         .iter()
-        .filter_map(|e| match e {
-            TalentEffect::Proc(p) => Some(p),
-            _ => None,
-        })
-        .nth(usize::from(index))?;
+        .copied()
+        .filter(|p| p.effect == proc.effect)
+        .collect();
     // Built by the constructor the resolver lands it with, so the page states
     // the aura that lands.
     let slot = TalentProcSlot::new(talent, &config.name, proc.clone());
@@ -61,6 +78,6 @@ pub fn entry(key: EngineKey, source: &CatalogSource) -> Option<EngineSpec> {
         persistence: Persistence::Seconds(landed.duration),
         riders: EngineSpec::no_riders(),
         landed: landed.clone(),
-        provenance: talent_proc_description(&config.name, proc, source.abilities),
+        provenance: talent_procs_description(&config.name, &landing, source.abilities),
     })
 }

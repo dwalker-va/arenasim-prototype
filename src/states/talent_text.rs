@@ -217,6 +217,7 @@ pub fn proc_clause(proc: &TalentProc, abilities: &AbilityDefinitions) -> String 
     let event = match proc.trigger {
         TalentTrigger::MeleeHit if proc.crit_only => "a melee critical strike".to_string(),
         TalentTrigger::MeleeHit => "a melee hit".to_string(),
+        TalentTrigger::SpellHit if proc.crit_only => of("a critical hit"),
         TalentTrigger::SpellHit => of("a hit"),
         TalentTrigger::DotTick => of("each damage tick"),
         TalentTrigger::HealCrit => of("a critical heal"),
@@ -315,6 +316,29 @@ pub fn talent_proc_description(
         ProcRankScale::Effect => " Its effect is per rank.",
     };
     format!("{talent}: {}.{rank}", proc_clause(proc, abilities))
+}
+
+/// [`talent_proc_description`] for a talent whose procs land ONE aura on
+/// several events (Vengeance: a melee crit, or a Crusader Strike crit): the
+/// first proc's sentence, and each further event as "Also ...". `procs` is
+/// never empty, and they share their ranks rule.
+pub fn talent_procs_description(
+    talent: &str,
+    procs: &[&TalentProc],
+    abilities: &AbilityDefinitions,
+) -> String {
+    let (first, rest) = procs.split_first().expect("at least one proc");
+    let mut text = talent_proc_description(talent, first, abilities);
+    for proc in rest {
+        let clause = proc_clause(proc, abilities);
+        let mut chars = clause.chars();
+        let lowered: String = chars
+            .next()
+            .map(|c| c.to_lowercase().chain(chars).collect())
+            .unwrap_or_default();
+        text.push_str(&format!(" Also {lowered}."));
+    }
+    text
 }
 
 /// A sentence made a clause: its first letter lower-cased, its full stops
@@ -475,6 +499,7 @@ fn stat_name(stat: TalentStat) -> &'static str {
         TalentStat::HolyResistance => "holy resistance",
         TalentStat::WeaponDamage => "weapon damage",
         TalentStat::OffHandDamage => "off-hand weapon damage",
+        TalentStat::TwoHandedWeaponDamage => "damage with a two-handed weapon",
         TalentStat::DodgeChance => "dodge chance",
         TalentStat::ParryChance => "parry chance",
         TalentStat::MeleeAttackSpeed => "melee attack speed",
@@ -504,7 +529,8 @@ fn stat_points(stat: TalentStat, points: f32) -> String {
         | TalentStat::NatureResistance
         | TalentStat::HolyResistance
         | TalentStat::WeaponDamage
-        | TalentStat::OffHandDamage => signed(points, ""),
+        | TalentStat::OffHandDamage
+        | TalentStat::TwoHandedWeaponDamage => signed(points, ""),
     }
 }
 

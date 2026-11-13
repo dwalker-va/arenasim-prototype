@@ -149,7 +149,7 @@ fn the_holy_tree_is_as_specified() {
             .iter()
             .map(|t| t.id)
             .collect::<Vec<_>>(),
-        vec![TreeId::Holy, TreeId::Protection]
+        vec![TreeId::Holy, TreeId::Protection, TreeId::Retribution]
     );
     assert_eq!(
         talents.get(AuraMastery).unwrap().requires,

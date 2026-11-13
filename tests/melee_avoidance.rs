@@ -30,7 +30,7 @@ use arenasim::states::match_config::{CharacterClass, RogueOpener};
 use arenasim::states::play_match::ability_config::load_ability_definitions;
 use arenasim::states::play_match::class_ai::scene::{Scene, SceneAvoided, Who};
 use arenasim::states::play_match::combat_core::{effective_attack_interval, Avoidance};
-use arenasim::states::play_match::components::{AuraType, Combatant};
+use arenasim::states::play_match::components::{Aura, AuraType, Combatant};
 use arenasim::states::play_match::{
     effective_melee_interval, effective_offhand_interval, AbilityType,
 };
@@ -342,6 +342,37 @@ fn rupture_is_avoided_and_bleeds_nothing() {
         |v| {
             v.auras_queued
                 .contains(&(DEFENDER, AuraType::DamageOverTime))
+        },
+    );
+}
+
+/// Crusader Strike (the Retribution capstone): avoided, it deals nothing.
+/// The Paladin's Devotion Aura is up and its Hammer of Justice spent, so its
+/// turn goes to the strike.
+#[test]
+fn crusader_strike_is_avoided_and_deals_nothing() {
+    assert_avoidable(
+        AbilityType::CrusaderStrike,
+        "Crusader Strike",
+        |a| {
+            melee_scene(CharacterClass::Paladin, a)
+                .aura_full(
+                    ATTACKER,
+                    Aura {
+                        effect_type: AuraType::DamageTakenReduction,
+                        duration: 600.0,
+                        magnitude: 0.10,
+                        ability_name: "Devotion Aura".into(),
+                        ..Default::default()
+                    },
+                )
+                .grant(ATTACKER, AbilityType::CrusaderStrike)
+                .cooldown(ATTACKER, AbilityType::HammerOfJustice, 30.0)
+        },
+        |v| {
+            v.landed
+                .iter()
+                .any(|l| l.ability == AbilityType::CrusaderStrike)
         },
     );
 }
@@ -1096,6 +1127,7 @@ fn every_melee_attack_is_a_pacify_ability_at_melee_range() {
         AbilityType::Kick,
         AbilityType::ExposeArmor,
         AbilityType::Rupture,
+        AbilityType::CrusaderStrike,
     ]
     .into_iter()
     .collect();

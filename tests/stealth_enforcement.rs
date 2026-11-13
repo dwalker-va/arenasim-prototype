@@ -493,12 +493,14 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                 class_ai::paladin::decide_paladin_action(
                     &mut commands,
                     &mut combat_log,
+                    &mut game_rng,
                     &book,
                     me,
                     &mut combatant,
                     my_pos,
                     auras,
                     &ctx,
+                    &mut instant_attacks,
                     &mut set_a,
                     &mut Default::default(),
                     &mut same_frame_cc,
@@ -829,7 +831,8 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
         | Innervate | EntanglingRoots | Cyclone | TravelForm | ShadowWordPain | ExposeArmor
         | DivineProtection | BlessingOfSacrifice | SacredShield | Shadowform | SiphonLife
         | AmplifyCurse | CurseOfExhaustion | InnerFocus | PowerInfusion | PainSuppression
-        | Shadowburn | Conflagrate | Rupture | DivineFavor | AuraMastery => false,
+        | Shadowburn | Conflagrate | Rupture | DivineFavor | AuraMastery | Repentance
+        | CrusaderStrike => false,
         // A Paladin aura on allies: its damage answers a melee attacker that
         // struck one, and that hit has revealed the attacker already.
         RetributionAura => false,
