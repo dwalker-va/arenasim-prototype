@@ -504,7 +504,31 @@ fn has_friendly_breakable_cc_ignores_enemy_caster() {
 }
 
 #[test]
-fn has_friendly_breakable_cc_ignores_high_threshold_auras() {
+fn has_friendly_breakable_cc_detects_team_fear() {
+    let me = Entity::from_raw(1);
+    let ally = Entity::from_raw(2);
+    let enemy = Entity::from_raw(3);
+
+    let mut snapshot = snapshot_for(me, 1, CharacterClass::Warrior);
+    snapshot
+        .combatants
+        .insert(ally, info(ally, 1, CharacterClass::Warlock));
+    snapshot
+        .combatants
+        .insert(enemy, info(enemy, 2, CharacterClass::Rogue));
+
+    // Ally Feared the enemy — breaks after 100 damage, a hold the team waits
+    // out like a Polymorph.
+    snapshot
+        .active_auras
+        .insert(enemy, vec![aura_with(AuraType::Fear, Some(ally), 100.0)]);
+
+    let ctx = snapshot.context_for(me);
+    assert!(ctx.has_friendly_breakable_cc(enemy));
+}
+
+#[test]
+fn has_friendly_breakable_cc_ignores_a_root_that_breaks_on_damage() {
     let me = Entity::from_raw(1);
     let ally = Entity::from_raw(2);
     let enemy = Entity::from_raw(3);
@@ -517,8 +541,8 @@ fn has_friendly_breakable_cc_ignores_high_threshold_auras() {
         .combatants
         .insert(enemy, info(enemy, 2, CharacterClass::Rogue));
 
-    // Frost Nova root: break_on_damage_threshold == 80.0, not 0.0. It absorbs
-    // moderate damage before breaking, so attacking the target is fine.
+    // Frost Nova root: breaks after 80 damage, but a root is no hold — the
+    // rooted unit still casts and swings — so a root and a nuke go together.
     snapshot
         .active_auras
         .insert(enemy, vec![aura_with(AuraType::Root, Some(ally), 80.0)]);

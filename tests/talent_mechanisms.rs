@@ -1186,7 +1186,11 @@ fn every_site_pushes_its_trigger() {
             &["Warlock"],
             &["Priest"],
             on(TalentTrigger::DotTick, AbilityType::DrainLife),
-            Stage::new().health(T1, 0.5),
+            // Its Fear held: the Warlock waits out its own Fear on its
+            // target (AS-436), which would hold the channel.
+            Stage::new()
+                .health(T1, 0.5)
+                .cooldown(T1, AbilityType::Fear, 1000.0),
         ),
         (
             &["Mage"],
@@ -1495,11 +1499,15 @@ const WARLOCK_SHADOW: [AbilityType; 6] = [
     AbilityType::DeathCoil,
 ];
 
+/// Every [`WARLOCK_SHADOW`] ability but `keep` held on cooldown, and the Fear
+/// too: the Warlock waits out its own Fear on its target (AS-436), so a Fear
+/// would hold the one site the case measures.
 fn only(stage: Stage, who: Unit, keep: AbilityType) -> Stage {
     WARLOCK_SHADOW
         .iter()
         .filter(|a| **a != keep)
         .fold(stage, |s, a| s.cooldown(who, *a, 1000.0))
+        .cooldown(who, AbilityType::Fear, 1000.0)
 }
 
 /// A silence held for the whole match.

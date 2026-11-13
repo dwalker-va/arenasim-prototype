@@ -7,8 +7,10 @@
 //!
 //! `tests/decision_properties.rs`'s `never_stacks_hard_cc_on_a_unit_its_team_holds`
 //! guards the rule over the whole grid; these pin the edges the grid does not
-//! walk: the chain window, a root not counting as a hold, and a Fear the team
-//! is beating on not counting either (its damage is about to break it).
+//! walk: the chain window, a root not counting as a hold, and a Fear the
+//! team's damage over time is ticking on not counting against a stun (those
+//! ticks are about to break it). A Fear the team is only targeting holds: the
+//! team waits it out (`tests/friendly_fear_scenes.rs`).
 
 use arenasim::states::match_config::CharacterClass::{Priest, Rogue, Warlock, Warrior};
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
@@ -197,20 +199,49 @@ fn the_warlock_does_not_fear_a_healer_its_team_holds() {
 }
 
 // ---------------------------------------------------------------------------
-// A Fear the team is attacking through is no hold.
+// A Fear the team waits out holds; one its damage over time is breaking does
+// not.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn a_fear_the_team_is_breaking_does_not_hold_but_one_left_alone_does() {
-    // The Rogue's own target, feared by its Warlock: the Rogue's blows are
-    // about to break the Fear, so the stun is the lock that lasts.
-    let scene = rogue_scene().unit(WARLOCK, 1, Warlock).at(-20.0, 0.0);
-    let beaten = held(scene, ENEMY, WARLOCK, AuraType::Fear, 6.0).decide(ROGUE);
+fn a_fear_the_team_waits_out_holds_but_one_its_dots_are_breaking_does_not() {
+    // The Rogue's own target, feared by its Warlock. The team holds its
+    // damage for the Fear, so it lasts, and no stun is stacked on it: the
+    // stun's chooser passes the held target over.
+    let scene = || rogue_scene().unit(WARLOCK, 1, Warlock).at(-20.0, 0.0);
+    let waited = held(scene(), ENEMY, WARLOCK, AuraType::Fear, 6.0).decide(ROGUE);
+    assert_ne!(
+        waited.chose().map(|(a, _)| a),
+        Some(AbilityType::KidneyShot),
+        "a Fear the team waits out is a hold: {}",
+        describe(&waited)
+    );
+    assert!(
+        matches!(
+            waited.rejected(AbilityType::KidneyShot),
+            Some(RejectionReason::NoValidTarget)
+        ),
+        "the stun finds no target it does not already hold: {}",
+        describe(&waited)
+    );
+
+    // The same Fear with the Warlock's Corruption ticking on its bearer: the
+    // ticks are about to break it, so the stun is the lock that lasts.
+    let warlock = scene().entity(WARLOCK);
+    let ticking = held(scene(), ENEMY, WARLOCK, AuraType::Fear, 6.0)
+        .aura_full(
+            ENEMY,
+            Aura {
+                break_on_damage_threshold: -1.0,
+                ..dot("Corruption", warlock)
+            },
+        )
+        .decide(ROGUE);
     assert_eq!(
-        beaten.chose(),
+        ticking.chose(),
         Some((AbilityType::KidneyShot, Some(ENEMY))),
-        "a Fear the Rogue is attacking through is not a hold: {}",
-        describe(&beaten)
+        "a Fear the team's damage over time is breaking is not a hold: {}",
+        describe(&ticking)
     );
 
     // The Warlock's CC target, feared by a teammate and attacked by nobody:
@@ -229,67 +260,23 @@ fn a_fear_the_team_is_breaking_does_not_hold_but_one_left_alone_does() {
 }
 
 // ---------------------------------------------------------------------------
-// Death Coil's damage never breaks a friendly Polymorph, even one ending.
-// ---------------------------------------------------------------------------
-
-/// The Warlock with an enemy Warrior on it, in Death Coil's peel radius.
-fn peel_scene() -> Scene {
-    Scene::new()
-        .unit(WARLOCK, 1, Warlock)
-        .targeting(ENEMY)
-        .unit(ALLY, 1, Warrior)
-        .at(-10.0, 0.0)
-        .unit(ENEMY, 2, Warrior)
-        .at(2.0, 0.0)
-        .targeting(WARLOCK)
-}
-
-#[test]
-fn death_coil_does_not_break_a_friendly_polymorph_inside_the_chain_window() {
-    // The control: the Warrior is free, and is peeled.
-    let free = peel_scene().decide(WARLOCK);
-    assert_eq!(
-        free.chose(),
-        Some((AbilityType::DeathCoil, Some(ENEMY))),
-        "the control peels the free Warrior: {}",
-        describe(&free)
-    );
-
-    // A teammate's Polymorph in its last moments is no longer a hold, but
-    // Death Coil's damage would still break it.
-    let ending = held(
-        peel_scene(),
-        ENEMY,
-        ALLY,
-        AuraType::Polymorph,
-        CC_CHAIN_WINDOW - 0.1,
-    )
-    .decide(WARLOCK);
-    assert_ne!(
-        ending.chose(),
-        Some((AbilityType::DeathCoil, Some(ENEMY))),
-        "Death Coil broke a friendly Polymorph: {}",
-        describe(&ending)
-    );
-    assert!(
-        matches!(
-            ending.rejected(AbilityType::DeathCoil),
-            Some(RejectionReason::FriendlyBreakableCC)
-        ),
-        "the refusal is traced as the friendly CC: {}",
-        describe(&ending)
-    );
-}
-
-// ---------------------------------------------------------------------------
 // A Fear the team is breaking still holds off a CC that breaks the same way.
 // ---------------------------------------------------------------------------
 
 #[test]
 fn a_fear_the_team_is_breaking_still_holds_off_a_fear() {
-    // The Warlock's ally is beating on the feared healer. A stun would take
-    // over from that Fear; another Fear would only be broken the same way.
-    let scene = warlock_scene().target(ALLY, HEALER);
+    // The Warlock's Corruption is ticking on the feared healer, about to
+    // break the Fear. A stun would take over from it; another Fear would only
+    // be broken the same way.
+    let scene = warlock_scene();
+    let me = scene.entity(WARLOCK);
+    let scene = scene.aura_full(
+        HEALER,
+        Aura {
+            break_on_damage_threshold: -1.0,
+            ..dot("Corruption", me)
+        },
+    );
     let breaking = held(scene, HEALER, WARLOCK, AuraType::Fear, 6.0).decide(WARLOCK);
     assert!(
         matches!(

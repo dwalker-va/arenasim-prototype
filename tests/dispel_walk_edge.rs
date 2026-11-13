@@ -442,6 +442,12 @@ fn a_healer_that_walked_into_dispel_reach_holds_there_while_the_dispel_is_owed()
                 .place(HEALER, -20.0, 0.0)
                 .place(MAGE, 25.0, 0.0)
                 .land(MAGE, AbilityType::Fear, WARLOCK)
+                // The enemy's crowd control for the healer held: the
+                // Warlock and the Priest wait out their own Fear on the Mage
+                // (AS-436), so they would otherwise spend the walk fearing
+                // the healer, and no walk would reach.
+                .cooldown(WARLOCK, AbilityType::Fear, 1000.0)
+                .cooldown(PRIEST, AbilityType::PsychicScream, 1000.0)
                 .place(WARLOCK, 30.0, 12.0)
                 .place(PRIEST, 34.0, -12.0);
             let played = play(config, Some(stage));

@@ -671,15 +671,16 @@ impl<'a> CombatContext<'a> {
     /// one CHAINS onto it instead (the Rogue's Kidney Shot onto its own
     /// expiring Cheap Shot).
     ///
-    /// `incoming` is how the CC about to be cast takes damage. One that
-    /// [`Incoming::Lasts`] (a stun, a horror, a Cyclone) is not stacked on a
-    /// hold the team is breaking: a hold that breaks once enough damage
-    /// accumulates (a Fear, a Psychic Scream) does not count while the team is
-    /// attacking its bearer, so the stun becomes the lock that lasts. A hold
-    /// that breaks on ANY damage (a Polymorph, a Freezing Trap) still counts —
-    /// the team holds its damage for it ([`Self::has_friendly_breakable_cc`]).
-    /// One that [`Incoming::Breaks`] itself would only be broken the same way,
-    /// so every hold counts against it.
+    /// `incoming` is how the CC about to be cast takes damage. The team holds
+    /// its damage for every hold damage breaks, a Fear included
+    /// ([`damage_breaks_friendly_hold`], [`Self::has_friendly_breakable_cc`]),
+    /// so such a hold lasts and counts. The one exception is a hold that
+    /// breaks once enough damage accumulates (a Fear, a Psychic Scream) on a
+    /// bearer the team's damage over time is already ticking on: those ticks
+    /// are about to break it, so a CC that [`Incoming::Lasts`] (a stun, a
+    /// horror, a Cyclone) is not stacked on it but becomes the lock that
+    /// lasts. One that [`Incoming::Breaks`] itself would only be broken the
+    /// same way, so every hold counts against it.
     ///
     /// Asked of enemies, whose crowd control can only be the deciding unit's
     /// own team's: no hold lands on its caster's side. So the caster is not
@@ -702,7 +703,7 @@ impl<'a> CombatContext<'a> {
         incoming: Incoming,
         lands_after: f32,
     ) -> Option<AuraType> {
-        let breaking = incoming == Incoming::Lasts && self.attacked_by_my_team(entity);
+        let breaking = incoming == Incoming::Lasts && self.has_friendly_dots_on_target(entity);
         self.active_auras
             .get(&entity)?
             .iter()
@@ -990,17 +991,18 @@ impl<'a> CombatContext<'a> {
         })
     }
 
-    /// Check if target has a break-on-any-damage CC from a friendly caster.
-    /// Uses threshold-based detection: any aura with `break_on_damage_threshold == 0.0`
-    /// (breaks on ANY damage) from a same-team caster is protected.
-    /// Used to prevent AI from breaking own team's CC with damage/DoTs.
+    /// Does `target` carry crowd control from a caster on the deciding unit's
+    /// team that damage would break ([`damage_breaks_friendly_hold`]: a
+    /// Polymorph, a Freezing Trap, a Fear, a Psychic Scream — never a root)?
+    /// The team waits such a hold out, so no damage or damage over time is
+    /// cast on its bearer.
     pub fn has_friendly_breakable_cc(&self, target: Entity) -> bool {
         let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
         self.active_auras
             .get(&target)
             .map(|auras| {
                 auras.iter().any(|a| {
-                    a.break_on_damage_threshold == 0.0
+                    damage_breaks_friendly_hold(a)
                         && a.caster
                             .and_then(|c| self.combatants.get(&c).map(|info| info.team))
                             == Some(my_team)
@@ -1677,6 +1679,23 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
 /// "cannot act" test) are it.
 pub const fn holds(aura: AuraType) -> bool {
     is_hard_cc(aura) && !matches!(aura, AuraType::Root)
+}
+
+/// Would damage break `aura` — so that, cast by the attacker's own team, it
+/// is crowd control the team holds its damage for? Every aura that breaks on
+/// ANY damage (a Polymorph, a Freezing Trap, Repentance), and every HOLD
+/// ([`holds`]) that breaks once enough damage accumulates (a Fear, a Psychic
+/// Scream). A root that breaks on damage is not one: a rooted unit still
+/// casts and swings, and a root and a nuke go together (Frost Nova).
+///
+/// The one copy of the rule. The cast gate asks it through
+/// [`CombatContext::has_friendly_breakable_cc`], the auto-attack asks it
+/// before it lands a swing, and [`CombatContext::held_in_hard_cc`] counts
+/// such a hold against a fresh crowd control because the team is waiting it
+/// out.
+pub fn damage_breaks_friendly_hold(aura: &Aura) -> bool {
+    aura.break_on_damage_threshold == 0.0
+        || (holds(aura.effect_type) && aura.break_on_damage_threshold > 0.0)
 }
 
 /// How a hard CC about to be cast takes damage — what
