@@ -791,6 +791,13 @@ hunter's sight is 0.947 → 0.941 on staffed endgames.
 The claim this card makes is how the hunt reads, and the geometry tests carry
 it (§10.2). The measurement shows the change costs nothing.
 
+**Round 3 (the reach latch, the plain-block hold, the restart memory),
+re-checked on one block.** Block 747-750, `main` at `80e32c11` against the
+branch: staffed endgames 748, 28.4 → 28.1s, paired −0.34s (t −0.9;
+seed-clustered 95% −0.69 to 0.05); every endgame (3,549) −0.07s; hunting
+side win / lose / draw 703/39/6 → 702/40/6 (6 flips to the hunters, 7 away);
+draws over the 5,040 matches 28 → 28; 334 matches differ. Still level.
+
 `Legacy`: 144 configs (six comps, a 3v3 among them, on BasicArena,
 PillaredArena and TwinPillars, seeds 721-728), full `--headless` logs on the
 merged tree against `main` (`5300b998`): identical. 326 eliminations, 128

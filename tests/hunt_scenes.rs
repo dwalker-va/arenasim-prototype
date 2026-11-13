@@ -715,3 +715,65 @@ fn a_hunt_that_starts_again_at_once_keeps_its_sides() {
         "the control: later, a fresh pairing"
     );
 }
+
+/// A walk point is kept only while the healer is still in the hunter's
+/// reach from it: once the healer stands where the point cannot attack it
+/// (here, inside a Hunter's 8yd dead zone), past the re-aim floor, the
+/// hunter walks to another. The control: a healer the kept point still
+/// reaches leaves it kept.
+#[test]
+fn a_walk_point_out_of_reach_is_given_up() {
+    use arenasim::states::match_config::CharacterClass::Hunter;
+    use arenasim::states::play_match::class_ai::hunt::REAIM_SECS;
+    const HUNTER: &str = "hunter";
+    let eye = |q: Vec2| Vec3::new(q.x, 1.0, q.y);
+    let sees = |a: Vec2, b: Vec2| has_line_of_sight(&[pillar()], eye(a), eye(b));
+    let (hunter, priest) = (Vec2::new(-20.0, 2.0), Vec2::new(-22.0, -4.0));
+    let scene = || {
+        Scene::new()
+            .obstacles(vec![pillar()])
+            .ai_profile(1, AiProfile::TeamPlan)
+            .ai_profile(2, AiProfile::TeamPlan)
+            .unit(HUNTER, 1, Hunter)
+            .at(hunter.x, hunter.y)
+            .targeting(HIDER)
+            .unit(PRIEST, 1, Priest)
+            .at(priest.x, priest.y)
+            .targeting(HIDER)
+            .unit(HIDER, 2, Priest)
+            .at(HIDER_AT.x, HIDER_AT.y)
+            .targeting(PRIEST)
+    };
+    let mut s = scene();
+    let g = station(&hunt(&mut s).unwrap(), &s, HUNTER).expect("the Hunter walks");
+    // A step that puts the healer inside the kept spot's dead zone, in its
+    // sight, still at the pillar and on the far side of the spot from the
+    // Hunter's side, and hidden from the Hunter where it stands.
+    let step = (0..72)
+        .flat_map(|k| {
+            (1..8).map(move |r| g + Vec2::from_angle((k as f32 * 5.0).to_radians()) * r as f32)
+        })
+        .find(|&p| {
+            p.length() - 6.0 > 1.0
+                && p.length() - 6.0 <= HUNT_ENTER
+                && sees(g, p)
+                && side_of(g, p) > 5.0
+                && !sees(hunter, p)
+        })
+        .expect("the situation: a step into the spot's dead zone");
+    s.set_position(HIDER, step.x, step.y);
+    s.set_now(30.0 + REAIM_SECS + 0.5);
+    let h = hunt(&mut s).expect("still hunted");
+    let next = station(&h, &s, HUNTER).expect("the Hunter walks");
+    assert!(
+        next.distance(g) > 1.0,
+        "{next}: the old spot given up ({step})"
+    );
+    assert!(next.distance(step) >= 8.0, "{next}: out of the dead zone");
+    // Control: the healer stays put; past the floor the spot is kept.
+    let mut s = scene();
+    assert_eq!(station(&hunt(&mut s).unwrap(), &s, HUNTER), Some(g));
+    s.set_now(30.0 + REAIM_SECS + 0.5);
+    let h = hunt(&mut s).unwrap();
+    assert_eq!(station(&h, &s, HUNTER), Some(g), "kept while it reaches");
+}
