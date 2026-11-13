@@ -432,11 +432,11 @@ fn no_hunter_stands_still_without_sight() {
     );
 }
 
-/// The walk is re-aimed when its point moves on — a new walk of a carrot
-/// round the back, or a walk point that lost the hider — never every frame
-/// its point drifts: no hunter begins more than [`MAX_WALKS_PER_SECOND`] new
-/// walks in any one second. (Its controls are mutations: re-aiming every
-/// frame, or tracing every drift, breaks it.)
+/// The walk is re-aimed when its point moves on — a carrot round the back
+/// half a step behind, or a walk point that lost the hider — never every few
+/// frames as the hider moves: no hunter begins more than [`MAX_WALKS_PER_SECOND`] new
+/// walks in any one second. (Its controls are mutations: dropping the kept
+/// walk point or the kept carrot breaks it.)
 #[test]
 fn a_walk_is_re_aimed_only_when_its_point_moves_on() {
     let on = readings(true);

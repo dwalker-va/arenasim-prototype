@@ -841,10 +841,10 @@ impl CombatContext<'_> {
 /// Walk `entity` to its hunt point `station` (or hold it: a sighted unit's
 /// point is where it stands): a `Point` directive on it, re-issued once its
 /// commit window has run or when it names another point, and traced
-/// (`MovementTrigger::Hunt`) as each new walk begins — to a point farther
-/// than [`STATION_ARRIVED`] from the live one, not the drift of a point that
-/// follows the healer. Returns whether the unit is still walking (beyond
-/// [`STATION_ARRIVED`]).
+/// (`MovementTrigger::Hunt`) as each walk to a new point begins (a walk point
+/// is kept until it loses the healer, and a carrot round the back for half a
+/// step, so that is when the walk moves on). Returns whether the unit is
+/// still walking (beyond [`STATION_ARRIVED`]).
 #[allow(clippy::too_many_arguments)]
 pub fn walk_to_station(
     commands: &mut Commands,
@@ -864,9 +864,6 @@ pub fn walk_to_station(
         _ => None,
     });
     let same = current.is_some_and(|(p, _)| p.distance(station) < 1e-3);
-    // A point that drifts with the healer is the same walk: only a point
-    // farther than [`STATION_ARRIVED`] from the live one begins a new walk.
-    let new_walk = current.is_none_or(|(p, _)| p.distance(station) > STATION_ARRIVED);
     let live = current.is_some_and(|(_, d)| now < d.committed_until && now < d.expires);
     if !(same && live) {
         commands.entity(entity).try_insert(MovementDirective {
@@ -874,7 +871,7 @@ pub fn walk_to_station(
             expires: now + ttl.max(commit),
             committed_until: now + commit,
         });
-        if new_walk {
+        if !same {
             if let Some(info) = ctx.combatants.get(&entity) {
                 let actor = crate::states::play_match::decision_trace::ActorView::from_info(info);
                 let mut builder = decision_trace.start_movement_decision(actor, None);
