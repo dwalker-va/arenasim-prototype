@@ -1361,19 +1361,19 @@ fn the_holy_tree_reads() {
 }
 
 /// Aura Mastery is off the global cooldown (Wrath 31821 has no recovery
-/// category): with its Holy Shock coming ready a moment after the gates, the
-/// Paladin raises Aura Mastery for its casting Mage and shocks the Rogue on
-/// its next decisions, not a global cooldown later. Divine Favor's is pinned
+/// category): with its Holy Shock coming ready two frames after the gates,
+/// the Paladin raises Aura Mastery for its casting Mage and shocks the Rogue
+/// on the very next frame, not a global cooldown (1.5s) later. Divine Favor's is pinned
 /// by `divine_favor_and_infusion_of_light_act_in_a_match`.
 #[test]
 fn aura_mastery_leaves_the_global_cooldown_free() {
-    let log = kick_match(holy_to_mastery(), 3.0, 0.1).log;
+    let log = kick_match(holy_to_mastery(), 3.0, 0.03).log;
     let mastery =
         first_at(&log, "Paladin #1 casts Aura Mastery").unwrap_or_else(|| panic!("{log}"));
     let shock = first_at(&log, "Paladin #1 casts Holy Shock (Damage)")
         .unwrap_or_else(|| panic!("no Holy Shock:\n{log}"));
     assert!(
-        shock >= mastery && shock - mastery < 0.2,
+        shock >= mastery && shock - mastery < 0.05,
         "{mastery} -> {shock}: the shock waited a global cooldown\n{log}"
     );
 }
