@@ -381,18 +381,26 @@ const ONE_SWING_FRAMES: u32 = 10;
 
 /// What ONE main-hand swing of a Warrior produced: the main-hand swings that
 /// landed (the swing and any extra one), the tornadoes, the trinket's `procs`
-/// lines, and the rage it ended with.
+/// lines, the damage events that critted (the attacker is the only one
+/// dealing damage), and the rage it ended with.
 struct OneSwing {
     main: usize,
     tornadoes: usize,
     procs: usize,
+    crits: usize,
     rage: f32,
+}
+
+/// [`one_swing_at`] at the Warrior's own crit chance.
+fn one_swing(hand_of_justice: bool, windfury: bool) -> OneSwing {
+    one_swing_at(hand_of_justice, windfury, None)
 }
 
 /// A Warrior with an empty rage bar whose main hand is ready, swinging once
 /// at a Mage that cannot dodge or parry, with or without a certain Hand of
-/// Justice and a certain Windfury Totem buff.
-fn one_swing(hand_of_justice: bool, windfury: bool) -> OneSwing {
+/// Justice and a certain Windfury Totem buff, at `crit_chance` when one is
+/// given.
+fn one_swing_at(hand_of_justice: bool, windfury: bool, crit_chance: Option<f32>) -> OneSwing {
     let mut app = app(7);
     let mut mage = Combatant::new(2, 0, CharacterClass::Mage);
     mage.max_health = 1.0e6;
@@ -409,6 +417,9 @@ fn one_swing(hand_of_justice: bool, windfury: bool) -> OneSwing {
     attacker.attack_timer = ONE_SWING_SPEED;
     attacker.current_mana = 0.0;
     attacker.max_mana = 100.0;
+    if let Some(crit_chance) = crit_chance {
+        attacker.crit_chance = crit_chance;
+    }
     if hand_of_justice {
         attacker.proc_trinkets.push(certain_hand_of_justice());
     }
@@ -440,11 +451,24 @@ fn one_swing(hand_of_justice: bool, windfury: bool) -> OneSwing {
         .iter()
         .filter(|e| e.message.contains("procs Hand of Justice (extra attack)"))
         .count();
+    let crits = app
+        .world()
+        .resource::<CombatLog>()
+        .entries
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.structured_data,
+                Some(StructuredEventData::Damage { is_crit: true, .. })
+            )
+        })
+        .count();
     let rage = app.world().get::<Combatant>(attacker).unwrap().current_mana;
     OneSwing {
         main,
         tornadoes,
         procs,
+        crits,
         rage,
     }
 }
@@ -472,6 +496,38 @@ fn an_extra_swing_grants_rage_like_a_white_hit() {
             run.rage,
             2.0 * swing_rage(),
             "{who}: the extra swing granted no rage, or not a white hit's"
+        );
+    }
+}
+
+/// An extra swing that CRITS pays the same rage as one that does not: a white
+/// hit's rage follows its weapon's speed, never its damage. At a certain crit
+/// every swing crits, so the extra swing — from the trinket and from the
+/// totem alike — is seen to crit and still pays exactly one white hit's
+/// rage; the control, the critting swing with no extra one, pays one.
+#[test]
+fn a_critting_extra_swing_pays_a_white_hit_s_rage() {
+    let bare = one_swing_at(false, false, Some(1.0));
+    assert_eq!(
+        (bare.main, bare.crits),
+        (1, 1),
+        "control: one swing, and it crits"
+    );
+    assert_eq!(bare.rage, swing_rage(), "control: one white hit's rage");
+
+    for (who, run) in [
+        ("Hand of Justice", one_swing_at(true, false, Some(1.0))),
+        ("Windfury Totem", one_swing_at(false, true, Some(1.0))),
+    ] {
+        assert_eq!(
+            (run.main, run.crits),
+            (2, 2),
+            "{who}: the swing and its extra one, both critting"
+        );
+        assert_eq!(
+            run.rage - bare.rage,
+            swing_rage(),
+            "{who}: the critting extra swing paid other than one white hit's rage"
         );
     }
 }
