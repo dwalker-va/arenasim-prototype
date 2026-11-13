@@ -20,14 +20,32 @@
 //!    pays twice.
 //!
 //! Lexical, like the other audits built on `tests/common/source_audit.rs`: it
-//! reads comment-, string- and test-module-blanked source. It does not see a
-//! drop spelled without `-` or a zero literal (`current_mana.min(max_mana)`
-//! when a mana buff ends, which cannot go below zero, and the pre-match
-//! resets to `pre_combat_resource()`), nor one taken in two steps.
-
+//! reads comment-, string- and test-module-blanked source, and names a site
+//! by its enclosing `fn`.
+//!
+//! **What it catches.** A write to a field named `current_mana` by `-=`; by
+//! `+=` of a negated amount (`+= -cost`); by `*=` or `/=` (any factor); by `=`
+//! whose right-hand side contains a `-` or is a zero literal; and any mutable
+//! borrow of the field (`&mut c.current_mana`), counted as a site because
+//! what is written through it is out of sight. Question 2 also follows each
+//! cast starter ONE call deep: a starter that calls any function in the
+//! lowering set, by name, fails too.
+//!
+//! **What it misses.** A lowering `=` with no `-` in it
+//! (`current_mana = cost.min(x)`, `= x * 0.5`; the shipped such writes, the
+//! `.min(max_mana)` clamp when a mana buff ends and the pre-match resets to
+//! `pre_combat_resource()`, cannot go below zero); `+=` of an amount that
+//! may be negative but is not written negated (`+= delta`); a write through
+//! a reference bound elsewhere (`let m = &mut c; m.current_mana ...` is
+//! caught, but a `&mut f32` handed in as a parameter and written as `*m -=`
+//! is not); a whole-`Combatant` write (`*c = other`, a struct literal); a
+//! drop taken in two steps; and for question 2, a helper more than one call
+//! away, or one reached through a method on another type or a closure.
 mod common;
 
-use common::source_audit::{blank_comments_and_strings, blank_test_modules, load_sources};
+use common::source_audit::{
+    blank_comments_and_strings, blank_test_modules, find_fn_body, load_sources,
+};
 use regex::Regex;
 use std::collections::BTreeSet;
 
@@ -153,17 +171,27 @@ fn declared() -> BTreeSet<(String, String)> {
     spends.chain(others).collect()
 }
 
-/// Every subtractive or zeroing write to `current_mana` in non-test `src/`.
+/// Every site in non-test `src/` that lowers `current_mana`, or may: see the
+/// module docs for the shapes this reads and the ones it does not.
 fn lowering_sites() -> BTreeSet<(String, String)> {
-    // `current_mana -=`, or `current_mana =` whose right-hand side subtracts
-    // or is a zero literal. The right-hand side runs to the next `;`, which
-    // for a closure body is past the closure, so a `->` there is not a
-    // subtraction.
-    let write = Regex::new(r"\bcurrent_mana\s*(-=|=[^=])").unwrap();
+    // A write: `-=`; `+=` of a negated amount (`+= -cost`); `*=` and `/=`,
+    // which lower it by any factor below one; or `=` whose right-hand side
+    // subtracts or is a zero literal. The right-hand side runs to the next
+    // `;`, which for a closure body is past the closure, so a `->` there is
+    // not a subtraction.
+    let write = Regex::new(r"\bcurrent_mana\s*(-=|\+=|\*=|/=|=[^=])").unwrap();
     let zero = Regex::new(r"^\s*0(\.0*)?\s*$").unwrap();
-    sites(&write, |op, rhs| {
-        op == "-=" || rhs.replace("->", "").contains('-') || zero.is_match(rhs)
-    })
+    let mut found = sites(&write, |op, rhs| match op {
+        "+=" => rhs.trim_start().starts_with('-'),
+        "-=" | "*=" | "/=" => true,
+        _ => rhs.replace("->", "").contains('-') || zero.is_match(rhs),
+    });
+    // A mutable borrow of the field (`&mut c.current_mana`): whatever is
+    // written through it is out of sight, so the borrow is the site.
+    let borrow =
+        Regex::new(r"&\s*mut\s+(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)*current_mana\b").unwrap();
+    found.extend(sites(&borrow, |_, _| true));
+    found
 }
 
 #[test]
@@ -240,5 +268,30 @@ fn a_cast_with_a_cast_bar_pays_only_as_it_lands() {
         "These functions begin a cast with a cast bar AND lower the caster's resource, \
          so the cast pays twice: as it begins, and again as it lands in \
          `process_casting` (AS-438). Drop the charge at the cast's start: {both:?}"
+    );
+
+    // One call deep: a starter that pays through a helper which lowers the
+    // resource pays twice just the same.
+    let files = load_sources(&["src"]).expect("read src/");
+    let helpers: BTreeSet<&str> = lowering.iter().map(|(_, f)| f.as_str()).collect();
+    let call = Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(").unwrap();
+    let mut through = Vec::new();
+    for (file, name) in &starters {
+        let src = files
+            .iter()
+            .find(|f| &f.rel_display() == file)
+            .unwrap_or_else(|| panic!("{file} is not in src/"));
+        let code = blank_test_modules(&blank_comments_and_strings(&src.raw));
+        let body = find_fn_body(&code, name).unwrap_or_else(|| panic!("no fn {name} in {file}"));
+        for c in call.captures_iter(&body) {
+            if helpers.contains(&c[1]) {
+                through.push(format!("{file} {name} -> {}", &c[1]));
+            }
+        }
+    }
+    assert!(
+        through.is_empty(),
+        "These functions begin a cast with a cast bar AND call a function that lowers \
+         the resource, so the cast pays twice (AS-438): {through:?}"
     );
 }
