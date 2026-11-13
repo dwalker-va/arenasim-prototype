@@ -6,7 +6,8 @@
 //! 1. Ice Barrier (self-shield when no shield or HP < 80%)
 //! 2. Mage Armor (self-buff based on preference: Frost Armor / Mage Armor / Molten Armor)
 //! 3. Arcane Intellect (buff mana-using allies pre-combat)
-//! 4. Frost Nova (defensive AoE when enemies in melee)
+//! 4. Frost Nova (defensive AoE when enemies in melee; held while it would
+//!    break the team's breakable crowd control, unless the Mage is dying)
 //! 5. Polymorph (CC non-kill target to create outnumbering situation)
 //! 6. Frostbolt (main damage spell with kiting behavior)
 #![allow(clippy::too_many_arguments)]
@@ -543,7 +544,60 @@ enum NovaTrigger<'a> {
     Peel(&'a [Entity]),
 }
 
-/// Try to cast Frost Nova when `trigger` holds.
+/// The note a Frost Nova held for the team's crowd control is traced with.
+pub const NOVA_HOLDS_FOR_TEAM_CC: &str =
+    "an enemy inside the Nova is in the team's breakable crowd control";
+
+/// Whether Frost Nova cast at `my_pos` would break crowd control the Mage's
+/// own team holds: a living enemy inside its `radius` carries a hold any
+/// damage breaks ([`CombatContext::has_friendly_breakable_cc`] — a Polymorph,
+/// a Freezing Trap — whoever on the team cast it, the Mage included). The
+/// Nova damages every enemy inside it and aims at none, so a hold anywhere in
+/// it is broken. Decided on what the Mage sees, as Holy Nova's gate is: an
+/// unseen enemy carries no hold of its team's.
+fn nova_breaks_team_cc(ctx: &CombatContext, team: u8, my_pos: Vec3, radius: f32) -> bool {
+    ctx.combatants.values().any(|c| {
+        c.team != team
+            && c.is_alive
+            && my_pos.distance(c.position) <= radius
+            && ctx.has_friendly_breakable_cc(c.entity)
+    })
+}
+
+/// The one case a Nova breaks its own team's crowd control anyway: it is the
+/// Mage's escape — a (non-pet) enemy in melee range of it that the team does
+/// NOT hold — and the Mage is dying (below `urgency_hp_threshold`, the
+/// situation's `dying`). A teammate's hold costs the enemy seconds; a dying
+/// Mage left in melee costs the team a unit. A Nova for any other reason — a
+/// healthy Mage, a peel for a teammate (which still has Polymorph), a held
+/// enemy wandering at the Mage's feet — keeps the hold.
+fn nova_escape_outweighs_team_cc(ctx: &CombatContext, me: Entity, team: u8, my_pos: Vec3) -> bool {
+    ctx.situation().dying_allies().any(|ally| ally == me)
+        && ctx.combatants.values().any(|info| {
+            in_melee_of(team, my_pos, info) && !ctx.has_friendly_breakable_cc(info.entity)
+        })
+}
+
+/// Whether a living, non-pet enemy stands in melee range of `my_pos`: the
+/// rotation's Nova trigger.
+fn melee_on_me(ctx: &CombatContext, team: u8, my_pos: Vec3) -> bool {
+    ctx.combatants
+        .values()
+        .any(|info| in_melee_of(team, my_pos, info))
+}
+
+/// Whether `info` is a living, non-pet enemy of `team` in melee range of
+/// `my_pos`.
+fn in_melee_of(team: u8, my_pos: Vec3, info: &super::CombatantInfo) -> bool {
+    info.team != team
+        && info.is_alive
+        && !info.is_pet
+        && my_pos.distance(info.position) <= MELEE_RANGE
+}
+
+/// Try to cast Frost Nova when `trigger` holds, unless it would break the
+/// team's crowd control ([`nova_breaks_team_cc`]) and the Mage's own escape
+/// does not outweigh that ([`nova_escape_outweighs_team_cc`]).
 /// Returns true if the ability was used.
 fn try_frost_nova(
     commands: &mut Commands,
@@ -576,13 +630,7 @@ fn try_frost_nova(
 
     match trigger {
         NovaTrigger::MeleeOnMe => {
-            let enemies_in_melee_range = ctx.combatants.iter().any(|(_, info)| {
-                info.team != combatant.team
-                    && info.is_alive
-                    && !info.is_pet
-                    && my_pos.distance(info.position) <= MELEE_RANGE
-            });
-            if !enemies_in_melee_range {
+            if !melee_on_me(ctx, combatant.team, my_pos) {
                 builder.reject(
                     frost_nova,
                     RejectionReason::PreconditionUnmet {
@@ -613,6 +661,18 @@ fn try_frost_nova(
                 return false;
             }
         }
+    }
+
+    if nova_breaks_team_cc(ctx, combatant.team, my_pos, nova_def.range)
+        && !nova_escape_outweighs_team_cc(ctx, entity, combatant.team, my_pos)
+    {
+        builder.reject(
+            frost_nova,
+            RejectionReason::PreconditionUnmet {
+                note: NOVA_HOLDS_FOR_TEAM_CC.into(),
+            },
+        );
+        return false;
     }
 
     builder.choose(cleared, None, true);
