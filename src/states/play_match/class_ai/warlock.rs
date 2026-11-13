@@ -23,7 +23,9 @@
 //! the DoTs, on a target below `kill_hp_threshold` (see
 //! [`shadowburn_finishes`]). Being kited is no moment for it: the kiter is
 //! beyond the Warlock's preferred range, and Shadowburn reaches only 20
-//! yards.
+//! yards. Under the Burst play both instants are burst tools
+//! (`burst::burst_tools`): after Death Coil and ahead of Shadow Bolt, on the
+//! kill window's enemy.
 //!
 //! ## Kiting Detection
 //! When being kited (slowed and out of range), the Warlock prioritizes instant-cast
@@ -331,14 +333,21 @@ pub fn decide_warlock_action(
     }
 
     // The Burst play (TeamPlan): a kill window is open, so its enemy takes
-    // Death Coil (damage, and a horror that never breaks) and then Shadow Bolt
-    // — each only if it lands before the window's `until` (the cast gate's
-    // fit). No Shadow Bolt while being kited: the cast would be interrupted.
+    // Death Coil (damage, and a horror that never breaks), then the
+    // Destruction talents' instants — Conflagrate on the Warlock's own
+    // Immolate, then Shadowburn — and then Shadow Bolt, in
+    // `burst::burst_tools` order; each only if it lands before the window's
+    // `until` (the cast gate's fit). A Warlock without a talent's grant does
+    // not consider it. No Shadow Bolt while being kited: the cast would be
+    // interrupted. The instants are not held for it.
     if let Some(call) = super::burst::burst_call(ctx) {
         if let Some(pos) = ctx.combatants.get(&call.subject).map(|i| i.position) {
             let burst = if ctx.entity_is_immune(call.subject) {
-                builder.reject(AbilityType::DeathCoil, RejectionReason::TargetImmune);
-                builder.reject(AbilityType::Shadowbolt, RejectionReason::TargetImmune);
+                for &tool in super::burst::burst_tools(CharacterClass::Warlock) {
+                    if abilities.get(&tool).is_some() {
+                        builder.reject(tool, RejectionReason::TargetImmune);
+                    }
+                }
                 false
             } else {
                 let coil = if ctx.is_dr_immune(call.subject, DRCategory::Horror) {
@@ -364,7 +373,33 @@ pub fn decide_warlock_action(
                         &mut builder,
                     )
                 };
-                coil || if being_kited {
+                coil || try_conflagrate(
+                    commands,
+                    combat_log,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    auras,
+                    call.subject,
+                    pos,
+                    false,
+                    ctx,
+                    &mut builder,
+                ) || try_shadowburn(
+                    commands,
+                    combat_log,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    auras,
+                    call.subject,
+                    pos,
+                    false,
+                    ctx,
+                    &mut builder,
+                ) || if being_kited {
                     builder.reject(
                         AbilityType::Shadowbolt,
                         RejectionReason::PreconditionUnmet {

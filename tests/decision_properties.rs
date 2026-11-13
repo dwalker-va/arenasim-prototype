@@ -2687,9 +2687,11 @@ fn lands_after(r: &Record, ability: AbilityType, target: &str) -> f32 {
 ///
 /// - the (class, tool) pairs the grid's bursts used are exactly the pairs
 ///   `burst_tools` names for the classes the play runs for (every DPS but
-///   `BURST_EXCEPTIONS`): set equality, so a class whose burst step stops
-///   reaching ANY of its tools fails here, and so does a step that bursts with
-///   a tool it does not list;
+///   `BURST_EXCEPTIONS`), less the talent grants the grid's untalented books
+///   never hold (`tests/burst_scenes.rs` grants each of those in a scene
+///   pair): set equality, so a class whose burst step stops reaching ANY of
+///   its tools fails here, and so does a step that bursts with a tool it does
+///   not list;
 /// - every burst is aimed at the kill window's subject (the grid's low target):
 ///   a targeted burst names it; Heroic Strike, which rides the next swing,
 ///   names none and is allowed only on a unit whose target it is;
@@ -2799,12 +2801,14 @@ fn every_burst_tool_is_reached_aimed_at_the_subject_and_landed_inside_the_window
         .iter()
         .map(|e| format!("{:?}", e.class))
         .collect();
+    let talents: BTreeSet<AbilityType> = g.defs.talent_abilities().into_iter().collect();
     let expected: BTreeSet<(String, String)> = CharacterClass::all()
         .iter()
         .filter(|c| !excepted.contains(&format!("{c:?}")))
         .flat_map(|c| {
             burst_tools(*c)
                 .iter()
+                .filter(|a| !talents.contains(a))
                 .map(move |a| (format!("{c:?}"), format!("{a:?}")))
         })
         .collect();
