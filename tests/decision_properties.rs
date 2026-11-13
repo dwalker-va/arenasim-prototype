@@ -1539,6 +1539,12 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         AbilityType::Conflagrate,
         Unreached::NeedsKnob("a build that takes Conflagrate"),
     ),
+    // The Assassination tree (AS-417): tests/assassination_talents.rs builds
+    // it in its scene pairs.
+    (
+        AbilityType::Rupture,
+        Unreached::NeedsKnob("a build that takes Rupture"),
+    ),
     // The Holy tree (AS-420): the grid grants no talent; tests/paladin_holy.rs
     // builds each in its scene pairs.
     (

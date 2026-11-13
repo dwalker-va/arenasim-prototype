@@ -258,6 +258,8 @@ pub enum AbilityType {
     // Warlock: the Destruction tree (AS-411). Appended for the same reason.
     Shadowburn,  // talent: instant Shadow damage, 20yd, 15s
     Conflagrate, // talent: instant Fire damage that consumes the Warlock's Immolate
+    // Rogue: the Assassination tree (AS-417). Appended for the same reason.
+    Rupture, // talent: a Physical bleed, 60 damage over 12s
     // Paladin: the Holy tree (AS-420). Appended for the same reason.
     DivineFavor, // talent: the next Flash of Light, Holy Light or Holy Shock crits
     AuraMastery, // talent: teammates immune to silence and interrupts for 6s
@@ -278,7 +280,7 @@ impl AbilityType {
             // Weapon strikes, at melee range. Heroic Strike rides the next
             // auto-attack swing, so it is rolled where that swing is.
             HeroicStrike | MortalStrike | Rend | Pummel | Ambush | CheapShot | SinisterStrike
-            | KidneyShot | Kick | ExposeArmor => true,
+            | KidneyShot | Kick | ExposeArmor | Rupture => true,
             // A charge closes the gap; what it lands on arrival is not a
             // weapon strike, and it is cast from 25 yards.
             Charge | BoarCharge => false,

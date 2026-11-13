@@ -1041,14 +1041,36 @@ pub fn apply_pending_auras(
         // member of the chill is still up).
         //  - the rider inherits the face's CASTER, so a damage rider (the
         //    Entangling Roots DoT) is attributed to whoever cast the debuff.
+        //  - a vulnerable stun's rider takes its SIZE and its NAME from the
+        //    face too (`CompoundDebuff::StunVulnerability`): the increase is
+        //    the stun's config, patched by its caster's talents.
+        if let (Some(CompoundDebuff::StunVulnerability), Some(increase)) =
+            (aura_to_add.compound, aura_to_add.damage_mods.vulnerability)
+        {
+            combat_log.log(
+                CombatLogEventType::CrowdControl,
+                format!(
+                    "{} takes {:.0}% more damage while {} holds",
+                    target_id,
+                    increase * 100.0,
+                    aura_to_add.ability_name,
+                ),
+            );
+        }
         let riders = aura_to_add.compound.map(|compound| {
             let face_duration = aura_to_add.duration;
             let face_caster = aura_to_add.caster;
+            let face_name = aura_to_add.ability_name.clone();
+            let face_vulnerability = aura_to_add.damage_mods.vulnerability;
             super::combat_core::compound_riders(compound)
                 .into_iter()
                 .map(move |mut rider| {
                     rider.duration = face_duration;
                     rider.caster = face_caster;
+                    if compound == CompoundDebuff::StunVulnerability {
+                        rider.magnitude = face_vulnerability.unwrap_or(0.0);
+                        rider.ability_name = face_name.clone();
+                    }
                     rider
                 })
         });

@@ -17,11 +17,16 @@
 #      away when the talent is taken back;
 #  11. Destruction, the third tree, names its spec, and its capstone waits
 #      on its prerequisite;
-#  12. one point back, a match started: the Warlock's team frame names the
-#      spec (awaited on the frame's own note, not a frame count).
+#  12. the slot made a Rogue: Assassination's Master Poisoner adds an
+#      off-hand poison choice, every poison but the main hand's, which goes
+#      away when the talent is taken back;
+#  13. the slot a Warlock again, one point back, a match started: the
+#      Warlock's team frame names the spec (awaited on the frame's own note,
+#      not a frame count).
 #
 # The Warlock's trees read Affliction, Demonology, Destruction, so a
-# Demonology build's shorthand is "0/N/0".
+# Demonology build's shorthand is "0/N/0"; the Rogue's read Assassination
+# first.
 #
 # Every wait is the driver's own (hover settles on egui's tooltip gate, a
 # click on the click): there is no frame count here.
@@ -118,6 +123,35 @@ hover talent:Conflagrate
 assert-note tooltip:Talent(Conflagrate)
 click talents:reset
 assert-note talents:t1s0 points=0 spec=No talents learned
+
+# Master Poisoner: an off-hand poison choice, only while the talent is
+# learned, offering every poison but the main hand's (Crippling, the default).
+key Escape
+assert-state ConfigureMatch
+click slot:t1s0:change
+click class:Rogue
+click slot:t1s0
+assert-state ViewCombatant
+assert-absent strategic:DeadlyPoison:offhand
+click talent:VilePoisons
+click talent:VilePoisons
+click talent:MasterPoisoner
+assert-note talents:t1s0 points=3 spec=Assassination Rogue 3/0
+assert-enabled strategic:DeadlyPoison:offhand true
+assert-absent strategic:CripplingPoison:offhand
+click talent:MasterPoisoner left shift
+assert-note talents:t1s0 points=2 spec=Assassination Rogue 2/0
+assert-absent strategic:DeadlyPoison:offhand
+click talents:reset
+assert-note talents:t1s0 points=0 spec=No talents learned
+
+# Back to the Warlock.
+key Escape
+assert-state ConfigureMatch
+click slot:t1s0:change
+click class:Warlock
+click slot:t1s0
+assert-state ViewCombatant
 
 # A talented match: the Warlock's team frame reads the spec its build names.
 click talent:DemonicEmbrace
