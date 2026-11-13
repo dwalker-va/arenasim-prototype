@@ -336,10 +336,11 @@ For deeper context, see these focused references:
    resolve instead of drawing at the cap — expect `[EVENT] Arena dampening reaches N%`
    milestones in logs of matches longer than ~85s. **Every heal lands through
    `combat_core::apply_healing`** (`combat_core/healing.rs`) — direct heals, heal over
-   time ticks, the bloom, drains and lifesteal — which applies `HealingReduction`
-   (Mortal Strike cuts ALL healing received, HoT ticks included, as in Classic), the
-   Mortal Wounds tell and dampening in one place; a rule for all healing (an immunity)
-   goes at its top. `tests/heal_site_audit.rs` fails on a health raise anywhere else and
+   time ticks, the bloom, drains and lifesteal — which applies, in order, the strongest
+   `HealingReceivedIncrease` (Guardian Spirit), `HealingReduction` (Mortal Strike cuts
+   ALL healing received, HoT ticks included, as in Classic), the Mortal Wounds tell
+   (measured from the raised heal, so it brackets the cut alone) and dampening in one
+   place; a rule for all healing (an immunity) goes at its top. `tests/heal_site_audit.rs` fails on a health raise anywhere else and
    on a change to the set of systems that call it. Absorbs are not healing: a NEW absorb
    mechanic applies `Res<ArenaDampening>` at its own application site.
 5. **Match end**: When one team is eliminated, logs saved, results displayed. Attacks
@@ -684,7 +685,8 @@ carrying every slot's build.
   direct hits only, and does not raise ticks), the strongest transfer
   (`DamageTransfer` to its caster, or Soul Link), absorbs (a reflecting one
   returns its share), the stealth reveal, the killing-blow save
-  (`KillingBlowSave`, Cheat Death), health, then `DamageReflect` on a melee
+  (`KillingBlowSave` first, then Cheat Death; a save that belongs to a compound,
+  Guardian Spirit, spends the whole buff), health, then `DamageReflect` on a melee
   hit. Every one of these kinds takes only its STRONGEST instance in scope
   (the stacking simplification: Cheat Death's 90% cut under Devotion Aura is
   90%, not 91%); different kinds multiply. What a hit sets off on another

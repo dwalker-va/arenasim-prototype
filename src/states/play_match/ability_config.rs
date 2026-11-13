@@ -821,6 +821,8 @@ impl AbilityDefinitions {
             // Paladin: the Holy tree
             AbilityType::DivineFavor,
             AbilityType::AuraMastery,
+            AbilityType::HolyNova,
+            AbilityType::GuardianSpirit,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -1763,6 +1765,8 @@ mod tests {
                     AbilityType::InnerFocus,
                     AbilityType::PowerInfusion,
                     AbilityType::PainSuppression,
+                    AbilityType::HolyNova,
+                    AbilityType::GuardianSpirit,
                 ],
             ),
             (

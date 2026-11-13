@@ -782,7 +782,8 @@ struct Share<'a> {
 pub const SOUL_LINK_NAME: &str = "Soul Link";
 
 /// Step 7: a blow that would kill the holder is prevented by its save — the
-/// first [`AuraType::KillingBlowSave`] on it (spent; the holder's health is
+/// first [`AuraType::KillingBlowSave`] on it (spent, with the rest of its
+/// compound when it is one — Guardian Spirit; the holder's health is
 /// left where it stood, and a follow-up heals it through `apply_healing`), or
 /// else an unspent Cheat Death (the holder is left at its share of maximum
 /// health, or where it stood if lower, and takes less damage for a while).
@@ -799,7 +800,9 @@ fn prevent_killing_blow(
             .iter()
             .position(|a| a.effect_type == AuraType::KillingBlowSave)
         {
-            let save = auras.auras.remove(i);
+            // A save that belongs to a compound (Guardian Spirit) spends the
+            // whole buff, its healing increase included.
+            let save = auras.remove_debuff_at(i);
             *damage = 0.0;
             follow_ups.push(DamageFollowUp::Saved {
                 holder: hit.victim,

@@ -308,6 +308,9 @@ struct Setup {
     /// A Priest decider under pressure: the gate on its defensive Psychic
     /// Scream, computed by its posture layer rather than its decider.
     pressured: bool,
+    /// A Priest decider whose legs a walk owns: the heal ladder's
+    /// `escape_defer`, computed by its posture layer.
+    walking: bool,
     /// Adjusts the decider before the run (a strategic option, say).
     prepare: fn(&mut Combatant),
 }
@@ -317,6 +320,7 @@ impl Default for Setup {
         Self {
             bystander: false,
             pressured: false,
+            walking: false,
             prepare: |_| {},
         }
     }
@@ -326,6 +330,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
     let Setup {
         bystander,
         pressured,
+        walking,
         prepare,
     } = setup;
     let mut world = World::new();
@@ -351,7 +356,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
     let mut my_info = info(me, 1, class, my_pos);
     my_info.target = Some(rogue);
     my_info.max_health = combatant.max_health;
-    my_info.current_health = combatant.max_health;
+    my_info.current_health = combatant.current_health;
     my_info.stealthed = combatant.stealthed;
     roster.insert(me, my_info);
     let mut rogue_info = info(rogue, 2, CharacterClass::Rogue, rogue_pos);
@@ -399,6 +404,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
         let mut commands = Commands::new(&mut queue, &world);
         let mut instant_attacks: Vec<QueuedInstantAttack> = Vec::new();
         let mut frost_nova: Vec<QueuedAoeDamage> = Vec::new();
+        let mut area_heals: Vec<class_ai::QueuedAoeHeal> = Vec::new();
         let mut same_frame_cc: Vec<(Entity, Aura)> = Vec::new();
         let mut set_a: HashSet<Entity> = HashSet::new();
         let mut set_b: HashSet<Entity> = HashSet::new();
@@ -458,6 +464,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                 class_ai::priest::decide_priest_action(
                     &mut commands,
                     &mut combat_log,
+                    &mut game_rng,
                     &book,
                     me,
                     &mut combatant,
@@ -468,10 +475,15 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                     &mut set_b,
                     &PriestMovementPlan {
                         pressured,
+                        escape_defer: walking.then_some(0.5),
                         ..PriestMovementPlan::default()
                     },
                     &movement,
                     &mut same_frame_cc,
+                    &mut class_ai::AreaQueues {
+                        damage: &mut frost_nova,
+                        heals: &mut area_heals,
+                    },
                     &mut trace,
                 );
             }
@@ -597,8 +609,10 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                 found.touches.push(tag(&format!("queued {:?}", a.ability)));
             }
         }
-        if frost_nova.iter().any(|d| d.target == rogue) {
-            found.touches.push(tag("caught it in Frost Nova"));
+        for d in frost_nova.iter().filter(|d| d.target == rogue) {
+            found
+                .touches
+                .push(tag(&format!("caught it in {:?}", d.ability)));
         }
         for (target, aura) in &same_frame_cc {
             if *target == rogue {
@@ -753,7 +767,7 @@ fn an_area_decided_on_a_seen_enemy_still_catches_the_stealthed_one() {
         with_rogue
             .touches
             .iter()
-            .any(|t| t.ends_with("caught it in Frost Nova")),
+            .any(|t| t.ends_with("caught it in FrostNova")),
         "the Nova must catch the stealthed Rogue standing in it: {:?}",
         with_rogue.touches
     );
@@ -812,7 +826,8 @@ fn the_guard_drives_every_class_the_enum_has() {
 fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
     use AbilityType::*;
     match ability {
-        FrostNova | PsychicScream | DemoralizingShout | FreezingTrap | FrostTrap | Flare => true,
+        FrostNova | HolyNova | PsychicScream | DemoralizingShout | FreezingTrap | FrostTrap
+        | Flare => true,
         Frostbolt | FlashHeal | HeroicStrike | Ambush | CheapShot | MindBlast | SinisterStrike
         | Charge | KidneyShot | PowerWordFortitude | Rend | MortalStrike | Pummel
         | BerserkerRage | Kick | CripplingPoison | DeadlyPoison | WoundPoison
@@ -829,7 +844,7 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
         | Innervate | EntanglingRoots | Cyclone | TravelForm | ShadowWordPain | ExposeArmor
         | DivineProtection | BlessingOfSacrifice | SacredShield | Shadowform | SiphonLife
         | AmplifyCurse | CurseOfExhaustion | InnerFocus | PowerInfusion | PainSuppression
-        | Shadowburn | Conflagrate | Rupture | DivineFavor | AuraMastery => false,
+        | GuardianSpirit | Shadowburn | Conflagrate | Rupture | DivineFavor | AuraMastery => false,
         // A Paladin aura on allies: its damage answers a melee attacker that
         // struck one, and that hit has revealed the attacker already.
         RetributionAura => false,
@@ -858,7 +873,26 @@ fn drive_area_effect(ability: AbilityType) -> Result<String, String> {
                 bystander: true,
                 ..Setup::default()
             },
-            "caught it in Frost Nova",
+            "caught it in FrostNova",
+        ),
+        // A Priest on the move, hurt, with Holy Nova granted: the nova it
+        // casts for its own heal strikes the Rogue beside it.
+        AbilityType::HolyNova => touched(
+            CharacterClass::Priest,
+            Setup {
+                bystander: true,
+                walking: true,
+                prepare: |priest| {
+                    let book = priest
+                        .book()
+                        .clone()
+                        .granting(&AbilityDefinitions::default(), AbilityType::HolyNova);
+                    *priest = priest.clone().with_book(book);
+                    priest.current_health = priest.max_health * 0.7;
+                },
+                ..Setup::default()
+            },
+            "caught it in HolyNova",
         ),
         AbilityType::PsychicScream => touched(
             CharacterClass::Priest,
@@ -1006,7 +1040,8 @@ fn every_area_effect_reaches_a_stealthed_enemy() {
             FreezingTrap,
             FrostTrap,
             Flare,
-            DemoralizingShout
+            DemoralizingShout,
+            HolyNova
         ]
     );
     let mut failures = Vec::new();

@@ -1962,6 +1962,8 @@ mod tests {
                 "Aura Mastery",
                 "Concentration Aura",
                 "Devotion Aura",
+                // No dispel type (Wrath 47788, AS-415).
+                "Guardian Spirit",
                 "Flametongue Totem",
                 "Frost Armor",
                 "Mage Armor",

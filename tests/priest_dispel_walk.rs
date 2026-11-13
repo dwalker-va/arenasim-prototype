@@ -263,6 +263,7 @@ impl Scene {
             decide_priest_action(
                 &mut commands,
                 &mut combat_log,
+                &mut arenasim::states::play_match::GameRng::from_seed(1),
                 &self.combatant.book().clone(),
                 self.priest,
                 &mut self.combatant,
@@ -274,6 +275,10 @@ impl Scene {
                 &PriestMovementPlan::default(),
                 &movement,
                 &mut same_frame_cc,
+                &mut arenasim::states::play_match::class_ai::AreaQueues {
+                    damage: &mut Vec::new(),
+                    heals: &mut Vec::new(),
+                },
                 &mut trace,
             );
         }
@@ -581,6 +586,7 @@ fn step_until_dispelled(s: &mut Scene, seconds: f32) -> Option<Freed> {
             decide_priest_action(
                 &mut commands,
                 &mut combat_log,
+                &mut arenasim::states::play_match::GameRng::from_seed(1),
                 &s.combatant.book().clone(),
                 s.priest,
                 &mut s.combatant,
@@ -592,6 +598,10 @@ fn step_until_dispelled(s: &mut Scene, seconds: f32) -> Option<Freed> {
                 &plan,
                 &movement,
                 &mut same_frame_cc,
+                &mut arenasim::states::play_match::class_ai::AreaQueues {
+                    damage: &mut Vec::new(),
+                    heals: &mut Vec::new(),
+                },
                 &mut trace,
             );
         }
