@@ -193,26 +193,15 @@ fn two_different_proc_trinkets_are_live_at_the_same_time() {
 /// The seeds the overlap probe plays.
 const OVERLAP_BANK: std::ops::Range<u64> = 770_140..770_200;
 
-/// A caster proc fires off a completed cast, and a healer proc off a completed
-/// heal — the two trigger kinds the melee tests above cannot reach.
+/// A caster proc fires off a completed cast — the trigger kind the melee tests
+/// above cannot reach. `process_casting`'s damage resolution point is wired.
 ///
-/// One test over both because they share the claim: `process_casting`'s two
-/// resolution points are wired. Each half names itself on failure.
-///
-/// The Mage half deliberately faces a PRIEST rather than a Warrior. Against a
+/// The Mage deliberately faces a PRIEST rather than a Warrior. Against a
 /// Warrior the 1v1 is over in about twenty seconds, which is few enough casts
 /// that a 12% proc genuinely misses on some seeds — the probe would then be
 /// pinning the seed rather than the wiring.
-///
-/// The Priest half's seed was re-pinned for AS-167 (weapon speed from item
-/// data), from 770_143 to 770_144. At 770_143 the Warrior's 3.8s Arcanite
-/// Reaper now kills the Priest in 17.6s of combat, after ONE landed heal, so
-/// the 20% Reliquary proc had one chance; the first line that differs from
-/// `main` @ 17cb9f0 is the Priest's opening Wand Shot, 8 -> 10 (the Staff of
-/// Dominance fires every 1.6s for the same DPS). A scan of 770_143..=770_162
-/// picked 770_144: eight landed heals over a 36s fight, one proc.
 #[test]
-fn the_cast_and_heal_triggers_both_fire() {
+fn the_cast_trigger_fires() {
     let caster = peak_concurrent(
         config(
             "Mage",
@@ -227,20 +216,84 @@ fn the_cast_and_heal_triggers_both_fire() {
         "Sigil of Arcane Surge should proc off the Mage's Frostbolts; saw {}",
         caster
     );
+}
 
-    let healer = peak_concurrent(
-        config(
-            "Priest",
-            "Warrior",
-            770_144,
-            &[("Trinket2", "ReliquaryOfRenewal")],
-        ),
+/// The largest number of `effect` auras a wounded Priest carried on any one
+/// frame, healing itself with its Warrior rooted 40 yards off, so nothing
+/// but its own heals happens. Its heal procs fire at `chance`.
+fn staged_priest_peak(t1_gear: &[(&str, &str)], chance: f32, effect: AuraType) -> usize {
+    use arenasim::headless::{run_headless_match_staged, Stage, Unit};
+    use arenasim::states::play_match::components::Aura;
+    use arenasim::states::play_match::proc_trinkets::ProcTrigger;
+    const PRIEST: Unit = Unit::new(1, 0);
+    const WARRIOR: Unit = Unit::new(2, 0);
+    let config = HeadlessMatchConfig {
+        max_duration_secs: 10.0,
+        ..config("Priest", "Warrior", 770_144, t1_gear)
+    };
+    let stage = Stage::new()
+        .place(PRIEST, 0.0, 0.0)
+        .place(WARRIOR, 40.0, 0.0)
+        .health(PRIEST, 0.4)
+        .aura(
+            WARRIOR,
+            Aura {
+                effect_type: AuraType::Root,
+                duration: 60.0,
+                break_on_damage_threshold: -1.0,
+                ability_name: "Root".into(),
+                ..Default::default()
+            },
+        )
+        .combatant(PRIEST, move |c| {
+            for slot in &mut c.proc_trinkets {
+                if slot.config.trigger == ProcTrigger::Heal {
+                    slot.config.chance = chance;
+                }
+            }
+        });
+    let mut peak = 0;
+    run_headless_match_staged(config, true, None, stage, |frame| {
+        for c in frame.combatants.values() {
+            if c.team == 1 && c.slot == 0 && !c.is_pet {
+                peak = peak.max(c.aura_types.iter().filter(|a| **a == effect).count());
+            }
+        }
+    })
+    .expect("match runs");
+    peak
+}
+
+/// A healer proc fires off a completed heal: `process_casting`'s heal
+/// resolution point is wired. Staged (AS-488): the Priest heals itself, out
+/// of the Warrior's reach, with the proc's chance made certain, so the claim
+/// is the wiring and not a seed's rolls. It was a seed-pinned probe until
+/// AS-488 moved the RNG stream and its seed stopped containing a proc.
+#[test]
+fn the_heal_trigger_fires() {
+    let healer = staged_priest_peak(
+        &[("Trinket2", "ReliquaryOfRenewal")],
+        1.0,
         AuraType::ManaRegenIncrease,
     );
     assert_eq!(
         healer, 1,
-        "Reliquary of Renewal should proc off the Priest's heals; saw {}",
-        healer
+        "Reliquary of Renewal should proc off the Priest's heals; saw {healer}"
+    );
+}
+
+/// The control: the same Priest whose Reliquary never procs gains no mana
+/// regeneration, so the `1` above is the proc's.
+#[test]
+fn the_heal_trigger_control_never_procs() {
+    let healer = staged_priest_peak(
+        &[("Trinket2", "ReliquaryOfRenewal")],
+        0.0,
+        AuraType::ManaRegenIncrease,
+    );
+    assert_eq!(
+        healer, 0,
+        "a proc that never fires, no mana regeneration buff"
     );
 }
 
@@ -248,7 +301,7 @@ fn the_cast_and_heal_triggers_both_fire() {
 /// never procs it. This is what keeps `Heal` a real axis rather than a second
 /// spelling of `SpellCast`.
 ///
-/// The SAME matchup and seed as the Mage half above, where a `SpellCast`
+/// The SAME matchup and seed as `the_cast_trigger_fires`, where a `SpellCast`
 /// trinket demonstrably fires. So this zero is the TRIGGER declining, not a
 /// match too short for anything to happen in.
 #[test]

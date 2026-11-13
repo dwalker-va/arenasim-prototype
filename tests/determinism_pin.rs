@@ -151,10 +151,17 @@ fn seeded_2v2_matches_its_recorded_identity() {
     // from Some(2) @ 59.61593s. The first line that differs from `main` @
     // 18ae5824 is at 13.08s (log clock): the Mage's first Frostbolt begins at
     // 13.15s, the Mage reaching its casting range a few frames later.
+    //
+    // Re-recorded for AS-488, a queued strike landing on a target mid-cast or
+    // mid-channel instead of vanishing. Took this cell to Some(1) @ 31.566357s
+    // from Some(1) @ 30.166378s. The first line that differs from `main` @
+    // 236c8712 is at 26.83s (log clock): the Warrior's Mortal Strike on the
+    // Mage, mid-Frostbolt since 25.65s, which `main` charged and dropped,
+    // hits for 136.
     assert_pinned(
         &result,
         Some(1),
-        1_106_334_910,
+        1_107_068_902,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }
@@ -203,10 +210,17 @@ fn seeded_1v1_matches_its_recorded_identity() {
     // differs from `main` @ 18ae5824 is at 13.08s (log clock): the Mage's
     // first Frostbolt begins at 13.15s, the Mage reaching its casting range a
     // few frames later.
+    //
+    // Re-recorded for AS-488, a queued strike landing on a target mid-cast or
+    // mid-channel instead of vanishing. Took this cell to Some(2) @ 16.166592s
+    // from Some(1) @ 16.21659s. The first line that differs from `main` @
+    // 236c8712 is at 26.13s (log clock): the Warrior's Mortal Strike on the
+    // Mage, mid-Frostbolt since 24.63s, which `main` charged and dropped,
+    // hits for 70 and kills it.
     assert_pinned(
         &result,
-        Some(1),
-        1_099_021_204,
+        Some(2),
+        1_098_994_990,
         "1v1 Mage vs Warrior @99001",
     );
 }

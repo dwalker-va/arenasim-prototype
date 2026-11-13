@@ -144,7 +144,7 @@ pub enum EntryFamily {
     ///
     /// Covers every ability whose visual is emitted inline by code the sandbox
     /// does not run: the class AIs (gated `in_state(GameState::PlayMatch)`) and
-    /// `combat_ai.rs`'s `QueuedInstantAttack` drain. Leaving one of these on the
+    /// `instant_landings.rs`'s `QueuedInstantAttack` drain. Leaving one of these on the
     /// `Cast` default fails SILENTLY — the preview still shows damage, so it
     /// looks fine, right up until the ability's signature never fires.
     ///
@@ -691,7 +691,7 @@ pub fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> 
 /// `process_casting` route can produce.
 ///
 /// The sandbox runs neither the class AIs (gated `in_state(GameState::PlayMatch)`)
-/// nor `combat_ai.rs`'s `QueuedInstantAttack` drain, so for a `Residue` entry it
+/// nor `instant_landings.rs`'s `QueuedInstantAttack` drain, so for a `Residue` entry it
 /// has to emit the marker itself. Spawning the marker ALONE is not enough — an
 /// ability with no signature yet has nothing listening, and the preview would
 /// lose its damage number — so the caller pairs this with the zero-duration
@@ -988,19 +988,13 @@ fn start_entry(
                     ));
                     true
                 }
-                // M2 channels — shared entry point (mirror warlock.rs:819);
+                // M2 channels — shared entry point (`ChannelingState::new`,
+                // as the Warlock starts one);
                 // process_channeling resolves the ticks and drives the beam.
                 Some(EntryFamily::Channel) => {
-                    commands.entity(caster).insert(ChannelingState {
-                        ability,
-                        duration_remaining: config.channel_duration.unwrap_or(5.0),
-                        time_until_next_tick: config.channel_tick_interval,
-                        tick_interval: config.channel_tick_interval,
-                        target,
-                        interrupted: false,
-                        interrupted_display_time: 0.0,
-                        ticks_applied: 0,
-                    });
+                    commands
+                        .entity(caster)
+                        .insert(ChannelingState::new(ability, target, config));
                     true
                 }
                 // M3 — bespoke `*Pending` / movement components.

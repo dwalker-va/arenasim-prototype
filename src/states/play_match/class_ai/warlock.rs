@@ -1830,19 +1830,11 @@ fn try_drain_life(
     combatant.current_mana -= drain_life_def.mana_cost;
     combatant.global_cooldown = GCD;
 
-    let channel_duration = drain_life_def.channel_duration.unwrap_or(5.0);
-    let tick_interval = drain_life_def.channel_tick_interval;
-
-    commands.entity(entity).insert(ChannelingState {
-        ability: drain_life,
-        duration_remaining: channel_duration,
-        time_until_next_tick: tick_interval,
-        tick_interval,
-        target: target_entity,
-        interrupted: false,
-        interrupted_display_time: 0.0,
-        ticks_applied: 0,
-    });
+    commands.entity(entity).insert(ChannelingState::new(
+        drain_life,
+        target_entity,
+        drain_life_def,
+    ));
 
     let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
     log_ability_use(

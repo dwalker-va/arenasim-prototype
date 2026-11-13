@@ -1383,6 +1383,24 @@ pub struct ChannelingState {
     pub ticks_applied: u32,
 }
 
+impl ChannelingState {
+    /// A channel of `config` on `target`, starting now: its first tick one
+    /// interval in, and one tick per interval to its end
+    /// (`auras::periodic_tick`).
+    pub fn new(ability: AbilityType, target: Entity, config: &AbilityConfig) -> Self {
+        Self {
+            ability,
+            duration_remaining: config.channel_duration.unwrap_or(5.0),
+            time_until_next_tick: config.channel_tick_interval,
+            tick_interval: config.channel_tick_interval,
+            target,
+            interrupted: false,
+            interrupted_display_time: 0.0,
+            ticks_applied: 0,
+        }
+    }
+}
+
 /// Component tracking an active Charge (Warrior gap closer).
 #[derive(Component)]
 pub struct ChargingState {

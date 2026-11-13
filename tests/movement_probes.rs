@@ -848,68 +848,11 @@ mod priest_postures {
         );
     }
 
-    /// (b) ANCHOR PROBE — while PRESSURED, the Priest never exits heal range
-    /// (40) of its ally for more than a 1s grace (R6 anchor constraint).
-    /// Grace widened 1.0s → 2.5s (2026-06-14) for Psychic Scream: when the
-    /// Priest fears an attacker, the melee ally chases the feared enemy out of
-    /// the Priest's 40yd heal range for a beat while the Priest re-anchors
-    /// (~2s observed). The invariant the probe protects — the Priest does not
-    /// ABANDON its ally — still holds; the wider grace tolerates the transient
-    /// fear-scatter without masking a sustained walk-off.
-    ///
-    /// Judged over a bank of the statue comp's seeds: every PRESSURED window
-    /// any of them holds. The statue seed alone went off the situation when
-    /// every unit's speed moved 2% (AS-464: its Priest is never PRESSURED), so
-    /// the probe finds its windows instead of naming a seed.
-    #[test]
-    fn pressured_priest_stays_in_heal_range_of_ally() {
-        let mut judged = 0;
-        for seed in [20260606, 1, 2, 3, 4, 5, 6, 7] {
-            let mut cfg = statue_config();
-            cfg.random_seed = Some(seed);
-            let (_result, timeline, trace) = run_observed_traced(cfg);
-            let gate_time = timeline.gates_open_time.expect("gates opened");
-
-            let priest = timeline.find(1, CharacterClass::Priest, false);
-            let warrior = timeline.find(1, CharacterClass::Warrior, false);
-            let events = movement_events(&trace);
-
-            // Last priest sample (combat time) bounds any unclosed window.
-            let priest_samples = timeline.samples.get(&priest).cloned().unwrap_or_default();
-            let end = priest_samples
-                .last()
-                .map(|(t, _)| t - gate_time)
-                .unwrap_or(0.0);
-            let windows = pressured_windows(&events, 1, 1, end);
-            judged += windows.len();
-
-            let ally_distance = min_distance_series(&timeline, priest, &[warrior]);
-            for (start, stop) in &windows {
-                // Convert combat-time window to timeline time.
-                let (w0, w1) = (start + gate_time, stop + gate_time);
-                let in_window: Vec<(f32, f32)> = ally_distance
-                    .iter()
-                    .copied()
-                    .filter(|(t, _)| *t >= w0 && *t <= w1)
-                    .collect();
-                let out_of_range = max_consecutive_secs(&in_window, |d| d > 40.0);
-                eprintln!(
-                    "anchor probe: seed {seed} window [{:.1},{:.1}]s, max consecutive \
-                     out-of-heal-range {:.2}s",
-                    w0, w1, out_of_range
-                );
-                assert!(
-                    out_of_range <= 2.5,
-                    "seed {seed}: PRESSURED Priest left heal range (40) of its ally for \
-                     {:.2}s (grace 2.5s) during window [{:.1},{:.1}]",
-                    out_of_range,
-                    w0,
-                    w1
-                );
-            }
-        }
-        assert_min_occurrences("PRESSURED windows (focused Priest)", judged, 1);
-    }
+    // (b) ANCHOR PROBE — migrated off its seed bank to a staged match:
+    // `tests/priest_pressured_anchor.rs`. The statue comp's ally always stood
+    // near, and its PRESSURED windows were shorter than the probe's 2.5s grace,
+    // so it could not fail; the stage holds the ally 34yd off, stunned, with
+    // the attacker on its side of the Priest.
 
     /// (c) STEALTH PROBE (AE2) — vs a stealth-opener Rogue forced onto the
     /// Priest, no posture transition fires before the opener lands:
@@ -3430,26 +3373,53 @@ mod mage_postures {
         windows
     }
 
-    /// Seed for [`mage_enters_kite_after_nova_and_exits`], split from [`SEED`]
-    /// because only that probe needs a match in which a KITE window CLOSES
-    /// before the match ends. See its doc for the re-pin.
-    const KITE_EXIT_SEED: u64 = 0;
+    /// Play a Mage v Warrior match staged by `stage`, traced.
+    fn run_staged_traced(
+        config: HeadlessMatchConfig,
+        stage: arenasim::headless::Stage,
+    ) -> (MatchResult, Vec<serde_json::Value>) {
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let path = dir.path().join("trace.jsonl");
+        let result = arenasim::headless::run_headless_match_staged(
+            config,
+            true,
+            Some(TraceConfig {
+                output_path: path.clone(),
+            }),
+            stage,
+            |_| {},
+        )
+        .expect("staged traced match failed");
+        let body = std::fs::read_to_string(&path).expect("read trace");
+        let events = body
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
+        (result, events)
+    }
 
     /// Frost Nova roots a melee Warrior → the Mage enters KITE, and the window
     /// later closes (KITE is not a one-way trap). Honors the kite_hold floor
     /// and bounds the exit lag so a stuck-KITE regression fails loudly.
     ///
-    /// Re-pinned for AS-167, weapon speed from item data. At [`SEED`] the
-    /// probe went vacuous: 0 KiteExit transitions. The first line that differs
-    /// from `main` @ 17cb9f0 is the Mage's first Wand Shot, 7 -> 9 (the Wand of
-    /// Shadows fires every 1.8s for the same DPS, so each shot hits harder).
-    /// The probe moved to its own seed, [`KITE_EXIT_SEED`], from
-    /// `scan_kite_exit_seeds`: one KiteEnter, one real KiteExit, a 4.53s
-    /// window. (At [`SEED`] the window ran 4.52s to match end with no exit.)
+    /// Staged (AS-488): the Warrior stands beside the Mage on the gate frame
+    /// with the Mage's Frost Nova landed on it, so the KITE entry holds by
+    /// construction. It was a seed-pinned probe until AS-488 moved the RNG
+    /// stream and its seed stopped containing a KITE exit.
     #[test]
     fn mage_enters_kite_after_nova_and_exits() {
-        let cfg = create_config(vec!["Mage"], vec!["Warrior"], Some(KITE_EXIT_SEED));
-        let (result, _timeline, trace) = run_traced(cfg);
+        use arenasim::headless::{Stage, Unit};
+        use arenasim::states::play_match::abilities::AbilityType;
+        const MAGE: Unit = Unit::new(1, 0);
+        const WARRIOR: Unit = Unit::new(2, 0);
+        let cfg = create_config(vec!["Mage"], vec!["Warrior"], Some(SEED));
+        let stage = Stage::new()
+            .place(MAGE, 0.0, 0.0)
+            .place(WARRIOR, 1.5, 0.0)
+            .target(MAGE, WARRIOR)
+            .target(WARRIOR, MAGE)
+            .land(WARRIOR, AbilityType::FrostNova, MAGE);
+        let (result, trace) = run_staged_traced(cfg, stage);
         let events = mage_events(&trace);
 
         let enters = events.iter().filter(|e| e.trigger == "KiteEnter").count();
@@ -3473,33 +3443,6 @@ mod mage_postures {
             assert!(
                 dwell <= 30.0,
                 "KITE dwell {dwell:.2}s — KITE appears stuck (exit predicate not firing)"
-            );
-        }
-    }
-
-    /// Exploratory scan for [`KITE_EXIT_SEED`] (re-pin
-    /// `mage_enters_kite_after_nova_and_exits` when trajectories drift):
-    /// prints entries / exits / dwell range per seed and flags seeds where a
-    /// real KiteExit fires and every window sits inside the probe's bounds.
-    /// Ignored by default.
-    #[test]
-    #[ignore]
-    fn scan_kite_exit_seeds() {
-        for seed in 0u64..40 {
-            let cfg = create_config(vec!["Mage"], vec!["Warrior"], Some(seed));
-            let (result, _timeline, trace) = run_traced(cfg);
-            let events = mage_events(&trace);
-            let enters = events.iter().filter(|e| e.trigger == "KiteEnter").count();
-            let exits = events.iter().filter(|e| e.trigger == "KiteExit").count();
-            let windows = kite_windows(&events, result.match_time);
-            let dwells: Vec<f32> = windows.iter().map(|(a, b)| b - a).collect();
-            let lo = dwells.iter().cloned().fold(f32::INFINITY, f32::min);
-            let hi = dwells.iter().cloned().fold(0.0f32, f32::max);
-            let ok = exits >= 1 && !windows.is_empty() && lo >= 1.0 - 1e-3 && hi <= 30.0;
-            eprintln!(
-                "seed {seed:2}: enters={enters} exits={exits} windows={} dwell=[{lo:5.2},{hi:5.2}]{}",
-                windows.len(),
-                if ok { " <-- CANDIDATE" } else { "" }
             );
         }
     }
@@ -5206,7 +5149,7 @@ mod u9_seek_reset {
 // pulling into cover. We measure this directly on PillaredArena with a
 // healer-heavy comp (Warrior+Priest vs Warlock+Priest): each Priest's
 // PRESSURED/ESCAPE movement decisions carry the `cover_pull` scorer term, and we
-// join every decision to that team's HP advantage at the moment it fired.
+// join every decision to the tempo its team decided under on that frame.
 //
 //   - the LEADING team's Priest (advantage >= margin) emits ZERO positive
 //     cover_pull terms — press zeroed the weight; and
@@ -5221,7 +5164,6 @@ mod u9_seek_reset {
 mod u10_press {
     use super::*;
     use arenasim::headless::runner::{EndReason, MatchResult, TraceConfig};
-    use arenasim::states::play_match::movement_config::load_movement_config;
     use std::collections::BTreeMap as Btm;
 
     /// One observed + traced PillaredArena run of the healer-heavy comp.
@@ -5256,57 +5198,44 @@ mod u10_press {
         (result, frames, events)
     }
 
-    /// `team`'s HP-fraction advantage at absolute frame time `abs_t` — the same
-    /// alive/`!is_pet` sum the sim's `team_hp_advantage` computes, evaluated on
-    /// the nearest observed frame. Mirrors the production signal so the probe
-    /// classifies a decision by the very quantity the code gated on.
-    fn team_adv_at(frames: &[FrameObservation], abs_t: f32, team: u8) -> Option<f32> {
-        let f = frames.iter().min_by(|a, b| {
-            (a.sim_time - abs_t)
-                .abs()
-                .partial_cmp(&(b.sim_time - abs_t).abs())
-                .unwrap()
-        })?;
-        let mut sums: Btm<u8, f32> = Btm::new();
-        for c in f.combatants.values() {
-            if c.alive && !c.is_pet && c.max_health > 0.0 {
-                *sums.entry(c.team).or_insert(0.0) += c.current_health / c.max_health;
-            }
-        }
-        let own = sums.get(&team).copied().unwrap_or(0.0);
-        let enemy: f32 = sums
+    /// Each team's tempo on each frame, as its units' ability decisions saw
+    /// it (`situation.tempo`, "pressing" / "even" / "trailing"): the very
+    /// quantity the posture's press gate reads (`ctx.situation().tempo`),
+    /// classified from the frame's start-of-dispatch snapshot. Reading HP off
+    /// the observed frame instead counts damage that frame's later systems
+    /// landed after the decision was made, and misfiles a decision on a frame
+    /// with a big hit (AS-487: a 91-point hit took the advantage from 0.007 to
+    /// 0.23 after a Priest had decided at `even`).
+    fn tempo_by_frame(events: &[serde_json::Value]) -> Btm<(u64, u64), String> {
+        events
             .iter()
-            .filter(|(t, _)| **t != team)
-            .map(|(_, v)| *v)
-            .sum();
-        Some(own - enemy)
+            .filter(|e| e["kind"] == "ability_decision")
+            .filter_map(|e| {
+                let frame = e["frame"].as_u64()?;
+                let team = e["actor"]["team"].as_u64()?;
+                let tempo = e["situation"]["tempo"].as_str()?;
+                Some(((frame, team), tempo.to_string()))
+            })
+            .collect()
     }
 
     struct PressStats {
         end_reason: EndReason,
         match_time: f32,
-        /// PRESSURED/ESCAPE Priest decisions fired while that Priest's team led
-        /// by >= margin (the leader, pressing).
+        /// PRESSURED/ESCAPE Priest decisions fired while that Priest's team was
+        /// pressing (the leader).
         leader_decisions: usize,
         /// ...of those, how many carried a POSITIVE cover_pull term. Must be 0:
         /// press zeroes the weight, so a leader can never pull into cover.
         leader_cover_positive: usize,
-        /// Trailing-Priest decisions (team behind by >= margin) that denied LoS
+        /// Trailing-Priest decisions (its team trailing) that denied LoS
         /// (cover_pull > 0) — proof the suppression is conditional.
         trailer_denials: usize,
     }
 
     fn measure(seed: u64) -> PressStats {
-        let margin = load_movement_config()
-            .expect("movement.ron loads")
-            .shared
-            .press_advantage_margin;
-        let (result, frames, events) = run(seed);
-        let gate = frames
-            .iter()
-            .find(|f| f.gates_open)
-            .map(|f| f.sim_time)
-            .expect("gates opened");
+        let (result, _frames, events) = run(seed);
+        let tempo = tempo_by_frame(&events);
 
         let (mut leader_decisions, mut leader_cover_positive, mut trailer_denials) = (0, 0, 0);
         for v in &events {
@@ -5321,18 +5250,21 @@ mod u10_press {
             let Some(cover) = v["scorer_terms"]["cover_pull"].as_f64() else {
                 continue;
             };
-            let team = v["actor"]["team"].as_u64().unwrap_or(0) as u8;
-            let combat_t = v["sim_time"].as_f64().unwrap_or(0.0) as f32;
-            let Some(adv) = team_adv_at(&frames, combat_t + gate, team) else {
-                continue;
-            };
-            if adv >= margin {
-                leader_decisions += 1;
-                if cover > 0.0 {
-                    leader_cover_positive += 1;
+            let key = (
+                v["frame"].as_u64().unwrap_or(0),
+                v["actor"]["team"].as_u64().unwrap_or(0),
+            );
+            // A frame on which no unit of the team decided an ability is
+            // left out: its tempo is not on the trace.
+            match tempo.get(&key).map(String::as_str) {
+                Some("pressing") => {
+                    leader_decisions += 1;
+                    if cover > 0.0 {
+                        leader_cover_positive += 1;
+                    }
                 }
-            } else if adv <= -margin && cover > 0.0 {
-                trailer_denials += 1;
+                Some("trailing") if cover > 0.0 => trailer_denials += 1,
+                _ => {}
             }
         }
 
@@ -5359,7 +5291,7 @@ mod u10_press {
             assert_eq!(
                 s.leader_cover_positive, 0,
                 "seed {seed}: a leading Priest pulled into cover {} time(s) while its team was \
-                 ahead by the press margin — press should have zeroed cover_pull",
+                 pressing — press should have zeroed cover_pull",
                 s.leader_cover_positive,
             );
             leader_decisions += s.leader_decisions;

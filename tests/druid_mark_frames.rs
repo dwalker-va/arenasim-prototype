@@ -18,6 +18,7 @@ use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, AuraPending, Combatant, CompoundDebuff, GameRng, MatchCountdown,
 };
 use arenasim::states::play_match::decision_trace::DecisionTrace;
+use arenasim::states::play_match::instant_landings::InstantLandings;
 use arenasim::states::play_match::map_config::ActiveMapGeometry;
 use arenasim::states::play_match::{decide_abilities, AbilityDefinitions, MovementConfig};
 use arenasim::CharacterClass;
@@ -30,6 +31,7 @@ fn world() -> World {
     world.insert_resource(AbilityDefinitions::default());
     world.insert_resource(MovementConfig::default());
     world.insert_resource(DecisionTrace::default());
+    world.insert_resource(InstantLandings::default());
     // Before the gates: Mark of the Wild is the only thing a Druid casts.
     world.insert_resource(MatchCountdown {
         time_remaining: 5.0,

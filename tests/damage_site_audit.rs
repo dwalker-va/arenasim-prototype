@@ -65,9 +65,12 @@ const HEALTH_DROPS: &[(&str, &str)] = &[
 /// Every system that deals damage through `apply_damage_with_absorb`, as
 /// (file, fn). Each must also log the deaths it causes.
 const DAMAGERS: &[(&str, &str)] = &[
-    // Instant attacks and Frost Nova, queued by the class AI and landed as
-    // the dispatch ends.
-    ("src/states/play_match/combat_ai.rs", "decide_abilities"),
+    // Instant strikes and area damage (Frost Nova, Holy Nova), queued by the
+    // class AI and landed right after the dispatch, on every combatant.
+    (
+        "src/states/play_match/instant_landings.rs",
+        "land_instant_effects",
+    ),
     // Damage over time ticks.
     ("src/states/play_match/auras.rs", "process_dot_ticks"),
     // Projectile hits (Frostbolt, Shadow Bolt, ...).
@@ -256,7 +259,10 @@ fn every_damager_raises_by_the_attacker_and_spawns_its_follow_ups() {
 /// through `combat_core::credit_damage_dealt` and logs the breakdown row
 /// (`CombatLog::log_damage`) of the same hit.
 const DAMAGE_CREDITORS: &[(&str, &str)] = &[
-    ("src/states/play_match/combat_ai.rs", "decide_abilities"),
+    (
+        "src/states/play_match/instant_landings.rs",
+        "land_instant_effects",
+    ),
     ("src/states/play_match/auras.rs", "process_dot_ticks"),
     (
         "src/states/play_match/projectiles.rs",
