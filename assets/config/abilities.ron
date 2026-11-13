@@ -298,6 +298,7 @@
             prevention: Silence,
             icon: "icons/abilities/spell_frost_windwalkon.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // TBC 14751: StartRecoveryTime 0
             range: 0.0,  // Self-cast
             mana_cost: 0.0,
             cooldown: 45.0,
@@ -325,6 +326,7 @@
             prevention: Silence,
             icon: "icons/abilities/spell_holy_powerinfusion.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // TBC 10060: StartRecoveryTime 0
             range: 30.0,
             mana_cost: 45.0,
             cooldown: 45.0,
@@ -439,6 +441,7 @@
             prevention: Pacify,
             icon: "icons/abilities/inv_gauntlets_04.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // an interrupt (`check_interrupts`) starts no GCD
             range: 2.5,
             mana_cost: 10.0,
             cooldown: 12.0,
@@ -572,6 +575,7 @@
             prevention: Pacify,
             icon: "icons/abilities/ability_kick.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // an interrupt (`check_interrupts`) starts no GCD
             range: 2.5,
             mana_cost: 25.0,
             cooldown: 12.0,
@@ -593,6 +597,7 @@
             prevention: None,
             icon: "icons/abilities/ability_poisonsting.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // a weapon proc, never cast
             range: 2.5,
             mana_cost: 0.0,
             cooldown: 0.0,
@@ -624,6 +629,7 @@
             prevention: None,
             icon: "icons/abilities/ability_rogue_dualweild.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // a weapon proc, never cast
             range: 2.5,
             mana_cost: 0.0,
             cooldown: 0.0,
@@ -652,6 +658,7 @@
             prevention: None,
             icon: "icons/abilities/inv_misc_herb_16.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // a weapon proc, never cast
             range: 2.5,
             mana_cost: 0.0,
             cooldown: 0.0,
@@ -678,6 +685,7 @@
             prevention: None,
             icon: "icons/abilities/spell_nature_nullifydisease.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // a weapon proc, never cast
             range: 2.5,
             mana_cost: 0.0,
             cooldown: 0.0,
@@ -1043,6 +1051,7 @@
             prevention: None,
             icon: "icons/abilities/spell_shadow_contagion.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // TBC 18288: StartRecoveryCategory 0
             range: 0.0,  // Self-cast
             mana_cost: 0.0,
             cooldown: 45.0,
@@ -1265,6 +1274,7 @@
             prevention: Silence,
             icon: "icons/abilities/spell_shadow_mindrot.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // an interrupt starts no GCD
             range: 30.0,
             mana_cost: 0.0,
             cooldown: 30.0,
@@ -1901,6 +1911,7 @@
             prevention: Silence,
             icon: "icons/abilities/spell_nature_cyclone.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // an interrupt (`check_interrupts`) starts no GCD
             range: 30.0,
             mana_cost: 12.0,
             cooldown: 9.0,
