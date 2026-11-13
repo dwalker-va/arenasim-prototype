@@ -396,6 +396,8 @@ fn aura_family(t: AuraType) -> AuraFamily {
         | AuraType::DamageReflect
         // Sacred Shield's arming buff (AS-421): a buff like any other.
         | AuraType::TriggeredAbsorb
+        // Aura Mastery's immunity (AS-420): a buff like any other.
+        | AuraType::SilenceInterruptImmunity
         | AuraType::TravelForm => AuraFamily::Status,
     }
 }
@@ -803,6 +805,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     AirTotem,
     AmplifyCurse,
     ArcaneIntellect,
+    AuraMastery,
     BattleShout,
     BerserkerRage,
     BlessingOfSacrifice,
@@ -812,6 +815,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     CurseOfWeakness,
     DemoralizingShout,
     DevotionAura,
+    DivineFavor,
     DivineProtection,
     DivineShield,
     EarthTotem,
@@ -932,12 +936,20 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
         "AS-346 (Amplify Curse and Shadow Trance, the primed casts)",
     ),
     (ArcaneIntellect, "AS-134 (aura application)"),
+    (
+        AuraMastery,
+        "AS-374 (the Holy talent visuals: Aura Mastery's immunity)",
+    ),
     (BattleShout, "AS-134 (aura application)"),
     (BlessingOfSacrifice, "AS-374 (Blessing of Sacrifice impact)"),
     (CommandingShout, "AS-134 (aura application)"),
     (ConcentrationAura, "AS-134 (aura application)"),
     (DemoralizingShout, "AS-134 (aura application)"),
     (DevotionAura, "AS-134 (aura application)"),
+    (
+        DivineFavor,
+        "AS-374 (the Holy talent visuals: Divine Favor and Infusion of Light, the primed heals)",
+    ),
     (DivineProtection, "AS-376 (Divine Protection globe)"),
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (

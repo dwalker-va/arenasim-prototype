@@ -55,9 +55,10 @@ use crate::states::play_match::combat_ai::{
 };
 use crate::states::play_match::combat_core::{Avoidance, MeleeAvoided};
 use crate::states::play_match::components::{
-    ActiveAuras, Aura, AuraPending, AuraType, Combatant, DRTracker, GameRng, HealerPosture,
-    InstantAbilityFired, InterruptPending, KitePosture, MeleeResetState, MovementDirective,
-    RogueFlareState, ShapeshiftPending, Shift, Trap, TrapLaunchProjectile, TrapType,
+    ActiveAuras, Aura, AuraPending, AuraType, CastingState, Combatant, DRTracker, GameRng,
+    HealerPosture, InstantAbilityFired, InterruptPending, KitePosture, MeleeResetState,
+    MovementDirective, RogueFlareState, ShapeshiftPending, Shift, Trap, TrapLaunchProjectile,
+    TrapType,
 };
 use crate::states::play_match::decision_trace::{
     AbilityCandidate, AbilityOutcome, CandidateStatus, DecisionTrace, EventKind, EventPayload,
@@ -696,6 +697,11 @@ impl Scene {
         &mut self.unit_mut(who).combatant
     }
 
+    /// `who`'s `Combatant` as the scene holds it.
+    pub fn combatant(&self, who: Who) -> &Combatant {
+        &self.find(who).combatant
+    }
+
     /// The auras on `who`, as the scene set them.
     pub fn auras_of(&self, who: Who) -> &[Aura] {
         &self.find(who).auras
@@ -704,6 +710,11 @@ impl Scene {
     /// The entity standing for `who`.
     pub fn entity(&self, who: Who) -> Entity {
         self.find(who).entity
+    }
+
+    /// Where `who` stands.
+    pub fn position(&self, who: Who) -> Vec3 {
+        self.find(who).position
     }
 
     fn find(&self, who: Who) -> &SceneUnit {
@@ -821,6 +832,14 @@ impl Scene {
     /// discarded, so a second `decide` sees the same scene.
     pub fn decide(&self, who: Who) -> DecisionView {
         self.decide_with(who, &mut DispatchAccumulators::default())
+            .0
+    }
+
+    /// [`Scene::decide`], and `who`'s `Combatant` as the decision left it:
+    /// what it paid, the cooldowns it started, a next-cast modifier its cast
+    /// carries to its landing. The scene is not changed.
+    pub fn decide_keeping(&self, who: Who) -> (DecisionView, Combatant) {
+        self.decide_with(who, &mut DispatchAccumulators::default())
     }
 
     /// Run `whos`' decisions one after another in ONE frame, in that order:
@@ -831,11 +850,11 @@ impl Scene {
     pub fn decide_in_one_frame(&self, whos: &[Who]) -> Vec<DecisionView> {
         let mut acc = DispatchAccumulators::default();
         whos.iter()
-            .map(|&who| self.decide_with(who, &mut acc))
+            .map(|&who| self.decide_with(who, &mut acc).0)
             .collect()
     }
 
-    fn decide_with(&self, who: Who, acc: &mut DispatchAccumulators) -> DecisionView {
+    fn decide_with(&self, who: Who, acc: &mut DispatchAccumulators) -> (DecisionView, Combatant) {
         let unit = self.find(who);
         assert!(
             !unit.auras.iter().any(|a| is_incapacitating(&a.effect_type)),
@@ -906,7 +925,7 @@ impl Scene {
             lit_flares: &[],
         };
         let mut combatant = self.combatant_of(unit);
-        let auras = ActiveAuras {
+        let mut auras = ActiveAuras {
             auras: unit.auras.clone(),
         };
         // The decision's commands run against a third world whose entity ids
@@ -945,8 +964,32 @@ impl Scene {
             &ctx,
             posture,
         );
+        // The turn's talent effects, as `decide_abilities` runs them after the
+        // dispatch: a next-cast modifier the turn spent leaves its holder and
+        // rides on the combatant to its cast's landing.
+        let used = trace.take_casts_of(unit.entity);
+        let spent_on = trace.turn_spent.take();
+        if !used.is_empty() {
+            let primed = crate::states::play_match::next_cast::any_live(&auras);
+            crate::states::play_match::talent_procs::after_turn(
+                &mut commands,
+                &mut combat_log,
+                unit.entity,
+                &mut combatant,
+                if primed { Some(&mut auras) } else { None },
+                &used,
+                spent_on,
+            );
+        }
         queue.apply(&mut exec_world);
-        let mut view = DecisionView::read(self, unit.entity, acted, &trace);
+        let mut view = DecisionView::read(self, unit.entity, acted, &trace, &combatant);
+        view.cast_started = exec_world
+            .get::<CastingState>(unit.entity)
+            .map(|cast| SceneCast {
+                ability: cast.ability,
+                target: cast.target.map(|t| self.who(t.index())),
+                cast_time: cast.time_remaining,
+            });
         view.directive = exec_world.get::<MovementDirective>(unit.entity).copied();
         let mut used = exec_world.query::<&OnUsePending>();
         view.items_used.extend(
@@ -954,8 +997,6 @@ impl Scene {
                 .map(|p| (self.who(p.wearer.index()), p.item)),
         );
         view.on_use_after = combatant.on_use_items.clone();
-        view.resource_after = combatant.current_mana;
-        view.global_cooldown_after = combatant.global_cooldown;
         let mut placed = exec_world.query::<(&Trap, &Transform)>();
         view.trap_landings.extend(
             placed
@@ -984,7 +1025,7 @@ impl Scene {
                 }),
         );
         self.read_landings(&mut exec_world, &mut view);
-        view
+        (view, combatant)
     }
 
     /// Run a HELD unit's tick — what `decide_abilities` runs for a unit under
@@ -1037,15 +1078,13 @@ impl Scene {
                 .any(|a| a.effect_type == AuraType::Cyclone),
         );
         queue.apply(&mut exec_world);
-        let mut view = DecisionView::read(self, unit.entity, acted, &trace);
+        let mut view = DecisionView::read(self, unit.entity, acted, &trace, &combatant);
         let mut used = exec_world.query::<&OnUsePending>();
         view.items_used.extend(
             used.iter(&exec_world)
                 .map(|p| (self.who(p.wearer.index()), p.item)),
         );
         view.on_use_after = combatant.on_use_items.clone();
-        view.resource_after = combatant.current_mana;
-        view.global_cooldown_after = combatant.global_cooldown;
         view
     }
 
@@ -1116,14 +1155,14 @@ impl Scene {
             &casts,
             Some(&mut trace),
         );
-        let mut view = DecisionView::read(self, unit.entity, turn.is_some(), &trace);
         // The interrupt chosen is used, as `check_interrupts` uses it, in a
         // throwaway world whose entity ids match the scene's.
+        let acted = turn.is_some();
+        let mut exec_world = World::new();
+        for u in &self.units {
+            assert_eq!(exec_world.spawn_empty().id(), u.entity);
+        }
         if let Some((ability, target, cast)) = turn {
-            let mut exec_world = World::new();
-            for u in &self.units {
-                assert_eq!(exec_world.spawn_empty().id(), u.entity);
-            }
             let mut queue = CommandQueue::default();
             let mut commands = Commands::new(&mut queue, &exec_world);
             let target_pos = casts.get(&target).map_or(unit.position, |c| c.position);
@@ -1144,8 +1183,9 @@ impl Scene {
                 }),
             );
             queue.apply(&mut exec_world);
-            self.read_landings(&mut exec_world, &mut view);
         }
+        let mut view = DecisionView::read(self, unit.entity, acted, &trace, &combatant);
+        self.read_landings(&mut exec_world, &mut view);
         view
     }
 
@@ -1307,13 +1347,24 @@ pub struct DecisionView {
     /// The deciding unit's on-use items as the decision left them — their
     /// cooldowns and a wait's state ([`Scene::decide_held`] only).
     pub on_use_after: Vec<OnUseSlot>,
-    /// The deciding unit's resource (mana, energy or rage) as the decision
-    /// left it: what its choices spent ([`Scene::decide`] and
-    /// [`Scene::decide_held`] only).
-    pub resource_after: f32,
-    /// The deciding unit's global cooldown as the decision left it
-    /// ([`Scene::decide`] and [`Scene::decide_held`] only).
+    /// The deciding unit's global cooldown as the decision left it.
     pub global_cooldown_after: f32,
+    /// The deciding unit's resource (mana, energy or rage) as the decision
+    /// left it. A cast with a bar, or an instant routed through a zero-length
+    /// one, pays when it LANDS, so the decision has not charged it yet.
+    pub resource_after: f32,
+    /// The cast the decision began ([`Scene::decide`] only): a `CastingState`
+    /// it put on the unit, a zero-length one included.
+    pub cast_started: Option<SceneCast>,
+}
+
+/// A cast a scene decision began, its target named.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SceneCast {
+    pub ability: AbilityType,
+    pub target: Option<Who>,
+    /// Its cast time: 0 for an instant routed through a zero-length cast.
+    pub cast_time: f32,
 }
 
 /// An instant attack a scene decision queued, its target named.
@@ -1341,7 +1392,15 @@ pub struct SceneInstantMarker {
 }
 
 impl DecisionView {
-    fn read(scene: &Scene, entity: Entity, acted: bool, trace: &DecisionTrace) -> Self {
+    /// Read the decision `entity` made off `trace`, and what it left on its
+    /// `combatant`.
+    fn read(
+        scene: &Scene,
+        entity: Entity,
+        acted: bool,
+        trace: &DecisionTrace,
+        combatant: &Combatant,
+    ) -> Self {
         let mut view = DecisionView {
             acted,
             chosen: None,
@@ -1360,8 +1419,9 @@ impl DecisionView {
             item_decisions: Vec::new(),
             items_used: Vec::new(),
             on_use_after: Vec::new(),
-            resource_after: 0.0,
-            global_cooldown_after: 0.0,
+            global_cooldown_after: combatant.global_cooldown,
+            resource_after: combatant.current_mana,
+            cast_started: None,
         };
         let mine = trace.pending_events.iter().filter(|e| {
             e.actor

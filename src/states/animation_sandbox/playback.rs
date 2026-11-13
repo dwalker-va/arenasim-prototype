@@ -2047,7 +2047,9 @@ mod tests {
     /// The exceptions are the self buffs that are UNPURGEABLE by design, so
     /// the beneficial list cannot vouch for them: `DamageImmunity` (Divine
     /// Shield), `FearImmunity` (Berserker Rage — a physical enrage, not
-    /// magic) and `TravelForm` (a shapeshift, not a spell on the Druid). Anything else appearing here is a debuff previewing on the wrong
+    /// magic), `SilenceInterruptImmunity` (Aura Mastery, a cooldown like the
+    /// other two) and `TravelForm` (a shapeshift, not a spell on the Druid).
+    /// Anything else appearing here is a debuff previewing on the wrong
     /// unit, and adding to this list is how that gets waved through.
     #[test]
     fn an_entry_previews_on_the_caster_only_for_a_beneficial_aura() {
@@ -2073,7 +2075,10 @@ mod tests {
             };
             let unpurgeable_self_buff = matches!(
                 applied.aura_type,
-                AuraType::DamageImmunity | AuraType::FearImmunity | AuraType::TravelForm
+                AuraType::DamageImmunity
+                    | AuraType::FearImmunity
+                    | AuraType::SilenceInterruptImmunity
+                    | AuraType::TravelForm
             );
             assert!(
                 sample.can_be_purged() || unpurgeable_self_buff,

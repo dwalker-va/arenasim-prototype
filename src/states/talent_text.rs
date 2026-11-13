@@ -537,9 +537,9 @@ fn field_name(field: AbilityField) -> &'static str {
         AbilityField::CritChance => "critical strike chance",
         AbilityField::AuraStrength => "effect strength",
         AbilityField::PeriodicDamage => "damage over time",
+        AbilityField::Healing => "healing",
         AbilityField::ManaPerHealth => "mana gained",
         AbilityField::AuraVulnerability => "damage taken while stunned",
-        AbilityField::Healing => "healing",
     }
 }
 

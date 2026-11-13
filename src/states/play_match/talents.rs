@@ -193,6 +193,14 @@ talent_ids! {
     Malice,
     Rupture,
     BloodSpatter,
+    // Paladin: Holy
+    ImprovedHolyShock,
+    HealingLight,
+    InfusionOfLight,
+    DivineFavor,
+    PurifyingPower,
+    LightsGrace,
+    AuraMastery,
 }
 
 /// A talent tree. A tree is named per class: `(class, TreeId)` is the key.
@@ -489,7 +497,8 @@ pub enum AbilityField {
     /// Present only on an ability that heals directly (a nonzero range or
     /// coefficient), so a school-wide patch of it passes over a Holy spell
     /// that heals nothing (Power Word: Shield). Takes only a `Mul`, as
-    /// `Damage` does. Spiritual Healing's field.
+    /// `Damage` does. Spiritual Healing's field (the Priest's Holy spells)
+    /// and Healing Light's (Flash of Light and Holy Light).
     Healing,
 }
 
@@ -693,6 +702,7 @@ pub fn strength_is_remainder(aura: AuraType) -> bool {
         | AuraType::HealingOverTime
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
+        | AuraType::SilenceInterruptImmunity
         | AuraType::ArmorIncrease
         | AuraType::Cyclone
         | AuraType::TravelForm

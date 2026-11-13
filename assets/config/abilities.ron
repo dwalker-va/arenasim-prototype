@@ -298,6 +298,7 @@
             prevention: Silence,
             icon: "icons/abilities/spell_frost_windwalkon.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // TBC 14751: StartRecoveryTime 0
             range: 0.0,  // Self-cast
             mana_cost: 0.0,
             cooldown: 45.0,
@@ -325,6 +326,7 @@
             prevention: Silence,
             icon: "icons/abilities/spell_holy_powerinfusion.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // TBC 10060: StartRecoveryTime 0
             range: 30.0,
             mana_cost: 45.0,
             cooldown: 45.0,
@@ -410,6 +412,7 @@
             // constant.
             description: "The first blow that would kill the target while the spirit lasts is prevented: the target is healed for 30% of its maximum health instead, and the spirit ends.",
             cast_time: 0.0,
+            off_gcd: true,  // Wrath 47788: StartRecoveryCategory 0
             range: 40.0,
             mana_cost: 17.0,
             cooldown: 60.0,
@@ -501,6 +504,7 @@
             prevention: Pacify,
             icon: "icons/abilities/inv_gauntlets_04.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // an interrupt (`check_interrupts`) starts no GCD
             range: 2.5,
             mana_cost: 10.0,
             cooldown: 12.0,
@@ -634,6 +638,7 @@
             prevention: Pacify,
             icon: "icons/abilities/ability_kick.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // an interrupt (`check_interrupts`) starts no GCD
             range: 2.5,
             mana_cost: 25.0,
             cooldown: 12.0,
@@ -655,6 +660,7 @@
             prevention: None,
             icon: "icons/abilities/ability_poisonsting.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // a weapon proc, never cast
             range: 2.5,
             mana_cost: 0.0,
             cooldown: 0.0,
@@ -686,6 +692,7 @@
             prevention: None,
             icon: "icons/abilities/ability_rogue_dualweild.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // a weapon proc, never cast
             range: 2.5,
             mana_cost: 0.0,
             cooldown: 0.0,
@@ -714,6 +721,7 @@
             prevention: None,
             icon: "icons/abilities/inv_misc_herb_16.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // a weapon proc, never cast
             range: 2.5,
             mana_cost: 0.0,
             cooldown: 0.0,
@@ -740,6 +748,7 @@
             prevention: None,
             icon: "icons/abilities/spell_nature_nullifydisease.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // a weapon proc, never cast
             range: 2.5,
             mana_cost: 0.0,
             cooldown: 0.0,
@@ -1132,6 +1141,7 @@
             prevention: None,
             icon: "icons/abilities/spell_shadow_contagion.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // TBC 18288: StartRecoveryCategory 0
             range: 0.0,  // Self-cast
             mana_cost: 0.0,
             cooldown: 45.0,
@@ -1354,6 +1364,7 @@
             prevention: Silence,
             icon: "icons/abilities/spell_shadow_mindrot.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // an interrupt starts no GCD
             range: 30.0,
             mana_cost: 0.0,
             cooldown: 30.0,
@@ -1888,6 +1899,62 @@
             spell_school: Holy,
         ),
 
+        // Divine Favor (talent, Holy tier 2): the Paladin's next Flash of
+        // Light, Holy Light or Holy Shock is a sure crit (TBC 20216). Held
+        // until that cast spends it. 45s cooldown (the client's is 2 min);
+        // 3% of the Paladin's base mana, as TBC. Off the global cooldown (TBC
+        // 20216 has no global-cooldown category), so the heal follows on the
+        // next decision. TBC 20216: Holy, Magic, prevented by a silence.
+        DivineFavor: (
+            name: "Divine Favor",
+            class: Paladin,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_holy_heal.jpg",
+            cast_time: 0.0,
+            off_gcd: true,  // TBC 20216: no global-cooldown category
+            range: 0.0,  // Self-cast
+            mana_cost: 5.0,
+            cooldown: 45.0,
+            applies_aura: Some((
+                aura_type: NextCast,
+                duration: 600.0,  // until spent: lasts the match
+                magnitude: 1.0,
+                next_cast: Some((
+                    applies_to: Abilities([FlashOfLight, HolyLight, HolyShock]),
+                    crit_chance: 1.0,
+                )),
+            )),
+            spell_school: Holy,
+        ),
+
+        // Aura Mastery (talent, Holy capstone): every living teammate is
+        // immune to silence and interrupt effects for 6s
+        // (`AuraType::SilenceInterruptImmunity`); 45s cooldown (ruling; the
+        // client's is 2 min). Free, off the global cooldown and stopped by
+        // no silence: Wrath 31821 has no SpellCategories row (no dispel
+        // type, no prevention, no recovery category), and its school is
+        // Physical. No dispel type, so no purge takes it.
+        AuraMastery: (
+            name: "Aura Mastery",
+            class: Paladin,
+            talent: true,
+            prevention: None,
+            icon: "icons/abilities/spell_holy_auramastery.jpg",
+            cast_time: 0.0,
+            off_gcd: true,  // Wrath 31821: no recovery category
+            range: 100.0,  // Every teammate, as the Paladin auras reach them
+            mana_cost: 0.0,
+            cooldown: 45.0,
+            applies_aura: Some((
+                aura_type: SilenceInterruptImmunity,
+                duration: 6.0,
+                magnitude: 1.0,
+                dispel_type: Untyped,
+            )),
+            spell_school: Physical,
+        ),
+
         // ============================================================================
         // SHAMAN ABILITIES
         // ============================================================================
@@ -1990,6 +2057,7 @@
             prevention: Silence,
             icon: "icons/abilities/spell_nature_cyclone.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // an interrupt (`check_interrupts`) starts no GCD
             range: 30.0,
             mana_cost: 12.0,
             cooldown: 9.0,

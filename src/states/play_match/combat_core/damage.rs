@@ -946,6 +946,24 @@ pub fn process_interrupts(
             commands.entity(interrupt_entity).despawn();
             continue;
         }
+        // Nor on a caster immune to interrupts (Aura Mastery): spent, and it
+        // cuts nothing and locks no school. Every interrupter's scan passes
+        // such a caster over (`class_ai::interrupts`); this keeps any other
+        // path to the same rule.
+        if auras_query
+            .get(interrupt.target)
+            .is_ok_and(|a| super::super::auras::silence_interrupt_immune(&a.auras))
+        {
+            if let Ok(target) = combatants.get(interrupt.target) {
+                let target_id = combat_log_id_for(target, pet_query.get(interrupt.target).ok());
+                combat_log.log(
+                    CombatLogEventType::AbilityUsed,
+                    format!("{target_id} is immune to the interrupt (Aura Mastery)"),
+                );
+            }
+            commands.entity(interrupt_entity).despawn();
+            continue;
+        }
         let mut interrupted = false;
 
         // Check if target is casting. A cast already interrupted, or an

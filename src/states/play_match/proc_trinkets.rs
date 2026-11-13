@@ -369,7 +369,10 @@ pub fn proc_effect_budget_weight(effect: AuraType) -> Option<f32> {
         // Percentage mitigation and outright immunity. Not linear in a stat
         // weight at all — `DamageTakenReduction` at magnitude 1.0 is immunity,
         // which the budget would happily sell for one point.
-        AuraType::DamageTakenReduction | AuraType::DamageImmunity | AuraType::FearImmunity => None,
+        AuraType::DamageTakenReduction
+        | AuraType::DamageImmunity
+        | AuraType::FearImmunity
+        | AuraType::SilenceInterruptImmunity => None,
         // Percentage damage, armor, transfer, save and reflect effects (the
         // damage pipeline, AS-408): none is a quantity of an item stat, so none
         // has a weight to price by. Each is its own card when a trinket wants

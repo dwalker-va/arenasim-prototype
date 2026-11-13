@@ -295,6 +295,11 @@ fn expected(ability: AbilityType) -> Row {
         // Not in TBC: the column reads Wrath 3.4.5.63697's 53601 (its absorb,
         // 58597, is Magic too).
         AbilityType::SacredShield => config(S::Magic, T::Magic),
+        // The Holy talents (AS-420).
+        AbilityType::DivineFavor => config(S::Magic, T::Magic), // 20216
+        // 31821 has no SpellCategories row in TBC (a passive there) or in
+        // Wrath 3.4.5.63697 (the active this is): no dispel type.
+        AbilityType::AuraMastery => config(S::Untyped, T::NoType),
 
         // ---- Hunter ----
         AbilityType::AimedShot => config(S::Physical, T::NoType),
