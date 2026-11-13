@@ -400,6 +400,8 @@ fn aura_family(t: AuraType) -> AuraFamily {
         | AuraType::SilenceInterruptImmunity
         // Shadow Dance's window (AS-419): a buff like any other.
         | AuraType::ShadowDance
+        // Vampiric Embrace's leech (AS-416): a debuff like any other.
+        | AuraType::LeechMark
         | AuraType::TravelForm => AuraFamily::Status,
     }
 }
@@ -489,6 +491,7 @@ const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
     LightningBolt,
     ManaBurn,
     MindBlast,
+    MindFlay,
     Moonfire,
     MortalStrike,
     Shadowbolt,
@@ -551,6 +554,10 @@ const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (
         HolyNova,
         "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
+    ),
+    (
+        MindFlay,
+        "AS-356 (Mind Flay, the channel and its slow; scoped by AS-335)",
     ),
     (
         Shadowburn,
@@ -748,9 +755,11 @@ const CONTROL_MEMBERS: &[AbilityType] = &[
     Frostbolt,
     HammerOfJustice,
     KidneyShot,
+    MindFlay,
     Polymorph,
     PsychicScream,
     Repentance,
+    Silence,
     SpiderWeb,
 ];
 
@@ -801,8 +810,16 @@ const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[
         "AS-334 (the talent visuals: Curse of Exhaustion's slow)",
     ),
     (
+        MindFlay,
+        "AS-356 (Mind Flay, the channel and its slow; scoped by AS-335)",
+    ),
+    (
         Repentance,
         "AS-378 (Repentance, the Retribution incapacitate; never Freezing Trap's ice block)",
+    ),
+    (
+        Silence,
+        "AS-357 (Silence on the target, and the Silence aura's routing; scoped by AS-335)",
     ),
 ];
 
@@ -866,6 +883,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     ShadowResistanceAura,
     Shadowform,
     TravelForm,
+    VampiricEmbrace,
     WaterTotem,
     WoundPoison,
 ];
@@ -1013,6 +1031,10 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (
         Shadowform,
         "AS-343 (Shadowform, the form on the Priest all match)",
+    ),
+    (
+        VampiricEmbrace,
+        "AS-357 (Vampiric Embrace on the target, and its heals; scoped by AS-335)",
     ),
 ];
 

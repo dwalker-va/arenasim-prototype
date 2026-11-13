@@ -226,6 +226,12 @@ fn expected(ability: AbilityType) -> Row {
         // wago.tools build 3.4.5.63697 has DispelType 0, so nothing removes
         // it, its killing-blow rider included.
         AbilityType::GuardianSpirit => config(S::Untyped, T::NoType),
+        // The Shadow talents (AS-416). Mind Flay's slow is the channel's,
+        // and 15407 has DispelType 0; Vampiric Embrace (15286) and Silence
+        // (15487) are DispelType 1, derived Magic from their Shadow school.
+        AbilityType::MindFlay => config(S::Untyped, T::NoType), // 15407
+        AbilityType::VampiricEmbrace => config(S::Magic, T::Magic), // 15286
+        AbilityType::Silence => config(S::Magic, T::Magic),     // 15487
 
         // ---- Warrior ----
         AbilityType::HeroicStrike => Row::NoAura,
@@ -790,12 +796,14 @@ fn dispel_magic_takes_psychic_scream_off_an_ally() {
 /// what the sim resolves it to and what TBC calls it. Checked by SET
 /// EQUALITY against the procs the shipped table actually carries, so a new
 /// debuff proc fails until its row is written here.
-const PROC_DEBUFFS: [(TalentId, Sim, Tbc); 2] = [
+const PROC_DEBUFFS: [(TalentId, Sim, Tbc); 3] = [
     // Shadow Vulnerability, 17800: DispelType 1 (Magic). User ruling,
     // 2026-11-13 (AS-482): dispellable, as in TBC.
     (TalentId::ImprovedShadowBolt, Sim::Magic, Tbc::Magic),
     // Aftermath's daze, 18118: DispelType 1 (Magic).
     (TalentId::Aftermath, Sim::Magic, Tbc::Magic),
+    // Blackout's stun, 15269: DispelType 1 (Magic). AS-416.
+    (TalentId::Blackout, Sim::Magic, Tbc::Magic),
 ];
 
 /// Every talent's procs, ranks and `FromRank` wrappers unwrapped.

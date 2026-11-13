@@ -50,6 +50,7 @@ use arenasim::states::encyclopedia::{
 };
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::abilities::SpellSchool;
+use arenasim::states::play_match::ability_config::{load_ability_definitions, AbilityDefinitions};
 use arenasim::states::play_match::equipment::{ArmorType, ItemId, ItemSlotType};
 use arenasim::states::play_match::talents::TalentId;
 
@@ -476,6 +477,29 @@ fn encyclopedia_aura_detail_source_siblings() {
     snapshot("encyclopedia_aura_detail_source_siblings", state);
 }
 
+/// An Incapacitate aura page now that two abilities apply one (Freezing Trap
+/// and Repentance, re-pinned here alone — added after AS-456): its OTHER INCAPACITATE EFFECTS section carries the
+/// mechanic's own sentence, which describes every incapacitate rather than
+/// the first one written (Freezing Trap's "frozen", AS-486); whether damage
+/// breaks it is the aura's own text above.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn encyclopedia_aura_detail_incapacitate() {
+    let abilities = || pinned_abilities_with(&[AbilityType::Repentance]);
+    let mut state = state_at_root_over(abilities());
+    state.apply(
+        arenasim::states::encyclopedia::EncyclopediaAction::Navigate(View::topic(Topic::Aura(
+            AuraId::Ability(AbilityType::Repentance),
+        ))),
+    );
+    snapshot_over(
+        "encyclopedia_aura_detail_incapacitate",
+        state,
+        arenasim::states::GameState::MainMenu,
+        abilities(),
+    );
+}
+
 /// The Talents index: every class with trees, each drawn read-only by the
 /// kit's talent tree, each node a link to its page; the classes without trees
 /// are named under them.
@@ -638,9 +662,27 @@ fn a_restricted_table_holds_exactly_its_members() {
 /// A fresh state with its registry built over the pinned catalogue — the same
 /// thing the Bevy wrapper does on its first frame.
 fn state_at_root() -> EncyclopediaState {
+    state_at_root_over(pinned_catalogue::abilities())
+}
+
+/// The pinned ability table with `added` members re-pinned into it, for the
+/// one snapshot that needs an ability added since AS-456 — without moving any
+/// other snapshot's grid, index or search.
+fn pinned_abilities_with(added: &[AbilityType]) -> AbilityDefinitions {
+    let keep: Vec<AbilityType> = pinned_catalogue::ABILITIES
+        .iter()
+        .chain(added)
+        .copied()
+        .collect();
+    load_ability_definitions()
+        .expect("abilities.ron must load")
+        .restricted_to(&keep)
+}
+
+/// [`state_at_root`] over `abilities` rather than the pinned table.
+fn state_at_root_over(abilities: AbilityDefinitions) -> EncyclopediaState {
     let mut state = EncyclopediaState::default();
     let items = pinned_catalogue::items();
-    let abilities = pinned_catalogue::abilities();
     state.rebuild_registry(&CatalogSource {
         abilities: &abilities,
         items: &items,
@@ -665,13 +707,22 @@ fn snapshot(name: &'static str, state: EncyclopediaState) {
 /// Snapshot `state` as `return_to` opened it: Home names that screen.
 fn snapshot_opened_from(
     name: &'static str,
+    state: EncyclopediaState,
+    return_to: arenasim::states::GameState,
+) {
+    snapshot_over(name, state, return_to, pinned_catalogue::abilities());
+}
+
+/// Snapshot `state` drawn over `abilities` rather than the pinned table.
+fn snapshot_over(
+    name: &'static str,
     mut state: EncyclopediaState,
     return_to: arenasim::states::GameState,
+    abilities: AbilityDefinitions,
 ) {
     // `Harness::build` takes a 'static closure, so the definitions are moved in
     // rather than borrowed from the caller's frame.
     let items = pinned_catalogue::items();
-    let abilities = pinned_catalogue::abilities();
     let mut harness = Harness::builder().with_size(SIZE).build(move |ctx| {
         arenasim::ui::install(ctx);
         let data = EncyclopediaData {

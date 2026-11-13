@@ -11,11 +11,11 @@
 //!   below the emergency line and the heal would go out now, so the sure crit
 //!   lands on it. Off the global cooldown (TBC 20216), so the heal follows on
 //!   the Paladin's next decision.
-//! - **Aura Mastery** when an enemy is about to interrupt a casting teammate
-//!   ([`interrupt_threat`]): an interrupt it could start within
-//!   [`AURA_MASTERY_HORIZON`] ([`super::ready_interrupt_reach`]) and the
-//!   teammate within that reach (plus [`AURA_MASTERY_REACH_MARGIN`]) and its
-//!   sight. Every living teammate is then immune to silence and interrupt
+//! - **Aura Mastery** when an enemy is about to stop a casting teammate's
+//!   cast ([`interrupt_threat`]): an interrupt or a silence it could start
+//!   within [`AURA_MASTERY_HORIZON`] ([`super::ready_interrupt_reach`],
+//!   [`super::ready_silence_reach`]) and the teammate within that reach (plus
+//!   [`AURA_MASTERY_REACH_MARGIN`]) and its sight. Every living teammate is then immune to silence and interrupt
 //!   effects for its duration. Off the global cooldown.
 //!
 //! The decisions are pure ([`interrupt_threat`]) and the casts are `try_*`
@@ -33,7 +33,7 @@ use crate::states::play_match::decision_trace::{DecisionEventBuilder, RejectionR
 use crate::states::play_match::utils::log_ability_use;
 
 use super::cast_guard::{cast_gate, PreCastOpts};
-use super::{cast_reach, ready_interrupt_reach, CastReach, CombatContext};
+use super::{cast_reach, ready_interrupt_reach, ready_silence_reach, CastReach, CombatContext};
 
 /// How soon an enemy's interrupt must be ready to count as about to land: the
 /// global cooldown, the time a casting teammate's cast has in it.
@@ -43,7 +43,8 @@ pub const AURA_MASTERY_HORIZON: f32 = 1.5;
 /// the cast: what a melee closes in under a second.
 pub const AURA_MASTERY_REACH_MARGIN: f32 = 5.0;
 
-/// A casting teammate an enemy is about to interrupt, and that enemy.
+/// A casting teammate an enemy is about to interrupt or silence, and that
+/// enemy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InterruptThreat {
     pub teammate: Entity,
@@ -51,36 +52,47 @@ pub struct InterruptThreat {
 }
 
 /// The first casting teammate of `me` (itself included, in entity order) that
-/// a visible enemy is about to interrupt: the teammate's cast is one an
-/// interrupt takes (a cast bar a silence prevents, or a channel), it is not
-/// already immune to interrupts, and an enemy has an interrupt ready within
-/// [`AURA_MASTERY_HORIZON`] with the teammate inside its reach plus
-/// [`AURA_MASTERY_REACH_MARGIN`] and in its sight. `None` when no teammate is
-/// threatened.
+/// a visible enemy is about to stop casting, with an interrupt or a silence:
+///
+/// - an INTERRUPT takes a cast bar a silence prevents, or a channel; the enemy
+///   has one ready within [`AURA_MASTERY_HORIZON`]
+///   ([`super::ready_interrupt_reach`]);
+/// - a SILENCE (the Priest's) stops a cast a silence prevents that costs mana,
+///   by a mana user (`AbilityConfig::silence_stops`); the enemy has one ready
+///   within the same horizon ([`super::ready_silence_reach`]).
+///
+/// The teammate is not already immune to interrupts, and stands inside the
+/// enemy's reach for it plus [`AURA_MASTERY_REACH_MARGIN`] and in its sight.
+/// `None` when no teammate is threatened.
 pub fn interrupt_threat(ctx: &CombatContext, me: Entity) -> Option<InterruptThreat> {
     let team = ctx.combatants.get(&me)?.team;
-    let casting = ctx.combatants.values().filter(|c| {
-        c.team == team
-            && c.is_alive
-            && !ctx.entity_is_interrupt_immune(c.entity)
-            && c.casting_ability.is_some_and(|ability| {
-                c.book
-                    .get(&ability)
-                    .is_some_and(|def| def.can_be_interrupted() || def.is_channel())
-            })
+    let casting = ctx.combatants.values().filter_map(|c| {
+        if c.team != team || !c.is_alive || ctx.entity_is_interrupt_immune(c.entity) {
+            return None;
+        }
+        let def = c.book.get(&c.casting_ability?)?;
+        let interruptible = def.can_be_interrupted() || def.is_channel();
+        let silenceable = def.silence_stops() && c.class.uses_mana();
+        (interruptible || silenceable).then_some((c, interruptible, silenceable))
     });
-    for teammate in casting {
+    for (teammate, interruptible, silenceable) in casting {
+        let reaches = |reach: Option<f32>, e: &super::CombatantInfo| {
+            reach.is_some_and(|reach| {
+                cast_reach(
+                    ctx,
+                    reach + AURA_MASTERY_REACH_MARGIN,
+                    e.position,
+                    teammate.position,
+                ) == CastReach::Reaches
+            })
+        };
         let enemy = ctx.combatants.values().find(|e| {
             e.team != team
                 && e.is_alive
-                && ready_interrupt_reach(ctx, e, AURA_MASTERY_HORIZON).is_some_and(|reach| {
-                    cast_reach(
-                        ctx,
-                        reach + AURA_MASTERY_REACH_MARGIN,
-                        e.position,
-                        teammate.position,
-                    ) == CastReach::Reaches
-                })
+                && ((interruptible
+                    && reaches(ready_interrupt_reach(ctx, e, AURA_MASTERY_HORIZON), e))
+                    || (silenceable
+                        && reaches(ready_silence_reach(ctx, e, AURA_MASTERY_HORIZON), e)))
         });
         if let Some(enemy) = enemy {
             return Some(InterruptThreat {
@@ -191,8 +203,8 @@ pub fn try_divine_favor(
     true
 }
 
-/// Aura Mastery, when an enemy is about to interrupt a casting teammate
-/// ([`interrupt_threat`]): every living teammate (pets aside, as the
+/// Aura Mastery, when an enemy is about to interrupt or silence a casting
+/// teammate ([`interrupt_threat`]): every living teammate (pets aside, as the
 /// Paladin's auras) in its range gains the immunity.
 pub fn try_aura_mastery(
     commands: &mut Commands,

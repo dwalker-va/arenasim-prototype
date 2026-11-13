@@ -59,7 +59,8 @@ pub enum AuraType {
     /// Complete damage immunity - all incoming damage is negated, all hostile auras are blocked.
     /// Used by Divine Shield. Magnitude unused (always 1.0 by convention).
     DamageImmunity,
-    /// Incapacitate - target is frozen in place, can't attack/cast, breaks on ANY damage.
+    /// Incapacitate - target is held in place, can't attack/cast (Freezing Trap). Whether
+    /// damage breaks it is its source's `break_on_damage`.
     /// Unlike Polymorph (target wanders), incapacitated targets stand still.
     /// Shares DRCategory::Incapacitates with Polymorph.
     /// Used by Freezing Trap.
@@ -216,6 +217,11 @@ pub enum AuraType {
     /// the holder, and changes no number. Magnitude unused (1.0 by
     /// convention). User: Shadow Dance.
     ShadowDance,
+    /// A LEECH on its bearer, and nothing else: the aura's `leech` field
+    /// (`combat_core::leech`, a `CasterSchool` source) says whose damage of
+    /// which school feeds it and whom it heals. The aura itself changes no
+    /// number; its magnitude is unread. User: Vampiric Embrace.
+    LeechMark,
 }
 
 /// Which hits a damage modifier aura reaches: one school, or every school but
@@ -477,7 +483,7 @@ impl AuraType {
     /// DOES cost is coverage: a guard that sweeps `ALL` quietly stops covering
     /// whatever `ALL` forgot, while still reading like a whole-enum sweep.
     /// `aura_type_tests::all_lists_every_aura_type` is what stops that.
-    pub const ALL: [AuraType; 48] = [
+    pub const ALL: [AuraType; 49] = [
         AuraType::MovementSpeedSlow,
         AuraType::Root,
         AuraType::Stun,
@@ -526,6 +532,7 @@ impl AuraType {
         AuraType::SilenceInterruptImmunity,
         AuraType::HealingReceivedIncrease,
         AuraType::ShadowDance,
+        AuraType::LeechMark,
     ];
 
     /// Player-facing name of this MECHANIC, as the encyclopedia's mechanic
@@ -550,6 +557,7 @@ impl AuraType {
             AuraType::Incapacitate => "Incapacitate",
             AuraType::Cyclone => "Cyclone",
             AuraType::Silence => "Silence",
+            AuraType::LeechMark => "Leech",
             AuraType::SpellSchoolLockout => "School Lockout",
             AuraType::DamageOverTime => "Damage over Time",
             AuraType::HealingOverTime => "Healing over Time",
@@ -620,7 +628,7 @@ impl AuraType {
                 "The target is transformed and wanders harmlessly. Any damage ends it immediately."
             }
             AuraType::Incapacitate => {
-                "The target is frozen where it stands, unable to act. Any damage frees it."
+                "The target is held where it stands, unable to move, attack or cast."
             }
             AuraType::Cyclone => {
                 "The target is swept up and cannot act. Nothing can damage or heal it until the \
@@ -734,6 +742,9 @@ impl AuraType {
             AuraType::HealingReceivedIncrease => {
                 "Raises the healing the holder receives, from every heal and heal over time."
             }
+            AuraType::LeechMark => {
+                "Part of the damage its caster deals the holder heals the caster's party."
+            }
         }
     }
 
@@ -800,6 +811,11 @@ impl AuraType {
             // DoT or vulnerability dispellable — the removal class already
             // stops the physical ones.
             AuraType::DamageOverTime | AuraType::DamageTakenIncrease => false,
+
+            // A leech on an enemy (Vampiric Embrace): TBC 15286 is a magic
+            // debuff its bearer's healer may dispel. Dispellable if magic,
+            // and only routine (`dispel_priority`).
+            AuraType::LeechMark => true,
 
             // Stat debuffs, not crowd control — this classifier's true arm is
             // scoped to CC. Stuns are never dispellable in WoW at all; the
@@ -934,7 +950,8 @@ impl AuraType {
             | AuraType::AttackPowerReduction
             | AuraType::AttackSpeedSlow
             | AuraType::DamageTakenIncrease
-            | AuraType::ArmorPercentReduction => true,
+            | AuraType::ArmorPercentReduction
+            | AuraType::LeechMark => true,
 
             // Beneficial — never stripped from their holder.
             AuraType::Absorb
@@ -1668,7 +1685,8 @@ impl Aura {
             | AuraType::AttackPowerReduction
             | AuraType::AttackSpeedSlow
             | AuraType::DamageTakenIncrease
-            | AuraType::ArmorPercentReduction => false,
+            | AuraType::ArmorPercentReduction
+            | AuraType::LeechMark => false,
         }
     }
 }
@@ -2222,7 +2240,8 @@ impl DRCategory {
             | AuraType::DamageReduction
             | AuraType::AttackPowerReduction
             | AuraType::DamageTakenIncrease
-            | AuraType::ArmorPercentReduction => None,
+            | AuraType::ArmorPercentReduction
+            | AuraType::LeechMark => None,
 
             // Beneficial. DR exists to cap how long one side can hold the other
             // still; nothing about a buff on its own holder is a chain to cap.
@@ -2649,6 +2668,18 @@ mod tests {
         Aura {
             effect_type,
             ..Default::default()
+        }
+    }
+
+    /// The Incapacitate MECHANIC sentence describes every incapacitate, not
+    /// the first one written (Freezing Trap's "frozen"), and leaves whether
+    /// damage breaks it to the source's own text (`ability_text`, from its
+    /// `break_on_damage`). AS-486.
+    #[test]
+    fn the_incapacitate_mechanic_names_no_source() {
+        let text = AuraType::Incapacitate.description().to_lowercase();
+        for source_word in ["frozen", "freez", "ice", "damage"] {
+            assert!(!text.contains(source_word), "{source_word:?} in {text:?}");
         }
     }
 
