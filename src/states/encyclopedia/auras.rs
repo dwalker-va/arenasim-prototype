@@ -1876,6 +1876,9 @@ mod tests {
             rows,
             vec![
                 "Aimed Shot [Physical]",
+                // Magic (TBC 15269), but a stun: no dispel takes a stun, as
+                // Hammer of Justice's below (AS-416's proc).
+                "Blackout [Magic]",
                 "Boar Charge [Physical]",
                 "Cheap Shot [Physical]",
                 "Concussive Shot [Physical]",
@@ -1889,6 +1892,8 @@ mod tests {
                 "Hammer of Justice [Magic]",
                 "Kick [—]",
                 "Kidney Shot [Physical]",
+                // The channel's slow: 15407 has no dispel type (AS-416).
+                "Mind Flay [—]",
                 "Mortal Strike [Physical]",
                 "Pummel [—]",
                 "Rend [Physical]",

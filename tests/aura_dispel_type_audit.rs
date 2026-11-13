@@ -218,6 +218,12 @@ fn expected(ability: AbilityType) -> Row {
         // wago.tools build 3.4.5.63697 has DispelType 0, so nothing removes
         // it, its killing-blow rider included.
         AbilityType::GuardianSpirit => config(S::Untyped, T::NoType),
+        // The Shadow talents (AS-416). Mind Flay's slow is the channel's,
+        // and 15407 has DispelType 0; Vampiric Embrace (15286) and Silence
+        // (15487) are DispelType 1, derived Magic from their Shadow school.
+        AbilityType::MindFlay => config(S::Untyped, T::NoType), // 15407
+        AbilityType::VampiricEmbrace => config(S::Magic, T::Magic), // 15286
+        AbilityType::Silence => config(S::Magic, T::Magic),     // 15487
 
         // ---- Warrior ----
         AbilityType::HeroicStrike => Row::NoAura,

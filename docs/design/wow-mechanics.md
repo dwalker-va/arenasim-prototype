@@ -70,7 +70,9 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   Lock) passes it over, as it passes over a damage-immune target. The Holy
   Paladin raises it on every teammate for 6s when an enemy's interrupt, ready
   within 1.5s (`class_ai::ready_interrupt_reach`), reaches a casting teammate
-  (`class_ai::paladin_holy::interrupt_threat`).
+  (`class_ai::paladin_holy::interrupt_threat`), or an enemy's Silence (the
+  Shadow Priest's, AS-416; `class_ai::ready_silence_reach`) reaches a teammate
+  casting a spell a silence stops.
 
 ### Auto-Attacks
 - Disabled while casting
@@ -384,6 +386,12 @@ tests fail if a full-CC type or spell is left unlabelled.
   (`apply_pending_auras`), so no silence outlasts it.
 - Loss of control (stun, fear, polymorph, cyclone) stops every cast, whatever
   its prevention.
+- Two silences exist: the Unstable Affliction backlash's, and the Shadow
+  Priest's Silence (AS-416; TBC 15487: 5s, 20yd, 45s cooldown, castable only
+  in Shadowform). Both are `AuraType::Silence`: magic (Dispel Magic and
+  Cleanse take them, at the urgent bar), diminishing in one Silence category.
+  The Priest silences an enemy mid-cast whose cast it would stop, a healer
+  first (`class_ai::priest_shadow::silence_target`).
 
 ### Root
 - Prevents movement only

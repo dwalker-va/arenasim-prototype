@@ -140,6 +140,9 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::ShadowWordPain
         | A::PowerInfusion
         | A::PainSuppression
+        | A::MindFlay
+        | A::VampiricEmbrace
+        | A::Silence
         | A::GuardianSpirit
         | A::FlashOfLight
         | A::HolyLight
@@ -210,6 +213,11 @@ pub fn could_cast(
     def: &AbilityConfig,
     horizon: f32,
 ) -> bool {
+    // An ability its per-match choices lock (Silence without Shadowform) is
+    // one it cannot cast at all.
+    if enemy.book.is_locked(ability) {
+        return false;
+    }
     let auras = ctx.active_auras.get(&enemy.entity).map(Vec::as_slice);
     let wrapped = auras.map(|a| ActiveAuras { auras: a.to_vec() });
     if wrapped.as_ref().is_some_and(ActiveAuras::is_shapeshifted) {

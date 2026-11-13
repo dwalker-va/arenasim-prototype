@@ -823,6 +823,10 @@ impl AbilityDefinitions {
             AbilityType::AuraMastery,
             AbilityType::HolyNova,
             AbilityType::GuardianSpirit,
+            // Priest: the Shadow tree
+            AbilityType::MindFlay,
+            AbilityType::VampiricEmbrace,
+            AbilityType::Silence,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -1767,6 +1771,9 @@ mod tests {
                     AbilityType::PainSuppression,
                     AbilityType::HolyNova,
                     AbilityType::GuardianSpirit,
+                    AbilityType::MindFlay,
+                    AbilityType::VampiricEmbrace,
+                    AbilityType::Silence,
                 ],
             ),
             (

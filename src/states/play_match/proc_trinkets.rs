@@ -383,7 +383,8 @@ pub fn proc_effect_budget_weight(effect: AuraType) -> Option<f32> {
         | AuraType::TriggeredAbsorb
         | AuraType::KillingBlowSave
         | AuraType::HealingReceivedIncrease
-        | AuraType::DamageReflect => None,
+        | AuraType::DamageReflect
+        | AuraType::LeechMark => None,
         // A shapeshift is an ability's state, not a stat a trinket could sell.
         AuraType::TravelForm => None,
         // Reveals stealthed enemies and reveals the holder. A visibility swap,

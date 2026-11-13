@@ -1332,6 +1332,10 @@ pub fn process_channeling(
 
     // Track updates to apply after the loop
     let mut remove_channel: Vec<Entity> = Vec::new();
+    // Channels that ended this frame, by any path, or stand interrupted:
+    // (caster, target, ability). A channel's own aura on its target (Mind
+    // Flay's slow) ends with it.
+    let mut ended: Vec<(Entity, Entity, AbilityType)> = Vec::new();
     // (caster_entity, target_entity, damage, caster_team, caster_slot,
     // caster_class, spell_school, ability, the caster's book)
     let mut damage_to_apply: Vec<(
@@ -1363,6 +1367,7 @@ pub fn process_channeling(
 
         // Handle interrupted state display
         if channeling.interrupted {
+            ended.push((caster_entity, channeling.target, channeling.ability));
             channeling.interrupted_display_time -= dt;
             if channeling.interrupted_display_time <= 0.0 {
                 remove_channel.push(caster_entity);
@@ -1372,6 +1377,7 @@ pub fn process_channeling(
 
         // Check if caster died
         if !caster.is_alive() {
+            ended.push((caster_entity, channeling.target, channeling.ability));
             remove_channel.push(caster_entity);
             continue;
         }
@@ -1397,6 +1403,7 @@ pub fn process_channeling(
                 },
                 PlayMatchEntity,
             ));
+            ended.push((caster_entity, channeling.target, channeling.ability));
             remove_channel.push(caster_entity);
             continue;
         }
@@ -1424,6 +1431,7 @@ pub fn process_channeling(
                 },
                 PlayMatchEntity,
             ));
+            ended.push((caster_entity, channeling.target, channeling.ability));
             remove_channel.push(caster_entity);
             continue;
         }
@@ -1467,6 +1475,7 @@ pub fn process_channeling(
 
         // Check if channel duration expired
         if channeling.duration_remaining <= 0.0 {
+            ended.push((caster_entity, channeling.target, channeling.ability));
             remove_channel.push(caster_entity);
 
             info!(
@@ -1777,6 +1786,32 @@ pub fn process_channeling(
         );
         if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(owed.caster) {
             caster.healing_done += credited;
+        }
+    }
+
+    // A channel's own aura on its target ends with the channel: Mind Flay's
+    // slow is the channel's, as in TBC, and a Kick, a crowd control, a silence
+    // or its end takes it off. Only that channeler's own, by name.
+    for (caster_entity, target_entity, ability) in ended {
+        let Some(aura_type) = combatants
+            .get(caster_entity)
+            .ok()
+            .and_then(|(_, _, c, _, _)| c.book().get(&ability).cloned())
+            .and_then(|def| {
+                def.applies_aura
+                    .as_ref()
+                    .map(|a| (a.aura_type, def.name.clone()))
+            })
+        else {
+            continue;
+        };
+        let (aura_type, name) = aura_type;
+        if let Ok((_, _, _, _, Some(mut auras))) = combatants.get_mut(target_entity) {
+            auras.auras.retain(|a| {
+                !(a.effect_type == aura_type
+                    && a.caster == Some(caster_entity)
+                    && a.ability_name == name)
+            });
         }
     }
 

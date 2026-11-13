@@ -1569,6 +1569,20 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         AbilityType::GuardianSpirit,
         Unreached::NeedsKnob("a build that takes Guardian Spirit"),
     ),
+    // The Shadow tree (AS-416): grants; tests/shadow_talents.rs grants each
+    // in its scene pairs.
+    (
+        AbilityType::MindFlay,
+        Unreached::NeedsKnob("a build that takes Mind Flay"),
+    ),
+    (
+        AbilityType::VampiricEmbrace,
+        Unreached::NeedsKnob("a build that takes Vampiric Embrace"),
+    ),
+    (
+        AbilityType::Silence,
+        Unreached::NeedsKnob("a build that takes Silence, and the Shadowform choice"),
+    ),
 ];
 
 /// Every ability of every class's own kit is chosen somewhere in the grid, or

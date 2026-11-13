@@ -266,6 +266,10 @@ pub enum AbilityType {
     // Priest: the Holy tree (AS-415). Appended for the same reason.
     HolyNova,       // talent: Holy damage to enemies and a heal to allies within 10yd
     GuardianSpirit, // talent: +40% healing received and a killing blow prevented, 10s
+    // Priest: the Shadow tree (AS-416). Appended for the same reason.
+    MindFlay,        // talent: a 3s Shadow channel that slows its target 50%
+    VampiricEmbrace, // talent: the Priest's Shadow damage to the target heals its party
+    Silence,         // talent: silences the target for 5s; castable only in Shadowform
 }
 
 impl AbilityType {
@@ -308,7 +312,8 @@ impl AbilityType {
             | Cyclone | TravelForm | Shadowform | DivineProtection | BlessingOfSacrifice
             | SacredShield | RetributionAura | SiphonLife | AmplifyCurse | CurseOfExhaustion
             | InnerFocus | PowerInfusion | PainSuppression | Shadowburn | Conflagrate
-            | DivineFavor | AuraMastery | HolyNova | GuardianSpirit => false,
+            | DivineFavor | AuraMastery | HolyNova | GuardianSpirit | MindFlay
+            | VampiricEmbrace | Silence => false,
         }
     }
 

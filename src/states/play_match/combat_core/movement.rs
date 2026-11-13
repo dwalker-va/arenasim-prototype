@@ -786,6 +786,13 @@ pub fn move_to_target(
             // its staff (`class_ai::druid::duel_melee`). Never latched outside
             // a duel, so team pursuit is unchanged.
             crate::states::play_match::class_ai::druid::DRUID_DUEL_MELEE_STOP
+        } else if let Some(range) =
+            crate::states::play_match::class_ai::priest_shadow::shadow_pursuit_range(combatant)
+        {
+            // A Shadowform Priest with Mind Flay (AS-416) closes to its
+            // filler's reach. No other Priest holds it, so pursuit is
+            // unchanged for them.
+            range
         } else {
             combatant.class.preferred_range()
         };

@@ -77,6 +77,9 @@ const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::AuraMastery, paladin_ally_casting_by_a_rogue),
     (AbilityType::HolyNova, priest_threatened),
     (AbilityType::GuardianSpirit, priest_ally_endangered),
+    (AbilityType::MindFlay, priest_mage_chased),
+    (AbilityType::VampiricEmbrace, shadow_priest_pain_up),
+    (AbilityType::Silence, shadow_priest_healer_casting),
 ];
 
 /// A Warlock 20 yards from its kill target, a Warrior, with Corruption and
@@ -310,6 +313,72 @@ fn priest_threatened(defs: &AbilityDefinitions) -> (Scene, Who) {
 fn priest_ally_endangered(defs: &AbilityDefinitions) -> (Scene, Who) {
     let (scene, who) = priest_ally_dying(defs);
     (scene.health_of("warrior", 0.2), who)
+}
+
+/// A healthy healing Priest whose Mage teammate has an enemy Warrior on it,
+/// the Warrior 12 yards from the Priest: Mind Flay's peel. Weakened Soul on
+/// both, so no shield goes out first.
+fn priest_mage_chased(defs: &AbilityDefinitions) -> (Scene, Who) {
+    const ALLY: Who = "mage";
+    let scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PRIEST, 1, CharacterClass::Priest)
+        .aura_full(PRIEST, fortitude())
+        .aura(PRIEST, AuraType::WeakenedSoul, 10.0)
+        .targeting(WARRIOR)
+        .unit(ALLY, 1, CharacterClass::Mage)
+        .at(10.0, 0.0)
+        .aura_full(ALLY, fortitude())
+        .aura(ALLY, AuraType::WeakenedSoul, 10.0)
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(12.0, 0.0)
+        .targeting(ALLY);
+    (scene, PRIEST)
+}
+
+/// A Shadowform Priest whose own Shadow Word: Pain ticks on its kill target,
+/// an enemy Mage 20 yards off: Vampiric Embrace's moment, ahead of Mind
+/// Blast.
+fn shadow_priest_pain_up(defs: &AbilityDefinitions) -> (Scene, Who) {
+    const ENEMY: Who = "enemy mage";
+    let mut scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PRIEST, 1, CharacterClass::Priest)
+        .aura_full(PRIEST, fortitude())
+        .aura(PRIEST, AuraType::WeakenedSoul, 10.0)
+        .targeting(ENEMY)
+        .unit(ENEMY, 2, CharacterClass::Mage)
+        .at(20.0, 0.0)
+        .in_shadowform(PRIEST);
+    let me = scene.entity(PRIEST);
+    scene = scene.aura_full(
+        ENEMY,
+        Aura {
+            effect_type: AuraType::DamageOverTime,
+            duration: 15.0,
+            magnitude: 10.0,
+            tick_interval: 3.0,
+            ability_name: "Shadow Word: Pain".into(),
+            caster: Some(me),
+            break_on_damage_threshold: -1.0,
+            ..Default::default()
+        },
+    );
+    (scene, PRIEST)
+}
+
+/// A Shadowform Priest with an enemy Priest 15 yards off casting Flash Heal:
+/// Silence's moment.
+fn shadow_priest_healer_casting(defs: &AbilityDefinitions) -> (Scene, Who) {
+    const ENEMY: Who = "enemy priest";
+    let scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PRIEST, 1, CharacterClass::Priest)
+        .aura_full(PRIEST, fortitude())
+        .aura(PRIEST, AuraType::WeakenedSoul, 10.0)
+        .targeting(ENEMY)
+        .unit(ENEMY, 2, CharacterClass::Priest)
+        .at(15.0, 0.0)
+        .casting(ENEMY, AbilityType::FlashHeal)
+        .in_shadowform(PRIEST);
+    (scene, PRIEST)
 }
 
 fn considered(view: &DecisionView, ability: AbilityType) -> bool {

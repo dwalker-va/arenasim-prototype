@@ -131,6 +131,9 @@ pub fn reflect_instant_cc_in_snapshot(
                 | AuraType::Polymorph
                 | AuraType::Incapacitate
                 | AuraType::Cyclone
+                // The Priest's Silence (AS-416): a second silencer in the
+                // frame sees it.
+                | AuraType::Silence
         ),
         "reflect_instant_cc_in_snapshot called with non-CC aura type {:?}",
         aura.effect_type
