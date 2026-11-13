@@ -108,6 +108,7 @@ use arenasim::states::play_match::talent_procs::TalentProcSlot;
 use arenasim::states::play_match::talents::TalentDefinitions;
 use arenasim::states::play_match::talents::TalentEffect;
 use arenasim::states::play_match::talents::TalentId;
+use arenasim::states::play_match::wears_shadowform_look;
 use arenasim::states::play_match::DotStateVisual;
 use arenasim::states::play_match::InterruptLanding;
 use arenasim::states::play_match::SlowTint;
@@ -981,6 +982,9 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             AuraType::TravelForm => {
                 Some("pill on all fours + shift puff (TravelFormVisual → shapeshift.rs)")
             }
+            _ if wears_shadowform_look(c.applies_aura.as_ref().and_then(|a| a.compound)) => {
+                Some("violet translucent body + feet shroud while the form holds (shadowform.rs)")
+            }
             _ if AuraLandingKind::for_aura(t, &c.name)
                 == Some(AuraLandingKind::MarkOfTheWildGlyph) =>
             {
@@ -1056,10 +1060,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
         "AS-336 (Shadow Dance, the Subtlety capstone's window; AS-368 builds it)",
     ),
     (ShadowResistanceAura, "AS-134 (aura application)"),
-    (
-        Shadowform,
-        "AS-343 (Shadowform, the form on the Priest all match)",
-    ),
     (
         VampiricEmbrace,
         "AS-357 (Vampiric Embrace on the target, and its heals; scoped by AS-335)",

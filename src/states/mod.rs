@@ -680,7 +680,11 @@ impl Plugin for StatesPlugin {
         .add_systems(
             Update,
             (
-                play_match::update_stealth_visuals,
+                // Ordered against the Shadowform look, so a sync point stands
+                // between them: stealth reads a translucent body as its own
+                // fade, and unordered it could see the look's alpha on the
+                // frame it lands, before the look's marker is applied.
+                play_match::update_stealth_visuals.before(play_match::update_shadowform_visuals),
                 play_match::trigger_death_animation,
                 play_match::animate_death,
                 play_match::update_victory_celebration,
@@ -709,11 +713,17 @@ impl Plugin for StatesPlugin {
                 // composes with the form instead of excluding it, and
                 // `dress_travel_form` runs last so the parts wear a husk tint
                 // that lands this frame.
+                //
+                // The Shadowform look heads the chain: it tints the body's own
+                // material in place, so a sheep or husk landing this frame
+                // stores the already-tinted handle and gives it back when it
+                // lifts.
                 (
-                    play_match::update_polymorph_visuals, // Sheep body swap when polymorphed
-                    play_match::update_fear_visuals,      // Shadow-husk tint when feared
+                    play_match::update_shadowform_visuals, // Violet, translucent body in Shadowform
+                    play_match::update_polymorph_visuals,  // Sheep body swap when polymorphed
+                    play_match::update_fear_visuals,       // Shadow-husk tint when feared
                     play_match::update_travel_form_visuals, // Druid on all fours in Travel Form
-                    play_match::dress_travel_form,        // Form parts follow the body material
+                    play_match::dress_travel_form,         // Form parts follow the body material
                 )
                     .chain(),
                 // Fear sub-effects nested to keep the outer tuple within Bevy's 20-limit.
@@ -912,6 +922,19 @@ impl Plugin for StatesPlugin {
                 play_match::billboard_poison_clouds,
             )
                 .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // The Shadowform feet shroud: emits, follows and retires before the
+        // client particles age, and turns them after. Its own group so the
+        // chain above keeps its size.
+        .add_systems(
+            Update,
+            (
+                play_match::update_shadowform_shrouds.before(play_match::animate_client_particles),
+                play_match::billboard_shadowform_shrouds
+                    .after(play_match::animate_client_particles),
+            )
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
