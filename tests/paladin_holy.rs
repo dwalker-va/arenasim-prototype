@@ -1075,7 +1075,7 @@ fn divine_favor_and_infusion_of_light_act_in_a_match() {
 /// A Mage casting its Frostbolt beside an enemy Rogue whose Kick comes ready
 /// a second in: the Paladin raises Aura Mastery (free), and no Kick lands
 /// while it lasts. Control: without the talent the Rogue kicks the Mage.
-fn kick_match(build: Build, secs: f32) -> common::staged::Played {
+fn kick_match(build: Build, secs: f32, shock_ready_in: f32) -> common::staged::Played {
     let config = HeadlessMatchConfig {
         team1: vec!["Paladin".into(), "Mage".into()],
         team2: vec!["Rogue".into()],
@@ -1093,7 +1093,7 @@ fn kick_match(build: Build, secs: f32) -> common::staged::Played {
             // The Paladin's instants waiting, so its global cooldown is free
             // when the Kick comes; the Rogue's stun waiting, so the Mage
             // casts.
-            .cooldown(PAL, AbilityType::HolyShock, 10.0)
+            .cooldown(PAL, AbilityType::HolyShock, shock_ready_in)
             .cooldown(PAL, AbilityType::HammerOfJustice, 30.0)
             .cooldown(FOE, AbilityType::KidneyShot, 30.0)
             // The Mage rooted where it stands, and its Frost Nova waiting, so
@@ -1137,7 +1137,7 @@ fn holy_to_mastery() -> Build {
 
 #[test]
 fn aura_mastery_shields_a_cast_from_a_kick_in_a_match() {
-    let played = kick_match(holy_to_mastery(), 4.0);
+    let played = kick_match(holy_to_mastery(), 4.0, 10.0);
     let log = &played.log;
     let mastery = first_at(log, "Paladin #1 casts Aura Mastery").unwrap_or_else(|| panic!("{log}"));
     for unit in ["Paladin #1", "Mage #2"] {
@@ -1156,7 +1156,7 @@ fn aura_mastery_shields_a_cast_from_a_kick_in_a_match() {
     );
     assert!(mana_paid(&played, (1, 0), AuraType::SilenceInterruptImmunity) < 0.5);
 
-    let control = kick_match(Build::default(), 4.0);
+    let control = kick_match(Build::default(), 4.0, 10.0);
     assert!(
         !lines(&control.log, "interrupts Team 1 Mage").is_empty(),
         "{}",
@@ -1282,7 +1282,7 @@ fn divine_favor_and_aura_mastery_start_their_cooldowns() {
     );
     assert_eq!(lines(&log, "casts Divine Favor").len(), 1, "{log}");
 
-    let log = kick_match(holy_to_mastery(), 26.0).log;
+    let log = kick_match(holy_to_mastery(), 26.0, 10.0).log;
     let mastery: Vec<f32> = lines(&log, "Paladin #1 casts Aura Mastery")
         .into_iter()
         .map(at)
@@ -1358,4 +1358,22 @@ fn the_holy_tree_reads() {
         assert_eq!(lines.len(), usize::from(talent.max_rank), "{id:?}");
         assert!(lines.iter().all(|l| !l.is_empty()), "{id:?}");
     }
+}
+
+/// Aura Mastery is off the global cooldown (Wrath 31821 has no recovery
+/// category): with its Holy Shock coming ready a moment after the gates, the
+/// Paladin raises Aura Mastery for its casting Mage and shocks the Rogue on
+/// its next decisions, not a global cooldown later. Divine Favor's is pinned
+/// by `divine_favor_and_infusion_of_light_act_in_a_match`.
+#[test]
+fn aura_mastery_leaves_the_global_cooldown_free() {
+    let log = kick_match(holy_to_mastery(), 3.0, 0.1).log;
+    let mastery =
+        first_at(&log, "Paladin #1 casts Aura Mastery").unwrap_or_else(|| panic!("{log}"));
+    let shock = first_at(&log, "Paladin #1 casts Holy Shock (Damage)")
+        .unwrap_or_else(|| panic!("no Holy Shock:\n{log}"));
+    assert!(
+        shock >= mastery && shock - mastery < 0.2,
+        "{mastery} -> {shock}: the shock waited a global cooldown\n{log}"
+    );
 }
