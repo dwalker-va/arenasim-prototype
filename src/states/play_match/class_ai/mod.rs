@@ -939,6 +939,26 @@ impl<'a> CombatContext<'a> {
         threat_info.distance_to(my_info.position) > preferred
     }
 
+    /// Whether `target` carries `caster`'s OWN damage over time from the
+    /// ability named `ability_name` — a DoT's "already applied" gate.
+    ///
+    /// A periodic effect is per caster: every caster's copy lands and ticks
+    /// beside the others' (`apply_pending_auras` refuses no
+    /// `DamageOverTime`), so a teammate's Rupture or Corruption — or a second
+    /// Warlock's Corruption — is not this caster's, and does not stand for it.
+    /// Never gate a DoT on "any DoT" or on the spell's name alone. The type is
+    /// part of the key: a dispelled Unstable Affliction silences its dispeller
+    /// with an aura of the same name and caster, and that is not the DoT.
+    pub fn has_own_dot(&self, caster: Entity, target: Entity, ability_name: &str) -> bool {
+        self.active_auras.get(&target).is_some_and(|auras| {
+            auras.iter().any(|a| {
+                a.effect_type == AuraType::DamageOverTime
+                    && a.caster == Some(caster)
+                    && a.ability_name == ability_name
+            })
+        })
+    }
+
     /// Check if target has a break-on-any-damage CC from a friendly caster.
     /// Uses threshold-based detection: any aura with `break_on_damage_threshold == 0.0`
     /// (breaks on ANY damage) from a same-team caster is protected.
