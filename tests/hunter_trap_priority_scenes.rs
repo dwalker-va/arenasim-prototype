@@ -425,3 +425,29 @@ fn a_healer_in_crowd_control_is_forecast_standing_still() {
     assert_peeled(&build().decide(ME));
     assert_held(&build().aura(PRIEST, AuraType::Stun, 0.3).decide(ME));
 }
+
+/// The healer's slows are forecast too, apart from the Hunter's. The Priest
+/// walking away as fast as the Hunter closes stays out of reach. At 30% of its
+/// speed the Hunter gains enough to bring the freeze inside the horizon, so
+/// the peel is held. At 40%, the freeze stays just past the horizon and the
+/// peel goes out.
+#[test]
+fn a_slowed_healer_is_forecast_at_its_slowed_speed() {
+    let build = || {
+        Scene::new()
+            .unit(ME, 1, Hunter)
+            .at(0.0, 0.0)
+            .facing(1.0, 0.0)
+            .targeting(WARRIOR)
+            .unit(WARRIOR, 2, Warrior)
+            .at(10.0, 0.0)
+            .targeting(ME)
+            .unit(PRIEST, 2, Priest)
+            .at(trap_range() - 2.0, 0.0)
+            .facing(1.0, 0.0)
+            .cooldown(ME, AbilityType::ConcussiveShot, 5.0)
+    };
+    assert_peeled(&build().decide(ME));
+    assert_held(&slowed(build(), PRIEST, 0.3).decide(ME));
+    assert_peeled(&slowed(build(), PRIEST, 0.4).decide(ME));
+}

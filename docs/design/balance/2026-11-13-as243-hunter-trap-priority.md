@@ -24,7 +24,7 @@ each moves along this frame's heading at the speed its slows leave it, and not
 at all while rooted or in hard crowd control (`hunter::forecast_velocity`). The
 Peel play's Frost Trap (a teammate in danger) is not held.
 
-Scenes: `tests/hunter_trap_priority_scenes.rs`, ten pairs, one per condition.
+Scenes: `tests/hunter_trap_priority_scenes.rs`, 17 scenes, each paired with its control: one per condition, including a rooted or slowed Hunter, a rooted, stunned or slowed healer, and the Peel play's Frost Trap.
 
 ## What the peel meets
 
