@@ -25,8 +25,9 @@ use crate::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementCo
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::components::{
-    ActiveAuras, AuraType, DRTracker, HealingRefused, MovementDirective, MovementGoal, Pet,
-    PetType, Totem, TotemElement, TrapLaunchProjectile, TrapType,
+    ActiveAuras, AuraType, DRTracker, FormationMemory, HealerPosture, HealingRefused,
+    MovementDirective, MovementGoal, Pet, PetType, Totem, TotemElement, TrapLaunchProjectile,
+    TrapType,
 };
 use crate::states::play_match::constants::PET_SLOT_BASE;
 use crate::states::play_match::decision_trace::{DecisionTrace, TraceWriter};
@@ -91,6 +92,11 @@ pub struct ObservedCombatant {
     /// only where it ends up — the executor stops short of a spot it cannot
     /// reach, which hides a bad goal from the position track.
     pub point_goal: Option<Vec3>,
+    /// A healer's FREE formation memory (`HealerPosture::formation`): the
+    /// heading, the kept sight exit and the reach repair's kept spot or stay.
+    /// Lets probes name which stage of the formation machine moved its goal.
+    /// `None` for a unit with no healer posture.
+    pub formation: Option<FormationMemory>,
 }
 
 /// A read-only snapshot of one Shaman totem on a frame. Totems are NOT
@@ -1177,6 +1183,7 @@ fn observe_frame(world: &World) -> FrameObservation {
                         MovementGoal::Point(p) => Some(p),
                         _ => None,
                     }),
+                formation: entity_ref.get::<HealerPosture>().map(|p| p.formation),
             },
         );
     }
@@ -1194,6 +1201,31 @@ fn observe_frame(world: &World) -> FrameObservation {
         trap_launches,
         healing_refused,
     }
+}
+
+/// [`build_headless_app`] with `stage` landed on it as the gates open, the
+/// way [`run_headless_match_staged`] lands one: for a test that drives the
+/// app itself and reads its world at the end (`tests/results_damage_totals.rs`).
+pub fn build_headless_app_staged(
+    config: &HeadlessMatchConfig,
+    suppress_log: bool,
+    preloaded: Option<&PreloadedConfigs>,
+    stage: Stage,
+) -> App {
+    let mut app = build_headless_app(config, suppress_log, preloaded);
+    add_stage(&mut app, stage);
+    app
+}
+
+/// Land `stage` between `update_countdown` and every other combat system of
+/// its frame, so nothing runs on a half-built world.
+fn add_stage(app: &mut App, stage: Stage) {
+    app.insert_resource(PendingStage(Some(stage))).add_systems(
+        FixedUpdate,
+        land_stage
+            .after(systems::update_countdown)
+            .before(systems::update_dampening),
+    );
 }
 
 /// Build the headless match [`App`] for `config`: minimal plugins, the fixed
@@ -1298,12 +1330,7 @@ fn run_match_impl(
 
     let mut app = build_headless_app(&config, suppress_log, preloaded);
     if let Some(stage) = stage {
-        app.insert_resource(PendingStage(Some(stage))).add_systems(
-            FixedUpdate,
-            land_stage
-                .after(systems::update_countdown)
-                .before(systems::update_dampening),
-        );
+        add_stage(&mut app, stage);
     }
 
     // Registration guard (debug builds / cargo test only): movement config

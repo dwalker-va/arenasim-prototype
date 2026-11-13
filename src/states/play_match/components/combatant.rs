@@ -1,7 +1,7 @@
 use super::super::abilities::{AbilityType, ScalingStat, SpellSchool};
 use super::super::ability_book::AbilityBook;
 use super::super::ability_config::AbilityConfig;
-use super::super::constants::{OFFHAND_DAMAGE_MULTIPLIER, UNARMED_WEAPON_SPEED};
+use super::super::constants::{OFFHAND_DAMAGE_MULTIPLIER, PASSIVE_SPEED_CAP, UNARMED_WEAPON_SPEED};
 use super::super::equipment::{ItemDefinitions, ItemSlot, Loadout};
 use super::super::match_config::{
     self, MageArmor, PaladinAura, PriestForm, RogueOpener, RoguePoison, WarlockCurse, WarriorShout,
@@ -324,6 +324,16 @@ pub struct TrapRetarget {
     pub spring_by: f32,
 }
 
+/// A combatant's passive speed: its `natural` (class) speed raised by the ONE
+/// passive speed term, `strongest` — the strongest of its passive sources
+/// (an item's `movement_speed`, a talent's), never their sum — capped at
+/// [`PASSIVE_SPEED_CAP`], as TBC caps it. The one rule the spawn and the View
+/// Combatant sheet use. A temporary speed aura is outside it: it multiplies
+/// the result in `combat_core::effective_movement_speed`.
+pub fn passive_movement_speed(natural: f32, strongest: f32) -> f32 {
+    natural * (1.0 + strongest.clamp(0.0, PASSIVE_SPEED_CAP))
+}
+
 /// Core combatant component containing all combat state and stats.
 #[derive(Component, Clone)]
 pub struct Combatant {
@@ -442,8 +452,14 @@ pub struct Combatant {
     pub nature_resistance: f32,
     /// Holy spell resistance
     pub holy_resistance: f32,
-    /// Base movement speed in units per second (modified by auras/debuffs)
+    /// Movement speed in yards per second, passive speed included
+    /// ([`passive_movement_speed`]); temporary auras multiply it as it moves.
     pub base_movement_speed: f32,
+    /// The speed before any passive source: the class's, or a pet's.
+    pub natural_movement_speed: f32,
+    /// The strongest passive speed source offered so far, a fraction of
+    /// natural speed, uncapped as offered ([`Combatant::offer_passive_speed`]).
+    pub passive_speed: f32,
     /// Current target entity for damage (None if no valid target)
     pub target: Option<Entity>,
     /// CC target entity (separate from damage target, None = use heuristics)
@@ -745,6 +761,8 @@ impl Combatant {
             nature_resistance: 0.0,
             holy_resistance: 0.0,
             base_movement_speed: movement_speed,
+            natural_movement_speed: movement_speed,
+            passive_speed: 0.0,
             target: None,
             cc_target: None,
             damage_dealt: 0.0,
@@ -844,6 +862,7 @@ impl Combatant {
                 pet.spell_power = owner.spell_power * 0.3;
                 pet.crit_chance = 0.05;
                 pet.base_movement_speed = pet_type.movement_speed();
+                pet.natural_movement_speed = pet.base_movement_speed;
                 pet
             }
             PetType::Spider | PetType::Boar | PetType::Bird => {
@@ -863,6 +882,7 @@ impl Combatant {
                 pet.spell_power = 0.0;
                 pet.crit_chance = 0.05;
                 pet.base_movement_speed = pet_type.movement_speed();
+                pet.natural_movement_speed = pet.base_movement_speed;
                 pet
             }
         }
@@ -1127,6 +1147,9 @@ impl Combatant {
         // weapon" — an empty or relic-filled live socket must end here, and
         // that is the case the class ladder cannot express.
         self.auto_attack_kind = AutoAttackKind::None;
+        // Every item's movement speed is a passive source: the strongest
+        // feeds the one passive term, after the loop.
+        let mut strongest_speed = 0.0f32;
 
         for (slot, item_id) in loadout {
             let Some(item) = items.get(item_id) else {
@@ -1140,7 +1163,7 @@ impl Combatant {
             self.attack_power += item.attack_power;
             self.spell_power += item.spell_power;
             self.crit_chance += item.crit_chance;
-            self.base_movement_speed += item.movement_speed;
+            strongest_speed = strongest_speed.max(item.movement_speed);
             self.armor += item.armor;
             self.fire_resistance += item.fire_resistance;
             self.frost_resistance += item.frost_resistance;
@@ -1229,6 +1252,8 @@ impl Combatant {
             }
         }
 
+        self.offer_passive_speed(strongest_speed);
+
         // The off hand accompanies the main hand. A main-hand class's empty
         // main hand already leaves it no auto-attack at all (its live kind is
         // `None`); a Hunter with no melee main hand has its bow, so its off
@@ -1252,6 +1277,16 @@ impl Combatant {
         } else {
             0.0
         }
+    }
+
+    /// Offer a passive speed source (an item's `movement_speed`, a talent's),
+    /// a fraction of natural speed. Passive sources do not stack: the
+    /// strongest offered so far is the passive term, capped, and the
+    /// combatant's speed is set from it ([`passive_movement_speed`]).
+    pub fn offer_passive_speed(&mut self, fraction: f32) {
+        self.passive_speed = self.passive_speed.max(fraction);
+        self.base_movement_speed =
+            passive_movement_speed(self.natural_movement_speed, self.passive_speed);
     }
 }
 
