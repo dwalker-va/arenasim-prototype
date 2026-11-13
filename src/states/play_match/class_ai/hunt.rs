@@ -60,9 +60,11 @@
 //!   healer clear of the widened shadow ([`pincer_point`]): 4-14yd off the
 //!   skin, within [`HUNT_REACH`]. As the healer moves round, that spot moves
 //!   with it, so the two close in from both sides.
-//! - Until a unit first sees the healer it takes the shorter way to its side,
-//!   and stops to cast if it gets sight on the way. After that a blind unit
-//!   on the wrong side goes round the BACK of the pillar to its own
+//! - Until a unit first sees the healer (its onset walk), it takes the
+//!   shorter way round to its side's onset point — the far station a unit
+//!   walked to before AS-404 — and stops to cast if it gets sight on the way
+//!   ([`Station::onset_round_back`]). After that a blind unit on the wrong
+//!   side always goes round the BACK of the pillar to its own
 //!   ([`round_the_back`]), never across the healer's face — the rule that
 //!   stops both hunters trailing the healer round one side.
 //! - With no spot on its side that sees the healer (a wall), the unit walks
@@ -179,9 +181,14 @@ pub struct Station {
     /// sight. While set the unit stands and casts.
     pub sighted: bool,
     /// Whether the unit has been [`Self::sighted`] since it took its side:
-    /// its onset walk (the shorter way to its side) is over, and from now on
-    /// it goes round the back of the pillar to reach its side.
+    /// its onset walk is over, and from now on it goes round the back of the
+    /// pillar to reach its side.
     pub onset_walk_done: bool,
+    /// Whether the unit's onset walk goes round the back: the shorter walk
+    /// from where it took its side to that side's onset point ([`stations`])
+    /// passes behind the pillar, not across the healer's face. Fixed when
+    /// the unit takes its side.
+    pub onset_round_back: bool,
 }
 
 /// One live hunt: the healer, its pillar, the axis and who holds which
@@ -402,6 +409,17 @@ const BACK_TOLERANCE: f32 = 20.0 * std::f32::consts::PI / 180.0;
 /// the unit's own circle, re-aimed as it walks.
 const BACK_CARROT: f32 = 40.0 * std::f32::consts::PI / 180.0;
 
+/// Whether the shorter walk round `ring`'s pillar from `from` to `to` (on
+/// opposite sides of the healer's bearing) passes behind the pillar rather
+/// than across the healer's face.
+fn crosses_the_back(ring: &Ring, from: Vec2, to: Vec2, healer_bearing: f32) -> bool {
+    let (a, b) = (
+        signed_offset(ring, from, healer_bearing),
+        signed_offset(ring, to, healer_bearing),
+    );
+    a.signum() != b.signum() && a.abs() + b.abs() > std::f32::consts::PI
+}
+
 /// `p`'s bearing round `ring`'s pillar less the healer's, in (-π, π].
 fn signed_offset(ring: &Ring, p: Vec2, healer_bearing: f32) -> f32 {
     (ring.bearing(p) - healer_bearing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
@@ -535,6 +553,7 @@ fn assign(
                     hold: false,
                     sighted: false,
                     onset_walk_done: false,
+                    onset_round_back: false,
                 });
             }
             None => rest.push((unit, at)),
@@ -558,6 +577,7 @@ fn assign(
                 hold: false,
                 sighted: false,
                 onset_walk_done: false,
+                onset_round_back: false,
             });
         }
         (_, 1) => {
@@ -572,6 +592,7 @@ fn assign(
                 hold: false,
                 sighted: false,
                 onset_walk_done: false,
+                onset_round_back: false,
             });
         }
         _ => {
@@ -590,6 +611,7 @@ fn assign(
                     hold: false,
                     sighted: false,
                     onset_walk_done: false,
+                    onset_round_back: false,
                 });
             }
         }
@@ -710,6 +732,13 @@ pub fn classify(
         let before = prev_window
             .and_then(|w| w.stations.iter().find(|s| s.unit == station.unit))
             .filter(|s| s.slot == station.slot);
+        // The onset walk's way round, fixed when the unit takes its side: the
+        // shorter walk to its side's onset point (`assign` left it in
+        // `point`), the one a far-station walker took before AS-404.
+        station.onset_round_back = match before {
+            Some(s) => s.onset_round_back,
+            None => crosses_the_back(&ring, xz(me), station.point, healer_bearing),
+        };
         let sees = has_line_of_sight(&snapshot.obstacles, me, healer.position);
         let was_sighted = before.is_some_and(|s| s.sighted);
         let sighted =
@@ -727,8 +756,17 @@ pub fn classify(
         let offset = signed_offset(&ring, xz(me), healer_bearing);
         let wrong_side = offset * side < -PINCER_STEP * 0.5
             && offset.abs() < std::f32::consts::PI - BACK_TOLERANCE;
-        if station.onset_walk_done && wrong_side {
-            station.point = round_the_back(&ring, xz(me), side);
+        if wrong_side && (station.onset_walk_done || station.onset_round_back) {
+            // The carrot is kept until the unit is within half a step of it,
+            // so the walk is re-aimed every [`BACK_CARROT`] / 2, not every
+            // frame.
+            let carrot = before
+                .filter(|s| !s.sighted && !on_side(&ring, s.point, healer_bearing, side))
+                .map(|s| s.point)
+                .filter(|&p| {
+                    signed_offset(&ring, p, ring.bearing(xz(me))).abs() > BACK_CARROT * 0.5
+                });
+            station.point = carrot.unwrap_or_else(|| round_the_back(&ring, xz(me), side));
             continue;
         }
         let kept = before
@@ -793,10 +831,12 @@ impl CombatContext<'_> {
     }
 }
 
-/// Walk `entity` to its hunt `station` and hold it: a `Point` directive on
-/// the station, re-issued once its commit window has run or when it names
-/// another point, and traced (`MovementTrigger::Hunt`) as each walk to a new
-/// station begins. Returns whether the unit is still walking (beyond
+/// Walk `entity` to its hunt point `station` (or hold it: a sighted unit's
+/// point is where it stands): a `Point` directive on it, re-issued once its
+/// commit window has run or when it names another point, and traced
+/// (`MovementTrigger::Hunt`) as each new walk begins — to a point farther
+/// than [`STATION_ARRIVED`] from the live one, not the drift of a point that
+/// follows the healer. Returns whether the unit is still walking (beyond
 /// [`STATION_ARRIVED`]).
 #[allow(clippy::too_many_arguments)]
 pub fn walk_to_station(
@@ -817,6 +857,9 @@ pub fn walk_to_station(
         _ => None,
     });
     let same = current.is_some_and(|(p, _)| p.distance(station) < 1e-3);
+    // A point that drifts with the healer is the same walk: only a point
+    // farther than [`STATION_ARRIVED`] from the live one begins a new walk.
+    let new_walk = current.is_none_or(|(p, _)| p.distance(station) > STATION_ARRIVED);
     let live = current.is_some_and(|(_, d)| now < d.committed_until && now < d.expires);
     if !(same && live) {
         commands.entity(entity).try_insert(MovementDirective {
@@ -824,7 +867,7 @@ pub fn walk_to_station(
             expires: now + ttl.max(commit),
             committed_until: now + commit,
         });
-        if !same {
+        if new_walk {
             if let Some(info) = ctx.combatants.get(&entity) {
                 let actor = crate::states::play_match::decision_trace::ActorView::from_info(info);
                 let mut builder = decision_trace.start_movement_decision(actor, None);

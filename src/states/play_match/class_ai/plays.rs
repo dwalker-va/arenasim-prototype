@@ -371,6 +371,7 @@ mod tests {
                     hold: true,
                     sighted: false,
                     onset_walk_done: false,
+                    onset_round_back: false,
                 }]
                 .into_iter()
                 .collect(),

@@ -477,6 +477,11 @@ lines, 671 / 576 / 13), and `TeamPlan` with the focus withheld reproduces
 
 ### 9.1 The shape
 
+**Superseded in part by AS-404 (§10):** the stations and the hold rule below
+are replaced by an active pincer, and the hunt now holds while the healer is
+in its pillar's shadow from the team. The rest of §9 records AS-394 as built
+and measured.
+
 `class_ai::hunt`, a `TeamPlan` play; the module docs and CLAUDE.md (*Plays*)
 carry the rules. In short:
 

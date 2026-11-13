@@ -17,9 +17,9 @@
 //! 1. **Nobody stands blind.** No hunter stands still without sight of the
 //!    hider for longer than a global cooldown while it is free to move: not
 //!    crowd-controlled, rooted, casting or channelling.
-//! 2. **Opposite sides.** Whenever both hunters stand on one side of the
-//!    hider and neither sees it, they do not both close on its face from that
-//!    side: one of them goes round the back.
+//! 2. **Opposite sides.** Whenever both hunters stand blind on one side of
+//!    the hider, they do not both close on its face from that side: one of
+//!    them goes round the back.
 //! 3. **The hunt holds in the shadow.** On every frame the hider stands
 //!    beyond `HUNT_LEAVE` of its pillar's skin but in that pillar's shadow from
 //!    a hunter, the hunt is on.
@@ -209,13 +209,11 @@ pub struct Reading {
     pub longest_blind_still: f32,
     /// Seconds both hunters stood blind, after both had first seen the hider
     /// (their onset walks over), and of those the seconds they had stood
-    /// together on one side of it for longer than [`SAME_SIDE_SETTLE`].
+    /// together on one side of it for longer than [`SAME_SIDE_SETTLE`], and
+    /// of those the seconds in which BOTH walked toward its face.
     pub both_blind: f32,
     pub same_side_blind: f32,
-    /// Frames the hider stood beyond `HUNT_LEAVE` in its pillar's shadow from
-    /// a hunter, and of those the frames with no hunt on.
-    pub shadow_step_off: u32,
-    pub shadow_step_off_unhunted: u32,
+    pub both_closing: f32,
 }
 
 /// The hunt's windows on the app clock, and the pillar of each.
@@ -291,36 +289,14 @@ pub fn read(e: &Endgame, played: &Played, obstacles: &[ObstacleVolume]) -> Readi
             sighted_for[i] = if sees[i] { sighted_for[i] + dt } else { 0.0 };
             seen_once[i] |= sighted_for[i] >= SEEN_ONCE;
         }
-        // The pillar the hider is nearest (the hunt's, while one is on).
-        let nearest = obstacles
-            .iter()
-            .enumerate()
-            .map(|(i, o)| (i, o.footprint_disc()))
-            .min_by(|a, b| {
-                (a.1 .0.distance(hp) - a.1 .1).total_cmp(&(b.1 .0.distance(hp) - b.1 .1))
-            })
-            .map(|(i, _)| i)
-            .unwrap_or(0);
         let hunt = hunting_at(t);
-        let pillar = hunt.unwrap_or(nearest);
-        let (center, radius) = obstacles[pillar].footprint_disc();
-
-        // 3. The shadow step-off.
-        if hp.distance(center) - radius > HUNT_LEAVE
-            && pos.iter().any(|&p| in_shadow(obstacles, pillar, p, hp))
-            && windows.iter().any(|w| w.2 == pillar && w.0 <= t)
-        {
-            r.shadow_step_off += 1;
-            if hunt.is_none() {
-                r.shadow_step_off_unhunted += 1;
-            }
-        }
-        if hunt.is_none() {
+        let Some(pillar) = hunt else {
             prev = Some((t, pos, hp));
             blind_still = [0.0; 2];
             together = 0.0;
             continue;
-        }
+        };
+        let (center, _) = obstacles[pillar].footprint_disc();
         r.hunt_frames += 1;
 
         // 1. Nobody stands blind.
@@ -347,6 +323,15 @@ pub fn read(e: &Endgame, played: &Played, obstacles: &[ObstacleVolume]) -> Readi
             together = if one_side { together + dt } else { 0.0 };
             if together > SAME_SIDE_SETTLE {
                 r.same_side_blind += dt;
+                if let Some((_, before, hider_before)) = prev {
+                    // Each hunter's own walk, measured against where the
+                    // hider stood a frame ago so that its run does not count.
+                    let was = before.map(|p| signed_deg(center, hider_before, p).abs());
+                    let now = pos.map(|p| signed_deg(center, hider_before, p).abs());
+                    if now[0] < was[0] - 1e-3 && now[1] < was[1] - 1e-3 {
+                        r.both_closing += dt;
+                    }
+                }
             }
         } else {
             together = 0.0;
@@ -416,26 +401,26 @@ fn no_hunter_stands_still_without_sight() {
     );
 }
 
-/// Claim 2: once both hunters have seen the hider, they are never blind
-/// together on one side of it: whenever the hider hides from both, they
-/// stand on opposite sides, or one is on its way round. The control
+/// Claim 2: once both hunters have seen the hider, two blind hunters on one
+/// side of it never both close on its face: one of them is on its way round
+/// the back, so the two come at it from opposite sides. The control
 /// (excepted): the two trail it round one side.
 #[test]
-fn blind_hunters_stand_on_opposite_sides() {
+fn blind_hunters_close_from_opposite_sides() {
     let on = readings(true);
-    let both_blind: f32 = on.iter().map(|(_, r)| r.both_blind).sum();
+    let same_side: f32 = on.iter().map(|(_, r)| r.same_side_blind).sum();
     assert!(
-        both_blind > 2.0,
-        "the hider hid from both hunters: {both_blind:.1}s"
+        same_side > 0.5,
+        "the situation: two blind hunters on one side ({same_side:.2}s)"
     );
     for (name, r) in &on {
         assert!(
-            r.same_side_blind == 0.0,
-            "{name}: blind together on one side for {:.2}s",
-            r.same_side_blind
+            r.both_closing == 0.0,
+            "{name}: both closed on the face from one side for {:.2}s",
+            r.both_closing
         );
     }
-    let off: f32 = readings(false).iter().map(|(_, r)| r.same_side_blind).sum();
+    let off: f32 = readings(false).iter().map(|(_, r)| r.both_closing).sum();
     assert!(
         off > 1.0,
         "the control: excepted, they trail it ({off:.1}s)"
@@ -496,6 +481,7 @@ fn hunt_under_way(pillar: usize, axis: f32, onset_walk_done: bool) -> impl FnOnc
             hold: true,
             sighted: false,
             onset_walk_done,
+            onset_round_back: false,
         };
         w.resource_mut::<Situations>().teams[0].hunt = Some(HuntWindow {
             subject,
@@ -719,6 +705,84 @@ fn the_hunt_holds_while_the_hider_stands_in_the_shadow() {
         assert!(
             end.is_some_and(|e| e < 0.1),
             "seed {seed}: the control: in the open, the hunt ends at once ({end:?})"
+        );
+    }
+}
+
+/// The onset walk of the far hunter keeps the short route to its side's
+/// onset point (the far station before AS-404), and here that route is
+/// round the back: from -120° the onset point at +90° is 150° away behind
+/// the pillar and 210° across the hider's face, though the nearest spot that
+/// sees the hider on its side is the shorter walk across the face. The hunt
+/// begins as played (no staged hunt): our Priest at -110° takes the near
+/// (-90°) side, our Mage the far one.
+///
+/// The control: the play excepted, the Mage's own walk for sight closes on
+/// the hider's face from the Priest's side.
+#[test]
+fn the_far_hunters_onset_walk_takes_the_short_route_to_its_side() {
+    let (_, center) = SE;
+    let stage = |hunt: bool| {
+        let (mx, mz) = round(center, -120.0, 14.0);
+        let (px, pz) = round(center, -110.0, 12.0);
+        let config = HeadlessMatchConfig {
+            team1_exceptions: if hunt {
+                Default::default()
+            } else {
+                [("Hunt".into(), every_exception_entry(PlayId::Hunt))].into()
+            },
+            ..two_v_one(0)
+        };
+        let stage = Stage::new()
+            .place(HIDER, 47.0, -20.0)
+            .aura(HIDER, root())
+            .place(MAGE, mx, mz)
+            .target(MAGE, HIDER)
+            .place(PRIEST, px, pz)
+            .target(PRIEST, HIDER)
+            .target(HIDER, PRIEST);
+        (config, stage)
+    };
+    let closes_on_the_face = |seed: u64, hunt: bool| {
+        let (config, stage) = stage(hunt);
+        let t = track(
+            &play(
+                HeadlessMatchConfig {
+                    random_seed: Some(seed),
+                    ..config
+                },
+                stage,
+            ),
+            center,
+            25.0,
+        );
+        let first = t.frames[0];
+        assert!(
+            first.1[0] < -110.0 && !first.2[0],
+            "seed {seed}: the situation: the Mage blind at {:.0}°",
+            first.1[0]
+        );
+        let start = first.1[0].abs();
+        let closest = t
+            .frames
+            .iter()
+            .take_while(|f| f.1[0] < 0.0)
+            .map(|f| f.1[0].abs())
+            .fold(start, f32::min);
+        let reached = t.frames.iter().any(|f| f.1[0] > 0.0);
+        (closest < start - 3.0, reached, closest, start)
+    };
+    for seed in [1, 2, 3] {
+        let (closed, reached, closest, start) = closes_on_the_face(seed, true);
+        assert!(
+            !closed,
+            "seed {seed}: the Mage walked toward the face ({start:.0}° -> {closest:.0}°)"
+        );
+        assert!(reached, "seed {seed}: the Mage never reached its own side");
+        let (closed, ..) = closes_on_the_face(seed, false);
+        assert!(
+            closed,
+            "seed {seed}: the control: excepted, it closes on the face"
         );
     }
 }

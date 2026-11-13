@@ -164,6 +164,28 @@ fn a_healer_that_runs_to_another_pillar_is_hunted_there() {
     let h = hunt(&mut s).expect("a new hunt");
     assert_eq!(h.pillar, 1);
     assert_eq!(h.stations.len(), 2);
+
+    // A second pillar close behind the first: at it, the hider is still in
+    // the first one's shadow from the hunters, but it is hunted at the
+    // pillar it reached.
+    let behind = ObstacleVolume::Cylinder {
+        center_xz: Vec2::new(22.0, 0.0),
+        radius: 3.0,
+        base_y: 0.0,
+        height: 10.0,
+    };
+    let mut s = scene().obstacles(vec![pillar(), behind]);
+    s.set_position(MAGE, -30.0, 2.0);
+    s.set_position(PRIEST, -30.0, -2.0);
+    assert_eq!(hunt(&mut s).unwrap().pillar, 0);
+    s.set_position(HIDER, 26.5, 0.0);
+    assert!(in_shadow(
+        &[pillar()],
+        0,
+        Vec2::new(-30.0, 2.0),
+        Vec2::new(26.5, 0.0)
+    ));
+    assert_eq!(hunt(&mut s).map(|h| h.pillar), Some(1));
 }
 
 #[test]
