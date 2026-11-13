@@ -59,7 +59,8 @@ pub enum AuraType {
     /// Complete damage immunity - all incoming damage is negated, all hostile auras are blocked.
     /// Used by Divine Shield. Magnitude unused (always 1.0 by convention).
     DamageImmunity,
-    /// Incapacitate - target is frozen in place, can't attack/cast, breaks on ANY damage.
+    /// Incapacitate - target is held in place, can't attack/cast (Freezing Trap). Whether
+    /// damage breaks it is its source's `break_on_damage`.
     /// Unlike Polymorph (target wanders), incapacitated targets stand still.
     /// Shares DRCategory::Incapacitates with Polymorph.
     /// Used by Freezing Trap.
@@ -620,7 +621,7 @@ impl AuraType {
                 "The target is transformed and wanders harmlessly. Any damage ends it immediately."
             }
             AuraType::Incapacitate => {
-                "The target is frozen where it stands, unable to act. Any damage frees it."
+                "The target is held where it stands, unable to move, attack or cast."
             }
             AuraType::Cyclone => {
                 "The target is swept up and cannot act. Nothing can damage or heal it until the \
@@ -2649,6 +2650,18 @@ mod tests {
         Aura {
             effect_type,
             ..Default::default()
+        }
+    }
+
+    /// The Incapacitate MECHANIC sentence describes every incapacitate, not
+    /// the first one written (Freezing Trap's "frozen"), and leaves whether
+    /// damage breaks it to the source's own text (`ability_text`, from its
+    /// `break_on_damage`). AS-486.
+    #[test]
+    fn the_incapacitate_mechanic_names_no_source() {
+        let text = AuraType::Incapacitate.description().to_lowercase();
+        for source_word in ["frozen", "freez", "ice", "damage"] {
+            assert!(!text.contains(source_word), "{source_word:?} in {text:?}");
         }
     }
 
