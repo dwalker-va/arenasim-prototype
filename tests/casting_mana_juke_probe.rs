@@ -5,7 +5,9 @@
 //! dies first, the rest of the match is the Mage+Priest grinding down a lone
 //! Shaman around the pillars, and the Shaman jukes the Mage's Frostbolts behind
 //! cover — the probe judges every match of a seed bank ([`SEED_BANK`]) in which
-//! that happened.
+//! that happened. Each match is STAGED with the Warrior nearly dead as the
+//! gates open ([`stage`]), so the Warrior dies first and the lone-Shaman 2v1
+//! is most of the match.
 //!
 //! BEFORE the fix, every juked Frostbolt still cost full mana at completion, so
 //! the Mage bankrupted itself — its mana collapsed to ~0 (measured min mana_pct
@@ -18,10 +20,12 @@
 //! economy. The load-bearing assertion here is therefore the mana trajectory,
 //! not the duration. Duration is only sanity-bounded well under the cap.
 //!
-//! Observed via `run_headless_match_observed`, which is read-only by
-//! construction and proven non-perturbing by the determinism battery.
+//! Observed via `run_headless_match_staged`, whose observer is read-only by
+//! construction.
 
-use arenasim::headless::{run_headless_match_observed, HeadlessMatchConfig, MatchResult};
+use arenasim::headless::{
+    run_headless_match_staged, HeadlessMatchConfig, MatchResult, Stage, Unit,
+};
 use arenasim::CharacterClass;
 
 /// The seeds the probe plays. It judges the matches in which the situation
@@ -30,10 +34,12 @@ use arenasim::CharacterClass;
 /// them, so a change that moves the RNG stream moves WHICH seeds qualify, not
 /// whether the probe judges anything. (A single pinned seed carried this probe
 /// until it went stale twice: AS-203 moved the Priest's path, and AS-282 the
-/// Mage's Ice Barrier timing under a Frost lockout.)
+/// Mage's Ice Barrier timing under a Frost lockout.) Unstaged, the bank held
+/// exactly four juked 2v1s, and a 2% change of every unit's speed (AS-464)
+/// left one; staged ([`stage`]), it holds seven.
 const SEED_BANK: std::ops::Range<u64> = 0..90;
 
-/// The fewest juked 2v1 matches the bank must hold (8 on AS-282's `main`).
+/// The fewest juked 2v1 matches the bank must hold (7 staged, AS-464).
 const MIN_JUKED_MATCHES: usize = 4;
 
 /// One per-frame sample of the state this probe cares about. The 2v1 window is
@@ -83,6 +89,12 @@ fn log_time(line: &str) -> Option<f32> {
     line[open + 1..close].trim().parse::<f32>().ok()
 }
 
+/// The enemy Warrior at 2% health as the gates open: it dies first, so the
+/// rest of the match is the 2v1 the probe is about.
+fn stage() -> Stage {
+    Stage::new().health(Unit::new(2, 0), 0.02)
+}
+
 fn measure(seed: u64) -> Measured {
     // The combat log carries the fizzles; suppress_log gates output only, not
     // the sim, so writing it leaves the match unchanged.
@@ -93,7 +105,7 @@ fn measure(seed: u64) -> Measured {
     cfg.output_path = Some(log_path.to_string_lossy().into_owned());
 
     let mut frames: Vec<Frame> = Vec::new();
-    let result = run_headless_match_observed(cfg, false, None, |frame| {
+    let result = run_headless_match_staged(cfg, false, None, stage(), |frame| {
         // Resolve the three combatants of interest by (team, class). None are pets.
         let mut mage = None;
         let mut warrior_alive = false;

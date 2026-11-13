@@ -31,7 +31,7 @@ use arenasim::states::play_match::map_config::{load_map_geometry_config, ActiveM
 use arenasim::states::play_match::map_geometry::{position_blocked, MOVER_RADIUS};
 use arenasim::states::play_match::{
     ring_spots, AbilityConfigPlugin, CelebrationMarch, GameRng, MapConfigPlugin,
-    MovementConfigPlugin, CONVERGE_SPACING, PET_HEEL_DISTANCE,
+    MovementConfigPlugin, CONVERGE_SPACING, PET_HEEL_DISTANCE, VICTORY_CELEBRATION_DURATION,
 };
 use arenasim::states::{GameState, StatesPlugin};
 use arenasim::HeadlessMatchConfig;
@@ -99,6 +99,8 @@ struct Seen {
     /// Each winner's planned spot, and whether it had settled, on the last
     /// tick.
     marches_at_end: Vec<(u8, CelebrationMarch)>,
+    /// Each marching winner's walking speed (yd/s).
+    speeds: Vec<(u8, f32)>,
 }
 
 fn winners(
@@ -159,10 +161,13 @@ fn watch_tick(
         seen.pet_to_owner_at_decision = pets.clone();
     }
     seen.pet_to_owner_at_end = pets;
-    let mut marches: Vec<(u8, CelebrationMarch)> =
-        marches.iter().map(|(c, m)| (c.slot, *m)).collect();
-    marches.sort_by_key(|(slot, _)| *slot);
-    seen.marches_at_end = marches;
+    let mut marches: Vec<(u8, CelebrationMarch, f32)> = marches
+        .iter()
+        .map(|(c, m)| (c.slot, *m, c.base_movement_speed))
+        .collect();
+    marches.sort_by_key(|(slot, ..)| *slot);
+    seen.speeds = marches.iter().map(|(slot, _, v)| (*slot, *v)).collect();
+    seen.marches_at_end = marches.into_iter().map(|(slot, m, _)| (slot, m)).collect();
 }
 
 fn watch_frame(
@@ -258,12 +263,31 @@ fn a_lone_winner_bounces_where_it_stands() {
 /// each simply stopped on the side it came from, share a spot. Every winner
 /// gets a distinct spot, reaches it, and stands clear of the others — asserted
 /// on a match already played.
+///
+/// A spot farther from where its winner stood than the winner can walk in the
+/// celebration is out of its reach: the march has no catch-up. That winner
+/// walks toward it the whole celebration, closing at least 90% of a
+/// celebration's walk, and is not held to arriving.
 fn assert_three_stand_apart_seen(cfg: &str, seen: Seen) -> Seen {
     assert_eq!(seen.at_decision.len(), 3, "{cfg}: {:?}", seen.at_decision);
     assert_eq!(seen.marches_at_end.len(), 3);
     for (slot, march) in &seen.marches_at_end {
         let (_, at) = seen.at_end.iter().find(|(s, _)| s == slot).unwrap();
-        let off = Vec2::new(at.x - march.goal.x, at.z - march.goal.z).length();
+        let (_, from) = seen.at_decision.iter().find(|(s, _)| s == slot).unwrap();
+        let (_, speed) = seen.speeds.iter().find(|(s, _)| s == slot).unwrap();
+        let flat = |a: Vec3, b: Vec3| Vec2::new(a.x - b.x, a.z - b.z).length();
+        let off = flat(*at, march.goal);
+        let start = flat(*from, march.goal);
+        let walk = speed * VICTORY_CELEBRATION_DURATION;
+        if start > walk {
+            assert!(
+                start - off >= 0.9 * walk,
+                "{cfg}: slot {slot}, {start:.1}yd from a spot beyond its {walk:.1}yd \
+                 celebration walk, closed only {:.1}yd",
+                start - off
+            );
+            continue;
+        }
         assert!(
             march.settled && off < 0.05,
             "{cfg}: slot {slot} ended {off:.2}yd from its spot (settled {})",
