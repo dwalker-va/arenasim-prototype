@@ -36,6 +36,16 @@ assert-note tooltip:Ability(Ambush)
 hover strategic:CheapShot
 assert-note tooltip:Ability(CheapShot)
 
+# A raised stats row and its breakdown (AS-458): a rank of Lightning Reflexes
+# draws the Dodge row, whose hover shows; taking the rank back removes it.
+assert-absent stat:Dodge
+click talent:LightningReflexes
+hover stat:Dodge
+assert-note tooltip:Stat(Dodge)
+click talent:LightningReflexes left shift
+assert-note talents:t1s0 points=0
+assert-absent stat:Dodge
+
 click kit:Ambush
 assert-state Encyclopedia
 assert-view Ability(Ambush)

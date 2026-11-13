@@ -125,6 +125,39 @@ fn view_combatant_warlock_talented() {
     );
 }
 
+/// A Combat Rogue: the Dodge, Parry, Melee Haste and Off-Hand Damage rows its
+/// build draws (Lightning Reflexes 2/2, Dual Wield Specialization 2/2,
+/// Deflection 1/2, Swift Blades 1/1).
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn view_combatant_rogue_combat() {
+    let mut config = mock_config();
+    config.team1[0] = Some(CharacterClass::Rogue);
+    config.team1_builds[0] = combat_rogue_build();
+    snapshot_with(
+        "view_combatant_rogue_combat",
+        ViewCombatantState {
+            class: CharacterClass::Rogue,
+            team: 1,
+            slot: 0,
+        },
+        config,
+        TALENTED_SIZE,
+    );
+}
+
+/// The Combat build both the snapshot and the row test read: every node of
+/// the tree that raises a stat with no row before AS-458, Deflection at one
+/// rank so that dodge (8%) and parry (4%) differ.
+fn combat_rogue_build() -> Build {
+    Build::of(&[
+        (TalentId::LightningReflexes, 2),
+        (TalentId::DualWieldSpecialization, 2),
+        (TalentId::Deflection, 1),
+        (TalentId::SwiftBlades, 1),
+    ])
+}
+
 // ===========================================================================
 // EVERY TOOLTIP AT THE DEFAULT WINDOW SIZE
 //
@@ -519,6 +552,168 @@ fn mitigation_rows_say_what_their_total_buys() {
         (reduction - talented).abs() <= 0.1 && (reduction - geared).abs() > 0.1,
         "{hover:?}: the talented total buys {talented:.1}%, the gear alone {geared:.1}%"
     );
+}
+
+/// The Dodge, Parry and Melee Haste rows read the stats the spawn fights
+/// with: a Combat Rogue's sheet against a Rogue equipped, resolved and
+/// applied as the spawn does it, each total and each hover's base read off
+/// the combatant itself. The build draws exactly those rows and Off-Hand
+/// Damage beside the untalented sheet's, in the bonus colour; the untalented
+/// sheet draws none of them, for any class, and no class's spawn has any of
+/// those stats. A script reaches the new rows' hovers.
+#[test]
+fn avoidance_and_haste_rows_read_the_spawns_stats() {
+    use std::collections::BTreeSet;
+
+    let abilities = load_ability_definitions().expect("abilities.ron must load");
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+    let class_icons = ClassIcons::default();
+    let talents = TalentDefinitions::shipped();
+    let data = || ViewCombatantData {
+        abilities: &abilities,
+        items: &items,
+        default_loadouts: &defaults,
+        class_icons: &class_icons,
+        ability_icons: None,
+        item_icons: None,
+        pet_icons: None,
+        talents,
+    };
+    let rows = |sheet: &Sheet| -> BTreeSet<String> {
+        sheet
+            .last
+            .notes
+            .iter()
+            .filter_map(|n| n.strip_prefix("stat "))
+            .map(|n| n.split_once('=').expect("a value").0.to_string())
+            .collect()
+    };
+    let new_rows = ["Dodge", "Parry", "Melee Haste"];
+
+    // Untalented: no class draws a new row, and no class's spawn has any of
+    // their stats (the sheet's base, `UNTRAINED`).
+    for &class in CharacterClass::all() {
+        let spawn = Combatant::new(1, 0, class);
+        assert_eq!(
+            (
+                spawn.dodge_chance,
+                spawn.parry_chance,
+                spawn.attack_speed_bonus,
+                spawn.melee_attack_speed_bonus
+            ),
+            (0.0, 0.0, 0.0, 0.0),
+            "{class:?}'s base: the sheet reads 0 for it"
+        );
+        let mut config = MatchConfig::default();
+        config.team1[0] = Some(class);
+        let sheet = Sheet::open(class, config, data());
+        let drawn = rows(&sheet);
+        for key in new_rows.iter().chain(&["Off-Hand Damage"]) {
+            assert!(!drawn.contains(*key), "{class:?} untalented draws {key}");
+        }
+    }
+
+    let mut config = MatchConfig::default();
+    config.team1[0] = Some(CharacterClass::Rogue);
+    let untalented = rows(&Sheet::open(CharacterClass::Rogue, config.clone(), data()));
+    config.team1_builds[0] = combat_rogue_build();
+    let mut sheet = Sheet::open(CharacterClass::Rogue, config, data());
+    let talented = rows(&sheet);
+    let added: BTreeSet<String> = talented.difference(&untalented).cloned().collect();
+    assert_eq!(
+        added,
+        ["Dodge", "Melee Haste", "Off-Hand Damage", "Parry"]
+            .map(String::from)
+            .into(),
+        "the Combat build's new rows"
+    );
+    assert!(untalented.is_subset(&talented), "{untalented:?}");
+
+    // The spawn, as `spawn_combatant` builds it.
+    let loadout =
+        resolve_equipped_loadout(CharacterClass::Rogue, &defaults, &Loadout::new(), &items);
+    let bare = Combatant::new(1, 0, CharacterClass::Rogue);
+    let mut spawn = bare.clone();
+    spawn.apply_equipment(&loadout, &items);
+    let geared = spawn.clone();
+    talents
+        .resolve(&abilities, CharacterClass::Rogue, &combat_rogue_build())
+        .expect("the build resolves")
+        .apply(&mut spawn);
+
+    let pct = |v: f32| format!("{:.1}%", v * 100.0);
+    for (key, value, base, gear, total) in [
+        (
+            "Dodge",
+            pct(spawn.dodge_chance),
+            bare.dodge_chance,
+            geared.dodge_chance - bare.dodge_chance,
+            spawn.dodge_chance,
+        ),
+        (
+            "Parry",
+            pct(spawn.parry_chance),
+            bare.parry_chance,
+            geared.parry_chance - bare.parry_chance,
+            spawn.parry_chance,
+        ),
+        (
+            "Melee Haste",
+            format!("+{}", pct(spawn.melee_attack_speed_bonus)),
+            bare.melee_attack_speed_bonus,
+            geared.melee_attack_speed_bonus - bare.melee_attack_speed_bonus,
+            spawn.melee_attack_speed_bonus,
+        ),
+    ] {
+        let suffix = if key == "Melee Haste" {
+            " (melee swings only)"
+        } else {
+            ""
+        };
+        let want = format!(
+            "{value} hover={} base + {} from equipment + {} from talents{suffix}",
+            pct(base),
+            pct(gear),
+            pct(total - base - gear)
+        );
+        assert_eq!(
+            note_value(&sheet.last.notes, "stat", key),
+            Some(want.as_str()),
+            "{key}"
+        );
+        assert_eq!(
+            note_value(&sheet.last.notes, "tone", key),
+            Some("bonus"),
+            "{key}"
+        );
+    }
+    // The values the build's ranks name, so a spawn that lost them fails too.
+    assert_eq!(
+        note_value(&sheet.last.notes, "stat", "Dodge").map(|n| &n[..4]),
+        Some("8.0%")
+    );
+    assert_eq!(
+        note_value(&sheet.last.notes, "stat", "Parry").map(|n| &n[..4]),
+        Some("4.0%")
+    );
+    assert_eq!(
+        note_value(&sheet.last.notes, "stat", "Melee Haste").map(|n| &n[..6]),
+        Some("+10.0%")
+    );
+    assert_eq!(
+        note_value(&sheet.last.notes, "stat", "Off-Hand Damage"),
+        Some("+20%")
+    );
+
+    // A script hovers each new row and its breakdown shows.
+    for key in ["Dodge", "Parry", "MeleeHaste"] {
+        assert!(
+            sheet.hover_shows(&format!("stat:{key}"), &format!("tooltip:Stat({key})")),
+            "hovering stat:{key} showed no breakdown; notes: {:?}",
+            sheet.last.notes
+        );
+    }
 }
 
 /// The curse panel offers Curse of Exhaustion only to a slot whose build
@@ -927,7 +1122,8 @@ fn retribution_aura_is_offered_and_kept_only_with_its_talent() {
 }
 
 /// Every widget on the sheet with a tooltip, and the note its tooltip body
-/// leaves: `kit:X` and `strategic:X[:eN]` show `Ability(X)`, and a worn item's
+/// leaves: `kit:X` and `strategic:X[:eN]` show `Ability(X)`, a raised stats
+/// row `stat:<Key>` its breakdown, `Stat(<Key>)`, and a worn item's
 /// `equip:<Slot>` row shows `Item(<id>)`. An empty socket has no tooltip.
 fn hover_targets(frame: &registry::Frame) -> Vec<(String, String)> {
     let mut targets = Vec::new();
@@ -938,6 +1134,8 @@ fn hover_targets(frame: &registry::Frame) -> Vec<(String, String)> {
         } else if let Some(rest) = id.strip_prefix("strategic:") {
             let ability = rest.split(':').next().expect("an ability name");
             targets.push((id.to_string(), format!("tooltip:Ability({ability})")));
+        } else if let Some(key) = id.strip_prefix("stat:") {
+            targets.push((id.to_string(), format!("tooltip:Stat({key})")));
         } else if let Some(slot) = id.strip_prefix("equip:") {
             let worn = format!("equip-row {slot} item=");
             let item = frame

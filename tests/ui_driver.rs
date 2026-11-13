@@ -1090,9 +1090,11 @@ const EXPECTED_CALL_SITES: &[(&str, usize)] = &[
     // not an ability), and the restore button registers through the kit's
     // `driver_id`.
     // The stats panel notes each total it draws (the four raised rows, the
-    // rows read through `StatLine`, the Weapon Damage row and the Two-Hand
-    // Damage row) and the colour each toned row drew (`toned_row`).
-    ("src/states/view_combatant_ui.rs", 16),
+    // rows read through `StatLine`, and the weapon damage rows, one call for
+    // all three) and the colour each toned row drew (`toned_row`); a raised
+    // row with a hover registers as `stat:<Key>` and notes its hover's body
+    // (`bonus_row`).
+    ("src/states/view_combatant_ui.rs", 17),
     // A class page notes which list each ability is drawn in: the base kit
     // or the talent abilities.
     ("src/states/encyclopedia/classes.rs", 2),

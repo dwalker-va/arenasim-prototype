@@ -1076,10 +1076,11 @@ struct StatLine<'a> {
     value: &'a dyn Fn(f32) -> String,
     /// A part of it as the hover explains it.
     amount: &'a dyn Fn(f32) -> String,
-    /// What the total buys, appended to the hover: armor's physical
-    /// reduction, a resistance's damage reduction. Read off the TALENTED
-    /// total, the one the spawn fights with.
-    mitigation: Option<&'a dyn Fn(f32) -> String>,
+    /// Appended to the hover in parentheses: what the total buys (armor's
+    /// physical reduction, a resistance's damage reduction), or which swings
+    /// it reaches (melee haste). Read off the TALENTED total, the one the
+    /// spawn fights with.
+    suffix: Option<&'a dyn Fn(f32) -> String>,
     /// The talented total, for a stat the build does not change by
     /// [`StatChange::applied`] (movement speed, one capped passive term);
     /// `None` reads it off `base + gear` by that rule.
@@ -1111,8 +1112,8 @@ impl StatLine<'_> {
             if from_talents != 0.0 {
                 explain.push_str(&format!(" + {} from talents", (self.amount)(from_talents)));
             }
-            if let Some(mitigation) = self.mitigation {
-                explain.push_str(&format!(" ({})", mitigation(total)));
+            if let Some(suffix) = self.suffix {
+                explain.push_str(&format!(" ({})", suffix(total)));
             }
             explain
         };
@@ -1136,6 +1137,11 @@ impl std::fmt::Display for Lazy<'_> {
         f.write_str(&(self.0)())
     }
 }
+
+/// Every class's base dodge, parry and melee haste: none
+/// (`Combatant::new_with_book`). The sheet's base for those rows; pinned
+/// against a spawn by `avoidance_and_haste_rows_read_the_spawns_stats`.
+const UNTRAINED: f32 = 0.0;
 
 /// What `armor` buys: "12.3% physical reduction", the share of physical
 /// damage it removes (`armor / (armor + 5500)`).
@@ -1269,11 +1275,30 @@ fn toned_row(ui: &mut egui::Ui, key: &str, value: &str, bonus: f32) -> egui::Res
 }
 
 /// One stats row whose value equipment changed: drawn in [`bonus_color`],
-/// and explained on hover.
+/// and explained on hover. A row with a hover registers as `stat:<key>`, its
+/// spaces dropped (`stat:CritChance`), so a script can hover it; its hover
+/// notes `tooltip:Stat(<key>)` as it is drawn.
 fn bonus_row(ui: &mut egui::Ui, key: &str, value: &str, bonus: f32, explain: impl Fn() -> String) {
     let response = toned_row(ui, key, value, bonus);
     if bonus != 0.0 {
-        response.on_hover_text(explain());
+        let id = Unspaced(key);
+        ui_driver::mark(ui, response.rect, true, format_args!("stat:{id}"));
+        // `on_hover_text`'s body, with the note beside it.
+        response.on_hover_ui(|ui| {
+            ui.set_max_width(ui.spacing().tooltip_width);
+            ui_driver::note(ui, format_args!("tooltip:Stat({id})"));
+            ui.label(explain());
+        });
+    }
+}
+
+/// Formats as its text with the spaces dropped: a stats row's key as a
+/// script names it, one word.
+struct Unspaced<'a>(&'a str);
+
+impl std::fmt::Display for Unspaced<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.split(' ').try_for_each(|word| f.write_str(word))
     }
 }
 
@@ -1398,7 +1423,7 @@ fn render_stats_panel(
                         let pct = |v: f32| format!("{:.1}%", v * 100.0);
                         let one = |v: f32| format!("{v:.1}");
                         let whole = |v: f32| format!("{v:.0}");
-                        let lines: [StatLine; 4] = [
+                        let lines: [StatLine; 7] = [
                             // Every class has a non-zero base crit (Rogue 10% down
                             // to Priest 4%), so this row always shows.
                             StatLine {
@@ -1408,7 +1433,7 @@ fn render_stats_panel(
                                 gear: equip.crit_chance,
                                 value: &pct,
                                 amount: &pct,
-                                mitigation: None,
+                                suffix: None,
                                 total: None,
                             },
                             StatLine {
@@ -1418,7 +1443,21 @@ fn render_stats_panel(
                                 gear: equip.mana_regen,
                                 value: &|v| format!("+{v:.1} MP5"),
                                 amount: &one,
-                                mitigation: None,
+                                suffix: None,
+                                total: None,
+                            },
+                            // Haste on melee swings only (Swift Blades). No
+                            // other haste is permanent (`attack_speed_bonus`
+                            // has no source but an aura), so this is the
+                            // whole of what a build adds to a melee swing.
+                            StatLine {
+                                key: "Melee Haste",
+                                stat: TalentStat::MeleeAttackSpeed,
+                                base: UNTRAINED,
+                                gear: 0.0,
+                                value: &|v| format!("+{:.1}%", v * 100.0),
+                                amount: &pct,
+                                suffix: Some(&|_| "melee swings only".to_string()),
                                 total: None,
                             },
                             StatLine {
@@ -1431,7 +1470,7 @@ fn render_stats_panel(
                                 ) - stats.movement_speed,
                                 value: &|v| format!("{v:.1}/s"),
                                 amount: &one,
-                                mitigation: None,
+                                suffix: None,
                                 // The strongest passive source, the gear's
                                 // or the build's, capped: as the spawn.
                                 total: Some(passive_movement_speed(
@@ -1450,7 +1489,29 @@ fn render_stats_panel(
                                 gear: equip.armor,
                                 value: &whole,
                                 amount: &whole,
-                                mitigation: Some(&armor_reduction),
+                                suffix: Some(&armor_reduction),
+                                total: None,
+                            },
+                            // Avoidance: every class starts at none, and no
+                            // item carries it; a build adds it in points.
+                            StatLine {
+                                key: "Dodge",
+                                stat: TalentStat::DodgeChance,
+                                base: UNTRAINED,
+                                gear: 0.0,
+                                value: &pct,
+                                amount: &pct,
+                                suffix: None,
+                                total: None,
+                            },
+                            StatLine {
+                                key: "Parry",
+                                stat: TalentStat::ParryChance,
+                                base: UNTRAINED,
+                                gear: 0.0,
+                                value: &pct,
+                                amount: &pct,
+                                suffix: None,
                                 total: None,
                             },
                         ];
@@ -1508,31 +1569,28 @@ fn render_stats_panel(
                                 gear,
                                 value: &whole,
                                 amount: &whole,
-                                mitigation: Some(&resistance_reduction),
+                                suffix: Some(&resistance_reduction),
                                 total: None,
                             }
                             .draw(ui, talents);
                         }
 
                         // Weapon damage has no row of its own (the swing is the
-                        // weapon's); a build that raises it says so here.
-                        if let Some(change) = talents.get(&TalentStat::WeaponDamage) {
-                            let value = weapon_damage_bonus(*change);
-                            toned_row(ui, "Weapon Damage", &value, change.points + change.fraction);
-                            ui_driver::note(ui, format_args!("stat Weapon Damage={value}"));
-                        }
-                        // Nor has a two-hander's (Two-Handed Weapon
-                        // Specialization): it reaches the swing only while the
-                        // main hand holds one.
-                        if let Some(change) = talents.get(&TalentStat::TwoHandedWeaponDamage) {
-                            let value = weapon_damage_bonus(*change);
-                            toned_row(
-                                ui,
-                                "Two-Hand Damage",
-                                &value,
-                                change.points + change.fraction,
-                            );
-                            ui_driver::note(ui, format_args!("stat Two-Hand Damage={value}"));
+                        // weapon's); a build that raises it says so here. So
+                        // does one that raises the off hand's alone (Dual
+                        // Wield Specialization), or a two-hander's (Two-Handed
+                        // Weapon Specialization), which reach a swing only
+                        // while that hand holds such a weapon.
+                        for (key, stat) in [
+                            ("Weapon Damage", TalentStat::WeaponDamage),
+                            ("Off-Hand Damage", TalentStat::OffHandDamage),
+                            ("Two-Hand Damage", TalentStat::TwoHandedWeaponDamage),
+                        ] {
+                            if let Some(change) = talents.get(&stat) {
+                                let value = weapon_damage_bonus(*change);
+                                toned_row(ui, key, &value, change.points + change.fraction);
+                                ui_driver::note(ui, format_args!("stat {key}={value}"));
+                            }
                         }
                     });
                 })
