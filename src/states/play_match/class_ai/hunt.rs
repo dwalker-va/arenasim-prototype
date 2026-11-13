@@ -89,6 +89,7 @@ use bevy::prelude::*;
 use smallvec::SmallVec;
 
 use super::combat_snapshot::CombatSnapshot;
+use super::formation;
 use super::pillar_mode::{rings, Ring};
 use super::plays::{own_class, PlayStage};
 use super::{CombatContext, CombatantInfo};
@@ -161,6 +162,9 @@ pub struct Station {
     /// Whether the unit has reached this station since it took it (within
     /// [`STATION_ARRIVED`]), latched.
     pub arrived: bool,
+    /// Whether the unit has seen the healer since it took its slot: its
+    /// onset walk is over (AS-404 prototype).
+    pub seen: bool,
 }
 
 /// One live hunt: the healer, its pillar, the axis and who holds which
@@ -343,6 +347,114 @@ pub fn stations(
     ]
 }
 
+/// The farthest a pincer spot stands from the healer it watches: every
+/// ranged unit's casting reach.
+pub const HUNT_REACH: f32 = 30.0;
+
+/// The angle between two pincer candidates round the pillar.
+const PINCER_STEP: f32 = 10.0 * std::f32::consts::PI / 180.0;
+
+/// Whether `healer` (XZ) stands in `pillar`'s shadow as `viewer` sees it:
+/// AS-206's widened shadow ([`formation::shadow_exits`] at
+/// [`formation::SIGHT_MARGIN`]) — the wedge behind the pillar's footprint
+/// from the viewer, widened by the margin, and only out to the near-obstacle
+/// limit (no farther from the pillar than the viewer, or within
+/// `REPAIR_FULL` of its footprint). One definition serves both the hunt's
+/// hold (the healer is still using its pillar against one of the team) and
+/// a walking hunter's stop (it sees the healer with the margin to spare).
+pub fn in_shadow(obstacles: &[ObstacleVolume], pillar: usize, viewer: Vec2, healer: Vec2) -> bool {
+    obstacles.get(pillar).is_some_and(|o| {
+        !formation::shadow_exits(viewer, o, healer, formation::SIGHT_MARGIN).is_empty()
+    })
+}
+
+/// Whether `p` stands on `side` (`1.0` counter-clockwise, `-1.0` clockwise)
+/// of the healer's bearing round `ring`'s pillar, allowing the front itself.
+fn on_side(ring: &Ring, p: Vec2, healer_bearing: f32, side: f32) -> bool {
+    let d = (ring.bearing(p) - healer_bearing + std::f32::consts::PI)
+        .rem_euclid(std::f32::consts::TAU)
+        - std::f32::consts::PI;
+    d * side >= -PINCER_STEP * 0.5
+}
+
+/// How near the back of the pillar (the healer's antipode) a unit counts as
+/// on either side: from there both ways round are about as long.
+const BACK_TOLERANCE: f32 = 20.0 * std::f32::consts::PI / 180.0;
+
+/// How far round the pillar a walk round the back aims at once: a carrot on
+/// the unit's own circle, re-aimed as it walks.
+const BACK_CARROT: f32 = 40.0 * std::f32::consts::PI / 180.0;
+
+/// `p`'s bearing round `ring`'s pillar less the healer's, in (-π, π].
+fn signed_offset(ring: &Ring, p: Vec2, healer_bearing: f32) -> f32 {
+    (ring.bearing(p) - healer_bearing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+        - std::f32::consts::PI
+}
+
+/// Whether a unit at `p` sees the healer at `healer` clear of the pillar's
+/// widened shadow.
+fn sees_clear(obstacles: &[ObstacleVolume], pillar: usize, p: Vec2, healer: Vec2, y: f32) -> bool {
+    has_line_of_sight(
+        obstacles,
+        Vec3::new(p.x, y, p.y),
+        Vec3::new(healer.x, y, healer.y),
+    ) && !in_shadow(obstacles, pillar, p, healer)
+}
+
+/// The next point of a walk round the BACK of the pillar from `from`, which
+/// stands on the side of the healer's bearing opposite `side`:
+/// [`BACK_CARROT`] further away from the healer's face, on the unit's own
+/// circle (held between [`HUNT_MIN_STANDOFF`] and [`HUNT_STANDOFF`] off the
+/// skin), in 10° steps so the goal does not change every frame.
+fn round_the_back(ring: &Ring, from: Vec2, side: f32) -> Vec2 {
+    // Walking away from the face on the wrong side means turning by -side.
+    let bearing = ring.bearing(from);
+    let step = (bearing / PINCER_STEP).round() * PINCER_STEP - side * BACK_CARROT;
+    let radius = from
+        .distance(ring.center)
+        .clamp(ring.disc + HUNT_MIN_STANDOFF, ring.disc + HUNT_STANDOFF);
+    ring.center + Vec2::from_angle(step) * radius
+}
+
+/// The nearest spot, by the walk round the pillar ([`walk_round`]), on
+/// `side` of the healer's live bearing from which a unit at `from` sees the
+/// healer at `healer` clear of the pillar's widened shadow ([`in_shadow`]):
+/// on standable ground, between [`HUNT_MIN_STANDOFF`] and [`HUNT_STANDOFF`]
+/// off the skin, within [`HUNT_REACH`] of the healer. `None` when no spot
+/// on that side qualifies.
+fn pincer_point(
+    obstacles: &[ObstacleVolume],
+    bounds: &ArenaBounds,
+    ring: &Ring,
+    from: Vec2,
+    healer: Vec2,
+    side: f32,
+    y: f32,
+) -> Option<Vec2> {
+    let h = ring.bearing(healer);
+    let steps = (std::f32::consts::PI / PINCER_STEP).round() as i32;
+    let mut best: Option<(f32, Vec2)> = None;
+    for k in 1..=steps {
+        let theta = h + side * PINCER_STEP * k as f32;
+        let mut standoff = HUNT_STANDOFF;
+        while standoff >= HUNT_MIN_STANDOFF - 1e-3 {
+            let p = ring.center + Vec2::from_angle(theta) * (ring.disc + standoff);
+            standoff -= STATION_PULL_STEP;
+            if p.distance(healer) > HUNT_REACH
+                || !standable(obstacles, bounds, p, y)
+                || !sees_clear(obstacles, ring.pillar, p, healer, y)
+            {
+                continue;
+            }
+            let walk = walk_round(ring, from, p);
+            if best.is_none_or(|(w, _)| walk < w) {
+                best = Some((walk, p));
+            }
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
 /// Whether a teammate other than `healer` is owed its sight, given whether
 /// one was ([`HuntWindow::owed`]): any living non-pet teammate below
 /// `dying` (`urgency_hp_threshold`) makes it owed; it stays owed until every
@@ -405,6 +517,7 @@ fn assign(
                     point: slots[slot].unwrap(),
                     hold: false,
                     arrived: false,
+                    seen: false,
                 });
             }
             None => rest.push((unit, at)),
@@ -427,6 +540,7 @@ fn assign(
                 point: slots[slot].unwrap(),
                 hold: false,
                 arrived: false,
+                seen: false,
             });
         }
         (_, 1) => {
@@ -440,6 +554,7 @@ fn assign(
                 point: slots[free[0]].unwrap(),
                 hold: false,
                 arrived: false,
+                seen: false,
             });
         }
         _ => {
@@ -457,6 +572,7 @@ fn assign(
                     point: slots[slot].unwrap(),
                     hold: false,
                     arrived: false,
+                    seen: false,
                 });
             }
         }
@@ -496,10 +612,26 @@ pub fn classify(
     }
     let all = rings(&snapshot.obstacles);
     let at = xz(healer.position);
+    // A hunt holds while its healer is near its pillar, or while it still
+    // stands in that pillar's shadow from one of the team (AS-404): it is
+    // still using the pillar as cover. A healer that has reached ANOTHER
+    // pillar is hunted there instead.
+    let nearest = all
+        .iter()
+        .min_by(|a, b| a.skin(at).total_cmp(&b.skin(at)))
+        .map(|r| r.pillar);
     let held = prev.hunt.as_ref().and_then(|h| {
-        all.iter()
-            .find(|r| r.pillar == h.pillar && r.skin(at) <= HUNT_LEAVE)
-            .map(|r| (h, *r))
+        let ring = all.iter().find(|r| r.pillar == h.pillar)?;
+        let near = ring.skin(at) <= HUNT_LEAVE;
+        let elsewhere = nearest.is_some_and(|n| n != h.pillar)
+            && all
+                .iter()
+                .any(|r| r.pillar != h.pillar && r.skin(at) <= HUNT_ENTER);
+        let shadowed = !elsewhere
+            && mates
+                .iter()
+                .any(|m| in_shadow(&snapshot.obstacles, h.pillar, xz(m.position), at));
+        (near || shadowed).then_some((h, *ring))
     });
     let (ring, axis, since) = match held {
         Some((h, ring)) => (ring, h.axis, h.since),
@@ -552,16 +684,69 @@ pub fn classify(
         assigned.clear();
     }
     let position = |unit: Entity| roster.get(&unit).map_or(Vec3::ZERO, |c| c.position);
-    let covered = assigned
-        .iter()
-        .any(|s| has_line_of_sight(&snapshot.obstacles, position(s.unit), healer.position));
+    // The active pincer (AS-404 prototype). Each unit keeps the SIDE its slot
+    // gave it at onset — slot 0 the arc counter-clockwise of the healer's
+    // LIVE bearing, slot 1 the arc clockwise of it — and every frame either
+    // stands and casts (it sees the healer) or walks toward sight on its own
+    // side. `arrived` is the sighted latch: a walking unit stops once it sees
+    // the healer clear of the pillar's widened shadow, and a standing one
+    // walks again only once it has lost plain sight. `seen` marks the end of
+    // the unit's onset walk: until it first sees the healer it walks the
+    // shorter way to its side (and stops to cast if it gets sight on the
+    // way); after that a blind unit on the other side goes round the BACK of
+    // the pillar to its own, never across the healer's face, so the two close
+    // from both sides instead of trailing it round one.
+    let healer_bearing = ring.bearing(at);
     for station in assigned.iter_mut() {
-        let was = prev_window
+        let me = position(station.unit);
+        let before = prev_window
             .and_then(|w| w.stations.iter().find(|s| s.unit == station.unit))
-            .is_some_and(|s| s.slot == station.slot && s.arrived);
-        station.arrived =
-            was || xz(position(station.unit)).distance(station.point) <= STATION_ARRIVED;
-        station.hold = !station.arrived || covered;
+            .filter(|s| s.slot == station.slot);
+        let sees = has_line_of_sight(&snapshot.obstacles, me, healer.position);
+        let was_sighted = before.is_some_and(|s| s.arrived);
+        let sighted =
+            sees && (was_sighted || !in_shadow(&snapshot.obstacles, ring.pillar, xz(me), at));
+        station.seen = before.is_some_and(|s| s.seen) || sighted;
+        let side = if station.slot == 0 { 1.0 } else { -1.0 };
+        if sighted {
+            station.arrived = true;
+            station.hold = true;
+            station.point = match before {
+                Some(s) if was_sighted => s.point,
+                _ => xz(me),
+            };
+            continue;
+        }
+        station.arrived = false;
+        station.hold = true;
+        let offset = signed_offset(&ring, xz(me), healer_bearing);
+        let wrong_side = offset * side < -PINCER_STEP * 0.5
+            && offset.abs() < std::f32::consts::PI - BACK_TOLERANCE;
+        if station.seen && wrong_side {
+            station.point = round_the_back(&ring, xz(me), side);
+            continue;
+        }
+        let kept = before
+            .filter(|s| !s.arrived && s.hold)
+            .map(|s| s.point)
+            .filter(|&p| {
+                on_side(&ring, p, healer_bearing, side)
+                    && sees_clear(&snapshot.obstacles, ring.pillar, p, at, y)
+            });
+        match kept.or_else(|| {
+            pincer_point(
+                &snapshot.obstacles,
+                &snapshot.bounds,
+                &ring,
+                xz(me),
+                at,
+                side,
+                y,
+            )
+        }) {
+            Some(p) => station.point = p,
+            None => station.hold = false,
+        }
     }
     Some(HuntWindow {
         subject: healer.entity,

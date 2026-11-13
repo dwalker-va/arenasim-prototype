@@ -370,6 +370,7 @@ mod tests {
                     point: Vec2::ZERO,
                     hold: true,
                     arrived: false,
+                    seen: false,
                 }]
                 .into_iter()
                 .collect(),
