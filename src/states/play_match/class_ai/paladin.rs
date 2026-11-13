@@ -326,7 +326,7 @@ pub fn decide_paladin_action(
         return true;
     }
 
-    // Priority 2: Cleanse - Urgent (Polymorph, Freezing Trap, UA Silence, Fear).
+    // Priority 2: Cleanse - Urgent (Polymorph, Freezing Trap, a magic stun, UA Silence, Fear).
     if try_cleanse(
         commands,
         combat_log,

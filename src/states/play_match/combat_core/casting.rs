@@ -420,6 +420,38 @@ pub fn process_casting(
                 false
             };
 
+            // A caster that can no longer pay fails the cast, as in TBC: the
+            // cast bar checked its mana as it began, but a Mana Burn landing
+            // mid-cast can take it. It pays nothing and lands nothing, and
+            // a modifier it spent is given back. Checked after the rolls
+            // above, so the `game_rng` draws stay one set per completed cast.
+            if caster.current_mana < def.mana_cost {
+                combat_log.log(
+                    CombatLogEventType::MatchEvent,
+                    format!(
+                        "{} fails to cast {}: not enough mana",
+                        combatant_id(caster.team, caster.slot, caster.class),
+                        def.name
+                    ),
+                );
+                caster.next_cast_spent = spent;
+                give_back_spent(
+                    &mut caster,
+                    caster_auras.as_deref_mut(),
+                    ability,
+                    &mut combat_log,
+                );
+                commands.spawn((
+                    CastEnding {
+                        caster: caster_entity,
+                        kind: CastEndingKind::Fizzled,
+                    },
+                    PlayMatchEntity,
+                ));
+                commands.entity(caster_entity).remove::<CastingState>();
+                continue;
+            }
+
             // Store cast info for processing
             completed_casts.push((
                 caster_entity,

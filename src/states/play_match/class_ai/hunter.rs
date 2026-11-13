@@ -2107,7 +2107,7 @@ fn try_aimed_shot(
         .entity(entity)
         .insert(CastingState::new(ability, target_entity, cast_time));
 
-    combatant.current_mana -= def.mana_cost;
+    // No mana here: a cast pays when it lands, in `process_casting`.
     combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;
 

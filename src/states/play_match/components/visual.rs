@@ -2478,7 +2478,8 @@ pub enum CastEndingKind {
     /// The cast completed and its effect actually landed (mana was charged).
     Landed,
     /// The cast reached completion but fizzled — target dead, despawned, or
-    /// out of line of sight at the resolution gates (no mana charged).
+    /// out of line of sight at the resolution gates, or its caster no longer
+    /// able to pay (no mana charged).
     Fizzled,
     /// The cast or channel was cut short: ability interrupt (Pummel/Kick),
     /// crowd control (stun/fear/polymorph), or Silence.
