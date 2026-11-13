@@ -864,6 +864,7 @@ fn compound_face(defs: &AbilityDefinitions, compound: CompoundDebuff) -> Aura {
         CompoundDebuff::Shadowform => landed_aura(defs, AbilityType::Shadowform),
         // Improved Kidney Shot's rider rides Kidney Shot's stun.
         CompoundDebuff::StunVulnerability => landed_aura(defs, AbilityType::KidneyShot),
+        CompoundDebuff::GuardianSpirit => landed_aura(defs, AbilityType::GuardianSpirit),
     }
 }
 
