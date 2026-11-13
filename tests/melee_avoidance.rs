@@ -818,6 +818,14 @@ fn a_swing_held_off_a_friendly_fear_is_not_avoided() {
 /// plays each cell's match log byte-identically to the tree itself, so zero
 /// avoidance still draws exactly what a pre-avoidance build of the same kit
 /// draws. (The logs carry 24 crits, 7 eliminations and six trinket procs.)
+///
+/// Re-recorded for AS-464, no movement speed on the starting boots, so every
+/// unit walks at its natural speed, about 2% slower, and these matches play
+/// differently (Warrior+Rogue v Hunter+Priest 107 -> 122, the 3v3
+/// 302 -> 299, Rogue v Warrior 65 -> 59). The evidence is the same: a
+/// scratch build of AS-464's tree with `roll_avoidance` returning before any
+/// draw plays each cell's match log byte-identically to the tree itself. (The
+/// logs carry 14 crits, 7 eliminations and four trinket procs.)
 #[test]
 fn a_match_without_avoidance_draws_what_it_drew_before() {
     for (team1, team2, map, profile, seed, recorded) in ZERO_AVOIDANCE_DRAWS {
@@ -853,7 +861,7 @@ const ZERO_AVOIDANCE_DRAWS: &[DrawPin] = &[
         "BasicArena",
         "Legacy",
         11,
-        107,
+        122,
     ),
     (
         &["Rogue", "Warrior", "Paladin"],
@@ -861,9 +869,9 @@ const ZERO_AVOIDANCE_DRAWS: &[DrawPin] = &[
         "PillaredArena",
         "TeamPlan",
         5,
-        302,
+        299,
     ),
-    (&["Rogue"], &["Warrior"], "BasicArena", "Legacy", 3, 65),
+    (&["Rogue"], &["Warrior"], "BasicArena", "Legacy", 3, 59),
 ];
 
 // ---------------------------------------------------------------------------

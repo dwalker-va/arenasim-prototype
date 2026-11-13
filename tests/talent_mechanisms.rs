@@ -288,13 +288,27 @@ fn a_spell_hit_proc_lands_its_aura_on_the_enemy_struck() {
         dispel_type: DispelType::Auto,
         name: Some("Aftermath".to_string()),
     };
+    // The Priest staged under every damage over time the Warlock opens
+    // with, and its Fear and Death Coil held, so its next cast is a Shadow
+    // Bolt.
+    let opened = || {
+        Stage::new()
+            .land(T2, AbilityType::Corruption, T1)
+            .land(T2, AbilityType::CurseOfAgony, T1)
+            .land(T2, AbilityType::Immolate, T1)
+            .land(T2, AbilityType::UnstableAffliction, T1)
+            .cooldown(T1, AbilityType::Fear, 60.0)
+            .cooldown(T1, AbilityType::DeathCoil, 60.0)
+    };
     let played = play(
         config(&["Warlock"], &["Priest"], 30.0),
-        with_proc(Stage::new(), T1, aftermath.clone()),
+        with_proc(opened(), T1, aftermath.clone()),
     );
     assert!(
         !lines(&played.log, "Shadow Bolt hits").is_empty()
-            || !lines(&played.log, "Shadow Bolt CRITS").is_empty()
+            || !lines(&played.log, "Shadow Bolt CRITS").is_empty(),
+        "{}",
+        played.log
     );
     assert!(
         !procs(&played.log, "Aftermath").is_empty(),
@@ -305,7 +319,7 @@ fn a_spell_hit_proc_lands_its_aura_on_the_enemy_struck() {
     aftermath.abilities = vec![AbilityType::LifeTap];
     let control = play(
         config(&["Warlock"], &["Priest"], 30.0),
-        with_proc(Stage::new(), T1, aftermath),
+        with_proc(opened(), T1, aftermath),
     );
     assert!(procs(&control.log, "Aftermath").is_empty());
 }
@@ -912,13 +926,25 @@ fn death_coil_leeches_through_the_field() {
         })
     );
     // A Warlock hurt but not dying, beside a Warrior, so it lives to peel.
+    // The enemy Priest has no mana and its Warrior no shield: a coil wholly
+    // absorbed deals nothing, so leeches nothing.
     let played = play(
         config(&["Warlock", "Warrior"], &["Warrior", "Priest"], 60.0),
-        Stage::new().health(T1, 0.7),
+        Stage::new()
+            .health(T1, 0.7)
+            .clear_auras(T2)
+            .mana(Unit::new(2, 1), 0.0),
     );
     let coils =
         lines(&played.log, "Death Coil hits").len() + lines(&played.log, "Death Coil CRITS").len();
     assert!(coils > 0, "{}", played.log);
+    assert!(
+        lines(&played.log, "Death Coil hits")
+            .iter()
+            .all(|l| !l.contains(" for 0 damage")),
+        "{}",
+        played.log
+    );
     assert_eq!(lines(&played.log, "'s Death Coil heals for").len(), coils);
 }
 

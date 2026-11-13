@@ -756,7 +756,13 @@ any ring fits either ring socket, and the same item may not occupy both
    - Effective budget = `item_level × 0.75 × slot_multiplier`
    - Slot multipliers (TBC's slot groups; `slot_budget_multiplier`): Head/Chest/Legs = 1.0, Shoulders/Hands/Waist/Feet = 0.75, Trinket = 0.70, Wrists/Neck/Back/Ring/Ranged = 0.5625. The values are the TBC client's `RandPropPoints` columns; trinket 0.70 and ranged 0.5625 are rulings (TBC's ranged is 0.32)
    - Hand items are priced by how they are HELD (`held_budget_multiplier`): two-hander = 1.0, one-hander = 0.42, off-hand (shield/frill) = 0.5625. However the hands are filled they draw about one full slot (0.42 + 0.5625 = 0.9825). A shipped two-hander is priced at exactly what the one-hander + off-hand pair it displaces spends, not its cap — `two_handers_are_priced_at_the_pair_they_displace` pins each one to its pair, and a new two-hander must be added there
-   - Stat costs: max_health/max_mana = 1.0/pt, attack_power/spell_power = 1.5/pt, crit_chance = 300.0/pt (0.01 = 3.0), movement_speed = 30.0/pt (0.1 = 3.0), resistances = 0.4/pt, mana_regen = 5.0/pt
+   - Stat costs: max_health/max_mana = 1.0/pt, attack_power/spell_power = 1.5/pt, crit_chance = 300.0/pt (0.01 = 3.0), movement_speed = 30.0/pt (0.05 = 1.5), resistances = 0.4/pt, mana_regen = 5.0/pt
+   - **`movement_speed` is passive speed, a fraction of natural speed (0.05 is +5%), capped at 8%
+     as in TBC** (`PASSIVE_SPEED_CAP`; the loader refuses an item above it). Every passive source —
+     an item's, a talent's `MovementSpeed` points (the same fraction, the same weight) — feeds ONE
+     term: the strongest applies, never their sum (`components::passive_movement_speed`,
+     `Combatant::offer_passive_speed`). A temporary speed aura (Travel Form) is outside the cap. No
+     ordinary gear carries it: it is for a boot enchant or a meta gem
    - **Free stats** (excluded from budget): `armor`, `attack_damage_min`, `attack_damage_max`, `weapon_speed`
    - **A weapon's `weapon_speed` is seconds per swing — the Classic tooltip's "Speed"**, taken from a
      named real Classic item (same weapon type, hand and role, nearest item level). The item is the only
