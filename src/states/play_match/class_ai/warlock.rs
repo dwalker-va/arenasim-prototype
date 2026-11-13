@@ -1049,17 +1049,9 @@ fn try_corruption(
     let corruption = AbilityType::Corruption;
     let corruption_def = abilities.get_unchecked(&corruption);
 
-    let target_has_corruption = ctx
-        .active_auras
-        .get(&target_entity)
-        .map(|auras| {
-            auras.iter().any(|a| {
-                a.effect_type == AuraType::DamageOverTime && a.ability_name == "Corruption"
-            })
-        })
-        .unwrap_or(false);
-
-    if target_has_corruption {
+    // Only this Warlock's own Corruption stops a reapply: another Warlock's
+    // ticks beside it.
+    if ctx.has_own_dot(entity, target_entity, &corruption_def.name) {
         builder.reject(corruption, RejectionReason::AlreadyApplied);
         return false;
     }
@@ -1138,17 +1130,8 @@ fn try_unstable_affliction(
     let ua = AbilityType::UnstableAffliction;
     let ua_def = abilities.get_unchecked(&ua);
 
-    let target_has_ua = ctx
-        .active_auras
-        .get(&target_entity)
-        .map(|auras| {
-            auras.iter().any(|a| {
-                a.effect_type == AuraType::DamageOverTime && a.ability_name == "Unstable Affliction"
-            })
-        })
-        .unwrap_or(false);
-
-    if target_has_ua {
+    // Only this Warlock's own Unstable Affliction stops a reapply.
+    if ctx.has_own_dot(entity, target_entity, &ua_def.name) {
         builder.reject(ua, RejectionReason::AlreadyApplied);
         return false;
     }
@@ -1220,17 +1203,8 @@ fn try_immolate(
     let immolate = AbilityType::Immolate;
     let immolate_def = abilities.get_unchecked(&immolate);
 
-    let target_has_immolate = ctx
-        .active_auras
-        .get(&target_entity)
-        .map(|auras| {
-            auras
-                .iter()
-                .any(|a| a.effect_type == AuraType::DamageOverTime && a.ability_name == "Immolate")
-        })
-        .unwrap_or(false);
-
-    if target_has_immolate {
+    // Only this Warlock's own Immolate stops a reapply.
+    if ctx.has_own_dot(entity, target_entity, &immolate_def.name) {
         builder.reject(immolate, RejectionReason::AlreadyApplied);
         return false;
     }
