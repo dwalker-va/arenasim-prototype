@@ -173,6 +173,37 @@ fn drain(seed: u64) -> HeadlessMatchConfig {
     }
 }
 
+/// The Warlock channeling Drain Life into the enemy Warrior, which holds its
+/// Paladin's Blessing of Sacrifice, as the gates open. Pummel waits, so the
+/// channel runs.
+fn drain_stage() -> Stage {
+    use arenasim::states::play_match::components::ChannelingState;
+    use arenasim::states::play_match::AbilityType;
+    const WARLOCK: Unit = Unit::new(1, 0);
+    const WARRIOR: Unit = Unit::new(2, 0);
+    const PALADIN: Unit = Unit::new(2, 1);
+    Stage::new()
+        .place(WARLOCK, 0.0, 0.0)
+        .place(WARRIOR, 15.0, 0.0)
+        .place(PALADIN, 20.0, 0.0)
+        .cooldown(WARRIOR, AbilityType::Pummel, 60.0)
+        .land(WARRIOR, AbilityType::BlessingOfSacrifice, PALADIN)
+        .world(|world| {
+            let warlock = WARLOCK.entity(world);
+            let warrior = WARRIOR.entity(world);
+            world.entity_mut(warlock).insert(ChannelingState {
+                ability: AbilityType::DrainLife,
+                duration_remaining: 5.0,
+                time_until_next_tick: 1.0,
+                tick_interval: 1.0,
+                target: warrior,
+                interrupted: false,
+                interrupted_display_time: 0.0,
+                ticks_applied: 0,
+            });
+        })
+}
+
 /// One primary combatant's two Results numbers.
 struct Ledger {
     id: String,
@@ -308,26 +339,18 @@ fn batch() -> &'static [Played] {
                 ));
             }
         }
-        // A bank for the Drain Life share, played until DRAIN_SHARES of its
-        // matches have seen one (stopping on a success leaves the chance of
-        // missing unchanged). Measured on seeds 1-60 (2026-11-12): 13 matches
-        // drain a Sacrifice holder, a rate of 0.22, so the whole bank misses
-        // with probability 0.78^60, about 4e-7; even at 0.13 (well below the
-        // measured rate) it is 0.87^60, about 2e-4. The one-tick case is
+        // The Drain Life share, staged: the Warlock channels into the
+        // Warrior holding the Paladin's Blessing of Sacrifice (AS-488). It
+        // was a seed bank until AS-488 moved the RNG stream: the enemy
+        // Warrior's strikes now land on the channeling Warlock, and no seed of
+        // 1-60 still drained a holder. The one-tick case is
         // `tests/drain_life_tick_log.rs`.
-        const DRAIN_SHARES: usize = 3;
-        let mut shared = 0;
-        for seed in 1..=60 {
-            let match_ = play(format!("drain seed {seed}"), drain(seed));
-            if rows(&match_.log).any(|(_, ability, _, message)| {
-                message.starts_with("[TRANSFER]") && ability == "Drain Life (tick)"
-            }) {
-                shared += 1;
-            }
-            played.push(match_);
-            if shared == DRAIN_SHARES {
-                break;
-            }
+        for seed in 466..469 {
+            played.push(play_staged(
+                format!("drain seed {seed}"),
+                drain(seed),
+                drain_stage(),
+            ));
         }
         played
     })

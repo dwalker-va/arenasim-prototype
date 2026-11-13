@@ -2,7 +2,7 @@
 //! sites in the source.
 //!
 //! That list is the seam between combat code and the animation sandbox: the
-//! sandbox runs neither the class AIs nor `combat_ai.rs`'s `QueuedInstantAttack`
+//! sandbox runs neither the class AIs nor `instant_landings.rs`'s `QueuedInstantAttack`
 //! drain, so it spawns the marker itself for exactly the abilities the list
 //! names. The sandbox's own test asserts every LISTED ability previews.
 //!
@@ -25,7 +25,7 @@ use arenasim::states::play_match::components::InstantAbilityFired;
 /// `animation_sandbox/playback.rs` is deliberately excluded: it spawns the
 /// marker DERIVED from the list, so including it would make this circular.
 const SPAWN_SOURCES: &[&str] = &[
-    "src/states/play_match/combat_ai.rs",
+    "src/states/play_match/instant_landings.rs",
     "src/states/play_match/class_ai/interrupts.rs",
     "src/states/play_match/class_ai/mage.rs",
     "src/states/play_match/class_ai/rogue.rs",
@@ -37,7 +37,7 @@ const SPAWN_SOURCES: &[&str] = &[
     "src/states/play_match/class_ai/shaman.rs",
 ];
 
-/// Abilities that reach the marker through `combat_ai.rs`'s generic
+/// Abilities that reach the marker through `instant_landings.rs`'s generic
 /// `QueuedInstantAttack` drain rather than by name. The drain spawns one marker
 /// for whatever ability was queued, so the scan cannot see these literally.
 const VIA_DRAIN: &[AbilityType] = &[

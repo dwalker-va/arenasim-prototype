@@ -1564,13 +1564,7 @@ fn mind_flay_build() -> Build {
 /// A healing Priest whose Mage teammate has an enemy Warrior on it, the
 /// Priest 12 yards off and its Mind Blast cooling down: it channels Mind
 /// Flay on the Warrior for 15 mana, its ticks land 10 each, and the Warrior
-/// is slowed while it channels.
-///
-/// The channel lands its first two ticks and not always its third: the
-/// shared channel timer (`process_channeling`) resets each tick to the full
-/// interval, dropping a frame's overshoot, so a channel's last tick can fall
-/// past its end (Drain Life lands 4 of its 5 the same way). That is the
-/// channel mechanism's, not Mind Flay's, so this asserts the ticks that land.
+/// is slowed while it channels. All three of its ticks land.
 #[test]
 fn mind_flay_channels_ticks_of_ten() {
     let config = HeadlessMatchConfig {
@@ -1601,7 +1595,7 @@ fn mind_flay_channels_ticks_of_ten() {
         .into_iter()
         .filter(|l| stamp(l).is_some_and(|t| t > start && t <= start + 3.1))
         .collect();
-    assert!((2..=3).contains(&ticks.len()), "{log}");
+    assert_eq!(ticks.len(), 3, "{log}");
     for t in &ticks {
         assert_eq!(amount(t, " for "), 10.0, "{t}");
     }

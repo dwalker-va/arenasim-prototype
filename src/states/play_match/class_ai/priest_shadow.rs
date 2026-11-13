@@ -162,17 +162,9 @@ fn channel_mind_flay(
 ) {
     combatant.current_mana -= def.mana_cost;
     combatant.global_cooldown = GCD;
-    let tick_interval = def.channel_tick_interval;
-    commands.entity(entity).insert(ChannelingState {
-        ability: AbilityType::MindFlay,
-        duration_remaining: def.channel_duration.unwrap_or(3.0),
-        time_until_next_tick: tick_interval,
-        tick_interval,
-        target,
-        interrupted: false,
-        interrupted_display_time: 0.0,
-        ticks_applied: 0,
-    });
+    commands
+        .entity(entity)
+        .insert(ChannelingState::new(AbilityType::MindFlay, target, def));
     if let Some(pending) = AuraPending::from_ability(target, entity, def) {
         commands.spawn(pending);
     }
