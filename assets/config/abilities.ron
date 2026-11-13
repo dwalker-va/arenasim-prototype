@@ -777,6 +777,33 @@
             spell_school: Physical,
         ),
 
+        // Rupture (Assassination, AS-417): a Physical bleed, 10 damage every
+        // 2s for 12s (60 in all). Classic's finisher (1943) scales with combo
+        // points, 40 over 8s at one to 144 over 16s at five; the sim's Rogue
+        // has none, so it is priced flat: 25 energy and a 20s cooldown, about
+        // a two-point Rupture. A melee attack: dodged or parried, it applies
+        // nothing. A bleed is not a poison and not magic: Physical, so no
+        // dispel, cleanse or purge removes it (TBC gives it no dispel type).
+        Rupture: (
+            name: "Rupture",
+            class: Rogue,
+            talent: true,
+            prevention: Pacify,
+            icon: "icons/abilities/ability_rogue_rupture.jpg",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 25.0,
+            cooldown: 20.0,
+            applies_aura: Some((
+                aura_type: DamageOverTime,
+                duration: 12.0,
+                magnitude: 10.0,
+                tick_interval: 2.0,
+                dispel_type: Physical,  // TBC 1943..26867: DispelType 0, a bleed (Mechanic 15)
+            )),
+            spell_school: Physical,
+        ),
+
         // ============================================================================
         // WARLOCK ABILITIES
         // ============================================================================

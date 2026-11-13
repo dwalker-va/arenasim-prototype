@@ -43,6 +43,9 @@ const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::PainSuppression, priest_ally_dying),
     (AbilityType::Shadowburn, warlock_target_low),
     (AbilityType::Conflagrate, warlock_immolate_up),
+    // Expose Armor's moment: below the Kidney Shot planner, on the kill
+    // target.
+    (AbilityType::Rupture, expose_armor_scene),
     (AbilityType::HolyNova, priest_team_healthy),
     (AbilityType::GuardianSpirit, priest_ally_dying),
 ];

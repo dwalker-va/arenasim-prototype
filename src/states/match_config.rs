@@ -1045,6 +1045,35 @@ impl MatchConfig {
                 }
             }
         }
+        // The off-hand poison (Master Poisoner): empty while the build opens
+        // no second slot; while it does, a poison other than the main hand's,
+        // the first one offered when the slot holds none or the main hand's.
+        let main = if team == 1 {
+            &self.team1_rogue_poisons
+        } else {
+            &self.team2_rogue_poisons
+        }
+        .get(slot)
+        .copied()
+        .unwrap_or_default();
+        let opens = talents.opens(
+            &build,
+            crate::states::play_match::talent_choices::ChoiceSlot::OffHandPoison,
+        );
+        let offhand = if team == 1 {
+            &mut self.team1_rogue_offhand_poisons
+        } else {
+            &mut self.team2_rogue_offhand_poisons
+        };
+        if let Some(off) = offhand.get_mut(slot) {
+            let legal = |p: RoguePoison| p != main && offered(ChoiceOption::RoguePoison(p));
+            *off = if !opens {
+                None
+            } else {
+                off.filter(|p| legal(*p))
+                    .or_else(|| RoguePoison::ALL.into_iter().find(|p| legal(*p)))
+            };
+        }
     }
 
     /// Assign a class to a team slot, dropping that slot's equipment overrides
@@ -1117,6 +1146,32 @@ impl MatchConfig {
             .and_then(|slot_prefs| slot_prefs.get(enemy_target))
             .copied()
             .unwrap_or_default()
+    }
+
+    /// Set the main-hand weapon poison of a Rogue slot. Choosing the poison
+    /// its off hand wears (Master Poisoner) swaps the two, so the hands never
+    /// wear the same one.
+    pub fn set_rogue_poison(&mut self, team: u8, slot: usize, poison: RoguePoison) {
+        let (main, offhand) = if team == 1 {
+            (
+                &mut self.team1_rogue_poisons,
+                &mut self.team1_rogue_offhand_poisons,
+            )
+        } else {
+            (
+                &mut self.team2_rogue_poisons,
+                &mut self.team2_rogue_offhand_poisons,
+            )
+        };
+        let Some(current) = main.get_mut(slot) else {
+            return;
+        };
+        if let Some(off) = offhand.get_mut(slot) {
+            if *off == Some(poison) {
+                *off = Some(*current);
+            }
+        }
+        *current = poison;
     }
 
     /// Set the curse preference for a specific warlock slot and enemy target
