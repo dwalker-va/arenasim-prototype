@@ -126,16 +126,32 @@ pub fn burst_call(ctx: &CombatContext) -> Option<BurstCall> {
 /// burst from any other cast. These are each class's tools in its own role: a
 /// Priest that chose Shadowform plays a ranged damage dealer, and bursts with
 /// Mind Blast (`priest::decide_shadow_priest_action`).
+///
+/// A talent's grant (Hemorrhage, Conflagrate, Shadowburn) is listed where its
+/// class's burst step tries it; an untalented unit's book lacks it and its
+/// step passes it by. Unlisted on purpose: Rupture and Expose Armor (a bleed
+/// and an armor debuff, which open a burst rather than deal it), Crusader
+/// Strike (the Paladin is a healer, and the play is a DPS's) and Mind Flay (a
+/// channel, whose ticks land over three seconds).
 pub fn burst_tools(class: CharacterClass) -> &'static [AbilityType] {
     match class {
         // Mortal Strike, then a Heroic Strike that spends the rage the
         // chain otherwise holds back for the next Mortal Strike.
         CharacterClass::Warrior => &[AbilityType::MortalStrike, AbilityType::HeroicStrike],
-        // Sinister Strike, ahead of the Kidney Shot planner's pooling.
-        CharacterClass::Rogue => &[AbilityType::SinisterStrike],
+        // Sinister Strike, ahead of the Kidney Shot planner's pooling — or
+        // Hemorrhage (Subtlety, a talent) in its place while its wound is down
+        // or low (`rogue::try_strike`, the same strike the rotation makes).
+        CharacterClass::Rogue => &[AbilityType::Hemorrhage, AbilityType::SinisterStrike],
         CharacterClass::Mage => &[AbilityType::Frostbolt],
-        // Death Coil's damage and horror, then Shadow Bolt.
-        CharacterClass::Warlock => &[AbilityType::DeathCoil, AbilityType::Shadowbolt],
+        // Death Coil's damage and horror; the Destruction talents' instants,
+        // which land inside any window — Conflagrate on the Warlock's own
+        // Immolate, then Shadowburn (20 yards); then Shadow Bolt.
+        CharacterClass::Warlock => &[
+            AbilityType::DeathCoil,
+            AbilityType::Conflagrate,
+            AbilityType::Shadowburn,
+            AbilityType::Shadowbolt,
+        ],
         CharacterClass::Hunter => &[AbilityType::AimedShot, AbilityType::ArcaneShot],
         CharacterClass::Priest
         | CharacterClass::Paladin
