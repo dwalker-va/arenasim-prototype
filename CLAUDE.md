@@ -859,8 +859,12 @@ any ring fits either ring socket, and the same item may not occupy both
      on Windfury Totem's own path (`combat_core::ExtraSwingSource`), rolled
      where the swing is queued rather than after it lands. It takes no
      `magnitude`, `duration` or `internal_cooldown` (validated), never draws
-     the totem's `WindfuryTornado`, grants no rage (a TBC deviation, AS-448)
+     the totem's `WindfuryTornado`, grants a white hit's rage when it lands
      and no further extra swing, and logs `X procs <trinket> (extra attack)`.
+     One swing gets at most ONE extra attack, and the trinket's comes first:
+     the totem is rolled only when no trinket fired
+     (`combat_core::roll_extra_attack`; TBC, sourced in
+     `docs/design/wow-mechanics.md`).
      No stat buys it, so it is priced at a DECLARED rate per unit of `chance`,
      `WEIGHT_EXTRA_SWING`: 1.5x haste's weight, provisional (a 10x-dose sweep
      the constant cites). Every consumer that lists or draws proc BUFFS asks
@@ -1832,6 +1836,12 @@ jq -c 'select(.outcome.ability == "FreezingTrap") | {t: .sim_time, aimed_at: .ou
 # moves the Hunter off that healer onto the melee, kill target or not; the
 # target-switch recipe above shows it.)
 jq -r 'select(.actor.class == "Hunter") | .candidates[]? | select(.ability == "FreezingTrap") | .reason.PreconditionUnmet.note // empty' $T | grep '^healer trap' | sort | uniq -c
+
+# Frost Trap peels held for the shared trap cooldown: the pressure trap would
+# freeze the enemy healer within `HEALER_FREEZE_HOLD_SECS`
+# (`hunter::frost_trap_held_for_healer`), or the Hunter's own Freezing Trap is
+# still waiting to spring.
+jq -r 'select(.actor.class == "Hunter") | .candidates[]? | select(.ability == "FrostTrap") | .reason.PreconditionUnmet.note // empty' $T | grep '^frost trap held' | sort | uniq -c
 
 # Melee avoidance (`combat_core/avoidance.rs`): every dodged or parried melee
 # attack, the attacker as `actor` and the defender as `target`. Matches no

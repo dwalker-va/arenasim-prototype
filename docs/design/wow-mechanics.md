@@ -258,8 +258,8 @@ trinket: 5% on each melee hit that connects (Classic's 11815 is 2%). Gressil,
 Dawn of Ruin (a Champion sword) carries the same proc at 4%, our design: the
 Classic sword has none. The swing takes the totem's path (`ExtraSwingSource`
 in `combat_core/auto_attack.rs`) —
-its own avoidance and crit rolls, no Heroic Strike bonus, no rage, no further
-extra swing — with three differences:
+its own avoidance and crit rolls, no Heroic Strike bonus, a white hit's rage
+when it lands, no further extra swing — with three differences:
 
 - **Either hand procs it, and the swing is the main hand's**, as in Classic,
   where an extra attack is always a main-hand attack. Nothing occupies the
@@ -272,9 +272,39 @@ extra swing — with three differences:
 Neither swing carries bonus attack power: an auto-attack here is weapon damage
 alone, so the totem's swing and the trinket's are the same swing.
 
-**Deviation from TBC: an extra swing generates no rage.** In TBC an extra
-attack generates rage like any white hit. Here neither the totem's swing nor
-the trinket's does; the rule change is AS-448.
+### Extra attacks: rage, and one per swing (TBC)
+
+- **An extra swing that lands generates rage like any main-hand white hit**
+  (`grant_white_hit_rage`, the one formula every white hit pays through: the
+  main-hand weapon's `RAGE_PER_WEAPON_SECOND` share). A dodged or parried one
+  generates none, as an avoided swing never does. In TBC an extra attack is an
+  ordinary `BASE_ATTACK` swing, rewarded rage on its damage like any other.
+- **One swing is granted at most one extra attack, and the trinket's comes
+  first.** A main-hand hit that would proc both Hand of Justice (or Gressil)
+  and Windfury Totem gets the trinket's extra swing and no totem roll at all;
+  the totem rolls only when no trinket fired. An extra swing the target avoids
+  still spends it — the proc fired. Two trinkets already gave at most one
+  (`proc_trinkets::roll_extra_swing`). `combat_core::roll_extra_attack` is the
+  rule's one site.
+
+  The source is the TBC client data and the cmangos TBC server
+  ([cmangos/mangos-tbc](https://github.com/cmangos/mangos-tbc) at
+  `e9682190f7f20aa3b43dbf0d8cf7b49825707bd4`). In the client (2.5.6.69795),
+  Windfury Totem's buff is a weapon enchant — `SpellItemEnchantment` 2639
+  "Windfury Totem 5", whose combat spell 25584 "Windfury Attack" carries
+  `SPELL_EFFECT_ADD_EXTRA_ATTACKS` (19) — and Hand of Justice is an equip aura,
+  15600 (`PROC_TRIGGER_SPELL`) firing 15601, the same effect. On a hit the
+  server resolves the attacker's aura procs first and its weapon enchants
+  after (`Unit::ProcDamageAndSpell`, `src/game/Spells/UnitAuraProcHandler.cpp`),
+  and `Player::CastItemCombatSpell` (`src/game/Entities/Player.cpp`) skips an
+  enchant whose spell adds an extra attack while one is already pending —
+  "not allow proc extra attack spell at extra attack" (cmangos commit
+  `d64d4848`, "Extra attacks from weapon enchants should not chain"). The
+  pending attacks are swung before the next swing (`Unit::DoExtraAttacks`),
+  and none of them can proc another extra attack (`m_extraAttacksExecuting`).
+  Two equip-aura procs on one hit would accumulate there (commits `6382658e`,
+  `008e0542`); the sim's two trinket sources keep the one-per-swing roll they
+  already had.
 
 ---
 

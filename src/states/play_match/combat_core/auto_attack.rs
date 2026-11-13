@@ -541,40 +541,25 @@ pub fn combat_auto_attack(
                                 swing_kind,
                             ));
 
-                            // Windfury Totem proc: a successful roll pushes a duplicate
-                            // (bonus) swing that resolves like a normal weapon hit. Both
-                            // the proc roll and the bonus swing's crit roll draw from the
-                            // seeded game_rng, so match determinism is preserved. This branch
-                            // is only reached when a WindfuryBuff aura is present, so existing
-                            // (totem-free) matches draw zero extra RNG and stay byte-identical.
-                            let main_swing = ExtraSwingWeapon {
-                                damage: weapon_damage,
-                                kind: swing_kind,
-                                crit_chance: combatant.crit_chance + crit_bonus,
-                                damage_reduction,
-                                ds_penalty,
-                            };
-                            if let Some(wf_chance) = windfury_chance {
-                                if game_rng.random_f32() < wf_chance {
-                                    attacks.extend(queue_extra_swing(
-                                        ExtraSwingSource::WindfuryTotem,
-                                        main_swing,
-                                        &mut commands,
-                                        &mut game_rng,
-                                        defense,
-                                        defender_auras,
-                                        attacker_entity,
-                                        target_entity,
-                                    ));
-                                }
-                            }
-                            // An extra-swing trinket (Hand of Justice) on the
-                            // same path, rolled after the totem's. A melee
-                            // swing only, like the totem's: `swing_kind` is
-                            // the live socket's, so a wand or an Auto Shot
-                            // never rolls it. No roll at all without one.
+                            // The swing's one extra attack, if a proc grants
+                            // it: an extra-swing trinket (Hand of Justice) or
+                            // Windfury Totem — see `roll_extra_attack`. A melee
+                            // swing only: `swing_kind` is the live socket's,
+                            // so a wand or an Auto Shot never rolls either.
+                            // Neither roll draws without its source, so a
+                            // match with no totem and no trinket draws nothing
+                            // here and stays byte-identical.
                             if swing_kind == AutoAttackKind::Melee {
-                                attacks.extend(roll_trinket_extra_swing(
+                                let main_swing = ExtraSwingWeapon {
+                                    damage: weapon_damage,
+                                    speed: weapon_speed,
+                                    kind: swing_kind,
+                                    crit_chance: combatant.crit_chance + crit_bonus,
+                                    damage_reduction,
+                                    ds_penalty,
+                                };
+                                attacks.extend(roll_extra_attack(
+                                    windfury_chance,
                                     &mut combatant,
                                     main_swing,
                                     &mut commands,
@@ -597,14 +582,7 @@ pub fn combat_auto_attack(
                                 );
                             }
 
-                            // Warriors generate Rage from auto-attacks, in
-                            // proportion to the weapon's speed — see
-                            // `RAGE_PER_WEAPON_SECOND`.
-                            if combatant.resource_type == ResourceType::Rage {
-                                let rage_gain = RAGE_PER_WEAPON_SECOND * weapon_speed;
-                                combatant.current_mana =
-                                    (combatant.current_mana + rage_gain).min(combatant.max_mana);
-                            }
+                            grant_white_hit_rage(&mut combatant, weapon_speed, 1.0);
                         }
 
                         // A missed or avoided swing is still a swing: it
@@ -666,18 +644,21 @@ pub fn combat_auto_attack(
                             // melee main hand, everyone else's live one.
                             // Windfury Totem's buff sits on the main hand
                             // alone, so it has no roll here.
+                            let (damage, speed) = if melee_main {
+                                (combatant.melee_damage, combatant.melee_weapon_speed)
+                            } else {
+                                (combatant.attack_damage, combatant.weapon_speed)
+                            };
                             let main_swing = ExtraSwingWeapon {
-                                damage: if melee_main {
-                                    combatant.melee_damage
-                                } else {
-                                    combatant.attack_damage
-                                },
+                                damage,
+                                speed,
                                 kind: AutoAttackKind::Melee,
                                 crit_chance: combatant.crit_chance + crit_bonus,
                                 damage_reduction,
                                 ds_penalty,
                             };
-                            attacks.extend(roll_trinket_extra_swing(
+                            attacks.extend(roll_extra_attack(
+                                None,
                                 &mut combatant,
                                 main_swing,
                                 &mut commands,
@@ -695,13 +676,12 @@ pub fn combat_auto_attack(
                             // it pays the same fraction of its weapon's
                             // per-swing rage. Full rate would let a second
                             // weapon double a Warrior's rage income.
-                            if combatant.resource_type == ResourceType::Rage {
-                                let rage_gain = RAGE_PER_WEAPON_SECOND
-                                    * combatant.offhand_weapon_speed
-                                    * OFFHAND_DAMAGE_MULTIPLIER;
-                                combatant.current_mana =
-                                    (combatant.current_mana + rage_gain).min(combatant.max_mana);
-                            }
+                            let offhand_speed = combatant.offhand_weapon_speed;
+                            grant_white_hit_rage(
+                                &mut combatant,
+                                offhand_speed,
+                                OFFHAND_DAMAGE_MULTIPLIER,
+                            );
                         }
                         combatant.offhand_timer = 0.0;
                     }
@@ -1705,6 +1685,9 @@ struct ExtraSwingWeapon {
     /// The weapon's damage — base, with no Heroic Strike bonus: that bonus
     /// buffs the swing it was queued against, never the extra one.
     damage: f32,
+    /// The weapon's speed, which sets the rage the swing grants
+    /// ([`grant_white_hit_rage`]).
+    speed: f32,
     kind: AutoAttackKind,
     crit_chance: f32,
     damage_reduction: f32,
@@ -1715,19 +1698,38 @@ struct ExtraSwingWeapon {
 /// hand, kind) — the shape `combat_auto_attack` collects.
 type QueuedAttack = (Entity, Entity, f32, bool, bool, WeaponHand, AutoAttackKind);
 
+/// An extra swing a proc granted. `None` inside when the target avoided it:
+/// the proc fired all the same, and still spends the swing's one extra
+/// attack ([`roll_extra_attack`]).
+struct GrantedExtraSwing(Option<QueuedAttack>);
+
+/// Pay a Rage user for a white hit that landed: [`RAGE_PER_WEAPON_SECOND`]
+/// per second of the weapon's speed, times the share of a full hit it deals
+/// (`1.0` for a main-hand swing, [`OFFHAND_DAMAGE_MULTIPLIER`] for an off-hand
+/// one), capped at the pool. The one rage formula for every white hit: the
+/// main hand's, the off hand's and an extra swing's. Nothing for any other
+/// resource.
+fn grant_white_hit_rage(combatant: &mut Combatant, weapon_speed: f32, hit_share: f32) {
+    if combatant.resource_type == ResourceType::Rage {
+        let rage_gain = RAGE_PER_WEAPON_SECOND * weapon_speed * hit_share;
+        combatant.current_mana = (combatant.current_mana + rage_gain).min(combatant.max_mana);
+    }
+}
+
 /// Queue ONE extra main-hand swing, whatever gave it. The extra swing is a
 /// melee swing of its own: it may be dodged or parried (logged as the swing
 /// would be), and otherwise rolls its own crit at the procced swing's
-/// modifiers. It grants no rage (a deviation from TBC, AS-448) and rolls no
-/// further extra swing. Returns the attack to queue, or `None` when it was
-/// avoided.
+/// modifiers and grants rage as any landed main-hand white hit does (TBC). It
+/// rolls no further extra swing. The returned grant carries the attack to
+/// queue, or `None` when it was avoided.
 ///
 /// Windfury Totem's bonus swing has taken this path since before the trinket
 /// shared it, in the same draw order (avoidance, then crit), so a match with a
-/// totem and no trinket is byte-identical to one before the trinket existed.
+/// totem and no trinket draws what it drew before the trinket existed.
 #[allow(clippy::too_many_arguments)]
 fn queue_extra_swing(
     source: ExtraSwingSource,
+    attacker_combatant: &mut Combatant,
     weapon: ExtraSwingWeapon,
     commands: &mut Commands,
     game_rng: &mut GameRng,
@@ -1735,7 +1737,7 @@ fn queue_extra_swing(
     defender_auras: &[Aura],
     attacker: Entity,
     target: Entity,
-) -> Option<QueuedAttack> {
+) -> GrantedExtraSwing {
     if avoid_melee_attack(
         commands,
         game_rng,
@@ -1747,7 +1749,7 @@ fn queue_extra_swing(
     )
     .is_some()
     {
-        return None;
+        return GrantedExtraSwing(None);
     }
     let is_crit = roll_crit(weapon.crit_chance, game_rng);
     let crit_damage = if is_crit {
@@ -1756,6 +1758,8 @@ fn queue_extra_swing(
         weapon.damage
     };
     let total = (crit_damage * (1.0 - weapon.damage_reduction) * weapon.ds_penalty).max(0.0);
+    // A landed white hit of the main-hand weapon, whatever procced it.
+    grant_white_hit_rage(attacker_combatant, weapon.speed, 1.0);
 
     // Signature Windfury VFX: a wind funnel swirls up around the proccing
     // melee ally. Spawned here like FloatingCombatText; the mesh is built only
@@ -1773,7 +1777,7 @@ fn queue_extra_swing(
             PlayMatchEntity,
         ));
     }
-    Some((
+    GrantedExtraSwing(Some((
         attacker,
         target,
         total,
@@ -1781,13 +1785,79 @@ fn queue_extra_swing(
         is_crit,
         WeaponHand::Main,
         weapon.kind,
-    ))
+    )))
+}
+
+/// Roll the extra attack one melee swing that connected may be granted, and
+/// queue it through [`queue_extra_swing`]. Both hands ask it; only the main
+/// hand passes a `windfury_chance` (the totem's buff is on the main hand
+/// alone — see `windfury_bonus_chance`).
+///
+/// **A swing is granted at most ONE extra attack, and the trinket's comes
+/// first** (TBC). Hand of Justice's proc is an equip aura and Windfury
+/// Totem's is a weapon enchant (TBC client: `SpellItemEnchantment` 2639's
+/// combat spell 25584 carries `SPELL_EFFECT_ADD_EXTRA_ATTACKS`, as Hand of
+/// Justice's 15600 → 15601 does). On a hit the server resolves the attacker's
+/// aura procs before its weapon enchants, and an enchant whose spell adds an
+/// extra attack is not rolled while one is already pending
+/// (cmangos/mangos-tbc `Unit::ProcDamageAndSpell` and
+/// `Player::CastItemCombatSpell`, "not allow proc extra attack spell at extra
+/// attack"; cited in `docs/design/wow-mechanics.md`). So the trinket is rolled
+/// first, and the totem only when the trinket did not fire. An extra swing
+/// the target avoids still spends the one: the proc fired.
+///
+/// Draws nothing for an attacker with neither source.
+#[allow(clippy::too_many_arguments)]
+fn roll_extra_attack(
+    windfury_chance: Option<f32>,
+    attacker_combatant: &mut Combatant,
+    weapon: ExtraSwingWeapon,
+    commands: &mut Commands,
+    game_rng: &mut GameRng,
+    combat_log: &mut CombatLog,
+    combatant_info: &std::collections::HashMap<Entity, (u8, String, bool, u8, AutoAttackKind)>,
+    defense: MeleeDefense,
+    defender_auras: &[Aura],
+    attacker: Entity,
+    target: Entity,
+) -> Option<QueuedAttack> {
+    let mut granted = roll_trinket_extra_swing(
+        attacker_combatant,
+        weapon,
+        commands,
+        game_rng,
+        combat_log,
+        combatant_info,
+        defense,
+        defender_auras,
+        attacker,
+        target,
+    );
+    if granted.is_none() {
+        if let Some(chance) = windfury_chance {
+            if game_rng.random_f32() < chance {
+                granted = Some(queue_extra_swing(
+                    ExtraSwingSource::WindfuryTotem,
+                    attacker_combatant,
+                    weapon,
+                    commands,
+                    game_rng,
+                    defense,
+                    defender_auras,
+                    attacker,
+                    target,
+                ));
+            }
+        }
+    }
+    granted.and_then(|GrantedExtraSwing(attack)| attack)
 }
 
 /// Roll the attacker's extra-swing trinket for a melee swing that connected
 /// and, if it fires, log the proc and queue the extra swing through
-/// [`queue_extra_swing`]. Returns nothing and draws nothing for an attacker
-/// with no proc trinket — the guard is the first line, before the RNG.
+/// [`queue_extra_swing`]. `None` when no trinket fired. Draws nothing for an
+/// attacker with no proc trinket — the guard is the first line, before the
+/// RNG.
 #[allow(clippy::too_many_arguments)]
 fn roll_trinket_extra_swing(
     attacker_combatant: &mut Combatant,
@@ -1800,7 +1870,7 @@ fn roll_trinket_extra_swing(
     defender_auras: &[Aura],
     attacker: Entity,
     target: Entity,
-) -> Option<QueuedAttack> {
+) -> Option<GrantedExtraSwing> {
     if attacker_combatant.proc_trinkets.is_empty() {
         return None;
     }
@@ -1820,8 +1890,9 @@ fn roll_trinket_extra_swing(
             ),
         );
     }
-    queue_extra_swing(
+    Some(queue_extra_swing(
         ExtraSwingSource::Trinket(item),
+        attacker_combatant,
         weapon,
         commands,
         game_rng,
@@ -1829,7 +1900,7 @@ fn roll_trinket_extra_swing(
         defender_auras,
         attacker,
         target,
-    )
+    ))
 }
 
 /// Windfury Totem bonus-swing chance for this attacker. Returns `Some(magnitude)`
