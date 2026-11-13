@@ -803,7 +803,7 @@ fn conflagrate_consumes_its_own_immolate() {
 /// `UP` on the target, Conflagrate granted, and a second Warlock beside this
 /// one whose Immolate burns on the target.
 fn others_immolate_up() -> Scene {
-    let mut scene = warlock_scene(&UP, &[AbilityType::Conflagrate])
+    let scene = warlock_scene(&UP, &[AbilityType::Conflagrate])
         .unit("other warlock", 1, Warlock)
         .at(0.0, 5.0);
     let other = scene.entity("other warlock");
