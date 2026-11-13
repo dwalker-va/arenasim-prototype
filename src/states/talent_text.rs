@@ -506,6 +506,7 @@ fn field_name(field: AbilityField) -> &'static str {
         AbilityField::AuraStrength => "effect strength",
         AbilityField::PeriodicDamage => "damage over time",
         AbilityField::ManaPerHealth => "mana gained",
+        AbilityField::Healing => "healing",
     }
 }
 
@@ -539,7 +540,8 @@ fn field_is_fraction(field: AbilityField) -> bool {
         | AbilityField::ManaPerHealth
         // Take only a Mul, which is written as a percentage.
         | AbilityField::Damage
-        | AbilityField::PeriodicDamage => false,
+        | AbilityField::PeriodicDamage
+        | AbilityField::Healing => false,
     }
 }
 
@@ -571,7 +573,8 @@ fn field_unit(field: AbilityField) -> &'static str {
         | AbilityField::ManaPerHealth
         // Take only a Mul, which is written as a percentage.
         | AbilityField::Damage
-        | AbilityField::PeriodicDamage => "",
+        | AbilityField::PeriodicDamage
+        | AbilityField::Healing => "",
     }
 }
 

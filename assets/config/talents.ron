@@ -70,6 +70,7 @@
         ],
         Priest: [
             (id: Discipline, name: "Discipline", icon: "icons/talents/spell_holy_wordfortitude.jpg"),
+            (id: Holy, name: "Holy", icon: "icons/talents/spell_holy_holybolt.jpg"),
             (id: Shadow, name: "Shadow", icon: "icons/talents/spell_shadow_shadowwordpain.jpg"),
         ],
     },
@@ -470,6 +471,112 @@
             per_rank: [Grant(PainSuppression)],
         ),
 
+        // ---- Priest: Holy (AS-415; the talents proposal §5.2) ----
+        // The healer that lasts. Diverges from TBC so its deep talents
+        // compete: a large mana-regeneration node at tier 3, and Wrath's
+        // Guardian Spirit as the capstone. Values provisional: tuning is the
+        // milestone sweep's (AS-302).
+        HolySpecialization: (
+            name: "Holy Specialization",
+            class: Priest, tree: Holy, tier: 1, column: 0,
+            icon: "icons/talents/spell_holy_sealofsalvation.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // +2.5% critical strike chance a rank on Holy spells (Classic
+            // 15011: +1% a rank, five ranks): Flash Heal and Holy Nova.
+            per_rank: [Patch(on: School(Holy), field: CritChance, op: Add(0.025))],
+        ),
+        SpiritualHealing: (
+            name: "Spiritual Healing",
+            class: Priest, tree: Holy, tier: 1, column: 2,
+            icon: "icons/talents/spell_nature_moonglow.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // +5% healing a rank on the Priest's heals, base and spell-power
+            // share alike (Classic 15356: +2% a rank, five ranks): Flash Heal
+            // 105 -> 110 -> 116 on the starting kit, and Holy Nova's heal.
+            per_rank: [Patch(on: School(Holy), field: Healing, op: Mul(1.05))],
+        ),
+        Inspiration: (
+            name: "Inspiration",
+            class: Priest, tree: Holy, tier: 2, column: 0,
+            icon: "icons/talents/spell_holy_layonhands.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // A critical Flash Heal raises its target's armor 12% a rank for
+            // 15s (Classic 15363: 25% at 3/3, after a critical Flash Heal,
+            // Heal, Greater Heal or Prayer of Healing; Holy Nova is not one).
+            // TBC 14893's buff is Magic. Drawn by the shared aura band until
+            // the Priest talents' visual cards (scoped by AS-335).
+            per_rank: [
+                Proc((
+                    trigger: HealCrit,
+                    abilities: [FlashHeal],
+                    chance: Chance(1.0),
+                    ranks_add: Effect,
+                    effect: ApplyAura(
+                        on: Other,
+                        aura_type: ArmorPercentIncrease,
+                        magnitude: 0.12,
+                        duration: 15.0,
+                        dispel_type: Magic,
+                    ),
+                )),
+            ],
+        ),
+        BlessedRecovery: (
+            name: "Blessed Recovery",
+            class: Priest, tree: Holy, tier: 2, column: 2,
+            icon: "icons/talents/spell_holy_blessedrecovery.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // Struck by a melee or ranged critical hit, the Priest heals 25%
+            // of the damage it took over 6s, in 2s ticks (Classic 27816; TBC
+            // 27813's heal over time: period 2000ms, Magic). Its heal over
+            // time lands with no visual of its own until AS-352 (scoped by
+            // AS-335).
+            per_rank: [
+                Proc((
+                    trigger: CritTaken,
+                    chance: Chance(1.0),
+                    ranks_add: Effect,
+                    effect: HealBack(fraction: 0.25, duration: 6.0, tick_interval: 2.0),
+                )),
+            ],
+        ),
+        HolyNova: (
+            name: "Holy Nova",
+            class: Priest, tree: Holy, tier: 3, column: 0,
+            icon: "icons/talents/spell_holy_holynova.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // 13-15 Holy damage to every enemy and 25-29 healing to every
+            // teammate within 10 yards, instant; 50 mana.
+            per_rank: [Grant(HolyNova)],
+        ),
+        HolyConcentration: (
+            name: "Holy Concentration",
+            class: Priest, tree: Holy, tier: 3, column: 1,
+            icon: "icons/talents/spell_holy_fanaticism.jpg",
+            max_rank: 1,
+            // +35% mana regeneration, always on, gear included. TBC has no
+            // deep mana talent for Holy; the name is Wrath's. Its price is
+            // computed at the reference Priest.
+            per_rank: [StatPercent(ManaRegen, 0.35)],
+        ),
+        GuardianSpirit: (
+            name: "Guardian Spirit",
+            class: Priest, tree: Holy, tier: 4, column: 1,
+            icon: "icons/talents/spell_holy_guardianspirit.jpg",
+            max_rank: 1,
+            budget: Some(22.0),
+            requires: Some((HolyConcentration, 1)),
+            // An ally receives 40% more healing for 10s; the first blow that
+            // would kill it then is prevented and heals it for 30% of its
+            // maximum health instead, ending the spirit. 60s, so once a match.
+            per_rank: [Grant(GuardianSpirit)],
+        ),
+
         // ---- Priest: Shadow (the talents proposal §5.2) ----
         ImprovedMindBlast: (
             name: "Improved Mind Blast",
@@ -513,9 +620,9 @@
         // SpellShapeshift) excludes form 28 from Flash Heal, Holy Nova and
         // every other heal, and lists Power Word: Shield, Power Word:
         // Fortitude, Dispel Magic, Mind Blast, Mana Burn, Psychic Scream,
-        // Shadow Word: Pain and Silence as castable in it. Holy Nova's rule
-        // lands with Holy Nova (AS-415).
+        // Shadow Word: Pain and Silence as castable in it.
         Forbids(option: PriestForm(Shadowform), ability: FlashHeal),
+        Forbids(option: PriestForm(Shadowform), ability: HolyNova),
         // The form is the spell: castable only with the form chosen. Silence
         // (AS-416) takes the same rule: Requires(ability: Silence, option:
         // PriestForm(Shadowform)).
@@ -542,6 +649,11 @@
             Head: JudgementCrown,
             Chest: JudgementBreastplate,
             Legs: JudgementLegguards,
+        },
+        Priest: {
+            Head: ArcanistCrown,
+            Chest: ArcanistRobes,
+            Legs: ArcanistLeggings,
         },
     },
 )

@@ -27,7 +27,10 @@
 //!   (`process_projectile_hits`), a queued instant attack (`decide_abilities`);
 //! - [`TalentTrigger::DotTick`] — a damage tick of the unit's DoT
 //!   (`process_dot_ticks`) or of its channel (`process_channeling`);
-//! - [`TalentTrigger::HealCrit`] — a cast heal that crit (`process_casting`);
+//! - [`TalentTrigger::HealCrit`] — a heal the unit cast that crit: a cast
+//!   completing (`process_casting`), Holy Shock's (`process_holy_shock_heals`)
+//!   and an area heal's on each teammate it heals (`decide_abilities`, Holy
+//!   Nova);
 //! - [`TalentTrigger::CritTaken`] — a melee or ranged crit landing ON the unit:
 //!   an auto-attack, a queued instant attack, or a shot's projectile arriving
 //!   (`process_projectile_hits`; an attack, `AbilityConfig::is_attack`, never

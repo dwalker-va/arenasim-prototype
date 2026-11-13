@@ -793,6 +793,7 @@ impl HealImpact {
             | AuraType::DamageTransfer
             | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
+            | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect
             | AuraType::TravelForm => None,
         }
@@ -1597,6 +1598,7 @@ impl AuraApplyRoute {
             | AuraType::DamageTransfer
             | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
+            | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect => AuraApplyRoute::Band,
 
             // Travel Form has no bespoke apply treatment of its own, so the

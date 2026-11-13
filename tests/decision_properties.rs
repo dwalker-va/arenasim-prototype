@@ -1529,6 +1529,16 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         AbilityType::PainSuppression,
         Unreached::NeedsKnob("a build that takes Pain Suppression"),
     ),
+    // The Holy tree (AS-415): grants; tests/holy_talents.rs grants each in
+    // its scene pairs.
+    (
+        AbilityType::HolyNova,
+        Unreached::NeedsKnob("a build that takes Holy Nova"),
+    ),
+    (
+        AbilityType::GuardianSpirit,
+        Unreached::NeedsKnob("a build that takes Guardian Spirit"),
+    ),
 ];
 
 /// Every ability of every class's own kit is chosen somewhere in the grid, or

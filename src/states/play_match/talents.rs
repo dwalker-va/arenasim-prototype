@@ -150,6 +150,14 @@ talent_ids! {
     PowerInfusion,
     ReflectiveShield,
     PainSuppression,
+    // Priest: Holy
+    HolySpecialization,
+    SpiritualHealing,
+    Inspiration,
+    BlessedRecovery,
+    HolyConcentration,
+    HolyNova,
+    GuardianSpirit,
     // Priest: Shadow
     ImprovedMindBlast,
     ImprovedPsychicScream,
@@ -181,6 +189,7 @@ pub enum TreeId {
     Shadow,
     Protection,
     Discipline,
+    Holy,
 }
 
 /// One tree of a class, as `talents.ron` lists it. A class's trees are in
@@ -448,6 +457,13 @@ pub enum AbilityField {
     /// takes (Life Tap: 1.0). Present only on an ability that converts.
     /// Improved Life Tap's field.
     ManaPerHealth,
+    /// The ability's whole direct heal: its base range and its coefficient
+    /// together ([`Self::parts`]), so `Mul(1.05)` makes every heal 5% bigger.
+    /// Present only on an ability that heals directly (a nonzero range or
+    /// coefficient), so a school-wide patch of it passes over a Holy spell
+    /// that heals nothing (Power Word: Shield). Takes only a `Mul`, as
+    /// `Damage` does. Spiritual Healing's field.
+    Healing,
 }
 
 impl AbilityField {
@@ -486,7 +502,7 @@ impl AbilityField {
             // `get` / `set`.
             AbilityField::AuraStrength => None,
             // A composite: patched through its `parts`.
-            AbilityField::PeriodicDamage => None,
+            AbilityField::PeriodicDamage | AbilityField::Healing => None,
             AbilityField::ManaPerHealth => config
                 .health_to_mana
                 .as_mut()
@@ -498,7 +514,7 @@ impl AbilityField {
     pub fn get(self, config: &AbilityConfig) -> Option<f32> {
         match self {
             // A composite names several values, so no one of them.
-            AbilityField::Damage | AbilityField::PeriodicDamage => None,
+            AbilityField::Damage | AbilityField::PeriodicDamage | AbilityField::Healing => None,
             AbilityField::AuraStrength => config.applies_aura.as_ref().map(|a| {
                 if strength_is_remainder(a.aura_type) {
                     1.0 - a.magnitude
@@ -526,7 +542,7 @@ impl AbilityField {
                 }
             }
             // A composite is written through its `parts`, never as one value.
-            AbilityField::Damage | AbilityField::PeriodicDamage => {}
+            AbilityField::Damage | AbilityField::PeriodicDamage | AbilityField::Healing => {}
             stored => {
                 if let Some(v) = stored.of(config) {
                     *v = value;
@@ -547,6 +563,11 @@ impl AbilityField {
             AbilityField::PeriodicDamage => &[
                 AbilityField::AuraMagnitude,
                 AbilityField::AuraMagnitudeCoefficient,
+            ],
+            AbilityField::Healing => &[
+                AbilityField::HealingBaseMin,
+                AbilityField::HealingBaseMax,
+                AbilityField::HealingCoefficient,
             ],
             AbilityField::ManaPerHealth => &[AbilityField::ManaPerHealth],
             AbilityField::CastTime => &[AbilityField::CastTime],
@@ -590,6 +611,11 @@ impl AbilityField {
             // Its parts are any aura's: it is present only where they are a
             // damage over time's.
             AbilityField::PeriodicDamage => dot() && parts(),
+            // Its parts are every ability's: it is present only where they
+            // heal.
+            AbilityField::Healing => {
+                parts() && (config.healing_base_max > 0.0 || config.healing_coefficient > 0.0)
+            }
             _ => parts(),
         }
     }
@@ -647,6 +673,7 @@ pub fn strength_is_remainder(aura: AuraType) -> bool {
         | AuraType::ArmorPercentReduction
         | AuraType::DamageTransfer
         | AuraType::KillingBlowSave
+        | AuraType::HealingReceivedIncrease
         | AuraType::DamageReflect
         | AuraType::TriggeredAbsorb => false,
     }

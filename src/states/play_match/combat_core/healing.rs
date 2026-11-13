@@ -11,12 +11,16 @@
 //!    victim's own tick killed in the same pass), and a dead unit is never
 //!    healed back above 0: every reader of a corpse's health may rely on it
 //!    staying at 0.
-//! 1. [`AuraType::HealingReduction`] (Mortal Strike's Mortal Wound and the
+//! 1. [`AuraType::HealingReceivedIncrease`] (Guardian Spirit): the strongest
+//!    one raises the heal as it arrives.
+//! 2. [`AuraType::HealingReduction`] (Mortal Strike's Mortal Wound and the
 //!    other healing debuffs): Classic cuts all healing received, heal over time
-//!    ticks included.
-//! 2. The Mortal Wounds tell for that cut, bracketing the debuff alone.
-//! 3. [`ArenaDampening`], after the debuff.
-//! 4. The overheal clamp.
+//!    ticks included. The two multiply, so their order changes no number; the
+//!    increase goes first so the tell below brackets the debuff alone.
+//! 3. The Mortal Wounds tell for that cut, bracketing the debuff alone.
+//! 4. [`ArenaDampening`], after the debuff and the increase: a dampened heal
+//!    is dampened whatever raised it.
+//! 5. The overheal clamp.
 //!
 //! A rule that stops healing outright (a healing immunity) belongs at the top
 //! of [`apply_healing`], before the reduction, so it covers every site at once.
@@ -65,6 +69,19 @@ pub fn healing_multiplier(target_auras: Option<&ActiveAuras>) -> f32 {
         .fold(1.0, f32::min)
 }
 
+/// The multiplier the [`AuraType::HealingReceivedIncrease`] auras on a target
+/// put on the healing it receives: one plus the STRONGEST one's magnitude
+/// (0.40 = 40% more), or 1.0 with none. Only the strongest applies (the
+/// stacking simplification), as for [`healing_multiplier`]'s cuts.
+pub fn healing_received_multiplier(target_auras: Option<&ActiveAuras>) -> f32 {
+    1.0 + target_auras
+        .into_iter()
+        .flat_map(|auras| auras.auras.iter())
+        .filter(|aura| aura.effect_type == AuraType::HealingReceivedIncrease)
+        .map(|aura| aura.magnitude)
+        .fold(0.0, f32::max)
+}
+
 /// Land `amount` of healing on `target` and return the effective healing (the
 /// health actually gained, overheal excluded) — the figure every site credits,
 /// logs and shows.
@@ -97,13 +114,17 @@ pub fn apply_healing(
         return 0.0;
     }
 
+    // Healing received increase: only the strongest applies. A multiply by
+    // exactly 1.0 with none, so a match without one is the match before it.
+    let raised = amount * healing_received_multiplier(target_auras);
+
     // Healing reduction: only the strongest debuff applies.
-    let healing = amount * healing_multiplier(target_auras);
+    let healing = raised * healing_multiplier(target_auras);
 
     // Mortal Wounds tell: the debuff has no body treatment, it states itself
-    // by visibly breaking the heal. Before dampening, so the tell reflects the
-    // debuff's cut only.
-    if let Some(refused) = refused_fraction(amount, healing) {
+    // by visibly breaking the heal. Before dampening, and measured from the
+    // raised heal, so the tell reflects the debuff's cut only.
+    if let Some(refused) = refused_fraction(raised, healing) {
         commands.spawn((
             HealingRefused {
                 target: target_entity,

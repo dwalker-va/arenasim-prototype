@@ -41,6 +41,8 @@ const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::InnerFocus, priest_ally_dying),
     (AbilityType::PowerInfusion, priest_kill_window),
     (AbilityType::PainSuppression, priest_ally_dying),
+    (AbilityType::HolyNova, priest_team_healthy),
+    (AbilityType::GuardianSpirit, priest_ally_dying),
 ];
 
 /// A Warlock 20 yards from its kill target, a Warrior, with Corruption and
@@ -202,6 +204,25 @@ fn priest_kill_window(defs: &AbilityDefinitions) -> (Scene, Who) {
         .unit(WARRIOR, 2, CharacterClass::Warrior)
         .at(30.0, 0.0)
         .health(0.2);
+    (scene, PRIEST)
+}
+
+/// A Priest whose Warrior teammate is unhurt, an enemy Warrior 30 yards
+/// off: no heal is owed, so the chain reaches its steps below Flash Heal
+/// (Holy Nova's, which holds: no walk owns the Priest's legs). Both carry
+/// Weakened Soul, so no shield goes out first.
+fn priest_team_healthy(defs: &AbilityDefinitions) -> (Scene, Who) {
+    const ALLY: Who = "warrior";
+    let scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PRIEST, 1, CharacterClass::Priest)
+        .aura_full(PRIEST, fortitude())
+        .aura(PRIEST, AuraType::WeakenedSoul, 10.0)
+        .unit(ALLY, 1, CharacterClass::Warrior)
+        .at(5.0, 0.0)
+        .aura_full(ALLY, fortitude())
+        .aura(ALLY, AuraType::WeakenedSoul, 10.0)
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(30.0, 0.0);
     (scene, PRIEST)
 }
 

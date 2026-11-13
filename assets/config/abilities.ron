@@ -361,6 +361,65 @@
             spell_school: Holy,
         ),
 
+        // Holy Nova (talent, Holy tier 3): an explosion of holy light round
+        // the Priest, 13-15 Holy damage to every enemy and 25-29 healing to
+        // every teammate (the Priest included) within 10 yards, pets aside.
+        // Classic 15237 rank 1 (29-34 damage, 54-63 healing, 185 mana) at its
+        // ratio, sized to the talent budget, with no spell-power share: the
+        // stated numbers are the whole of it. 50 mana, instant, on the global
+        // cooldown (TBC StartRecoveryCategory 133). `range` is the radius.
+        // No aura, so no dispel type (TBC 15237: DispelType 0).
+        HolyNova: (
+            name: "Holy Nova",
+            class: Priest,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_holy_holynova.jpg",
+            cast_time: 0.0,
+            range: 10.0,
+            mana_cost: 50.0,
+            cooldown: 0.0,
+            damage_base_min: 13.0,
+            damage_base_max: 15.0,
+            damage_coefficient: 0.0,
+            damage_scales_with: SpellPower,
+            healing_base_min: 25.0,
+            healing_base_max: 29.0,
+            healing_coefficient: 0.0,
+            spell_school: Holy,
+        ),
+
+        // Guardian Spirit (talent, Holy capstone; Wrath 47788): an ally
+        // receives 40% more healing for 10s, and the first blow that would
+        // kill it in that time is prevented instead, healing it for 30% of
+        // its maximum health and ending the spirit (the compound's rider).
+        // 60s cooldown (Wrath: 3 min), so once a match. 17 mana, Wrath's 6%
+        // of base mana on the Priest's 280; no global cooldown (Wrath
+        // StartRecoveryCategory 0). Wrath gives it no dispel type: Untyped.
+        GuardianSpirit: (
+            name: "Guardian Spirit",
+            class: Priest,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_holy_guardianspirit.jpg",
+            // The save is the compound's rider, which no numeric field states;
+            // `guardian_spirit_text_names_the_save` holds the 30% to its
+            // constant.
+            description: "The first blow that would kill the target while the spirit lasts is prevented: the target is healed for 30% of its maximum health instead, and the spirit ends.",
+            cast_time: 0.0,
+            range: 40.0,
+            mana_cost: 17.0,
+            cooldown: 60.0,
+            applies_aura: Some((
+                aura_type: HealingReceivedIncrease,
+                duration: 10.0,
+                magnitude: 0.40,
+                compound: Some(GuardianSpirit),
+                dispel_type: Untyped,
+            )),
+            spell_school: Holy,
+        ),
+
         // ============================================================================
         // WARRIOR ABILITIES
         // ============================================================================

@@ -6,7 +6,8 @@
 //! (Numbered as the `Priority N` comments in [`decide_priest_action`]; the
 //! Peel play's Psychic Scream heads the chain under `TeamPlan`, and the
 //! Discipline talents' saves follow it — Pain Suppression, Power Infusion —
-//! in a book that holds them: `priest_discipline`.)
+//! in a book that holds them: `priest_discipline`; the Holy capstone,
+//! Guardian Spirit, between the two: `priest_holy`.)
 //! 1. Power Word: Fortitude (buff all allies pre-combat)
 //! 2. Dispel Magic - Urgent (Polymorph, Freezing Trap, UA Silence, Fear)
 //!    2.5. The `Legacy` dip's Psychic Scream
@@ -14,6 +15,8 @@
 //! 4. Power Word: Shield (shield low-health allies)
 //!    4.5. Mana Burn on the enemy healer (surplus GCDs only)
 //!    4.8. Inner Focus ahead of a Flash Heal on a dying teammate (talent)
+//!    4.9. Holy Nova in place of a Flash Heal an interrupt or a walk would
+//!    stop (talent)
 //! 5. Flash Heal (heal injured allies)
 //! 6. Dispel Magic - Maintenance (Roots, DoTs when team HP is stable)
 //! 7. Mind Blast (damage when allies are healthy)
@@ -133,6 +136,7 @@ pub enum ScreamDipPlan {
 pub fn decide_priest_action(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
+    game_rng: &mut GameRng,
     abilities: &AbilityBook,
     entity: Entity,
     combatant: &mut Combatant,
@@ -144,6 +148,7 @@ pub fn decide_priest_action(
     plan: &PriestMovementPlan,
     movement: &MovementConfig,
     same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
+    area: &mut super::AreaQueues<'_>,
     decision_trace: &mut DecisionTrace,
 ) -> bool {
     let escape_defer = plan.escape_defer;
@@ -179,10 +184,12 @@ pub fn decide_priest_action(
         }
     }
 
-    // The Discipline talents (AS-414), each only in a book that holds it:
-    // Pain Suppression on the teammate in danger, then Power Infusion (no
-    // global cooldown) on a damage dealer's burst or the Priest's own heals.
-    if try_discipline_saves(
+    // The talents' saves, each only in a book that holds it: Pain
+    // Suppression on the teammate in danger (Discipline, AS-414), Guardian
+    // Spirit (Holy, AS-415; no global cooldown) on the most endangered one,
+    // then Power Infusion (no global cooldown) on a damage dealer's burst or
+    // the Priest's own heals.
+    if try_talent_saves(
         commands,
         combat_log,
         abilities,
@@ -360,6 +367,28 @@ pub fn decide_priest_action(
         return true;
     }
 
+    // Priority 4.9 (Holy talent, AS-415): Holy Nova in place of a Flash Heal
+    // an enemy's interrupt or a walk would stop, when its target stands inside
+    // the nova.
+    if super::priest_holy::try_holy_nova(
+        combat_log,
+        game_rng,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        escape_defer,
+        FLASH_HEAL_HP,
+        abilities.get_unchecked(&AbilityType::FlashHeal).range,
+        area,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
     // Priority 5: Flash Heal
     if try_flash_heal(
         commands,
@@ -505,8 +534,8 @@ pub fn decide_shadow_priest_action(
         }
     }
 
-    // The Discipline talents (AS-414), as in the healing chain.
-    if try_discipline_saves(
+    // The talents' saves (AS-414, AS-415), as in the healing chain.
+    if try_talent_saves(
         commands,
         combat_log,
         abilities,
@@ -705,10 +734,12 @@ fn shadow_burn_held(
     (!in_reach).then_some("closing on the target: beyond Mind Blast's reach")
 }
 
-/// The Discipline talents' saves (AS-414), shared by both chains: Pain
-/// Suppression on the teammate in danger, then Power Infusion. Each does
-/// nothing, and traces nothing, without its talent.
-fn try_discipline_saves(
+/// The talents' saves, shared by both chains: Pain Suppression on the
+/// teammate in danger (Discipline, AS-414), Guardian Spirit on the most
+/// endangered teammate (Holy, AS-415), then Power Infusion (Discipline). Each
+/// does nothing, and traces nothing, without its talent; no build holds both
+/// capstones.
+fn try_talent_saves(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
     abilities: &AbilityBook,
@@ -720,6 +751,8 @@ fn try_discipline_saves(
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     super::priest_discipline::try_pain_suppression(
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, builder,
+    ) || super::priest_holy::try_guardian_spirit(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, builder,
     ) || super::priest_discipline::try_power_infusion(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, builder,

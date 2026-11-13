@@ -1955,6 +1955,8 @@ mod tests {
                 // totem's buff, a Mage armor or a shapeshift.
                 "Concentration Aura",
                 "Devotion Aura",
+                // No dispel type (Wrath 47788, AS-415).
+                "Guardian Spirit",
                 "Flametongue Totem",
                 "Frost Armor",
                 "Mage Armor",

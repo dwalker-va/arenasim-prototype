@@ -196,6 +196,13 @@ pub enum AuraType {
     /// shield, how big and how often (`triggered_absorbs`). The aura itself
     /// changes no number; its magnitude is unread. User: Sacred Shield.
     TriggeredAbsorb,
+    /// The holder RECEIVES more healing: a fraction (magnitude, e.g. 0.40 =
+    /// 40% more), on every heal that lands on it — direct heals, heal over
+    /// time ticks, blooms, drains and saves alike. Read in
+    /// `combat_core::apply_healing`, the one heal site, before the
+    /// [`AuraType::HealingReduction`] cut; only the strongest applies (the
+    /// stacking simplification). User: Guardian Spirit.
+    HealingReceivedIncrease,
 }
 
 /// Which hits a damage modifier aura reaches: one school, or every school but
@@ -412,7 +419,7 @@ impl AuraType {
     /// DOES cost is coverage: a guard that sweeps `ALL` quietly stops covering
     /// whatever `ALL` forgot, while still reading like a whole-enum sweep.
     /// `aura_type_tests::all_lists_every_aura_type` is what stops that.
-    pub const ALL: [AuraType; 45] = [
+    pub const ALL: [AuraType; 46] = [
         AuraType::MovementSpeedSlow,
         AuraType::Root,
         AuraType::Stun,
@@ -458,6 +465,7 @@ impl AuraType {
         AuraType::KillingBlowSave,
         AuraType::DamageReflect,
         AuraType::TriggeredAbsorb,
+        AuraType::HealingReceivedIncrease,
     ];
 
     /// Player-facing name of this MECHANIC, as the encyclopedia's mechanic
@@ -519,6 +527,7 @@ impl AuraType {
             AuraType::TriggeredAbsorb => "Triggered Shield",
             AuraType::KillingBlowSave => "Death Prevention",
             AuraType::DamageReflect => "Damage Reflection",
+            AuraType::HealingReceivedIncrease => "Healing Boost",
         }
     }
 
@@ -653,6 +662,9 @@ impl AuraType {
             AuraType::TriggeredAbsorb => {
                 "Taking damage raises an absorb shield on the holder, at most once in a while."
             }
+            AuraType::HealingReceivedIncrease => {
+                "Raises the healing the holder receives, from every heal and heal over time."
+            }
         }
     }
 
@@ -778,6 +790,7 @@ impl AuraType {
             | AuraType::DamageTransfer
             | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
+            | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect
             | AuraType::TravelForm => false,
         }
@@ -855,6 +868,7 @@ impl AuraType {
             | AuraType::DamageTransfer
             | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
+            | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect
             | AuraType::TravelForm => false,
 
@@ -917,6 +931,12 @@ pub enum CompoundDebuff {
     /// Physical damage taken, one buff. Nothing removes it: it has no dispel
     /// type, and it is held the whole match.
     Shadowform,
+    /// The Priest's Guardian Spirit: more healing received (the face) and a
+    /// killing blow prevented, one buff. The save SPENDS it: the blow it
+    /// prevents ends the whole buff, the healing increase with it (Wrath's
+    /// "this sacrifice terminates the effect"). Nothing else removes it: it
+    /// has no dispel type.
+    GuardianSpirit,
 }
 
 impl CompoundDebuff {
@@ -928,11 +948,12 @@ impl CompoundDebuff {
     /// exhaustive match is.** What it buys is COVERAGE: the guards below sweep
     /// it, so compound N+1 is checked the moment it is declared here, instead
     /// of a test quietly continuing to check only the one it was written for.
-    pub const ALL: [CompoundDebuff; 4] = [
+    pub const ALL: [CompoundDebuff; 5] = [
         CompoundDebuff::FrostArmorChill,
         CompoundDebuff::MarkOfTheWild,
         CompoundDebuff::EntanglingRoots,
         CompoundDebuff::Shadowform,
+        CompoundDebuff::GuardianSpirit,
     ];
 
     /// The effect that REPRESENTS this debuff: the icon the frames draw, the
@@ -958,6 +979,7 @@ impl CompoundDebuff {
             CompoundDebuff::MarkOfTheWild => AuraType::MaxHealthIncrease,
             CompoundDebuff::EntanglingRoots => AuraType::Root,
             CompoundDebuff::Shadowform => AuraType::DamageDealtIncrease,
+            CompoundDebuff::GuardianSpirit => AuraType::HealingReceivedIncrease,
         }
     }
 }
@@ -1501,6 +1523,7 @@ impl Aura {
             | AuraType::DamageTransfer
             | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
+            | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect => true,
 
             // Beneficial, but DELIBERATELY unpurgeable — see the doc above.
@@ -2108,6 +2131,7 @@ impl DRCategory {
             | AuraType::DamageTransfer
             | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
+            | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect
             | AuraType::TravelForm => None,
 
@@ -2361,6 +2385,15 @@ mod compound_tests {
                 })
                 .chain(crate::states::play_match::combat_core::compound_riders(
                     CompoundDebuff::Shadowform,
+                ))
+                .collect(),
+                CompoundDebuff::GuardianSpirit => std::iter::once(Aura {
+                    effect_type: AuraType::HealingReceivedIncrease,
+                    compound: Some(CompoundDebuff::GuardianSpirit),
+                    ..Default::default()
+                })
+                .chain(crate::states::play_match::combat_core::compound_riders(
+                    CompoundDebuff::GuardianSpirit,
                 ))
                 .collect(),
             };

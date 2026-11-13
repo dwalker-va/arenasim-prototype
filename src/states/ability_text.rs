@@ -561,6 +561,13 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
                 aura.magnitude * 100.0
             )
         }
+        AuraType::HealingReceivedIncrease => {
+            format!(
+                "Increases healing received by {:.0}% for {:.0} sec.",
+                aura.magnitude * 100.0,
+                aura.duration
+            )
+        }
         AuraType::DamageReflect => {
             format!(
                 "Deals {:.0} damage to a melee attacker each time it strikes, for {:.0} sec.",
