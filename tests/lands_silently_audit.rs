@@ -1720,8 +1720,9 @@ fn talent_mechanic_lands_nothing_silently() {
 // over time's visual, a client shield). The generic aura band does NOT count,
 // as for talent mechanics: it sweeps every buff alike, so it cannot tell the
 // player this talent fired. Neither does the buff-bar icon every proc wears
-// (`source_talent`). A proc whose icon is its whole footprint BY RULING is
-// named in [`TALENT_PROC_ICON_ONLY_BY_RULING`] with the card that ruled it.
+// (`source_talent`). A proc ruled to need no visual of its own, the band
+// and its icon being enough, is named in
+// [`TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING`] with the card that ruled it.
 
 /// One talent proc as a node declares it: its id, its name and the proc.
 type NodeProc = (TalentId, String, TalentProc);
@@ -1838,15 +1839,6 @@ const TALENT_PROC_KNOWN_SILENT: &[(TalentId, &str)] = &[
         TalentId::InfusionOfLight,
         "AS-374 (Infusion of Light: the gold halo above the Paladin's head)",
     ),
-    (
-        TalentId::Initiative,
-        "AS-336 (the Rogue talent visuals' scoping card: no build card names Initiative yet)",
-    ),
-    (
-        TalentId::Inspiration,
-        "AS-335 (the Priest talent visuals' scoping card: no build card names Inspiration \
-         yet; the aura band draws it meanwhile)",
-    ),
     (TalentId::Nightfall, "AS-346 (Shadow Trance's speck halo)"),
     (
         TalentId::TheArtOfWar,
@@ -1858,26 +1850,41 @@ const TALENT_PROC_KNOWN_SILENT: &[(TalentId, &str)] = &[
     ),
 ];
 
-/// Procs whose buff-bar icon is the whole footprint by ruling: (node, the card
-/// that ruled it, why). No design doc on main records these rulings, so each
+/// Procs ruled to need no bespoke visual: the generic aura band draws each as
+/// it lands, and its buff-bar icon carries it while it lasts. (node, the card
+/// that ruled it, why.) No design doc on main records these rulings, so each
 /// cites its card, as `ON_USE_BAND_BY_RULING` does. They count as listed, so
-/// one that gains a treatment fails until it is removed.
-const TALENT_PROC_ICON_ONLY_BY_RULING: &[(TalentId, &str, &str)] = &[
+/// one that gains a treatment fails until it is removed; and each must be one
+/// the band draws (`AuraApplyRoute::Band`), so the list cannot hold a proc
+/// that lands with nothing at all.
+const TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING: &[(TalentId, &str, &str)] = &[
     (
         TalentId::ImprovedShadowBolt,
         "AS-334",
-        "Shadow Vulnerability is icon-only by ruling (AS-411's Visuals line); the proposal's \
-         footprint is the debuff icon on the target (§5.1)",
+        "Shadow Vulnerability needs no visual of its own (AS-411's Visuals line); the \
+         proposal's footprint is the debuff icon on the target (§5.1)",
+    ),
+    (
+        TalentId::Initiative,
+        "AS-479",
+        "user ruling 2026-11-13: \"no it doesnt need a visual, just a buff icon\"",
+    ),
+    (
+        TalentId::Inspiration,
+        "AS-335",
+        "Inspiration is the generic buff ring; it needs no card",
     ),
     (
         TalentId::LightsGrace,
         "AS-337",
-        "Light's Grace has no client visual at any build: icon only (AS-374 item 8, AS-420)",
+        "Light's Grace has no client visual at any build: the icon carries it (AS-374 item 8, \
+         AS-420)",
     ),
     (
         TalentId::MasterOfSubtlety,
         "AS-336",
-        "Master of Subtlety is icon-only (AS-419's Visuals line)",
+        "the generic buff band draws Master of Subtlety; it needs no visual of its own \
+         (AS-419's Visuals line)",
     ),
 ];
 
@@ -1885,7 +1892,7 @@ const TALENT_PROC_ICON_ONLY_BY_RULING: &[(TalentId, &str, &str)] = &[
 fn check_proc_rulings(rulings: &[(TalentId, &str, &str)]) -> Result<(), String> {
     check_sorted(
         "talent-proc",
-        "icon-only-by-ruling list",
+        "no-bespoke-visual-by-ruling list",
         rulings.iter().map(|(talent, _, _)| talent),
     )?;
     let mut problems = Vec::new();
@@ -1895,11 +1902,42 @@ fn check_proc_rulings(rulings: &[(TalentId, &str, &str)]) -> Result<(), String> 
             .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
         if !numbered {
             problems.push(format!(
-                "{talent:?} is icon-only by ruling, but `{card}` is not a card id (AS-<n>)"
+                "{talent:?} needs no bespoke visual by ruling, but `{card}` is not a card id \
+                 (AS-<n>)"
             ));
         }
         if reason.trim().is_empty() {
-            problems.push(format!("{talent:?} is icon-only by ruling with no reason"));
+            problems.push(format!(
+                "{talent:?} needs no bespoke visual by ruling, with no reason"
+            ));
+        }
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("\n"))
+    }
+}
+
+/// Every aura a by-ruling proc lands is one the generic aura band draws: the
+/// ruling is that the band and the icon are enough, not that nothing draws.
+fn check_rulings_draw_the_band(
+    defs: &TalentDefinitions,
+    rulings: &[(TalentId, &str, &str)],
+) -> Result<(), String> {
+    let mut problems = Vec::new();
+    for proc in talent_procs_in(defs) {
+        if !rulings.iter().any(|(talent, _, _)| *talent == proc.0) {
+            continue;
+        }
+        let aura = talent_proc_aura(&proc);
+        let route = AuraApplyRoute::for_instance(aura.effect_type, &aura.ability_name);
+        if route != AuraApplyRoute::Band {
+            problems.push(format!(
+                "{:?} needs no bespoke visual by ruling, but its {:?} aura routes to \
+                 {route:?}, not the aura band — list it as known-silent with its card",
+                proc.0, aura.effect_type
+            ));
         }
     }
     if problems.is_empty() {
@@ -1921,6 +1959,7 @@ fn check_talent_procs(
     let scanned = talent_proc_nodes(defs);
     check_finds("talent-proc", &scanned, members)?;
     check_proc_rulings(rulings)?;
+    check_rulings_draw_the_band(defs, rulings)?;
     check_sorted(
         "talent-proc",
         "known-silent list",
@@ -1954,7 +1993,7 @@ fn talent_proc_lands_nothing_silently() {
         TalentDefinitions::shipped(),
         TALENT_PROC_MEMBERS,
         TALENT_PROC_KNOWN_SILENT,
-        TALENT_PROC_ICON_ONLY_BY_RULING,
+        TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING,
     ) {
         panic!("{e}");
     }
@@ -2023,7 +2062,7 @@ fn the_talent_proc_family_catches_a_planted_untagged_proc() {
         &defs,
         TALENT_PROC_MEMBERS,
         TALENT_PROC_KNOWN_SILENT,
-        TALENT_PROC_ICON_ONLY_BY_RULING,
+        TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING,
     )
     .unwrap_err();
     assert!(
@@ -2039,7 +2078,7 @@ fn the_talent_proc_family_catches_a_planted_untagged_proc() {
         &defs,
         &members,
         TALENT_PROC_KNOWN_SILENT,
-        TALENT_PROC_ICON_ONLY_BY_RULING,
+        TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING,
     )
     .unwrap_err();
     assert_eq!(err.lines().count(), 1, "only the planted proc fails: {err}");
@@ -2053,8 +2092,35 @@ fn the_talent_proc_family_catches_a_planted_untagged_proc() {
     tagged.push((TalentId::ImprovedAmbush, "AS-0"));
     tagged.sort_by_key(|(id, _)| format!("{id:?}"));
     assert_eq!(
-        check_talent_procs(&defs, &members, &tagged, TALENT_PROC_ICON_ONLY_BY_RULING),
+        check_talent_procs(
+            &defs,
+            &members,
+            &tagged,
+            TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING
+        ),
         Ok(())
+    );
+}
+
+/// A ruling on a proc the band does not draw (Aftermath's slow routes to the
+/// slow ring, which has no tint for it) fails: the ruling list holds only
+/// procs the band draws.
+#[test]
+fn a_ruling_on_a_proc_the_band_does_not_draw_fails() {
+    let defs = TalentDefinitions::shipped();
+    let silent: Vec<(TalentId, &str)> = TALENT_PROC_KNOWN_SILENT
+        .iter()
+        .copied()
+        .filter(|(id, _)| *id != TalentId::Aftermath)
+        .collect();
+    let mut rulings = TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING.to_vec();
+    rulings.push((TalentId::Aftermath, "AS-0", "planted"));
+    rulings.sort_by_key(|(id, _, _)| format!("{id:?}"));
+    let err = check_talent_procs(defs, TALENT_PROC_MEMBERS, &silent, &rulings).unwrap_err();
+    assert_eq!(err.lines().count(), 1, "only Aftermath fails: {err}");
+    assert!(
+        err.contains("Aftermath needs no bespoke visual by ruling, but its MovementSpeedSlow"),
+        "{err}"
     );
 }
 

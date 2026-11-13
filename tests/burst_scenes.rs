@@ -375,6 +375,55 @@ fn the_destruction_instants_fit_a_window_shadow_bolt_does_not() {
     }
 }
 
+/// A kited Warlock — slowed, its own target beyond its preferred range — still
+/// bursts with a granted Destruction instant on the window's subject: being
+/// kited holds only the Shadow Bolt cast. The untalented control refuses
+/// Shadow Bolt as being kited and starts nothing on the subject.
+#[test]
+fn a_kited_warlock_still_bursts_with_the_destruction_instants() {
+    let kited = |tool: AbilityType, granted: bool| {
+        let mut s = talent_burst_scene(tool, granted, AiProfile::TeamPlan).aura_full(
+            ME,
+            arenasim::states::play_match::Aura {
+                effect_type: AuraType::MovementSpeedSlow,
+                duration: 6.0,
+                magnitude: 0.5,
+                ability_name: "Frostbolt".into(),
+                ..Default::default()
+            },
+        );
+        // Its own target beyond the Warlock's 28yd preferred range; the
+        // subject stays inside Shadowburn's 20.
+        s.set_position(OTHER, 35.0, 0.0);
+        s.decide(ME)
+    };
+    for tool in [AbilityType::Shadowburn, AbilityType::Conflagrate] {
+        let with = kited(tool, true);
+        assert_eq!(
+            with.chose(),
+            Some((tool, Some(LOW))),
+            "{tool:?}: {}",
+            describe(&with)
+        );
+        assert_eq!(with.situation.unwrap().play_step, Some(PlayStep::Burst));
+
+        let control = kited(tool, false);
+        assert!(
+            matches!(
+                control.rejected(AbilityType::Shadowbolt),
+                Some(RejectionReason::PreconditionUnmet { note }) if note.contains("being kited")
+            ),
+            "{tool:?} control: {}",
+            describe(&control)
+        );
+        assert!(
+            control.choices.iter().all(|(_, t)| *t != Some(LOW)),
+            "{tool:?} control: {}",
+            describe(&control)
+        );
+    }
+}
+
 /// `s` with the enemy Priest's stun, and so the kill window, 1.0s long.
 fn short_window(mut s: Scene) -> Scene {
     s.clear_auras(ENEMY_HEALER);
