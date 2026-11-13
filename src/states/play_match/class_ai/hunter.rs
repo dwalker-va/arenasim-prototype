@@ -1083,9 +1083,11 @@ const HEALER_FREEZE_HOLD_STEP: f32 = 0.25;
 /// horizon; only where the Hunter stands relative to it is projected forward.
 ///
 /// The projection is relative: the Hunter is moved along its velocity less the
-/// healer's, and everyone else is asked where they stand now. Positions and
-/// headings are this frame's, and every unit re-decides its path each tick, so
-/// the answer is a forecast, which is why the horizon is short.
+/// healer's ([`forecast_velocity`]: at the speed its auras leave it, and not
+/// at all while it cannot move), and everyone else is asked where they stand
+/// now. Positions and headings are this frame's, and every unit re-decides its
+/// path each tick, so the answer is a forecast, which is why the horizon is
+/// short.
 fn healer_freeze_in_reach(
     abilities: &AbilityBook,
     entity: Entity,
@@ -1110,8 +1112,7 @@ fn healer_freeze_in_reach(
         return None;
     }
     let healer = super::hunter_dip::pressure_trap_healer(ctx, entity, combatant.team)?.ok()?;
-    let velocity = |e: Entity| ctx.combatants.get(&e).map_or(Vec3::ZERO, |i| i.velocity);
-    let relative = velocity(entity) - velocity(healer);
+    let relative = forecast_velocity(ctx, entity) - forecast_velocity(ctx, healer);
     let relative = Vec3::new(relative.x, 0.0, relative.z);
     let steps = (HEALER_FREEZE_HOLD_SECS / HEALER_FREEZE_HOLD_STEP).round() as usize;
     (0..=steps)
@@ -1121,6 +1122,30 @@ fn healer_freeze_in_reach(
             super::hunter_dip::pressure_trap_landing(ctx, abilities, combatant.team, at, healer)
                 .is_ok_and(|landing| trap_landing(ctx, def, at, landing, Some(healer)).is_ok())
         })
+}
+
+/// How `e` is forecast to move over the next few seconds: along its heading
+/// (`CombatantInfo::velocity`, zero while it casts) at the speed its slows
+/// leave it ([`effective_movement_speed`](crate::states::play_match::combat_core::effective_movement_speed),
+/// the one derivation movement uses), and not at all while it is rooted or
+/// held in hard crowd control ([`CombatContext::is_ccd`], which counts both).
+fn forecast_velocity(ctx: &CombatContext, e: Entity) -> Vec3 {
+    let Some(info) = ctx.combatants.get(&e) else {
+        return Vec3::ZERO;
+    };
+    // `is_ccd` counts a root with the holds: rooted, stunned, feared,
+    // polymorphed, incapacitated or cycloned, the unit goes nowhere.
+    if ctx.is_ccd(e) {
+        return Vec3::ZERO;
+    }
+    let auras = ActiveAuras {
+        auras: ctx.active_auras.get(&e).cloned().unwrap_or_default(),
+    };
+    let speed = crate::states::play_match::combat_core::effective_movement_speed(
+        info.velocity.length(),
+        Some(&auras),
+    );
+    info.velocity.normalize_or_zero() * speed
 }
 
 /// Trace note for a Frost Trap peel held because the pressure trap would

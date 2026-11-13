@@ -19,9 +19,10 @@ Reach is the pressure trap's own predicates, asked forward in time
 castable, a `pressure_trap_healer`, its `pressure_trap_landing` (in range,
 sprung cleanly by the healer) and the placement's refusals (`trap_landing`,
 now shared with `try_place_trap_at`: already held, immune, range, sight). Only
-the Hunter's position relative to the healer is projected, along this frame's
-two velocities, in 0.25s steps. The Peel play's Frost Trap (a teammate in
-danger) is not held.
+the Hunter's position relative to the healer is projected, in 0.25s steps:
+each moves along this frame's heading at the speed its slows leave it, and not
+at all while rooted or in hard crowd control (`hunter::forecast_velocity`). The
+Peel play's Frost Trap (a teammate in danger) is not held.
 
 Scenes: `tests/hunter_trap_priority_scenes.rs`, ten pairs, one per condition.
 
@@ -66,4 +67,7 @@ Hunter (z 2.9). TeamPlan, team 1 only +0.0pt (ns), team 2 only +0.3pt for the
 Hunter (z 2.5). Matches with a Hunter on both sides do not flip.
 
 Directional: it says which way, and it may not be cited as the Hunter's
-standing.
+standing. The sweep ran before the forecast took slows and crowd control into
+account. That change moves 30 of 5,088 Hunter matches (both profiles, three
+maps). Every one diverges first on a Hunter decision whose hold differs between
+the two forecasts, so it was not re-swept.

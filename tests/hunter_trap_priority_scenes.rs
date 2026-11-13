@@ -15,8 +15,11 @@
 //! now. Every unit not given a facing walks +Z at its base speed, as a scene
 //! estimates it.
 
-use arenasim::states::match_config::CharacterClass::{Hunter, Mage, Paladin, Priest, Warrior};
+use arenasim::states::match_config::CharacterClass::{
+    Hunter, Mage, Paladin, Priest, Shaman, Warrior,
+};
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
+use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::hunter::{
     FROST_TRAP_HELD_FOR_HEALER, HEALER_FREEZE_HOLD_SECS,
 };
@@ -24,9 +27,9 @@ use arenasim::states::play_match::class_ai::hunter_dip::{
     PRESSURE_TRAP_LEAD_OUT_OF_RANGE, PRESSURE_TRAP_OUT_OF_RANGE,
 };
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
-use arenasim::states::play_match::decision_trace::RejectionReason;
+use arenasim::states::play_match::decision_trace::{PlayStep, RejectionReason};
 use arenasim::states::play_match::map_geometry::ObstacleVolume;
-use arenasim::states::play_match::AbilityType;
+use arenasim::states::play_match::{AbilityType, Aura, AuraType};
 
 use bevy::prelude::Vec2;
 
@@ -34,6 +37,7 @@ const ME: &str = "me";
 const WARRIOR: &str = "enemy warrior";
 const PRIEST: &str = "enemy priest";
 const OTHER: &str = "other enemy";
+const ALLY: &str = "ally";
 
 /// Freezing Trap's configured throw range.
 fn trap_range() -> f32 {
@@ -287,4 +291,137 @@ fn peel_is_not_held_for_a_healer_walking_away_as_fast_as_the_hunter_closes() {
     );
     assert_peeled(&walking);
     assert_held(&build((0.0, 1.0)).decide(ME));
+}
+
+/// A slow of `magnitude` on `who`.
+fn slowed(scene: Scene, who: &'static str, magnitude: f32) -> Scene {
+    scene.aura_full(
+        who,
+        Aura {
+            effect_type: AuraType::MovementSpeedSlow,
+            duration: 8.0,
+            magnitude,
+            ..Default::default()
+        },
+    )
+}
+
+/// A rooted Hunter walks into reach of nothing: the closing-band peel goes
+/// out. The same Hunter free holds it.
+#[test]
+fn peel_is_not_held_while_the_hunter_is_rooted() {
+    assert_held(&reachable().decide(ME));
+    let view = reachable().aura(ME, AuraType::Root, 4.0).decide(ME);
+    assert_peeled(&view);
+    assert_eq!(view.chose(), Some((AbilityType::FrostTrap, Some(WARRIOR))));
+}
+
+/// Rooted in the dead zone, Disengage is refused and the pressure trap is out
+/// of range, so the Frost Trap at its feet is all the Hunter has: it goes
+/// down. Free, with Disengage cooling, it is held for the freeze.
+#[test]
+fn dead_zone_frost_trap_goes_down_while_the_hunter_is_rooted() {
+    let build = || scene_with(priest_x(1.0), 1.0, 5.0);
+    assert_held(&build().cooldown(ME, AbilityType::Disengage, 5.0).decide(ME));
+    let view = build().aura(ME, AuraType::Root, 4.0).decide(ME);
+    assert!(
+        matches!(
+            view.rejected(AbilityType::Disengage),
+            Some(RejectionReason::Rooted)
+        ),
+        "{}",
+        describe(&view)
+    );
+    assert_peeled(&view);
+}
+
+/// The forecast walks the Hunter at the speed its slows leave it. A freeze
+/// 2.5s away at base speed is 5s away at half speed, past the horizon: the
+/// peel goes out. Unslowed it is held.
+#[test]
+fn peel_is_not_held_when_a_slow_puts_the_freeze_past_the_horizon() {
+    let build = || scene_with(priest_x(HEALER_FREEZE_HOLD_SECS - 0.5), 1.0, 10.0);
+    assert_held(&build().decide(ME));
+    assert_peeled(&slowed(build(), ME, 0.5).decide(ME));
+}
+
+/// The healer's own motion is forecast the same way: one walking away as fast
+/// as the Hunter closes stays out of reach, and the same healer rooted is
+/// caught up with.
+#[test]
+fn a_rooted_healer_is_forecast_standing_still() {
+    let build = || {
+        Scene::new()
+            .unit(ME, 1, Hunter)
+            .at(0.0, 0.0)
+            .facing(1.0, 0.0)
+            .targeting(WARRIOR)
+            .unit(WARRIOR, 2, Warrior)
+            .at(10.0, 0.0)
+            .targeting(ME)
+            .unit(PRIEST, 2, Priest)
+            .at(trap_range() - 2.0, 0.0)
+            .facing(1.0, 0.0)
+            .cooldown(ME, AbilityType::ConcussiveShot, 5.0)
+    };
+    assert_peeled(&build().decide(ME));
+    assert_held(&build().aura(PRIEST, AuraType::Root, 4.0).decide(ME));
+}
+
+/// The Peel play (TeamPlan) throws its Frost Trap onto the attacker of a
+/// teammate in danger, freeze in reach or not: that peel is not held. The same
+/// scene with the teammate healthy has no danger, and the closing-band peel
+/// is held for the freeze.
+#[test]
+fn the_peel_play_frost_trap_is_not_held_for_a_freeze() {
+    let build = |ally_health: f32| {
+        reachable()
+            .ai_profile(1, AiProfile::TeamPlan)
+            .unit(ALLY, 1, Shaman)
+            .at(12.0, 2.0)
+            .health(ally_health)
+            .targeting(PRIEST)
+            .target(WARRIOR, ALLY)
+    };
+    let view = build(0.3).decide(ME);
+    assert_eq!(
+        view.chose(),
+        Some((AbilityType::FrostTrap, Some(WARRIOR))),
+        "{}",
+        describe(&view)
+    );
+    assert_eq!(
+        view.situation.and_then(|s| s.play_step),
+        Some(PlayStep::Peel),
+        "{}",
+        describe(&view)
+    );
+    assert!(!held_for_healer(&view), "{}", describe(&view));
+
+    assert_held(&build(1.0).decide(ME));
+}
+
+/// A healer in hard crowd control is forecast standing still too. Only the
+/// last moments of a hold count: before `CC_CHAIN_WINDOW` the placement
+/// refuses a trap on a held healer, so a stun with 0.3s left is the case where
+/// the forecast decides. The walking-away healer stunned is caught up with;
+/// free, it is not.
+#[test]
+fn a_healer_in_crowd_control_is_forecast_standing_still() {
+    let build = || {
+        Scene::new()
+            .unit(ME, 1, Hunter)
+            .at(0.0, 0.0)
+            .facing(1.0, 0.0)
+            .targeting(WARRIOR)
+            .unit(WARRIOR, 2, Warrior)
+            .at(10.0, 0.0)
+            .targeting(ME)
+            .unit(PRIEST, 2, Priest)
+            .at(trap_range() - 2.0, 0.0)
+            .facing(1.0, 0.0)
+            .cooldown(ME, AbilityType::ConcussiveShot, 5.0)
+    };
+    assert_peeled(&build().decide(ME));
+    assert_held(&build().aura(PRIEST, AuraType::Stun, 0.3).decide(ME));
 }
