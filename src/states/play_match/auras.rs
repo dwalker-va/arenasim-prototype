@@ -131,6 +131,9 @@ pub fn reflect_instant_cc_in_snapshot(
                 | AuraType::Polymorph
                 | AuraType::Incapacitate
                 | AuraType::Cyclone
+                // The Priest's Silence (AS-416): a second silencer in the
+                // frame sees it.
+                | AuraType::Silence
         ),
         "reflect_instant_cc_in_snapshot called with non-CC aura type {:?}",
         aura.effect_type
@@ -1254,6 +1257,35 @@ pub fn process_aura_breaks(
     }
 }
 
+/// Whether a periodic effect's tick lands this frame: the one tick-scheduling
+/// rule for every periodic effect with an end — a damage over time, a heal over
+/// time, a channel.
+///
+/// `time_until_next_tick` runs down by `dt`. A tick lands on the frame it runs
+/// out, and the timer restarts at the full `interval` from that frame. A tick
+/// also lands on the frame the effect ENDS (`ends_this_frame`) whenever the
+/// timer has not run out: the final tick, at the end.
+///
+/// The restart drops the part of a frame each tick overran, so each later
+/// tick lands up to a frame later than the one before. The final tick is what
+/// keeps the count whole all the same: an effect of `n` whole intervals lands
+/// `n` ticks, its last on the frame it ends (an 18s damage over time in 3s
+/// ticks lands 6; a 5s channel in 1s ticks lands 5). Without it the drift
+/// carries the last tick past the end and it never lands.
+pub fn periodic_tick(
+    time_until_next_tick: &mut f32,
+    interval: f32,
+    dt: f32,
+    ends_this_frame: bool,
+) -> bool {
+    *time_until_next_tick -= dt;
+    if *time_until_next_tick <= 0.0 {
+        *time_until_next_tick = interval;
+        return true;
+    }
+    ends_this_frame
+}
+
 /// Process damage-over-time ticks.
 ///
 /// IMPORTANT: This system must run BEFORE update_auras so that the final tick
@@ -1345,17 +1377,15 @@ pub fn process_dot_ticks(
                 continue;
             }
 
-            // Tick down time until next damage application
-            aura.time_until_next_tick -= dt;
-
-            // Check if we should apply damage:
-            // 1. Normal tick: time_until_next_tick <= 0
-            // 2. Final tick: aura is expiring this frame (duration - dt <= 0) but tick timer hasn't fired
-            //    This ensures WoW-style behavior where the final tick happens exactly at expiration
-            let normal_tick = aura.time_until_next_tick <= 0.0;
-            let final_tick = !normal_tick && (aura.duration - dt) <= 0.0;
-
-            if normal_tick || final_tick {
+            // A tick when the timer runs out, or the final tick as the aura
+            // expires this frame (`update_auras` runs after this system).
+            let expires = (aura.duration - dt) <= 0.0;
+            if periodic_tick(
+                &mut aura.time_until_next_tick,
+                aura.tick_interval,
+                dt,
+                expires,
+            ) {
                 // Time to apply DoT damage!
                 // Per stack (exact for a non-stacking DoT). See `Aura::tick_amount`.
                 let damage = aura.tick_amount();
@@ -1383,11 +1413,6 @@ pub fn process_dot_ticks(
                             aura.damage_mods.mechanic,
                         ));
                     }
-                }
-
-                // Reset tick timer (only for normal ticks, final tick doesn't need reset)
-                if normal_tick {
-                    aura.time_until_next_tick = aura.tick_interval;
                 }
             }
         }
@@ -1747,15 +1772,15 @@ pub fn process_hot_ticks(
                 continue;
             }
 
-            // Tick down time until next healing application
-            aura.time_until_next_tick -= dt;
-
-            // Same normal/final-tick cadence as process_dot_ticks: the final tick
-            // fires exactly at expiration (WoW-style).
-            let normal_tick = aura.time_until_next_tick <= 0.0;
-            let final_tick = !normal_tick && (aura.duration - dt) <= 0.0;
-
-            if normal_tick || final_tick {
+            // The same rule as process_dot_ticks: the final tick lands as the
+            // aura expires.
+            let expires = (aura.duration - dt) <= 0.0;
+            if periodic_tick(
+                &mut aura.time_until_next_tick,
+                aura.tick_interval,
+                dt,
+                expires,
+            ) {
                 // Time to apply HoT healing!
                 // Per stack (exact for a non-stacking HoT). See `Aura::tick_amount`.
                 let healing = aura.tick_amount();
@@ -1776,11 +1801,6 @@ pub fn process_hot_ticks(
                             aura.ability_name.clone(),
                         ));
                     }
-                }
-
-                // Reset tick timer (only for normal ticks, final tick doesn't need reset)
-                if normal_tick {
-                    aura.time_until_next_tick = aura.tick_interval;
                 }
             }
         }
@@ -2126,5 +2146,40 @@ mod tests {
         assert_eq!(target_auras.len(), 1);
         assert_eq!(target_auras[0].effect_type, AuraType::Root);
         assert_eq!(target_auras[0].duration, 8.0);
+    }
+
+    /// The frames `periodic_tick` lands its ticks on over an effect of
+    /// `duration` in ticks of `interval`, stepped at the sim's 60Hz the way an
+    /// aura is, and the frame the effect ends on (its duration runs out).
+    fn periodic_ticks(duration: f32, interval: f32) -> (Vec<u32>, u32) {
+        let dt = std::time::Duration::from_secs_f64(1.0 / 60.0).as_secs_f32();
+        let mut remaining = duration;
+        let mut timer = interval;
+        let mut frames = Vec::new();
+        let mut frame = 0;
+        while remaining > 0.0 {
+            frame += 1;
+            if periodic_tick(&mut timer, interval, dt, remaining - dt <= 0.0) {
+                frames.push(frame);
+            }
+            remaining -= dt;
+        }
+        (frames, frame)
+    }
+
+    /// An effect of whole intervals lands every tick, the last on the frame it
+    /// ends: the 18s damage over time of 3s ticks lands 6, the 5s channel of
+    /// 1s ticks 5, the 3s channel 3.
+    #[test]
+    fn a_periodic_effect_lands_its_whole_count_the_last_as_it_ends() {
+        for (duration, interval, ticks) in [(18.0, 3.0, 6), (5.0, 1.0, 5), (3.0, 1.0, 3)] {
+            let (frames, end) = periodic_ticks(duration, interval);
+            assert_eq!(
+                frames.len(),
+                ticks,
+                "{duration}s in {interval}s: {frames:?}"
+            );
+            assert_eq!(*frames.last().unwrap(), end, "{duration}s: {frames:?}");
+        }
     }
 }

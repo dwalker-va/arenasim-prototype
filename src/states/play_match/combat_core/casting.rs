@@ -1332,6 +1332,11 @@ pub fn process_channeling(
 
     // Track updates to apply after the loop
     let mut remove_channel: Vec<Entity> = Vec::new();
+    // The channels still running after this frame: (caster, ability,
+    // target). A channel's own aura on its target (Mind Flay's slow) lasts
+    // only while its channel does (`end_orphaned_channel_auras`).
+    let mut live: std::collections::BTreeSet<(Entity, AbilityType, Entity)> =
+        std::collections::BTreeSet::new();
     // (caster_entity, target_entity, damage, caster_team, caster_slot,
     // caster_class, spell_school, ability, the caster's book)
     let mut damage_to_apply: Vec<(
@@ -1435,12 +1440,18 @@ pub fn process_channeling(
             continue;
         }
 
-        // Tick down timers
+        // A tick when the timer runs out, or the final tick as the channel
+        // ends this frame: the rule every periodic effect ticks by, so a
+        // channel of whole intervals lands every one of them.
         channeling.duration_remaining -= dt;
-        channeling.time_until_next_tick -= dt;
-
-        // Process tick if ready
-        if channeling.time_until_next_tick <= 0.0 {
+        let ends = channeling.duration_remaining <= 0.0;
+        let interval = channeling.tick_interval;
+        if super::super::auras::periodic_tick(
+            &mut channeling.time_until_next_tick,
+            interval,
+            dt,
+            ends,
+        ) {
             let ability_def = book.get_unchecked(&channeling.ability);
 
             // Calculate damage (flat damage per tick for Drain Life)
@@ -1460,13 +1471,11 @@ pub fn process_channeling(
                 book.clone(),
             ));
 
-            // Reset tick timer
-            channeling.time_until_next_tick = channeling.tick_interval;
             channeling.ticks_applied += 1;
         }
 
         // Check if channel duration expired
-        if channeling.duration_remaining <= 0.0 {
+        if ends {
             remove_channel.push(caster_entity);
 
             info!(
@@ -1476,6 +1485,8 @@ pub fn process_channeling(
                 book.get_unchecked(&channeling.ability).name,
                 channeling.ticks_applied
             );
+        } else {
+            live.insert((caster_entity, channeling.ability, channeling.target));
         }
     }
 
@@ -1780,9 +1791,75 @@ pub fn process_channeling(
         }
     }
 
+    // A channel's own aura on its target ends with the channel, whatever
+    // ends it (Mind Flay's slow, as in TBC).
+    end_orphaned_channel_auras(&live, &mut combatants);
+
     // Remove completed/interrupted channels
     for entity in remove_channel {
         commands.entity(entity).remove::<ChannelingState>();
+    }
+}
+
+/// End every channel aura whose channel is not in `live`: an aura on a unit
+/// whose caster's book holds a channel that applies it (same type and name),
+/// with no live channel of that ability from that caster on that unit. So a
+/// channel's aura (Mind Flay's slow) comes off whatever ended the channel —
+/// its end, an interrupt, crowd control, a silence, its target's death, and
+/// its caster's death on any kill site (each of which strips the dead unit's
+/// `ChannelingState` itself, so the channel is simply gone by the next
+/// frame). A no-op for every unit whose caster has no such channel: Drain
+/// Life applies no aura.
+fn end_orphaned_channel_auras(
+    live: &std::collections::BTreeSet<(Entity, AbilityType, Entity)>,
+    combatants: &mut Query<(
+        Entity,
+        &Transform,
+        &mut Combatant,
+        Option<&mut ChannelingState>,
+        Option<&mut ActiveAuras>,
+    )>,
+) {
+    // Every caster whose book holds a channel with an aura: its channels'
+    // (ability, aura type, name).
+    let mut channel_auras: std::collections::BTreeMap<
+        Entity,
+        Vec<(AbilityType, super::super::components::AuraType, String)>,
+    > = std::collections::BTreeMap::new();
+    for (entity, _, combatant, _, _) in combatants.iter() {
+        let auras: Vec<_> = combatant
+            .book()
+            .iter()
+            .filter(|(_, def)| def.is_channel())
+            .filter_map(|(ability, def)| {
+                def.applies_aura
+                    .as_ref()
+                    .map(|a| (*ability, a.aura_type, def.name.clone()))
+            })
+            .collect();
+        if !auras.is_empty() {
+            channel_auras.insert(entity, auras);
+        }
+    }
+    if channel_auras.is_empty() {
+        return;
+    }
+    for (bearer, _, _, _, auras) in combatants.iter_mut() {
+        let Some(mut auras) = auras else { continue };
+        let orphaned = |a: &Aura| {
+            a.caster
+                .and_then(|caster| channel_auras.get(&caster).map(|list| (caster, list)))
+                .is_some_and(|(caster, list)| {
+                    list.iter().any(|(ability, aura_type, name)| {
+                        a.effect_type == *aura_type
+                            && a.ability_name == *name
+                            && !live.contains(&(caster, *ability, bearer))
+                    })
+                })
+        };
+        if auras.auras.iter().any(orphaned) {
+            auras.auras.retain(|a| !orphaned(a));
+        }
     }
 }
 

@@ -2,7 +2,7 @@
 //!
 //! A hard cast telegraphs itself through `CastingState` and the casting orb. An
 //! instant does not — it is applied inline in its class AI or resolved through
-//! `combat_ai.rs`'s `QueuedInstantAttack` drain, and never enters
+//! `instant_landings.rs`'s `QueuedInstantAttack` drain, and never enters
 //! `CastingState`/`process_casting` at all. So an instant that wants an
 //! actor-side animation states it by spawning an ability-AGNOSTIC
 //! [`InstantAbilityFired`] marker, and this module is the single place that

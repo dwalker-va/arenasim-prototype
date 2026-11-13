@@ -1107,7 +1107,10 @@
             per_rank: [Grant(GuardianSpirit)],
         ),
 
-        // ---- Priest: Shadow (the talents proposal §5.2) ----
+        // ---- Priest: Shadow (AS-413, AS-416; the talents proposal §5.2) ----
+        // Damage tools for a healer, and the way to stop healing. Only Silence
+        // is locked to the form. Values provisional: tuning is the milestone
+        // sweep's (AS-302).
         ImprovedMindBlast: (
             name: "Improved Mind Blast",
             class: Priest, tree: Shadow, tier: 1, column: 0,
@@ -1139,6 +1142,62 @@
             // heals with it.
             per_rank: [WidenChoice(PriestForm(Shadowform)), Grant(Shadowform)],
         ),
+        Blackout: (
+            name: "Blackout",
+            class: Priest, tree: Shadow, tier: 2, column: 2,
+            icon: "icons/talents/spell_shadow_gathershadows.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // A Mind Blast that hits stuns its target for 3s, 4% a rank
+            // (Classic 15326: 10% on any Shadow damage, five ranks). A
+            // resistance-free stun proc by ruling: it never rolls to resist.
+            // TBC 15269's stun is Magic; it diminishes with the other stuns.
+            per_rank: [
+                Proc((
+                    trigger: SpellHit,
+                    abilities: [MindBlast],
+                    chance: Chance(0.04),
+                    ranks_add: Chance,
+                    effect: ApplyAura(
+                        on: Other,
+                        aura_type: Stun,
+                        magnitude: 1.0,
+                        duration: 3.0,
+                        dispel_type: Magic,
+                    ),
+                )),
+            ],
+        ),
+        MindFlay: (
+            name: "Mind Flay",
+            class: Priest, tree: Shadow, tier: 3, column: 0,
+            icon: "icons/talents/spell_shadow_siphonmana.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // A 3s channel: 30 Shadow damage and a 50% slow on its target.
+            per_rank: [Grant(MindFlay)],
+        ),
+        VampiricEmbrace: (
+            name: "Vampiric Embrace",
+            class: Priest, tree: Shadow, tier: 3, column: 2,
+            icon: "icons/talents/spell_shadow_unsummonbuilding.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // A 60s debuff: 20% of the Priest's Shadow damage to its bearer
+            // heals the Priest's party.
+            per_rank: [Grant(VampiricEmbrace)],
+        ),
+        Silence: (
+            name: "Silence",
+            class: Priest, tree: Shadow, tier: 4, column: 1,
+            icon: "icons/talents/spell_shadow_impphaseshift.jpg",
+            max_rank: 1,
+            budget: Some(22.0),
+            requires: Some((Shadowform, 1)),
+            // Silences the target for 5s; 45s. Castable only in Shadowform:
+            // a choice rule below locks it without the form.
+            per_rank: [Grant(Silence)],
+        ),
     },
 
     // Choices that are exclusive (talent_choices.rs).
@@ -1154,9 +1213,9 @@
         Forbids(option: PriestForm(Shadowform), ability: FlashHeal),
         Forbids(option: PriestForm(Shadowform), ability: HolyNova),
         // The form is the spell: castable only with the form chosen. Silence
-        // (AS-416) takes the same rule: Requires(ability: Silence, option:
-        // PriestForm(Shadowform)).
+        // takes the same rule: a healing Priest never silences.
         Requires(ability: Shadowform, option: PriestForm(Shadowform)),
+        Requires(ability: Silence, option: PriestForm(Shadowform)),
     ],
 
     // Each class's reference combatant at mid-run, which prices its computed

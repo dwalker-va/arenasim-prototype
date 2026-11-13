@@ -797,6 +797,7 @@ impl HealImpact {
             | AuraType::KillingBlowSave
             | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect
+            | AuraType::LeechMark
             | AuraType::TravelForm => None,
         }
     }
@@ -1603,6 +1604,10 @@ impl AuraApplyRoute {
             | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect => AuraApplyRoute::Band,
 
+            // Vampiric Embrace's leech has no bespoke apply treatment yet:
+            // the family cue draws it as a debuff (its visual card is AS-357).
+            AuraType::LeechMark => AuraApplyRoute::Band,
+
             // Aura Mastery's immunity has no bespoke apply treatment yet: the
             // family cue draws it (its visual card is AS-374).
             AuraType::SilenceInterruptImmunity => AuraApplyRoute::Band,
@@ -2386,7 +2391,7 @@ impl InstantAbilityFired {
         use AbilityType::*;
         matches!(
             ability,
-            // Resolved through the `QueuedInstantAttack` drain in combat_ai.rs.
+            // Resolved through the `QueuedInstantAttack` drain in instant_landings.rs.
             MortalStrike | Ambush | SinisterStrike
             // Instant AND aura-only: applied inline in class AI, entering
             // neither generic caster hook (A2). Power Word: Shield's marker

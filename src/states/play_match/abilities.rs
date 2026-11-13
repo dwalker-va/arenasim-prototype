@@ -276,6 +276,10 @@ pub enum AbilityType {
     // Rogue: the Subtlety tree (AS-419). Appended for the same reason.
     Hemorrhage,  // talent: a strike that leaves +2% Physical damage taken a stack
     ShadowDance, // talent: Cheap Shot and Ambush out of stealth for 8s
+    // Priest: the Shadow tree (AS-416). Appended for the same reason.
+    MindFlay,        // talent: a 3s Shadow channel that slows its target 50%
+    VampiricEmbrace, // talent: the Priest's Shadow damage to the target heals its party
+    Silence,         // talent: silences the target for 5s; castable only in Shadowform
 }
 
 impl AbilityType {
@@ -318,9 +322,8 @@ impl AbilityType {
             | Cyclone | TravelForm | Shadowform | DivineProtection | BlessingOfSacrifice
             | SacredShield | RetributionAura | SiphonLife | AmplifyCurse | CurseOfExhaustion
             | InnerFocus | PowerInfusion | PainSuppression | Shadowburn | Conflagrate
-            | DivineFavor | AuraMastery | HolyNova | GuardianSpirit | Repentance | ShadowDance => {
-                false
-            }
+            | DivineFavor | AuraMastery | HolyNova | GuardianSpirit | Repentance | ShadowDance
+            | MindFlay | VampiricEmbrace | Silence => false,
         }
     }
 

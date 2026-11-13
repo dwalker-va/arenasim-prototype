@@ -828,6 +828,10 @@ impl AbilityDefinitions {
             // Rogue: the Subtlety tree
             AbilityType::Hemorrhage,
             AbilityType::ShadowDance,
+            // Priest: the Shadow tree
+            AbilityType::MindFlay,
+            AbilityType::VampiricEmbrace,
+            AbilityType::Silence,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -1121,6 +1125,23 @@ impl AbilityDefinitions {
                     "abilities.ron: {:?} is a channel with `prevention: {:?}`. A channel's \
                      interrupt does not read `prevention`; only a Silence channel is modelled.",
                     ability, def.prevention
+                );
+            }
+        }
+
+        // A channel lasts a whole number of its ticks: the final tick lands as
+        // it ends (`auras::periodic_tick`), so a part interval would land a
+        // whole extra tick.
+        for (ability, def) in &self.definitions {
+            let Some(duration) = def.channel_duration else {
+                continue;
+            };
+            let interval = def.channel_tick_interval;
+            let ticks = (duration / interval).round();
+            if interval <= 0.0 || ticks < 1.0 || (ticks * interval - duration).abs() > 1e-4 {
+                panic!(
+                    "abilities.ron: {ability:?} channels for {duration}s in ticks of \
+                     {interval}s. A channel lasts a whole number of its ticks."
                 );
             }
         }
@@ -1528,6 +1549,20 @@ mod tests {
         );
     }
 
+    /// A channel lasts a whole number of its ticks...
+    #[test]
+    #[should_panic(expected = "a whole number of its ticks")]
+    fn a_channel_lasts_whole_ticks() {
+        validate_drain_life(|d| d.channel_tick_interval = 0.8);
+    }
+
+    /// ...and has a tick at all.
+    #[test]
+    #[should_panic(expected = "a whole number of its ticks")]
+    fn a_channel_ticks() {
+        validate_drain_life(|d| d.channel_tick_interval = 0.0);
+    }
+
     /// A channel's leech is a share...
     #[test]
     #[should_panic(expected = "outside (0, 1]")]
@@ -1774,6 +1809,9 @@ mod tests {
                     AbilityType::PainSuppression,
                     AbilityType::HolyNova,
                     AbilityType::GuardianSpirit,
+                    AbilityType::MindFlay,
+                    AbilityType::VampiricEmbrace,
+                    AbilityType::Silence,
                 ],
             ),
             (

@@ -44,6 +44,7 @@ pub mod plays;
 pub mod priest;
 pub mod priest_discipline;
 pub mod priest_holy;
+pub mod priest_shadow;
 pub mod rogue;
 pub mod rogue_flare;
 #[doc(hidden)]
@@ -1232,6 +1233,9 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         // its magic instances reach this: the Kidney Shot rider is Physical
         // (`Aura::can_be_dispelled`, per aura).
         AuraType::DamageTakenIncrease => 50,
+        // Vampiric Embrace: the enemy's Shadow damage on the holder heals the
+        // enemy's party. Routine, as a DoT is.
+        AuraType::LeechMark => 50,
 
         // ---- Below every caller's bar: deliberately never dispelled. ----
         // A snare is not worth a GCD that could be a heal, and the caster
@@ -1574,7 +1578,8 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         | AuraType::AttackPowerReduction
         | AuraType::AttackSpeedSlow
         | AuraType::DamageTakenIncrease
-        | AuraType::ArmorPercentReduction => 0,
+        | AuraType::ArmorPercentReduction
+        | AuraType::LeechMark => 0,
     }
 }
 
@@ -1649,6 +1654,7 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
         | AuraType::KillingBlowSave
         | AuraType::HealingReceivedIncrease
         | AuraType::DamageReflect
+        | AuraType::LeechMark
         | AuraType::TravelForm => false,
     }
 }
@@ -1753,6 +1759,7 @@ pub const fn grants_damage_immunity(aura: AuraType) -> bool {
         | AuraType::KillingBlowSave
         | AuraType::HealingReceivedIncrease
         | AuraType::DamageReflect
+        | AuraType::LeechMark
         | AuraType::TravelForm => false,
     }
 }
@@ -1951,6 +1958,25 @@ pub fn ready_interrupt_reach(
         .iter()
         .filter(|(ability, def)| {
             def.is_interrupt && cc_reach::could_cast(ctx, unit, **ability, def, horizon)
+        })
+        .map(|(_, def)| def.range)
+        .reduce(f32::max)
+}
+
+/// How far `unit` can SILENCE a cast from: the longest range among the
+/// abilities in its own kit whose aura is a Silence (the Priest's Silence),
+/// counting only one it could start within `horizon` seconds
+/// ([`cc_reach::could_cast`], a locked one never). `None` when it has none
+/// ready. The second half of what "about to stop a cast" means to a unit
+/// guarding one (Aura Mastery), beside [`ready_interrupt_reach`].
+pub fn ready_silence_reach(ctx: &CombatContext, unit: &CombatantInfo, horizon: f32) -> Option<f32> {
+    unit.book
+        .iter()
+        .filter(|(ability, def)| {
+            def.applies_aura
+                .as_ref()
+                .is_some_and(|a| a.aura_type == AuraType::Silence)
+                && cc_reach::could_cast(ctx, unit, **ability, def, horizon)
         })
         .map(|(_, def)| def.range)
         .reduce(f32::max)
