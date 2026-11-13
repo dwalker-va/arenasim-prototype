@@ -674,6 +674,23 @@ impl AuraType {
         }
     }
 
+    /// The aura types whose dispellability is decided PER AURA, by that
+    /// aura's own removal class, rather than by the type: a DoT, and a
+    /// damage-taken increase. [`Aura::can_be_dispelled`] admits an instance
+    /// of one exactly when it is magic — declared [`DispelType::Magic`], or
+    /// [`DispelType::Auto`] with a non-physical `spell_school`. A schoolless
+    /// `Auto` instance stays undispellable: nothing says it is magic.
+    ///
+    /// Each is also one arm of [`AuraType::is_magic_dispellable`], where it
+    /// answers `false` and points here. That match is the exhaustive guard; a
+    /// type moves into this set by moving its arm there.
+    pub fn is_dispelled_per_aura(&self) -> bool {
+        matches!(
+            self,
+            AuraType::DamageOverTime | AuraType::DamageTakenIncrease
+        )
+    }
+
     /// Returns true if this aura type is dispellable WHEN IT IS MAGIC.
     /// This covers CC effects that are always magical in WoW, plus Silence (which is
     /// removable by Dispel Magic / Cleanse).
@@ -710,12 +727,16 @@ impl AuraType {
             | AuraType::Incapacitate
             | AuraType::Silence => true,
 
-            // Classified PER AURA, not per type: [`Aura::can_be_dispelled`]
-            // admits a DoT only when its `spell_school` is non-physical, so
-            // Corruption and Immolate are dispellable and Rend is not. Listing
-            // the type here would make a SCHOOLLESS DoT dispellable — the
-            // removal class already stops the physical ones.
-            AuraType::DamageOverTime => false,
+            // Classified PER AURA, not per type ([`AuraType::is_dispelled_per_aura`]):
+            // [`Aura::can_be_dispelled`] admits one only when its own removal
+            // class is magic — declared `Magic`, or derived from a
+            // non-physical `spell_school`. So Corruption and Immolate are
+            // dispellable and Rend is not; Shadow Vulnerability (declared
+            // Magic, TBC 17800) is, and Improved Kidney Shot's rider (declared
+            // Physical) is not. Listing the types here would make a SCHOOLLESS
+            // DoT or vulnerability dispellable — the removal class already
+            // stops the physical ones.
+            AuraType::DamageOverTime | AuraType::DamageTakenIncrease => false,
 
             // Stat debuffs, not crowd control — this classifier's true arm is
             // scoped to CC. Stuns are never dispellable in WoW at all; the
@@ -741,10 +762,10 @@ impl AuraType {
             | AuraType::AttackPowerReduction
             | AuraType::AttackSpeedSlow => false,
 
-            // Stat debuffs too, scoped out like the ones above: a magic
-            // vulnerability (Shadow Vulnerability) or armor cut is not crowd
-            // control, and "no" is the status quo answer for a stat debuff.
-            AuraType::DamageTakenIncrease | AuraType::ArmorPercentReduction => false,
+            // A stat debuff too, scoped out like the ones above: an armor cut
+            // is not crowd control, and "no" is the status quo answer for a
+            // stat debuff. Its one source today, Expose Armor, is physical.
+            AuraType::ArmorPercentReduction => false,
 
             // Cyclone is magic crowd control that NO dispel takes (TBC). It is
             // the one CC here that is undispellable by rule rather than by
@@ -1316,8 +1337,9 @@ impl Aura {
     /// a disease, a curse and a physical debuff are not magic, so there is
     /// nothing for a dispel to take hold of. Only once an aura is magic does
     /// the mechanic get a vote — magic-dispellable types (slows, roots, fear,
-    /// polymorph, silence) are dispellable, and a DoT is dispellable when it
-    /// carries a magic school.
+    /// polymorph, silence) are dispellable, and a DoT or a damage-taken
+    /// increase is dispellable when it is itself magic
+    /// ([`AuraType::is_dispelled_per_aura`]).
     ///
     /// The physical gate lives HERE, above the type check, rather than being
     /// spelled out per aura type. That ordering is the point: the rule was
@@ -1350,11 +1372,13 @@ impl Aura {
             return true;
         }
 
-        // DoTs are dispellable only if magic school. Physical DoTs never reach
-        // this arm — they are `DispelType::Physical` and returned above — but
-        // the school check stays as the backstop for a DoT built by hand in
-        // engine code, which never passes through `DispelType::for_ability`.
-        if matches!(self.effect_type, AuraType::DamageOverTime) {
+        // A DoT or a damage-taken increase is dispellable only when it is
+        // itself magic: declared so (Shadow Vulnerability, TBC 17800), or of a
+        // magic school. Physical ones never reach this arm — they are
+        // `DispelType::Physical` and returned above — but the school check
+        // stays as the backstop for an aura built by hand in engine code,
+        // which never passes through `DispelType::for_ability`.
+        if self.effect_type.is_dispelled_per_aura() {
             if self.dispel_type == DispelType::Magic {
                 return true;
             }
@@ -2824,6 +2848,46 @@ mod tests {
         assert!(!physical.can_be_purged());
         assert_eq!(physical.removal_class_name(), Some("Physical"));
         assert!(!aura(AuraType::DamageOverTime, DispelType::Auto).can_be_dispelled());
+    }
+
+    /// A damage-taken increase follows its own removal class, as a DoT does
+    /// (AS-482, user ruling 2026-11-13): declared Magic (Shadow Vulnerability,
+    /// schoolless) or derived magic from its school, a dispel takes it;
+    /// declared Physical (Improved Kidney Shot's rider), schoolless `Auto`, or
+    /// any other class, none does.
+    #[test]
+    fn a_damage_taken_increase_is_dispellable_exactly_when_it_is_magic() {
+        let aura = |dispel_type, spell_school| Aura {
+            effect_type: AuraType::DamageTakenIncrease,
+            dispel_type,
+            spell_school,
+            ..Default::default()
+        };
+        let dispellable: Vec<(DispelType, Option<SpellSchool>)> = [
+            DispelType::Auto,
+            DispelType::Magic,
+            DispelType::Physical,
+            DispelType::Poison,
+            DispelType::Disease,
+            DispelType::Curse,
+            DispelType::Untyped,
+        ]
+        .into_iter()
+        .flat_map(|class| {
+            [None, Some(SpellSchool::Shadow), Some(SpellSchool::Physical)]
+                .map(|school| (class, school))
+        })
+        .filter(|&(class, school)| aura(class, school).can_be_dispelled())
+        .collect();
+        assert_eq!(
+            dispellable,
+            vec![
+                (DispelType::Auto, Some(SpellSchool::Shadow)),
+                (DispelType::Magic, None),
+                (DispelType::Magic, Some(SpellSchool::Shadow)),
+                (DispelType::Magic, Some(SpellSchool::Physical)),
+            ]
+        );
     }
 
     /// No school derives to `Curse`. Curses are Shadow and so is Corruption, so
