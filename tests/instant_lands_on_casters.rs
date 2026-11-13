@@ -24,7 +24,13 @@
 //! Beside them: Mortal Strike chosen by the Warrior's own AI on a casting
 //! Mage lands, logs and fires its `SpellHit` proc (an idle Mage the control);
 //! Holy Nova's queued heal lands on a casting teammate; and Divine Shield
-//! still halves a queued strike, read as the strike is queued.
+//! still halves a queued strike, read as the strike is queued. What the
+//! landing kept when it moved is pinned too: strikes traded to the death on
+//! one frame draw, and a strike breaks a Polymorph or a Fear.
+//!
+//! And structurally: the systems that write `Combatant` through a query that
+//! leaves out casters are a named set of deciders, so a new landing system
+//! cannot quietly look away from a caster.
 //!
 //! The route a class AI queues an ability through is the class AI's: this
 //! file states it and puts the ability through it, it cannot read it. A strike
@@ -93,6 +99,7 @@ const ROUTES: &[(AbilityType, Route)] = &[
     (ArcaneShot, Route::Projectile),
     (HolyShock, Route::HolyShock),
     (DrainLife, Route::Channel),
+    (MindFlay, Route::Channel),
     (WoundPoison, Route::WeaponProc),
 ];
 
@@ -731,4 +738,231 @@ fn a_queued_heal_lands_on_a_casting_teammate() {
 #[test]
 fn a_queued_heal_lands_on_an_idle_teammate() {
     assert_eq!(holy_nova_heal_on(false), (true, true));
+}
+
+// ---------------------------------------------------------------------------
+// What the landing keeps from before it moved
+// ---------------------------------------------------------------------------
+
+/// Two Warriors side by side with full rage and Mortal Strike ready, each the
+/// other's target, deciding on the gate frame. Team 1's Warrior is left with
+/// `team1_health` of its health, team 2's with 1%. Their swings and Rend wait,
+/// so the strikes are all that happens.
+fn mortal_strikes_traded(team1_health: f32) -> Played {
+    const T1: Unit = Unit::new(1, 0);
+    const T2: Unit = Unit::new(2, 0);
+    let config = HeadlessMatchConfig {
+        team1: vec!["Warrior".into()],
+        team2: vec!["Warrior".into()],
+        random_seed: Some(488),
+        max_duration_secs: 2.0,
+        ..Default::default()
+    };
+    let mut stage = Stage::new()
+        .place(T1, 0.0, 0.0)
+        .place(T2, 2.0, 0.0)
+        .health(T1, team1_health)
+        .health(T2, 0.01);
+    for (me, them) in [(T1, T2), (T2, T1)] {
+        stage = stage
+            .target(me, them)
+            .resource(me, 100.0)
+            .cooldown(me, Rend, HOLD_SECS)
+            .combatant(me, |c| {
+                c.attack_timer = -HOLD_SECS;
+                c.dodge_chance = 0.0;
+                c.parry_chance = 0.0;
+            });
+    }
+    play(config, stage)
+}
+
+/// Dying-blow semantics: every strike queued in a frame lands, even one whose
+/// attacker an earlier strike that frame killed. Two Warriors who strike each
+/// other dead on the same frame draw. The control: team 1's Warrior healthy
+/// takes team 2's strike and wins.
+#[test]
+fn strikes_traded_to_the_death_on_one_frame_draw() {
+    let traded = mortal_strikes_traded(0.01);
+    let hits = traded
+        .log
+        .lines()
+        .filter(|l| l.contains("'s Mortal Strike hits") || l.contains("'s Mortal Strike CRITS"))
+        .count();
+    assert_eq!(hits, 2, "both strikes landed:\n{}", traded.log);
+    assert_eq!(
+        traded.result.winner, None,
+        "a mutual lethal is a draw:\n{}",
+        traded.log
+    );
+
+    let control = mortal_strikes_traded(1.0);
+    assert!(
+        control
+            .log
+            .contains("Team 2 Warrior #1's Mortal Strike hits Team 1 Warrior #1")
+            || control
+                .log
+                .contains("Team 2 Warrior #1's Mortal Strike CRITS Team 1 Warrior #1"),
+        "the dying Warrior's strike still landed:\n{}",
+        control.log
+    );
+    assert_eq!(control.result.winner, Some(1), "{}", control.log);
+}
+
+/// A strike queued onto a Mage held in `hold` (a Polymorph, which any damage
+/// breaks, or a Fear, which 20 damage breaks), or none queued (`strike`
+/// false). Returns the frames from the stage's on which the Mage still carried
+/// the hold, over the first half second.
+fn held_frames_after(hold: AuraType, strike: bool) -> usize {
+    const WARRIOR: Unit = Unit::new(1, 0);
+    const MAGE: Unit = Unit::new(2, 0);
+    let config = HeadlessMatchConfig {
+        team1: vec!["Warrior".into()],
+        team2: vec!["Mage".into()],
+        random_seed: Some(488),
+        max_duration_secs: 2.0,
+        ..Default::default()
+    };
+    let stage = Stage::new()
+        .place(WARRIOR, 0.0, 0.0)
+        .place(MAGE, 2.0, 0.0)
+        .target(WARRIOR, MAGE)
+        // No Ice Barrier to soak the strike: a hit wholly absorbed breaks
+        // nothing.
+        .clear_auras(MAGE)
+        // The Warrior does nothing of its own, so the strike is the only
+        // damage the Mage takes.
+        .combatant(WARRIOR, |c| {
+            c.global_cooldown = HOLD_SECS;
+            c.attack_timer = -HOLD_SECS;
+        })
+        .world(move |world| {
+            let warrior = WARRIOR.entity(world);
+            let mage = MAGE.entity(world);
+            world
+                .get_mut::<ActiveAuras>(mage)
+                .expect("the Mage's auras")
+                .auras
+                .push(Aura {
+                    effect_type: hold,
+                    duration: HOLD_SECS,
+                    break_on_damage_threshold: if hold == AuraType::Fear { 20.0 } else { 0.0 },
+                    caster: Some(warrior),
+                    ability_name: format!("{hold:?}"),
+                    ..Default::default()
+                });
+            if strike {
+                let c = world
+                    .get::<Combatant>(warrior)
+                    .expect("the Warrior")
+                    .clone();
+                world
+                    .resource_mut::<InstantLandings>()
+                    .strikes
+                    .push(PendingStrike {
+                        attack: QueuedInstantAttack {
+                            attacker: warrior,
+                            target: mage,
+                            damage: 50.0,
+                            attacker_team: c.team,
+                            attacker_slot: c.slot,
+                            attacker_class: c.class,
+                            ability: MortalStrike,
+                            is_crit: false,
+                        },
+                        dealt: 1.0,
+                    });
+            }
+        });
+    let played = play(config, stage);
+    let from = played.landed().app;
+    played
+        .frames
+        .iter()
+        .filter(|f| f.sim_time >= from && f.sim_time < from + 0.5)
+        .filter(|f| {
+            f.combatants
+                .values()
+                .find(|c| c.team == 2 && c.slot == 0 && !c.is_pet)
+                .expect("the Mage")
+                .aura_types
+                .contains(&hold)
+        })
+        .count()
+}
+
+/// A queued strike breaks the crowd control damage breaks: its hit is the
+/// target's `DamageTakenThisFrame`. The control: no strike, and the hold
+/// stands the whole half second.
+#[test]
+fn a_queued_strike_breaks_a_polymorph_and_a_fear() {
+    for hold in [AuraType::Polymorph, AuraType::Fear] {
+        let unstruck = held_frames_after(hold, false);
+        let struck = held_frames_after(hold, true);
+        assert!(
+            unstruck >= 25,
+            "{hold:?} stands unstruck: {unstruck} frames"
+        );
+        assert!(
+            struck <= 3,
+            "{hold:?} breaks within a few frames of the strike: held {struck} frames"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Who may look away from a caster
+// ---------------------------------------------------------------------------
+
+/// The systems whose query writes `Combatant` yet leaves out units mid-cast or
+/// mid-channel, as (file, fn). Each writes only units that ACT this frame —
+/// a unit mid-cast does not decide — and lands nothing on another unit
+/// through that query. A new landing system that filters its targets this way
+/// would drop its effect on every caster (AS-488), so it fails here until it
+/// is named, and it must not be: land it over every combatant instead.
+const CASTER_BLIND_WRITERS: &[(&str, &str)] = &[
+    // The free units decide; their strikes land in `land_instant_effects`.
+    ("src/states/play_match/combat_ai.rs", "decide_abilities"),
+    // The interrupters decide; the interrupt lands in `process_interrupts`.
+    ("src/states/play_match/combat_ai.rs", "check_interrupts"),
+    // The pets decide; their abilities land through commands and queues.
+    ("src/states/play_match/class_ai/pet_ai.rs", "pet_ai_system"),
+];
+
+#[test]
+fn only_deciding_systems_write_combatants_past_casters() {
+    use common::source_audit::{
+        blank_comments_and_strings, blank_test_modules, is_reference_param, load_sources,
+        pub_fn_signatures, split_params,
+    };
+    let mut found = BTreeSet::new();
+    for file in load_sources(&["src"]).expect("read src/") {
+        let code = blank_test_modules(&blank_comments_and_strings(&file.raw));
+        for sig in pub_fn_signatures(&code) {
+            // A system parameter, not a helper's borrowed one (a snapshot
+            // builder reads through `&Query<..>`).
+            let blind = split_params(&sig.params).iter().any(|p| {
+                if is_reference_param(p) {
+                    return false;
+                }
+                let p: String = p.split_whitespace().collect::<Vec<_>>().join(" ");
+                p.contains("Query<")
+                    && p.contains("&mut Combatant")
+                    && (p.contains("Without<CastingState>")
+                        || p.contains("Without<ChannelingState>"))
+            });
+            if blind {
+                found.insert((file.rel_display(), sig.name.clone()));
+            }
+        }
+    }
+    let named: BTreeSet<(String, String)> = CASTER_BLIND_WRITERS
+        .iter()
+        .map(|(f, n)| (f.to_string(), n.to_string()))
+        .collect();
+    assert_eq!(
+        found, named,
+        "the systems writing `Combatant` through a query that leaves out casters"
+    );
 }

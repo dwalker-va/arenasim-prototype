@@ -3504,6 +3504,7 @@ mod mage_postures {
         }
     }
 
+    /// KITE does not strobe: the entry count over a full 1v1 is bounded.
     #[test]
     fn mage_kite_does_not_strobe() {
         let cfg = create_config(vec!["Mage"], vec!["Warrior"], Some(SEED));
