@@ -1827,6 +1827,12 @@ jq -c 'select(.outcome.ability == "FreezingTrap") | {t: .sim_time, aimed_at: .ou
 # target-switch recipe above shows it.)
 jq -r 'select(.actor.class == "Hunter") | .candidates[]? | select(.ability == "FreezingTrap") | .reason.PreconditionUnmet.note // empty' $T | grep '^healer trap' | sort | uniq -c
 
+# Frost Trap peels held for the shared trap cooldown: the pressure trap would
+# freeze the enemy healer within `HEALER_FREEZE_HOLD_SECS`
+# (`hunter::frost_trap_held_for_healer`), or the Hunter's own Freezing Trap is
+# still waiting to spring.
+jq -r 'select(.actor.class == "Hunter") | .candidates[]? | select(.ability == "FrostTrap") | .reason.PreconditionUnmet.note // empty' $T | grep '^frost trap held' | sort | uniq -c
+
 # Melee avoidance (`combat_core/avoidance.rs`): every dodged or parried melee
 # attack, the attacker as `actor` and the defender as `target`. Matches no
 # event in a match where nobody has a dodge or parry chance.
