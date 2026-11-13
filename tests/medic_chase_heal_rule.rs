@@ -244,6 +244,7 @@ impl Scene {
             decide_priest_action(
                 &mut commands,
                 &mut CombatLog::default(),
+                &mut arenasim::states::play_match::GameRng::from_seed(1),
                 &self.combatant.book().clone(),
                 self.healer,
                 &mut self.combatant,
@@ -255,6 +256,10 @@ impl Scene {
                 plan,
                 &movement,
                 &mut Vec::new(),
+                &mut arenasim::states::play_match::class_ai::AreaQueues {
+                    damage: &mut Vec::new(),
+                    heals: &mut Vec::new(),
+                },
                 &mut trace,
             );
         }

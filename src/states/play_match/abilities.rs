@@ -263,6 +263,9 @@ pub enum AbilityType {
     // Paladin: the Holy tree (AS-420). Appended for the same reason.
     DivineFavor, // talent: the next Flash of Light, Holy Light or Holy Shock crits
     AuraMastery, // talent: teammates immune to silence and interrupts for 6s
+    // Priest: the Holy tree (AS-415). Appended for the same reason.
+    HolyNova,       // talent: Holy damage to enemies and a heal to allies within 10yd
+    GuardianSpirit, // talent: +40% healing received and a killing blow prevented, 10s
     // Rogue: the Subtlety tree (AS-419). Appended for the same reason.
     Hemorrhage,  // talent: a strike that leaves +2% Physical damage taken a stack
     ShadowDance, // talent: Cheap Shot and Ambush out of stealth for 8s
@@ -308,7 +311,7 @@ impl AbilityType {
             | Cyclone | TravelForm | Shadowform | DivineProtection | BlessingOfSacrifice
             | SacredShield | RetributionAura | SiphonLife | AmplifyCurse | CurseOfExhaustion
             | InnerFocus | PowerInfusion | PainSuppression | Shadowburn | Conflagrate
-            | DivineFavor | AuraMastery | ShadowDance => false,
+            | DivineFavor | AuraMastery | HolyNova | GuardianSpirit | ShadowDance => false,
         }
     }
 

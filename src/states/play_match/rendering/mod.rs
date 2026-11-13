@@ -206,6 +206,7 @@ pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) 
         | AuraType::DamageTransfer
         | AuraType::TriggeredAbsorb
         | AuraType::KillingBlowSave
+        | AuraType::HealingReceivedIncrease
         | AuraType::DamageReflect => "aura_max_health".to_string(),
         AuraType::DamageTakenIncrease | AuraType::ArmorPercentReduction => "aura_dot".to_string(),
     }
@@ -252,6 +253,7 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         | AuraType::DamageTransfer
         | AuraType::TriggeredAbsorb
         | AuraType::KillingBlowSave
+        | AuraType::HealingReceivedIncrease
         | AuraType::DamageReflect
         | AuraType::TravelForm => true,
 

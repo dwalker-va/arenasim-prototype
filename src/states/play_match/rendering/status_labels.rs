@@ -114,6 +114,7 @@ pub fn overhead_status_label(aura: &Aura) -> Option<OverheadLabel> {
         | AuraType::DamageTransfer
         | AuraType::TriggeredAbsorb
         | AuraType::KillingBlowSave
+        | AuraType::HealingReceivedIncrease
         | AuraType::DamageReflect
         | AuraType::TravelForm => None,
     }

@@ -75,6 +75,8 @@ const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::Rupture, expose_armor_scene),
     (AbilityType::DivineFavor, paladin_ally_under_attack),
     (AbilityType::AuraMastery, paladin_ally_casting_by_a_rogue),
+    (AbilityType::HolyNova, priest_threatened),
+    (AbilityType::GuardianSpirit, priest_ally_endangered),
     // Sinister Strike's moment, the target wearing no Hemorrhage.
     (AbilityType::Hemorrhage, expose_armor_scene),
     (AbilityType::ShadowDance, shadow_dance_scene),
@@ -302,6 +304,31 @@ fn priest_kill_window(defs: &AbilityDefinitions) -> (Scene, Who) {
         .at(30.0, 0.0)
         .health(0.2);
     (scene, PRIEST)
+}
+
+/// A Priest at 60% with an enemy Warrior beside it, Pummel ready and the
+/// rage for it: the Flash Heal it owes itself would be interrupted, so Holy
+/// Nova's moment. Psychic Scream cooling down and Weakened Soul on it, so
+/// neither the scream nor a shield goes out first.
+fn priest_threatened(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PRIEST, 1, CharacterClass::Priest)
+        .health(0.6)
+        .aura_full(PRIEST, fortitude())
+        .aura(PRIEST, AuraType::WeakenedSoul, 10.0)
+        .cooldown(PRIEST, AbilityType::PsychicScream, 20.0)
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(1.5, 0.0)
+        .rage(30.0)
+        .targeting(PRIEST);
+    (scene, PRIEST)
+}
+
+/// [`priest_ally_dying`] with the Warrior teammate below 25%: Guardian
+/// Spirit's moment, whatever is on it.
+fn priest_ally_endangered(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let (scene, who) = priest_ally_dying(defs);
+    (scene.health_of("warrior", 0.2), who)
 }
 
 fn considered(view: &DecisionView, ability: AbilityType) -> bool {

@@ -203,6 +203,13 @@ pub enum AuraType {
     /// comes off as the immunity lands (`apply_pending_auras`). Magnitude
     /// unused (1.0 by convention). User: Aura Mastery.
     SilenceInterruptImmunity,
+    /// The holder RECEIVES more healing: a fraction (magnitude, e.g. 0.40 =
+    /// 40% more), on every heal that lands on it — direct heals, heal over
+    /// time ticks, blooms, drains and saves alike. Read in
+    /// `combat_core::apply_healing`, the one heal site, before the
+    /// [`AuraType::HealingReduction`] cut; only the strongest applies (the
+    /// stacking simplification). User: Guardian Spirit.
+    HealingReceivedIncrease,
     /// The holder may use its OPENERS (Ambush, Cheap Shot: `requires_stealth`)
     /// out of stealth while it lasts, as often as its energy allows
     /// (`abilities::can_open`, which the cast gate asks). It does not stealth
@@ -236,8 +243,45 @@ impl DamageScope {
     }
 }
 
+/// What KIND of harm an effect is, after TBC's `SpellMechanic`, where the kind
+/// changes how the damage pipeline treats it. Crowd control's kinds (stun,
+/// fear, root, ...) are the aura type here and need no mechanic; this names
+/// only those an aura type cannot say.
+///
+/// Declared on an ability's `applies_aura` block (`mechanic: Some(Bleed)`),
+/// the effect TBC puts it on: a bleed's mechanic sits on its periodic damage
+/// effect (Rake's and Lacerate's direct hits are not bleeds).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Mechanic {
+    /// TBC Mechanic 15: a physical wound (Rend, Rupture, Garrote, Deep
+    /// Wounds). Its ticks are Physical damage that armor does not reduce;
+    /// every other step of the damage pipeline applies to them.
+    /// `tests/bleed_mechanic_audit.rs` holds the declared bleeds to the TBC
+    /// client's.
+    Bleed,
+}
+
+impl Mechanic {
+    /// Whether a hit of this mechanic passes its victim's armor unreduced.
+    pub fn ignores_armor(self) -> bool {
+        match self {
+            Mechanic::Bleed => true,
+        }
+    }
+
+    /// The school a periodic effect of this mechanic deals its damage in.
+    /// An aura stores `None` for a physical ability's school (the same as a
+    /// schoolless one's), so a bleed's tick takes its school from here.
+    pub fn school(self) -> SpellSchool {
+        match self {
+            Mechanic::Bleed => SpellSchool::Physical,
+        }
+    }
+}
+
 /// The damage-pipeline data an aura may carry beyond its magnitude. Inert by
-/// default: no scope (every hit), no charges, no reflect, no triggered absorb.
+/// default: no scope (every hit), no charges, no reflect, no triggered absorb,
+/// no mechanic.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct AuraDamageMods {
     /// The hits a `DamageTakenIncrease`, `DamageDealtIncrease` or
@@ -260,6 +304,9 @@ pub struct AuraDamageMods {
     /// `apply_pending_auras` lands it as the stun's
     /// [`CompoundDebuff::StunVulnerability`] rider. `None` on every other aura.
     pub vulnerability: Option<f32>,
+    /// On a damage over time: the [`Mechanic`] its ticks land as (a bleed's
+    /// pass armor). `None` on every other aura.
+    pub mechanic: Option<Mechanic>,
 }
 
 /// A debuff's REMOVAL CLASS — what kind of thing it is for the purpose of
@@ -430,7 +477,7 @@ impl AuraType {
     /// DOES cost is coverage: a guard that sweeps `ALL` quietly stops covering
     /// whatever `ALL` forgot, while still reading like a whole-enum sweep.
     /// `aura_type_tests::all_lists_every_aura_type` is what stops that.
-    pub const ALL: [AuraType; 47] = [
+    pub const ALL: [AuraType; 48] = [
         AuraType::MovementSpeedSlow,
         AuraType::Root,
         AuraType::Stun,
@@ -477,6 +524,7 @@ impl AuraType {
         AuraType::DamageReflect,
         AuraType::TriggeredAbsorb,
         AuraType::SilenceInterruptImmunity,
+        AuraType::HealingReceivedIncrease,
         AuraType::ShadowDance,
     ];
 
@@ -541,6 +589,7 @@ impl AuraType {
             AuraType::TriggeredAbsorb => "Triggered Shield",
             AuraType::KillingBlowSave => "Death Prevention",
             AuraType::DamageReflect => "Damage Reflection",
+            AuraType::HealingReceivedIncrease => "Healing Boost",
         }
     }
 
@@ -682,6 +731,9 @@ impl AuraType {
             AuraType::TriggeredAbsorb => {
                 "Taking damage raises an absorb shield on the holder, at most once in a while."
             }
+            AuraType::HealingReceivedIncrease => {
+                "Raises the healing the holder receives, from every heal and heal over time."
+            }
         }
     }
 
@@ -809,6 +861,7 @@ impl AuraType {
             | AuraType::DamageTransfer
             | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
+            | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect
             | AuraType::TravelForm => false,
         }
@@ -888,6 +941,7 @@ impl AuraType {
             | AuraType::DamageTransfer
             | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
+            | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect
             | AuraType::TravelForm => false,
 
@@ -956,6 +1010,12 @@ pub enum CompoundDebuff {
     /// the stun's end takes the increase with it. Built only from a stun
     /// whose config carries a `vulnerability` (`AuraEffect::compound`).
     StunVulnerability,
+    /// The Priest's Guardian Spirit: more healing received (the face) and a
+    /// killing blow prevented, one buff. The save SPENDS it: the blow it
+    /// prevents ends the whole buff, the healing increase with it (Wrath's
+    /// "this sacrifice terminates the effect"). Nothing else removes it: it
+    /// has no dispel type.
+    GuardianSpirit,
 }
 
 impl CompoundDebuff {
@@ -967,12 +1027,13 @@ impl CompoundDebuff {
     /// exhaustive match is.** What it buys is COVERAGE: the guards below sweep
     /// it, so compound N+1 is checked the moment it is declared here, instead
     /// of a test quietly continuing to check only the one it was written for.
-    pub const ALL: [CompoundDebuff; 5] = [
+    pub const ALL: [CompoundDebuff; 6] = [
         CompoundDebuff::FrostArmorChill,
         CompoundDebuff::MarkOfTheWild,
         CompoundDebuff::EntanglingRoots,
         CompoundDebuff::Shadowform,
         CompoundDebuff::StunVulnerability,
+        CompoundDebuff::GuardianSpirit,
     ];
 
     /// The effect that REPRESENTS this debuff: the icon the frames draw, the
@@ -999,6 +1060,7 @@ impl CompoundDebuff {
             CompoundDebuff::EntanglingRoots => AuraType::Root,
             CompoundDebuff::Shadowform => AuraType::DamageDealtIncrease,
             CompoundDebuff::StunVulnerability => AuraType::Stun,
+            CompoundDebuff::GuardianSpirit => AuraType::HealingReceivedIncrease,
         }
     }
 }
@@ -1544,6 +1606,7 @@ impl Aura {
             | AuraType::DamageTransfer
             | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
+            | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect => true,
 
             // Beneficial, but DELIBERATELY unpurgeable — see the doc above.
@@ -2164,6 +2227,7 @@ impl DRCategory {
             | AuraType::DamageTransfer
             | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
+            | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect
             | AuraType::TravelForm => None,
 
@@ -2426,6 +2490,15 @@ mod compound_tests {
                 })
                 .chain(crate::states::play_match::combat_core::compound_riders(
                     CompoundDebuff::StunVulnerability,
+                ))
+                .collect(),
+                CompoundDebuff::GuardianSpirit => std::iter::once(Aura {
+                    effect_type: AuraType::HealingReceivedIncrease,
+                    compound: Some(CompoundDebuff::GuardianSpirit),
+                    ..Default::default()
+                })
+                .chain(crate::states::play_match::combat_core::compound_riders(
+                    CompoundDebuff::GuardianSpirit,
                 ))
                 .collect(),
             };

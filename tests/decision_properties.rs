@@ -1559,6 +1559,16 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         AbilityType::AuraMastery,
         Unreached::NeedsKnob("a build that takes Aura Mastery"),
     ),
+    // The Holy tree (AS-415): grants; tests/holy_talents.rs grants each in
+    // its scene pairs.
+    (
+        AbilityType::HolyNova,
+        Unreached::NeedsKnob("a build that takes Holy Nova"),
+    ),
+    (
+        AbilityType::GuardianSpirit,
+        Unreached::NeedsKnob("a build that takes Guardian Spirit"),
+    ),
     // The Subtlety tree (AS-419): tests/subtlety_talents.rs builds it in its
     // scene pairs.
     (

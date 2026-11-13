@@ -69,6 +69,7 @@ pub const fn aim(ability: AbilityType) -> Aim {
     match ability {
         A::FreezingTrap | A::FrostTrap => Aim::Ground,
         A::FrostNova
+        | A::HolyNova
         | A::PsychicScream
         | A::BerserkerRage
         | A::BattleShout
@@ -141,6 +142,7 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::ShadowWordPain
         | A::PowerInfusion
         | A::PainSuppression
+        | A::GuardianSpirit
         | A::FlashOfLight
         | A::HolyLight
         | A::HolyShock

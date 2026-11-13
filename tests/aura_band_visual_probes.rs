@@ -88,6 +88,9 @@ const BAND_TYPES: &[AuraType] = &[
     AuraType::DamageTransfer,
     AuraType::KillingBlowSave,
     AuraType::DamageReflect,
+    // Guardian Spirit's healing increase (AS-415): the band until AS-354
+    // draws the spirit on the ally.
+    AuraType::HealingReceivedIncrease,
     // Sacred Shield's arming buff (AS-421): the band until AS-375 draws its
     // disc and absorb card.
     AuraType::TriggeredAbsorb,

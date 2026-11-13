@@ -692,6 +692,8 @@ fn try_frost_nova(
             caster_class: combatant.class,
             target_pos: *target_pos,
             is_crit,
+            ability: frost_nova,
+            school: nova_def.spell_school,
         });
 
         if let Some(aura) = nova_def.applies_aura.as_ref() {

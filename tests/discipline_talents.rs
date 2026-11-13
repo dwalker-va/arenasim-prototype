@@ -73,6 +73,7 @@ fn the_discipline_tree_is_as_specified() {
             .collect::<Vec<_>>(),
         vec![
             (TreeId::Discipline, "Discipline"),
+            (TreeId::Holy, "Holy"),
             (TreeId::Shadow, "Shadow")
         ]
     );
