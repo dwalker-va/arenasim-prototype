@@ -40,7 +40,9 @@
 //! Two families are not an ability's: an item proc's EXTRA SWING (Hand of
 //! Justice) lands an attack too, so `extra_swing_*` scans `items.ron` for it;
 //! and a talent's `Mechanic` lands at its own site (Soul Link's transfer, the
-//! Demonic Sacrifice), so `talent_mechanic_*` scans `talents.ron`.
+//! Demonic Sacrifice), so `talent_mechanic_*` scans `talents.ron`; and a
+//! talent's `Proc` lands its aura from the proc resolver, so `talent_proc_*`
+//! scans `talents.ron` for those.
 //! The harness's own failure modes are proved by planted offenders at the
 //! bottom of the file.
 //!
@@ -60,17 +62,21 @@
 
 use std::collections::BTreeSet;
 
+use bevy::prelude::Entity;
+
 // One `use` per item, never a braced group: rustfmt keeps separate `use`s
 // separate and sorts them, so an import a change adds is one new line at its
 // own place, where a braced group reflows and two changes that each add an
 // import conflict in it.
 use arenasim::states::play_match::abilities::AbilityType;
+use arenasim::states::play_match::abilities::SpellSchool;
 use arenasim::states::play_match::ability_config::AbilityConfig;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::bolt_kind_for;
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::client_landing_style;
 use arenasim::states::play_match::combat_core::ExtraSwingSource;
+use arenasim::states::play_match::components::Aura;
 use arenasim::states::play_match::components::AuraApplyRoute;
 use arenasim::states::play_match::components::AuraLandingKind;
 use arenasim::states::play_match::components::AuraType;
@@ -95,6 +101,10 @@ use arenasim::states::play_match::on_use_items::OnUseEffect;
 use arenasim::states::play_match::proc_trinkets::ProcEffect;
 use arenasim::states::play_match::root_style_for;
 use arenasim::states::play_match::talent_mechanics::MechanicKind;
+use arenasim::states::play_match::talent_procs::effect_aura;
+use arenasim::states::play_match::talent_procs::ProcEvent;
+use arenasim::states::play_match::talent_procs::TalentProc;
+use arenasim::states::play_match::talent_procs::TalentProcSlot;
 use arenasim::states::play_match::talents::TalentDefinitions;
 use arenasim::states::play_match::talents::TalentEffect;
 use arenasim::states::play_match::talents::TalentId;
@@ -775,25 +785,43 @@ fn control_treatment(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> 
         if aura_family(t) != AuraFamily::Control {
             continue;
         }
-        let this = match t {
-            AuraType::Stun => Some("stun whirl (hard_cc.rs)"),
-            AuraType::Root => Some(match root_style_for(&c.name, Some(c.spell_school)) {
-                RootStyle::Roots => "bark roots (druid_control.rs)",
-                RootStyle::Ice | RootStyle::Web => "root restraint (hard_cc.rs)",
-            }),
-            AuraType::Cyclone => Some("cyclone funnel + lifted victim (druid_control.rs)"),
-            AuraType::Fear => Some("fear shroud (fear.rs)"),
-            AuraType::Polymorph => Some("sheep swap (polymorph.rs)"),
-            AuraType::Incapacitate if a == FreezingTrap => Some("ice block (traps.rs)"),
-            AuraType::MovementSpeedSlow => {
-                SlowTint::for_slow(&c.name).map(|_| "slow bind ring + scuff (slow_ring.rs)")
-            }
-            _ => None,
-        };
         // Every control aura must be drawn for the member to pass.
-        treatment = Some(this?);
+        treatment = Some(control_visual(
+            t,
+            &c.name,
+            Some(c.spell_school),
+            a == FreezingTrap,
+        )?);
     }
     treatment
+}
+
+/// The victim treatment one control aura draws: its type, its name (`name`:
+/// the slow tint and the root style route by it), its school where it has one
+/// (the root style), and whether Freezing Trap's trigger spawned it (the only
+/// incapacitate drawn as the ice block). Shared by the crowd-control family
+/// and the talent-proc family.
+fn control_visual(
+    t: AuraType,
+    name: &str,
+    school: Option<SpellSchool>,
+    freezing_trap: bool,
+) -> Option<&'static str> {
+    match t {
+        AuraType::Stun => Some("stun whirl (hard_cc.rs)"),
+        AuraType::Root => Some(match root_style_for(name, school) {
+            RootStyle::Roots => "bark roots (druid_control.rs)",
+            RootStyle::Ice | RootStyle::Web => "root restraint (hard_cc.rs)",
+        }),
+        AuraType::Cyclone => Some("cyclone funnel + lifted victim (druid_control.rs)"),
+        AuraType::Fear => Some("fear shroud (fear.rs)"),
+        AuraType::Polymorph => Some("sheep swap (polymorph.rs)"),
+        AuraType::Incapacitate if freezing_trap => Some("ice block (traps.rs)"),
+        AuraType::MovementSpeedSlow => {
+            SlowTint::for_slow(name).map(|_| "slow bind ring + scuff (slow_ring.rs)")
+        }
+        _ => None,
+    }
 }
 
 #[test]
@@ -1677,6 +1705,437 @@ fn talent_mechanic_lands_nothing_silently() {
     ) {
         panic!("{e}");
     }
+}
+
+// ── family: talent proc auras ───────────────────────────────────────────────
+//
+// A talent's `Proc` lands an aura through `resolve_talent_procs`, not through
+// an ability, so this family scans `talents.ron` for every node carrying one
+// (its `FromRank` wrappers unwrapped) and names its members by node. Each
+// aura is built by the engine's own `talent_procs::effect_aura`, so the judge
+// sees the type and name the renderers will.
+//
+// The judge asks for a treatment of the proc's OWN aura: one its type or its
+// name routes to (the stun whirl, a tinted slow ring, a named landing, a heal
+// over time's visual, a client shield). The generic aura band does NOT count,
+// as for talent mechanics: it sweeps every buff alike, so it cannot tell the
+// player this talent fired. Neither does the buff-bar icon every proc wears
+// (`source_talent`). A proc ruled to need no visual of its own, the band
+// and its icon being enough, is named in
+// [`TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING`] with the card that ruled it.
+
+/// One talent proc as a node declares it: its id, its name and the proc.
+type NodeProc = (TalentId, String, TalentProc);
+
+/// Every proc in `defs`, each node's `FromRank` wrappers unwrapped.
+fn talent_procs_in(defs: &TalentDefinitions) -> Vec<NodeProc> {
+    fn procs_in(effect: &TalentEffect, out: &mut Vec<TalentProc>) {
+        match effect {
+            TalentEffect::Proc(p) => out.push(p.clone()),
+            TalentEffect::FromRank(_, inner) => procs_in(inner, out),
+            _ => {}
+        }
+    }
+    let mut all = Vec::new();
+    for (id, node) in defs.iter() {
+        let mut procs = Vec::new();
+        for effect in &node.per_rank {
+            procs_in(effect, &mut procs);
+        }
+        all.extend(procs.into_iter().map(|p| (id, node.name.clone(), p)));
+    }
+    all
+}
+
+/// Every node of `defs` carrying a `Proc`.
+fn talent_proc_nodes(defs: &TalentDefinitions) -> BTreeSet<TalentId> {
+    talent_procs_in(defs)
+        .into_iter()
+        .map(|(id, _, _)| id)
+        .collect()
+}
+
+/// The aura a proc lands, through the engine's own constructor, on an event
+/// with a unit on its other end and an amount (every effect's needs).
+fn talent_proc_aura((id, name, proc): &NodeProc) -> Aura {
+    let slot = TalentProcSlot::new(*id, name, proc.clone());
+    let (owner, other) = (Entity::from_raw(1), Entity::from_raw(2));
+    let event = ProcEvent::new(owner, slot.proc.trigger)
+        .amount(50.0)
+        .other(other);
+    effect_aura(&slot, owner, &event)
+        .unwrap_or_else(|| panic!("{id:?}'s proc lands no aura"))
+        .aura
+}
+
+/// The treatment a proc's aura reaches, by its family. Exhaustive over
+/// [`AuraFamily`], so a family N+1 must answer here too. A proc has no school
+/// and is never Freezing Trap's.
+fn talent_proc_aura_visual(aura: &Aura) -> Option<&'static str> {
+    let (t, name) = (aura.effect_type, aura.ability_name.as_str());
+    match aura_family(t) {
+        AuraFamily::Control => control_visual(t, name, None, false),
+        AuraFamily::Dot => DotStateVisual::for_dot(name).map(|_| "DoT state (dot_state.rs)"),
+        AuraFamily::Status => {
+            if AuraLandingKind::for_aura(t, name).is_some() {
+                Some("named landing one-shot (AuraLandingKind)")
+            } else if t == AuraType::HealingOverTime && HotVisual::for_hot(name).is_some() {
+                Some("heal-over-time visual (HotVisual::for_hot)")
+            } else if ShieldKind::ALL
+                .into_iter()
+                .any(|kind| is_live_shield(kind, aura))
+            {
+                Some("client shield cards (shield.rs)")
+            } else {
+                // The aura band (`AuraApplyRoute::Band`) is not this proc's
+                // own visual: see the family's header.
+                None
+            }
+        }
+    }
+}
+
+/// A node draws when every aura its procs land does (Vengeance lands its
+/// buff from two procs).
+fn talent_proc_judge(defs: &TalentDefinitions, talent: TalentId) -> Option<&'static str> {
+    let mut visual = None;
+    for proc in talent_procs_in(defs)
+        .iter()
+        .filter(|(id, _, _)| *id == talent)
+    {
+        visual = Some(talent_proc_aura_visual(&talent_proc_aura(proc))?);
+    }
+    visual
+}
+
+const TALENT_PROC_MEMBERS: &[TalentId] = &[
+    TalentId::Aftermath,
+    TalentId::Blackout,
+    TalentId::BlessedRecovery,
+    TalentId::ImprovedShadowBolt,
+    TalentId::InfusionOfLight,
+    TalentId::Initiative,
+    TalentId::Inspiration,
+    TalentId::LightsGrace,
+    TalentId::MasterOfSubtlety,
+    TalentId::Nightfall,
+    TalentId::TheArtOfWar,
+    TalentId::Vengeance,
+];
+
+/// Procs whose aura lands with no treatment of its own yet, each with the
+/// card that builds one. Blackout is not here: its stun draws the stun whirl
+/// every stun does (AS-335 asked whether it would).
+const TALENT_PROC_KNOWN_SILENT: &[(TalentId, &str)] = &[
+    (
+        TalentId::Aftermath,
+        "AS-349 (Aftermath: the client fire hit, and the slow ring with a Fire tint)",
+    ),
+    (
+        TalentId::BlessedRecovery,
+        "AS-352 (Blessed Recovery's palm glow and Renew's amber rings)",
+    ),
+    (
+        TalentId::InfusionOfLight,
+        "AS-374 (Infusion of Light: the gold halo above the Paladin's head)",
+    ),
+    (TalentId::Nightfall, "AS-346 (Shadow Trance's speck halo)"),
+    (
+        TalentId::TheArtOfWar,
+        "AS-374 (The Art of War: the gold spark ring opening round the chest)",
+    ),
+    (
+        TalentId::Vengeance,
+        "AS-377 (Vengeance: both hands glow pale blue while the buff lasts)",
+    ),
+];
+
+/// Procs ruled to need no bespoke visual: the generic aura band draws each as
+/// it lands, and its buff-bar icon carries it while it lasts. (node, the card
+/// that ruled it, why.) No design doc on main records these rulings, so each
+/// cites its card, as `ON_USE_BAND_BY_RULING` does. They count as listed, so
+/// one that gains a treatment fails until it is removed; and each must be one
+/// the band draws (`AuraApplyRoute::Band`), so the list cannot hold a proc
+/// that lands with nothing at all.
+const TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING: &[(TalentId, &str, &str)] = &[
+    (
+        TalentId::ImprovedShadowBolt,
+        "AS-334",
+        "Shadow Vulnerability needs no visual of its own (AS-411's Visuals line); the \
+         proposal's footprint is the debuff icon on the target (§5.1)",
+    ),
+    (
+        TalentId::Initiative,
+        "AS-479",
+        "user ruling 2026-11-13: \"no it doesnt need a visual, just a buff icon\"",
+    ),
+    (
+        TalentId::Inspiration,
+        "AS-335",
+        "Inspiration is the generic buff ring; it needs no card",
+    ),
+    (
+        TalentId::LightsGrace,
+        "AS-337",
+        "Light's Grace has no client visual at any build: the icon carries it (AS-374 item 8, \
+         AS-420)",
+    ),
+    (
+        TalentId::MasterOfSubtlety,
+        "AS-336",
+        "the generic buff band draws Master of Subtlety; it needs no visual of its own \
+         (AS-419's Visuals line)",
+    ),
+];
+
+/// A by-ruling entry names a card (`AS-<n>`) and gives a reason.
+fn check_proc_rulings(rulings: &[(TalentId, &str, &str)]) -> Result<(), String> {
+    check_sorted(
+        "talent-proc",
+        "no-bespoke-visual-by-ruling list",
+        rulings.iter().map(|(talent, _, _)| talent),
+    )?;
+    let mut problems = Vec::new();
+    for (talent, card, reason) in rulings {
+        let numbered = card
+            .strip_prefix("AS-")
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+        if !numbered {
+            problems.push(format!(
+                "{talent:?} needs no bespoke visual by ruling, but `{card}` is not a card id \
+                 (AS-<n>)"
+            ));
+        }
+        if reason.trim().is_empty() {
+            problems.push(format!(
+                "{talent:?} needs no bespoke visual by ruling, with no reason"
+            ));
+        }
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("\n"))
+    }
+}
+
+/// Every aura a by-ruling proc lands is one the generic aura band draws: the
+/// ruling is that the band and the icon are enough, not that nothing draws.
+fn check_rulings_draw_the_band(
+    defs: &TalentDefinitions,
+    rulings: &[(TalentId, &str, &str)],
+) -> Result<(), String> {
+    let mut problems = Vec::new();
+    for proc in talent_procs_in(defs) {
+        if !rulings.iter().any(|(talent, _, _)| *talent == proc.0) {
+            continue;
+        }
+        let aura = talent_proc_aura(&proc);
+        let route = AuraApplyRoute::for_instance(aura.effect_type, &aura.ability_name);
+        if route != AuraApplyRoute::Band {
+            problems.push(format!(
+                "{:?} needs no bespoke visual by ruling, but its {:?} aura routes to \
+                 {route:?}, not the aura band — list it as known-silent with its card",
+                proc.0, aura.effect_type
+            ));
+        }
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("\n"))
+    }
+}
+
+/// The family's two claims against `defs`, with `known_silent` and `rulings`
+/// as its lists: the planted-offender test runs the same function on a
+/// planted table.
+fn check_talent_procs(
+    defs: &TalentDefinitions,
+    members: &[TalentId],
+    known_silent: &[(TalentId, &str)],
+    rulings: &[(TalentId, &str, &str)],
+) -> Result<(), String> {
+    let scanned = talent_proc_nodes(defs);
+    check_finds("talent-proc", &scanned, members)?;
+    check_proc_rulings(rulings)?;
+    check_rulings_draw_the_band(defs, rulings)?;
+    check_sorted(
+        "talent-proc",
+        "known-silent list",
+        known_silent.iter().map(|(member, _)| member),
+    )?;
+    let mut listed: Vec<(TalentId, &str)> = known_silent.to_vec();
+    listed.extend(rulings.iter().map(|(talent, card, _)| (*talent, *card)));
+    listed.sort_by_key(|(member, _)| format!("{member:?}"));
+    check_judged(
+        "talent-proc",
+        &scanned,
+        |talent| talent_proc_judge(defs, talent),
+        &listed,
+    )
+}
+
+#[test]
+fn talent_proc_finds_every_member() {
+    if let Err(e) = check_finds(
+        "talent-proc",
+        &talent_proc_nodes(TalentDefinitions::shipped()),
+        TALENT_PROC_MEMBERS,
+    ) {
+        panic!("{e}");
+    }
+}
+
+#[test]
+fn talent_proc_lands_nothing_silently() {
+    if let Err(e) = check_talent_procs(
+        TalentDefinitions::shipped(),
+        TALENT_PROC_MEMBERS,
+        TALENT_PROC_KNOWN_SILENT,
+        TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING,
+    ) {
+        panic!("{e}");
+    }
+}
+
+/// The judge names what the one drawn member draws, so a wrong route fails
+/// even though it is not silent; and the generic band is not a visual.
+#[test]
+fn the_talent_proc_judge_names_each_drawn_members_treatment() {
+    let defs = TalentDefinitions::shipped();
+    assert_eq!(
+        talent_proc_judge(defs, TalentId::Blackout),
+        Some("stun whirl (hard_cc.rs)")
+    );
+    // Inspiration's armor buff routes to the band, which is not its own.
+    let inspiration = talent_procs_in(defs)
+        .into_iter()
+        .find(|(id, _, _)| *id == TalentId::Inspiration)
+        .expect("Inspiration is a proc");
+    let aura = talent_proc_aura(&inspiration);
+    assert_eq!(
+        AuraApplyRoute::for_instance(aura.effect_type, &aura.ability_name),
+        AuraApplyRoute::Band
+    );
+    assert_eq!(talent_proc_aura_visual(&aura), None);
+}
+
+/// A talent proc planted on a node that has none (Improved Ambush), with no
+/// tag, and behind a `FromRank` (no shipped proc is, so the plant is what
+/// holds the scan to unwrapping one): the family derives its members from
+/// the table, so the scan finds it unnamed, and with it named the judge finds
+/// it silent and unlisted.
+#[test]
+fn the_talent_proc_family_catches_a_planted_untagged_proc() {
+    let shipped = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/config/talents.ron"),
+    )
+    .expect("talents.ron reads");
+    let anchor = "per_rank: [Patch(on: Ability(Ambush), field: CritChance, op: Add(0.15))],";
+    assert_eq!(shipped.matches(anchor).count(), 1, "the anchor is unique");
+    let planted = shipped.replace(
+        anchor,
+        "per_rank: [
+                Patch(on: Ability(Ambush), field: CritChance, op: Add(0.15)),
+                FromRank(2, Proc((
+                    trigger: MeleeHit,
+                    chance: Chance(0.1),
+                    ranks_add: Chance,
+                    effect: ApplyAura(
+                        on: Owner,
+                        aura_type: DamageDealtIncrease,
+                        magnitude: 0.05,
+                        duration: 6.0,
+                        dispel_type: Untyped,
+                        name: Some(\"Planted Fury\"),
+                    ),
+                ))),
+            ],",
+    );
+    let defs = TalentDefinitions::from_ron(&planted, &AbilityDefinitions::default())
+        .expect("the planted table loads");
+    assert!(talent_proc_nodes(&defs).contains(&TalentId::ImprovedAmbush));
+
+    // Unnamed: claim 1 fails on it.
+    let err = check_talent_procs(
+        &defs,
+        TALENT_PROC_MEMBERS,
+        TALENT_PROC_KNOWN_SILENT,
+        TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING,
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("ImprovedAmbush is now a talent-proc member"),
+        "{err}"
+    );
+
+    // Named but untagged: claim 2 fails on it, and only on it.
+    let mut members = TALENT_PROC_MEMBERS.to_vec();
+    members.push(TalentId::ImprovedAmbush);
+    members.sort_by_key(|id| format!("{id:?}"));
+    let err = check_talent_procs(
+        &defs,
+        &members,
+        TALENT_PROC_KNOWN_SILENT,
+        TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING,
+    )
+    .unwrap_err();
+    assert_eq!(err.lines().count(), 1, "only the planted proc fails: {err}");
+    assert!(
+        err.contains("ImprovedAmbush lands with no talent-proc visual"),
+        "{err}"
+    );
+
+    // Tagged with its card: the family passes.
+    let mut tagged = TALENT_PROC_KNOWN_SILENT.to_vec();
+    tagged.push((TalentId::ImprovedAmbush, "AS-0"));
+    tagged.sort_by_key(|(id, _)| format!("{id:?}"));
+    assert_eq!(
+        check_talent_procs(
+            &defs,
+            &members,
+            &tagged,
+            TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING
+        ),
+        Ok(())
+    );
+}
+
+/// A ruling on a proc the band does not draw (Aftermath's slow routes to the
+/// slow ring, which has no tint for it) fails: the ruling list holds only
+/// procs the band draws.
+#[test]
+fn a_ruling_on_a_proc_the_band_does_not_draw_fails() {
+    let defs = TalentDefinitions::shipped();
+    let silent: Vec<(TalentId, &str)> = TALENT_PROC_KNOWN_SILENT
+        .iter()
+        .copied()
+        .filter(|(id, _)| *id != TalentId::Aftermath)
+        .collect();
+    let mut rulings = TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING.to_vec();
+    rulings.push((TalentId::Aftermath, "AS-0", "planted"));
+    rulings.sort_by_key(|(id, _, _)| format!("{id:?}"));
+    let err = check_talent_procs(defs, TALENT_PROC_MEMBERS, &silent, &rulings).unwrap_err();
+    assert_eq!(err.lines().count(), 1, "only Aftermath fails: {err}");
+    assert!(
+        err.contains("Aftermath needs no bespoke visual by ruling, but its MovementSpeedSlow"),
+        "{err}"
+    );
+}
+
+#[test]
+fn harness_holds_a_proc_ruling_to_a_card_and_a_reason() {
+    assert_eq!(
+        check_proc_rulings(&[(TalentId::Nightfall, "AS-1", "planted")]),
+        Ok(())
+    );
+    for bad in ["AS-", "docs/x.md", "AS-1a"] {
+        let err = check_proc_rulings(&[(TalentId::Nightfall, bad, "planted")]).unwrap_err();
+        assert!(err.contains("is not a card id"), "{err}");
+    }
+    let err = check_proc_rulings(&[(TalentId::Nightfall, "AS-1", " ")]).unwrap_err();
+    assert!(err.contains("no reason"), "{err}");
 }
 
 const FAMILIES: &[fn(AbilityType, &AbilityConfig) -> bool] = &[
