@@ -57,9 +57,10 @@ use crate::states::play_match::combat_core::{Avoidance, MeleeAvoided};
 use crate::states::play_match::components::{
     ActiveAuras, Aura, AuraPending, AuraType, CastingState, Combatant, DRTracker, GameRng,
     HealerPosture, InstantAbilityFired, InterruptPending, KitePosture, MeleeResetState,
-    MovementDirective, RogueFlareState, ShapeshiftPending, Shift, Trap, TrapLaunchProjectile,
-    TrapType,
+    MovementDirective, Pet, PetType, RogueFlareState, ShapeshiftPending, Shift, Trap,
+    TrapLaunchProjectile, TrapType,
 };
+use crate::states::play_match::constants::PET_SLOT_BASE;
 use crate::states::play_match::decision_trace::{
     AbilityCandidate, AbilityOutcome, CandidateStatus, DecisionTrace, EventKind, EventPayload,
     MovementTrigger, Posture, RejectionReason, SituationTag,
@@ -104,6 +105,10 @@ struct SceneUnit {
     /// way it last stepped; `None` faces +Z. Its snapshot row estimates its
     /// velocity from this.
     facing: Option<Vec3>,
+    /// The unit's `Pet` component when it is a pet ([`Scene::pet`]): its
+    /// snapshot row reads `is_pet` and `pet_type` from it, and its owner's row
+    /// names it as the owner's pet.
+    pet: Option<Pet>,
 }
 
 /// A constructed situation. See the module docs.
@@ -187,7 +192,7 @@ impl Scene {
         let slot = self
             .units
             .iter()
-            .filter(|u| u.combatant.team == team)
+            .filter(|u| u.combatant.team == team && u.pet.is_none())
             .count() as u8;
         let entity = self.world.spawn_empty().id();
         self.units.push(SceneUnit {
@@ -211,6 +216,32 @@ impl Scene {
             dr: DRTracker::default(),
             casting: None,
             facing: None,
+            pet: None,
+        });
+        self
+    }
+
+    /// Add a pet of `pet_type` owned by `owner`, on its team, standing at the
+    /// origin: `Combatant::new_pet` from the owner's stats and the pet's own
+    /// book, in the owner's pet slot, as the spawn makes one.
+    pub fn pet(mut self, who: Who, owner: Who, pet_type: PetType) -> Self {
+        let (owner_entity, owner_combatant) = {
+            let o = self.find(owner);
+            (o.entity, o.combatant.clone())
+        };
+        let book = AbilityBook::for_pet(&self.abilities, pet_type);
+        self = self.unit(who, owner_combatant.team, owner_combatant.class);
+        let unit = self.last();
+        unit.combatant = Combatant::new_pet(
+            owner_combatant.team,
+            PET_SLOT_BASE + owner_combatant.slot,
+            pet_type,
+            &owner_combatant,
+            book,
+        );
+        unit.pet = Some(Pet {
+            owner: owner_entity,
+            pet_type,
         });
         self
     }
@@ -772,7 +803,15 @@ impl Scene {
             combatants.insert(
                 u.entity,
                 CombatantInfo::from_combatant(
-                    u.entity, &combatant, &transform, u.casting, None, None,
+                    u.entity,
+                    &combatant,
+                    &transform,
+                    u.casting,
+                    u.pet.as_ref(),
+                    self.units
+                        .iter()
+                        .find(|p| p.pet.as_ref().is_some_and(|pet| pet.owner == u.entity))
+                        .map(|p| p.entity),
                 ),
             );
             active_auras.insert(u.entity, u.auras.clone());

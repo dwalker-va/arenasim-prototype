@@ -19,6 +19,9 @@
 //!    stop (talent)
 //! 5. Flash Heal (heal injured allies)
 //! 6. Dispel Magic - Maintenance (Roots, DoTs when team HP is stable)
+//!    6.5. Mind Flay to slow an enemy melee or pet off a ranged teammate, and
+//!    6.8. Vampiric Embrace on the target, once nothing is owed (Shadow
+//!    talents: `priest_shadow`)
 //! 7. Mind Blast (damage when allies are healthy)
 //! 8. Shadow Word: Pain on the kill target, when no heal or dispel is owed
 //!    (`TeamPlan` only)
@@ -35,9 +38,12 @@
 //! 3. Dispel Magic - Urgent
 //! 4. Psychic Scream (defensive, while pressured)
 //! 5. Power Word: Shield (shield low-health allies)
+//!    5.5. Silence on an enemy mid-cast, a healer first (talent)
 //! 6. Shadow Word: Pain on the kill target, kept up: a core DoT here (user
 //!    ruling 2026-10-29)
+//!    6.5. Vampiric Embrace on the kill target (talent)
 //! 7. Mind Blast on the kill target
+//!    7.5. Mind Flay, the filler, on the kill target (talent)
 //! 8. Mana Burn on the enemy healer
 #![allow(clippy::too_many_arguments)]
 
@@ -425,6 +431,44 @@ pub fn decide_priest_action(
         return true;
     }
 
+    // Priority 6.5 and 6.8 (Shadow talents, AS-416), once nothing is owed:
+    // Mind Flay to slow an enemy melee or pet off a ranged teammate, then
+    // Vampiric Embrace on the target ahead of the Priest's Shadow damage.
+    let shadow_held = if abilities.get(&AbilityType::MindFlay).is_some()
+        || abilities.get(&AbilityType::VampiricEmbrace).is_some()
+    {
+        shadow_word_pain_held(ctx, abilities, combatant.team, my_pos)
+    } else {
+        None
+    };
+    if super::priest_shadow::try_mind_flay_peel(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        escape_defer,
+        shadow_held,
+        &mut builder,
+    ) || super::priest_shadow::try_vampiric_embrace(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        shadow_held,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
     // Priority 7: Mind Blast
     let target = combatant.target;
     if try_mind_blast(
@@ -467,10 +511,10 @@ pub fn decide_priest_action(
 
 /// A Shadowform Priest's decision: a ranged damage dealer's chain (see the
 /// module docs). Its Peel step is the healing Priest's Psychic Scream; its
-/// Burst step is Mind Blast on the kill window's enemy. AS-416's grants take
-/// the slots marked below: Silence on an enemy healer's cast (castable only in
-/// the form), Vampiric Embrace on the kill target, and Mind Flay as the
-/// filler.
+/// Burst step is Mind Blast on the kill window's enemy. The Shadow talents
+/// (AS-416, `priest_shadow`) take their slots: Silence on an enemy's cast
+/// (castable only in the form), Vampiric Embrace on the kill target, and Mind
+/// Flay as the filler.
 ///
 /// Returns `true` if an action was taken this frame.
 pub fn decide_shadow_priest_action(
@@ -645,7 +689,23 @@ pub fn decide_shadow_priest_action(
         return true;
     }
 
-    // (AS-416: Silence on an enemy healer's cast, here.)
+    // Priority 5.5 (Shadow capstone, AS-416): Silence on an enemy mid-cast,
+    // a healer first. Castable only in the form.
+    if super::priest_shadow::try_silence(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        same_frame_cc_queue,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
 
     // Priority 6: Shadow Word: Pain on the kill target, kept up — a core DoT
     // in the form, never waiting on a heal it cannot cast.
@@ -664,7 +724,23 @@ pub fn decide_shadow_priest_action(
         return true;
     }
 
-    // (AS-416: Vampiric Embrace on the kill target, here.)
+    // Priority 6.5 (Shadow talent, AS-416): Vampiric Embrace on the kill
+    // target, ahead of the Shadow damage that feeds it.
+    if super::priest_shadow::try_vampiric_embrace(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        None,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
 
     // Priority 7: Mind Blast on the kill target.
     let target = combatant.target;
@@ -685,7 +761,22 @@ pub fn decide_shadow_priest_action(
         return true;
     }
 
-    // (AS-416: Mind Flay, the filler, here.)
+    // Priority 7.5 (Shadow talent, AS-416): Mind Flay, the filler, on the
+    // kill target.
+    if super::priest_shadow::try_mind_flay_filler(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
 
     // Priority 8: Mana Burn on the enemy healer — once the Priest stands in
     // its damage spells' reach of its target. Its 40 yards outreach Mind

@@ -582,6 +582,25 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
                 aura.duration
             )
         }
+        AuraType::LeechMark => {
+            use crate::states::play_match::combat_core::leech::LeechSource;
+            match aura.leech {
+                Some(leech) => {
+                    let damage = match leech.of {
+                        LeechSource::CasterSchool(school) => format!("{school:?} damage"),
+                        LeechSource::Ability => "damage".to_string(),
+                    };
+                    format!(
+                        "For {:.0} sec, {} the {} the caster deals the target heals {}.",
+                        aura.duration,
+                        leech_share(leech.fraction),
+                        damage,
+                        leech_recipient(leech.to)
+                    )
+                }
+                None => format!("Marks the target for {:.0} sec.", aura.duration),
+            }
+        }
         AuraType::DamageReflect => {
             format!(
                 "Deals {:.0} damage to a melee attacker each time it strikes, for {:.0} sec.",

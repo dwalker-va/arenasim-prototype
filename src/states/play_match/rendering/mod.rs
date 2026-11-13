@@ -208,7 +208,9 @@ pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) 
         | AuraType::KillingBlowSave
         | AuraType::HealingReceivedIncrease
         | AuraType::DamageReflect => "aura_max_health".to_string(),
-        AuraType::DamageTakenIncrease | AuraType::ArmorPercentReduction => "aura_dot".to_string(),
+        AuraType::DamageTakenIncrease | AuraType::ArmorPercentReduction | AuraType::LeechMark => {
+            "aura_dot".to_string()
+        }
     }
 }
 
@@ -274,7 +276,8 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         | AuraType::AttackPowerReduction
         | AuraType::AttackSpeedSlow
         | AuraType::DamageTakenIncrease
-        | AuraType::ArmorPercentReduction => false,
+        | AuraType::ArmorPercentReduction
+        | AuraType::LeechMark => false,
 
         // Weakened Soul is the Power Word: Shield cooldown marker the Priest
         // hangs on the ally it just shielded. Not beneficial — it is what stops
