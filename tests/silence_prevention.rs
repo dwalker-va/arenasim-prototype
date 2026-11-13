@@ -1,8 +1,7 @@
 //! A silence stops only what TBC's `PreventionType` says it stops (AS-291).
 //!
 //! Every ability carries its TBC `prevention` (`abilities.ron`, checked
-//! against the client by
-//! `docs/design/balance/sweeps/2026-10-12-as287-tbc-interruptibility.py`). A
+//! against the client by `tests/prevention_tbc_audit.rs`). A
 //! silence stops a Silence-prevented ability that costs mana — begun or
 //! already being cast — and nothing else. So a silenced Hunter still shoots
 //! (Aimed Shot, Arcane Shot, Concussive Shot, Serpent Sting and Disengage are
