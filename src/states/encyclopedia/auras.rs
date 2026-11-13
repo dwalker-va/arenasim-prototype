@@ -382,10 +382,12 @@ impl NamedAura {
                 "Beneficial magic. An enemy can strip this with a purge.",
             )
         } else if self.sample.is_hostile_effect() {
-            // Stuns and interrupt lockouts: not a physical debuff, but not a
+            // Cyclone and interrupt lockouts: not a physical debuff, but not a
             // dispellable KIND of effect either. Deliberately says nothing
-            // about the class — some of these are magic (Hammer of Justice is
-            // Holy) and some are schoolless with no determined class at all.
+            // about the class — some of these are magic (Cyclone is Nature)
+            // and some are schoolless with no determined class at all. A
+            // stun is not here: a magic one is dispellable and a physical one
+            // takes the physical rung above.
             //
             // A compound debuff is classified by its FACE, which is why Frost
             // Armor's chill no longer lands here: its attack-speed effect is a
@@ -1805,6 +1807,16 @@ mod tests {
             "Dispellable",
             "TBC 17800 is Magic"
         );
+
+        // So does a stun (AS-491): the magic ones are dispellable, the
+        // physical ones are on the physical rung.
+        for name in ["Hammer of Justice", "Blackout"] {
+            assert_eq!(by_name(name).removal().0, "Dispellable", "{name}");
+        }
+        for name in ["Cheap Shot", "Kidney Shot", "Boar Charge"] {
+            assert_eq!(by_name(name).removal().0, "Immune to dispel", "{name}");
+            assert!(by_name(name).sample.is_physical(), "{name}");
+        }
     }
 
     /// No player-facing removal wording names an ability. The engine's
@@ -1855,7 +1867,7 @@ mod tests {
     /// Every entry the page tells a player no dispel reaches. Two kinds live
     /// here and the split is the card's whole subject: the PHYSICAL debuffs
     /// (arrow, wound, boot) and the mechanics no dispel takes whatever their
-    /// school (stuns, interrupt lockouts). Pinned because this rung is where a
+    /// school (Cyclone, interrupt lockouts). Pinned because this rung is where a
     /// widening of `is_magic_dispellable` would silently show up — moving a
     /// name out of this list is a balance change, not a wording change.
     ///
@@ -1884,9 +1896,9 @@ mod tests {
             rows,
             vec![
                 "Aimed Shot [Physical]",
-                // Magic (TBC 15269), but a stun: no dispel takes a stun, as
-                // Hammer of Justice's below (AS-416's proc).
-                "Blackout [Magic]",
+                // A stun follows its class (AS-491): Hammer of Justice and
+                // Blackout are Magic and dispellable, so neither is here; the
+                // physical stuns are.
                 "Boar Charge [Physical]",
                 "Cheap Shot [Physical]",
                 "Concussive Shot [Physical]",
@@ -1897,7 +1909,6 @@ mod tests {
                 "Demoralizing Shout [—]",
                 "Expose Armor [Physical]",
                 "Frost Trap [—]",
-                "Hammer of Justice [Magic]",
                 // A wound, like Rend (AS-419).
                 "Hemorrhage [Physical]",
                 "Kick [—]",

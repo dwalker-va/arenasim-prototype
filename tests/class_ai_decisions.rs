@@ -156,16 +156,17 @@ fn a_magic_vulnerability_is_a_maintenance_dispel_beside_a_dot() {
 /// wildcard: classified dispellable, removal path wired, never once removed
 /// across 32 seeded matches carrying 19 dispels and 46 cleanses.
 ///
-/// Swept over `AuraType::ALL`, so the assertion is two-sided: the four urgent
+/// Swept over `AuraType::ALL`, so the assertion is two-sided: the five urgent
 /// types must clear the bar, and NOTHING ELSE may — a variant promoted into the
 /// urgent band is a decision about what a pressured healer drops a heal for,
 /// and it should be made here rather than noticed later.
 #[test]
 fn urgent_crowd_control_clears_every_caller_bar() {
     const URGENT_BAR: i32 = 90;
-    const URGENT: [AuraType; 4] = [
+    const URGENT: [AuraType; 5] = [
         AuraType::Polymorph,
         AuraType::Incapacitate, // Freezing Trap
+        AuraType::Stun,         // a MAGIC stun: Hammer of Justice, Blackout (AS-491)
         AuraType::Silence,      // Unstable Affliction backlash
         AuraType::Fear,
     ];
@@ -186,7 +187,9 @@ fn urgent_crowd_control_clears_every_caller_bar() {
 }
 
 /// Ordering intent for the two types AS-44 promoted: the complete
-/// incapacitates tie at the top, the silence sits between them and Fear.
+/// incapacitates tie at the top, the silence sits between them and Fear. A
+/// magic stun (AS-491) ties the incapacitates: as helpless, and it does not
+/// break on damage.
 #[test]
 fn dispel_priority_ranks_incapacitates_top_and_silence_above_fear() {
     assert_eq!(
@@ -194,6 +197,11 @@ fn dispel_priority_ranks_incapacitates_top_and_silence_above_fear() {
         dispel_priority(AuraType::Polymorph),
         "Freezing Trap and Polymorph are both complete incapacitates sharing a \
          DR category — neither outranks the other"
+    );
+    assert_eq!(
+        dispel_priority(AuraType::Stun),
+        dispel_priority(AuraType::Polymorph),
+        "a magic stun is as complete a loss of control as a polymorph"
     );
     assert!(dispel_priority(AuraType::Polymorph) > dispel_priority(AuraType::Silence));
     assert!(dispel_priority(AuraType::Silence) > dispel_priority(AuraType::Fear));
@@ -211,26 +219,36 @@ fn dispel_priority_ranks_incapacitates_top_and_silence_above_fear() {
 /// increase) is in the domain too: its magic instances reach this function.
 #[test]
 fn every_magic_dispellable_type_is_graded() {
-    let mut swept = 0;
+    let mut swept = Vec::new();
     for ty in AuraType::ALL {
         if !ty.is_magic_dispellable() && !ty.is_dispelled_per_aura() {
             continue;
         }
-        swept += 1;
+        swept.push(ty);
         assert!(
             dispel_priority(ty) > 0,
             "{ty:?} is dispellable but scores 0 — no caller's min_priority can ever reach it"
         );
     }
-    // Non-vacuity: the sweep is only worth anything while the filter admits
-    // something. Eight types are dispellable today (the five CC mechanics,
-    // the Unstable Affliction Silence, and the two per-aura types); a refactor
-    // that emptied the filter would otherwise turn this test green by
-    // covering nothing.
-    assert!(
-        swept >= 8,
-        "only {swept} magic-dispellable types found — the filter, not the grading, \
-         is what changed"
+    // Non-vacuity, by name: the sweep is only worth anything while the filter
+    // admits what it should. The five CC mechanics, the Unstable Affliction
+    // Silence, Vampiric Embrace's leech, and the three per-aura types (a DoT,
+    // a damage-taken increase, a stun).
+    assert_eq!(
+        swept,
+        vec![
+            AuraType::MovementSpeedSlow,
+            AuraType::Root,
+            AuraType::Stun,
+            AuraType::DamageOverTime,
+            AuraType::Fear,
+            AuraType::Polymorph,
+            AuraType::Incapacitate,
+            AuraType::Silence,
+            AuraType::DamageTakenIncrease,
+            AuraType::LeechMark,
+        ],
+        "the magic-dispellable types, in `AuraType::ALL` order"
     );
 }
 

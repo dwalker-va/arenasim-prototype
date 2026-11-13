@@ -70,8 +70,9 @@ fn long_holds(auras: &[Aura]) -> impl Iterator<Item = &Aura> {
 ///
 /// - one dispel in its kit removes EVERY long hold on the wearer, at the
 ///   urgent bar its rotation spends a dispel on ahead of healing
-///   (`URGENT_DISPEL_PRIORITY`: Polymorph, Freezing Trap, Fear) — a stun no
-///   healer dispels leaves nothing to wait for;
+///   (`URGENT_DISPEL_PRIORITY`: Polymorph, Freezing Trap, Fear, a magic stun
+///   such as Hammer of Justice) — a physical stun (Kidney Shot), which no
+///   dispel takes, leaves nothing to wait for;
 /// - it can cast that dispel now: not held, not silenced or locked out of the
 ///   school ([`can_cast_dispel`]), and the dispel is off cooldown;
 /// - the dispel is owed to the WEARER ([`owed_dispel`]): the rotation's urgent

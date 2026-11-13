@@ -407,6 +407,13 @@ tests fail if a full-CC type or spell is left unlabelled.
 ### Stun
 - Prevents all actions (movement, attacking, casting)
 - Examples: Kidney Shot, Charge stun component
+- A stun follows its removal class, as in TBC (user ruling, 2026-11-13): a
+  MAGIC stun — Hammer of Justice (Holy, TBC 10308) and Blackout (TBC 15269) —
+  comes off to Dispel Magic, Cleanse and Devour Magic; a Physical one — Cheap
+  Shot, Kidney Shot, the Boar's Charge — does not. A healer dispels a magic
+  stun on a teammate at the urgent bar (`dispel_priority` 100, tied with
+  Polymorph and Freezing Trap): a stun does not break on damage, so the dispel
+  is the only thing that ends it early
 - Improved Kidney Shot (Assassination) makes a Kidney Shot victim take 5% more
   damage a rank, from every source, while the stun holds: a stun with a
   `vulnerability` lands a `DamageTakenIncrease` rider bound to it as one
@@ -490,11 +497,11 @@ tests fail if a full-CC type or spell is left unlabelled.
   Shield: TBC's is Magic, but only Mass Dispel removes it and the sim has none
 - The MECHANIC gets a vote only once an aura is magic. Crowd control (slow,
   root, fear, polymorph, incapacitate, silence) is dispellable when magic;
-  stuns, Cyclone and the stat debuffs are not. A DoT and a damage-taken
-  increase are decided PER AURA (`AuraType::is_dispelled_per_aura`): a dispel
-  takes one exactly when its own class is magic. So Corruption and Shadow
-  Vulnerability come off, and Rend and Improved Kidney Shot's rider (Physical,
-  like its stun) do not
+  Cyclone and the stat debuffs are not. A DoT, a damage-taken increase and a
+  stun are decided PER AURA (`AuraType::is_dispelled_per_aura`): a dispel
+  takes one exactly when its own class is magic. So Corruption, Shadow
+  Vulnerability, Hammer of Justice and Blackout come off, and Rend, Kidney
+  Shot and its rider (Physical) do not
 - The healers' dispel AI grades a magic vulnerability with a DoT
   (`dispel_priority`, 50): a maintenance dispel, cast while the team is
   healthy, after urgent crowd control (90 and up) and a root holding a
