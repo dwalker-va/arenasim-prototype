@@ -787,12 +787,14 @@ fn dispel_magic_takes_psychic_scream_off_an_ally() {
 /// what the sim resolves it to and what TBC calls it. Checked by SET
 /// EQUALITY against the procs the shipped table actually carries, so a new
 /// debuff proc fails until its row is written here.
-const PROC_DEBUFFS: [(TalentId, Sim, Tbc); 2] = [
+const PROC_DEBUFFS: [(TalentId, Sim, Tbc); 3] = [
     // Shadow Vulnerability, 17800: DispelType 1 (Magic). User ruling,
     // 2026-11-13 (AS-482): dispellable, as in TBC.
     (TalentId::ImprovedShadowBolt, Sim::Magic, Tbc::Magic),
     // Aftermath's daze, 18118: DispelType 1 (Magic).
     (TalentId::Aftermath, Sim::Magic, Tbc::Magic),
+    // Blackout's stun, 15269: DispelType 1 (Magic). AS-416.
+    (TalentId::Blackout, Sim::Magic, Tbc::Magic),
 ];
 
 /// Every talent's procs, ranks and `FromRank` wrappers unwrapped.
