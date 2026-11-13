@@ -574,8 +574,10 @@ takes it (`AbilityConfig::has_cast_bar`, read from `cast_time`; see Interrupts i
 another's when it has none); a hit eats only its caster's own, and nothing off
 a target immune to it (Conflagrate eats the Warlock's Immolate). A CHANNEL's
 `applies_aura` (Mind Flay's slow) is landed by the AI that begins the channel,
-and is the channel's: `process_channeling` takes its caster's own off the
-target when the channel ends, by any path.
+and is the channel's: each frame `process_channeling` takes off every such
+aura whose caster no longer channels it on that unit, whatever ended the
+channel (its end, an interrupt, crowd control, a silence, or a kill site
+stripping the dead caster's `ChannelingState`).
 
 **Every ability declares `prevention`** — TBC's `SpellCategories.PreventionType`:
 `Silence` (a spell), `Pacify` (a physical attack or shot) or `None` (Travel

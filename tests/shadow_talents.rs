@@ -986,33 +986,34 @@ fn the_filler_never_breaks_the_teams_crowd_control() {
     );
 }
 
-/// A Shadowform Priest with Mind Flay stops its pursuit inside Mind Flay's
-/// reach; without it, or out of the form, it keeps its class's range.
+/// A Shadowform Priest with Mind Flay or Silence stops its pursuit inside
+/// their 20-yard reach; without either, with them locked, or out of the form,
+/// it keeps its class's range.
 #[test]
 fn a_shadowform_priest_closes_to_mind_flays_reach() {
     let defs = AbilityDefinitions::shipped();
-    let flay_range = defs.get_unchecked(&FLAY).range;
-    let priest = |form: PriestForm, flay: bool| {
-        let mut c = Combatant::new(1, 0, Priest);
-        if flay {
-            let book = c.book().clone().granting(defs, FLAY);
-            c = c.with_book(book);
+    let reach = defs.get_unchecked(&FLAY).range - MIND_FLAY_RANGE_BUFFER;
+    assert_eq!(
+        defs.get_unchecked(&SILENCE).range,
+        defs.get_unchecked(&FLAY).range
+    );
+    let priest = |form: PriestForm, grants: &[AbilityType], locked: &[AbilityType]| {
+        let mut book = Combatant::new(1, 0, Priest).book().clone();
+        for a in grants {
+            book = book.granting(defs, *a);
         }
+        let book = book.locking(&locked.iter().copied().collect());
+        let mut c = Combatant::new(1, 0, Priest).with_book(book);
         c.priest_form = form;
-        c
+        shadow_pursuit_range(&c)
     };
-    assert_eq!(
-        shadow_pursuit_range(&priest(PriestForm::Shadowform, true)),
-        Some(flay_range - MIND_FLAY_RANGE_BUFFER)
-    );
-    assert_eq!(
-        shadow_pursuit_range(&priest(PriestForm::Shadowform, false)),
-        None
-    );
-    assert_eq!(
-        shadow_pursuit_range(&priest(PriestForm::NoForm, true)),
-        None
-    );
+    let form = PriestForm::Shadowform;
+    assert_eq!(priest(form, &[FLAY], &[]), Some(reach));
+    assert_eq!(priest(form, &[SILENCE], &[]), Some(reach));
+    assert_eq!(priest(form, &[FLAY, SILENCE], &[]), Some(reach));
+    assert_eq!(priest(form, &[], &[]), None);
+    assert_eq!(priest(form, &[SILENCE], &[SILENCE]), None);
+    assert_eq!(priest(PriestForm::NoForm, &[FLAY, SILENCE], &[]), None);
 }
 
 // ---- Vampiric Embrace -------------------------------------------------------
@@ -1419,8 +1420,9 @@ enum Channel {
     Interrupted,
     /// Its last moment: it completes on the next frame.
     Ending,
-    /// The Priest has died.
-    Dead,
+    /// The channel is gone: a kill site stripped its dead Priest's
+    /// `ChannelingState`, as every kill site does.
+    Gone,
 }
 
 /// A Priest channelling Mind Flay on a Warrior that carries the channel's
@@ -1470,8 +1472,18 @@ fn channel_slow_after(how: Channel) -> (bool, bool) {
         }),
         _ => {}
     }
-    let mut channeler = Combatant::new(1, 0, Priest).with_book(book);
-    if how == Channel::Dead {
+    let channel = |ending: bool, interrupted: bool| ChannelingState {
+        ability: FLAY,
+        duration_remaining: if ending { 0.001 } else { 2.0 },
+        time_until_next_tick: 0.5,
+        tick_interval: 1.0,
+        target: warrior,
+        interrupted,
+        interrupted_display_time: 0.5,
+        ticks_applied: 1,
+    };
+    let mut channeler = Combatant::new(1, 0, Priest).with_book(book.clone());
+    if how == Channel::Gone {
         channeler.current_health = 0.0;
     }
     let priest = world
@@ -1481,18 +1493,21 @@ fn channel_slow_after(how: Channel) -> (bool, bool) {
             ActiveAuras {
                 auras: priest_auras,
             },
-            ChannelingState {
-                ability: FLAY,
-                duration_remaining: if how == Channel::Ending { 0.001 } else { 2.0 },
-                time_until_next_tick: 0.5,
-                tick_interval: 1.0,
-                target: warrior,
-                interrupted: how == Channel::Interrupted,
-                interrupted_display_time: 0.5,
-                ticks_applied: 1,
-            },
         ))
         .id();
+    if how != Channel::Gone {
+        world
+            .entity_mut(priest)
+            .insert(channel(how == Channel::Ending, how == Channel::Interrupted));
+    }
+    // A second Priest flaying the same Warrior, its channel running
+    // throughout: its slow is its own channel's.
+    world.entity_mut(other).insert((
+        Transform::from_xyz(0.0, 0.0, 5.0),
+        Combatant::new(1, 1, Priest).with_book(book),
+        ActiveAuras::default(),
+        channel(false, false),
+    ));
     let slow = |caster: Entity| Aura {
         effect_type: AuraType::MovementSpeedSlow,
         duration: 2.0,
@@ -1515,9 +1530,11 @@ fn channel_slow_after(how: Channel) -> (bool, bool) {
 }
 
 /// The channel's slow is the channel's: crowd control, a silence, an
-/// interrupt, its Priest's death or the channel's own end takes it off its
-/// target, and only the channelling Priest's; while the channel runs (the
-/// control) it stays.
+/// interrupt, the channel's removal by a kill site or its own end takes it
+/// off its target, and only that Priest's: a second Priest still flaying
+/// keeps its slow. While the channel runs (the control) both stay. A kill
+/// through a real site is played in
+/// [`mind_flays_slow_ends_with_its_priests_death`].
 #[test]
 fn mind_flays_slow_ends_with_its_channel() {
     assert_eq!(channel_slow_after(Channel::Running), (true, true));
@@ -1526,7 +1543,7 @@ fn mind_flays_slow_ends_with_its_channel() {
         Channel::Silenced,
         Channel::Interrupted,
         Channel::Ending,
-        Channel::Dead,
+        Channel::Gone,
     ] {
         assert_eq!(channel_slow_after(how), (false, true), "{how:?}");
     }
@@ -1865,9 +1882,9 @@ fn a_second_silencer_in_the_frame_sees_the_first_silence() {
     assert_eq!(same_frame, 1, "{log}");
 }
 
-/// A Shadowform Priest with Mind Flay closes to Mind Flay's reach of its
-/// target; without the talent (the control), it stands at its class's 28
-/// yards. The target is a Warlock 40 yards off, which itself holds at 28.
+/// A Shadowform Priest with Mind Flay, or with Silence and no Mind Flay,
+/// closes to their 20-yard reach of its target; without either (the control),
+/// it stands at its class's 28 yards. The target is a Warlock 40 yards off, which itself holds at 28.
 #[test]
 fn a_shadowform_priest_with_mind_flay_closes_in() {
     let closest = |build: Build| {
@@ -1907,6 +1924,9 @@ fn a_shadowform_priest_with_mind_flay_closes_in() {
         (TalentId::MindFlay, 1),
     ]));
     assert!(with <= 20.0, "{with}");
+    // Silence alone (no Mind Flay) closes to its reach the same way.
+    let silence = closest(silence_build());
+    assert!(silence <= 20.0, "{silence}");
     let without = closest(Build::of(&[
         (ImprovedMindBlast, 2),
         (TalentId::Shadowform, 1),
@@ -1997,4 +2017,103 @@ fn mind_flay_does_not_peel_for_a_pet() {
     };
     assert!(!flayed_at_gates(true));
     assert!(flayed_at_gates(false));
+}
+
+/// A healing Priest flays the Warrior off its Mage (the Mage out of mana, so
+/// it slows nothing itself), and a lethal
+/// Physical damage over time the Warrior left on the Priest ticks 1.2s after
+/// the gates: the Priest dies mid-channel
+/// through a real kill site (`process_dot_ticks`), which strips its channel.
+/// Mind Flay's slow comes off the Warrior by the frame after the death. With
+/// no damage over time (the control) the Priest lives and the slow stays
+/// through that same moment, until its channel ends.
+#[test]
+fn mind_flays_slow_ends_with_its_priests_death() {
+    let run = |lethal: bool| {
+        let config = HeadlessMatchConfig {
+            team1: vec!["Priest".into(), "Mage".into()],
+            team2: vec!["Warrior".into()],
+            random_seed: Some(4),
+            max_duration_secs: 6.0,
+            team1_builds: vec![mind_flay_build()],
+            ..Default::default()
+        };
+        let mut stage = Stage::new()
+            .place(T1, 0.0, 0.0)
+            .place(T1B, 10.0, 0.0)
+            .place(T2, 11.5, 0.0)
+            .target(T2, T1B)
+            .target(T1, T2)
+            .mana(T1B, 0.0)
+            .cooldown(T1, MindBlast, 30.0)
+            .aura(T1, weakened())
+            .aura(T1B, weakened());
+        if lethal {
+            stage = stage.world(|w| {
+                let warrior = T2.entity(w);
+                let priest = T1.entity(w);
+                w.get_mut::<ActiveAuras>(priest).unwrap().auras.push(Aura {
+                    effect_type: AuraType::DamageOverTime,
+                    duration: 10.0,
+                    magnitude: 100_000.0,
+                    tick_interval: 1.2,
+                    time_until_next_tick: 1.2,
+                    caster: Some(warrior),
+                    ability_name: "Lethal".into(),
+                    // Physical, so the Priest cannot dispel it.
+                    spell_school: Some(SpellSchool::Physical),
+                    break_on_damage_threshold: -1.0,
+                    ..Default::default()
+                });
+            });
+        }
+        play(config, stage)
+    };
+    let unit = |f: &arenasim::headless::FrameObservation, team: u8| {
+        f.combatants
+            .values()
+            .find(|c| !c.is_pet && c.team == team && c.slot == 0)
+            .cloned()
+            .expect("observed")
+    };
+    let slowed = |f: &arenasim::headless::FrameObservation| {
+        unit(f, 2).aura_types.contains(&AuraType::MovementSpeedSlow)
+    };
+    let killed = run(true);
+    let log = &killed.log;
+    let channel =
+        first_at(log, "Priest #1 begins channeling Mind Flay").unwrap_or_else(|| panic!("{log}"));
+    let frames = &killed.frames;
+    let death = frames
+        .iter()
+        .position(|f| f.gates_open && !unit(f, 1).alive)
+        .unwrap_or_else(|| panic!("the Priest never died\n{log}"));
+    let died_at = frames[death].sim_time;
+    assert!(
+        died_at > channel + 0.5 && died_at < channel + 2.5,
+        "{channel} -> {died_at}\n{log}"
+    );
+    // Slowed while the channel ran, before the death...
+    assert!(slowed(&frames[death - 5]), "{log}");
+    // ...and never again from the frame after it to where the channel would
+    // have ended (after which the Mage's Frost Armor may chill it).
+    let after: Vec<f32> = frames[death + 1..]
+        .iter()
+        .take_while(|f| f.sim_time < channel + 3.0)
+        .filter(|f| slowed(f))
+        .map(|f| f.sim_time)
+        .collect();
+    assert!(
+        after.is_empty(),
+        "slowed after the death at {died_at}: {after:?}\n{log}"
+    );
+
+    let control = run(false);
+    let at = control
+        .frames
+        .iter()
+        .find(|f| f.sim_time >= died_at + 0.1)
+        .expect("a frame after the moment");
+    assert!(unit(at, 1).alive, "{}", control.log);
+    assert!(slowed(at), "{}", control.log);
 }

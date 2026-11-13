@@ -11,8 +11,9 @@
 //!   channels it as a PEEL ([`mind_flay_peel_target`]): on an enemy melee or
 //!   pet on one of its ranged teammates (itself included), only while no heal
 //!   or dispel is owed and no walk owns its legs. A Shadowform Priest
-//!   channels it as its FILLER on its kill target, below Mind Blast; it
-//!   closes to Mind Flay's reach to do so (`combat_core::movement`).
+//!   channels it as its FILLER on its kill target, below Mind Blast. A
+//!   Shadowform Priest holding Mind Flay or Silence closes to their 20-yard
+//!   reach ([`shadow_pursuit_range`], read by `combat_core::movement`).
 //! - **Vampiric Embrace** goes on the Priest's target ahead of its Shadow
 //!   damage, while the target lacks the Priest's own: in the Shadowform
 //!   rotation after Shadow Word: Pain, and in a healing Priest's damage slot
@@ -45,8 +46,9 @@ use super::{cast_reach, CastReach, CombatContext, CombatantInfo};
 /// it.
 pub const MIND_FLAY_PEEL_REACH: f32 = 8.0;
 
-/// Yards inside Mind Flay's range a Shadowform Priest stops at, so drift
-/// between decisions does not flicker its filler in and out of range.
+/// Yards inside Mind Flay's (or Silence's) range a Shadowform Priest stops
+/// at, so drift between decisions does not flicker the cast in and out of
+/// range.
 pub const MIND_FLAY_RANGE_BUFFER: f32 = 2.0;
 
 /// Whether `auras` hold an impairment that makes Mind Flay's slow pointless:
@@ -332,20 +334,27 @@ pub fn try_mind_flay_filler(
     true
 }
 
-/// The stop distance of a Shadowform Priest's pursuit, when its book holds a
-/// Mind Flay its choices leave castable: inside Mind Flay's range by
-/// [`MIND_FLAY_RANGE_BUFFER`], so its filler reaches. `None` otherwise: it
-/// keeps its class's.
+/// The Shadow talents' grants a Shadowform Priest closes to the reach of:
+/// Mind Flay, its filler, and Silence, its capstone. Both reach 20 yards,
+/// short of the class's 28.
+pub const SHADOW_CLOSE_RANGE_GRANTS: [AbilityType; 2] =
+    [AbilityType::MindFlay, AbilityType::Silence];
+
+/// The stop distance of a Shadowform Priest's pursuit, when its book holds one
+/// of [`SHADOW_CLOSE_RANGE_GRANTS`] its choices leave castable: inside the
+/// shortest such reach by [`MIND_FLAY_RANGE_BUFFER`], so the spell reaches.
+/// `None` otherwise: it keeps its class's.
 pub fn shadow_pursuit_range(combatant: &Combatant) -> Option<f32> {
     if combatant.priest_form != crate::states::match_config::PriestForm::Shadowform {
         return None;
     }
     let book = combatant.book();
-    if book.is_locked(AbilityType::MindFlay) {
-        return None;
-    }
-    book.get(&AbilityType::MindFlay)
+    SHADOW_CLOSE_RANGE_GRANTS
+        .iter()
+        .filter(|a| !book.is_locked(**a))
+        .filter_map(|a| book.get(a))
         .map(|def| def.range - MIND_FLAY_RANGE_BUFFER)
+        .reduce(f32::min)
 }
 
 /// Vampiric Embrace on the Priest's target, ahead of its Shadow damage: while
