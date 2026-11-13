@@ -1545,6 +1545,16 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         AbilityType::Rupture,
         Unreached::NeedsKnob("a build that takes Rupture"),
     ),
+    // The Holy tree (AS-420): the grid grants no talent; tests/paladin_holy.rs
+    // builds each in its scene pairs.
+    (
+        AbilityType::DivineFavor,
+        Unreached::NeedsKnob("a build that takes Divine Favor"),
+    ),
+    (
+        AbilityType::AuraMastery,
+        Unreached::NeedsKnob("a build that takes Aura Mastery"),
+    ),
 ];
 
 /// Every ability of every class's own kit is chosen somewhere in the grid, or

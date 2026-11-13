@@ -1957,7 +1957,9 @@ mod tests {
                 "Divine Shield",
                 "Shadow Sight",
                 // No dispel type (TBC): no purge takes a Paladin aura, a
-                // totem's buff, a Mage armor or a shapeshift.
+                // totem's buff, a Mage armor or a shapeshift; nor Aura
+                // Mastery (31821 has no dispel type).
+                "Aura Mastery",
                 "Concentration Aura",
                 "Devotion Aura",
                 "Flametongue Totem",

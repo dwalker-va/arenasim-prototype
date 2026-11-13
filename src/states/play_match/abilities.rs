@@ -260,6 +260,9 @@ pub enum AbilityType {
     Conflagrate, // talent: instant Fire damage that consumes the Warlock's Immolate
     // Rogue: the Assassination tree (AS-417). Appended for the same reason.
     Rupture, // talent: a Physical bleed, 60 damage over 12s
+    // Paladin: the Holy tree (AS-420). Appended for the same reason.
+    DivineFavor, // talent: the next Flash of Light, Holy Light or Holy Shock crits
+    AuraMastery, // talent: teammates immune to silence and interrupts for 6s
 }
 
 impl AbilityType {
@@ -301,7 +304,8 @@ impl AbilityType {
             | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild | Innervate | EntanglingRoots
             | Cyclone | TravelForm | Shadowform | DivineProtection | BlessingOfSacrifice
             | SacredShield | RetributionAura | SiphonLife | AmplifyCurse | CurseOfExhaustion
-            | InnerFocus | PowerInfusion | PainSuppression | Shadowburn | Conflagrate => false,
+            | InnerFocus | PowerInfusion | PainSuppression | Shadowburn | Conflagrate
+            | DivineFavor | AuraMastery => false,
         }
     }
 

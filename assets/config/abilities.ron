@@ -1826,6 +1826,60 @@
             spell_school: Holy,
         ),
 
+        // Divine Favor (talent, Holy tier 2): the Paladin's next Flash of
+        // Light, Holy Light or Holy Shock is a sure crit (TBC 20216). Held
+        // until that cast spends it. 45s cooldown (the client's is 2 min);
+        // 3% of the Paladin's base mana, as TBC. Off the global cooldown (TBC
+        // 20216 has no global-cooldown category), so the heal follows on the
+        // next decision. TBC 20216: Holy, Magic, prevented by a silence.
+        DivineFavor: (
+            name: "Divine Favor",
+            class: Paladin,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_holy_heal.jpg",
+            cast_time: 0.0,
+            range: 0.0,  // Self-cast
+            mana_cost: 5.0,
+            cooldown: 45.0,
+            applies_aura: Some((
+                aura_type: NextCast,
+                duration: 600.0,  // until spent: lasts the match
+                magnitude: 1.0,
+                next_cast: Some((
+                    applies_to: Abilities([FlashOfLight, HolyLight, HolyShock]),
+                    crit_chance: 1.0,
+                )),
+            )),
+            spell_school: Holy,
+        ),
+
+        // Aura Mastery (talent, Holy capstone): every living teammate is
+        // immune to silence and interrupt effects for 6s
+        // (`AuraType::SilenceInterruptImmunity`); 45s cooldown (ruling; the
+        // client's is 2 min). Free, off the global cooldown and stopped by
+        // no silence: Wrath 31821 has no SpellCategories row (no dispel
+        // type, no prevention, no recovery category), and its school is
+        // Physical. No dispel type, so no purge takes it.
+        AuraMastery: (
+            name: "Aura Mastery",
+            class: Paladin,
+            talent: true,
+            prevention: None,
+            icon: "icons/abilities/spell_holy_auramastery.jpg",
+            cast_time: 0.0,
+            range: 100.0,  // Every teammate, as the Paladin auras reach them
+            mana_cost: 0.0,
+            cooldown: 45.0,
+            applies_aura: Some((
+                aura_type: SilenceInterruptImmunity,
+                duration: 6.0,
+                magnitude: 1.0,
+                dispel_type: Untyped,
+            )),
+            spell_school: Physical,
+        ),
+
         // ============================================================================
         // SHAMAN ABILITIES
         // ============================================================================

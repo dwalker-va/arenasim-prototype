@@ -16,7 +16,7 @@ use arenasim::states::play_match::components::{Aura, AuraType};
 use arenasim::states::play_match::decision_trace::RejectionReason;
 use arenasim::states::play_match::talent_choices::ChoiceOption;
 use arenasim::states::play_match::talents::{
-    Build, TalentDefinitions, TalentEffect, TalentId, TalentStat,
+    Build, TalentDefinitions, TalentEffect, TalentId, TalentStat, TreeId,
 };
 
 const PALADIN: &str = "paladin";
@@ -432,6 +432,7 @@ fn the_protection_tree_is_as_specified() {
     let talents = TalentDefinitions::shipped();
     let rows: Vec<(TalentId, u8, u8, u8, Option<f32>)> = talents
         .talents_for_class(Paladin)
+        .filter(|(_, t)| t.tree == TreeId::Protection)
         .map(|(id, t)| (id, t.tier, t.column, t.max_rank, t.budget))
         .collect();
     assert_eq!(

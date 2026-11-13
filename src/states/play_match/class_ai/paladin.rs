@@ -4,9 +4,11 @@
 //!
 //! ## Priority Order
 //! 1. Paladin Aura (buff all allies pre-combat — Devotion/Shadow Resistance/Concentration)
+//!    1.2. Aura Mastery (Holy talent: an enemy about to interrupt a casting teammate)
 //!    1.5. Divine Shield (emergency: self < 30% HP, or CC break for teammate)
 //! 2. Cleanse - Urgent (Polymorph, Freezing Trap, UA Silence, Fear on allies)
-//! 3. Emergency healing (ally < 40% HP) - Holy Shock (heal)
+//! 3. Emergency healing (ally < 40% HP) - Holy Shock (heal), Divine Favor
+//!    (Holy talent) first
 //! 4. Hammer of Justice (stun enemy in melee range)
 //!    4.5. Holy Light, `TeamPlan` only (ally 50-85% HP and missing a whole
 //!    Holy Light, neither it nor the Paladin pressured)
@@ -251,6 +253,23 @@ pub fn decide_paladin_action(
         return true;
     }
 
+    // Priority 1.2 (Holy talent): Aura Mastery, when an enemy is about to
+    // interrupt a casting teammate. Off the global cooldown.
+    if super::paladin_holy::try_aura_mastery(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
     // Priority 1.4 (Protection talent): Divine Protection, while the Paladin
     // is dying and pressured — the 45s cut before the 5-minute bubble.
     if super::paladin_protection::try_divine_protection(
@@ -361,8 +380,24 @@ pub fn decide_paladin_action(
         }
     }
 
-    // Priority 3: Emergency healing via Holy Shock.
+    // Priority 3: Emergency healing via Holy Shock — Divine Favor (Holy
+    // talent) first, off the global cooldown, so the heal that follows on the
+    // next decision is a sure crit.
     if has_emergency_target(combatant.team, &ctx.combatants) {
+        if super::paladin_holy::try_divine_favor(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            &mut builder,
+        ) {
+            builder.finish();
+            return true;
+        }
         if try_holy_shock_heal(
             commands,
             combat_log,

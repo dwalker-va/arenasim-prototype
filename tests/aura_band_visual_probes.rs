@@ -91,6 +91,8 @@ const BAND_TYPES: &[AuraType] = &[
     // Sacred Shield's arming buff (AS-421): the band until AS-375 draws its
     // disc and absorb card.
     AuraType::TriggeredAbsorb,
+    // Aura Mastery's immunity (AS-420): the band until AS-374 draws it.
+    AuraType::SilenceInterruptImmunity,
 ];
 
 fn names(types: impl IntoIterator<Item = AuraType>) -> BTreeSet<String> {

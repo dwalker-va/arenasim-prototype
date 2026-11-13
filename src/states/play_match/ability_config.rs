@@ -795,6 +795,9 @@ impl AbilityDefinitions {
             AbilityType::Conflagrate,
             // Rogue: the Assassination tree
             AbilityType::Rupture,
+            // Paladin: the Holy tree
+            AbilityType::DivineFavor,
+            AbilityType::AuraMastery,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -1711,6 +1714,8 @@ mod tests {
                     AbilityType::DivineProtection,
                     AbilityType::BlessingOfSacrifice,
                     AbilityType::SacredShield,
+                    AbilityType::DivineFavor,
+                    AbilityType::AuraMastery,
                 ],
             ),
             (
