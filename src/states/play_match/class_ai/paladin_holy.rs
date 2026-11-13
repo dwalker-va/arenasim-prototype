@@ -104,9 +104,9 @@ fn primed_by(auras: Option<&ActiveAuras>, name: &str) -> bool {
 
 /// Divine Favor, ahead of the emergency Holy Shock heal: asked only while a
 /// teammate is below the emergency line, and cast only when that heal would
-/// go out now (its own gate clears, and a teammate below
-/// [`LOW_HP_THRESHOLD`] is in its reach), so the sure crit is never left
-/// waiting. Not while its own modifier is still unspent.
+/// go out now (its own gate clears with Divine Favor's cost already paid, and
+/// a teammate below [`LOW_HP_THRESHOLD`] is in its reach), so the sure crit
+/// is never left waiting. Not while its own modifier is still unspent.
 pub fn try_divine_favor(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -128,10 +128,15 @@ pub fn try_divine_favor(
     }
     let shock = AbilityType::HolyShock;
     let shock_def = abilities.get_unchecked(&shock);
+    // The heal is judged as the Paladin will stand after paying for Divine
+    // Favor: a favor that leaves too little mana for the shock would strand
+    // its sure crit on a Flash of Light.
+    let mut after_favor = combatant.clone();
+    after_favor.current_mana -= def.mana_cost;
     let heal_goes_out = cast_gate(
         shock,
         shock_def,
-        combatant,
+        &after_favor,
         my_pos,
         auras,
         None,

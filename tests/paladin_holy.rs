@@ -474,6 +474,34 @@ fn divine_favor_waits_for_a_heal_that_would_go_out() {
     );
 }
 
+/// Divine Favor's own cost counts: with mana for the favor but then too
+/// little for the Holy Shock, it is held (the heal would be a Flash of Light,
+/// stranding the sure crit); with the favor and the shock both paid for, it
+/// goes out.
+#[test]
+fn divine_favor_leaves_mana_for_its_holy_shock() {
+    let cost = |a: AbilityType| defs().get_unchecked(&a).mana_cost;
+    let both = cost(AbilityType::HolyShock) + cost(AbilityType::DivineFavor);
+    let at = |mana: f32| {
+        let mut scene = mage_at(0.3).grant(PALADIN, AbilityType::DivineFavor);
+        scene.combatant_mut(PALADIN).current_mana = mana;
+        scene.decide(PALADIN)
+    };
+    let short = at(both - 1.0);
+    assert!(
+        precondition(&short, AbilityType::DivineFavor),
+        "{both} - 1 mana: {}",
+        describe(&short)
+    );
+    let paid = at(both);
+    assert_eq!(
+        paid.chose(),
+        Some((AbilityType::DivineFavor, None)),
+        "{both} mana: {}",
+        describe(&paid)
+    );
+}
+
 /// Primed already, the Paladin goes straight to the heal, which spends it.
 #[test]
 fn a_primed_divine_favor_is_spent_by_the_holy_shock() {
