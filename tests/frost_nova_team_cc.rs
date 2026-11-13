@@ -11,8 +11,9 @@ use arenasim::states::match_config::CharacterClass::{Hunter, Mage, Priest, Warlo
 use arenasim::states::play_match::ai_profile::AiProfile;
 use arenasim::states::play_match::class_ai::mage::NOVA_HOLDS_FOR_TEAM_CC;
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
-use arenasim::states::play_match::components::{Aura, AuraType};
+use arenasim::states::play_match::components::{Aura, AuraType, PetType};
 use arenasim::states::play_match::decision_trace::{PlayStep, RejectionReason};
+use arenasim::states::play_match::movement_config::load_movement_config;
 use arenasim::states::play_match::AbilityType::{FrostNova, IceBarrier, Polymorph};
 
 const ME: &str = "mage";
@@ -21,6 +22,8 @@ const HELD: &str = "held enemy";
 const ALLY: &str = "ally";
 const HUNTER: &str = "hunter";
 const ENEMY_HEALER: &str = "enemy priest";
+const OWNER: &str = "enemy warlock";
+const PET: &str = "enemy felhunter";
 
 fn describe(view: &DecisionView) -> String {
     format!(
@@ -153,6 +156,74 @@ fn a_dying_mage_novas_its_melee_off_through_the_teams_crowd_control() {
             describe(&view)
         );
     }
+}
+
+/// "Dying" is the situation's `dying`: below `urgency_hp_threshold`. Just
+/// under it the Mage Novas through the team's hold; just over it, it holds.
+#[test]
+fn the_exception_starts_at_the_urgency_threshold() {
+    let threshold = load_movement_config()
+        .expect("movement.ron loads")
+        .shared
+        .urgency_hp_threshold;
+    for held in [Held::MagesPolymorph, Held::HuntersTrap] {
+        let under = melee_scene(threshold - 0.05, 6.0, held).decide(ME);
+        assert_eq!(
+            under.chose(),
+            Some((FrostNova, None)),
+            "{held:?} at {}: {}",
+            threshold - 0.05,
+            describe(&under)
+        );
+        let over = melee_scene(threshold + 0.05, 6.0, held).decide(ME);
+        assert!(
+            held_for_team_cc(&over),
+            "{held:?} at {}: {}",
+            threshold + 0.05,
+            describe(&over)
+        );
+    }
+}
+
+/// The escape is from a non-pet melee, the rotation's own trigger: a dying
+/// Mage whose only free attacker at its feet is an enemy pet keeps the
+/// team's Polymorph on the Warrior beside it. The control puts a second
+/// Warrior where the pet stood, and the Mage Novas.
+#[test]
+fn an_enemy_pet_at_its_feet_is_no_escape() {
+    let scene = |pet: bool| {
+        let mut scene = Scene::new()
+            .unit(ME, 1, Mage)
+            .health(0.3)
+            .aura(ME, AuraType::FrostArmorBuff, 600.0)
+            .aura(ME, AuraType::MaxManaIncrease, 600.0)
+            .cooldown(ME, IceBarrier, 20.0)
+            .targeting(ENEMY_HEALER)
+            .unit(MELEE, 2, Warrior)
+            .at(1.5, 0.0)
+            .unit(ENEMY_HEALER, 2, Priest)
+            .at(0.0, 25.0)
+            .unit(OWNER, 2, Warlock)
+            .at(0.0, -25.0);
+        scene = if pet {
+            scene
+                .pet(PET, OWNER, PetType::Felhunter)
+                .at(0.0, 1.5)
+                .targeting(ME)
+        } else {
+            scene.unit(PET, 2, Warrior).at(0.0, 1.5).targeting(ME)
+        };
+        let mage = scene.entity(ME);
+        scene.aura_full(MELEE, hold(AuraType::Polymorph, "Polymorph", mage))
+    };
+    // Held only if the Felhunter's row reads `is_pet`: counted as a melee, it
+    // would be the escape, as the control's Warrior is.
+    let held = scene(true).decide(ME);
+    assert!(held_for_team_cc(&held), "{}", describe(&held));
+    assert_ne!(held.chose(), Some((FrostNova, None)), "{}", describe(&held));
+
+    let free = scene(false).decide(ME);
+    assert_eq!(free.chose(), Some((FrostNova, None)), "{}", describe(&free));
 }
 
 /// The escape is from a melee that can hit the Mage: a dying Mage whose only
