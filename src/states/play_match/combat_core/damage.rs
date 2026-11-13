@@ -112,6 +112,10 @@ pub struct Hit<'a> {
     /// ([`damage_dealt_multiplier`] over its auras): 1.0 for none.
     pub dealt: f32,
     pub kind: HitKind,
+    /// The kind of harm it is, where that changes a step
+    /// ([`Mechanic::ignores_armor`]: a bleed's tick passes armor). `None` for
+    /// almost every hit.
+    pub mechanic: Option<Mechanic>,
 }
 
 impl<'a> Hit<'a> {
@@ -134,6 +138,7 @@ impl<'a> Hit<'a> {
             victim,
             dealt: damage_dealt_multiplier(attacker_auras, school),
             kind: HitKind::Direct,
+            mechanic: None,
         }
     }
 
@@ -155,6 +160,18 @@ impl<'a> Hit<'a> {
     pub fn of_kind(mut self, kind: HitKind) -> Self {
         self.kind = kind;
         self
+    }
+
+    /// This hit, of `mechanic` (a bleed's tick: `Some(Mechanic::Bleed)`).
+    pub fn mechanic(mut self, mechanic: Option<Mechanic>) -> Self {
+        self.mechanic = mechanic;
+        self
+    }
+
+    /// Whether the armor step passes this hit by: a bleed
+    /// ([`Mechanic::ignores_armor`]).
+    pub fn ignores_armor(&self) -> bool {
+        self.mechanic.is_some_and(Mechanic::ignores_armor)
     }
 
     /// This hit, as a melee strike when `melee`.
@@ -293,7 +310,8 @@ pub fn armor_reduction(armor: f32) -> f32 {
 /// 0. **Immunity** (Divine Shield, Cyclone) blocks the hit outright.
 /// 1. **Damage dealt**: the attacker's strongest in-scope
 ///    [`AuraType::DamageDealtIncrease`] ([`Hit::dealt`]).
-/// 2. **Armor** for Physical ([`effective_armor`]), **resistance** for magic.
+/// 2. **Armor** for Physical ([`effective_armor`]), but never for a bleed
+///    ([`Hit::ignores_armor`]); **resistance** for magic.
 /// 3. **Damage taken**: the strongest in-scope
 ///    [`AuraType::DamageTakenReduction`], then the strongest in-scope
 ///    [`AuraType::DamageTakenIncrease`]; a charged one spends a charge on a
@@ -540,9 +558,10 @@ fn mitigate(target: &mut Combatant, auras: Option<&ActiveAuras>, hit: &Hit, dama
 
     // Apply armor reduction for Physical damage. Equipment armor plus any
     // `ArmorIncrease` aura (Mark of the Wild), scaled by the percentage armor
-    // auras — exactly `target.armor` when there is none.
+    // auras — exactly `target.armor` when there is none. A bleed passes it
+    // (TBC: armor does not reduce Mechanic 15 damage).
     let armor = effective_armor(target, auras);
-    if spell_school == SpellSchool::Physical && armor > 0.0 {
+    if spell_school == SpellSchool::Physical && !hit.ignores_armor() && armor > 0.0 {
         let pre_armor = *damage;
         let reduction = armor_reduction(armor);
         *damage *= 1.0 - reduction;
@@ -763,7 +782,8 @@ struct Share<'a> {
 pub const SOUL_LINK_NAME: &str = "Soul Link";
 
 /// Step 7: a blow that would kill the holder is prevented by its save — the
-/// first [`AuraType::KillingBlowSave`] on it (spent; the holder's health is
+/// first [`AuraType::KillingBlowSave`] on it (spent, with the rest of its
+/// compound when it is one — Guardian Spirit; the holder's health is
 /// left where it stood, and a follow-up heals it through `apply_healing`), or
 /// else an unspent Cheat Death (the holder is left at its share of maximum
 /// health, or where it stood if lower, and takes less damage for a while).
@@ -780,7 +800,9 @@ fn prevent_killing_blow(
             .iter()
             .position(|a| a.effect_type == AuraType::KillingBlowSave)
         {
-            let save = auras.auras.remove(i);
+            // A save that belongs to a compound (Guardian Spirit) spends the
+            // whole buff, its healing increase included.
+            let save = auras.remove_debuff_at(i);
             *damage = 0.0;
             follow_ups.push(DamageFollowUp::Saved {
                 holder: hit.victim,

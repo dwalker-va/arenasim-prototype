@@ -77,6 +77,9 @@ const HEALERS: &[(&str, &str)] = &[
         "src/states/play_match/effects/dispels.rs",
         "process_dispels",
     ),
+    // Area healing decided in the frame's dispatch and landed after it
+    // (Holy Nova, AS-415).
+    ("src/states/play_match/combat_ai.rs", "decide_abilities"),
     // A heeled pet's recovery at its owner's side.
     (
         "src/states/play_match/class_ai/pet_ai.rs",

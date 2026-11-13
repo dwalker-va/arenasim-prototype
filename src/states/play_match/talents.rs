@@ -150,6 +150,14 @@ talent_ids! {
     PowerInfusion,
     ReflectiveShield,
     PainSuppression,
+    // Priest: Holy
+    HolySpecialization,
+    SpiritualHealing,
+    Inspiration,
+    BlessedRecovery,
+    HolyConcentration,
+    HolyNova,
+    GuardianSpirit,
     // Priest: Shadow
     ImprovedMindBlast,
     ImprovedPsychicScream,
@@ -484,9 +492,13 @@ pub enum AbilityField {
     /// 5% more damage from every source. Present only on an ability whose
     /// aura is a stun. Improved Kidney Shot's field.
     AuraVulnerability,
-    /// The ability's whole healing: its base range and its coefficient
-    /// ([`Self::parts`]), so `Mul(1.05)` makes every heal 5% larger. Takes
-    /// only a `Mul`, as `Damage` does. Healing Light's field.
+    /// The ability's whole direct heal: its base range and its coefficient
+    /// together ([`Self::parts`]), so `Mul(1.05)` makes every heal 5% bigger.
+    /// Present only on an ability that heals directly (a nonzero range or
+    /// coefficient), so a school-wide patch of it passes over a Holy spell
+    /// that heals nothing (Power Word: Shield). Takes only a `Mul`, as
+    /// `Damage` does. Spiritual Healing's field (the Priest's Holy spells)
+    /// and Healing Light's (Flash of Light and Holy Light).
     Healing,
 }
 
@@ -639,6 +651,11 @@ impl AbilityField {
             // Its parts are any aura's: it is present only where they are a
             // damage over time's.
             AbilityField::PeriodicDamage => dot() && parts(),
+            // Its parts are every ability's: it is present only where they
+            // heal.
+            AbilityField::Healing => {
+                parts() && (config.healing_base_max > 0.0 || config.healing_coefficient > 0.0)
+            }
             _ => parts(),
         }
     }
@@ -697,6 +714,7 @@ pub fn strength_is_remainder(aura: AuraType) -> bool {
         | AuraType::ArmorPercentReduction
         | AuraType::DamageTransfer
         | AuraType::KillingBlowSave
+        | AuraType::HealingReceivedIncrease
         | AuraType::DamageReflect
         | AuraType::TriggeredAbsorb => false,
     }
