@@ -144,8 +144,11 @@ fn an_uninterrupted_channel_lands_every_tick() {
         let run = channel(*ability, def, length + 120, None);
         assert_eq!(run.tick_frames.len(), ticks, "{ability:?}: {run:?}");
         let last = *run.tick_frames.last().unwrap();
+        // Within a frame of its configured end, either way: a channel that
+        // ends early still lands its whole count by the final-tick rule, so
+        // the count alone cannot see it.
         assert!(
-            last <= length + 1,
+            (length - 1..=length + 1).contains(&last),
             "{ability:?}'s last tick lands at its end (frame {length}): {run:?}"
         );
         assert!(
@@ -362,8 +365,12 @@ fn in_a_match_drain_life_lands_all_five_ticks() {
     assert_eq!(interrupt, None, "nothing interrupted it");
     assert_eq!(ticks.len(), 5, "{ticks:?}");
     let last = *ticks.last().unwrap();
+    // Within three frames of the channel's end, either way: a channel cut
+    // short would still land five. (The log's stamps run about two frames
+    // behind the app clock the stage landed on, and print to 0.01s: the
+    // first tick, 61 frames in, is stamped 0.98s after the stage.)
     assert!(
-        last <= landed + 5.0 + 0.02,
+        (last - (landed + 5.0)).abs() <= 0.05,
         "the last tick lands at the end ({}): {ticks:?}",
         landed + 5.0
     );
