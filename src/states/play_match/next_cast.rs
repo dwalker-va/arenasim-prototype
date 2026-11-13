@@ -31,8 +31,9 @@
 //! combatant ([`SpentNextCast`], read by `process_casting` when the cast
 //! completes), a projectile on the `Projectile` (cast-bar or instant), Holy
 //! Shock's pending effect in the book it carries. A cast with a bar that does
-//! NOT land — interrupted, stopped by crowd control or a silence, or fizzled
-//! at completion on a dead or unseen target — gives its modifiers back
+//! NOT land — interrupted, stopped by crowd control or a silence, fizzled
+//! at completion on a dead or unseen target, or failed for want of the mana
+//! a Mana Burn took mid-cast — gives its modifiers back
 //! ([`restore`]), as TBC restores a mod a cancelled cast consumed, and as the
 //! sim charges such a cast nothing. A channel is paid for when it starts, so
 //! its modifier is spent then.
