@@ -75,7 +75,10 @@ pub fn overhead_status_label(aura: &Aura) -> Option<OverheadLabel> {
 
         // No overhead label: snares, damage, stat changes, buffs and markers
         // read off the team frames' aura icons and the effect visuals.
+        // Aura Mastery's immunity included: the team frames' icon shows it
+        // (its visual card is AS-374).
         AuraType::MovementSpeedSlow
+        | AuraType::SilenceInterruptImmunity
         | AuraType::MaxHealthIncrease
         | AuraType::DamageOverTime
         | AuraType::SpellSchoolLockout

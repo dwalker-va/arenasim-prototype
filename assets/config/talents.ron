@@ -64,9 +64,11 @@
             (id: Destruction, name: "Destruction", icon: "icons/talents/spell_shadow_rainoffire.jpg"),
         ],
         Rogue: [
+            (id: Assassination, name: "Assassination", icon: "icons/talents/ability_rogue_eviscerate.jpg"),
             (id: Combat, name: "Combat", icon: "icons/talents/ability_backstab.jpg"),
         ],
         Paladin: [
+            (id: Holy, name: "Holy", icon: "icons/talents/spell_holy_holybolt.jpg"),
             (id: Protection, name: "Protection", icon: "icons/talents/spell_holy_devotionaura.jpg"),
         ],
         Priest: [
@@ -339,6 +341,96 @@
             per_rank: [Grant(Conflagrate)],
         ),
 
+        // ---- Rogue: Assassination (AS-417) ----
+        // Poisons and bleeds. The poison itself and the opener stay per-match
+        // choices: a talent here only strengthens the poisons, or widens the
+        // choice to a second one (Master Poisoner). Poisons still roll per
+        // landed weapon hit, not normalized for weapon speed.
+        VilePoisons: (
+            name: "Vile Poisons",
+            class: Rogue, tree: Assassination, tier: 1, column: 0,
+            icon: "icons/talents/ability_rogue_feigndeath.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Every poison stronger, relative to its own base, a rank:
+            // Crippling slows 70% -> 77% -> 84%, Deadly ticks 20% harder,
+            // Wound cuts healing 50% -> 55% -> 60%, Mind-numbing slows
+            // casting 60% -> 66% -> 72%. (Classic 16513: +4% poison damage.)
+            per_rank: [
+                Patch(on: Ability(CripplingPoison), field: AuraStrength, op: Mul(1.10)),
+                Patch(on: Ability(DeadlyPoison), field: AuraStrength, op: Mul(1.20)),
+                Patch(on: Ability(WoundPoison), field: AuraStrength, op: Mul(1.10)),
+                Patch(on: Ability(MindNumbingPoison), field: AuraStrength, op: Mul(1.10)),
+            ],
+        ),
+        ImprovedPoisons: (
+            name: "Improved Poisons",
+            class: Rogue, tree: Assassination, tier: 1, column: 2,
+            icon: "icons/talents/ability_poisons.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // +10% chance a rank to apply a poison, each from its own base:
+            // Crippling, Wound and Mind-numbing 50% -> 60% -> 70%, Deadly
+            // 30% -> 40% -> 50%. (Classic 14113: +2% a rank.)
+            per_rank: [
+                Patch(on: Ability(CripplingPoison), field: ApplicationChance, op: Add(0.10)),
+                Patch(on: Ability(DeadlyPoison), field: ApplicationChance, op: Add(0.10)),
+                Patch(on: Ability(WoundPoison), field: ApplicationChance, op: Add(0.10)),
+                Patch(on: Ability(MindNumbingPoison), field: ApplicationChance, op: Add(0.10)),
+            ],
+        ),
+        MasterPoisoner: (
+            name: "Master Poisoner",
+            class: Rogue, tree: Assassination, tier: 2, column: 0,
+            icon: "icons/talents/ability_creature_poison_06.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // Two poisons: the main hand's, and a different one on the off
+            // hand, chosen in Prepare beside the first.
+            per_rank: [AddChoiceSlot(OffHandPoison)],
+        ),
+        ImprovedKidneyShot: (
+            name: "Improved Kidney Shot",
+            class: Rogue, tree: Assassination, tier: 2, column: 1,
+            icon: "icons/talents/ability_rogue_kidneyshot.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // A Kidney Shot victim takes 5% more damage a rank, from every
+            // source, while the stun holds (Classic 14174: 3% a rank).
+            per_rank: [Patch(on: Ability(KidneyShot), field: AuraVulnerability, op: Add(0.05))],
+        ),
+        Malice: (
+            name: "Malice",
+            class: Rogue, tree: Assassination, tier: 2, column: 2,
+            icon: "icons/talents/ability_racial_bloodrage.jpg",
+            max_rank: 2,
+            // +1% crit chance a rank, in points, on every roll that reads it,
+            // auto-attacks included (Classic 14138). Priced at the item
+            // weight of its points: 3 a rank.
+            per_rank: [StatAdd(CritChance, 0.01)],
+        ),
+        Rupture: (
+            name: "Rupture",
+            class: Rogue, tree: Assassination, tier: 3, column: 1,
+            icon: "icons/talents/ability_rogue_rupture.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // A Physical bleed: 60 damage over 12s for 25 energy, 20s
+            // cooldown. No dispel removes it.
+            per_rank: [Grant(Rupture)],
+        ),
+        BloodSpatter: (
+            name: "Blood Spatter",
+            class: Rogue, tree: Assassination, tier: 4, column: 1,
+            icon: "icons/talents/ability_rogue_bloodsplatter.jpg",
+            max_rank: 1,
+            budget: Some(22.0),
+            requires: Some((Rupture, 1)),
+            // Rupture deals 50% more damage: 10 -> 15 a tick, 90 in all
+            // (TBC 31130: Garrote and Rupture +15% a rank).
+            per_rank: [Patch(on: Ability(Rupture), field: PeriodicDamage, op: Mul(1.50))],
+        ),
+
         // ---- Rogue: Combat (AS-418) ----
         // The anti-melee specialist: avoidance, melee haste, and a capstone
         // that opens an armored target up. Dodge, parry and melee haste carry
@@ -412,6 +504,110 @@
             // Removes 50% of the target's armor for 15s: 25 energy, 20s
             // cooldown.
             per_rank: [Grant(ExposeArmor)],
+        ),
+
+        // ---- Paladin: Holy (AS-420) ----
+        // Built around Holy Shock: its cooldown, and two procs on casting
+        // it that prime the next Flash of Light and Holy Light. Values
+        // provisional: tuning is the milestone sweep's (AS-302).
+        ImprovedHolyShock: (
+            name: "Improved Holy Shock",
+            class: Paladin, tree: Holy, tier: 1, column: 0,
+            icon: "icons/talents/spell_holy_searinglight.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Holy Shock's cooldown -2s a rank: 15 -> 13 -> 11.
+            per_rank: [Patch(on: Ability(HolyShock), field: Cooldown, op: Add(-2.0))],
+        ),
+        HealingLight: (
+            name: "Healing Light",
+            class: Paladin, tree: Holy, tier: 1, column: 2,
+            icon: "icons/talents/spell_holy_holybolt.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Flash of Light and Holy Light heal 5% more a rank (TBC 20237's
+            // 4% a rank, over three ranks).
+            per_rank: [
+                Patch(on: Ability(FlashOfLight), field: Healing, op: Mul(1.05)),
+                Patch(on: Ability(HolyLight), field: Healing, op: Mul(1.05)),
+            ],
+        ),
+        InfusionOfLight: (
+            name: "Infusion of Light",
+            class: Paladin, tree: Holy, tier: 2, column: 0,
+            icon: "icons/talents/ability_paladin_infusionoflight.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // After a Holy Shock, the next Flash of Light within 15s has +25%
+            // crit chance a rank. Wrath's 54149 lasts 15s and has no dispel
+            // type.
+            per_rank: [
+                Proc((
+                    trigger: AbilityUsed,
+                    abilities: [HolyShock],
+                    chance: Chance(1.0),
+                    ranks_add: Effect,
+                    effect: NextCast(
+                        modifier: (applies_to: Abilities([FlashOfLight]), crit_chance: 0.25),
+                        duration: 15.0,
+                        dispel_type: Untyped,
+                        name: Some("Infusion of Light"),
+                    ),
+                )),
+            ],
+        ),
+        DivineFavor: (
+            name: "Divine Favor",
+            class: Paladin, tree: Holy, tier: 2, column: 1,
+            icon: "icons/talents/spell_holy_heal.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // The next Flash of Light, Holy Light or Holy Shock is a sure
+            // crit; 45s cooldown.
+            per_rank: [Grant(DivineFavor)],
+        ),
+        PurifyingPower: (
+            name: "Purifying Power",
+            class: Paladin, tree: Holy, tier: 2, column: 2,
+            icon: "icons/talents/spell_holy_purifyingpower.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Cleanse costs 20% less mana a rank: 15 -> 12 -> 9.
+            per_rank: [Patch(on: Ability(PaladinCleanse), field: ManaCost, op: Mul(0.80))],
+        ),
+        LightsGrace: (
+            name: "Light's Grace",
+            class: Paladin, tree: Holy, tier: 3, column: 0,
+            icon: "icons/talents/spell_holy_lightsgrace.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // After a Holy Shock, the next Holy Light within 15s casts 0.5s
+            // faster. TBC 31834 lasts 15s and is Magic.
+            per_rank: [
+                Proc((
+                    trigger: AbilityUsed,
+                    abilities: [HolyShock],
+                    chance: Chance(1.0),
+                    ranks_add: Effect,
+                    effect: NextCast(
+                        modifier: (applies_to: Abilities([HolyLight]), cast_time_reduction: 0.5),
+                        duration: 15.0,
+                        dispel_type: Magic,
+                        name: Some("Light's Grace"),
+                    ),
+                )),
+            ],
+        ),
+        AuraMastery: (
+            name: "Aura Mastery",
+            class: Paladin, tree: Holy, tier: 4, column: 1,
+            icon: "icons/talents/spell_holy_auramastery.jpg",
+            max_rank: 1,
+            budget: Some(22.0),
+            requires: Some((DivineFavor, 1)),
+            // Every teammate immune to silence and interrupt effects for 6s;
+            // 45s cooldown.
+            per_rank: [Grant(AuraMastery)],
         ),
 
         // ---- Paladin: Protection (AS-421) ----

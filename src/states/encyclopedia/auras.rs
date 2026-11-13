@@ -1892,6 +1892,8 @@ mod tests {
                 "Mortal Strike [Physical]",
                 "Pummel [—]",
                 "Rend [Physical]",
+                // A bleed, like Rend (AS-417).
+                "Rupture [Physical]",
                 // Magic, but a stat debuff: `is_magic_dispellable` scopes
                 // out every damage-taken increase (AS-411's proc).
                 "Shadow Vulnerability [Magic]",
@@ -1955,7 +1957,9 @@ mod tests {
                 "Divine Shield",
                 "Shadow Sight",
                 // No dispel type (TBC): no purge takes a Paladin aura, a
-                // totem's buff, a Mage armor or a shapeshift.
+                // totem's buff, a Mage armor or a shapeshift; nor Aura
+                // Mastery (31821 has no dispel type).
+                "Aura Mastery",
                 "Concentration Aura",
                 "Devotion Aura",
                 "Flametongue Totem",

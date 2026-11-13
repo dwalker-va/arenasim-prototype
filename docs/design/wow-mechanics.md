@@ -63,6 +63,14 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   be interrupted." Loss of control still stops it — a stun, fear, polymorph or
   cyclone cancels any cast in `process_casting` — and that is not an interrupt:
   no school is locked, so the Hunter can Disengage the moment it is free.
+- **Aura Mastery makes a caster immune to interrupts** (AS-420): while a unit
+  holds `AuraType::SilenceInterruptImmunity` (`auras::silence_interrupt_immune`),
+  `process_interrupts` spends an interrupt that reaches it and cuts nothing and
+  locks no school, and every interrupter's scan (`check_interrupts`, Spell
+  Lock) passes it over, as it passes over a damage-immune target. The Holy
+  Paladin raises it on every teammate for 6s when an enemy's interrupt, ready
+  within 1.5s (`class_ai::ready_interrupt_reach`), reaches a casting teammate
+  (`class_ai::paladin_holy::interrupt_threat`).
 
 ### Auto-Attacks
 - Disabled while casting
@@ -120,6 +128,12 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   - **Mind-numbing** (50%): cast times +60% for 14s, refreshed by a new proc.
   The other three land through `apply_pending_auras`. All four are poisons:
   Cleanse removes them (a stack at a time), Dispel Magic does not.
+  - **Assassination** (Rogue talents) strengthens them and never chooses them:
+    Vile Poisons makes each stronger relative to its own base (Crippling,
+    Wound and Mind-numbing 10% a rank, Deadly 20%), Improved Poisons adds 10
+    points of application chance a rank, and Master Poisoner opens a second,
+    different poison for the off hand (`team{1,2}_rogue_offhand_poisons`), whose
+    swings roll it instead of the main hand's.
 - **Healing reductions and cast-time increases do not compound** (TBC): only
   the strongest healing reduction on a target applies (`healing_multiplier` —
   Mortal Strike's and Aimed Shot's 35% under Wound Poison's 50% is 50%), and only
@@ -364,6 +378,10 @@ tests fail if a full-CC type or spell is left unlabelled.
   it never touches a Warrior's or Rogue's kit.
 - Nothing in the sim pacifies, so `Pacify` stops nothing today; a pacify
   effect would stop exactly those abilities.
+- Aura Mastery's immunity (AS-420) blocks a new Silence
+  (`auras::aura_type_immunity_source`, refused and logged `IMMUNE`), and a
+  Silence its holder already carries comes off as the immunity lands
+  (`apply_pending_auras`), so no silence outlasts it.
 - Loss of control (stun, fear, polymorph, cyclone) stops every cast, whatever
   its prevention.
 
@@ -379,6 +397,18 @@ tests fail if a full-CC type or spell is left unlabelled.
 ### Stun
 - Prevents all actions (movement, attacking, casting)
 - Examples: Kidney Shot, Charge stun component
+- Improved Kidney Shot (Assassination) makes a Kidney Shot victim take 5% more
+  damage a rank, from every source, while the stun holds: a stun with a
+  `vulnerability` lands a `DamageTakenIncrease` rider bound to it as one
+  compound debuff (`CompoundDebuff::StunVulnerability`), so diminishing returns,
+  a crowd-control break or the stun's end take the rider with it.
+
+### Bleeds
+- Rend (Warrior) and Rupture (Rogue, an Assassination talent: 10 every 2s for
+  12s, 25 energy, 20s cooldown) are Physical damage over time. A bleed is not
+  a poison and not magic: no dispel, cleanse or purge removes it. Blood
+  Spatter (Assassination's capstone) makes Rupture tick 50% harder. The Rogue
+  keeps Rupture rolling on its kill target whenever its cooldown allows.
 
 ### Fear
 - Target runs in random directions

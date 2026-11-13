@@ -213,7 +213,9 @@ pub fn reflect_instant_cc_in_snapshot(
 /// - a CYCLONED holder is immune to every new aura (TBC: nothing reaches a
 ///   cycloned target, friendly or hostile);
 /// - a holder in TRAVEL FORM is immune to Polymorph (a shapeshifted Druid
-///   cannot be polymorphed).
+///   cannot be polymorphed);
+/// - a holder of Aura Mastery's immunity
+///   ([`AuraType::SilenceInterruptImmunity`]) is immune to Silence.
 pub fn aura_immunity_source(auras: &[Aura], aura: &Aura) -> Option<&'static str> {
     aura_type_immunity_source(auras, aura.effect_type)
 }
@@ -230,7 +232,21 @@ pub fn aura_type_immunity_source(auras: &[Aura], effect_type: AuraType) -> Optio
     {
         return Some("Travel Form");
     }
+    if effect_type == AuraType::Silence && silence_interrupt_immune(auras) {
+        // Aura Mastery is the one source of the immunity.
+        return Some("Aura Mastery");
+    }
     None
+}
+
+/// Whether the holder of `auras` is immune to silence and interrupt effects
+/// ([`AuraType::SilenceInterruptImmunity`], Aura Mastery): the one question
+/// the silence immunity above, `process_interrupts` and every interrupter's
+/// target scan ask.
+pub fn silence_interrupt_immune(auras: &[Aura]) -> bool {
+    auras
+        .iter()
+        .any(|a| a.effect_type == AuraType::SilenceInterruptImmunity)
 }
 
 /// Apply pending auras to targets.
@@ -580,6 +596,7 @@ pub fn apply_pending_auras(
                 | AuraType::SpellPowerIncrease
                 | AuraType::HealingOverTime
                 | AuraType::WindfuryBuff
+                | AuraType::SilenceInterruptImmunity
         );
         // A STACKING aura its source has already applied is REFRESHED, not
         // refused and not doubled (see `AuraStacks`). Checked before the
@@ -869,6 +886,40 @@ pub fn apply_pending_auras(
             );
         }
 
+        // Aura Mastery's immunity: a Silence the holder carries comes off as it
+        // lands (a new one is refused while it lasts, by
+        // `aura_immunity_source`), so no silence outlasts it.
+        if pending.aura.effect_type == AuraType::SilenceInterruptImmunity {
+            combat_log.log(
+                CombatLogEventType::Buff,
+                format!(
+                    "{} gains {} (immune to silence and interrupts)",
+                    target_id, pending.aura.ability_name
+                ),
+            );
+            let not_silence = |a: &Aura| a.effect_type != AuraType::Silence;
+            let mut removed = 0;
+            if let Some(auras) = active_auras.as_mut() {
+                let before = auras.auras.len();
+                auras.auras.retain(not_silence);
+                removed += before - auras.auras.len();
+            }
+            if let Some(auras) = new_auras_map.get_mut(&pending.target) {
+                let before = auras.len();
+                auras.retain(not_silence);
+                removed += before - auras.len();
+            }
+            if removed > 0 {
+                combat_log.log(
+                    CombatLogEventType::Buff,
+                    format!(
+                        "{}'s Silence is removed by {}",
+                        target_id, pending.aura.ability_name
+                    ),
+                );
+            }
+        }
+
         // Handle LockoutDurationReduction aura (Concentration Aura) - log application
         if pending.aura.effect_type == AuraType::LockoutDurationReduction {
             let reduction_pct = (pending.aura.magnitude * 100.0) as i32;
@@ -990,14 +1041,36 @@ pub fn apply_pending_auras(
         // member of the chill is still up).
         //  - the rider inherits the face's CASTER, so a damage rider (the
         //    Entangling Roots DoT) is attributed to whoever cast the debuff.
+        //  - a vulnerable stun's rider takes its SIZE and its NAME from the
+        //    face too (`CompoundDebuff::StunVulnerability`): the increase is
+        //    the stun's config, patched by its caster's talents.
+        if let (Some(CompoundDebuff::StunVulnerability), Some(increase)) =
+            (aura_to_add.compound, aura_to_add.damage_mods.vulnerability)
+        {
+            combat_log.log(
+                CombatLogEventType::CrowdControl,
+                format!(
+                    "{} takes {:.0}% more damage while {} holds",
+                    target_id,
+                    increase * 100.0,
+                    aura_to_add.ability_name,
+                ),
+            );
+        }
         let riders = aura_to_add.compound.map(|compound| {
             let face_duration = aura_to_add.duration;
             let face_caster = aura_to_add.caster;
+            let face_name = aura_to_add.ability_name.clone();
+            let face_vulnerability = aura_to_add.damage_mods.vulnerability;
             super::combat_core::compound_riders(compound)
                 .into_iter()
                 .map(move |mut rider| {
                     rider.duration = face_duration;
                     rider.caster = face_caster;
+                    if compound == CompoundDebuff::StunVulnerability {
+                        rider.magnitude = face_vulnerability.unwrap_or(0.0);
+                        rider.ability_name = face_name.clone();
+                    }
                     rider
                 })
         });

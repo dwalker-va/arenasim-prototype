@@ -214,10 +214,15 @@ pub fn decide_interrupt(
     let def = book.get_unchecked(&ability);
     let reach = |at: Vec3| cast_reach(ctx, def.range, my_pos, at);
 
-    // The enemy casts (not channels) a scan considers: alive, not immune.
+    // The enemy casts (not channels) a scan considers: alive, not immune to
+    // damage, and not immune to interrupts (Aura Mastery).
     let scanned = || {
         casts.values().filter(|c| {
-            !c.channel && c.team != combatant.team && c.alive && !ctx.entity_is_immune(c.entity)
+            !c.channel
+                && c.team != combatant.team
+                && c.alive
+                && !ctx.entity_is_immune(c.entity)
+                && !ctx.entity_is_interrupt_immune(c.entity)
         })
     };
 
@@ -292,8 +297,9 @@ pub fn decide_interrupt(
         target
     };
 
-    // Not on an immune target (Divine Shield, Cyclone).
-    if ctx.entity_is_immune(target) {
+    // Not on an immune target (Divine Shield, Cyclone), nor one immune to
+    // interrupts (Aura Mastery).
+    if ctx.entity_is_immune(target) || ctx.entity_is_interrupt_immune(target) {
         return Idle;
     }
     let Some(cast) = casts.get(&target) else {
@@ -416,9 +422,12 @@ pub fn spell_lock_pick(
     let mut reachable: Vec<(InterruptCandidate, bool)> = Vec::new();
     let mut passed_over: Option<AbilityType> = None;
     let mut unseen = false;
-    let considered = casts
-        .iter()
-        .filter(|c| c.team != my_team && c.alive && !ctx.entity_is_immune(c.entity));
+    let considered = casts.iter().filter(|c| {
+        c.team != my_team
+            && c.alive
+            && !ctx.entity_is_immune(c.entity)
+            && !ctx.entity_is_interrupt_immune(c.entity)
+    });
     for c in considered.clone().filter(|c| !c.channel) {
         match cast_reach(ctx, range, my_pos, c.position) {
             CastReach::OutOfRange { .. } => continue,

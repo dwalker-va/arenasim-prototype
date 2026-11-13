@@ -23,6 +23,12 @@
 //! on the kill window's enemy ahead of the burst instead. Either way, only when
 //! halving the target's armor makes a Physical hit land at least
 //! [`EXPOSE_ARMOR_MIN_GAIN`] harder ([`try_expose_armor`]).
+//!
+//! Rupture (the Assassination tree's bleed, a talent) goes in the same place:
+//! below the Kidney Shot planner and ahead of Sinister Strike, on the kill
+//! target, whenever this Rogue's own Rupture is not already on it — so it
+//! keeps rolling as its cooldown allows ([`try_rupture`]). The two talents
+//! sit in different trees and no legal build holds both.
 #![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
@@ -379,6 +385,28 @@ pub fn decide_rogue_action(
             my_pos,
             auras,
             target_entity,
+            ctx,
+            &mut builder,
+        )
+    {
+        builder.finish();
+        return true;
+    }
+
+    // Rupture on the kill target, in the same place and for the same reason:
+    // it never takes the stun's moment or the energy pooled for it.
+    if abilities.get(&AbilityType::Rupture).is_some()
+        && try_rupture(
+            commands,
+            combat_log,
+            game_rng,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
             ctx,
             &mut builder,
         )
@@ -1015,6 +1043,84 @@ fn try_expose_armor(
     );
 
     // A dodged or parried Expose Armor exposes nothing; its energy is spent.
+    if ctx.melee_attack_avoided(commands, game_rng, target_entity, &def.name) {
+        return true;
+    }
+
+    if let Some(pending) = AuraPending::from_ability(target_entity, entity, def) {
+        commands.spawn(pending);
+    }
+    true
+}
+
+/// Try to use Rupture on `target_entity`, keeping it rolling: only while
+/// this Rogue's own Rupture is not on the target. Never on a target the team
+/// holds in crowd control a hit breaks (its ticks would break it). A melee
+/// attack: dodged or parried, it applies nothing and its cost is spent.
+fn try_rupture(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    game_rng: &mut GameRng,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    target_pos: Vec3,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::Rupture;
+    let def = abilities.get_unchecked(&ability);
+    let mine_on_target = ctx.active_auras.get(&target_entity).is_some_and(|list| {
+        list.iter()
+            .any(|a| a.caster == Some(entity) && a.ability_name == def.name)
+    });
+    if mine_on_target {
+        builder.reject(ability, RejectionReason::AlreadyApplied);
+        return false;
+    }
+
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
+
+    builder.choose(cleared, Some(target_entity), true);
+
+    combatant.current_mana -= def.mana_cost;
+    combatant.start_cooldown(ability);
+    combatant.global_cooldown = GCD;
+
+    let target_id = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        target_id,
+        "uses",
+    );
+
+    // A dodged or parried Rupture opens no bleed; its energy is spent.
     if ctx.melee_attack_avoided(commands, game_rng, target_entity, &def.name) {
         return true;
     }

@@ -196,6 +196,13 @@ pub enum AuraType {
     /// shield, how big and how often (`triggered_absorbs`). The aura itself
     /// changes no number; its magnitude is unread. User: Sacred Shield.
     TriggeredAbsorb,
+    /// Immunity to SILENCE and INTERRUPT effects: an interrupt that reaches
+    /// the holder's cast cuts nothing and locks no school
+    /// (`process_interrupts`), a new Silence is refused
+    /// (`auras::aura_type_immunity_source`), and a Silence it already carries
+    /// comes off as the immunity lands (`apply_pending_auras`). Magnitude
+    /// unused (1.0 by convention). User: Aura Mastery.
+    SilenceInterruptImmunity,
 }
 
 /// Which hits a damage modifier aura reaches: one school, or every school but
@@ -242,6 +249,11 @@ pub struct AuraDamageMods {
     /// `None` on every other aura.
     pub triggered_absorb:
         Option<crate::states::play_match::triggered_absorbs::TriggeredAbsorbConfig>,
+    /// On a stun that carries one (`AuraEffect::vulnerability`, Improved Kidney
+    /// Shot): the damage-taken increase its victim suffers while it holds.
+    /// `apply_pending_auras` lands it as the stun's
+    /// [`CompoundDebuff::StunVulnerability`] rider. `None` on every other aura.
+    pub vulnerability: Option<f32>,
 }
 
 /// A debuff's REMOVAL CLASS — what kind of thing it is for the purpose of
@@ -412,7 +424,7 @@ impl AuraType {
     /// DOES cost is coverage: a guard that sweeps `ALL` quietly stops covering
     /// whatever `ALL` forgot, while still reading like a whole-enum sweep.
     /// `aura_type_tests::all_lists_every_aura_type` is what stops that.
-    pub const ALL: [AuraType; 45] = [
+    pub const ALL: [AuraType; 46] = [
         AuraType::MovementSpeedSlow,
         AuraType::Root,
         AuraType::Stun,
@@ -458,6 +470,7 @@ impl AuraType {
         AuraType::KillingBlowSave,
         AuraType::DamageReflect,
         AuraType::TriggeredAbsorb,
+        AuraType::SilenceInterruptImmunity,
     ];
 
     /// Player-facing name of this MECHANIC, as the encyclopedia's mechanic
@@ -496,6 +509,7 @@ impl AuraType {
             AuraType::DamageTakenReduction => "Damage Reduction",
             AuraType::DamageImmunity => "Damage Immunity",
             AuraType::FearImmunity => "Fear Immunity",
+            AuraType::SilenceInterruptImmunity => "Silence and Interrupt Immunity",
             AuraType::MaxHealthIncrease => "Health Buff",
             AuraType::ArmorIncrease => "Armor Buff",
             AuraType::TravelForm => "Shapeshift",
@@ -591,6 +605,10 @@ impl AuraType {
             }
             AuraType::FearImmunity => {
                 "Breaks fear and blocks new fear effects. Horror effects bypass it."
+            }
+            AuraType::SilenceInterruptImmunity => {
+                "Removes silence and blocks new silence effects; an interrupt cuts no cast and \
+                 locks out no school."
             }
             AuraType::MaxHealthIncrease => "Raises the holder's maximum health.",
             AuraType::ArmorIncrease => "Raises the holder's armor, reducing physical damage taken.",
@@ -771,6 +789,7 @@ impl AuraType {
             | AuraType::SpellResistanceBuff
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
+            | AuraType::SilenceInterruptImmunity
             | AuraType::AttackSpeedIncrease
             | AuraType::NextCast
             | AuraType::DamageDealtIncrease
@@ -848,6 +867,7 @@ impl AuraType {
             | AuraType::SpellResistanceBuff
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
+            | AuraType::SilenceInterruptImmunity
             | AuraType::AttackSpeedIncrease
             | AuraType::NextCast
             | AuraType::DamageDealtIncrease
@@ -917,6 +937,12 @@ pub enum CompoundDebuff {
     /// Physical damage taken, one buff. Nothing removes it: it has no dispel
     /// type, and it is held the whole match.
     Shadowform,
+    /// A stun (the face) and a damage-taken increase on its victim, one
+    /// debuff: Kidney Shot with Improved Kidney Shot. The victim takes more
+    /// damage exactly while it is stunned — a CC break, a replacing stun or
+    /// the stun's end takes the increase with it. Built only from a stun
+    /// whose config carries a `vulnerability` (`AuraEffect::compound`).
+    StunVulnerability,
 }
 
 impl CompoundDebuff {
@@ -928,11 +954,12 @@ impl CompoundDebuff {
     /// exhaustive match is.** What it buys is COVERAGE: the guards below sweep
     /// it, so compound N+1 is checked the moment it is declared here, instead
     /// of a test quietly continuing to check only the one it was written for.
-    pub const ALL: [CompoundDebuff; 4] = [
+    pub const ALL: [CompoundDebuff; 5] = [
         CompoundDebuff::FrostArmorChill,
         CompoundDebuff::MarkOfTheWild,
         CompoundDebuff::EntanglingRoots,
         CompoundDebuff::Shadowform,
+        CompoundDebuff::StunVulnerability,
     ];
 
     /// The effect that REPRESENTS this debuff: the icon the frames draw, the
@@ -958,6 +985,7 @@ impl CompoundDebuff {
             CompoundDebuff::MarkOfTheWild => AuraType::MaxHealthIncrease,
             CompoundDebuff::EntanglingRoots => AuraType::Root,
             CompoundDebuff::Shadowform => AuraType::DamageDealtIncrease,
+            CompoundDebuff::StunVulnerability => AuraType::Stun,
         }
     }
 }
@@ -1441,12 +1469,14 @@ impl Aura {
     /// test in this repo observes. A wildcard arm would let variant N+1 default
     /// into "unpurgeable" without anyone deciding that.
     ///
-    /// Purgeable is BENEFICIAL-minus-exceptions, and the two exceptions are
+    /// Purgeable is BENEFICIAL-minus-exceptions, and the three exceptions are
     /// deliberate self buffs that must survive this list rather than be folded
     /// into the general rule:
     /// - `DamageImmunity` — Divine Shield is unpurgeable by design.
     /// - `FearImmunity` — Berserker Rage is a physical enrage, not magic, so
     ///   there is nothing for a magic purge to take.
+    /// - `SilenceInterruptImmunity` — Aura Mastery, a cooldown like the
+    ///   other two immunities.
     ///
     /// `ShadowSight` and `WeaponPoison` are mechanical markers rather than real
     /// buffs, and the whole debuff/CC half belongs to the target.
@@ -1508,7 +1538,12 @@ impl Aura {
             // not a spell cast on it. Its class says so as well (`Untyped`,
             // as TBC gives a shapeshift no dispel type), so it stays on the
             // Druid by either rule.
-            AuraType::DamageImmunity | AuraType::FearImmunity | AuraType::TravelForm => false,
+            // Aura Mastery's immunity is a cooldown like the other two
+            // immunities (and `Untyped` besides: 31821 has no dispel type).
+            AuraType::DamageImmunity
+            | AuraType::FearImmunity
+            | AuraType::SilenceInterruptImmunity
+            | AuraType::TravelForm => false,
 
             // Mechanical markers, not buffs.
             AuraType::ShadowSight | AuraType::WeaponPoison | AuraType::WeakenedSoul => false,
@@ -1802,7 +1837,7 @@ impl AuraPending {
                 // The FACE of a compound, when the RON declares one; its riders
                 // are pulled in by `apply_pending_auras` when the face lands.
                 // See `CompoundDebuff`.
-                compound: aura_effect.compound,
+                compound: aura_effect.compound(),
                 source_item: None,
                 source_talent: None,
                 next_cast: aura_effect.next_cast.clone(),
@@ -1865,7 +1900,7 @@ impl AuraPending {
                 dispel_type,
                 // The FACE of a compound, when the RON declares one. See
                 // `CompoundDebuff`.
-                compound: aura_effect.compound,
+                compound: aura_effect.compound(),
                 source_item: None,
                 source_talent: None,
                 next_cast: aura_effect.next_cast.clone(),
@@ -1927,7 +1962,7 @@ impl AuraPending {
                 dispel_type,
                 // The FACE of a compound, when the RON declares one. See
                 // `CompoundDebuff`.
-                compound: aura_effect.compound,
+                compound: aura_effect.compound(),
                 source_item: None,
                 source_talent: None,
                 next_cast: aura_effect.next_cast.clone(),
@@ -2104,6 +2139,7 @@ impl DRCategory {
             | AuraType::SpellResistanceBuff
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
+            | AuraType::SilenceInterruptImmunity
             | AuraType::AttackSpeedIncrease
             | AuraType::NextCast
             | AuraType::DamageDealtIncrease
@@ -2364,6 +2400,15 @@ mod compound_tests {
                 })
                 .chain(crate::states::play_match::combat_core::compound_riders(
                     CompoundDebuff::Shadowform,
+                ))
+                .collect(),
+                CompoundDebuff::StunVulnerability => std::iter::once(Aura {
+                    effect_type: AuraType::Stun,
+                    compound: Some(CompoundDebuff::StunVulnerability),
+                    ..Default::default()
+                })
+                .chain(crate::states::play_match::combat_core::compound_riders(
+                    CompoundDebuff::StunVulnerability,
                 ))
                 .collect(),
             };
