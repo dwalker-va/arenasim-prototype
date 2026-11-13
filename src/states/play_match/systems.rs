@@ -63,6 +63,7 @@ pub use super::combat_core::move_to_target;
 pub use super::combat_core::process_casting;
 pub use super::combat_core::process_channeling;
 pub use super::combat_core::process_interrupts;
+pub use super::instant_landings::land_instant_effects;
 pub use super::projectiles::move_projectiles;
 pub use super::projectiles::process_projectile_hits;
 pub use super::shadow_sight::check_orb_pickups;
@@ -200,6 +201,8 @@ pub fn add_core_combat_systems<M, N>(
     // The frame's talent proc events (`talent_procs.rs`), drained at the end
     // of Phase 3. Empty in every match without a talent proc.
     app.init_resource::<super::talent_procs::TalentProcEvents>();
+    // The instant effects `decide_abilities` queued for `land_instant_effects`.
+    app.init_resource::<super::instant_landings::InstantLandings>();
 
     // Phase 1: Resources and Auras
     app.add_systems(
@@ -298,6 +301,9 @@ pub fn add_core_combat_systems<M, N>(
             // query), capturing the mid-cast juke the ability pass never sees.
             tick_kite_occlusion.run_if(decide.clone()),
             decide_abilities.run_if(decide.clone()),
+            // The strikes and area effects the dispatch queued, landed over
+            // every combatant, casting or channeling included (AS-488).
+            land_instant_effects.run_if(decide.clone()),
             ApplyDeferred, // Flush PetCommand components spawned by Hunter
             // AI in decide_abilities so pet_ai_system sees
             // them on the same tick (per U3 of the pet

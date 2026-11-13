@@ -49,6 +49,7 @@ pub mod decision_trace;
 pub mod demonology;
 pub mod effects;
 pub mod equipment;
+pub mod instant_landings;
 pub mod map_config;
 pub mod map_geometry;
 pub mod match_flow;

@@ -87,3 +87,26 @@ Files: `src/states/play_match/class_ai/combat_snapshot.rs`,
   covers pet AI.
 - Provenance / full mechanism dive: `docs/reports/2026-06-healer-movement.md`
   (U4 mechanism section).
+
+## The resolution half (AS-488)
+
+The snapshot fix let a class AI SEE a casting target, but the strikes it queued
+(`QueuedInstantAttack`: Mortal Strike, Sinister Strike, Ambush, Crusader
+Strike) and the area effects (`QueuedAoeDamage` / `QueuedAoeHeal`: Frost Nova,
+Holy Nova) were still LANDED inside `decide_abilities` through its own
+`combatants` query — the one filtered `Without<CastingState>,
+Without<ChannelingState>` so that only free units decide. On a target mid-cast
+or mid-channel `get_mut` found nothing: no damage, no log line, no proc, while
+the attacker had paid its resource and cooldown. About one Mortal or Sinister
+Strike in five vanished.
+
+The landing is now its own system, `instant_landings::land_instant_effects`,
+next in the chain after `decide_abilities`, over an UNFILTERED query; the
+dispatch hands it the frame's queues through the `InstantLandings` resource,
+each strike with what its attacker brought to it (Divine Shield's penalty, its
+damage-dealt multiplier) read from the snapshot it decided in.
+
+**Prevention:** a query filtered to the units that may ACT is the wrong query to
+land an effect ON. `tests/instant_lands_on_casters.rs` derives every damaging
+instant from the ability table, makes each name its landing route, and lands
+each on a casting and a channeling target in a staged match.

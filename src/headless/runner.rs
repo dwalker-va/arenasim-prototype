@@ -24,10 +24,11 @@ use crate::states::play_match::talents::{
 use crate::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementConfigPlugin};
 // Use the stable systems API instead of importing internal functions directly
 use crate::states::match_config::CharacterClass;
+use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::{
-    ActiveAuras, AuraType, DRTracker, FormationMemory, HealerPosture, HealingRefused,
-    MovementDirective, MovementGoal, Pet, PetType, Totem, TotemElement, TrapLaunchProjectile,
-    TrapType,
+    ActiveAuras, AuraType, CastingState, ChannelingState, DRTracker, FormationMemory,
+    HealerPosture, HealingRefused, MovementDirective, MovementGoal, Pet, PetType, Totem,
+    TotemElement, TrapLaunchProjectile, TrapType,
 };
 use crate::states::play_match::constants::PET_SLOT_BASE;
 use crate::states::play_match::decision_trace::{DecisionTrace, TraceWriter};
@@ -97,6 +98,11 @@ pub struct ObservedCombatant {
     /// Lets probes name which stage of the formation machine moved its goal.
     /// `None` for a unit with no healer posture.
     pub formation: Option<FormationMemory>,
+    /// The cast in progress (`CastingState`), if any — a cast already
+    /// interrupted and only showing it included.
+    pub casting: Option<AbilityType>,
+    /// The channel in progress (`ChannelingState`), if any.
+    pub channeling: Option<AbilityType>,
 }
 
 /// A read-only snapshot of one Shaman totem on a frame. Totems are NOT
@@ -1184,6 +1190,8 @@ fn observe_frame(world: &World) -> FrameObservation {
                         _ => None,
                     }),
                 formation: entity_ref.get::<HealerPosture>().map(|p| p.formation),
+                casting: entity_ref.get::<CastingState>().map(|c| c.ability),
+                channeling: entity_ref.get::<ChannelingState>().map(|c| c.ability),
             },
         );
     }
