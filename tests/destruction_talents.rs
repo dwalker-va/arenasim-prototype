@@ -1218,6 +1218,77 @@ fn a_conflagrate_into_an_immunity_consumes_nothing() {
     );
 }
 
+/// A Conflagrate an absorb soaks whole still lands, so it consumes the
+/// Immolate: an absorbed hit is a hit, unlike one an immunity refuses
+/// ([`a_conflagrate_into_an_immunity_consumes_nothing`], the contrast). The
+/// Immolate is staged half a second from its next tick, so a burn left behind
+/// would tick inside the match; the control, the same Immolate with no
+/// Conflagrate, does.
+#[test]
+fn an_absorbed_conflagrate_still_consumes_the_immolate() {
+    let staged = |conflagrate: bool| {
+        held_match(&["Warlock"], conflagrate_build(), 1.0, 3.0, move |s| {
+            s.world(move |w| {
+                let (me, foe) = (T1.entity(w), T2.entity(w));
+                let mut immolate = {
+                    let warlock = w.get::<Combatant>(me).expect("the Warlock");
+                    let def = warlock.book().get_unchecked(&AbilityType::Immolate);
+                    AuraPending::from_ability(foe, me, def)
+                        .expect("Immolate burns")
+                        .aura
+                };
+                immolate.time_until_next_tick = 0.5;
+                let shield = Aura {
+                    effect_type: AuraType::Absorb,
+                    duration: 30.0,
+                    magnitude: 10_000.0,
+                    ability_name: "Power Word: Shield".into(),
+                    break_on_damage_threshold: -1.0,
+                    ..Default::default()
+                };
+                let mut auras = w
+                    .get_mut::<ActiveAuras>(foe)
+                    .expect("the held Warrior's auras");
+                auras.auras.push(immolate);
+                auras.auras.push(shield);
+                if conflagrate {
+                    w.entity_mut(me)
+                        .insert(CastingState::new(AbilityType::Conflagrate, foe, 0.0));
+                }
+            })
+        })
+    };
+    let soaked = staged(true);
+    let hits = lines(&soaked.log, "Conflagrate hits Team 2 Warrior");
+    assert_eq!(hits.len(), 1, "{}", soaked.log);
+    assert!(
+        hits[0].contains("for 0 damage (") && hits[0].contains(" absorbed)"),
+        "{}",
+        hits[0]
+    );
+    assert_eq!(
+        lines(
+            &soaked.log,
+            "Warlock #1's Conflagrate consumes Immolate on Team 2 Warrior"
+        )
+        .len(),
+        1,
+        "{}",
+        soaked.log
+    );
+    assert!(
+        lines(&soaked.log, "Warlock #1's Immolate ticks").is_empty(),
+        "a burn was left behind:\n{}",
+        soaked.log
+    );
+    let control = staged(false);
+    assert!(
+        !lines(&control.log, "Warlock #1's Immolate ticks").is_empty(),
+        "{}",
+        control.log
+    );
+}
+
 /// The Shadow Vulnerability aura Improved Shadow Bolt's proc lands, as the
 /// shipped table builds it.
 fn shadow_vulnerability() -> Aura {
