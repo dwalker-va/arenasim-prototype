@@ -230,7 +230,7 @@ fn the_medallion_goes_before_a_class_break() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn a_dispellable_hold_waits_for_the_priest_and_a_stun_does_not() {
+fn a_dispellable_hold_waits_for_the_priest_and_an_undispellable_stun_does_not() {
     let view = held_beside_a_priest(AuraType::Polymorph, 8.0).decide_held(WEARER);
     assert!(waits(&view), "{view:?}");
     // Freezing Trap and Fear are urgent dispels too.
@@ -247,12 +247,13 @@ fn a_dispellable_hold_waits_for_the_priest_and_a_stun_does_not() {
         "{view:?}"
     );
     assert_eq!(view.chose().map(|c| c.0), Some(AbilityType::BerserkerRage));
-    // Control: no dispel lifts a stun.
+    // Control: no dispel lifts a stun with no magic class (this fixture's is
+    // schoolless; a magic stun is waited for, `tests/magic_stun_dispel.rs`).
     assert!(used(
         &held_beside_a_priest(AuraType::Stun, 4.0).decide_held(WEARER)
     ));
-    // Control: a stun beside the polymorph is still a long hold the dispel
-    // leaves, so there is nothing to wait for.
+    // Control: such a stun beside the polymorph is still a long hold the
+    // dispel leaves, so there is nothing to wait for.
     let view = held_beside_a_priest(AuraType::Polymorph, 8.0)
         .aura(WEARER, AuraType::Stun, 4.0)
         .decide_held(WEARER);

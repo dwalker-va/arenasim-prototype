@@ -299,6 +299,114 @@ fn stun_cancels_cast_charges_no_mana_and_spawns_interrupted_marker() {
 }
 
 // ============================================================================
+// The caster must still be able to pay as the cast completes (AS-438)
+// ============================================================================
+//
+// The cast gate checked the mana as the cast began, but a Mana Burn landing
+// mid-cast can take it. A caster that cannot pay the cast's cost as it
+// completes fails it, as in TBC: nothing lands and nothing is paid. The cost
+// is the one the cast was begun with — a next-cast modifier's, when the cast
+// spent one.
+
+use arenasim::states::play_match::next_cast::{NextCastModifier, NextCastScope, SpentNextCast};
+
+/// `caster`'s mana set to `points`.
+fn set_mana(app: &mut App, caster: Entity, points: f32) {
+    app.world_mut()
+        .get_mut::<Combatant>(caster)
+        .unwrap()
+        .current_mana = points;
+}
+
+/// A Frostbolt from a Mage holding `points` mana, completing on the next tick
+/// at a target in the open; `free` gives the cast a spent "costs nothing"
+/// modifier (Inner Focus's shape). Returns the app and the Mage.
+fn frostbolt_with_mana(points: f32, free: bool) -> (App, Entity) {
+    let mut app = harness_app(Vec::new());
+    let mage = spawn_combatant(&mut app, CharacterClass::Mage, Vec3::new(0.0, 1.0, -12.0));
+    let victim = spawn_combatant(&mut app, CharacterClass::Mage, Vec3::new(0.0, 1.0, 12.0));
+    set_mana(&mut app, mage, points);
+    if free {
+        app.world_mut()
+            .get_mut::<Combatant>(mage)
+            .unwrap()
+            .next_cast_spent = Some(SpentNextCast {
+            caster: mage,
+            ability: AbilityType::Frostbolt,
+            modifier: NextCastModifier {
+                applies_to: NextCastScope::Abilities(vec![AbilityType::Frostbolt]),
+                instant: false,
+                free: true,
+                crit_chance: 0.0,
+                cast_time_reduction: 0.0,
+                cost_reduction: 0.0,
+                power: 0.0,
+            },
+            auras: Vec::new(),
+        });
+    }
+    begin_completing_cast(&mut app, mage, AbilityType::Frostbolt, victim);
+    (app, mage)
+}
+
+/// (7) One point short of the cost at completion: the cast fails — a
+/// Fizzled ending, no mana charged.
+#[test]
+fn a_cast_its_caster_cannot_pay_for_at_completion_fails() {
+    let (mut app, mage) = frostbolt_with_mana(FROSTBOLT_COST - 1.0, false);
+
+    run(&mut app);
+
+    assert_eq!(
+        mana(&app, mage),
+        FROSTBOLT_COST - 1.0,
+        "a cast its caster cannot pay for must cost no mana"
+    );
+    assert_eq!(
+        cast_endings(&mut app, mage),
+        vec![CastEndingKind::Fizzled],
+        "a cast failed for mana must spawn exactly one Fizzled CastEnding"
+    );
+}
+
+/// (8) Exactly the cost at completion: the caster can pay, so the cast lands
+/// and leaves it at zero.
+#[test]
+fn a_cast_paid_with_exactly_its_cost_lands() {
+    let (mut app, mage) = frostbolt_with_mana(FROSTBOLT_COST, false);
+
+    run(&mut app);
+
+    assert_eq!(
+        mana(&app, mage),
+        0.0,
+        "a cast paid with exactly its cost must land and leave the caster at 0"
+    );
+    assert_eq!(cast_endings(&mut app, mage), vec![CastEndingKind::Landed]);
+}
+
+/// (9) A cast made free by a next-cast modifier needs no mana: below the
+/// book cost at completion, it still lands and pays nothing. Its control is
+/// (7), the same cast without the modifier, which fails.
+#[test]
+fn a_free_cast_lands_below_its_book_cost() {
+    let (mut app, mage) = frostbolt_with_mana(FROSTBOLT_COST - 1.0, true);
+
+    run(&mut app);
+
+    assert_eq!(
+        mana(&app, mage),
+        FROSTBOLT_COST - 1.0,
+        "a free cast must cost nothing"
+    );
+    assert_eq!(
+        cast_endings(&mut app, mage),
+        vec![CastEndingKind::Landed],
+        "a free cast must land whatever mana its caster holds"
+    );
+}
+
+// ============================================================================
 // Proc trinkets ride the SAME resolution point
 // ============================================================================
 //

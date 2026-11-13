@@ -1212,8 +1212,15 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         // the holder from the match outright — there is no honest basis for
         // ranking one above the other, so they tie.
         AuraType::Polymorph | AuraType::Incapacitate => 100,
-        // Unstable Affliction's backlash silence (5s). Above Fear because it is
-        // the only crowd control in the game that does NOT break on damage
+        // A MAGIC stun (Hammer of Justice, Blackout; a physical one never
+        // reaches this, `Aura::can_be_dispelled`). Ties the incapacitates: the
+        // holder is as helpless, and since a stun does not break on damage a
+        // dispel is the only thing that ends it early — the Silence's reason,
+        // without the Silence's mitigation (a stunned unit cannot even move
+        // or swing).
+        AuraType::Stun => 100,
+        // Unstable Affliction's backlash silence (5s). Above Fear because,
+        // like a stun, it does NOT break on damage
         // (`break_on_damage_threshold: -1.0`), so a dispel is the sole way it
         // ends early, where a feared/sheeped/trapped ally is freed by incidental
         // cleave. Below the incapacitates because it leaves movement and
@@ -1248,8 +1255,7 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         // dispellable" a two-place decision instead of a silent promotion.
         // Cyclone is the one crowd control here that is undispellable by RULE
         // (TBC) rather than by removal class — see `is_magic_dispellable`.
-        AuraType::Stun
-        | AuraType::Cyclone
+        AuraType::Cyclone
         | AuraType::SpellSchoolLockout
         | AuraType::HealingReduction
         | AuraType::AttackPowerReduction

@@ -329,7 +329,12 @@ For deeper context, see these focused references:
    charge site. NOTE: instant abilities (0 cast time, applied in class AI without
    a `CastingState`) charge mana atomically at their application site and are
    unaffected. Channels (Drain Life) pay the full cost up-front at channel start
-   (WoW-faithful — an interrupted channel is not refunded).
+   (WoW-faithful — an interrupted channel is not refunded). A cast whose caster
+   can no longer pay at completion (a Mana Burn landed mid-cast) FAILS, as in
+   TBC: "fails to cast X: not enough mana", no effect, no mana. The class AI
+   never charges a cast with a cast bar as it begins; nothing clamps the
+   resource at zero, and `tests/mana_spend_audit.rs` names every site that
+   lowers it (AS-438).
 4. **Arena dampening**: starting `DAMPENING_START_SECS` (75s) after gates, ALL healing,
    absorb shields, and lifesteal ramp linearly to zero over `DAMPENING_RAMP_SECS` (120s;
    both in `constants.rs`). Ticked by `match_flow::update_dampening` into the
@@ -854,8 +859,12 @@ any ring fits either ring socket, and the same item may not occupy both
      on Windfury Totem's own path (`combat_core::ExtraSwingSource`), rolled
      where the swing is queued rather than after it lands. It takes no
      `magnitude`, `duration` or `internal_cooldown` (validated), never draws
-     the totem's `WindfuryTornado`, grants no rage (a TBC deviation, AS-448)
+     the totem's `WindfuryTornado`, grants a white hit's rage when it lands
      and no further extra swing, and logs `X procs <trinket> (extra attack)`.
+     One swing gets at most ONE extra attack, and the trinket's comes first:
+     the totem is rolled only when no trinket fired
+     (`combat_core::roll_extra_attack`; TBC, sourced in
+     `docs/design/wow-mechanics.md`).
      No stat buys it, so it is priced at a DECLARED rate per unit of `chance`,
      `WEIGHT_EXTRA_SWING`: 1.5x haste's weight, provisional (a 10x-dose sweep
      the constant cites). Every consumer that lists or draws proc BUFFS asks
@@ -1193,7 +1202,8 @@ machine) and the tests in `formation.rs`.
 choosing its ally with `class_ai::dispel_chase_target` (no RON knob). Cleanse and
 Dispel Magic only reach allies within their 30yd range AND in sight, so a
 teammate held in urgent crowd control the dispel removes
-(`URGENT_DISPEL_PRIORITY`: Freezing Trap, Polymorph, the UA silence, Fear)
+(`URGENT_DISPEL_PRIORITY`: Freezing Trap, Polymorph, a magic stun — Hammer of
+Justice, Blackout — the UA silence, Fear)
 beyond that range or behind cover would otherwise sit out the whole CC. The
 healer walks straight at the nearest such teammate (a `MovementGoal::Point`,
 tangent-steered round a pillar, same walk as the medic chase, which outranks it)

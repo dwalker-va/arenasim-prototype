@@ -58,13 +58,19 @@
 //! purge takes it as magic.
 //!
 //! The class is the subject here, not the mechanic. Whether a dispel takes a
-//! magic STUN (it does not — `AuraType::is_magic_dispellable`) is the aura
-//! type's question, and is answered there.
+//! magic CYCLONE (it does not — `AuraType::is_magic_dispellable`) is the aura
+//! type's question, and is answered there. A STUN is the other way round: its
+//! type defers to the class (`AuraType::is_dispelled_per_aura`), so a magic
+//! stun comes off to a dispel and a physical one does not, as in TBC (user
+//! ruling, 2026-11-13). `every_stun_follows_its_removal_class` holds every
+//! stun in the sim to that, and `a_planted_stun_follows_its_class` holds the
+//! rule to it for a stun of each class.
 
 use bevy::prelude::*;
 
 use arenasim::combat::log::CombatLog;
 use arenasim::states::play_match::abilities::AbilityType;
+use arenasim::states::play_match::abilities::SpellSchool;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::class_ai::{ally_dispel_scope, ally_removal};
@@ -982,4 +988,170 @@ fn no_dispel_takes_the_kidney_shot_rider() {
         ),
         "control: Dispel Magic cannot take a Magic vulnerability, so the check proves nothing"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Stuns: the type defers to the class (AS-491)
+// ---------------------------------------------------------------------------
+
+/// The three ally-side removals, each with the class of the unit that casts
+/// it.
+const ALLY_DISPELS: [(AbilityType, CharacterClass); 3] = [
+    (AbilityType::DispelMagic, CharacterClass::Priest),
+    (AbilityType::PaladinCleanse, CharacterClass::Paladin),
+    (AbilityType::DevourMagic, CharacterClass::Warlock),
+];
+
+/// The ally-side removals that took `aura` off its bearer, through the real
+/// `process_dispels`.
+fn dispels_taking(aura: &Aura) -> Vec<AbilityType> {
+    ALLY_DISPELS
+        .iter()
+        .filter(|(dispel, class)| !survives(aura.clone(), ally_dispel_scope(*dispel), *class))
+        .map(|(dispel, _)| *dispel)
+        .collect()
+}
+
+/// Every stun in the sim, by its source's name, and whether it is magic. A
+/// new stun fails `every_stun_follows_its_removal_class` until its row is
+/// written here — and its row cannot say anything its class does not.
+const STUNS: [(&str, bool); 5] = [
+    // TBC 1833: DispelType 0.
+    ("CheapShot", false),
+    // TBC 8643: DispelType 0.
+    ("KidneyShot", false),
+    // TBC 10308: DispelType 1 (Magic). User ruling, 2026-11-13.
+    ("HammerOfJustice", true),
+    // TBC 7371 and its ranks (the pet's Charge): DispelType 0.
+    ("BoarCharge", false),
+    // TBC 15269: DispelType 1 (Magic). User ruling, 2026-11-13.
+    ("Blackout", true),
+];
+
+/// User ruling, 2026-11-13 (AS-491): a stun is dispellable exactly when its
+/// removal class is magic, as in TBC. Every stun an ability or a talent proc
+/// lands is found from the data, named against [`STUNS`] by set equality, and
+/// put through every ally-side removal: all three take a magic stun, none
+/// takes a physical one. Its class is tabled against TBC above.
+#[test]
+fn every_stun_follows_its_removal_class() {
+    let defs = AbilityDefinitions::default();
+    let mut stuns: Vec<(String, Aura)> = defs
+        .iter()
+        .filter(|(ability, _)| !matches!(expected(**ability), Row::NoAura))
+        .map(|(ability, _)| (format!("{ability:?}"), landed_aura(&defs, *ability)))
+        .chain(talent_procs().into_iter().filter_map(|(id, name, proc)| {
+            proc_aura(id, &name, proc).map(|aura| (format!("{id:?}"), aura))
+        }))
+        .filter(|(_, aura)| aura.effect_type == AuraType::Stun)
+        .collect();
+    stuns.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut found: Vec<(String, bool)> = stuns
+        .iter()
+        .map(|(name, aura)| (name.clone(), sim_class(aura) == Sim::Magic))
+        .collect();
+    found.sort();
+    let mut tabled: Vec<(String, bool)> = STUNS
+        .iter()
+        .map(|&(name, magic)| (name.to_string(), magic))
+        .collect();
+    tabled.sort();
+    assert_eq!(found, tabled, "the sim's stuns against `STUNS`");
+
+    let mut wrong = Vec::new();
+    for (name, aura) in stuns {
+        let magic = sim_class(&aura) == Sim::Magic;
+        let expected: Vec<AbilityType> = if magic {
+            ALLY_DISPELS.iter().map(|(d, _)| *d).collect()
+        } else {
+            Vec::new()
+        };
+        let taken = dispels_taking(&aura);
+        if taken != expected {
+            wrong.push(format!(
+                "{name} ({:?}): taken by {taken:?}, but a {} stun is taken by {expected:?}",
+                sim_class(&aura),
+                if magic { "magic" } else { "non-magic" }
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The rule, on a planted stun of each removal class — the shapes a new stun
+/// could arrive in, from the RON or from a constructor in engine code. A
+/// dispel takes it exactly when the class is magic: declared `Magic`, or
+/// derived (`Auto`) from a magic school. A physical school, a schoolless
+/// `Auto`, and every non-magic class leave it.
+#[test]
+fn a_planted_stun_follows_its_class() {
+    let planted = |dispel_type: DispelType, spell_school: Option<SpellSchool>| Aura {
+        effect_type: AuraType::Stun,
+        duration: 6.0,
+        magnitude: 1.0,
+        ability_name: "Planted stun".to_string(),
+        dispel_type,
+        spell_school,
+        ..Default::default()
+    };
+    let every = || ALLY_DISPELS.iter().map(|(d, _)| *d).collect::<Vec<_>>();
+    let cases: [(&str, Aura, Vec<AbilityType>); 9] = [
+        ("declared Magic", planted(DispelType::Magic, None), every()),
+        (
+            "Auto, Holy",
+            planted(DispelType::Auto, Some(SpellSchool::Holy)),
+            every(),
+        ),
+        (
+            "Auto, Shadow",
+            planted(DispelType::Auto, Some(SpellSchool::Shadow)),
+            every(),
+        ),
+        (
+            "Auto, Physical school",
+            planted(DispelType::Auto, Some(SpellSchool::Physical)),
+            Vec::new(),
+        ),
+        (
+            "Auto, no school",
+            planted(DispelType::Auto, None),
+            Vec::new(),
+        ),
+        (
+            "Auto, schoolless school",
+            planted(DispelType::Auto, Some(SpellSchool::None)),
+            Vec::new(),
+        ),
+        (
+            "declared Physical",
+            planted(DispelType::Physical, Some(SpellSchool::Holy)),
+            Vec::new(),
+        ),
+        (
+            "Untyped",
+            planted(DispelType::Untyped, Some(SpellSchool::Holy)),
+            Vec::new(),
+        ),
+        (
+            "Curse",
+            planted(DispelType::Curse, Some(SpellSchool::Shadow)),
+            Vec::new(),
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (label, aura, expected) in cases {
+        let taken = dispels_taking(&aura);
+        if taken != expected {
+            wrong.push(format!(
+                "{label}: taken by {taken:?}, expected {expected:?}"
+            ));
+        }
+        if aura.can_be_dispelled() != !expected.is_empty() {
+            wrong.push(format!(
+                "{label}: `can_be_dispelled` disagrees with the dispels"
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
