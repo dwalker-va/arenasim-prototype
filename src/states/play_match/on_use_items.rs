@@ -381,7 +381,8 @@ pub const fn cc_break_breaks(aura: AuraType) -> bool {
         | AuraType::DamageOverTime
         | AuraType::WeakenedSoul
         | AuraType::DamageTakenIncrease
-        | AuraType::ArmorPercentReduction => false,
+        | AuraType::ArmorPercentReduction
+        | AuraType::LeechMark => false,
         // Buffs, states and markers.
         AuraType::Absorb
         | AuraType::HealingOverTime

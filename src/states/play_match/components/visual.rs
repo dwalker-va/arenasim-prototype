@@ -797,6 +797,7 @@ impl HealImpact {
             | AuraType::KillingBlowSave
             | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect
+            | AuraType::LeechMark
             | AuraType::TravelForm => None,
         }
     }
@@ -1602,6 +1603,10 @@ impl AuraApplyRoute {
             | AuraType::KillingBlowSave
             | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect => AuraApplyRoute::Band,
+
+            // Vampiric Embrace's leech has no bespoke apply treatment yet:
+            // the family cue draws it as a debuff (its visual card is AS-357).
+            AuraType::LeechMark => AuraApplyRoute::Band,
 
             // Aura Mastery's immunity has no bespoke apply treatment yet: the
             // family cue draws it (its visual card is AS-374).

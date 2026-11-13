@@ -98,6 +98,8 @@ const BAND_TYPES: &[AuraType] = &[
     AuraType::SilenceInterruptImmunity,
     // Shadow Dance's window (AS-419): the band until AS-368 draws it.
     AuraType::ShadowDance,
+    // Vampiric Embrace's leech (AS-416): the band until AS-357 draws it.
+    AuraType::LeechMark,
 ];
 
 fn names(types: impl IntoIterator<Item = AuraType>) -> BTreeSet<String> {
