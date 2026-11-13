@@ -302,10 +302,13 @@ pub struct AbilityConfig {
     /// Coefficient for spell power scaling: Healing = Base + (SpellPower * Coefficient)
     #[serde(default)]
     pub healing_coefficient: f32,
-    /// A heal that CONSUMES an aura on its target: the named ability's aura
-    /// must be on the target for the heal to be cast, and the heal removes it
-    /// when it lands (Swiftmend consumes Rejuvenation). The AI checks the
-    /// precondition; `process_casting` performs the removal.
+    /// A cast that CONSUMES an aura on its target: the named ability's aura
+    /// must be on the target for it to be cast, and it removes that aura when
+    /// it lands. A heal takes its caster's own first and another's when its
+    /// caster has none (Swiftmend consumes Rejuvenation); a hit takes only its
+    /// caster's own, and nothing from a target immune to it (Conflagrate
+    /// consumes the Warlock's Immolate). The AI checks the precondition;
+    /// `process_casting` performs the removal.
     #[serde(default)]
     pub consumes_aura: Option<AbilityType>,
 
@@ -766,6 +769,9 @@ impl AbilityDefinitions {
             AbilityType::InnerFocus,
             AbilityType::PowerInfusion,
             AbilityType::PainSuppression,
+            // Warlock: the Destruction tree
+            AbilityType::Shadowburn,
+            AbilityType::Conflagrate,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -1556,6 +1562,8 @@ mod tests {
                     AbilityType::SiphonLife,
                     AbilityType::AmplifyCurse,
                     AbilityType::CurseOfExhaustion,
+                    AbilityType::Shadowburn,
+                    AbilityType::Conflagrate,
                 ],
             ),
             (

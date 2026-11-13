@@ -60,7 +60,8 @@ use std::collections::BTreeSet;
 
 use super::abilities::AbilityType;
 use super::components::{
-    Aura, AuraPending, AuraStacks, AuraType, Combatant, DispelType, GameRng, StackScope,
+    Aura, AuraPending, AuraStacks, AuraType, Combatant, DamageScope, DispelType, GameRng,
+    StackScope,
 };
 use super::next_cast::NextCastModifier;
 use super::talents::TalentId;
@@ -207,6 +208,18 @@ pub enum ProcEffect {
         /// Its removal class: declared, as a proc has no school to derive one
         /// from.
         dispel_type: DispelType,
+        /// The hits a damage modifier reaches (`DamageTakenIncrease`,
+        /// `DamageDealtIncrease`, `DamageTakenReduction`), as an ability's aura
+        /// declares it: Shadow Vulnerability's `Some(School(Shadow))`. `None`,
+        /// the default, reaches every hit.
+        #[serde(default)]
+        scope: Option<DamageScope>,
+        /// Hit charges on a `DamageTakenIncrease`: each direct hit it raises
+        /// spends one, and the aura ends at zero (Shadow Vulnerability: 4). A
+        /// proc firing again while its aura is up gives them back. `None`, the
+        /// default, lasts its duration.
+        #[serde(default)]
+        charges: Option<u8>,
         /// The aura's name; the talent's name when omitted.
         #[serde(default)]
         name: Option<String>,
@@ -242,6 +255,8 @@ impl ProcEffect {
                 duration,
                 tick_interval,
                 dispel_type,
+                scope,
+                charges,
                 name,
             } => ProcEffect::ApplyAura {
                 on: *on,
@@ -250,6 +265,8 @@ impl ProcEffect {
                 duration: *duration,
                 tick_interval: *tick_interval,
                 dispel_type: *dispel_type,
+                scope: *scope,
+                charges: *charges,
                 name: name.clone(),
             },
             ProcEffect::NextCast {
@@ -393,6 +410,8 @@ impl TalentProc {
                 magnitude,
                 duration,
                 tick_interval,
+                scope,
+                charges,
                 ..
             } => {
                 if *aura_type == AuraType::NextCast {
@@ -410,6 +429,28 @@ impl TalentProc {
                     || *tick_interval < 0.0
                 {
                     return Err("a proc aura needs a finite magnitude and a duration".to_string());
+                }
+                if scope.is_some()
+                    && !matches!(
+                        aura_type,
+                        AuraType::DamageTakenIncrease
+                            | AuraType::DamageDealtIncrease
+                            | AuraType::DamageTakenReduction
+                    )
+                {
+                    return Err(format!(
+                        "a proc's {aura_type:?} aura is not a damage modifier, so it has no scope"
+                    ));
+                }
+                match charges {
+                    Some(0) => return Err("a proc aura with charges holds at least one".into()),
+                    Some(_) if *aura_type != AuraType::DamageTakenIncrease => {
+                        return Err(format!(
+                            "a proc's {aura_type:?} aura spends no charges: only a \
+                             DamageTakenIncrease does"
+                        ));
+                    }
+                    _ => {}
                 }
             }
             ProcEffect::NextCast {
@@ -625,22 +666,24 @@ pub fn effect_aura(slot: &TalentProcSlot, owner: Entity, event: &ProcEvent) -> O
             duration,
             tick_interval,
             dispel_type,
+            scope,
+            charges,
             ..
         } => {
             let target = match on {
                 ProcTarget::Owner => owner,
                 ProcTarget::Other => event.other?,
             };
-            Some(AuraPending {
-                target,
-                aura: base(
-                    *aura_type,
-                    *magnitude,
-                    *duration,
-                    *tick_interval,
-                    *dispel_type,
-                ),
-            })
+            let mut aura = base(
+                *aura_type,
+                *magnitude,
+                *duration,
+                *tick_interval,
+                *dispel_type,
+            );
+            aura.damage_mods.scope = *scope;
+            aura.damage_mods.charges = *charges;
+            Some(AuraPending { target, aura })
         }
         ProcEffect::NextCast {
             modifier,
@@ -1025,6 +1068,8 @@ mod tests {
             duration: 3.0,
             tick_interval: 0.0,
             dispel_type: DispelType::Auto,
+            scope: None,
+            charges: None,
             name: Some("Blackout".to_string()),
         };
         let victim = Entity::from_raw(9);
@@ -1136,8 +1181,89 @@ mod tests {
             duration: 3.0,
             tick_interval: 0.0,
             dispel_type: DispelType::Auto,
+            scope: None,
+            charges: None,
             name: None,
         };
         assert!(other.validate(1, &r).is_err(), "a use has no other unit");
+    }
+
+    /// A proc aura's scope and charges are a damage modifier's: Shadow
+    /// Vulnerability's shape validates, and each is refused on an aura that
+    /// cannot use it.
+    #[test]
+    fn validate_holds_scope_and_charges_to_their_auras() {
+        let r = reachable();
+        let aura = |aura_type, scope, charges| {
+            let mut p = trance();
+            p.trigger = TalentTrigger::SpellHit;
+            p.abilities = vec![AbilityType::Shadowbolt];
+            p.effect = ProcEffect::ApplyAura {
+                on: ProcTarget::Other,
+                aura_type,
+                magnitude: 0.1,
+                duration: 12.0,
+                tick_interval: 0.0,
+                dispel_type: DispelType::Magic,
+                scope,
+                charges,
+                name: None,
+            };
+            p
+        };
+        let shadow = Some(DamageScope::School(
+            crate::states::play_match::abilities::SpellSchool::Shadow,
+        ));
+        assert!(aura(AuraType::DamageTakenIncrease, shadow, Some(4))
+            .validate(2, &r)
+            .is_ok());
+        assert!(aura(AuraType::DamageTakenIncrease, None, None)
+            .validate(2, &r)
+            .is_ok());
+        assert!(
+            aura(AuraType::DamageTakenIncrease, shadow, Some(0))
+                .validate(2, &r)
+                .is_err(),
+            "no charges"
+        );
+        assert!(
+            aura(AuraType::DamageTakenReduction, shadow, Some(4))
+                .validate(2, &r)
+                .is_err(),
+            "charges are spent by an increase only"
+        );
+        assert!(aura(AuraType::DamageTakenReduction, shadow, None)
+            .validate(2, &r)
+            .is_ok());
+        assert!(
+            aura(AuraType::MovementSpeedSlow, shadow, None)
+                .validate(2, &r)
+                .is_err(),
+            "a slow has no scope"
+        );
+    }
+
+    /// The aura a proc lands carries its scope and its charges.
+    #[test]
+    fn a_proc_aura_carries_its_scope_and_charges() {
+        let mut p = trance();
+        p.trigger = TalentTrigger::SpellHit;
+        let scope = Some(DamageScope::Spells);
+        p.effect = ProcEffect::ApplyAura {
+            on: ProcTarget::Other,
+            aura_type: AuraType::DamageTakenIncrease,
+            magnitude: 0.1,
+            duration: 12.0,
+            tick_interval: 0.0,
+            dispel_type: DispelType::Magic,
+            scope,
+            charges: Some(3),
+            name: None,
+        };
+        let victim = Entity::from_raw(9);
+        let event = ProcEvent::new(unit(), TalentTrigger::SpellHit).other(victim);
+        let landed = effect_aura(&slot(p), unit(), &event).unwrap();
+        assert_eq!(landed.aura.damage_mods.scope, scope);
+        assert_eq!(landed.aura.damage_mods.charges, Some(3));
     }
 }

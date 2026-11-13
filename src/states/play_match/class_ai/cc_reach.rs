@@ -124,6 +124,8 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::CurseOfTongues
         | A::CurseOfExhaustion
         | A::SiphonLife
+        | A::Shadowburn
+        | A::Conflagrate
         | A::UnstableAffliction
         | A::DeathCoil
         | A::ArcaneIntellect
