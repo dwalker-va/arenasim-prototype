@@ -2048,7 +2048,8 @@ mod tests {
     /// the beneficial list cannot vouch for them: `DamageImmunity` (Divine
     /// Shield), `FearImmunity` (Berserker Rage — a physical enrage, not
     /// magic), `SilenceInterruptImmunity` (Aura Mastery, a cooldown like the
-    /// other two) and `TravelForm` (a shapeshift, not a spell on the Druid).
+    /// other two), `ShadowDance` (a cooldown too) and `TravelForm` (a
+    /// shapeshift, not a spell on the Druid).
     /// Anything else appearing here is a debuff previewing on the wrong
     /// unit, and adding to this list is how that gets waved through.
     #[test]
@@ -2078,6 +2079,7 @@ mod tests {
                 AuraType::DamageImmunity
                     | AuraType::FearImmunity
                     | AuraType::SilenceInterruptImmunity
+                    | AuraType::ShadowDance
                     | AuraType::TravelForm
             );
             assert!(

@@ -1579,6 +1579,16 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         AbilityType::CrusaderStrike,
         Unreached::NeedsKnob("a build that takes Crusader Strike"),
     ),
+    // The Subtlety tree (AS-419): tests/subtlety_talents.rs builds it in its
+    // scene pairs.
+    (
+        AbilityType::Hemorrhage,
+        Unreached::NeedsKnob("a build that takes Hemorrhage"),
+    ),
+    (
+        AbilityType::ShadowDance,
+        Unreached::NeedsKnob("a build that takes Shadow Dance"),
+    ),
 ];
 
 /// Every ability of every class's own kit is chosen somewhere in the grid, or

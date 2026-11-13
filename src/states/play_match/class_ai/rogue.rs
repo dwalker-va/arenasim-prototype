@@ -29,6 +29,21 @@
 //! target, whenever this Rogue's own Rupture is not already on it — so it
 //! keeps rolling as its cooldown allows ([`try_rupture`]). The two talents
 //! sit in different trees and no legal build holds both.
+//!
+//! Hemorrhage (the Subtlety tree's strike, a talent) takes Sinister Strike's
+//! place wherever it is struck while its debuff on the target is down or low
+//! ([`hemorrhage_wanted`]); otherwise Sinister Strike goes as before.
+//!
+//! Shadow Dance (the Subtlety capstone) is spent only when the stun chain it
+//! opens can run ([`try_shadow_dance`]): the kill target in melee and held by
+//! nothing, its stun diminishing returns clear, Kidney Shot ready by the time
+//! the two Cheap Shots run out, the enemy healer unable to answer, and the
+//! energy the chain needs pooled ([`dance_chain`]). While it lasts the Rogue
+//! runs the chain ([`dance_turn`]) — Cheap Shot, Cheap Shot at half, then the
+//! Kidney Shot planner's opener-extend — and strikes with Ambush only with
+//! energy to spare for the next stun. Both sit just below the Peel play: a
+//! teammate in danger comes first, and the dance's own chain is the Rogue's
+//! lock, ahead of the Chain play's hand-offs onto a teammate's.
 #![allow(clippy::too_many_arguments)]
 
 use bevy::prelude::*;
@@ -43,7 +58,9 @@ use crate::states::play_match::combat_core::{
     get_crit_chance_bonus_from_slice, roll_crit,
 };
 use crate::states::play_match::components::*;
-use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, GCD, MELEE_RANGE};
+use crate::states::play_match::constants::{
+    CRIT_DAMAGE_MULTIPLIER, DR_MULTIPLIERS, GCD, MELEE_RANGE,
+};
 use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, NoActionReason, PlayStep, RejectionReason,
 };
@@ -177,6 +194,55 @@ pub fn decide_rogue_action(
         }
     }
 
+    // Shadow Dance (a talent): while it lasts, its stun chain on the kill
+    // target; before it, the moment to spend it. A Rogue without the talent
+    // has no rule here.
+    if abilities.get(&AbilityType::ShadowDance).is_some() {
+        if let Some(acted) = dance_turn(
+            commands,
+            combat_log,
+            game_rng,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            ctx,
+            instant_attacks,
+            same_frame_cc_queue,
+            &mut builder,
+        ) {
+            builder.finish();
+            return acted;
+        }
+        match try_shadow_dance(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            ctx,
+            &mut builder,
+        ) {
+            DanceCall::Danced => {
+                builder.finish();
+                return true;
+            }
+            DanceCall::Pool => {
+                reject_strikes(abilities, &mut builder, "pooling energy for Shadow Dance");
+                builder.finish();
+                return false;
+            }
+            DanceCall::Not => {}
+        }
+    }
+
     // The Chain play (TeamPlan): a lock the team holds on an enemy is about to
     // end, so Kidney Shot hands off onto it, landing in its last moments — or
     // the global cooldown (and the energy) is held for that moment.
@@ -247,7 +313,7 @@ pub fn decide_rogue_action(
                 builder.finish();
                 return true;
             }
-            if try_sinister_strike(
+            if try_strike(
                 commands,
                 combat_log,
                 game_rng,
@@ -288,11 +354,10 @@ pub fn decide_rogue_action(
             // so Kidney Shot is affordable the instant its control window reaches
             // the chain buffer — a seamless stun chain with no energy-starved gap.
             builder.reject(kidney_shot, reason);
-            builder.reject(
-                AbilityType::SinisterStrike,
-                RejectionReason::PreconditionUnmet {
-                    note: "pooling energy for Kidney Shot chain".into(),
-                },
+            reject_strikes(
+                abilities,
+                &mut builder,
+                "pooling energy for Kidney Shot chain",
             );
             builder.finish();
             return false;
@@ -357,12 +422,7 @@ pub fn decide_rogue_action(
                     PreCastOpts::default(),
                 );
                 if matches!(reason, RejectionReason::InsufficientResource { .. }) {
-                    builder.reject(
-                        AbilityType::SinisterStrike,
-                        RejectionReason::PreconditionUnmet {
-                            note: "pooling energy for Kidney Shot".into(),
-                        },
-                    );
+                    reject_strikes(abilities, &mut builder, "pooling energy for Kidney Shot");
                     builder.finish();
                     return false;
                 }
@@ -415,8 +475,8 @@ pub fn decide_rogue_action(
         return true;
     }
 
-    // Priority 2: Sinister Strike
-    let acted = try_sinister_strike(
+    // Priority 2: Sinister Strike, or Hemorrhage in its place
+    let acted = try_strike(
         commands,
         combat_log,
         game_rng,
@@ -1226,6 +1286,510 @@ fn try_sinister_strike(
     );
 
     true
+}
+
+/// Reject the Rogue's strikes — Sinister Strike, and Hemorrhage when it has
+/// it — for `note`: the turn pools its energy for something better.
+fn reject_strikes(abilities: &AbilityBook, builder: &mut DecisionEventBuilder<'_>, note: &str) {
+    for ability in [AbilityType::SinisterStrike, AbilityType::Hemorrhage] {
+        if abilities.get(&ability).is_some() {
+            builder.reject(
+                ability,
+                RejectionReason::PreconditionUnmet { note: note.into() },
+            );
+        }
+    }
+}
+
+/// How little of Hemorrhage's debuff may be left before the Rogue strikes
+/// with Hemorrhage again rather than Sinister Strike: two global cooldowns,
+/// so the refresh lands before it runs out.
+pub const HEMORRHAGE_REFRESH_SECS: f32 = 2.0 * GCD;
+
+/// Whether Hemorrhage's debuff (`def`'s aura) on `target` is down or low:
+/// absent, short of its full stacks, or within [`HEMORRHAGE_REFRESH_SECS`]
+/// of running out. Anyone's counts: one Hemorrhage debuff stacks per target.
+pub fn hemorrhage_wanted(ctx: &CombatContext, target: Entity, def: &AbilityConfig) -> bool {
+    let Some(effect) = def.applies_aura.as_ref() else {
+        return false;
+    };
+    let on_target = ctx.active_auras.get(&target).and_then(|list| {
+        list.iter()
+            .find(|a| a.effect_type == effect.aura_type && a.ability_name == def.name)
+    });
+    match on_target {
+        None => true,
+        Some(aura) => {
+            aura.stacks.is_some_and(|s| s.count < s.max) || aura.duration <= HEMORRHAGE_REFRESH_SECS
+        }
+    }
+}
+
+/// The Rogue's strike on `target_entity`: Hemorrhage, when the Rogue has it
+/// and its debuff there is down or low ([`hemorrhage_wanted`]); otherwise
+/// Sinister Strike.
+fn try_strike(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    game_rng: &mut GameRng,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    target_pos: Vec3,
+    ctx: &CombatContext,
+    instant_attacks: &mut Vec<super::QueuedInstantAttack>,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    if let Some(def) = abilities.get(&AbilityType::Hemorrhage) {
+        if !hemorrhage_wanted(ctx, target_entity, def) {
+            builder.reject(
+                AbilityType::Hemorrhage,
+                hold_reason("Hemorrhage is up on the target"),
+            );
+        } else if try_hemorrhage(
+            commands,
+            combat_log,
+            game_rng,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            ctx,
+            instant_attacks,
+            builder,
+        ) {
+            return true;
+        }
+    }
+    try_sinister_strike(
+        commands,
+        combat_log,
+        game_rng,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        target_entity,
+        target_pos,
+        ctx,
+        instant_attacks,
+        builder,
+    )
+}
+
+/// Try to use Hemorrhage: Sinister Strike's blow, and its debuff on the
+/// target. A melee attack: dodged or parried, it deals and applies nothing,
+/// and its cost is spent.
+fn try_hemorrhage(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    game_rng: &mut GameRng,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    target_pos: Vec3,
+    ctx: &CombatContext,
+    instant_attacks: &mut Vec<super::QueuedInstantAttack>,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::Hemorrhage;
+    let def = abilities.get_unchecked(&ability);
+
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
+
+    builder.choose(cleared, Some(target_entity), true);
+
+    combatant.current_mana -= def.mana_cost;
+    combatant.global_cooldown = GCD;
+
+    let target_id = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        target_id,
+        "uses",
+    );
+
+    // A dodged or parried Hemorrhage deals nothing and opens no wound.
+    if ctx.melee_attack_avoided(commands, game_rng, target_entity, &def.name) {
+        return true;
+    }
+
+    let self_auras = ctx
+        .active_auras
+        .get(&entity)
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+    let ap_bonus = get_attack_power_bonus_from_slice(self_auras);
+    let crit_bonus = get_crit_chance_bonus_from_slice(self_auras);
+    let mut damage = combatant.calculate_ability_damage_config(def, game_rng, ap_bonus, 0.0);
+    let is_crit = roll_crit(
+        combatant.crit_chance + crit_bonus + def.crit_chance,
+        game_rng,
+    );
+    if is_crit {
+        damage *= CRIT_DAMAGE_MULTIPLIER;
+    }
+    instant_attacks.push(super::QueuedInstantAttack {
+        attacker: entity,
+        target: target_entity,
+        damage,
+        attacker_team: combatant.team,
+        attacker_slot: combatant.slot,
+        attacker_class: combatant.class,
+        ability,
+        is_crit,
+    });
+    if let Some(pending) = AuraPending::from_ability(target_entity, entity, def) {
+        commands.spawn(pending);
+    }
+    true
+}
+
+/// What one Shadow Dance's stun chain asks of a fresh target: Cheap Shot, a
+/// second Cheap Shot (the stun diminishing returns halve it), then Kidney
+/// Shot (its own bucket), each going on as the stun before it reaches
+/// [`super::CC_CHAIN_WINDOW`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DanceChain {
+    /// Seconds into the chain at which Kidney Shot goes on.
+    pub kidney_at: f32,
+    /// The energy the Rogue needs at the start for each stun to be
+    /// affordable when it is due, at its regeneration: never more than its
+    /// bar holds.
+    pub energy: f32,
+}
+
+/// The chain of a Shadow Dance by a Rogue with these Cheap Shot and Kidney
+/// Shot configs, `regen` energy a second and a bar of `max_energy`. With the
+/// shipped kit (60 and 60, 20 a second): the second Cheap Shot at 3.5s,
+/// Kidney Shot at 5s, and 80 energy to start.
+pub fn dance_chain(
+    cheap_shot: &AbilityConfig,
+    kidney_shot: &AbilityConfig,
+    regen: f32,
+    max_energy: f32,
+) -> DanceChain {
+    let window = super::CC_CHAIN_WINDOW;
+    let stun = cheap_shot.applies_aura.as_ref().map_or(0.0, |a| a.duration);
+    let second_at = (stun - window).max(0.0);
+    let kidney_at = second_at + (stun * DR_MULTIPLIERS[1] - window).max(0.0);
+    let cheap = cheap_shot.mana_cost;
+    let energy = [
+        (0.0, cheap),
+        (second_at, 2.0 * cheap),
+        (kidney_at, 2.0 * cheap + kidney_shot.mana_cost),
+    ]
+    .into_iter()
+    .map(|(at, spent)| spent - regen * at)
+    .fold(0.0_f32, f32::max);
+    DanceChain {
+        kidney_at,
+        energy: energy.min(max_energy),
+    }
+}
+
+/// Whether the Rogue is dancing: its Shadow Dance aura is up.
+fn dancing(auras: Option<&ActiveAuras>) -> bool {
+    auras.is_some_and(|a| {
+        a.auras
+            .iter()
+            .any(|x| x.effect_type == AuraType::ShadowDance)
+    })
+}
+
+/// Whether an enemy healer could answer a stun chain on `target` now: a
+/// living enemy healer other than `target` (a chain on the healer itself
+/// locks it) that is not the one the team holds locked, while `target` is
+/// not the team's kill window (low, and beyond every enemy healer's help).
+fn enemy_healer_answers(ctx: &CombatContext, my_team: u8, target: Entity) -> bool {
+    let situation = ctx.situation();
+    if situation.kill_window.is_some_and(|w| w.subject == target) {
+        return false;
+    }
+    let locked = situation.enemy_healer_locked.map(|w| w.subject);
+    ctx.combatants.values().any(|i| {
+        i.team != my_team
+            && i.is_alive
+            && !i.is_pet
+            && i.is_healer()
+            && i.entity != target
+            && Some(i.entity) != locked
+    })
+}
+
+/// What [`try_shadow_dance`] decided.
+enum DanceCall {
+    /// Shadow Dance was used.
+    Danced,
+    /// Everything else is ready: hold the turn's energy for the chain.
+    Pool,
+    /// Not this turn.
+    Not,
+}
+
+/// Try to use Shadow Dance on the kill target `target`: only when the stun
+/// chain it opens can run. The target in melee, not immune (the decision's
+/// head refuses an immune one) and held by nothing; its stun diminishing
+/// returns, both buckets, clear; Kidney Shot ready by the time the two Cheap
+/// Shots run out; the enemy healer unable to answer
+/// ([`enemy_healer_answers`]: none standing but the target itself, or the
+/// one standing locked, or the target the team's kill window); and the
+/// energy the chain needs
+/// ([`dance_chain`]) — the one condition the Rogue pools for. Never on its
+/// cooldown alone. Free and off the global cooldown: the chain's first Cheap
+/// Shot follows on the next turn.
+fn try_shadow_dance(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target: Entity,
+    target_pos: Vec3,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> DanceCall {
+    let ability = AbilityType::ShadowDance;
+    let def = abilities.get_unchecked(&ability);
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return DanceCall::Not;
+        }
+    };
+    let chain = dance_chain(
+        abilities.get_unchecked(&AbilityType::CheapShot),
+        abilities.get_unchecked(&AbilityType::KidneyShot),
+        combatant.mana_regen,
+        combatant.max_mana,
+    );
+    let kidney_wait = combatant
+        .ability_cooldowns
+        .get(&AbilityType::KidneyShot)
+        .copied()
+        .unwrap_or(0.0);
+    let unmet = if my_pos.distance(target_pos) > MELEE_RANGE {
+        Some("the kill target is out of melee")
+    } else if ctx
+        .held_in_hard_cc(target, super::Incoming::Lasts)
+        .is_some()
+    {
+        Some("the kill target is already held")
+    } else if ctx.dr_level(target, DRCategory::Stuns) > 0
+        || ctx.dr_level(target, DRCategory::KidneyShotStun) > 0
+    {
+        Some("the kill target's stun diminishing returns are not clear")
+    } else if kidney_wait > chain.kidney_at {
+        Some("Kidney Shot would not be ready for the chain")
+    } else if enemy_healer_answers(ctx, combatant.team, target) {
+        Some("the enemy healer is free to answer the chain")
+    } else {
+        None
+    };
+    if let Some(note) = unmet {
+        builder.reject(ability, hold_reason(note));
+        return DanceCall::Not;
+    }
+    if combatant.current_mana < chain.energy {
+        builder.reject(
+            ability,
+            hold_reason("pooling energy for the Shadow Dance chain"),
+        );
+        return DanceCall::Pool;
+    }
+
+    builder.choose(cleared, Some(entity), true);
+    combatant.current_mana -= def.mana_cost;
+    combatant.start_cooldown(ability);
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        None,
+        "uses",
+    );
+    if let Some(pending) = AuraPending::from_ability(entity, entity, def) {
+        commands.spawn(pending);
+    }
+    DanceCall::Danced
+}
+
+/// Seconds left on the longest hold ([`super::holds`]) on `target`, `0.0`
+/// for none.
+fn hold_remaining(ctx: &CombatContext, target: Entity) -> f32 {
+    ctx.active_auras.get(&target).map_or(0.0, |list| {
+        list.iter()
+            .filter(|a| super::holds(a.effect_type))
+            .map(|a| a.duration)
+            .fold(0.0, f32::max)
+    })
+}
+
+/// One turn of a Shadow Dance in progress, on the kill target `target`.
+/// `None` when the Rogue is not dancing, or the dance has nothing to say
+/// this turn (out of melee, or the target in its team's breakable crowd
+/// control), so the ordinary rotation runs.
+///
+/// While a Cheap Shot still lands for half or more (the stun diminishing
+/// returns have seen at most one), the chain is Cheap Shot: onto a target
+/// held by nothing, or one whose hold is in its last
+/// [`super::CC_CHAIN_WINDOW`]. While the hold runs, Ambush goes only with
+/// energy to spare for that Cheap Shot when it is due, and the turn pools
+/// otherwise. After the second Cheap Shot, Kidney Shot is the planner's
+/// opener-extend (`plan_kidney_shot`); once it is spent, Ambush is the
+/// dance's strike.
+fn dance_turn(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    game_rng: &mut GameRng,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target: Entity,
+    target_pos: Vec3,
+    ctx: &CombatContext,
+    instant_attacks: &mut Vec<super::QueuedInstantAttack>,
+    same_frame_cc_queue: &mut Vec<(Entity, Aura)>,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> Option<bool> {
+    if !dancing(auras)
+        || my_pos.distance(target_pos) > MELEE_RANGE
+        || ctx.has_friendly_breakable_cc(target)
+    {
+        return None;
+    }
+    let cheap_cost = abilities.get_unchecked(&AbilityType::CheapShot).mana_cost;
+    let ambush_cost = abilities.get_unchecked(&AbilityType::Ambush).mana_cost;
+    let pool = |builder: &mut DecisionEventBuilder<'_>, note: &'static str| {
+        builder.reject(AbilityType::Ambush, hold_reason(note));
+        reject_strikes(abilities, builder, note);
+        Some(false)
+    };
+
+    if ctx.dr_level(target, DRCategory::Stuns) <= 1 {
+        let held = hold_remaining(ctx, target);
+        if held > super::CC_CHAIN_WINDOW {
+            // The energy left when the next Cheap Shot is due, after it.
+            let due_in = held - super::CC_CHAIN_WINDOW;
+            let spare = combatant.current_mana + combatant.mana_regen * due_in - cheap_cost;
+            if spare >= ambush_cost
+                && try_ambush(
+                    commands,
+                    combat_log,
+                    game_rng,
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    auras,
+                    target,
+                    target_pos,
+                    ctx,
+                    instant_attacks,
+                    builder,
+                )
+            {
+                return Some(true);
+            }
+            return pool(builder, "pooling energy for the next Cheap Shot");
+        }
+        if try_cheap_shot(
+            commands,
+            combat_log,
+            game_rng,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target,
+            target_pos,
+            ctx,
+            same_frame_cc_queue,
+            builder,
+        ) {
+            return Some(true);
+        }
+        if combatant.current_mana < cheap_cost {
+            return pool(builder, "pooling energy for Cheap Shot");
+        }
+        return None;
+    }
+
+    // The Cheap Shots are spent: Kidney Shot, while it is still to come, is
+    // the planner's.
+    let kidney_to_come = !combatant
+        .ability_cooldowns
+        .contains_key(&AbilityType::KidneyShot)
+        && !ctx.is_dr_immune(target, DRCategory::KidneyShotStun);
+    if kidney_to_come {
+        return None;
+    }
+    try_ambush(
+        commands,
+        combat_log,
+        game_rng,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        target,
+        target_pos,
+        ctx,
+        instant_attacks,
+        builder,
+    )
+    .then_some(true)
 }
 
 /// Select the best target for melee-range CC abilities.

@@ -1895,6 +1895,8 @@ mod tests {
                 "Expose Armor [Physical]",
                 "Frost Trap [—]",
                 "Hammer of Justice [Magic]",
+                // A wound, like Rend (AS-419).
+                "Hemorrhage [Physical]",
                 "Kick [—]",
                 "Kidney Shot [Physical]",
                 "Mortal Strike [Physical]",
@@ -1963,8 +1965,10 @@ mod tests {
                 "Shadow Sight",
                 // No dispel type (TBC): no purge takes a Paladin aura, a
                 // totem's buff, a Mage armor or a shapeshift; nor Aura
-                // Mastery (31821 has no dispel type).
+                // Mastery (31821 has no dispel type), nor Shadow Dance (Wrath
+                // 51713 has none).
                 "Aura Mastery",
+                "Shadow Dance",
                 "Concentration Aura",
                 "Devotion Aura",
                 // No dispel type (Wrath 47788, AS-415).
