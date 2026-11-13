@@ -407,7 +407,9 @@ pub const WEIGHT_EXTRA_SWING: f32 = EXTRA_SWING_HASTE_RATIO * WEIGHT_ATTACK_SPEE
 /// An item's movement_speed is a fraction of its wearer's natural speed
 /// (0.05 is +5%, `components::passive_movement_speed`), so this weight is
 /// large: 0.05 costs 1.5 budget points. A talent's `MovementSpeed` points are
-/// the same fraction and are priced at the same weight.
+/// the same fraction, but this weight does not price them
+/// (`TalentStat::item_weight` is `None`): passive speed is one capped term the
+/// strongest source sets, never a sum, so a speed node declares its budget.
 pub const WEIGHT_MOVEMENT_SPEED: f32 = 30.0;
 
 /// The cap on PASSIVE movement speed, as a fraction of natural speed: TBC's

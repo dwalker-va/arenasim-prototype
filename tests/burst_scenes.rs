@@ -221,6 +221,305 @@ fn a_warlock_shadow_bolts_into_a_kill_window_with_death_coil_down() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// The talent grants among the burst tools
+// ---------------------------------------------------------------------------
+
+/// The scene a talent burst tool is reached in: its class targeting ANOTHER
+/// enemy (so neither the chain below the play nor `Legacy` reaches the low
+/// one), with the tools ahead of it in `burst_tools` out of the way, and the
+/// ability `granted` or not. Exhaustive over the talent burst tools the table
+/// names: a new one does not pass
+/// [`every_talent_burst_tool_is_reached_when_granted_and_only_then`] until it
+/// has a scene here.
+fn talent_burst_scene(tool: AbilityType, granted: bool, profile: AiProfile) -> Scene {
+    let (class, dist) = match tool {
+        // Inside Shadowburn's 20 yards.
+        AbilityType::Shadowburn => (Warlock, 15.0),
+        AbilityType::Conflagrate => (Warlock, 25.0),
+        AbilityType::Hemorrhage => (Rogue, 2.0),
+        other => panic!(
+            "{other:?} is a talent burst tool with no scene: add its arm to \
+             `talent_burst_scene`"
+        ),
+    };
+    let mut s = scene(class, dist, Some(LOCK), profile)
+        .unit(OTHER, 2, Mage)
+        .at(dist, -1.5)
+        .target(ME, OTHER);
+    if class == Warlock {
+        // Death Coil heads the Warlock's tools; Conflagrate needs its own
+        // Immolate on the subject.
+        s = s.cooldown(ME, AbilityType::DeathCoil, 20.0);
+        if tool == AbilityType::Conflagrate {
+            s = own_immolate_on_low(s);
+        }
+    }
+    if granted {
+        s = s.grant(ME, tool);
+    }
+    s
+}
+
+/// The Warlock's own Immolate on the low enemy.
+fn own_immolate_on_low(s: Scene) -> Scene {
+    let me = s.entity(ME);
+    s.aura_full(
+        LOW,
+        arenasim::states::play_match::Aura {
+            effect_type: AuraType::DamageOverTime,
+            duration: 15.0,
+            magnitude: 5.0,
+            tick_interval: 3.0,
+            time_until_next_tick: 3.0,
+            break_on_damage_threshold: -1.0,
+            caster: Some(me),
+            ability_name: "Immolate".into(),
+            ..Default::default()
+        },
+    )
+}
+
+/// Every talent grant among the burst tools — derived from `burst_tools` and
+/// the ability table's `talent` flag, never a hand list — is reached by its
+/// class's burst step on the window's subject when the book holds it (and
+/// not with the play excepted, nor under `Legacy`), and not at all when it
+/// does not. The grid of `decision_properties` plays untalented books, so
+/// this is where these tools are held to the set equality it holds the
+/// others to.
+#[test]
+fn every_talent_burst_tool_is_reached_when_granted_and_only_then() {
+    let defs = arenasim::states::play_match::ability_config::AbilityDefinitions::default();
+    let talents = defs.talent_abilities();
+    let tools: Vec<(CharacterClass, AbilityType)> = CharacterClass::all()
+        .iter()
+        .flat_map(|c| burst_tools(*c).iter().map(move |a| (*c, *a)))
+        .filter(|(_, a)| talents.contains(a))
+        .collect();
+    assert_eq!(
+        tools,
+        vec![
+            (Rogue, AbilityType::Hemorrhage),
+            (Warlock, AbilityType::Conflagrate),
+            (Warlock, AbilityType::Shadowburn),
+        ],
+        "the talent burst tools"
+    );
+    for (class, tool) in tools {
+        bursts_in(|p| talent_burst_scene(tool, true, p), class, tool);
+        let untalented = talent_burst_scene(tool, false, AiProfile::TeamPlan).decide(ME);
+        assert!(
+            untalented.choices.iter().all(|(a, _)| *a != tool),
+            "{class:?} without {tool:?}: {}",
+            describe(&untalented)
+        );
+        assert!(
+            untalented.rejected(tool).is_none(),
+            "an untalented {class:?} does not consider {tool:?}"
+        );
+        assert_eq!(
+            untalented.situation.unwrap().play_step,
+            Some(PlayStep::Burst),
+            "{class:?}: the burst falls to the next tool: {}",
+            describe(&untalented)
+        );
+    }
+}
+
+/// The untalented control bursts with the tool the talent displaces: Shadow
+/// Bolt for the Warlock's two, Sinister Strike for Hemorrhage.
+#[test]
+fn without_the_talent_the_burst_falls_to_the_base_tool() {
+    for (tool, base) in [
+        (AbilityType::Shadowburn, AbilityType::Shadowbolt),
+        (AbilityType::Conflagrate, AbilityType::Shadowbolt),
+        (AbilityType::Hemorrhage, AbilityType::SinisterStrike),
+    ] {
+        let view = talent_burst_scene(tool, false, AiProfile::TeamPlan).decide(ME);
+        assert_eq!(
+            view.chose(),
+            Some((base, Some(LOW))),
+            "{tool:?}: {}",
+            describe(&view)
+        );
+    }
+}
+
+/// A window too short for Shadow Bolt (1.0s): the Destruction instants land
+/// inside it and go; Shadow Bolt is refused for the fit, as before.
+#[test]
+fn the_destruction_instants_fit_a_window_shadow_bolt_does_not() {
+    for tool in [AbilityType::Shadowburn, AbilityType::Conflagrate] {
+        let view = short_window(talent_burst_scene(tool, true, AiProfile::TeamPlan)).decide(ME);
+        assert_eq!(
+            view.chose(),
+            Some((tool, Some(LOW))),
+            "{tool:?}: {}",
+            describe(&view)
+        );
+        assert_eq!(view.situation.unwrap().play_step, Some(PlayStep::Burst));
+        let view = short_window(talent_burst_scene(tool, false, AiProfile::TeamPlan)).decide(ME);
+        assert!(
+            matches!(
+                view.rejected(AbilityType::Shadowbolt),
+                Some(RejectionReason::OutlastsWindow { .. })
+            ),
+            "{tool:?} control: {}",
+            describe(&view)
+        );
+        assert!(
+            view.choices.iter().all(|(_, t)| *t != Some(LOW)),
+            "{tool:?} control: {}",
+            describe(&view)
+        );
+    }
+}
+
+/// A kited Warlock — slowed, its own target beyond its preferred range — still
+/// bursts with a granted Destruction instant on the window's subject: being
+/// kited holds only the Shadow Bolt cast. The untalented control refuses
+/// Shadow Bolt as being kited and starts nothing on the subject.
+#[test]
+fn a_kited_warlock_still_bursts_with_the_destruction_instants() {
+    let kited = |tool: AbilityType, granted: bool| {
+        let mut s = talent_burst_scene(tool, granted, AiProfile::TeamPlan).aura_full(
+            ME,
+            arenasim::states::play_match::Aura {
+                effect_type: AuraType::MovementSpeedSlow,
+                duration: 6.0,
+                magnitude: 0.5,
+                ability_name: "Frostbolt".into(),
+                ..Default::default()
+            },
+        );
+        // Its own target beyond the Warlock's 28yd preferred range; the
+        // subject stays inside Shadowburn's 20.
+        s.set_position(OTHER, 35.0, 0.0);
+        s.decide(ME)
+    };
+    for tool in [AbilityType::Shadowburn, AbilityType::Conflagrate] {
+        let with = kited(tool, true);
+        assert_eq!(
+            with.chose(),
+            Some((tool, Some(LOW))),
+            "{tool:?}: {}",
+            describe(&with)
+        );
+        assert_eq!(with.situation.unwrap().play_step, Some(PlayStep::Burst));
+
+        let control = kited(tool, false);
+        assert!(
+            matches!(
+                control.rejected(AbilityType::Shadowbolt),
+                Some(RejectionReason::PreconditionUnmet { note }) if note.contains("being kited")
+            ),
+            "{tool:?} control: {}",
+            describe(&control)
+        );
+        assert!(
+            control.choices.iter().all(|(_, t)| *t != Some(LOW)),
+            "{tool:?} control: {}",
+            describe(&control)
+        );
+    }
+}
+
+/// `s` with the enemy Priest's stun, and so the kill window, 1.0s long.
+fn short_window(mut s: Scene) -> Scene {
+    s.clear_auras(ENEMY_HEALER);
+    s.aura(ENEMY_HEALER, AuraType::Stun, 1.0)
+}
+
+/// Conflagrate with no Immolate of the Warlock's own on the subject is passed
+/// by for the next tool, and a subject immune to damage is refused every
+/// granted tool for that.
+#[test]
+fn the_destruction_instants_keep_their_own_rules_in_the_burst() {
+    let mut s = talent_burst_scene(AbilityType::Conflagrate, true, AiProfile::TeamPlan);
+    s.clear_auras(LOW);
+    let view = s.decide(ME);
+    assert!(
+        matches!(
+            view.rejected(AbilityType::Conflagrate),
+            Some(RejectionReason::PreconditionUnmet { .. })
+        ),
+        "{}",
+        describe(&view)
+    );
+    assert_eq!(
+        view.chose(),
+        Some((AbilityType::Shadowbolt, Some(LOW))),
+        "{}",
+        describe(&view)
+    );
+
+    // Immune: every tool in the book is refused for it, and only those — an
+    // untalented Warlock refuses no talent it lacks.
+    let immune_refusals = |granted: bool| {
+        let mut s = talent_burst_scene(AbilityType::Shadowburn, granted, AiProfile::TeamPlan);
+        if granted {
+            s = s.grant(ME, AbilityType::Conflagrate);
+        }
+        let view = s.aura(LOW, AuraType::DamageImmunity, 8.0).decide(ME);
+        assert!(
+            view.choices.iter().all(|(_, t)| *t != Some(LOW)),
+            "{}",
+            describe(&view)
+        );
+        view.candidates
+            .iter()
+            .filter(|c| matches!(c.reason, Some(RejectionReason::TargetImmune)))
+            .map(|c| c.ability)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        immune_refusals(true),
+        vec![
+            AbilityType::DeathCoil,
+            AbilityType::Conflagrate,
+            AbilityType::Shadowburn,
+            AbilityType::Shadowbolt,
+        ]
+    );
+    assert_eq!(
+        immune_refusals(false),
+        vec![AbilityType::DeathCoil, AbilityType::Shadowbolt]
+    );
+}
+
+/// Both Destruction instants granted, the Warlock's Immolate up and the
+/// subject inside Shadowburn's reach: Conflagrate goes first, in
+/// `burst_tools` order (the bigger hit, on an Immolate that may run out).
+/// With Conflagrate cooling down, Shadowburn.
+#[test]
+fn conflagrate_leads_shadowburn_in_the_burst() {
+    let both = || {
+        own_immolate_on_low(
+            talent_burst_scene(AbilityType::Shadowburn, true, AiProfile::TeamPlan)
+                .grant(ME, AbilityType::Conflagrate),
+        )
+    };
+    let tools = burst_tools(Warlock);
+    let at = |a| tools.iter().position(|t| *t == a).unwrap();
+    assert!(at(AbilityType::Conflagrate) < at(AbilityType::Shadowburn));
+    let view = both().decide(ME);
+    assert_eq!(
+        view.chose(),
+        Some((AbilityType::Conflagrate, Some(LOW))),
+        "{}",
+        describe(&view)
+    );
+    let view = both()
+        .cooldown(ME, AbilityType::Conflagrate, 10.0)
+        .decide(ME);
+    assert_eq!(
+        view.chose(),
+        Some((AbilityType::Shadowburn, Some(LOW))),
+        "{}",
+        describe(&view)
+    );
+}
+
 /// The Hunter targets another enemy: the burst Aimed Shots the low one.
 /// Without the play its chain — the lock window's Aimed Shot first, since the
 /// Priest is locked — shoots its own target.

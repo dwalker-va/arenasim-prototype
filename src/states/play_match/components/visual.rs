@@ -521,6 +521,43 @@ pub struct ShiftPuff {
     pub emitted: u32,
 }
 
+/// The Shadowform look on a Priest's body (`rendering/effects/shadowform.rs`):
+/// its TRUE body material, tinted violet and made translucent IN PLACE, and
+/// the values that material had before, which the form's end puts back.
+///
+/// Stored on the [`VisualBody`] child, never on the combatant, and never in
+/// the shared [`OriginalBodyMaterial`] slot: the form edits the material
+/// asset itself rather than swapping the handle, so Fear's husk and
+/// Polymorph's wool, which swap the handle and later restore it, hand back the
+/// tinted material untouched. Its presence is also the marker that the look
+/// is on.
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+pub struct ShadowformLook {
+    /// The material the form tinted: the body's own, whichever handle the
+    /// body wore when the form landed (or the one Fear or Polymorph had
+    /// displaced into [`OriginalBodyMaterial`]).
+    pub material: Handle<StandardMaterial>,
+    /// Its colour before the tint.
+    pub base_color: Color,
+    /// Its alpha mode before the tint.
+    pub alpha_mode: AlphaMode,
+}
+
+/// The feet shroud of one Shadowform Priest (`shadow_precast_med_base.m2`,
+/// kit 3129): a rig entity of its own at the Priest's feet, parent of every
+/// flame, flare and smoke streak it emits, so the shroud moves with a running
+/// Priest. Spawned and despawned with the [`ShadowformLook`], one per Priest.
+#[derive(Component)]
+pub struct ShadowformShroud {
+    /// The Priest (the SIM entity) the shroud follows.
+    pub owner: Entity,
+    /// Particles owed per layer, carried between frames.
+    pub carry: [f32; 3],
+    /// Particles emitted over the rig's whole life: the jitter seed.
+    pub emitted: u32,
+}
+
 /// The breathing shadow aura sphere spawned as a child of a feared combatant's
 /// [`VisualBody`]. Mirrors [`SheepPart`]'s owner scoping: `owner` is the SIM
 /// entity, so restore despawns exactly this unit's shroud and two
