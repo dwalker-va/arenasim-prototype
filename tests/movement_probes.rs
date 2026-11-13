@@ -3430,26 +3430,53 @@ mod mage_postures {
         windows
     }
 
-    /// Seed for [`mage_enters_kite_after_nova_and_exits`], split from [`SEED`]
-    /// because only that probe needs a match in which a KITE window CLOSES
-    /// before the match ends. See its doc for the re-pin.
-    const KITE_EXIT_SEED: u64 = 0;
+    /// Play a Mage v Warrior match staged by `stage`, traced.
+    fn run_staged_traced(
+        config: HeadlessMatchConfig,
+        stage: arenasim::headless::Stage,
+    ) -> (MatchResult, Vec<serde_json::Value>) {
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let path = dir.path().join("trace.jsonl");
+        let result = arenasim::headless::run_headless_match_staged(
+            config,
+            true,
+            Some(TraceConfig {
+                output_path: path.clone(),
+            }),
+            stage,
+            |_| {},
+        )
+        .expect("staged traced match failed");
+        let body = std::fs::read_to_string(&path).expect("read trace");
+        let events = body
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
+        (result, events)
+    }
 
     /// Frost Nova roots a melee Warrior → the Mage enters KITE, and the window
     /// later closes (KITE is not a one-way trap). Honors the kite_hold floor
     /// and bounds the exit lag so a stuck-KITE regression fails loudly.
     ///
-    /// Re-pinned for AS-167, weapon speed from item data. At [`SEED`] the
-    /// probe went vacuous: 0 KiteExit transitions. The first line that differs
-    /// from `main` @ 17cb9f0 is the Mage's first Wand Shot, 7 -> 9 (the Wand of
-    /// Shadows fires every 1.8s for the same DPS, so each shot hits harder).
-    /// The probe moved to its own seed, [`KITE_EXIT_SEED`], from
-    /// `scan_kite_exit_seeds`: one KiteEnter, one real KiteExit, a 4.53s
-    /// window. (At [`SEED`] the window ran 4.52s to match end with no exit.)
+    /// Staged (AS-488): the Warrior stands beside the Mage on the gate frame
+    /// with the Mage's Frost Nova landed on it, so the KITE entry holds by
+    /// construction. It was a seed-pinned probe until AS-488 moved the RNG
+    /// stream and its seed stopped containing a KITE exit.
     #[test]
     fn mage_enters_kite_after_nova_and_exits() {
-        let cfg = create_config(vec!["Mage"], vec!["Warrior"], Some(KITE_EXIT_SEED));
-        let (result, _timeline, trace) = run_traced(cfg);
+        use arenasim::headless::{Stage, Unit};
+        use arenasim::states::play_match::abilities::AbilityType;
+        const MAGE: Unit = Unit::new(1, 0);
+        const WARRIOR: Unit = Unit::new(2, 0);
+        let cfg = create_config(vec!["Mage"], vec!["Warrior"], Some(SEED));
+        let stage = Stage::new()
+            .place(MAGE, 0.0, 0.0)
+            .place(WARRIOR, 1.5, 0.0)
+            .target(MAGE, WARRIOR)
+            .target(WARRIOR, MAGE)
+            .land(WARRIOR, AbilityType::FrostNova, MAGE);
+        let (result, trace) = run_staged_traced(cfg, stage);
         let events = mage_events(&trace);
 
         let enters = events.iter().filter(|e| e.trigger == "KiteEnter").count();
@@ -3477,34 +3504,6 @@ mod mage_postures {
         }
     }
 
-    /// Exploratory scan for [`KITE_EXIT_SEED`] (re-pin
-    /// `mage_enters_kite_after_nova_and_exits` when trajectories drift):
-    /// prints entries / exits / dwell range per seed and flags seeds where a
-    /// real KiteExit fires and every window sits inside the probe's bounds.
-    /// Ignored by default.
-    #[test]
-    #[ignore]
-    fn scan_kite_exit_seeds() {
-        for seed in 0u64..40 {
-            let cfg = create_config(vec!["Mage"], vec!["Warrior"], Some(seed));
-            let (result, _timeline, trace) = run_traced(cfg);
-            let events = mage_events(&trace);
-            let enters = events.iter().filter(|e| e.trigger == "KiteEnter").count();
-            let exits = events.iter().filter(|e| e.trigger == "KiteExit").count();
-            let windows = kite_windows(&events, result.match_time);
-            let dwells: Vec<f32> = windows.iter().map(|(a, b)| b - a).collect();
-            let lo = dwells.iter().cloned().fold(f32::INFINITY, f32::min);
-            let hi = dwells.iter().cloned().fold(0.0f32, f32::max);
-            let ok = exits >= 1 && !windows.is_empty() && lo >= 1.0 - 1e-3 && hi <= 30.0;
-            eprintln!(
-                "seed {seed:2}: enters={enters} exits={exits} windows={} dwell=[{lo:5.2},{hi:5.2}]{}",
-                windows.len(),
-                if ok { " <-- CANDIDATE" } else { "" }
-            );
-        }
-    }
-
-    /// KITE does not strobe: the entry count over a full 1v1 is bounded.
     #[test]
     fn mage_kite_does_not_strobe() {
         let cfg = create_config(vec!["Mage"], vec!["Warrior"], Some(SEED));

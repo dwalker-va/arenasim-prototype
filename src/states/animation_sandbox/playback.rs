@@ -144,7 +144,7 @@ pub enum EntryFamily {
     ///
     /// Covers every ability whose visual is emitted inline by code the sandbox
     /// does not run: the class AIs (gated `in_state(GameState::PlayMatch)`) and
-    /// `combat_ai.rs`'s `QueuedInstantAttack` drain. Leaving one of these on the
+    /// `instant_landings.rs`'s `QueuedInstantAttack` drain. Leaving one of these on the
     /// `Cast` default fails SILENTLY — the preview still shows damage, so it
     /// looks fine, right up until the ability's signature never fires.
     ///
@@ -691,7 +691,7 @@ pub fn entry_duration(playback: &SandboxPlayback, defs: &AbilityDefinitions) -> 
 /// `process_casting` route can produce.
 ///
 /// The sandbox runs neither the class AIs (gated `in_state(GameState::PlayMatch)`)
-/// nor `combat_ai.rs`'s `QueuedInstantAttack` drain, so for a `Residue` entry it
+/// nor `instant_landings.rs`'s `QueuedInstantAttack` drain, so for a `Residue` entry it
 /// has to emit the marker itself. Spawning the marker ALONE is not enough — an
 /// ability with no signature yet has nothing listening, and the preview would
 /// lose its damage number — so the caller pairs this with the zero-duration

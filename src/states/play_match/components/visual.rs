@@ -2383,7 +2383,7 @@ impl InstantAbilityFired {
         use AbilityType::*;
         matches!(
             ability,
-            // Resolved through the `QueuedInstantAttack` drain in combat_ai.rs.
+            // Resolved through the `QueuedInstantAttack` drain in instant_landings.rs.
             MortalStrike | Ambush | SinisterStrike
             // Instant AND aura-only: applied inline in class AI, entering
             // neither generic caster hook (A2). Power Word: Shield's marker

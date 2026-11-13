@@ -869,6 +869,13 @@ fn a_swing_held_off_a_friendly_fear_is_not_avoided() {
 /// scratch build of AS-464's tree with `roll_avoidance` returning before any
 /// draw plays each cell's match log byte-identically to the tree itself. (The
 /// logs carry 14 crits, 7 eliminations and four trinket procs.)
+///
+/// Re-recorded for AS-488, a queued strike landing on a target mid-cast or
+/// mid-channel instead of vanishing: the 3v3 299 -> 264; the other two cells
+/// held. The evidence is the same: a scratch build of AS-488's tree with
+/// `roll_avoidance` returning before any draw plays each cell's match log
+/// byte-identically to the tree itself. (The logs carry 12 crits and 7
+/// eliminations.)
 #[test]
 fn a_match_without_avoidance_draws_what_it_drew_before() {
     for (team1, team2, map, profile, seed, recorded) in ZERO_AVOIDANCE_DRAWS {
@@ -912,7 +919,7 @@ const ZERO_AVOIDANCE_DRAWS: &[DrawPin] = &[
         "PillaredArena",
         "TeamPlan",
         5,
-        299,
+        264,
     ),
     (&["Rogue"], &["Warrior"], "BasicArena", "Legacy", 3, 59),
 ];
