@@ -46,6 +46,9 @@ use common::staged::{play, sim_time, Played};
 /// How long after the stage each endgame is read.
 const WINDOW: f32 = 30.0;
 
+/// The most new walks a hunter may begin in one second.
+const MAX_WALKS_PER_SECOND: usize = 4;
+
 /// A global cooldown: the longest a hunter may stand blind.
 const GCD: f32 = 1.5;
 
@@ -214,6 +217,10 @@ pub struct Reading {
     pub both_blind: f32,
     pub same_side_blind: f32,
     pub both_closing: f32,
+    /// The most new walks (`MovementTrigger::Hunt`) one hunter began in any
+    /// one second: the walk is re-aimed when its point moves on, not every
+    /// frame its point drifts.
+    pub walks_per_second: usize,
 }
 
 /// The hunt's windows on the app clock, and the pillar of each.
@@ -338,6 +345,30 @@ pub fn read(e: &Endgame, played: &Played, obstacles: &[ObstacleVolume]) -> Readi
         }
         prev = Some((t, pos, hp));
     }
+    let landed = played.landed();
+    let mut walks: std::collections::BTreeMap<u64, Vec<f32>> = Default::default();
+    for ev in played.staged_trace() {
+        if ev["kind"] == "movement_decision"
+            && ev["trigger"] == "Hunt"
+            && ev["actor"]["team"] == e.hunting_team
+        {
+            let id = ev["actor"]["entity_id"].as_u64().unwrap_or(0);
+            walks
+                .entry(id)
+                .or_default()
+                .push(sim_time(ev) - landed.combat);
+        }
+    }
+    r.walks_per_second = walks
+        .values()
+        .map(|ts| {
+            ts.iter()
+                .map(|&a| ts.iter().filter(|&&b| b >= a && b < a + 1.0).count())
+                .max()
+                .unwrap_or(0)
+        })
+        .max()
+        .unwrap_or(0);
     r
 }
 
@@ -399,6 +430,27 @@ fn no_hunter_stands_still_without_sight() {
         worst > GCD,
         "the control: excepted, some hunter stands blind ({worst:.2}s at most)"
     );
+}
+
+/// The walk is re-aimed when its point moves on — a new walk of a carrot
+/// round the back, or a walk point that lost the hider — never every frame
+/// its point drifts: no hunter begins more than [`MAX_WALKS_PER_SECOND`] new
+/// walks in any one second. (Its controls are mutations: re-aiming every
+/// frame, or tracing every drift, breaks it.)
+#[test]
+fn a_walk_is_re_aimed_only_when_its_point_moves_on() {
+    let on = readings(true);
+    assert!(
+        on.iter().any(|(_, r)| r.walks_per_second >= 2),
+        "the situation: hunters re-aimed their walks"
+    );
+    for (name, r) in &on {
+        assert!(
+            r.walks_per_second <= MAX_WALKS_PER_SECOND,
+            "{name}: {} new walks in one second",
+            r.walks_per_second
+        );
+    }
 }
 
 /// Claim 2: once both hunters have seen the hider, two blind hunters on one

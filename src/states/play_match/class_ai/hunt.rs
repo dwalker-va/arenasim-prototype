@@ -769,12 +769,19 @@ pub fn classify(
             station.point = carrot.unwrap_or_else(|| round_the_back(&ring, xz(me), side));
             continue;
         }
+        // A walk point is chosen clear of the widened shadow and kept while
+        // it still sees the healer at all (the latch's Schmitt pair again),
+        // so a healer on the move does not re-aim the walk every frame.
         let kept = before
             .filter(|s| !s.sighted && s.hold)
             .map(|s| s.point)
             .filter(|&p| {
                 on_side(&ring, p, healer_bearing, side)
-                    && sees_clear(&snapshot.obstacles, ring.pillar, p, at, y)
+                    && has_line_of_sight(
+                        &snapshot.obstacles,
+                        Vec3::new(p.x, y, p.y),
+                        healer.position,
+                    )
             });
         match kept.or_else(|| {
             pincer_point(
