@@ -20,15 +20,20 @@
 //! 4. **hidden**: one of the team's units cannot see it.
 //!
 //! It HOLDS while the healer stays within [`HUNT_LEAVE`] of that pillar's
-//! skin, or stands in the pillar's shadow from any living unit of the team
-//! ([`in_shadow`]: AS-206's widened shadow, the one shadow definition) — it
-//! is still using the pillar as cover. It ends once the healer is out in the
-//! open, or when it reaches another pillar (a new hunt there). The shadow's
-//! [`formation::SIGHT_MARGIN`] widening is the release hysteresis: a healer
-//! must stand that far clear of every teammate's sight line round the pillar
-//! before the hunt lets go. The window names the healer, the pillar and the
-//! AXIS (the healer's bearing round the pillar's centre at onset, which only
-//! assigns the sides). Every change is a `situation_change` named `hunt`.
+//! skin, or — out to [`HUNT_SHADOW_LEAVE`] — while the pillar hides it from
+//! any living unit of the team: it stands in the pillar's widened shadow
+//! from that unit ([`in_shadow`]: AS-206's, the one shadow definition), or
+//! the pillar blocks that unit's plain sight of it (past the widened
+//! shadow's near-obstacle limit). It is still using the pillar as cover. It
+//! ends once the healer is out in the open, or when it reaches another
+//! pillar (a new hunt there). The shadow's [`formation::SIGHT_MARGIN`]
+//! widening is the release hysteresis: a healer must stand that far clear of
+//! every teammate's sight line round the pillar before the hunt lets go. A
+//! hunt that starts again on the same healer at the same pillar within
+//! [`HUNT_REMEMBER`] of ending ([`HuntMemory`]) is the same hunt: each unit
+//! keeps its side. The window names the healer, the pillar and the AXIS (the
+//! healer's bearing round the pillar's centre at onset, which only assigns
+//! the sides). Every change is a `situation_change` named `hunt`.
 //!
 //! **Who hunts** — exactly two units, or none: one viewer cannot out-angle a
 //! hugger. In this order:
@@ -52,14 +57,18 @@
 //!
 //! **The pincer** (per unit, every classification):
 //!
-//! - A unit that SEES the healer stands where it is and casts. The sight
-//!   latch ([`Station::sighted`]) is a Schmitt pair on one shadow: it sets
-//!   once the unit sees the healer clear of the pillar's widened shadow, and
-//!   clears only once it loses plain sight.
-//! - A BLIND unit walks to the nearest spot on its own side that sees the
-//!   healer clear of the widened shadow ([`pincer_point`]): 4-14yd off the
-//!   skin, within [`HUNT_REACH`]. As the healer moves round, that spot moves
-//!   with it, so the two close in from both sides.
+//! - A unit that SEES the healer from within its REACH ([`in_reach`]: the
+//!   range bands of its own book's damaging abilities) stands where it is
+//!   and casts. The latch ([`Station::sighted`]) is a Schmitt pair on each:
+//!   it sets once the unit sees the healer clear of the pillar's widened
+//!   shadow from [`REACH_MARGIN`] inside its reach, and clears once it loses
+//!   plain sight or leaves its reach.
+//! - Any other unit — blind, or in sight beyond its reach — walks to the
+//!   nearest spot on its own side that sees the healer clear of the widened
+//!   shadow from within its reach ([`pincer_point`], 4-14yd off the skin),
+//!   kept at least [`REAIM_SECS`] and then while it still sees the healer.
+//!   As the healer moves round, that spot moves with it, so the two close in
+//!   from both sides.
 //! - Until a unit first sees the healer (its onset walk), it takes the
 //!   shorter way round to its side's onset point — the far station a unit
 //!   walked to before AS-404 — and stops to cast if it gets sight on the way

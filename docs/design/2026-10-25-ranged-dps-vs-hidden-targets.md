@@ -702,20 +702,29 @@ stall the prototype showed is AS-492's.
 ### 10.1 The rule
 
 - **The hunt holds in the shadow.** It holds while the healer is within
-  `HUNT_LEAVE` of its pillar's skin or in that pillar's shadow from any living
-  teammate, and ends once it is out in the open (or reaches another pillar).
-  The shadow is AS-206's (`formation::shadow_exits` at `SIGHT_MARGIN`): the
-  wedge behind the pillar's footprint from the viewer, widened by 2.5yd, out
-  to the near-obstacle limit. The widening is the release hysteresis.
+  `HUNT_LEAVE` of its pillar's skin, or, out to `HUNT_SHADOW_LEAVE` (16yd off
+  the skin), while the pillar hides it from any living teammate: it is in that
+  teammate's widened shadow, or the pillar blocks the teammate's plain sight.
+  It ends once the healer is out in the open (or reaches another pillar). The
+  shadow is AS-206's (`formation::shadow_exits` at `SIGHT_MARGIN`): the wedge
+  behind the pillar's footprint from the viewer, widened by 2.5yd, out to the
+  near-obstacle limit. The widening is the release hysteresis; the plain
+  block carries the hold past the limit, where the widened shadow is cut off
+  by distance alone (seed 758, round 3). A hunt that starts again on the same
+  healer at the same pillar within `HUNT_REMEMBER` (3s) keeps each unit's
+  side.
 - **Sides.** At onset each hunter takes a side, paired with the axis ±90° by
   the shorter total walk round the pillar (AS-403's assignment), and keeps it.
   Sides are measured from the healer's live bearing.
-- **Seeing.** A hunter that sees the healer stands where it is and casts. The
-  latch sets on sight clear of the widened shadow and clears on losing plain
-  sight.
-- **Blind.** A blind hunter walks to the nearest spot on its own side, 4-14yd
-  off the skin and within 30yd of the healer, that sees the healer clear of the
-  widened shadow, and keeps that spot while it still sees the healer at all.
+- **Seeing.** A hunter that sees the healer from within its own reach (its
+  book's damaging abilities' range bands: a Hunter's 8-35yd shots, a Mage's
+  40yd Frostbolt) stands where it is and casts. The latch sets on sight clear
+  of the widened shadow from `REACH_MARGIN` (2yd) inside reach, and clears on
+  losing plain sight or reach.
+- **Blind or out of reach.** Any other hunter walks to the nearest spot on its
+  own side, 4-14yd off the skin, that sees the healer clear of the widened
+  shadow from within its reach. It keeps that spot at least `REAIM_SECS`
+  (0.5s), then while the spot still sees the healer within reach.
 - **The onset walk.** Until a hunter first sees the healer, it takes the
   shorter way round to its side's onset point (where its station stood) and
   stops to cast if it gets sight on the way. After that, a blind hunter on the
@@ -732,8 +741,9 @@ same hunter goes round the back and meets the healer head-on.
 ### 10.2 Tests
 
 `tests/hunt_pincer_staged.rs` asserts geometry over a bank of staged endgames
-(the 723 and 732 onsets reconstructed as 2v1s, and two "both hunters on one
-side" starts; four seeds each), each claim with its situation counted and its
+(the 723 and 732 onsets reconstructed as 2v1s, two "both hunters on one
+side" starts, and a Hunter starting in sight of the healer beyond its reach;
+four seeds each), each claim with its situation counted and its
 control:
 
 | claim | control |
@@ -743,6 +753,8 @@ control:
 | a wrong-side hunter whose onset walk is over goes round the back, and the two end on opposite sides (staged hunt under way) | the same stage with the onset walk not over: it closes on the face |
 | the far hunter's onset walk goes round the back when that is the shorter way to its side (real onset) | excepted: it closes on the face |
 | the hunt holds while the hider stands beyond `HUNT_LEAVE` in a hunter's shadow, and lets go only out of every shadow | the same hider with both hunters in clear sight: the hunt ends at once |
+| no hunter stands in sight of the healer beyond its own reach for more than a GCD | the scene pair: in reach it stands, beyond it walks |
+| the hunt holds where the pillar blocks a hunter's plain sight past the widened shadow's limit | the same with both hunters in sight: it ends at once |
 | a walk is re-aimed when its point moves on, never every frame | (mutations) |
 
 The scene tests (`tests/hunt_scenes.rs`) pin the sides, the latch and the

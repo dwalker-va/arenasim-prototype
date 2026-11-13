@@ -7,28 +7,34 @@
 //! reconstruct the onsets of the 0.8 review's replays (seed 723, Mage+Priest
 //! against a Priest on the south-east pillar's west face; seed 732, Hunter+
 //! Priest against a Druid off the north-east pillar), at the survivors'
-//! positions, health and mana there. The rest put the hunters together on
-//! one side of the pillar and the hider on another. The hider plays its own
-//! AI, so it runs round its pillar and steps off it; the seed governs only
-//! the rolls.
+//! positions, health and mana there. Two put the
+//! hunters together on one side of the pillar and the hider on another,
+//! and one starts a Hunter in plain sight of the hider from beyond its
+//! reach. The hider plays its own AI, so it runs round its pillar and steps
+//! off it; the seed governs only the rolls. Frames on which the hider is
+//! held are not read: the play stands down while the healer is locked.
 //!
-//! The claims, each read over the whole bank:
+//! The claims, read over the bank (1, 1b, 2) or a staging built for each
+//! (3, 4):
 //!
 //! 1. **Nobody stands blind.** No hunter stands still without sight of the
 //!    hider for longer than a global cooldown while it is free to move: not
 //!    crowd-controlled, rooted, casting or channelling.
+//!    1b. Nor in sight from beyond its own reach.
 //! 2. **Opposite sides.** Whenever both hunters stand blind on one side of
 //!    the hider, they do not both close on its face from that side: one of
 //!    them goes round the back.
-//! 3. **The hunt holds in the shadow.** On every frame the hider stands
-//!    beyond `HUNT_LEAVE` of its pillar's skin but in that pillar's shadow from
-//!    a hunter, the hunt is on.
+//! 3. **The hunt holds while the pillar hides the healer:** in a hunter's
+//!    widened shadow beyond `HUNT_LEAVE`, or past the shadow's near-obstacle
+//!    limit while the pillar blocks a hunter's plain sight.
+//! 4. **The wrong-side hunter goes round the back**, on its onset walk when
+//!    that is the short way to its side, and always after it.
 //!
-//! Each claim first asserts that its situation occurred (frames counted), so
-//! none passes on an empty bank. Its control is the play excepted everywhere
-//! on the hunting team (`every_exception_entry`, the graduated play's
-//! control): the hunt is still classified, but nobody takes a side, and the
-//! claim must fail there — so the bank can see the failure it guards.
+//! Each claim asserts that its situation occurred (counted, or staged and
+//! checked on the first frame), so none passes on an empty bank, and each
+//! has a control that fails it: the play excepted everywhere on the hunting
+//! team (`every_exception_entry`, the graduated play's control), or the
+//! staging with its one condition removed.
 
 mod common;
 
@@ -489,7 +495,10 @@ fn no_hunter_stands_still_without_sight() {
 /// Claim 1b: no hunter stands in sight of the hider from beyond its own
 /// reach (its book's damaging abilities' range bands) for more than a GCD:
 /// it walks into reach instead. The bank's "far sight" endgame starts a
-/// Hunter 44yd from the hider in plain sight, beyond its 35yd shots.
+/// Hunter 44yd from the hider in plain sight, beyond its 35yd shots. Its
+/// control is the scene pair in `tests/hunt_scenes.rs`
+/// (`a_hunter_in_sight_beyond_reach_walks_into_reach`): in reach, a hunter
+/// stands.
 #[test]
 fn no_hunter_stands_in_sight_beyond_its_reach() {
     let on = readings(true);
@@ -547,10 +556,12 @@ fn blind_hunters_close_from_opposite_sides() {
             r.both_closing
         );
     }
-    let off: f32 = readings(false).iter().map(|(_, r)| r.both_closing).sum();
+    let off = readings(false);
+    let trailing = off.iter().filter(|(_, r)| r.both_closing > 0.0).count();
+    let total: f32 = off.iter().map(|(_, r)| r.both_closing).sum();
     assert!(
-        off > 1.0,
-        "the control: excepted, they trail it ({off:.1}s)"
+        trailing >= 2 && total > 1.0,
+        "the control: excepted, they trail it ({trailing} runs, {total:.1}s)"
     );
 }
 

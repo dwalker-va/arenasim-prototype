@@ -2087,10 +2087,12 @@ is its design) with eleven context gates and two 3v3 format gates.
 (`hunt`, `class_ai::hunt`; within `HUNT_ENTER` of its skin and hidden from one
 of the team at onset) and the team has two or more units, so two of them close
 on it from both sides of that pillar. The hunt HOLDS while the healer is within
-`HUNT_LEAVE` of the skin or in the pillar's shadow from any living teammate
-(`hunt::in_shadow`: AS-206's widened shadow, `formation::shadow_exits` at
-`SIGHT_MARGIN`, whose widening is the release hysteresis), and ends once the
-healer is out in the open or reaches another pillar. Ranged DPS hunt first; the
+`HUNT_LEAVE` of the skin, or out to `HUNT_SHADOW_LEAVE` while the pillar hides
+it from any living teammate: in that teammate's widened shadow (`hunt::in_shadow`:
+AS-206's, `formation::shadow_exits` at `SIGHT_MARGIN`, whose widening is the
+release hysteresis) or blocking its plain sight. It ends once the healer is out
+in the open or reaches another pillar; a hunt that starts again on the same
+healer and pillar within `HUNT_REMEMBER` keeps each unit's side. Ranged DPS hunt first; the
 healer is the second when only one ranged DPS does, and only while no teammate
 is dying (D2: a dying teammate is owed its sight; once owed, not again until all
 are back to `SIGHT_YIELD_HP`); melee do not; one hunter is no hunt.
@@ -2100,10 +2102,13 @@ Priest hunts. The two are the first that qualify in Entity order, not the
 nearest. At onset each takes a SIDE of the pillar (paired with the axis ±90°
 by the shorter total walk round the pillar, `hunt::walk_round`), kept for the
 hunt and measured from the healer's LIVE bearing. Each frame a hunter that sees
-the healer stands where it is and casts (the sight latch sets on sight clear of
-the widened shadow and clears on losing plain sight); a blind one walks to the
-nearest spot on its own side that sees the healer clear (`hunt::pincer_point`,
-4-14yd off the skin, within 30yd), so the two close in as the healer moves.
+the healer from within its own reach (`hunt::in_reach`: its book's damaging
+abilities' range bands) stands where it is and casts (the latch sets on sight
+clear of the widened shadow `REACH_MARGIN` inside reach, and clears on losing
+plain sight or reach); any other — blind, or in sight beyond reach — walks to
+the nearest spot on its own side that sees the healer clear from within reach
+(`hunt::pincer_point`, 4-14yd off the skin), kept at least `REAIM_SECS`, so the
+two close in as the healer moves.
 Until a hunter first sees the healer it takes the shorter way round to its
 side's onset point (the old far station), casting if it gets sight on the way
 (user ruling); after that a blind hunter on the wrong side walks round the
