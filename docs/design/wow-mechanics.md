@@ -359,11 +359,12 @@ tests fail if a full-CC type or spell is left unlabelled.
 - A silence stops what TBC's `SpellCategories.PreventionType` says it stops
   (AS-291). Every ability declares that type as `prevention` in
   `abilities.ron` — `Silence` (spells), `Pacify` (physical attacks and shots)
-  or `None` (Travel Form, Berserker Rage) — and
-  `docs/design/balance/sweeps/2026-10-12-as287-tbc-interruptibility.py` checks
-  the whole book against the client. Four abilities have no TBC spell of
-  their own name (Web, Boar Charge, Master's Call, Wind Shear); the script
-  names the spells and client build each is read from instead.
+  or `None` (Travel Form, Berserker Rage) — and `tests/prevention_tbc_audit.rs`
+  holds the whole book to the client, through the fixture
+  `scripts/tbc_spell_categories.py` writes. Six abilities have no TBC spell of
+  their own name (Web, Boar Charge, Master's Call, Wind Shear, Guardian
+  Spirit, Sacred Shield); the script names the spells and client build each is
+  read from instead.
 - A silence stops a `Silence`-prevented ability that costs mana, cast by a
   mana user (`AbilityConfig::silence_stops`, `abilities::is_silenced`): the
   AI's pre-cast guard (`cast_guard::pre_cast_ok`) refuses to begin one, traced
