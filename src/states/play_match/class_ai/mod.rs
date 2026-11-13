@@ -32,6 +32,7 @@ pub mod interrupts;
 pub mod mage;
 pub mod on_use;
 pub mod paladin;
+pub mod paladin_holy;
 pub(crate) mod paladin_postures;
 pub mod paladin_protection;
 pub mod peel;
@@ -981,6 +982,15 @@ impl<'a> CombatContext<'a> {
             .is_some_and(|auras| auras.iter().any(|a| grants_damage_immunity(a.effect_type)))
     }
 
+    /// Whether `entity` is immune to interrupts (Aura Mastery,
+    /// `auras::silence_interrupt_immune`, the rule `process_interrupts`
+    /// applies): an interrupter never spends its interrupt on its cast.
+    pub fn entity_is_interrupt_immune(&self, entity: Entity) -> bool {
+        self.active_auras
+            .get(&entity)
+            .is_some_and(|auras| crate::states::play_match::auras::silence_interrupt_immune(auras))
+    }
+
     /// Whether `entity` is CYCLONED: out of reach of every spell, friendly ones
     /// included. A cycloned ally takes no healing, no buff and no dispel
     /// (`ActiveAuras::is_cycloned`, which the engine's funnels ask), so a healer
@@ -1199,6 +1209,7 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         | AuraType::SpellResistanceBuff
         | AuraType::ArmorIncrease
         | AuraType::FearImmunity
+        | AuraType::SilenceInterruptImmunity
         | AuraType::AttackSpeedIncrease
         | AuraType::NextCast
         | AuraType::DamageDealtIncrease
@@ -1466,7 +1477,10 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         // Beneficial but unpurgeable by design (see [`Aura::can_be_purged`]):
         // Divine Shield and Berserker Rage's fear immunity are cooldowns, not
         // buffs to strip; Travel Form is a shapeshift, not a buff at all.
-        AuraType::DamageImmunity | AuraType::FearImmunity | AuraType::TravelForm => 0,
+        AuraType::DamageImmunity
+        | AuraType::FearImmunity
+        | AuraType::SilenceInterruptImmunity
+        | AuraType::TravelForm => 0,
 
         // Mechanical markers, not buffs.
         AuraType::ShadowSight | AuraType::WeaponPoison | AuraType::WeakenedSoul => 0,
@@ -1551,6 +1565,7 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
         | AuraType::HealingOverTime
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
+        | AuraType::SilenceInterruptImmunity
         | AuraType::AttackSpeedIncrease
         | AuraType::NextCast
         | AuraType::DamageTakenIncrease
@@ -1652,6 +1667,7 @@ pub const fn grants_damage_immunity(aura: AuraType) -> bool {
         | AuraType::HealingOverTime
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
+        | AuraType::SilenceInterruptImmunity
         | AuraType::AttackSpeedIncrease
         | AuraType::NextCast
         | AuraType::DamageTakenIncrease
@@ -1842,6 +1858,25 @@ pub fn interrupt_reach(unit: &CombatantInfo) -> Option<f32> {
     unit.book
         .iter()
         .filter(|(_, def)| def.is_interrupt)
+        .map(|(_, def)| def.range)
+        .reduce(f32::max)
+}
+
+/// [`interrupt_reach`], counting only an interrupt `unit` could START within
+/// `horizon` seconds ([`cc_reach::could_cast`], the cast gate's own-state
+/// checks asked from its side: its cooldown, its resource, a hold or a lockout
+/// on it). `None` when it has no interrupt, or none ready. What "about to
+/// interrupt" means to a unit guarding a cast against it (Aura Mastery).
+pub fn ready_interrupt_reach(
+    ctx: &CombatContext,
+    unit: &CombatantInfo,
+    horizon: f32,
+) -> Option<f32> {
+    unit.book
+        .iter()
+        .filter(|(ability, def)| {
+            def.is_interrupt && cc_reach::could_cast(ctx, unit, **ability, def, horizon)
+        })
         .map(|(_, def)| def.range)
         .reduce(f32::max)
 }

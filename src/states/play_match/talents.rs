@@ -162,6 +162,14 @@ talent_ids! {
     SiphonLife,
     CurseOfExhaustion,
     ShadowMastery,
+    // Paladin: Holy
+    ImprovedHolyShock,
+    HealingLight,
+    InfusionOfLight,
+    DivineFavor,
+    PurifyingPower,
+    LightsGrace,
+    AuraMastery,
 }
 
 /// A talent tree. A tree is named per class: `(class, TreeId)` is the key.
@@ -172,6 +180,7 @@ pub enum TreeId {
     Combat,
     Shadow,
     Protection,
+    Holy,
 }
 
 /// One tree of a class, as `talents.ron` lists it. A class's trees are in
@@ -439,6 +448,10 @@ pub enum AbilityField {
     /// takes (Life Tap: 1.0). Present only on an ability that converts.
     /// Improved Life Tap's field.
     ManaPerHealth,
+    /// The ability's whole healing: its base range and its coefficient
+    /// ([`Self::parts`]), so `Mul(1.05)` makes every heal 5% larger. Takes
+    /// only a `Mul`, as `Damage` does. Healing Light's field.
+    Healing,
 }
 
 impl AbilityField {
@@ -477,7 +490,7 @@ impl AbilityField {
             // `get` / `set`.
             AbilityField::AuraStrength => None,
             // A composite: patched through its `parts`.
-            AbilityField::PeriodicDamage => None,
+            AbilityField::PeriodicDamage | AbilityField::Healing => None,
             AbilityField::ManaPerHealth => config
                 .health_to_mana
                 .as_mut()
@@ -489,7 +502,7 @@ impl AbilityField {
     pub fn get(self, config: &AbilityConfig) -> Option<f32> {
         match self {
             // A composite names several values, so no one of them.
-            AbilityField::Damage | AbilityField::PeriodicDamage => None,
+            AbilityField::Damage | AbilityField::PeriodicDamage | AbilityField::Healing => None,
             AbilityField::AuraStrength => config.applies_aura.as_ref().map(|a| {
                 if strength_is_remainder(a.aura_type) {
                     1.0 - a.magnitude
@@ -517,7 +530,7 @@ impl AbilityField {
                 }
             }
             // A composite is written through its `parts`, never as one value.
-            AbilityField::Damage | AbilityField::PeriodicDamage => {}
+            AbilityField::Damage | AbilityField::PeriodicDamage | AbilityField::Healing => {}
             stored => {
                 if let Some(v) = stored.of(config) {
                     *v = value;
@@ -538,6 +551,11 @@ impl AbilityField {
             AbilityField::PeriodicDamage => &[
                 AbilityField::AuraMagnitude,
                 AbilityField::AuraMagnitudeCoefficient,
+            ],
+            AbilityField::Healing => &[
+                AbilityField::HealingBaseMin,
+                AbilityField::HealingBaseMax,
+                AbilityField::HealingCoefficient,
             ],
             AbilityField::ManaPerHealth => &[AbilityField::ManaPerHealth],
             AbilityField::CastTime => &[AbilityField::CastTime],
@@ -627,6 +645,7 @@ pub fn strength_is_remainder(aura: AuraType) -> bool {
         | AuraType::HealingOverTime
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
+        | AuraType::SilenceInterruptImmunity
         | AuraType::ArmorIncrease
         | AuraType::Cyclone
         | AuraType::TravelForm

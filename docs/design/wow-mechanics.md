@@ -63,6 +63,14 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   be interrupted." Loss of control still stops it — a stun, fear, polymorph or
   cyclone cancels any cast in `process_casting` — and that is not an interrupt:
   no school is locked, so the Hunter can Disengage the moment it is free.
+- **Aura Mastery makes a caster immune to interrupts** (AS-420): while a unit
+  holds `AuraType::SilenceInterruptImmunity` (`auras::silence_interrupt_immune`),
+  `process_interrupts` spends an interrupt that reaches it and cuts nothing and
+  locks no school, and every interrupter's scan (`check_interrupts`, Spell
+  Lock) passes it over, as it passes over a damage-immune target. The Holy
+  Paladin raises it on every teammate for 6s when an enemy's interrupt, ready
+  within 1.5s (`class_ai::ready_interrupt_reach`), reaches a casting teammate
+  (`class_ai::paladin_holy::interrupt_threat`).
 
 ### Auto-Attacks
 - Disabled while casting
@@ -347,6 +355,10 @@ tests fail if a full-CC type or spell is left unlabelled.
   it never touches a Warrior's or Rogue's kit.
 - Nothing in the sim pacifies, so `Pacify` stops nothing today; a pacify
   effect would stop exactly those abilities.
+- Aura Mastery's immunity (AS-420) blocks a new Silence
+  (`auras::aura_type_immunity_source`, refused and logged `IMMUNE`), and a
+  Silence its holder already carries comes off as the immunity lands
+  (`apply_pending_auras`), so no silence outlasts it.
 - Loss of control (stun, fear, polymorph, cyclone) stops every cast, whatever
   its prevention.
 

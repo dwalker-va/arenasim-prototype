@@ -762,6 +762,9 @@ impl AbilityDefinitions {
             AbilityType::SiphonLife,
             AbilityType::AmplifyCurse,
             AbilityType::CurseOfExhaustion,
+            // Paladin: the Holy tree
+            AbilityType::DivineFavor,
+            AbilityType::AuraMastery,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -1567,6 +1570,8 @@ mod tests {
                     AbilityType::DivineProtection,
                     AbilityType::BlessingOfSacrifice,
                     AbilityType::SacredShield,
+                    AbilityType::DivineFavor,
+                    AbilityType::AuraMastery,
                 ],
             ),
             (

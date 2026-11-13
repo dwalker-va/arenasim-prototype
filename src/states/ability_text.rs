@@ -687,6 +687,12 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
         AuraType::WindfuryBuff => {
             format!("Empowers melee auto-attacks for {:.0} sec.", aura.duration)
         }
+        AuraType::SilenceInterruptImmunity => {
+            format!(
+                "Removes Silence and grants immunity to silence and interrupt effects for {:.0} sec.",
+                aura.duration
+            )
+        }
         AuraType::FearImmunity => {
             format!("Breaks Fear and grants immunity to Fear effects for {:.0} sec. Does not affect Horror (Death Coil).", aura.duration)
         }

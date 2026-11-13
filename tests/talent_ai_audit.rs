@@ -38,6 +38,8 @@ const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::SacredShield, paladin_ally_pressured),
     (AbilityType::SiphonLife, warlock_dots_up),
     (AbilityType::AmplifyCurse, warlock_dots_up),
+    (AbilityType::DivineFavor, paladin_ally_under_attack),
+    (AbilityType::AuraMastery, paladin_ally_casting_by_a_rogue),
 ];
 
 /// A Warlock 20 yards from its kill target, a Warrior, with Corruption and
@@ -115,6 +117,22 @@ fn paladin_ally_at(defs: &AbilityDefinitions, health: f32) -> (Scene, Who) {
 /// The Mage dying under the Warrior: Blessing of Sacrifice's moment.
 fn paladin_ally_under_attack(defs: &AbilityDefinitions) -> (Scene, Who) {
     paladin_ally_at(defs, 0.3)
+}
+
+/// The Mage mid-Frostbolt with an enemy Rogue beside it, its Kick ready:
+/// Aura Mastery's moment.
+fn paladin_ally_casting_by_a_rogue(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let mut scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PALADIN, 1, CharacterClass::Paladin)
+        .aura_full(PALADIN, devotion())
+        .unit(MAGE, 1, CharacterClass::Mage)
+        .at(10.0, 0.0)
+        .casting(MAGE, AbilityType::Frostbolt)
+        .unit("enemy rogue", 2, CharacterClass::Rogue)
+        .at(12.0, 0.0)
+        .targeting(MAGE);
+    scene.combatant_mut("enemy rogue").stealthed = false;
+    (scene, PALADIN)
 }
 
 /// The Mage pressured but healthy: Sacred Shield's moment.
