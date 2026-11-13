@@ -1277,17 +1277,19 @@ fn toned_row(ui: &mut egui::Ui, key: &str, value: &str, bonus: f32) -> egui::Res
 /// One stats row whose value equipment changed: drawn in [`bonus_color`],
 /// and explained on hover. A row with a hover registers as `stat:<key>`, its
 /// spaces dropped (`stat:CritChance`), so a script can hover it; its hover
-/// notes `tooltip:Stat(<key>)` as it is drawn.
+/// notes `tooltip:Stat(<key>) <the text it shows>` as it is drawn.
 fn bonus_row(ui: &mut egui::Ui, key: &str, value: &str, bonus: f32, explain: impl Fn() -> String) {
     let response = toned_row(ui, key, value, bonus);
     if bonus != 0.0 {
         let id = Unspaced(key);
         ui_driver::mark(ui, response.rect, true, format_args!("stat:{id}"));
-        // `on_hover_text`'s body, with the note beside it.
+        // The tooltip area opens at the theme's tooltip width, which wraps
+        // the breakdown; it never changes while it is open, so it needs no
+        // `on_hover_text` guard against the area shrinking to it.
         response.on_hover_ui(|ui| {
-            ui.set_max_width(ui.spacing().tooltip_width);
-            ui_driver::note(ui, format_args!("tooltip:Stat({id})"));
-            ui.label(explain());
+            let text = explain();
+            ui_driver::note(ui, format_args!("tooltip:Stat({id}) {text}"));
+            ui.label(text);
         });
     }
 }

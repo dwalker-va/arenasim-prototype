@@ -34,6 +34,7 @@
 mod common;
 
 use bevy_egui::egui;
+use egui_kittest::kittest::Queryable as _;
 use egui_kittest::Harness;
 
 use arenasim::states::configure_match_ui::ClassIcons;
@@ -643,6 +644,7 @@ fn avoidance_and_haste_rows_read_the_spawns_stats() {
         .apply(&mut spawn);
 
     let pct = |v: f32| format!("{:.1}%", v * 100.0);
+    let mut breakdowns = Vec::new();
     for (key, value, base, gear, total) in [
         (
             "Dodge",
@@ -666,22 +668,14 @@ fn avoidance_and_haste_rows_read_the_spawns_stats() {
             spawn.melee_attack_speed_bonus,
         ),
     ] {
-        let suffix = if key == "Melee Haste" {
-            " (melee swings only)"
-        } else {
-            ""
-        };
-        let want = format!(
-            "{value} hover={} base + {} from equipment + {} from talents{suffix}",
-            pct(base),
-            pct(gear),
-            pct(total - base - gear)
-        );
+        let breakdown = combat_rogue_breakdown(key, base, gear, total);
+        let want = format!("{value} hover={breakdown}");
         assert_eq!(
             note_value(&sheet.last.notes, "stat", key),
             Some(want.as_str()),
             "{key}"
         );
+        breakdowns.push((key.replace(' ', ""), breakdown));
         assert_eq!(
             note_value(&sheet.last.notes, "tone", key),
             Some("bonus"),
@@ -706,14 +700,150 @@ fn avoidance_and_haste_rows_read_the_spawns_stats() {
         Some("+20%")
     );
 
-    // A script hovers each new row and its breakdown shows.
-    for key in ["Dodge", "Parry", "MeleeHaste"] {
+    // A script hovers each new row, and its tooltip draws the breakdown.
+    assert_eq!(
+        breakdowns
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect::<Vec<_>>(),
+        ["Dodge", "Parry", "MeleeHaste"]
+    );
+    for (id, breakdown) in breakdowns {
+        let note = format!("tooltip:Stat({id}) {breakdown}");
         assert!(
-            sheet.hover_shows(&format!("stat:{key}"), &format!("tooltip:Stat({key})")),
-            "hovering stat:{key} showed no breakdown; notes: {:?}",
+            sheet.hover_shows(&format!("stat:{id}"), &note),
+            "hovering stat:{id} did not draw {note:?}; notes: {:?}",
             sheet.last.notes
         );
     }
+}
+
+/// A new row's hover text on the Combat Rogue's sheet, from the spawn's
+/// numbers: "0.0% base + 0.0% from equipment + 8.0% from talents", and Melee
+/// Haste's scope after it.
+fn combat_rogue_breakdown(key: &str, base: f32, gear: f32, total: f32) -> String {
+    let pct = |v: f32| format!("{:.1}%", v * 100.0);
+    let suffix = if key == "Melee Haste" {
+        " (melee swings only)"
+    } else {
+        ""
+    };
+    format!(
+        "{} base + {} from equipment + {} from talents{suffix}",
+        pct(base),
+        pct(gear),
+        pct(total - base - gear)
+    )
+}
+
+/// The Combat Rogue's sheet in a kittest harness with the `--ui-script`
+/// registry armed, so a test finds a row by its pinned id. No GPU is touched
+/// until a snapshot renders.
+fn combat_rogue_harness() -> Harness<'static> {
+    let abilities = common::pinned_catalogue::abilities();
+    let items = load_item_definitions().expect("items.ron must load");
+    let defaults = load_default_loadouts(&items).expect("loadouts.ron must load");
+    let class_icons = ClassIcons::default();
+    let mut config = mock_config();
+    config.team1[0] = Some(CharacterClass::Rogue);
+    config.team1_builds[0] = combat_rogue_build();
+    let view = ViewCombatantState {
+        class: CharacterClass::Rogue,
+        team: 1,
+        slot: 0,
+    };
+    let mut picker = EquipmentPickerState::default();
+    Harness::builder()
+        .with_size(TALENTED_SIZE)
+        .build(move |ctx| {
+            arenasim::ui::install(ctx);
+            registry::arm(ctx);
+            let data = ViewCombatantData {
+                abilities: &abilities,
+                items: &items,
+                default_loadouts: &defaults,
+                class_icons: &class_icons,
+                ability_icons: None,
+                item_icons: None,
+                pet_icons: None,
+                talents: common::pinned_catalogue::talents(),
+            };
+            let _ = draw_view_combatant(
+                ctx,
+                Some(&view),
+                &mut config,
+                &mut picker,
+                &data,
+                Nav::Return(GameState::ConfigureMatch),
+            );
+        })
+}
+
+/// Park the pointer on the row registered as `id` and let its tooltip open.
+fn hover_row(harness: &mut Harness<'_>, id: &str) {
+    harness.run();
+    let rect = registry::snapshot(&harness.ctx)
+        .expect("armed")
+        .widget(id)
+        .unwrap_or_else(|| panic!("no {id} row"))
+        .rect;
+    harness
+        .input_mut()
+        .events
+        .push(egui::Event::PointerMoved(rect.center()));
+    harness.run();
+}
+
+/// What a new row's tooltip DRAWS, read off the accessibility tree rather
+/// than a note: its whole breakdown as one label, wrapped inside the theme's
+/// tooltip width. Melee Haste's breakdown is the longest, wider than that
+/// width on one line, so a tooltip that stopped wrapping fails here.
+#[test]
+fn stat_tooltips_draw_their_breakdown_within_the_tooltip_width() {
+    let max_width = arenasim::ui::theme::size::TOOLTIP_MAX_WIDTH;
+    for (id, breakdown) in [
+        (
+            "stat:Dodge",
+            combat_rogue_breakdown("Dodge", 0.0, 0.0, 0.08),
+        ),
+        (
+            "stat:Parry",
+            combat_rogue_breakdown("Parry", 0.0, 0.0, 0.04),
+        ),
+        (
+            "stat:MeleeHaste",
+            combat_rogue_breakdown("Melee Haste", 0.0, 0.0, 0.10),
+        ),
+    ] {
+        let mut harness = combat_rogue_harness();
+        hover_row(&mut harness, id);
+        let label = harness.get_by_label(&breakdown);
+        let width = label
+            .bounding_box()
+            .unwrap_or_else(|| panic!("{id}: the tooltip label has no bounds"))
+            .width() as f32;
+        assert!(
+            width <= max_width,
+            "{id}: the tooltip is {width} wide, past the theme's {max_width}"
+        );
+        if id == "stat:MeleeHaste" {
+            assert!(
+                label.bounding_box().expect("bounds").height() as f32
+                    > 1.5 * arenasim::ui::theme::text::BODY,
+                "{id}: the longest breakdown wraps"
+            );
+        }
+    }
+}
+
+/// The Combat Rogue's Melee Haste tooltip open: what the breakdown looks like
+/// beside its row, wrapped at the tooltip width.
+#[test]
+#[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]
+fn view_combatant_rogue_combat_haste_tooltip() {
+    let mut harness = combat_rogue_harness();
+    hover_row(&mut harness, "stat:MeleeHaste");
+    harness.snapshot("view_combatant_rogue_combat_haste_tooltip");
 }
 
 /// The curse panel offers Curse of Exhaustion only to a slot whose build
