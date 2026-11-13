@@ -803,12 +803,12 @@ const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[
         "AS-334 (the talent visuals: Curse of Exhaustion's slow)",
     ),
     (
-        Repentance,
-        "AS-378 (Repentance, the Retribution incapacitate; never Freezing Trap's ice block)",
-    ),
-    (
         MindFlay,
         "AS-356 (Mind Flay, the channel and its slow; scoped by AS-335)",
+    ),
+    (
+        Repentance,
+        "AS-378 (Repentance, the Retribution incapacitate; never Freezing Trap's ice block)",
     ),
     (
         Silence,
