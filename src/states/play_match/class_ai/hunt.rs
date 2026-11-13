@@ -1,89 +1,99 @@
-//! The endgame Hunt play (AS-394): a team that outnumbers a lone enemy healer
-//! hiding at a pillar surrounds the pillar from two sides.
+//! The endgame Hunt play (AS-394, AS-404): a team that outnumbers a lone
+//! enemy healer hiding at a pillar closes on it from both sides of the
+//! pillar.
 //!
 //! A healer left alone hides at a pillar (its cover denial, its team solve
 //! or its pillar mode put it there), and a lone chaser cannot out-angle a
 //! pillar hugger: closing on it shrinks the arc it must stay out of, and it
 //! turns round the pillar faster in angle than the chaser can
 //! (`docs/design/2026-10-25-ranged-dps-vs-hidden-targets.md` §3.2). Two
-//! viewers on opposite sides of the pillar leave it nowhere to hide.
+//! hunters closing from opposite sides leave it nowhere to hide.
 //!
 //! **The situation** ([`classify`], `TeamSituation::hunt`). `TeamPlan` only
 //! (a team that runs [`PlayId::Hunt`]), with the gates open, at a pillar (a
-//! map with none has nothing to hunt round). All of:
+//! map with none has nothing to hunt round). It begins when all of:
 //!
 //! 1. **lone healer**: the enemy's only living non-pet unit is a healer;
 //! 2. **outnumbered**: the team has two or more living non-pet units;
 //! 3. **at a pillar**: the healer stands within [`HUNT_ENTER`] of a pillar's
-//!    skin (held until it is beyond [`HUNT_LEAVE`]);
-//! 4. **hidden**, at onset only: one of the team's units cannot see it.
+//!    skin;
+//! 4. **hidden**: one of the team's units cannot see it.
 //!
-//! The window names the healer, the pillar and the hunt's AXIS: the healer's
-//! bearing round the pillar's centre at onset. It carries over while the
-//! healer stays at that pillar, so the stations do not chase the healer round
-//! the pillar; a healer that leaves for another pillar starts a new hunt
-//! there. Every change is a `situation_change` named `hunt`.
+//! It HOLDS while the healer stays within [`HUNT_LEAVE`] of that pillar's
+//! skin, or stands in the pillar's shadow from any living unit of the team
+//! ([`in_shadow`]: AS-206's widened shadow, the one shadow definition) — it
+//! is still using the pillar as cover. It ends once the healer is out in the
+//! open, or when it reaches another pillar (a new hunt there). The shadow's
+//! [`formation::SIGHT_MARGIN`] widening is the release hysteresis: a healer
+//! must stand that far clear of every teammate's sight line round the pillar
+//! before the hunt lets go. The window names the healer, the pillar and the
+//! AXIS (the healer's bearing round the pillar's centre at onset, which only
+//! assigns the sides). Every change is a `situation_change` named `hunt`.
 //!
-//! **The stations** ([`HuntWindow::stations`]): two points on a ring
-//! [`HUNT_STANDOFF`] beyond the pillar's skin, at the axis plus and minus
-//! half of [`HUNT_SPLIT`] (180°), so between them every bearing a hugger can
-//! take is in sight of one ([`tests::two_stations_leave_a_hugger_nowhere_to_hide`]).
-//! A station the arena wall or another pillar takes is pulled in toward the
-//! pillar, then turned toward the axis ([`station_point`]).
-//!
-//! **Who takes a station** — exactly two units, or none: one viewer cannot
-//! out-angle a hugger. In this order:
+//! **Who hunts** — exactly two units, or none: one viewer cannot out-angle a
+//! hugger. In this order:
 //!
 //! | role | in the hunt |
 //! |---|---|
-//! | ranged DPS (Mage, Hunter, Warlock) | a station, first |
-//! | healer (the Priest: [`HUNT_EXCEPTIONS`] names the others) | the second station when only one ranged DPS takes one, and only while no teammate is dying |
-//! | melee DPS | no station: its pursuit already walks round the pillar onto the healer, and a melee on it sees it |
+//! | ranged DPS (Mage, Hunter, Warlock) | first |
+//! | healer (the Priest: [`HUNT_EXCEPTIONS`] names the others) | the second when only one ranged DPS hunts, and only while no teammate is dying |
+//! | melee DPS | no: its pursuit already walks round the pillar onto the healer, and a melee on it sees it |
 //!
 //! The two units are the first two that qualify in Entity order (ranged DPS
-//! before the healer), not the two nearest the pillar: in a 3v3 with two
-//! ranged DPS the stations go to the lower-numbered pair. Each unit keeps the
-//! station it took for as long as the hunt lasts; the first assignment of
-//! the two to the two stations is the shorter total walk ROUND the pillar
-//! ([`walk_round`]), so two units on one side fan out, each to the station
-//! on its own hand, instead of one walking past the other to the far side.
+//! before the healer), not the two nearest the pillar.
 //!
-//! **Holding** (`hold = !arrived || covered`, per unit). A unit holds its
-//! station until it first reaches it; after that it holds only while one of
-//! the two stationed units sees the healer. So a unit that has arrived gives
-//! its station up as soon as nobody sees the healer — even while its partner
-//! is still walking to the other one (the partner keeps walking: it has not
-//! arrived) — and goes back to its ordinary walk for sight, taking the
-//! station back once one of them sees the healer again. In the seed-723
-//! endgame (Mage+Priest against a lone Priest, Nagrand) the Mage, on its
-//! station, gives it up at 64.9s while our Priest is feared short of its own.
-//! A station never parks a unit blind with nobody shooting.
+//! **Sides** ([`Station::slot`]). At onset each unit takes a side of the
+//! pillar: the two candidate points at the axis ±90° ([`stations`]) are
+//! paired with the two units by the shorter total walk ROUND the pillar
+//! ([`walk_round`], AS-403), so two units on one side fan out, each to the
+//! side on its own hand. A unit keeps its side for the whole hunt. Sides are
+//! measured from the healer's LIVE bearing round the pillar, so they move
+//! with it.
+//!
+//! **The pincer** (per unit, every classification):
+//!
+//! - A unit that SEES the healer stands where it is and casts. The sight
+//!   latch ([`Station::sighted`]) is a Schmitt pair on one shadow: it sets
+//!   once the unit sees the healer clear of the pillar's widened shadow, and
+//!   clears only once it loses plain sight.
+//! - A BLIND unit walks to the nearest spot on its own side that sees the
+//!   healer clear of the widened shadow ([`pincer_point`]): 4-14yd off the
+//!   skin, within [`HUNT_REACH`]. As the healer moves round, that spot moves
+//!   with it, so the two close in from both sides.
+//! - Until a unit first sees the healer it takes the shorter way to its side,
+//!   and stops to cast if it gets sight on the way. After that a blind unit
+//!   on the wrong side goes round the BACK of the pillar to its own
+//!   ([`round_the_back`]), never across the healer's face — the rule that
+//!   stops both hunters trailing the healer round one side.
+//! - With no spot on its side that sees the healer (a wall), the unit walks
+//!   for sight on its ordinary movement.
+//!
+//! So no hunter is ever parked without sight, and none walks out of sight
+//! onto a fixed point.
 //!
 //! **The healer and its team's sight** (AS-385 D2: sight of an OWED duty
-//! comes before hiding). A healer on the far station cannot see a DPS on the
-//! near one: the pillar stands between them. It takes the station only while
-//! no living teammate is dying (below `urgency_hp_threshold`, the health at
+//! comes before hiding). A healer hunting on the far side cannot see a DPS
+//! on the near one: the pillar stands between them. It hunts only while no
+//! living teammate is dying (below `urgency_hp_threshold`, the health at
 //! which the medic chase and the team solve already walk a healer back into
 //! sight), and once one is, not again until every one is back to
 //! [`SIGHT_YIELD_HP`] — the healer tops them up first. While it is owed, the
-//! healer is on its ordinary solve and takes no station, and with only one
-//! ranged DPS the team takes none.
+//! healer is on its ordinary solve, and with only one ranged DPS the team
+//! hunts with nobody.
 //!
 //! **The play** ([`HuntStage`], `situation::Play::Hunt`) is a MOVEMENT play,
-//! like Pillar: what the unit casts is its ordinary chain, and
-//! the Burst step still leads it inside a kill window (the Burst stage
-//! applies whatever the unit's play). A stationed unit walks to its station
-//! and holds it ([`walk_to_station`]) — a kiter in place of its ENGAGE seek
-//! and chase, a Warlock in place of its pursuit, a healer in place of its
-//! formation or cover. A stationed DPS ignores its sight yield while it
-//! walks: the team's hunt leads, as the team's stance does. The play stands
-//! down while the healer is locked (the team's `enemy_healer_locked` is on
-//! it): a locked healer cannot run round its pillar, and the Chain play below
-//! it extends the lock.
+//! like Pillar: what the unit casts is its ordinary chain, and the Burst
+//! step still leads it inside a kill window (the Burst stage applies
+//! whatever the unit's play). A hunting unit walks to its point
+//! ([`walk_to_station`]) — a kiter in place of its ENGAGE seek and chase, a
+//! Warlock in place of its pursuit, a healer in place of its formation or
+//! cover. A hunting DPS ignores its sight yield: the team's hunt leads, as
+//! the team's stance does. The play stands down while the healer is locked
+//! (the team's `enemy_healer_locked` is on it): a locked healer cannot run
+//! round its pillar, and the Chain play below it extends the lock.
 //!
 //! **The target focus** (AS-389) needs no rule here: with one enemy left
-//! there is nobody else in reach to move the focus to, and a stationed DPS
-//! that cannot see the healer is the station the other one covers.
+//! there is nobody else in reach to move the focus to.
 
 use bevy::prelude::*;
 use smallvec::SmallVec;
@@ -112,29 +122,33 @@ use crate::states::play_match::situation::{
 /// the team solve's cover spots stand up to a few yards out.
 pub const HUNT_ENTER: f32 = 6.0;
 
-/// A hunt ends once its healer stands farther than this from the pillar's
-/// skin: the release half of [`HUNT_ENTER`]'s Schmitt pair.
+/// A hunt holds while its healer stands within this of the pillar's skin
+/// (the release half of [`HUNT_ENTER`]'s Schmitt pair), and beyond it while
+/// the healer is still in the pillar's shadow from one of the team
+/// ([`in_shadow`]).
 pub const HUNT_LEAVE: f32 = 10.0;
 
-/// How far beyond the pillar's skin the stations stand. From 20yd off a
+/// The farthest a pincer spot stands off the pillar's skin ([`pincer_point`]),
+/// and where the two onset side points stand ([`stations`]). From 20yd off a
 /// Nagrand pillar's centre a hugger is in sight across about 95° either side
-/// of the viewer's bearing (design §3.2), so two stations half a turn apart
-/// overlap; and a hugger on the far side of either stays within 30yd, every
-/// ranged unit's casting reach.
+/// of the viewer's bearing (design §3.2), and a hugger on the far side stays
+/// within 30yd, every ranged unit's casting reach.
 pub const HUNT_STANDOFF: f32 = 14.0;
 
-/// The nearest a station is pulled in toward the pillar when the wall or
-/// another pillar takes the ring at [`HUNT_STANDOFF`].
+/// The nearest a pincer spot stands off the skin, and the nearest an onset
+/// side point is pulled in toward the pillar when the wall or another pillar
+/// takes the ring at [`HUNT_STANDOFF`].
 pub const HUNT_MIN_STANDOFF: f32 = 4.0;
 
-/// The angle between the two stations, round the pillar's centre: half a
-/// turn. The design's "about 160° or more" is the least that works from
-/// 30yd; at the shipped standoff 160° leaves a sliver of the far side out of
-/// both stations' sight, and 180° leaves none
+/// The angle between the two onset side points round the pillar's centre,
+/// which assign the two units their sides ([`stations`], [`assign`]): half a
+/// turn, so each side is one half of the pillar. Two viewers on those points
+/// leave a hugger nowhere to hide, where 160° leaves a sliver of the far
+/// side out of both points' sight
 /// ([`tests::two_stations_leave_a_hugger_nowhere_to_hide`]).
 pub const HUNT_SPLIT: f32 = std::f32::consts::PI;
 
-/// A stationed unit within this many yards of its station is on it.
+/// A walking unit within this many yards of its point is on it.
 pub const STATION_ARRIVED: f32 = 1.5;
 
 /// How far a station may turn toward the axis when its own bearing is
@@ -144,27 +158,30 @@ const STATION_TURN_STEP: f32 = 10.0 * std::f32::consts::PI / 180.0;
 /// The step a taken station is pulled in by.
 const STATION_PULL_STEP: f32 = 2.0;
 
-/// One unit's station: the point it holds.
+/// One hunter's place in the pincer: its side, and the point it walks to or
+/// stands on this frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Station {
     pub unit: Entity,
-    /// Which side of the axis: 0 (the axis plus half the split) or 1.
+    /// Its side, kept for the hunt: 0 the arc counter-clockwise of the
+    /// healer's live bearing round the pillar, 1 the arc clockwise of it.
     pub slot: u8,
+    /// Where the unit goes: where it stands while [`Self::sighted`],
+    /// otherwise its [`pincer_point`] (or the next point of its walk round
+    /// the back of the pillar).
     pub point: Vec2,
-    /// Whether the unit holds its station this frame: `!arrived || covered`.
-    /// Until it first reaches the station it holds it; after that, only
-    /// while one of the two stationed units sees the healer. An arrived unit
-    /// gives its station up whenever nobody sees the healer, whether or not
-    /// its partner has reached its own, and walks for sight on its ordinary
-    /// movement until one of them sees it again — so a station never parks a
-    /// unit blind with nobody shooting.
+    /// Whether the unit runs the play this frame: `false` only when no spot
+    /// on its side sees the healer, and it walks for sight on its ordinary
+    /// movement instead.
     pub hold: bool,
-    /// Whether the unit has reached this station since it took it (within
-    /// [`STATION_ARRIVED`]), latched.
-    pub arrived: bool,
-    /// Whether the unit has seen the healer since it took its slot: its
-    /// onset walk is over (AS-404 prototype).
-    pub seen: bool,
+    /// The sight latch: set once the unit sees the healer clear of the
+    /// pillar's widened shadow ([`in_shadow`]), cleared once it loses plain
+    /// sight. While set the unit stands and casts.
+    pub sighted: bool,
+    /// Whether the unit has been [`Self::sighted`] since it took its side:
+    /// its onset walk (the shorter way to its side) is over, and from now on
+    /// it goes round the back of the pillar to reach its side.
+    pub onset_walk_done: bool,
 }
 
 /// One live hunt: the healer, its pillar, the axis and who holds which
@@ -516,8 +533,8 @@ fn assign(
                     slot: slot as u8,
                     point: slots[slot].unwrap(),
                     hold: false,
-                    arrived: false,
-                    seen: false,
+                    sighted: false,
+                    onset_walk_done: false,
                 });
             }
             None => rest.push((unit, at)),
@@ -539,8 +556,8 @@ fn assign(
                 slot: slot as u8,
                 point: slots[slot].unwrap(),
                 hold: false,
-                arrived: false,
-                seen: false,
+                sighted: false,
+                onset_walk_done: false,
             });
         }
         (_, 1) => {
@@ -553,8 +570,8 @@ fn assign(
                 slot: free[0] as u8,
                 point: slots[free[0]].unwrap(),
                 hold: false,
-                arrived: false,
-                seen: false,
+                sighted: false,
+                onset_walk_done: false,
             });
         }
         _ => {
@@ -571,8 +588,8 @@ fn assign(
                     slot: slot as u8,
                     point: slots[slot].unwrap(),
                     hold: false,
-                    arrived: false,
-                    seen: false,
+                    sighted: false,
+                    onset_walk_done: false,
                 });
             }
         }
@@ -684,18 +701,9 @@ pub fn classify(
         assigned.clear();
     }
     let position = |unit: Entity| roster.get(&unit).map_or(Vec3::ZERO, |c| c.position);
-    // The active pincer (AS-404 prototype). Each unit keeps the SIDE its slot
-    // gave it at onset — slot 0 the arc counter-clockwise of the healer's
-    // LIVE bearing, slot 1 the arc clockwise of it — and every frame either
-    // stands and casts (it sees the healer) or walks toward sight on its own
-    // side. `arrived` is the sighted latch: a walking unit stops once it sees
-    // the healer clear of the pillar's widened shadow, and a standing one
-    // walks again only once it has lost plain sight. `seen` marks the end of
-    // the unit's onset walk: until it first sees the healer it walks the
-    // shorter way to its side (and stops to cast if it gets sight on the
-    // way); after that a blind unit on the other side goes round the BACK of
-    // the pillar to its own, never across the healer's face, so the two close
-    // from both sides instead of trailing it round one.
+    // The pincer (the module docs): stand while sighted; blind, walk to the
+    // nearest spot on its own side that sees, or — its onset walk done, on the
+    // wrong side — round the back of the pillar.
     let healer_bearing = ring.bearing(at);
     for station in assigned.iter_mut() {
         let me = position(station.unit);
@@ -703,31 +711,28 @@ pub fn classify(
             .and_then(|w| w.stations.iter().find(|s| s.unit == station.unit))
             .filter(|s| s.slot == station.slot);
         let sees = has_line_of_sight(&snapshot.obstacles, me, healer.position);
-        let was_sighted = before.is_some_and(|s| s.arrived);
+        let was_sighted = before.is_some_and(|s| s.sighted);
         let sighted =
             sees && (was_sighted || !in_shadow(&snapshot.obstacles, ring.pillar, xz(me), at));
-        station.seen = before.is_some_and(|s| s.seen) || sighted;
+        station.onset_walk_done = before.is_some_and(|s| s.onset_walk_done) || sighted;
         let side = if station.slot == 0 { 1.0 } else { -1.0 };
         if sighted {
-            station.arrived = true;
+            station.sighted = true;
             station.hold = true;
-            station.point = match before {
-                Some(s) if was_sighted => s.point,
-                _ => xz(me),
-            };
+            station.point = xz(me);
             continue;
         }
-        station.arrived = false;
+        station.sighted = false;
         station.hold = true;
         let offset = signed_offset(&ring, xz(me), healer_bearing);
         let wrong_side = offset * side < -PINCER_STEP * 0.5
             && offset.abs() < std::f32::consts::PI - BACK_TOLERANCE;
-        if station.seen && wrong_side {
+        if station.onset_walk_done && wrong_side {
             station.point = round_the_back(&ring, xz(me), side);
             continue;
         }
         let kept = before
-            .filter(|s| !s.arrived && s.hold)
+            .filter(|s| !s.sighted && s.hold)
             .map(|s| s.point)
             .filter(|&p| {
                 on_side(&ring, p, healer_bearing, side)
@@ -920,6 +925,93 @@ mod tests {
         // The control: through the pillar, the other pairing is shorter.
         let line = |u: (Entity, Vec2), s: usize| u.1.distance(slots[s].unwrap());
         assert!(line(mage, 0) + line(warlock, 1) < line(mage, 1) + line(warlock, 0));
+    }
+
+    /// The shadow is the wedge behind the pillar from the viewer, widened by
+    /// the margin and bounded by the near-obstacle limit: a hider just
+    /// outside the plain wedge is still in it (the release hysteresis), one
+    /// beyond the margin is not, and one farther from the pillar than the
+    /// viewer and beyond `REPAIR_FULL` is in the open.
+    #[test]
+    fn the_shadow_is_widened_by_the_margin_and_bounded() {
+        let obstacles = [cylinder(0.0, 0.0, 6.0)];
+        let viewer = Vec2::new(-30.0, 0.0);
+        // The plain wedge's upper edge, 14yd beyond the centre.
+        let half = (6.0f32 / 30.0).asin();
+        let along = 44.0;
+        let edge = viewer + Vec2::from_angle(half) * (along / half.cos());
+        let outward = Vec2::from_angle(half + std::f32::consts::FRAC_PI_2);
+        let sees = |p: Vec2| {
+            has_line_of_sight(
+                &obstacles,
+                Vec3::new(viewer.x, 1.0, viewer.y),
+                Vec3::new(p.x, 1.0, p.y),
+            )
+        };
+        let inside = edge - outward * 1.0;
+        let band = edge + outward * 1.0;
+        let clear = edge + outward * (formation::SIGHT_MARGIN + 0.5);
+        assert!(!sees(inside) && in_shadow(&obstacles, 0, viewer, inside));
+        assert!(
+            sees(band) && in_shadow(&obstacles, 0, viewer, band),
+            "the band"
+        );
+        assert!(sees(clear) && !in_shadow(&obstacles, 0, viewer, clear));
+        // Straight behind, but beyond both the viewer's distance and
+        // `REPAIR_FULL` off the pillar: the open.
+        assert!(in_shadow(&obstacles, 0, viewer, Vec2::new(14.0, 0.0)));
+        assert!(!in_shadow(&obstacles, 0, viewer, Vec2::new(31.0, 0.0)));
+    }
+
+    /// A pincer spot stands on the unit's own side of the healer's bearing,
+    /// sees the healer clear of the widened shadow, and is the nearest such
+    /// spot by the walk round the pillar.
+    #[test]
+    fn a_pincer_spot_is_the_nearest_clear_sight_on_its_side() {
+        let obstacles = [cylinder(0.0, 0.0, 6.0)];
+        let ring = ring();
+        let healer = Vec2::new(7.0, 0.0);
+        let from = Vec2::new(-20.0, 3.0);
+        let bounds = ArenaBounds::default();
+        for side in [1.0, -1.0] {
+            let p =
+                pincer_point(&obstacles, &bounds, &ring, from, healer, side, 1.0).expect("a spot");
+            assert!(on_side(&ring, p, 0.0, side), "{side}: {p}");
+            assert!(sees_clear(&obstacles, 0, p, healer, 1.0));
+            assert!(p.distance(healer) <= HUNT_REACH);
+            // Nothing on that side that sees is a shorter walk.
+            for k in 1..=18 {
+                let theta = side * (k as f32 * 10.0).to_radians();
+                let q = ring.center + Vec2::from_angle(theta) * (ring.disc + HUNT_STANDOFF);
+                if sees_clear(&obstacles, 0, q, healer, 1.0) {
+                    assert!(walk_round(&ring, from, p) <= walk_round(&ring, from, q) + 1e-3);
+                }
+            }
+        }
+        // From the north the counter-clockwise spot is the nearer; the
+        // clockwise one is round the pillar's back.
+        let north = Vec2::new(0.0, 20.0);
+        let ccw = pincer_point(&obstacles, &bounds, &ring, north, healer, 1.0, 1.0).unwrap();
+        let cw = pincer_point(&obstacles, &bounds, &ring, north, healer, -1.0, 1.0).unwrap();
+        assert!(walk_round(&ring, north, ccw) < walk_round(&ring, north, cw));
+    }
+
+    /// The walk round the back turns away from the healer's face: a unit
+    /// clockwise of the healer bound for the counter-clockwise side turns
+    /// clockwise, further from the face, on its own circle.
+    #[test]
+    fn the_walk_round_the_back_turns_away_from_the_face() {
+        let ring = ring();
+        // The healer east (0°); the unit at -60°, 15yd out, owed side +1.
+        let from = Vec2::from_angle((-60f32).to_radians()) * 15.0;
+        let next = round_the_back(&ring, from, 1.0);
+        let off = signed_offset(&ring, next, 0.0).to_degrees();
+        assert!(off < -60.0 - 30.0, "{off}: further from the face");
+        assert!((next.length() - 15.0).abs() < 1e-3, "on its own circle");
+        // The other side's unit turns the other way.
+        let from = Vec2::from_angle(60f32.to_radians()) * 15.0;
+        let off = signed_offset(&ring, round_the_back(&ring, from, -1.0), 0.0).to_degrees();
+        assert!(off > 60.0 + 30.0, "{off}");
     }
 
     /// A free spot is [`HUNT_STANDOFF`] off the skin at its own bearing.

@@ -369,8 +369,8 @@ mod tests {
                     slot: 0,
                     point: Vec2::ZERO,
                     hold: true,
-                    arrived: false,
-                    seen: false,
+                    sighted: false,
+                    onset_walk_done: false,
                 }]
                 .into_iter()
                 .collect(),
