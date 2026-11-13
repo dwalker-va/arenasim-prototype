@@ -422,6 +422,11 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
                 format!("Roots the target for {:.0} sec.", aura.duration)
             }
         }
+        AuraType::Stun if aura.vulnerability > 0.0 => format!(
+            "Stuns the target for {:.0} sec. It takes {:.0}% more damage while stunned.",
+            aura.duration,
+            aura.vulnerability * 100.0
+        ),
         AuraType::Stun => {
             format!("Stuns the target for {:.0} sec.", aura.duration)
         }
@@ -729,6 +734,21 @@ mod tests {
         assert_eq!(
             build_aura_description(&aura),
             "Increases attack speed by 20% for 10 sec."
+        );
+    }
+
+    /// A stun carrying a vulnerability (Improved Kidney Shot's) says so; a
+    /// plain stun says only that it stuns.
+    #[test]
+    fn a_vulnerable_stun_says_what_its_victim_suffers() {
+        let mut aura: AuraEffect =
+            ron::from_str("(aura_type: Stun, duration: 6.0, magnitude: 1.0)")
+                .expect("a stun parses");
+        assert_eq!(build_aura_description(&aura), "Stuns the target for 6 sec.");
+        aura.vulnerability = 0.10;
+        assert_eq!(
+            build_aura_description(&aura),
+            "Stuns the target for 6 sec. It takes 10% more damage while stunned."
         );
     }
 

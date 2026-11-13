@@ -149,6 +149,16 @@ pub struct AuraEffect {
     /// [`NextCastModifier`](super::next_cast::NextCastModifier).
     #[serde(default)]
     pub next_cast: Option<super::next_cast::NextCastModifier>,
+    /// On a stun: the damage-taken increase its victim suffers while the stun
+    /// holds, as a fraction (`0.05`: 5% more damage from every source). A
+    /// non-zero value makes the stun the face of a
+    /// [`CompoundDebuff::StunVulnerability`](super::components::CompoundDebuff),
+    /// whose `DamageTakenIncrease` rider lands with it and leaves with it,
+    /// however it ends. `0.0`, the default, on every shipped stun: Improved
+    /// Kidney Shot patches it in (`AbilityField::AuraVulnerability`).
+    /// `validate()` refuses it on any other aura.
+    #[serde(default)]
+    pub vulnerability: f32,
 }
 
 impl AuraEffect {
@@ -161,7 +171,18 @@ impl AuraEffect {
             charges: self.charges,
             reflect_absorbed: None,
             triggered_absorb: self.triggered_absorb,
+            vulnerability: (self.vulnerability > 0.0).then_some(self.vulnerability),
         }
+    }
+
+    /// The compound the configured aura is the face of: the one its RON
+    /// declares, or — for a stun carrying a vulnerability — a
+    /// `StunVulnerability`, whose rider is the vulnerability.
+    pub fn compound(&self) -> Option<CompoundDebuff> {
+        self.compound.or_else(|| {
+            (self.aura_type == AuraType::Stun && self.vulnerability > 0.0)
+                .then_some(CompoundDebuff::StunVulnerability)
+        })
     }
 }
 
@@ -772,6 +793,8 @@ impl AbilityDefinitions {
             // Warlock: the Destruction tree
             AbilityType::Shadowburn,
             AbilityType::Conflagrate,
+            // Rogue: the Assassination tree
+            AbilityType::Rupture,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -930,6 +953,35 @@ impl AbilityDefinitions {
                     }
                 }
                 (false, None) => {}
+            }
+        }
+
+        // A vulnerability rides only on a stun that is not already the face
+        // of another compound, and is a share: its rider is the stun's.
+        for (ability, def) in &self.definitions {
+            let Some(aura) = def.applies_aura.as_ref() else {
+                continue;
+            };
+            if aura.vulnerability == 0.0 {
+                continue;
+            }
+            if aura.aura_type != AuraType::Stun || aura.compound.is_some() {
+                panic!(
+                    "abilities.ron: {ability:?} sets `vulnerability` on a {:?} aura{}; it rides \
+                     only on a stun that is no other compound's face",
+                    aura.aura_type,
+                    if aura.compound.is_some() {
+                        " with a compound"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            if !(0.0..=1.0).contains(&aura.vulnerability) {
+                panic!(
+                    "abilities.ron: {ability:?}'s `vulnerability` is {}; it is a share in 0..=1",
+                    aura.vulnerability
+                );
             }
         }
 
@@ -1223,6 +1275,82 @@ mod tests {
             cost_reduction: 0.0,
             power: 0.0,
         }
+    }
+
+    /// The shipped table with `edit` made to `ability`'s aura, validated.
+    fn validate_aura_of(ability: AbilityType, edit: impl FnOnce(&mut AuraEffect)) {
+        let path = crate::paths::asset_path_str("config/abilities.ron");
+        let mut config: AbilitiesConfig =
+            ron::from_str(&std::fs::read_to_string(path).expect("abilities.ron")).expect("parses");
+        edit(
+            config
+                .abilities
+                .get_mut(&ability)
+                .and_then(|d| d.applies_aura.as_mut())
+                .expect("the ability's aura"),
+        );
+        let _ = AbilityDefinitions::new(config).validate();
+    }
+
+    /// A vulnerability rides on a stun: Kidney Shot's validates...
+    #[test]
+    fn a_vulnerability_rides_on_a_stun() {
+        validate_aura_of(AbilityType::KidneyShot, |a| a.vulnerability = 0.05);
+    }
+
+    /// ...a fear's does not (Death Coil's horror)...
+    #[test]
+    #[should_panic(expected = "rides only on a stun")]
+    fn a_vulnerability_needs_a_stun() {
+        validate_aura_of(AbilityType::DeathCoil, |a| a.vulnerability = 0.05);
+    }
+
+    /// ...nor a stun already the face of another compound...
+    #[test]
+    #[should_panic(expected = "with a compound")]
+    fn a_vulnerability_needs_a_stun_of_no_other_compound() {
+        validate_aura_of(AbilityType::KidneyShot, |a| {
+            a.vulnerability = 0.05;
+            a.compound = Some(CompoundDebuff::Shadowform);
+        });
+    }
+
+    /// ...and it is a share.
+    #[test]
+    #[should_panic(expected = "it is a share")]
+    fn a_vulnerability_is_a_share() {
+        validate_aura_of(AbilityType::KidneyShot, |a| a.vulnerability = 1.5);
+    }
+
+    /// The compound a configured aura is the face of: a stun with a
+    /// vulnerability is a `StunVulnerability`; without one, or on any other
+    /// aura, only what the RON declares.
+    #[test]
+    fn a_vulnerable_stun_is_the_face_of_its_compound() {
+        let defs = AbilityDefinitions::shipped();
+        let mut stun = defs
+            .get_unchecked(&AbilityType::KidneyShot)
+            .applies_aura
+            .clone()
+            .unwrap();
+        assert_eq!(stun.compound(), None);
+        assert_eq!(stun.damage_mods().vulnerability, None);
+        stun.vulnerability = 0.10;
+        assert_eq!(stun.compound(), Some(CompoundDebuff::StunVulnerability));
+        assert_eq!(stun.damage_mods().vulnerability, Some(0.10));
+        let mut fear = defs
+            .get_unchecked(&AbilityType::Fear)
+            .applies_aura
+            .clone()
+            .unwrap();
+        fear.vulnerability = 0.10;
+        assert_eq!(fear.compound(), None);
+        let roots = defs
+            .get_unchecked(&AbilityType::EntanglingRoots)
+            .applies_aura
+            .clone()
+            .unwrap();
+        assert_eq!(roots.compound(), Some(CompoundDebuff::EntanglingRoots));
     }
 
     /// A `next_cast` modifier rides only on a NextCast aura...
@@ -1526,6 +1654,7 @@ mod tests {
                     // The Combat capstone (AS-418): a talent ability is in
                     // its class's own kit, as every kit surface shows it.
                     AbilityType::ExposeArmor,
+                    AbilityType::Rupture,
                 ],
             ),
             (

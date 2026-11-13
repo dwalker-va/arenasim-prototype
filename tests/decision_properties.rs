@@ -1539,6 +1539,12 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         AbilityType::Conflagrate,
         Unreached::NeedsKnob("a build that takes Conflagrate"),
     ),
+    // The Assassination tree (AS-417): tests/assassination_talents.rs builds
+    // it in its scene pairs.
+    (
+        AbilityType::Rupture,
+        Unreached::NeedsKnob("a build that takes Rupture"),
+    ),
 ];
 
 /// Every ability of every class's own kit is chosen somewhere in the grid, or
