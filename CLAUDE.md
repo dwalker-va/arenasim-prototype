@@ -401,8 +401,16 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
        )),
        projectile_speed: Some(35.0),
        projectile_visuals: Some((color: (1.0, 0.5, 0.0), emissive: (1.5, 0.8, 0.0))),
+       off_gcd: true,         // only if its cast site starts no global cooldown
    )
    ```
+   `off_gcd` currently follows the CODE: it declares what the class AI's cast
+   site does (each sets `global_cooldown = GCD` by hand), not what TBC's
+   `StartRecoveryCategory` says. The interrupts are off it here and category 133
+   (the GCD) in TBC; AS-484 reconciles the two. `tests/decision_properties.rs`
+   holds every ability the grid chooses to it and names the cast site of every
+   other one (`GCD_READ_AT_SITE`); a talent ability is held by the charge audit
+   below.
 
 4. **Add AI logic** in the appropriate `class_ai/<class>.rs` file:
    - Implement when to use the ability in the class's `decide_action()` method
@@ -633,7 +641,11 @@ carrying every slot's build.
   class AI decides it with `abilities.get(..)`, never `get_unchecked`: an
   untalented unit's book lacks it. `tests/talent_ai_audit.rs` fails until the
   ability has a row there whose scene shows the AI deciding it when granted
-  and leaving it alone when not.
+  and leaving it alone when not. The same row prices it
+  (`every_talent_ability_pays_its_declared_price`): granted, the AI chooses it
+  ALONE, the caster pays exactly its `mana_cost` (nothing under Inner Focus),
+  at the choice for an instant and at the landing for a cast, and starts the
+  global cooldown exactly when it is not `off_gcd`.
 - **Per-match choices** (`talent_choices.rs`). `WidenChoice(<menu>(<option>))`
   hides an option from every build without the node (which options are hidden
   is data: the ones some node widens; a menu's default never is);

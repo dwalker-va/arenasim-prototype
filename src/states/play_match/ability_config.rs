@@ -262,6 +262,17 @@ pub struct AbilityConfig {
     /// Cast time in seconds (0.0 = instant)
     #[serde(default)]
     pub cast_time: f32,
+    /// OFF the global cooldown: using it does not start the caster's GCD.
+    /// It currently follows the code, not TBC's
+    /// `SpellCategories.StartRecoveryCategory` (the interrupts are off it here
+    /// and category 133, the GCD, in TBC); AS-484 reconciles the two. The
+    /// class AI sets the GCD by hand at each cast site, so this field
+    /// DECLARES what that site does:
+    /// `tests/decision_properties.rs` holds every base-kit ability the grid
+    /// chooses to it and names the site of every other non-talent one, and
+    /// `tests/talent_ai_audit.rs` holds every talent ability.
+    #[serde(default)]
+    pub off_gcd: bool,
     /// What stops this ability being used: TBC's
     /// `SpellCategories.PreventionType`. REQUIRED, with no serde default, so a
     /// new ability states it rather than inheriting a guess. A silence stops
@@ -1495,6 +1506,7 @@ mod tests {
             icon: String::new(),
             description: String::new(),
             cast_time: 0.0,
+            off_gcd: false,
             prevention: Prevention::Silence,
             range: 40.0,
             min_range: None,
