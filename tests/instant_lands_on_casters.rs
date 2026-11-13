@@ -82,6 +82,7 @@ const ROUTES: &[(AbilityType, Route)] = &[
     (Ambush, Route::Strike),
     (SinisterStrike, Route::Strike),
     (CrusaderStrike, Route::Strike),
+    (Hemorrhage, Route::Strike),
     (FrostNova, Route::Area),
     (HolyNova, Route::Area),
     (Shadowburn, Route::InstantCast),

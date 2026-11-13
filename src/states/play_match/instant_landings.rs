@@ -1,5 +1,5 @@
 //! Where a frame's queued instant effects land: the strikes (Mortal Strike,
-//! Sinister Strike, Ambush, Crusader Strike), the area damage (Frost Nova,
+//! Sinister Strike, Ambush, Crusader Strike, Hemorrhage), the area damage (Frost Nova,
 //! Holy Nova) and the area heals (Holy Nova) the class AIs decided in
 //! `combat_ai::decide_abilities`.
 //!
@@ -125,7 +125,7 @@ pub fn land_instant_effects(
     } = std::mem::take(&mut *landings);
 
     // Queued instant strikes (Ambush, Sinister Strike, Mortal Strike,
-    // Crusader Strike).
+    // Crusader Strike, Hemorrhage).
     for PendingStrike { attack, dealt } in strikes {
         let QueuedInstantAttack {
             attacker: attacker_entity,
