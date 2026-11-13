@@ -33,7 +33,11 @@
 mod common;
 
 use arenasim::headless::{HeadlessMatchConfig, Stage, Unit};
-use arenasim::states::play_match::class_ai::hunt::{in_shadow, HuntWindow, Station, HUNT_LEAVE};
+use arenasim::states::match_config::CharacterClass;
+use arenasim::states::play_match::ability_book::AbilityBook;
+use arenasim::states::play_match::class_ai::hunt::{
+    book_reaches, in_shadow, HuntWindow, Station, HUNT_LEAVE,
+};
 use arenasim::states::play_match::class_ai::plays::every_exception_entry;
 use arenasim::states::play_match::components::{Aura, AuraType, DispelType};
 use arenasim::states::play_match::map_config::load_map_geometry_config;
@@ -118,6 +122,21 @@ pub fn bank() -> Vec<Endgame> {
             seeds: &[1, 2, 3, 4],
         },
         Endgame {
+            name: "far sight, Hunter+Priest v Druid",
+            hunters: ["Hunter", "Priest"],
+            hider: "Druid",
+            hunting_team: 1,
+            // The hider on the south-east pillar's west face, the Hunter
+            // 44yd west of it in plain sight (beyond its 35yd shots), the
+            // Priest east of the pillar, out of its sight.
+            at: [
+                (-10.0, -20.0, 0.9, 0.6),
+                (55.0, -24.0, 0.9, 0.6),
+                (33.5, -20.0, 0.8, 0.6),
+            ],
+            seeds: &[1, 2, 3, 4],
+        },
+        Endgame {
             name: "one side, Warlock+Priest v Priest",
             hunters: ["Warlock", "Priest"],
             hider: "Priest",
@@ -182,6 +201,16 @@ fn stage(e: &Endgame) -> Stage {
         })
 }
 
+fn class_of(name: &str) -> CharacterClass {
+    match name {
+        "Mage" => CharacterClass::Mage,
+        "Priest" => CharacterClass::Priest,
+        "Hunter" => CharacterClass::Hunter,
+        "Warlock" => CharacterClass::Warlock,
+        other => panic!("no hunter class {other}"),
+    }
+}
+
 fn xz(p: Vec3) -> Vec2 {
     Vec2::new(p.x, p.z)
 }
@@ -210,6 +239,10 @@ pub struct Reading {
     pub hunt_frames: u32,
     /// The longest a hunter stood blind and free to move, during the hunt.
     pub longest_blind_still: f32,
+    /// Seconds a hunter saw the hider from beyond its reach (the situation),
+    /// and the longest it stood there free to move.
+    pub out_of_reach: f32,
+    pub longest_beyond_reach_still: f32,
     /// Seconds both hunters stood blind, after both had first seen the hider
     /// (their onset walks over), and of those the seconds they had stood
     /// together on one side of it for longer than [`SAME_SIDE_SETTLE`], and
@@ -261,6 +294,8 @@ pub fn read(e: &Endgame, played: &Played, obstacles: &[ObstacleVolume]) -> Readi
     let hunters = hunter_units(e);
     let mut r = Reading::default();
     let mut blind_still = [0.0f32; 2];
+    let mut beyond_still = [0.0f32; 2];
+    let books = e.hunters.map(|class| AbilityBook::shipped(class_of(class)));
     let mut together = 0.0f32;
     let mut sighted_for = [0.0f32; 2];
     let mut seen_once = [false; 2];
@@ -297,9 +332,16 @@ pub fn read(e: &Endgame, played: &Played, obstacles: &[ObstacleVolume]) -> Readi
             seen_once[i] |= sighted_for[i] >= SEEN_ONCE;
         }
         let hunt = hunting_at(t);
-        let Some(pillar) = hunt else {
+        // The play stands down while the hider is held (its lock is the
+        // Chain play's to extend): those frames are not the hunt's.
+        let locked = hider
+            .aura_types
+            .iter()
+            .any(|a| HELD.contains(a) && *a != AuraType::Root);
+        let Some(pillar) = hunt.filter(|_| !locked) else {
             prev = Some((t, pos, hp));
             blind_still = [0.0; 2];
+            beyond_still = [0.0; 2];
             together = 0.0;
             continue;
         };
@@ -317,6 +359,18 @@ pub fn read(e: &Endgame, played: &Played, obstacles: &[ObstacleVolume]) -> Readi
                 r.longest_blind_still = r.longest_blind_still.max(blind_still[i]);
             } else {
                 blind_still[i] = 0.0;
+            }
+            // ...and nobody stands in sight beyond its reach.
+            let out_of_reach =
+                sees[i] && !book_reaches(&books[i], u.position.distance(hider.position), 0.0);
+            if out_of_reach {
+                r.out_of_reach += dt;
+            }
+            if out_of_reach && free && speed(i) < STILL {
+                beyond_still[i] += dt;
+                r.longest_beyond_reach_still = r.longest_beyond_reach_still.max(beyond_still[i]);
+            } else {
+                beyond_still[i] = 0.0;
             }
         }
 
@@ -432,6 +486,27 @@ fn no_hunter_stands_still_without_sight() {
     );
 }
 
+/// Claim 1b: no hunter stands in sight of the hider from beyond its own
+/// reach (its book's damaging abilities' range bands) for more than a GCD:
+/// it walks into reach instead. The bank's "far sight" endgame starts a
+/// Hunter 44yd from the hider in plain sight, beyond its 35yd shots.
+#[test]
+fn no_hunter_stands_in_sight_beyond_its_reach() {
+    let on = readings(true);
+    let beyond: f32 = on.iter().map(|(_, r)| r.out_of_reach).sum();
+    assert!(
+        beyond > 1.0,
+        "the situation: in sight beyond reach ({beyond:.2}s)"
+    );
+    for (name, r) in &on {
+        assert!(
+            r.longest_beyond_reach_still <= GCD,
+            "{name}: a hunter stood in sight beyond its reach for {:.2}s",
+            r.longest_beyond_reach_still
+        );
+    }
+}
+
 /// The walk is re-aimed when its point moves on — a carrot round the back
 /// half a step behind, or a walk point that lost the hider — never every few
 /// frames as the hider moves: no hunter begins more than [`MAX_WALKS_PER_SECOND`] new
@@ -534,6 +609,8 @@ fn hunt_under_way(pillar: usize, axis: f32, onset_walk_done: bool) -> impl FnOnc
             sighted: false,
             onset_walk_done,
             onset_round_back: false,
+            aimed_at: 0.0,
+            round_back: false,
         };
         w.resource_mut::<Situations>().teams[0].hunt = Some(HuntWindow {
             subject,
@@ -835,6 +912,76 @@ fn the_far_hunters_onset_walk_takes_the_short_route_to_its_side() {
         assert!(
             closed,
             "seed {seed}: the control: excepted, it closes on the face"
+        );
+    }
+}
+
+/// The hunt holds while the pillar blocks a hunter's plain sight of the
+/// hider, past the widened shadow's near-obstacle limit (seed 758, AS-404
+/// round 3: the hunt ended with the healer 16.07yd from the pillar's centre
+/// and the Warlock blind 15.42yd out, and started again with the sides
+/// dealt afresh).
+///
+/// The hider is rooted 16.5yd west of the south-east pillar's centre. Our
+/// Mage stands 15.4yd east of it, blind: the hider is farther from the
+/// pillar than the Mage and more than `REPAIR_FULL` off its footprint, so it
+/// is in no widened shadow of the Mage's. Our Priest sees it clear. The hunt
+/// holds until the Mage sees the hider. The control: the Mage standing where
+/// it sees the hider too, and the hunt ends at once.
+#[test]
+fn the_hunt_holds_while_the_pillar_hides_the_healer_past_the_shadow_limit() {
+    let (pillar, center) = SE;
+    let obstacles = obstacles();
+    let hider = Vec2::new(23.5, -20.0);
+    let stage = |mage: (f32, f32)| {
+        Stage::new()
+            .place(HIDER, hider.x, hider.y)
+            .aura(HIDER, root())
+            .place(MAGE, mage.0, mage.1)
+            .target(MAGE, HIDER)
+            .place(PRIEST, 10.0, -20.0)
+            .target(PRIEST, HIDER)
+            .world(hunt_under_way(pillar, 180.0, false))
+    };
+    let end_of = |played: &Played| {
+        let landed = played.landed();
+        played
+            .staged_trace()
+            .find(|e| {
+                e["kind"] == "situation_change"
+                    && e["name"] == "hunt"
+                    && e["team"] == 1
+                    && e["change"] == "end"
+            })
+            .map(|e| sim_time(e) - landed.combat)
+    };
+    let mage = Vec2::new(55.4, -20.0);
+    assert!(
+        !in_shadow(&obstacles, pillar, mage, hider),
+        "the situation: beyond the widened shadow's limit"
+    );
+    let eye = |q: Vec2| Vec3::new(q.x, 1.0, q.y);
+    assert!(!has_line_of_sight(&obstacles, eye(mage), eye(hider)));
+    for seed in [1, 2, 3] {
+        let played = play(two_v_one(seed), stage((mage.x, mage.y)));
+        let t = track(&played, center, 25.0);
+        let first_sight = t
+            .frames
+            .iter()
+            .find(|f| f.2[0])
+            .map(|f| f.0)
+            .unwrap_or_else(|| panic!("seed {seed}: the Mage never saw the hider"));
+        let end = end_of(&played);
+        assert!(
+            end.is_none_or(|e| e >= first_sight),
+            "seed {seed}: the hunt ended at {end:?}s, before the Mage saw the hider \
+             ({first_sight:.2}s)"
+        );
+        let played = play(two_v_one(seed), stage((35.0, -36.0)));
+        let end = end_of(&played);
+        assert!(
+            end.is_some_and(|e| e < 0.1),
+            "seed {seed}: the control: both in sight, the hunt ends at once ({end:?})"
         );
     }
 }

@@ -5,7 +5,8 @@
 //! writes one CSV row per living non-pet combatant per frame after the gates
 //! to `TRACK_OUT`: the app clock (the combat log's), the unit, its position,
 //! health and mana, its live `Point` goal, whether it sees each living enemy
-//! (the cast's own sight test) and its auras. `TRACE_OUT`, when set, gets the
+//! (the cast's own sight test), the cast or channel in progress and its
+//! auras. `TRACE_OUT`, when set, gets the
 //! decision trace.
 //!
 //! `TRACK_IN` is either a `--headless` config (played as its seed plays it),
@@ -85,7 +86,7 @@ fn hunt_tracks() {
     let mut out = std::io::BufWriter::new(std::fs::File::create(&output).unwrap());
     writeln!(
         out,
-        "t,team,slot,class,x,z,hp,mana,goal_x,goal_z,sees,auras"
+        "t,team,slot,class,x,z,hp,mana,goal_x,goal_z,sees,casting,auras"
     )
     .unwrap();
     let observe = |f: &FrameObservation| {
@@ -109,7 +110,7 @@ fn hunt_tracks() {
             });
             writeln!(
                 out,
-                "{:.3},{},{},{:?},{:.2},{:.2},{:.3},{:.3},{},{},{},{}",
+                "{:.3},{},{},{:?},{:.2},{:.2},{:.3},{:.3},{},{},{},{},{}",
                 f.sim_time,
                 c.team,
                 c.slot,
@@ -121,6 +122,9 @@ fn hunt_tracks() {
                 gx,
                 gz,
                 sees.join(" "),
+                c.casting
+                    .or(c.channeling)
+                    .map_or(String::new(), |a| format!("{a:?}")),
                 c.aura_types
                     .iter()
                     .map(|a| format!("{a:?}"))

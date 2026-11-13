@@ -106,6 +106,7 @@ use super::pillar_mode::{rings, Ring};
 use super::plays::{own_class, PlayStage};
 use super::{CombatContext, CombatantInfo};
 use crate::states::match_config::CharacterClass;
+use crate::states::play_match::ability_book::AbilityBook;
 use crate::states::play_match::arena_bounds::ArenaBounds;
 use crate::states::play_match::components::{MovementDirective, MovementGoal};
 use crate::states::play_match::decision_trace::{
@@ -129,6 +130,13 @@ pub const HUNT_ENTER: f32 = 6.0;
 /// the healer is still in the pillar's shadow from one of the team
 /// ([`in_shadow`]).
 pub const HUNT_LEAVE: f32 = 10.0;
+
+/// The farthest off its pillar's skin a healer can stand and still be held
+/// by the pillar's shadow from a teammate: beyond [`HUNT_LEAVE`], a hunt
+/// holds while the pillar hides the healer from one of the team, out to
+/// here. Farther out the healer is in the open, whoever the pillar hides it
+/// from.
+pub const HUNT_SHADOW_LEAVE: f32 = 16.0;
 
 /// The farthest a pincer spot stands off the pillar's skin ([`pincer_point`]),
 /// and where the two onset side points stand ([`stations`]). From 20yd off a
@@ -189,6 +197,11 @@ pub struct Station {
     /// passes behind the pillar, not across the healer's face. Fixed when
     /// the unit takes its side.
     pub onset_round_back: bool,
+    /// When the unit's current walk point was chosen (the decision trace's
+    /// `sim_time` clock): a walk point is kept at least [`REAIM_SECS`].
+    pub aimed_at: f32,
+    /// Whether [`Self::point`] is a carrot of a walk round the back.
+    pub round_back: bool,
 }
 
 /// One live hunt: the healer, its pillar, the axis and who holds which
@@ -371,9 +384,71 @@ pub fn stations(
     ]
 }
 
-/// The farthest a pincer spot stands from the healer it watches: every
-/// ranged unit's casting reach.
-pub const HUNT_REACH: f32 = 30.0;
+/// How far inside an attack's range band a hunter must stand before it
+/// counts as in reach: the enter half of the reach Schmitt pair (it stays in
+/// reach out to the band's own edge).
+pub const REACH_MARGIN: f32 = 2.0;
+
+/// The least time a blind hunter keeps the walk point it chose before it may
+/// choose another: a healer on the run moves every point's sight, and
+/// re-aiming each frame it does would turn the walk every few frames.
+pub const REAIM_SECS: f32 = 0.5;
+
+/// How long after a hunt ends a hunt that starts again on the same healer at
+/// the same pillar is the same hunt: each unit keeps its side.
+pub const HUNT_REMEMBER: f32 = 3.0;
+
+/// A hunt that just ended, kept for [`HUNT_REMEMBER`] (`TeamSituation::hunt_memory`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct HuntMemory {
+    pub window: HuntWindow,
+    /// When it ended, on the decision trace's `sim_time` clock.
+    pub ended: f32,
+}
+
+/// The team's hunt memory after a classification: the hunt that just ended
+/// (`prev` held one, `next` holds none), or the one it already kept while
+/// that is younger than [`HUNT_REMEMBER`]; none while a hunt runs.
+pub fn remember(
+    prev: Option<&HuntWindow>,
+    kept: Option<&HuntMemory>,
+    next: Option<&HuntWindow>,
+    now: f32,
+) -> Option<HuntMemory> {
+    match (prev, next) {
+        (_, Some(_)) => None,
+        (Some(w), None) => Some(HuntMemory {
+            window: w.clone(),
+            ended: now,
+        }),
+        (None, None) => kept.filter(|m| now - m.ended <= HUNT_REMEMBER).cloned(),
+    }
+}
+
+/// Whether `unit` can attack from `distance` (yards): some damaging ability
+/// in its own book, not locked by its per-match choices, whose range band
+/// holds `distance` with `margin` to spare at both ends (a Hunter's shots
+/// have a dead zone).
+pub fn in_reach(unit: &CombatantInfo, distance: f32, margin: f32) -> bool {
+    book_reaches(&unit.book, distance, margin)
+}
+
+/// [`in_reach`], asked of an ability book.
+pub fn book_reaches(book: &AbilityBook, distance: f32, margin: f32) -> bool {
+    book.iter().any(|(ability, config)| {
+        config.is_damage()
+            && !book.is_locked(*ability)
+            && distance <= config.range - margin
+            && config.min_range.is_none_or(|m| distance >= m + margin)
+    })
+}
+
+/// Whether `pillar` alone stands between `a` and `b`.
+fn pillar_blocks(obstacles: &[ObstacleVolume], pillar: usize, a: Vec3, b: Vec3) -> bool {
+    obstacles
+        .get(pillar)
+        .is_some_and(|o| !has_line_of_sight(std::slice::from_ref(o), a, b))
+}
 
 /// The angle between two pincer candidates round the pillar.
 const PINCER_STEP: f32 = 10.0 * std::f32::consts::PI / 180.0;
@@ -455,8 +530,8 @@ fn round_the_back(ring: &Ring, from: Vec2, side: f32) -> Vec2 {
 /// `side` of the healer's live bearing from which a unit at `from` sees the
 /// healer at `healer` clear of the pillar's widened shadow ([`in_shadow`]):
 /// on standable ground, between [`HUNT_MIN_STANDOFF`] and [`HUNT_STANDOFF`]
-/// off the skin, within [`HUNT_REACH`] of the healer. `None` when no spot
-/// on that side qualifies.
+/// off the skin, at a distance from the healer the unit can attack from
+/// (`reach`). `None` when no spot on that side qualifies.
 fn pincer_point(
     obstacles: &[ObstacleVolume],
     bounds: &ArenaBounds,
@@ -465,6 +540,7 @@ fn pincer_point(
     healer: Vec2,
     side: f32,
     y: f32,
+    reach: impl Fn(f32) -> bool,
 ) -> Option<Vec2> {
     let h = ring.bearing(healer);
     let steps = (std::f32::consts::PI / PINCER_STEP).round() as i32;
@@ -475,7 +551,7 @@ fn pincer_point(
         while standoff >= HUNT_MIN_STANDOFF - 1e-3 {
             let p = ring.center + Vec2::from_angle(theta) * (ring.disc + standoff);
             standoff -= STATION_PULL_STEP;
-            if p.distance(healer) > HUNT_REACH
+            if !reach(Vec3::new(p.x, y, p.y).distance(Vec3::new(healer.x, y, healer.y)))
                 || !standable(obstacles, bounds, p, y)
                 || !sees_clear(obstacles, ring.pillar, p, healer, y)
             {
@@ -554,6 +630,8 @@ fn assign(
                     sighted: false,
                     onset_walk_done: false,
                     onset_round_back: false,
+                    aimed_at: 0.0,
+                    round_back: false,
                 });
             }
             None => rest.push((unit, at)),
@@ -578,6 +656,8 @@ fn assign(
                 sighted: false,
                 onset_walk_done: false,
                 onset_round_back: false,
+                aimed_at: 0.0,
+                round_back: false,
             });
         }
         (_, 1) => {
@@ -593,6 +673,8 @@ fn assign(
                 sighted: false,
                 onset_walk_done: false,
                 onset_round_back: false,
+                aimed_at: 0.0,
+                round_back: false,
             });
         }
         _ => {
@@ -612,6 +694,8 @@ fn assign(
                     sighted: false,
                     onset_walk_done: false,
                     onset_round_back: false,
+                    aimed_at: 0.0,
+                    round_back: false,
                 });
             }
         }
@@ -667,11 +751,20 @@ pub fn classify(
                 .iter()
                 .any(|r| r.pillar != h.pillar && r.skin(at) <= HUNT_ENTER);
         let shadowed = !elsewhere
-            && mates
-                .iter()
-                .any(|m| in_shadow(&snapshot.obstacles, h.pillar, xz(m.position), at));
+            && ring.skin(at) <= HUNT_SHADOW_LEAVE
+            && mates.iter().any(|m| {
+                in_shadow(&snapshot.obstacles, h.pillar, xz(m.position), at)
+                    || pillar_blocks(&snapshot.obstacles, h.pillar, m.position, healer.position)
+            });
         (near || shadowed).then_some((h, *ring))
     });
+    // A hunt that ended a moment ago on this healer at this pillar is the
+    // same hunt starting again: each unit keeps the side it had.
+    let remembered = prev
+        .hunt_memory
+        .as_ref()
+        .filter(|m| clock.now - m.ended <= HUNT_REMEMBER && m.window.subject == healer.entity)
+        .map(|m| &m.window);
     let (ring, axis, since) = match held {
         Some((h, ring)) => (ring, h.axis, h.since),
         None => {
@@ -685,10 +778,15 @@ pub fn classify(
             if ring.skin(at) > HUNT_ENTER || !hidden {
                 return None;
             }
-            (ring, ring.bearing(at), clock.now)
+            match remembered.filter(|w| w.pillar == ring.pillar) {
+                Some(w) => (ring, w.axis, clock.now),
+                None => (ring, ring.bearing(at), clock.now),
+            }
         }
     };
-    let prev_window = held.map(|(h, _)| h);
+    let prev_window = held
+        .map(|(h, _)| h)
+        .or_else(|| remembered.filter(|w| w.pillar == ring.pillar));
     let excepted = |class: CharacterClass| {
         next.exceptions
             .of(PlayId::Hunt)
@@ -739,10 +837,21 @@ pub fn classify(
             Some(s) => s.onset_round_back,
             None => crosses_the_back(&ring, xz(me), station.point, healer_bearing),
         };
+        let info = roster.get(&station.unit).expect("a hunter on the roster");
+        let range = me.distance(healer.position);
         let sees = has_line_of_sight(&snapshot.obstacles, me, healer.position);
         let was_sighted = before.is_some_and(|s| s.sighted);
-        let sighted =
-            sees && (was_sighted || !in_shadow(&snapshot.obstacles, ring.pillar, xz(me), at));
+        // Sighted means in sight AND in reach: a Schmitt pair on each. It sets
+        // on sight clear of the widened shadow within `REACH_MARGIN` of the
+        // reach band's edges, and clears on losing plain sight or leaving the
+        // band itself.
+        let sighted = sees
+            && if was_sighted {
+                in_reach(info, range, 0.0)
+            } else {
+                in_reach(info, range, REACH_MARGIN)
+                    && !in_shadow(&snapshot.obstacles, ring.pillar, xz(me), at)
+            };
         station.onset_walk_done = before.is_some_and(|s| s.onset_walk_done) || sighted;
         let side = if station.slot == 0 { 1.0 } else { -1.0 };
         if sighted {
@@ -761,39 +870,49 @@ pub fn classify(
             // so the walk is re-aimed every [`BACK_CARROT`] / 2, not every
             // frame.
             let carrot = before
-                .filter(|s| !s.sighted && !on_side(&ring, s.point, healer_bearing, side))
+                .filter(|s| s.round_back)
                 .map(|s| s.point)
                 .filter(|&p| {
                     signed_offset(&ring, p, ring.bearing(xz(me))).abs() > BACK_CARROT * 0.5
                 });
             station.point = carrot.unwrap_or_else(|| round_the_back(&ring, xz(me), side));
+            station.round_back = true;
             continue;
         }
-        // A walk point is chosen clear of the widened shadow and kept while
-        // it still sees the healer at all (the latch's Schmitt pair again),
-        // so a healer on the move does not re-aim the walk every frame.
+        // A walk point is chosen clear of the widened shadow and in reach, and
+        // kept for at least `REAIM_SECS`, then for as long as it still sees
+        // the healer at all within reach (the latch's Schmitt pair again),
+        // so a healer on the move does not re-aim the walk every few frames.
         let kept = before
-            .filter(|s| !s.sighted && s.hold)
-            .map(|s| s.point)
-            .filter(|&p| {
-                on_side(&ring, p, healer_bearing, side)
-                    && has_line_of_sight(
-                        &snapshot.obstacles,
-                        Vec3::new(p.x, y, p.y),
-                        healer.position,
-                    )
-            });
-        match kept.or_else(|| {
-            pincer_point(
-                &snapshot.obstacles,
-                &snapshot.bounds,
-                &ring,
-                xz(me),
-                at,
-                side,
-                y,
-            )
-        }) {
+            .filter(|s| {
+                !s.sighted
+                    && !s.round_back
+                    && s.hold
+                    && on_side(&ring, s.point, healer_bearing, side)
+            })
+            .filter(|s| {
+                let p3 = Vec3::new(s.point.x, y, s.point.y);
+                clock.now - s.aimed_at < REAIM_SECS
+                    || (has_line_of_sight(&snapshot.obstacles, p3, healer.position)
+                        && in_reach(info, p3.distance(healer.position), 0.0))
+            })
+            .map(|s| (s.point, s.aimed_at));
+        if let Some((p, at)) = kept {
+            station.point = p;
+            station.aimed_at = at;
+            continue;
+        }
+        station.aimed_at = clock.now;
+        match pincer_point(
+            &snapshot.obstacles,
+            &snapshot.bounds,
+            &ring,
+            xz(me),
+            at,
+            side,
+            y,
+            |d| in_reach(info, d, REACH_MARGIN),
+        ) {
             Some(p) => station.point = p,
             None => station.hold = false,
         }
@@ -1021,11 +1140,13 @@ mod tests {
         let from = Vec2::new(-20.0, 3.0);
         let bounds = ArenaBounds::default();
         for side in [1.0, -1.0] {
-            let p =
-                pincer_point(&obstacles, &bounds, &ring, from, healer, side, 1.0).expect("a spot");
+            let p = pincer_point(&obstacles, &bounds, &ring, from, healer, side, 1.0, |d| {
+                d <= 30.0
+            })
+            .expect("a spot");
             assert!(on_side(&ring, p, 0.0, side), "{side}: {p}");
             assert!(sees_clear(&obstacles, 0, p, healer, 1.0));
-            assert!(p.distance(healer) <= HUNT_REACH);
+            assert!(p.distance(healer) <= 30.0);
             // Nothing on that side that sees is a shorter walk.
             for k in 1..=18 {
                 let theta = side * (k as f32 * 10.0).to_radians();
@@ -1038,8 +1159,14 @@ mod tests {
         // From the north the counter-clockwise spot is the nearer; the
         // clockwise one is round the pillar's back.
         let north = Vec2::new(0.0, 20.0);
-        let ccw = pincer_point(&obstacles, &bounds, &ring, north, healer, 1.0, 1.0).unwrap();
-        let cw = pincer_point(&obstacles, &bounds, &ring, north, healer, -1.0, 1.0).unwrap();
+        let ccw = pincer_point(&obstacles, &bounds, &ring, north, healer, 1.0, 1.0, |d| {
+            d <= 30.0
+        })
+        .unwrap();
+        let cw = pincer_point(&obstacles, &bounds, &ring, north, healer, -1.0, 1.0, |d| {
+            d <= 30.0
+        })
+        .unwrap();
         assert!(walk_round(&ring, north, ccw) < walk_round(&ring, north, cw));
     }
 

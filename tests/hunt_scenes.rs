@@ -13,7 +13,9 @@
 
 use arenasim::states::match_config::CharacterClass::{Mage, Paladin, Priest, Warlock, Warrior};
 use arenasim::states::play_match::ai_profile::AiProfile;
-use arenasim::states::play_match::class_ai::hunt::{in_shadow, HuntWindow, HUNT_ENTER, HUNT_LEAVE};
+use arenasim::states::play_match::class_ai::hunt::{
+    in_shadow, HuntWindow, HUNT_ENTER, HUNT_LEAVE, HUNT_SHADOW_LEAVE,
+};
 use arenasim::states::play_match::class_ai::scene::Scene;
 use arenasim::states::play_match::components::MovementGoal;
 use arenasim::states::play_match::decision_trace::{MovementTrigger, PlayTag};
@@ -140,6 +142,14 @@ fn a_hunt_holds_in_the_pillars_shadow_and_ends_in_the_open() {
     s.set_position(MAGE, 5.0, 25.0);
     s.set_position(PRIEST, 5.0, -25.0);
     assert_eq!(hunt(&mut s), None, "released in the open");
+    // Behind the pillar from both, but out beyond `HUNT_SHADOW_LEAVE`: in
+    // the open whoever the pillar hides it from.
+    let mut s = scene();
+    assert!(hunt(&mut s).is_some());
+    s.set_position(HIDER, 6.0 + HUNT_SHADOW_LEAVE - 0.5, 0.0);
+    assert!(hunt(&mut s).is_some(), "held while the pillar hides it");
+    s.set_position(HIDER, 6.0 + HUNT_SHADOW_LEAVE + 0.5, 0.0);
+    assert_eq!(hunt(&mut s), None, "released beyond the shadow's reach");
     // And within the leave radius, in the open, it is still held.
     let mut s = scene();
     assert!(hunt(&mut s).is_some());
@@ -630,4 +640,78 @@ fn a_healer_whose_hunt_ends_gives_its_station_walk_back() {
     assert!(!pressed(Some(SOUTH)));
     // Control: a walk the hunt never gave is the posture's own, and is kept.
     assert!(pressed(None));
+}
+
+/// A hunter in sight of the healer but beyond its reach (the Mage's
+/// Frostbolt, 40yd) does not stand there: it walks to a spot on its side it
+/// can attack from. The pillar stands at (20, 0) with the hider on its west
+/// face, so the Mage sees it across open ground from the west.
+#[test]
+fn a_hunter_in_sight_beyond_reach_walks_into_reach() {
+    let hider = Vec2::new(13.0, 0.0);
+    let column = ObstacleVolume::Cylinder {
+        center_xz: Vec2::new(20.0, 0.0),
+        radius: 6.0,
+        base_y: 0.0,
+        height: 10.0,
+    };
+    let at = |mage: Vec2| {
+        let mut s = Scene::new()
+            .obstacles(vec![column])
+            .ai_profile(1, AiProfile::TeamPlan)
+            .unit(MAGE, 1, Mage)
+            .at(mage.x, mage.y)
+            .targeting(HIDER)
+            .unit(PRIEST, 1, Priest)
+            .at(34.0, -4.0)
+            .targeting(HIDER)
+            .unit(HIDER, 2, Priest)
+            .at(hider.x, hider.y)
+            .targeting(MAGE);
+        let h = hunt(&mut s).expect("the team hunts");
+        station(&h, &s, MAGE).expect("the Mage hunts")
+    };
+    let eye = |q: Vec2| Vec3::new(q.x, 1.0, q.y);
+    // In reach (37yd): it stands.
+    let near = Vec2::new(-24.0, 0.0);
+    assert!(has_line_of_sight(&[column], eye(near), eye(hider)));
+    assert_eq!(at(near), near, "in reach: stands");
+    // Beyond it (43yd), in plain sight: it walks to a spot in reach.
+    let far = Vec2::new(-30.0, 0.0);
+    assert!(has_line_of_sight(&[column], eye(far), eye(hider)));
+    let goal = at(far);
+    assert!(goal.distance(far) > 5.0, "{goal}: walks");
+    assert!(goal.distance(hider) <= 40.0, "{goal}: within reach");
+}
+
+/// A hunt that ends and starts again a moment later on the same healer at
+/// the same pillar is the same hunt: each unit keeps its side, though the
+/// two now stand where a fresh hunt would pair them the other way. The
+/// control: the same restart after `HUNT_REMEMBER` deals the sides afresh.
+#[test]
+fn a_hunt_that_starts_again_at_once_keeps_its_sides() {
+    use arenasim::states::play_match::class_ai::hunt::HUNT_REMEMBER;
+    let restart = |gap: f32| {
+        let mut s = scene();
+        assert_eq!(slot(&hunt(&mut s).unwrap(), &s, MAGE), Some(0));
+        // The hider steps into the open, in sight of both: the hunt ends.
+        s.set_position(MAGE, 5.0, 25.0);
+        s.set_position(PRIEST, 5.0, -25.0);
+        s.set_position(HIDER, 6.0 + HUNT_LEAVE + 5.0, 0.0);
+        s.set_now(31.0);
+        assert_eq!(hunt(&mut s), None, "the hunt ended");
+        // It hides again on the east face; the two now stand swapped.
+        s.set_position(MAGE, -10.0, -22.0);
+        s.set_position(PRIEST, -10.0, 22.0);
+        s.set_position(HIDER, 7.0, 0.0);
+        s.set_now(31.0 + gap);
+        let h = hunt(&mut s).expect("a hunt again");
+        slot(&h, &s, MAGE)
+    };
+    assert_eq!(restart(1.0), Some(0), "the Mage keeps its side");
+    assert_eq!(
+        restart(HUNT_REMEMBER + 1.0),
+        Some(1),
+        "the control: later, a fresh pairing"
+    );
 }
