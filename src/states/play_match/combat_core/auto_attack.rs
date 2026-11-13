@@ -1286,6 +1286,7 @@ pub fn compound_riders(compound: CompoundDebuff) -> Vec<Aura> {
         CompoundDebuff::EntanglingRoots => entangling_roots_riders(),
         CompoundDebuff::Shadowform => shadowform_riders(),
         CompoundDebuff::StunVulnerability => stun_vulnerability_riders(),
+        CompoundDebuff::GuardianSpirit => guardian_spirit_riders(),
     }
 }
 
@@ -1303,6 +1304,30 @@ pub fn stun_vulnerability_riders() -> Vec<Aura> {
         break_on_damage_threshold: -1.0,
         dispel_type: DispelType::Physical,
         compound: Some(CompoundDebuff::StunVulnerability),
+        ..Default::default()
+    }]
+}
+
+/// The share of its holder's maximum health Guardian Spirit heals when it
+/// prevents a killing blow (Wrath 47788 heals 50%; 30% here, the talents
+/// proposal §5.2).
+pub const GUARDIAN_SPIRIT_SAVE_HEAL: f32 = 0.30;
+
+/// Guardian Spirit's RIDER: the killing blow it prevents. The face — 40% more
+/// healing received — is the aura `abilities.ron` describes; this lands with
+/// it, at its duration and with its caster, and when it prevents a blow it
+/// spends the whole buff (`combat_core::damage`, step 7). Untyped, as Wrath
+/// gives 47788 no dispel type: nothing removes it.
+pub fn guardian_spirit_riders() -> Vec<Aura> {
+    vec![Aura {
+        effect_type: AuraType::KillingBlowSave,
+        duration: 10.0, // overwritten with the face's on landing
+        magnitude: GUARDIAN_SPIRIT_SAVE_HEAL,
+        break_on_damage_threshold: -1.0,
+        ability_name: "Guardian Spirit".to_string(),
+        spell_school: Some(SpellSchool::Holy),
+        dispel_type: DispelType::Untyped,
+        compound: Some(CompoundDebuff::GuardianSpirit),
         ..Default::default()
     }]
 }

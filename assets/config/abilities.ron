@@ -298,6 +298,7 @@
             prevention: Silence,
             icon: "icons/abilities/spell_frost_windwalkon.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // TBC 14751: StartRecoveryTime 0
             range: 0.0,  // Self-cast
             mana_cost: 0.0,
             cooldown: 45.0,
@@ -325,6 +326,7 @@
             prevention: Silence,
             icon: "icons/abilities/spell_holy_powerinfusion.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // TBC 10060: StartRecoveryTime 0
             range: 30.0,
             mana_cost: 45.0,
             cooldown: 45.0,
@@ -357,6 +359,69 @@
                 duration: 8.0,
                 magnitude: 0.40,
                 stacking: Some((max_stacks: 1)),
+            )),
+            spell_school: Holy,
+        ),
+
+        // Holy Nova (talent, Holy tier 3): an explosion of holy light round
+        // the Priest, 13-15 Holy damage to every enemy and 25-29 healing to
+        // every teammate (the Priest included) within 10 yards, pets aside.
+        // Classic 15237 rank 1 (29-34 damage, 54-63 healing, 185 mana) at its
+        // ratio, sized to the talent budget, as base values; each scales
+        // with spell power at TBC's coefficient (user ruling): 0.161 on the
+        // damage (15237 rank 1) and 0.161 on the heal (23455, the heal rank 1
+        // triggers), SpellEffect.EffectBonusCoefficient at wago.tools build
+        // 2.5.6.69795. 50 mana, instant, on the global cooldown (TBC
+        // StartRecoveryCategory 133). `range` is the radius. No aura, so no
+        // dispel type (TBC 15237: DispelType 0).
+        HolyNova: (
+            name: "Holy Nova",
+            class: Priest,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_holy_holynova.jpg",
+            cast_time: 0.0,
+            range: 10.0,
+            mana_cost: 50.0,
+            cooldown: 0.0,
+            damage_base_min: 13.0,
+            damage_base_max: 15.0,
+            damage_coefficient: 0.161,
+            damage_scales_with: SpellPower,
+            healing_base_min: 25.0,
+            healing_base_max: 29.0,
+            healing_coefficient: 0.161,
+            spell_school: Holy,
+        ),
+
+        // Guardian Spirit (talent, Holy capstone; Wrath 47788): an ally
+        // receives 40% more healing for 10s, and the first blow that would
+        // kill it in that time is prevented instead, healing it for 30% of
+        // its maximum health and ending the spirit (the compound's rider).
+        // 60s cooldown (Wrath: 3 min), so once a match. 17 mana, Wrath's 6%
+        // of base mana on the Priest's 280; no global cooldown (Wrath
+        // StartRecoveryCategory 0). Wrath gives it no dispel type: Untyped.
+        GuardianSpirit: (
+            name: "Guardian Spirit",
+            class: Priest,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_holy_guardianspirit.jpg",
+            // The save is the compound's rider, which no numeric field states;
+            // `guardian_spirit_text_names_the_save` holds the 30% to its
+            // constant.
+            description: "The first blow that would kill the target while the spirit lasts is prevented: the target is healed for 30% of its maximum health instead, and the spirit ends.",
+            cast_time: 0.0,
+            off_gcd: true,  // Wrath 47788: StartRecoveryCategory 0
+            range: 40.0,
+            mana_cost: 17.0,
+            cooldown: 60.0,
+            applies_aura: Some((
+                aura_type: HealingReceivedIncrease,
+                duration: 10.0,
+                magnitude: 0.40,
+                compound: Some(GuardianSpirit),
+                dispel_type: Untyped,
             )),
             spell_school: Holy,
         ),
@@ -408,6 +473,7 @@
                 duration: 15.0,
                 magnitude: 8.0,
                 tick_interval: 3.0,
+                mechanic: Some(Bleed),  // TBC 772..25208: Mechanic 15, armor does not reduce it
             )),
             spell_school: Physical,
         ),
@@ -439,6 +505,7 @@
             prevention: Pacify,
             icon: "icons/abilities/inv_gauntlets_04.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // an interrupt (`check_interrupts`) starts no GCD
             range: 2.5,
             mana_cost: 10.0,
             cooldown: 12.0,
@@ -572,6 +639,7 @@
             prevention: Pacify,
             icon: "icons/abilities/ability_kick.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // an interrupt (`check_interrupts`) starts no GCD
             range: 2.5,
             mana_cost: 25.0,
             cooldown: 12.0,
@@ -593,6 +661,7 @@
             prevention: None,
             icon: "icons/abilities/ability_poisonsting.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // a weapon proc, never cast
             range: 2.5,
             mana_cost: 0.0,
             cooldown: 0.0,
@@ -624,6 +693,7 @@
             prevention: None,
             icon: "icons/abilities/ability_rogue_dualweild.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // a weapon proc, never cast
             range: 2.5,
             mana_cost: 0.0,
             cooldown: 0.0,
@@ -652,6 +722,7 @@
             prevention: None,
             icon: "icons/abilities/inv_misc_herb_16.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // a weapon proc, never cast
             range: 2.5,
             mana_cost: 0.0,
             cooldown: 0.0,
@@ -678,6 +749,7 @@
             prevention: None,
             icon: "icons/abilities/spell_nature_nullifydisease.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // a weapon proc, never cast
             range: 2.5,
             mana_cost: 0.0,
             cooldown: 0.0,
@@ -738,6 +810,7 @@
                 magnitude: 10.0,
                 tick_interval: 2.0,
                 dispel_type: Physical,  // TBC 1943..26867: DispelType 0, a bleed (Mechanic 15)
+                mechanic: Some(Bleed),  // armor does not reduce its ticks
             )),
             spell_school: Physical,
         ),
@@ -1070,6 +1143,7 @@
             prevention: None,
             icon: "icons/abilities/spell_shadow_contagion.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // TBC 18288: StartRecoveryCategory 0
             range: 0.0,  // Self-cast
             mana_cost: 0.0,
             cooldown: 45.0,
@@ -1292,6 +1366,7 @@
             prevention: Silence,
             icon: "icons/abilities/spell_shadow_mindrot.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // an interrupt starts no GCD
             range: 30.0,
             mana_cost: 0.0,
             cooldown: 30.0,
@@ -1839,6 +1914,7 @@
             prevention: Silence,
             icon: "icons/abilities/spell_holy_heal.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // TBC 20216: no global-cooldown category
             range: 0.0,  // Self-cast
             mana_cost: 5.0,
             cooldown: 45.0,
@@ -1868,6 +1944,7 @@
             prevention: None,
             icon: "icons/abilities/spell_holy_auramastery.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // Wrath 31821: no recovery category
             range: 100.0,  // Every teammate, as the Paladin auras reach them
             mana_cost: 0.0,
             cooldown: 45.0,
@@ -2027,6 +2104,7 @@
             prevention: Silence,
             icon: "icons/abilities/spell_nature_cyclone.jpg",
             cast_time: 0.0,
+            off_gcd: true,  // an interrupt (`check_interrupts`) starts no GCD
             range: 30.0,
             mana_cost: 12.0,
             cooldown: 9.0,

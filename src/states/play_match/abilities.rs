@@ -267,6 +267,9 @@ pub enum AbilityType {
     // Paladin: the Holy tree (AS-420). Appended for the same reason.
     DivineFavor, // talent: the next Flash of Light, Holy Light or Holy Shock crits
     AuraMastery, // talent: teammates immune to silence and interrupts for 6s
+    // Priest: the Holy tree (AS-415). Appended for the same reason.
+    HolyNova,       // talent: Holy damage to enemies and a heal to allies within 10yd
+    GuardianSpirit, // talent: +40% healing received and a killing blow prevented, 10s
     // Paladin: the Retribution tree (AS-422). Appended for the same reason.
     Repentance,     // talent: a 6s incapacitate any damage breaks, 20yd
     CrusaderStrike, // talent: an instant 110% weapon strike, 6s cooldown
@@ -312,7 +315,7 @@ impl AbilityType {
             | Cyclone | TravelForm | Shadowform | DivineProtection | BlessingOfSacrifice
             | SacredShield | RetributionAura | SiphonLife | AmplifyCurse | CurseOfExhaustion
             | InnerFocus | PowerInfusion | PainSuppression | Shadowburn | Conflagrate
-            | DivineFavor | AuraMastery | Repentance => false,
+            | DivineFavor | AuraMastery | HolyNova | GuardianSpirit | Repentance => false,
         }
     }
 

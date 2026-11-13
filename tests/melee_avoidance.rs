@@ -63,6 +63,22 @@ fn melee_scene(attacker_class: CharacterClass, avoidance: (f32, f32)) -> Scene {
         .avoidance(avoidance.0, avoidance.1)
 }
 
+/// The attacker's own Rend on the defender, so a Warrior's chain passes Rend
+/// for Mortal Strike (only its own Rend holds its Rend).
+fn rended(scene: Scene) -> Scene {
+    let rend = Aura {
+        effect_type: AuraType::DamageOverTime,
+        duration: 10.0,
+        // A bleed never breaks on damage (an aura's default threshold, 0.0,
+        // would read as the team's own breakable crowd control).
+        break_on_damage_threshold: -1.0,
+        caster: Some(scene.entity(ATTACKER)),
+        ability_name: "Rend".to_string(),
+        ..Default::default()
+    };
+    scene.aura_full(DEFENDER, rend)
+}
+
 fn avoided(attack: &str, avoidance: Avoidance) -> SceneAvoided {
     SceneAvoided {
         attacker: ATTACKER,
@@ -122,7 +138,7 @@ fn mortal_strike_is_avoided_and_applies_nothing() {
         AbilityType::MortalStrike,
         "Mortal Strike",
         // Rended already, so Mortal Strike is next.
-        |a| melee_scene(CharacterClass::Warrior, a).aura(DEFENDER, AuraType::DamageOverTime, 10.0),
+        |a| rended(melee_scene(CharacterClass::Warrior, a)),
         |v| {
             v.landed
                 .iter()
@@ -138,11 +154,7 @@ fn mortal_strike_is_avoided_and_applies_nothing() {
 #[test]
 fn a_stunned_defender_cannot_dodge() {
     let scene = |stunned: bool| {
-        let scene = melee_scene(CharacterClass::Warrior, DODGE).aura(
-            DEFENDER,
-            AuraType::DamageOverTime,
-            10.0,
-        );
+        let scene = rended(melee_scene(CharacterClass::Warrior, DODGE));
         if stunned {
             scene.aura(DEFENDER, AuraType::Stun, 4.0)
         } else {

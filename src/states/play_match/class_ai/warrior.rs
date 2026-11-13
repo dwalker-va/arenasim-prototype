@@ -733,18 +733,8 @@ fn try_rend(
     let rend = AbilityType::Rend;
     let rend_def = abilities.get_unchecked(&rend);
 
-    // Check if target already has Rend (any DoT for now)
-    let target_has_rend = ctx
-        .active_auras
-        .get(&target_entity)
-        .map(|auras| {
-            auras
-                .iter()
-                .any(|a| a.effect_type == AuraType::DamageOverTime)
-        })
-        .unwrap_or(false);
-
-    if target_has_rend {
+    // Only this Warrior's own Rend stops a reapply: a teammate's DoT is not it.
+    if ctx.has_own_dot(entity, target_entity, &rend_def.name) {
         builder.reject(rend, RejectionReason::AlreadyApplied);
         return false;
     }

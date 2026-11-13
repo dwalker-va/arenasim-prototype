@@ -1196,9 +1196,11 @@ struct Record {
     view: DecisionView,
     /// The unit's interrupt decision in the same scene.
     interrupt: DecisionView,
-    /// The deciding unit's resource and cooldowns, as the scene set them.
+    /// The deciding unit's resource, cooldowns and global cooldown, as the
+    /// scene set them.
     my_resource: f32,
     my_cooldowns: BTreeSet<AbilityType>,
+    my_gcd: f32,
 }
 
 struct Grid {
@@ -1226,6 +1228,7 @@ fn grid() -> &'static Grid {
                                 let me = scene.combatant_mut(ME);
                                 let my_resource = me.current_mana;
                                 let my_cooldowns = me.ability_cooldowns.keys().copied().collect();
+                                let my_gcd = me.global_cooldown;
                                 let view = scene.decide(ME);
                                 let interrupt = scene.interrupt(ME);
                                 Record {
@@ -1234,6 +1237,7 @@ fn grid() -> &'static Grid {
                                     interrupt,
                                     my_resource,
                                     my_cooldowns,
+                                    my_gcd,
                                 }
                             })
                             .collect::<Vec<_>>()
@@ -1555,6 +1559,16 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         AbilityType::AuraMastery,
         Unreached::NeedsKnob("a build that takes Aura Mastery"),
     ),
+    // The Holy tree (AS-415): grants; tests/holy_talents.rs grants each in
+    // its scene pairs.
+    (
+        AbilityType::HolyNova,
+        Unreached::NeedsKnob("a build that takes Holy Nova"),
+    ),
+    (
+        AbilityType::GuardianSpirit,
+        Unreached::NeedsKnob("a build that takes Guardian Spirit"),
+    ),
     // The Retribution tree (AS-422): tests/paladin_retribution.rs builds each
     // in its scene pairs.
     (
@@ -1857,6 +1871,170 @@ fn never_chooses_an_ability_it_cannot_afford() {
     }
     assert!(judged > 0);
     assert!(v.is_empty(), "chosen without the resource: {v:#?}");
+}
+
+/// Every decision that chose leaves the global cooldown as its abilities
+/// DECLARE it (`AbilityConfig::off_gcd`): started when any ability it chose
+/// is on the global cooldown, untouched when every one is off it. A class AI
+/// sets the GCD by hand at each cast site, so this holds every site the grid
+/// reaches to the declaration — and the declaration, for every base-kit
+/// ability, to what its site does. Each chosen ability's own flag must be
+/// WITNESSED by a decision that chose it alone (two choices on the GCD would
+/// hide the first one's), or the property names it.
+#[test]
+fn every_choice_leaves_the_global_cooldown_its_abilities_declare() {
+    use arenasim::states::play_match::constants::GCD;
+    let g = grid();
+    // (what was chosen, the GCD it left, the GCD declared) -> scenes, and one.
+    let mut v: BTreeMap<(String, String, String), (usize, String)> = BTreeMap::new();
+    let mut chosen = BTreeSet::new();
+    let mut alone = BTreeSet::new();
+    let mut judged = 0;
+    for r in &g.records {
+        for view in decisions(r) {
+            if view.choices.is_empty() {
+                continue;
+            }
+            judged += 1;
+            let on = view
+                .choices
+                .iter()
+                .any(|(a, _)| !g.defs.get_unchecked(a).off_gcd);
+            let expected = if on { GCD } else { r.my_gcd };
+            if view.global_cooldown_after != expected {
+                let key = (
+                    format!(
+                        "{:?}",
+                        view.choices.iter().map(|(a, _)| *a).collect::<Vec<_>>()
+                    ),
+                    format!("{}", view.global_cooldown_after),
+                    format!("{expected}"),
+                );
+                let entry = v.entry(key).or_insert((0, r.point.describe()));
+                entry.0 += 1;
+            }
+            chosen.extend(view.choices.iter().map(|(a, _)| *a));
+            if let [(a, _)] = view.choices.as_slice() {
+                alone.insert(*a);
+            }
+        }
+    }
+    assert!(judged > 0);
+    let unwitnessed: Vec<_> = chosen.difference(&alone).collect();
+    let v: Vec<String> = v
+        .iter()
+        .map(|((chose, after, declared), (n, example))| {
+            format!(
+                "chose {chose}: global cooldown {after} after, {declared} declared \
+                 ({n} scenes, e.g. {example})"
+            )
+        })
+        .collect();
+    assert!(
+        v.is_empty() && unwitnessed.is_empty(),
+        "global cooldown left otherwise than declared: {v:#?}\n\
+         chosen, but never alone, so its own flag is unwitnessed: {unwitnessed:?}",
+    );
+}
+
+/// The abilities no test sees choose — the grid's [`UNREACHED`] that are
+/// not talents (`tests/talent_ai_audit.rs` prices those), and every pet
+/// ability (no scene decides a pet) — each with whether its cast site starts
+/// the global cooldown, read at the site named. A declaration that disagrees
+/// with its row, an ability that joins the set without one, or a row whose
+/// ability has left it, fails [`every_unobserved_gcd_declaration_is_read_at_its_site`].
+const GCD_READ_AT_SITE: &[(AbilityType, bool, &str)] = &[
+    (
+        AbilityType::CripplingPoison,
+        false,
+        "a weapon proc the auto-attack rolls; never cast",
+    ),
+    (
+        AbilityType::DeadlyPoison,
+        false,
+        "a weapon proc the auto-attack rolls; never cast",
+    ),
+    (
+        AbilityType::WoundPoison,
+        false,
+        "a weapon proc the auto-attack rolls; never cast",
+    ),
+    (
+        AbilityType::MindNumbingPoison,
+        false,
+        "a weapon proc the auto-attack rolls; never cast",
+    ),
+    (
+        AbilityType::BerserkerRage,
+        true,
+        "warrior::try_berserker_rage_while_cc",
+    ),
+    (AbilityType::Flare, true, "hunter::apply_flare"),
+    (
+        AbilityType::Lifebloom,
+        true,
+        "druid's DruidTurn::cast, every Druid spell's site",
+    ),
+    (
+        AbilityType::ShadowWordPain,
+        true,
+        "priest::cast_shadow_word_pain",
+    ),
+    (
+        AbilityType::RetributionAura,
+        true,
+        "paladin::try_paladin_aura, Devotion Aura's site",
+    ),
+    (
+        AbilityType::CurseOfExhaustion,
+        true,
+        "warlock::try_cast_curse, every curse's site",
+    ),
+    (
+        AbilityType::SpellLock,
+        false,
+        "pet_ai::try_spell_lock / execute_spell_lock: an interrupt",
+    ),
+    (AbilityType::DevourMagic, true, "pet_ai::try_devour_magic"),
+    (AbilityType::SpiderWeb, true, "pet_ai::execute_spider_web"),
+    (AbilityType::BoarCharge, true, "pet_ai::execute_boar_charge"),
+    (
+        AbilityType::MastersCall,
+        true,
+        "pet_ai::execute_masters_call",
+    ),
+];
+
+/// Every ability's `off_gcd` declaration is held to its cast site: by the
+/// grid ([`every_choice_leaves_the_global_cooldown_its_abilities_declare`])
+/// for what it chooses, by the talent audit for talents, and by
+/// [`GCD_READ_AT_SITE`] — set equality, both ways — for the rest.
+#[test]
+fn every_unobserved_gcd_declaration_is_read_at_its_site() {
+    let g = grid();
+    let talents: BTreeSet<AbilityType> = g.defs.talent_abilities().into_iter().collect();
+    let unobserved: BTreeSet<AbilityType> = UNREACHED
+        .iter()
+        .map(|(a, _)| *a)
+        .filter(|a| !talents.contains(a))
+        .chain(
+            g.defs
+                .iter()
+                .filter(|(_, d)| d.pet.is_some())
+                .map(|(a, _)| *a),
+        )
+        .collect();
+    let rows: BTreeSet<AbilityType> = GCD_READ_AT_SITE.iter().map(|(a, _, _)| *a).collect();
+    assert_eq!(
+        unobserved, rows,
+        "abilities no test sees choose, against GCD_READ_AT_SITE's rows"
+    );
+    let disagree: Vec<_> = GCD_READ_AT_SITE
+        .iter()
+        .filter(|(a, starts, _)| g.defs.get_unchecked(a).off_gcd == *starts)
+        .map(|(a, starts, site)| format!("{a:?}: {site} starts the GCD: {starts}"))
+        .collect();
+    assert!(disagree.is_empty(), "declared otherwise: {disagree:#?}");
 }
 
 fn not_immune() -> Finding {

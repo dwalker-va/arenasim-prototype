@@ -614,7 +614,7 @@ pub fn decide_hunter_action(
     // Magic, say) is not delayed.
     if !combatant.hunter_opened
         && distance_to_target >= 20.0
-        && sting_due(target_entity, target_info, ctx)
+        && sting_due(abilities, entity, target_entity, target_info, ctx)
         && aimed_shot_before_sting(abilities, entity, my_pos, auras, ctx)
         && try_aimed_shot(
             commands,
@@ -1349,15 +1349,20 @@ fn find_nearest_enemy(
     (nearest, distance)
 }
 
-/// Is Serpent Sting due on `target`: it carries no sting of ours, and is not a
-/// rage user the sting would feed ([`try_serpent_sting`]'s own two checks).
-fn sting_due(target: Entity, target_info: &super::CombatantInfo, ctx: &CombatContext) -> bool {
-    let stung = ctx.active_auras.get(&target).is_some_and(|auras| {
-        auras
-            .iter()
-            .any(|a| a.effect_type == AuraType::DamageOverTime && a.ability_name == "Serpent Sting")
-    });
-    !stung && !target_info.class.gains_rage_from_damage()
+/// Is Serpent Sting due on `target`: it carries no sting of `hunter`'s, and
+/// is not a rage user the sting would feed ([`try_serpent_sting`]'s own two
+/// checks).
+fn sting_due(
+    abilities: &AbilityBook,
+    hunter: Entity,
+    target: Entity,
+    target_info: &super::CombatantInfo,
+    ctx: &CombatContext,
+) -> bool {
+    abilities
+        .get(&AbilityType::SerpentSting)
+        .is_some_and(|def| !ctx.has_own_dot(hunter, target, &def.name))
+        && !target_info.class.gains_rage_from_damage()
 }
 
 /// Does the opener's Aimed Shot go ahead of a due Serpent Sting? Only when the
@@ -2041,10 +2046,10 @@ fn try_arcane_shot(
 /// kiting damage. Pure DoT (zero direct damage), so the projectile applies the
 /// aura via the non-damage branch and its impact can never break CC.
 ///
-/// Dedup keys on `effect_type == DamageOverTime && ability_name == "Serpent
-/// Sting"` (the Corruption idiom — never `AuraType` alone, so stings and
-/// Warlock DoTs coexist). No cooldown is inserted: the ability has none, and
-/// `pre_cast_ok`'s cooldown check passes on an absent key.
+/// Dedup keys on this Hunter's OWN sting ([`CombatContext::has_own_dot`] —
+/// never `AuraType` alone, nor the name alone, so a teammate's DoT or a second
+/// Hunter's sting does not stand for it). No cooldown is inserted: the ability
+/// has none, and `pre_cast_ok`'s cooldown check passes on an absent key.
 fn try_serpent_sting(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -2065,17 +2070,7 @@ fn try_serpent_sting(
         return false;
     };
 
-    let target_has_sting = ctx
-        .active_auras
-        .get(&target_entity)
-        .map(|target_auras| {
-            target_auras.iter().any(|a| {
-                a.effect_type == AuraType::DamageOverTime && a.ability_name == "Serpent Sting"
-            })
-        })
-        .unwrap_or(false);
-
-    if target_has_sting {
+    if ctx.has_own_dot(entity, target_entity, &def.name) {
         builder.reject(ability, RejectionReason::AlreadyApplied);
         return false;
     }

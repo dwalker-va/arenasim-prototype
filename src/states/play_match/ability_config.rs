@@ -22,7 +22,8 @@ use std::collections::HashMap;
 
 use super::abilities::{AbilityType, ScalingStat, SpellSchool};
 use super::components::{
-    AuraDamageMods, AuraType, CompoundDebuff, DRCategory, DamageScope, DispelType, PetType,
+    AuraDamageMods, AuraType, CompoundDebuff, DRCategory, DamageScope, DispelType, Mechanic,
+    PetType,
 };
 use super::match_config::CharacterClass;
 
@@ -159,6 +160,16 @@ pub struct AuraEffect {
     /// `validate()` refuses it on any other aura.
     #[serde(default)]
     pub vulnerability: f32,
+    /// On a `DamageOverTime` aura: TBC's `SpellMechanic` for its periodic
+    /// effect, where the kind changes the damage pipeline. `Some(Bleed)`
+    /// (Mechanic 15: Rend, Rupture) lands each tick as Physical damage that
+    /// armor does not reduce. `None`, the default, on every other aura.
+    /// `validate()` refuses it anywhere but a Physical ability's damage over
+    /// time, and requires it on every such aura (its ticks' school comes from
+    /// it); `tests/bleed_mechanic_audit.rs` holds the declared set to the TBC
+    /// client's bleeds.
+    #[serde(default)]
+    pub mechanic: Option<Mechanic>,
 }
 
 impl AuraEffect {
@@ -172,6 +183,7 @@ impl AuraEffect {
             reflect_absorbed: None,
             triggered_absorb: self.triggered_absorb,
             vulnerability: (self.vulnerability > 0.0).then_some(self.vulnerability),
+            mechanic: self.mechanic,
         }
     }
 
@@ -262,6 +274,17 @@ pub struct AbilityConfig {
     /// Cast time in seconds (0.0 = instant)
     #[serde(default)]
     pub cast_time: f32,
+    /// OFF the global cooldown: using it does not start the caster's GCD.
+    /// It currently follows the code, not TBC's
+    /// `SpellCategories.StartRecoveryCategory` (the interrupts are off it here
+    /// and category 133, the GCD, in TBC); AS-484 reconciles the two. The
+    /// class AI sets the GCD by hand at each cast site, so this field
+    /// DECLARES what that site does:
+    /// `tests/decision_properties.rs` holds every base-kit ability the grid
+    /// chooses to it and names the site of every other non-talent one, and
+    /// `tests/talent_ai_audit.rs` holds every talent ability.
+    #[serde(default)]
+    pub off_gcd: bool,
     /// What stops this ability being used: TBC's
     /// `SpellCategories.PreventionType`. REQUIRED, with no serde default, so a
     /// new ability states it rather than inheriting a guess. A silence stops
@@ -798,6 +821,8 @@ impl AbilityDefinitions {
             // Paladin: the Holy tree
             AbilityType::DivineFavor,
             AbilityType::AuraMastery,
+            AbilityType::HolyNova,
+            AbilityType::GuardianSpirit,
             // Paladin: the Retribution tree
             AbilityType::Repentance,
             AbilityType::CrusaderStrike,
@@ -988,6 +1013,32 @@ impl AbilityDefinitions {
                     "abilities.ron: {ability:?}'s `vulnerability` is {}; it is a share in 0..=1",
                     aura.vulnerability
                 );
+            }
+        }
+
+        // A mechanic rides only on a Physical ability's damage over time, and
+        // every such aura declares one: the aura stores no school for a
+        // Physical ability (`Aura::spell_school`), so its ticks take theirs
+        // from the mechanic, and one with none would land schoolless and
+        // pass armor by accident.
+        for (ability, def) in &self.definitions {
+            let Some(aura) = def.applies_aura.as_ref() else {
+                continue;
+            };
+            let physical_dot = aura.aura_type == AuraType::DamageOverTime
+                && def.spell_school == SpellSchool::Physical;
+            match (aura.mechanic, physical_dot) {
+                (Some(mechanic), false) => panic!(
+                    "abilities.ron: {ability:?} sets `mechanic: Some({mechanic:?})` on a {:?} \
+                     {:?} aura; a mechanic rides only on a Physical damage over time",
+                    def.spell_school, aura.aura_type
+                ),
+                (None, true) => panic!(
+                    "abilities.ron: {ability:?} is a Physical damage over time with no \
+                     `mechanic`; its ticks would land schoolless. Declare TBC's (a bleed is \
+                     `mechanic: Some(Bleed)`)"
+                ),
+                (Some(_), true) | (None, false) => {}
             }
         }
 
@@ -1328,6 +1379,44 @@ mod tests {
         validate_aura_of(AbilityType::KidneyShot, |a| a.vulnerability = 1.5);
     }
 
+    /// A bleed rides on a Physical damage over time: the shipped Rend and
+    /// Rupture validate...
+    #[test]
+    fn the_shipped_bleeds_are_rend_and_ruptures_dots() {
+        let defs = AbilityDefinitions::shipped();
+        for ability in [AbilityType::Rend, AbilityType::Rupture] {
+            let aura = defs.get_unchecked(&ability).applies_aura.as_ref().unwrap();
+            assert_eq!(aura.mechanic, Some(Mechanic::Bleed), "{ability:?}");
+            assert_eq!(aura.damage_mods().mechanic, Some(Mechanic::Bleed));
+        }
+    }
+
+    /// ...a Physical damage over time without one does not...
+    #[test]
+    #[should_panic(expected = "Physical damage over time with no `mechanic`")]
+    fn a_physical_dot_declares_its_mechanic() {
+        validate_aura_of(AbilityType::Rend, |a| a.mechanic = None);
+    }
+
+    /// ...nor a bleed on a magic school's damage over time (Corruption)...
+    #[test]
+    #[should_panic(expected = "a mechanic rides only on a Physical damage over time")]
+    fn a_bleed_needs_a_physical_school() {
+        validate_aura_of(AbilityType::Corruption, |a| {
+            a.mechanic = Some(Mechanic::Bleed)
+        });
+    }
+
+    /// ...nor on a Physical aura that is not a damage over time (Mortal
+    /// Strike's armor cut).
+    #[test]
+    #[should_panic(expected = "a mechanic rides only on a Physical damage over time")]
+    fn a_bleed_needs_a_damage_over_time() {
+        validate_aura_of(AbilityType::MortalStrike, |a| {
+            a.mechanic = Some(Mechanic::Bleed)
+        });
+    }
+
     /// The compound a configured aura is the face of: a stun with a
     /// vulnerability is a `StunVulnerability`; without one, or on any other
     /// aura, only what the RON declares.
@@ -1498,6 +1587,7 @@ mod tests {
             icon: String::new(),
             description: String::new(),
             cast_time: 0.0,
+            off_gcd: false,
             prevention: Prevention::Silence,
             range: 40.0,
             min_range: None,
@@ -1678,6 +1768,8 @@ mod tests {
                     AbilityType::InnerFocus,
                     AbilityType::PowerInfusion,
                     AbilityType::PainSuppression,
+                    AbilityType::HolyNova,
+                    AbilityType::GuardianSpirit,
                 ],
             ),
             (

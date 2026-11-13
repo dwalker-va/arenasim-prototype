@@ -791,7 +791,11 @@ pub struct DispatchAccumulators {
     /// deciding later in the frame sees no shield there yet.
     pub sacred_shielded_this_frame: std::collections::HashSet<Entity>,
     pub marked_this_frame: std::collections::HashSet<Entity>,
-    pub frost_nova_damage: Vec<class_ai::QueuedAoeDamage>,
+    /// Area damage decided this frame (Frost Nova, Holy Nova), landed after
+    /// the loop.
+    pub area_damage: Vec<class_ai::QueuedAoeDamage>,
+    /// Area healing decided this frame (Holy Nova), landed after the loop.
+    pub area_heals: Vec<class_ai::QueuedAoeHeal>,
     pub same_frame_cc_queue: Vec<(Entity, Aura)>,
 }
 
@@ -969,7 +973,8 @@ pub fn dispatch_class_decision(
         paladin_aura_this_frame,
         sacred_shielded_this_frame,
         marked_this_frame,
-        frost_nova_damage,
+        area_damage,
+        area_heals,
         same_frame_cc_queue,
     } = acc;
     // A buff on-use item (a stat burst, haste) costs no global cooldown, so
@@ -1044,7 +1049,7 @@ pub fn dispatch_class_decision(
                 my_pos,
                 auras,
                 ctx,
-                frost_nova_damage,
+                area_damage,
                 same_frame_cc_queue,
                 decision_trace,
             )
@@ -1129,6 +1134,7 @@ pub fn dispatch_class_decision(
             class_ai::priest::decide_priest_action(
                 commands,
                 combat_log,
+                game_rng,
                 abilities,
                 entity,
                 combatant,
@@ -1140,6 +1146,10 @@ pub fn dispatch_class_decision(
                 &plan,
                 movement_config,
                 same_frame_cc_queue,
+                &mut class_ai::AreaQueues {
+                    damage: area_damage,
+                    heals: area_heals,
+                },
                 decision_trace,
             )
         }
@@ -2127,8 +2137,8 @@ pub fn decide_abilities(
         }
     }
 
-    // Process queued Frost Nova damage
-    for aoe in acc.frost_nova_damage {
+    // Process queued area damage (Frost Nova, Holy Nova)
+    for aoe in acc.area_damage {
         let class_ai::QueuedAoeDamage {
             caster: caster_entity,
             target: target_entity,
@@ -2138,26 +2148,33 @@ pub fn decide_abilities(
             caster_class,
             target_pos: _target_pos,
             is_crit,
+            ability,
+            school,
         } = aoe;
         let mut actual_damage = 0.0;
         let mut absorbed_damage = 0.0;
         let mut nova_landed = false;
 
-        // Skip if caster died from an instant attack earlier this frame (or entity is gone)
-        match combatants.get(caster_entity) {
-            Ok((_, caster, _, _, _, _)) if caster.is_alive() => {}
+        // Skip if caster died from an instant attack earlier this frame (or
+        // entity is gone). The effect's name is read from its caster's book.
+        let name = match combatants.get(caster_entity) {
+            Ok((_, caster, _, _, _, _)) if caster.is_alive() => caster
+                .book()
+                .get(&ability)
+                .map_or_else(|| format!("{ability:?}"), |c| c.name.clone()),
             _ => continue,
-        }
+        };
 
         if let Ok((_, mut target, target_transform, mut target_auras, _, _)) =
             combatants.get_mut(target_entity)
         {
             if target.is_alive() {
-                // Apply damage with absorb shield consideration (Frost Nova is always Frost school)
+                // Apply damage with absorb shield consideration, in the
+                // effect's own school.
                 let hit = super::combat_core::Hit::new(
                     damage,
-                    super::abilities::SpellSchool::Frost,
-                    "Frost Nova",
+                    school,
+                    &name,
                     Some(caster_entity),
                     None,
                     target_entity,
@@ -2169,7 +2186,7 @@ pub fn decide_abilities(
                             .get(&caster_entity)
                             .map_or(&[], Vec::as_slice),
                     )
-                    .multiplier(super::abilities::SpellSchool::Frost),
+                    .multiplier(school),
                 );
                 let (dmg, absorbed) = super::combat_core::apply_damage_with_absorb(
                     hit,
@@ -2239,7 +2256,7 @@ pub fn decide_abilities(
                     ));
                 }
 
-                // Log the Frost Nova damage with structured data
+                // Log the area damage with structured data
                 let is_killing_blow = !target.is_alive();
                 let is_first_death = is_killing_blow && !target.is_dead;
                 if is_first_death {
@@ -2249,19 +2266,19 @@ pub fn decide_abilities(
                 let verb = if is_crit { "CRITS" } else { "hits" };
                 let message = if absorbed > 0.0 {
                     format!(
-                        "{}'s Frost Nova {} {} for {:.0} damage ({:.0} absorbed)",
-                        caster_id, verb, target_id, actual_damage, absorbed
+                        "{}'s {} {} {} for {:.0} damage ({:.0} absorbed)",
+                        caster_id, name, verb, target_id, actual_damage, absorbed
                     )
                 } else {
                     format!(
-                        "{}'s Frost Nova {} {} for {:.0} damage",
-                        caster_id, verb, target_id, actual_damage
+                        "{}'s {} {} {} for {:.0} damage",
+                        caster_id, name, verb, target_id, actual_damage
                     )
                 };
                 combat_log.log_damage(
                     caster_id.clone(),
                     target_id.clone(),
-                    "Frost Nova".to_string(),
+                    name.clone(),
                     super::combat_core::credited_damage(actual_damage, absorbed),
                     is_killing_blow,
                     is_crit,
@@ -2292,9 +2309,90 @@ pub fn decide_abilities(
                         caster_entity,
                         super::talent_procs::TalentTrigger::SpellHit,
                     )
-                    .ability(AbilityType::FrostNova)
+                    .ability(ability)
                     .crit(is_crit)
                     .amount(actual_damage)
+                    .other(target_entity),
+                );
+            }
+        }
+    }
+
+    // Process queued area healing (Holy Nova), through the one heal site.
+    let no_dampening = ArenaDampening::default();
+    let dampening = extras.dampening.as_deref().unwrap_or(&no_dampening);
+    for aoe in acc.area_heals {
+        let class_ai::QueuedAoeHeal {
+            caster: caster_entity,
+            target: target_entity,
+            heal,
+            is_crit,
+            caster_team,
+            caster_slot,
+            caster_class,
+            ability,
+        } = aoe;
+        let name = match combatants.get(caster_entity) {
+            Ok((_, caster, _, _, _, _)) if caster.is_alive() => caster
+                .book()
+                .get(&ability)
+                .map_or_else(|| format!("{ability:?}"), |c| c.name.clone()),
+            _ => continue,
+        };
+        let Ok((_, mut target, target_transform, target_auras, _, _)) =
+            combatants.get_mut(target_entity)
+        else {
+            continue;
+        };
+        if !target.is_alive() {
+            continue;
+        }
+        let healed = super::combat_core::apply_healing(
+            &mut commands,
+            target_entity,
+            &mut target,
+            target_auras.as_deref(),
+            dampening,
+            heal,
+        );
+        let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
+        let text_position = target_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
+        let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
+            get_next_fct_offset(&mut fct_state)
+        } else {
+            (0.0, 0.0)
+        };
+        commands.spawn((
+            FloatingCombatText {
+                world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
+                text: format!("+{:.0}", healed),
+                color: crate::ui::theme::fct::HEAL,
+                lifetime: 1.5,
+                vertical_offset: offset_y,
+                is_crit,
+            },
+            PlayMatchEntity,
+        ));
+        let caster_id = combatant_id(caster_team, caster_slot, caster_class);
+        let verb = if is_crit { "CRITICALLY heals" } else { "heals" };
+        let message = format!(
+            "{}'s {} {} {} for {:.0}",
+            caster_id, name, verb, target_id, healed
+        );
+        combat_log.log_healing(caster_id, target_id, name, healed, is_crit, message);
+        // A critical heal is its caster's `HealCrit`.
+        if is_crit {
+            if let Ok((_, caster, _, _, _, _)) = combatants.get(caster_entity) {
+                super::talent_procs::push_for(
+                    &mut commands,
+                    &caster.talent_procs,
+                    super::talent_procs::ProcEvent::new(
+                        caster_entity,
+                        super::talent_procs::TalentTrigger::HealCrit,
+                    )
+                    .ability(ability)
+                    .crit(true)
+                    .amount(healed)
                     .other(target_entity),
                 );
             }

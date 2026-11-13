@@ -166,9 +166,17 @@ fn assert_min(label: &str, actual: usize, min: usize) {
 
 // ── routing ────────────────────────────────────────────────────────────────
 
-/// Every heal in the config must reach SOME landing. A future heal ability
-/// with no arm in `HealImpact::kind_for` fails here instead of landing in
-/// silence.
+/// Heals that land with no visual yet, each with the card that will draw it
+/// (the heal family's known-silent list in `tests/lands_silently_audit.rs`
+/// names the same).
+const KNOWN_SILENT_HEALS: &[(AbilityType, &str)] = &[(
+    AbilityType::HolyNova,
+    "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
+)];
+
+/// Every heal in the config must reach SOME landing, or be named known-silent
+/// with its card. A future heal ability with no arm in `HealImpact::kind_for`
+/// fails here instead of landing in silence.
 #[test]
 fn every_heal_in_the_config_reaches_a_landing() {
     let defs = AbilityDefinitions::default();
@@ -178,9 +186,13 @@ fn every_heal_in_the_config_reaches_a_landing() {
             silent.push(*ability);
         }
     }
-    assert!(
-        silent.is_empty(),
-        "heals with no landing at all: {silent:?} — add an arm to HealImpact::kind_for"
+    silent.sort();
+    let mut known: Vec<AbilityType> = KNOWN_SILENT_HEALS.iter().map(|(a, _)| *a).collect();
+    known.sort();
+    assert_eq!(
+        silent, known,
+        "heals with no landing at all — add an arm to HealImpact::kind_for, or name the card \
+         that will draw it in KNOWN_SILENT_HEALS"
     );
 }
 

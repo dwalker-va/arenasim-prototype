@@ -794,6 +794,7 @@ impl HealImpact {
             | AuraType::DamageTransfer
             | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
+            | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect
             | AuraType::TravelForm => None,
         }
@@ -1598,6 +1599,7 @@ impl AuraApplyRoute {
             | AuraType::DamageTransfer
             | AuraType::TriggeredAbsorb
             | AuraType::KillingBlowSave
+            | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect => AuraApplyRoute::Band,
 
             // Aura Mastery's immunity has no bespoke apply treatment yet: the

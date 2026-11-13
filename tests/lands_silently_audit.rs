@@ -391,6 +391,8 @@ fn aura_family(t: AuraType) -> AuraFamily {
         | AuraType::ArmorPercentReduction
         | AuraType::DamageTransfer
         | AuraType::KillingBlowSave
+        // Guardian Spirit's face (AS-415).
+        | AuraType::HealingReceivedIncrease
         | AuraType::DamageReflect
         // Sacred Shield's arming buff (AS-421): a buff like any other.
         | AuraType::TriggeredAbsorb
@@ -430,10 +432,17 @@ const HEAL_MEMBERS: &[AbilityType] = &[
     FlashHeal,
     FlashOfLight,
     HolyLight,
+    HolyNova,
     HolyShock,
     LesserHealingWave,
     Swiftmend,
 ];
+
+/// Scoped by AS-335 (the Priest talents' visuals).
+const HEAL_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
+    HolyNova,
+    "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
+)];
 
 fn heal_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
     HealImpact::kind_for(a).map(|_| "heal landing (heal_impact.rs)")
@@ -446,7 +455,7 @@ fn heal_finds_every_member() {
 
 #[test]
 fn heal_lands_nothing_silently() {
-    assert_judged("heal", is_heal, heal_landing, &[]);
+    assert_judged("heal", is_heal, heal_landing, HEAL_KNOWN_SILENT);
 }
 
 // ── family: direct damage ───────────────────────────────────────────────────
@@ -471,6 +480,7 @@ const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
     FrostShock,
     Frostbolt,
     HeroicStrike,
+    HolyNova,
     HolyShock,
     Immolate,
     LightningBolt,
@@ -530,6 +540,10 @@ const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (
         CrusaderStrike,
         "AS-379 (Crusader Strike, the Retribution capstone's strike)",
+    ),
+    (
+        HolyNova,
+        "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
     ),
     (
         Shadowburn,
@@ -823,6 +837,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     ExposeArmor,
     FireTotem,
     FrostArmor,
+    GuardianSpirit,
     IceBarrier,
     InnerFocus,
     Innervate,
@@ -958,6 +973,11 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     ),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
     (FrostArmor, "AS-134 (aura application)"),
+    (
+        GuardianSpirit,
+        "AS-354 (Guardian Spirit, the spirit on the ally and the shared \"Saved\" cue; \
+         scoped by AS-335)",
+    ),
     (InnerFocus, "AS-352 (Inner Focus, the focus on the Priest)"),
     (MageArmorSpell, "AS-134 (aura application)"),
     (MoltenArmor, "AS-134 (aura application)"),

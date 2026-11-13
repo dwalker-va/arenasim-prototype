@@ -43,6 +43,7 @@ pub mod pillar_stance;
 pub mod plays;
 pub mod priest;
 pub mod priest_discipline;
+pub mod priest_holy;
 pub mod rogue;
 pub mod rogue_flare;
 #[doc(hidden)]
@@ -144,7 +145,8 @@ pub struct QueuedInstantAttack {
     pub is_crit: bool,
 }
 
-/// Deferred AoE damage (Frost Nova).
+/// Deferred area damage (Frost Nova, Holy Nova): one victim's hit, rolled
+/// when its caster decided, landed after the frame's dispatch.
 #[derive(Clone, Copy)]
 pub struct QueuedAoeDamage {
     pub caster: Entity,
@@ -155,6 +157,33 @@ pub struct QueuedAoeDamage {
     pub caster_class: CharacterClass,
     pub target_pos: Vec3,
     pub is_crit: bool,
+    /// The area effect it belongs to: its name in the log (read from the
+    /// caster's book) and its caster's `SpellHit`.
+    pub ability: AbilityType,
+    /// The school it lands in.
+    pub school: crate::states::play_match::abilities::SpellSchool,
+}
+
+/// The frame's area-effect queues a class AI pushes onto: damage and
+/// healing, landed after the frame's dispatch (`combat_ai::decide_abilities`).
+pub struct AreaQueues<'a> {
+    pub damage: &'a mut Vec<QueuedAoeDamage>,
+    pub heals: &'a mut Vec<QueuedAoeHeal>,
+}
+
+/// Deferred area healing (Holy Nova): one teammate's heal, rolled when its
+/// caster decided (crit included), landed after the frame's dispatch through
+/// `combat_core::apply_healing`.
+#[derive(Clone, Copy)]
+pub struct QueuedAoeHeal {
+    pub caster: Entity,
+    pub target: Entity,
+    pub heal: f32,
+    pub is_crit: bool,
+    pub caster_team: u8,
+    pub caster_slot: u8,
+    pub caster_class: CharacterClass,
+    pub ability: AbilityType,
 }
 
 impl CombatantInfo {
@@ -940,6 +969,26 @@ impl<'a> CombatContext<'a> {
         threat_info.distance_to(my_info.position) > preferred
     }
 
+    /// Whether `target` carries `caster`'s OWN damage over time from the
+    /// ability named `ability_name` — a DoT's "already applied" gate.
+    ///
+    /// A periodic effect is per caster: every caster's copy lands and ticks
+    /// beside the others' (`apply_pending_auras` refuses no
+    /// `DamageOverTime`), so a teammate's Rupture or Corruption — or a second
+    /// Warlock's Corruption — is not this caster's, and does not stand for it.
+    /// Never gate a DoT on "any DoT" or on the spell's name alone. The type is
+    /// part of the key: a dispelled Unstable Affliction silences its dispeller
+    /// with an aura of the same name and caster, and that is not the DoT.
+    pub fn has_own_dot(&self, caster: Entity, target: Entity, ability_name: &str) -> bool {
+        self.active_auras.get(&target).is_some_and(|auras| {
+            auras.iter().any(|a| {
+                a.effect_type == AuraType::DamageOverTime
+                    && a.caster == Some(caster)
+                    && a.ability_name == ability_name
+            })
+        })
+    }
+
     /// Check if target has a break-on-any-damage CC from a friendly caster.
     /// Uses threshold-based detection: any aura with `break_on_damage_threshold == 0.0`
     /// (breaks on ANY damage) from a same-team caster is protected.
@@ -1219,6 +1268,7 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         | AuraType::DamageTransfer
         | AuraType::TriggeredAbsorb
         | AuraType::KillingBlowSave
+        | AuraType::HealingReceivedIncrease
         | AuraType::DamageReflect
         | AuraType::TravelForm => 0,
     }
@@ -1448,12 +1498,13 @@ pub fn select_purge(
 pub fn purge_priority(aura_type: AuraType) -> i32 {
     match aura_type {
         // Defensives — most valuable to remove (denies mitigation / sustain).
-        AuraType::Absorb => 100,              // PW:Shield / damage absorb
-        AuraType::KillingBlowSave => 100,     // a death prevented (Guardian Spirit)
-        AuraType::DamageTakenReduction => 90, // flat damage cut (Devotion Aura is untyped)
-        AuraType::DamageTransfer => 80,       // damage moved off the holder (Blessing of Sacrifice)
-        AuraType::TriggeredAbsorb => 80,      // shields that keep coming (Sacred Shield)
-        AuraType::HealingOverTime => 70,      // ongoing sustain (Rejuvenation)
+        AuraType::Absorb => 100,                 // PW:Shield / damage absorb
+        AuraType::KillingBlowSave => 100,        // a death prevented (Guardian Spirit)
+        AuraType::DamageTakenReduction => 90,    // flat damage cut (Devotion Aura is untyped)
+        AuraType::DamageTransfer => 80, // damage moved off the holder (Blessing of Sacrifice)
+        AuraType::TriggeredAbsorb => 80, // shields that keep coming (Sacred Shield)
+        AuraType::HealingOverTime => 70, // ongoing sustain (Rejuvenation)
+        AuraType::HealingReceivedIncrease => 70, // every heal bigger (Guardian Spirit)
         // Offensive throughput buffs.
         AuraType::AttackPowerIncrease => 60,
         AuraType::SpellPowerIncrease => 60,
@@ -1577,6 +1628,7 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
         | AuraType::DamageTransfer
         | AuraType::TriggeredAbsorb
         | AuraType::KillingBlowSave
+        | AuraType::HealingReceivedIncrease
         | AuraType::DamageReflect
         | AuraType::TravelForm => false,
     }
@@ -1679,6 +1731,7 @@ pub const fn grants_damage_immunity(aura: AuraType) -> bool {
         | AuraType::DamageTransfer
         | AuraType::TriggeredAbsorb
         | AuraType::KillingBlowSave
+        | AuraType::HealingReceivedIncrease
         | AuraType::DamageReflect
         | AuraType::TravelForm => false,
     }

@@ -1108,6 +1108,7 @@ fn every_numeric_ability_field_is_decided() {
         class: _,
         pet: _,
         talent: _,
+        off_gcd: _,
         icon: _,
         description: _,
         prevention: _,

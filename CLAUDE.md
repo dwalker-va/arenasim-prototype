@@ -336,10 +336,11 @@ For deeper context, see these focused references:
    resolve instead of drawing at the cap — expect `[EVENT] Arena dampening reaches N%`
    milestones in logs of matches longer than ~85s. **Every heal lands through
    `combat_core::apply_healing`** (`combat_core/healing.rs`) — direct heals, heal over
-   time ticks, the bloom, drains and lifesteal — which applies `HealingReduction`
-   (Mortal Strike cuts ALL healing received, HoT ticks included, as in Classic), the
-   Mortal Wounds tell and dampening in one place; a rule for all healing (an immunity)
-   goes at its top. `tests/heal_site_audit.rs` fails on a health raise anywhere else and
+   time ticks, the bloom, drains and lifesteal — which applies, in order, the strongest
+   `HealingReceivedIncrease` (Guardian Spirit), `HealingReduction` (Mortal Strike cuts
+   ALL healing received, HoT ticks included, as in Classic), the Mortal Wounds tell
+   (measured from the raised heal, so it brackets the cut alone) and dampening in one
+   place; a rule for all healing (an immunity) goes at its top. `tests/heal_site_audit.rs` fails on a health raise anywhere else and
    on a change to the set of systems that call it. Absorbs are not healing: a NEW absorb
    mechanic applies `Res<ArenaDampening>` at its own application site.
 5. **Match end**: When one team is eliminated, logs saved, results displayed. Attacks
@@ -401,8 +402,16 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
        )),
        projectile_speed: Some(35.0),
        projectile_visuals: Some((color: (1.0, 0.5, 0.0), emissive: (1.5, 0.8, 0.0))),
+       off_gcd: true,         // only if its cast site starts no global cooldown
    )
    ```
+   `off_gcd` currently follows the CODE: it declares what the class AI's cast
+   site does (each sets `global_cooldown = GCD` by hand), not what TBC's
+   `StartRecoveryCategory` says. The interrupts are off it here and category 133
+   (the GCD) in TBC; AS-484 reconciles the two. `tests/decision_properties.rs`
+   holds every ability the grid chooses to it and names the cast site of every
+   other one (`GCD_READ_AT_SITE`); a talent ability is held by the charge audit
+   below.
 
 4. **Add AI logic** in the appropriate `class_ai/<class>.rs` file:
    - Implement when to use the ability in the class's `decide_action()` method
@@ -633,7 +642,11 @@ carrying every slot's build.
   class AI decides it with `abilities.get(..)`, never `get_unchecked`: an
   untalented unit's book lacks it. `tests/talent_ai_audit.rs` fails until the
   ability has a row there whose scene shows the AI deciding it when granted
-  and leaving it alone when not.
+  and leaving it alone when not. The same row prices it
+  (`every_talent_ability_pays_its_declared_price`): granted, the AI chooses it
+  ALONE, the caster pays exactly its `mana_cost` (nothing under Inner Focus),
+  at the choice for an instant and at the landing for a cast, and starts the
+  global cooldown exactly when it is not `off_gcd`.
 - **Per-match choices** (`talent_choices.rs`). `WidenChoice(<menu>(<option>))`
   hides an option from every build without the node (which options are hidden
   is data: the ones some node widens; a menu's default never is);
@@ -663,13 +676,17 @@ carrying every slot's build.
 - **The damage pipeline** (`combat_core::apply_damage_with_absorb`, taking a
   `Hit`): immunity, the attacker's `DamageDealtIncrease` (every site passes it
   with `Hit::with_dealt` — `damage_site_audit` checks), armor (with
-  `ArmorPercentIncrease`/`Reduction`, never written into `armor`) and
-  resistance, the strongest in-scope `DamageTakenReduction`, the strongest
-  in-scope `DamageTakenIncrease` (a charged one is spent by
+  `ArmorPercentIncrease`/`Reduction`, never written into `armor`; a bleed
+  passes it, as in TBC — `mechanic: Some(Bleed)` on a Physical damage over
+  time, which `validate()` requires there and `tests/bleed_mechanic_audit.rs`
+  holds to the TBC client's bleeds) and resistance, the strongest in-scope
+  `DamageTakenReduction`, the strongest in-scope `DamageTakenIncrease` (a
+  charged one is spent by
   direct hits only, and does not raise ticks), the strongest transfer
   (`DamageTransfer` to its caster, or Soul Link), absorbs (a reflecting one
   returns its share), the stealth reveal, the killing-blow save
-  (`KillingBlowSave`, Cheat Death), health, then `DamageReflect` on a melee
+  (`KillingBlowSave` first, then Cheat Death; a save that belongs to a compound,
+  Guardian Spirit, spends the whole buff), health, then `DamageReflect` on a melee
   hit. Every one of these kinds takes only its STRONGEST instance in scope
   (the stacking simplification: Cheat Death's 90% cut under Devotion Aura is
   90%, not 91%); different kinds multiply. What a hit sets off on another

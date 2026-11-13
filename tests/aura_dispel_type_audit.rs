@@ -212,6 +212,12 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::InnerFocus => config(S::Magic, T::Magic), // 14751
         AbilityType::PowerInfusion => config(S::Magic, T::Magic), // 10060
         AbilityType::PainSuppression => config(S::Magic, T::Magic), // 33206
+        // The Holy talents (AS-415). Holy Nova (15237) applies no aura.
+        AbilityType::HolyNova => Row::NoAura,
+        // Guardian Spirit is Wrath's (TBC has no such spell): 47788 at
+        // wago.tools build 3.4.5.63697 has DispelType 0, so nothing removes
+        // it, its killing-blow rider included.
+        AbilityType::GuardianSpirit => config(S::Untyped, T::NoType),
 
         // ---- Warrior ----
         AbilityType::HeroicStrike => Row::NoAura,
