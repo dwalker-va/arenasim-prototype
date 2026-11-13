@@ -988,19 +988,13 @@ fn start_entry(
                     ));
                     true
                 }
-                // M2 channels — shared entry point (mirror warlock.rs:819);
+                // M2 channels — shared entry point (`ChannelingState::new`,
+                // as the Warlock starts one);
                 // process_channeling resolves the ticks and drives the beam.
                 Some(EntryFamily::Channel) => {
-                    commands.entity(caster).insert(ChannelingState {
-                        ability,
-                        duration_remaining: config.channel_duration.unwrap_or(5.0),
-                        time_until_next_tick: config.channel_tick_interval,
-                        tick_interval: config.channel_tick_interval,
-                        target,
-                        interrupted: false,
-                        interrupted_display_time: 0.0,
-                        ticks_applied: 0,
-                    });
+                    commands
+                        .entity(caster)
+                        .insert(ChannelingState::new(ability, target, config));
                     true
                 }
                 // M3 — bespoke `*Pending` / movement components.

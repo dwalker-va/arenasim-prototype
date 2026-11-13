@@ -1435,12 +1435,18 @@ pub fn process_channeling(
             continue;
         }
 
-        // Tick down timers
+        // A tick when the timer runs out, or the final tick as the channel
+        // ends this frame: the rule every periodic effect ticks by, so a
+        // channel of whole intervals lands every one of them.
         channeling.duration_remaining -= dt;
-        channeling.time_until_next_tick -= dt;
-
-        // Process tick if ready
-        if channeling.time_until_next_tick <= 0.0 {
+        let ends = channeling.duration_remaining <= 0.0;
+        let interval = channeling.tick_interval;
+        if super::super::auras::periodic_tick(
+            &mut channeling.time_until_next_tick,
+            interval,
+            dt,
+            ends,
+        ) {
             let ability_def = book.get_unchecked(&channeling.ability);
 
             // Calculate damage (flat damage per tick for Drain Life)
@@ -1460,13 +1466,11 @@ pub fn process_channeling(
                 book.clone(),
             ));
 
-            // Reset tick timer
-            channeling.time_until_next_tick = channeling.tick_interval;
             channeling.ticks_applied += 1;
         }
 
         // Check if channel duration expired
-        if channeling.duration_remaining <= 0.0 {
+        if ends {
             remove_channel.push(caster_entity);
 
             info!(
