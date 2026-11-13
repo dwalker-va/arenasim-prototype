@@ -17,6 +17,11 @@
 //! against the aura the engine actually builds — from the RON for a config aura,
 //! from the engine's own constructor for an aura built in code (traps, totems).
 //!
+//! Two kinds of debuff have no ability row of their own, and get their own
+//! check: a talent's proc debuff (`PROC_DEBUFFS`, set-equal with the procs
+//! `talents.ron` carries), and a compound's rider, which carries its face's
+//! class (`every_compound_rider_carries_its_faces_class`).
+//!
 //! **Where the sim and TBC disagree, the row says why.** A row whose two
 //! classes disagree must carry a `divergence` reason, and a row whose classes
 //! agree must not, so a divergence is always a decision someone wrote down and
@@ -63,11 +68,14 @@ use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::class_ai::{ally_dispel_scope, ally_removal};
+use arenasim::states::play_match::combat_core::{compound_riders, frost_armor_movement_slow_aura};
 use arenasim::states::play_match::components::{
-    ActiveAuras, ArenaDampening, Aura, AuraPending, AuraType, Combatant, DispelPending,
-    DispelScope, DispelType, GameRng, TotemElement,
+    ActiveAuras, ArenaDampening, Aura, AuraPending, AuraType, Combatant, CompoundDebuff,
+    DispelPending, DispelScope, DispelType, GameRng, TotemElement,
 };
 use arenasim::states::play_match::effects::process_dispels;
+use arenasim::states::play_match::talent_procs::{effect_aura, ProcEvent, TalentProcSlot};
+use arenasim::states::play_match::talents::{TalentDefinitions, TalentEffect, TalentId};
 use arenasim::states::play_match::totems::make_totem_aura;
 use arenasim::states::play_match::traps::{freezing_trap_aura, frost_trap_slow_aura};
 use arenasim::CharacterClass;
@@ -768,5 +776,199 @@ fn dispel_magic_takes_psychic_scream_off_an_ally() {
             CharacterClass::Priest
         ),
         "Dispel Magic left Psychic Scream's fear on the ally"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Debuffs no ability's row reaches: talent procs and compound riders
+// ---------------------------------------------------------------------------
+
+/// Every DEBUFF a talent's proc lands (`talents.ron`), keyed by its talent:
+/// what the sim resolves it to and what TBC calls it. Checked by SET
+/// EQUALITY against the procs the shipped table actually carries, so a new
+/// debuff proc fails until its row is written here.
+const PROC_DEBUFFS: [(TalentId, Sim, Tbc); 2] = [
+    // Shadow Vulnerability, 17800: DispelType 1 (Magic). User ruling,
+    // 2026-11-13 (AS-482): dispellable, as in TBC.
+    (TalentId::ImprovedShadowBolt, Sim::Magic, Tbc::Magic),
+    // Aftermath's daze, 18118: DispelType 1 (Magic).
+    (TalentId::Aftermath, Sim::Magic, Tbc::Magic),
+];
+
+/// Every talent's procs, ranks and `FromRank` wrappers unwrapped.
+fn talent_procs() -> Vec<(
+    TalentId,
+    String,
+    arenasim::states::play_match::talent_procs::TalentProc,
+)> {
+    fn procs_in(
+        effect: &TalentEffect,
+        out: &mut Vec<arenasim::states::play_match::talent_procs::TalentProc>,
+    ) {
+        match effect {
+            TalentEffect::Proc(p) => out.push(p.clone()),
+            TalentEffect::FromRank(_, inner) => procs_in(inner, out),
+            _ => {}
+        }
+    }
+    let mut all = Vec::new();
+    for (id, talent) in TalentDefinitions::shipped().iter() {
+        let mut procs = Vec::new();
+        for effect in &talent.per_rank {
+            procs_in(effect, &mut procs);
+        }
+        all.extend(procs.into_iter().map(|p| (id, talent.name.clone(), p)));
+    }
+    all
+}
+
+/// The aura a talent proc lands, built by the engine's own `effect_aura`.
+fn proc_aura(
+    id: TalentId,
+    name: &str,
+    proc: arenasim::states::play_match::talent_procs::TalentProc,
+) -> Option<Aura> {
+    let slot = TalentProcSlot::new(id, name, proc);
+    let (owner, other) = (Entity::from_raw(1), Entity::from_raw(2));
+    let event = ProcEvent::new(owner, slot.proc.trigger)
+        .amount(50.0)
+        .other(other);
+    effect_aura(&slot, owner, &event).map(|pending| pending.aura)
+}
+
+/// Every debuff a talent proc lands resolves to its tabled class, the class
+/// agrees with TBC, and the table names exactly the talents whose procs land
+/// a debuff.
+#[test]
+fn every_talent_proc_debuff_resolves_to_its_tabled_class() {
+    let mut found: Vec<(TalentId, Sim)> = talent_procs()
+        .into_iter()
+        .filter_map(|(id, name, proc)| proc_aura(id, &name, proc).map(|aura| (id, aura)))
+        .filter(|(_, aura)| aura.effect_type.is_hostile_effect())
+        .map(|(id, aura)| (id, sim_class(&aura)))
+        .collect();
+    found.sort_by_key(|(id, _)| format!("{id:?}"));
+    let mut tabled: Vec<(TalentId, Sim)> =
+        PROC_DEBUFFS.iter().map(|&(id, sim, _)| (id, sim)).collect();
+    tabled.sort_by_key(|(id, _)| format!("{id:?}"));
+    assert_eq!(found, tabled, "talent proc debuffs against `PROC_DEBUFFS`");
+    for (id, sim, tbc) in PROC_DEBUFFS {
+        assert!(
+            tbc.agrees_with(sim),
+            "{id:?}: the sim's {sim:?} departs from TBC {tbc:?}"
+        );
+    }
+}
+
+/// The aura a compound's FACE lands as, from the source that builds it. **No
+/// wildcard arm**: a new compound does not compile until its face is named.
+fn compound_face(defs: &AbilityDefinitions, compound: CompoundDebuff) -> Aura {
+    match compound {
+        CompoundDebuff::FrostArmorChill => frost_armor_movement_slow_aura(),
+        CompoundDebuff::MarkOfTheWild => landed_aura(defs, AbilityType::MarkOfTheWild),
+        CompoundDebuff::EntanglingRoots => landed_aura(defs, AbilityType::EntanglingRoots),
+        CompoundDebuff::Shadowform => landed_aura(defs, AbilityType::Shadowform),
+        // Improved Kidney Shot's rider rides Kidney Shot's stun.
+        CompoundDebuff::StunVulnerability => landed_aura(defs, AbilityType::KidneyShot),
+        CompoundDebuff::GuardianSpirit => landed_aura(defs, AbilityType::GuardianSpirit),
+    }
+}
+
+/// A compound's riders carry its face's removal class: one debuff, one class.
+/// The face's class is tabled against TBC above, so a rider agrees with TBC
+/// through it — Improved Kidney Shot's vulnerability is Physical because
+/// Kidney Shot is, and stays so whatever a damage-taken increase's own rule
+/// says (AS-482).
+#[test]
+fn every_compound_rider_carries_its_faces_class() {
+    let defs = AbilityDefinitions::default();
+    let mut wrong = Vec::new();
+    let mut checked = 0;
+    for compound in CompoundDebuff::ALL {
+        let face = compound_face(&defs, compound);
+        assert_eq!(face.effect_type, compound.face(), "{compound:?}'s face");
+        for rider in compound_riders(compound) {
+            checked += 1;
+            if sim_class(&rider) != sim_class(&face) {
+                wrong.push(format!(
+                    "{compound:?}: rider {:?} resolves to {:?}, its face to {:?}",
+                    rider.effect_type,
+                    sim_class(&rider),
+                    sim_class(&face)
+                ));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    assert!(
+        checked >= CompoundDebuff::ALL.len(),
+        "only {checked} riders"
+    );
+}
+
+/// Shadow Vulnerability as Improved Shadow Bolt's proc lands it.
+fn shadow_vulnerability() -> Aura {
+    let (id, name, proc) = talent_procs()
+        .into_iter()
+        .find(|(id, _, _)| *id == TalentId::ImprovedShadowBolt)
+        .expect("Improved Shadow Bolt is a proc");
+    let aura = proc_aura(id, &name, proc).expect("its proc lands an aura");
+    assert_eq!(aura.effect_type, AuraType::DamageTakenIncrease);
+    aura
+}
+
+/// User ruling, 2026-11-13 (AS-482): Shadow Vulnerability is Magic, so every
+/// ally-side dispel takes it off, through the real `process_dispels`. No
+/// purge does: it is a debuff, not a buff.
+#[test]
+fn every_dispel_takes_shadow_vulnerability() {
+    for dispel in [
+        AbilityType::DispelMagic,
+        AbilityType::PaladinCleanse,
+        AbilityType::DevourMagic,
+    ] {
+        assert!(
+            !survives(
+                shadow_vulnerability(),
+                ally_dispel_scope(dispel),
+                CharacterClass::Priest
+            ),
+            "{dispel:?} left Shadow Vulnerability on the ally"
+        );
+    }
+    assert!(survives(
+        shadow_vulnerability(),
+        DispelScope::Purge,
+        CharacterClass::Shaman
+    ));
+}
+
+/// Improved Kidney Shot's rider is Physical, as its stun is: no dispel takes
+/// it. Checked with the rider taken out of its compound, so it is a candidate
+/// on its class alone (a rider in its compound is never one). Its control is
+/// the same vulnerability declared Magic, which Dispel Magic takes — so a
+/// survival is the class at work, not a dispel that never reaches a
+/// damage-taken increase.
+#[test]
+fn no_dispel_takes_the_kidney_shot_rider() {
+    let mut rider = compound_riders(CompoundDebuff::StunVulnerability)
+        .into_iter()
+        .find(|a| a.effect_type == AuraType::DamageTakenIncrease)
+        .expect("the stun's vulnerability rider");
+    rider.ability_name = "Kidney Shot rider".into();
+    rider.compound = None;
+    assert_eq!(rider.dispel_type, DispelType::Physical);
+    let wrong = dispel_failures(&rider, AbilityType::KidneyShot);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+
+    let mut as_magic = rider;
+    as_magic.dispel_type = DispelType::Magic;
+    assert!(
+        !survives(
+            as_magic,
+            ally_dispel_scope(AbilityType::DispelMagic),
+            CharacterClass::Priest
+        ),
+        "control: Dispel Magic cannot take a Magic vulnerability, so the check proves nothing"
     );
 }

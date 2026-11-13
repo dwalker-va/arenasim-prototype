@@ -1215,6 +1215,14 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         // ---- Maintenance band: only the team-healthy caller (50) reaches these. ----
         AuraType::Root => 80,           // Can't move
         AuraType::DamageOverTime => 50, // Taking damage
+        // A magic vulnerability (Shadow Vulnerability, AS-482): a stat debuff,
+        // not crowd control, so it never clears the urgent bar or the root
+        // tier ([`ROOT_DISPEL_PRIORITY`]). It ties with a DoT — both cost the
+        // holder damage, both come back with the caster's next proc or cast —
+        // so a healthy team's healer lifts it, and a pressed one heals. Only
+        // its magic instances reach this: the Kidney Shot rider is Physical
+        // (`Aura::can_be_dispelled`, per aura).
+        AuraType::DamageTakenIncrease => 50,
         // Vampiric Embrace: the enemy's Shadow damage on the holder heals the
         // enemy's party. Routine, as a DoT is.
         AuraType::LeechMark => 50,
@@ -1238,7 +1246,6 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         | AuraType::AttackSpeedSlow
         | AuraType::DamageReduction
         | AuraType::CastTimeIncrease
-        | AuraType::DamageTakenIncrease
         | AuraType::ArmorPercentReduction => 0,
 
         // Mechanical markers, not effects. Lifting `WeakenedSoul` would hand the
@@ -2417,7 +2424,7 @@ pub fn scan_ally_dispel(
 ///   Affliction Silence, Fear)
 /// - 85 ([`ROOT_DISPEL_PRIORITY`]): also a root holding a teammate back
 ///   ([`root_holds_back`])
-/// - 50: Include every root and DoTs
+/// - 50: Include every root, DoTs and magic vulnerabilities
 /// - 20: Include slows (not recommended)
 ///
 /// Only an ally the dispel reaches is a candidate: in range AND in sight
