@@ -144,10 +144,17 @@ fn seeded_2v2_matches_its_recorded_identity() {
     // absorbed), from the Sigil of Arcane Surge's 3 spell power. A single
     // seed's winner is not a balance claim; the change's effect is measured
     // at the milestone sweep.
+    //
+    // Re-recorded for AS-464, no movement speed on the starting boots (its
+    // budget re-spent on attack or spell power), so every unit walks at its
+    // natural speed, about 2% slower. Took this cell to Some(1) @ 30.166378s
+    // from Some(2) @ 59.61593s. The first line that differs from `main` @
+    // 18ae5824 is at 13.08s (log clock): the Mage's first Frostbolt begins at
+    // 13.15s, the Mage reaching its casting range a few frames later.
     assert_pinned(
         &result,
-        Some(2),
-        1_114_535_606,
+        Some(1),
+        1_106_334_910,
         "2v2 Mage+Priest vs Warrior+Priest @424242",
     );
 }
@@ -189,10 +196,17 @@ fn seeded_1v1_matches_its_recorded_identity() {
     // 15.37s (log clock), 89 -> 91 with the Sigil of Arcane Surge's 3 spell
     // power, and the Warrior's Dragonspine Trophy rolls on its swings, but the
     // Mage's killing blow still lands on the same frame.
+    //
+    // Re-recorded for AS-464, no movement speed on the starting boots: every
+    // unit walks at its natural speed, about 2% slower. Took this cell to
+    // Some(1) @ 16.21659s from Some(1) @ 17.549904s. The first line that
+    // differs from `main` @ 18ae5824 is at 13.08s (log clock): the Mage's
+    // first Frostbolt begins at 13.15s, the Mage reaching its casting range a
+    // few frames later.
     assert_pinned(
         &result,
         Some(1),
-        1_099_720_244,
+        1_099_021_204,
         "1v1 Mage vs Warrior @99001",
     );
 }
