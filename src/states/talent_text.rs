@@ -274,6 +274,7 @@ pub fn proc_clause(proc: &TalentProc, abilities: &AbilityDefinitions) -> String 
                 next_cast: None,
                 triggered_absorb: None,
                 vulnerability: 0.0,
+                mechanic: None,
             });
             format!("{} (on {whom})", in_clause(&sentence))
         }

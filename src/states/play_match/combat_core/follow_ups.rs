@@ -219,6 +219,8 @@ pub fn process_damage_follow_ups(
                     dealt: 1.0,
                     // A share handed back meets its holder's absorbs.
                     kind: if returned { HitKind::Returned } else { kind },
+                    // A share met (or skipped) armor on the unit it left.
+                    mechanic: None,
                 };
                 let landed = land(
                     hit,
@@ -280,6 +282,7 @@ pub fn process_damage_follow_ups(
                     victim: to,
                     dealt: 1.0,
                     kind: HitKind::Reflected,
+                    mechanic: None,
                 };
                 let landed = land(
                     hit,

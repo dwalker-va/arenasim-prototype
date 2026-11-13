@@ -1268,6 +1268,7 @@ pub fn process_dot_ticks(
         String,
         super::abilities::SpellSchool,
         Option<super::combat_core::leech::Leech>,
+        Option<Mechanic>,
     )> = Vec::new();
 
     // Every caster's damage-dealt increases, read before the auras are
@@ -1322,9 +1323,13 @@ pub fn process_dot_ticks(
                             caster_slot,
                             caster_class,
                             aura.ability_name.clone(),
+                            // A Physical ability's aura stores no school; its
+                            // mechanic (a bleed) gives the tick its own.
                             aura.spell_school
+                                .or(aura.damage_mods.mechanic.map(Mechanic::school))
                                 .unwrap_or(super::abilities::SpellSchool::None),
                             aura.leech,
+                            aura.damage_mods.mechanic,
                         ));
                     }
                 }
@@ -1356,6 +1361,7 @@ pub fn process_dot_ticks(
         ability_name,
         spell_school,
         own_leech,
+        mechanic,
     ) in dot_damage_to_apply
     {
         // Get target combatant
@@ -1388,7 +1394,8 @@ pub fn process_dot_ticks(
                 .get(&caster_entity)
                 .map_or(1.0, |mods| mods.multiplier(spell_school)),
         )
-        .of_kind(super::combat_core::HitKind::Periodic);
+        .of_kind(super::combat_core::HitKind::Periodic)
+        .mechanic(mechanic);
         let (actual_damage, absorbed) = super::combat_core::apply_damage_with_absorb(
             hit,
             &mut target,
