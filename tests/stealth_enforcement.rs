@@ -828,7 +828,8 @@ fn reaches_enemies_in_an_area(ability: AbilityType) -> bool {
         | FireTotem | Rejuvenation | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild
         | Innervate | EntanglingRoots | Cyclone | TravelForm | ShadowWordPain | ExposeArmor
         | DivineProtection | BlessingOfSacrifice | SacredShield | Shadowform | SiphonLife
-        | AmplifyCurse | CurseOfExhaustion | DivineFavor | AuraMastery => false,
+        | AmplifyCurse | CurseOfExhaustion | InnerFocus | PowerInfusion | PainSuppression
+        | DivineFavor | AuraMastery => false,
         // A Paladin aura on allies: its damage answers a melee attacker that
         // struck one, and that hit has revealed the attacker already.
         RetributionAura => false,

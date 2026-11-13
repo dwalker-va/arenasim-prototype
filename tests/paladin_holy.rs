@@ -240,7 +240,7 @@ fn the_holy_tree_is_as_specified() {
             AbilityType::HolyLight,
             0.0,
             0.5,
-            DispelType::Auto,
+            DispelType::Magic,
             "Light's Grace"
         )
     );

@@ -251,6 +251,10 @@ pub enum AbilityType {
     SiphonLife,        // talent: Shadow DoT whose ticks heal the Warlock
     AmplifyCurse,      // talent: the next Curse of Weakness or Agony +50%
     CurseOfExhaustion, // a curse a talent offers: 30% movement slow for 12s
+    // Priest: the Discipline tree (AS-414). Appended for the same reason.
+    InnerFocus,      // talent: the Priest's next spell is free, +25% crit
+    PowerInfusion,   // talent: an ally gains 24 spell power for 15s
+    PainSuppression, // talent: an ally takes 40% less damage for 8s
     // Paladin: the Holy tree (AS-420). Appended for the same reason.
     DivineFavor, // talent: the next Flash of Light, Holy Light or Holy Shock crits
     AuraMastery, // talent: teammates immune to silence and interrupts for 6s
@@ -295,7 +299,7 @@ impl AbilityType {
             | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild | Innervate | EntanglingRoots
             | Cyclone | TravelForm | Shadowform | DivineProtection | BlessingOfSacrifice
             | SacredShield | RetributionAura | SiphonLife | AmplifyCurse | CurseOfExhaustion
-            | DivineFavor | AuraMastery => false,
+            | InnerFocus | PowerInfusion | PainSuppression | DivineFavor | AuraMastery => false,
         }
     }
 

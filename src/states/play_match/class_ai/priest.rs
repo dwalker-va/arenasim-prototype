@@ -4,13 +4,16 @@
 //!
 //! ## Priority Order
 //! (Numbered as the `Priority N` comments in [`decide_priest_action`]; the
-//! Peel play's Psychic Scream heads the chain under `TeamPlan`.)
+//! Peel play's Psychic Scream heads the chain under `TeamPlan`, and the
+//! Discipline talents' saves follow it — Pain Suppression, Power Infusion —
+//! in a book that holds them: `priest_discipline`.)
 //! 1. Power Word: Fortitude (buff all allies pre-combat)
 //! 2. Dispel Magic - Urgent (Polymorph, Freezing Trap, UA Silence, Fear)
 //!    2.5. The `Legacy` dip's Psychic Scream
 //! 3. Psychic Scream (defensive, while pressured)
 //! 4. Power Word: Shield (shield low-health allies)
 //!    4.5. Mana Burn on the enemy healer (surplus GCDs only)
+//!    4.8. Inner Focus ahead of a Flash Heal on a dying teammate (talent)
 //! 5. Flash Heal (heal injured allies)
 //! 6. Dispel Magic - Maintenance (Roots, DoTs when team HP is stable)
 //! 7. Mind Blast (damage when allies are healthy)
@@ -22,7 +25,8 @@
 //! dealer: it heals no one (`talents.ron`'s choice rules lock Flash Heal), so
 //! it runs [`decide_shadow_priest_action`] instead of the chain above, and a
 //! damage dealer's movement (the Warlock's pursuit, `combat_ai`) instead of
-//! the healer posture machine. Its order, under the play pipeline's steps:
+//! the healer posture machine. Its order, under the play pipeline's steps
+//! (the Peel step, then the Discipline talents' saves, as above):
 //! 1. Shadowform, until it holds the form (before the gates)
 //! 2. Power Word: Fortitude (buff all allies pre-combat)
 //! 3. Dispel Magic - Urgent
@@ -175,6 +179,24 @@ pub fn decide_priest_action(
         }
     }
 
+    // The Discipline talents (AS-414), each only in a book that holds it:
+    // Pain Suppression on the teammate in danger, then Power Infusion (no
+    // global cooldown) on a damage dealer's burst or the Priest's own heals.
+    if try_discipline_saves(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
     // Priority 1: Power Word: Fortitude (buff allies)
     if try_fortitude(
         commands,
@@ -314,6 +336,24 @@ pub fn decide_priest_action(
         ctx,
         escape_defer,
         plan.pressured,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // Priority 4.8 (Discipline talent, AS-414): Inner Focus just ahead of a
+    // Flash Heal on a dying teammate, which goes out free on the next frame.
+    if super::priest_discipline::try_inner_focus(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        FLASH_HEAL_HP,
         &mut builder,
     ) {
         builder.finish();
@@ -463,6 +503,22 @@ pub fn decide_shadow_priest_action(
             builder.finish();
             return true;
         }
+    }
+
+    // The Discipline talents (AS-414), as in the healing chain.
+    if try_discipline_saves(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        ctx,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
     }
 
     // The Burst play (TeamPlan): Mind Blast on the kill window's enemy heads
@@ -647,6 +703,27 @@ fn shadow_burn_held(
         .and_then(|t| ctx.combatants.get(&t))
         .is_some_and(|info| my_pos.distance(info.position) <= reach);
     (!in_reach).then_some("closing on the target: beyond Mind Blast's reach")
+}
+
+/// The Discipline talents' saves (AS-414), shared by both chains: Pain
+/// Suppression on the teammate in danger, then Power Infusion. Each does
+/// nothing, and traces nothing, without its talent.
+fn try_discipline_saves(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    super::priest_discipline::try_pain_suppression(
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, builder,
+    ) || super::priest_discipline::try_power_infusion(
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, builder,
+    )
 }
 
 /// Take Shadowform: the Priest's chosen form, cast once before the gates and
@@ -3050,6 +3127,7 @@ fn compute_formation_point(
             point,
             &field,
             shared.heal_range - crate::states::play_match::team_solve::HEAL_REACH_MARGIN,
+            now,
             &mut memory.reach,
         )
     } else {

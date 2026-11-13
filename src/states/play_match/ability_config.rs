@@ -762,6 +762,10 @@ impl AbilityDefinitions {
             AbilityType::SiphonLife,
             AbilityType::AmplifyCurse,
             AbilityType::CurseOfExhaustion,
+            // Priest talent abilities
+            AbilityType::InnerFocus,
+            AbilityType::PowerInfusion,
+            AbilityType::PainSuppression,
             // Paladin: the Holy tree
             AbilityType::DivineFavor,
             AbilityType::AuraMastery,
@@ -1533,6 +1537,9 @@ mod tests {
                     AbilityType::ManaBurn,
                     AbilityType::ShadowWordPain,
                     AbilityType::Shadowform,
+                    AbilityType::InnerFocus,
+                    AbilityType::PowerInfusion,
+                    AbilityType::PainSuppression,
                 ],
             ),
             (

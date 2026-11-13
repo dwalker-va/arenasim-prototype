@@ -29,6 +29,7 @@ use crate::states::play_match::components::{
     DisengagingState, Pet,
 };
 use crate::states::play_match::map_geometry::ObstacleVolume;
+use crate::states::play_match::talent_mechanics::TalentMechanics;
 
 impl CombatantInfo {
     /// The snapshot row for one combatant: its live `Combatant` and
@@ -122,6 +123,10 @@ pub struct CombatSnapshot {
     /// Empty in every match without avoidance: a melee attack on a combatant
     /// absent from it rolls nothing.
     pub melee_defense: BTreeMap<Entity, MeleeDefense>,
+    /// Every combatant with a talent mechanic, and its mechanics: what
+    /// [`Self::reflect_instant_cc`] reads to shorten a crowd control as its
+    /// real landing will (Unbreakable Will). Empty in every untalented match.
+    pub talent_mechanics: BTreeMap<Entity, TalentMechanics>,
 }
 
 impl CombatSnapshot {
@@ -245,7 +250,11 @@ impl CombatSnapshot {
         let mut active_auras: BTreeMap<Entity, Vec<Aura>> = BTreeMap::new();
         let mut ability_cooldowns: BTreeMap<Entity, BTreeMap<AbilityType, f32>> = BTreeMap::new();
         let mut melee_defense: BTreeMap<Entity, MeleeDefense> = BTreeMap::new();
+        let mut talent_mechanics: BTreeMap<Entity, TalentMechanics> = BTreeMap::new();
         for u in &units {
+            if !u.combatant.talent_mechanics.is_empty() {
+                talent_mechanics.insert(u.entity, u.combatant.talent_mechanics.clone());
+            }
             let defense = u.combatant.melee_defense();
             if !defense.is_none() {
                 melee_defense.insert(u.entity, defense);
@@ -290,6 +299,7 @@ impl CombatSnapshot {
             bounds,
             ai_profile,
             melee_defense,
+            talent_mechanics,
         }
     }
 
@@ -325,6 +335,12 @@ impl CombatSnapshot {
     /// Delegates to [`reflect_instant_cc_in_snapshot`], which handles DR
     /// scaling, immunity rejection, and same-category CC replacement.
     pub fn reflect_instant_cc(&mut self, target: Entity, aura: &Aura) {
-        reflect_instant_cc_in_snapshot(target, aura, &mut self.active_auras, &mut self.dr_trackers);
+        reflect_instant_cc_in_snapshot(
+            target,
+            aura,
+            &mut self.active_auras,
+            &mut self.dr_trackers,
+            self.talent_mechanics.get(&target),
+        );
     }
 }

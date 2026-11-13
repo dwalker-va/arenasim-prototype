@@ -41,6 +41,7 @@ pub mod pillar_mode;
 pub mod pillar_stance;
 pub mod plays;
 pub mod priest;
+pub mod priest_discipline;
 pub mod rogue;
 pub mod rogue_flare;
 #[doc(hidden)]

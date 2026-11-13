@@ -160,6 +160,10 @@ fn mechanic_text(mechanic: TalentMechanic) -> String {
              match",
             percent(shadow_damage)
         ),
+        TalentMechanic::UnbreakableWill { reduction } => format!(
+            "Stuns, fears and silences on you last {} shorter",
+            unsigned_percent(reduction)
+        ),
     }
 }
 
@@ -445,16 +449,16 @@ fn stat_name(stat: TalentStat) -> &'static str {
     }
 }
 
-/// Points of a stat in its own unit, signed: a chance or a haste in
-/// percentage points ("+1%" for `0.01` crit chance), movement speed in yards
-/// a second, everything else as a number ("+10" maximum health).
+/// Points of a stat in its own unit, signed: a chance, a haste or movement
+/// speed in percentage points ("+1%" for `0.01` crit chance, "+8%" for `0.08`
+/// movement speed), everything else as a number ("+10" maximum health).
 fn stat_points(stat: TalentStat, points: f32) -> String {
     match stat {
         TalentStat::CritChance
         | TalentStat::DodgeChance
         | TalentStat::ParryChance
-        | TalentStat::MeleeAttackSpeed => percent(points),
-        TalentStat::MovementSpeed => signed(points, "yd/sec"),
+        | TalentStat::MeleeAttackSpeed
+        | TalentStat::MovementSpeed => percent(points),
         TalentStat::MaxHealth
         | TalentStat::MaxMana
         | TalentStat::ManaRegen
@@ -715,6 +719,11 @@ mod tests {
             effect_text(&sacrifice, 1, abilities()),
             "Sacrificing your pet at the gates grants Touch of Shadow: +15% Shadow damage for \
              the match"
+        );
+        let will = TalentEffect::Mechanic(TalentMechanic::UnbreakableWill { reduction: 0.1 });
+        assert_eq!(
+            effect_text(&will, 2, abilities()),
+            "Stuns, fears and silences on you last 20% shorter"
         );
     }
 

@@ -10,8 +10,9 @@
 //! Unstable Affliction backlash, reflects and transferred shares each used to
 //! pick their own.
 //!
-//! One seeded batch (42 matches, and a Drain Life bank played until it
-//! has what it is for), talented and geared so that every one of
+//! One seeded batch (42 matches, its Frost Novas staged on a shielded
+//! Warrior, and a Drain Life bank played until it has what it is for),
+//! talented and geared so that every one of
 //! those sites meets an absorb: Power Word: Shield, Aegis of the Last Stand
 //! and Sacred Shield; Retribution Aura and a Reflective Shield; Soul Link and
 //! Blessing of Sacrifice; Unstable Affliction under a Priest's and a Paladin's
@@ -34,8 +35,10 @@ use std::collections::{BTreeMap, HashMap};
 use regex::Regex;
 
 use arenasim::combat::log::{CombatLog, StructuredEventData};
-use arenasim::headless::runner::{build_headless_app, HeadlessMatchState};
-use arenasim::headless::HeadlessMatchConfig;
+use arenasim::headless::runner::{
+    build_headless_app, build_headless_app_staged, HeadlessMatchState,
+};
+use arenasim::headless::{HeadlessMatchConfig, Stage, Unit};
 use bevy::prelude::Entity;
 
 use arenasim::states::play_match::components::{Combatant, Pet, PetType};
@@ -126,7 +129,7 @@ fn trio(seed: u64, striker: &str) -> HeadlessMatchConfig {
 }
 
 /// A Mage + Priest against a Warrior + Priest: a Frost Nova on a shielded
-/// Warrior.
+/// Warrior, staged by [`nova_stage`].
 fn nova(seed: u64) -> HeadlessMatchConfig {
     HeadlessMatchConfig {
         team1: vec!["Mage".into(), "Priest".into()],
@@ -137,6 +140,23 @@ fn nova(seed: u64) -> HeadlessMatchConfig {
         team2_equipment: vec![aegis()],
         ..Default::default()
     }
+}
+
+/// The enemy Warrior on the Mage, inside Frost Nova's reach and under its
+/// Priest's Power Word: Shield, so the Mage's Nova lands into the absorb.
+fn nova_stage() -> Stage {
+    const MAGE: Unit = Unit::new(1, 0);
+    const WARRIOR: Unit = Unit::new(2, 0);
+    const PRIEST: Unit = Unit::new(2, 1);
+    Stage::new()
+        .place(MAGE, 0.0, 0.0)
+        .place(WARRIOR, 1.5, 0.0)
+        .target(WARRIOR, MAGE)
+        .land(
+            WARRIOR,
+            arenasim::states::play_match::AbilityType::PowerWordShield,
+            PRIEST,
+        )
 }
 
 /// A Warlock + Warrior against a Warrior + Paladin with Blessing of
@@ -174,7 +194,15 @@ struct Played {
 /// Play `config` to its end. Every Priest is given a Reflective Shield (no
 /// shipped talent grants it yet) once it spawns.
 fn play(label: String, config: HeadlessMatchConfig) -> Played {
-    let mut app = build_headless_app(&config, true, None);
+    play_app(label, build_headless_app(&config, true, None))
+}
+
+/// [`play`] with `stage` landed as the gates open.
+fn play_staged(label: String, config: HeadlessMatchConfig, stage: Stage) -> Played {
+    play_app(label, build_headless_app_staged(&config, true, None, stage))
+}
+
+fn play_app(label: String, mut app: bevy::prelude::App) -> Played {
     let mut reflecting = false;
     for _ in 0..(60 * 60 * 5) {
         app.update();
@@ -266,14 +294,20 @@ fn batch() -> &'static [Played] {
             for striker in ["Mage", "Rogue"] {
                 configs.push((format!("trio seed {seed} {striker}"), trio(seed, striker)));
             }
-            for nova_seed in [seed, seed + 100, seed + 200] {
-                configs.push((format!("nova seed {nova_seed}"), nova(nova_seed)));
-            }
         }
         let mut played: Vec<Played> = configs
             .into_iter()
             .map(|(label, config)| play(label, config))
             .collect();
+        for seed in 466..472 {
+            for nova_seed in [seed, seed + 100, seed + 200] {
+                played.push(play_staged(
+                    format!("nova seed {nova_seed}"),
+                    nova(nova_seed),
+                    nova_stage(),
+                ));
+            }
+        }
         // A bank for the Drain Life share, played until DRAIN_SHARES of its
         // matches have seen one (stopping on a success leaves the chance of
         // missing unchanged). Measured on seeds 1-60 (2026-11-12): 13 matches
