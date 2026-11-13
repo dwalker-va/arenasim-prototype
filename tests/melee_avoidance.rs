@@ -358,6 +358,37 @@ fn rupture_is_avoided_and_bleeds_nothing() {
     );
 }
 
+/// Crusader Strike (the Retribution capstone): avoided, it deals nothing.
+/// The Paladin's Devotion Aura is up and its Hammer of Justice spent, so its
+/// turn goes to the strike.
+#[test]
+fn crusader_strike_is_avoided_and_deals_nothing() {
+    assert_avoidable(
+        AbilityType::CrusaderStrike,
+        "Crusader Strike",
+        |a| {
+            melee_scene(CharacterClass::Paladin, a)
+                .aura_full(
+                    ATTACKER,
+                    Aura {
+                        effect_type: AuraType::DamageTakenReduction,
+                        duration: 600.0,
+                        magnitude: 0.10,
+                        ability_name: "Devotion Aura".into(),
+                        ..Default::default()
+                    },
+                )
+                .grant(ATTACKER, AbilityType::CrusaderStrike)
+                .cooldown(ATTACKER, AbilityType::HammerOfJustice, 30.0)
+        },
+        |v| {
+            v.landed
+                .iter()
+                .any(|l| l.ability == AbilityType::CrusaderStrike)
+        },
+    );
+}
+
 /// Hemorrhage (the Subtlety strike): avoided, it deals nothing and leaves no
 /// wound.
 #[test]
@@ -1130,6 +1161,7 @@ fn every_melee_attack_is_a_pacify_ability_at_melee_range() {
         AbilityType::Kick,
         AbilityType::ExposeArmor,
         AbilityType::Rupture,
+        AbilityType::CrusaderStrike,
         AbilityType::Hemorrhage,
     ]
     .into_iter()

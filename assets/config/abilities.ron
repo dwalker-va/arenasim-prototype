@@ -2014,6 +2014,51 @@
             spell_school: Physical,
         ),
 
+        // Repentance (talent, Retribution tier 3): incapacitates an enemy for
+        // 6s; any damage ends it (TBC 20066: up to 6s, "any damage caused will
+        // awaken the target"). 20yd; 30s cooldown (the card's; the client's is
+        // 1 min). 9% of the Paladin's base mana, as TBC. TBC 20066: Holy,
+        // Magic, prevented by a silence, on the global cooldown (category
+        // 133); its DR is the incapacitates', with Polymorph and Freezing Trap.
+        Repentance: (
+            name: "Repentance",
+            class: Paladin,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_holy_prayerofhealing.jpg",
+            cast_time: 0.0,
+            range: 20.0,
+            mana_cost: 15.0,
+            cooldown: 30.0,
+            applies_aura: Some((
+                aura_type: Incapacitate,
+                duration: 6.0,
+                magnitude: 1.0,
+                break_on_damage: 0.0,  // Breaks on ANY damage
+            )),
+            spell_school: Holy,
+        ),
+
+        // Crusader Strike (talent, Retribution capstone): an instant strike
+        // for 110% of the weapon's damage (TBC 35395), 6s cooldown. 5% of the
+        // Paladin's base mana, as TBC. TBC 35395: Physical, no dispel type,
+        // prevented by a pacify, on the global cooldown (category 133). A
+        // weapon strike, so it may be dodged or parried.
+        CrusaderStrike: (
+            name: "Crusader Strike",
+            class: Paladin,
+            talent: true,
+            prevention: Pacify,
+            icon: "icons/abilities/spell_holy_crusaderstrike.jpg",
+            cast_time: 0.0,
+            range: 2.5,  // MELEE_RANGE
+            mana_cost: 8.0,
+            cooldown: 6.0,
+            damage_coefficient: 1.1,
+            damage_scales_with: WeaponDamage,
+            spell_school: Physical,
+        ),
+
         // ============================================================================
         // SHAMAN ABILITIES
         // ============================================================================

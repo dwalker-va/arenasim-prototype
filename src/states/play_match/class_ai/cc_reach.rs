@@ -171,7 +171,9 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::EntanglingRoots
         | A::Cyclone
         | A::BlessingOfSacrifice
-        | A::SacredShield => Aim::Unit,
+        | A::SacredShield
+        | A::Repentance
+        | A::CrusaderStrike => Aim::Unit,
     }
 }
 
@@ -546,6 +548,7 @@ mod tests {
                 A::FreezingTrap,
                 A::BoarCharge,
                 A::Cyclone,
+                A::Repentance,
             ]
         );
     }

@@ -71,6 +71,7 @@
         Paladin: [
             (id: Holy, name: "Holy", icon: "icons/talents/spell_holy_holybolt.jpg"),
             (id: Protection, name: "Protection", icon: "icons/talents/spell_holy_devotionaura.jpg"),
+            (id: Retribution, name: "Retribution", icon: "icons/talents/spell_holy_auraoflight.jpg"),
         ],
         Priest: [
             (id: Discipline, name: "Discipline", icon: "icons/talents/spell_holy_wordfortitude.jpg"),
@@ -544,7 +545,8 @@
             budget: Some(11.0),
             // +4% movement speed a rank, a passive source: the one capped
             // passive term takes the strongest source, never a sum, so 2/2 is
-            // the 8% cap (TBC 31208: +8% a rank).
+            // the 8% cap. (TBC 31208/31209: +8% at rank 1 and +15% at rank 2,
+            // with 5%/10% to resist movement-impairing effects.)
             per_rank: [StatAdd(MovementSpeed, 0.04)],
         ),
         Initiative: (
@@ -793,6 +795,126 @@
             // An ally gains Sacred Shield for 30s: when it takes damage it
             // gains a shield absorbing 40, at most once every 6s.
             per_rank: [Grant(SacredShield)],
+        ),
+
+        // ---- Paladin: Retribution (AS-422) ----
+        // The melee Paladin: crits that hit harder for a while, instant Flash
+        // of Lights off its swings, Repentance and Crusader Strike. Values
+        // provisional: tuning is the milestone sweep's (AS-302).
+        Conviction: (
+            name: "Conviction",
+            class: Paladin, tree: Retribution, tier: 1, column: 0,
+            icon: "icons/talents/spell_holy_retributionaura.jpg",
+            max_rank: 2,
+            // +1% crit chance a rank, in points, on every roll that reads it,
+            // auto-attacks included (TBC 20117: +1% melee crit a rank).
+            // Priced at the item weight of its points: 3 a rank.
+            per_rank: [StatAdd(CritChance, 0.01)],
+        ),
+        PursuitOfJustice: (
+            name: "Pursuit of Justice",
+            class: Paladin, tree: Retribution, tier: 1, column: 2,
+            icon: "icons/talents/spell_holy_persuitofjustice.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // +4% movement speed a rank, a passive source: the strongest
+            // passive source is the one term, capped at 8%, so 2/2 is the cap
+            // (TBC 26022: +5% a rank, not stacking with other speed).
+            per_rank: [StatAdd(MovementSpeed, 0.04)],
+        ),
+        TwoHandedWeaponSpecialization: (
+            name: "Two-Handed Weapon Specialization",
+            class: Paladin, tree: Retribution, tier: 2, column: 0,
+            icon: "icons/talents/inv_hammer_04.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // +5% damage a rank with a two-handed weapon: its swings and
+            // Crusader Strike, which scales with it (TBC 20111: +2% a rank).
+            // Nothing with a one-hander.
+            per_rank: [StatPercent(TwoHandedWeaponDamage, 0.05)],
+        ),
+        Vengeance: (
+            name: "Vengeance",
+            class: Paladin, tree: Retribution, tier: 2, column: 1,
+            icon: "icons/talents/ability_racial_avatar.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // A melee crit (a swing or a Crusader Strike) gives +5% damage a
+            // rank for 30s; a crit while it is up renews it. The buff is
+            // Magic (TBC 20050), so a purge takes it.
+            per_rank: [
+                Proc((
+                    trigger: MeleeHit,
+                    crit_only: true,
+                    chance: Chance(1.0),
+                    ranks_add: Effect,
+                    effect: ApplyAura(
+                        on: Owner,
+                        aura_type: DamageDealtIncrease,
+                        magnitude: 0.05,
+                        duration: 30.0,
+                        dispel_type: Magic,
+                    ),
+                )),
+                Proc((
+                    trigger: SpellHit,
+                    abilities: [CrusaderStrike],
+                    crit_only: true,
+                    chance: Chance(1.0),
+                    ranks_add: Effect,
+                    effect: ApplyAura(
+                        on: Owner,
+                        aura_type: DamageDealtIncrease,
+                        magnitude: 0.05,
+                        duration: 30.0,
+                        dispel_type: Magic,
+                    ),
+                )),
+            ],
+        ),
+        TheArtOfWar: (
+            name: "The Art of War",
+            class: Paladin, tree: Retribution, tier: 3, column: 0,
+            icon: "icons/talents/ability_paladin_artofwar.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // A melee swing can make the next Flash of Light within 15s
+            // instant and free: 4.8 times a minute of melee whatever the
+            // weapon (ruling: normalized for weapon speed, 20% a swing at
+            // 2.5s). Wrath 53489's buff lasts 15s and is Magic.
+            per_rank: [
+                Proc((
+                    trigger: MeleeHit,
+                    chance: PerMinute(4.8),
+                    ranks_add: Chance,
+                    effect: NextCast(
+                        modifier: (applies_to: Abilities([FlashOfLight]), instant: true, free: true),
+                        duration: 15.0,
+                        dispel_type: Magic,
+                        name: Some("The Art of War"),
+                    ),
+                )),
+            ],
+        ),
+        Repentance: (
+            name: "Repentance",
+            class: Paladin, tree: Retribution, tier: 3, column: 2,
+            icon: "icons/talents/spell_holy_prayerofhealing.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // Incapacitates an enemy for 6s, broken by any damage; 20yd, 30s
+            // cooldown, 15 mana.
+            per_rank: [Grant(Repentance)],
+        ),
+        CrusaderStrike: (
+            name: "Crusader Strike",
+            class: Paladin, tree: Retribution, tier: 4, column: 1,
+            icon: "icons/talents/spell_holy_crusaderstrike.jpg",
+            max_rank: 1,
+            budget: Some(22.0),
+            requires: Some((Vengeance, 1)),
+            // An instant strike for 110% weapon damage; 6s cooldown, 8 mana.
+            per_rank: [Grant(CrusaderStrike)],
         ),
 
         // ---- Priest: Discipline (AS-414; the talents proposal §5.2) ----

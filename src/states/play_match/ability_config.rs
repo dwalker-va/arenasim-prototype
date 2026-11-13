@@ -823,6 +823,9 @@ impl AbilityDefinitions {
             AbilityType::AuraMastery,
             AbilityType::HolyNova,
             AbilityType::GuardianSpirit,
+            // Paladin: the Retribution tree
+            AbilityType::Repentance,
+            AbilityType::CrusaderStrike,
             // Rogue: the Subtlety tree
             AbilityType::Hemorrhage,
             AbilityType::ShadowDance,
@@ -1813,6 +1816,8 @@ mod tests {
                     AbilityType::SacredShield,
                     AbilityType::DivineFavor,
                     AbilityType::AuraMastery,
+                    AbilityType::Repentance,
+                    AbilityType::CrusaderStrike,
                 ],
             ),
             (

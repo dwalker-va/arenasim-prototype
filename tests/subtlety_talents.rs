@@ -960,6 +960,18 @@ fn shadow_dance_waits_for_the_enemy_healer() {
     assert!(danced(&on_the_healer), "{}", describe(&on_the_healer));
 }
 
+/// A dead enemy healer answers nothing: the Rogue dances beside its body.
+/// The living healer above, in the same place, is the control.
+#[test]
+fn a_dead_enemy_healer_does_not_hold_the_dance() {
+    let view = dance_scene(1.0)
+        .unit("enemy priest", 2, CharacterClass::Priest)
+        .at(15.0, 0.0)
+        .health_of("enemy priest", 0.0)
+        .decide(ME);
+    assert!(danced(&view), "{}", describe(&view));
+}
+
 /// The kill window answers for the healer too: a free enemy healer that
 /// cannot reach the kill target (out of its range), the target low.
 #[test]
@@ -1084,6 +1096,33 @@ fn the_dance_ambushes_only_with_energy_for_the_next_cheap_shot() {
     assert_eq!(
         note(&short, AbilityType::SinisterStrike),
         "pooling energy for the next Cheap Shot"
+    );
+}
+
+/// The dance's turn is the dancing Rogue's only: at 50 energy, the target
+/// free, a Rogue holding Shadow Dance but not dancing strikes Hemorrhage;
+/// the same Rogue dancing pools for its Cheap Shot (below).
+#[test]
+fn only_a_dancing_rogue_pools_for_the_dance() {
+    let view = dance_scene(0.5)
+        .cooldown(ME, AbilityType::ShadowDance, 40.0)
+        .cooldown(ME, AbilityType::KidneyShot, 20.0)
+        .decide(ME);
+    assert_eq!(
+        view.chose(),
+        Some((AbilityType::Hemorrhage, Some(FOE))),
+        "{}",
+        describe(&view)
+    );
+    let dancing = dance_scene(0.5)
+        .cooldown(ME, AbilityType::ShadowDance, 40.0)
+        .cooldown(ME, AbilityType::KidneyShot, 20.0)
+        .aura_full(ME, dance_window())
+        .decide(ME);
+    assert_eq!(dancing.chose(), None, "{}", describe(&dancing));
+    assert_eq!(
+        note(&dancing, AbilityType::Hemorrhage),
+        "pooling energy for Cheap Shot"
     );
 }
 

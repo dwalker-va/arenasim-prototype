@@ -401,6 +401,11 @@ pub struct Combatant {
     /// Seconds between swings of that melee main hand — its own weapon's
     /// speed, on its own clock, separate from the ranged swing timer.
     pub melee_weapon_speed: f32,
+    /// Whether the main hand holds a two-handed WEAPON the combatant swings.
+    /// Set by
+    /// [`Self::apply_equipment`] and nothing else; read by
+    /// [`Self::two_handed_damage`] (Two-Handed Weapon Specialization).
+    pub two_handed: bool,
     /// Timer tracking time until the next melee main-hand swing.
     pub melee_timer: f32,
     /// Attack Power - scales physical damage abilities and auto-attacks
@@ -753,6 +758,7 @@ impl Combatant {
             parry_chance: 0.0,
             attack_speed_bonus: 0.0,
             melee_attack_speed_bonus: 0.0,
+            two_handed: false,
             armor,
             fire_resistance: 0.0,
             frost_resistance: 0.0,
@@ -904,6 +910,30 @@ impl Combatant {
     /// a non-zero speed for the same reason [`Self::is_dual_wielding`] does.
     pub fn has_melee_main_hand(&self) -> bool {
         self.melee_damage > 0.0 && self.melee_weapon_speed > 0.0
+    }
+
+    /// The damage of the swing a two-handed main hand makes, or `None` when
+    /// the main hand holds no two-hander: the live auto-attack, or a
+    /// Hunter's melee main hand beside its bow.
+    pub fn two_handed_damage(&self) -> Option<f32> {
+        self.two_handed.then(|| {
+            if self.has_melee_main_hand() {
+                self.melee_damage
+            } else {
+                self.attack_damage
+            }
+        })
+    }
+
+    /// [`Self::two_handed_damage`], to raise.
+    pub fn two_handed_damage_mut(&mut self) -> Option<&mut f32> {
+        if !self.two_handed {
+            None
+        } else if self.has_melee_main_hand() {
+            Some(&mut self.melee_damage)
+        } else {
+            Some(&mut self.attack_damage)
+        }
     }
 
     /// The part this combatant plays for its team: its class's
@@ -1088,6 +1118,7 @@ impl Combatant {
         let stat_value = match ability_config.damage_scales_with {
             ScalingStat::AttackPower => (self.attack_power + ap_bonus).max(0.0),
             ScalingStat::SpellPower => self.spell_power + sp_bonus,
+            ScalingStat::WeaponDamage => self.attack_damage,
             ScalingStat::None => 0.0,
         };
 
@@ -1147,6 +1178,7 @@ impl Combatant {
         // weapon" — an empty or relic-filled live socket must end here, and
         // that is the case the class ladder cannot express.
         self.auto_attack_kind = AutoAttackKind::None;
+        self.two_handed = false;
         // Every item's movement speed is a passive source: the strongest
         // feeds the one passive term, after the loop.
         let mut strongest_speed = 0.0f32;
@@ -1223,6 +1255,16 @@ impl Combatant {
                 ));
             }
 
+            // A two-hander the combatant swings: its live socket's, or a
+            // Hunter's melee main hand (a caster's staff beside its wand is
+            // not swung).
+            if item.is_weapon
+                && *slot == ItemSlot::MainHand
+                && (primary_weapon_slot == ItemSlot::MainHand || melee_beside_ranged)
+                && item.held() == Some(crate::states::play_match::equipment::HeldSlot::TwoHand)
+            {
+                self.two_handed = true;
+            }
             // For the primary weapon slot, replace attack_damage and weapon_speed
             if item.is_weapon && *slot == primary_weapon_slot {
                 let avg_damage = (item.attack_damage_min + item.attack_damage_max) / 2.0;

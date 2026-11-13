@@ -201,6 +201,14 @@ talent_ids! {
     PurifyingPower,
     LightsGrace,
     AuraMastery,
+    // Paladin: Retribution
+    Conviction,
+    PursuitOfJustice,
+    TwoHandedWeaponSpecialization,
+    Vengeance,
+    TheArtOfWar,
+    Repentance,
+    CrusaderStrike,
     // Rogue: Subtlety
     MasterOfSubtlety,
     FleetFooted,
@@ -223,6 +231,7 @@ pub enum TreeId {
     Destruction,
     Assassination,
     Holy,
+    Retribution,
     Subtlety,
 }
 
@@ -265,6 +274,11 @@ pub enum TalentStat {
     WeaponDamage,
     /// The damage of the off-hand weapon's swing only.
     OffHandDamage,
+    /// The damage of the main hand's swing while it holds a two-handed weapon
+    /// (`Combatant::two_handed`), and of every strike that scales with it
+    /// (`ScalingStat::WeaponDamage`, Crusader Strike); nothing with a
+    /// one-hander. A percentage only.
+    TwoHandedWeaponDamage,
     /// Chance to dodge a melee attack (`Combatant::dodge_chance`). Points
     /// only.
     DodgeChance,
@@ -306,6 +320,7 @@ impl TalentStat {
             TalentStat::Armor
             | TalentStat::WeaponDamage
             | TalentStat::OffHandDamage
+            | TalentStat::TwoHandedWeaponDamage
             | TalentStat::DodgeChance
             | TalentStat::ParryChance
             | TalentStat::MeleeAttackSpeed => None,
@@ -336,7 +351,8 @@ impl TalentStat {
             | TalentStat::NatureResistance
             | TalentStat::HolyResistance
             | TalentStat::WeaponDamage
-            | TalentStat::OffHandDamage => false,
+            | TalentStat::OffHandDamage
+            | TalentStat::TwoHandedWeaponDamage => false,
         }
     }
 
@@ -360,6 +376,7 @@ impl TalentStat {
             TalentStat::HolyResistance => c.holy_resistance,
             TalentStat::WeaponDamage => c.attack_damage,
             TalentStat::OffHandDamage => c.offhand_damage,
+            TalentStat::TwoHandedWeaponDamage => c.two_handed_damage().unwrap_or(0.0),
             TalentStat::DodgeChance => c.dodge_chance,
             TalentStat::ParryChance => c.parry_chance,
             TalentStat::MeleeAttackSpeed => c.melee_attack_speed_bonus,
@@ -391,6 +408,11 @@ impl TalentStat {
                 stat(&mut c.offhand_damage);
             }
             TalentStat::OffHandDamage => stat(&mut c.offhand_damage),
+            TalentStat::TwoHandedWeaponDamage => {
+                if let Some(damage) = c.two_handed_damage_mut() {
+                    stat(damage);
+                }
+            }
             TalentStat::DodgeChance => stat(&mut c.dodge_chance),
             TalentStat::ParryChance => stat(&mut c.parry_chance),
             TalentStat::MeleeAttackSpeed => stat(&mut c.melee_attack_speed_bonus),

@@ -316,8 +316,9 @@ Improved Shadow Bolt (10% a rank, on a Shadow Bolt hit) lays Shadow
 Vulnerability on the target, +10% Shadow damage taken for 4 direct hits or
 12s (a tick spends no charge, and a fresh proc gives the four back); Aftermath
 (5% a rank, on a Shadow Bolt, Immolate, Shadowburn or Conflagrate hit) slows
-the target 30% for 5s, on the Slows bucket. Both are Magic, as in TBC; the
-vulnerability, a stat debuff, is not dispellable here. Shadowburn (instant
+the target 30% for 5s, on the Slows bucket. Both are Magic, as in TBC, and a
+dispel takes either (the vulnerability by user ruling, 2026-11-13; see Dispel
+types below). Shadowburn (instant
 Shadow, 20yd, 15s) is a finisher, cast on a target below `kill_hp_threshold`.
 Conflagrate (instant Fire, 15s, the capstone, needs Improved Immolate) is cast
 as soon as the Warlock's own Immolate burns on its target, and consumes it as
@@ -422,6 +423,11 @@ tests fail if a full-CC type or spell is left unlabelled.
 - Breaks on ANY damage (threshold: 0)
 - Separate category from stuns for future diminishing returns
 - Example: Mage Polymorph (10s duration)
+- Repentance (Retribution talent, AS-422) is the other targeted
+  incapacitate: 6s, broken by any damage, Magic, sharing the incapacitates'
+  DR with Polymorph and Freezing Trap. The Paladin casts it only on an enemy
+  no teammate (or teammate's pet) has targeted and none of its team's damage
+  over time is on, the healer first (`class_ai::paladin_retribution`).
 
 ### Cyclone (Druid, TBC)
 - 1.5s cast, 20 yd, 6s: the target cannot move or act
@@ -473,6 +479,19 @@ tests fail if a full-CC type or spell is left unlabelled.
   2.5.6.69795), and a written reason wherever the two differ. A new ability
   does not compile until its row is written. The one departure is Divine
   Shield: TBC's is Magic, but only Mass Dispel removes it and the sim has none
+- The MECHANIC gets a vote only once an aura is magic. Crowd control (slow,
+  root, fear, polymorph, incapacitate, silence) is dispellable when magic;
+  stuns, Cyclone and the stat debuffs are not. A DoT and a damage-taken
+  increase are decided PER AURA (`AuraType::is_dispelled_per_aura`): a dispel
+  takes one exactly when its own class is magic. So Corruption and Shadow
+  Vulnerability come off, and Rend and Improved Kidney Shot's rider (Physical,
+  like its stun) do not
+- The healers' dispel AI grades a magic vulnerability with a DoT
+  (`dispel_priority`, 50): a maintenance dispel, cast while the team is
+  healthy, after urgent crowd control (90 and up) and a root holding a
+  teammate back (85)
+- A talent's proc debuff has no ability row; the audit tables it apart
+  (`PROC_DEBUFFS`), and a compound's rider carries its face's class
 - The Classic Era client (1.15.9) is NOT the reference: it reproduces 1.12.
   Psychic Scream reads DispelType 0 there; patch 2.0.1 made it magic, and TBC
   reads Magic. Era and TBC also disagree on Concussive Shot, Frost Trap Aura,
@@ -636,6 +655,10 @@ Healing = Base + (Spell Power × Coefficient)
 ### Scaling Stats
 - `AttackPower`: Warrior, Rogue physical abilities
 - `SpellPower`: Mage, Priest, Warlock magical abilities
+- `WeaponDamage`: a weapon strike, a share of the average damage of the swing
+  it rides (`Combatant::attack_damage`, talents included). Crusader Strike is
+  `damage_coefficient: 1.1`, 110% weapon damage, so Two-Handed Weapon
+  Specialization (+5% a rank to a two-hander's swing) reaches it too.
 - `None`: Utility/CC abilities with no scaling
 
 ### Class Base Stats
@@ -722,5 +745,7 @@ These behaviors may look like bugs but are intentional design decisions. Do not 
 | Flash of Light | Heal | 1.5s | Fast, efficient single-target heal |
 | Holy Light | Heal | 2.5s | Large heal for safe situations |
 | Holy Shock | Instant | - | Heals ally OR damages enemy (20yd range for damage) |
-| Cleanse | Utility | Instant | Removes 1 dispellable debuff (Poly/Fear/Root/DoT) |
+| Cleanse | Utility | Instant | Removes 1 dispellable debuff (Poly/Fear/Root/DoT/vulnerability) |
 | Hammer of Justice | CC | Instant | 10yd range, 6s stun, prioritizes healers |
+| Repentance (talent) | CC | Instant | 20yd, 6s incapacitate broken by damage, on an enemy the team leaves alone |
+| Crusader Strike (talent) | Melee | Instant | 110% weapon damage, 6s cooldown; not while a teammate is below 50% |
