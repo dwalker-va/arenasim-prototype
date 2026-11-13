@@ -712,6 +712,35 @@ mod tests {
         );
     }
 
+    /// The Subtlety tree's nodes: its two procs, speed in points, Ambush's
+    /// crit, Cheat Death, and the two grants.
+    #[test]
+    fn the_subtlety_tree_reads_as_it_plays() {
+        let talents = TalentDefinitions::shipped();
+        let text = |id: TalentId, rank: u8| rank_text(talents.get(id).unwrap(), rank, abilities());
+        assert_eq!(
+            text(TalentId::MasterOfSubtlety, 2),
+            "On leaving stealth, increases damage dealt by 10% for 6 sec (on you)."
+        );
+        assert_eq!(text(TalentId::FleetFooted, 2), "+8% movement speed.");
+        assert_eq!(
+            text(TalentId::Initiative, 2),
+            "On using any ability, primes your next cast: Within 10 sec, the next ability \
+             costs 10 less."
+        );
+        assert_eq!(
+            text(TalentId::ImprovedAmbush, 2),
+            "+30% Ambush critical strike chance."
+        );
+        assert_eq!(
+            text(TalentId::CheatDeath, 1),
+            "The first blow that would kill you leaves you at 10% health, and you take 90% \
+             less damage for 3 sec."
+        );
+        assert_eq!(text(TalentId::Hemorrhage, 1), "Learn Hemorrhage.");
+        assert_eq!(text(TalentId::ShadowDance, 1), "Learn Shadow Dance.");
+    }
+
     #[test]
     fn patches_and_grants_name_their_ability() {
         let bane = TalentEffect::Patch {

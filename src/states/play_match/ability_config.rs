@@ -825,6 +825,9 @@ impl AbilityDefinitions {
             // Paladin: the Retribution tree
             AbilityType::Repentance,
             AbilityType::CrusaderStrike,
+            // Rogue: the Subtlety tree
+            AbilityType::Hemorrhage,
+            AbilityType::ShadowDance,
             // Priest: the Shadow tree
             AbilityType::MindFlay,
             AbilityType::VampiricEmbrace,
@@ -1754,6 +1757,8 @@ mod tests {
                     // its class's own kit, as every kit surface shows it.
                     AbilityType::ExposeArmor,
                     AbilityType::Rupture,
+                    AbilityType::Hemorrhage,
+                    AbilityType::ShadowDance,
                 ],
             ),
             (

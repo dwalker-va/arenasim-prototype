@@ -804,3 +804,93 @@ fn empty_obstacles_never_block_los() {
         PreCastOpts::default(),
     ));
 }
+
+// ============================================================================
+// The opener's stealth step (AS-419): stealth, or Shadow Dance's window
+// (`abilities::can_open`), in can_cast_config's place in the order.
+// ============================================================================
+
+#[test]
+fn an_opener_needs_stealth_or_shadow_dance() {
+    let mut world = TestWorld::new(CharacterClass::Rogue);
+    world.target_pos = world.caster_pos + Vec3::new(2.0, 0.0, 0.0);
+    let mut rogue = caster_combatant(CharacterClass::Rogue);
+    rogue.stealthed = false;
+    let abilities = defs();
+    let dance = ActiveAuras {
+        auras: vec![make_aura(AuraType::ShadowDance, "Shadow Dance", None)],
+    };
+    let at = Some((world.target, world.target_pos));
+    for ability in [AbilityType::Ambush, AbilityType::CheapShot] {
+        let def = abilities.get_unchecked(&ability);
+        let ok = |c: &Combatant, auras: Option<&ActiveAuras>| {
+            pre_cast_ok(
+                ability,
+                def,
+                c,
+                world.caster_pos,
+                auras,
+                at,
+                &world.ctx(),
+                PreCastOpts::default(),
+            )
+        };
+        assert!(!ok(&rogue, None), "{ability:?} out of stealth");
+        let reason = classify_pre_cast_failure(
+            ability,
+            def,
+            &rogue,
+            world.caster_pos,
+            None,
+            at,
+            &world.ctx(),
+            PreCastOpts::default(),
+        );
+        assert!(
+            matches!(
+                &reason,
+                RejectionReason::PreconditionUnmet { note }
+                    if note == "stealth required (Ambush/CheapShot)"
+            ),
+            "{reason:?}"
+        );
+        assert!(ok(&rogue, Some(&dance)), "{ability:?} dancing");
+        let mut stealthed = rogue.clone();
+        stealthed.stealthed = true;
+        assert!(ok(&stealthed, None), "{ability:?} stealthed");
+    }
+    // Dancing, the stealth step passes, so a refusal for sight further on
+    // names sight: the stealth step reads the dance in the trace's
+    // classifier too, not only in the gate.
+    let mut blocked = TestWorld::new(CharacterClass::Rogue);
+    blocked.target_pos = blocked.caster_pos + Vec3::new(2.0, 0.0, 0.0);
+    blocked.obstacles.push(ObstacleVolume::Cylinder {
+        center_xz: Vec2::new(1.0, 0.0),
+        radius: 0.2,
+        base_y: -1.0,
+        height: 10.0,
+    });
+    let def = abilities.get_unchecked(&AbilityType::CheapShot);
+    let reason = classify_pre_cast_failure(
+        AbilityType::CheapShot,
+        def,
+        &rogue,
+        blocked.caster_pos,
+        Some(&dance),
+        Some((blocked.target, blocked.target_pos)),
+        &blocked.ctx(),
+        PreCastOpts::default(),
+    );
+    assert!(matches!(reason, RejectionReason::LosBlocked), "{reason:?}");
+    // Sinister Strike needs neither.
+    assert!(pre_cast_ok(
+        AbilityType::SinisterStrike,
+        abilities.get_unchecked(&AbilityType::SinisterStrike),
+        &rogue,
+        world.caster_pos,
+        None,
+        at,
+        &world.ctx(),
+        PreCastOpts::default(),
+    ));
+}

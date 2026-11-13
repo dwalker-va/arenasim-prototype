@@ -213,6 +213,14 @@ talent_ids! {
     TheArtOfWar,
     Repentance,
     CrusaderStrike,
+    // Rogue: Subtlety
+    MasterOfSubtlety,
+    FleetFooted,
+    Initiative,
+    ImprovedAmbush,
+    CheatDeath,
+    Hemorrhage,
+    ShadowDance,
 }
 
 /// A talent tree. A tree is named per class: `(class, TreeId)` is the key.
@@ -228,6 +236,7 @@ pub enum TreeId {
     Assassination,
     Holy,
     Retribution,
+    Subtlety,
 }
 
 /// One tree of a class, as `talents.ron` lists it. A class's trees are in
@@ -733,6 +742,7 @@ pub fn strength_is_remainder(aura: AuraType) -> bool {
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
         | AuraType::SilenceInterruptImmunity
+        | AuraType::ShadowDance
         | AuraType::ArmorIncrease
         | AuraType::Cyclone
         | AuraType::TravelForm

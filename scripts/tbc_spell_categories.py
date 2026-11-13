@@ -107,6 +107,11 @@ EXPLICIT = {
         "Sacred Shield arrives in Wrath. 53601 is the spell the Paladin begins; "
         "58597, the absorb it triggers (PreventionType 0), is not",
     ),
+    ("Rogue", "Shadow Dance"): (
+        WRATH_BUILD,
+        ["51713"],
+        "Shadow Dance arrives in Wrath; 51713 has no SpellCategories row there",
+    ),
 }
 
 # spell id -> why. On a class's skill line under the name of the spell the

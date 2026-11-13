@@ -97,7 +97,8 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::AmplifyCurse
         | A::InnerFocus
         | A::DivineFavor
-        | A::AuraMastery => Aim::Caster,
+        | A::AuraMastery
+        | A::ShadowDance => Aim::Caster,
         A::Frostbolt
         | A::FlashHeal
         | A::HeroicStrike
@@ -107,6 +108,7 @@ pub const fn aim(ability: AbilityType) -> Aim {
         | A::SinisterStrike
         | A::ExposeArmor
         | A::Rupture
+        | A::Hemorrhage
         | A::Charge
         | A::KidneyShot
         | A::PowerWordFortitude
@@ -202,8 +204,8 @@ pub fn reach(ability: AbilityType, def: &AbilityConfig) -> f32 {
 /// crowd control, its school not locked, not silenced for a spell a silence
 /// stops, the cooldown (its category's included — `start_cooldown` writes
 /// every member) at most `horizon`, the resource to pay for it, and stealth
-/// for an opener that needs it. Range and sight are the disc's business, not
-/// this.
+/// for an opener that needs it (or Shadow Dance: `abilities::can_open`).
+/// Range and sight are the disc's business, not this.
 ///
 /// Conservative where the sim has state this does not read: a Rogue's Kidney
 /// Shot counts as ready on energy and cooldown alone, whatever its combo
@@ -246,7 +248,8 @@ pub fn could_cast(
     if enemy.current_mana < def.mana_cost {
         return false;
     }
-    !(def.requires_stealth && !enemy.stealthed)
+    !(def.requires_stealth
+        && !crate::states::play_match::abilities::can_open(enemy.stealthed, auras))
 }
 
 /// The control-seconds a landing of `def`'s hold on `healer` would cost: its
@@ -661,6 +664,26 @@ mod tests {
         // In stealth and unseen: not in the healer's perception at all.
         f.roster.get_mut(&f.enemy).unwrap().stealthed = true;
         assert!(f.threats().is_empty());
+    }
+
+    /// Shadow Dance opens Cheap Shot out of stealth (`abilities::can_open`):
+    /// a dancing Rogue in sight threatens it beside Kidney Shot.
+    #[test]
+    fn a_dancing_rogue_threatens_its_cheap_shot() {
+        let mut f = fixture(Rogue, Vec3::new(2.0, 1.0, 0.0));
+        f.auras.insert(
+            f.enemy,
+            vec![Aura {
+                effect_type: AuraType::ShadowDance,
+                duration: 8.0,
+                magnitude: 1.0,
+                ..Default::default()
+            }],
+        );
+        assert_eq!(
+            f.threats(),
+            vec![AbilityType::CheapShot, AbilityType::KidneyShot]
+        );
     }
 
     #[test]

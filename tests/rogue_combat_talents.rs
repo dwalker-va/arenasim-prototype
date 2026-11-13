@@ -69,10 +69,12 @@ fn the_combat_tree_is_as_specified() {
             .iter()
             .map(|t| (t.id, t.name.as_str()))
             .collect::<Vec<_>>(),
-        // WoW's order: Assassination (AS-417) reads first, Combat second.
+        // WoW's order: Assassination (AS-417) reads first, Combat second,
+        // Subtlety (AS-419) third.
         vec![
             (TreeId::Assassination, "Assassination"),
-            (TreeId::Combat, "Combat")
+            (TreeId::Combat, "Combat"),
+            (TreeId::Subtlety, "Subtlety")
         ]
     );
 

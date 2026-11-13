@@ -784,6 +784,7 @@ impl HealImpact {
             | AuraType::WindfuryBuff
             | AuraType::FearImmunity
             | AuraType::SilenceInterruptImmunity
+            | AuraType::ShadowDance
             | AuraType::Cyclone
             | AuraType::AttackSpeedIncrease
             | AuraType::NextCast
@@ -1610,6 +1611,8 @@ impl AuraApplyRoute {
             // Aura Mastery's immunity has no bespoke apply treatment yet: the
             // family cue draws it (its visual card is AS-374).
             AuraType::SilenceInterruptImmunity => AuraApplyRoute::Band,
+            // Shadow Dance likewise (its visual card is AS-368).
+            AuraType::ShadowDance => AuraApplyRoute::Band,
 
             // Travel Form has no bespoke apply treatment of its own, so the
             // family cue draws it.

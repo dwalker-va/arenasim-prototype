@@ -372,7 +372,8 @@ pub fn proc_effect_budget_weight(effect: AuraType) -> Option<f32> {
         AuraType::DamageTakenReduction
         | AuraType::DamageImmunity
         | AuraType::FearImmunity
-        | AuraType::SilenceInterruptImmunity => None,
+        | AuraType::SilenceInterruptImmunity
+        | AuraType::ShadowDance => None,
         // Percentage damage, armor, transfer, save and reflect effects (the
         // damage pipeline, AS-408): none is a quantity of an item stat, so none
         // has a weight to price by. Each is its own card when a trinket wants
