@@ -1885,6 +1885,32 @@ fn a_fizzled_cast_gives_its_modifier_back() {
     assert_eq!(lines(&played.log, KEPT).len(), 1, "{}", played.log);
 }
 
+/// A cast its caster can no longer pay for at completion (a Mana Burn took
+/// the mana mid-cast) fails, and gives it back (AS-438).
+#[test]
+fn a_cast_its_caster_cannot_pay_for_gives_its_modifier_back() {
+    let played = play(
+        mind_blast_config(),
+        mid_cast(|w| {
+            let priest = T1.entity(w);
+            w.get_mut::<arenasim::states::play_match::Combatant>(priest)
+                .expect("the Priest")
+                .current_mana = 0.0;
+        }),
+    );
+    assert_eq!(
+        lines(
+            &played.log,
+            "Priest #1 fails to cast Mind Blast: not enough mana"
+        )
+        .len(),
+        1,
+        "{}",
+        played.log
+    );
+    assert_eq!(lines(&played.log, KEPT).len(), 1, "{}", played.log);
+}
+
 /// A cast a SILENCE stops gives it back; the same cast unsilenced lands and
 /// keeps it spent.
 #[test]

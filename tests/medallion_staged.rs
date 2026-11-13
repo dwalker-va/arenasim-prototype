@@ -67,10 +67,13 @@ fn item_decisions(played: &Played) -> Vec<(f32, String, String)> {
         .collect()
 }
 
+/// Beside a Mage, which frees nobody. (Beside a Priest the same Hammer of
+/// Justice, a magic stun, is waited out for its dispel:
+/// [`a_hammer_of_justice_its_priest_dispels_keeps_the_medallion`].)
 #[test]
 fn a_long_stun_is_broken_at_once() {
     let stage = placed().land(WEARER, AbilityType::HammerOfJustice, PALADIN);
-    let played = play(config("Priest"), stage);
+    let played = play(config("Mage"), stage);
     let decisions = item_decisions(&played);
     assert_eq!(
         decisions.first().map(|d| d.1.as_str()),
@@ -135,8 +138,8 @@ fn a_polymorph_its_priest_dispels_keeps_the_medallion() {
         "{decisions:?}"
     );
     // ...whose Dispel Magic took the Polymorph off inside the grace, so the
-    // Medallion never broke it. (It stays ready for the next long hold: the
-    // Paladin's Hammer of Justice, which it breaks.)
+    // Medallion never broke it. (It stays ready for the next long hold no
+    // teammate frees.)
     assert!(
         played
             .log
@@ -159,6 +162,32 @@ fn a_polymorph_its_priest_dispels_keeps_the_medallion() {
         played
             .log
             .contains("Team 1 Warrior #1's Medallion of the Alliance breaks Polymorph"),
+        "{}",
+        played.log
+    );
+}
+
+/// A magic stun is an urgent dispel (AS-491), so the wearer waits for its
+/// Priest's Dispel Magic as it does for a Polymorph, and keeps the Medallion.
+#[test]
+fn a_hammer_of_justice_its_priest_dispels_keeps_the_medallion() {
+    let stage = placed().land(WEARER, AbilityType::HammerOfJustice, PALADIN);
+    let played = play(config("Priest"), stage);
+    let decisions = item_decisions(&played);
+    let first = decisions.first().expect("the wearer was asked");
+    assert!(
+        first.1 == "rejected" && first.2.contains("waiting for"),
+        "{decisions:?}"
+    );
+    assert!(
+        played
+            .log
+            .contains("[DISPEL] Hammer of Justice removed from Team 1 Warrior #1"),
+        "{}",
+        played.log
+    );
+    assert!(
+        !played.log.contains("breaks Hammer of Justice"),
         "{}",
         played.log
     );
