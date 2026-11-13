@@ -410,6 +410,7 @@
                 duration: 15.0,
                 magnitude: 8.0,
                 tick_interval: 3.0,
+                mechanic: Some(Bleed),  // TBC 772..25208: Mechanic 15, armor does not reduce it
             )),
             spell_school: Physical,
         ),
@@ -746,6 +747,7 @@
                 magnitude: 10.0,
                 tick_interval: 2.0,
                 dispel_type: Physical,  // TBC 1943..26867: DispelType 0, a bleed (Mechanic 15)
+                mechanic: Some(Bleed),  // armor does not reduce its ticks
             )),
             spell_school: Physical,
         ),

@@ -230,8 +230,45 @@ impl DamageScope {
     }
 }
 
+/// What KIND of harm an effect is, after TBC's `SpellMechanic`, where the kind
+/// changes how the damage pipeline treats it. Crowd control's kinds (stun,
+/// fear, root, ...) are the aura type here and need no mechanic; this names
+/// only those an aura type cannot say.
+///
+/// Declared on an ability's `applies_aura` block (`mechanic: Some(Bleed)`),
+/// the effect TBC puts it on: a bleed's mechanic sits on its periodic damage
+/// effect (Rake's and Lacerate's direct hits are not bleeds).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Mechanic {
+    /// TBC Mechanic 15: a physical wound (Rend, Rupture, Garrote, Deep
+    /// Wounds). Its ticks are Physical damage that armor does not reduce;
+    /// every other step of the damage pipeline applies to them.
+    /// `tests/bleed_mechanic_audit.rs` holds the declared bleeds to the TBC
+    /// client's.
+    Bleed,
+}
+
+impl Mechanic {
+    /// Whether a hit of this mechanic passes its victim's armor unreduced.
+    pub fn ignores_armor(self) -> bool {
+        match self {
+            Mechanic::Bleed => true,
+        }
+    }
+
+    /// The school a periodic effect of this mechanic deals its damage in.
+    /// An aura stores `None` for a physical ability's school (the same as a
+    /// schoolless one's), so a bleed's tick takes its school from here.
+    pub fn school(self) -> SpellSchool {
+        match self {
+            Mechanic::Bleed => SpellSchool::Physical,
+        }
+    }
+}
+
 /// The damage-pipeline data an aura may carry beyond its magnitude. Inert by
-/// default: no scope (every hit), no charges, no reflect, no triggered absorb.
+/// default: no scope (every hit), no charges, no reflect, no triggered absorb,
+/// no mechanic.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct AuraDamageMods {
     /// The hits a `DamageTakenIncrease`, `DamageDealtIncrease` or
@@ -254,6 +291,9 @@ pub struct AuraDamageMods {
     /// `apply_pending_auras` lands it as the stun's
     /// [`CompoundDebuff::StunVulnerability`] rider. `None` on every other aura.
     pub vulnerability: Option<f32>,
+    /// On a damage over time: the [`Mechanic`] its ticks land as (a bleed's
+    /// pass armor). `None` on every other aura.
+    pub mechanic: Option<Mechanic>,
 }
 
 /// A debuff's REMOVAL CLASS — what kind of thing it is for the purpose of

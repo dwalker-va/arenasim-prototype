@@ -675,9 +675,12 @@ carrying every slot's build.
 - **The damage pipeline** (`combat_core::apply_damage_with_absorb`, taking a
   `Hit`): immunity, the attacker's `DamageDealtIncrease` (every site passes it
   with `Hit::with_dealt` — `damage_site_audit` checks), armor (with
-  `ArmorPercentIncrease`/`Reduction`, never written into `armor`) and
-  resistance, the strongest in-scope `DamageTakenReduction`, the strongest
-  in-scope `DamageTakenIncrease` (a charged one is spent by
+  `ArmorPercentIncrease`/`Reduction`, never written into `armor`; a bleed
+  passes it, as in TBC — `mechanic: Some(Bleed)` on a Physical damage over
+  time, which `validate()` requires there and `tests/bleed_mechanic_audit.rs`
+  holds to the TBC client's bleeds) and resistance, the strongest in-scope
+  `DamageTakenReduction`, the strongest in-scope `DamageTakenIncrease` (a
+  charged one is spent by
   direct hits only, and does not raise ticks), the strongest transfer
   (`DamageTransfer` to its caster, or Soul Link), absorbs (a reflecting one
   returns its share), the stealth reveal, the killing-blow save
