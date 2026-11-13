@@ -338,6 +338,8 @@
             // Instant Fire damage, 20 + 0.4 x spell power, that consumes the
             // Warlock's own Immolate on its target; 15s, 45 mana.
             per_rank: [Grant(Conflagrate)],
+        ),
+
         // ---- Rogue: Assassination (AS-417) ----
         // Poisons and bleeds. The poison itself and the opener stay per-match
         // choices: a talent here only strengthens the poisons, or widens the
