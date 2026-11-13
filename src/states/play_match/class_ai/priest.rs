@@ -9,7 +9,7 @@
 //! in a book that holds them: `priest_discipline`; the Holy capstone,
 //! Guardian Spirit, between the two: `priest_holy`.)
 //! 1. Power Word: Fortitude (buff all allies pre-combat)
-//! 2. Dispel Magic - Urgent (Polymorph, Freezing Trap, UA Silence, Fear)
+//! 2. Dispel Magic - Urgent (Polymorph, Freezing Trap, a magic stun, UA Silence, Fear)
 //!    2.5. The `Legacy` dip's Psychic Scream
 //! 3. Psychic Scream (defensive, while pressured)
 //! 4. Power Word: Shield (shield low-health allies)
@@ -227,7 +227,7 @@ pub fn decide_priest_action(
         return true;
     }
 
-    // Priority 2: Dispel Magic - Urgent (Polymorph, Freezing Trap, UA Silence, Fear)
+    // Priority 2: Dispel Magic - Urgent (Polymorph, Freezing Trap, a magic stun, UA Silence, Fear)
     if try_dispel_magic(
         commands,
         combat_log,

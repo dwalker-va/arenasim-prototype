@@ -1193,7 +1193,8 @@ machine) and the tests in `formation.rs`.
 choosing its ally with `class_ai::dispel_chase_target` (no RON knob). Cleanse and
 Dispel Magic only reach allies within their 30yd range AND in sight, so a
 teammate held in urgent crowd control the dispel removes
-(`URGENT_DISPEL_PRIORITY`: Freezing Trap, Polymorph, the UA silence, Fear)
+(`URGENT_DISPEL_PRIORITY`: Freezing Trap, Polymorph, a magic stun — Hammer of
+Justice, Blackout — the UA silence, Fear)
 beyond that range or behind cover would otherwise sit out the whole CC. The
 healer walks straight at the nearest such teammate (a `MovementGoal::Point`,
 tangent-steered round a pillar, same walk as the medic chase, which outranks it)

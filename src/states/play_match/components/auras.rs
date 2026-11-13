@@ -350,8 +350,8 @@ pub enum DispelType {
     /// The default, and the right answer for most abilities.
     ///
     /// Magic is the only class whose removability then also depends on the
-    /// MECHANIC — a magic stun is still not dispellable, because stuns are not
-    /// (see [`AuraType::is_magic_dispellable`]).
+    /// MECHANIC — a magic Cyclone is still not dispellable, because Cyclone is
+    /// not (see [`AuraType::is_magic_dispellable`]).
     #[default]
     Auto,
     /// A poison debuff — no dispel touches it; a cleanse does. Crippling Poison
@@ -749,8 +749,8 @@ impl AuraType {
     }
 
     /// The aura types whose dispellability is decided PER AURA, by that
-    /// aura's own removal class, rather than by the type: a DoT, and a
-    /// damage-taken increase. [`Aura::can_be_dispelled`] admits an instance
+    /// aura's own removal class, rather than by the type: a DoT, a
+    /// damage-taken increase, and a stun. [`Aura::can_be_dispelled`] admits an instance
     /// of one exactly when it is magic — declared [`DispelType::Magic`], or
     /// [`DispelType::Auto`] with a non-physical `spell_school`. A schoolless
     /// `Auto` instance stays undispellable: nothing says it is magic.
@@ -761,7 +761,7 @@ impl AuraType {
     pub fn is_dispelled_per_aura(&self) -> bool {
         matches!(
             self,
-            AuraType::DamageOverTime | AuraType::DamageTakenIncrease
+            AuraType::DamageOverTime | AuraType::DamageTakenIncrease | AuraType::Stun
         )
     }
 
@@ -808,9 +808,14 @@ impl AuraType {
             // dispellable and Rend is not; Shadow Vulnerability (declared
             // Magic, TBC 17800) is, and Improved Kidney Shot's rider (declared
             // Physical) is not. Listing the types here would make a SCHOOLLESS
-            // DoT or vulnerability dispellable — the removal class already
-            // stops the physical ones.
-            AuraType::DamageOverTime | AuraType::DamageTakenIncrease => false,
+            // DoT, vulnerability or stun dispellable — the removal class
+            // already stops the physical ones.
+            //
+            // A stun follows its class as TBC does (user ruling, 2026-11-13):
+            // Hammer of Justice (Holy, TBC 10308) and Blackout (declared
+            // Magic, TBC 15269) are magic and come off to a dispel; Cheap
+            // Shot, Kidney Shot and the Boar's Charge are Physical and do not.
+            AuraType::DamageOverTime | AuraType::DamageTakenIncrease | AuraType::Stun => false,
 
             // A leech on an enemy (Vampiric Embrace): TBC 15286 is a magic
             // debuff its bearer's healer may dispel. Dispellable if magic,
@@ -818,9 +823,8 @@ impl AuraType {
             AuraType::LeechMark => true,
 
             // Stat debuffs, not crowd control — this classifier's true arm is
-            // scoped to CC. Stuns are never dispellable in WoW at all; the
-            // healing reduction (Mortal Strike, Aimed Shot) and the AP cut
-            // (Demoralizing Shout) are physical.
+            // scoped to CC. The healing reduction (Mortal Strike, Aimed Shot)
+            // and the AP cut (Demoralizing Shout) are physical.
             //
             // `AttackSpeedSlow` used to be the awkward one: it is the
             // frost-school half of Frost Armor's proc, its paired
@@ -836,8 +840,7 @@ impl AuraType {
             // the natural widening — admitting `AttackSpeedSlow` — would drag
             // `AttackPowerReduction` along with it and make Demoralizing Shout
             // dispellable as magic without anyone deciding that.
-            AuraType::Stun
-            | AuraType::HealingReduction
+            AuraType::HealingReduction
             | AuraType::AttackPowerReduction
             | AuraType::AttackSpeedSlow => false,
 
@@ -1429,8 +1432,8 @@ impl Aura {
     /// a disease, a curse and a physical debuff are not magic, so there is
     /// nothing for a dispel to take hold of. Only once an aura is magic does
     /// the mechanic get a vote — magic-dispellable types (slows, roots, fear,
-    /// polymorph, silence) are dispellable, and a DoT or a damage-taken
-    /// increase is dispellable when it is itself magic
+    /// polymorph, silence) are dispellable, and a DoT, a damage-taken
+    /// increase or a stun is dispellable when it is itself magic
     /// ([`AuraType::is_dispelled_per_aura`]).
     ///
     /// The physical gate lives HERE, above the type check, rather than being
@@ -1464,19 +1467,30 @@ impl Aura {
             return true;
         }
 
-        // A DoT or a damage-taken increase is dispellable only when it is
-        // itself magic: declared so (Shadow Vulnerability, TBC 17800), or of a
-        // magic school. Physical ones never reach this arm — they are
+        // A DoT, a damage-taken increase or a stun is dispellable only when it
+        // is itself magic: declared so (Shadow Vulnerability, TBC 17800;
+        // Blackout, TBC 15269), or of a magic school (Hammer of Justice is
+        // Holy). Physical ones never reach this arm — they are
         // `DispelType::Physical` and returned above — but the school check
         // stays as the backstop for an aura built by hand in engine code,
-        // which never passes through `DispelType::for_ability`.
+        // which never passes through `DispelType::for_ability`. A schoolless
+        // one names no class ([`Aura::removal_class_name`]), so nothing says
+        // it is magic and it stays.
         if self.effect_type.is_dispelled_per_aura() {
             if self.dispel_type == DispelType::Magic {
                 return true;
             }
-            if let Some(school) = self.spell_school {
-                return school != SpellSchool::Physical;
-            }
+            return match self.spell_school {
+                Some(SpellSchool::Physical) | Some(SpellSchool::None) | None => false,
+                Some(
+                    SpellSchool::Frost
+                    | SpellSchool::Holy
+                    | SpellSchool::Shadow
+                    | SpellSchool::Arcane
+                    | SpellSchool::Fire
+                    | SpellSchool::Nature,
+                ) => true,
+            };
         }
 
         false
