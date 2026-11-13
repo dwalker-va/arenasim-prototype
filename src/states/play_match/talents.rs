@@ -252,7 +252,8 @@ pub struct TreeConfig {
 /// ([`TalentStat::takes_points_only`]): a percentage of 0 would be nothing.
 /// So does movement speed, whose points are already a fraction of natural
 /// speed: a passive source, offered to the one capped passive term
-/// ([`Combatant::offer_passive_speed`]) as an item's is.
+/// ([`Combatant::offer_passive_speed`]) as an item's is. Two speed nodes on
+/// one build offer the stronger, never their sum ([`TalentStat::across_nodes`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TalentStat {
     MaxHealth,
@@ -356,6 +357,35 @@ impl TalentStat {
         }
     }
 
+    /// How the changes two NODES of one build make to this stat combine. The
+    /// ranks of one node always add (user ruling); across nodes a stat adds
+    /// as items do, except movement speed, the one passive term the strongest
+    /// source sets (TBC): two speed nodes give the stronger, never the sum.
+    pub fn across_nodes(self) -> AcrossNodes {
+        match self {
+            TalentStat::MovementSpeed => AcrossNodes::Strongest,
+            TalentStat::MaxHealth
+            | TalentStat::MaxMana
+            | TalentStat::ManaRegen
+            | TalentStat::AttackPower
+            | TalentStat::SpellPower
+            | TalentStat::CritChance
+            | TalentStat::Armor
+            | TalentStat::FireResistance
+            | TalentStat::FrostResistance
+            | TalentStat::ShadowResistance
+            | TalentStat::ArcaneResistance
+            | TalentStat::NatureResistance
+            | TalentStat::HolyResistance
+            | TalentStat::WeaponDamage
+            | TalentStat::OffHandDamage
+            | TalentStat::TwoHandedWeaponDamage
+            | TalentStat::DodgeChance
+            | TalentStat::ParryChance
+            | TalentStat::MeleeAttackSpeed => AcrossNodes::Add,
+        }
+    }
+
     /// The combatant's total of this stat (for a weapon, its live swing's
     /// damage; for movement speed, its strongest passive source).
     pub fn total(self, c: &Combatant) -> f32 {
@@ -436,6 +466,44 @@ impl StatChange {
     /// every display of a talented stat use.
     pub fn applied(self, value: f32) -> f32 {
         (value + self.points) * (1.0 + self.fraction)
+    }
+}
+
+/// How the changes several talent nodes make to one stat combine
+/// ([`TalentStat::across_nodes`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcrossNodes {
+    /// The nodes' changes add, as items' stats do.
+    Add,
+    /// The strongest node's change is the build's: a passive source that
+    /// does not stack (movement speed).
+    Strongest,
+}
+
+/// The entry a node's change to `stat` accumulates in: the build's total for
+/// a stat whose nodes add, or this node's own for one whose strongest node
+/// wins, folded into the total by [`fold_strongest`] once the node is done.
+fn node_entry<'a>(
+    total: &'a mut BTreeMap<TalentStat, StatChange>,
+    node: &'a mut BTreeMap<TalentStat, StatChange>,
+    stat: TalentStat,
+) -> &'a mut StatChange {
+    match stat.across_nodes() {
+        AcrossNodes::Add => total.entry(stat).or_default(),
+        AcrossNodes::Strongest => node.entry(stat).or_default(),
+    }
+}
+
+/// Fold one node's changes to its strongest-wins stats into the build's
+/// total: the stronger of the two, never their sum.
+fn fold_strongest(
+    total: &mut BTreeMap<TalentStat, StatChange>,
+    node: &mut BTreeMap<TalentStat, StatChange>,
+) {
+    for (stat, change) in std::mem::take(node) {
+        let entry = total.entry(stat).or_default();
+        entry.points = entry.points.max(change.points);
+        entry.fraction = entry.fraction.max(change.fraction);
     }
 }
 
@@ -1416,6 +1484,10 @@ impl TalentDefinitions {
         let mut patches: BTreeMap<(AbilityType, AbilityField), (f32, f32)> = BTreeMap::new();
         let mut patch_effects: Vec<(PatchTarget, AbilityField, PatchOp, u8)> = Vec::new();
         let mut procs: Vec<TalentProcSlot> = Vec::new();
+        // One node's changes to its strongest-wins stats (movement speed),
+        // folded into `stats` / `pet_stats` once the node is done.
+        let mut node_stats: BTreeMap<TalentStat, StatChange> = BTreeMap::new();
+        let mut node_pet_stats: BTreeMap<TalentStat, StatChange> = BTreeMap::new();
 
         for (id, rank) in &build.ranks {
             if switched_off.contains(id) {
@@ -1427,13 +1499,16 @@ impl TalentDefinitions {
                         book = book.granting(abilities, *ability);
                     }
                     TalentEffect::StatPercent(stat, fraction) => {
-                        stats.entry(*stat).or_default().fraction += fraction * f32::from(rank);
+                        node_entry(&mut stats, &mut node_stats, *stat).fraction +=
+                            fraction * f32::from(rank);
                     }
                     TalentEffect::StatAdd(stat, points) => {
-                        stats.entry(*stat).or_default().points += points * f32::from(rank);
+                        node_entry(&mut stats, &mut node_stats, *stat).points +=
+                            points * f32::from(rank);
                     }
                     TalentEffect::PetStatPercent(stat, fraction) => {
-                        pet_stats.entry(*stat).or_default().fraction += fraction * f32::from(rank);
+                        node_entry(&mut pet_stats, &mut node_pet_stats, *stat).fraction +=
+                            fraction * f32::from(rank);
                     }
                     TalentEffect::Patch { on, field, op } => {
                         patch_effects.push((*on, *field, *op, rank));
@@ -1455,6 +1530,8 @@ impl TalentDefinitions {
                     TalentEffect::FromRank(..) => unreachable!("ranked_effects unwraps FromRank"),
                 }
             }
+            fold_strongest(&mut stats, &mut node_stats);
+            fold_strongest(&mut pet_stats, &mut node_pet_stats);
         }
 
         // Patches resolve against the book with every grant in, so a patch
@@ -1927,9 +2004,10 @@ impl ResolvedBuild {
         &self.build
     }
 
-    /// The summed change the build makes to each of the combatant's stats:
-    /// the points its `StatAdd` ranks add and the percentage its
-    /// `StatPercent` ranks take.
+    /// The change the build makes to each of the combatant's stats: the
+    /// points its `StatAdd` ranks add and the percentage its `StatPercent`
+    /// ranks take, summed over its nodes — or, for a stat whose strongest node
+    /// wins ([`TalentStat::across_nodes`], movement speed), the strongest.
     pub fn stat_changes(&self) -> &BTreeMap<TalentStat, StatChange> {
         &self.stats
     }

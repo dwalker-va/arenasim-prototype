@@ -848,68 +848,11 @@ mod priest_postures {
         );
     }
 
-    /// (b) ANCHOR PROBE — while PRESSURED, the Priest never exits heal range
-    /// (40) of its ally for more than a 1s grace (R6 anchor constraint).
-    /// Grace widened 1.0s → 2.5s (2026-06-14) for Psychic Scream: when the
-    /// Priest fears an attacker, the melee ally chases the feared enemy out of
-    /// the Priest's 40yd heal range for a beat while the Priest re-anchors
-    /// (~2s observed). The invariant the probe protects — the Priest does not
-    /// ABANDON its ally — still holds; the wider grace tolerates the transient
-    /// fear-scatter without masking a sustained walk-off.
-    ///
-    /// Judged over a bank of the statue comp's seeds: every PRESSURED window
-    /// any of them holds. The statue seed alone went off the situation when
-    /// every unit's speed moved 2% (AS-464: its Priest is never PRESSURED), so
-    /// the probe finds its windows instead of naming a seed.
-    #[test]
-    fn pressured_priest_stays_in_heal_range_of_ally() {
-        let mut judged = 0;
-        for seed in [20260606, 1, 2, 3, 4, 5, 6, 7] {
-            let mut cfg = statue_config();
-            cfg.random_seed = Some(seed);
-            let (_result, timeline, trace) = run_observed_traced(cfg);
-            let gate_time = timeline.gates_open_time.expect("gates opened");
-
-            let priest = timeline.find(1, CharacterClass::Priest, false);
-            let warrior = timeline.find(1, CharacterClass::Warrior, false);
-            let events = movement_events(&trace);
-
-            // Last priest sample (combat time) bounds any unclosed window.
-            let priest_samples = timeline.samples.get(&priest).cloned().unwrap_or_default();
-            let end = priest_samples
-                .last()
-                .map(|(t, _)| t - gate_time)
-                .unwrap_or(0.0);
-            let windows = pressured_windows(&events, 1, 1, end);
-            judged += windows.len();
-
-            let ally_distance = min_distance_series(&timeline, priest, &[warrior]);
-            for (start, stop) in &windows {
-                // Convert combat-time window to timeline time.
-                let (w0, w1) = (start + gate_time, stop + gate_time);
-                let in_window: Vec<(f32, f32)> = ally_distance
-                    .iter()
-                    .copied()
-                    .filter(|(t, _)| *t >= w0 && *t <= w1)
-                    .collect();
-                let out_of_range = max_consecutive_secs(&in_window, |d| d > 40.0);
-                eprintln!(
-                    "anchor probe: seed {seed} window [{:.1},{:.1}]s, max consecutive \
-                     out-of-heal-range {:.2}s",
-                    w0, w1, out_of_range
-                );
-                assert!(
-                    out_of_range <= 2.5,
-                    "seed {seed}: PRESSURED Priest left heal range (40) of its ally for \
-                     {:.2}s (grace 2.5s) during window [{:.1},{:.1}]",
-                    out_of_range,
-                    w0,
-                    w1
-                );
-            }
-        }
-        assert_min_occurrences("PRESSURED windows (focused Priest)", judged, 1);
-    }
+    // (b) ANCHOR PROBE — migrated off its seed bank to a staged match:
+    // `tests/priest_pressured_anchor.rs`. The statue comp's ally always stood
+    // near, and its PRESSURED windows were shorter than the probe's 2.5s grace,
+    // so it could not fail; the stage holds the ally 34yd off, stunned, with
+    // the attacker on its side of the Priest.
 
     /// (c) STEALTH PROBE (AE2) — vs a stealth-opener Rogue forced onto the
     /// Priest, no posture transition fires before the opener lands:
