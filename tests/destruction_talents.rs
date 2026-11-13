@@ -800,16 +800,44 @@ fn conflagrate_consumes_its_own_immolate() {
     );
 }
 
-/// Another Warlock's Immolate is not this one's to consume: Immolate is held
-/// (one is up) and so is Conflagrate.
-#[test]
-fn another_warlocks_immolate_is_not_conflagrated() {
+/// `UP` on the target, Conflagrate granted, and a second Warlock beside this
+/// one whose Immolate burns on the target.
+fn others_immolate_up() -> Scene {
     let mut scene = warlock_scene(&UP, &[AbilityType::Conflagrate])
         .unit("other warlock", 1, Warlock)
         .at(0.0, 5.0);
     let other = scene.entity("other warlock");
-    scene = scene.aura_full(FOE, dot("Immolate", other));
-    let view = scene.decide(ME);
+    scene.aura_full(FOE, dot("Immolate", other))
+}
+
+/// Another Warlock's Immolate is not this one's: it does not hold this
+/// Warlock's Immolate (a DoT is per caster, AS-476), so its own goes on
+/// beside it, and Conflagrate is not spent on the other's.
+#[test]
+fn another_warlocks_immolate_does_not_hold_this_warlocks_own() {
+    let view = others_immolate_up().decide(ME);
+    assert_eq!(
+        view.chose(),
+        Some((AbilityType::Immolate, Some(FOE))),
+        "{}",
+        describe(&view)
+    );
+    assert!(
+        !chose(&view, AbilityType::Conflagrate),
+        "{}",
+        describe(&view)
+    );
+}
+
+/// Another Warlock's Immolate is not this one's to consume. With its own
+/// Immolate unavailable (locked), the chain reaches Conflagrate, which is
+/// refused for want of an Immolate of its own; its control, its own Immolate
+/// burning under the same lock, is consumed.
+#[test]
+fn another_warlocks_immolate_is_not_conflagrated() {
+    let view = others_immolate_up()
+        .lock(ME, AbilityType::Immolate)
+        .decide(ME);
     assert!(
         !chose(&view, AbilityType::Conflagrate),
         "{}",
@@ -822,6 +850,16 @@ fn another_warlocks_immolate_is_not_conflagrated() {
         ),
         "{}",
         describe(&view)
+    );
+
+    let control = immolated(&[AbilityType::Conflagrate])
+        .lock(ME, AbilityType::Immolate)
+        .decide(ME);
+    assert_eq!(
+        control.chose(),
+        Some((AbilityType::Conflagrate, Some(FOE))),
+        "{}",
+        describe(&control)
     );
 }
 

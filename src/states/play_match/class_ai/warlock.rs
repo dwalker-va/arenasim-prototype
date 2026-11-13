@@ -891,13 +891,7 @@ fn try_shadowburn(
 /// Whether the Warlock's own Immolate burns on `target`: Conflagrate's
 /// precondition (it consumes that one, never another Warlock's).
 pub fn own_immolate_on(ctx: &CombatContext, me: Entity, target: Entity) -> bool {
-    ctx.active_auras.get(&target).is_some_and(|list| {
-        list.iter().any(|a| {
-            a.effect_type == AuraType::DamageOverTime
-                && a.ability_name == "Immolate"
-                && a.caster == Some(me)
-        })
-    })
+    ctx.has_own_dot(me, target, "Immolate")
 }
 
 /// Conflagrate (Destruction capstone): instant Fire damage on the kill
