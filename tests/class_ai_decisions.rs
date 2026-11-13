@@ -17,6 +17,7 @@ use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::class_ai::combat_snapshot::CombatSnapshot;
 use arenasim::states::play_match::class_ai::{
     dispel_priority, purge_priority, select_purge, team_hp_sums, CombatantInfo, PURGE_MIN_PRIORITY,
+    ROOT_DISPEL_PRIORITY,
 };
 use arenasim::states::play_match::components::DispelScope;
 use arenasim::states::play_match::{
@@ -135,6 +136,18 @@ fn dispel_priority_orders_cc_above_dots_above_slows() {
     assert!(dispel_priority(AuraType::MovementSpeedSlow) > 0);
 }
 
+/// AS-482's placement: a magic damage-taken increase (Shadow Vulnerability)
+/// is a maintenance dispel, tied with a DoT — below a root and the root tier,
+/// below every urgent crowd control, and above a snare.
+#[test]
+fn a_magic_vulnerability_is_a_maintenance_dispel_beside_a_dot() {
+    let vulnerability = dispel_priority(AuraType::DamageTakenIncrease);
+    assert_eq!(vulnerability, dispel_priority(AuraType::DamageOverTime));
+    assert!(vulnerability < dispel_priority(AuraType::Root));
+    assert!(vulnerability < ROOT_DISPEL_PRIORITY);
+    assert!(vulnerability > dispel_priority(AuraType::MovementSpeedSlow));
+}
+
 /// AS-44 regression. `try_dispel_ally` is called with exactly two
 /// `min_priority` bars — 90 (urgent) and 50 (maintenance) — so a dispellable
 /// aura scoring below 90 is invisible to a pressured healer and one scoring 0
@@ -193,11 +206,14 @@ fn dispel_priority_ranks_incapacitates_top_and_silence_above_fear() {
 /// The domain is `AuraType::ALL`, not a list written out here: a hand-kept copy
 /// of the dispellable set would quietly stop covering whatever it forgot while
 /// still reading as a whole-enum sweep. `is_magic_dispellable` picks the subset.
+///
+/// A type dispelled PER AURA (`is_dispelled_per_aura`: a DoT, a damage-taken
+/// increase) is in the domain too: its magic instances reach this function.
 #[test]
 fn every_magic_dispellable_type_is_graded() {
     let mut swept = 0;
     for ty in AuraType::ALL {
-        if !ty.is_magic_dispellable() {
+        if !ty.is_magic_dispellable() && !ty.is_dispelled_per_aura() {
             continue;
         }
         swept += 1;
@@ -207,11 +223,12 @@ fn every_magic_dispellable_type_is_graded() {
         );
     }
     // Non-vacuity: the sweep is only worth anything while the filter admits
-    // something. Six types are dispellable today (the five CC mechanics plus
-    // the Unstable Affliction Silence); a refactor that emptied the filter
-    // would otherwise turn this test green by covering nothing.
+    // something. Eight types are dispellable today (the five CC mechanics,
+    // the Unstable Affliction Silence, and the two per-aura types); a refactor
+    // that emptied the filter would otherwise turn this test green by
+    // covering nothing.
     assert!(
-        swept >= 6,
+        swept >= 8,
         "only {swept} magic-dispellable types found — the filter, not the grading, \
          is what changed"
     );

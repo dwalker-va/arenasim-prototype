@@ -1797,6 +1797,14 @@ mod tests {
             "Corruption is ordinary Shadow magic"
         );
         assert_eq!(corruption.removal().0, "Dispellable");
+
+        // A damage-taken increase follows its own class too (AS-482): Shadow
+        // Vulnerability is declared Magic, so the page calls it dispellable.
+        assert_eq!(
+            by_name("Shadow Vulnerability").removal().0,
+            "Dispellable",
+            "TBC 17800 is Magic"
+        );
     }
 
     /// No player-facing removal wording names an ability. The engine's
@@ -1894,9 +1902,6 @@ mod tests {
                 "Rend [Physical]",
                 // A bleed, like Rend (AS-417).
                 "Rupture [Physical]",
-                // Magic, but a stat debuff: `is_magic_dispellable` scopes
-                // out every damage-taken increase (AS-411's proc).
-                "Shadow Vulnerability [Magic]",
                 "Spell Lock [—]",
                 "Web [Physical]",
                 "Wind Shear [—]",
