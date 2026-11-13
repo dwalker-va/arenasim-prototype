@@ -223,7 +223,8 @@ fn the_holy_tree_is_as_specified() {
 }
 
 /// The two grants carry the card's values. Holy Nova: 13-15 damage and
-/// 25-29 healing within 10 yards, the whole of it (no spell-power share), 50
+/// 25-29 healing within 10 yards as base values, each with TBC's 0.161
+/// spell-power coefficient (15237 and 23455, `EffectBonusCoefficient`), 50
 /// mana, no cooldown. Guardian Spirit: 40% more healing received for 10s,
 /// the save healing 30% of maximum health, 60s, 17 mana, and nothing removes
 /// it (Wrath 47788: no dispel type).
@@ -241,7 +242,7 @@ fn the_grants_are_as_specified() {
             nova.healing_base_max,
             nova.healing_coefficient,
         ),
-        (13.0, 15.0, 0.0, 25.0, 29.0, 0.0)
+        (13.0, 15.0, 0.161, 25.0, 29.0, 0.161)
     );
     assert_eq!(
         (nova.range, nova.mana_cost, nova.cooldown, nova.cast_time),
@@ -741,27 +742,28 @@ fn guardian_spirit_costs_seventeen_and_no_global_cooldown() {
 /// pay for it: Holy Nova goes out in place of the Flash Heal, for 50 mana,
 /// healing the Priest and its Warrior beside it, striking the enemy Warrior
 /// inside and not the second one outside, and the Priest's next cast waits a
-/// global cooldown. The teammate 20 yards off is not healed.
+/// global cooldown. The Hunter 20 yards off is not healed, nor is its pet,
+/// inside the nova (no healer heals a pet). Its numbers are the base values
+/// plus 16.1% of the Priest's spell power.
 #[test]
 fn holy_nova_heals_and_strikes_inside_for_fifty_on_the_global_cooldown() {
     let config = HeadlessMatchConfig {
-        team1: vec!["Priest".into(), "Warrior".into(), "Warrior".into()],
+        team1: vec!["Priest".into(), "Warrior".into(), "Hunter".into()],
         team2: vec!["Warrior".into(), "Warrior".into()],
         random_seed: Some(2),
         max_duration_secs: 4.0,
-        team1_builds: vec![Build::of(&[
-            (SpiritualHealing, 2),
-            (Inspiration, 1),
-            (HolyConcentration, 1),
-            (TalentId::HolyNova, 1),
-        ])],
+        team1_builds: vec![nova_build()],
         ..Default::default()
     };
     const T1C: Unit = Unit::new(1, 2);
+    const PET: Unit = Unit::pet_of(1, 2);
+    let sp = spawned_priest(&nova_build()).spell_power;
     let stage = Stage::new()
         .place(T1, 0.0, 0.0)
         .place(T1B, 4.0, 0.0)
         .place(T1C, 20.0, 0.0)
+        .place(PET, 3.0, 3.0)
+        .health(PET, 0.5)
         .place(T2, 1.5, 0.0)
         .place(T2B, 25.0, 0.0)
         .health(T1, 0.6)
@@ -823,34 +825,58 @@ fn holy_nova_heals_and_strikes_inside_for_fifty_on_the_global_cooldown() {
             l.contains(&format!("hits {who} for")) || l.contains(&format!("CRITS {who} for"))
         })
     };
+    // Exactly the Priest and its Warrior: not the Hunter outside, not its
+    // pet inside.
+    let healed_set: BTreeSet<String> = heals
+        .iter()
+        .filter(|l| l.contains(" heals "))
+        .map(|l| {
+            let at = l.find(" heals ").unwrap() + " heals ".len();
+            l[at..l.rfind(" for ").unwrap()].to_string()
+        })
+        .collect();
+    assert_eq!(
+        healed_set,
+        ["Team 1 Priest #1", "Team 1 Warrior #2"]
+            .into_iter()
+            .map(String::from)
+            .collect::<BTreeSet<_>>(),
+        "{log}"
+    );
     assert!(
         healed("Team 1 Priest #1") && healed("Team 1 Warrior #2"),
         "{log}"
     );
-    assert!(!healed("Team 1 Warrior #3"), "{log}");
     assert!(
         struck("Team 2 Warrior #1") && !struck("Team 2 Warrior #2"),
         "{log}"
     );
-    // Its damage is 13-15, doubled by the Holy increase and untouched by the
-    // Frost resistance: it lands as Holy.
+    // Its damage is 13-15 plus 16.1% of spell power, doubled by the Holy
+    // increase and untouched by the Frost resistance: it lands as Holy.
     let hits: Vec<&&str> = heals
         .iter()
         .filter(|l| l.contains("hits Team 2 Warrior #1"))
         .collect();
     assert!(!hits.is_empty(), "{log}");
+    let (lo, hi) = (
+        ((13.0 + 0.161 * sp) * 2.0).floor(),
+        ((15.0 + 0.161 * sp) * 2.0).ceil(),
+    );
     for l in hits {
         let n = amount(l, " for ");
-        assert!((26.0..=30.0).contains(&n), "{l}");
+        assert!((lo..=hi).contains(&n), "{l}: {lo}-{hi} at {sp} spell power");
     }
-    // Its heal is 25-29 a target, 10% more at 2/2 Spiritual Healing, half
-    // again on a crit.
-    for l in heals
+    // Its heal is 25-29 plus 16.1% of spell power a target, 10% more at 2/2
+    // Spiritual Healing.
+    let (lo, hi) = nova_heal_range(sp);
+    let plain: Vec<&&str> = heals
         .iter()
-        .filter(|l| l.contains("heals") && !l.contains("CRITICALLY"))
-    {
+        .filter(|l| l.contains(" heals ") && !l.contains("CRITICALLY"))
+        .collect();
+    assert!(!plain.is_empty(), "{log}");
+    for l in plain {
         let n = amount(l, " for ");
-        assert!((27.0..=32.0).contains(&n), "{l}");
+        assert!((lo..=hi).contains(&n), "{l}: {lo}-{hi} at {sp} spell power");
     }
     let paid = mana_paid_at(&played, nova);
     assert!((paid - 50.0).abs() < 0.5, "paid {paid}\n{log}");
@@ -861,6 +887,221 @@ fn holy_nova_heals_and_strikes_inside_for_fifty_on_the_global_cooldown() {
         .find(|t| *t > nova + 1e-3)
         .unwrap_or_else(|| panic!("the Priest cast nothing after:\n{log}"));
     assert!(next - nova >= 1.4, "{nova} -> {next}\n{log}");
+}
+
+/// The Holy Nova build the staged nova tests take: two ranks of Spiritual
+/// Healing, Inspiration, Holy Concentration and Holy Nova.
+fn nova_build() -> Build {
+    Build::of(&[
+        (SpiritualHealing, 2),
+        (Inspiration, 1),
+        (HolyConcentration, 1),
+        (TalentId::HolyNova, 1),
+    ])
+}
+
+/// A plain (not critical) Holy Nova heal's range at `sp` spell power under
+/// [`nova_build`]: 25-29 plus 16.1% of spell power, 10% more at 2/2
+/// Spiritual Healing, rounded outward.
+fn nova_heal_range(sp: f32) -> (f32, f32) {
+    (
+        ((25.0 + 0.161 * sp) * 1.10).floor(),
+        ((29.0 + 0.161 * sp) * 1.10).ceil(),
+    )
+}
+
+/// A Priest at 60% alone with an enemy Warrior beside it, Pummel ready: the
+/// Holy Nova it casts first, as its log shows it.
+fn lone_nova(stage: impl FnOnce(Stage) -> Stage, build: Build) -> String {
+    let config = HeadlessMatchConfig {
+        team1: vec!["Priest".into()],
+        team2: vec!["Warrior".into()],
+        random_seed: Some(2),
+        max_duration_secs: 3.0,
+        team1_builds: vec![build],
+        ..Default::default()
+    };
+    let base = Stage::new()
+        .place(T1, 0.0, 0.0)
+        .place(T2, 1.5, 0.0)
+        .health(T1, 0.6)
+        .target(T2, T1)
+        .resource(T2, 30.0)
+        .cooldown(T1, AbilityType::PsychicScream, 30.0)
+        .aura(T1, weakened());
+    play(config, stage(base)).log
+}
+
+/// The amount of the Priest's first plain Holy Nova heal on itself.
+fn first_nova_self_heal(log: &str) -> f32 {
+    let line = lines(log, "Holy Nova heals Team 1 Priest #1 for")
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| panic!("no plain nova heal:\n{log}"));
+    amount(line, " for ")
+}
+
+/// No crit for the Priest at all, its own or its book's: every nova heal
+/// is a plain one.
+fn never_crits(stage: Stage) -> Stage {
+    stage.combatant(T1, |c| {
+        c.crit_chance = 0.0;
+        let book = c.book().clone().patching(NOVA, |d| d.crit_chance = 0.0);
+        *c = c.clone().with_book(book);
+    })
+}
+
+/// Arena dampening reaches the area heal: a nova staged halfway up the
+/// dampening ramp (135s after the gates: 75s of grace, then 60 of 120) heals
+/// half the plain range; the same nova undampened (the control) heals in
+/// the range itself. The two halves do not overlap.
+#[test]
+fn a_holy_nova_heal_is_dampened() {
+    let sp = spawned_priest(&nova_build()).spell_power;
+    let (lo, hi) = nova_heal_range(sp);
+    assert!(hi / 2.0 + 1.0 < lo, "{lo}-{hi}");
+    let fresh = first_nova_self_heal(&lone_nova(never_crits, nova_build()));
+    assert!((lo..=hi).contains(&fresh), "{fresh}: {lo}-{hi}");
+    let late = lone_nova(|s| never_crits(s).clock(135.0), nova_build());
+    assert!(late.contains("Arena dampening reaches 50%"), "{late}");
+    let dampened = first_nova_self_heal(&late);
+    assert!(
+        (lo / 2.0 - 1.0..=hi / 2.0 + 1.0).contains(&dampened),
+        "{dampened} against {lo}-{hi} undampened\n{late}"
+    );
+}
+
+/// Holy Nova's crit reads its own book's crit chance (where Holy
+/// Specialization lands): a Priest with no crit of its own whose book gives
+/// Holy Nova a certain crit novas critically; without the book's crit (the
+/// control) it never does.
+#[test]
+fn holy_novas_crit_reads_its_books_crit_chance() {
+    let run = |book_crit: f32| {
+        lone_nova(
+            move |s| {
+                s.combatant(T1, move |c| {
+                    c.crit_chance = 0.0;
+                    let book = c
+                        .book()
+                        .clone()
+                        .patching(NOVA, |d| d.crit_chance = book_crit);
+                    *c = c.clone().with_book(book);
+                })
+            },
+            nova_build(),
+        )
+    };
+    let certain = run(1.0);
+    assert!(
+        certain.contains("Holy Nova CRITICALLY heals Team 1 Priest #1"),
+        "{certain}"
+    );
+    let never = run(0.0);
+    assert!(
+        never.contains("Holy Nova heals Team 1 Priest #1"),
+        "{never}"
+    );
+    assert!(!never.contains("Holy Nova CRITICALLY"), "{never}");
+}
+
+/// The area queue carries each effect's own school: a Frost-scoped damage
+/// increase on a Mage doubles its Frost Nova (the same seed with no increase
+/// is the control), as it would not if the hit landed in any other school.
+#[test]
+fn frost_nova_lands_as_frost_through_the_area_queue() {
+    let nova = |increase: bool| {
+        let config = HeadlessMatchConfig {
+            team1: vec!["Mage".into()],
+            team2: vec!["Warrior".into()],
+            random_seed: Some(4),
+            max_duration_secs: 2.0,
+            ..Default::default()
+        };
+        let stage = Stage::new()
+            .place(T1, 0.0, 0.0)
+            .place(T2, 1.5, 0.0)
+            .target(T2, T1);
+        let stage = if increase {
+            stage.aura(
+                T1,
+                Aura {
+                    effect_type: AuraType::DamageDealtIncrease,
+                    duration: 300.0,
+                    magnitude: 1.0,
+                    damage_mods: AuraDamageMods {
+                        scope: Some(DamageScope::School(
+                            arenasim::states::play_match::abilities::SpellSchool::Frost,
+                        )),
+                        ..Default::default()
+                    },
+                    ability_name: "Frost Fervour".into(),
+                    ..Default::default()
+                },
+            )
+        } else {
+            stage
+        };
+        let log = play(config, stage).log;
+        let line = lines(&log, "Frost Nova hits Team 2 Warrior #1 for")
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| panic!("no Frost Nova hit:\n{log}"))
+            .to_string();
+        amount(&line, " for ")
+    };
+    let plain = nova(false);
+    let raised = nova(true);
+    assert!(plain > 0.0);
+    assert!(
+        (raised - plain * 2.0).abs() <= 1.0,
+        "{raised} against {plain}"
+    );
+}
+
+/// Two Warrior teammates both below 25%: the Priest spirits the lower, and
+/// on its next decision, the other still endangered and unspirited, it asks
+/// for the spirit again and finds it cooling down from 60s. It is cast once.
+#[test]
+fn guardian_spirit_cools_down_for_sixty_seconds() {
+    const T1C: Unit = Unit::new(1, 2);
+    let config = HeadlessMatchConfig {
+        team1: vec!["Priest".into(), "Warrior".into(), "Warrior".into()],
+        team2: vec!["Warrior".into()],
+        random_seed: Some(3),
+        max_duration_secs: 3.0,
+        team1_builds: vec![full_holy()],
+        ..Default::default()
+    };
+    let stage = Stage::new()
+        .place(T1, 0.0, 0.0)
+        .place(T1B, 10.0, 0.0)
+        .place(T1C, 10.0, 5.0)
+        .place(T2, 30.0, 0.0)
+        .health(T1B, 0.15)
+        .health(T1C, 0.2)
+        .aura(T1, weakened())
+        .aura(T1B, weakened())
+        .aura(T1C, weakened());
+    let played = play(config, stage);
+    let log = &played.log;
+    let casts = lines(log, "Priest #1 casts Guardian Spirit");
+    assert_eq!(casts.len(), 1, "{log}");
+    assert!(casts[0].ends_with("on Team 1 Warrior #2"), "{log}");
+    let remaining: Vec<f64> = played
+        .trace
+        .iter()
+        .filter(|e| e["actor"]["class"] == "Priest")
+        .filter_map(|e| e["candidates"].as_array())
+        .flatten()
+        .filter(|c| c["ability"] == "GuardianSpirit")
+        .filter_map(|c| c["reason"]["OnCooldown"]["remaining"].as_f64())
+        .collect();
+    assert!(!remaining.is_empty(), "never asked again:\n{log}");
+    assert!(
+        remaining.iter().all(|r| *r > 55.0 && *r <= 60.0),
+        "{remaining:?}"
+    );
 }
 
 /// A certain proc on `trigger` naming `abilities`, giving its owner a marker
@@ -1136,6 +1377,37 @@ fn a_shadowform_priest_casts_the_spirit() {
         .in_shadowform(PRIEST)
         .decide(PRIEST);
     assert!(precondition(&calm, SPIRIT), "{}", describe(&calm));
+}
+
+/// The spirit goes on the most endangered teammate IN REACH: with a second
+/// teammate below 25% 50 yards off, beyond the spirit's 40, the nearer one
+/// at 20% takes it; with that teammate 30 yards off (the control), it is the
+/// more endangered and takes it.
+#[test]
+fn the_spirit_passes_over_a_teammate_out_of_reach() {
+    let with_far = |x: f32| {
+        spirit_scene(Warrior, 0.2, 2)
+            .unit("far", 1, Warrior)
+            .at(x, 0.0)
+            .health(0.1)
+            .aura_full("far", fortitude())
+            .aura("far", AuraType::WeakenedSoul, 10.0)
+            .decide(PRIEST)
+    };
+    let beyond = with_far(50.0);
+    assert_eq!(
+        beyond.chose(),
+        Some((SPIRIT, Some(ALLY))),
+        "{}",
+        describe(&beyond)
+    );
+    let near = with_far(30.0);
+    assert_eq!(
+        near.chose(),
+        Some((SPIRIT, Some("far"))),
+        "{}",
+        describe(&near)
+    );
 }
 
 /// A Priest at `priest_hp` with an enemy Warrior beside it targeting it,

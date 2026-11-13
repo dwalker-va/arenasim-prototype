@@ -365,10 +365,13 @@
         // the Priest, 13-15 Holy damage to every enemy and 25-29 healing to
         // every teammate (the Priest included) within 10 yards, pets aside.
         // Classic 15237 rank 1 (29-34 damage, 54-63 healing, 185 mana) at its
-        // ratio, sized to the talent budget, with no spell-power share: the
-        // stated numbers are the whole of it. 50 mana, instant, on the global
-        // cooldown (TBC StartRecoveryCategory 133). `range` is the radius.
-        // No aura, so no dispel type (TBC 15237: DispelType 0).
+        // ratio, sized to the talent budget, as base values; each scales
+        // with spell power at TBC's coefficient (user ruling): 0.161 on the
+        // damage (15237 rank 1) and 0.161 on the heal (23455, the heal rank 1
+        // triggers), SpellEffect.EffectBonusCoefficient at wago.tools build
+        // 2.5.6.69795. 50 mana, instant, on the global cooldown (TBC
+        // StartRecoveryCategory 133). `range` is the radius. No aura, so no
+        // dispel type (TBC 15237: DispelType 0).
         HolyNova: (
             name: "Holy Nova",
             class: Priest,
@@ -381,11 +384,11 @@
             cooldown: 0.0,
             damage_base_min: 13.0,
             damage_base_max: 15.0,
-            damage_coefficient: 0.0,
+            damage_coefficient: 0.161,
             damage_scales_with: SpellPower,
             healing_base_min: 25.0,
             healing_base_max: 29.0,
-            healing_coefficient: 0.0,
+            healing_coefficient: 0.161,
             spell_school: Holy,
         ),
 
