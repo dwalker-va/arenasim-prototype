@@ -470,6 +470,7 @@ const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
     AimedShot,
     Ambush,
     ArcaneShot,
+    Conflagrate,
     DeathCoil,
     DrainLife,
     FrostNova,
@@ -485,6 +486,7 @@ const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
     Moonfire,
     MortalStrike,
     Shadowbolt,
+    Shadowburn,
     SinisterStrike,
     WoundPoison,
 ];
@@ -527,10 +529,20 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
     }
 }
 
-const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
-    HolyNova,
-    "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
-)];
+const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[
+    (
+        Conflagrate,
+        "AS-348 (Shadowburn and Conflagrate, the Destruction casts; AS-334's talent visuals)",
+    ),
+    (
+        HolyNova,
+        "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
+    ),
+    (
+        Shadowburn,
+        "AS-348 (Shadowburn and Conflagrate, the Destruction casts; AS-334's talent visuals)",
+    ),
+];
 
 #[test]
 fn direct_damage_finds_every_member() {

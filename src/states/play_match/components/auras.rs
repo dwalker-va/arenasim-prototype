@@ -1718,7 +1718,9 @@ impl ActiveAuras {
 ///   holder's stats, and expiry takes back what the aura carries, so the two
 ///   must not drift apart;
 /// - its tick CADENCE is kept: a refreshed heal over time goes on ticking on
-///   the beat it already had.
+///   the beat it already had;
+/// - its hit charges back to `fresh`'s: a refreshed Shadow Vulnerability
+///   holds its four hits again, whatever it had spent.
 ///
 /// Shared by `apply_pending_auras`'s two aura stores — the live component,
 /// and the auras accumulating this frame for a target that has none yet.
@@ -1732,6 +1734,7 @@ pub fn refresh_stacking_aura(auras: &mut [Aura], fresh: &Aura) -> Option<u8> {
     existing.duration = fresh.duration;
     existing.caster = fresh.caster;
     existing.bloom = fresh.bloom;
+    existing.damage_mods.charges = fresh.damage_mods.charges;
     if !matches!(
         existing.effect_type,
         AuraType::MaxHealthIncrease | AuraType::MaxManaIncrease

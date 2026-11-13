@@ -561,8 +561,10 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
 `CastingState` (the Druid's heals, Frost Shock) may set `magnitude_coefficient`;
 add it to `SP_SCALED_AURA_WIRED`. Such a cast is still an instant: no interrupt
 takes it (`AbilityConfig::has_cast_bar`, read from `cast_time`; see Interrupts in
-`docs/design/wow-mechanics.md`). A heal may also `consumes_aura: Some(<Ability>)`
-— Swiftmend eats the target's Rejuvenation as it lands.
+`docs/design/wow-mechanics.md`). A cast may also `consumes_aura: Some(<Ability>)`
+— Swiftmend eats the target's Rejuvenation as it lands (its caster's own first,
+another's when it has none); a hit eats only its caster's own, and nothing off
+a target immune to it (Conflagrate eats the Warlock's Immolate).
 
 **Every ability declares `prevention`** — TBC's `SpellCategories.PreventionType`:
 `Silence` (a spell), `Pacify` (a physical attack or shot) or `None` (Travel

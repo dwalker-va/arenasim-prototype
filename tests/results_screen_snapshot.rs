@@ -42,7 +42,7 @@ fn results_screen_2v2() {
 }
 
 /// The same match with the Warlock talented: its row carries the spec its
-/// build names ("Demonology Warlock 0/3") under the class, and the untalented
+/// build names ("Demonology Warlock 0/3/0") under the class, and the untalented
 /// rows carry none.
 #[test]
 #[ignore = "needs a GPU (wgpu); run explicitly with -- --ignored"]

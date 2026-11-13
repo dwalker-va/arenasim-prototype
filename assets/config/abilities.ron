@@ -1117,6 +1117,51 @@
             spell_school: Shadow,
         ),
 
+        // Shadowburn (talent, Destruction tier 2): instant Shadow damage, 10 +
+        // 0.35 x spell power, 20yd, 15s cooldown, 40 mana, no soul shard (TBC
+        // 17877: Shadow, 20yd, PreventionType Silence, on the global
+        // cooldown; 15s). Routed through a zero-length cast, so its mana is
+        // charged when it lands.
+        Shadowburn: (
+            name: "Shadowburn",
+            class: Warlock,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_shadow_scourgebuild.jpg",
+            cast_time: 0.0,
+            range: 20.0,
+            mana_cost: 40.0,
+            cooldown: 15.0,
+            damage_base_min: 10.0,
+            damage_base_max: 10.0,
+            damage_coefficient: 0.35,
+            damage_scales_with: SpellPower,
+            spell_school: Shadow,
+        ),
+
+        // Conflagrate (talent, Destruction capstone): instant Fire damage, 20
+        // + 0.4 x spell power, that consumes the Warlock's own Immolate on its
+        // target; cast only at a target that carries one. 15s cooldown, 45
+        // mana (TBC 17962: Fire, 30yd, PreventionType Silence, on the global
+        // cooldown; 10s).
+        Conflagrate: (
+            name: "Conflagrate",
+            class: Warlock,
+            talent: true,
+            prevention: Silence,
+            icon: "icons/abilities/spell_fire_fireball.jpg",
+            cast_time: 0.0,
+            range: 30.0,
+            mana_cost: 45.0,
+            cooldown: 15.0,
+            damage_base_min: 20.0,
+            damage_base_max: 20.0,
+            damage_coefficient: 0.4,
+            damage_scales_with: SpellPower,
+            consumes_aura: Some(Immolate),
+            spell_school: Fire,
+        ),
+
         // ============================================================================
         // PALADIN ABILITIES
         // ============================================================================
