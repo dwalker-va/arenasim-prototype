@@ -8,7 +8,7 @@
 //! at 0 HP with no `[DEATH]` line (AS-437). This audit keeps every site doing
 //! it.
 //!
-//! Two questions, each answered as SET EQUALITY over named members, so a new
+//! Four questions, each answered as SET EQUALITY over named members, so a new
 //! member fails loudly instead of passing under a `>=` floor:
 //!
 //! 1. **Where does health go down?** Every subtractive or zeroing write to
@@ -23,6 +23,13 @@
 //!    call it are the systems that log damage rows (DAMAGE_CREDITORS); and
 //!    every row's amount is `credited_damage(..)`, the rule the credit
 //!    applies. So the Results total and its breakdown cannot part.
+//! 4. **Is every damage line a row?** (AS-439) A damage line logged with a
+//!    plain `CombatLog::log` carries no dealer, ability or killing blow, so it
+//!    is missing from the per-ability breakdown and the K column. The places
+//!    that name `CombatLogEventType::Damage` outside `CombatLog` itself are a
+//!    declared set (UNSTRUCTURED_DAMAGE_LINES), none of them a hit with a
+//!    dealer; and every row hands `log_damage` its kill as a computed flag,
+//!    never a literal.
 //!
 //! Lexical, like the other audits built on `tests/common/source_audit.rs`: it
 //! reads comment-, string- and test-module-blanked source. It does not see a
@@ -366,6 +373,106 @@ fn every_damage_row_is_logged_under_the_rule() {
     assert!(
         bad.is_empty(),
         "A damage row's amount is not `credited_damage(landed, absorbed)`:\n{}",
+        bad.join("\n")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Every damage line is a row (AS-439)
+// ---------------------------------------------------------------------------
+
+/// The places outside `CombatLog` that name `CombatLogEventType::Damage`, as
+/// (file, fn), each with why it is not a hit that owes a row. A hit with a
+/// dealer logs through `CombatLog::log_damage`, which carries the dealer, the
+/// ability and the killing blow; a plain `CombatLog::log` line carries none of
+/// them, so its damage is missing from the Results breakdown and its kill from
+/// the K column (the Unstable Affliction backlash once was, AS-439).
+const UNSTRUCTURED_DAMAGE_LINES: &[(&str, &str, &str)] = &[
+    (
+        "src/states/play_match/combat_core/avoidance.rs",
+        "resolve_melee_avoidances",
+        "a dodged or parried swing: no damage landed, so there is no row",
+    ),
+    (
+        "src/states/play_match/combat_core/follow_ups.rs",
+        "record",
+        "a reflect or transferred share whose dealer is gone: no one to credit",
+    ),
+    (
+        "src/states/play_match/effects/backlash.rs",
+        "process_backlash",
+        "a backlash whose Warlock is gone: no one to credit",
+    ),
+    (
+        "src/states/play_match/rendering/combat_log.rs",
+        "render_combat_log_content",
+        "the HUD log's colour for a damage line: a read, not a log",
+    ),
+];
+
+#[test]
+fn every_damage_line_with_a_dealer_is_a_row() {
+    // A glob or renamed import would let a bare `Damage` past the pattern.
+    let aliased = Regex::new(r"\bCombatLogEventType\s*(::\s*[*{]|as\b)").unwrap();
+    assert_same(
+        "`CombatLogEventType` is imported by glob or alias, so this audit cannot see \
+         its `Damage`. Name it in full.",
+        sites(&aliased, |_, _| true),
+        BTreeSet::new(),
+    );
+    let damage = Regex::new(r"\bCombatLogEventType\s*::\s*Damage\b").unwrap();
+    let mut found = sites(&damage, |_, _| true);
+    // `CombatLog`'s own module: `log_damage` itself, and the queries.
+    found.retain(|(file, _)| file != "src/combat/log.rs");
+    let declared: BTreeSet<(String, String)> = UNSTRUCTURED_DAMAGE_LINES
+        .iter()
+        .map(|(file, f, _)| (file.to_string(), f.to_string()))
+        .collect();
+    assert_same(
+        "A damage line is logged without `CombatLog::log_damage`, so its damage is \
+         missing from the Results breakdown and its kill from the K column. Log a hit \
+         with a dealer through `log_damage` (credited to the dealer's ability, with its \
+         killing blow); a line that is genuinely no one's hit goes in \
+         UNSTRUCTURED_DAMAGE_LINES with its reason.",
+        found,
+        declared,
+    );
+}
+
+/// Every damage row hands `log_damage` its killing blow as a computed flag
+/// (`is_killing_blow`, `is_first_death`, `landed.killed`), never a literal: a
+/// row that passed `false` would drop a lethal hit's kill from the K column,
+/// and one that passed `true` would credit kills that never happened.
+#[test]
+fn every_damage_row_computes_its_killing_blow() {
+    let call = Regex::new(r"\.\s*log_damage\s*\(").unwrap();
+    let literal = Regex::new(r"^(true|false)$").unwrap();
+    let mut rows = 0;
+    let mut bad = Vec::new();
+    for file in load_sources(&["src"]).expect("read src/") {
+        let code = blank_test_modules(&blank_comments_and_strings(&file.raw));
+        for m in call.find_iter(&code) {
+            let args =
+                common::source_audit::param_list(&code, m.end() - 1).expect("a balanced call");
+            let args = common::source_audit::split_params(&args);
+            rows += 1;
+            let kill = args.get(4).map(|a| a.trim()).unwrap_or("");
+            if kill.is_empty() || literal.is_match(kill) {
+                let line = code[..m.start()].lines().count();
+                bad.push(format!(
+                    "{}:{line}: killing blow `{kill}`",
+                    file.rel_display()
+                ));
+            }
+        }
+    }
+    assert!(
+        rows >= DAMAGE_CREDITORS.len(),
+        "only {rows} damage rows found"
+    );
+    assert!(
+        bad.is_empty(),
+        "A damage row's killing blow is not computed from its victim's death:\n{}",
         bad.join("\n")
     );
 }
