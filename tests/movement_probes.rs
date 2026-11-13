@@ -5206,7 +5206,7 @@ mod u9_seek_reset {
 // pulling into cover. We measure this directly on PillaredArena with a
 // healer-heavy comp (Warrior+Priest vs Warlock+Priest): each Priest's
 // PRESSURED/ESCAPE movement decisions carry the `cover_pull` scorer term, and we
-// join every decision to that team's HP advantage at the moment it fired.
+// join every decision to the tempo its team decided under on that frame.
 //
 //   - the LEADING team's Priest (advantage >= margin) emits ZERO positive
 //     cover_pull terms — press zeroed the weight; and
@@ -5221,7 +5221,6 @@ mod u9_seek_reset {
 mod u10_press {
     use super::*;
     use arenasim::headless::runner::{EndReason, MatchResult, TraceConfig};
-    use arenasim::states::play_match::movement_config::load_movement_config;
     use std::collections::BTreeMap as Btm;
 
     /// One observed + traced PillaredArena run of the healer-heavy comp.
@@ -5256,57 +5255,44 @@ mod u10_press {
         (result, frames, events)
     }
 
-    /// `team`'s HP-fraction advantage at absolute frame time `abs_t` — the same
-    /// alive/`!is_pet` sum the sim's `team_hp_advantage` computes, evaluated on
-    /// the nearest observed frame. Mirrors the production signal so the probe
-    /// classifies a decision by the very quantity the code gated on.
-    fn team_adv_at(frames: &[FrameObservation], abs_t: f32, team: u8) -> Option<f32> {
-        let f = frames.iter().min_by(|a, b| {
-            (a.sim_time - abs_t)
-                .abs()
-                .partial_cmp(&(b.sim_time - abs_t).abs())
-                .unwrap()
-        })?;
-        let mut sums: Btm<u8, f32> = Btm::new();
-        for c in f.combatants.values() {
-            if c.alive && !c.is_pet && c.max_health > 0.0 {
-                *sums.entry(c.team).or_insert(0.0) += c.current_health / c.max_health;
-            }
-        }
-        let own = sums.get(&team).copied().unwrap_or(0.0);
-        let enemy: f32 = sums
+    /// Each team's tempo on each frame, as its units' ability decisions saw
+    /// it (`situation.tempo`, "pressing" / "even" / "trailing"): the very
+    /// quantity the posture's press gate reads (`ctx.situation().tempo`),
+    /// classified from the frame's start-of-dispatch snapshot. Reading HP off
+    /// the observed frame instead counts damage that frame's later systems
+    /// landed after the decision was made, and misfiles a decision on a frame
+    /// with a big hit (AS-487: a 91-point hit took the advantage from 0.007 to
+    /// 0.23 after a Priest had decided at `even`).
+    fn tempo_by_frame(events: &[serde_json::Value]) -> Btm<(u64, u64), String> {
+        events
             .iter()
-            .filter(|(t, _)| **t != team)
-            .map(|(_, v)| *v)
-            .sum();
-        Some(own - enemy)
+            .filter(|e| e["kind"] == "ability_decision")
+            .filter_map(|e| {
+                let frame = e["frame"].as_u64()?;
+                let team = e["actor"]["team"].as_u64()?;
+                let tempo = e["situation"]["tempo"].as_str()?;
+                Some(((frame, team), tempo.to_string()))
+            })
+            .collect()
     }
 
     struct PressStats {
         end_reason: EndReason,
         match_time: f32,
-        /// PRESSURED/ESCAPE Priest decisions fired while that Priest's team led
-        /// by >= margin (the leader, pressing).
+        /// PRESSURED/ESCAPE Priest decisions fired while that Priest's team was
+        /// pressing (the leader).
         leader_decisions: usize,
         /// ...of those, how many carried a POSITIVE cover_pull term. Must be 0:
         /// press zeroes the weight, so a leader can never pull into cover.
         leader_cover_positive: usize,
-        /// Trailing-Priest decisions (team behind by >= margin) that denied LoS
+        /// Trailing-Priest decisions (its team trailing) that denied LoS
         /// (cover_pull > 0) — proof the suppression is conditional.
         trailer_denials: usize,
     }
 
     fn measure(seed: u64) -> PressStats {
-        let margin = load_movement_config()
-            .expect("movement.ron loads")
-            .shared
-            .press_advantage_margin;
-        let (result, frames, events) = run(seed);
-        let gate = frames
-            .iter()
-            .find(|f| f.gates_open)
-            .map(|f| f.sim_time)
-            .expect("gates opened");
+        let (result, _frames, events) = run(seed);
+        let tempo = tempo_by_frame(&events);
 
         let (mut leader_decisions, mut leader_cover_positive, mut trailer_denials) = (0, 0, 0);
         for v in &events {
@@ -5321,18 +5307,21 @@ mod u10_press {
             let Some(cover) = v["scorer_terms"]["cover_pull"].as_f64() else {
                 continue;
             };
-            let team = v["actor"]["team"].as_u64().unwrap_or(0) as u8;
-            let combat_t = v["sim_time"].as_f64().unwrap_or(0.0) as f32;
-            let Some(adv) = team_adv_at(&frames, combat_t + gate, team) else {
-                continue;
-            };
-            if adv >= margin {
-                leader_decisions += 1;
-                if cover > 0.0 {
-                    leader_cover_positive += 1;
+            let key = (
+                v["frame"].as_u64().unwrap_or(0),
+                v["actor"]["team"].as_u64().unwrap_or(0),
+            );
+            // A frame on which no unit of the team decided an ability is
+            // left out: its tempo is not on the trace.
+            match tempo.get(&key).map(String::as_str) {
+                Some("pressing") => {
+                    leader_decisions += 1;
+                    if cover > 0.0 {
+                        leader_cover_positive += 1;
+                    }
                 }
-            } else if adv <= -margin && cover > 0.0 {
-                trailer_denials += 1;
+                Some("trailing") if cover > 0.0 => trailer_denials += 1,
+                _ => {}
             }
         }
 
@@ -5359,7 +5348,7 @@ mod u10_press {
             assert_eq!(
                 s.leader_cover_positive, 0,
                 "seed {seed}: a leading Priest pulled into cover {} time(s) while its team was \
-                 ahead by the press margin — press should have zeroed cover_pull",
+                 pressing — press should have zeroed cover_pull",
                 s.leader_cover_positive,
             );
             leader_decisions += s.leader_decisions;
