@@ -954,6 +954,8 @@ impl Scene {
                 .map(|p| (self.who(p.wearer.index()), p.item)),
         );
         view.on_use_after = combatant.on_use_items.clone();
+        view.resource_after = combatant.current_mana;
+        view.global_cooldown_after = combatant.global_cooldown;
         let mut placed = exec_world.query::<(&Trap, &Transform)>();
         view.trap_landings.extend(
             placed
@@ -1042,6 +1044,8 @@ impl Scene {
                 .map(|p| (self.who(p.wearer.index()), p.item)),
         );
         view.on_use_after = combatant.on_use_items.clone();
+        view.resource_after = combatant.current_mana;
+        view.global_cooldown_after = combatant.global_cooldown;
         view
     }
 
@@ -1303,6 +1307,13 @@ pub struct DecisionView {
     /// The deciding unit's on-use items as the decision left them — their
     /// cooldowns and a wait's state ([`Scene::decide_held`] only).
     pub on_use_after: Vec<OnUseSlot>,
+    /// The deciding unit's resource (mana, energy or rage) as the decision
+    /// left it: what its choices spent ([`Scene::decide`] and
+    /// [`Scene::decide_held`] only).
+    pub resource_after: f32,
+    /// The deciding unit's global cooldown as the decision left it
+    /// ([`Scene::decide`] and [`Scene::decide_held`] only).
+    pub global_cooldown_after: f32,
 }
 
 /// An instant attack a scene decision queued, its target named.
@@ -1349,6 +1360,8 @@ impl DecisionView {
             item_decisions: Vec::new(),
             items_used: Vec::new(),
             on_use_after: Vec::new(),
+            resource_after: 0.0,
+            global_cooldown_after: 0.0,
         };
         let mine = trace.pending_events.iter().filter(|e| {
             e.actor

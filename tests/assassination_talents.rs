@@ -234,6 +234,8 @@ fn rupture_is_a_physical_bleed_nothing_removes() {
         (AuraType::DamageOverTime, 10.0, 2.0, 12.0)
     );
     assert!(AbilityType::Rupture.is_melee_attack());
+    // Declared, not left to the Physical school (TBC DispelType 0).
+    assert_eq!(aura.dispel_type, DispelType::Physical);
 
     let mut world = World::new();
     let (target, caster) = (world.spawn_empty().id(), world.spawn_empty().id());
@@ -521,6 +523,22 @@ fn landed(
     build: &Build,
     prior: usize,
 ) -> Vec<(AuraType, f32, f32, String, Option<CompoundDebuff>)> {
+    landed_auras(build, prior)
+        .iter()
+        .map(|x| {
+            (
+                x.effect_type,
+                x.duration,
+                x.magnitude,
+                x.ability_name.clone(),
+                x.compound,
+            )
+        })
+        .collect()
+}
+
+/// The auras themselves, as [`landed`] reads them.
+fn landed_auras(build: &Build, prior: usize) -> Vec<Aura> {
     let mut app = apply_harness();
     let mut tracker = DRTracker::default();
     for _ in 0..prior {
@@ -540,20 +558,7 @@ fn landed(
     app.world()
         .entity(victim)
         .get::<ActiveAuras>()
-        .map(|a| {
-            a.auras
-                .iter()
-                .map(|x| {
-                    (
-                        x.effect_type,
-                        x.duration,
-                        x.magnitude,
-                        x.ability_name.clone(),
-                        x.compound,
-                    )
-                })
-                .collect()
-        })
+        .map(|a| a.auras.clone())
         .unwrap_or_default()
 }
 
@@ -581,6 +586,22 @@ fn a_kidney_shot_lands_its_vulnerability_with_the_stun() {
         landed(&Build::default(), 0),
         vec![(AuraType::Stun, 6.0, 1.0, ks, None)]
     );
+    // Both members are Physical, as the stun is: nothing removes the rider
+    // that would not remove the stun. (A dispellable rider would let a
+    // Dispel Magic take it, and `remove_debuff_at` the stun with it.)
+    let members = landed_auras(&poison_build(), 0);
+    assert_eq!(members.len(), 2);
+    for member in &members {
+        assert_eq!(
+            member.dispel_type,
+            DispelType::Physical,
+            "{:?}",
+            member.effect_type
+        );
+        assert!(!member.can_be_dispelled(), "{:?}", member.effect_type);
+        assert!(!member.is_cleansable_poison(), "{:?}", member.effect_type);
+        assert!(!member.can_be_purged(), "{:?}", member.effect_type);
+    }
 }
 
 /// A diminished stun's rider lasts the diminished time; a stun DR-immunity
@@ -732,6 +753,44 @@ fn rupture_goes_on_the_kill_target_unless_it_is_already_there() {
         ),
         "{}",
         describe(&control)
+    );
+}
+
+/// Opening Rupture spends its 25 energy and the global cooldown; its control,
+/// the Rogue striking instead with Rupture on cooldown, spends Sinister
+/// Strike's cost, so the number read is the one each choice charges.
+#[test]
+fn rupture_costs_its_energy_and_the_global_cooldown() {
+    let max = rupture_scene().combatant_mut(ME).max_mana;
+    let view = rupture_scene().decide(ME);
+    assert_eq!(view.chose(), Some((AbilityType::Rupture, Some(FOE))));
+    assert!(
+        near(view.resource_after, max - 25.0),
+        "{}",
+        view.resource_after
+    );
+    assert!(
+        near(
+            view.global_cooldown_after,
+            arenasim::states::play_match::constants::GCD
+        ),
+        "{}",
+        view.global_cooldown_after
+    );
+    let strike = abilities()
+        .get_unchecked(&AbilityType::SinisterStrike)
+        .mana_cost;
+    let control = rupture_scene()
+        .cooldown(ME, AbilityType::Rupture, 5.0)
+        .decide(ME);
+    assert_eq!(
+        control.chose(),
+        Some((AbilityType::SinisterStrike, Some(FOE)))
+    );
+    assert!(
+        near(control.resource_after, max - strike),
+        "{}",
+        control.resource_after
     );
 }
 
