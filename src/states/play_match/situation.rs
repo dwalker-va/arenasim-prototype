@@ -335,6 +335,12 @@ pub enum HideRule {
     /// Option A', the strong form: while any enemy ranged DPS could hand its
     /// damage to a teammate, cover from every enemy caster counts for nothing.
     NoCover,
+    /// Round 2 decomposition: the pillar stance runs and the healer hugs, but
+    /// the DPS's half is off (no sight-yield rule 3, no kiter stance pull).
+    StanceHealerHalf,
+    /// Round 2 decomposition: the pillar stance runs and the DPS keeps its
+    /// half (rule 3, the kiter's pull), but the healer does not hug.
+    StancePartnerHalf,
 }
 
 impl HideRule {
@@ -345,6 +351,8 @@ impl HideRule {
             "Follow" => Ok(Self::Follow),
             "Both" => Ok(Self::Both),
             "NoCover" => Ok(Self::NoCover),
+            "StanceHealerHalf" => Ok(Self::StanceHealerHalf),
+            "StancePartnerHalf" => Ok(Self::StancePartnerHalf),
             _ => Err(format!("unknown hide rule {s:?}")),
         }
     }
@@ -1393,7 +1401,7 @@ fn yield_sight(
         auras,
         &situation.allies,
         situation.ally_in_danger,
-        stance_leads_sight(situation),
+        stance_leads_sight(situation) && cfg.hide_rule != HideRule::StanceHealerHalf,
         team,
         prev,
         now,

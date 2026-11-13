@@ -1,125 +1,242 @@
-# AS-440: the healer that hides and the partner it exposes (design round 1)
+# AS-440: the healer that hides and the partner it exposes
 
-**Card:** AS-440. **Status: PROPOSED, awaiting the user's ruling.** The rules
-measured here are a prototype on this branch (`situation::HideRule`, a
-per-team measurement switch, `team{1,2}_hide_rule`); nothing is shipped.
-`Legacy` and the shipped `TeamPlan` are byte-identical with the prototype in
-(1,392 Legacy and 1,392 TeamPlan matches of the diagnosis bank, CSV for CSV;
-the harness rows of the 1,392 TeamPlan matches too).
-**Tier: DIRECTIONAL** (`sweep-tiers.md`): 2v2, the 30 x 30 play-bank cells,
-PillaredArena and TwinPillars, one seed per block (801 / 811 / 821), both
-seats. An effect is starred only when all three blocks agree in sign and the
-pooled McNemar |z| >= 1.96.
+**Card:** AS-440. **Status: PROPOSED, awaiting the user's ruling (§5).**
+Every rule measured here is a prototype on this branch: `situation::HideRule`,
+a per-team measurement switch (`team{1,2}_hide_rule`), and the Pillar play's
+existing withhold. Nothing is shipped. With the prototype in, `Legacy` and the
+shipped `TeamPlan` are byte-identical to main: 1,392 matches of each, compared
+CSV for CSV at 5300b998 and again at 0ca55319.
+**Tier: DIRECTIONAL** (`sweep-tiers.md`). 2v2, the 30 x 30 play-bank cells,
+PillaredArena and TwinPillars, both seats, head-to-head: the option runs on one
+healer + DPS side, paired with the same cell and seed with both sides shipped.
+The diagnosis (§1) was measured on 5300b998. Everything else was measured on
+main 0ca55319 at 12 seeds in three blocks (801-804 / 811-814 / 821-824), and
+confirmed on fresh blocks 831-834 and 841-844. An effect is starred (*) when
+its 95% seed-clustered bootstrap interval (resampling seeds) excludes zero
+**and** every block agrees in sign.
 
-## 1. Diagnosis
+## 1. Diagnosis: what hides the healer
 
 `tests/healer_hide_exposure.rs` (ignored, a measurement) plays every cell in
-which a healer + DPS team meets a team with a ranged DPS, uniform `TeamPlan`,
-trace on: 4,176 matches, 5,040 sides (2,016 healer + melee, 3,024 healer +
-ranged). For every enemy `target_focus` move off a side's healer onto its
-partner it finds the enemy DPS that was on the healer, walks back to the
-frame that DPS last saw it, attributes whose step broke the sight (positions
-0.5s either side), and reads what held the healer's legs on that frame off
-its posture machine (`ObservedHealerState`, new on the frame observer).
+which a healer + DPS team meets a team with a ranged DPS, both teams on
+uniform `TeamPlan` with the trace on. That is 4,176 matches and 5,040 sides
+(2,016 healer + melee, 3,024 healer + ranged). For each enemy `target_focus`
+move off a side's healer onto its partner, the harness:
 
-**Denominators.** Sides (one per qualifying team per match) for rates of
-events; seconds both alive with an enemy ranged DPS alive for shares of time.
+- finds the enemy DPS that was on the healer;
+- walks back to the frame that DPS last saw the healer;
+- attributes whose step broke the sight, from positions 0.5s either side;
+- reads what held the healer's legs on that frame, from its posture machine
+  (`ObservedHealerState`, new on the frame observer).
+
+Rates of events are per side (one per qualifying team per match). Shares of
+time are over the seconds both units were alive with an enemy ranged DPS
+alive.
 
 | | healer + melee | healer + ranged |
 |---|---|---|
 | sides with a focus move off the healer | 65.5% (0.71 moves/side) | 34.7% (0.38/side) |
 | healer sees its partner in heal range at the move | 42% | 86% |
-| the move's hide began in the opener (never seen, or lost in the first 10s) | 73% | 66% |
-| mid-fight moves per side | 0.19 | 0.13 |
+| hide began in the opener (never seen, or lost in the first 10s) | 73% | 66% |
 | DPS blind to the healer before the move, median | 7.9s | 4.1s |
-| whose step broke the sight (moves not hidden from the gates) | healer 86%, both 9%, enemy 5% | healer 80%, both 16%, enemy 4% |
 | focus then held on the partner, mean | 18.5s | 15.1s |
-| partner health lost while it holds, mean | 61% of max | 61% |
 
-Each block replicates within 1.5pt on every row (blocks 801 / 811 / 821:
-65.6 / 64.7 / 66.2% of H+M sides).
+What put the healer out of sight, healer + melee, 1,434 moves:
 
-**What put the healer out of the DPS's sight**, healer + melee, all 1,434
-moves (the frame the DPS lost it):
+| cause | share |
+|---|---|
+| never in that DPS's sight since the gates | 38.9% |
+| hugging a pillar under the team's pillar stance (FREE) | 17.2% |
+| plain FREE formation point | 10.0% |
+| PRESSURED team-solve cover (`C_OCCLUDED`) | 9.4% |
+| PRESSURED, walking out of CC reach | 6.0% |
+| PRESSURED while silenced or locked out | 5.8% |
+| FREE reach repair (AS-362) | 5.5% |
+| ESCAPE, CC'd, walks, dip | 7.2% |
 
-| cause | share | kind |
+## 2. The 2v2 pillar stance: where dropping it helps
+
+The Pillar play was withheld from the running side (`NoPillar`; 28,800
+sides). Pooled, the side gains **+0.8*** [+0.5, +1.2] (blocks +0.5 / +0.6 /
++1.3). Round 1's +1.3 was 3 seeds on the pre-merge main.
+
+**The pooled effect hides large effects of both signs, by side comp.** 15
+comps can take the stance; Paladin comps never do (the Paladin never hugs),
+and show 0 flips in 7,200 sides.
+
+| side comp | effect | 95% interval | blocks | fresh block 831-834 |
+|---|---|---|---|---|
+| Warrior + Druid | **+6.3*** | +4.9, +7.8 | +5.4 / +5.2 / +8.3 | **+5.2*** |
+| Warlock + Shaman | **+5.4*** | +3.5, +7.1 | +5.4 / +4.6 / +6.2 | **+2.1*** |
+| Warlock + Priest | **+4.9*** | +2.5, +7.2 | +3.9 / +6.5 / +4.5 | **+4.0*** |
+| Rogue + Shaman | **+4.2*** | +2.3, +5.9 | +4.8 / +5.2 / +2.6 | +1.2 |
+| Rogue + Priest | **+4.0*** | +1.9, +6.2 | +1.7 / +2.3 / +8.1 | **+3.8*** |
+| Rogue + Druid | **+2.4*** | +0.6, +4.2 | +5.3 / +0.2 / +1.7 | −0.6 |
+| Hunter + Priest | +2.1 | +0.3, +4.0 | +2.1 / +4.7 / −0.5 | |
+| Mage + Druid | +1.9 | +0.2, +3.8 | +2.5 / −1.1 / +4.4 | |
+| Warrior + Shaman | +0.7 | −2.0, +3.3 | | |
+| Hunter + Shaman | −0.3 | −2.0, +1.3 | | |
+| Mage + Priest | −0.9 | −3.9, +2.6 | | |
+| Mage + Shaman | **−2.5*** | −4.9, −0.5 | −3.2 / −2.2 / −2.2 | |
+| Warrior + Priest | **−2.8*** | −4.8, −1.2 | −3.9 / −2.6 / −2.0 | |
+| Warlock + Druid | **−3.1*** | −4.8, −1.2 | −1.8 / −5.0 / −2.5 | |
+| Hunter + Druid | **−6.1*** | −7.8, −4.4 | −6.8 / −5.6 / −5.8 | |
+
+n = 1,440 sides per comp (12 seeds); 480 on the fresh block.
+
+- **Concentration.** The net gain is +234 wins: +459 from the comps that
+  gain and −226 from those that lose. The top three comps carry 103% of it.
+  Ten comps replicate in all three blocks: six gain, four lose.
+- **Shape and map.** Healer + melee gains **+1.9***. Healer + ranged gains
+  +0.1, which is +Warlock and −Hunter/Mage cancelling. Nagrand **+1.0***,
+  TwinPillars **+0.6***.
+- **Enemy comp.** The enemies that bring no crowd control the stance
+  defends against are a second built-in null: 9 comps, 0 flips. The largest
+  gains are against Mage + Paladin (+8.4*), Warrior + Warlock (+6.7*) and
+  Mage + Shaman (+6.1*). The largest losses are against Mage + Rogue (−4.6*)
+  and Priest + Warlock (−4.2*).
+- **Fresh block.** The Pillar play was withheld only for the six gaining
+  comps, on new seeds. Those sides gained **+2.6pt** against the 12-seed
+  estimate of +4.5, which is the shrinkage a selection on the same data
+  predicts. Four of the six replicate: Warrior + Druid, Warlock + Priest,
+  Rogue + Priest and Warlock + Shaman. Pooled over all 9,600 sides, the
+  targeted withhold is worth **+0.8*** with no losing cells, the same as the
+  blanket withhold's +0.8 with its four losing comps.
+
+## 3. Why dropping the stance moves a match
+
+**The healer's hug is the active part; the DPS's half is not.** The stance
+has two halves. The healer hugs the pillar (AS-373). The DPS yields its
+healer's sight to the stance side (AS-386's rule 3) and, for a kiter, pulls
+toward that side. Each half was turned off alone, on the 15,120 sides the
+stance can reach (12 seeds):
+
+| arm | effect | per-comp pattern |
 |---|---|---|
-| hidden from the gates (never seen) | 38.9% | opener |
-| pillar-stance hug (FREE; AS-373 under AS-387's `AvoidCc` stance) | 17.2% | CC avoidance, almost all in the first 10s |
-| plain FREE formation point | 10.0% | incidental, opener |
-| PRESSURED team-solve cover (`C_OCCLUDED`) | 9.4% | cover |
-| PRESSURED walking out of CC reach (`C_CC_REACH`) | 6.0% | CC avoidance |
-| PRESSURED while silenced or locked out (owes no sight) | 5.8% | lockout |
-| FREE reach repair (AS-362) | 5.5% | CC avoidance |
-| ESCAPE, CC'd, walks, dip | 7.2% | other |
+| no stance (both halves off) | **+1.5*** | as §2 |
+| stance on, the healer does not hug (`StancePartnerHalf`) | **+1.0*** | reproduces §2 comp for comp: Warlock + Shaman +7.4*, Hunter + Druid −9.0* |
+| stance on, the DPS's half off (`StanceHealerHalf`) | +0.1 | flat; the largest comp is +3.0 |
 
-So the hand-off is mostly an **opener** effect (the team's opening position
-and the stance's opening hug), then **CC avoidance**; the PRESSURED solve's
-cover term, which AS-399 suspected, is a tenth of it. Its partner is not
-lost by the hide itself: when the healer cannot see its melee partner at the
-move, the partner's own step broke that sight (25% of moves) or it was
-already blind (28%); the healer's step, 3%.
+Dropping the hug carries two thirds of the effect, and its sign in every comp.
+The DPS's half alone is worth nothing. The remaining +0.4 is the two halves
+together.
 
-## 2. Options, measured head-to-head
+**The hug is an opener move.** The stance and no-hug arms are identical,
+frame by frame, until the healer's first hug (4,375 of 4,375 matches). That
+hug comes 1.8-3.1s after the gates, before contact. In the 20s after it, a
+healer that does not hug:
 
-Each option runs on the healer + DPS side only; its twin is the same cell and
-seed with both sides shipped. 7,200 sides per option; healer hard CC is
-seconds per side carrying a stun, fear, polymorph, incapacitate or cyclone.
+- stands off the pillar (within 4yd of it 4.2s against 9.8s, ranged-partner
+  comps that gain);
+- is seen by enemy casters a little more (10.1s against 8.6s);
+- takes the same hard crowd control (0.80s against 0.83s).
 
-| option | all | H+M | H+R | partner first death | healer hard CC |
-|---|---|---|---|---|---|
-| **C+A: no 2v2 stance, no hand-off cover** | **+1.7*** (+2.0 / +1.8 / +1.4) | **+1.7*** | **+1.7*** | 45.4 -> 43.6% (z -3.9) | 3.14 -> 3.01s |
-| C: no 2v2 stance (Pillar withheld) | **+1.3*** (+1.7 / +1.0 / +1.1) | **+2.0*** (Nagrand +3.4*) | +0.8 | 45.4 -> 44.6% (z -2.1) | 3.14 -> 3.06s |
-| A: no hand-off cover (`NoCover`) | **+0.7*** (+0.6 / +0.9 / +0.6) | +0.8 | +0.6 | 45.4 -> 44.8% (z -1.9) | 3.14 -> 3.10s |
-| B: follow the partner (`Follow`) | -0.0 | -0.3 | +0.2 | 45.4 -> 45.9% (z +1.6) | 3.14 -> 3.14s |
+Its partner's health 20s later is unchanged (49% against 47%). The difference
+builds later in the match.
 
-- **A, `NoCover`.** While an enemy ranged DPS sees a teammate of the healer
-  within the focus's 35yd reach, the PRESSURED solve gives no credit for
-  cover from any enemy caster; crowd-control reach (`C_CC_REACH`) and sight
-  of the anchor are untouched. (A narrower form, ignoring only the casters
-  that see a teammate, moved 2% of the focus moves and was not swept.)
-- **B, `Follow`.** Sight of a melee anchor counts only where the spot also
-  sees 5yd ahead of it toward its target, and the Paladin's band-hold does not
-  park blind to its anchor. It raised the link at the move from 43% to 50% and
-  moved nothing else.
-- **C, Pillar withheld.** The gated Pillar play off for the side: no stance,
-  so no hug. Inert for the Paladin (it never hugs: 0 flips of 1,800).
-- The H+M partner-first rate does not fall under any option (35.6 -> 36.0%
-  under C+A); its gain is the healer surviving (healer first 19.4 -> 18.0%).
+**What the hug changes is how the partner is kept alive, and its sign
+depends on the comp.** Across the 15 comps, the 12-seed effect correlates with
+these per-comp changes:
 
-## 3. Recommendation
+| what changes when the healer does not hug | correlation with the effect | gaining comps | losing comps |
+|---|---|---|---|
+| partner damage dealt (log) | +0.73 | +2 to +11% | −3 to −5% |
+| partner alive | +0.68 | +0.8 to +3.8s | −3.5 to +0.4s |
+| healing on the partner, per match | +0.67 | +0.06 to +0.17 of a bar | −0.24 to +0.03 |
+| partner died first | −0.62 | −9 to +1pt | 0 to +7pt |
+| healer's hard crowd control | −0.10 | −0.7 to −0.2s | −0.5 to +0.2s |
+| healer hidden from the enemy's ranged DPS | +0.24 | | |
 
-**C+A.** In 2v2 a healer + DPS team does not take the pillar stance, and its
-healer takes no cover from casters while an enemy ranged DPS could turn on its
-partner. CC exposure does not rise: the side's healer takes slightly less hard
-CC (3.14 -> 3.01s a side). Round 2 builds C as a 2v2 format exception on the
-Pillar play (`PILLAR_EXCEPTIONS` is class-keyed today; Peel's format gates
-are the precedent) and A as a team-solve rule with its scene tests.
+From 3 seeds per comp (360 sides each).
 
-Alternatives: **C alone** (data only, the larger H+M gain, leaves the PRESSURED
-cover term as it is); **A alone** (keeps the stance, the smallest gain).
+So the hug buys the healer nothing measurable in crowd control or exposure in
+2v2. Its cost or benefit lands on the partner. In the gaining comps, a healer
+not tied to a pillar ring keeps more healing on its partner, which lives
+longer and deals more damage. In the losing comps, the reverse holds. Which
+healer-side behaviour sets the sign per comp is not identified (Gaps).
+
+## 4. The cover rule (`NoCover`)
+
+While an enemy ranged DPS sees a teammate of the healer within the focus's
+35yd reach, the PRESSURED solve gives no credit for cover from any enemy
+caster. CC-reach avoidance and sight of the partner are unchanged.
+
+- **Effect:** **+1.0*** [+0.8, +1.3] at 12 seeds (blocks +0.8 / +0.8 /
+  +1.5). On fresh blocks: +0.8* (841-844), and +0.1 in 831-834 (the sides
+  outside the six comps, where it ran alone).
+- **Localisation: broad.**
+  - Healer + melee +1.2*, healer + ranged +0.9*; both maps +1.0*.
+  - Paladin +1.8* (replicated at +1.7* on 841-844); Druid +1.2*, Shaman
+    +0.9*, Priest +0.2.
+  - The top five comps carry 62% of the net: +328 gross gain, −32 gross
+    loss. No comp is significantly negative; Mage + Druid −0.8 and
+    Warrior + Priest −1.3 have intervals that exclude zero, but their blocks
+    disagree.
+  - Built-in null: enemies with no ranged DPS show 0 flips (8,640 sides),
+    because the rule never fires against them.
+- **Mechanism: the enemy's fire comes back to the healer.** At seed 801,
+  against an enemy with a ranged DPS:
+  - the healer is hidden from them less (52.8 to 49.5% of the time, healer
+    + melee);
+  - they shoot the partner less (47.5 to 45.7%) and the healer more (17.1 to
+    19.6%; healer + ranged 58.9 to 56.6% and 28.7 to 31.6%);
+  - damage to the partner falls by 1.5%;
+  - the healer's time below 10% mana falls by 0.6-0.9s;
+  - the healer's hard crowd control is unchanged (4.11 to 4.10s).
+
+  The healer, which heals itself, absorbs the fire the focus would have
+  moved onto its partner.
+- On the six gaining comps, adding the cover rule to the targeted stance
+  withhold did not add to it on the fresh block (+2.0 against +2.6).
+
+## 5. Options for the ruling
+
+1. **Recommended: a Pillar-play exception table keyed by (healer, partner)
+   for 2v2**, following Peel's pair gates. It names the four comps that
+   replicated on the fresh block: Druid with a Warrior, Priest with a Warlock,
+   Priest with a Rogue, Shaman with a Warlock. The stance stays everywhere
+   else, including the four comps it helps (Hunter + Druid, Warlock + Druid,
+   Warrior + Priest, Mage + Shaman). Each entry cites its measurement and is
+   re-checked at the milestone sweep. On the fresh block the four comps
+   gained +3.8pt between them, about +0.75pt pooled over every healer + DPS
+   side.
+2. **The cover rule**, a separate yes or no. It is broad, worth +0.8 to
+   +1.0pt over four of five blocks, costs the healer no crowd control, and
+   has no comp significantly negative. It is the more general mechanism, and
+   it acts mid-fight where the stance acts at the opener. On the named comps
+   it did not stack with option 1.
+3. **A blanket 2v2 exception on the Pillar play.** +0.8pt pooled, the same
+   as option 1, but it costs 2.5-6pt in four comps that replicate.
+4. **No change.**
 
 ## Gaps
 
-- Directional: one seed per block, 2v2 only. The 3v3 effect of either piece
-  is unmeasured; the stance measured +4.3 in AS-391's 3v3 bank at 0.8, which is
-  why C is proposed for 2v2 only.
-- The mechanism of C's gain is not shown. With the stance off, the opening
-  hide moves from the hug to the FREE reach repair at about the same time
-  (the sketch's match), so the focus still moves; what the side gains is its
-  healer's survival.
-- Double-healer 2v2 teams are not in any bank.
+- DIRECTIONAL, 2v2 only. Neither change is measured in 3v3, where the stance
+  measured +4.3 in AS-391's bank at 0.8.
+- §3 names the active part (the hug) and where its effect lands (the
+  partner's healing and survival). It does not identify the healer-side
+  behaviour that sets the sign comp by comp: the per-comp mechanism metrics
+  are 3 seeds (360 sides a comp), and none of the healer measures (CC,
+  exposure, link, distance) separates the gaining comps from the losing ones.
+- The fresh-block confirmation selects its comps from the 12-seed data. The
+  named four are the ones that held on new seeds. Two that held at 12 seeds
+  (Rogue + Shaman, Rogue + Druid) did not.
+- Double-healer 2v2 teams are in no bank.
 
 ## Recompute
 
-From `docs/design/balance/sweeps/`:
+From `docs/design/balance/sweeps/` (`R=2026-11-13-as440-reduce.py`,
+`G=2026-11-13-as440-gen.py`, files `2026-11-13-as440-…`):
 
 | figures | command |
 |---|---|
-| §1 | `2026-11-13-as440-reduce.py diag 2026-11-13-as440-diag.rows.jsonl.gz` |
-| §2 | `2026-11-13-as440-reduce.py h2h 2026-11-13-as440-h2h-ctl.rows.jsonl.gz 2026-11-13-as440-h2h-<option>.rows.jsonl.gz` |
+| §1 | `$R diag …-diag.rows.jsonl.gz` |
+| §2 | `$R local …-r2-ctl.csv.gz …-r2-np.csv.gz`; fresh block `$R local …-r2-c4_ctl.csv.gz …-r2-c4_tgt.csv.gz` |
+| §3 decomposition | `$R local …-r2-ctl.csv.gz <arm> --eligible`, arm `…-r2-np.csv.gz`, `…-r2-d_StancePartnerHalf.csv.gz`, `…-r2-d_StanceHealerHalf.csv.gz` |
+| §3 event study | `$R event ctl.rows np.rows`: the harness over `$G ctl` / `$G h2h NoPillar` at seeds 801-802, 811-812, 821-822, restricted to nine comps: the five largest gaining comps of §2 (Rogue + Druid aside) and the four losing ones |
+| §3 per-comp table | `$R partner ctl.rows np.rows local.txt`: the harness over `$G h2h-eligible NoPillar 801,811,821` and the matching control rows; damage dealt from `$R mechreport …-r2-mech-np.jsonl.gz` |
+| §4 | `$R local …-r2-ctl.csv.gz …-r2-nc.csv.gz`; `…-r2-c5_ctl.csv.gz …-r2-c5_nc.csv.gz`; mechanism `$R mechreport …-r2-mech-nc.jsonl.gz` |
 
-Banks: `2026-11-13-as440-gen.py diag 801,811,821`, `ctl 801,811,821` and
-`h2h <rule> 801,811,821` (`NoCover`, `Follow`, `NoPillar`,
-`NoPillar+NoCover`), run through `tests/healer_hide_exposure.rs`
-(`HHX_TRACE=0` for the h2h banks).
+The banks: `$G ctl|h2h <rule>|h2h-eligible <rule>|targeted <seeds> <comps> [NoCover]`, played with
+`--batch --jobs 4 --trace-mode off`; the harness banks with
+`HHX_TRACE=0` (`HHX_KEEP_LOGS=<dir>` for the log join).

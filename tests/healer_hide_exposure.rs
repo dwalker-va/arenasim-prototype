@@ -158,6 +158,8 @@ struct FocusMove {
 
 #[derive(Serialize, Default)]
 struct Row {
+    /// The config's line in the bank (0-based): its log is `match_<line>.txt`.
+    line: usize,
     label: String,
     map: String,
     seed: u64,
@@ -197,6 +199,61 @@ struct Row {
     /// The same for the healer.
     healer_shot_secs: f32,
     focus: Vec<FocusMove>,
+    /// The healer's mechanism metrics over its alive post-gate frames
+    /// (round 2): see [`Mech`].
+    mech: Mech,
+}
+
+/// What the healer did, per side (AS-440 round 2): where it stood, what it
+/// healed, what it spent, and what it took. Health figures are fractions of
+/// the unit's maximum, summed over frames (a heal of half a bar is 0.5).
+#[derive(Serialize, Default)]
+struct Mech {
+    alive_secs: f32,
+    /// Seconds hugging a pillar (`ObservedHealerState::hug`).
+    hug_secs: f32,
+    /// Seconds PRESSURED.
+    pressured_secs: f32,
+    /// Mean yards from the nearest pillar's skin.
+    pillar_skin: f32,
+    /// Seconds within 4yd of a pillar's skin.
+    at_pillar_secs: f32,
+    /// Seconds both alive, and of those: mean yards to the partner, and
+    /// seconds the healer saw the partner within heal range.
+    both_secs: f32,
+    partner_dist: f32,
+    link_secs: f32,
+    /// Seconds an enemy melee (or melee pet) stood within 10yd of the healer.
+    melee_near_secs: f32,
+    /// Seconds at least one living enemy caster (non-melee, non-pet) saw it.
+    seen_secs: f32,
+    /// Health raised on the partner and on the healer, and lost by each.
+    heal_partner: f32,
+    heal_self: f32,
+    dmg_healer: f32,
+    dmg_partner: f32,
+    /// Mana fraction at 20s and 40s after the gates (-1 if dead by then),
+    /// and seconds below 10% mana.
+    mana20: f32,
+    mana40: f32,
+    oom_secs: f32,
+    /// Seconds after the gates each died (-1: survived).
+    healer_death: f32,
+    partner_death: f32,
+    /// The partner's own play, over its alive post-gate frames: seconds
+    /// alive, hard-CC'd, in reach of its living target (6yd for a melee, 36yd
+    /// and in sight for a ranged DPS), and targeting the enemy healer.
+    partner_alive_secs: f32,
+    partner_cc_secs: f32,
+    partner_uptime_secs: f32,
+    partner_on_healer_secs: f32,
+    /// Per second after the gates: heal on partner, heal on self, damage to
+    /// healer, damage to partner (fractions of max), then seconds of hard CC,
+    /// heal link, seen by an enemy caster, hugging, PRESSURED and within 4yd
+    /// of a pillar, then the healer's mana, the partner's and the healer's
+    /// health at the second's end. For windows anchored to an event of the
+    /// paired arm (round 2's event study).
+    series: Vec<[f32; 13]>,
 }
 
 #[derive(Clone)]
@@ -246,6 +303,7 @@ fn run_one(cfg: HeadlessMatchConfig, tmp: &str, i: usize, trace: bool) -> Vec<Ro
     let mut history: BTreeMap<u8, Vec<Seen>> = BTreeMap::new();
     let mut deaths: BTreeMap<Entity, usize> = BTreeMap::new();
     let mut last_hp: BTreeMap<Entity, f32> = BTreeMap::new();
+    let mut mech_hp: BTreeMap<Entity, f32> = BTreeMap::new();
     let mut was_hard: BTreeMap<Entity, bool> = BTreeMap::new();
     let mut frame_ix = 0usize;
     // `HHX_TRACK_DIR`: every 0.1s, every unit's position, target and (for a
@@ -283,6 +341,7 @@ fn run_one(cfg: HeadlessMatchConfig, tmp: &str, i: usize, trace: bool) -> Vec<Ro
                         rows.insert(
                             team,
                             Row {
+                                line: i,
                                 label: label.clone(),
                                 map: map.clone(),
                                 seed,
@@ -292,6 +351,13 @@ fn run_one(cfg: HeadlessMatchConfig, tmp: &str, i: usize, trace: bool) -> Vec<Ro
                                 partner_melee: pc.class.is_melee(),
                                 enemy: teams[(2 - team) as usize].clone(),
                                 enemy_ranged,
+                                mech: Mech {
+                                    healer_death: -1.0,
+                                    partner_death: -1.0,
+                                    mana20: -1.0,
+                                    mana40: -1.0,
+                                    ..Default::default()
+                                },
                                 ..Default::default()
                             },
                         );
@@ -368,6 +434,148 @@ fn run_one(cfg: HeadlessMatchConfig, tmp: &str, i: usize, trace: bool) -> Vec<Ro
                     .filter(|c| c.team != *team && c.alive && is_ranged_dps(c))
                     .collect();
                 let both = hc.alive && pcb.alive;
+                {
+                    let t = frame_ix.saturating_sub(gate_frame.unwrap_or(frame_ix)) as f32 * FRAME;
+                    let m = &mut row.mech;
+                    let sec = t as usize;
+                    while m.series.len() <= sec {
+                        m.series.push([0.0; 13]);
+                    }
+                    let mut bin = [0.0f32; 13];
+                    let hfrac = if hc.alive {
+                        hc.current_health / hc.max_health
+                    } else {
+                        0.0
+                    };
+                    let mana = if hc.max_mana > 0.0 {
+                        hc.current_mana / hc.max_mana
+                    } else {
+                        0.0
+                    };
+                    let (dh, dp) = (
+                        mech_hp.insert(*h, hfrac).map_or(0.0, |prev| hfrac - prev),
+                        mech_hp.insert(*p, php).map_or(0.0, |prev| php - prev),
+                    );
+                    if hc.alive {
+                        m.alive_secs += FRAME;
+                        if dh > 0.0 {
+                            m.heal_self += dh;
+                            bin[1] += dh;
+                        } else {
+                            m.dmg_healer -= dh;
+                            bin[2] -= dh;
+                        }
+                        if hc.aura_types.iter().any(|a| is_hard(*a)) {
+                            bin[4] += FRAME;
+                        }
+                        let st = hc.healer_state;
+                        if st.is_some_and(|s| s.hug.is_some()) {
+                            m.hug_secs += FRAME;
+                            bin[7] += FRAME;
+                        }
+                        if st.is_some_and(|s| s.posture == Posture::Pressured) {
+                            m.pressured_secs += FRAME;
+                            bin[8] += FRAME;
+                        }
+                        let skin = volumes
+                            .iter()
+                            .map(|v| {
+                                let (c, r) = v.footprint_disc();
+                                flat(hc.position).distance(c) - r
+                            })
+                            .fold(f32::INFINITY, f32::min);
+                        if skin.is_finite() {
+                            m.pillar_skin += skin * FRAME;
+                            if skin <= 4.0 {
+                                m.at_pillar_secs += FRAME;
+                                bin[9] += FRAME;
+                            }
+                        }
+                        let near = frame.combatants.values().any(|c| {
+                            c.team != *team
+                                && c.alive
+                                && (c.class.is_melee() || c.is_pet)
+                                && flat(c.position).distance(flat(hc.position)) <= 10.0
+                        });
+                        if near {
+                            m.melee_near_secs += FRAME;
+                        }
+                        let seen = frame.combatants.values().any(|c| {
+                            c.team != *team
+                                && c.alive
+                                && !c.is_pet
+                                && !c.class.is_melee()
+                                && sees(c.position, hc.position)
+                        });
+                        if seen {
+                            m.seen_secs += FRAME;
+                            bin[6] += FRAME;
+                        }
+                        bin[10] = mana;
+                        if mana < 0.10 {
+                            m.oom_secs += FRAME;
+                        }
+                        if (t - 20.0).abs() < FRAME / 2.0 {
+                            m.mana20 = mana;
+                        }
+                        if (t - 40.0).abs() < FRAME / 2.0 {
+                            m.mana40 = mana;
+                        }
+                    } else if m.healer_death < 0.0 {
+                        m.healer_death = t;
+                    }
+                    if pcb.alive {
+                        m.partner_alive_secs += FRAME;
+                        if pcb.aura_types.iter().any(|a| is_hard(*a)) {
+                            m.partner_cc_secs += FRAME;
+                        }
+                        if let Some(tc) = pcb
+                            .target
+                            .and_then(|t| frame.combatants.get(&t))
+                            .filter(|tc| tc.alive)
+                        {
+                            let d = flat(pcb.position).distance(flat(tc.position));
+                            let reach = if pcb.class.is_melee() {
+                                d <= 6.0
+                            } else {
+                                d <= 36.0 && sees(pcb.position, tc.position)
+                            };
+                            if reach {
+                                m.partner_uptime_secs += FRAME;
+                            }
+                            if tc.class.is_healer() && !tc.is_pet {
+                                m.partner_on_healer_secs += FRAME;
+                            }
+                        }
+                        if dp > 0.0 {
+                            m.heal_partner += dp;
+                            bin[0] += dp;
+                        } else {
+                            m.dmg_partner -= dp;
+                            bin[3] -= dp;
+                        }
+                    } else if m.partner_death < 0.0 {
+                        m.partner_death = t;
+                    }
+                    if both {
+                        m.both_secs += FRAME;
+                        let d = flat(hc.position).distance(flat(pcb.position));
+                        m.partner_dist += d * FRAME;
+                        if d <= HEAL_RANGE && sees(hc.position, pcb.position) {
+                            m.link_secs += FRAME;
+                            bin[5] += FRAME;
+                        }
+                    }
+                    bin[11] = php;
+                    bin[12] = hfrac;
+                    let slot = &mut m.series[sec];
+                    for (acc, add) in slot.iter_mut().zip(bin.iter()).take(10) {
+                        *acc += add;
+                    }
+                    slot[10] = bin[10];
+                    slot[11] = bin[11];
+                    slot[12] = bin[12];
+                }
                 let melee_near = frame.combatants.values().any(|c| {
                     c.team != *team
                         && c.alive
@@ -627,7 +835,20 @@ fn run_one(cfg: HeadlessMatchConfig, tmp: &str, i: usize, trace: bool) -> Vec<Ro
             });
         }
     }
-    let _ = std::fs::remove_file(format!("{tmp}/match_{i:06}.txt"));
+    // `HHX_KEEP_LOGS`: keep each match log there, named by its line, for the
+    // log join (damage, heals and crowd control by source).
+    match std::env::var("HHX_KEEP_LOGS") {
+        Ok(dir) => {
+            std::fs::create_dir_all(&dir).unwrap();
+            let _ = std::fs::rename(
+                format!("{tmp}/match_{i:06}.txt"),
+                format!("{dir}/match_{i:06}.txt"),
+            );
+        }
+        Err(_) => {
+            let _ = std::fs::remove_file(format!("{tmp}/match_{i:06}.txt"));
+        }
+    }
     if let Some(dir) = &track_dir {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(format!("{dir}/track_{i:06}.jsonl"), track.join("\n")).unwrap();

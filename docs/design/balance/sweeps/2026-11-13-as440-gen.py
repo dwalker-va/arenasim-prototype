@@ -18,7 +18,19 @@ on PillaredArena and TwinPillars, both teams TeamPlan, 300s cap.
 - ctl: the h2h cells with both teams shipped, label `ctl|...` — the twin every
   h2h row is paired with.
 
-Seeds: three blocks, 801 / 811 / 821 (one seed each: DIRECTIONAL).
+- h2h-eligible <rule> <seeds>: as h2h, only the sides the pillar stance can
+  reach — a Priest, Shaman or Druid side against an enemy that fields a crowd
+  control the stance defends against (the nine enemies in `NO_STANCE_ENEMIES`
+  never move the stance: zero flips in the 12-seed NoPillar bank). The round-2
+  decomposition (`StanceHealerHalf`, `StancePartnerHalf`).
+- targeted <seeds> <comp,comp,...> [NoCover]: as h2h NoPillar, but the Pillar
+  play is withheld only for the running sides whose comp (`Dps+Healer`) is
+  named; every other running side is shipped (with `NoCover`, every running
+  side also runs the cover rule).
+
+Seeds: round 1, one seed per block (801 / 811 / 821); round 2, four
+(801-804 / 811-814 / 821-824), and fresh blocks 831-834 and 841-844 for
+confirmation.
 """
 import importlib.util
 import json
@@ -33,6 +45,10 @@ spec.loader.exec_module(g)
 HEALERS = {"Priest", "Paladin", "Shaman", "Druid"}
 RANGED = {"Mage", "Hunter", "Warlock"}
 MAPS = ("PillaredArena", "TwinPillars")
+
+
+NO_STANCE_ENEMIES = {"Warrior+Rogue", "Warrior+Priest", "Warrior+Hunter", "Warrior+Shaman",
+                     "Rogue+Priest", "Rogue+Hunter", "Rogue+Shaman", "Priest+Hunter", "Hunter+Shaman"}
 
 
 def healer_team(t):
@@ -93,6 +109,32 @@ def main(argv):
                     continue
                 for s in ss:
                     emit([g.row("ctl", m, a, b, s, ai_profile="TeamPlan")])
+    elif bank in ("h2h-eligible", "targeted"):
+        if bank == "h2h-eligible":
+            rule, ss, named, nc = argv[1], g.seeds(argv[2]), None, False
+        else:
+            ss, named, nc = g.seeds(argv[1]), set(argv[2].split(",")), len(argv) > 3
+        for seat in (1, 2):
+            for m in MAPS:
+                for a, b in cells:
+                    side, enemy = (a, b)[seat - 1], (a, b)[2 - seat]
+                    if not healer_team(side):
+                        continue
+                    name = "+".join([c for c in side if c not in HEALERS] + [c for c in side if c in HEALERS])
+                    for s in ss:
+                        if bank == "h2h-eligible":
+                            if "Paladin" in side or "+".join(enemy) in NO_STANCE_ENEMIES:
+                                continue
+                            emit([g.row(f"h2h-{rule}-t{seat}", m, a, b, s, ai_profile="TeamPlan",
+                                        **rule_config(rule, seat))])
+                        else:
+                            extra = {}
+                            if name in named:
+                                extra[f"team{seat}_withheld_plays"] = ["Pillar"]
+                            if nc:
+                                extra[f"team{seat}_hide_rule"] = "NoCover"
+                            label = "TargetedNC" if nc else "Targeted"
+                            emit([g.row(f"h2h-{label}-t{seat}", m, a, b, s, ai_profile="TeamPlan", **extra)])
     else:
         sys.exit(f"unknown bank {bank}")
 
