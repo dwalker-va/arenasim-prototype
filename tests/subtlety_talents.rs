@@ -590,6 +590,23 @@ fn hemorrhage_strikes_while_its_wound_is_down_or_low() {
         );
     }
 
+    // Another damage-taken increase on the target is not the wound.
+    let other = Aura {
+        effect_type: AuraType::DamageTakenIncrease,
+        duration: 12.0,
+        magnitude: 0.10,
+        ability_name: "Shadow Vulnerability".into(),
+        break_on_damage_threshold: -1.0,
+        ..Default::default()
+    };
+    let not_mine = strike_scene().aura_full(FOE, other).decide(ME);
+    assert_eq!(
+        not_mine.chose(),
+        Some((AbilityType::Hemorrhage, Some(FOE))),
+        "{}",
+        describe(&not_mine)
+    );
+
     let up = strike_scene().aura_full(FOE, wound(5, 12.0)).decide(ME);
     assert_eq!(
         up.chose(),
@@ -645,6 +662,47 @@ fn hemorrhage_pays_through_initiative() {
     let view = strike_scene().aura_full(ME, primed).decide(ME);
     assert_eq!(view.chose(), Some((AbilityType::Hemorrhage, Some(FOE))));
     assert!(near(view.resource_after, 80.0), "{}", view.resource_after);
+}
+
+/// Under the Burst play (`TeamPlan`, a kill window open on the low Warrior,
+/// its healer stunned) the burst's strike is the same choice: Hemorrhage
+/// while the wound is down, Sinister Strike while it is up.
+#[test]
+fn the_burst_strikes_with_hemorrhage_too() {
+    use arenasim::states::play_match::ai_profile::AiProfile;
+    use arenasim::states::play_match::decision_trace::{PlayStep, PlayTag};
+    use arenasim::states::play_match::situation::{PlaySet, CHAIN};
+    // The Chain play excepted, so the healer's stun is the burst's window
+    // and not a hand-off.
+    let scene = || {
+        strike_scene()
+            .ai_profile(1, AiProfile::TeamPlan)
+            .except_everywhere(1, PlaySet::of(&[CHAIN]))
+            .health_of(FOE, 0.2)
+            .unit("enemy priest", 2, CharacterClass::Priest)
+            .at(1.5, 30.0)
+            .aura("enemy priest", AuraType::Stun, 4.0)
+    };
+    for (wound_up, strike) in [
+        (false, AbilityType::Hemorrhage),
+        (true, AbilityType::SinisterStrike),
+    ] {
+        let s = if wound_up {
+            scene().aura_full(FOE, wound(5, 12.0))
+        } else {
+            scene()
+        };
+        let view = s.decide(ME);
+        let situation = view.situation.expect("a situation");
+        assert_eq!(situation.play, Some(PlayTag::Burst), "{}", describe(&view));
+        assert_eq!(situation.play_step, Some(PlayStep::Burst));
+        assert_eq!(
+            view.chose(),
+            Some((strike, Some(FOE))),
+            "wound up {wound_up}: {}",
+            describe(&view)
+        );
+    }
 }
 
 /// A Divine Shield on the kill target: immune to damage.
@@ -1105,6 +1163,16 @@ fn the_dance_does_not_break_its_teams_crowd_control() {
     assert!(!chose(&view, AbilityType::CheapShot), "{}", describe(&view));
     assert!(!chose(&view, AbilityType::Ambush), "{}", describe(&view));
     assert!(view.auras_queued.is_empty(), "{}", describe(&view));
+    // The ordinary rotation has the turn, and refuses its strike for the
+    // Polymorph (not for pooling).
+    assert!(
+        matches!(
+            view.rejected(AbilityType::Hemorrhage),
+            Some(RejectionReason::FriendlyBreakableCC)
+        ),
+        "{}",
+        describe(&view)
+    );
     // Control: the enemy's own Polymorph holds the target past the chain
     // window, so no Cheap Shot goes on it; the dance strikes it with Ambush.
     let control = polymorphed(dancing(), false).decide(ME);
