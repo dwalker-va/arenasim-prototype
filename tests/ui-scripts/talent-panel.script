@@ -15,11 +15,18 @@
 #   9. Reset clears the build, and the slot reads its class again;
 #  10. Affliction's Curse of Exhaustion adds a fourth curse tile, which goes
 #      away when the talent is taken back;
-#  11. one point back, a match started: the Warlock's team frame names the
-#      spec (awaited on the frame's own note, not a frame count).
+#  11. Destruction, the third tree, names its spec, and its capstone waits
+#      on its prerequisite;
+#  12. the slot made a Rogue: Assassination's Master Poisoner adds an
+#      off-hand poison choice, every poison but the main hand's, which goes
+#      away when the talent is taken back;
+#  13. the slot a Warlock again, one point back, a match started: the
+#      Warlock's team frame names the spec (awaited on the frame's own note,
+#      not a frame count).
 #
-# The Warlock's trees read Affliction first, so a Demonology build's
-# shorthand is "0/N".
+# The Warlock's trees read Affliction, Demonology, Destruction, so a
+# Demonology build's shorthand is "0/N/0"; the Rogue's read Assassination
+# first.
 #
 # Every wait is the driver's own (hover settles on egui's tooltip gate, a
 # click on the click): there is no frame count here.
@@ -43,24 +50,24 @@ assert-note tooltip:Talent(UnholyPower)
 
 # Spend three points in tier 1.
 click talent:DemonicEmbrace
-assert-note talents:t1s0 points=1 spec=Demonology Warlock 0/1
+assert-note talents:t1s0 points=1 spec=Demonology Warlock 0/1/0
 click talent:DemonicEmbrace
 click talent:FelStamina
-assert-note talents:t1s0 points=3 spec=Demonology Warlock 0/3
+assert-note talents:t1s0 points=3 spec=Demonology Warlock 0/3/0
 
 # Two points in the tiers above open tier 2.
 assert-enabled talent:UnholyPower true
 click talent:UnholyPower
-assert-note talents:t1s0 points=4 spec=Demonology Warlock 0/4
+assert-note talents:t1s0 points=4 spec=Demonology Warlock 0/4/0
 
 # A maxed node takes no more.
 assert-enabled talent:DemonicEmbrace false
 
 # Shift-click takes a rank back; a plain click learns it again.
 click talent:UnholyPower left shift
-assert-note talents:t1s0 points=3 spec=Demonology Warlock 0/3
+assert-note talents:t1s0 points=3 spec=Demonology Warlock 0/3/0
 click talent:UnholyPower
-assert-note talents:t1s0 points=4 spec=Demonology Warlock 0/4
+assert-note talents:t1s0 points=4 spec=Demonology Warlock 0/4/0
 
 # The deep link: right-click opens the talent's page.
 click talent:UnholyPower right
@@ -70,11 +77,11 @@ assert-view Talent(UnholyPower)
 # Back to the same combatant, the build still spent.
 key Escape
 assert-state ViewCombatant
-assert-note talents:t1s0 points=4 spec=Demonology Warlock 0/4
+assert-note talents:t1s0 points=4 spec=Demonology Warlock 0/4/0
 
 key Escape
 assert-state ConfigureMatch
-assert-note slot:t1s0 subtitle=Demonology Warlock 0/4
+assert-note slot:t1s0 subtitle=Demonology Warlock 0/4/0
 
 # Reset clears the build, and the slot reads its class again.
 click slot:t1s0
@@ -94,17 +101,61 @@ click talent:ImprovedDrainLife
 click talent:ImprovedDrainLife
 click talent:AmplifyCurse
 click talent:CurseOfExhaustion
-assert-note talents:t1s0 points=4 spec=Affliction Warlock 4/0
+assert-note talents:t1s0 points=4 spec=Affliction Warlock 4/0/0
 assert-enabled strategic:CurseOfExhaustion:e0 true
 click talent:CurseOfExhaustion left shift
-assert-note talents:t1s0 points=3 spec=Affliction Warlock 3/0
+assert-note talents:t1s0 points=3 spec=Affliction Warlock 3/0/0
 assert-absent strategic:CurseOfExhaustion:e0
 click talents:reset
 assert-note talents:t1s0 points=0 spec=No talents learned
 
+# Destruction, the third tree: two points open its tier 2, and its
+# capstone, Conflagrate, stays locked behind Improved Immolate.
+assert-enabled talent:Shadowburn false
+click talent:ImprovedShadowBolt
+click talent:ImprovedShadowBolt
+assert-note talents:t1s0 points=2 spec=Destruction Warlock 0/0/2
+assert-enabled talent:Shadowburn true
+click talent:Shadowburn
+assert-note talents:t1s0 points=3 spec=Destruction Warlock 0/0/3
+assert-enabled talent:Conflagrate false
+hover talent:Conflagrate
+assert-note tooltip:Talent(Conflagrate)
+click talents:reset
+assert-note talents:t1s0 points=0 spec=No talents learned
+
+# Master Poisoner: an off-hand poison choice, only while the talent is
+# learned, offering every poison but the main hand's (Crippling, the default).
+key Escape
+assert-state ConfigureMatch
+click slot:t1s0:change
+click class:Rogue
+click slot:t1s0
+assert-state ViewCombatant
+assert-absent strategic:DeadlyPoison:offhand
+click talent:VilePoisons
+click talent:VilePoisons
+click talent:MasterPoisoner
+assert-note talents:t1s0 points=3 spec=Assassination Rogue 3/0
+assert-enabled strategic:DeadlyPoison:offhand true
+assert-absent strategic:CripplingPoison:offhand
+click talent:MasterPoisoner left shift
+assert-note talents:t1s0 points=2 spec=Assassination Rogue 2/0
+assert-absent strategic:DeadlyPoison:offhand
+click talents:reset
+assert-note talents:t1s0 points=0 spec=No talents learned
+
+# Back to the Warlock.
+key Escape
+assert-state ConfigureMatch
+click slot:t1s0:change
+click class:Warlock
+click slot:t1s0
+assert-state ViewCombatant
+
 # A talented match: the Warlock's team frame reads the spec its build names.
 click talent:DemonicEmbrace
-assert-note talents:t1s0 points=1 spec=Demonology Warlock 0/1
+assert-note talents:t1s0 points=1 spec=Demonology Warlock 0/1/0
 key Escape
 assert-state ConfigureMatch
 click slot:t2s0
@@ -112,5 +163,5 @@ click class:Warrior
 assert-enabled configure:start true
 click configure:start
 assert-state PlayMatch
-await-note 30 frame-spec Warlock: Demonology Warlock 0/1
+await-note 30 frame-spec Warlock: Demonology Warlock 0/1/0
 dump

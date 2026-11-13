@@ -41,6 +41,24 @@ pub fn effect_text(effect: &TalentEffect, ranks: u8, abilities: &AbilityDefiniti
         TalentEffect::StatAdd(stat, points) => {
             format!("{} {}", stat_points(*stat, points * n), stat_name(*stat))
         }
+        // A stun's vulnerability reads as what it does to the victim.
+        TalentEffect::Patch {
+            on,
+            field: AbilityField::AuraVulnerability,
+            op: PatchOp::Add(value),
+        } => {
+            let victim = match on {
+                PatchTarget::Ability(ability) => abilities.get(ability).map_or_else(
+                    || format!("A {ability:?} victim"),
+                    |c| format!("A {} victim", c.name),
+                ),
+                PatchTarget::School(school) => format!("The victim of a {school:?} stun"),
+            };
+            format!(
+                "{victim} takes {} more damage while stunned",
+                unsigned_percent(value * n)
+            )
+        }
         TalentEffect::Patch { on, field, op } => {
             let target = match on {
                 PatchTarget::Ability(ability) => abilities
@@ -183,7 +201,11 @@ pub fn proc_clause(proc: &TalentProc, abilities: &AbilityDefinitions) -> String 
                     .map_or_else(|| format!("{a:?}"), |d| d.name.clone())
             })
             .collect();
-        names.join(" or ")
+        // "A or B", and "A, B or C" for more.
+        match names.split_last() {
+            Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+            _ => names.join(""),
+        }
     };
     let of = |what: &str| {
         if proc.abilities.is_empty() {
@@ -219,6 +241,8 @@ pub fn proc_clause(proc: &TalentProc, abilities: &AbilityDefinitions) -> String 
             duration,
             tick_interval,
             dispel_type,
+            scope,
+            charges,
             ..
         } => {
             let whom = match on {
@@ -239,8 +263,8 @@ pub fn proc_clause(proc: &TalentProc, abilities: &AbilityDefinitions) -> String 
                 break_on_damage: -1.0,
                 tick_interval: *tick_interval,
                 dr_category: None,
-                scope: None,
-                charges: None,
+                scope: *scope,
+                charges: *charges,
                 dispel_type: *dispel_type,
                 stacking: None,
                 bloom: None,
@@ -249,6 +273,7 @@ pub fn proc_clause(proc: &TalentProc, abilities: &AbilityDefinitions) -> String 
                 leech: None,
                 next_cast: None,
                 triggered_absorb: None,
+                vulnerability: 0.0,
             });
             format!("{} (on {whom})", in_clause(&sentence))
         }
@@ -296,12 +321,19 @@ pub fn talent_proc_description(
 /// turned to semicolons. "Roots the target for 4 sec. Breaks after 80
 /// damage." reads "roots the target for 4 sec; breaks after 80 damage".
 fn in_clause(sentence: &str) -> String {
-    let body = sentence.trim().trim_end_matches('.').replace(". ", "; ");
-    let mut chars = body.chars();
-    match chars.next() {
-        Some(first) => first.to_lowercase().chain(chars).collect(),
-        None => String::new(),
-    }
+    sentence
+        .trim()
+        .trim_end_matches('.')
+        .split(". ")
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_lowercase().chain(chars).collect(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<String>>()
+        .join("; ")
 }
 
 /// Every rank's text, one line each: "Rank 1: +3% maximum health." A
@@ -506,6 +538,7 @@ fn field_name(field: AbilityField) -> &'static str {
         AbilityField::AuraStrength => "effect strength",
         AbilityField::PeriodicDamage => "damage over time",
         AbilityField::ManaPerHealth => "mana gained",
+        AbilityField::AuraVulnerability => "damage taken while stunned",
     }
 }
 
@@ -513,7 +546,9 @@ fn field_name(field: AbilityField) -> &'static str {
 /// percentage points ("+3% Shadow Bolt critical strike chance").
 fn field_is_fraction(field: AbilityField) -> bool {
     match field {
-        AbilityField::CritChance | AbilityField::ApplicationChance => true,
+        AbilityField::CritChance
+        | AbilityField::ApplicationChance
+        | AbilityField::AuraVulnerability => true,
         AbilityField::CastTime
         | AbilityField::Range
         | AbilityField::MinRange
@@ -569,6 +604,7 @@ fn field_unit(field: AbilityField) -> &'static str {
         | AbilityField::CritChance
         | AbilityField::AuraStrength
         | AbilityField::ManaPerHealth
+        | AbilityField::AuraVulnerability
         // Take only a Mul, which is written as a percentage.
         | AbilityField::Damage
         | AbilityField::PeriodicDamage => "",
@@ -611,6 +647,39 @@ mod tests {
         );
         assert_eq!(text(TalentId::SwiftBlades, 1), "+10% melee attack speed.");
         assert_eq!(text(TalentId::ExposeArmor, 1), "Learn Expose Armor.");
+    }
+
+    /// The Assassination tree's nodes: every poison's own change, the off-hand
+    /// slot, what a Kidney Shot victim suffers, crit in points, and Rupture's
+    /// bleed.
+    #[test]
+    fn the_assassination_tree_reads_as_it_plays() {
+        let talents = TalentDefinitions::shipped();
+        let text = |id: TalentId, rank: u8| rank_text(talents.get(id).unwrap(), rank, abilities());
+        assert_eq!(
+            text(TalentId::VilePoisons, 2),
+            "+20% Crippling Poison effect strength, +40% Deadly Poison effect strength, \
+             +20% Wound Poison effect strength, +20% Mind-numbing Poison effect strength."
+        );
+        assert_eq!(
+            text(TalentId::ImprovedPoisons, 1),
+            "+10% Crippling Poison chance to apply, +10% Deadly Poison chance to apply, \
+             +10% Wound Poison chance to apply, +10% Mind-numbing Poison chance to apply."
+        );
+        assert_eq!(
+            text(TalentId::MasterPoisoner, 1),
+            "Opens a second poison slot for the off hand."
+        );
+        assert_eq!(
+            text(TalentId::ImprovedKidneyShot, 2),
+            "A Kidney Shot victim takes 10% more damage while stunned."
+        );
+        assert_eq!(text(TalentId::Malice, 2), "+2% critical strike chance.");
+        assert_eq!(text(TalentId::Rupture, 1), "Learn Rupture.");
+        assert_eq!(
+            text(TalentId::BloodSpatter, 1),
+            "+50% Rupture damage over time."
+        );
     }
 
     #[test]
@@ -740,6 +809,8 @@ mod tests {
                 duration: 6.0,
                 tick_interval: 0.0,
                 dispel_type: crate::states::play_match::components::DispelType::Physical,
+                scope: None,
+                charges: None,
                 name: None,
             },
             internal_cooldown: 0.0,
@@ -856,6 +927,8 @@ mod tests {
             duration: 3.0,
             tick_interval: 0.0,
             dispel_type: crate::states::play_match::components::DispelType::Auto,
+            scope: None,
+            charges: None,
             name: None,
         };
         blackout.internal_cooldown = 8.0;

@@ -242,6 +242,11 @@ pub struct AuraDamageMods {
     /// `None` on every other aura.
     pub triggered_absorb:
         Option<crate::states::play_match::triggered_absorbs::TriggeredAbsorbConfig>,
+    /// On a stun that carries one (`AuraEffect::vulnerability`, Improved Kidney
+    /// Shot): the damage-taken increase its victim suffers while it holds.
+    /// `apply_pending_auras` lands it as the stun's
+    /// [`CompoundDebuff::StunVulnerability`] rider. `None` on every other aura.
+    pub vulnerability: Option<f32>,
 }
 
 /// A debuff's REMOVAL CLASS — what kind of thing it is for the purpose of
@@ -917,6 +922,12 @@ pub enum CompoundDebuff {
     /// Physical damage taken, one buff. Nothing removes it: it has no dispel
     /// type, and it is held the whole match.
     Shadowform,
+    /// A stun (the face) and a damage-taken increase on its victim, one
+    /// debuff: Kidney Shot with Improved Kidney Shot. The victim takes more
+    /// damage exactly while it is stunned — a CC break, a replacing stun or
+    /// the stun's end takes the increase with it. Built only from a stun
+    /// whose config carries a `vulnerability` (`AuraEffect::compound`).
+    StunVulnerability,
 }
 
 impl CompoundDebuff {
@@ -928,11 +939,12 @@ impl CompoundDebuff {
     /// exhaustive match is.** What it buys is COVERAGE: the guards below sweep
     /// it, so compound N+1 is checked the moment it is declared here, instead
     /// of a test quietly continuing to check only the one it was written for.
-    pub const ALL: [CompoundDebuff; 4] = [
+    pub const ALL: [CompoundDebuff; 5] = [
         CompoundDebuff::FrostArmorChill,
         CompoundDebuff::MarkOfTheWild,
         CompoundDebuff::EntanglingRoots,
         CompoundDebuff::Shadowform,
+        CompoundDebuff::StunVulnerability,
     ];
 
     /// The effect that REPRESENTS this debuff: the icon the frames draw, the
@@ -958,6 +970,7 @@ impl CompoundDebuff {
             CompoundDebuff::MarkOfTheWild => AuraType::MaxHealthIncrease,
             CompoundDebuff::EntanglingRoots => AuraType::Root,
             CompoundDebuff::Shadowform => AuraType::DamageDealtIncrease,
+            CompoundDebuff::StunVulnerability => AuraType::Stun,
         }
     }
 }
@@ -1695,7 +1708,9 @@ impl ActiveAuras {
 ///   holder's stats, and expiry takes back what the aura carries, so the two
 ///   must not drift apart;
 /// - its tick CADENCE is kept: a refreshed heal over time goes on ticking on
-///   the beat it already had.
+///   the beat it already had;
+/// - its hit charges back to `fresh`'s: a refreshed Shadow Vulnerability
+///   holds its four hits again, whatever it had spent.
 ///
 /// Shared by `apply_pending_auras`'s two aura stores — the live component,
 /// and the auras accumulating this frame for a target that has none yet.
@@ -1709,6 +1724,7 @@ pub fn refresh_stacking_aura(auras: &mut [Aura], fresh: &Aura) -> Option<u8> {
     existing.duration = fresh.duration;
     existing.caster = fresh.caster;
     existing.bloom = fresh.bloom;
+    existing.damage_mods.charges = fresh.damage_mods.charges;
     if !matches!(
         existing.effect_type,
         AuraType::MaxHealthIncrease | AuraType::MaxManaIncrease
@@ -1799,7 +1815,7 @@ impl AuraPending {
                 // The FACE of a compound, when the RON declares one; its riders
                 // are pulled in by `apply_pending_auras` when the face lands.
                 // See `CompoundDebuff`.
-                compound: aura_effect.compound,
+                compound: aura_effect.compound(),
                 source_item: None,
                 source_talent: None,
                 next_cast: aura_effect.next_cast.clone(),
@@ -1862,7 +1878,7 @@ impl AuraPending {
                 dispel_type,
                 // The FACE of a compound, when the RON declares one. See
                 // `CompoundDebuff`.
-                compound: aura_effect.compound,
+                compound: aura_effect.compound(),
                 source_item: None,
                 source_talent: None,
                 next_cast: aura_effect.next_cast.clone(),
@@ -1924,7 +1940,7 @@ impl AuraPending {
                 dispel_type,
                 // The FACE of a compound, when the RON declares one. See
                 // `CompoundDebuff`.
-                compound: aura_effect.compound,
+                compound: aura_effect.compound(),
                 source_item: None,
                 source_talent: None,
                 next_cast: aura_effect.next_cast.clone(),
@@ -2361,6 +2377,15 @@ mod compound_tests {
                 })
                 .chain(crate::states::play_match::combat_core::compound_riders(
                     CompoundDebuff::Shadowform,
+                ))
+                .collect(),
+                CompoundDebuff::StunVulnerability => std::iter::once(Aura {
+                    effect_type: AuraType::Stun,
+                    compound: Some(CompoundDebuff::StunVulnerability),
+                    ..Default::default()
+                })
+                .chain(crate::states::play_match::combat_core::compound_riders(
+                    CompoundDebuff::StunVulnerability,
                 ))
                 .collect(),
             };

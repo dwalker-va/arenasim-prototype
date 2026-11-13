@@ -461,6 +461,7 @@ const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
     AimedShot,
     Ambush,
     ArcaneShot,
+    Conflagrate,
     DeathCoil,
     DrainLife,
     FrostNova,
@@ -475,6 +476,7 @@ const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
     Moonfire,
     MortalStrike,
     Shadowbolt,
+    Shadowburn,
     SinisterStrike,
     WoundPoison,
 ];
@@ -517,7 +519,16 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
     }
 }
 
-const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
+const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[
+    (
+        Conflagrate,
+        "AS-348 (Shadowburn and Conflagrate, the Destruction casts; AS-334's talent visuals)",
+    ),
+    (
+        Shadowburn,
+        "AS-348 (Shadowburn and Conflagrate, the Destruction casts; AS-334's talent visuals)",
+    ),
+];
 
 #[test]
 fn direct_damage_finds_every_member() {
@@ -569,6 +580,7 @@ const DOT_MEMBERS: &[AbilityType] = &[
     Immolate,
     Moonfire,
     Rend,
+    Rupture,
     SerpentSting,
     ShadowWordPain,
     SiphonLife,
@@ -576,10 +588,16 @@ const DOT_MEMBERS: &[AbilityType] = &[
 ];
 
 /// DoTs that land with nothing drawn yet.
-const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
-    SiphonLife,
-    "AS-347 (Siphon Life, the Affliction drain; its heal-back is icon-only by ruling)",
-)];
+const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[
+    (
+        Rupture,
+        "AS-336 (Rupture, the Assassination bleed; AS-365 builds it on Rend's bleed drips)",
+    ),
+    (
+        SiphonLife,
+        "AS-347 (Siphon Life, the Affliction drain; its heal-back is icon-only by ruling)",
+    ),
+];
 
 /// The DoT STATE a member's aura routes to. The aura carries the ability's
 /// RON `name:`, so this sweeps the config name through the very router every

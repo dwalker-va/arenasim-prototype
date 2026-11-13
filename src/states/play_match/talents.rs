@@ -170,6 +170,21 @@ talent_ids! {
     SiphonLife,
     CurseOfExhaustion,
     ShadowMastery,
+    // Warlock: Destruction
+    ImprovedShadowBolt,
+    Bane,
+    Aftermath,
+    Shadowburn,
+    ImprovedImmolate,
+    Conflagrate,
+    // Rogue: Assassination
+    VilePoisons,
+    ImprovedPoisons,
+    MasterPoisoner,
+    ImprovedKidneyShot,
+    Malice,
+    Rupture,
+    BloodSpatter,
 }
 
 /// A talent tree. A tree is named per class: `(class, TreeId)` is the key.
@@ -181,6 +196,8 @@ pub enum TreeId {
     Shadow,
     Protection,
     Discipline,
+    Destruction,
+    Assassination,
 }
 
 /// One tree of a class, as `talents.ron` lists it. A class's trees are in
@@ -453,6 +470,11 @@ pub enum AbilityField {
     /// takes (Life Tap: 1.0). Present only on an ability that converts.
     /// Improved Life Tap's field.
     ManaPerHealth,
+    /// The damage-taken increase a stun's victim suffers while the stun holds
+    /// (`AuraEffect::vulnerability`, `0.0` on every shipped stun): `0.05` is
+    /// 5% more damage from every source. Present only on an ability whose
+    /// aura is a stun. Improved Kidney Shot's field.
+    AuraVulnerability,
 }
 
 impl AbilityField {
@@ -496,6 +518,9 @@ impl AbilityField {
                 .health_to_mana
                 .as_mut()
                 .map(|conversion| &mut conversion.mana_per_health),
+            AbilityField::AuraVulnerability => aura
+                .filter(|a| a.aura_type == AuraType::Stun)
+                .map(|a| &mut a.vulnerability),
         }
     }
 
@@ -578,6 +603,7 @@ impl AbilityField {
             AbilityField::AuraTickInterval => &[AbilityField::AuraTickInterval],
             AbilityField::CritChance => &[AbilityField::CritChance],
             AbilityField::AuraStrength => &[AbilityField::AuraStrength],
+            AbilityField::AuraVulnerability => &[AbilityField::AuraVulnerability],
         }
     }
 

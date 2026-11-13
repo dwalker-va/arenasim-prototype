@@ -41,6 +41,11 @@ const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::InnerFocus, priest_ally_dying),
     (AbilityType::PowerInfusion, priest_kill_window),
     (AbilityType::PainSuppression, priest_ally_dying),
+    (AbilityType::Shadowburn, warlock_target_low),
+    (AbilityType::Conflagrate, warlock_immolate_up),
+    // Expose Armor's moment: below the Kidney Shot planner, on the kill
+    // target.
+    (AbilityType::Rupture, expose_armor_scene),
 ];
 
 /// A Warlock 20 yards from its kill target, a Warrior, with Corruption and
@@ -72,6 +77,36 @@ fn warlock_dots_up(defs: &AbilityDefinitions) -> (Scene, Who) {
     scene.combatant_mut(WARLOCK).warlock_curse_prefs =
         vec![arenasim::states::match_config::WarlockCurse::Agony];
     (scene, WARLOCK)
+}
+
+/// [`warlock_dots_up`] with the Warrior 15 yards off and below the line the
+/// team calls an enemy low: Shadowburn's finisher.
+fn warlock_target_low(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let (scene, who) = warlock_dots_up(defs);
+    (scene.place(WARRIOR, 15.0, 0.0).health_of(WARRIOR, 0.2), who)
+}
+
+/// [`warlock_dots_up`] with the Warlock's curse and its own Immolate on the
+/// Warrior too: Conflagrate's moment.
+fn warlock_immolate_up(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let (mut scene, who) = warlock_dots_up(defs);
+    let me = scene.entity(WARLOCK);
+    for name in ["Curse of Agony", "Immolate"] {
+        scene = scene.aura_full(
+            WARRIOR,
+            Aura {
+                effect_type: AuraType::DamageOverTime,
+                duration: 15.0,
+                magnitude: 4.0,
+                tick_interval: 3.0,
+                ability_name: name.into(),
+                caster: Some(me),
+                break_on_damage_threshold: -1.0,
+                ..Default::default()
+            },
+        );
+    }
+    (scene, who)
 }
 
 const PALADIN: Who = "paladin";

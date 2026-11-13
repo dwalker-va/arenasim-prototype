@@ -752,12 +752,67 @@ fn draw_sheet(
             if let Some(poison) =
                 strategic_option_panel(ui, "Weapon Poison", &options, current, encyclopedia_data)
             {
-                set_slot_value(
-                    &mut match_config.team1_rogue_poisons,
-                    &mut match_config.team2_rogue_poisons,
+                match_config.set_rogue_poison(view_state.team, view_state.slot, poison);
+            }
+
+            // The off-hand poison (Master Poisoner): every poison offered but
+            // the main hand's. The slot holds one exactly while the build
+            // opens it — `keep_choices_offered`, after the talent panel below,
+            // fills it, keeps it off the main hand's and empties it — so a
+            // slot the talent opened this frame shows its row the next.
+            let offhand = slot_value(
+                &match_config.team1_rogue_offhand_poisons,
+                &match_config.team2_rogue_offhand_poisons,
+                view_state,
+            );
+            if let Some(current) = offhand {
+                let build = slot_build(match_config, view_state);
+                let main = slot_value(
+                    &match_config.team1_rogue_poisons,
+                    &match_config.team2_rogue_poisons,
                     view_state,
-                    poison,
                 );
+                let offered: Vec<RoguePoison> = RoguePoison::ALL
+                    .into_iter()
+                    .filter(|poison| {
+                        *poison != main
+                            && data.talents.offers(
+                                &build,
+                                super::play_match::talent_choices::ChoiceOption::RoguePoison(
+                                    *poison,
+                                ),
+                            )
+                    })
+                    .collect();
+                pick_section(ui);
+                let tiles: Vec<ChoiceOption> = offered
+                    .iter()
+                    .map(|poison| ChoiceOption {
+                        label: poison.name(),
+                        texture: ability_icon(poison.name()),
+                        ability: Some(poison.ability()),
+                    })
+                    .collect();
+                let selected = offered
+                    .iter()
+                    .position(|p| *p == current)
+                    .unwrap_or_default();
+                if let Some(i) = tagged_choice_panel(
+                    ui,
+                    "Off-Hand Poison",
+                    &tiles,
+                    selected,
+                    current.description(),
+                    encyclopedia_data,
+                    Some("offhand"),
+                ) {
+                    set_slot_value(
+                        &mut match_config.team1_rogue_offhand_poisons,
+                        &mut match_config.team2_rogue_offhand_poisons,
+                        view_state,
+                        Some(offered[i]),
+                    );
+                }
             }
         }
         CharacterClass::Warrior => {
@@ -2003,14 +2058,15 @@ struct ChoiceOption<'a> {
 ///
 /// An option that is an ability hovers to the same slim summary the kit rows
 /// show — one builder. Click is the pick and nothing else: the kit list is
-/// where each of these abilities links on to its page. `enemy_slot` names a
-/// row that is repeated per enemy (the Warlock's curses), so its tiles'
-/// `--ui-script` ids stay distinct: `strategic:<Ability>:e<slot>`.
+/// where each of these abilities links on to its page. `id_suffix` names a
+/// row whose abilities another row also offers — one repeated per enemy (the
+/// Warlock's curses, `e<slot>`), or the Rogue's off-hand poison (`offhand`) —
+/// so its tiles' `--ui-script` ids stay distinct: `strategic:<Ability>:<suffix>`.
 fn choice_row(
     ui: &mut egui::Ui,
     options: &[ChoiceOption],
     selected: usize,
-    enemy_slot: Option<usize>,
+    id_suffix: Option<&str>,
     data: &EncyclopediaData,
 ) -> Option<usize> {
     let mut clicked = None;
@@ -2026,12 +2082,12 @@ fn choice_row(
                 clicked = Some(i);
             }
             if let Some(ability) = option.ability {
-                match enemy_slot {
-                    Some(e) => ui_driver::mark(
+                match id_suffix {
+                    Some(suffix) => ui_driver::mark(
                         ui,
                         response.rect,
                         true,
-                        format_args!("strategic:{ability:?}:e{e}"),
+                        format_args!("strategic:{ability:?}:{suffix}"),
                     ),
                     None => ui_driver::mark(
                         ui,
@@ -2070,11 +2126,24 @@ fn choice_panel(
     description: &str,
     data: &EncyclopediaData,
 ) -> Option<usize> {
+    tagged_choice_panel(ui, title, options, selected, description, data, None)
+}
+
+/// [`choice_panel`], its tiles' ids carrying `id_suffix` ([`choice_row`]).
+fn tagged_choice_panel(
+    ui: &mut egui::Ui,
+    title: &str,
+    options: &[ChoiceOption],
+    selected: usize,
+    description: &str,
+    data: &EncyclopediaData,
+    id_suffix: Option<&str>,
+) -> Option<usize> {
     panel(None)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             panel_header(ui, title, color::ACCENT, |_| {});
-            let clicked = choice_row(ui, options, selected, None, data);
+            let clicked = choice_row(ui, options, selected, id_suffix, data);
             ui.add_space(space::SM);
             widget::prose(ui, description, text::BODY, color::TEXT_MUTED);
             clicked
@@ -2381,7 +2450,8 @@ fn render_warlock_curse_panel(
                         enemy_label(ui, enemy_slot, *enemy_class, class_icons);
                     },
                 );
-                if let Some(i) = choice_row(ui, &tiles, selected, Some(enemy_slot), data) {
+                let suffix = format!("e{enemy_slot}");
+                if let Some(i) = choice_row(ui, &tiles, selected, Some(&suffix), data) {
                     changed_curse = Some((enemy_slot, curses[i].0));
                 }
             });

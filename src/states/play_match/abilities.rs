@@ -255,6 +255,11 @@ pub enum AbilityType {
     InnerFocus,      // talent: the Priest's next spell is free, +25% crit
     PowerInfusion,   // talent: an ally gains 24 spell power for 15s
     PainSuppression, // talent: an ally takes 40% less damage for 8s
+    // Warlock: the Destruction tree (AS-411). Appended for the same reason.
+    Shadowburn,  // talent: instant Shadow damage, 20yd, 15s
+    Conflagrate, // talent: instant Fire damage that consumes the Warlock's Immolate
+    // Rogue: the Assassination tree (AS-417). Appended for the same reason.
+    Rupture, // talent: a Physical bleed, 60 damage over 12s
 }
 
 impl AbilityType {
@@ -272,7 +277,7 @@ impl AbilityType {
             // Weapon strikes, at melee range. Heroic Strike rides the next
             // auto-attack swing, so it is rolled where that swing is.
             HeroicStrike | MortalStrike | Rend | Pummel | Ambush | CheapShot | SinisterStrike
-            | KidneyShot | Kick | ExposeArmor => true,
+            | KidneyShot | Kick | ExposeArmor | Rupture => true,
             // A charge closes the gap; what it lands on arrival is not a
             // weapon strike, and it is cast from 25 yards.
             Charge | BoarCharge => false,
@@ -296,7 +301,7 @@ impl AbilityType {
             | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild | Innervate | EntanglingRoots
             | Cyclone | TravelForm | Shadowform | DivineProtection | BlessingOfSacrifice
             | SacredShield | RetributionAura | SiphonLife | AmplifyCurse | CurseOfExhaustion
-            | InnerFocus | PowerInfusion | PainSuppression => false,
+            | InnerFocus | PowerInfusion | PainSuppression | Shadowburn | Conflagrate => false,
         }
     }
 

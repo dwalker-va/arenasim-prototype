@@ -93,6 +93,8 @@ fn certain(trigger: TalentTrigger, name: &str) -> TalentProc {
             duration: 5.0,
             tick_interval: 0.0,
             dispel_type: DispelType::Physical,
+            scope: None,
+            charges: None,
             name: Some(name.to_string()),
         },
         internal_cooldown: 0.0,
@@ -286,6 +288,8 @@ fn a_spell_hit_proc_lands_its_aura_on_the_enemy_struck() {
         duration: 5.0,
         tick_interval: 0.0,
         dispel_type: DispelType::Auto,
+        scope: None,
+        charges: None,
         name: Some("Aftermath".to_string()),
     };
     // The Priest staged under every damage over time the Warlock opens
@@ -387,6 +391,8 @@ fn a_heal_crit_proc_lands_on_the_ally_healed() {
         duration: 15.0,
         tick_interval: 0.0,
         dispel_type: DispelType::Auto,
+        scope: None,
+        charges: None,
         name: Some("Inspiration".to_string()),
     };
     let stage = |crit: f32| {
@@ -1356,6 +1362,8 @@ fn a_crit_taken_proc_lands_its_aura_on_the_attacker() {
         duration: 5.0,
         tick_interval: 0.0,
         dispel_type: DispelType::Physical,
+        scope: None,
+        charges: None,
         name: Some("Marked".to_string()),
     };
     let cases: [(&str, &str, Stage); 3] = [

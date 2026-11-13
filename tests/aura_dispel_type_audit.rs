@@ -236,6 +236,8 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::MindNumbingPoison => config(S::Poison, T::Poison),
         // TBC 26866 (every rank): DispelType 0.
         AbilityType::ExposeArmor => config(S::Physical, T::NoType),
+        // 1943 .. 26867, every rank DispelType 0 (Mechanic 15, bleed).
+        AbilityType::Rupture => config(S::Physical, T::NoType),
 
         // ---- Warlock ----
         AbilityType::Corruption => config(S::Magic, T::Magic),
@@ -255,6 +257,10 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::AmplifyCurse => config(S::Magic, T::Magic),
         // 18223, 29539: DispelType 2 (Curse).
         AbilityType::CurseOfExhaustion => config(S::Curse, T::Curse),
+        // 17877: its soul-shard debuff (29341) is not modelled; a plain hit.
+        AbilityType::Shadowburn => Row::NoAura,
+        // 17962: a plain hit; the Immolate it consumes is Immolate's row.
+        AbilityType::Conflagrate => Row::NoAura,
         AbilityType::SpellLock => Row::NoAura,
         AbilityType::DevourMagic => Row::NoAura,
 

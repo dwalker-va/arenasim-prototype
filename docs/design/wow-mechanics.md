@@ -120,6 +120,12 @@ Implemented WoW Classic mechanics adapted for our autobattler. Reference this do
   - **Mind-numbing** (50%): cast times +60% for 14s, refreshed by a new proc.
   The other three land through `apply_pending_auras`. All four are poisons:
   Cleanse removes them (a stack at a time), Dispel Magic does not.
+  - **Assassination** (Rogue talents) strengthens them and never chooses them:
+    Vile Poisons makes each stronger relative to its own base (Crippling,
+    Wound and Mind-numbing 10% a rank, Deadly 20%), Improved Poisons adds 10
+    points of application chance a rank, and Master Poisoner opens a second,
+    different poison for the off hand (`team{1,2}_rogue_offhand_poisons`), whose
+    swings roll it instead of the main hand's.
 - **Healing reductions and cast-time increases do not compound** (TBC): only
   the strongest healing reduction on a target applies (`healing_multiplier` —
   Mortal Strike's and Aimed Shot's 35% under Wound Poison's 50% is 50%), and only
@@ -294,6 +300,23 @@ for a build with its Affliction talent. A curse whose effect diminishes
 it. Amplify Curse (Affliction) makes the next Curse of Agony or Weakness 50%
 stronger; it is off the global cooldown, so the curse follows at once.
 
+### Destruction (Warlock)
+The burst tree (AS-411). Bane cuts Shadow Bolt's and Immolate's cast 0.25s a
+rank (2.0 -> 1.5 at 2/2); Improved Immolate raises Immolate's landing 25%,
+not its burn. Two procs on a hit (`SpellHit`), each rank adding its chance:
+Improved Shadow Bolt (10% a rank, on a Shadow Bolt hit) lays Shadow
+Vulnerability on the target, +10% Shadow damage taken for 4 direct hits or
+12s (a tick spends no charge, and a fresh proc gives the four back); Aftermath
+(5% a rank, on a Shadow Bolt, Immolate, Shadowburn or Conflagrate hit) slows
+the target 30% for 5s, on the Slows bucket. Both are Magic, as in TBC; the
+vulnerability, a stat debuff, is not dispellable here. Shadowburn (instant
+Shadow, 20yd, 15s) is a finisher, cast on a target below `kill_hp_threshold`.
+Conflagrate (instant Fire, 15s, the capstone, needs Improved Immolate) is cast
+as soon as the Warlock's own Immolate burns on its target, and consumes it as
+it lands: only the caster's own, never another Warlock's (a heal that
+consumes, Swiftmend, takes another's when its caster has none), and nothing
+from a target immune to the hit.
+
 ### Rage (Warrior)
 - Max: 100
 - Starts every match at 0: the pre-match countdown holds rage empty while it
@@ -362,6 +385,18 @@ tests fail if a full-CC type or spell is left unlabelled.
 ### Stun
 - Prevents all actions (movement, attacking, casting)
 - Examples: Kidney Shot, Charge stun component
+- Improved Kidney Shot (Assassination) makes a Kidney Shot victim take 5% more
+  damage a rank, from every source, while the stun holds: a stun with a
+  `vulnerability` lands a `DamageTakenIncrease` rider bound to it as one
+  compound debuff (`CompoundDebuff::StunVulnerability`), so diminishing returns,
+  a crowd-control break or the stun's end take the rider with it.
+
+### Bleeds
+- Rend (Warrior) and Rupture (Rogue, an Assassination talent: 10 every 2s for
+  12s, 25 energy, 20s cooldown) are Physical damage over time. A bleed is not
+  a poison and not magic: no dispel, cleanse or purge removes it. Blood
+  Spatter (Assassination's capstone) makes Rupture tick 50% harder. The Rogue
+  keeps Rupture rolling on its kill target whenever its cooldown allows.
 
 ### Fear
 - Target runs in random directions
