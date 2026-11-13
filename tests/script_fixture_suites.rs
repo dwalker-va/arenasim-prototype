@@ -74,7 +74,7 @@ fn run_suite(relative: &str) {
     }
 }
 
-/// The scaffolding the other six suites inherit their offline guarantee from,
+/// The scaffolding the other seven suites inherit their offline guarantee from,
 /// plus the repo-wide interpreter floor.
 #[test]
 fn harness_suite_passes() {
@@ -117,4 +117,12 @@ fn gen_sweep_fixture_suite_passes() {
 #[test]
 fn paired_sweep_fixture_suite_passes() {
     run_suite("scripts/tests/test_paired_sweep.py");
+}
+
+/// What the TBC `SpellCategories` generator refuses to write: a stale
+/// EXPLICIT or EXCLUDED entry, or an EXPLICIT spell its build lacks. Its
+/// output is the fixture `tests/prevention_tbc_audit.rs` holds the book to.
+#[test]
+fn tbc_spell_categories_fixture_suite_passes() {
+    run_suite("scripts/tests/test_tbc_spell_categories.py");
 }

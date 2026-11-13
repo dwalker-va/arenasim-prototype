@@ -3971,6 +3971,7 @@ armor             None         Warrior Mage Rogue Priest Warlock Paladin Hunter 
         scaling.iter().any(|stat| match stat {
             ScalingStat::SpellPower => item.spell_power > 0.0,
             ScalingStat::AttackPower => item.attack_power > 0.0,
+            ScalingStat::WeaponDamage => item.is_weapon,
             ScalingStat::None => false,
         })
     }

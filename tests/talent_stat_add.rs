@@ -113,6 +113,9 @@ fn assert_stat_add(stat: TalentStat, points: f32, fields: &[&str]) {
     c.attack_damage = 10.0;
     c.melee_damage = 20.0;
     c.offhand_damage = 30.0;
+    // A two-hander in the main hand, so a two-handed add has a swing to
+    // reach (the live one: no melee main hand beside a bow).
+    c.two_handed = true;
     c.current_health = 1.0;
     c.current_mana = 1.0;
     let before = totals(&c);
@@ -177,6 +180,7 @@ stat_add_reaches! {
     stat_add_holy_resistance: HolyResistance, 5.0 => ["holy_resistance"];
     stat_add_weapon_damage: WeaponDamage, 3.0 => ["attack_damage", "melee_damage", "offhand_damage"];
     stat_add_offhand_damage: OffHandDamage, 3.0 => ["offhand_damage"];
+    stat_add_two_handed_weapon_damage: TwoHandedWeaponDamage, 3.0 => ["attack_damage"];
     stat_add_dodge_chance: DodgeChance, 0.04 => ["dodge_chance"];
     stat_add_parry_chance: ParryChance, 0.04 => ["parry_chance"];
     stat_add_melee_attack_speed: MeleeAttackSpeed, 0.1 => ["melee_attack_speed_bonus"];

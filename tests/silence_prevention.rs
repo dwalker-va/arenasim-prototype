@@ -1,8 +1,7 @@
 //! A silence stops only what TBC's `PreventionType` says it stops (AS-291).
 //!
 //! Every ability carries its TBC `prevention` (`abilities.ron`, checked
-//! against the client by
-//! `docs/design/balance/sweeps/2026-10-12-as287-tbc-interruptibility.py`). A
+//! against the client by `tests/prevention_tbc_audit.rs`). A
 //! silence stops a Silence-prevented ability that costs mana — begun or
 //! already being cast — and nothing else. So a silenced Hunter still shoots
 //! (Aimed Shot, Arcane Shot, Concussive Shot, Serpent Sting and Disengage are
@@ -63,8 +62,9 @@ fn silence(duration: f32) -> Aura {
 
 /// The abilities a silenced caster may still use, among those a silence could
 /// touch at all (a mana user's mana-costing abilities), are exactly the
-/// Hunter's five Pacify shots, the Druid's Travel Form and the Priest's
-/// Shadowform (TBC PreventionType 0 for both forms) — asked of the same
+/// Hunter's five Pacify shots, the Paladin's Crusader Strike (Pacify, TBC
+/// 35395), the Druid's Travel Form and the Priest's Shadowform (TBC
+/// PreventionType 0 for both forms) — asked of the same
 /// guard every class AI asks, for a silenced caster of the owning class. Every
 /// other such ability is refused, and each is refused for the silence alone:
 /// the same caster unsilenced passes.
@@ -106,6 +106,7 @@ fn a_silence_stops_every_mana_ability_but_the_pacify_shots_and_the_forms() {
         AbilityType::Disengage,
         AbilityType::TravelForm,
         AbilityType::Shadowform,
+        AbilityType::CrusaderStrike,
     ]
     .into_iter()
     .collect();

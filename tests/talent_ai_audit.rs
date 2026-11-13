@@ -77,6 +77,11 @@ const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::AuraMastery, paladin_ally_casting_by_a_rogue),
     (AbilityType::HolyNova, priest_threatened),
     (AbilityType::GuardianSpirit, priest_ally_endangered),
+    (AbilityType::Repentance, paladin_enemy_healer_left_alone),
+    (AbilityType::CrusaderStrike, paladin_in_melee),
+    // Sinister Strike's moment, the target wearing no Hemorrhage.
+    (AbilityType::Hemorrhage, expose_armor_scene),
+    (AbilityType::ShadowDance, shadow_dance_scene),
 ];
 
 /// A Warlock 20 yards from its kill target, a Warrior, with Corruption and
@@ -202,6 +207,38 @@ fn paladin_ally_casting_by_a_rogue(defs: &AbilityDefinitions) -> (Scene, Who) {
     (scene, PALADIN)
 }
 
+/// A healthy Paladin and Mage on an enemy Warrior, its Priest 15 yards off
+/// and left alone: Repentance's moment.
+fn paladin_enemy_healer_left_alone(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PALADIN, 1, CharacterClass::Paladin)
+        .aura_full(PALADIN, devotion())
+        .targeting(WARRIOR)
+        .unit(MAGE, 1, CharacterClass::Mage)
+        .at(-10.0, 0.0)
+        .targeting(WARRIOR)
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(2.0, 0.0)
+        .targeting(PALADIN)
+        .unit("enemy priest", 2, CharacterClass::Priest)
+        .at(15.0, 0.0);
+    (scene, PALADIN)
+}
+
+/// A healthy Paladin in melee of its target, a Warrior, its Hammer of
+/// Justice spent: Crusader Strike's moment.
+fn paladin_in_melee(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(PALADIN, 1, CharacterClass::Paladin)
+        .aura_full(PALADIN, devotion())
+        .targeting(WARRIOR)
+        .cooldown(PALADIN, AbilityType::HammerOfJustice, 30.0)
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(2.0, 0.0)
+        .targeting(PALADIN);
+    (scene, PALADIN)
+}
+
 /// The Mage pressured but healthy: Sacred Shield's moment.
 fn paladin_ally_pressured(defs: &AbilityDefinitions) -> (Scene, Who) {
     paladin_ally_at(defs, 0.8)
@@ -220,6 +257,22 @@ fn expose_armor_scene(defs: &AbilityDefinitions) -> (Scene, Who) {
         .armor(2300.0)
         // Below the Kidney Shot planner: a ready stun would take the turn.
         .cooldown(ROGUE, AbilityType::KidneyShot, 10.0);
+    scene.combatant_mut(ROGUE).stealthed = false;
+    (scene, ROGUE)
+}
+
+/// A Rogue out of stealth at full energy, in melee of its kill target, a
+/// Warrior with no healer behind it, Kidney Shot ready and the Warrior's stun
+/// diminishing returns clear: the moment Shadow Dance's chain can run
+/// (`class_ai::rogue::try_shadow_dance`).
+fn shadow_dance_scene(defs: &AbilityDefinitions) -> (Scene, Who) {
+    const ROGUE: Who = "rogue";
+    let mut scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(ROGUE, 1, CharacterClass::Rogue)
+        .at(0.0, 0.0)
+        .targeting(WARRIOR)
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(1.5, 0.0);
     scene.combatant_mut(ROGUE).stealthed = false;
     (scene, ROGUE)
 }

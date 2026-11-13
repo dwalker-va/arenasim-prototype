@@ -252,6 +252,12 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::ExposeArmor => config(S::Physical, T::NoType),
         // 1943 .. 26867, every rank DispelType 0 (Mechanic 15, bleed).
         AbilityType::Rupture => config(S::Physical, T::NoType),
+        // The Subtlety tree (AS-419). TBC 16511..26864, every rank
+        // DispelType 0.
+        AbilityType::Hemorrhage => config(S::Physical, T::NoType),
+        // No TBC spell: Wrath 51713 (3.4.5.63697) has no SpellCategories
+        // row, so no dispel type.
+        AbilityType::ShadowDance => config(S::Untyped, T::NoType),
 
         // ---- Warlock ----
         AbilityType::Corruption => config(S::Magic, T::Magic),
@@ -308,6 +314,9 @@ fn expected(ability: AbilityType) -> Row {
         // 31821 has no SpellCategories row in TBC (a passive there) or in
         // Wrath 3.4.5.63697 (the active this is): no dispel type.
         AbilityType::AuraMastery => config(S::Untyped, T::NoType),
+        // The Retribution talents (AS-422).
+        AbilityType::Repentance => config(S::Magic, T::Magic), // 20066
+        AbilityType::CrusaderStrike => Row::NoAura,
 
         // ---- Hunter ----
         AbilityType::AimedShot => config(S::Physical, T::NoType),

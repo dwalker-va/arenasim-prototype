@@ -130,11 +130,20 @@ fn effect_parts(ability: AbilityType, config: &AbilityConfig, stats: &ClassBaseS
 
     let mut parts = Vec::new();
 
+    // A weapon strike's damage is its weapon's, which the class's base stats
+    // do not know: it reads as a share of the weapon's damage.
+    if config.damage_scales_with == ScalingStat::WeaponDamage && config.damage_coefficient > 0.0 {
+        parts.push(format!(
+            "Deals {:.0}% weapon damage.",
+            config.damage_coefficient * 100.0
+        ));
+    }
+
     // Calculate stat contribution for damage
     let damage_stat_value = match config.damage_scales_with {
         ScalingStat::AttackPower => stats.attack_power,
         ScalingStat::SpellPower => stats.spell_power,
-        ScalingStat::None => 0.0,
+        ScalingStat::WeaponDamage | ScalingStat::None => 0.0,
     };
     let damage_bonus = damage_stat_value * config.damage_coefficient;
 
@@ -699,6 +708,10 @@ pub fn build_aura_description(aura: &AuraEffect) -> String {
         AuraType::WindfuryBuff => {
             format!("Empowers melee auto-attacks for {:.0} sec.", aura.duration)
         }
+        AuraType::ShadowDance => format!(
+            "Ambush and Cheap Shot can be used without stealth for {:.0} sec.",
+            aura.duration
+        ),
         AuraType::SilenceInterruptImmunity => {
             format!(
                 "Removes Silence and grants immunity to silence and interrupt effects for {:.0} sec.",
@@ -747,6 +760,24 @@ mod tests {
         assert_eq!(
             build_aura_description(&aura),
             "Increases attack speed by 20% for 10 sec."
+        );
+    }
+
+    /// The Subtlety abilities' auras say what they do (AS-419): Hemorrhage's
+    /// stacking wound, and Shadow Dance's window.
+    #[test]
+    fn the_subtlety_auras_say_what_they_do() {
+        let defs = crate::states::play_match::ability_config::AbilityDefinitions::shipped();
+        let aura = |a: AbilityType| {
+            build_aura_description(defs.get_unchecked(&a).applies_aura.as_ref().unwrap())
+        };
+        assert_eq!(
+            aura(AbilityType::Hemorrhage),
+            "Increases Physical damage taken by 2% for 15 sec. Stacks up to 5 times."
+        );
+        assert_eq!(
+            aura(AbilityType::ShadowDance),
+            "Ambush and Cheap Shot can be used without stealth for 8 sec."
         );
     }
 

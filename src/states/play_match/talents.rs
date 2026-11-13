@@ -45,7 +45,7 @@ use super::ability_config::{AbilityConfig, AbilityDefinitions};
 use super::components::{AuraType, Combatant};
 use super::constants::{
     WEIGHT_ATTACK_POWER, WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN, WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA,
-    WEIGHT_MOVEMENT_SPEED, WEIGHT_RESISTANCE, WEIGHT_SPELL_POWER,
+    WEIGHT_RESISTANCE, WEIGHT_SPELL_POWER,
 };
 use super::equipment::{
     resolve_equipped_loadout, validate_class_restrictions, DefaultLoadouts, ItemDefinitions,
@@ -201,6 +201,22 @@ talent_ids! {
     PurifyingPower,
     LightsGrace,
     AuraMastery,
+    // Paladin: Retribution
+    Conviction,
+    PursuitOfJustice,
+    TwoHandedWeaponSpecialization,
+    Vengeance,
+    TheArtOfWar,
+    Repentance,
+    CrusaderStrike,
+    // Rogue: Subtlety
+    MasterOfSubtlety,
+    FleetFooted,
+    Initiative,
+    ImprovedAmbush,
+    CheatDeath,
+    Hemorrhage,
+    ShadowDance,
 }
 
 /// A talent tree. A tree is named per class: `(class, TreeId)` is the key.
@@ -215,6 +231,8 @@ pub enum TreeId {
     Destruction,
     Assassination,
     Holy,
+    Retribution,
+    Subtlety,
 }
 
 /// One tree of a class, as `talents.ron` lists it. A class's trees are in
@@ -256,6 +274,11 @@ pub enum TalentStat {
     WeaponDamage,
     /// The damage of the off-hand weapon's swing only.
     OffHandDamage,
+    /// The damage of the main hand's swing while it holds a two-handed weapon
+    /// (`Combatant::two_handed`), and of every strike that scales with it
+    /// (`ScalingStat::WeaponDamage`, Crusader Strike); nothing with a
+    /// one-hander. A percentage only.
+    TwoHandedWeaponDamage,
     /// Chance to dodge a melee attack (`Combatant::dodge_chance`). Points
     /// only.
     DodgeChance,
@@ -283,7 +306,11 @@ impl TalentStat {
             TalentStat::AttackPower => Some(WEIGHT_ATTACK_POWER),
             TalentStat::SpellPower => Some(WEIGHT_SPELL_POWER),
             TalentStat::CritChance => Some(WEIGHT_CRIT_CHANCE),
-            TalentStat::MovementSpeed => Some(WEIGHT_MOVEMENT_SPEED),
+            // Passive speed is one capped term the strongest source sets,
+            // never a sum, so the item weight (which priced boot speed that
+            // stacked) does not describe a talent's: a speed node declares
+            // its price, as a node on a free stat does.
+            TalentStat::MovementSpeed => None,
             TalentStat::FireResistance
             | TalentStat::FrostResistance
             | TalentStat::ShadowResistance
@@ -293,6 +320,7 @@ impl TalentStat {
             TalentStat::Armor
             | TalentStat::WeaponDamage
             | TalentStat::OffHandDamage
+            | TalentStat::TwoHandedWeaponDamage
             | TalentStat::DodgeChance
             | TalentStat::ParryChance
             | TalentStat::MeleeAttackSpeed => None,
@@ -323,7 +351,8 @@ impl TalentStat {
             | TalentStat::NatureResistance
             | TalentStat::HolyResistance
             | TalentStat::WeaponDamage
-            | TalentStat::OffHandDamage => false,
+            | TalentStat::OffHandDamage
+            | TalentStat::TwoHandedWeaponDamage => false,
         }
     }
 
@@ -347,6 +376,7 @@ impl TalentStat {
             TalentStat::HolyResistance => c.holy_resistance,
             TalentStat::WeaponDamage => c.attack_damage,
             TalentStat::OffHandDamage => c.offhand_damage,
+            TalentStat::TwoHandedWeaponDamage => c.two_handed_damage().unwrap_or(0.0),
             TalentStat::DodgeChance => c.dodge_chance,
             TalentStat::ParryChance => c.parry_chance,
             TalentStat::MeleeAttackSpeed => c.melee_attack_speed_bonus,
@@ -378,6 +408,11 @@ impl TalentStat {
                 stat(&mut c.offhand_damage);
             }
             TalentStat::OffHandDamage => stat(&mut c.offhand_damage),
+            TalentStat::TwoHandedWeaponDamage => {
+                if let Some(damage) = c.two_handed_damage_mut() {
+                    stat(damage);
+                }
+            }
             TalentStat::DodgeChance => stat(&mut c.dodge_chance),
             TalentStat::ParryChance => stat(&mut c.parry_chance),
             TalentStat::MeleeAttackSpeed => stat(&mut c.melee_attack_speed_bonus),
@@ -703,6 +738,7 @@ pub fn strength_is_remainder(aura: AuraType) -> bool {
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
         | AuraType::SilenceInterruptImmunity
+        | AuraType::ShadowDance
         | AuraType::ArmorIncrease
         | AuraType::Cyclone
         | AuraType::TravelForm

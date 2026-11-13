@@ -35,6 +35,7 @@ pub mod paladin;
 pub mod paladin_holy;
 pub(crate) mod paladin_postures;
 pub mod paladin_protection;
+pub mod paladin_retribution;
 pub mod peel;
 pub mod pet_ai;
 pub mod pillar_mode;
@@ -1060,6 +1061,15 @@ impl<'a> CombatContext<'a> {
             .unwrap_or(false)
     }
 
+    /// How many crowd controls of `category` `entity` has taken since its
+    /// diminishing returns last reset: `0` is fresh (the next lands in full),
+    /// `1` halves the next, and so on to immunity.
+    pub fn dr_level(&self, entity: Entity, category: DRCategory) -> u8 {
+        self.dr_trackers
+            .get(&entity)
+            .map_or(0, |tracker| tracker.level(category))
+    }
+
     /// Start a decision-trace `ability_decision` builder for the current
     /// actor. Returns None only when the snapshot doesn't contain self
     /// (defensive — shouldn't happen in normal dispatch).
@@ -1267,6 +1277,7 @@ pub fn dispel_priority(aura_type: AuraType) -> i32 {
         | AuraType::ArmorIncrease
         | AuraType::FearImmunity
         | AuraType::SilenceInterruptImmunity
+        | AuraType::ShadowDance
         | AuraType::AttackSpeedIncrease
         | AuraType::NextCast
         | AuraType::DamageDealtIncrease
@@ -1539,6 +1550,7 @@ pub fn purge_priority(aura_type: AuraType) -> i32 {
         AuraType::DamageImmunity
         | AuraType::FearImmunity
         | AuraType::SilenceInterruptImmunity
+        | AuraType::ShadowDance
         | AuraType::TravelForm => 0,
 
         // Mechanical markers, not buffs.
@@ -1625,6 +1637,7 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
         | AuraType::SilenceInterruptImmunity
+        | AuraType::ShadowDance
         | AuraType::AttackSpeedIncrease
         | AuraType::NextCast
         | AuraType::DamageTakenIncrease
@@ -1728,6 +1741,7 @@ pub const fn grants_damage_immunity(aura: AuraType) -> bool {
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
         | AuraType::SilenceInterruptImmunity
+        | AuraType::ShadowDance
         | AuraType::AttackSpeedIncrease
         | AuraType::NextCast
         | AuraType::DamageTakenIncrease

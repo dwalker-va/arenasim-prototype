@@ -217,6 +217,7 @@ pub fn proc_clause(proc: &TalentProc, abilities: &AbilityDefinitions) -> String 
     let event = match proc.trigger {
         TalentTrigger::MeleeHit if proc.crit_only => "a melee critical strike".to_string(),
         TalentTrigger::MeleeHit => "a melee hit".to_string(),
+        TalentTrigger::SpellHit if proc.crit_only => of("a critical hit"),
         TalentTrigger::SpellHit => of("a hit"),
         TalentTrigger::DotTick => of("each damage tick"),
         TalentTrigger::HealCrit => of("a critical heal"),
@@ -316,6 +317,29 @@ pub fn talent_proc_description(
         ProcRankScale::Effect => " Its effect is per rank.",
     };
     format!("{talent}: {}.{rank}", proc_clause(proc, abilities))
+}
+
+/// [`talent_proc_description`] for a talent whose procs land ONE aura on
+/// several events (Vengeance: a melee crit, or a Crusader Strike crit): the
+/// first proc's sentence, and each further event as "Also ...". `procs` is
+/// never empty, and they share their ranks rule.
+pub fn talent_procs_description(
+    talent: &str,
+    procs: &[&TalentProc],
+    abilities: &AbilityDefinitions,
+) -> String {
+    let (first, rest) = procs.split_first().expect("at least one proc");
+    let mut text = talent_proc_description(talent, first, abilities);
+    for proc in rest {
+        let clause = proc_clause(proc, abilities);
+        let mut chars = clause.chars();
+        let lowered: String = chars
+            .next()
+            .map(|c| c.to_lowercase().chain(chars).collect())
+            .unwrap_or_default();
+        text.push_str(&format!(" Also {lowered}."));
+    }
+    text
 }
 
 /// A sentence made a clause: its first letter lower-cased, its full stops
@@ -476,6 +500,7 @@ fn stat_name(stat: TalentStat) -> &'static str {
         TalentStat::HolyResistance => "holy resistance",
         TalentStat::WeaponDamage => "weapon damage",
         TalentStat::OffHandDamage => "off-hand weapon damage",
+        TalentStat::TwoHandedWeaponDamage => "damage with a two-handed weapon",
         TalentStat::DodgeChance => "dodge chance",
         TalentStat::ParryChance => "parry chance",
         TalentStat::MeleeAttackSpeed => "melee attack speed",
@@ -505,7 +530,8 @@ fn stat_points(stat: TalentStat, points: f32) -> String {
         | TalentStat::NatureResistance
         | TalentStat::HolyResistance
         | TalentStat::WeaponDamage
-        | TalentStat::OffHandDamage => signed(points, ""),
+        | TalentStat::OffHandDamage
+        | TalentStat::TwoHandedWeaponDamage => signed(points, ""),
     }
 }
 
@@ -684,6 +710,35 @@ mod tests {
             text(TalentId::BloodSpatter, 1),
             "+50% Rupture damage over time."
         );
+    }
+
+    /// The Subtlety tree's nodes: its two procs, speed in points, Ambush's
+    /// crit, Cheat Death, and the two grants.
+    #[test]
+    fn the_subtlety_tree_reads_as_it_plays() {
+        let talents = TalentDefinitions::shipped();
+        let text = |id: TalentId, rank: u8| rank_text(talents.get(id).unwrap(), rank, abilities());
+        assert_eq!(
+            text(TalentId::MasterOfSubtlety, 2),
+            "On leaving stealth, increases damage dealt by 10% for 6 sec (on you)."
+        );
+        assert_eq!(text(TalentId::FleetFooted, 2), "+8% movement speed.");
+        assert_eq!(
+            text(TalentId::Initiative, 2),
+            "On using any ability, primes your next cast: Within 10 sec, the next ability \
+             costs 10 less."
+        );
+        assert_eq!(
+            text(TalentId::ImprovedAmbush, 2),
+            "+30% Ambush critical strike chance."
+        );
+        assert_eq!(
+            text(TalentId::CheatDeath, 1),
+            "The first blow that would kill you leaves you at 10% health, and you take 90% \
+             less damage for 3 sec."
+        );
+        assert_eq!(text(TalentId::Hemorrhage, 1), "Learn Hemorrhage.");
+        assert_eq!(text(TalentId::ShadowDance, 1), "Learn Shadow Dance.");
     }
 
     #[test]

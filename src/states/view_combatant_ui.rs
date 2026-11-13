@@ -1521,6 +1521,19 @@ fn render_stats_panel(
                             toned_row(ui, "Weapon Damage", &value, change.points + change.fraction);
                             ui_driver::note(ui, format_args!("stat Weapon Damage={value}"));
                         }
+                        // Nor has a two-hander's (Two-Handed Weapon
+                        // Specialization): it reaches the swing only while the
+                        // main hand holds one.
+                        if let Some(change) = talents.get(&TalentStat::TwoHandedWeaponDamage) {
+                            let value = weapon_damage_bonus(*change);
+                            toned_row(
+                                ui,
+                                "Two-Hand Damage",
+                                &value,
+                                change.points + change.fraction,
+                            );
+                            ui_driver::note(ui, format_args!("stat Two-Hand Damage={value}"));
+                        }
                     });
                 })
                 .response

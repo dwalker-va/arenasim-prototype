@@ -291,8 +291,7 @@ pub struct AbilityConfig {
     /// only a [`Prevention::Silence`] ability
     /// ([`AbilityConfig::silence_stops`]), and an interrupt takes only a
     /// Silence-prevented cast bar ([`AbilityConfig::can_be_interrupted`]).
-    /// Checked against the TBC client by
-    /// `docs/design/balance/sweeps/2026-10-12-as287-tbc-interruptibility.py`.
+    /// Checked against the TBC client by `tests/prevention_tbc_audit.rs`.
     pub prevention: Prevention,
     /// Maximum range in units
     pub range: f32,
@@ -823,6 +822,12 @@ impl AbilityDefinitions {
             AbilityType::AuraMastery,
             AbilityType::HolyNova,
             AbilityType::GuardianSpirit,
+            // Paladin: the Retribution tree
+            AbilityType::Repentance,
+            AbilityType::CrusaderStrike,
+            // Rogue: the Subtlety tree
+            AbilityType::Hemorrhage,
+            AbilityType::ShadowDance,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -1748,6 +1753,8 @@ mod tests {
                     // its class's own kit, as every kit surface shows it.
                     AbilityType::ExposeArmor,
                     AbilityType::Rupture,
+                    AbilityType::Hemorrhage,
+                    AbilityType::ShadowDance,
                 ],
             ),
             (
@@ -1808,6 +1815,8 @@ mod tests {
                     AbilityType::SacredShield,
                     AbilityType::DivineFavor,
                     AbilityType::AuraMastery,
+                    AbilityType::Repentance,
+                    AbilityType::CrusaderStrike,
                 ],
             ),
             (

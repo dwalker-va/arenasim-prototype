@@ -756,6 +756,7 @@ fn scaling_stat_name(stat: ScalingStat) -> Option<&'static str> {
     match stat {
         ScalingStat::AttackPower => Some("attack power"),
         ScalingStat::SpellPower => Some("spell power"),
+        ScalingStat::WeaponDamage => Some("weapon damage"),
         ScalingStat::None => None,
     }
 }
