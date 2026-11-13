@@ -170,6 +170,13 @@ talent_ids! {
     SiphonLife,
     CurseOfExhaustion,
     ShadowMastery,
+    // Warlock: Destruction
+    ImprovedShadowBolt,
+    Bane,
+    Aftermath,
+    Shadowburn,
+    ImprovedImmolate,
+    Conflagrate,
     // Rogue: Assassination
     VilePoisons,
     ImprovedPoisons,
@@ -189,6 +196,7 @@ pub enum TreeId {
     Shadow,
     Protection,
     Discipline,
+    Destruction,
     Assassination,
 }
 

@@ -61,6 +61,7 @@
         Warlock: [
             (id: Affliction, name: "Affliction", icon: "icons/talents/spell_shadow_deathcoil.jpg"),
             (id: Demonology, name: "Demonology", icon: "icons/talents/spell_shadow_metamorphosis.jpg"),
+            (id: Destruction, name: "Destruction", icon: "icons/talents/spell_shadow_rainoffire.jpg"),
         ],
         Rogue: [
             (id: Assassination, name: "Assassination", icon: "icons/talents/ability_rogue_eviscerate.jpg"),
@@ -235,6 +236,108 @@
             per_rank: [Mechanic(SoulLink(share: 0.12))],
         ),
 
+        // ---- Warlock: Destruction (AS-411) ----
+        // The burst tree: Shadow Vulnerability windows, faster Shadow Bolts,
+        // and Shadowburn and Conflagrate as instant burst.
+        ImprovedShadowBolt: (
+            name: "Improved Shadow Bolt",
+            class: Warlock, tree: Destruction, tier: 1, column: 0,
+            icon: "icons/talents/spell_shadow_shadowbolt.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // A 10% chance a rank on a Shadow Bolt hit (Classic 17803: every
+            // crit; crits are rare at this gear) to lay Shadow Vulnerability
+            // on the target: +10% Shadow damage taken (Classic: 20%), for 4
+            // direct hits or 12s. TBC 17800's aura is Magic.
+            per_rank: [
+                Proc((
+                    trigger: SpellHit,
+                    abilities: [Shadowbolt],
+                    chance: Chance(0.10),
+                    ranks_add: Chance,
+                    effect: ApplyAura(
+                        on: Other,
+                        aura_type: DamageTakenIncrease,
+                        magnitude: 0.10,
+                        duration: 12.0,
+                        dispel_type: Magic,
+                        scope: Some(School(Shadow)),
+                        charges: Some(4),
+                        name: Some("Shadow Vulnerability"),
+                    ),
+                )),
+            ],
+        ),
+        Bane: (
+            name: "Bane",
+            class: Warlock, tree: Destruction, tier: 1, column: 2,
+            icon: "icons/talents/spell_shadow_deathpact.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Shadow Bolt and Immolate cast 0.25s faster a rank (Classic
+            // 17788: 0.1s): 2.0 -> 1.75 -> 1.5.
+            per_rank: [
+                Patch(on: Ability(Shadowbolt), field: CastTime, op: Add(-0.25)),
+                Patch(on: Ability(Immolate), field: CastTime, op: Add(-0.25)),
+            ],
+        ),
+        Aftermath: (
+            name: "Aftermath",
+            class: Warlock, tree: Destruction, tier: 2, column: 0,
+            icon: "icons/talents/spell_fire_fire.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // A 5% chance a rank on a Destruction hit (Shadow Bolt, Immolate,
+            // Shadowburn, Conflagrate; Classic 18119: 2%) to slow the target
+            // 30% for 5s. TBC 18118's daze is Magic.
+            per_rank: [
+                Proc((
+                    trigger: SpellHit,
+                    abilities: [Shadowbolt, Immolate, Shadowburn, Conflagrate],
+                    chance: Chance(0.05),
+                    ranks_add: Chance,
+                    effect: ApplyAura(
+                        on: Other,
+                        aura_type: MovementSpeedSlow,
+                        magnitude: 0.7,  // 30% slower: the speed left
+                        duration: 5.0,
+                        dispel_type: Magic,
+                        name: Some("Aftermath"),
+                    ),
+                )),
+            ],
+        ),
+        Shadowburn: (
+            name: "Shadowburn",
+            class: Warlock, tree: Destruction, tier: 2, column: 2,
+            icon: "icons/talents/spell_shadow_scourgebuild.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // Instant Shadow damage, 10 + 0.35 x spell power; 20yd, 15s, 40
+            // mana, no soul shard.
+            per_rank: [Grant(Shadowburn)],
+        ),
+        ImprovedImmolate: (
+            name: "Improved Immolate",
+            class: Warlock, tree: Destruction, tier: 3, column: 1,
+            icon: "icons/talents/spell_fire_immolation.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // Immolate's initial damage +25% (Classic 17815's five ranks of
+            // 5% folded into one): 35 -> 44 on the starting kit. Its burn is
+            // untouched.
+            per_rank: [Patch(on: Ability(Immolate), field: Damage, op: Mul(1.25))],
+        ),
+        Conflagrate: (
+            name: "Conflagrate",
+            class: Warlock, tree: Destruction, tier: 4, column: 1,
+            icon: "icons/talents/spell_fire_fireball.jpg",
+            max_rank: 1,
+            budget: Some(22.0),
+            requires: Some((ImprovedImmolate, 1)),
+            // Instant Fire damage, 20 + 0.4 x spell power, that consumes the
+            // Warlock's own Immolate on its target; 15s, 45 mana.
+            per_rank: [Grant(Conflagrate)],
         // ---- Rogue: Assassination (AS-417) ----
         // Poisons and bleeds. The poison itself and the opener stay per-match
         // choices: a talent here only strengthens the poisons, or widens the

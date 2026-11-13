@@ -12,8 +12,9 @@ use super::super::match_config;
 use super::super::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
 use super::super::FCT_HEIGHT;
 use super::damage::{
-    apply_damage_with_absorb, credit_damage_dealt, credited_damage, damage_dealt_multiplier,
-    get_divine_shield_damage_penalty, get_physical_damage_reduction, roll_crit, Hit, HitKind,
+    apply_damage_with_absorb, blocks_all_damage, credit_damage_dealt, credited_damage,
+    damage_dealt_multiplier, get_divine_shield_damage_penalty, get_physical_damage_reduction,
+    roll_crit, Hit, HitKind,
 };
 use super::follow_ups::DamageFollowUps;
 use super::healing::apply_healing;
@@ -703,6 +704,8 @@ pub fn process_casting(
                 target_entity,
             )
             .with_dealt(dealt);
+            // A target immune to the hit keeps an aura it would consume.
+            let refused = blocks_all_damage(target_auras.as_deref());
             let (actual_damage, absorbed) = apply_damage_with_absorb(
                 hit,
                 &mut target,
@@ -710,6 +713,27 @@ pub fn process_casting(
                 &mut follow_ups,
                 &mut combat_log,
             );
+
+            // A hit that consumes an aura (Conflagrate eats Immolate) takes the
+            // caster's OWN as it lands, never a teammate's: the AI casts it only
+            // at a target that carries the caster's own.
+            if let (Some(consumed), false) = (def.consumes_aura, refused) {
+                consume_aura(
+                    &mut commands,
+                    &mut combat_log,
+                    Consumption {
+                        consumed: &book.get_unchecked(&consumed).name,
+                        by: &def.name,
+                        caster: caster_entity,
+                        caster_id: &caster_id,
+                        target: target_entity,
+                        target_id: &target_id,
+                        anyones: false,
+                    },
+                    &mut target,
+                    target_auras.as_deref_mut(),
+                );
+            }
 
             // Warriors generate Rage from taking damage (only on actual health damage)
             if actual_damage > 0.0 && target.resource_type == ResourceType::Rage {
@@ -911,28 +935,21 @@ pub fn process_casting(
             // the target it eats the caster's own, and another's only when the
             // caster has none (Classic's Swiftmend takes any Druid's).
             if let Some(consumed) = def.consumes_aura {
-                let consumed_name = &book.get_unchecked(&consumed).name;
-                if let Some(auras) = target_auras.as_deref_mut() {
-                    let named = |a: &Aura| &a.ability_name == consumed_name;
-                    let own = auras
-                        .auras
-                        .iter()
-                        .position(|a| named(a) && a.caster == Some(caster_entity));
-                    if let Some(index) = own.or_else(|| auras.auras.iter().position(named)) {
-                        let eaten = auras.remove_debuff_at(index);
-                        target.reverse_stat_mutation(&eaten);
-                        if let Some(bloom) = BloomPending::for_ending(target_entity, &eaten) {
-                            commands.spawn(bloom);
-                        }
-                        combat_log.log(
-                            CombatLogEventType::Buff,
-                            format!(
-                                "{}'s {} consumes {} on {}",
-                                caster_id, def.name, eaten.ability_name, target_id
-                            ),
-                        );
-                    }
-                }
+                consume_aura(
+                    &mut commands,
+                    &mut combat_log,
+                    Consumption {
+                        consumed: &book.get_unchecked(&consumed).name,
+                        by: &def.name,
+                        caster: caster_entity,
+                        caster_id: &caster_id,
+                        target: target_entity,
+                        target_id: &target_id,
+                        anyones: true,
+                    },
+                    &mut target,
+                    target_auras.as_deref_mut(),
+                );
             }
 
             // Use pre-calculated healing (already includes stat scaling + crit)
@@ -1767,4 +1784,61 @@ pub fn process_channeling(
     for entity in remove_channel {
         commands.entity(entity).remove::<ChannelingState>();
     }
+}
+
+/// One aura a landing cast consumes ([`AbilityConfig::consumes_aura`]).
+struct Consumption<'a> {
+    /// The consumed aura's name (its ability's).
+    consumed: &'a str,
+    /// The consuming cast's name.
+    by: &'a str,
+    caster: Entity,
+    caster_id: &'a str,
+    target: Entity,
+    target_id: &'a str,
+    /// Whether another caster's aura is taken when the caster has none of
+    /// its own on the target: a heal's (Swiftmend takes any Druid's
+    /// Rejuvenation), never a hit's (Conflagrate takes only its Warlock's
+    /// Immolate).
+    anyones: bool,
+}
+
+/// Remove the aura `what` names from the target, the caster's own first, and
+/// log it. A consumed aura that blooms blooms here, since it has ended; one
+/// that raised a stat gives it back.
+fn consume_aura(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    what: Consumption<'_>,
+    target: &mut Combatant,
+    target_auras: Option<&mut ActiveAuras>,
+) {
+    let Some(auras) = target_auras else {
+        return;
+    };
+    let named = |a: &Aura| a.ability_name == what.consumed;
+    let own = auras
+        .auras
+        .iter()
+        .position(|a| named(a) && a.caster == Some(what.caster));
+    let found = match own {
+        Some(index) => Some(index),
+        None if what.anyones => auras.auras.iter().position(named),
+        None => None,
+    };
+    let Some(index) = found else {
+        return;
+    };
+    let eaten = auras.remove_debuff_at(index);
+    target.reverse_stat_mutation(&eaten);
+    if let Some(bloom) = BloomPending::for_ending(what.target, &eaten) {
+        commands.spawn(bloom);
+    }
+    combat_log.log(
+        CombatLogEventType::Buff,
+        format!(
+            "{}'s {} consumes {} on {}",
+            what.caster_id, what.by, eaten.ability_name, what.target_id
+        ),
+    );
 }

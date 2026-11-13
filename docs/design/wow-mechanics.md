@@ -300,6 +300,23 @@ for a build with its Affliction talent. A curse whose effect diminishes
 it. Amplify Curse (Affliction) makes the next Curse of Agony or Weakness 50%
 stronger; it is off the global cooldown, so the curse follows at once.
 
+### Destruction (Warlock)
+The burst tree (AS-411). Bane cuts Shadow Bolt's and Immolate's cast 0.25s a
+rank (2.0 -> 1.5 at 2/2); Improved Immolate raises Immolate's landing 25%,
+not its burn. Two procs on a hit (`SpellHit`), each rank adding its chance:
+Improved Shadow Bolt (10% a rank, on a Shadow Bolt hit) lays Shadow
+Vulnerability on the target, +10% Shadow damage taken for 4 direct hits or
+12s (a tick spends no charge, and a fresh proc gives the four back); Aftermath
+(5% a rank, on a Shadow Bolt, Immolate, Shadowburn or Conflagrate hit) slows
+the target 30% for 5s, on the Slows bucket. Both are Magic, as in TBC; the
+vulnerability, a stat debuff, is not dispellable here. Shadowburn (instant
+Shadow, 20yd, 15s) is a finisher, cast on a target below `kill_hp_threshold`.
+Conflagrate (instant Fire, 15s, the capstone, needs Improved Immolate) is cast
+as soon as the Warlock's own Immolate burns on its target, and consumes it as
+it lands: only the caster's own, never another Warlock's (a heal that
+consumes, Swiftmend, takes another's when its caster has none), and nothing
+from a target immune to the hit.
+
 ### Rage (Warrior)
 - Max: 100
 - Starts every match at 0: the pre-match countdown holds rage empty while it

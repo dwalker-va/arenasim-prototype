@@ -1894,6 +1894,9 @@ mod tests {
                 "Rend [Physical]",
                 // A bleed, like Rend (AS-417).
                 "Rupture [Physical]",
+                // Magic, but a stat debuff: `is_magic_dispellable` scopes
+                // out every damage-taken increase (AS-411's proc).
+                "Shadow Vulnerability [Magic]",
                 "Spell Lock [—]",
                 "Web [Physical]",
                 "Wind Shear [—]",
