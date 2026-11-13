@@ -132,6 +132,64 @@ fn two_speed_nodes(embrace: f32, fel: f32) -> TalentDefinitions {
     .expect("the fixture validates")
 }
 
+/// The shipped talents with Fel Stamina made a second Demonic Embrace: +3%
+/// maximum health a rank, its price computed as Demonic Embrace's is (so it
+/// declares no budget). Two nodes on one stat whose nodes ADD.
+fn two_health_nodes() -> TalentDefinitions {
+    let text = std::fs::read_to_string(arenasim::paths::asset_path("config/talents.ron"))
+        .expect("talents.ron reads");
+    let felhunter = "budget: Some(11.0),\n            \
+                     // Felhunter +10% maximum health a rank: 170 -> 187 -> 204.\n            \
+                     per_rank: [PetStatPercent(MaxHealth, 0.10)],";
+    assert!(text.contains(felhunter));
+    TalentDefinitions::from_ron(
+        &text.replacen(felhunter, "per_rank: [StatPercent(MaxHealth, 0.03)],", 1),
+        AbilityDefinitions::shipped(),
+    )
+    .expect("the fixture validates")
+}
+
+/// The control for the speed rule: a stat whose nodes ADD keeps adding. Two
+/// health nodes of 2/2 at +3% a rank take the SUM, +12% — never the stronger
+/// node's +6% — in the resolved change and in the spawned maximum health.
+#[test]
+fn two_nodes_on_an_adding_stat_give_their_sum() {
+    use TalentId::{DemonicEmbrace, FelStamina};
+    let talents = two_health_nodes();
+    let resolve = |build: &[(TalentId, u8)]| {
+        talents
+            .resolve(
+                AbilityDefinitions::shipped(),
+                CharacterClass::Warlock,
+                &Build::of(build),
+            )
+            .expect("the build resolves")
+    };
+    let fraction =
+        |build: &[(TalentId, u8)]| resolve(build).stat_changes()[&TalentStat::MaxHealth].fraction;
+    assert!((fraction(&[(DemonicEmbrace, 2)]) - 0.06).abs() < 1e-6);
+    assert!((fraction(&[(FelStamina, 2)]) - 0.06).abs() < 1e-6);
+    let summed = fraction(&[(DemonicEmbrace, 2), (FelStamina, 2)]);
+    assert!(
+        (summed - 0.12).abs() < 1e-6,
+        "+{summed}: two adding nodes give the sum, +12%, not the stronger +6%"
+    );
+
+    let geared = || {
+        let mut c = Combatant::new(1, 0, CharacterClass::Warlock);
+        c.apply_equipment(&both(), &items(0.0, 0.0));
+        c
+    };
+    let base = geared().max_health;
+    let mut c = geared();
+    resolve(&[(DemonicEmbrace, 2), (FelStamina, 2)]).apply(&mut c);
+    assert!(
+        (c.max_health - base * 1.12).abs() < 1e-3,
+        "{} from {base}: not +12%",
+        c.max_health
+    );
+}
+
 /// A Warlock with no gear speed, given `build` from `talents`: its passive
 /// term and its speed, as the spawn sets them.
 fn warlock_with(talents: &TalentDefinitions, build: &[(TalentId, u8)]) -> Combatant {
