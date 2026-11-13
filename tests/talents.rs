@@ -1210,7 +1210,7 @@ fn assert_talented(s: &Spawned, base: &(Combatant, Combatant), patched: bool) {
         assert_eq!(cast, base_cast);
     }
     let talents_line = "[TALENTS] Team 1 Warlock #1: Demonic Embrace 2/2, Fel Stamina 2/2, \
-                        Unholy Power 2/2 (Affliction 0, Demonology 6)"
+                        Unholy Power 2/2 (Affliction 0, Demonology 6, Destruction 0)"
         .to_string();
     assert!(
         s.log.contains(&talents_line),

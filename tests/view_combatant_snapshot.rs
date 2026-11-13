@@ -606,7 +606,7 @@ fn the_sheet_draws_the_slots_build_and_its_stats_read_it() {
     assert!(
         talented
             .last
-            .has_note("talents:t1s0 points=2 spec=Demonology Warlock 0/2"),
+            .has_note("talents:t1s0 points=2 spec=Demonology Warlock 0/2/0"),
         "{:?}",
         talented.last.notes
     );

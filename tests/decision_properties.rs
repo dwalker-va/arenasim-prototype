@@ -1529,6 +1529,16 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         AbilityType::PainSuppression,
         Unreached::NeedsKnob("a build that takes Pain Suppression"),
     ),
+    // The Destruction tree (AS-411): grants; tests/destruction_talents.rs
+    // grants each in its scene pairs.
+    (
+        AbilityType::Shadowburn,
+        Unreached::NeedsKnob("a build that takes Shadowburn"),
+    ),
+    (
+        AbilityType::Conflagrate,
+        Unreached::NeedsKnob("a build that takes Conflagrate"),
+    ),
 ];
 
 /// Every ability of every class's own kit is chosen somewhere in the grid, or

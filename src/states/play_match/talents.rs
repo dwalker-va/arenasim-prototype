@@ -170,6 +170,13 @@ talent_ids! {
     SiphonLife,
     CurseOfExhaustion,
     ShadowMastery,
+    // Warlock: Destruction
+    ImprovedShadowBolt,
+    Bane,
+    Aftermath,
+    Shadowburn,
+    ImprovedImmolate,
+    Conflagrate,
 }
 
 /// A talent tree. A tree is named per class: `(class, TreeId)` is the key.
@@ -181,6 +188,7 @@ pub enum TreeId {
     Shadow,
     Protection,
     Discipline,
+    Destruction,
 }
 
 /// One tree of a class, as `talents.ron` lists it. A class's trees are in
