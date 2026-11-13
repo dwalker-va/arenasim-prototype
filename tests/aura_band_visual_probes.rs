@@ -93,6 +93,8 @@ const BAND_TYPES: &[AuraType] = &[
     AuraType::TriggeredAbsorb,
     // Aura Mastery's immunity (AS-420): the band until AS-374 draws it.
     AuraType::SilenceInterruptImmunity,
+    // Shadow Dance's window (AS-419): the band until AS-368 draws it.
+    AuraType::ShadowDance,
 ];
 
 fn names(types: impl IntoIterator<Item = AuraType>) -> BTreeSet<String> {

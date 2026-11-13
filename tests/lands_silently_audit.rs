@@ -396,6 +396,8 @@ fn aura_family(t: AuraType) -> AuraFamily {
         | AuraType::TriggeredAbsorb
         // Aura Mastery's immunity (AS-420): a buff like any other.
         | AuraType::SilenceInterruptImmunity
+        // Shadow Dance's window (AS-419): a buff like any other.
+        | AuraType::ShadowDance
         | AuraType::TravelForm => AuraFamily::Status,
     }
 }
@@ -469,6 +471,7 @@ const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
     FrostNova,
     FrostShock,
     Frostbolt,
+    Hemorrhage,
     HeroicStrike,
     HolyShock,
     Immolate,
@@ -525,6 +528,10 @@ const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (
         Conflagrate,
         "AS-348 (Shadowburn and Conflagrate, the Destruction casts; AS-334's talent visuals)",
+    ),
+    (
+        Hemorrhage,
+        "AS-336 (Hemorrhage, the Subtlety strike and its wound; AS-367 builds it)",
     ),
     (
         Shadowburn,
@@ -808,6 +815,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     ExposeArmor,
     FireTotem,
     FrostArmor,
+    Hemorrhage,
     IceBarrier,
     InnerFocus,
     Innervate,
@@ -824,6 +832,7 @@ const STATUS_MEMBERS: &[AbilityType] = &[
     Rejuvenation,
     RetributionAura,
     SacredShield,
+    ShadowDance,
     ShadowResistanceAura,
     Shadowform,
     TravelForm,
@@ -943,6 +952,10 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     ),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
     (FrostArmor, "AS-134 (aura application)"),
+    (
+        Hemorrhage,
+        "AS-336 (Hemorrhage, the Subtlety strike and its wound; AS-367 builds it)",
+    ),
     (InnerFocus, "AS-352 (Inner Focus, the focus on the Priest)"),
     (MageArmorSpell, "AS-134 (aura application)"),
     (MoltenArmor, "AS-134 (aura application)"),
@@ -957,6 +970,10 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (PowerWordFortitude, "AS-134 (aura application)"),
     (RetributionAura, "AS-374 (Retribution Aura rune disc)"),
     (SacredShield, "AS-375 (Sacred Shield disc and absorb card)"),
+    (
+        ShadowDance,
+        "AS-336 (Shadow Dance, the Subtlety capstone's window; AS-368 builds it)",
+    ),
     (ShadowResistanceAura, "AS-134 (aura application)"),
     (
         Shadowform,
@@ -1521,6 +1538,7 @@ fn talent_mechanic_judge(talent: TalentId) -> Option<&'static str> {
 }
 
 const TALENT_MECHANIC_MEMBERS: &[TalentId] = &[
+    TalentId::CheatDeath,
     TalentId::DemonicSacrifice,
     TalentId::MasterDemonologist,
     TalentId::ReflectiveShield,
@@ -1529,6 +1547,10 @@ const TALENT_MECHANIC_MEMBERS: &[TalentId] = &[
 ];
 
 const TALENT_MECHANIC_KNOWN_SILENT: &[(TalentId, &str)] = &[
+    (
+        TalentId::CheatDeath,
+        "AS-336 (Cheat Death's save; AS-369 builds it on AS-354's shared Saved cue)",
+    ),
     (
         TalentId::DemonicSacrifice,
         "AS-350 (the sacrifice triad; the Felhunter's death is the ordinary one)",

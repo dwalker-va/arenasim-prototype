@@ -263,6 +263,9 @@ pub enum AbilityType {
     // Paladin: the Holy tree (AS-420). Appended for the same reason.
     DivineFavor, // talent: the next Flash of Light, Holy Light or Holy Shock crits
     AuraMastery, // talent: teammates immune to silence and interrupts for 6s
+    // Rogue: the Subtlety tree (AS-419). Appended for the same reason.
+    Hemorrhage,  // talent: a strike that leaves +2% Physical damage taken a stack
+    ShadowDance, // talent: Cheap Shot and Ambush out of stealth for 8s
 }
 
 impl AbilityType {
@@ -280,7 +283,7 @@ impl AbilityType {
             // Weapon strikes, at melee range. Heroic Strike rides the next
             // auto-attack swing, so it is rolled where that swing is.
             HeroicStrike | MortalStrike | Rend | Pummel | Ambush | CheapShot | SinisterStrike
-            | KidneyShot | Kick | ExposeArmor | Rupture => true,
+            | KidneyShot | Kick | ExposeArmor | Rupture | Hemorrhage => true,
             // A charge closes the gap; what it lands on arrival is not a
             // weapon strike, and it is cast from 25 yards.
             Charge | BoarCharge => false,
@@ -305,11 +308,15 @@ impl AbilityType {
             | Cyclone | TravelForm | Shadowform | DivineProtection | BlessingOfSacrifice
             | SacredShield | RetributionAura | SiphonLife | AmplifyCurse | CurseOfExhaustion
             | InnerFocus | PowerInfusion | PainSuppression | Shadowburn | Conflagrate
-            | DivineFavor | AuraMastery => false,
+            | DivineFavor | AuraMastery | ShadowDance => false,
         }
     }
 
     /// Check if a combatant can cast this ability (has mana, in range, not casting, etc.)
+    ///
+    /// Not stealth: an opener's (`requires_stealth`) is [`can_open`], which
+    /// reads the caster's auras (Shadow Dance), and the cast gate asks it
+    /// right after this, in the same place this order puts it.
     pub fn can_cast_config(
         &self,
         caster: &Combatant,
@@ -335,13 +342,18 @@ impl AbilityType {
             }
         }
 
-        // Stealth abilities require stealth
-        if matches!(self, AbilityType::Ambush | AbilityType::CheapShot) && !caster.stealthed {
-            return false;
-        }
-
         true
     }
+}
+
+/// Whether a combatant may use an OPENER (an ability that `requires_stealth`:
+/// Ambush, Cheap Shot): it is stealthed, or it is dancing — a
+/// [`AuraType::ShadowDance`] aura
+/// lets it open out of stealth while it lasts. The one rule: the cast gate
+/// asks it of the caster, and `cc_reach` of an enemy.
+pub fn can_open(stealthed: bool, auras: Option<&[super::components::Aura]>) -> bool {
+    stealthed
+        || auras.is_some_and(|auras| auras.iter().any(|a| a.effect_type == AuraType::ShadowDance))
 }
 
 /// Helper function to check if a combatant is currently silenced.

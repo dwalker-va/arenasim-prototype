@@ -809,6 +809,9 @@ impl AbilityDefinitions {
             // Paladin: the Holy tree
             AbilityType::DivineFavor,
             AbilityType::AuraMastery,
+            // Rogue: the Subtlety tree
+            AbilityType::Hemorrhage,
+            AbilityType::ShadowDance,
         ];
 
         let missing: Vec<AbilityType> = expected_abilities
@@ -1670,6 +1673,8 @@ mod tests {
                     // its class's own kit, as every kit surface shows it.
                     AbilityType::ExposeArmor,
                     AbilityType::Rupture,
+                    AbilityType::Hemorrhage,
+                    AbilityType::ShadowDance,
                 ],
             ),
             (

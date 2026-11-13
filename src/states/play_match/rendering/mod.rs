@@ -193,6 +193,7 @@ pub fn get_aura_icon_key(aura: &Aura, ability_definitions: &AbilityDefinitions) 
         AuraType::HealingOverTime => "aura_max_health".to_string(), // Healing Stream Totem buff, reuse buff icon
         AuraType::WindfuryBuff => "aura_max_health".to_string(), // Windfury Totem buff, reuse buff icon
         AuraType::SilenceInterruptImmunity => "aura_max_health".to_string(), // Aura Mastery, reuse buff icon (real icon comes from the ability config)
+        AuraType::ShadowDance => "aura_max_health".to_string(), // Shadow Dance, reuse buff icon (real icon comes from the ability config)
         AuraType::FearImmunity => "aura_max_health".to_string(), // Berserker Rage buff, reuse buff icon (real icon comes from the ability config)
         AuraType::Cyclone => "aura_stun".to_string(), // Reuse stun icon (real icon comes from the ability config)
         AuraType::TravelForm => "aura_max_health".to_string(), // Reuse buff icon (real icon comes from the ability config)
@@ -242,6 +243,7 @@ pub fn is_buff_aura(aura_type: &AuraType) -> bool {
         | AuraType::HealingOverTime
         | AuraType::FearImmunity
         | AuraType::SilenceInterruptImmunity
+        | AuraType::ShadowDance
         | AuraType::WindfuryBuff
         | AuraType::AttackSpeedIncrease
         | AuraType::NextCast

@@ -91,6 +91,11 @@ EXPLICIT = {
         ["57994"],
         "Wind Shear arrives in Wrath (TBC's interrupt, Earth Shock, is also Silence)",
     ),
+    "ShadowDance": (
+        WRATH_BUILD,
+        ["51713"],
+        "Shadow Dance arrives in Wrath; 51713 has no SpellCategories row there",
+    ),
 }
 
 

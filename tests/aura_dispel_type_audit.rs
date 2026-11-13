@@ -238,6 +238,12 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::ExposeArmor => config(S::Physical, T::NoType),
         // 1943 .. 26867, every rank DispelType 0 (Mechanic 15, bleed).
         AbilityType::Rupture => config(S::Physical, T::NoType),
+        // The Subtlety tree (AS-419). TBC 16511..26864, every rank
+        // DispelType 0.
+        AbilityType::Hemorrhage => config(S::Physical, T::NoType),
+        // No TBC spell: Wrath 51713 (3.4.5.63697) has no SpellCategories
+        // row, so no dispel type.
+        AbilityType::ShadowDance => config(S::Untyped, T::NoType),
 
         // ---- Warlock ----
         AbilityType::Corruption => config(S::Magic, T::Magic),

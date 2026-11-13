@@ -750,6 +750,63 @@
             spell_school: Physical,
         ),
 
+        // Hemorrhage (talent, Subtlety tier 3): a Sinister Strike for 30
+        // energy (Sinister Strike: 40), the same damage, leaving a debuff
+        // that raises the Physical damage its target takes by 2% a stack, a
+        // stack a strike up to 5, for 15s (TBC 16511..26864's debuff added
+        // flat Physical damage to its next 10 hits). A melee attack, on the
+        // global cooldown (TBC: StartRecoveryCategory 133), Pacify.
+        Hemorrhage: (
+            name: "Hemorrhage",
+            class: Rogue,
+            talent: true,
+            prevention: Pacify,
+            icon: "icons/abilities/spell_shadow_lifedrain.jpg",
+            cast_time: 0.0,
+            range: 2.5,
+            mana_cost: 30.0,
+            cooldown: 0.0,
+            damage_base_min: 5.0,
+            damage_base_max: 10.0,
+            damage_coefficient: 0.5,
+            damage_scales_with: AttackPower,
+            applies_aura: Some((
+                aura_type: DamageTakenIncrease,
+                duration: 15.0,
+                magnitude: 0.02,             // per stack
+                scope: Some(School(Physical)),
+                stacking: Some((max_stacks: 5)),
+                dispel_type: Physical,  // TBC 16511..26864: DispelType 0
+            )),
+            spell_school: Physical,
+        ),
+
+        // Shadow Dance (talent, the Subtlety capstone): for 8s the Rogue may
+        // use Cheap Shot and Ambush without stealth, whichever opener it
+        // chose, as often as its energy allows. 45s cooldown; free and off
+        // the global cooldown. Wrath 51713 (6s, 1 min there; no TBC spell)
+        // has no SpellCategories row: no dispel type, no prevention, no
+        // global cooldown.
+        ShadowDance: (
+            name: "Shadow Dance",
+            class: Rogue,
+            talent: true,
+            prevention: None,
+            icon: "icons/abilities/ability_rogue_shadowdance.jpg",
+            cast_time: 0.0,
+            off_gcd: true,  // Wrath 51713: StartRecoveryCategory 0
+            range: 0.0,  // Self-cast
+            mana_cost: 0.0,
+            cooldown: 45.0,
+            applies_aura: Some((
+                aura_type: ShadowDance,
+                duration: 8.0,
+                magnitude: 1.0,
+                dispel_type: Untyped,  // Wrath 51713: DispelType 0
+            )),
+            spell_school: Physical,
+        ),
+
         // ============================================================================
         // WARLOCK ABILITIES
         // ============================================================================

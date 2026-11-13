@@ -66,6 +66,7 @@
         Rogue: [
             (id: Assassination, name: "Assassination", icon: "icons/talents/ability_rogue_eviscerate.jpg"),
             (id: Combat, name: "Combat", icon: "icons/talents/ability_backstab.jpg"),
+            (id: Subtlety, name: "Subtlety", icon: "icons/talents/ability_stealth.jpg"),
         ],
         Paladin: [
             (id: Holy, name: "Holy", icon: "icons/talents/spell_holy_holybolt.jpg"),
@@ -504,6 +505,111 @@
             // Removes 50% of the target's armor for 15s: 25 energy, 20s
             // cooldown.
             per_rank: [Grant(ExposeArmor)],
+        ),
+
+        // ---- Rogue: Subtlety (AS-419) ----
+        // The stealth opener, out of stealth. Tier 1 pays every match (every
+        // Rogue opens from stealth, and runs); no node waits on the per-match
+        // opener choice. Values provisional: tuning is the milestone sweep's.
+        MasterOfSubtlety: (
+            name: "Master of Subtlety",
+            class: Rogue, tree: Subtlety, tier: 1, column: 0,
+            icon: "icons/talents/ability_rogue_masterofsubtlety.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // +5% damage a rank for 6s after leaving stealth (TBC 31221: +4%
+            // a rank while stealthed and 6s after). Its buff, like TBC 31665,
+            // has no dispel type.
+            per_rank: [
+                Proc((
+                    trigger: StealthBreak,
+                    chance: Chance(1.0),
+                    ranks_add: Effect,
+                    effect: ApplyAura(
+                        on: Owner,
+                        aura_type: DamageDealtIncrease,
+                        magnitude: 0.05,
+                        duration: 6.0,
+                        dispel_type: Untyped,
+                    ),
+                )),
+            ],
+        ),
+        FleetFooted: (
+            name: "Fleet Footed",
+            class: Rogue, tree: Subtlety, tier: 1, column: 2,
+            icon: "icons/talents/ability_rogue_fleetfooted.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // +4% movement speed a rank, a passive source: the one capped
+            // passive term takes the strongest source, never a sum, so 2/2 is
+            // the 8% cap (TBC 31208: +8% a rank).
+            per_rank: [StatAdd(MovementSpeed, 0.04)],
+        ),
+        Initiative: (
+            name: "Initiative",
+            class: Rogue, tree: Subtlety, tier: 2, column: 0,
+            icon: "icons/talents/spell_shadow_fumble.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Each ability the Rogue uses makes its next one, within 10s,
+            // cost 5 less energy a rank (TBC 13976 gave a combo point to an
+            // opener instead).
+            per_rank: [
+                Proc((
+                    trigger: AbilityUsed,
+                    chance: Chance(1.0),
+                    ranks_add: Effect,
+                    effect: NextCast(
+                        modifier: (applies_to: Any, cost_reduction: 5.0),
+                        duration: 10.0,
+                        dispel_type: Untyped,
+                    ),
+                )),
+            ],
+        ),
+        ImprovedAmbush: (
+            name: "Improved Ambush",
+            class: Rogue, tree: Subtlety, tier: 2, column: 2,
+            icon: "icons/talents/ability_rogue_ambush.jpg",
+            max_rank: 2,
+            budget: Some(11.0),
+            // Ambush +15% crit chance a rank (TBC 14079: the same a rank); it
+            // pays with Shadow Dance's Ambushes as well as the opener.
+            per_rank: [Patch(on: Ability(Ambush), field: CritChance, op: Add(0.15))],
+        ),
+        CheatDeath: (
+            name: "Cheat Death",
+            class: Rogue, tree: Subtlety, tier: 3, column: 0,
+            icon: "icons/talents/ability_rogue_cheatdeath.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // The match's first killing blow leaves the Rogue at 10% health,
+            // and it takes 90% less damage for 3s. Deterministic (TBC 31230
+            // rolled 33% a rank; its 45182 cut damage 91% for 3s).
+            per_rank: [Mechanic(CheatDeath(health: 0.1, reduction: 0.9, duration: 3.0))],
+        ),
+        Hemorrhage: (
+            name: "Hemorrhage",
+            class: Rogue, tree: Subtlety, tier: 3, column: 1,
+            icon: "icons/talents/spell_shadow_lifedrain.jpg",
+            max_rank: 1,
+            budget: Some(11.0),
+            // A Sinister Strike for 30 energy that leaves +2% Physical damage
+            // taken a stack, up to 5, for 15s. Physical: nothing removes it.
+            per_rank: [Grant(Hemorrhage)],
+        ),
+        ShadowDance: (
+            name: "Shadow Dance",
+            class: Rogue, tree: Subtlety, tier: 4, column: 1,
+            icon: "icons/talents/ability_rogue_shadowdance.jpg",
+            max_rank: 1,
+            budget: Some(22.0),
+            requires: Some((Hemorrhage, 1)),
+            // For 8s, Cheap Shot and Ambush without stealth, as often as
+            // energy allows; 45s cooldown. Diminishing returns cap the stun
+            // chain: Cheap Shot 4s, Cheap Shot 2s, Kidney Shot 6s.
+            per_rank: [Grant(ShadowDance)],
         ),
 
         // ---- Paladin: Holy (AS-420) ----

@@ -75,6 +75,9 @@ const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::Rupture, expose_armor_scene),
     (AbilityType::DivineFavor, paladin_ally_under_attack),
     (AbilityType::AuraMastery, paladin_ally_casting_by_a_rogue),
+    // Sinister Strike's moment, the target wearing no Hemorrhage.
+    (AbilityType::Hemorrhage, expose_armor_scene),
+    (AbilityType::ShadowDance, shadow_dance_scene),
 ];
 
 /// A Warlock 20 yards from its kill target, a Warrior, with Corruption and
@@ -218,6 +221,22 @@ fn expose_armor_scene(defs: &AbilityDefinitions) -> (Scene, Who) {
         .armor(2300.0)
         // Below the Kidney Shot planner: a ready stun would take the turn.
         .cooldown(ROGUE, AbilityType::KidneyShot, 10.0);
+    scene.combatant_mut(ROGUE).stealthed = false;
+    (scene, ROGUE)
+}
+
+/// A Rogue out of stealth at full energy, in melee of its kill target, a
+/// Warrior with no healer behind it, Kidney Shot ready and the Warrior's stun
+/// diminishing returns clear: the moment Shadow Dance's chain can run
+/// (`class_ai::rogue::try_shadow_dance`).
+fn shadow_dance_scene(defs: &AbilityDefinitions) -> (Scene, Who) {
+    const ROGUE: Who = "rogue";
+    let mut scene = Scene::with_config(defs.clone(), load_movement_config().unwrap())
+        .unit(ROGUE, 1, CharacterClass::Rogue)
+        .at(0.0, 0.0)
+        .targeting(WARRIOR)
+        .unit(WARRIOR, 2, CharacterClass::Warrior)
+        .at(1.5, 0.0);
     scene.combatant_mut(ROGUE).stealthed = false;
     (scene, ROGUE)
 }

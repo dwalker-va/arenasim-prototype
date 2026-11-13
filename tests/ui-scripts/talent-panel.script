@@ -20,13 +20,15 @@
 #  12. the slot made a Rogue: Assassination's Master Poisoner adds an
 #      off-hand poison choice, every poison but the main hand's, which goes
 #      away when the talent is taken back;
-#  13. the slot a Warlock again, one point back, a match started: the
+#  13. Subtlety, the Rogue's third tree, names its spec, and its capstone,
+#      Shadow Dance, waits on its prerequisite;
+#  14. the slot a Warlock again, one point back, a match started: the
 #      Warlock's team frame names the spec (awaited on the frame's own note,
 #      not a frame count).
 #
 # The Warlock's trees read Affliction, Demonology, Destruction, so a
-# Demonology build's shorthand is "0/N/0"; the Rogue's read Assassination
-# first.
+# Demonology build's shorthand is "0/N/0"; the Rogue's read Assassination,
+# Combat, Subtlety.
 #
 # Every wait is the driver's own (hover settles on egui's tooltip gate, a
 # click on the click): there is no frame count here.
@@ -136,12 +138,23 @@ assert-absent strategic:DeadlyPoison:offhand
 click talent:VilePoisons
 click talent:VilePoisons
 click talent:MasterPoisoner
-assert-note talents:t1s0 points=3 spec=Assassination Rogue 3/0
+assert-note talents:t1s0 points=3 spec=Assassination Rogue 3/0/0
 assert-enabled strategic:DeadlyPoison:offhand true
 assert-absent strategic:CripplingPoison:offhand
 click talent:MasterPoisoner left shift
-assert-note talents:t1s0 points=2 spec=Assassination Rogue 2/0
+assert-note talents:t1s0 points=2 spec=Assassination Rogue 2/0/0
 assert-absent strategic:DeadlyPoison:offhand
+click talents:reset
+assert-note talents:t1s0 points=0 spec=No talents learned
+
+# Subtlety, the third tree: two points name its spec, and its capstone,
+# Shadow Dance, stays locked behind Hemorrhage.
+click talent:MasterOfSubtlety
+click talent:MasterOfSubtlety
+assert-note talents:t1s0 points=2 spec=Subtlety Rogue 0/0/2
+assert-enabled talent:ShadowDance false
+hover talent:ShadowDance
+assert-note tooltip:Talent(ShadowDance)
 click talents:reset
 assert-note talents:t1s0 points=0 spec=No talents learned
 

@@ -11,7 +11,9 @@
 use bevy::prelude::*;
 
 use super::CombatContext;
-use crate::states::play_match::abilities::{is_silenced, is_spell_school_locked, AbilityType};
+use crate::states::play_match::abilities::{
+    can_open, is_silenced, is_spell_school_locked, AbilityType,
+};
 use crate::states::play_match::ability_config::AbilityConfig;
 use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::components::{ActiveAuras, AuraType, Combatant};
@@ -149,6 +151,13 @@ pub fn pre_cast_ok_but_hold(
     match target {
         Some((_, target_pos)) => {
             if !ability.can_cast_config(caster, target_pos, caster_pos, def) {
+                return false;
+            }
+            // An opener needs stealth, or Shadow Dance: right after
+            // can_cast_config's mana / range / min-range, before sight.
+            if def.requires_stealth
+                && !can_open(caster.stealthed, auras.map(|a| a.auras.as_slice()))
+            {
                 return false;
             }
             // Line-of-sight gate — a DISTINCT predicate placed immediately
@@ -497,7 +506,8 @@ pub fn classify_pre_cast_failure(
                     };
                 }
             }
-            if matches!(ability, AbilityType::Ambush | AbilityType::CheapShot) && !caster.stealthed
+            if def.requires_stealth
+                && !can_open(caster.stealthed, auras.map(|a| a.auras.as_slice()))
             {
                 return RejectionReason::PreconditionUnmet {
                     note: "stealth required (Ambush/CheapShot)".into(),

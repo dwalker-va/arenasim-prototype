@@ -804,3 +804,70 @@ fn empty_obstacles_never_block_los() {
         PreCastOpts::default(),
     ));
 }
+
+// ============================================================================
+// The opener's stealth step (AS-419): stealth, or Shadow Dance's window
+// (`abilities::can_open`), in can_cast_config's place in the order.
+// ============================================================================
+
+#[test]
+fn an_opener_needs_stealth_or_shadow_dance() {
+    let mut world = TestWorld::new(CharacterClass::Rogue);
+    world.target_pos = world.caster_pos + Vec3::new(2.0, 0.0, 0.0);
+    let mut rogue = caster_combatant(CharacterClass::Rogue);
+    rogue.stealthed = false;
+    let abilities = defs();
+    let dance = ActiveAuras {
+        auras: vec![make_aura(AuraType::ShadowDance, "Shadow Dance", None)],
+    };
+    let at = Some((world.target, world.target_pos));
+    for ability in [AbilityType::Ambush, AbilityType::CheapShot] {
+        let def = abilities.get_unchecked(&ability);
+        let ok = |c: &Combatant, auras: Option<&ActiveAuras>| {
+            pre_cast_ok(
+                ability,
+                def,
+                c,
+                world.caster_pos,
+                auras,
+                at,
+                &world.ctx(),
+                PreCastOpts::default(),
+            )
+        };
+        assert!(!ok(&rogue, None), "{ability:?} out of stealth");
+        let reason = classify_pre_cast_failure(
+            ability,
+            def,
+            &rogue,
+            world.caster_pos,
+            None,
+            at,
+            &world.ctx(),
+            PreCastOpts::default(),
+        );
+        assert!(
+            matches!(
+                &reason,
+                RejectionReason::PreconditionUnmet { note }
+                    if note == "stealth required (Ambush/CheapShot)"
+            ),
+            "{reason:?}"
+        );
+        assert!(ok(&rogue, Some(&dance)), "{ability:?} dancing");
+        let mut stealthed = rogue.clone();
+        stealthed.stealthed = true;
+        assert!(ok(&stealthed, None), "{ability:?} stealthed");
+    }
+    // Sinister Strike needs neither.
+    assert!(pre_cast_ok(
+        AbilityType::SinisterStrike,
+        abilities.get_unchecked(&AbilityType::SinisterStrike),
+        &rogue,
+        world.caster_pos,
+        None,
+        at,
+        &world.ctx(),
+        PreCastOpts::default(),
+    ));
+}

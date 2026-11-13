@@ -54,7 +54,7 @@ fn embrace_speed(points: f32) -> TalentDefinitions {
     TalentDefinitions::from_ron(
         &text.replacen(
             health,
-            &format!("per_rank: [StatAdd(MovementSpeed, {points:?})],"),
+            &format!("budget: Some(11.0), per_rank: [StatAdd(MovementSpeed, {points:?})],"),
             1,
         ),
         AbilityDefinitions::shipped(),

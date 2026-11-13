@@ -45,7 +45,7 @@ use super::ability_config::{AbilityConfig, AbilityDefinitions};
 use super::components::{AuraType, Combatant};
 use super::constants::{
     WEIGHT_ATTACK_POWER, WEIGHT_CRIT_CHANCE, WEIGHT_MANA_REGEN, WEIGHT_MAX_HEALTH, WEIGHT_MAX_MANA,
-    WEIGHT_MOVEMENT_SPEED, WEIGHT_RESISTANCE, WEIGHT_SPELL_POWER,
+    WEIGHT_RESISTANCE, WEIGHT_SPELL_POWER,
 };
 use super::equipment::{
     resolve_equipped_loadout, validate_class_restrictions, DefaultLoadouts, ItemDefinitions,
@@ -193,6 +193,14 @@ talent_ids! {
     PurifyingPower,
     LightsGrace,
     AuraMastery,
+    // Rogue: Subtlety
+    MasterOfSubtlety,
+    FleetFooted,
+    Initiative,
+    ImprovedAmbush,
+    CheatDeath,
+    Hemorrhage,
+    ShadowDance,
 }
 
 /// A talent tree. A tree is named per class: `(class, TreeId)` is the key.
@@ -207,6 +215,7 @@ pub enum TreeId {
     Destruction,
     Assassination,
     Holy,
+    Subtlety,
 }
 
 /// One tree of a class, as `talents.ron` lists it. A class's trees are in
@@ -275,7 +284,11 @@ impl TalentStat {
             TalentStat::AttackPower => Some(WEIGHT_ATTACK_POWER),
             TalentStat::SpellPower => Some(WEIGHT_SPELL_POWER),
             TalentStat::CritChance => Some(WEIGHT_CRIT_CHANCE),
-            TalentStat::MovementSpeed => Some(WEIGHT_MOVEMENT_SPEED),
+            // Passive speed is one capped term the strongest source sets,
+            // never a sum, so the item weight (which priced boot speed that
+            // stacked) does not describe a talent's: a speed node declares
+            // its price, as a node on a free stat does.
+            TalentStat::MovementSpeed => None,
             TalentStat::FireResistance
             | TalentStat::FrostResistance
             | TalentStat::ShadowResistance
@@ -686,6 +699,7 @@ pub fn strength_is_remainder(aura: AuraType) -> bool {
         | AuraType::WindfuryBuff
         | AuraType::FearImmunity
         | AuraType::SilenceInterruptImmunity
+        | AuraType::ShadowDance
         | AuraType::ArmorIncrease
         | AuraType::Cyclone
         | AuraType::TravelForm
