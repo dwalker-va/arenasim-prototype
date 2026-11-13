@@ -591,6 +591,27 @@ tests fail if a full-CC type or spell is left unlabelled.
   it was lit and which way the Rogue walked — never a roll. Traced as the
   `FlareSkirt` / `FlareWait` / `FlareCommit` movement triggers, each with a
   `[FLARE] <Rogue> skirts / holds outside / goes into the Flare` log line.
+- **Openers out of stealth: Shadow Dance** (the Subtlety capstone, a talent):
+  for 8s (45s cooldown; free, off the global cooldown) the Rogue may use
+  Cheap Shot and Ambush without stealth, whichever opener it chose, as often
+  as its energy allows (`AuraType::ShadowDance`; `abilities::can_open` is the
+  one opener rule, which the cast gate and the enemy's crowd-control reach
+  both ask). It does not stealth the Rogue. Diminishing returns cap the chain:
+  Cheap Shot 4s, a second at 2s, then Kidney Shot 6s on its own bucket. The AI
+  spends it only when that chain can run — the kill target in melee and held
+  by nothing, both stun buckets clear, Kidney Shot ready by the time the Cheap
+  Shots run out, the enemy healer locked (or none but the target itself, or
+  the target in the team's kill window), and 80 energy pooled — then Ambushes
+  only with energy to spare for the next stun. The Shadow Dance window has no
+  dispel type (Wrath 51713): no purge takes it.
+- **Hemorrhage** (Subtlety): a Sinister Strike for 30 energy that leaves a
+  wound, +2% Physical damage taken a stack, a stack a strike up to 5, for 15s
+  (one stack per target, whoever struck). Physical: nothing removes it. The
+  Rogue strikes with it in Sinister Strike's place while the wound is down or
+  low (short of five stacks, or within two global cooldowns of running out).
+- **Master of Subtlety** gives +5% damage a rank for 6s after leaving stealth;
+  **Cheat Death** survives the match's first killing blow at 10% health with
+  90% less damage taken for 3s (deterministic: TBC rolled a chance).
 
 ---
 

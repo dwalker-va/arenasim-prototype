@@ -210,6 +210,12 @@ pub enum AuraType {
     /// [`AuraType::HealingReduction`] cut; only the strongest applies (the
     /// stacking simplification). User: Guardian Spirit.
     HealingReceivedIncrease,
+    /// The holder may use its OPENERS (Ambush, Cheap Shot: `requires_stealth`)
+    /// out of stealth while it lasts, as often as its energy allows
+    /// (`abilities::can_open`, which the cast gate asks). It does not stealth
+    /// the holder, and changes no number. Magnitude unused (1.0 by
+    /// convention). User: Shadow Dance.
+    ShadowDance,
 }
 
 /// Which hits a damage modifier aura reaches: one school, or every school but
@@ -471,7 +477,7 @@ impl AuraType {
     /// DOES cost is coverage: a guard that sweeps `ALL` quietly stops covering
     /// whatever `ALL` forgot, while still reading like a whole-enum sweep.
     /// `aura_type_tests::all_lists_every_aura_type` is what stops that.
-    pub const ALL: [AuraType; 47] = [
+    pub const ALL: [AuraType; 48] = [
         AuraType::MovementSpeedSlow,
         AuraType::Root,
         AuraType::Stun,
@@ -519,6 +525,7 @@ impl AuraType {
         AuraType::TriggeredAbsorb,
         AuraType::SilenceInterruptImmunity,
         AuraType::HealingReceivedIncrease,
+        AuraType::ShadowDance,
     ];
 
     /// Player-facing name of this MECHANIC, as the encyclopedia's mechanic
@@ -558,6 +565,7 @@ impl AuraType {
             AuraType::DamageImmunity => "Damage Immunity",
             AuraType::FearImmunity => "Fear Immunity",
             AuraType::SilenceInterruptImmunity => "Silence and Interrupt Immunity",
+            AuraType::ShadowDance => "Shadow Dance",
             AuraType::MaxHealthIncrease => "Health Buff",
             AuraType::ArmorIncrease => "Armor Buff",
             AuraType::TravelForm => "Shapeshift",
@@ -658,6 +666,9 @@ impl AuraType {
             AuraType::SilenceInterruptImmunity => {
                 "Removes silence and blocks new silence effects; an interrupt cuts no cast and \
                  locks out no school."
+            }
+            AuraType::ShadowDance => {
+                "The holder may use its stealth openers, Ambush and Cheap Shot, without stealth."
             }
             AuraType::MaxHealthIncrease => "Raises the holder's maximum health.",
             AuraType::ArmorIncrease => "Raises the holder's armor, reducing physical damage taken.",
@@ -863,6 +874,7 @@ impl AuraType {
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
             | AuraType::SilenceInterruptImmunity
+            | AuraType::ShadowDance
             | AuraType::AttackSpeedIncrease
             | AuraType::NextCast
             | AuraType::DamageDealtIncrease
@@ -942,6 +954,7 @@ impl AuraType {
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
             | AuraType::SilenceInterruptImmunity
+            | AuraType::ShadowDance
             | AuraType::AttackSpeedIncrease
             | AuraType::NextCast
             | AuraType::DamageDealtIncrease
@@ -1627,9 +1640,12 @@ impl Aura {
             // Druid by either rule.
             // Aura Mastery's immunity is a cooldown like the other two
             // immunities (and `Untyped` besides: 31821 has no dispel type).
+            // Shadow Dance is a cooldown too, and `Untyped` (Wrath 51713 has
+            // no dispel type).
             AuraType::DamageImmunity
             | AuraType::FearImmunity
             | AuraType::SilenceInterruptImmunity
+            | AuraType::ShadowDance
             | AuraType::TravelForm => false,
 
             // Mechanical markers, not buffs.
@@ -2227,6 +2243,7 @@ impl DRCategory {
             | AuraType::ArmorIncrease
             | AuraType::FearImmunity
             | AuraType::SilenceInterruptImmunity
+            | AuraType::ShadowDance
             | AuraType::AttackSpeedIncrease
             | AuraType::NextCast
             | AuraType::DamageDealtIncrease

@@ -79,6 +79,7 @@ pub fn overhead_status_label(aura: &Aura) -> Option<OverheadLabel> {
         // (its visual card is AS-374).
         AuraType::MovementSpeedSlow
         | AuraType::SilenceInterruptImmunity
+        | AuraType::ShadowDance
         | AuraType::MaxHealthIncrease
         | AuraType::DamageOverTime
         | AuraType::SpellSchoolLockout

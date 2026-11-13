@@ -397,6 +397,7 @@ pub const fn cc_break_breaks(aura: AuraType) -> bool {
         | AuraType::DamageImmunity
         | AuraType::FearImmunity
         | AuraType::SilenceInterruptImmunity
+        | AuraType::ShadowDance
         | AuraType::TravelForm
         | AuraType::ShadowSight
         | AuraType::FrostArmorBuff

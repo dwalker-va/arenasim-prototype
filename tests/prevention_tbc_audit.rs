@@ -200,6 +200,7 @@ fn the_audit_joins_the_whole_book() {
         AbilityType::WindShear,
         AbilityType::GuardianSpirit,
         AbilityType::SacredShield,
+        AbilityType::ShadowDance,
     ]
     .iter()
     .map(|a| format!("{a:?}"))
