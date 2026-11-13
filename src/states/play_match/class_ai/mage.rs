@@ -275,14 +275,17 @@ fn try_ice_barrier(
     let ice_barrier = AbilityType::IceBarrier;
     let barrier_def = abilities.get_unchecked(&ice_barrier);
 
-    // Check if already shielded
-    let has_absorb_shield = ctx
-        .active_auras
-        .get(&entity)
-        .map(|auras| auras.iter().any(|a| a.effect_type == AuraType::Absorb))
-        .unwrap_or(false);
-
-    if has_absorb_shield {
+    // Held only by its own barrier. An absorb is keyed by its SOURCE (its
+    // type and ability, `Aura::same_source_as`): `apply_pending_auras` lands
+    // the barrier beside a Power Word: Shield or an item's shield, and refuses
+    // it only while an Ice Barrier is up. It is not held for an ally's shield
+    // either: it lasts 60s on a 30s cooldown, so it waits out the shield.
+    let barrier_up = ctx.active_auras.get(&entity).is_some_and(|auras| {
+        auras
+            .iter()
+            .any(|a| a.effect_type == AuraType::Absorb && a.ability_name == barrier_def.name)
+    });
+    if barrier_up {
         builder.reject(ice_barrier, RejectionReason::AlreadyApplied);
         return false;
     }
@@ -380,11 +383,15 @@ fn try_mage_armor(
         MageArmor::MoltenArmor => (AbilityType::MoltenArmor, AuraType::CritChanceIncrease),
     };
 
+    // The armor is a one-per-type buff, so it is held by whatever holds its
+    // type's slot (`Aura::holds_type_slot`, the rule `apply_pending_auras`
+    // refuses it by). A proc buff of the same type does not: Doomfinger's crit
+    // is not Molten Armor, nor Darkmoon Card: Blue Dragon's regeneration Mage
+    // Armor.
     let already_buffed = ctx
         .active_auras
         .get(&entity)
-        .map(|auras| auras.iter().any(|a| a.effect_type == aura_check))
-        .unwrap_or(false);
+        .is_some_and(|auras| auras.iter().any(|a| a.holds_type_slot(aura_check)));
 
     if already_buffed {
         builder.reject(ability, RejectionReason::AlreadyApplied);

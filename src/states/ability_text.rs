@@ -130,11 +130,20 @@ fn effect_parts(ability: AbilityType, config: &AbilityConfig, stats: &ClassBaseS
 
     let mut parts = Vec::new();
 
+    // A weapon strike's damage is its weapon's, which the class's base stats
+    // do not know: it reads as a share of the weapon's damage.
+    if config.damage_scales_with == ScalingStat::WeaponDamage && config.damage_coefficient > 0.0 {
+        parts.push(format!(
+            "Deals {:.0}% weapon damage.",
+            config.damage_coefficient * 100.0
+        ));
+    }
+
     // Calculate stat contribution for damage
     let damage_stat_value = match config.damage_scales_with {
         ScalingStat::AttackPower => stats.attack_power,
         ScalingStat::SpellPower => stats.spell_power,
-        ScalingStat::None => 0.0,
+        ScalingStat::WeaponDamage | ScalingStat::None => 0.0,
     };
     let damage_bonus = damage_stat_value * config.damage_coefficient;
 

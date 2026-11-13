@@ -1569,6 +1569,16 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         AbilityType::GuardianSpirit,
         Unreached::NeedsKnob("a build that takes Guardian Spirit"),
     ),
+    // The Retribution tree (AS-422): tests/paladin_retribution.rs builds each
+    // in its scene pairs.
+    (
+        AbilityType::Repentance,
+        Unreached::NeedsKnob("a build that takes Repentance"),
+    ),
+    (
+        AbilityType::CrusaderStrike,
+        Unreached::NeedsKnob("a build that takes Crusader Strike"),
+    ),
     // The Shadow tree (AS-416): grants; tests/shadow_talents.rs grants each
     // in its scene pairs.
     (

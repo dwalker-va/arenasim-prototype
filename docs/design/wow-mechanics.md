@@ -361,11 +361,12 @@ tests fail if a full-CC type or spell is left unlabelled.
 - A silence stops what TBC's `SpellCategories.PreventionType` says it stops
   (AS-291). Every ability declares that type as `prevention` in
   `abilities.ron` — `Silence` (spells), `Pacify` (physical attacks and shots)
-  or `None` (Travel Form, Berserker Rage) — and
-  `docs/design/balance/sweeps/2026-10-12-as287-tbc-interruptibility.py` checks
-  the whole book against the client. Four abilities have no TBC spell of
-  their own name (Web, Boar Charge, Master's Call, Wind Shear); the script
-  names the spells and client build each is read from instead.
+  or `None` (Travel Form, Berserker Rage) — and `tests/prevention_tbc_audit.rs`
+  holds the whole book to the client, through the fixture
+  `scripts/tbc_spell_categories.py` writes. Six abilities have no TBC spell of
+  their own name (Web, Boar Charge, Master's Call, Wind Shear, Guardian
+  Spirit, Sacred Shield); the script names the spells and client build each is
+  read from instead.
 - A silence stops a `Silence`-prevented ability that costs mana, cast by a
   mana user (`AbilityConfig::silence_stops`, `abilities::is_silenced`): the
   AI's pre-cast guard (`cast_guard::pre_cast_ok`) refuses to begin one, traced
@@ -431,6 +432,11 @@ tests fail if a full-CC type or spell is left unlabelled.
 - Breaks on ANY damage (threshold: 0)
 - Separate category from stuns for future diminishing returns
 - Example: Mage Polymorph (10s duration)
+- Repentance (Retribution talent, AS-422) is the other targeted
+  incapacitate: 6s, broken by any damage, Magic, sharing the incapacitates'
+  DR with Polymorph and Freezing Trap. The Paladin casts it only on an enemy
+  no teammate (or teammate's pet) has targeted and none of its team's damage
+  over time is on, the healer first (`class_ai::paladin_retribution`).
 
 ### Cyclone (Druid, TBC)
 - 1.5s cast, 20 yd, 6s: the target cannot move or act
@@ -637,6 +643,10 @@ Healing = Base + (Spell Power × Coefficient)
 ### Scaling Stats
 - `AttackPower`: Warrior, Rogue physical abilities
 - `SpellPower`: Mage, Priest, Warlock magical abilities
+- `WeaponDamage`: a weapon strike, a share of the average damage of the swing
+  it rides (`Combatant::attack_damage`, talents included). Crusader Strike is
+  `damage_coefficient: 1.1`, 110% weapon damage, so Two-Handed Weapon
+  Specialization (+5% a rank to a two-hander's swing) reaches it too.
 - `None`: Utility/CC abilities with no scaling
 
 ### Class Base Stats
@@ -725,3 +735,5 @@ These behaviors may look like bugs but are intentional design decisions. Do not 
 | Holy Shock | Instant | - | Heals ally OR damages enemy (20yd range for damage) |
 | Cleanse | Utility | Instant | Removes 1 dispellable debuff (Poly/Fear/Root/DoT/vulnerability) |
 | Hammer of Justice | CC | Instant | 10yd range, 6s stun, prioritizes healers |
+| Repentance (talent) | CC | Instant | 20yd, 6s incapacitate broken by damage, on an enemy the team leaves alone |
+| Crusader Strike (talent) | Melee | Instant | 110% weapon damage, 6s cooldown; not while a teammate is below 50% |

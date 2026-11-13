@@ -180,10 +180,11 @@ properties make an omission or a broken assumption visible in the output:
 The reporting blocks have their own offline fixture suite,
 `scripts/tests/test_db2_spell_sweep.py`, driving `main(argv)` over hand-built
 CSVs with no network round-trip. `cargo test` runs it, with the five balance
-sweep suites and the harness's own, via `tests/script_fixture_suites.rs`; run
-it directly while editing it. Add a case there for any new claim the script
-prints — a reporting regression is otherwise invisible until a human reads a
-sweep. The scaffolding all six share — the no-subprocess guard that keeps
+sweep suites, the TBC `SpellCategories` generator's and the harness's own, via
+`tests/script_fixture_suites.rs`; run it directly while editing it. Add a case
+there for any new claim the script prints — a reporting regression is
+otherwise invisible until a human reads a sweep. The scaffolding all seven
+share — the no-subprocess guard that keeps
 them offline, the `main(argv)` driver, the scratch directory, the output
 assertions and the Python 3.9 interpreter floor — lives in
 `scripts/tests/_harness.py` and is itself pinned by
@@ -382,7 +383,7 @@ Abilities are data-driven via `assets/config/abilities.ron`. To add a new abilit
                               // For a PET ability this is the pet's OWNER, and
                               // `pet: Some(Spider)` names the pet.
        prevention: Silence,   // REQUIRED - TBC's PreventionType: Silence, Pacify
-                              // or None. Run the as287 TBC check script (below).
+                              // or None. tests/prevention_tbc_audit.rs checks it (below).
        icon: "icons/abilities/<icon_name>.jpg",
        cast_time: 1.5,        // 0.0 for instant
        range: 40.0,           // Use MELEE_RANGE (2.5) for melee
@@ -581,10 +582,14 @@ stripping the dead caster's `ChannelingState`).
 
 **Every ability declares `prevention`** — TBC's `SpellCategories.PreventionType`:
 `Silence` (a spell), `Pacify` (a physical attack or shot) or `None` (Travel
-Form). It is required, with no default, and
-`docs/design/balance/sweeps/2026-10-12-as287-tbc-interruptibility.py` checks
-every ability's value against the TBC client (an ability whose name the client
-lacks is listed there with the spells it is read from). It decides two things.
+Form). It is required, with no default, and `tests/prevention_tbc_audit.rs`
+holds every ability's value to the TBC client's, read offline from
+`tests/data/tbc_spell_categories.csv` by the ability's class (or "Pet - <pet>")
+and RON `name`. A new ability whose name TBC lacks — a pet ability the client
+names differently, a spell a later client brings — fails there until
+`scripts/tbc_spell_categories.py`'s `EXPLICIT` names the client spell it is
+read from and the fixture is regenerated; the failure prints the line to add.
+It decides two things.
 A silence stops only a `Silence` ability that costs mana, begun or already
 being cast (`AbilityConfig::silence_stops`): a silenced Hunter still shoots, and
 a silenced Druid still shifts. An interrupt takes only a `Silence` cast bar
