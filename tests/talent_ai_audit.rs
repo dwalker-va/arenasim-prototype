@@ -41,6 +41,8 @@ const SCENES: &[(AbilityType, SceneFor)] = &[
     (AbilityType::InnerFocus, priest_ally_dying),
     (AbilityType::PowerInfusion, priest_kill_window),
     (AbilityType::PainSuppression, priest_ally_dying),
+    (AbilityType::Shadowburn, warlock_target_low),
+    (AbilityType::Conflagrate, warlock_immolate_up),
     (AbilityType::DivineFavor, paladin_ally_under_attack),
     (AbilityType::AuraMastery, paladin_ally_casting_by_a_rogue),
 ];
@@ -74,6 +76,36 @@ fn warlock_dots_up(defs: &AbilityDefinitions) -> (Scene, Who) {
     scene.combatant_mut(WARLOCK).warlock_curse_prefs =
         vec![arenasim::states::match_config::WarlockCurse::Agony];
     (scene, WARLOCK)
+}
+
+/// [`warlock_dots_up`] with the Warrior 15 yards off and below the line the
+/// team calls an enemy low: Shadowburn's finisher.
+fn warlock_target_low(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let (scene, who) = warlock_dots_up(defs);
+    (scene.place(WARRIOR, 15.0, 0.0).health_of(WARRIOR, 0.2), who)
+}
+
+/// [`warlock_dots_up`] with the Warlock's curse and its own Immolate on the
+/// Warrior too: Conflagrate's moment.
+fn warlock_immolate_up(defs: &AbilityDefinitions) -> (Scene, Who) {
+    let (mut scene, who) = warlock_dots_up(defs);
+    let me = scene.entity(WARLOCK);
+    for name in ["Curse of Agony", "Immolate"] {
+        scene = scene.aura_full(
+            WARRIOR,
+            Aura {
+                effect_type: AuraType::DamageOverTime,
+                duration: 15.0,
+                magnitude: 4.0,
+                tick_interval: 3.0,
+                ability_name: name.into(),
+                caster: Some(me),
+                break_on_damage_threshold: -1.0,
+                ..Default::default()
+            },
+        );
+    }
+    (scene, who)
 }
 
 const PALADIN: Who = "paladin";

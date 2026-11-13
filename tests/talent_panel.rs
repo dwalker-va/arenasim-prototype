@@ -154,9 +154,9 @@ fn the_tree_with_the_most_points_names_the_spec() {
         )
         .expect("a spent build has a spec");
     assert_eq!(spec.label, "Demonology Warlock");
-    // Affliction is the Warlock's first tree, so its 0 leads the shorthand.
-    assert_eq!(spec.short, "0/3");
-    assert_eq!(spec.line(), "Demonology Warlock 0/3");
+    // Affliction leads the shorthand and Destruction ends it, so both 0s show.
+    assert_eq!(spec.short, "0/3/0");
+    assert_eq!(spec.line(), "Demonology Warlock 0/3/0");
     // A class without trees has no spec, whatever it is handed.
     assert_eq!(
         talents().spec(
@@ -422,7 +422,7 @@ fn a_click_learns_a_rank_and_a_shift_click_takes_it_back() {
     assert!(
         panel
             .last
-            .has_note("talents:test points=2 spec=Demonology Warlock 0/2"),
+            .has_note("talents:test points=2 spec=Demonology Warlock 0/2/0"),
         "{:?}",
         panel.last.notes
     );
@@ -581,7 +581,7 @@ fn a_played_match_hands_results_each_combatants_build() {
         talents()
             .spec(WARLOCK, &results.team1_combatants[0].build)
             .map(|s| s.line()),
-        Some("Demonology Warlock 0/3".to_string())
+        Some("Demonology Warlock 0/3/0".to_string())
     );
 }
 
@@ -646,5 +646,5 @@ fn results_names_a_talented_combatants_spec() {
         .iter()
         .filter(|n| n.starts_with("results:spec"))
         .collect();
-    assert_eq!(specs, vec!["results:spec t1s0 Demonology Warlock 0/3"]);
+    assert_eq!(specs, vec!["results:spec t1s0 Demonology Warlock 0/3/0"]);
 }

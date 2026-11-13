@@ -1529,6 +1529,16 @@ const UNREACHED: &[(AbilityType, Unreached)] = &[
         AbilityType::PainSuppression,
         Unreached::NeedsKnob("a build that takes Pain Suppression"),
     ),
+    // The Destruction tree (AS-411): grants; tests/destruction_talents.rs
+    // grants each in its scene pairs.
+    (
+        AbilityType::Shadowburn,
+        Unreached::NeedsKnob("a build that takes Shadowburn"),
+    ),
+    (
+        AbilityType::Conflagrate,
+        Unreached::NeedsKnob("a build that takes Conflagrate"),
+    ),
     // The Holy tree (AS-420): the grid grants no talent; tests/paladin_holy.rs
     // builds each in its scene pairs.
     (

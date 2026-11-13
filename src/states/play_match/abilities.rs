@@ -255,6 +255,9 @@ pub enum AbilityType {
     InnerFocus,      // talent: the Priest's next spell is free, +25% crit
     PowerInfusion,   // talent: an ally gains 24 spell power for 15s
     PainSuppression, // talent: an ally takes 40% less damage for 8s
+    // Warlock: the Destruction tree (AS-411). Appended for the same reason.
+    Shadowburn,  // talent: instant Shadow damage, 20yd, 15s
+    Conflagrate, // talent: instant Fire damage that consumes the Warlock's Immolate
     // Paladin: the Holy tree (AS-420). Appended for the same reason.
     DivineFavor, // talent: the next Flash of Light, Holy Light or Holy Shock crits
     AuraMastery, // talent: teammates immune to silence and interrupts for 6s
@@ -299,7 +302,8 @@ impl AbilityType {
             | Lifebloom | Swiftmend | Moonfire | MarkOfTheWild | Innervate | EntanglingRoots
             | Cyclone | TravelForm | Shadowform | DivineProtection | BlessingOfSacrifice
             | SacredShield | RetributionAura | SiphonLife | AmplifyCurse | CurseOfExhaustion
-            | InnerFocus | PowerInfusion | PainSuppression | DivineFavor | AuraMastery => false,
+            | InnerFocus | PowerInfusion | PainSuppression | Shadowburn | Conflagrate
+            | DivineFavor | AuraMastery => false,
         }
     }
 

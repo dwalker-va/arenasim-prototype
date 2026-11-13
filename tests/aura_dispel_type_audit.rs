@@ -255,6 +255,10 @@ fn expected(ability: AbilityType) -> Row {
         AbilityType::AmplifyCurse => config(S::Magic, T::Magic),
         // 18223, 29539: DispelType 2 (Curse).
         AbilityType::CurseOfExhaustion => config(S::Curse, T::Curse),
+        // 17877: its soul-shard debuff (29341) is not modelled; a plain hit.
+        AbilityType::Shadowburn => Row::NoAura,
+        // 17962: a plain hit; the Immolate it consumes is Immolate's row.
+        AbilityType::Conflagrate => Row::NoAura,
         AbilityType::SpellLock => Row::NoAura,
         AbilityType::DevourMagic => Row::NoAura,
 

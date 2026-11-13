@@ -183,7 +183,11 @@ pub fn proc_clause(proc: &TalentProc, abilities: &AbilityDefinitions) -> String 
                     .map_or_else(|| format!("{a:?}"), |d| d.name.clone())
             })
             .collect();
-        names.join(" or ")
+        // "A or B", and "A, B or C" for more.
+        match names.split_last() {
+            Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+            _ => names.join(""),
+        }
     };
     let of = |what: &str| {
         if proc.abilities.is_empty() {
@@ -219,6 +223,8 @@ pub fn proc_clause(proc: &TalentProc, abilities: &AbilityDefinitions) -> String 
             duration,
             tick_interval,
             dispel_type,
+            scope,
+            charges,
             ..
         } => {
             let whom = match on {
@@ -239,8 +245,8 @@ pub fn proc_clause(proc: &TalentProc, abilities: &AbilityDefinitions) -> String 
                 break_on_damage: -1.0,
                 tick_interval: *tick_interval,
                 dr_category: None,
-                scope: None,
-                charges: None,
+                scope: *scope,
+                charges: *charges,
                 dispel_type: *dispel_type,
                 stacking: None,
                 bloom: None,
@@ -296,12 +302,19 @@ pub fn talent_proc_description(
 /// turned to semicolons. "Roots the target for 4 sec. Breaks after 80
 /// damage." reads "roots the target for 4 sec; breaks after 80 damage".
 fn in_clause(sentence: &str) -> String {
-    let body = sentence.trim().trim_end_matches('.').replace(". ", "; ");
-    let mut chars = body.chars();
-    match chars.next() {
-        Some(first) => first.to_lowercase().chain(chars).collect(),
-        None => String::new(),
-    }
+    sentence
+        .trim()
+        .trim_end_matches('.')
+        .split(". ")
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_lowercase().chain(chars).collect(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<String>>()
+        .join("; ")
 }
 
 /// Every rank's text, one line each: "Rank 1: +3% maximum health." A
@@ -743,6 +756,8 @@ mod tests {
                 duration: 6.0,
                 tick_interval: 0.0,
                 dispel_type: crate::states::play_match::components::DispelType::Physical,
+                scope: None,
+                charges: None,
                 name: None,
             },
             internal_cooldown: 0.0,
@@ -859,6 +874,8 @@ mod tests {
             duration: 3.0,
             tick_interval: 0.0,
             dispel_type: crate::states::play_match::components::DispelType::Auto,
+            scope: None,
+            charges: None,
             name: None,
         };
         blackout.internal_cooldown = 8.0;

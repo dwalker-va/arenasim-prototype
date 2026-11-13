@@ -13,10 +13,17 @@
 //! 2. Spread curses to enemies (per-target preferences); Amplify Curse (a
 //!    talent, off the global cooldown) first, when the curse due is one it
 //!    amplifies
-//! 3. Immolate (2s cast Fire DoT) - skipped when being kited
+//! 3. Immolate (2s cast Fire DoT) - skipped when being kited; then
+//!    Conflagrate (a talent) consumes the Warlock's own Immolate for its burst
 //! 4. Fear (CC on non-CC'd target)
 //! 5. Drain Life (when HP < 80% and target has DoTs)
 //! 6. Shadow Bolt (main damage spell) - skipped when being kited
+//!
+//! Shadowburn (a talent's instant) is a finisher: after Life Tap and ahead of
+//! the DoTs, on a target below `kill_hp_threshold` (see
+//! [`shadowburn_finishes`]). Being kited is no moment for it: the kiter is
+//! beyond the Warlock's preferred range, and Shadowburn reaches only 20
+//! yards.
 //!
 //! ## Kiting Detection
 //! When being kited (slowed and out of range), the Warlock prioritizes instant-cast
@@ -430,6 +437,29 @@ pub fn decide_warlock_action(
         return true;
     }
 
+    // Shadowburn (Destruction talent) as a finisher: a target below the
+    // line the team calls an enemy low takes the instant now, ahead of the
+    // DoTs that would land too late to matter.
+    if shadowburn_finishes(target_info, movement)
+        && try_shadowburn(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            target_immune,
+            ctx,
+            &mut builder,
+        )
+    {
+        builder.finish();
+        return true;
+    }
+
     let enemy_has_dispeller = ctx
         .alive_enemies()
         .iter()
@@ -594,6 +624,27 @@ pub fn decide_warlock_action(
         auras,
         target_entity,
         target_pos,
+        ctx,
+        &mut builder,
+    ) {
+        builder.finish();
+        return true;
+    }
+
+    // Priority 3.5: Conflagrate (Destruction talent) consumes the Warlock's
+    // own Immolate for its burst as soon as one is on the target. Instant, so
+    // being kited does not hold it.
+    if try_conflagrate(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        target_entity,
+        target_pos,
+        target_immune,
         ctx,
         &mut builder,
     ) {
@@ -786,6 +837,176 @@ fn try_siphon_life(
             ),
         );
     }
+    true
+}
+
+/// Whether Shadowburn finishes `target`: it is below `kill_hp_threshold`,
+/// the line at which the team calls an enemy low (`movement.ron`'s
+/// `shared:` block).
+pub fn shadowburn_finishes(target: &super::CombatantInfo, movement: &MovementConfig) -> bool {
+    target.is_alive && target.health_pct() < movement.shared.kill_hp_threshold
+}
+
+/// Shadowburn (Destruction talent): instant Shadow damage on the kill target,
+/// asked as a finisher ([`shadowburn_finishes`]). A Warlock without the
+/// talent does not consider it.
+fn try_shadowburn(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    target_pos: Vec3,
+    target_immune: bool,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::Shadowburn;
+    if abilities.get(&ability).is_none() {
+        return false;
+    }
+    if target_immune {
+        builder.reject(ability, RejectionReason::TargetImmune);
+        return false;
+    }
+    cast_instant_hit(
+        commands,
+        combat_log,
+        abilities,
+        ability,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        target_entity,
+        target_pos,
+        ctx,
+        builder,
+    )
+}
+
+/// Whether the Warlock's own Immolate burns on `target`: Conflagrate's
+/// precondition (it consumes that one, never another Warlock's).
+pub fn own_immolate_on(ctx: &CombatContext, me: Entity, target: Entity) -> bool {
+    ctx.active_auras.get(&target).is_some_and(|list| {
+        list.iter().any(|a| {
+            a.effect_type == AuraType::DamageOverTime
+                && a.ability_name == "Immolate"
+                && a.caster == Some(me)
+        })
+    })
+}
+
+/// Conflagrate (Destruction capstone): instant Fire damage on the kill
+/// target that consumes the Warlock's own Immolate on it, cast as soon as
+/// one burns there. A Warlock without the talent does not consider it.
+fn try_conflagrate(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    target_pos: Vec3,
+    target_immune: bool,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::Conflagrate;
+    if abilities.get(&ability).is_none() {
+        return false;
+    }
+    if target_immune {
+        builder.reject(ability, RejectionReason::TargetImmune);
+        return false;
+    }
+    if !own_immolate_on(ctx, entity, target_entity) {
+        builder.reject(
+            ability,
+            RejectionReason::PreconditionUnmet {
+                note: "no Immolate of its own on the target to consume".into(),
+            },
+        );
+        return false;
+    }
+    cast_instant_hit(
+        commands,
+        combat_log,
+        abilities,
+        ability,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        target_entity,
+        target_pos,
+        ctx,
+        builder,
+    )
+}
+
+/// An instant direct-damage cast on the target, through the cast gate (and
+/// its friendly crowd-control guard: the hit would break it) and a
+/// zero-length cast: `process_casting` lands it, charges its mana as it lands
+/// and fires its `SpellHit`. On the global cooldown, and on its own.
+fn cast_instant_hit(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityBook,
+    ability: AbilityType,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    target_pos: Vec3,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let def = abilities.get_unchecked(&ability);
+    let opts = PreCastOpts {
+        check_friendly_cc: true,
+        ..Default::default()
+    };
+    let cleared = match cast_gate(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        Some((target_entity, target_pos)),
+        ctx,
+        opts,
+    ) {
+        Ok(cleared) => cleared,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
+
+    builder.choose(cleared, Some(target_entity), true);
+    combatant.start_cooldown(ability);
+    combatant.global_cooldown = GCD;
+    commands
+        .entity(entity)
+        .insert(CastingState::new(ability, target_entity, 0.0));
+
+    let target_tuple = ctx.combatants.get(&target_entity).map(|info| info.log_id());
+    log_ability_use(
+        combat_log,
+        combatant.team,
+        combatant.slot,
+        combatant.class,
+        &def.name,
+        target_tuple,
+        "casts",
+    );
     true
 }
 
