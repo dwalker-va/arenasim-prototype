@@ -27,9 +27,9 @@
 //!    plain `CombatLog::log` carries no dealer, ability or killing blow, so it
 //!    is missing from the per-ability breakdown and the K column. The places
 //!    that name `CombatLogEventType::Damage` outside `CombatLog` itself are a
-//!    declared set (UNSTRUCTURED_DAMAGE_LINES), none of them a hit with a
-//!    dealer; and every row hands `log_damage` its kill as a computed flag,
-//!    never a literal.
+//!    declared set, counted per function (UNSTRUCTURED_DAMAGE_LINES), none of
+//!    them a hit with a dealer; and every row (DAMAGE_CREDITORS counts them)
+//!    hands `log_damage` its kill as a computed flag, never a literal.
 //!
 //! Lexical, like the other audits built on `tests/common/source_audit.rs`: it
 //! reads comment-, string- and test-module-blanked source. It does not see a
@@ -41,7 +41,7 @@ mod common;
 
 use common::source_audit::{blank_comments_and_strings, blank_test_modules, load_sources};
 use regex::Regex;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The subtractive or zeroing `current_health` writes allowed in `src/`, as
 /// (file, fn).
@@ -115,11 +115,28 @@ const DAMAGERS: &[(&str, &str)] = &[
     ),
 ];
 
+/// The name of the `fn` item `code[..at]` is inside, or `<module>`.
+fn enclosing_fn(code: &str, at: usize) -> String {
+    let fn_item = Regex::new(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap();
+    fn_item
+        .captures_iter(&code[..at])
+        .last()
+        .map_or_else(|| "<module>".to_string(), |c| c[1].to_string())
+}
+
 /// Every (file, enclosing fn) in non-test `src/` code where `pattern` matches
 /// and `keep(first capture group, rest of the statement)` holds.
 fn sites(pattern: &Regex, keep: impl Fn(&str, &str) -> bool) -> BTreeSet<(String, String)> {
-    let fn_item = Regex::new(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap();
-    let mut found = BTreeSet::new();
+    site_counts(pattern, keep).into_keys().collect()
+}
+
+/// [`sites`], with how many times each matched: a second match in a function
+/// already named is a new member too.
+fn site_counts(
+    pattern: &Regex,
+    keep: impl Fn(&str, &str) -> bool,
+) -> BTreeMap<(String, String), usize> {
+    let mut found = BTreeMap::new();
     for file in load_sources(&["src"]).expect("read src/") {
         let code = blank_test_modules(&blank_comments_and_strings(&file.raw));
         for m in pattern.captures_iter(&code) {
@@ -131,11 +148,8 @@ fn sites(pattern: &Regex, keep: impl Fn(&str, &str) -> bool) -> BTreeSet<(String
             if !keep(group, &code[whole.end()..statement_end]) {
                 continue;
             }
-            let enclosing = fn_item
-                .captures_iter(&code[..whole.start()])
-                .last()
-                .map_or_else(|| "<module>".to_string(), |c| c[1].to_string());
-            found.insert((file.rel_display(), enclosing));
+            let enclosing = enclosing_fn(&code, whole.start());
+            *found.entry((file.rel_display(), enclosing)).or_insert(0) += 1;
         }
     }
     found
@@ -159,6 +173,29 @@ fn assert_same(
         extra.is_empty() && missing.is_empty(),
         "{label}\n  found but not declared: {extra:?}\n  declared but not found: {missing:?}"
     );
+}
+
+/// [`assert_same`] for counted members: each (file, fn) and how many times.
+fn assert_same_counts(
+    label: &str,
+    found: BTreeMap<(String, String), usize>,
+    expected: BTreeMap<(String, String), usize>,
+) {
+    let differ: Vec<_> = found
+        .keys()
+        .chain(expected.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter(|k| found.get(*k) != expected.get(*k))
+        .map(|k| {
+            format!(
+                "{k:?}: found {}, declared {}",
+                found.get(k).copied().unwrap_or(0),
+                expected.get(k).copied().unwrap_or(0)
+            )
+        })
+        .collect();
+    assert!(differ.is_empty(), "{label}\n  {}", differ.join("\n  "));
 }
 
 /// Every non-definition call of `name(` in non-test `src/`, as (file, fn).
@@ -262,40 +299,53 @@ fn every_damager_raises_by_the_attacker_and_spawns_its_follow_ups() {
 // Damage dealt: one rule for the Results total and its breakdown (AS-466)
 // ---------------------------------------------------------------------------
 
-/// The systems that credit a dealer with damage, as (file, fn). Each credits
-/// through `combat_core::credit_damage_dealt` and logs the breakdown row
-/// (`CombatLog::log_damage`) of the same hit.
-const DAMAGE_CREDITORS: &[(&str, &str)] = &[
+/// The systems that credit a dealer with damage, as (file, fn, the
+/// `CombatLog::log_damage` calls in it). Each credits through
+/// `combat_core::credit_damage_dealt` and logs the breakdown row of the same
+/// hit. The row count makes the row audits below exact: a row that
+/// disappears, or a second one in a system already named, fails them.
+const DAMAGE_CREDITORS: &[(&str, &str, usize)] = &[
     (
         "src/states/play_match/instant_landings.rs",
         "land_instant_effects",
+        2,
     ),
-    ("src/states/play_match/auras.rs", "process_dot_ticks"),
+    ("src/states/play_match/auras.rs", "process_dot_ticks", 1),
     (
         "src/states/play_match/projectiles.rs",
         "process_projectile_hits",
+        1,
     ),
     (
         "src/states/play_match/combat_core/casting.rs",
         "process_casting",
+        1,
     ),
     (
         "src/states/play_match/combat_core/casting.rs",
         "process_channeling",
+        1,
     ),
     (
         "src/states/play_match/combat_core/auto_attack.rs",
         "combat_auto_attack",
+        2,
     ),
     (
         "src/states/play_match/effects/holy_shock.rs",
         "process_holy_shock_damage",
+        1,
     ),
     // Transferred shares and reflects, landed by `land`.
-    ("src/states/play_match/combat_core/follow_ups.rs", "record"),
+    (
+        "src/states/play_match/combat_core/follow_ups.rs",
+        "record",
+        1,
+    ),
     (
         "src/states/play_match/effects/backlash.rs",
         "process_backlash",
+        1,
     ),
 ];
 
@@ -328,7 +378,7 @@ fn every_damage_credit_has_its_breakdown_row() {
         "The systems that call `credit_damage_dealt` changed. A new damage site names \
          itself in DAMAGE_CREDITORS.",
         callers("credit_damage_dealt"),
-        named(DAMAGE_CREDITORS),
+        creditors(),
     );
     let mut loggers = callers("log_damage");
     // The definition's own module: `CombatLog`'s methods and their tests.
@@ -338,8 +388,63 @@ fn every_damage_credit_has_its_breakdown_row() {
          dealt: a credit with no row leaves the Results total above its breakdown, a \
          row with no credit leaves it below.",
         loggers,
-        named(DAMAGE_CREDITORS),
+        creditors(),
     );
+}
+
+fn creditors() -> BTreeSet<(String, String)> {
+    DAMAGE_CREDITORS
+        .iter()
+        .map(|(file, f, _)| (file.to_string(), f.to_string()))
+        .collect()
+}
+
+/// One `CombatLog::log_damage` call in non-test `src/`.
+struct Row {
+    /// "file:line", for a failure message.
+    at: String,
+    /// Its arguments, trimmed.
+    args: Vec<String>,
+}
+
+/// Every `log_damage` call in non-test `src/` outside `CombatLog` itself,
+/// after checking they are exactly the rows DAMAGE_CREDITORS declares, so a
+/// check over them cannot pass on a row that went missing.
+fn damage_rows() -> Vec<Row> {
+    let call = Regex::new(r"\.\s*log_damage\s*\(").unwrap();
+    let mut rows = Vec::new();
+    let mut counts = BTreeMap::new();
+    for file in load_sources(&["src"]).expect("read src/") {
+        if file.rel_display() == "src/combat/log.rs" {
+            continue;
+        }
+        let code = blank_test_modules(&blank_comments_and_strings(&file.raw));
+        for m in call.find_iter(&code) {
+            let args =
+                common::source_audit::param_list(&code, m.end() - 1).expect("a balanced call");
+            let line = code[..m.start()].lines().count();
+            *counts
+                .entry((file.rel_display(), enclosing_fn(&code, m.start())))
+                .or_insert(0) += 1;
+            rows.push(Row {
+                at: format!("{}:{line}", file.rel_display()),
+                args: common::source_audit::split_params(&args)
+                    .iter()
+                    .map(|a| a.trim().to_string())
+                    .collect(),
+            });
+        }
+    }
+    assert_same_counts(
+        "The `log_damage` rows are not the rows DAMAGE_CREDITORS declares: a row went \
+         missing, or a new one needs its count raised there.",
+        counts,
+        DAMAGE_CREDITORS
+            .iter()
+            .map(|(file, f, n)| ((file.to_string(), f.to_string()), *n))
+            .collect(),
+    );
+    rows
 }
 
 /// Every damage row's amount is `credited_damage(landed, absorbed)`, the rule
@@ -348,28 +453,14 @@ fn every_damage_credit_has_its_breakdown_row() {
 /// rule (`tests/results_damage_totals.rs` plays the rows).
 #[test]
 fn every_damage_row_is_logged_under_the_rule() {
-    let call = Regex::new(r"\.\s*log_damage\s*\(").unwrap();
     let rule = Regex::new(r"^(?:[A-Za-z_][A-Za-z0-9_]*\s*::\s*)*credited_damage\s*\(").unwrap();
-    let mut rows = 0;
     let mut bad = Vec::new();
-    for file in load_sources(&["src"]).expect("read src/") {
-        let code = blank_test_modules(&blank_comments_and_strings(&file.raw));
-        for m in call.find_iter(&code) {
-            let args =
-                common::source_audit::param_list(&code, m.end() - 1).expect("a balanced call");
-            let args = common::source_audit::split_params(&args);
-            rows += 1;
-            let amount = args.get(3).map(|a| a.trim()).unwrap_or("");
-            if !rule.is_match(amount) {
-                let line = code[..m.start()].lines().count();
-                bad.push(format!("{}:{line}: amount `{amount}`", file.rel_display()));
-            }
+    for row in damage_rows() {
+        let amount = row.args.get(3).map_or("", String::as_str);
+        if !rule.is_match(amount) {
+            bad.push(format!("{}: amount `{amount}`", row.at));
         }
     }
-    assert!(
-        rows >= DAMAGE_CREDITORS.len(),
-        "only {rows} damage rows found"
-    );
     assert!(
         bad.is_empty(),
         "A damage row's amount is not `credited_damage(landed, absorbed)`:\n{}",
@@ -382,30 +473,35 @@ fn every_damage_row_is_logged_under_the_rule() {
 // ---------------------------------------------------------------------------
 
 /// The places outside `CombatLog` that name `CombatLogEventType::Damage`, as
-/// (file, fn), each with why it is not a hit that owes a row. A hit with a
+/// (file, fn, how many times), each with why it is not a hit that owes a row.
+/// Counted, so a second line in a function already named fails too. A hit with a
 /// dealer logs through `CombatLog::log_damage`, which carries the dealer, the
 /// ability and the killing blow; a plain `CombatLog::log` line carries none of
 /// them, so its damage is missing from the Results breakdown and its kill from
 /// the K column (the Unstable Affliction backlash once was, AS-439).
-const UNSTRUCTURED_DAMAGE_LINES: &[(&str, &str, &str)] = &[
+const UNSTRUCTURED_DAMAGE_LINES: &[(&str, &str, usize, &str)] = &[
     (
         "src/states/play_match/combat_core/avoidance.rs",
         "resolve_melee_avoidances",
+        1,
         "a dodged or parried swing: no damage landed, so there is no row",
     ),
     (
         "src/states/play_match/combat_core/follow_ups.rs",
         "record",
+        1,
         "a reflect or transferred share whose dealer is gone: no one to credit",
     ),
     (
         "src/states/play_match/effects/backlash.rs",
         "process_backlash",
+        1,
         "a backlash whose Warlock is gone: no one to credit",
     ),
     (
         "src/states/play_match/rendering/combat_log.rs",
         "render_combat_log_content",
+        1,
         "the HUD log's colour for a damage line: a read, not a log",
     ),
 ];
@@ -421,14 +517,14 @@ fn every_damage_line_with_a_dealer_is_a_row() {
         BTreeSet::new(),
     );
     let damage = Regex::new(r"\bCombatLogEventType\s*::\s*Damage\b").unwrap();
-    let mut found = sites(&damage, |_, _| true);
+    let mut found = site_counts(&damage, |_, _| true);
     // `CombatLog`'s own module: `log_damage` itself, and the queries.
-    found.retain(|(file, _)| file != "src/combat/log.rs");
-    let declared: BTreeSet<(String, String)> = UNSTRUCTURED_DAMAGE_LINES
+    found.retain(|(file, _), _| file != "src/combat/log.rs");
+    let declared = UNSTRUCTURED_DAMAGE_LINES
         .iter()
-        .map(|(file, f, _)| (file.to_string(), f.to_string()))
+        .map(|(file, f, n, _)| ((file.to_string(), f.to_string()), *n))
         .collect();
-    assert_same(
+    assert_same_counts(
         "A damage line is logged without `CombatLog::log_damage`, so its damage is \
          missing from the Results breakdown and its kill from the K column. Log a hit \
          with a dealer through `log_damage` (credited to the dealer's ability, with its \
@@ -445,31 +541,14 @@ fn every_damage_line_with_a_dealer_is_a_row() {
 /// and one that passed `true` would credit kills that never happened.
 #[test]
 fn every_damage_row_computes_its_killing_blow() {
-    let call = Regex::new(r"\.\s*log_damage\s*\(").unwrap();
     let literal = Regex::new(r"^(true|false)$").unwrap();
-    let mut rows = 0;
     let mut bad = Vec::new();
-    for file in load_sources(&["src"]).expect("read src/") {
-        let code = blank_test_modules(&blank_comments_and_strings(&file.raw));
-        for m in call.find_iter(&code) {
-            let args =
-                common::source_audit::param_list(&code, m.end() - 1).expect("a balanced call");
-            let args = common::source_audit::split_params(&args);
-            rows += 1;
-            let kill = args.get(4).map(|a| a.trim()).unwrap_or("");
-            if kill.is_empty() || literal.is_match(kill) {
-                let line = code[..m.start()].lines().count();
-                bad.push(format!(
-                    "{}:{line}: killing blow `{kill}`",
-                    file.rel_display()
-                ));
-            }
+    for row in damage_rows() {
+        let kill = row.args.get(4).map_or("", String::as_str);
+        if kill.is_empty() || literal.is_match(kill) {
+            bad.push(format!("{}: killing blow `{kill}`", row.at));
         }
     }
-    assert!(
-        rows >= DAMAGE_CREDITORS.len(),
-        "only {rows} damage rows found"
-    );
     assert!(
         bad.is_empty(),
         "A damage row's killing blow is not computed from its victim's death:\n{}",
