@@ -854,8 +854,12 @@ any ring fits either ring socket, and the same item may not occupy both
      on Windfury Totem's own path (`combat_core::ExtraSwingSource`), rolled
      where the swing is queued rather than after it lands. It takes no
      `magnitude`, `duration` or `internal_cooldown` (validated), never draws
-     the totem's `WindfuryTornado`, grants no rage (a TBC deviation, AS-448)
+     the totem's `WindfuryTornado`, grants a white hit's rage when it lands
      and no further extra swing, and logs `X procs <trinket> (extra attack)`.
+     One swing gets at most ONE extra attack, and the trinket's comes first:
+     the totem is rolled only when no trinket fired
+     (`combat_core::roll_extra_attack`; TBC, sourced in
+     `docs/design/wow-mechanics.md`).
      No stat buys it, so it is priced at a DECLARED rate per unit of `chance`,
      `WEIGHT_EXTRA_SWING`: 1.5x haste's weight, provisional (a 10x-dose sweep
      the constant cites). Every consumer that lists or draws proc BUFFS asks
