@@ -30,9 +30,10 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::{
     animate_client_particles, animate_saved_flashes, billboard_cheat_death_particles,
     build_cheat_death_rigs, cheat_death_pose, cheat_death_sprite_image,
-    consume_killing_blow_signals, fire_alpha, spawn_saved_flashes, update_cheat_death,
-    CheatDeathLaunch, CheatDeathPart, CheatDeathPiece, CheatDeathPose, CheatDeathRig,
-    CheatDeathSprite, EmitterSprite, SavedFlash, CHEAT_DEATH_LAYERS, CHEAT_DEATH_SPRITE_PX,
+    consume_killing_blow_signals, fire_alpha, particle_sprite_image, spawn_saved_flashes,
+    tail_length, update_cheat_death, CheatDeathLaunch, CheatDeathPart, CheatDeathPiece,
+    CheatDeathPose, CheatDeathRig, CheatDeathSprite, CheatDeathTail, EmitterSprite, SavedFlash,
+    CHEAT_DEATH_LAYERS, CHEAT_DEATH_SPRITE_PX, GLOW_SOFT, SMOKE_SOFT,
 };
 use arenasim::CharacterClass;
 use bevy::prelude::*;
@@ -58,8 +59,8 @@ fn near(a: Vec3, b: Vec3) -> bool {
 use CheatDeathPiece as P;
 use CheatDeathSprite as S;
 
-/// Every piece as the bench draws it: its sRGB, its sprite, and whether it
-/// darkens (the sockets, painted source-over) rather than adds light.
+/// Every piece as the bench draws it: its sRGB, its sprite, and whether it is
+/// painted source-over (laid over what is behind it) rather than `lighter`.
 const BENCH_LOOK: &[(CheatDeathPiece, [u8; 3], CheatDeathSprite, bool)] = &[
     // `skull(..., [149,120,255], a)`: the body at a × 0.75, `lighter`.
     (P::SkullBody, [149, 120, 255], S::SkullBody, false),
@@ -79,13 +80,16 @@ const FLAME_RGB: [u8; 3] = [181, 134, 244];
 
 fn bench_look(piece: CheatDeathPiece) -> ([u8; 3], CheatDeathSprite, bool) {
     if let P::Flame(_) = piece {
-        return (FLAME_RGB, S::Flame, false);
+        // `ghostFire` calls `sprite('flame', ...)` from `customDraw` with no
+        // composite of its own: every helper before it restores its state,
+        // so the flames are painted source-over, not `lighter`.
+        return (FLAME_RGB, S::Flame, true);
     }
-    let (_, rgb, sprite, darkens) = BENCH_LOOK
+    let (_, rgb, sprite, source_over) = BENCH_LOOK
         .iter()
         .find(|l| l.0 == piece)
         .expect("every piece is in the table");
-    (*rgb, *sprite, *darkens)
+    (*rgb, *sprite, *source_over)
 }
 
 /// Every piece, once: the nine onset pieces and eighteen flames.
@@ -96,10 +100,10 @@ fn the_pieces_wear_the_benchs_colours_sprites_and_blends() {
     assert_eq!(CheatDeathPiece::all(), expected, "every piece, once");
     assert_eq!(expected.len(), 27);
     for piece in expected {
-        let (rgb, sprite, darkens) = bench_look(piece);
+        let (rgb, sprite, source_over) = bench_look(piece);
         assert_eq!(piece.rgb(), rgb, "{piece:?} colour");
         assert_eq!(piece.sprite(), sprite, "{piece:?} sprite");
-        assert_eq!(piece.darkens(), darkens, "{piece:?} blend");
+        assert_eq!(piece.source_over(), source_over, "{piece:?} blend");
     }
 }
 
@@ -272,15 +276,29 @@ fn the_light_column_is_the_benchs() {
     }
 }
 
+/// The combatant capsule (`Capsule3d::new(0.5, 1.5)`, centred 1.0 above the
+/// floor), its radius `y` yards up: 0.5 from 0.25 to 1.75, its hemispheres
+/// closing to 0 and 2.25.
+fn capsule_radius(y: f32) -> f32 {
+    if (0.25..=1.75).contains(&y) {
+        0.5
+    } else {
+        let d = if y < 0.25 { 0.25 - y } else { y - 1.75 };
+        (0.25 - d * d).max(0.0).sqrt()
+    }
+}
+
 /// The bench's `ghostFire`, worked here: flame `k` at `ms` stands at angle
-/// `k / 18 τ + ms / 900` and radius `0.4 (1 − 0.35 ph)`, `−0.1 + 2.3 ph` up,
-/// `0.42 (1 − 0.5 ph)` across, at `a sin(ph π) 0.8`; `ph` its place in a
-/// `520 + (k % 5) 60` ms rise, offset `97 k` ms.
+/// `k / 18 τ + ms / 900`, `−0.1 + 2.3 ph` up, `0.42 (1 − 0.5 ph)` across, at
+/// `a sin(ph π) 0.8`; `ph` its place in a `520 + (k % 5) 60` ms rise, offset
+/// `97 k` ms. Its radius is the one named departure: 0.05 yd outside the
+/// body capsule at its height, where the bench's `0.4 (1 − 0.35 ph)` would
+/// stand inside the 0.5 yd capsule.
 fn bench_flame(k: u8, ms: f32, a: f32) -> (Vec3, f32, f32) {
     let per = 520.0 + (k % 5) as f32 * 60.0;
     let ph = ((ms + k as f32 * 97.0) % per) / per;
     let angle = k as f32 / 18.0 * TAU + ms / 900.0;
-    let r = 0.4 * (1.0 - ph * 0.35);
+    let r = capsule_radius(-0.1 + ph * 2.3) + 0.05;
     (
         Vec3::new(r * angle.cos(), -0.1 + ph * 2.3, r * angle.sin()),
         0.42 * (1.0 - ph * 0.5),
@@ -313,7 +331,21 @@ fn the_ghost_fire_comes_in_holds_and_goes_as_the_bench_has_it() {
     // Flame 7 at 2 s, by hand: ph = (2679 mod 640) / 640.
     let p = pose_of(P::Flame(7), 2.0, None);
     assert!(close(p.world.y, 0.327_656), "{}", p.world.y);
-    assert!(close(p.world.xz().length(), 0.373_969));
+    assert!(close(p.world.xz().length(), 0.55), "0.05 outside the body");
+    // Near the crown (2.2 yd up) the capsule has closed to 0.218 yd.
+    for k in 0..18 {
+        for ms in (0..3000).step_by(7) {
+            let age = ms as f32 / 1000.0;
+            if let Some(p) = cheat_death_pose(P::Flame(k), age, None) {
+                let r = p.world.xz().length();
+                assert!(
+                    r >= capsule_radius(p.world.y) + 0.05 - 1e-4,
+                    "flame {k} at {age}s: {r} inside the body at {}",
+                    p.world.y
+                );
+            }
+        }
+    }
     assert!(close(p.size.x, 0.380_953) && close(p.size.y, 0.380_953));
     assert!(close(p.alpha, 0.441_186), "{}", p.alpha);
     // Every flame, through the fire's whole life.
@@ -347,17 +379,20 @@ fn the_ghost_fire_comes_in_holds_and_goes_as_the_bench_has_it() {
 /// P6, the streaks: `t_vfx_flar_blur`, 300/s at 0.567-0.833 s, from 3.17 yd up
 /// and 0.2 to the side, every direction at 8.3 yd/s under drag 0.6, living
 /// 0.9 s, white -> lavender (183,183,255), alpha 0.2 -> 1 -> 0 and radius 0.4
-/// -> 0.056 keyed at 5% of life. P0, the smoke: `toonsmoke16` at 3.3 yd, 50 ->
-/// 100 -> 0/s across 0-567-1100 ms, emitted 167-1100 ms, sinking at 0.56 yd/s
-/// within 0.23 rad of straight down, living 2.5 s, indigo, radius 0.83 -> 0.26
-/// -> 0.42. Both add light.
+/// -> 0.056 keyed at 5% of life, drawn as the bench's `glow` with `tail` 3.
+/// P0, the smoke: `toonsmoke16` at 3.3 yd, 50 -> 100 -> 0/s across
+/// 0-567-1100 ms, emitted 167-1100 ms, sinking at 0.56 yd/s within 0.23 rad
+/// of straight down, living 2.5 s, indigo, radius 0.83 -> 0.26 -> 0.42, drawn
+/// as the bench's `smoke`, no tail. Both add light.
 #[test]
 fn the_streaks_and_smoke_are_the_benchs() {
     let [streaks, smoke] = CHEAT_DEATH_LAYERS;
 
     let e = &streaks.emitter;
     assert!(streaks.on);
-    assert_eq!(e.sprite, EmitterSprite::Streak);
+    assert_eq!(e.sprite, EmitterSprite::Glow);
+    assert_eq!(streaks.soft, [1.0, 0.45, 0.0], "sprite('glow')'s stops");
+    assert_eq!(streaks.tail, 3.0);
     assert!(e.additive);
     assert_eq!(e.rate, 300.0);
     assert_eq!(e.track, None);
@@ -381,6 +416,8 @@ fn the_streaks_and_smoke_are_the_benchs() {
     let e = &smoke.emitter;
     assert!(smoke.on);
     assert_eq!(e.sprite, EmitterSprite::Glow);
+    assert_eq!(smoke.soft, [0.85, 0.5, 0.0], "sprite('smoke')'s stops");
+    assert_eq!(smoke.tail, 0.0);
     assert!(e.additive);
     assert_eq!(e.window, Some((0.167, 1.1)));
     assert_eq!(e.life, 2.5);
@@ -531,6 +568,68 @@ fn the_glow_eye_and_flame_sprites_are_the_benchs() {
         cheat_death_sprite_image(S::LevelRing).is_none(),
         "a solid ring"
     );
+}
+
+/// The bench's tail: `min(tail × 0.12, speed × 0.06)` yd behind a particle
+/// faster than 0.2 yd/s, none for a layer without a tail.
+#[test]
+fn a_tail_shortens_as_its_streak_slows() {
+    for (tail, speed, want) in [
+        (3.0, 8.3, Some(0.36)),
+        (3.0, 6.0, Some(0.36)),
+        (3.0, 5.0, Some(0.3)),
+        (3.0, 1.64, Some(0.0984)),
+        (3.0, 0.25, Some(0.015)),
+        (3.0, 0.2, None),
+        (0.0, 8.3, None),
+    ] {
+        match (tail_length(tail, speed), want) {
+            (Some(got), Some(want)) => assert!(close(got, want), "{speed}: {got} vs {want}"),
+            (got, want) => assert_eq!(got, want, "tail {tail} at {speed}"),
+        }
+    }
+}
+
+/// The particles' sprites, read off their images: the streak's head is the
+/// bench's `glow` (1 at the centre, 0.45 at 0.45 out, nothing at the rim),
+/// the smoke the bench's `smoke` (0.85, 0.5, nothing), each round.
+#[test]
+fn the_particle_sprites_are_the_benchs_glow_and_smoke() {
+    let step = 1.5 / 255.0 + 2.0 / CHEAT_DEATH_SPRITE_PX as f32;
+    for (soft, want) in [
+        (
+            GLOW_SOFT,
+            [
+                (0.0, 1.0),
+                (0.225, 0.725),
+                (0.45, 0.45),
+                (0.725, 0.225),
+                (1.0, 0.0),
+            ],
+        ),
+        (
+            SMOKE_SOFT,
+            [
+                (0.0, 0.85),
+                (0.225, 0.675),
+                (0.45, 0.5),
+                (0.725, 0.25),
+                (1.0, 0.0),
+            ],
+        ),
+    ] {
+        let image = particle_sprite_image(soft);
+        for (r, want) in want {
+            for angle in [0.0f32, 1.1, 2.6, 4.0] {
+                let got = drawn_alpha(&image, r * angle.cos(), r * angle.sin());
+                assert!(
+                    (got - want).abs() < step * 2.0,
+                    "{soft:?} at {r} ({angle}): {got} vs {want}"
+                );
+            }
+        }
+        assert!(drawn_alpha(&image, 0.95, 0.95) < 0.01, "round, not square");
+    }
 }
 
 // =============================================================================
@@ -883,7 +982,7 @@ fn every_piece_is_drawn_as_the_bench_draws_it_wherever_the_camera_stands() {
             let what = format!("{:?}", part.piece);
             let pose = cheat_death_pose(part.piece, age, None)
                 .unwrap_or_else(|| panic!("{what} draws at 0.85 s"));
-            let (rgb, sprite, darkens) = bench_look(part.piece);
+            let (rgb, sprite, source_over) = bench_look(part.piece);
             let m = &part.material;
             // The colour: the bench's (the shockwave's keyed with its pose).
             let want = if part.piece == P::Shockwave {
@@ -896,7 +995,7 @@ fn every_piece_is_drawn_as_the_bench_draws_it_wherever_the_camera_stands() {
             assert!(m.unlit, "{what}: colour × sprite × alpha, unlit");
             assert_eq!(
                 m.alpha_mode,
-                if darkens {
+                if source_over {
                     AlphaMode::Blend
                 } else {
                     AlphaMode::Add
@@ -965,9 +1064,10 @@ fn every_piece_is_drawn_as_the_bench_draws_it_wherever_the_camera_stands() {
 }
 
 /// The streaks fly from 3.17 yd above the feet and 0.2 yd aside, at 8.3 yd/s
-/// slowed by the drag, facing the camera along their flight; the smoke
-/// sinks from 3.3 yd at 0.56 yd/s. Each emitter emits its bench count, every
-/// particle under the rig, drawn in its emitter's added light.
+/// slowed by the drag, each a round glow facing the camera; the smoke sinks
+/// from 3.3 yd at 0.56 yd/s. Each emitter emits its bench count, every
+/// particle under the rig, drawn in its emitter's added light on its bench
+/// sprite.
 #[test]
 fn the_streaks_and_smoke_fly_as_the_bench_flies_them() {
     let mut h = Harness::new();
@@ -999,7 +1099,7 @@ fn the_streaks_and_smoke_fly_as_the_bench_flies_them() {
     let world = h.app.world();
     for (p, drag, t, _) in &streaks {
         assert!(drag.is_some_and(|d| close(d, 1.8)), "{drag:?}");
-        assert_eq!(p.facing, ParticleFacing::Streak);
+        assert_eq!(p.facing, ParticleFacing::Camera, "a round head");
         assert!(p.owned, "under the rig, retired with it");
         // Born at the emitter, flown under exp(-1.8 t) decay, a frame's drag
         // applied before each frame's step.
@@ -1014,17 +1114,10 @@ fn the_streaks_and_smoke_fly_as_the_bench_flies_them() {
             "born at {born}"
         );
         assert!((speed - 8.3 * (-1.8 * p.age).exp()).abs() < 0.05, "{speed}");
-        // Facing the camera, its long axis along its flight on screen.
-        assert!((t.rotation * Vec3::Z).dot(cam.rotation * Vec3::Z) > 0.999);
-        let along = t.rotation * Vec3::Y;
-        let v = p.velocity;
-        let screen = v - (cam.rotation * Vec3::Z) * v.dot(cam.rotation * Vec3::Z);
-        if screen.length() > 0.1 {
-            assert!(
-                along.dot(screen.normalize()) > 0.999,
-                "a streak along its flight"
-            );
-        }
+        // A round head facing the camera, unrolled.
+        assert!(close(t.scale.x, t.scale.y), "round: {}", t.scale);
+        assert!((t.rotation * Vec3::Z).dot(cam.rotation * Vec3::Z) > 0.9999);
+        assert!((t.rotation * Vec3::Y).dot(cam.rotation * Vec3::Y) > 0.9999);
     }
     for (p, drag, t, _) in &smoke {
         assert_eq!(*drag, None);
@@ -1048,7 +1141,7 @@ fn the_streaks_and_smoke_fly_as_the_bench_flies_them() {
             keys[1] + (keys[2] - keys[1]) * (t - mid) / (1.0 - mid)
         }
     };
-    for (group, colour, alpha, mid) in [
+    for (group, colour, alpha, mid, soft) in [
         (
             &streaks,
             [
@@ -1058,6 +1151,7 @@ fn the_streaks_and_smoke_fly_as_the_bench_flies_them() {
             ],
             [0.2, 1.0, 0.0],
             0.05,
+            [1.0, 0.45, 0.0],
         ),
         (
             &smoke,
@@ -1068,6 +1162,7 @@ fn the_streaks_and_smoke_fly_as_the_bench_flies_them() {
             ],
             [0.31, 0.7, 0.0],
             0.5,
+            [0.85, 0.5, 0.0],
         ),
     ] {
         let palette = &group[0].0.palette;
@@ -1079,7 +1174,14 @@ fn the_streaks_and_smoke_fly_as_the_bench_flies_them() {
                 .get(handle)
                 .unwrap();
             assert_eq!(m.alpha_mode, AlphaMode::Add);
-            assert!(m.base_color_texture.is_some());
+            assert!(m.unlit, "colour × sprite × alpha");
+            let tex = m.base_color_texture.as_ref().expect("a sprite");
+            let image = world.resource::<Assets<Image>>().get(tex).unwrap();
+            assert_eq!(
+                image.data,
+                particle_sprite_image(soft).data,
+                "{soft:?} sprite"
+            );
             let c = m.base_color.to_srgba();
             for (ch, got) in [c.red, c.green, c.blue].into_iter().enumerate() {
                 let want = ramp([colour[0][ch], colour[1][ch], colour[2][ch]], mid, t);
@@ -1092,6 +1194,139 @@ fn the_streaks_and_smoke_fly_as_the_bench_flies_them() {
         }
     }
     assert!(age > 0.85);
+}
+
+/// The bench's streak ramp, worked here: white -> (235,210,255) by 5% of its
+/// life -> lavender, alpha 0.2 -> 1 -> 0, diameter 0.8 -> 0.112 -> 0.112.
+fn streak_at(t: f32) -> ([f32; 3], f32, f32) {
+    let ramp = |a: f32, b: f32, c: f32| {
+        if t < 0.05 {
+            a + (b - a) * t / 0.05
+        } else {
+            b + (c - b) * (t - 0.05) / 0.95
+        }
+    };
+    (
+        [
+            ramp(255.0, 235.0, 183.0),
+            ramp(255.0, 210.0, 183.0),
+            ramp(255.0, 255.0, 255.0),
+        ],
+        ramp(0.2, 1.0, 0.0),
+        ramp(0.8, 0.112, 0.112),
+    )
+}
+
+/// Every streak's tail as it is drawn, checked against the bench's `streak`:
+/// a line from the streak back along its flight, `min(0.36, speed × 0.06)` yd
+/// (here as the camera sees it), stroked 0.7 of the head's radius wide, in
+/// the streak's colour at 0.85 of its alpha, added light and untextured.
+/// Returns how many tails it checked and their lengths.
+fn check_tails(h: &mut Harness, rig: Entity, cam: &Transform) -> Vec<f32> {
+    let back = cam.rotation * Vec3::Z;
+    let world = h.app.world();
+    let mut lengths = Vec::new();
+    for child in h.children(rig) {
+        let Some(tail) = world.get::<CheatDeathTail>(child) else {
+            continue;
+        };
+        let p = world.get::<ClientParticle>(tail.head).expect("its streak");
+        let head = world.get::<Transform>(tail.head).unwrap().translation;
+        let line = *world.get::<Transform>(child).unwrap();
+        if p.age >= p.life {
+            // Spent this frame: drawn at nothing until its rig retires both.
+            assert_eq!(line.scale, Vec3::ZERO, "a spent streak's tail is not drawn");
+            continue;
+        }
+        let length = (3.0f32 * 0.12).min(p.velocity.length() * 0.06);
+        let along = p.velocity.normalize() * length;
+        let seen = along - back * along.dot(back);
+        assert!(
+            near(line.translation, head - along * 0.5),
+            "behind its streak"
+        );
+        assert!(
+            close(line.scale.y, seen.length()),
+            "{} vs {}",
+            line.scale.y,
+            seen.length()
+        );
+        let (rgb, alpha, diameter) = streak_at(p.age / p.life);
+        assert!(
+            close(line.scale.x, 0.35 * diameter),
+            "stroke {}",
+            line.scale.x
+        );
+        assert!(
+            (line.rotation * Vec3::Z).dot(back) > 0.9999,
+            "faces the camera"
+        );
+        if seen.length() > 0.01 {
+            assert!(
+                (line.rotation * Vec3::Y).dot(seen.normalize()) > 0.999,
+                "along its flight"
+            );
+        }
+        let m = world
+            .resource::<Assets<StandardMaterial>>()
+            .get(
+                &world
+                    .get::<MeshMaterial3d<StandardMaterial>>(child)
+                    .unwrap()
+                    .0,
+            )
+            .unwrap();
+        assert_eq!(m.alpha_mode, AlphaMode::Add);
+        assert!(m.unlit && m.base_color_texture.is_none(), "a flat stroke");
+        assert_rgb(m.base_color, rgb, "tail");
+        assert!(
+            (m.base_color.alpha() - 0.85 * alpha).abs() < 1e-3,
+            "tail alpha"
+        );
+        assert_unit_quad(world, &world.get::<Mesh3d>(child).unwrap().0, "tail");
+        lengths.push(length);
+    }
+    lengths
+}
+
+/// Each streak trails the bench's tail behind its round head, and the tail
+/// shortens as the streak slows: 0.36 yd while it flies faster than 6 yd/s,
+/// `speed × 0.06` after.
+#[test]
+fn every_streak_trails_a_tail_that_shortens_as_it_slows() {
+    let mut h = Harness::new();
+    let cam = h.camera(Vec3::new(-6.0, 9.0, 11.0));
+    let rogue = h.spawn_rogue(Vec3::new(1.0, 1.0, 1.0));
+    h.cheat_death(rogue);
+    // 0.75 s: the streaks flying out.
+    h.tick(16);
+    let rig = h.rig_of(rogue);
+    let streaks = h.particles(rig).iter().filter(|p| p.0.life == 0.9).count();
+    let lengths = check_tails(&mut h, rig, &cam);
+    assert_eq!(lengths.len(), streaks, "a tail for every streak");
+    assert!(streaks > 40);
+    assert!(
+        lengths.iter().any(|l| close(*l, 0.36)),
+        "the newest at full length"
+    );
+    // 1.5 s: every streak slowed below 6 yd/s, every tail shorter.
+    h.tick(15);
+    let streaks = h.particles(rig).iter().filter(|p| p.0.life == 0.9).count();
+    let lengths = check_tails(&mut h, rig, &cam);
+    assert_eq!(lengths.len(), streaks);
+    assert!(streaks > 40);
+    assert!(lengths.iter().all(|l| *l < 0.2), "{lengths:?}");
+    // 2.0 s: the streaks spent, their tails gone with them.
+    h.tick(10);
+    assert_eq!(
+        h.particles(rig).iter().filter(|p| p.0.life == 0.9).count(),
+        0
+    );
+    assert_eq!(
+        h.count::<CheatDeathTail>(),
+        0,
+        "tails retired with their streaks"
+    );
 }
 
 /// The ghost-fire holds while the buff does and goes with it: full at 2.5 s
@@ -1238,6 +1473,7 @@ fn nothing_draws_on_a_corpse() {
     assert!(h.rigs_of(living).is_empty(), "down with its Rogue");
     assert_eq!(h.count::<CheatDeathPart>(), 0, "every piece with it");
     assert_eq!(h.count::<ClientParticle>(), 0, "every particle with it");
+    assert_eq!(h.count::<CheatDeathTail>(), 0, "every tail with it");
 
     let gone = h.spawn_rogue(Vec3::new(-5.0, 1.0, 0.0));
     h.cheat_death(gone);

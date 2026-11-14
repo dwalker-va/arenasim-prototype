@@ -1,11 +1,15 @@
 use std::f32::consts::{PI, TAU};
+use std::sync::Arc;
 
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
 use super::druid_heals::{body_point, keyed, keyed_color};
 use super::guardian_spirit::panel_glow_alpha;
-use super::hunter_shots::{draw, particle_rotation, ClientEmitter, EmitterAssets, EmitterSprite};
+use super::heal_impact::COMBATANT_BODY_RADIUS;
+use super::hunter_shots::{
+    draw, particle_rotation, ramp3, ramp_color, ClientEmitter, EmitterSprite, PALETTE_STEPS,
+};
 use crate::states::play_match::combat_core::CHEAT_DEATH_NAME;
 use crate::states::play_match::components::*;
 
@@ -35,12 +39,29 @@ use crate::states::play_match::components::*;
 //               widening, a shockwave glow 0.56 -> 1.67 yd changing slate ->
 //               white -> mauve, and a white flare;
 //   streaks  -> 300 a second at 0.567-0.833 s, out of the skull at 8.3 yd/s
-//               under drag, white -> lavender;
-//   smoke    -> indigo smoke at 3.3 yd, sinking, emitted to 1.1 s;
+//               under drag, white -> lavender: each a round `glow` with a
+//               tail behind it that shortens as it slows;
+//   smoke    -> indigo smoke (the bench's `smoke` sprite) at 3.3 yd, sinking,
+//               emitted to 1.1 s;
 //   column   -> a tall light column through the body, peaking at 0.767 s;
-//   fire     -> the 3 s state: eighteen lavender flames rising round a
-//               0.8 × 2.5 yd column, in from 0.8 s, full at 1.367 s, out over
-//               0.6 s once the buff ends.
+//   fire     -> the 3 s state: eighteen lavender flames rising round the
+//               body, laid over it (source-over, not added), in from 0.8 s,
+//               full at 1.367 s, out over 0.6 s once the buff ends.
+//
+// Everything but the sockets and the flames adds light, as the bench's
+// `lighter` composite does: colour × sprite × alpha, unlit.
+//
+// **Departures from the bench**, each forced by the 3D world:
+//
+// - The flames hug the body capsule's outline 0.05 yd out
+//   ([`flame_ring_radius`]) instead of the bench's 0.4 -> 0.26 yd: the
+//   capsule is 0.5 yd across its radius and would bury them, where the bench
+//   paints them over the body in 2D. The far side's flames are hidden by the
+//   body.
+// - A tail is a camera-facing quad without the canvas stroke's round caps
+//   (a cap's radius is at most 0.02 yd once the streak settles).
+// - The thin rings keep the bench's stroke in yards (3 and 4 px at its 8 yd
+//   framing), so they are thinner than a pixel at the match camera.
 //
 // **What starts it.** The save's own marker, `KillingBlowPrevented`, read by
 // `consume_killing_blow_signals` (`guardian_spirit.rs`), which also lands the
@@ -175,11 +196,15 @@ impl CheatDeathPiece {
         }
     }
 
-    /// Whether the piece darkens what is behind it (the sockets, which the
-    /// bench paints source-over) rather than adding light (every other piece,
-    /// painted `lighter`).
-    pub fn darkens(self) -> bool {
-        self == CheatDeathPiece::SkullSockets
+    /// Whether the bench paints the piece source-over, laid over what is
+    /// behind it (the dark sockets, and the ghost-fire's flames, which
+    /// `ghostFire` draws with the canvas's default composite), rather than
+    /// adding light (`lighter`, every other piece).
+    pub fn source_over(self) -> bool {
+        matches!(
+            self,
+            CheatDeathPiece::SkullSockets | CheatDeathPiece::Flame(_)
+        )
     }
 
     /// The piece's colour as it is spawned, the bench's sRGB (the
@@ -233,6 +258,31 @@ pub fn fire_alpha(age: f32, ended: Option<f32>) -> f32 {
         (1.0 - (age - end) / CHEAT_DEATH_FIRE_OUT_SECS).clamp(0.0, 1.0)
     });
     fade_in * fade_out * CHEAT_DEATH_OPACITY_MUL
+}
+
+/// The combatant capsule's radius `y` yards above the feet: 0.5, its
+/// cylinder from 0.25 to 1.75 yd, its hemispheres closing to the floor and to
+/// 2.25 yd (`Capsule3d::new(0.5, 1.5)` centred 1.0 above the floor).
+pub fn body_radius_at(y: f32) -> f32 {
+    let beyond = ((y - 1.0).abs() - 0.75).max(0.0);
+    (COMBATANT_BODY_RADIUS * COMBATANT_BODY_RADIUS - beyond * beyond)
+        .max(0.0)
+        .sqrt()
+}
+
+/// How far outside the body a flame stands.
+pub const CHEAT_DEATH_FLAME_CLEARANCE: f32 = 0.05;
+
+/// The radius a flame `y` yards up stands at: just outside the body.
+///
+/// A departure from the bench, whose flames run 0.4 -> 0.26 yd from the
+/// axis (the client's 0.8 yd cylinder about its thinner body). The bench
+/// paints them over the body in 2D; here the body is a 0.5 yd capsule that
+/// would bury every one of them (the AS-10 lesson, as `immolate.rs`'s flame
+/// ring). So each flame hugs the capsule's outline, and the far side's are
+/// hidden by the body, as fire round a body is.
+pub fn flame_ring_radius(y: f32) -> f32 {
+    body_radius_at(y) + CHEAT_DEATH_FLAME_CLEARANCE
 }
 
 /// One flame's place in its rise, 0..1 (the bench's `ph`).
@@ -370,7 +420,7 @@ pub fn cheat_death_pose(
             let angle = k as f32 / CHEAT_DEATH_FLAMES as f32 * TAU + ms / 900.0;
             let ph = flame_phase(k, ms);
             let y = -0.1 + ph * 2.3 * s;
-            let r = 0.4 * s * (1.0 - ph * 0.35);
+            let r = flame_ring_radius(y);
             pose(
                 Vec3::new(r * angle.cos(), y, r * angle.sin()),
                 Vec3::ZERO,
@@ -565,11 +615,19 @@ pub enum CheatDeathLaunch {
 /// One of the onset's emitters, as the bench's layer record carries it: the
 /// record as a [`ClientEmitter`] (its `window` or `track` is the emission
 /// window from the save; its `speed` the launch speed), where the particles
-/// are born, how they launch, and their drag.
+/// are born, how they launch, their drag, the bench sprite each is drawn
+/// with, and its tail.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct CheatDeathLayer {
     pub on: bool,
     pub emitter: ClientEmitter,
+    /// The bench sprite's radial alpha stops at its centre, 0.45 of the way
+    /// out and its rim (`sprite()`'s `soft`): `glow` is `[1, 0.45, 0]`,
+    /// `smoke` `[0.85, 0.5, 0]`.
+    pub soft: [f32; 3],
+    /// The bench's `tail`: a particle faster than 0.2 yd/s trails a line
+    /// `min(tail × 0.12, speed × 0.06)` yd long behind it; `0.0` draws none.
+    pub tail: f32,
     /// Birth height above the feet (the bench's `pos` height).
     pub height: f32,
     /// Horizontal birth offset from the Rogue's axis (the bench's `pos` x, y).
@@ -596,16 +654,22 @@ const fn at_knobs(mut e: ClientEmitter) -> ClientEmitter {
     e
 }
 
+/// The bench's `glow` and `smoke` sprites' alpha stops.
+pub const GLOW_SOFT: [f32; 3] = [1.0, 0.45, 0.0];
+pub const SMOKE_SOFT: [f32; 3] = [0.85, 0.5, 0.0];
+
 /// The onset's two emitters.
 pub const CHEAT_DEATH_LAYERS: [CheatDeathLayer; 2] = [
     // P6, `t_vfx_flar_blur`: 300/s at 0.567-0.833 s out of the skull, in
     // every direction at 8.3 yd/s under drag 0.6, living 0.9 s, white ->
     // lavender, flashing large at birth and settling to 0.056 by 5% of life.
+    // The bench draws each as a round `glow` with a tail behind it (`tail`
+    // 3) that shortens as the streak slows.
     CheatDeathLayer {
         on: CHEAT_DEATH_STREAKS,
         emitter: at_knobs(ClientEmitter {
             name: "cheat_death/p6 streaks",
-            sprite: EmitterSprite::Streak,
+            sprite: EmitterSprite::Glow,
             additive: true,
             rate: 300.0,
             window: Some((0.567, 0.833)),
@@ -625,6 +689,8 @@ pub const CHEAT_DEATH_LAYERS: [CheatDeathLayer; 2] = [
         offset: Vec2::new(-0.2, 0.0),
         launch: CheatDeathLaunch::Sphere,
         drag: 3.0 * 0.6,
+        soft: GLOW_SOFT,
+        tail: 3.0,
     },
     // P0, `toonsmoke16`: indigo smoke at 3.3 yd, 50 -> 100/s, emitted
     // 0.167-1.1 s, sinking at 0.56 yd/s, living 2.5 s.
@@ -652,6 +718,8 @@ pub const CHEAT_DEATH_LAYERS: [CheatDeathLayer; 2] = [
         offset: Vec2::ZERO,
         launch: CheatDeathLaunch::Sinking { cone: 0.23 },
         drag: 0.0,
+        soft: SMOKE_SOFT,
+        tail: 0.0,
     },
 ];
 
@@ -704,6 +772,99 @@ pub fn cheat_death_particles_secs() -> f32 {
         .iter()
         .map(CheatDeathLayer::done_secs)
         .fold(0.0, f32::max)
+}
+
+/// A bench particle sprite (`sprite()`'s `glow` or `smoke`): `soft[0]` at the
+/// centre, `soft[1]` 0.45 of the way out, `soft[2]` at the rim, linear
+/// between, nothing beyond.
+pub fn particle_sprite_alpha(soft: [f32; 3], r: f32) -> f32 {
+    if r > 1.0 {
+        return 0.0;
+    }
+    keyed(
+        &[(0.0, soft[0]), (0.45, soft[1]), (1.0, soft[2])],
+        r.max(0.0),
+    )
+}
+
+/// A layer's particle sprite as an image.
+pub fn particle_sprite_image(soft: [f32; 3]) -> Image {
+    sprite_image(move |x, up| particle_sprite_alpha(soft, (x * x + up * up).sqrt()))
+}
+
+/// A layer's palette: `PALETTE_STEPS` materials sampling its colour and
+/// alpha ramps over the particle's life, each adding colour × sprite ×
+/// alpha (the bench's `lighter`).
+fn particle_palette(
+    materials: &mut Assets<StandardMaterial>,
+    e: &ClientEmitter,
+    sprite: &Handle<Image>,
+) -> Arc<[Handle<StandardMaterial>]> {
+    (0..PALETTE_STEPS)
+        .map(|i| {
+            let t = (i as f32 + 0.5) / PALETTE_STEPS as f32;
+            materials.add(StandardMaterial {
+                base_color: ramp_color(e.color, e.mid, t).with_alpha(ramp3(e.alpha, e.mid, t)),
+                base_color_texture: Some(sprite.clone()),
+                unlit: true,
+                alpha_mode: AlphaMode::Add,
+                cull_mode: None,
+                double_sided: true,
+                ..default()
+            })
+        })
+        .collect()
+}
+
+/// The bench's tail behind a particle moving at `speed`, yards (its
+/// `min(tail × 0.12, speed × 0.06) × size`), or `None` when it draws none
+/// (no tail, or slower than 0.2 yd/s).
+pub fn tail_length(tail: f32, speed: f32) -> Option<f32> {
+    (tail > 0.0 && speed > 0.2).then(|| (tail * 0.12).min(speed * 0.06) * CHEAT_DEATH_SIZE_MUL)
+}
+
+/// A tail as it is drawn, in the rig's frame.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct TailPose {
+    /// The midpoint of the line from the particle back along its flight.
+    pub at: Vec3,
+    /// A camera-facing quad rolled so its long (local Y) axis lies along the
+    /// line as the camera sees it.
+    pub rotation: Quat,
+    /// Width (the bench's stroke, 0.7 of the sprite's radius) and length
+    /// (the line's length as the camera sees it).
+    pub size: Vec2,
+    /// sRGB 0-1, and alpha (0.85 of the particle's).
+    pub color: Color,
+}
+
+/// The tail of `particle`, standing at `at`, seen through a camera turned
+/// `camera`: the bench's `streak` — a line from the particle back along its
+/// flight, `min(tail × 0.12, speed × 0.06)` long, stroked 0.7 of its sprite's
+/// radius wide in its colour at 0.85 of its alpha.
+pub fn tail_pose(
+    layer: &CheatDeathLayer,
+    particle: &ClientParticle,
+    at: Vec3,
+    camera: Quat,
+) -> Option<TailPose> {
+    let e = &layer.emitter;
+    let length = tail_length(layer.tail, particle.velocity.length())?;
+    let t = (particle.age / particle.life).clamp(0.0, 1.0);
+    let line = particle.velocity.normalize() * length;
+    let (right, up, back) = (camera * Vec3::X, camera * Vec3::Y, camera * Vec3::Z);
+    let seen = line - back * line.dot(back);
+    let (sx, sy) = (seen.dot(right), seen.dot(up));
+    if sx * sx + sy * sy < 1e-10 {
+        return None;
+    }
+    let diameter = ramp3(particle.size.diameter_keys(), particle.mid, t);
+    Some(TailPose {
+        at: at - line * 0.5,
+        rotation: camera * Quat::from_rotation_z((-sx).atan2(sy)),
+        size: Vec2::new(diameter * 0.5 * 0.7, seen.length()),
+        color: ramp_color(e.color, e.mid, t).with_alpha(0.85 * ramp3(e.alpha, e.mid, t)),
+    })
 }
 
 // ── Routing ──────────────────────────────────────────────────────────────────
@@ -759,6 +920,16 @@ pub struct CheatDeathPart {
     pub piece: CheatDeathPiece,
     pub material: Handle<StandardMaterial>,
     pub mesh: Handle<Mesh>,
+}
+
+/// A particle's tail (the bench's `streak`), under the rig beside its
+/// particle, with the material it colours.
+#[derive(Component, Debug)]
+pub struct CheatDeathTail {
+    pub head: Entity,
+    /// Its particle's layer in [`CHEAT_DEATH_LAYERS`].
+    pub layer: usize,
+    pub material: Handle<StandardMaterial>,
 }
 
 /// Raise the rig for a save on `holder` (the marker's consumer calls this).
@@ -822,15 +993,42 @@ impl CheatDeathAssets {
     }
 }
 
+/// The particles' quad, each layer's sprite and palette, built once.
+pub struct CheatDeathParticleAssets {
+    quad: Handle<Mesh>,
+    palettes: Vec<Arc<[Handle<StandardMaterial>]>>,
+}
+
+impl CheatDeathParticleAssets {
+    fn build(
+        meshes: &mut Assets<Mesh>,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> Self {
+        let palettes = CHEAT_DEATH_LAYERS
+            .iter()
+            .map(|layer| {
+                let sprite = images.add(particle_sprite_image(layer.soft));
+                particle_palette(materials, &layer.emitter, &sprite)
+            })
+            .collect();
+        Self {
+            quad: meshes.add(Rectangle::new(1.0, 1.0)),
+            palettes,
+        }
+    }
+}
+
 /// A piece's material: added light (`lighter`: colour × sprite × alpha and
-/// nothing else), or for the sockets a flat colour that darkens.
+/// nothing else), or laid over what is behind it (alpha-blended: the sockets
+/// and the flames).
 fn part_material(piece: CheatDeathPiece, texture: Option<Handle<Image>>) -> StandardMaterial {
     let [r, g, b] = piece.rgb();
     StandardMaterial {
         base_color: Color::srgb_u8(r, g, b).with_alpha(0.0),
         base_color_texture: texture,
         unlit: true,
-        alpha_mode: if piece.darkens() {
+        alpha_mode: if piece.source_over() {
             AlphaMode::Blend
         } else {
             AlphaMode::Add
@@ -897,7 +1095,7 @@ pub fn update_cheat_death(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut emitters: Local<Option<EmitterAssets>>,
+    mut particle_assets: Local<Option<CheatDeathParticleAssets>>,
     camera: Query<
         &Transform,
         (
@@ -924,6 +1122,7 @@ pub fn update_cheat_death(
         (Without<CheatDeathRig>, Without<Camera3d>),
     >,
     particles: Query<&ClientParticle>,
+    tails: Query<&CheatDeathTail>,
 ) {
     let dt = time.delta_secs();
     let cam = camera.iter().next().map_or(Quat::IDENTITY, |c| c.rotation);
@@ -980,18 +1179,25 @@ pub fn update_cheat_death(
                     Color::srgba(r / 255.0, g / 255.0, b / 255.0, pose.alpha.clamp(0.0, 1.0));
             } else if particles.get(child).is_ok_and(|p| p.age >= p.life) {
                 commands.entity(child).despawn();
+            } else if let Ok(tail) = tails.get(child) {
+                // A tail goes with its particle.
+                if particles.get(tail.head).map_or(true, |p| p.age >= p.life) {
+                    commands.entity(child).despawn();
+                }
             }
         }
 
-        let assets = emitters.get_or_insert_with(|| EmitterAssets::build(&mut meshes, &mut images));
+        let assets = particle_assets.get_or_insert_with(|| {
+            CheatDeathParticleAssets::build(&mut meshes, &mut images, &mut materials)
+        });
         for (i, layer) in CHEAT_DEATH_LAYERS.iter().enumerate() {
             rig.carry[i] += layer.count_between(from, to);
             if rig.carry[i] < 1.0 {
                 continue;
             }
             let e = &layer.emitter;
-            let palette = assets.palette(&mut materials, e);
-            let quad = assets.quad();
+            let palette = assets.palettes[i].clone();
+            let quad = assets.quad.clone();
             while rig.carry[i] >= 1.0 {
                 rig.carry[i] -= 1.0;
                 let seed = entity
@@ -1000,10 +1206,6 @@ pub fn update_cheat_death(
                     .wrapping_add(rig.emitted.wrapping_mul(0x85EB_CA6B));
                 rig.emitted = rig.emitted.wrapping_add(1);
                 let (at, velocity) = layer.launch(seed);
-                let facing = match e.sprite {
-                    EmitterSprite::Streak => ParticleFacing::Streak,
-                    _ => ParticleFacing::Camera,
-                };
                 let mut particle = commands.spawn((
                     ClientParticle {
                         age: 0.0,
@@ -1014,7 +1216,7 @@ pub fn update_cheat_death(
                         mid: e.mid,
                         palette: palette.clone(),
                         step: 0,
-                        facing,
+                        facing: ParticleFacing::Camera,
                         owned: true,
                     },
                     Mesh3d(quad.clone()),
@@ -1029,27 +1231,66 @@ pub fn update_cheat_death(
                 }
                 let particle = particle.id();
                 commands.entity(entity).add_child(particle);
+                if layer.tail > 0.0 {
+                    let material = materials.add(StandardMaterial {
+                        base_color: Color::NONE,
+                        unlit: true,
+                        alpha_mode: AlphaMode::Add,
+                        cull_mode: None,
+                        double_sided: true,
+                        ..default()
+                    });
+                    let tail = commands
+                        .spawn((
+                            CheatDeathTail {
+                                head: particle,
+                                layer: i,
+                                material: material.clone(),
+                            },
+                            Mesh3d(quad.clone()),
+                            MeshMaterial3d(material),
+                            Transform::from_translation(at).with_scale(Vec3::ZERO),
+                            NotShadowCaster,
+                        ))
+                        .id();
+                    commands.entity(entity).add_child(tail);
+                }
             }
         }
     }
 }
 
-/// Turn every live particle of a rig to the camera (a streak along its
-/// flight), after the client particles have aged and moved.
+/// Turn every live particle of a rig to the camera, and lay each tail behind
+/// its particle as the camera sees it, after the client particles have aged
+/// and moved.
 #[allow(clippy::type_complexity)]
 pub fn billboard_cheat_death_particles(
+    mut materials: ResMut<Assets<StandardMaterial>>,
     camera: Query<
         &Transform,
         (
             With<Camera3d>,
             Without<CheatDeathRig>,
             Without<ClientParticle>,
+            Without<CheatDeathTail>,
         ),
     >,
     rigs: Query<(&Transform, &Children), With<CheatDeathRig>>,
     mut particles: Query<
         (&ClientParticle, &mut Transform),
-        (Without<Camera3d>, Without<CheatDeathRig>),
+        (
+            Without<Camera3d>,
+            Without<CheatDeathRig>,
+            Without<CheatDeathTail>,
+        ),
+    >,
+    mut tails: Query<
+        (&CheatDeathTail, &mut Transform),
+        (
+            Without<Camera3d>,
+            Without<CheatDeathRig>,
+            Without<ClientParticle>,
+        ),
     >,
 ) {
     let Some(cam) = camera.iter().next() else {
@@ -1059,6 +1300,33 @@ pub fn billboard_cheat_death_particles(
         for child in children.iter() {
             if let Ok((particle, mut part)) = particles.get_mut(child) {
                 part.rotation = particle_rotation(particle, rig.rotation, cam.rotation);
+            }
+        }
+        for child in children.iter() {
+            let Ok((tail, mut line)) = tails.get_mut(child) else {
+                continue;
+            };
+            let pose = particles
+                .get(tail.head)
+                .ok()
+                .filter(|(p, _)| p.age < p.life)
+                .and_then(|(p, at)| {
+                    tail_pose(
+                        &CHEAT_DEATH_LAYERS[tail.layer],
+                        p,
+                        at.translation,
+                        cam.rotation,
+                    )
+                });
+            let Some(pose) = pose else {
+                line.scale = Vec3::ZERO;
+                continue;
+            };
+            line.translation = pose.at;
+            line.rotation = pose.rotation;
+            line.scale = pose.size.extend(1.0);
+            if let Some(m) = materials.get_mut(&tail.material) {
+                m.base_color = pose.color;
             }
         }
     }
