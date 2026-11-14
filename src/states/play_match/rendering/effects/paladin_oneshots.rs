@@ -2215,11 +2215,87 @@ mod tests {
         );
     }
 
+    /// The bench's glyph discs: eight ticks on the Sacrifice shell, sixteen on
+    /// the Retribution disc, ten on the Art of War disc; turning 1.0, 0.5
+    /// and 2.0 rad/s (its `t/1000`, `u/2000` and `u/500` over milliseconds).
+    #[test]
+    fn the_glyph_discs_are_the_benchs() {
+        assert_eq!(
+            (SHELL_GLYPH_TICKS, RETRIBUTION_GLYPH_TICKS, AOW_DISC_TICKS),
+            (8, 16, 10)
+        );
+        for (role, spin) in [
+            (OneShotPieceRole::ShellGlyph, 1.0),
+            (OneShotPieceRole::RetributionGlyph, 0.5),
+            (OneShotPieceRole::ArtOfWarDisc, 2.0),
+        ] {
+            for age in [0.0, 0.3, 1.1] {
+                assert_eq!(
+                    piece_pose(role, age).facing,
+                    PieceFacing::Flat { turn: age * spin },
+                    "{role:?} turns {spin} rad/s"
+                );
+            }
+        }
+        // The rings and the underlay lie still.
+        for role in [
+            OneShotPieceRole::ShellRing,
+            OneShotPieceRole::RetributionRing,
+            OneShotPieceRole::RetributionUnderlay,
+            OneShotPieceRole::HaloRing,
+        ] {
+            assert_eq!(
+                piece_pose(role, 0.7).facing,
+                PieceFacing::Flat { turn: 0.0 }
+            );
+        }
+    }
+
+    /// Every piece's colour, as the bench draws it.
+    #[test]
+    fn every_piece_is_the_benchs_colour() {
+        use OneShotPieceRole as R;
+        for (role, rgb) in [
+            (R::WardGlow, [255, 232, 130]),
+            (R::ShellGlow, [220, 10, 0]),
+            (R::ShellRing, [255, 54, 0]),
+            (R::ShellGlyph, [243, 137, 0]),
+            (R::RetributionGlyph, [252, 93, 12]),
+            (R::RetributionRing, [255, 0, 0]),
+            (R::RetributionArrow { index: 2 }, [255, 162, 0]),
+            (R::RetributionUnderlay, [255, 199, 29]),
+            (R::HaloRing, [237, 192, 72]),
+            (R::HaloGlow, [255, 230, 150]),
+            (R::ArtOfWarDisc, [221, 181, 57]),
+            (R::ArtOfWarGlow, [255, 230, 140]),
+        ] {
+            for age in [0.0, 0.5, 1.2] {
+                assert_eq!(piece_pose(role, age).rgb, rgb, "{role:?}");
+            }
+        }
+        // A spark runs pale gold -> orange -> yellow over its life.
+        let born = bench_hash(3) * AOW_SPARK_BIRTH_SPAN;
+        let at = |ph: f32| aow_spark(3, born + ph * AOW_SPARK_LIFE).unwrap().rgb;
+        assert_eq!(at(0.0), [255, 249, 181]);
+        assert_eq!(at(0.5), [229, 148, 62]);
+        assert_eq!(at(1.0), [242, 227, 65]);
+    }
+
+    /// A layer switched off emits nothing (every shipped layer is on by the
+    /// ruling, so only a constructed one can show the gate).
+    #[test]
+    fn a_layer_switched_off_emits_nothing() {
+        let on = DIVINE_FAVOR_LAYERS[1];
+        assert!(on.count_between(0.0, 1.0, CLIENT_KNOBS) > 20.0);
+        let off = OneShotLayer { on: false, ..on };
+        assert_eq!(off.count_between(0.0, 1.0, CLIENT_KNOBS), 0.0);
+    }
+
     /// The glyph texture carries its ticks: around the band between the two
     /// rings, alpha rises and falls `ticks` times.
     #[test]
     fn a_glyph_texture_carries_its_ticks() {
-        for ticks in [SHELL_GLYPH_TICKS, RETRIBUTION_GLYPH_TICKS, AOW_DISC_TICKS] {
+        for ticks in [8, 16, 10] {
             let image = oneshot_glyph_texture(ticks);
             let data = image.data.as_ref().unwrap();
             let px = PIECE_PX as usize;

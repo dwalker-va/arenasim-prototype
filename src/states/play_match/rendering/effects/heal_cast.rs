@@ -470,6 +470,17 @@ pub fn heal_cast_release_pitch(t: f32) -> f32 {
 // --- Palette ------------------------------------------------------------------
 
 /// The three Holy ribbon tints (transcribed ribbon color tracks).
+/// The `index`th wisp's colour in a family: the Holy ribbons (the instant
+/// Holy flash's too) or the Nature star threads.
+pub fn heal_cast_wisp_color(kind: HealCastKind, index: u32) -> Color {
+    match kind {
+        HealCastKind::Holy | HealCastKind::HolyFlash => holy_wisp_color(index),
+        HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => {
+            nature_wisp_color(index)
+        }
+    }
+}
+
 fn holy_wisp_color(index: u32) -> Color {
     match index % 3 {
         0 => Color::srgb(0.988, 0.863, 0.165),
@@ -499,7 +510,9 @@ fn water_ring_blue() -> Color {
     Color::srgb(0.55, 0.75, 0.95)
 }
 
-fn glow_color(kind: HealCastKind) -> Color {
+/// A family's hand-glow colour. The instant Holy flash is the Holy hands, so
+/// it glows exactly as they do.
+pub fn heal_cast_glow_color(kind: HealCastKind) -> Color {
     match kind {
         HealCastKind::Holy | HealCastKind::HolyFlash => holy_gold_pale(),
         HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => nature_green(),
@@ -974,7 +987,7 @@ fn spawn_hand_rig(
         ] {
             let material = additive_material(
                 materials,
-                glow_color(kind),
+                heal_cast_glow_color(kind),
                 strength,
                 Some(assets.dot.clone()),
             );
@@ -993,14 +1006,14 @@ fn spawn_hand_rig(
     if !instant || holy {
         let wisp_width = heal_cast_wisp_width(kind);
         for index in 0..3_u32 {
-            let (color, texture) = match kind {
-                // Ribbon-blur streamers for Holy, star threads for Nature
-                // — the source's genericglow2b vs star11b split.
-                HealCastKind::Holy | HealCastKind::HolyFlash => {
-                    (holy_wisp_color(index), assets.dot.clone())
-                }
-                _ => (nature_wisp_color(index), assets.star.clone()),
+            // Ribbon-blur streamers for Holy, star threads for Nature — the
+            // source's genericglow2b vs star11b split.
+            let texture = if holy {
+                assets.dot.clone()
+            } else {
+                assets.star.clone()
             };
+            let color = heal_cast_wisp_color(kind, index);
             let material = additive_material(materials, color, 2.2, Some(texture));
             parts.push(piece(
                 HealCastPieceRole::Wisp { index },

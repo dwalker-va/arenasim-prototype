@@ -36,6 +36,10 @@ use arenasim::states::play_match::{
     update_heal_cast_glows, update_paladin_oneshots, AURA_MASTERY_SECS, HOLY_INSTANT_FLASH_SECS,
     RETRIBUTION_AURA_SECS,
 };
+use arenasim::states::play_match::{
+    blob_texture, heal_cast_glow_color, heal_cast_wisp_color, oneshot_glow_texture,
+    oneshot_glyph_texture, oneshot_ground_texture, oneshot_ring_texture, star_flash_texture,
+};
 use arenasim::CharacterClass;
 
 const TICK: Duration = Duration::from_millis(16);
@@ -645,4 +649,211 @@ fn the_art_of_war_ring_opens_round_the_chest() {
     assert!(late > early + 0.1, "the ring opens: {early} -> {late}");
     h.tick_secs(1.05);
     assert!(h.rigs().is_empty(), "retired at 2 s");
+}
+
+// ── what each piece is drawn with ───────────────────────────────────────────
+
+/// The sprite the bench draws a piece with, as the generator that makes it.
+#[derive(Debug)]
+enum Sprite {
+    Glow,
+    Ground,
+    Ring,
+    Glyph(u32),
+    Star,
+    /// A flat-colour triangle: no texture, three vertices.
+    Arrow,
+}
+
+/// Every role's colour (as the bench draws it; `None` for a spark, which
+/// runs a ramp) and sprite — written out, not read from the module.
+fn bench_piece(role: OneShotPieceRole) -> (Option<[u8; 3]>, Sprite) {
+    use OneShotPieceRole as R;
+    match role {
+        R::WardGlow => (Some([255, 232, 130]), Sprite::Glow),
+        R::ShellGlow => (Some([220, 10, 0]), Sprite::Glow),
+        R::ShellRing => (Some([255, 54, 0]), Sprite::Ring),
+        R::ShellGlyph => (Some([243, 137, 0]), Sprite::Glyph(8)),
+        R::RetributionGlyph => (Some([252, 93, 12]), Sprite::Glyph(16)),
+        R::RetributionRing => (Some([255, 0, 0]), Sprite::Ring),
+        R::RetributionArrow { .. } => (Some([255, 162, 0]), Sprite::Arrow),
+        R::RetributionUnderlay => (Some([255, 199, 29]), Sprite::Ground),
+        R::HaloRing => (Some([237, 192, 72]), Sprite::Ring),
+        R::HaloGlow => (Some([255, 230, 150]), Sprite::Glow),
+        R::ArtOfWarDisc => (Some([221, 181, 57]), Sprite::Glyph(10)),
+        R::ArtOfWarGlow => (Some([255, 230, 140]), Sprite::Glow),
+        R::ArtOfWarSpark { .. } => (None, Sprite::Star),
+    }
+}
+
+fn srgb_u8(c: Color) -> [u8; 3] {
+    let c = c.to_srgba();
+    [c.red, c.green, c.blue].map(|v| (v * 255.0).round() as u8)
+}
+
+/// Every piece of every one-shot, as spawned and drawn: its material's
+/// colour is the bench's, and its texture (or mesh) is the bench's sprite.
+#[test]
+fn every_piece_draws_the_benchs_colour_and_sprite() {
+    let mut h = Harness::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for (i, kind) in [
+        AuraLandingKind::AuraMasteryWard,
+        AuraLandingKind::SacrificeShell,
+        AuraLandingKind::RetributionDisc,
+        AuraLandingKind::InfusionHalo,
+        AuraLandingKind::ArtOfWarRing,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let paladin = h.unit(CharacterClass::Paladin, Vec3::new(i as f32 * 6.0, 1.0, 0.0));
+        h.land(paladin, kind, Some(paladin));
+    }
+    // Late enough for the Art of War sparks to be lit, early enough that
+    // every one-shot is still up.
+    h.tick_secs(0.5);
+    let rows: Vec<(OneShotPieceRole, Handle<StandardMaterial>, Handle<Mesh>)> = {
+        let mut q = h.app.world_mut().query::<(
+            &PaladinOneShotPiece,
+            &MeshMaterial3d<StandardMaterial>,
+            &Mesh3d,
+        )>();
+        q.iter(h.app.world())
+            .map(|(p, m, mesh)| (p.role, m.0.clone(), mesh.0.clone()))
+            .collect()
+    };
+    let world = h.app.world();
+    let (materials, images, meshes) = (
+        world.resource::<Assets<StandardMaterial>>(),
+        world.resource::<Assets<Image>>(),
+        world.resource::<Assets<Mesh>>(),
+    );
+    for (role, material, mesh) in rows {
+        let (rgb, sprite) = bench_piece(role);
+        let material = materials.get(&material).expect("its material");
+        if let Some(rgb) = rgb {
+            assert_eq!(srgb_u8(material.base_color), rgb, "{role:?} colour");
+        }
+        let expected = match sprite {
+            Sprite::Glow => oneshot_glow_texture(),
+            Sprite::Ground => oneshot_ground_texture(),
+            Sprite::Ring => oneshot_ring_texture(),
+            Sprite::Glyph(ticks) => oneshot_glyph_texture(ticks),
+            Sprite::Star => star_flash_texture(),
+            Sprite::Arrow => {
+                assert!(material.base_color_texture.is_none(), "{role:?} is flat");
+                assert_eq!(meshes.get(&mesh).unwrap().count_vertices(), 3);
+                seen.insert(format!("{sprite:?}"));
+                continue;
+            }
+        };
+        let texture = material
+            .base_color_texture
+            .as_ref()
+            .unwrap_or_else(|| panic!("{role:?} has a sprite"));
+        assert_eq!(
+            images.get(texture).unwrap().data,
+            expected.data,
+            "{role:?} is drawn with the bench's {sprite:?}"
+        );
+        seen.insert(format!("{sprite:?}"));
+    }
+    // Every sprite the bench uses is drawn somewhere: the probe is not vacuous.
+    assert_eq!(seen.len(), 8, "{seen:?}");
+}
+
+/// Blessing of Sacrifice's motes are the bench's `blob`: a hard disc, not a
+/// soft glow.
+#[test]
+fn the_sacrifice_motes_are_hard_blobs() {
+    let mut h = Harness::new();
+    let paladin = h.unit(CharacterClass::Paladin, Vec3::new(0.0, 1.0, 0.0));
+    let ally = h.unit(CharacterClass::Warrior, Vec3::new(5.0, 1.0, 0.0));
+    h.land(ally, AuraLandingKind::SacrificeShell, Some(paladin));
+    h.tick_secs(0.3);
+    let textures: Vec<Handle<Image>> = {
+        let mut q = h
+            .app
+            .world_mut()
+            .query::<(&ClientParticle, &MeshMaterial3d<StandardMaterial>)>();
+        let rows: Vec<_> = q
+            .iter(h.app.world())
+            .filter(|(p, _)| (p.velocity - Vec3::new(0.0, -1.67, 0.0)).length() < 1e-4)
+            .map(|(_, m)| m.0.clone())
+            .collect();
+        let materials = h.app.world().resource::<Assets<StandardMaterial>>();
+        rows.iter()
+            .map(|m| {
+                materials
+                    .get(m)
+                    .unwrap()
+                    .base_color_texture
+                    .clone()
+                    .unwrap()
+            })
+            .collect()
+    };
+    assert!(textures.len() > 10, "{} motes", textures.len());
+    let images = h.app.world().resource::<Assets<Image>>();
+    let blob = blob_texture();
+    for texture in textures {
+        assert_eq!(images.get(&texture).unwrap().data, blob.data, "a blob");
+    }
+}
+
+/// The instant Holy flash IS the Holy hands: its glows and wisps take the
+/// Holy family's colours, and its wisps the glow's soft sprite (Nature's are
+/// star threads). The Sacred Shield, Divine Protection and Repentance cards
+/// reuse it.
+#[test]
+fn the_instant_holy_flash_wears_the_holy_colours() {
+    let mut h = Harness::new();
+    let paladin = h.unit(CharacterClass::Paladin, Vec3::new(0.0, 1.0, 0.0));
+    h.land(paladin, AuraLandingKind::AuraMasteryWard, Some(paladin));
+    h.tick(3);
+    let rows: Vec<(HealCastPieceRole, Handle<StandardMaterial>)> = {
+        let mut q = h
+            .app
+            .world_mut()
+            .query::<(&HealCastPiece, &MeshMaterial3d<StandardMaterial>)>();
+        q.iter(h.app.world())
+            .map(|(p, m)| (p.role, m.0.clone()))
+            .collect()
+    };
+    let materials = h.app.world().resource::<Assets<StandardMaterial>>();
+    let holy_glow = srgb_u8(heal_cast_glow_color(HealCastKind::Holy));
+    assert_ne!(
+        holy_glow,
+        srgb_u8(heal_cast_glow_color(HealCastKind::Nature)),
+        "Holy is not Nature"
+    );
+    let (mut glows, mut wisps) = (Vec::new(), Vec::new());
+    for (role, material) in rows {
+        let m = materials.get(&material).unwrap();
+        match role {
+            HealCastPieceRole::GlowOuter | HealCastPieceRole::GlowCore => {
+                assert_eq!(srgb_u8(m.base_color), holy_glow, "{role:?}");
+                glows.push(m.base_color_texture.clone().unwrap());
+            }
+            HealCastPieceRole::Wisp { index } => {
+                assert_eq!(
+                    srgb_u8(m.base_color),
+                    srgb_u8(heal_cast_wisp_color(HealCastKind::Holy, index)),
+                    "wisp {index}"
+                );
+                wisps.push(m.base_color_texture.clone().unwrap());
+            }
+            other => panic!("the Holy flash draws no {other:?}"),
+        }
+    }
+    assert_eq!(
+        (glows.len(), wisps.len()),
+        (4, 6),
+        "both hands' glows and wisps"
+    );
+    assert!(
+        wisps.iter().all(|w| *w == glows[0]),
+        "Holy wisps are ribbon-blur glows"
+    );
 }
