@@ -261,21 +261,23 @@ fn priest_burns_mana_with_a_topped_team_whether_or_not_the_enemy_healer_is_locke
 // The Priest's focus gate: an enemy targeting the Priest holds its hard-cast
 // Mana Burn back, unless crowd control HOLDS that enemy (`class_ai::holds`,
 // the set `locks_healer` is). A cycloned attacker is as harmless as a feared
-// one.
+// one; a rooted one still casts, so it still counts.
 // ---------------------------------------------------------------------------
 
 /// [`priest_scene`] with the team topped (so the burn is the surplus-GCD
-/// rung's to take) and an enemy Warrior targeting the Priest from beyond
-/// `threat_intent_radius`: it focuses the Priest without pressuring it, so the
-/// focus gate alone decides the burn. `held` is the crowd control on it.
+/// rung's to take) and an enemy Warlock targeting the Priest from 25yd,
+/// inside its own 28yd preferred range: a ranged focuser holding position,
+/// which does not pressure the Priest (beyond `danger_radius`, and not
+/// closing), so the focus gate alone decides the burn. `held` is the crowd
+/// control on it.
 fn focused_priest_scene(held: Option<AuraType>) -> Scene {
     let mut scene = priest_scene()
-        .unit(ENEMY_WARRIOR, 2, Warrior)
-        .at(33.0, 0.0)
+        .unit(ENEMY_WARLOCK, 2, Warlock)
+        .at(25.0, 0.0)
         .targeting(PRIEST);
     scene.set_health(ALLY, 1.0);
     match held {
-        Some(effect) => scene.aura(ENEMY_WARRIOR, effect, 6.0),
+        Some(effect) => scene.aura(ENEMY_WARLOCK, effect, 6.0),
         None => scene,
     }
 }
@@ -309,18 +311,25 @@ fn a_cycloned_attacker_frees_the_priest_to_burn_as_a_feared_one_does() {
     }
 }
 
-/// The control: the same Warrior unheld is focusing the Priest, and the focus
-/// gate holds the burn back — so the burns above are the hold's doing.
+/// The control: the same Warlock unheld is focusing the Priest, and the focus
+/// gate holds the burn back, so the burns above are the hold's doing. A root
+/// is no hold (a rooted Warlock still casts), so it holds the burn back too.
 #[test]
-fn an_unheld_attacker_holds_the_priests_burn_back() {
-    let view = focused_priest_scene(None).decide(PRIEST);
-    assert!(focus_gate_holds_the_burn(&view), "{}", describe(&view));
-    assert_ne!(
-        view.chose().map(|(ability, _)| ability),
-        Some(AbilityType::ManaBurn),
-        "{}",
-        describe(&view)
-    );
+fn an_unheld_or_rooted_attacker_holds_the_priests_burn_back() {
+    for held in [None, Some(AuraType::Root)] {
+        let view = focused_priest_scene(held).decide(PRIEST);
+        assert!(
+            focus_gate_holds_the_burn(&view),
+            "{held:?}: {}",
+            describe(&view)
+        );
+        assert_ne!(
+            view.chose().map(|(ability, _)| ability),
+            Some(AbilityType::ManaBurn),
+            "{held:?}: {}",
+            describe(&view)
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
