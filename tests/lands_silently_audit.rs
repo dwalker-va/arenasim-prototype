@@ -634,16 +634,10 @@ const DOT_MEMBERS: &[AbilityType] = &[
 ];
 
 /// DoTs that land with nothing drawn yet.
-const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[
-    (
-        Rupture,
-        "AS-336 (Rupture, the Assassination bleed; AS-365 builds it on Rend's bleed drips)",
-    ),
-    (
-        SiphonLife,
-        "AS-347 (Siphon Life, the Affliction drain; its heal-back is icon-only by ruling)",
-    ),
-];
+const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
+    SiphonLife,
+    "AS-347 (Siphon Life, the Affliction drain; its heal-back is icon-only by ruling)",
+)];
 
 /// The DoT STATE a member's aura routes to. The aura carries the ability's
 /// RON `name:`, so this sweeps the config name through the very router every
@@ -720,6 +714,8 @@ fn the_dot_router_names_each_members_state() {
     let defs = AbilityDefinitions::default();
     let route = |a: AbilityType| DotStateVisual::for_dot(&defs.get(&a).unwrap().name);
     assert_eq!(route(Rend), Some(DotStateVisual::Drip(DripKind::Bleed)));
+    // Rupture has no client state; it bleeds as Rend does (AS-336, AS-365).
+    assert_eq!(route(Rupture), Some(DotStateVisual::Drip(DripKind::Bleed)));
     assert_eq!(
         route(SerpentSting),
         Some(DotStateVisual::Drip(DripKind::Poison))

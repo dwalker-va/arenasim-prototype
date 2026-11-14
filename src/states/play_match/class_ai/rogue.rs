@@ -1165,6 +1165,20 @@ fn try_rupture(
 
     builder.choose(cleared, Some(target_entity), true);
 
+    // Caster-side gesture marker (A2) — see the note in `cast_hammer_of_justice`
+    // for the spawn contract. Spawned before the avoidance roll: the Rogue
+    // strikes whether or not the blow lands, and the graphical spray asks the
+    // victim's auras whether it did.
+    commands.spawn((
+        InstantAbilityFired {
+            caster: entity,
+            target: Some(target_entity),
+            ability,
+            is_crit: false,
+        },
+        PlayMatchEntity,
+    ));
+
     combatant.current_mana -= def.mana_cost;
     combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;

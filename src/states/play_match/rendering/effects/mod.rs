@@ -116,3 +116,7 @@ mod druid_heals;
 pub use druid_heals::*;
 mod shadow_word_pain;
 pub use shadow_word_pain::*;
+mod finisher_flash;
+pub use finisher_flash::*;
+mod bleed_spray;
+pub use bleed_spray::*;

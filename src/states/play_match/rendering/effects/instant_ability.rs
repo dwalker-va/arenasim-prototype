@@ -26,6 +26,8 @@
 //! `CombatSystemPhase::CombatResolution`: `FixedUpdate` can tick several times
 //! per rendered frame, and a marker consumed a tick late desyncs from its hit.
 
+use super::bleed_spray::spawn_bleed_spray_pending;
+use super::finisher_flash::{spawn_finisher_hand_flash, FinisherFlashAssets};
 use super::frost_nova::spawn_frost_nova;
 use super::holy_justice::spawn_holy_justice;
 use super::life_tap::spawn_life_tap_glow;
@@ -68,6 +70,10 @@ pub fn swing_style_for_ability(ability: AbilityType) -> Option<SwingStyle> {
         // ModelAttach rows add; these kits have none).
         AbilityType::Ambush => Some(SwingStyle::Ambush),
         AbilityType::SinisterStrike => Some(SwingStyle::SinisterStrike),
+        // The apply stroke (AS-336): a finisher that puts its debuff ON the
+        // victim sweeps a backhand across its chest. Expose Armor (AS-366)
+        // joins this arm.
+        AbilityType::Rupture => Some(SwingStyle::Backhand),
         _ => None,
     }
 }
@@ -86,6 +92,7 @@ pub fn consume_instant_ability_signals(
     // opacity ladder is identical for every slash of every rogue stun.
     mut crescent_ladder: Local<Option<CrescentLadder>>,
     mut rune_tex: Local<Option<Handle<Image>>>,
+    mut finisher_assets: Local<Option<FinisherFlashAssets>>,
     signals: Query<(Entity, &InstantAbilityFired)>,
     mut sockets: Query<&mut WeaponSocket>,
     positions: Query<&Transform, With<Combatant>>,
@@ -213,6 +220,34 @@ pub fn consume_instant_ability_signals(
                         caster_pos,
                         &victims,
                     );
+                }
+            }
+            // Rupture: the finisher hand flash rides the backhand, and the
+            // bleed spray waits for its contact — and for the bleed to have
+            // landed, so a dodge, a parry or an immune victim draws no blood.
+            AbilityType::Rupture => {
+                if let Some(caster_pos) = caster_pos {
+                    spawn_finisher_hand_flash(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &mut images,
+                        &mut finisher_assets,
+                        signal.caster,
+                        caster_pos,
+                        target_pos,
+                    );
+                }
+                if let (Some(style), Some(victim)) = (style, signal.target) {
+                    if let Some(aura) = ability_defs.get(&AbilityType::Rupture) {
+                        spawn_bleed_spray_pending(
+                            &mut commands,
+                            victim,
+                            signal.caster,
+                            aura.name.clone(),
+                            style.impact_at(),
+                        );
+                    }
                 }
             }
             // Caster-centred too: Life Tap lands on the Warlock's own chest.

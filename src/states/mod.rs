@@ -561,6 +561,30 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // The finisher hand flash (`finisher_flash.rs`) rides the striking
+        // hand: placed from the sockets' local transforms after the swing and
+        // the lean have written them, so it sits on the hand this frame.
+        .add_systems(
+            Update,
+            play_match::update_finisher_hand_flashes
+                .after(play_match::animate_body_lean)
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // The bleed spray (`bleed_spray.rs`): held for the stroke's contact,
+        // fired only on a landing, its droplets flown by
+        // `animate_client_particles` and turned to the camera here.
+        .add_systems(
+            Update,
+            (
+                play_match::fire_bleed_sprays,
+                play_match::update_bleed_sprays,
+                play_match::billboard_bleed_droplets,
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Cast-ending signal consumption: same rationale as
         // `consume_swing_signals` above — FixedUpdate can tick several
         // times per rendered frame, and a CastEnding marker consumed one
