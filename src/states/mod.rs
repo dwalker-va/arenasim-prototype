@@ -1010,6 +1010,27 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // The empowered ground flash of Amplify Curse and Shadow Trance, and
+        // Shadow Trance's speck halo (`empowered_flash.rs`): spawn (consumes
+        // their landing markers) -> flash -> halo, before the client
+        // particles age (the specks are `ClientParticle`s), and the specks
+        // turned after.
+        .add_systems(
+            Update,
+            (
+                (
+                    play_match::spawn_empowered_flashes,
+                    play_match::animate_empowered_flashes,
+                    play_match::update_shadow_trance_halos,
+                )
+                    .chain()
+                    .before(play_match::animate_client_particles),
+                play_match::billboard_shadow_trance_specks
+                    .after(play_match::animate_client_particles),
+            )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Shadow Word: Pain's landing (`shadow_word_pain.rs`): spawn (consumes
         // the sim's SW:P landing markers) -> emit -> particles -> billboard.
         .add_systems(
@@ -1228,6 +1249,29 @@ impl Plugin for StatesPlugin {
                 play_match::update_drain_particles, // Move particles toward caster
                 play_match::cleanup_drain_life_beams, // Remove beam when channel ends
             )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Mind Flay's channel (visual 277, Drain Mana's): the mana-funnel
+        // stars at the Priest's hand and the victim's chest, and the mana beam
+        // between them — graphical only. The victim star's particles are
+        // client particles: emitted before `animate_client_particles` ages
+        // them, turned after.
+        .add_systems(
+            Update,
+            (
+                play_match::sync_mind_flay_channels,
+                play_match::animate_mind_flay_channels,
+            )
+                .chain()
+                .before(play_match::animate_client_particles)
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        .add_systems(
+            Update,
+            play_match::billboard_mind_flay_particles
+                .after(play_match::animate_client_particles)
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )

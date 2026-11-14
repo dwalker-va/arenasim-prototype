@@ -112,6 +112,7 @@ use arenasim::states::play_match::talents::TalentEffect;
 use arenasim::states::play_match::talents::TalentId;
 use arenasim::states::play_match::wears_guardian_spirit;
 use arenasim::states::play_match::wears_shadowform_look;
+use arenasim::states::play_match::ChannelVisual;
 use arenasim::states::play_match::DotStateVisual;
 use arenasim::states::play_match::InterruptLanding;
 use arenasim::states::play_match::SlowTint;
@@ -554,6 +555,11 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
         LightningBolt => Some("forked-arc strike (casting.rs → lightning_bolt.rs)"),
         Immolate => Some("landing flame burst (casting.rs → flame.rs)"),
         DrainLife => Some("drain beam (drain_life.rs, keyed on the channel's ability)"),
+        // The channel is its landing: the client draws no per-tick impact,
+        // only the stars at both ends and the beam, held while it runs.
+        MindFlay if ChannelVisual::for_channel(a).is_some() => {
+            Some("mana-funnel stars + mana beam (mind_flay.rs, ChannelVisual::for_channel)")
+        }
         Moonfire => Some("moon orb + beam landing (casting.rs → moonfire.rs)"),
         // The empowered swing carries `HeroicStrikeSwing` (auto_attack.rs);
         // heroic_strike.rs lays its trail and lands it through the client
@@ -581,10 +587,6 @@ const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (
         HolyNova,
         "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
-    ),
-    (
-        MindFlay,
-        "AS-356 (Mind Flay, the channel and its slow; scoped by AS-335)",
     ),
     (
         Shadowburn,
@@ -865,10 +867,6 @@ const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[
         "AS-334 (the talent visuals: Curse of Exhaustion's slow)",
     ),
     (
-        MindFlay,
-        "AS-356 (Mind Flay, the channel and its slow; scoped by AS-335)",
-    ),
-    (
         Repentance,
         "AS-378 (Repentance, the Retribution incapacitate; never Freezing Trap's ice block)",
     ),
@@ -1019,6 +1017,9 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             {
                 Some("Mark of the Wild glyph on landing (druid_heals.rs)")
             }
+            _ if AuraLandingKind::for_aura(t, &c.name) == Some(AuraLandingKind::AmplifyFlash) => {
+                Some("empowered ground flash on cast (empowered_flash.rs)")
+            }
             // The Paladin talent one-shots (AS-374), each routed by its
             // aura's name: the landing marks it, the band does not.
             _ if paladin_oneshot(t, &c.name).is_some() => paladin_oneshot(t, &c.name),
@@ -1044,10 +1045,6 @@ fn paladin_oneshot(t: AuraType, name: &str) -> Option<&'static str> {
 const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     // A totem's OBJECT is drawn; the buff it pulses onto allies is not.
     (AirTotem, "AS-134 (aura application — totem pulse)"),
-    (
-        AmplifyCurse,
-        "AS-346 (Amplify Curse and Shadow Trance, the primed casts)",
-    ),
     (ArcaneIntellect, "AS-134 (aura application)"),
     (BattleShout, "AS-134 (aura application)"),
     (CommandingShout, "AS-134 (aura application)"),
@@ -1915,7 +1912,6 @@ const TALENT_PROC_KNOWN_SILENT: &[(TalentId, &str)] = &[
         TalentId::BlessedRecovery,
         "AS-352 (Blessed Recovery's palm glow and Renew's amber rings)",
     ),
-    (TalentId::Nightfall, "AS-346 (Shadow Trance's speck halo)"),
     (
         TalentId::Vengeance,
         "AS-377 (Vengeance: both hands glow pale blue while the buff lasts)",

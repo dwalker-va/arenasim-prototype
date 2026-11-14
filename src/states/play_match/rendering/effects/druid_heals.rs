@@ -518,7 +518,9 @@ impl DruidEffect {
             | AuraLandingKind::RetributionDisc
             | AuraLandingKind::InfusionHalo
             | AuraLandingKind::ArtOfWarRing
-            | AuraLandingKind::SacredShieldDisc => None,
+            | AuraLandingKind::SacredShieldDisc
+            | AuraLandingKind::AmplifyFlash
+            | AuraLandingKind::ShadowTrance => None,
         }
     }
 }
