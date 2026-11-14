@@ -569,7 +569,7 @@ fn pet_command_rejection(
         }
         // Boar Charge stuns: never onto a unit the team already holds.
         if ability == AbilityType::BoarCharge {
-            if let Some(cc_type) = ctx.held_in_hard_cc(target, super::Incoming::of(def)) {
+            if let Some(cc_type) = ctx.held_in_hard_cc(target) {
                 return Some(RejectionReason::TargetAlreadyCCd { cc_type });
             }
         }
@@ -1189,7 +1189,7 @@ fn boar_autonomous_dispatch(
         builder.reject(ability, RejectionReason::FriendlyBreakableCC);
         return;
     }
-    if let Some(cc_type) = ctx.held_in_hard_cc(target, super::Incoming::of(def)) {
+    if let Some(cc_type) = ctx.held_in_hard_cc(target) {
         builder.reject(ability, RejectionReason::TargetAlreadyCCd { cc_type });
         return;
     }

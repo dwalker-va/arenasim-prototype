@@ -8,8 +8,8 @@ use bevy::prelude::*;
 use crate::combat::log::CombatLog;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::combat_core::{
-    apply_damage_with_absorb, apply_healing, credit_damage_dealt, credited_damage,
-    damage_dealt_multiplier, roll_crit, DamageFollowUps, Hit,
+    apply_damage_with_absorb, apply_healing, credit_damage_dealt, credit_healing_done,
+    credited_damage, damage_dealt_multiplier, roll_crit, DamageFollowUps, Hit,
 };
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
@@ -121,6 +121,9 @@ pub fn process_holy_shock_heals(
                 is_crit,
                 message,
             );
+            if let Ok((mut caster, _, _)) = combatants.get_mut(pending.caster) {
+                credit_healing_done(&mut caster, actual_heal);
+            }
 
             // A critical Holy Shock heal is its Paladin's `HealCrit`.
             if is_crit {

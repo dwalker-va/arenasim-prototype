@@ -423,8 +423,8 @@ pub fn trap_spring_deadline(my_pos: Vec3, landing: Vec3) -> f32 {
 /// ARMED (launch travel, then `TRAP_ARM_DELAY`), so the victim is not whoever
 /// stands nearest the landing now but whoever is inside the radius first after
 /// arming. Each visible living enemy, pets included, is extrapolated along its
-/// estimated [`velocity`](super::CombatantInfo::velocity) (zero while casting),
-/// stopping at its preferred range of its own target when it is heading toward
+/// [`forecast_velocity`] (zero while casting, rooted or held; slowed by its
+/// slows), stopping at its preferred range of its own target when it is heading toward
 /// it — a pursuer does not run through the unit it is chasing, and a caster
 /// stops at casting range. The springer is the
 /// one inside the radius earliest in `[armed, armed + TRAP_SPRING_WINDOW]`
@@ -464,8 +464,9 @@ fn flat(v: Vec3) -> Vec3 {
 
 /// The first moment in `[from, from + window]` (seconds from now, sampled at
 /// `SPRING_PREDICTION_STEP`) at which `enemy`, extrapolated along its
-/// estimated [`velocity`](super::CombatantInfo::velocity), is inside the
-/// trigger radius of a trap at `landing` (planar). A pursuer stops at its
+/// [`forecast_velocity`] (the one the trap's lead is aimed by: slowed by its
+/// slows, still while rooted or held), is inside the trigger radius of a trap
+/// at `landing` (planar). A pursuer stops at its
 /// preferred range of its own target, as pursuit in `move_to_target` does: the
 /// closest approach along its heading, less that range. Heading away (a
 /// kiter), or with no target in view, it keeps going.
@@ -477,7 +478,7 @@ pub(super) fn first_inside(
     window: f32,
 ) -> Option<f32> {
     let start = flat(enemy.position);
-    let velocity = flat(enemy.velocity);
+    let velocity = flat(forecast_velocity(ctx, enemy.entity));
     let speed = velocity.length();
     let heading = velocity.normalize_or_zero();
     let stop = match enemy.pet_type {
@@ -768,16 +769,44 @@ pub fn evaluate_hunter_dip(
 }
 
 /// Where to aim a Freezing Trap so it lands on — or just ahead of — `target`
-/// when it arms. A planted target (casting → zero `velocity`) is aimed at
-/// directly; a moving target is led along its velocity by the trap's travel +
-/// arm time so the trap drops into its path. The lead is capped so a long arm
-/// window can't fling the aim across the arena when the target turns.
+/// when it arms. A target going nowhere (casting, rooted or held:
+/// [`forecast_velocity`] is zero) is aimed at directly; a moving target is led
+/// along its forecast velocity by the trap's travel + arm time so the trap
+/// drops into its path, at the speed its slows leave it. The lead is capped so
+/// a long arm window can't fling the aim across the arena when the target
+/// turns.
 pub fn trap_lead_landing(ctx: &CombatContext, target: Entity, my_pos: Vec3) -> Option<Vec3> {
     let info = ctx.combatants.get(&target)?;
     let travel = my_pos.distance(info.position) / TRAP_LAUNCH_SPEED;
     let lead_time = TRAP_ARM_DELAY + travel;
-    let lead = (info.velocity * lead_time).clamp_length_max(TRAP_TRIGGER_RADIUS * 3.0);
+    let lead =
+        (forecast_velocity(ctx, target) * lead_time).clamp_length_max(TRAP_TRIGGER_RADIUS * 3.0);
     Some(info.position + lead)
+}
+
+/// How `e` is forecast to move over the next few seconds, for every trap
+/// prediction the Hunter makes: along its heading
+/// ([`CombatantInfo::velocity`](super::CombatantInfo::velocity), zero while it
+/// casts) at the speed its slows leave it
+/// ([`effective_movement_speed`](crate::states::play_match::combat_core::effective_movement_speed),
+/// the one derivation movement uses), and not at all while it is rooted or
+/// held in hard crowd control ([`CombatContext::is_ccd`], which counts both).
+pub fn forecast_velocity(ctx: &CombatContext, e: Entity) -> Vec3 {
+    let Some(info) = ctx.combatants.get(&e) else {
+        return Vec3::ZERO;
+    };
+    // `is_ccd` counts a root with the holds: rooted, stunned, feared,
+    // polymorphed, incapacitated or cycloned, the unit goes nowhere.
+    if ctx.is_ccd(e) {
+        return Vec3::ZERO;
+    }
+    let auras = ActiveAuras {
+        auras: ctx.active_auras.get(&e).cloned().unwrap_or_default(),
+    };
+    // The share of its base speed its auras leave it: exactly 1.0 with no
+    // slow, so an unslowed heading is carried through unchanged.
+    let share = crate::states::play_match::combat_core::effective_movement_speed(1.0, Some(&auras));
+    info.velocity * share
 }
 
 /// Emit the `DipComplete` movement event after the ability pass lands the trap.

@@ -176,6 +176,9 @@ enum Hold {
     EnemyPolymorph,
     /// A Polymorph from the deciding unit's OWN team (breaks on any damage).
     FriendlyPolymorph,
+    /// A Psychic Scream from the deciding unit's OWN team (breaks after 100
+    /// damage): a hold the team waits out, as it does a Polymorph.
+    FriendlyFear,
     /// A 1s stun from the deciding unit's OWN team (never breaks): a lock
     /// whose end is close, which a cast with a cast time cannot fit into.
     FriendlyStun,
@@ -189,6 +192,16 @@ enum Hold {
 const SHORT_LOCK: f32 = 1.0;
 /// How long a [`Hold::FriendlyPolymorph`] has left.
 const POLYMORPH_LEFT: f32 = 6.0;
+/// How long a [`Hold::FriendlyFear`] has left.
+const FEAR_LEFT: f32 = 6.0;
+
+impl Hold {
+    /// A hold of the deciding unit's own team that damage would break: the
+    /// team waits it out, so no damage is aimed at its bearer.
+    fn friendly_breakable(self) -> bool {
+        matches!(self, Hold::FriendlyPolymorph | Hold::FriendlyFear)
+    }
+}
 /// A lock ending in time for an instant hand-off to land in its last
 /// moments.
 const HANDOFF_NOW: f32 = 0.2;
@@ -331,8 +344,24 @@ fn situations(class: CharacterClass, bars: &[f32]) -> Vec<Situation> {
             ..CALM
         },
         Situation {
+            name: "target feared by my team",
+            target_aura: Hold::FriendlyFear,
+            ..CALM
+        },
+        Situation {
+            name: "target low, feared by my team",
+            target_health: Some(0.15),
+            target_aura: Hold::FriendlyFear,
+            ..CALM
+        },
+        Situation {
             name: "enemy healer polymorphed by my team",
             healer_aura: Hold::FriendlyPolymorph,
+            ..CALM
+        },
+        Situation {
+            name: "enemy healer feared by my team",
+            healer_aura: Hold::FriendlyFear,
             ..CALM
         },
         Situation {
@@ -911,6 +940,21 @@ fn hold(scene: Scene, who: &'static str, hold: Hold) -> Scene {
             let caster = scene.entity(HEALER);
             scene.aura_full(who, polymorph(caster))
         }
+        // A friendly Psychic Scream is the ally's.
+        Hold::FriendlyFear => {
+            let caster = scene.entity(ALLY);
+            scene.aura_full(
+                who,
+                Aura {
+                    effect_type: AuraType::Fear,
+                    duration: FEAR_LEFT,
+                    break_on_damage_threshold: 100.0,
+                    caster: Some(caster),
+                    ability_name: "Psychic Scream".into(),
+                    ..Default::default()
+                },
+            )
+        }
         Hold::FriendlyStun | Hold::FriendlyStunEnding(_) => {
             let caster = scene.entity(ALLY);
             let duration = match hold {
@@ -946,7 +990,7 @@ fn hold(scene: Scene, who: &'static str, hold: Hold) -> Scene {
 fn cc_target(scene: &mut Scene, p: &Point) -> Option<Entity> {
     use arenasim::states::play_match::class_ai::{grants_damage_immunity, stealth_visible};
     use arenasim::states::play_match::combat_ai::select_cc_target_heuristic;
-    if p.situation.healer_aura == Hold::FriendlyPolymorph {
+    if p.situation.healer_aura.friendly_breakable() {
         return Some(scene.entity(HEALER));
     }
     let mut auras: std::collections::HashMap<Entity, Vec<Aura>> = Default::default();
@@ -1136,8 +1180,9 @@ fn build(defs: &AbilityDefinitions, movement: MovementConfig, p: &Point) -> Scen
             }
         }
         // ...and the unit's own damage over time already on its target
-        // (never on one its team holds in a Polymorph, which it would break).
-        if p.upkeep == Upkeep::Full && hold_of(p, whom(p)) != Hold::FriendlyPolymorph {
+        // (never on one its team holds in a Polymorph or a Fear, which it
+        // would break).
+        if p.upkeep == Upkeep::Full && !hold_of(p, whom(p)).friendly_breakable() {
             let curse = scene.combatant_mut(ME).warlock_curse_prefs[0].ability();
             for aura in own_dots(defs, p.class, scene.entity(ME), curse) {
                 scene = scene.aura_full(whom(p), aura);
@@ -1145,7 +1190,7 @@ fn build(defs: &AbilityDefinitions, movement: MovementConfig, p: &Point) -> Scen
         }
         // ...and its curse on every enemy it spreads to.
         for enemy in [TARGET, HEALER] {
-            let cursed = enemy == whom(p) || hold_of(p, enemy) == Hold::FriendlyPolymorph;
+            let cursed = enemy == whom(p) || hold_of(p, enemy).friendly_breakable();
             if p.upkeep == Upkeep::Full && !cursed && alive(p, enemy) {
                 let curse = scene.combatant_mut(ME).warlock_curse_prefs[0].ability();
                 for aura in own_dots(defs, p.class, scene.entity(ME), curse) {
@@ -2152,7 +2197,7 @@ fn friendly_cc_kept() -> Finding {
             continue;
         }
         judged += 1;
-        if hold_of(&r.point, t) == Hold::FriendlyPolymorph {
+        if hold_of(&r.point, t).friendly_breakable() {
             violations.push((ability, describe(r, ability, target)));
         }
     }
@@ -2160,7 +2205,8 @@ fn friendly_cc_kept() -> Finding {
 }
 
 /// Damage — direct or over time — is never aimed at an enemy held in a
-/// crowd control of the deciding unit's own team that breaks on any damage.
+/// crowd control of the deciding unit's own team that damage breaks: a
+/// Polymorph, or a Fear the team waits out.
 #[test]
 fn never_breaks_a_friendly_breakable_cc() {
     verdict(Property::FriendlyCcKept, Scope::Guard, friendly_cc_kept());
@@ -2471,6 +2517,7 @@ fn cc_not_stacked() -> Finding {
         // (the Chain play's hand-off); one landing earlier stacks.
         let left = match hold_of(&r.point, t) {
             Hold::FriendlyPolymorph => POLYMORPH_LEFT,
+            Hold::FriendlyFear => FEAR_LEFT,
             Hold::FriendlyStun => SHORT_LOCK,
             Hold::FriendlyStunEnding(left) => left,
             Hold::Free | Hold::DivineShield | Hold::Cyclone | Hold::EnemyPolymorph => continue,

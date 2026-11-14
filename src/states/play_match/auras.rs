@@ -9,7 +9,7 @@
 //!
 //! Note: Instant effect processing (Holy Shock, Dispels) moved to effects/ module.
 
-use super::combat_core::apply_healing;
+use super::combat_core::{apply_healing, credit_healing_done};
 use super::components::*;
 use super::effects::BloomPending;
 use super::match_config;
@@ -1675,9 +1675,9 @@ pub fn process_dot_ticks(
         );
         if credited > 0.0 {
             if let Ok((_, mut caster, _, _)) = combatants_with_auras.get_mut(owed.caster) {
-                caster.healing_done += credited;
+                credit_healing_done(&mut caster, credited);
             } else if let Ok((_, mut caster)) = combatants_without_auras.get_mut(owed.caster) {
-                caster.healing_done += credited;
+                credit_healing_done(&mut caster, credited);
             }
         }
     }
@@ -1905,7 +1905,7 @@ pub fn process_hot_ticks(
     // Third pass: update caster healing_done stats
     for (caster_entity, healing) in caster_healing_updates {
         if let Ok((_, mut caster, _, _)) = combatants_with_auras.get_mut(caster_entity) {
-            caster.healing_done += healing;
+            credit_healing_done(&mut caster, healing);
         }
     }
 }

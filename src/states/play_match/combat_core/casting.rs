@@ -17,7 +17,7 @@ use super::damage::{
     roll_crit, Hit, HitKind,
 };
 use super::follow_ups::DamageFollowUps;
-use super::healing::apply_healing;
+use super::healing::{apply_healing, credit_healing_done};
 use super::leech::{self, OwedLeech};
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use crate::states::play_match::talent_procs::{self, ProcEvent, TalentTrigger};
@@ -1011,7 +1011,7 @@ pub fn process_casting(
             // Track healing done for healer (update later to avoid double borrow)
             if is_self_target {
                 // Self-healing: target IS caster, so update now
-                target.healing_done += actual_healing;
+                credit_healing_done(&mut target, actual_healing);
             } else {
                 // Different target: collect for later update
                 caster_healing_updates.push((caster_entity, actual_healing));
@@ -1277,7 +1277,7 @@ pub fn process_casting(
             },
         );
         if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(owed.caster) {
-            caster.healing_done += credited;
+            credit_healing_done(&mut caster, credited);
         }
     }
 
@@ -1298,7 +1298,7 @@ pub fn process_casting(
     // Apply collected healer healing updates
     for (healer_entity, healing) in caster_healing_updates {
         if let Ok((_, _, mut healer, _, _)) = combatants.get_mut(healer_entity) {
-            healer.healing_done += healing;
+            credit_healing_done(&mut healer, healing);
         }
     }
 
@@ -1767,7 +1767,7 @@ pub fn process_channeling(
             },
         );
         if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(owed.caster) {
-            caster.healing_done += credited;
+            credit_healing_done(&mut caster, credited);
         }
         for (recipient, position, effective) in healed {
             if effective <= 0.0 {
@@ -1823,7 +1823,7 @@ pub fn process_channeling(
             },
         );
         if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(owed.caster) {
-            caster.healing_done += credited;
+            credit_healing_done(&mut caster, credited);
         }
     }
 

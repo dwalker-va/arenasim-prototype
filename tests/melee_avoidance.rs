@@ -907,6 +907,16 @@ fn a_swing_held_off_a_friendly_fear_is_not_avoided() {
 /// `roll_avoidance` returning before any draw plays each cell's match log
 /// byte-identically to the tree itself. (The logs carry 13 crits and 7
 /// eliminations.)
+///
+/// Re-recorded for AS-493, the Freezing Trap led at the speed its victim's
+/// slows leave it: the 3v3 192 -> 204; the other two cells held. Its log
+/// first differs at the Freezing Trap the Hunter throws at 26.5s on the
+/// Paladin, slowed by Frost Shock: it lands at (18, -8) instead of
+/// (25, -11), and freezes it. The
+/// evidence is the same: a scratch build of AS-493's tree with
+/// `roll_avoidance` returning before any draw plays each cell's match log
+/// byte-identically to the tree itself. (The logs carry 14 crits and 7
+/// eliminations.)
 #[test]
 fn a_match_without_avoidance_draws_what_it_drew_before() {
     for (team1, team2, map, profile, seed, recorded) in ZERO_AVOIDANCE_DRAWS {
@@ -950,7 +960,7 @@ const ZERO_AVOIDANCE_DRAWS: &[DrawPin] = &[
         "PillaredArena",
         "TeamPlan",
         5,
-        192,
+        204,
     ),
     (&["Rogue"], &["Warrior"], "BasicArena", "Legacy", 3, 59),
 ];

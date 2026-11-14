@@ -1120,7 +1120,7 @@ the two keys (`key_stance`, `key_arc`).
   forbidden the heading is `turn_limited` bit for bit.
 - The Paladin (`HUG_EXCEPTIONS`, design D5) is untouched by both modes: its
   FREE is melee pursuit, with no formation point. Medic chase, dispel walk,
-  a hunt station, ESCAPE and DIP outrank it and leave the mode as it was.
+  the Hunt play's walk, ESCAPE and DIP outrank it and leave the mode as it was.
   Obstacle-free maps are untouched; `Legacy` is byte-identical.
 
 **Medic chase (heal-seeking movement)** — shared across Priest/Paladin/Shaman
@@ -2101,33 +2101,48 @@ into range (*Psychic Scream under `TeamPlan`* below). Graduated at the 0.8
 milestone sweep (+0.3pt in 2v2; `docs/design/balance/2026-10-12-as274-peel-play.md`
 is its design) with eleven context gates and two 3v3 format gates.
 
-`Hunt` (AS-394): the enemy is down to a lone healer
-at a pillar (`hunt`, `class_ai::hunt`; within `HUNT_ENTER` of its skin, held
-to `HUNT_LEAVE`, hidden from one of the team at onset) and the team has two or
-more units, so two of them take STATIONS half a turn apart round that pillar,
-`HUNT_STANDOFF` off its skin, about the healer's bearing at onset — from there
-a hugger is in one station's sight at every bearing (the unit test
-`two_stations_leave_a_hugger_nowhere_to_hide`; 160° leaves a sliver). Ranged
-DPS take stations first; the healer takes the second when only one ranged DPS
-does, and only while no teammate is dying (D2: a dying teammate is owed its
-sight; once owed, not again until all are back to `SIGHT_YIELD_HP`); melee
-take none; one viewer is no hunt. `HUNT_EXCEPTIONS` names the Paladin, Druid
-and Shaman — healers with no attack that costs no mana, whose stations
-lengthened endgames and drew matches — so only a Priest stations. The two
-stationed units are the first that qualify in Entity order, not the nearest
-(a 3v3 with two ranged DPS stations the lower-numbered pair). A unit holds its
-station until it first reaches it; after that only while one of the two sees
-the healer (`hold = !arrived || covered`), so an arrived unit gives its station
-up for its ordinary walk for sight whenever nobody sees the healer, even while
-its partner is still walking, and takes it back once one of them does. A MOVEMENT play, walked by `hunt::walk_to_station` (a `Point`
+`Hunt` (AS-394, AS-404): the enemy is down to a lone healer at a pillar
+(`hunt`, `class_ai::hunt`; within `HUNT_ENTER` of its skin and hidden from one
+of the team at onset) and the team has two or more units, so two of them close
+on it from both sides of that pillar. The hunt HOLDS while the healer is within
+`HUNT_LEAVE` of the skin, or out to `HUNT_SHADOW_LEAVE` while the pillar hides
+it from any living teammate: in that teammate's widened shadow (`hunt::in_shadow`:
+AS-206's, `formation::shadow_exits` at `SIGHT_MARGIN`, whose widening is the
+release hysteresis) or blocking its plain sight. It ends once the healer is out
+in the open or reaches another pillar; a hunt that starts again on the same
+healer and pillar within `HUNT_REMEMBER` keeps each unit's side. Ranged DPS hunt first; the
+healer is the second when only one ranged DPS does, and only while no teammate
+is dying (D2: a dying teammate is owed its sight; once owed, not again until all
+are back to `SIGHT_YIELD_HP`); melee do not; one hunter is no hunt.
+`HUNT_EXCEPTIONS` names the Paladin, Druid and Shaman — healers with no attack
+that costs no mana, which lengthened endgames and drew matches — so only a
+Priest hunts. The two are the first that qualify in Entity order, not the
+nearest. At onset each takes a SIDE of the pillar (paired with the axis ±90°
+by the shorter total walk round the pillar, `hunt::walk_round`), kept for the
+hunt and measured from the healer's LIVE bearing. Each frame a hunter that sees
+the healer from within its own reach (`hunt::in_reach`: its book's damaging
+abilities' range bands) stands where it is and casts (the latch sets on sight
+clear of the widened shadow `REACH_MARGIN` inside reach, and clears on losing
+plain sight or reach); any other — blind, or in sight beyond reach — walks to
+the nearest spot on its own side that sees the healer clear from within reach
+(`hunt::pincer_point`, 4-14yd off the skin), kept at least `REAIM_SECS`, so the
+two close in as the healer moves.
+Until a hunter first sees the healer it takes the shorter way round to its
+side's onset point (the old far station), casting if it gets sight on the way
+(user ruling); after that a blind hunter on the wrong side walks round the
+BACK of the pillar to its own (`hunt::round_the_back`), never across the
+healer's face. Nobody is parked
+blind. A MOVEMENT play, walked by `hunt::walk_to_station` (a `Point`
 directive) from the kiter's ENGAGE, the Warlock's dispatch and the healers'
 `hunt_station_tick`; Burst still leads the chain, and the play stands down while
 the healer is locked so Chain extends the lock. It sits before Pillar: a team
 hunting the last enemy does not hide from its crowd control. Traced as
 `situation_change` `hunt` (subject: the healer; `pillar`) and the
-`MovementTrigger::Hunt` walk. Measured (`docs/design/2026-10-25-ranged-dps-vs-hidden-targets.md`
-§9): endgames about 19% shorter where a team can staff both stations (about
-21% of endgames), about 2.5s over all endgames; wins and draws unchanged. Endgame lengths per match:
+`MovementTrigger::Hunt` walk. Geometry pinned by `tests/hunt_pincer_staged.rs`.
+Measured (`docs/design/2026-10-25-ranged-dps-vs-hidden-targets.md` §9-10):
+the AS-394 stations shortened endgames about 19% where a team can staff two
+hunters; the pincer that replaced them is level with the stations on endgame
+length, wins and draws (§10). Endgame lengths per match:
 `tests/hunt_endgame_sweep.rs` (ignored, a measurement).
 
 **Psychic Scream under `TeamPlan` (AS-388).** The Priest has no offensive

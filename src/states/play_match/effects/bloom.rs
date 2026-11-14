@@ -20,7 +20,7 @@
 use bevy::prelude::*;
 
 use crate::combat::log::CombatLog;
-use crate::states::play_match::combat_core::apply_healing;
+use crate::states::play_match::combat_core::{apply_healing, credit_healing_done};
 use crate::states::play_match::components::*;
 use crate::states::play_match::match_config::CharacterClass;
 use crate::states::play_match::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
@@ -108,7 +108,7 @@ pub fn process_blooms(
         let target_id = combat_log_id_for(&target, pet_query.get(pending.target).ok());
         let self_bloom = pending.caster == Some(pending.target);
         if self_bloom {
-            target.healing_done += actual;
+            credit_healing_done(&mut target, actual);
         }
         let text_position = target_position + Vec3::new(0.0, super::super::FCT_HEIGHT, 0.0);
         let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
@@ -135,7 +135,7 @@ pub fn process_blooms(
         };
         if let Some(caster_entity) = pending.caster.filter(|_| !self_bloom) {
             if let Ok((mut caster_combatant, _, _)) = combatants.get_mut(caster_entity) {
-                caster_combatant.healing_done += actual;
+                credit_healing_done(&mut caster_combatant, actual);
             }
         }
 

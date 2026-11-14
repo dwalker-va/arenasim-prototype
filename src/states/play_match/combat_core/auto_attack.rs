@@ -179,8 +179,8 @@ pub fn combat_auto_attack(
     //    must not break these: it webs a target to peel it off the owner, and
     //    meleeing through the Web both defeats the peel and shatters it. A ranged
     //    player legitimately nukes a rooted target (root + nuke), so this tier is
-    //    pet-only. Stuns/Fears are excluded — those are offensive setups the pet
-    //    should keep attacking through.
+    //    pet-only. A stun never breaks, so the pet attacks through it; a Fear
+    //    is held off by `friendly_cc_team` below, for every attacker.
     let caster_team = |a: &Aura| {
         a.caster
             .and_then(|c| combatant_info.get(&c))
@@ -220,16 +220,16 @@ pub fn combat_auto_attack(
         })
         .collect();
 
-    // Build a map of targets with breakable CC from friendly casters.
+    // Build a map of targets with breakable CC from friendly casters: the
+    // holds the attacker's team waits out, by the cast gate's own rule
+    // (`class_ai::damage_breaks_friendly_hold` — a Polymorph, a Freezing Trap,
+    // a Fear; never a root).
     let mut friendly_cc_team: std::collections::BTreeMap<Entity, u8> =
         std::collections::BTreeMap::new();
     for (entity, _, combatant, _, _, auras) in combatants.iter() {
         if let Some(auras) = auras {
             for aura in &auras.auras {
-                // Only care about CC auras that break on damage
-                if aura.break_on_damage_threshold >= 0.0
-                    && matches!(aura.effect_type, AuraType::Polymorph | AuraType::Fear)
-                {
+                if crate::states::play_match::class_ai::damage_breaks_friendly_hold(aura) {
                     // Look up the caster's team
                     if let Some(caster_entity) = aura.caster {
                         if let Some(&(caster_team, _, _, _, _)) = combatant_info.get(&caster_entity)
