@@ -700,8 +700,11 @@ pub fn spawn_instant_cast_hands(
                 // so they play once per cast.
                 && cast.ability != AbilityType::DivineShield
                 // The Paladin talent instants' hands come off their aura's
-                // landing (`paladin_oneshots.rs`) for the same reason.
+                // landing (`paladin_oneshots.rs`) for the same reason, and
+                // Divine Protection's off its globe's onset
+                // (`divine_protection.rs`).
                 && !AuraLandingKind::flashes_hands_for(cast.ability)
+                && !super::divine_protection::flashes_hands_at_onset(cast.ability)
         })
         .map(|(ending, cast)| (ending.caster, cast.ability));
     let marked = fired.iter().map(|signal| (signal.caster, signal.ability));

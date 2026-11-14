@@ -880,6 +880,10 @@ pub fn oneshot_launch(layer: &OneShotLayer, age: f32, seed: u32) -> (Vec3, Vec3)
 pub enum PieceFacing {
     /// A quad facing the camera (the bench's `bbGlow` and `sprite`).
     Camera,
+    /// A quad facing the camera, rolled `roll` radians in the screen plane,
+    /// counter-clockwise as the viewer sees it (a bench `sprite` drawn with
+    /// an angle, which the canvas turns clockwise: `roll` is its negation).
+    CameraRolled { roll: f32 },
     /// A quad lying flat, facing up, turned `turn` radians about world up
     /// (the bench's `ring3`, `groundDisc` and `glyphDisc`).
     Flat { turn: f32 },
@@ -1219,6 +1223,10 @@ pub fn piece_rotation(facing: PieceFacing, rig: Quat, camera: Option<Quat>) -> Q
             Some(camera) => camera,
             None => return Quat::IDENTITY,
         },
+        PieceFacing::CameraRolled { roll } => match camera {
+            Some(camera) => camera * Quat::from_rotation_z(roll),
+            None => return Quat::from_rotation_z(roll),
+        },
         // `Rectangle` faces +Z; tipped back a quarter turn it faces up.
         PieceFacing::Flat { turn } => {
             Quat::from_rotation_y(turn) * Quat::from_rotation_x(-FRAC_PI_2)
@@ -1236,7 +1244,7 @@ pub fn piece_rotation(facing: PieceFacing, rig: Quat, camera: Option<Quat>) -> Q
 const PIECE_PX: u32 = 128;
 /// A drawn ring's stroke: its centre radius and half-width over the sprite's
 /// radius (the bench's 2-3 px `ring3` stroke).
-const RING_STROKE: (f32, f32) = (0.965, 0.035);
+pub const RING_STROKE: (f32, f32) = (0.965, 0.035);
 /// A glyph disc's inner ring sits at 0.78 of the outer (the bench's
 /// `glyphDisc`), its ticks run from the inner ring to the outer, slanted
 /// 0.12 rad, and its soft fill is a quarter of the ground disc.

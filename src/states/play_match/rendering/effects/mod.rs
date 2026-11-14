@@ -24,6 +24,8 @@ mod shadowform;
 pub use shadowform::*;
 mod guardian_spirit;
 pub use guardian_spirit::*;
+mod divine_protection;
+pub use divine_protection::*;
 mod life_tap;
 pub use life_tap::*;
 mod empowered_flash;
