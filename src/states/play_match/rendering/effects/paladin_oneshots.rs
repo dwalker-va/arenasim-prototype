@@ -12,7 +12,8 @@ use crate::states::play_match::components::*;
 
 // ==============================================================================
 // Paladin talent one-shots — Divine Favor, Aura Mastery, Blessing of Sacrifice,
-// Retribution Aura, Infusion of Light and The Art of War (AS-374)
+// Retribution Aura, Infusion of Light and The Art of War (AS-374), and Sacred
+// Shield's cast (AS-375)
 // ==============================================================================
 //
 // From the client data joined in
@@ -42,6 +43,13 @@ use crate::states::play_match::components::*;
 // - **The Art of War** (§12): `the_art_of_war_impact.m2` at the chest on the
 //   proc, 2.0 s: a small gold disc and a ring of gold sparks opening out.
 // - **Light's Grace** (§10) has no client visual at any build: icon only.
+// - **Sacred Shield** (§5, AS-375): the instant Holy hand flash and
+//   `holy_precast_high_base.m2`, a brief gold glyph disc at the Paladin's
+//   feet; then `blessed_mending_impact.m2` on the ally, 1.97 s: a flat 1.6 yd
+//   gold rune disc at the chest, gold streaks flying out, and two
+//   counter-turning rune stars. The 30 s buff draws nothing after. Its absorb
+//   is a shield card held while the absorb lasts (`shield.rs`,
+//   `ShieldKind::SacredShield`).
 //
 // Played as the signed-off AS-337 Paladin Talent Visuals Bench plays them
 // (https://claude.ai/artifact/31rnhhKpACF51iUsqK5g7k, version 1792379243-e3d6,
@@ -57,8 +65,8 @@ use crate::states::play_match::components::*;
 // Spawning rides the sim's `AuraLanding` marker (`apply_pending_auras`, on a
 // fresh application or a refresh), which names the aura's caster: Aura
 // Mastery's ward and Retribution Aura's disc play only on the landing whose
-// bearer IS the caster, and Blessing of Sacrifice's plays at both ends. The
-// three casts' hands flash off the same landing (`heal_cast.rs`
+// bearer IS the caster, and Blessing of Sacrifice's and Sacred Shield's play
+// at both ends. The casts' hands flash off the same landing (`heal_cast.rs`
 // `flash_instant_hands`, `AuraLandingKind::cast_ability`): the class AI
 // applies them inline, with no cast state to flash from. Each named aura's
 // application is owned by its landing (`AuraApplyRoute::for_instance`), so
@@ -146,6 +154,16 @@ pub const ART_OF_WAR_RUNES: bool = true;
 pub const ART_OF_WAR_BURST: bool = true;
 pub const ART_OF_WAR_KNOBS: OneShotKnobs = CLIENT_KNOBS;
 
+// Sacred Shield (Wrath 53601 visual 11956 / 58597 visual 12581). Kit 193
+// holy_precast_high_hand.m2 @Hands and holy_precast_high_base.m2 @Base on
+// cast; kit 11039 blessed_mending_impact.m2 @Chest on the ally, 1.97 s. The
+// absorb (kit 11040, blessed_mending_proc_impact.m2 @Base) is
+// `ShieldKind::SacredShield` in shield.rs, held while the absorb lasts.
+pub const SACRED_SHIELD_CAST_FLASH: bool = true;
+pub const SACRED_SHIELD_DISC: bool = true;
+pub const SACRED_SHIELD_DISC_STREAKS: bool = true;
+pub const SACRED_SHIELD_KNOBS: OneShotKnobs = CLIENT_KNOBS;
+
 // ── The bench's anchors and sequence lengths ─────────────────────────────────
 
 /// The bench's anchors above the floor (`ANCH`): the chest attachment (34).
@@ -161,6 +179,10 @@ pub const RETRIBUTION_AURA_SECS: f32 = 1.434;
 /// the halo is gone at 1.834 s, which is where the bench stops drawing it.
 pub const INFUSION_SECS: f32 = 1.834;
 pub const ART_OF_WAR_SECS: f32 = 2.0;
+/// Sacred Shield's disc on the ally (the bench stops drawing it at 1967 ms),
+/// and the cast's disc at the Paladin's feet.
+pub const SACRED_SHIELD_SECS: f32 = 1.967;
+pub const SACRED_SHIELD_BASE_SECS: f32 = 0.7;
 
 // ── The emitter model ────────────────────────────────────────────────────────
 
@@ -178,6 +200,10 @@ pub enum OneShotLaunch {
     /// in a uniformly random direction (the bench's `orbit`, an M2 type-3
     /// emitter).
     Ring { radius: f32, rev_per_sec: f32 },
+    /// Within `half_angle` radians of straight up: a polar angle uniform in
+    /// `[-half_angle, half_angle]` and a uniform azimuth (the bench's
+    /// `vRange` between 0 and 3.1).
+    Cone { half_angle: f32 },
 }
 
 /// One emitter of a one-shot: its record as a [`ClientEmitter`] (whose
@@ -733,6 +759,36 @@ static ART_OF_WAR_LAYERS: [OneShotLayer; 3] = [
     ),
 ];
 
+// ── Sacred Shield: blessed_mending_impact.m2 ─────────────────────────────────
+
+/// `gradient64flipa` streaks from the ally's chest, 66/s from 0.1 to 0.43 s,
+/// flying out at 3.3 yd/s within 1.5 rad of straight up: gold -> pale gold ->
+/// white. (The research doc gives the client's 6.7 yd/s; the bench, signed
+/// off, launches them at 3.3.)
+static SACRED_SHIELD_LAYERS: [OneShotLayer; 1] = [at_knobs(
+    OneShotLayer {
+        on: SACRED_SHIELD_DISC_STREAKS,
+        emitter: emitter(
+            "blessed_mending_impact/gold streaks",
+            EmitterSprite::Streak,
+            66.0,
+            Some((0.1, 0.434)),
+            None,
+            0.5,
+            3.3,
+            None,
+            [[252, 217, 77], [253, 218, 112], [244, 252, 255]],
+            [1.0, 0.5, 0.0],
+            [0.1, mid_of(0.1, 0.05, 0.5), 0.05],
+            0.5,
+        ),
+        height: ONESHOT_CHEST,
+        launch: OneShotLaunch::Cone { half_angle: 1.5 },
+        drag: 0.0,
+    },
+    SACRED_SHIELD_KNOBS,
+)];
+
 // ── Per-kind routing ─────────────────────────────────────────────────────────
 
 /// A one-shot's emitter layers (empty for Retribution Aura, which is all
@@ -746,6 +802,8 @@ pub fn oneshot_layers(kind: PaladinOneShotKind) -> &'static [OneShotLayer] {
         PaladinOneShotKind::Retribution => &[],
         PaladinOneShotKind::InfusionOfLight => &INFUSION_LAYERS,
         PaladinOneShotKind::ArtOfWar => &ART_OF_WAR_LAYERS,
+        PaladinOneShotKind::SacredShield => &SACRED_SHIELD_LAYERS,
+        PaladinOneShotKind::SacredShieldBase => &[],
     }
 }
 
@@ -758,6 +816,9 @@ pub fn oneshot_knobs(kind: PaladinOneShotKind) -> OneShotKnobs {
         PaladinOneShotKind::Retribution => RETRIBUTION_AURA_KNOBS,
         PaladinOneShotKind::InfusionOfLight => INFUSION_KNOBS,
         PaladinOneShotKind::ArtOfWar => ART_OF_WAR_KNOBS,
+        PaladinOneShotKind::SacredShield | PaladinOneShotKind::SacredShieldBase => {
+            SACRED_SHIELD_KNOBS
+        }
     }
 }
 
@@ -770,6 +831,8 @@ pub fn oneshot_secs(kind: PaladinOneShotKind) -> f32 {
         PaladinOneShotKind::Retribution => RETRIBUTION_AURA_SECS,
         PaladinOneShotKind::InfusionOfLight => INFUSION_SECS,
         PaladinOneShotKind::ArtOfWar => ART_OF_WAR_SECS,
+        PaladinOneShotKind::SacredShield => SACRED_SHIELD_SECS,
+        PaladinOneShotKind::SacredShieldBase => SACRED_SHIELD_BASE_SECS,
     };
     secs * oneshot_knobs(kind).duration
 }
@@ -795,13 +858,19 @@ pub fn oneshot_visual(kind: PaladinOneShotKind) -> &'static str {
         PaladinOneShotKind::ArtOfWar => {
             "gold spark ring opening round the chest (paladin_oneshots.rs)"
         }
+        PaladinOneShotKind::SacredShield | PaladinOneShotKind::SacredShieldBase => {
+            "Holy hand flash + gold disc at the Paladin's feet + gold rune disc at the ally's \
+             chest (paladin_oneshots.rs)"
+        }
     }
 }
 
 /// Where a landing plays: the rigs it spawns (unit, one-shot), and the unit
 /// whose hands flash, if any. Aura Mastery and Retribution Aura play only on
 /// the landing whose bearer is the caster — the client draws nothing on the
-/// teammates they cover — and Blessing of Sacrifice plays at both ends.
+/// teammates they cover — and Blessing of Sacrifice and Sacred Shield play at
+/// both ends (Sacred Shield's disc on the ally, its cast disc at the
+/// Paladin's feet).
 pub fn oneshot_plan(
     landing: AuraLandingKind,
     bearer: Entity,
@@ -831,6 +900,14 @@ pub fn oneshot_plan(
         }
         PaladinOneShotKind::InfusionOfLight | PaladinOneShotKind::ArtOfWar => {
             (vec![(bearer, kind)], None)
+        }
+        PaladinOneShotKind::SacredShield | PaladinOneShotKind::SacredShieldBase => {
+            let mut rigs = vec![(bearer, PaladinOneShotKind::SacredShield)];
+            let paladin = caster.filter(|_| SACRED_SHIELD_CAST_FLASH);
+            if let Some(paladin) = paladin {
+                rigs.push((paladin, PaladinOneShotKind::SacredShieldBase));
+            }
+            (rigs, paladin)
         }
     }
 }
@@ -869,6 +946,15 @@ pub fn oneshot_launch(layer: &OneShotLayer, age: f32, seed: u32) -> (Vec3, Vec3)
             offset += Vec3::new(radius * angle.cos(), 0.0, radius * angle.sin());
             sphere() * e.speed
         }
+        OneShotLaunch::Cone { half_angle } => {
+            let polar = (draw(seed, 4) * 2.0 - 1.0) * half_angle;
+            let azimuth = draw(seed, 5) * TAU;
+            Vec3::new(
+                polar.sin() * azimuth.cos(),
+                polar.cos(),
+                polar.sin() * azimuth.sin(),
+            ) * e.speed
+        }
     };
     (offset, velocity)
 }
@@ -886,6 +972,9 @@ pub enum PieceFacing {
     /// A flat arrow pointing out along `angle` radians in the ground plane
     /// (from +X toward +Z, as the bench measures it).
     Arrow { angle: f32 },
+    /// A quad facing the camera, turned `roll` radians in the view plane (the
+    /// bench's `sprite` with an angle).
+    Roll { roll: f32 },
 }
 
 /// One piece's pose and look at a moment: rig-local position (the rig stands
@@ -996,6 +1085,32 @@ pub const AOW_SPARK_RGB: [(f32, [u8; 3]); 3] = [
 pub const AOW_SPARK_ALPHA: [(f32, f32); 3] = [(0.0, 0.0), (0.5, 0.48), (1.0, 0.0)];
 pub const AOW_SPARK_ALPHA_GAIN: f32 = 1.6;
 
+/// Sacred Shield's rune disc at the ally's chest (`rune1d`, `aurarune_b`):
+/// the brighter of two weight tracks (in at 134 ms and out by 734 ms; a
+/// flash at 34 ms out by 267 ms), 1.6 yd across, ten ticks, turning a radian
+/// every 0.7 s.
+pub const SACRED_DISC_WEIGHT: [(f32, f32); 4] =
+    [(0.0, 0.0), (0.067, 0.0), (0.134, 1.0), (0.734, 0.0)];
+pub const SACRED_DISC_FLASH: [(f32, f32); 3] = [(0.0, 0.0), (0.034, 1.0), (0.267, 0.0)];
+pub const SACRED_DISC_RADIUS: f32 = 0.8;
+pub const SACRED_DISC_RGB: [u8; 3] = [243, 211, 82];
+pub const SACRED_DISC_TICKS: u32 = 10;
+pub const SACRED_DISC_SPIN: f32 = 1.0 / 0.7;
+/// The two `aurarune_b` stars, 0.25 yd above and below the disc, 0.5 yd
+/// across, turning 2 rad/s opposite ways: in by 0.4 s, out by 1.234 s.
+pub const SACRED_RUNE_WEIGHT: [(f32, f32); 3] = [(0.0, 0.0), (0.4, 0.78), (1.234, 0.0)];
+pub const SACRED_RUNE_OFFSET: f32 = 0.25;
+pub const SACRED_RUNE_SIZE: f32 = 0.5;
+pub const SACRED_RUNE_RGB: [u8; 3] = [253, 218, 112];
+pub const SACRED_RUNE_SPIN: f32 = 2.0;
+/// `holy_precast_high_base.m2` at the Paladin's feet: a gold glyph disc,
+/// 1.6 yd across with six ticks, 0.8 at 100 ms and out by 700 ms.
+pub const SACRED_BASE_WEIGHT: [(f32, f32); 3] = [(0.0, 0.0), (0.1, 0.8), (0.7, 0.0)];
+pub const SACRED_BASE_HEIGHT: f32 = 0.04;
+pub const SACRED_BASE_RADIUS: f32 = 0.8;
+pub const SACRED_BASE_RGB: [u8; 3] = [253, 218, 112];
+pub const SACRED_BASE_TICKS: u32 = 6;
+
 /// The bench's `hh`: a deterministic 0..1 scatter, `fract(sin(n × 12.9898) ×
 /// 43758.5453)`, in double precision as the bench computes it — so the spark
 /// ring scatters exactly as the signed-off bench drew it.
@@ -1042,6 +1157,20 @@ pub fn oneshot_pieces(kind: PaladinOneShotKind) -> Vec<OneShotPieceRole> {
                 pieces.extend((0..AOW_SPARKS).map(|index| R::ArtOfWarSpark { index }));
             }
         }
+        PaladinOneShotKind::SacredShield => {
+            if SACRED_SHIELD_DISC {
+                pieces.extend([
+                    R::SacredDisc,
+                    R::SacredRune { index: 0 },
+                    R::SacredRune { index: 1 },
+                ]);
+            }
+        }
+        PaladinOneShotKind::SacredShieldBase => {
+            if SACRED_SHIELD_CAST_FLASH {
+                pieces.push(R::SacredBase);
+            }
+        }
     }
     pieces
 }
@@ -1058,6 +1187,8 @@ fn piece_kind(role: OneShotPieceRole) -> PaladinOneShotKind {
         | R::RetributionUnderlay => PaladinOneShotKind::Retribution,
         R::HaloRing | R::HaloGlow => PaladinOneShotKind::InfusionOfLight,
         R::ArtOfWarDisc | R::ArtOfWarGlow | R::ArtOfWarSpark { .. } => PaladinOneShotKind::ArtOfWar,
+        R::SacredDisc | R::SacredRune { .. } => PaladinOneShotKind::SacredShield,
+        R::SacredBase => PaladinOneShotKind::SacredShieldBase,
     }
 }
 
@@ -1208,6 +1339,32 @@ pub fn piece_pose(role: OneShotPieceRole, age: f32) -> PiecePose {
             rgb: AOW_SPARK_RGB[0].1,
             alpha: 0.0,
         }),
+        R::SacredDisc => disc(
+            ONESHOT_CHEST,
+            SACRED_DISC_RADIUS,
+            flat(age * SACRED_DISC_SPIN),
+            SACRED_DISC_RGB,
+            keyed(&SACRED_DISC_WEIGHT, age).max(keyed(&SACRED_DISC_FLASH, age)),
+        ),
+        R::SacredRune { index } => {
+            let sign = if index == 0 { 1.0 } else { -1.0 };
+            PiecePose {
+                at: Vec3::Y * (ONESHOT_CHEST + sign * SACRED_RUNE_OFFSET),
+                size: Vec2::splat(SACRED_RUNE_SIZE),
+                facing: PieceFacing::Roll {
+                    roll: sign * age * SACRED_RUNE_SPIN,
+                },
+                rgb: SACRED_RUNE_RGB,
+                alpha: keyed(&SACRED_RUNE_WEIGHT, age),
+            }
+        }
+        R::SacredBase => disc(
+            SACRED_BASE_HEIGHT,
+            SACRED_BASE_RADIUS,
+            flat(0.0),
+            SACRED_BASE_RGB,
+            keyed(&SACRED_BASE_WEIGHT, age),
+        ),
     }
 }
 
@@ -1226,6 +1383,10 @@ pub fn piece_rotation(facing: PieceFacing, rig: Quat, camera: Option<Quat>) -> Q
         // The arrow mesh lies in the ground plane pointing along +X; turning
         // it by `-angle` about up points it along (cos, 0, sin).
         PieceFacing::Arrow { angle } => Quat::from_rotation_y(-angle),
+        PieceFacing::Roll { roll } => match camera {
+            Some(camera) => camera * Quat::from_rotation_z(roll),
+            None => return Quat::IDENTITY,
+        },
     };
     rig.inverse() * world
 }
@@ -1319,6 +1480,8 @@ pub struct OneShotAssets {
     shell_glyph: Handle<Image>,
     retribution_glyph: Handle<Image>,
     aow_glyph: Handle<Image>,
+    sacred_glyph: Handle<Image>,
+    sacred_base_glyph: Handle<Image>,
 }
 
 impl OneShotAssets {
@@ -1339,6 +1502,8 @@ impl OneShotAssets {
             shell_glyph: images.add(oneshot_glyph_texture(SHELL_GLYPH_TICKS)),
             retribution_glyph: images.add(oneshot_glyph_texture(RETRIBUTION_GLYPH_TICKS)),
             aow_glyph: images.add(oneshot_glyph_texture(AOW_DISC_TICKS)),
+            sacred_glyph: images.add(oneshot_glyph_texture(SACRED_DISC_TICKS)),
+            sacred_base_glyph: images.add(oneshot_glyph_texture(SACRED_BASE_TICKS)),
         }
     }
 
@@ -1352,7 +1517,9 @@ impl OneShotAssets {
             R::RetributionGlyph => self.retribution_glyph.clone(),
             R::ArtOfWarDisc => self.aow_glyph.clone(),
             R::RetributionUnderlay => self.ground.clone(),
-            R::ArtOfWarSpark { .. } => self.star.clone(),
+            R::ArtOfWarSpark { .. } | R::SacredRune { .. } => self.star.clone(),
+            R::SacredDisc => self.sacred_glyph.clone(),
+            R::SacredBase => self.sacred_base_glyph.clone(),
             R::RetributionArrow { .. } => return (self.arrow.clone(), None),
         };
         (self.quad.clone(), Some(texture))
@@ -1982,6 +2149,112 @@ mod tests {
         );
     }
 
+    /// Sacred Shield's disc streaks: the bench's `dstreak` emitter, 66/s from
+    /// 100 to 434 ms, within 1.5 rad of straight up.
+    #[test]
+    fn sacred_shield_is_the_benchs_blessed_mending_impact() {
+        check(
+            &SACRED_SHIELD_LAYERS,
+            &[Bench {
+                name: "gold streaks",
+                sprite: EmitterSprite::Streak,
+                rate: Some(66.0),
+                window: (0.1, 0.434),
+                life: 0.5,
+                speed: 3.3,
+                area: None,
+                color: [[252, 217, 77], [253, 218, 112], [244, 252, 255]],
+                alpha: [1.0, 0.5, 0.0],
+                radii: [0.1, 0.05],
+                mid: 0.5,
+                height: 1.45,
+                launch: OneShotLaunch::Cone { half_angle: 1.5 },
+                drag: 0.0,
+            }],
+        );
+        assert!(oneshot_layers(PaladinOneShotKind::SacredShieldBase).is_empty());
+        // About 22 streaks, none before 100 ms.
+        let streaks = &SACRED_SHIELD_LAYERS[0];
+        assert_eq!(streaks.count_between(0.0, 0.1, CLIENT_KNOBS), 0.0);
+        let n = streaks.count_between(0.0, SACRED_SHIELD_SECS, CLIENT_KNOBS);
+        assert!((n - 66.0 * 0.334).abs() < 1e-3, "{n} streaks");
+        assert_eq!(oneshot_secs(PaladinOneShotKind::SacredShield), 1.967);
+        assert_eq!(oneshot_secs(PaladinOneShotKind::SacredShieldBase), 0.7);
+    }
+
+    /// The disc, the runes and the cast's base disc on the bench's tracks.
+    #[test]
+    fn the_sacred_shield_pieces_follow_the_benchs_tracks() {
+        use OneShotPieceRole as R;
+        let disc = |age| piece_pose(R::SacredDisc, age);
+        // The brighter of its two tracks: the flash at 34 ms, then the disc.
+        assert_eq!(disc(0.0).alpha, 0.0);
+        assert!((disc(0.034).alpha - 1.0).abs() < 1e-5, "the flash");
+        assert!((disc(0.134).alpha - 1.0).abs() < 1e-5, "the disc");
+        assert!((disc(0.2).alpha - (1.0 - 0.066 / 0.6)).abs() < 1e-4);
+        assert!((disc(0.434).alpha - 0.5).abs() < 1e-4);
+        assert_eq!(disc(0.734).alpha, 0.0);
+        assert_eq!(disc(1.5).alpha, 0.0);
+        assert_eq!(disc(0.5).size, Vec2::splat(1.6), "1.6 yd across");
+        assert_eq!(disc(0.5).at, Vec3::Y * 1.45, "at the chest");
+        // The runes: 0.25 yd above and below, 0.5 yd, 0.78 at 0.4 s, out by
+        // 1.234 s, turning 2 rad/s opposite ways in the view plane.
+        for (index, sign) in [(0u8, 1.0f32), (1, -1.0)] {
+            let rune = |age| piece_pose(R::SacredRune { index }, age);
+            assert_eq!(rune(0.6).at, Vec3::Y * (1.45 + sign * 0.25));
+            assert_eq!(rune(0.6).size, Vec2::splat(0.5));
+            assert!((rune(0.4).alpha - 0.78).abs() < 1e-5);
+            assert_eq!(rune(0.0).alpha, 0.0);
+            assert_eq!(rune(1.234).alpha, 0.0);
+            for age in [0.0, 0.3, 1.1] {
+                assert_eq!(
+                    rune(age).facing,
+                    PieceFacing::Roll {
+                        roll: sign * age * 2.0
+                    }
+                );
+            }
+        }
+        // The cast's base disc: flat at the feet, 1.6 yd, still, 0.8 at 0.1 s.
+        let base = |age| piece_pose(R::SacredBase, age);
+        assert!((base(0.1).alpha - 0.8).abs() < 1e-5);
+        assert_eq!(base(0.0).alpha, 0.0);
+        assert_eq!(base(0.7).alpha, 0.0);
+        assert!((base(0.4).alpha - 0.4).abs() < 1e-5);
+        assert_eq!(base(0.4).size, Vec2::splat(1.6));
+        assert_eq!(base(0.4).at, Vec3::Y * 0.04);
+        assert_eq!(base(0.4).facing, PieceFacing::Flat { turn: 0.0 });
+        assert_eq!(
+            oneshot_pieces(PaladinOneShotKind::SacredShield),
+            vec![
+                R::SacredDisc,
+                R::SacredRune { index: 0 },
+                R::SacredRune { index: 1 }
+            ]
+        );
+        assert_eq!(
+            oneshot_pieces(PaladinOneShotKind::SacredShieldBase),
+            vec![R::SacredBase]
+        );
+    }
+
+    /// A rune turns in the view plane, facing the camera: its normal is the
+    /// camera's whatever the roll, and the roll turns its up axis.
+    #[test]
+    fn a_rolled_piece_faces_the_camera() {
+        let camera = Quat::from_rotation_y(0.7) * Quat::from_rotation_x(-0.6);
+        for roll in [0.0, 0.9, -2.0] {
+            let q = piece_rotation(PieceFacing::Roll { roll }, Quat::IDENTITY, Some(camera));
+            assert!((q * Vec3::Z).dot(camera * Vec3::Z) > 0.9999);
+            let up = (q * Vec3::Y).dot(camera * Vec3::Y);
+            assert!((up - roll.cos()).abs() < 1e-4, "roll {roll}: {up}");
+        }
+        assert_eq!(
+            piece_rotation(PieceFacing::Roll { roll: 1.0 }, Quat::IDENTITY, None),
+            Quat::IDENTITY
+        );
+    }
+
     #[test]
     fn every_emitter_has_a_unique_palette_key() {
         let mut names: Vec<&str> = [
@@ -1990,6 +2263,7 @@ mod tests {
             &SACRIFICE_ALLY_LAYERS[..],
             &INFUSION_LAYERS[..],
             &ART_OF_WAR_LAYERS[..],
+            &SACRED_SHIELD_LAYERS[..],
         ]
         .iter()
         .flat_map(|t| t.iter().map(|l| l.emitter.name))
@@ -2051,6 +2325,24 @@ mod tests {
             .iter()
             .all(|v| (-1.11 - 1e-4..=3.33 + 1e-4).contains(v)));
         assert!(speeds.iter().any(|v| *v < -0.5) && speeds.iter().any(|v| *v > 2.5));
+        // Sacred Shield's streaks: at their speed, within 1.5 rad of up, on
+        // every side.
+        let cone = &SACRED_SHIELD_LAYERS[0];
+        let (mut east, mut west, mut low) = (false, false, false);
+        for seed in 0..400 {
+            let (at, v) = oneshot_launch(cone, 0.2, seed);
+            assert_eq!(at, Vec3::ZERO, "born at the chest");
+            assert!((v.length() - 3.3).abs() < 1e-4);
+            let polar = (v.y / 3.3).clamp(-1.0, 1.0).acos();
+            assert!(polar <= 1.5 + 1e-4, "{polar} rad off up");
+            east |= v.x > 2.0;
+            west |= v.x < -2.0;
+            low |= polar > 1.3;
+        }
+        assert!(
+            east && west && low,
+            "the cone spreads to its rim on every side"
+        );
         // The star ring: born on three points of the 1.0 yd ring, turning
         // half a turn a second.
         let ring = &AURA_MASTERY_LAYERS[3];
@@ -2208,6 +2500,26 @@ mod tests {
             plan(L::ArtOfWarRing, paladin, Some(paladin)),
             (vec![(paladin, P::ArtOfWar)], None)
         );
+        // Sacred Shield: the disc on the ally, the base disc and the hands
+        // at the Paladin; both on the Paladin when it shields itself.
+        assert_eq!(
+            plan(L::SacredShieldDisc, ally, Some(paladin)),
+            (
+                vec![(ally, P::SacredShield), (paladin, P::SacredShieldBase)],
+                Some(paladin)
+            )
+        );
+        assert_eq!(
+            plan(L::SacredShieldDisc, paladin, Some(paladin)),
+            (
+                vec![(paladin, P::SacredShield), (paladin, P::SacredShieldBase)],
+                Some(paladin)
+            )
+        );
+        assert_eq!(
+            plan(L::SacredShieldDisc, ally, None),
+            (vec![(ally, P::SacredShield)], None)
+        );
         // Another renderer's landing plays nothing here.
         assert_eq!(
             plan(L::RejuvenationSwirl, ally, Some(paladin)),
@@ -2221,13 +2533,21 @@ mod tests {
     #[test]
     fn the_glyph_discs_are_the_benchs() {
         assert_eq!(
-            (SHELL_GLYPH_TICKS, RETRIBUTION_GLYPH_TICKS, AOW_DISC_TICKS),
-            (8, 16, 10)
+            (
+                SHELL_GLYPH_TICKS,
+                RETRIBUTION_GLYPH_TICKS,
+                AOW_DISC_TICKS,
+                SACRED_DISC_TICKS,
+                SACRED_BASE_TICKS
+            ),
+            (8, 16, 10, 10, 6)
         );
         for (role, spin) in [
             (OneShotPieceRole::ShellGlyph, 1.0),
             (OneShotPieceRole::RetributionGlyph, 0.5),
             (OneShotPieceRole::ArtOfWarDisc, 2.0),
+            // Sacred Shield's `t/700`.
+            (OneShotPieceRole::SacredDisc, 1.0 / 0.7),
         ] {
             for age in [0.0, 0.3, 1.1] {
                 assert_eq!(
@@ -2243,6 +2563,7 @@ mod tests {
             OneShotPieceRole::RetributionRing,
             OneShotPieceRole::RetributionUnderlay,
             OneShotPieceRole::HaloRing,
+            OneShotPieceRole::SacredBase,
         ] {
             assert_eq!(
                 piece_pose(role, 0.7).facing,
@@ -2268,6 +2589,10 @@ mod tests {
             (R::HaloGlow, [255, 230, 150]),
             (R::ArtOfWarDisc, [221, 181, 57]),
             (R::ArtOfWarGlow, [255, 230, 140]),
+            (R::SacredDisc, [243, 211, 82]),
+            (R::SacredRune { index: 0 }, [253, 218, 112]),
+            (R::SacredRune { index: 1 }, [253, 218, 112]),
+            (R::SacredBase, [253, 218, 112]),
         ] {
             for age in [0.0, 0.5, 1.2] {
                 assert_eq!(piece_pose(role, age).rgb, rgb, "{role:?}");
@@ -2295,7 +2620,7 @@ mod tests {
     /// rings, alpha rises and falls `ticks` times.
     #[test]
     fn a_glyph_texture_carries_its_ticks() {
-        for ticks in [8, 16, 10] {
+        for ticks in [8, 16, 10, 6] {
             let image = oneshot_glyph_texture(ticks);
             let data = image.data.as_ref().unwrap();
             let px = PIECE_PX as usize;
