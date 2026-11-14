@@ -1821,7 +1821,7 @@ fn a_reflect_on_a_reflecting_unit_stops_there() {
 }
 
 /// A save's heal lands through `apply_healing`: dampening cuts it, and the
-/// "Saved" marker is spawned for the shared cue.
+/// "Saved" marker is spawned for the shared cue, carrying the heal it landed.
 #[test]
 fn a_saves_heal_goes_through_apply_healing() {
     let Units {
@@ -1854,7 +1854,71 @@ fn a_saves_heal_goes_through_apply_healing() {
         marks,
         vec![KillingBlowPrevented {
             holder,
-            by: "Guardian Spirit".into()
+            by: "Guardian Spirit".into(),
+            heal: Some(50.0),
+        }]
+    );
+}
+
+/// A save with no heal (Cheat Death), and a save whose holder a later blow of
+/// the frame kills, each mark the save for the cue with no heal on it: the
+/// cue's heal landing plays only for a heal that landed.
+#[test]
+fn a_save_without_a_landed_heal_marks_no_heal() {
+    let marks = |world: &mut World| -> Vec<KillingBlowPrevented> {
+        world
+            .query::<&KillingBlowPrevented>()
+            .iter(world)
+            .cloned()
+            .collect()
+    };
+    let Units {
+        mut world, holder, ..
+    } = units();
+    world.get_mut::<Combatant>(holder).unwrap().current_health = 1.0;
+    run(
+        &mut world,
+        DamageFollowUp::Saved {
+            holder,
+            by: CHEAT_DEATH_NAME.into(),
+            caster: None,
+            heal_fraction: None,
+            aura: Some((0.9, 3.0)),
+        },
+    );
+    assert_eq!(
+        marks(&mut world),
+        vec![KillingBlowPrevented {
+            holder,
+            by: CHEAT_DEATH_NAME.into(),
+            heal: None,
+        }]
+    );
+
+    let Units {
+        mut world,
+        holder,
+        receiver,
+        ..
+    } = units();
+    world.get_mut::<Combatant>(holder).unwrap().current_health = 0.0;
+    run(
+        &mut world,
+        DamageFollowUp::Saved {
+            holder,
+            by: "Guardian Spirit".into(),
+            caster: Some(receiver),
+            heal_fraction: Some(0.3),
+            aura: None,
+        },
+    );
+    assert_eq!(health(&world, holder), 0.0, "killed by another blow");
+    assert_eq!(
+        marks(&mut world),
+        vec![KillingBlowPrevented {
+            holder,
+            by: "Guardian Spirit".into(),
+            heal: None,
         }]
     );
 }

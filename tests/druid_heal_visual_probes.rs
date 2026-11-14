@@ -486,6 +486,7 @@ fn rejuvenation_swirls_five_banded_ribbons_round_the_body_then_leaves() {
     h.app.world_mut().spawn(AuraLanding {
         target: ally,
         kind: AuraLandingKind::RejuvenationSwirl,
+        caster: None,
     });
     h.tick_secs(1.0);
 
@@ -758,6 +759,7 @@ fn the_glyph_is_two_superimposed_camera_facing_plates_over_the_crown_for_two_thi
     h.app.world_mut().spawn(AuraLanding {
         target: ally,
         kind: AuraLandingKind::MarkOfTheWildGlyph,
+        caster: None,
     });
     h.tick(3);
 
@@ -885,6 +887,7 @@ fn the_glyph_plates_add_nothing_outside_the_paw() {
     harness.app.world_mut().spawn(AuraLanding {
         target: ally,
         kind: AuraLandingKind::MarkOfTheWildGlyph,
+        caster: None,
     });
     harness.tick(3);
     let world = harness.app.world_mut();

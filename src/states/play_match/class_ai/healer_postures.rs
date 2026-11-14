@@ -1216,6 +1216,19 @@ pub(super) fn healer_pressured_tick_shared(
             }
         })
         .with_hug(hug)
+        // The hand-off cover rule (AS-440): no cover from casters while an
+        // enemy ranged DPS could turn on a teammate instead.
+        .with_cover_waived(
+            ctx.handoff_rule()
+                && ctx.self_info().is_some_and(|me| {
+                    super::target_focus::could_turn_on_teammate(
+                        &ctx.combatants,
+                        ctx.active_auras,
+                        ctx.obstacles,
+                        me,
+                    )
+                }),
+        )
     });
     // TeamPlan: a dying teammate the healer does not reach from where it
     // stands (AS-209). The solve walks into reach of it (`C_DYING`); the

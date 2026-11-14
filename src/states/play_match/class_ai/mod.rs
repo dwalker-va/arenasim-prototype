@@ -535,6 +535,13 @@ impl<'a> CombatContext<'a> {
         self.ai_profile.is_team_plan() && self.situation.as_ref().is_some_and(|s| s.pillar_modes)
     }
 
+    /// Whether this unit's healers run the hand-off cover rule (AS-440,
+    /// `team_solve::SolveWorld::cover_waived`): its team runs `TeamPlan` and
+    /// no measurement turned it off. `false` on a context nobody classified.
+    pub fn handoff_rule(&self) -> bool {
+        self.ai_profile.is_team_plan() && self.situation.as_ref().is_some_and(|s| s.handoff_rule)
+    }
+
     /// The healer this unit must keep in sight: `Some` while it is a DPS whose
     /// team's `sight_yield` says it yields to that healer (AS-386,
     /// `situation::SightPair`). `None` on a context nobody classified, and

@@ -35,7 +35,7 @@ pub fn update_floating_combat_text(
 /// Text fades out as lifetime decreases (alpha based on remaining lifetime).
 pub fn render_floating_combat_text(
     mut contexts: EguiContexts,
-    floating_texts: Query<&FloatingCombatText>,
+    floating_texts: Query<(&FloatingCombatText, Option<&FctScreenOffset>)>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
 ) {
     // Use try_ctx_mut to gracefully handle window close
@@ -59,159 +59,170 @@ pub fn render_floating_combat_text(
     egui::Area::new(egui::Id::new("floating_combat_text"))
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {
-            for fct in floating_texts.iter() {
-                // Only render if still alive
-                if fct.lifetime <= 0.0 {
-                    continue;
-                }
+            let project = |p: Vec3| {
+                camera
+                    .world_to_viewport(camera_transform, p)
+                    .ok()
+                    .map(|v| egui::pos2(v.x, v.y))
+            };
+            for (fct, screen_pos) in fct_placements(floating_texts.iter(), project) {
+                let screen_pos = screen_pos.round_to_pixels(pixels_per_point);
+                // Calculate alpha based on remaining lifetime
+                // Fade out in the last 0.5 seconds
+                let alpha = if fct.lifetime < 0.5 {
+                    (fct.lifetime / 0.5 * 255.0) as u8
+                } else {
+                    255
+                };
 
-                // Project 3D position to 2D screen space
-                if let Ok(screen_pos) =
-                    camera.world_to_viewport(camera_transform, fct.world_position)
-                {
-                    let screen_pos =
-                        egui::pos2(screen_pos.x, screen_pos.y).round_to_pixels(pixels_per_point);
-                    // Calculate alpha based on remaining lifetime
-                    // Fade out in the last 0.5 seconds
-                    let alpha = if fct.lifetime < 0.5 {
-                        (fct.lifetime / 0.5 * 255.0) as u8
-                    } else {
-                        255
-                    };
+                // Apply alpha to color
+                let color_with_alpha = theme::with_alpha(fct.color, alpha);
+                let outline_color = theme::with_alpha(theme::fct::OUTLINE, alpha);
 
-                    // Apply alpha to color
-                    let color_with_alpha = theme::with_alpha(fct.color, alpha);
-                    let outline_color = theme::with_alpha(theme::fct::OUTLINE, alpha);
+                // Check if this is absorbed text - render number and label separately
+                if let Some(number_str) = fct.text.strip_suffix(" absorbed") {
+                    // Render number at 24pt
+                    let number_font = egui::FontId::proportional(theme::fct::NUMBER_SIZE);
+                    let label_font = egui::FontId::proportional(theme::fct::LABEL_SIZE);
 
-                    // Check if this is absorbed text - render number and label separately
-                    if let Some(number_str) = fct.text.strip_suffix(" absorbed") {
-                        // Render number at 24pt
-                        let number_font = egui::FontId::proportional(theme::fct::NUMBER_SIZE);
-                        let label_font = egui::FontId::proportional(theme::fct::LABEL_SIZE);
+                    // Calculate positions - number centered, label to the right
+                    let number_galley = ui.painter().layout_no_wrap(
+                        number_str.to_string(),
+                        number_font.clone(),
+                        color_with_alpha,
+                    );
+                    let label_galley = ui.painter().layout_no_wrap(
+                        "absorbed".to_string(),
+                        label_font.clone(),
+                        color_with_alpha,
+                    );
+                    let total_width = number_galley.size().x + 4.0 + label_galley.size().x;
+                    let number_x = screen_pos.x - total_width / 2.0 + number_galley.size().x / 2.0;
+                    let label_x =
+                        number_x + number_galley.size().x / 2.0 + 4.0 + label_galley.size().x / 2.0;
 
-                        // Calculate positions - number centered, label to the right
-                        let number_galley = ui.painter().layout_no_wrap(
-                            number_str.to_string(),
-                            number_font.clone(),
-                            color_with_alpha,
-                        );
-                        let label_galley = ui.painter().layout_no_wrap(
-                            "absorbed".to_string(),
-                            label_font.clone(),
-                            color_with_alpha,
-                        );
-                        let total_width = number_galley.size().x + 4.0 + label_galley.size().x;
-                        let number_x =
-                            screen_pos.x - total_width / 2.0 + number_galley.size().x / 2.0;
-                        let label_x = number_x
-                            + number_galley.size().x / 2.0
-                            + 4.0
-                            + label_galley.size().x / 2.0;
-
-                        // Draw number outline
-                        for (dx, dy) in [
-                            (-2.0, 0.0),
-                            (2.0, 0.0),
-                            (0.0, -2.0),
-                            (0.0, 2.0),
-                            (-1.5, -1.5),
-                            (1.5, -1.5),
-                            (-1.5, 1.5),
-                            (1.5, 1.5),
-                        ] {
-                            let (dx, dy) = (px(dx), px(dy));
-                            ui.painter().text(
-                                egui::pos2(number_x + dx, screen_pos.y + dy),
-                                egui::Align2::CENTER_CENTER,
-                                number_str,
-                                number_font.clone(),
-                                outline_color,
-                            );
-                        }
-                        // Draw number
+                    // Draw number outline
+                    for (dx, dy) in [
+                        (-2.0, 0.0),
+                        (2.0, 0.0),
+                        (0.0, -2.0),
+                        (0.0, 2.0),
+                        (-1.5, -1.5),
+                        (1.5, -1.5),
+                        (-1.5, 1.5),
+                        (1.5, 1.5),
+                    ] {
+                        let (dx, dy) = (px(dx), px(dy));
                         ui.painter().text(
-                            egui::pos2(number_x, screen_pos.y),
+                            egui::pos2(number_x + dx, screen_pos.y + dy),
                             egui::Align2::CENTER_CENTER,
                             number_str,
-                            number_font,
-                            color_with_alpha,
-                        );
-
-                        // Draw label outline (smaller offset for smaller text)
-                        for (dx, dy) in [
-                            (-1.5, 0.0),
-                            (1.5, 0.0),
-                            (0.0, -1.5),
-                            (0.0, 1.5),
-                            (-1.0, -1.0),
-                            (1.0, -1.0),
-                            (-1.0, 1.0),
-                            (1.0, 1.0),
-                        ] {
-                            let (dx, dy) = (px(dx), px(dy));
-                            ui.painter().text(
-                                egui::pos2(label_x + dx, screen_pos.y + 2.0 + dy),
-                                egui::Align2::CENTER_CENTER,
-                                "absorbed",
-                                label_font.clone(),
-                                outline_color,
-                            );
-                        }
-                        // Draw label (slightly lower to align with number baseline)
-                        ui.painter().text(
-                            egui::pos2(label_x, screen_pos.y + 2.0),
-                            egui::Align2::CENTER_CENTER,
-                            "absorbed",
-                            label_font,
-                            color_with_alpha,
-                        );
-                    } else {
-                        // Regular text - 32pt for crits, 24pt for normal
-                        let font_size = if fct.is_crit {
-                            theme::fct::CRIT_SIZE
-                        } else {
-                            theme::fct::NUMBER_SIZE
-                        };
-                        let display_text = if fct.is_crit {
-                            format!("{}!", fct.text)
-                        } else {
-                            fct.text.clone()
-                        };
-                        let font_id = egui::FontId::proportional(font_size);
-
-                        // Draw thick black outline (8 directions for smooth outline)
-                        for (dx, dy) in [
-                            (-2.0, 0.0),
-                            (2.0, 0.0),
-                            (0.0, -2.0),
-                            (0.0, 2.0),
-                            (-1.5, -1.5),
-                            (1.5, -1.5),
-                            (-1.5, 1.5),
-                            (1.5, 1.5),
-                        ] {
-                            let (dx, dy) = (px(dx), px(dy));
-                            ui.painter().text(
-                                egui::pos2(screen_pos.x + dx, screen_pos.y + dy),
-                                egui::Align2::CENTER_CENTER,
-                                &display_text,
-                                font_id.clone(),
-                                outline_color,
-                            );
-                        }
-
-                        // Draw main text
-                        ui.painter().text(
-                            egui::pos2(screen_pos.x, screen_pos.y),
-                            egui::Align2::CENTER_CENTER,
-                            &display_text,
-                            font_id,
-                            color_with_alpha,
+                            number_font.clone(),
+                            outline_color,
                         );
                     }
+                    // Draw number
+                    ui.painter().text(
+                        egui::pos2(number_x, screen_pos.y),
+                        egui::Align2::CENTER_CENTER,
+                        number_str,
+                        number_font,
+                        color_with_alpha,
+                    );
+
+                    // Draw label outline (smaller offset for smaller text)
+                    for (dx, dy) in [
+                        (-1.5, 0.0),
+                        (1.5, 0.0),
+                        (0.0, -1.5),
+                        (0.0, 1.5),
+                        (-1.0, -1.0),
+                        (1.0, -1.0),
+                        (-1.0, 1.0),
+                        (1.0, 1.0),
+                    ] {
+                        let (dx, dy) = (px(dx), px(dy));
+                        ui.painter().text(
+                            egui::pos2(label_x + dx, screen_pos.y + 2.0 + dy),
+                            egui::Align2::CENTER_CENTER,
+                            "absorbed",
+                            label_font.clone(),
+                            outline_color,
+                        );
+                    }
+                    // Draw label (slightly lower to align with number baseline)
+                    ui.painter().text(
+                        egui::pos2(label_x, screen_pos.y + 2.0),
+                        egui::Align2::CENTER_CENTER,
+                        "absorbed",
+                        label_font,
+                        color_with_alpha,
+                    );
+                } else {
+                    // Regular text - 32pt for crits, 24pt for normal
+                    let font_size = if fct.is_crit {
+                        theme::fct::CRIT_SIZE
+                    } else {
+                        theme::fct::NUMBER_SIZE
+                    };
+                    let display_text = if fct.is_crit {
+                        format!("{}!", fct.text)
+                    } else {
+                        fct.text.clone()
+                    };
+                    let font_id = egui::FontId::proportional(font_size);
+
+                    // Draw thick black outline (8 directions for smooth outline)
+                    for (dx, dy) in [
+                        (-2.0, 0.0),
+                        (2.0, 0.0),
+                        (0.0, -2.0),
+                        (0.0, 2.0),
+                        (-1.5, -1.5),
+                        (1.5, -1.5),
+                        (-1.5, 1.5),
+                        (1.5, 1.5),
+                    ] {
+                        let (dx, dy) = (px(dx), px(dy));
+                        ui.painter().text(
+                            egui::pos2(screen_pos.x + dx, screen_pos.y + dy),
+                            egui::Align2::CENTER_CENTER,
+                            &display_text,
+                            font_id.clone(),
+                            outline_color,
+                        );
+                    }
+
+                    // Draw main text
+                    ui.painter().text(
+                        egui::pos2(screen_pos.x, screen_pos.y),
+                        egui::Align2::CENTER_CENTER,
+                        &display_text,
+                        font_id,
+                        color_with_alpha,
+                    );
                 }
             }
         });
+}
+
+/// Every live floating text and where on screen it is drawn: its anchor
+/// through `project` (`None` off screen, which drops it), moved by its
+/// [`FctScreenOffset`] when it has one ([`fct_screen_position`]). The one
+/// placement rule `render_floating_combat_text` draws by, kept apart so a
+/// test can place labels through a camera of its own.
+pub fn fct_placements<'a>(
+    texts: impl IntoIterator<Item = (&'a FloatingCombatText, Option<&'a FctScreenOffset>)>,
+    project: impl Fn(Vec3) -> Option<egui::Pos2>,
+) -> Vec<(&'a FloatingCombatText, egui::Pos2)> {
+    texts
+        .into_iter()
+        .filter(|(fct, _)| fct.lifetime > 0.0)
+        .filter_map(|(fct, offset)| {
+            let at = project(fct.world_position)?;
+            Some((fct, fct_screen_position(at, offset)))
+        })
+        .collect()
 }
 
 /// Cleanup expired floating combat text.

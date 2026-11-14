@@ -1160,7 +1160,7 @@ pub fn frost_shard_direction(i: u32, n: u32) -> Vec3 {
 /// Stands in for `cyanstarflash.blp`. Same shape as the stun sparkle in
 /// `hard_cc.rs` and generated for the same reason, but kept local so the two
 /// can be tuned apart.
-pub(crate) fn star_flash_texture() -> Image {
+pub fn star_flash_texture() -> Image {
     use bevy::image::Image;
     use bevy::render::render_asset::RenderAssetUsages;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};

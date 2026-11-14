@@ -1146,13 +1146,20 @@ pub fn apply_pending_auras(
 
 /// Spawn the one-shot an aura plays where it LANDS — a fresh application or a
 /// refresh — if it has one (Rejuvenation's swirl, Mark of the Wild's glyph,
-/// Shadow Word: Pain's hit). Same both-modes spawn idiom as the heal landings:
+/// Shadow Word: Pain's hit, the Paladin talent one-shots). Same both-modes spawn idiom as the heal landings:
 /// purely cosmetic, reads combat state, writes none, draws no `game_rng`;
 /// rendered only in graphical mode (`rendering/effects/druid_heals.rs`,
 /// `rendering/effects/shadow_word_pain.rs`).
 fn spawn_aura_landing(commands: &mut Commands, target: Entity, aura: &Aura) {
     if let Some(kind) = AuraLandingKind::for_aura(aura.effect_type, &aura.ability_name) {
-        commands.spawn((AuraLanding { target, kind }, PlayMatchEntity));
+        commands.spawn((
+            AuraLanding {
+                target,
+                kind,
+                caster: aura.caster,
+            },
+            PlayMatchEntity,
+        ));
     }
 }
 
@@ -2181,5 +2188,34 @@ mod tests {
             );
             assert_eq!(*frames.last().unwrap(), end, "{duration}s: {frames:?}");
         }
+    }
+
+    /// The landing marker names the aura's caster: Aura Mastery's ward and
+    /// Retribution Aura's disc play only where the bearer IS the caster, and
+    /// Blessing of Sacrifice's other end is drawn at it.
+    #[test]
+    fn a_landing_names_its_auras_caster() {
+        use super::super::components::{AuraLanding, AuraLandingKind};
+        let mut world = World::new();
+        let (paladin, ally) = (world.spawn_empty().id(), world.spawn_empty().id());
+        let aura = Aura {
+            effect_type: AuraType::DamageTransfer,
+            ability_name: "Blessing of Sacrifice".into(),
+            caster: Some(paladin),
+            ..make_cc_aura(AuraType::DamageTransfer, 12.0)
+        };
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        spawn_aura_landing(&mut commands, ally, &aura);
+        queue.apply(&mut world);
+        let landings: Vec<AuraLanding> = world
+            .query::<&AuraLanding>()
+            .iter(&world)
+            .copied()
+            .collect();
+        assert_eq!(landings.len(), 1);
+        assert_eq!(landings[0].target, ally);
+        assert_eq!(landings[0].kind, AuraLandingKind::SacrificeShell);
+        assert_eq!(landings[0].caster, Some(paladin));
     }
 }

@@ -375,6 +375,11 @@ pub struct TeamSituation {
     /// Whether this team's healers play the pillar modes (AS-373,
     /// [`SituationConfig::pillar_modes`]).
     pub pillar_modes: bool,
+    /// Whether this team's healers run the hand-off cover rule (AS-440,
+    /// [`SituationConfig::handoff_rule`]) — and the enemy team runs a target
+    /// focus for it to answer (`update_situations`): against a team that
+    /// never moves a focus, hiding hands nothing to the partner.
+    pub handoff_rule: bool,
     /// Each DPS–healer pair's sight yield: which of the two must not break
     /// the pair's line of sight (the module docs' `sight_yield`). Empty
     /// unless the team runs it ([`SituationConfig::sight_yield`]).
@@ -917,6 +922,11 @@ pub struct SituationConfig {
     /// `TeamPlan` ([`Self::under`]) unless a measurement turns it off
     /// ([`WithheldPlays::no_target_focus`]).
     pub target_focus: bool,
+    /// Whether the team's healers run the hand-off cover rule (AS-440,
+    /// `team_solve::SolveWorld::cover_waived`): `true` under `TeamPlan`
+    /// ([`Self::under`]) unless a measurement turns it off
+    /// ([`WithheldPlays::no_handoff_rule`]).
+    pub handoff_rule: bool,
 }
 
 impl Default for SituationConfig {
@@ -949,6 +959,7 @@ impl SituationConfig {
             yield_counts_healer_cast: true,
             cc_reach_margin: config.shared.cc_reach_margin,
             target_focus: false,
+            handoff_rule: false,
         }
     }
 
@@ -966,6 +977,7 @@ impl SituationConfig {
                 pillar_modes: true,
                 sight_yield: true,
                 target_focus: true,
+                handoff_rule: true,
                 ..self
             },
             AiProfile::Legacy => Self {
@@ -975,6 +987,7 @@ impl SituationConfig {
                 pillar_modes: false,
                 sight_yield: false,
                 target_focus: false,
+                handoff_rule: false,
                 ..self
             },
         }
@@ -1000,6 +1013,7 @@ impl SituationConfig {
             pillar_modes: cfg.pillar_modes && !self.withheld.no_pillar_modes(team),
             sight_yield: cfg.sight_yield && !self.withheld.no_sight_yield(team),
             target_focus: cfg.target_focus && !self.withheld.no_target_focus(team),
+            handoff_rule: cfg.handoff_rule && !self.withheld.no_handoff_rule(team),
             yield_counts_healer_cast: cfg.yield_counts_healer_cast
                 && !self.withheld.yield_cast_moves(team),
             ..cfg
@@ -1129,6 +1143,12 @@ pub struct WithheldPlays {
     pub team1_no_target_focus: bool,
     /// Team 2's, as [`Self::team1_no_target_focus`].
     pub team2_no_target_focus: bool,
+    /// Team 1 plays without the hand-off cover rule (AS-440): a measurement
+    /// control, as the target focus is (`team1_handoff_rule: false` in a
+    /// headless config).
+    pub team1_no_handoff_rule: bool,
+    /// Team 2's, as [`Self::team1_no_handoff_rule`].
+    pub team2_no_handoff_rule: bool,
 }
 
 impl WithheldPlays {
@@ -1139,6 +1159,16 @@ impl WithheldPlays {
             self.team2_yield_cast_moves
         } else {
             self.team1_yield_cast_moves
+        }
+    }
+
+    /// Whether team `team` plays without the hand-off cover rule; team 1's
+    /// for a team id outside 1..=2.
+    pub fn no_handoff_rule(&self, team: u8) -> bool {
+        if team == 2 {
+            self.team2_no_handoff_rule
+        } else {
+            self.team1_no_handoff_rule
         }
     }
 
@@ -1395,6 +1425,7 @@ fn classify_roster_before_yield(
         danger_attackers,
         runs: cfg.runs,
         pillar_modes: cfg.pillar_modes,
+        handoff_rule: cfg.handoff_rule,
         pillar_stance: None,
         stance_memory: StanceMemory::default(),
         hunt: None,
@@ -1986,7 +2017,14 @@ pub fn update_situations(
 ) {
     for (index, team) in [1u8, 2].into_iter().enumerate() {
         let prev = std::mem::take(&mut situations.teams[index]);
-        let cfg = cfg.for_team(team, snapshot.ai_profile.for_team(team));
+        let enemy = 3 - team;
+        let enemy_focus = cfg
+            .for_team(enemy, snapshot.ai_profile.for_team(enemy))
+            .target_focus;
+        let mut cfg = cfg.for_team(team, snapshot.ai_profile.for_team(team));
+        // The hand-off cover rule answers the ENEMY's target focus: against a
+        // team that runs none, cover hands nothing to the partner (AS-440).
+        cfg.handoff_rule &= enemy_focus;
         let mut next = classify_before_yield(snapshot, team, &prev, clock, &cfg);
         next.hunt = super::class_ai::hunt::classify(snapshot, team, &prev, &next, clock, &cfg);
         next.hunt_memory = super::class_ai::hunt::remember(
@@ -2525,6 +2563,7 @@ mod tests {
                 pillar_modes: true,
                 sight_yield: true,
                 target_focus: true,
+                handoff_rule: true,
                 ..SituationConfig::default()
             }
         );
@@ -2538,10 +2577,11 @@ mod tests {
                 pillar_modes: false,
                 sight_yield: false,
                 target_focus: false,
+                handoff_rule: false,
                 ..teamplan
             },
             "only the release, the closing rule, the gated plays, the pillar modes, the \
-             sight yield and the target focus differ"
+             sight yield, the target focus and the hand-off rule differ"
         );
         // With no band the latch is the plain test from each side, whatever
         // the previous tempo.
