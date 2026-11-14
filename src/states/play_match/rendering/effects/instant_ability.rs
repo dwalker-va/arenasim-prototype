@@ -26,6 +26,7 @@
 //! `CombatSystemPhase::CombatResolution`: `FixedUpdate` can tick several times
 //! per rendered frame, and a marker consumed a tick late desyncs from its hit.
 
+use super::backhand_trail::{spawn_backhand_trail, BackhandTrailAssets};
 use super::bleed_spray::spawn_bleed_spray_pending;
 use super::finisher_flash::{spawn_finisher_hand_flash, FinisherFlashAssets};
 use super::frost_nova::spawn_frost_nova;
@@ -93,6 +94,7 @@ pub fn consume_instant_ability_signals(
     mut crescent_ladder: Local<Option<CrescentLadder>>,
     mut rune_tex: Local<Option<Handle<Image>>>,
     mut finisher_assets: Local<Option<FinisherFlashAssets>>,
+    mut trail_assets: Local<Option<BackhandTrailAssets>>,
     signals: Query<(Entity, &InstantAbilityFired)>,
     mut sockets: Query<&mut WeaponSocket>,
     positions: Query<&Transform, With<Combatant>>,
@@ -137,6 +139,17 @@ pub fn consume_instant_ability_signals(
                 // varied one — and this stroke REVERSES the auto's direction,
                 // so a partial start can leave it beginning halfway up.
                 socket.windup_s = -1.0;
+            }
+            // The backhand draws its sweep's trail along the hand's path,
+            // whichever ability swings it.
+            if style == SwingStyle::Backhand {
+                spawn_backhand_trail(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &mut trail_assets,
+                    signal.caster,
+                );
             }
         }
 

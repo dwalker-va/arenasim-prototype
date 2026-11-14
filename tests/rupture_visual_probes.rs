@@ -26,9 +26,10 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::{
     animate_body_lean, animate_client_particles, animate_weapon_swings, billboard_bleed_droplets,
-    consume_instant_ability_signals, fire_bleed_sprays, update_bleed_sprays,
-    update_finisher_hand_flashes, BleedDroplet, BleedSpray, BleedSprayPending, FinisherFlashPiece,
-    FinisherHandFlash, BACKHAND_CONTACT_SECS,
+    consume_instant_ability_signals, fire_bleed_sprays, update_backhand_trails,
+    update_bleed_sprays, update_finisher_hand_flashes, BackhandTrail, BackhandTrailSegment,
+    BleedDroplet, BleedSpray, BleedSprayPending, FinisherFlashPiece, FinisherHandFlash,
+    BACKHAND_CONTACT_SECS,
 };
 use arenasim::CharacterClass;
 
@@ -86,6 +87,7 @@ impl Harness {
                 animate_weapon_swings,
                 animate_body_lean,
                 update_finisher_hand_flashes,
+                update_backhand_trails,
                 fire_bleed_sprays,
                 update_bleed_sprays,
                 animate_client_particles,
@@ -247,6 +249,19 @@ impl Harness {
             .clone()
     }
 
+    /// The alpha of `e`'s sprite at `r` (0 centre, 1 rim) along its middle row.
+    fn sprite_alpha(&self, e: Entity, r: f32) -> f32 {
+        let handle = self.material(e).base_color_texture.expect("a sprite");
+        let images = self.app.world().resource::<Assets<Image>>();
+        let image = images.get(&handle).expect("the sprite is an image asset");
+        let size = image.width() as usize;
+        let centre = (size as f32 - 1.0) / 2.0;
+        let x = (centre + r * centre).round() as usize;
+        let y = (size / 2).min(size - 1);
+        let data = image.data.as_ref().unwrap();
+        data[(y * size + x.min(size - 1)) * 4 + 3] as f32 / 255.0
+    }
+
     /// Every vertex position of `e`'s mesh.
     fn vertices(&self, e: Entity) -> Vec<Vec3> {
         let handle = &self.app.world().get::<Mesh3d>(e).unwrap().0;
@@ -350,7 +365,10 @@ fn the_backhand_sweeps_from_the_off_shoulder_through_the_chest_to_the_weapon_sid
     );
 
     let follow = at(&samples, 0.44);
-    assert!(follow.x > 1.1, "wide on the weapon side: {follow}");
+    assert!(
+        (follow.x - 0.85).abs() < 0.05,
+        "out on the weapon side at the bench's 0.85 yd: {follow}"
+    );
     let held = at(&samples, 0.5);
     assert!(held.distance(follow) < 0.01, "held at the follow-through");
 
@@ -397,7 +415,7 @@ fn only_the_backhand_crosses_the_body() {
         )
     };
     let (min, max) = lateral_span(AbilityType::Rupture);
-    assert!(min < -0.5 && max > 1.1, "backhand {min}..{max}");
+    assert!(min < -0.5 && max > 0.8, "backhand {min}..{max}");
     for other in [
         AbilityType::Ambush,
         AbilityType::KidneyShot,
@@ -421,43 +439,52 @@ fn the_grip_stays_clear_of_the_body() {
     }
 }
 
-/// The blade turns with the sweep: across the body when wound, into the
-/// victim at contact, trailing out on the weapon side after, and laid nearly
-/// level throughout.
+/// The blade lies ALONG the cut, as the bench draws it: at contact it points
+/// the way the hand is travelling — well round to the weapon side, never at
+/// the victim (the thrust line the user rejected) — and nearly level.
 #[test]
-fn the_blade_turns_through_the_victim() {
+fn the_blade_lies_along_the_cut() {
     let mut h = Harness::new();
     h.fire();
-    let mut blades = Vec::new();
+    let mut samples = Vec::new();
     for _ in 0..120 {
         h.tick();
         let Some(t) = h.socket(h.main).release_t else {
             continue;
         };
-        let rot = h
-            .app
-            .world()
-            .get::<GlobalTransform>(h.main)
-            .unwrap()
-            .compute_transform()
-            .rotation;
+        let g = h.app.world().get::<GlobalTransform>(h.main).unwrap();
         // The model's blade runs along its local +Y.
-        blades.push((t, rot * Vec3::Y));
+        samples.push((t, g.translation(), g.compute_transform().rotation * Vec3::Y));
     }
-    let blade = |t: f32| {
-        blades
+    let nearest = |t: f32| {
+        *samples
             .iter()
             .min_by(|a, b| (a.0 - t).abs().total_cmp(&(b.0 - t).abs()))
             .unwrap()
-            .1
     };
-    assert!(blade(0.22).x < -0.8, "across the body: {}", blade(0.22));
-    let contact = blade(0.33);
-    assert!(contact.z > 0.95, "into the victim: {contact}");
-    assert!(blade(0.44).x > 0.8, "trailing out: {}", blade(0.44));
-    for t in [0.22, 0.33, 0.44] {
-        assert!(blade(t).y.abs() < 0.2, "level at {t}: {}", blade(t));
+    let heading = |v: Vec3| v.x.atan2(v.z).to_degrees();
+    for t in [0.28, 0.33, 0.38] {
+        let (_, before, _) = nearest(t - 0.01);
+        let (_, after, _) = nearest(t + 0.01);
+        let (_, _, blade) = nearest(t);
+        let travel = heading(after - before);
+        assert!(
+            (heading(blade) - travel).abs() < 8.0,
+            "at {t} the blade ({:.0} deg) is not along the cut ({travel:.0} deg)",
+            heading(blade)
+        );
+        assert!(blade.y.abs() < 0.2, "level at {t}: {blade}");
     }
+    let contact = heading(nearest(0.33).2);
+    assert!(
+        (40.0..70.0).contains(&contact),
+        "at contact the blade lies {contact:.0} deg to the weapon side"
+    );
+    // Home on the mount at the end.
+    let rest =
+        (Quat::from_rotation_x(0.9) * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)) * Vec3::Y;
+    let end = samples.last().unwrap().2;
+    assert!(end.distance(rest) < 0.02, "{end} vs {rest}");
 }
 
 /// The body steps back as the stroke winds and into the sweep, then home —
@@ -632,7 +659,8 @@ fn the_ring_is_a_flat_yellow_to_red_annulus() {
     );
 }
 
-/// The puffs: six soft red-orange sprites, drifting back from the victim.
+/// The puffs: six soft red-orange sprites, alpha-blended as the bench paints
+/// them, drifting back from the victim.
 #[test]
 fn the_puffs_are_six_red_sprites_drifting_back() {
     let mut h = Harness::new();
@@ -651,7 +679,11 @@ fn the_puffs_are_six_red_sprites_drifting_back() {
         let m = h.material(e);
         let c = m.base_color.to_srgba();
         assert!((c.red - 1.0).abs() < 1e-5 && (c.green - 40.0 / 255.0).abs() < 1e-5);
-        assert_eq!(m.alpha_mode, AlphaMode::Add);
+        assert_eq!(
+            m.alpha_mode,
+            AlphaMode::Blend,
+            "painted over, as the bench does"
+        );
         assert!(m.base_color_texture.is_some());
         let p = h.world_of(e);
         // Never ahead of the hand toward the victim (+Z).
@@ -841,7 +873,12 @@ fn the_droplets_are_opaque_deep_red_discs_facing_the_camera() {
     let m = h.material(e);
     assert_eq!(m.alpha_mode, AlphaMode::Blend, "opaque blood, not a glow");
     assert!(m.unlit);
-    assert!(m.base_color_texture.is_some());
+    // The benches' blob: solid out to 0.6 of the radius, clear by 0.8.
+    assert!(h.sprite_alpha(e, 0.0) > 0.99 && h.sprite_alpha(e, 0.6) > 0.99);
+    assert!(
+        h.sprite_alpha(e, 0.8) < 0.01,
+        "a hard-edged disc, not a glow"
+    );
     let c = m.base_color.to_srgba();
     assert!(
         c.red > 0.5 && c.red < 0.6 && c.green < 0.04 && c.blue < 0.04,
@@ -903,4 +940,188 @@ fn only_the_bleed_itself_is_the_landing() {
             .push(aura);
     });
     assert_eq!(emitted, 0);
+}
+
+/// Which sprite each piece wears, read back from the image assets: the glows
+/// wear the bench's soft glow (alpha 1 at the centre, 0.45 halfway out, 0 at
+/// the rim), the puffs its cloud (0.9 at the centre, 0.6 at 0.45 out, 0 at
+/// the rim).
+#[test]
+fn each_flash_piece_wears_its_benchs_sprite() {
+    let mut h = Harness::new();
+    h.fire();
+    h.run_to(0.3);
+    let close = |a: f32, b: f32| (a - b).abs() < 0.04;
+    let mut glows = 0;
+    let mut puffs = 0;
+    for (e, piece) in h.pieces() {
+        let at = |r| h.sprite_alpha(e, r);
+        match piece {
+            FinisherFlashPiece::Glow | FinisherFlashPiece::OffGlow => {
+                assert!(close(at(0.0), 1.0), "{piece:?} centre {}", at(0.0));
+                assert!(close(at(0.5), 0.45), "{piece:?} halfway {}", at(0.5));
+                assert!(at(1.0) < 0.04, "{piece:?} rim {}", at(1.0));
+                glows += 1;
+            }
+            FinisherFlashPiece::Puff(_) => {
+                assert!(close(at(0.0), 0.9), "{piece:?} centre {}", at(0.0));
+                assert!(close(at(0.45), 0.6), "{piece:?} at 0.45 {}", at(0.45));
+                assert!(at(1.0) < 0.04, "{piece:?} rim {}", at(1.0));
+                puffs += 1;
+            }
+            FinisherFlashPiece::Ring => {}
+        }
+    }
+    assert_eq!((glows, puffs), (2, 6));
+}
+
+// ── The sweep's trail ───────────────────────────────────────────────────────
+
+/// `(stroke seconds, main grip, the trail segments' (k, transform))` each frame.
+fn trail_frames(h: &mut Harness) -> Vec<(f32, Vec3, Vec<(u32, Transform)>)> {
+    let mut frames = Vec::new();
+    for _ in 0..100 {
+        h.tick();
+        let Some(t) = h.socket(h.main).release_t else {
+            continue;
+        };
+        let grip = h.world_of(h.main);
+        let mut q = h
+            .app
+            .world_mut()
+            .query::<(&BackhandTrailSegment, &Transform, &Visibility)>();
+        let shown = q
+            .iter(h.app.world())
+            .filter(|(_, _, v)| **v != Visibility::Hidden)
+            .map(|(s, tf, _)| (s.0, *tf))
+            .collect();
+        frames.push((t, grip, shown));
+    }
+    frames
+}
+
+/// The trail shows only from the windup's end to just past the hold, and
+/// lies along the hand's own path: its head segment runs from the hand now
+/// to the hand 15 ms ago.
+#[test]
+fn the_trail_follows_the_hands_path_through_the_sweep() {
+    let mut h = Harness::new();
+    let cam = h.camera(Vec3::new(8.0, 10.0, -6.0));
+    h.fire();
+    let frames = trail_frames(&mut h);
+    let grip_at = |t: f32| {
+        let i = frames
+            .windows(2)
+            .position(|w| w[0].0 <= t && t <= w[1].0)
+            .expect("inside the stroke");
+        let (t0, p0, _) = &frames[i];
+        let (t1, p1, _) = &frames[i + 1];
+        p0.lerp(*p1, (t - t0) / (t1 - t0))
+    };
+    let mut shown = 0;
+    for (t, grip, segments) in &frames {
+        // The stroke clock sums 10 ms frames, so a frame on either boundary
+        // may land a hair to either side of it.
+        if (*t - 0.22).abs() < 1e-3 || (*t - 0.56).abs() < 1e-3 {
+            continue;
+        }
+        if *t < 0.22 || *t > 0.56 {
+            assert!(segments.is_empty(), "a trail at {t}");
+            continue;
+        }
+        if let Some((_, head)) = segments.iter().find(|(k, _)| *k == 1) {
+            let mid = (*grip + grip_at(t - 0.015)) * 0.5;
+            assert!(
+                head.translation.distance(mid) < 0.01,
+                "the head is off the hand's path at {t}"
+            );
+            // Its long axis lies along that stretch of path as the camera
+            // sees it.
+            let along = *grip - grip_at(t - 0.015);
+            let view = cam.rotation * Vec3::Z;
+            let seen = (along - view * along.dot(view)).normalize();
+            assert!(
+                (head.rotation * Vec3::Y).dot(seen).abs() > 0.99,
+                "the head lies across its path at {t}"
+            );
+            shown += 1;
+        }
+    }
+    // Every sweep frame from 0.235 s; through the hold the hand is still and
+    // a zero-length segment draws nothing.
+    assert!(shown > 18, "{shown}");
+    // Mid-sweep, every segment is out.
+    let mid = frames
+        .iter()
+        .find(|(t, _, _)| (*t - 0.40).abs() < 0.006)
+        .unwrap();
+    let mut ks: Vec<u32> = mid.2.iter().map(|(k, _)| *k).collect();
+    ks.sort();
+    assert_eq!(ks, (1..=7).collect::<Vec<_>>());
+}
+
+/// The trail as drawn: a pale additive solid line, tapering in width (0.12 yd
+/// at its head) and alpha (0.55) toward its tail in eighths, each segment a
+/// unit quad facing the camera with its long axis along its stretch of path.
+#[test]
+fn the_trail_is_a_pale_tapering_line_facing_the_camera() {
+    let mut h = Harness::new();
+    let cam = h.camera(Vec3::new(-5.0, 12.0, 9.0));
+    h.fire();
+    h.run_to(0.38);
+    let mut q = h
+        .app
+        .world_mut()
+        .query::<(Entity, &BackhandTrailSegment, &Transform)>();
+    let segments: Vec<(Entity, u32, Transform)> = q
+        .iter(h.app.world())
+        .map(|(e, s, tf)| (e, s.0, *tf))
+        .collect();
+    assert_eq!(segments.len(), 7);
+    for (e, k, tf) in segments {
+        let taper = 1.0 - k as f32 / 8.0;
+        let m = h.material(e);
+        let c = m.base_color.to_srgba();
+        for (got, want) in [(c.red, 235.0), (c.green, 235.0), (c.blue, 245.0)] {
+            assert!((got - want / 255.0).abs() < 1e-5, "segment {k}: {c:?}");
+        }
+        assert!(
+            (c.alpha - 0.55 * taper).abs() < 1e-5,
+            "segment {k}: {}",
+            c.alpha
+        );
+        assert_eq!(m.alpha_mode, AlphaMode::Add);
+        assert!(m.unlit);
+        assert!(m.base_color_texture.is_none(), "a solid line");
+        assert!(
+            (tf.scale.x - 0.12 * taper).abs() < 1e-5,
+            "segment {k} width"
+        );
+        let v = h.vertices(e);
+        let extent = v.iter().fold(Vec3::ZERO, |a, p| a.max(p.abs()));
+        assert!((extent.x - 0.5).abs() < 1e-6 && (extent.y - 0.5).abs() < 1e-6);
+        assert!(
+            (tf.rotation * Vec3::Z).dot(cam.rotation * Vec3::Z) > 0.999,
+            "segment {k} does not face the camera"
+        );
+    }
+}
+
+/// A Rogue killed mid-sweep leaves no trail on its corpse.
+#[test]
+fn a_dead_rogue_drops_its_trail() {
+    let mut h = Harness::new();
+    h.fire();
+    h.run_to(0.3);
+    assert_eq!(h.count::<BackhandTrail>(), 1);
+    let rogue = h.rogue;
+    h.app
+        .world_mut()
+        .get_mut::<Combatant>(rogue)
+        .unwrap()
+        .current_health = 0.0;
+    h.tick();
+    h.tick();
+    assert_eq!(h.count::<BackhandTrail>(), 0);
+    assert_eq!(h.count::<BackhandTrailSegment>(), 0);
 }

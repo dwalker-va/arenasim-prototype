@@ -122,5 +122,7 @@ mod finisher_flash;
 pub use finisher_flash::*;
 mod bleed_spray;
 pub use bleed_spray::*;
+mod backhand_trail;
+pub use backhand_trail::*;
 mod paladin_oneshots;
 pub use paladin_oneshots::*;

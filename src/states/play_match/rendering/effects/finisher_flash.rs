@@ -67,7 +67,8 @@ pub const FINISHER_RING_ALPHA: f32 = 0.9;
 pub const FINISHER_RING_INNER: f32 = 0.85;
 
 /// The P1 puffs: a fixed set cycling on the hand, each drifting back from the
-/// victim and up as it shrinks and fades.
+/// victim and up as it shrinks and fades, alpha-blended as the bench paints
+/// them.
 pub const FINISHER_PUFFS: u32 = 6;
 pub const FINISHER_PUFF_CYCLE_SECS: f32 = 0.7;
 pub const FINISHER_PUFF_RGB: [u8; 3] = [255, 40, 0];
@@ -123,6 +124,16 @@ impl FinisherFlashPiece {
     /// Whether the piece faces the camera (the ring lies flat instead).
     pub fn faces_camera(self) -> bool {
         self != FinisherFlashPiece::Ring
+    }
+
+    /// How the piece composites, as the bench draws it: the glows and the
+    /// ring add light (`lighter`); the puffs are painted OVER the scene
+    /// (`source-over`), so they read as red smoke rather than more glow.
+    pub fn alpha_mode(self) -> AlphaMode {
+        match self {
+            FinisherFlashPiece::Puff(_) => AlphaMode::Blend,
+            _ => AlphaMode::Add,
+        }
     }
 }
 
@@ -338,7 +349,7 @@ pub fn spawn_finisher_hand_flash(
                 base_color_texture: texture,
                 // The kit adds colour x sprite x weight and nothing else.
                 unlit: true,
-                alpha_mode: AlphaMode::Add,
+                alpha_mode: piece.alpha_mode(),
                 cull_mode: None,
                 double_sided: true,
                 ..default()
@@ -363,7 +374,7 @@ pub fn spawn_finisher_hand_flash(
 
 /// A socket's world position, composed from the unit, its body and the socket's
 /// own local transform — this frame's, not last frame's propagated one.
-fn socket_world(unit: &Transform, body: &Transform, socket: &Transform) -> Vec3 {
+pub(super) fn socket_world(unit: &Transform, body: &Transform, socket: &Transform) -> Vec3 {
     unit.mul_transform(*body).mul_transform(*socket).translation
 }
 

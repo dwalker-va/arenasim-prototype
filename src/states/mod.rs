@@ -562,11 +562,15 @@ impl Plugin for StatesPlugin {
                 .run_if(in_combat_scene),
         )
         // The finisher hand flash (`finisher_flash.rs`) rides the striking
-        // hand: placed from the sockets' local transforms after the swing and
-        // the lean have written them, so it sits on the hand this frame.
+        // hand, and the backhand's trail (`backhand_trail.rs`) follows its
+        // path: both placed from the sockets' local transforms after the swing
+        // and the lean have written them, so they sit on the hand this frame.
         .add_systems(
             Update,
-            play_match::update_finisher_hand_flashes
+            (
+                play_match::update_finisher_hand_flashes,
+                play_match::update_backhand_trails,
+            )
                 .after(play_match::animate_body_lean)
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),

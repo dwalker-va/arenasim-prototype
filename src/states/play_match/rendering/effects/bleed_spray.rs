@@ -4,7 +4,9 @@ use std::sync::Arc;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
-use super::hunter_shots::{draw, ramp3, ramp_color, ClientEmitter, EmitterSprite, PALETTE_STEPS};
+use super::hunter_shots::{
+    blob_texture, draw, ramp3, ramp_color, ClientEmitter, EmitterSprite, PALETTE_STEPS,
+};
 use super::school_impact::impact_origin;
 use crate::states::play_match::components::*;
 
@@ -44,8 +46,8 @@ use crate::states::play_match::components::*;
 /// speed, gravity, colour, alpha and size. Played at the victim's chest.
 pub const BLEED_SPRAY: ClientEmitter = ClientEmitter {
     name: "bloodyexplosion/spurts",
-    // Unused here (the spray draws its own droplet sprite); the nearest kind.
-    sprite: EmitterSprite::Glow,
+    // The benches' `blob`: a solid disc at 0.7 of the sprite's radius.
+    sprite: EmitterSprite::Blob,
     additive: false,
     rate: 0.0,
     window: ClientEmitter::tracked(&BLEED_SPRAY_RATE),
@@ -60,7 +62,7 @@ pub const BLEED_SPRAY: ClientEmitter = ClientEmitter {
     color: [[150, 8, 8], [140, 7, 7], [110, 4, 4]],
     alpha: [1.0, 0.69, 0.0],
     // The bench keys a droplet's RADIUS (its `sprite` draws `r = scale`), and
-    // its blob fills `BLEED_DROPLET_FILL` of that.
+    // its blob fills 0.7 of that (`blob_texture`).
     size: ParticleSize::radii([0.03, 0.11, 0.02]),
     mid: 0.25,
     track: Some(&BLEED_SPRAY_RATE),
@@ -76,12 +78,6 @@ pub const BLEED_SPRAY_RATE: [(f32, f32); 4] =
 pub const BLEED_SPRAY_CONE: f32 = 1.25;
 /// Launch speed varies by up to this fraction either side of `speed`.
 pub const BLEED_SPRAY_SPEED_VARIANCE: f32 = 0.25;
-/// The droplet is a solid disc filling this fraction of its sprite's radius
-/// (the bench's blob draws `r * 0.7`).
-pub const BLEED_DROPLET_FILL: f32 = 0.7;
-
-/// The droplet sprite, pixels on a side.
-const DROPLET_PX: u32 = 32;
 /// Keeps float drift from dropping the last droplet of an exact count.
 const EMIT_EPSILON: f32 = 1e-4;
 
@@ -145,40 +141,6 @@ pub fn bleed_droplet_velocity(seed: u32) -> Vec3 {
     dir * speed
 }
 
-/// A white solid disc filling [`BLEED_DROPLET_FILL`] of the sprite, its rim
-/// one texel soft so it does not shimmer.
-pub fn bleed_droplet_texture() -> Image {
-    use bevy::render::render_asset::RenderAssetUsages;
-    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-
-    let size = DROPLET_PX;
-    let mut data = vec![0u8; (size * size * 4) as usize];
-    let centre = (size as f32 - 1.0) / 2.0;
-    let edge = BLEED_DROPLET_FILL * (size as f32 / 2.0);
-    for y in 0..size {
-        for x in 0..size {
-            let r = ((x as f32 - centre).powi(2) + (y as f32 - centre).powi(2)).sqrt();
-            let a = (edge - r + 0.5).clamp(0.0, 1.0);
-            let i = ((y * size + x) * 4) as usize;
-            data[i] = 255;
-            data[i + 1] = 255;
-            data[i + 2] = 255;
-            data[i + 3] = (a * 255.0).round() as u8;
-        }
-    }
-    Image::new(
-        Extent3d {
-            width: size,
-            height: size,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        data,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    )
-}
-
 /// The material a droplet `t` of the way through its life wears: the colour
 /// and alpha ramps sampled there, alpha-BLENDED and unlit, so the spray can
 /// darken the sand as the client's blend-2 spurts do.
@@ -208,7 +170,7 @@ impl BleedSprayAssets {
         images: &mut Assets<Image>,
         materials: &mut Assets<StandardMaterial>,
     ) -> Self {
-        let texture = images.add(bleed_droplet_texture());
+        let texture = images.add(blob_texture());
         let palette: Arc<[Handle<StandardMaterial>]> = (0..PALETTE_STEPS)
             .map(|i| {
                 let t = (i as f32 + 0.5) / PALETTE_STEPS as f32;
@@ -400,16 +362,17 @@ mod tests {
     }
 
     #[test]
-    fn the_droplet_is_a_solid_disc_seven_tenths_of_its_sprite() {
-        let image = bleed_droplet_texture();
+    fn the_droplet_is_the_benchs_blob_a_solid_disc_seven_tenths_of_its_sprite() {
+        let image = blob_texture();
+        let px = image.width() as usize;
         let data = image.data.as_ref().unwrap();
-        let px = DROPLET_PX as usize;
         let alpha = |x: usize, y: usize| data[(y * px + x) * 4 + 3];
-        // Solid at the centre and well inside the fill.
-        assert_eq!(alpha(px / 2, px / 2), 255);
-        assert_eq!(alpha(px / 2 + 9, px / 2), 255);
-        // Clear outside it, and at the corner.
-        assert_eq!(alpha(px / 2 + 13, px / 2), 0);
+        let c = px / 2;
+        // Solid at the centre and at 0.6 of the radius.
+        assert_eq!(alpha(c, c), 255);
+        assert_eq!(alpha(c + (0.6 * c as f32) as usize, c), 255);
+        // Clear at 0.8 of the radius, and at the corner.
+        assert_eq!(alpha(c + (0.8 * c as f32) as usize, c), 0);
         assert_eq!(alpha(0, 0), 0);
     }
 

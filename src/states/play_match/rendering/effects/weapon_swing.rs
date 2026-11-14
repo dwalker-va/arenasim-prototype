@@ -259,9 +259,8 @@ pub(crate) enum SwingArc {
     /// rather than a rotation about a fixed grip. The grip winds up from rest
     /// across the body to the off shoulder, sweeps outward through a contact
     /// point in front of the chest along one quadratic curve, follows through
-    /// wide on the weapon side, holds, and returns to rest — while the blade
-    /// turns from pointing across the body, through the victim at contact, to
-    /// trailing out on the weapon side.
+    /// on the weapon side, holds, and returns to rest — the blade laid along
+    /// the cut through the sweep, as the bench draws it (`backhand_cut`).
     ///
     /// Its swing parameter is a PHASE in `[0, 3]` (see [`backhand_phase`]),
     /// not the `[-1, 1]` every other arc uses: the sweep never passes the rest
@@ -728,20 +727,14 @@ pub const BACKHAND_WOUND: Vec3 = Vec3::new(-0.60, 0.65, 0.40);
 /// The grip at contact: centred on the victim's chest line, at chest height,
 /// at the reach that puts the blade into a victim 2yd off.
 pub const BACKHAND_CONTACT: Vec3 = Vec3::new(0.0, 0.55, 1.30);
-/// The follow-through: wide on the WEAPON side and drawn back past the
-/// contact (the bench's `fol`, 0.85yd out, 0.35yd back and 0.1yd below it).
-pub const BACKHAND_FOLLOW: Vec3 = Vec3::new(1.20, 0.45, 0.95);
+/// The follow-through: out on the WEAPON side and drawn back past the contact
+/// — the bench's `fol`, 0.85 yd out from the contact's line, 0.35 yd back and
+/// 0.1 yd below it, as the bench places it.
+pub const BACKHAND_FOLLOW: Vec3 = Vec3::new(0.85, 0.45, 0.95);
 /// How far the windup bows FORWARD at its middle. The bench draws a straight
 /// line from rest to wound, which on this rig runs through the alpha-blended
 /// capsule; the bow keeps the weapon in front of the body as it crosses.
 pub const BACKHAND_WINDUP_BOW: f32 = 0.35;
-/// The blade's heading about world up at the wound grip: pointing across the
-/// body, past the off shoulder. Negative turns the tip to the off side.
-pub const BACKHAND_WOUND_HEADING: f32 = -1.40;
-/// The heading at the follow-through: trailing out on the weapon side. The
-/// sweep turns the heading linearly, so at contact the blade points into the
-/// victim.
-pub const BACKHAND_FOLLOW_HEADING: f32 = 1.40;
 /// Extra forward pitch while the stroke plays, laying the dagger's raised
 /// rest (0.9 rad off vertical) nearly level for a cut across the chest.
 pub const BACKHAND_LEVEL: f32 = 0.55;
@@ -798,22 +791,44 @@ pub(crate) fn backhand_grip(rest: Vec3, phase: f32) -> Vec3 {
     }
 }
 
+/// The grip's direction of travel through the sweep at sweep fraction `k`, in
+/// the aim frame: the curve's own tangent plus the body stepping in under it
+/// (both per unit of `k`). The bench lays the blade along exactly this — along
+/// the cut, never at the victim, which would be the thrust line the user
+/// rejected.
+fn backhand_cut(k: f32) -> Vec3 {
+    let control = 2.0 * BACKHAND_CONTACT - 0.5 * (BACKHAND_WOUND + BACKHAND_FOLLOW);
+    let tangent =
+        2.0 * (1.0 - k) * (control - BACKHAND_WOUND) + 2.0 * k * (BACKHAND_FOLLOW - control);
+    let stepping = if k * BACKHAND_STEP_RATE < 1.0 {
+        (BACKHAND_STEP_IN + BACKHAND_STEP_BACK) * BACKHAND_STEP_RATE
+    } else {
+        0.0
+    };
+    tangent + Vec3::Z * stepping
+}
+
+/// The blade's heading about world up along the cut at sweep fraction `k`:
+/// positive turns the tip to the weapon side.
+pub(crate) fn backhand_cut_heading(k: f32) -> f32 {
+    let cut = backhand_cut(k.clamp(0.0, 1.0));
+    cut.x.atan2(cut.z)
+}
+
 /// The blade's turn at backhand `phase`: its heading about world up, then its
-/// extra forward pitch. Both are zero at rest, so the stroke begins and ends
-/// on the mount.
+/// extra forward pitch. Through the sweep the blade lies along the cut, as the
+/// bench draws it; the windup eases it there from the mount, the hold keeps
+/// the heading the sweep ended on, and the recovery eases it home. Both are
+/// zero at rest, so the stroke begins and ends on the mount.
 fn backhand_turn(phase: f32) -> Quat {
     let (heading, level) = if phase <= 1.0 {
         let k = phase.clamp(0.0, 1.0);
-        (BACKHAND_WOUND_HEADING * k, BACKHAND_LEVEL * k)
+        (backhand_cut_heading(0.0) * k, BACKHAND_LEVEL * k)
     } else if phase <= 2.0 {
-        let k = phase - 1.0;
-        (
-            BACKHAND_WOUND_HEADING + (BACKHAND_FOLLOW_HEADING - BACKHAND_WOUND_HEADING) * k,
-            BACKHAND_LEVEL,
-        )
+        (backhand_cut_heading(phase - 1.0), BACKHAND_LEVEL)
     } else {
         let k = 1.0 - (phase - 2.0).clamp(0.0, 1.0);
-        (BACKHAND_FOLLOW_HEADING * k, BACKHAND_LEVEL * k)
+        (backhand_cut_heading(1.0) * k, BACKHAND_LEVEL * k)
     };
     Quat::from_rotation_y(heading) * Quat::from_rotation_x(level)
 }
