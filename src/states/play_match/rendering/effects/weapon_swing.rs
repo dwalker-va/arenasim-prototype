@@ -796,17 +796,24 @@ pub(crate) fn backhand_grip(rest: Vec3, phase: f32) -> Vec3 {
 /// (both per unit of `k`). The bench lays the blade along exactly this — along
 /// the cut, never at the victim, which would be the thrust line the user
 /// rejected.
+///
+/// The step stops dead at `1 / BACKHAND_STEP_RATE` of the sweep, which would
+/// kink the travel and turn the blade ~27 degrees in one frame; its share of
+/// the blade's line fades out across `BACKHAND_STEP_FADE` instead, centred on
+/// that moment and clear of the contact.
 fn backhand_cut(k: f32) -> Vec3 {
     let control = 2.0 * BACKHAND_CONTACT - 0.5 * (BACKHAND_WOUND + BACKHAND_FOLLOW);
     let tangent =
         2.0 * (1.0 - k) * (control - BACKHAND_WOUND) + 2.0 * k * (BACKHAND_FOLLOW - control);
-    let stepping = if k * BACKHAND_STEP_RATE < 1.0 {
-        (BACKHAND_STEP_IN + BACKHAND_STEP_BACK) * BACKHAND_STEP_RATE
-    } else {
-        0.0
-    };
+    let (fade_from, fade_to) = BACKHAND_STEP_FADE;
+    let share = 1.0 - smoothstep01((k - fade_from) / (fade_to - fade_from));
+    let stepping = (BACKHAND_STEP_IN + BACKHAND_STEP_BACK) * BACKHAND_STEP_RATE * share;
     tangent + Vec3::Z * stepping
 }
+
+/// The sweep window, in sweep fractions, across which the step's share of the
+/// blade's line fades out (see [`backhand_cut`]).
+const BACKHAND_STEP_FADE: (f32, f32) = (0.5, 0.75);
 
 /// The blade's heading about world up along the cut at sweep fraction `k`:
 /// positive turns the tip to the weapon side.
@@ -815,29 +822,73 @@ pub(crate) fn backhand_cut_heading(k: f32) -> f32 {
     cut.x.atan2(cut.z)
 }
 
-/// The blade's turn at backhand `phase`: its heading about world up, then its
-/// extra forward pitch. Through the sweep the blade lies along the cut, as the
-/// bench draws it; the windup eases it there from the mount, the hold keeps
-/// the heading the sweep ended on, and the recovery eases it home. Both are
-/// zero at rest, so the stroke begins and ends on the mount.
-fn backhand_turn(phase: f32) -> Quat {
-    let (heading, level) = if phase <= 1.0 {
-        let k = phase.clamp(0.0, 1.0);
-        (backhand_cut_heading(0.0) * k, BACKHAND_LEVEL * k)
+/// The windup's heading eases from the mount to the windup's line over this
+/// much of the windup phase.
+const BACKHAND_WINDUP_TURN: f32 = 0.5;
+/// The blade turns from the windup's line onto the cut across this phase
+/// window, straddling the sweep's start: the bench snaps the ~100 degree turn
+/// in one frame; spread over this window it stays under the sweep's own
+/// fastest turn.
+const BACKHAND_SWEEP_TURN: (f32, f32) = (0.85, 1.25);
+
+/// The windup's line for a weapon resting at `rest`: the heading from the rest
+/// grip to the wound grip, the way the bench lays the blade along the hand's
+/// travel as it crosses the body (about -86 degrees on the dagger mount). The
+/// chord, not the bowed path's tangent: the bow is this rig's, and the
+/// bench's hand travels the straight line.
+pub(crate) fn backhand_windup_heading(rest: Vec3) -> f32 {
+    let travel = BACKHAND_WOUND - rest;
+    travel.x.atan2(travel.z)
+}
+
+/// The blade's heading about world up at backhand `phase`, for a weapon
+/// resting at `rest`: positive turns the tip to the weapon side.
+///
+/// - Windup: eased from the mount (0) onto the windup's line, so the blade
+///   lies along the hand's travel across the body, never at the victim.
+/// - Into the sweep: turned from that line onto the cut across
+///   `BACKHAND_SWEEP_TURN`.
+/// - Sweep: along the cut (`backhand_cut_heading`).
+/// - Hold: the heading the sweep ended on, trailing out on the weapon side
+///   (the bench turns it back at the victim here; a held blade pointing at
+///   the victim reads as the stab this stroke exists to avoid).
+/// - Recovery: eased home to the mount through forward (the bench points it
+///   back at the Rogue; a home turn through forward is the shorter, calmer
+///   read).
+pub(crate) fn backhand_heading(rest: Vec3, phase: f32) -> f32 {
+    let (from, to) = BACKHAND_SWEEP_TURN;
+    let windup = backhand_windup_heading(rest);
+    if phase <= from {
+        windup * smoothstep01(phase / BACKHAND_WINDUP_TURN)
+    } else if phase < to {
+        let cut = backhand_cut_heading((phase - 1.0).max(0.0));
+        windup + (cut - windup) * smoothstep01((phase - from) / (to - from))
     } else if phase <= 2.0 {
-        (backhand_cut_heading(phase - 1.0), BACKHAND_LEVEL)
+        backhand_cut_heading(phase - 1.0)
     } else {
-        let k = 1.0 - (phase - 2.0).clamp(0.0, 1.0);
-        (backhand_cut_heading(1.0) * k, BACKHAND_LEVEL * k)
+        backhand_cut_heading(1.0) * (1.0 - (phase - 2.0).clamp(0.0, 1.0))
+    }
+}
+
+/// The blade's turn at backhand `phase`: its heading about world up
+/// ([`backhand_heading`]), then its extra forward pitch. Both are zero at
+/// rest, so the stroke begins and ends on the mount.
+fn backhand_turn(rest: Vec3, phase: f32) -> Quat {
+    let level = if phase <= 1.0 {
+        BACKHAND_LEVEL * phase.clamp(0.0, 1.0)
+    } else if phase <= 2.0 {
+        BACKHAND_LEVEL
+    } else {
+        BACKHAND_LEVEL * (1.0 - (phase - 2.0).clamp(0.0, 1.0))
     };
-    Quat::from_rotation_y(heading) * Quat::from_rotation_x(level)
+    Quat::from_rotation_y(backhand_heading(rest, phase)) * Quat::from_rotation_x(level)
 }
 
 /// The backhand's pose, composed LEFT of a rest mount whose grip is at
 /// `rest`: it carries the grip from `rest` to [`backhand_grip`] and turns the
 /// weapon about that grip, so the mount's own roll and scale ride along.
 fn backhand_pose(rest: Vec3, phase: f32) -> Transform {
-    let turn = backhand_turn(phase);
+    let turn = backhand_turn(rest, phase);
     let grip = backhand_grip(rest, phase);
     // T(grip) · R · T(−rest): the rest grip lands on `grip`, turned by R.
     Transform::from_translation(grip - turn * rest).with_rotation(turn)

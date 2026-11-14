@@ -1125,3 +1125,77 @@ fn a_dead_rogue_drops_its_trail() {
     assert_eq!(h.count::<BackhandTrail>(), 0);
     assert_eq!(h.count::<BackhandTrailSegment>(), 0);
 }
+
+/// `(stroke seconds, the blade's heading in degrees, + to the weapon side)`
+/// every 10 ms frame of the stroke, in world space.
+fn blade_headings() -> Vec<(f32, f32)> {
+    let mut h = Harness::new();
+    h.fire();
+    let mut out = Vec::new();
+    for _ in 0..120 {
+        h.tick();
+        let Some(t) = h.socket(h.main).release_t else {
+            continue;
+        };
+        let rot = h
+            .app
+            .world()
+            .get::<GlobalTransform>(h.main)
+            .unwrap()
+            .compute_transform()
+            .rotation;
+        // The model's blade runs along its local +Y.
+        let blade = rot * Vec3::Y;
+        out.push((t, blade.x.atan2(blade.z).to_degrees()));
+    }
+    out
+}
+
+fn heading_at(headings: &[(f32, f32)], t: f32) -> f32 {
+    headings
+        .iter()
+        .min_by(|a, b| (a.0 - t).abs().total_cmp(&(b.0 - t).abs()))
+        .unwrap()
+        .1
+}
+
+/// Through the windup the blade lies along the hand's travel across the body
+/// — the bench's line from the rest grip to the off shoulder, about -86
+/// degrees on the dagger mount — never at the victim; at 0.22 s it is part
+/// way round onto the cut. At the hold it trails out on the weapon side (about
+/// 135 degrees), where the sweep left it.
+#[test]
+fn the_blade_crosses_the_body_in_the_windup_and_trails_out_at_the_hold() {
+    let headings = blade_headings();
+    for t in [0.12, 0.15] {
+        let h = heading_at(&headings, t);
+        assert!((h + 86.0).abs() < 5.0, "windup at {t}: {h:.1} deg");
+    }
+    let h = heading_at(&headings, 0.22);
+    assert!(
+        (-70.0..-40.0).contains(&h),
+        "turning onto the cut at 0.22: {h:.1} deg"
+    );
+    let h = heading_at(&headings, 0.50);
+    assert!((h - 135.0).abs() < 5.0, "held at 0.50: {h:.1} deg");
+}
+
+/// The blade never jumps: between consecutive 10 ms frames it turns less than
+/// 20 degrees anywhere in the stroke — just above the sweep's own fastest
+/// (about 18 degrees a frame, where the cut turns hardest).
+#[test]
+fn the_blade_never_jumps_between_frames() {
+    let headings = blade_headings();
+    let mut fastest = 0.0f32;
+    for pair in headings.windows(2) {
+        let d = (pair[1].1 - pair[0].1 + 540.0).rem_euclid(360.0) - 180.0;
+        assert!(
+            d.abs() < 20.0,
+            "the blade turns {d:.1} deg between {:.2} and {:.2} s",
+            pair[0].0,
+            pair[1].0
+        );
+        fastest = fastest.max(d.abs());
+    }
+    assert!(fastest > 5.0, "the blade turns at all: {fastest}");
+}
