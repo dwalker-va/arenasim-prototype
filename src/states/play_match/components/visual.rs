@@ -30,6 +30,21 @@ pub struct FloatingCombatText {
     pub is_crit: bool,
 }
 
+/// A floating text's offset ON SCREEN, in points, from where its
+/// `world_position` projects: a line stacked over another text at the same
+/// anchor ("Saved" over the save's heal number). Screen-space, so the stack
+/// holds at every zoom and yaw, where a world offset shrinks with distance
+/// and turns with the camera. Read by `render_floating_combat_text` through
+/// [`fct_screen_position`].
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct FctScreenOffset(pub egui::Vec2);
+
+/// Where a floating text is drawn: its projected anchor, moved by its
+/// [`FctScreenOffset`] when it has one.
+pub fn fct_screen_position(projected: egui::Pos2, offset: Option<&FctScreenOffset>) -> egui::Pos2 {
+    projected + offset.map_or(egui::Vec2::ZERO, |o| o.0)
+}
+
 /// The segment an entity the sim moves is drawn along between ticks
 /// (`rendering::interpolation`). Graphical-only; the sim never reads it.
 #[derive(Component, Clone, Copy, Debug)]

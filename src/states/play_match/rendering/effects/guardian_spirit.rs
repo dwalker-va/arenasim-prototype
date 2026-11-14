@@ -53,10 +53,13 @@ use crate::states::play_match::FCT_HEIGHT;
 // modes (`combat_core/follow_ups.rs`); `consume_killing_blow_signals` reads it
 // here, graphical-only, and plays the client's heal landing (kit 232) with the
 // heal's number when the save carried a heal, and the authored "Saved" cue —
-// the user's ruling on AS-335 — for EVERY save: Guardian Spirit's and the
-// Rogue's Cheat Death's alike ([`spawn_saved_cue`]). The cue is gold "Saved"
-// in `fct::INVULNERABLE` at number size, and a gold body flash, 0.6 s, peaking
-// at 0.7 alpha at 80 ms.
+// the user's ruling on AS-335 — for every save its holder lives through:
+// Guardian Spirit's and the Rogue's Cheat Death's alike ([`spawn_saved_cue`]).
+// A save whose holder another blow of the same frame kills plays nothing. The
+// cue is gold "Saved" in `fct::INVULNERABLE` at number size, stacked one line
+// above the heal's number ON SCREEN (`fct::LINE_ABOVE`, so it holds at the
+// match camera's 60 yd as well as the bench's 7), and a gold body flash,
+// 0.6 s, peaking at 0.7 alpha at 80 ms.
 //
 // Graphical-only: reads `ActiveAuras` and the marker, writes no sim state,
 // draws no `game_rng` (the sparks' scatter is the shared deterministic hash),
@@ -728,9 +731,14 @@ pub fn billboard_guardian_spirit_sparks(
 
 // ── The save, and the shared "Saved" cue ─────────────────────────────────────
 
-/// The "Saved" text's offset from the save's text anchor: the bench lifts it
-/// 0.4 yd above the heal's number and 0.5 yd to its left.
-pub const SAVED_TEXT_OFFSET: Vec3 = Vec3::new(-0.5, 0.4, 0.0);
+/// The "Saved" text's offset ON SCREEN from the save's text anchor: one
+/// floating line up (`fct::LINE_STEP` points), over the heal's number. The
+/// bench lifts it above the number at its own 7 yd framing; a world offset
+/// that reads there shrinks to an overlap at the match camera's 60 yd, so the
+/// stack is held in points instead.
+pub fn saved_text_offset() -> FctScreenOffset {
+    FctScreenOffset(crate::ui::theme::fct::LINE_ABOVE)
+}
 /// The word, and how long it floats (a heal number's 1.5 s).
 pub const SAVED_TEXT: &str = "Saved";
 pub const SAVED_TEXT_SECS: f32 = 1.5;
@@ -760,20 +768,21 @@ pub fn saved_flash_alpha(age: f32) -> f32 {
 }
 
 /// The authored "Saved" cue on `holder`, whatever saved it: gold "Saved"
-/// (`fct::INVULNERABLE`, at number size) at `text_anchor` +
-/// [`SAVED_TEXT_OFFSET`], and the gold body flash. Guardian Spirit's save and
+/// (`fct::INVULNERABLE`, at number size) one line above `text_anchor`
+/// ([`saved_text_offset`]), and the gold body flash. Guardian Spirit's save and
 /// the Rogue's Cheat Death both land it, through
 /// [`consume_killing_blow_signals`].
 pub fn spawn_saved_cue(commands: &mut Commands, holder: Entity, text_anchor: Vec3) {
     commands.spawn((
         FloatingCombatText {
-            world_position: text_anchor + SAVED_TEXT_OFFSET,
+            world_position: text_anchor,
             text: SAVED_TEXT.to_string(),
             color: crate::ui::theme::fct::INVULNERABLE,
             lifetime: SAVED_TEXT_SECS,
             vertical_offset: 0.0,
             is_crit: false,
         },
+        saved_text_offset(),
         PlayMatchEntity,
     ));
     commands.spawn((
@@ -787,21 +796,26 @@ pub fn spawn_saved_cue(commands: &mut Commands, holder: Entity, text_anchor: Vec
 
 /// Play every prevented killing blow: the client's heal landing (kit 232,
 /// Heal's rising gold stream) and the heal's number when the save landed a
-/// heal, and the shared "Saved" cue for every save. Consumes the marker.
+/// heal, and the shared "Saved" cue for every save its holder lived through.
+/// A save whose holder another blow of the same frame killed plays nothing:
+/// there is no one saved to show it on. Consumes the marker.
 ///
 /// FixedUpdate after the combat phases, as every marker consumer runs: the
 /// sim can tick several times a rendered frame.
 pub fn consume_killing_blow_signals(
     mut commands: Commands,
     markers: Query<(Entity, &KillingBlowPrevented)>,
-    holders: Query<&Transform, With<Combatant>>,
+    holders: Query<(&Transform, &Combatant)>,
     mut fct_states: Query<&mut FloatingTextState>,
 ) {
     for (marker, saved) in markers.iter() {
         commands.entity(marker).despawn();
-        let Ok(holder) = holders.get(saved.holder) else {
+        let Ok((holder, combatant)) = holders.get(saved.holder) else {
             continue;
         };
+        if !combatant.is_alive() {
+            continue;
+        }
         let (dx, dy) = fct_states
             .get_mut(saved.holder)
             .map_or((0.0, 0.0), |mut state| get_next_fct_offset(&mut state));

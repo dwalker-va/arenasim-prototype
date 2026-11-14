@@ -20,26 +20,183 @@ use std::time::Duration;
 
 use arenasim::states::play_match::combat_core::KillingBlowPrevented;
 use arenasim::states::play_match::components::{
-    ActiveAuras, Aura, AuraType, ClientParticle, Combatant, CompoundDebuff, FloatingCombatText,
-    FloatingTextState, HealImpact, HealImpactKind, PlayMatchEntity,
+    ActiveAuras, Aura, AuraType, CameraController, ClientParticle, Combatant, CompoundDebuff,
+    FctScreenOffset, FloatingCombatText, FloatingTextState, HealImpact, HealImpactKind,
+    PlayMatchEntity,
 };
 use arenasim::states::play_match::{
     animate_client_particles, animate_guardian_spirits, animate_saved_flashes,
-    billboard_guardian_spirit_sparks, consume_killing_blow_signals, saved_flash_alpha,
-    spawn_saved_flashes, spirit_panel_pose, update_guardian_spirit_states, EmitterSprite,
-    GuardianSpiritPanel, GuardianSpiritRig, PanelPose, PanelSprite, SavedFlash, SpiritPanel,
-    FCT_HEIGHT, GUARDIAN_SPIRIT_SPARK_EMITTER,
+    billboard_guardian_spirit_sparks, consume_killing_blow_signals, fct_placements,
+    saved_flash_alpha, spawn_saved_flashes, spirit_panel_pose, update_guardian_spirit_states,
+    EmitterSprite, GuardianSpiritPanel, GuardianSpiritRig, PanelPose, PanelSprite, SavedFlash,
+    SpiritPanel, FCT_HEIGHT, GUARDIAN_SPIRIT_SPARK_EMITTER,
 };
 use arenasim::ui::theme;
 use arenasim::CharacterClass;
 use bevy::prelude::*;
+use bevy::render::camera::CameraProjection;
+use bevy::render::mesh::VertexAttributeValues;
 use bevy::time::TimeUpdateStrategy;
+use bevy_egui::egui;
 
 const TICK: Duration = Duration::from_millis(50);
 const TICK_SECS: f32 = 0.05;
 
 fn close(a: f32, b: f32) -> bool {
     (a - b).abs() < 1e-4
+}
+
+/// Every panel as the bench draws it: its sRGB, whether it adds light (the
+/// dark circle is the one source-over layer) and its sprite.
+const BENCH_LOOK: &[(SpiritPanel, [u8; 3], bool, PanelSprite)] = &[
+    // The dark circle: a solid source-over disc, `rgba(60,55,40,0.25)`.
+    (
+        SpiritPanel::DarkCircle,
+        [60, 55, 40],
+        false,
+        PanelSprite::Disc,
+    ),
+    // `ring3(..., [253,221,8], 0.9, 3)`: a level ring.
+    (
+        SpiritPanel::HaloRing,
+        [253, 221, 8],
+        true,
+        PanelSprite::LevelRing,
+    ),
+    (
+        SpiritPanel::RingGlow,
+        [255, 255, 127],
+        true,
+        PanelSprite::Glow,
+    ),
+    (
+        SpiritPanel::WingLeft,
+        [255, 200, 70],
+        true,
+        PanelSprite::Glow,
+    ),
+    (
+        SpiritPanel::WingRight,
+        [255, 200, 70],
+        true,
+        PanelSprite::Glow,
+    ),
+    (SpiritPanel::Band, [249, 240, 170], true, PanelSprite::Glow),
+    (
+        SpiritPanel::FlareLeft,
+        [255, 211, 107],
+        true,
+        PanelSprite::Glow,
+    ),
+    (
+        SpiritPanel::FlareRight,
+        [255, 211, 107],
+        true,
+        PanelSprite::Glow,
+    ),
+];
+
+fn bench_look(panel: SpiritPanel) -> ([u8; 3], bool, PanelSprite) {
+    let (_, rgb, additive, sprite) = BENCH_LOOK
+        .iter()
+        .find(|l| l.0 == panel)
+        .expect("every panel is in the table");
+    (*rgb, *additive, *sprite)
+}
+
+/// The bench's `bbGlow` gradient, worked independently of the module: 1 at
+/// the centre, 0.45 halfway out, 0 at the rim, linear between.
+fn bench_glow(r: f32) -> f32 {
+    if r <= 0.5 {
+        1.0 - 1.1 * r
+    } else if r < 1.0 {
+        0.9 * (1.0 - r)
+    } else {
+        0.0
+    }
+}
+
+/// A drawn colour is the bench's sRGB.
+fn assert_rgb(color: Color, rgb: [u8; 3], what: &str) {
+    let c = color.to_srgba();
+    for (got, want) in [c.red, c.green, c.blue].into_iter().zip(rgb) {
+        assert!(
+            (got * 255.0 - want as f32).abs() < 0.5,
+            "{what}: {c:?} is not {rgb:?}"
+        );
+    }
+}
+
+/// An additive material: added light in the bench's colour, its emissive the
+/// client emitters' 2.5x glow of it.
+fn assert_additive(m: &StandardMaterial, rgb: [u8; 3], what: &str) {
+    assert_eq!(m.alpha_mode, AlphaMode::Add, "{what} adds light");
+    assert_rgb(m.base_color, rgb, what);
+    let c = Color::srgb_u8(rgb[0], rgb[1], rgb[2]).to_linear();
+    let e = m.emissive;
+    for (got, want) in [(e.red, c.red), (e.green, c.green), (e.blue, c.blue)] {
+        assert!((got - 2.5 * want).abs() < 1e-4, "{what} emissive {e:?}");
+    }
+}
+
+/// The image is the bench's glow: white, every pixel's alpha within one step
+/// of the gradient at its distance from the centre.
+fn assert_glow_sprite(world: &World, handle: &Handle<Image>, what: &str) {
+    let image = world
+        .resource::<Assets<Image>>()
+        .get(handle)
+        .unwrap_or_else(|| panic!("{what}: no sprite"));
+    let (w, h) = (image.width(), image.height());
+    assert_eq!(w, h, "{what}: a square sprite");
+    let data = image.data.as_ref().expect("the sprite has pixels");
+    let centre = (w as f32 - 1.0) / 2.0;
+    for y in 0..h {
+        for x in 0..w {
+            let r = ((x as f32 - centre).hypot(y as f32 - centre)) / centre;
+            let i = ((y * w + x) * 4) as usize;
+            assert_eq!(&data[i..i + 3], &[255, 255, 255], "{what}: white");
+            let want = (bench_glow(r) * 255.0).round();
+            assert!(
+                (data[i + 3] as f32 - want).abs() <= 1.0,
+                "{what}: alpha {} at r {r} is not the bench's {want}",
+                data[i + 3]
+            );
+        }
+    }
+}
+
+fn mesh_positions(world: &World, handle: &Handle<Mesh>) -> Vec<Vec3> {
+    let mesh = world
+        .resource::<Assets<Mesh>>()
+        .get(handle)
+        .expect("a mesh");
+    match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        Some(VertexAttributeValues::Float32x3(v)) => v.iter().map(|p| Vec3::from(*p)).collect(),
+        other => panic!("unexpected positions {other:?}"),
+    }
+}
+
+/// A unit quad in its own XY plane: four corners at ±0.5.
+fn assert_unit_quad(world: &World, handle: &Handle<Mesh>, what: &str) {
+    let p = mesh_positions(world, handle);
+    assert_eq!(p.len(), 4, "{what}: a quad");
+    for v in p {
+        assert!(
+            close(v.x.abs(), 0.5) && close(v.y.abs(), 0.5) && close(v.z, 0.0),
+            "{what}: {v}"
+        );
+    }
+}
+
+/// The radii a flat mesh in its XY plane spans: the nearest and farthest
+/// vertex from its centre, and how many vertices it has.
+fn radii(world: &World, handle: &Handle<Mesh>) -> (f32, f32, usize) {
+    let p = mesh_positions(world, handle);
+    assert!(p.iter().all(|v| close(v.z, 0.0)), "a flat mesh");
+    let r = |v: &Vec3| v.truncate().length();
+    let lo = p.iter().map(r).fold(f32::MAX, f32::min);
+    let hi = p.iter().map(r).fold(0.0, f32::max);
+    (lo, hi, p.len())
 }
 
 // =============================================================================
@@ -274,9 +431,10 @@ fn other_boost() -> Aura {
 
 struct Text {
     text: String,
-    color: bevy_egui::egui::Color32,
+    color: egui::Color32,
     world_position: Vec3,
     is_crit: bool,
+    offset: Option<FctScreenOffset>,
 }
 
 struct Harness {
@@ -364,7 +522,7 @@ impl Harness {
             .unwrap_or_default()
     }
 
-    fn panels(&self, rig: Entity) -> Vec<(SpiritPanel, Transform, StandardMaterial)> {
+    fn panels(&self, rig: Entity) -> Vec<(SpiritPanel, Transform, StandardMaterial, Handle<Mesh>)> {
         let world = self.app.world();
         self.children(rig)
             .into_iter()
@@ -374,7 +532,8 @@ impl Harness {
                     .resource::<Assets<StandardMaterial>>()
                     .get(&panel.material)?
                     .clone();
-                Some((panel.panel, *world.get::<Transform>(c)?, material))
+                let mesh = world.get::<Mesh3d>(c)?.0.clone();
+                Some((panel.panel, *world.get::<Transform>(c)?, material, mesh))
             })
             .collect()
     }
@@ -395,13 +554,14 @@ impl Harness {
     fn texts(&mut self) -> Vec<Text> {
         self.app
             .world_mut()
-            .query::<&FloatingCombatText>()
+            .query::<(&FloatingCombatText, Option<&FctScreenOffset>)>()
             .iter(self.app.world())
-            .map(|t| Text {
+            .map(|(t, offset)| Text {
                 text: t.text.clone(),
                 color: t.color,
                 world_position: t.world_position,
                 is_crit: t.is_crit,
+                offset: offset.copied(),
             })
             .collect()
     }
@@ -507,6 +667,9 @@ fn the_spirit_sits_behind_the_shoulders_and_follows() {
 /// Wherever the camera stands, every glow and the disc face it, unrolled,
 /// each laid out along the camera's right at its pose and drawn at its pose's
 /// size and alpha; the gold ring lies level; and every live spark faces it.
+/// Each panel is drawn as the bench draws it: its colour, its blend, and its
+/// sprite (the glow gradient on a quad, a hard disc, a ring of the bench's
+/// 3 px stroke).
 #[test]
 fn the_spirit_faces_the_camera_wherever_it_stands() {
     for cam_at in [Vec3::new(12.0, 8.0, 0.0), Vec3::new(-3.0, 16.0, 14.0)] {
@@ -525,8 +688,54 @@ fn the_spirit_faces_the_camera_wherever_it_stands() {
         let panels = h.panels(rig);
         assert_eq!(panels.len(), SpiritPanel::ALL.len());
         let mut faced = 0;
-        for (panel, t, material) in &panels {
+        for (panel, t, material, mesh) in &panels {
             let want = spirit_panel_pose(*panel, age).expect("every panel draws at 0.85 s");
+            let world = h.app.world();
+            let what = format!("{panel:?}");
+            let (rgb, additive, sprite) = bench_look(*panel);
+            assert_eq!(panel.sprite(), sprite, "{what} sprite");
+            if additive {
+                assert_additive(material, rgb, &what);
+            } else {
+                assert_eq!(material.alpha_mode, AlphaMode::Blend, "{what} darkens");
+                assert!(material.unlit, "{what} is a flat colour");
+                assert_rgb(material.base_color, rgb, &what);
+            }
+            match sprite {
+                PanelSprite::Glow => {
+                    let tex = material.base_color_texture.as_ref().expect("a glow sprite");
+                    assert_eq!(material.emissive_texture.as_ref(), Some(tex), "{what}");
+                    assert_glow_sprite(world, tex, &what);
+                    assert_unit_quad(world, mesh, &what);
+                }
+                PanelSprite::Disc => {
+                    assert!(material.base_color_texture.is_none(), "{what}: hard-edged");
+                    let (_, hi, n) = radii(world, mesh);
+                    assert!(
+                        close(hi, 0.5) && n > 16,
+                        "{what}: a unit disc, {n} vertices"
+                    );
+                }
+                PanelSprite::LevelRing => {
+                    assert!(
+                        material.base_color_texture.is_none(),
+                        "{what}: a solid line"
+                    );
+                    // The ring as drawn: its mesh's radii at its scale.
+                    let (lo, hi, _) = radii(world, mesh);
+                    let (inner, outer) = (lo * t.scale.x, hi * t.scale.x);
+                    assert!(
+                        close(outer - inner, 3.0 / (1000.0 / 7.0)),
+                        "{what}: drawn {} yd wide, not the bench's 3 px",
+                        outer - inner
+                    );
+                    assert!(
+                        close(outer - inner, want.height),
+                        "{what}: the pose's width"
+                    );
+                    assert!(close((outer + inner) / 2.0, 0.35), "{what}: radius 0.35");
+                }
+            }
             assert!(
                 close(material.base_color.alpha(), want.alpha),
                 "{panel:?} alpha {} vs {}",
@@ -613,9 +822,9 @@ fn the_sparks_fly_at_the_benchs_speed_and_keep_a_steady_count() {
 
 /// A Guardian Spirit save plays the client's heal landing (Heal's rising
 /// stream) on its holder with the heal's number in the heal green, and the
-/// "Saved" cue: gold "Saved" in `fct::INVULNERABLE`, at number size, 0.5 yd
-/// left of and 0.4 yd above the number, and the gold flash. The marker is
-/// consumed.
+/// "Saved" cue: gold "Saved" in `fct::INVULNERABLE`, at number size, at the
+/// number's anchor and one floating line above it on screen, and the gold
+/// flash. The marker is consumed.
 #[test]
 fn a_spirit_save_lands_the_heal_and_the_saved_cue() {
     let mut h = Harness::new();
@@ -647,11 +856,12 @@ fn a_spirit_save_lands_the_heal_and_the_saved_cue() {
     // centre).
     let anchor = Vec3::new(3.0, 1.0 + FCT_HEIGHT, 2.0);
     assert!(heal.world_position.distance(anchor) < 1e-4);
-    assert!(
-        saved
-            .world_position
-            .distance(anchor + Vec3::new(-0.5, 0.4, 0.0))
-            < 1e-4
+    assert!(saved.world_position.distance(anchor) < 1e-4);
+    assert_eq!(heal.offset, None, "the number stands at its anchor");
+    assert_eq!(
+        saved.offset,
+        Some(FctScreenOffset(egui::vec2(0.0, -theme::fct::LINE_STEP))),
+        "one line up"
     );
 
     let impacts: Vec<(Entity, HealImpactKind)> = h
@@ -691,9 +901,9 @@ fn a_save_without_a_heal_lands_only_the_saved_cue() {
     assert_eq!(h.count::<SavedFlash>(), 1);
 }
 
-/// The flash rides its holder's body (1.3 yd above the feet), faces the
-/// camera at 2.2 × 3.0 yd, keys its alpha to the bench's ramp, and is gone
-/// once 0.6 s have passed.
+/// The flash is the bench's gold glow, added light; it rides its holder's
+/// body (1.3 yd above the feet), faces the camera at 2.2 × 3.0 yd, keys its
+/// alpha to the bench's ramp, and is gone once 0.6 s have passed.
 #[test]
 fn the_saved_flash_rides_the_body_faces_the_camera_and_goes() {
     let mut h = Harness::new();
@@ -707,6 +917,25 @@ fn the_saved_flash_rides_the_body_faces_the_camera_and_goes() {
         .query_filtered::<Entity, With<SavedFlash>>()
         .single(h.app.world())
         .expect("one flash");
+    {
+        // Drawn as the bench draws it: its gold, added light, the glow
+        // gradient on a quad.
+        let world = h.app.world();
+        let material = world
+            .resource::<Assets<StandardMaterial>>()
+            .get(
+                &world
+                    .get::<MeshMaterial3d<StandardMaterial>>(flash)
+                    .unwrap()
+                    .0,
+            )
+            .unwrap();
+        assert_additive(material, [255, 215, 90], "the flash");
+        let tex = material.base_color_texture.as_ref().expect("a glow sprite");
+        assert_eq!(material.emissive_texture.as_ref(), Some(tex));
+        assert_glow_sprite(world, tex, "the flash");
+        assert_unit_quad(world, &world.get::<Mesh3d>(flash).unwrap().0, "the flash");
+    }
     h.app
         .world_mut()
         .get_mut::<Transform>(holder)
@@ -745,4 +974,121 @@ fn the_saved_flash_rides_the_body_faces_the_camera_and_goes() {
         h.app.world().get_entity(flash).is_err(),
         "the flash is gone after 0.6 s"
     );
+}
+
+/// The match camera (`CameraController`'s placement) at `zoom` and `yaw`,
+/// looking at `target`.
+fn match_camera(target: Vec3, zoom: f32, yaw: f32) -> Transform {
+    let pitch = CameraController::default().pitch;
+    let at = target
+        + Vec3::new(
+            zoom * pitch.sin() * yaw.sin(),
+            zoom * pitch.cos(),
+            zoom * pitch.sin() * yaw.cos(),
+        );
+    Transform::from_translation(at).looking_at(target, Vec3::Y)
+}
+
+/// Where `p` lands on a `size` viewport (points) through `camera` and Bevy's
+/// default perspective (45° field of view).
+fn project(camera: &Transform, p: Vec3, size: egui::Vec2) -> egui::Pos2 {
+    let projection = PerspectiveProjection {
+        aspect_ratio: size.x / size.y,
+        ..default()
+    };
+    let clip = projection.get_clip_from_view() * camera.compute_matrix().inverse() * p.extend(1.0);
+    assert!(clip.w > 0.0, "in front of the camera");
+    let ndc = clip.truncate() / clip.w;
+    egui::pos2((ndc.x + 1.0) / 2.0 * size.x, (1.0 - ndc.y) / 2.0 * size.y)
+}
+
+/// At the match camera, "Saved" never lies on top of the heal's number: both
+/// labels as the consumer spawns them, projected and placed by the
+/// renderer's own placement rule (`fct_placements`), measured in the client's own
+/// fonts (`ui::install`) with their 2 pt outline, are apart at every yaw from
+/// the closest zoom to the farthest.
+#[test]
+fn saved_and_the_heal_number_never_overlap_at_the_match_camera() {
+    let mut h = Harness::new();
+    let holder = h.spawn_unit(Vec3::new(3.0, 1.0, 2.0));
+    h.save(holder, "Guardian Spirit", Some(126.0));
+    h.tick(1);
+    let world = h.app.world_mut();
+    let mut texts = world.query::<(&FloatingCombatText, Option<&FctScreenOffset>)>();
+
+    let ctx = egui::Context::default();
+    arenasim::ui::install(&ctx);
+    let _ = ctx.run(egui::RawInput::default(), |_| {});
+    let size_of = |text: &str| {
+        ctx.fonts(|f| {
+            f.layout_no_wrap(
+                text.to_string(),
+                egui::FontId::proportional(theme::fct::NUMBER_SIZE),
+                egui::Color32::WHITE,
+            )
+            .size()
+        })
+    };
+    let outline = egui::vec2(4.0, 4.0);
+    let viewport = egui::vec2(1280.0, 720.0);
+    let default_zoom = CameraController::default().zoom_distance;
+    let mut checked = 0;
+    for zoom in [20.0, default_zoom, 220.0] {
+        for step in 0..8 {
+            let yaw = step as f32 * std::f32::consts::FRAC_PI_4;
+            let cam = match_camera(Vec3::new(3.0, 1.0, 2.0), zoom, yaw);
+            // Placed by the renderer's own rule, through this camera.
+            let placed = fct_placements(texts.iter(world), |p| Some(project(&cam, p, viewport)));
+            assert_eq!(placed.len(), 2, "both labels on screen");
+            let rect = |text: &str| {
+                let (_, at) = placed
+                    .iter()
+                    .find(|(t, _)| t.text == text)
+                    .unwrap_or_else(|| panic!("{text} placed"));
+                egui::Rect::from_center_size(*at, size_of(text) + outline)
+            };
+            let (a, b) = (rect("+126"), rect("Saved"));
+            assert!(
+                !a.intersects(b),
+                "zoom {zoom}, yaw {yaw}: the number {a:?} and Saved {b:?} overlap"
+            );
+            assert!(b.max.y < a.min.y, "Saved stands above the number");
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 24);
+}
+
+/// A save whose holder another blow of the same frame killed plays nothing on
+/// the corpse: no "Saved", no flash, no heal. A living holder saved in the
+/// same frame still gets its cue.
+#[test]
+fn a_save_on_a_corpse_plays_nothing() {
+    let mut h = Harness::new();
+    let corpse = h.spawn_unit(Vec3::new(0.0, 1.0, 0.0));
+    h.app
+        .world_mut()
+        .get_mut::<Combatant>(corpse)
+        .unwrap()
+        .current_health = 0.0;
+    let living = h.spawn_unit(Vec3::new(5.0, 1.0, 0.0));
+    h.save(corpse, "Guardian Spirit", None);
+    h.save(living, "Cheat Death", None);
+    h.tick(1);
+    assert_eq!(
+        h.count::<KillingBlowPrevented>(),
+        0,
+        "both markers consumed"
+    );
+    let texts: Vec<String> = h.texts().into_iter().map(|t| t.text).collect();
+    assert_eq!(texts, vec!["Saved".to_string()], "only the living holder's");
+    let flashes: Vec<Entity> = h
+        .app
+        .world_mut()
+        .query::<&SavedFlash>()
+        .iter(h.app.world())
+        .map(|f| f.target)
+        .collect();
+    assert_eq!(flashes, vec![living]);
+    assert_eq!(h.count::<HealImpact>(), 0);
 }
