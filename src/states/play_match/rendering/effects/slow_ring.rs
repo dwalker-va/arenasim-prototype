@@ -13,8 +13,10 @@ use crate::states::play_match::components::*;
 // ==============================================================================
 //
 // One treatment for `AuraType::MovementSpeedSlow`, keyed on the aura type and
-// never on an ability, so all six sources share it: Frostbolt, Frost Armor's
-// chill, Frost Shock, Concussive Shot, Crippling Poison and the Frost Trap zone.
+// never on an ability, so all seven sources share it: Frostbolt, Frost Armor's
+// chill, Frost Shock, Concussive Shot, Crippling Poison, the Frost Trap zone
+// and Mind Flay's slow (which has no client visual of its own; the AS-335
+// ruling draws it here in a Shadow tint).
 // Research and the decisions behind every choice below:
 // `docs/design/2026-09-26-slow-state-client-data.md` ("Decision", "Kit 360").
 //
@@ -138,6 +140,10 @@ pub enum SlowTint {
     /// Crippling Poison. The client gives the poison no state colour of its
     /// own, so green comes from the Nature school.
     Nature,
+    /// Mind Flay's slow. The client draws the slow nothing of its own (only
+    /// the channel's stars and beam, `mind_flay.rs`); the AS-335 ruling gives
+    /// it this ring in the Shadow school's colour.
+    Shadow,
 }
 
 impl SlowTint {
@@ -152,6 +158,7 @@ impl SlowTint {
             "Frostbolt" | "Frost Armor" | "Frost Shock" | "Frost Trap" => Some(SlowTint::Frost),
             "Concussive Shot" => Some(SlowTint::Physical),
             "Crippling Poison" => Some(SlowTint::Nature),
+            "Mind Flay" => Some(SlowTint::Shadow),
             _ => None,
         }
     }
@@ -165,6 +172,7 @@ impl SlowTint {
             SlowTint::Frost => SpellSchool::Frost.color(),
             SlowTint::Physical => PHYSICAL_COLOR,
             SlowTint::Nature => SpellSchool::Nature.color(),
+            SlowTint::Shadow => SpellSchool::Shadow.color(),
         }
     }
 }
