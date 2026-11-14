@@ -162,9 +162,11 @@ pub struct ShiftView {
     pub rooted: bool,
     pub snared: bool,
     /// A visible melee enemy or pet targeting the Druid within the intent
-    /// radius — the kind of threat a faster Druid can leave behind.
+    /// radius, not held in crowd control — the kind of threat a faster Druid
+    /// can leave behind.
     pub chaser: bool,
-    /// A visible melee enemy or pet targeting the Druid within striking reach.
+    /// A visible melee enemy or pet targeting the Druid within striking
+    /// reach, not held in crowd control.
     pub melee_on_me: bool,
     pub self_health_pct: f32,
 }
@@ -182,10 +184,12 @@ impl ShiftView {
     ) -> Self {
         let has =
             |ty: AuraType| auras.is_some_and(|a| a.auras.iter().any(|aura| aura.effect_type == ty));
+        // A melee or pet held in crowd control chases no one (AS-496): it
+        // neither makes a snare worth shifting out of nor is on the Druid.
         let chasers = || {
             ctx.enemies_targeting(entity)
                 .into_iter()
-                .filter(|e| e.class.is_melee() || e.is_pet)
+                .filter(|e| (e.class.is_melee() || e.is_pet) && !ctx.is_held(e.entity))
         };
         Self {
             pressured,

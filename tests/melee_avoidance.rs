@@ -917,6 +917,15 @@ fn a_swing_held_off_a_friendly_fear_is_not_avoided() {
 /// `roll_avoidance` returning before any draw plays each cell's match log
 /// byte-identically to the tree itself. (The logs carry 14 crits and 7
 /// eliminations.)
+///
+/// Re-recorded for AS-496, a held enemy no longer pressuring its target: the
+/// 3v3 204 -> 223; the other two cells held. Its trace first differs at
+/// 19.2s, the frame the Hunter's Freezing Trap holds the Paladin, which was
+/// on the Shaman: the Shaman is no longer pressured, so its team's sight
+/// yield leaves the `healer_pressured` rule. The evidence is the same: a
+/// scratch build of AS-496's tree with `roll_avoidance` returning before any
+/// draw plays each cell's match log byte-identically to the tree itself.
+/// (The logs carry 13 crits and 8 eliminations.)
 #[test]
 fn a_match_without_avoidance_draws_what_it_drew_before() {
     for (team1, team2, map, profile, seed, recorded) in ZERO_AVOIDANCE_DRAWS {
@@ -960,7 +969,7 @@ const ZERO_AVOIDANCE_DRAWS: &[DrawPin] = &[
         "PillaredArena",
         "TeamPlan",
         5,
-        204,
+        223,
     ),
     (&["Rogue"], &["Warrior"], "BasicArena", "Legacy", 3, 59),
 ];

@@ -373,6 +373,7 @@ mod tests {
             dying: false,
             pressured,
             pressure_onset: pressured,
+            held_attacker: false,
         }
     }
 

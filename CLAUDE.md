@@ -1071,6 +1071,18 @@ in-and-out bob (AS-249; `tests/healer_positioning.rs` pins the reversal rate).
 `TeamPlan` enters on the plain trigger: there PRESSURED is the team solve's,
 which holds cover in reach of the ally, and the gap measurably cost its heal line.
 
+**A held enemy is no pressure** (AS-496; no RON knob). An enemy under crowd
+control that stops it acting (`class_ai::holds`: stun, fear, polymorph,
+incapacitate, cyclone — never a root) does not pressure its target
+(`situation::pressure_threats`), so it neither enters nor holds a healer's
+PRESSURED posture, puts no teammate in danger (no Peel on it), and chases no
+Druid out of a snare. Its pressure returns the frame the hold ends. The hold
+is still a window: a PRESSURED healer whose attacker is held
+(`AllyStanding::held_attacker`) still opens its ESCAPE window on it
+(`healer_postures::escape_entry_window`, the one gate all three posture
+machines ask). Both profiles. Scenes `tests/held_attacker_scenes.rs`, staged
+`tests/held_attacker_staged.rs`.
+
 **Out of reach of a focused teammate (`Legacy` PRESSURED)** — the scorer's
 anchor mask keeps a PRESSURED healer in heal range and sight of its anchor ally.
 When the healer is already out of reach, so every step is masked, the fallback
