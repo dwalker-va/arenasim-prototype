@@ -94,7 +94,8 @@ const BAND_TYPES: &[AuraType] = &[
     // Sacred Shield's arming buff (AS-421): the band until AS-375 draws its
     // disc and absorb card.
     AuraType::TriggeredAbsorb,
-    // Aura Mastery's immunity (AS-420): the band until AS-374 draws it.
+    // Aura Mastery's immunity (AS-420): the band for an unnamed one; Aura
+    // Mastery's own is owned by its named landing (AS-374).
     AuraType::SilenceInterruptImmunity,
     // Shadow Dance's window (AS-419): the band until AS-368 draws it.
     AuraType::ShadowDance,

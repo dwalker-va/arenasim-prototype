@@ -46,6 +46,10 @@ use crate::states::play_match::components::*;
 // Ice Barrier's kit 207 (`ice_precast_high_hand.m2`) is the fourth, Frost: a
 // 1000 ms deep-blue glow and pulsing ring with sparks, also an instant's
 // launch only (`docs/design/2026-10-17-ice-barrier-client-data.md`).
+// The Paladin talent instants (AS-374,
+// `docs/design/2026-10-18-paladin-talent-client-data.md`) add the fifth, the
+// instant Holy flash, and reuse the Arcane hands for Divine Favor (kit 425 is
+// Moonfire's `magic_cast_hand.m2`); both flash off their aura's landing.
 //
 // Timing is event-edge-driven in the source: the precast loop lives from the
 // cast-start edge to the cast-end edge — its duration IS the actual cast
@@ -162,6 +166,38 @@ pub const HEAL_CAST_READY_PITCH: f32 = -0.10;
 pub const HEAL_CAST_RELEASE_PITCH: f32 = 0.16;
 /// Seconds the loop pitch eases in over at cast start.
 pub const HEAL_CAST_POSTURE_EASE_SECS: f32 = 0.25;
+
+// --- The instant Holy hand flash (AS-374) ------------------------------------
+//
+// The Paladin talent instants with a Holy cast kit (Aura Mastery's 191,
+// Blessing of Sacrifice's 186/189 — `holy_precast_high_hand.m2` and
+// `holy_precast_med_hand.m2`) have no cast window, so the precast loop never
+// plays. They flash the Holy glow and wisps once, 0.7 s on both hands, gold,
+// under the AS-337 bench's hand envelope (signed off at version
+// 1792379243-e3d6, `castHands`): in by 80 ms, 0.8 at 420 ms (60% of the
+// flash), out at 700 ms. The Sacred Shield, Divine Protection and Repentance
+// cards reuse it (`HealCastKind::HolyFlash`).
+
+/// How long the instant Holy hand flash plays.
+pub const HOLY_INSTANT_FLASH_SECS: f32 = 0.7;
+/// Its alpha envelope, `(seconds, weight)`.
+pub const HOLY_INSTANT_FLASH_ENVELOPE: [(f32, f32); 4] =
+    [(0.0, 0.0), (0.08, 1.0), (0.42, 0.8), (0.7, 0.0)];
+
+/// The instant Holy hand flash's weight `age` seconds in.
+pub fn holy_instant_flash_alpha(age: f32) -> f32 {
+    let e = &HOLY_INSTANT_FLASH_ENVELOPE;
+    if age <= e[0].0 || age >= e[e.len() - 1].0 {
+        return 0.0;
+    }
+    for pair in e.windows(2) {
+        let ((t0, a0), (t1, a1)) = (pair[0], pair[1]);
+        if age <= t1 {
+            return a0 + (a1 - a0) * (age - t0) / (t1 - t0);
+        }
+    }
+    0.0
+}
 
 // --- Instants (the Druid's zero-length casts) ---------------------------------
 
@@ -358,6 +394,7 @@ pub fn heal_cast_flare_secs(kind: HealCastKind) -> f32 {
         HealCastKind::Nature => NATURE_LAUNCH_BURST_SECS,
         HealCastKind::Arcane => MOONFIRE_HAND_SECS,
         HealCastKind::Frost => IB_HAND_SECS,
+        HealCastKind::HolyFlash => HOLY_INSTANT_FLASH_SECS,
     }
 }
 
@@ -366,7 +403,7 @@ pub fn heal_cast_flare_secs(kind: HealCastKind) -> f32 {
 /// stays total.
 pub fn heal_cast_glow_sizes(kind: HealCastKind) -> [f32; 2] {
     let sizes = match kind {
-        HealCastKind::Holy => HOLY_CAST_GLOW_SIZES,
+        HealCastKind::Holy | HealCastKind::HolyFlash => HOLY_CAST_GLOW_SIZES,
         HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => NATURE_CAST_GLOW_SIZES,
     };
     [sizes[0] * GLOW_SCALE, sizes[1] * GLOW_SCALE]
@@ -375,7 +412,7 @@ pub fn heal_cast_glow_sizes(kind: HealCastKind) -> [f32; 2] {
 /// A family's wisp width (Arcane and Frost draw no wisps; see above).
 pub fn heal_cast_wisp_width(kind: HealCastKind) -> f32 {
     match kind {
-        HealCastKind::Holy => HOLY_CAST_WISP_WIDTH,
+        HealCastKind::Holy | HealCastKind::HolyFlash => HOLY_CAST_WISP_WIDTH,
         HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => NATURE_CAST_WISP_WIDTH,
     }
 }
@@ -464,7 +501,7 @@ fn water_ring_blue() -> Color {
 
 fn glow_color(kind: HealCastKind) -> Color {
     match kind {
-        HealCastKind::Holy => holy_gold_pale(),
+        HealCastKind::Holy | HealCastKind::HolyFlash => holy_gold_pale(),
         HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => nature_green(),
     }
 }
@@ -472,7 +509,7 @@ fn glow_color(kind: HealCastKind) -> Color {
 /// Source alphas: Holy ribbons 0.80, Nature threads 0.70.
 fn wisp_alpha(kind: HealCastKind) -> f32 {
     match kind {
-        HealCastKind::Holy => 0.80,
+        HealCastKind::Holy | HealCastKind::HolyFlash => 0.80,
         HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => 0.70,
     }
 }
@@ -494,7 +531,7 @@ pub struct HealCastAssets {
 }
 
 impl HealCastAssets {
-    fn build(meshes: &mut Assets<Mesh>, images: &mut Assets<Image>) -> Self {
+    pub(super) fn build(meshes: &mut Assets<Mesh>, images: &mut Assets<Image>) -> Self {
         Self {
             quad: meshes.add(Rectangle::new(1.0, 1.0)),
             // The water-ring sprite: a thin annulus, billboarded and expanded
@@ -649,6 +686,9 @@ pub fn spawn_instant_cast_hands(
                 // (`spawn_divine_shield_cast_hands`), never a `Landed` marker,
                 // so they play once per cast.
                 && cast.ability != AbilityType::DivineShield
+                // The Paladin talent instants' hands come off their aura's
+                // landing (`paladin_oneshots.rs`) for the same reason.
+                && !AuraLandingKind::flashes_hands_for(cast.ability)
         })
         .map(|(ending, cast)| (ending.caster, cast.ability));
     let marked = fired.iter().map(|signal| (signal.caster, signal.ability));
@@ -711,9 +751,10 @@ pub fn spawn_divine_shield_cast_hands(
 
 /// The launch alone on both of `caster`'s spell hands, in the family
 /// [`HealCastKind::for_ability`] routes `ability` to (nothing if unrouted, or
-/// for a caster with no rendered body).
+/// for a caster with no rendered body). Also called by the Paladin talent
+/// one-shots (`paladin_oneshots.rs`), whose hands ride their aura's landing.
 #[allow(clippy::too_many_arguments)]
-fn flash_instant_hands(
+pub(super) fn flash_instant_hands(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
@@ -925,7 +966,8 @@ fn spawn_hand_rig(
         return;
     }
 
-    if !instant || kind == HealCastKind::Holy || NATURE_INSTANT_HAND_GLOW {
+    let holy = matches!(kind, HealCastKind::Holy | HealCastKind::HolyFlash);
+    if !instant || holy || NATURE_INSTANT_HAND_GLOW {
         for (role, strength, alpha) in [
             (HealCastPieceRole::GlowOuter, 2.0, 0.55),
             (HealCastPieceRole::GlowCore, 2.8, 0.85),
@@ -946,15 +988,17 @@ fn spawn_hand_rig(
             ));
         }
     }
-    // Wisps belong to the precast loop (and to Holy's re-flare of it); a
-    // Nature launch is the jet, never the swirl.
-    if !instant || kind == HealCastKind::Holy {
+    // Wisps belong to the precast loop (and to Holy's re-flare of it, and
+    // its instant flash); a Nature launch is the jet, never the swirl.
+    if !instant || holy {
         let wisp_width = heal_cast_wisp_width(kind);
         for index in 0..3_u32 {
             let (color, texture) = match kind {
                 // Ribbon-blur streamers for Holy, star threads for Nature
                 // — the source's genericglow2b vs star11b split.
-                HealCastKind::Holy => (holy_wisp_color(index), assets.dot.clone()),
+                HealCastKind::Holy | HealCastKind::HolyFlash => {
+                    (holy_wisp_color(index), assets.dot.clone())
+                }
                 _ => (nature_wisp_color(index), assets.star.clone()),
             };
             let material = additive_material(materials, color, 2.2, Some(texture));
@@ -1004,7 +1048,12 @@ pub fn update_heal_cast_glows(
 
         // The flare clock, and the alpha/scale factors each phase applies.
         // `bloom` covers cast start; `flare_alpha`/`flare_scale` cover launch.
-        let bloom = (age / HEAL_CAST_BLOOM_SECS).clamp(0.0, 1.0);
+        // The instant Holy flash rides its own envelope, which brings it in.
+        let bloom = if rig.kind == HealCastKind::HolyFlash {
+            1.0
+        } else {
+            (age / HEAL_CAST_BLOOM_SECS).clamp(0.0, 1.0)
+        };
         let (flare_alpha, flare_scale) = match rig.phase {
             HealCastPhase::Loop => (1.0, 1.0),
             HealCastPhase::Flare { remaining } => {
@@ -1015,13 +1064,18 @@ pub fn update_heal_cast_glows(
                 }
                 rig.phase = HealCastPhase::Flare { remaining };
                 let total = heal_cast_flare_secs(rig.kind);
-                let t = 1.0 - remaining / total;
-                // The re-flare: brighter than the loop ever was, swelling as
-                // it dies (Holy). Nature's loop pieces are already gone.
-                (
-                    (1.0 + HOLY_LAUNCH_FLARE_INTENSITY) * (1.0 - t),
-                    1.0 + 0.5 * HOLY_LAUNCH_FLARE_INTENSITY * t,
-                )
+                if rig.kind == HealCastKind::HolyFlash {
+                    // The instant flash: the bench's envelope, at full size.
+                    (holy_instant_flash_alpha(total - remaining), 1.0)
+                } else {
+                    let t = 1.0 - remaining / total;
+                    // The re-flare: brighter than the loop ever was, swelling as
+                    // it dies (Holy). Nature's loop pieces are already gone.
+                    (
+                        (1.0 + HOLY_LAUNCH_FLARE_INTENSITY) * (1.0 - t),
+                        1.0 + 0.5 * HOLY_LAUNCH_FLARE_INTENSITY * t,
+                    )
+                }
             }
         };
 

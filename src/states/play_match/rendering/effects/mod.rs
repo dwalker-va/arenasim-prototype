@@ -116,3 +116,5 @@ mod druid_heals;
 pub use druid_heals::*;
 mod shadow_word_pain;
 pub use shadow_word_pain::*;
+mod paladin_oneshots;
+pub use paladin_oneshots::*;
