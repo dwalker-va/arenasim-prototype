@@ -27,15 +27,16 @@ use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
     ActiveAuras, Aura, AuraPending, AuraType, CameraController, CastEnding, CastEndingKind,
-    Combatant, HealCastHand, HealCastKind, LandedCast, ShieldCard, ShieldKind, ShieldVisual,
-    VisualBody, DIVINE_PROTECTION_AURA,
+    Combatant, HealCastHand, HealCastKind, LandedCast, PlayMatchEntity, ShieldCard, ShieldKind,
+    ShieldVisual, VisualBody, DIVINE_PROTECTION_AURA,
 };
 use arenasim::states::play_match::{
     consume_cast_ending_signals, globe_flame_texture, globe_pieces, oneshot_glow_texture,
-    oneshot_ring_texture, place_divine_protection_globes, place_shield_cards,
-    spawn_instant_cast_hands, star_flash_texture, update_divine_protection_globes,
-    update_heal_cast_glows, update_shield_visuals, DivineProtectionGlobe,
-    DivineProtectionGlobePiece, GlobePiece, GlobeSprite, DIVINE_SHIELD_AURA_NAME,
+    oneshot_ring_texture, place_divine_protection_globes, place_shield_cards, pws_card_translation,
+    shield_layer_is_blended, shield_layer_sort_bias, shield_tuning, spawn_instant_cast_hands,
+    star_flash_texture, update_divine_protection_globes, update_heal_cast_glows,
+    update_shield_visuals, DivineProtectionGlobe, DivineProtectionGlobePiece, GlobePiece,
+    GlobeSprite, DIVINE_SHIELD_AURA_NAME, SACRED_SHIELD_AURA_NAME,
 };
 use arenasim::CharacterClass;
 
@@ -419,6 +420,15 @@ fn the_globe_rises_on_the_paladin_with_one_holy_hand_flash() {
     let globes = h.globes();
     assert_eq!(globes.len(), 1, "one globe");
     assert_eq!(globes[0].0, paladin);
+    let mut rigs = h
+        .app
+        .world_mut()
+        .query_filtered::<(), (With<DivineProtectionGlobe>, With<PlayMatchEntity>)>();
+    assert_eq!(
+        rigs.iter(h.app.world()).count(),
+        1,
+        "the globe is cleared with the match"
+    );
     let drawn: BTreeSet<GlobePiece> = h.pieces().iter().map(|d| d.piece).collect();
     assert_eq!(drawn, every_piece(), "every layer the bench signed off");
     assert_eq!(h.pieces().len(), 27, "each piece once");
@@ -556,12 +566,31 @@ fn every_piece_draws_what_the_bench_draws_across_the_buff() {
 }
 
 /// A buff ending inside the pale-gold layer (0.95 s), so the 0.3 s fade-out
-/// is drawn over lit pieces and compared too.
+/// is drawn over lit gold pieces and compared too.
 #[test]
 fn a_buff_ending_while_lit_fades_as_the_bench_fades() {
     let (lit, frames) = compare_across_a_buff(0.95);
     assert!(lit.contains(&GlobePiece::GoldGlow), "{lit:?}");
     assert!((57..=61).contains(&frames), "{frames} frames");
+}
+
+/// A buff ending inside the red layer and the pulse (1.6 s), so the fade-out
+/// is drawn over the red glow and ring, the pulse's flash and its flames,
+/// and compared there too.
+#[test]
+fn a_buff_ending_in_the_pulse_fades_as_the_bench_fades() {
+    let (lit, frames) = compare_across_a_buff(1.6);
+    for piece in [
+        GlobePiece::RedGlow,
+        GlobePiece::RedRing,
+        GlobePiece::PulseFlash,
+        GlobePiece::PulseFlame { index: 0 },
+        GlobePiece::PulseFlame { index: 1 },
+        GlobePiece::PulseFlame { index: 2 },
+    ] {
+        assert!(lit.contains(&piece), "{piece:?} lit: {lit:?}");
+    }
+    assert!((98..=102).contains(&frames), "{frames} frames");
 }
 
 /// The fade, read off the aura's own time: a buff with 0.1 s left draws the
@@ -699,10 +728,10 @@ fn a_landed_marker_does_not_flash_the_hands_twice() {
 
 // ── what is drawn ───────────────────────────────────────────────────────────
 
-/// Every piece's material and mesh: additive, unlit, both faces, the bench's
-/// sprite (read back), on a unit quad.
+/// Every piece's material and mesh: composited as the bench's call draws it,
+/// unlit, both faces, the bench's sprite (read back), on a unit quad.
 #[test]
-fn every_piece_is_an_additive_sprite_on_a_unit_quad() {
+fn every_piece_is_the_benchs_sprite_and_blend_on_a_unit_quad() {
     let mut h = Harness::new();
     let (paladin, _) = h.unit(CharacterClass::Paladin, Vec3::new(0.0, 1.0, 0.0));
     h.protect(paladin);
@@ -714,11 +743,37 @@ fn every_piece_is_an_additive_sprite_on_a_unit_quad() {
         world.resource::<Assets<Mesh>>(),
     );
     let mut sprites = BTreeSet::new();
+    let mut blends = BTreeSet::new();
     for d in &drawn {
         let m = &d.material;
-        assert!(matches!(m.alpha_mode, AlphaMode::Add), "{:?}", d.piece);
+        // The bench's call for the piece, and how it composites it:
+        // `bbGlow` and `ring3` set 'lighter'; `sprite(...)` leaves the
+        // canvas at its default 'source-over'.
+        let (call, additive) = match d.piece {
+            GlobePiece::GoldGlow | GlobePiece::RedGlow | GlobePiece::PulseFlash => ("bbGlow", true),
+            GlobePiece::GoldRing
+            | GlobePiece::GoldRingUpper
+            | GlobePiece::GoldRingLower
+            | GlobePiece::RedRing => ("ring3", true),
+            GlobePiece::PulseFlame { .. } => ("sprite('flame')", false),
+            GlobePiece::Glint { .. } => ("sprite('star')", false),
+        };
+        if additive {
+            assert!(
+                matches!(m.alpha_mode, AlphaMode::Add),
+                "{:?} is the bench's {call}: additive",
+                d.piece
+            );
+        } else {
+            assert!(
+                matches!(m.alpha_mode, AlphaMode::Blend),
+                "{:?} is the bench's {call}: source-over",
+                d.piece
+            );
+        }
+        blends.insert((call, additive));
         assert!(m.unlit && m.double_sided && m.cull_mode.is_none());
-        assert_eq!(m.depth_bias, 0.1, "{:?} sorts over Divine Shield", d.piece);
+        assert_eq!(m.depth_bias, 0.25, "{:?} sorts over the shields", d.piece);
         let expected = match d.piece.sprite() {
             GlobeSprite::Glow => oneshot_glow_texture(),
             GlobeSprite::Ring => oneshot_ring_texture(),
@@ -740,6 +795,16 @@ fn every_piece_is_an_additive_sprite_on_a_unit_quad() {
         assert_eq!(Vec3::from(aabb.half_extents), Vec3::new(0.5, 0.5, 0.0));
     }
     assert_eq!(sprites.len(), 4, "glow, ring, flame and star: {sprites:?}");
+    assert_eq!(
+        blends,
+        BTreeSet::from([
+            ("bbGlow", true),
+            ("ring3", true),
+            ("sprite('flame')", false),
+            ("sprite('star')", false)
+        ]),
+        "every call the bench makes is drawn"
+    );
     // The sprites a role draws with are the bench's.
     use GlobePiece as P;
     for (piece, sprite) in [
@@ -864,14 +929,15 @@ fn match_camera(target: Vec3, zoom: f32, pitch: f32, yaw: f32) -> Transform {
 
 /// The draw order at the match camera's distance, over every pitch it allows
 /// (its own 38.7° among them), the body offsets the animation layers write,
-/// and Divine Shield's whole life beside it (its tall birth pop, its loop and
-/// its death swell): every piece on the globe's axis (its glows and rings)
-/// stands on the body's axis and sorts in front of the blended body, as the
-/// bench draws it over the body; and Divine Shield's blended outline and tint
-/// sort behind every one of them, so they never dim the globe's light. Both
-/// rigs draw throughout.
+/// and the whole life (birth, loop and death) of the two shields a Paladin
+/// wears beside the globe, its Divine Shield and its own Sacred Shield
+/// absorb: every piece on the globe's axis (its glows and rings) stands on
+/// the body's axis and sorts in front of the blended body, as the bench draws
+/// it over the body; and every shield's blended outline and tint sort behind
+/// every one of them, so they never dim the globe's light. All three rigs
+/// draw throughout.
 #[test]
-fn the_globe_sorts_over_the_body_and_divine_shield_at_the_match_camera() {
+fn the_globe_sorts_over_the_body_and_the_shields_at_the_match_camera() {
     let controller = CameraController::default();
     assert_eq!(controller.zoom_distance, 60.0);
     let offsets = [
@@ -907,11 +973,26 @@ fn the_globe_sorts_over_the_body_and_divine_shield_at_the_match_camera() {
                 ..Default::default()
             },
         );
-        // Birth and loop for 1.6 s, then the shield ends and swells away for 1 s.
+        // A live Sacred Shield absorb: the Protection Paladin's own shield,
+        // raised often inside its Divine Protection.
+        h.give(
+            paladin,
+            Aura {
+                effect_type: AuraType::Absorb,
+                duration: 6.0,
+                magnitude: 120.0,
+                ability_name: SACRED_SHIELD_AURA_NAME.into(),
+                ..Default::default()
+            },
+        );
+        // Birth and loop for 1.6 s, then both shields end and swell away
+        // for 1 s.
         for frame in 0..160_usize {
             if frame == 100 {
-                h.auras(paladin)
-                    .retain(|a| a.ability_name != DIVINE_SHIELD_AURA_NAME);
+                h.auras(paladin).retain(|a| {
+                    a.ability_name != DIVINE_SHIELD_AURA_NAME
+                        && a.ability_name != SACRED_SHIELD_AURA_NAME
+                });
             }
             let (pitch, yaw) = views[frame % views.len()];
             *h.app.world_mut().get_mut::<Transform>(cam).unwrap() =
@@ -937,14 +1018,27 @@ fn the_globe_sorts_over_the_body_and_divine_shield_at_the_match_camera() {
                         .then(|| range.distance_translation(&g.translation()) + m.depth_bias)
                 })
                 .collect();
-            let shielded = {
+            let shielded: BTreeSet<String> = {
                 let mut shields = h.app.world_mut().query::<&ShieldVisual>();
                 shields
                     .iter(h.app.world())
-                    .any(|s| s.kind == ShieldKind::DivineShield && s.bearer == paladin)
+                    .filter(|s| s.bearer == paladin)
+                    .map(|s| format!("{:?}", s.kind))
+                    .collect()
             };
-            assert!(shielded, "Divine Shield draws too (frame {frame})");
-            assert_eq!(blended.len(), 2, "Divine Shield's outline and tint");
+            assert_eq!(
+                shielded,
+                BTreeSet::from([
+                    format!("{:?}", ShieldKind::DivineShield),
+                    format!("{:?}", ShieldKind::SacredShield)
+                ]),
+                "both shields draw too (frame {frame})"
+            );
+            assert_eq!(
+                blended.len(),
+                3,
+                "Divine Shield's outline and tint, Sacred Shield's outline"
+            );
             let pieces = h.pieces();
             assert_eq!(pieces.len(), 27, "the globe draws too");
             for d in pieces {
@@ -967,7 +1061,7 @@ fn the_globe_sorts_over_the_body_and_divine_shield_at_the_match_camera() {
                 for shield in &blended {
                     assert!(
                         key > *shield,
-                        "{what}: Divine Shield's blended layer sorts over it by {}",
+                        "{what}: a shield's blended layer sorts over it by {}",
                         shield - key
                     );
                 }
@@ -976,6 +1070,66 @@ fn the_globe_sorts_over_the_body_and_divine_shield_at_the_match_camera() {
         }
     }
     assert_eq!(checked, 6 * 160 * 7);
+}
+
+/// The sort bias, proved for every shield a unit can wear beside the globe,
+/// at every pitch: a shield card's blended layer stands on the same axis,
+/// `dh` above the globe's lowest on-axis piece and pushed `push` toward the
+/// camera, so it leads that piece by at most `hypot(dh, push)` of view depth
+/// plus its own sort bias. The globe's bias clears that for every shield
+/// kind, every blended layer and every card scale its tracks reach (swept
+/// wide, 0 to 1.5 of the card's height).
+#[test]
+fn the_sort_bias_clears_every_shields_blended_layers() {
+    let mut h = Harness::new();
+    let (paladin, _) = h.unit(CharacterClass::Paladin, Vec3::new(0.0, 1.0, 0.0));
+    h.protect(paladin);
+    h.tick(2);
+    let body_centre = Vec3::new(0.0, 1.0, 0.0);
+    let lowest = h
+        .pieces()
+        .iter()
+        .filter(|d| {
+            !matches!(
+                d.piece,
+                GlobePiece::PulseFlame { .. } | GlobePiece::Glint { .. }
+            )
+        })
+        .map(|d| d.at.y - body_centre.y)
+        .fold(f32::MAX, f32::min);
+    assert!(
+        (lowest - 0.10).abs() < 1e-4,
+        "the lower gold ring: {lowest}"
+    );
+    let bias = h
+        .pieces()
+        .iter()
+        .map(|d| d.material.depth_bias)
+        .fold(f32::MAX, f32::min);
+    let mut checked = 0;
+    for kind in ShieldKind::ALL {
+        let push = shield_tuning(kind).push;
+        for &layer in kind.layers() {
+            if !shield_layer_is_blended(layer) {
+                continue;
+            }
+            for step in 0..=30 {
+                let scale = Vec2::new(1.0, step as f32 * 0.05);
+                let at = pws_card_translation(kind, Vec3::ZERO, layer, scale, Vec3::Z * 50.0);
+                let lead = (at.y - lowest).max(0.0).hypot(push) + shield_layer_sort_bias(layer);
+                assert!(
+                    lead < bias,
+                    "{kind:?} {layer:?} at height scale {}: leads by {lead}, bias {bias}",
+                    scale.y
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(
+        checked >= 31 * 5,
+        "{checked}: every kind's outline at least"
+    );
 }
 
 /// At the match camera and a 1080p view, the globe's equator as drawn spans

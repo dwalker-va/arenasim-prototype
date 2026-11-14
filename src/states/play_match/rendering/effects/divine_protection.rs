@@ -40,9 +40,9 @@
 //! draw order against the blended capsule fixed: every piece but the flying
 //! flames and the glints stands on the body's axis, above its centre, so it
 //! sorts in front at every camera pitch. Divine Shield's cards stand on the
-//! same axis lower down; [`GLOBE_SORT_BIAS`] keeps their blended outline and
-//! tint behind the globe's light, so the two draw together, the globe over
-//! the cards.
+//! same axis, and so do Sacred Shield's; [`GLOBE_SORT_BIAS`] keeps every
+//! shield's blended outline and tint behind the globe's light, so they draw
+//! together, the globe over the cards.
 //!
 //! Graphical-only: nothing here writes sim state, no `game_rng` is drawn (the
 //! scatter is the bench's own hash), and every system is registered in
@@ -203,13 +203,17 @@ pub const GLOBE_FLAME_ELLIPSE: (f32, f32) = (0.6, 1.0);
 pub const GLOBE_FLAME_ELLIPSE_LIFT: f32 = 0.25;
 
 /// The transparent pass's sort bias for every piece, yards of view depth
-/// (Bevy adds it to the sort distance; larger draws later, in front). Divine
-/// Shield's blended outline and tint stand on the same axis, their centres
-/// up to about 0.04 yd of view depth ahead of the globe's lower ring at the
-/// steepest pitch the camera allows, and would otherwise draw over its light
-/// and dim it. Small beside any other unit's distance, and truncated to an
-/// i32 for the depth-bias state, so the depth test is untouched.
-pub const GLOBE_SORT_BIAS: f32 = 0.1;
+/// (Bevy adds it to the sort distance; larger draws later, in front). The
+/// shields' cards stand on the same axis, and their blended outline and tint
+/// would otherwise draw over the globe's light and dim it: Sacred Shield's
+/// outline (a Protection Paladin's own absorb, often up inside its Divine
+/// Protection) stands 0.13 yd above the globe's lower ring, and every
+/// shield's blended layer leads that ring by at most about 0.19 yd of view
+/// depth at any pitch the camera allows, its card at any scale
+/// (`the_sort_bias_clears_every_shields_blended_layers`). Small beside two
+/// units' separation, and truncated to an i32 for the depth-bias state, so
+/// the depth test is untouched.
+pub const GLOBE_SORT_BIAS: f32 = 0.25;
 
 // ── Routing ──────────────────────────────────────────────────────────────────
 
@@ -280,6 +284,18 @@ impl GlobePiece {
             | GlobePiece::RedRing => GlobeSprite::Ring,
             GlobePiece::PulseFlame { .. } => GlobeSprite::Flame,
             GlobePiece::Glint { .. } => GlobeSprite::Star,
+        }
+    }
+}
+
+impl GlobeSprite {
+    /// How the bench composites the sprite: its `bbGlow` and `ring3` draw
+    /// `'lighter'` (additive), and its `sprite('flame')` and `sprite('star')`
+    /// calls leave the canvas at its default `'source-over'` (alpha blended).
+    pub fn alpha_mode(self) -> AlphaMode {
+        match self {
+            GlobeSprite::Glow | GlobeSprite::Ring => AlphaMode::Add,
+            GlobeSprite::Flame | GlobeSprite::Star => AlphaMode::Blend,
         }
     }
 }
@@ -598,9 +614,10 @@ pub fn update_divine_protection_globes(
             let material = materials.add(StandardMaterial {
                 base_color: Color::srgb_u8(pose.rgb[0], pose.rgb[1], pose.rgb[2]).with_alpha(0.0),
                 base_color_texture: Some(assets.texture(piece.sprite())),
-                // The bench adds colour × sprite × alpha and nothing else.
+                // Unlit: the bench draws colour × sprite × alpha, added or
+                // blended as its call composites, and nothing else.
                 unlit: true,
-                alpha_mode: AlphaMode::Add,
+                alpha_mode: piece.sprite().alpha_mode(),
                 depth_bias: GLOBE_SORT_BIAS,
                 cull_mode: None,
                 double_sided: true,
