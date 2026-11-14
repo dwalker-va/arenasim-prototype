@@ -294,3 +294,134 @@ fn a_held_melee_is_no_chaser_to_shift_from() {
         assert!(shifted(&free), "{profile:?}: {}", describe(&free));
     }
 }
+
+/// The Paladin's healing-heavy trigger (a teammate hurt AND a melee in the
+/// Paladin's face) does not count a held melee: with its teammate at 40% and
+/// a stunned enemy Warrior 6yd off, on that teammate, the Paladin stays out
+/// of PRESSURED. The control is the same Warrior unheld.
+#[test]
+fn a_held_melee_does_not_make_the_paladins_team_healing_heavy() {
+    for profile in PROFILES {
+        let decide = |aura| {
+            let mut s = scene(profile, Paladin, ALLY, aura);
+            s.set_health(ALLY, 0.4);
+            s.decide(HEALER)
+        };
+        for hold in HOLDS {
+            let held = decide(Some(hold));
+            assert!(
+                !pressured_enter(&held),
+                "{profile:?} under {hold:?}: {}",
+                describe(&held)
+            );
+        }
+        let free = decide(None);
+        assert!(
+            pressured_enter(&free),
+            "{profile:?} unheld: {}",
+            describe(&free)
+        );
+    }
+}
+
+const NEAR: &str = "near warrior";
+const FAR: &str = "far warrior";
+
+/// A peel on a dying teammate goes on an attacker that is free, not on one
+/// whose hold has 0.4s left: a held attacker is no `danger_attackers`
+/// member, even in the last `CC_CHAIN_WINDOW` of its hold, where the cast
+/// gate would let a fresh stun chain onto it. A Paladin peels with Hammer of
+/// Justice, nearest attacker first; the control is the same scene with the
+/// near Warrior unheld, which it then peels.
+#[test]
+fn a_peel_goes_on_the_free_attacker_not_one_ending_its_hold() {
+    let decide = |stun: Option<f32>| {
+        let s = Scene::new()
+            .now(NOW)
+            .ai_profile(1, AiProfile::TeamPlan)
+            .unit(HEALER, 1, Paladin)
+            .targeting(CASTER)
+            .aura(HEALER, AuraType::MaxHealthIncrease, 600.0)
+            .unit(ALLY, 1, CharacterClass::Mage)
+            .at(3.0, 0.0)
+            .health(0.3)
+            .aura(ALLY, AuraType::MaxHealthIncrease, 600.0)
+            .unit(NEAR, 2, Warrior)
+            .at(4.5, 0.0)
+            .targeting(ALLY)
+            .unit(FAR, 2, Warrior)
+            .at(3.0, 4.0)
+            .targeting(ALLY)
+            .unit(CASTER, 2, Priest)
+            .at(0.0, 30.0);
+        match stun {
+            Some(left) => s.aura(NEAR, AuraType::Stun, left),
+            None => s,
+        }
+        .decide(HEALER)
+    };
+    let held = decide(Some(0.4));
+    assert_eq!(
+        held.chose(),
+        Some((AbilityType::HammerOfJustice, Some(FAR))),
+        "{}",
+        describe(&held)
+    );
+    let free = decide(None);
+    assert_eq!(
+        free.chose(),
+        Some((AbilityType::HammerOfJustice, Some(NEAR))),
+        "{}",
+        describe(&free)
+    );
+}
+
+/// The `ally_in_danger` window's dwell: a teammate pressured only from the
+/// EDGE of the pressure test (a Mage 11.5yd off, inside `danger_radius` by
+/// less than `danger_edge_margin`) waits `danger_dwell` before its window
+/// opens, even with a held Warrior beside it: the held Warrior would press it
+/// firmly, but a held enemy presses no one. The control is the same Warrior
+/// unheld, which opens the window on the first dying frame.
+#[test]
+fn a_held_attacker_does_not_skip_the_danger_dwell() {
+    let frame = 1.0 / 60.0;
+    let window = |aura: Option<AuraType>| {
+        let mut s = Scene::new()
+            .now(NOW)
+            .ai_profile(1, AiProfile::TeamPlan)
+            .unit(HEALER, 1, Priest)
+            .at(0.0, -15.0)
+            .aura(HEALER, AuraType::MaxHealthIncrease, 600.0)
+            .unit(ALLY, 1, Warrior)
+            .aura(ALLY, AuraType::MaxHealthIncrease, 600.0)
+            .unit(ENEMY, 2, Warrior)
+            .at(-3.0, 0.0)
+            .targeting(ALLY)
+            .unit(CASTER, 2, CharacterClass::Mage)
+            .at(11.5, 0.0)
+            .targeting(ALLY);
+        if let Some(effect) = aura {
+            s = s.aura(ENEMY, effect, 4.0);
+        }
+        let ally = s.entity(ALLY);
+        // A frame of history with the teammate healthy, then dying.
+        s.reclassify();
+        s.set_health(ALLY, 0.3);
+        s.set_now(NOW + frame);
+        let first = s.reclassify().for_team(1).ally_in_danger.map(|w| w.subject);
+        s.set_now(NOW + frame + 0.2);
+        let later = s.reclassify().for_team(1).ally_in_danger.map(|w| w.subject);
+        (ally, first, later)
+    };
+    for hold in HOLDS {
+        let (ally, first, later) = window(Some(hold));
+        assert_eq!(first, None, "under {hold:?}: the dwell was skipped");
+        assert_eq!(later, Some(ally), "under {hold:?}: the window never opened");
+    }
+    let (ally, first, _) = window(None);
+    assert_eq!(
+        first,
+        Some(ally),
+        "unheld: a firm attacker opens it at once"
+    );
+}

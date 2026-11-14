@@ -87,11 +87,7 @@ pub struct Endgame {
     pub seeds: &'static [u64],
 }
 
-/// The bank (module docs). Eight seeds an endgame: the excepted control of
-/// claim 2 (two blind hunters trailing the hider round one side) is a rare
-/// situation, and at four seeds it rested on two runs in twenty (AS-496
-/// moved both: a unit a Priest feared stopped pressuring that Priest at once).
-/// At eight it occurs in two runs in forty.
+/// The bank (module docs).
 pub fn bank() -> Vec<Endgame> {
     vec![
         Endgame {
@@ -104,7 +100,7 @@ pub fn bank() -> Vec<Endgame> {
                 (40.36, -13.92, 1.0, 0.02),
                 (33.63, -17.46, 0.925, 0.391),
             ],
-            seeds: &[723, 1, 2, 3, 4, 5, 6, 7],
+            seeds: &[723, 1, 2, 3],
         },
         Endgame {
             name: "732 onset",
@@ -116,7 +112,7 @@ pub fn bank() -> Vec<Endgame> {
                 (44.36, 27.85, 1.0, 0.092),
                 (45.26, 9.37, 0.514, 0.055),
             ],
-            seeds: &[732, 1, 2, 3, 4, 5, 6, 7],
+            seeds: &[732, 1, 2, 3],
         },
         Endgame {
             name: "one side, Mage+Priest v Priest",
@@ -129,7 +125,7 @@ pub fn bank() -> Vec<Endgame> {
                 (44.0, -10.0, 0.9, 0.6),
                 (40.0, -27.0, 0.8, 0.6),
             ],
-            seeds: &[1, 2, 3, 4, 5, 6, 7, 8],
+            seeds: &[1, 2, 3, 4],
         },
         Endgame {
             name: "far sight, Hunter+Priest v Druid",
@@ -144,7 +140,7 @@ pub fn bank() -> Vec<Endgame> {
                 (55.0, -24.0, 0.9, 0.6),
                 (33.5, -20.0, 0.8, 0.6),
             ],
-            seeds: &[1, 2, 3, 4, 5, 6, 7, 8],
+            seeds: &[1, 2, 3, 4],
         },
         Endgame {
             name: "one side, Warlock+Priest v Priest",
@@ -157,7 +153,7 @@ pub fn bank() -> Vec<Endgame> {
                 (-53.0, -16.0, 0.9, 0.6),
                 (-33.0, -20.0, 0.8, 0.6),
             ],
-            seeds: &[1, 2, 3, 4, 5, 6, 7, 8],
+            seeds: &[1, 2, 3, 4],
         },
     ]
 }
@@ -543,8 +539,11 @@ fn a_walk_is_re_aimed_only_when_its_point_moves_on() {
 
 /// Claim 2: once both hunters have seen the hider, two blind hunters on one
 /// side of it never both close on its face: one of them is on its way round
-/// the back, so the two come at it from opposite sides. The control
-/// (excepted): the two trail it round one side.
+/// the back, so the two come at it from opposite sides. Its control is
+/// staged ([`excepted_blind_hunters_close_from_one_side`]): with the play
+/// excepted, two blind hunters on one side trail the hider round it. The
+/// bank's own excepted endgames put two hunters on one side too rarely to
+/// carry it.
 #[test]
 fn blind_hunters_close_from_opposite_sides() {
     let on = readings(true);
@@ -560,13 +559,6 @@ fn blind_hunters_close_from_opposite_sides() {
             r.both_closing
         );
     }
-    let off = readings(false);
-    let trailing = off.iter().filter(|(_, r)| r.both_closing > 0.0).count();
-    let total: f32 = off.iter().map(|(_, r)| r.both_closing).sum();
-    assert!(
-        trailing >= 2 && total > 1.0,
-        "the control: excepted, they trail it ({trailing} runs, {total:.1}s)"
-    );
 }
 
 /// The south-east pillar (index 2 in `maps.ron`) and the south-west one
@@ -764,6 +756,81 @@ fn a_hunter_on_the_wrong_side_goes_round_the_back() {
             closest < start - 3.0,
             "seed {seed}: the control: on its onset walk the Mage closes on the face \
              ({start:.0}° -> {closest:.0}°)"
+        );
+    }
+}
+
+/// Seconds in `track` that both hunters stood blind on one side of the
+/// hider for longer than [`SAME_SIDE_SETTLE`] and BOTH walked toward its
+/// face — claim 2's measure, for a staged hider that does not move.
+fn both_closing(track: &Track) -> f32 {
+    let (mut together, mut closing) = (0.0f32, 0.0f32);
+    for w in track.frames.windows(2) {
+        let (prev, (t, off, sees, ..)) = (&w[0], &w[1]);
+        let dt = t - prev.0;
+        let one_side = !sees[0]
+            && !sees[1]
+            && off[0].signum() == off[1].signum()
+            && off.iter().all(|o| o.abs() > 5.0 && o.abs() < 175.0);
+        together = if one_side { together + dt } else { 0.0 };
+        if together > SAME_SIDE_SETTLE
+            && off[0].abs() < prev.1[0].abs() - 1e-3
+            && off[1].abs() < prev.1[1].abs() - 1e-3
+        {
+            closing += dt;
+        }
+    }
+    closing
+}
+
+/// Claim 2's control, by construction: two blind hunters on one side of a
+/// rooted hider, their onset walks over, with the play excepted on their
+/// team, trail it round that side — both close on its face from it. With
+/// the play, from the same stage, they never do (one goes round the back:
+/// claim 4). The bank holds claim 2 in played endgames; this pins that the
+/// bank's `both_closing == 0` is the play's doing, without resting on how
+/// often an endgame happens to put two hunters on one side.
+#[test]
+fn excepted_blind_hunters_close_from_one_side() {
+    let (pillar, center) = SE;
+    let stage = || {
+        let (mx, mz) = round(center, -115.0, 14.0);
+        let (px, pz) = round(center, -145.0, 14.0);
+        Stage::new()
+            .place(HIDER, 47.0, -20.0)
+            .aura(HIDER, root())
+            .place(MAGE, mx, mz)
+            .target(MAGE, HIDER)
+            .place(PRIEST, px, pz)
+            .target(PRIEST, HIDER)
+            .target(HIDER, MAGE)
+            .world(hunt_under_way(pillar, 0.0, true))
+    };
+    let config = |seed, hunt: bool| HeadlessMatchConfig {
+        team1_exceptions: if hunt {
+            Default::default()
+        } else {
+            [("Hunt".into(), every_exception_entry(PlayId::Hunt))].into()
+        },
+        ..two_v_one(seed)
+    };
+    for seed in [1, 2, 3] {
+        let off = track(&play(config(seed, false), stage()), center, 10.0);
+        let first = off.frames.first().expect("frames");
+        assert!(
+            first.1[0] < -100.0 && first.1[1] < -100.0 && !first.2[0] && !first.2[1],
+            "seed {seed}: the situation: both blind on the clockwise side ({first:?})"
+        );
+        let trailed = both_closing(&off);
+        let on = both_closing(&track(&play(config(seed, true), stage()), center, 10.0));
+        println!("seed {seed}: excepted {trailed:.2}s, with the play {on:.2}s");
+        assert!(
+            trailed > 1.0,
+            "seed {seed}: excepted, the two close from one side ({trailed:.2}s)"
+        );
+        assert_eq!(
+            on, 0.0,
+            "seed {seed}: with the play, both closed ({on:.2}s)"
         );
     }
 }

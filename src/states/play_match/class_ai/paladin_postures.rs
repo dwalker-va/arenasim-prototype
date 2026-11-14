@@ -112,10 +112,11 @@ pub fn evaluate_paladin_posture(
     // probe caught exactly this). With the conjunct, healing-heavy fires
     // only when the team is hurting AND a melee is in the Paladin's face —
     // the situation a retreat-to-heal actually helps.
+    // A melee or pet held in crowd control is no pressure (AS-496).
     let melee_pressure = ctx
         .visible_enemies_within(entity, my_pos, shared.danger_radius)
         .iter()
-        .any(|t| t.is_pet || t.class.is_melee());
+        .any(|t| (t.is_pet || t.class.is_melee()) && !ctx.is_held(t.entity));
     // One `alive_allies()` snapshot reused for both the healing-heavy and the
     // degenerate-case gates below (it was allocated twice per tick).
     let allies = ctx.alive_allies();
