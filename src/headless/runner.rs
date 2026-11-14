@@ -103,6 +103,13 @@ pub struct ObservedCombatant {
     pub casting: Option<AbilityType>,
     /// The channel in progress (`ChannelingState`), if any.
     pub channeling: Option<AbilityType>,
+    /// Seconds the live socket's swing timer has built since it last swung
+    /// (`Combatant::attack_timer`). Lets probes see a held swing wait rather
+    /// than be spent.
+    pub attack_timer: f32,
+    /// The bonus queued onto the next main-hand swing (a Heroic Strike), 0.0
+    /// when none is queued (`Combatant::next_attack_bonus_damage`).
+    pub next_attack_bonus_damage: f32,
 }
 
 /// A read-only snapshot of one Shaman totem on a frame. Totems are NOT
@@ -1192,6 +1199,8 @@ fn observe_frame(world: &World) -> FrameObservation {
                 formation: entity_ref.get::<HealerPosture>().map(|p| p.formation),
                 casting: entity_ref.get::<CastingState>().map(|c| c.ability),
                 channeling: entity_ref.get::<ChannelingState>().map(|c| c.ability),
+                attack_timer: combatant.attack_timer,
+                next_attack_bonus_damage: combatant.next_attack_bonus_damage,
             },
         );
     }
