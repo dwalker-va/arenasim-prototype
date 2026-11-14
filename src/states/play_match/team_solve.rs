@@ -144,7 +144,9 @@ pub struct SolveWorld {
     /// (`target_focus::could_turn_on_teammate`), cover from enemy casters is
     /// worth nothing to it — hiding would only hand that DPS's fire to the
     /// teammate. `OccupyCover` then scores no occlusion ([`C_OCCLUDED`]) and
-    /// samples no shadows; crowd-control reach, sight of the anchor, a dying
+    /// samples no shadows — with no credit a shadow sample ties every other
+    /// spot on cost, and the nearest-spot tie-break would still walk the
+    /// healer into it; crowd-control reach, sight of the anchor, a dying
     /// teammate and an owed dispel are scored as before. `false` — the
     /// default — counts every caster.
     pub cover_waived: bool,
@@ -1675,6 +1677,47 @@ mod tests {
             is_melee: true,
             ..unit(id, team, slot, x, z)
         }
+    }
+
+    /// The hand-off cover rule (AS-440) takes the shadow samples out of the
+    /// `OccupyCover` candidates, not only their credit: with cover waived,
+    /// a shadow sample would tie every other spot on cost and the nearest-
+    /// spot tie-break would still walk the healer into it. Each shadow point
+    /// behind the pillar from the caster is a candidate with cover counted,
+    /// and none is with cover waived.
+    #[test]
+    fn waived_cover_offers_no_shadow_samples() {
+        let healer_unit = healer(1, 1, 0, -2.0, 6.0);
+        let mut w = world(vec![
+            healer_unit,
+            melee(2, 1, 1, -6.0, -14.0),
+            unit(3, 2, 0, 9.0, 3.0),
+        ]);
+        w.obstacles = vec![pillar_at(0.0, 0.0)];
+        let shadows: Vec<Vec2> = {
+            let (center, radius) = w.obstacles[0].footprint_disc();
+            let ring = radius + MOVER_RADIUS + COVER_STANDOFF;
+            let away = (center - Vec2::new(9.0, 3.0)).normalize();
+            SHADOW_DEPTHS
+                .iter()
+                .map(|d| center + away * (ring + d))
+                .collect()
+        };
+        let offered = |w: &SolveWorld| {
+            let ctx = SolveContext {
+                world: w,
+                unit: healer_unit,
+                focus: None,
+                placed: &BTreeMap::new(),
+            };
+            candidates_for(&ctx)
+        };
+        let has = |cands: &[Vec2], p: Vec2| cands.iter().any(|c| c.distance(p) < 1e-4);
+        let counted = offered(&w);
+        assert!(shadows.iter().all(|p| has(&counted, *p)), "{shadows:?}");
+        w.cover_waived = true;
+        let waived = offered(&w);
+        assert!(shadows.iter().all(|p| !has(&waived, *p)), "{shadows:?}");
     }
 
     fn world(units: Vec<SolveUnit>) -> SolveWorld {

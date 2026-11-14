@@ -9,9 +9,10 @@
 //! partner are unchanged.
 //!
 //! Each scene is a pair: the situation, and its control with one condition
-//! removed. In the control the partner is beyond the Mage's focus reach, or
-//! the rule is turned off for the team, and the healer takes the pillar's
-//! shadow.
+//! removed. In the control the partner is beyond the Mage's focus reach or
+//! out of its sight, the Mage follows no focus (a Druid), the Mage's team runs
+//! no target focus (turned off, or `Legacy`), or the rule is turned off for
+//! the healer's team; and the healer takes the pillar's shadow.
 
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::match_config::CharacterClass::{Druid, Mage, Priest, Shaman, Warrior};
@@ -177,6 +178,38 @@ fn a_caster_that_follows_no_focus_leaves_the_cover_in_place() {
             hidden_from_caster(&s, at),
             "{healer:?}: an enemy Druid cannot move a focus, yet the healer stayed out at {at}"
         );
+    }
+}
+
+/// The rule answers the ENEMY's target focus. Against a Mage whose team runs
+/// one (the default `TeamPlan`), the healer stays out of the shadow
+/// ([`an_exposed_partner_waives_the_healers_cover`]); against the same Mage
+/// with its team's focus turned off, or on `Legacy` (which runs none), no
+/// focus will move onto the partner, so the healer takes cover as before.
+#[test]
+fn an_enemy_without_a_focus_leaves_the_cover_in_place() {
+    for healer in HEALERS {
+        for (name, s) in [
+            ("focus off", scene(healer, EXPOSED).without_target_focus(2)),
+            (
+                "Legacy",
+                scene(healer, EXPOSED).ai_profile(2, AiProfile::Legacy),
+            ),
+        ] {
+            let view = s.decide(HEALER);
+            assert!(
+                view.movement
+                    .iter()
+                    .any(|m| m.posture == Posture::Pressured),
+                "{healer:?} vs {name}: not PRESSURED: {:?}",
+                view.movement
+            );
+            let at = spot(&s, &view);
+            assert!(
+                hidden_from_caster(&s, at),
+                "{healer:?} vs {name}: no focus can move, yet the healer stayed out at {at}"
+            );
+        }
     }
 }
 

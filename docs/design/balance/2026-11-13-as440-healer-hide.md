@@ -159,11 +159,17 @@ healer-side behaviour sets the sign per comp is not identified (Gaps).
 
 ## 4. The cover rule
 
-While an enemy that follows a focus could take one of the healer's teammates
+While the enemy team runs a target focus and one of its units that follows
+one could take one of the healer's teammates
 (`target_focus::could_turn_on_teammate`: targetable, within `FOCUS_REACH`,
 in its sight; never on a map with no obstacles), the PRESSURED solve gives no
-credit for cover from any enemy caster. CC-reach avoidance, sight of the
-partner, a dying teammate's reach and an owed dispel are unchanged.
+credit for cover from any enemy caster and samples no shadows. The shadow
+samples carry much of the rule: with no credit, a shadow sample ties every
+other spot on cost, and the nearest-spot tie-break walks the healer into it
+(3 of 6 diverging matches went back to main's output with the samples kept).
+CC-reach avoidance, sight of the partner, a dying teammate's reach and an
+owed dispel are unchanged. Against a team without a focus (`Legacy`, or
+`team{n}_target_focus: false`) the rule does not fire.
 
 The figures in this section's first three bullets were measured with the
 prototype's definition (a Mage, Hunter or Warlock; 2D distance; no
@@ -205,10 +211,16 @@ fresh block 851-854 the two definitions measure the same (+0.1 and +0.1).
   - block 841-844 again: **+0.7*** [+0.5, +0.9], against +0.8 with the
     prototype on 0ca55319.
 
-  Over the six blocks measured, the blocks run +0.8 / +0.8 / +1.5 / +0.7 /
-  +0.1 / +0.1. That is a positive effect of about +0.7pt, with two weak
-  blocks. 851-854 is low under both definitions, so the low reading comes
-  from those seeds, not from how the rule is defined.
+  - fresh block 861-864 (main f41e9401, with the enemy-focus gate):
+    **+0.6*** [+0.4, +0.8].
+- **The shipped rule's effect: +0.5pt [+0.3, +0.7]**, seed-clustered over
+  its 12 seeds (841-844, 851-854, 861-864; 28,800 sides; blocks +0.7 / +0.1 /
+  +0.6). That is about half to two thirds of the prototype's +1.0 over its
+  own first 12 seeds. 851-854 is low under both definitions, so that block's
+  reading comes from its seeds, not from how the rule is defined. The two
+  earlier blocks ran on main f366815d and the third on f41e9401; the
+  enemy-focus gate changes nothing in these banks, where both teams run a
+  focus.
 - **Determinism.** Full match logs from main f366815d and the rule's head
   are byte-identical:
   - 120 BasicArena `TeamPlan` and 60 BasicArena `Legacy` matches;
@@ -222,6 +234,12 @@ fresh block 851-854 the two definitions measure the same (+0.1 and +0.1).
   them PRESSURED. In the other 14, the first difference is a reordered event:
   a sight-yield change, a healer movement decision, or a decision whose target
   moved.
+  Re-checked at main f41e9401 with the enemy-focus gate: 60 BasicArena
+  `TeamPlan`, 30 BasicArena `Legacy`, 60 pillar-map `Legacy`, 60 pillar-map
+  `TeamPlan` with the rule off, and 60 pillar-map `TeamPlan` against a
+  `Legacy` team (where the gate keeps the rule off) are byte-identical to main
+  (603 deaths, 1,133 crits outside the switched-off set); 33 of 60
+  `TeamPlan`-against-`TeamPlan` matches diverge.
 
 ## 5. Options put to the user
 
@@ -274,6 +292,7 @@ From `docs/design/balance/sweeps/` (`R=2026-11-13-as440-reduce.py`,
 | §3 decomposition | `$R local …-r2-ctl.csv.gz <arm> --eligible`, arm `…-r2-np.csv.gz`, `…-r2-d_StancePartnerHalf.csv.gz`, `…-r2-d_StanceHealerHalf.csv.gz` |
 | §3 event study | `$R event ctl.rows np.rows`: the harness over `$G ctl` / `$G h2h NoPillar` at seeds 801-802, 811-812, 821-822, restricted to nine comps: the five largest gaining comps of §2 (Rogue + Druid aside) and the four losing ones |
 | §3 per-comp table | `$R partner ctl.rows np.rows local.txt`: the harness over `$G h2h-eligible NoPillar 801,811,821` and the matching control rows; damage dealt from `$R mechreport …-r2-mech-np.jsonl.gz` |
+| §4 shipped, pooled | concatenate `…-r3-cover841-*`, `…-r3-cover851-*` and `…-r4-cover861-*` (ctl and arm, headers once each), then `$R local ctl.csv arm.csv` |
 | §4 | `$R local …-r2-ctl.csv.gz …-r2-nc.csv.gz`; `…-r2-c5_ctl.csv.gz …-r2-c5_nc.csv.gz`; mechanism `$R mechreport …-r2-mech-nc.jsonl.gz`; shipped rule `$R local …-r3-cover851-ctl.csv.gz …-r3-cover851-arm.csv.gz` (`$G cover 851-854`), `…-r3-cover851-protodef.csv.gz`, `…-r3-cover841-{ctl,arm}.csv.gz` (`$G cover 841-844`) |
 
 The banks: `$G ctl|h2h <rule>|h2h-eligible <rule>|targeted <seeds> <comps> [NoCover]`, played with

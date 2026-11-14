@@ -369,7 +369,9 @@ pub struct TeamSituation {
     /// [`SituationConfig::pillar_modes`]).
     pub pillar_modes: bool,
     /// Whether this team's healers run the hand-off cover rule (AS-440,
-    /// [`SituationConfig::handoff_rule`]).
+    /// [`SituationConfig::handoff_rule`]) — and the enemy team runs a target
+    /// focus for it to answer (`update_situations`): against a team that
+    /// never moves a focus, hiding hands nothing to the partner.
     pub handoff_rule: bool,
     /// Each DPS–healer pair's sight yield: which of the two must not break
     /// the pair's line of sight (the module docs' `sight_yield`). Empty
@@ -1960,7 +1962,14 @@ pub fn update_situations(
 ) {
     for (index, team) in [1u8, 2].into_iter().enumerate() {
         let prev = std::mem::take(&mut situations.teams[index]);
-        let cfg = cfg.for_team(team, snapshot.ai_profile.for_team(team));
+        let enemy = 3 - team;
+        let enemy_focus = cfg
+            .for_team(enemy, snapshot.ai_profile.for_team(enemy))
+            .target_focus;
+        let mut cfg = cfg.for_team(team, snapshot.ai_profile.for_team(team));
+        // The hand-off cover rule answers the ENEMY's target focus: against a
+        // team that runs none, cover hands nothing to the partner (AS-440).
+        cfg.handoff_rule &= enemy_focus;
         let mut next = classify_before_yield(snapshot, team, &prev, clock, &cfg);
         next.hunt = super::class_ai::hunt::classify(snapshot, team, &prev, &next, clock, &cfg);
         next.hunt_memory = super::class_ai::hunt::remember(

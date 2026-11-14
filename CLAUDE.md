@@ -1325,22 +1325,27 @@ cooldown). Design: `docs/design/2026-10-18-healer-cc-avoidance.md`.
 
 **No cover that hands the fire to the partner (`TeamPlan`, AS-440).** The
 team target focus (*Team target focus* below) turns an enemy ranged DPS off a
-healer it cannot see onto a teammate it can. So while an enemy that follows a
-focus could take one of the healer's living teammates
+healer it cannot see onto a teammate it can. So while the enemy team runs a
+target focus (`update_situations` reads its profile and
+`team{1,2}_target_focus`, as the focus's own classification does) and one of
+its units that follows a focus could take one of the healer's teammates
 (`target_focus::could_turn_on_teammate`: `could_take`, the focus's own test —
 targetable, within `FOCUS_REACH`, in its sight), the PRESSURED `OccupyCover`
 solve gives no credit for cover from enemy casters
-(`team_solve::SolveWorld::cover_waived`): no `C_OCCLUDED`, no shadow samples.
+(`team_solve::SolveWorld::cover_waived`): no `C_OCCLUDED`, and no shadow
+samples — with no credit a shadow sample ties every other spot, and the
+nearest-spot tie-break would still walk the healer into it.
 Crowd-control reach, sight of the anchor, a dying teammate's reach and an
 owed dispel are scored exactly as before, so a healer still leaves the reach
 of a ready Polymorph or Fear, which hiding behind the pillar may do. A map with
 no obstacles never waives (no focus moves there), so BasicArena is
 byte-identical; so is `Legacy`, which never solves. `team{1,2}_handoff_rule:
 false` is the measurement switch. Measured head-to-head (DIRECTIONAL, 2v2,
-pillar maps): about +0.7pt over six seed blocks (+1.0 over the first three;
-two blocks near zero), broad (no comp significantly negative), with no extra
-crowd control on the healer: the enemy's fire comes back from the partner to
-the healer. Scenes `tests/handoff_cover_scenes.rs`, staged
+pillar maps): the shipped rule **+0.5pt** [+0.3, +0.7] (seed-clustered, 12
+seeds in three blocks, +0.7 / +0.1 / +0.6), against +1.0 for its prototype
+over its first 12 seeds. Broad (no comp significantly negative), with no
+extra crowd control on the healer: the enemy's fire comes back from the
+partner to the healer. Scenes `tests/handoff_cover_scenes.rs`, staged
 `tests/handoff_cover_staged.rs`; findings
 `docs/design/balance/2026-11-13-as440-healer-hide.md`.
 

@@ -139,7 +139,9 @@ pub fn could_take(
 /// case in which the healer's cover from it only hands its fire to that
 /// teammate (AS-440, `team_solve::SolveWorld::cover_waived`). `false` on a
 /// map with no obstacles, where no focus ever moves. `roster` is the view
-/// the healer decides from.
+/// the healer decides from. Whether the enemy team runs a focus at all is
+/// asked once per team in `situation::update_situations`
+/// (`TeamSituation::handoff_rule`), not here.
 pub fn could_turn_on_teammate(
     roster: &BTreeMap<Entity, CombatantInfo>,
     auras: &BTreeMap<Entity, Vec<Aura>>,
@@ -319,7 +321,8 @@ mod tests {
     /// pillar 8yd down +X. Each case is the Warrior in the Mage's sight and
     /// focus reach, against one condition removed: the pillar between them,
     /// beyond `FOCUS_REACH`, an enemy that follows no focus, a map with no
-    /// obstacles (where no focus moves).
+    /// obstacles (where no focus moves), and a teammate the Mage could not
+    /// take (`targetable`): dead, a pet, stealthed, immune to damage.
     #[test]
     fn a_teammate_in_a_ranged_dps_reach_and_sight_can_be_turned_on() {
         use crate::states::match_config::CharacterClass::{Druid, Mage, Priest, Warrior};
@@ -332,15 +335,39 @@ mod tests {
             world.spawn_empty().id(),
             world.spawn_empty().id(),
         );
-        let auras = BTreeMap::new();
-        let case = |enemy_class, mate_at: Vec3, obstacles: &[ObstacleVolume]| {
+        let none = BTreeMap::new();
+        let with = |mate_info: &dyn Fn(&mut CombatantInfo),
+                    enemy_class,
+                    mate_at: Vec3,
+                    obstacles: &[ObstacleVolume],
+                    auras: &BTreeMap<Entity, Vec<Aura>>| {
+            let mut m = unit(mate, 1, Warrior, mate_at, 1.0);
+            mate_info(&mut m);
             let r = roster(vec![
                 unit(enemy, 2, enemy_class, Vec3::new(0.0, 1.0, 0.0), 1.0),
                 unit(healer, 1, Priest, Vec3::new(-6.0, 1.0, 6.0), 1.0),
-                unit(mate, 1, Warrior, mate_at, 1.0),
+                m,
             ]);
-            could_turn_on_teammate(&r, &auras, obstacles, &r[&healer])
+            could_turn_on_teammate(&r, auras, obstacles, &r[&healer])
         };
+        let case = |enemy_class, mate_at: Vec3, obstacles: &[ObstacleVolume]| {
+            with(&|_| {}, enemy_class, mate_at, obstacles, &none)
+        };
+        let untakeable = |f: &dyn Fn(&mut CombatantInfo)| with(f, Mage, IN_SIGHT, &pillar(), &none);
+        assert!(!untakeable(&|m| m.is_alive = false), "a dead teammate");
+        assert!(!untakeable(&|m| m.is_pet = true), "a pet");
+        assert!(!untakeable(&|m| m.stealthed = true), "a stealthed teammate");
+        let immune = BTreeMap::from([(
+            mate,
+            vec![Aura {
+                effect_type: AuraType::DamageImmunity,
+                ..Default::default()
+            }],
+        )]);
+        assert!(
+            !with(&|_| {}, Mage, IN_SIGHT, &pillar(), &immune),
+            "a teammate immune to damage"
+        );
         assert!(case(Mage, IN_SIGHT, &pillar()));
         assert!(
             !case(Mage, BEHIND, &pillar()),
