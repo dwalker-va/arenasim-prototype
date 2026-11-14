@@ -61,9 +61,11 @@ use crate::states::play_match::components::*;
 //   0.45 yd offset, which is inside the 0.5 yd capsule.
 // - Both stars, and the emitters on the victim's, are held in front of their
 //   body, [`MANA_FUNNEL_CAMERA_LIFT`] nearer the camera than its axis
-//   ([`held_before_body`]), so their white cores beat the body's depth test
-//   (and a stacked Corruption shroud's) instead of reading as a dim annulus
-//   round the silhouette — the UA glow's fix (`warlock_dots.rs`). A hand on
+//   ([`held_before_body`]), so they sort in front of the body and a stacked
+//   Corruption shroud. Those are translucent and drawn back to front by
+//   distance with no depth write, so a star at the body's centre sorts behind
+//   it and reads as a dim annulus round the silhouette — the UA glow's fix
+//   (`warlock_dots.rs`). A hand on
 //   the far side of the Priest comes round in front of it. The move is along
 //   the view ray, so each star stays on its anchor on screen.
 // - The beam's ends stay on the hand and the chest themselves: it runs into

@@ -705,6 +705,86 @@ fn every_piece_faces_the_camera_wherever_it_stands() {
     }
 }
 
+/// The drawn beam zig-zags and re-seeds as the bench's does, at its call site:
+/// each inner joint strays the bench's `sin(seed 1.7 + i 2.3)` along the
+/// camera's right and `cos(seed 1.3 + i)` down its up, 0.066 yd each, off the
+/// hand-to-chest line and in the camera's plane, with `seed` the 66 ms flip
+/// the channel is in; the joints hold within a flip and move across one; the
+/// ends stay on the hand and the chest.
+#[test]
+fn the_drawn_beam_zig_zags_and_reseeds_every_flip() {
+    let mut h = Harness::new();
+    let cam = h.camera(
+        Transform::from_xyz(-3.0, 16.0, 14.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+    );
+    let (right, up, forward) = (
+        cam.rotation * Vec3::X,
+        cam.rotation * Vec3::Y,
+        cam.rotation * Vec3::NEG_Z,
+    );
+    let (priest, victim) = h.pair();
+    h.channel(priest, AbilityType::MindFlay, victim);
+    let n = (HAND.distance(CHEST) / 2.78).round() as usize;
+    assert!(n >= 3, "a beam of {n} segments has inner joints");
+
+    let mut frames: Vec<(u32, Vec<Vec3>)> = Vec::new();
+    for _ in 0..6 {
+        h.tick(1);
+        let root = h.visuals()[0].0;
+        // The age the pose was taken at (the system ages after posing), and
+        // the 66 ms flip that age is in.
+        let age = h.age(root) - TICK_SECS;
+        let flip = (age / 0.066).floor() as u32;
+        let p = h.positions(h.beam(root));
+        let centres: Vec<Vec3> = (0..p.len() / 2)
+            .map(|k| (p[2 * k] + p[2 * k + 1]) / 2.0)
+            .collect();
+        assert_eq!(centres.len(), n + 1);
+        assert!(
+            near(centres[0], HAND) && near(centres[n], CHEST),
+            "the ends"
+        );
+        let seed = flip as f32;
+        for (i, c) in centres.iter().enumerate().take(n).skip(1) {
+            let i_f = i as f32;
+            let line = HAND.lerp(CHEST, i_f / n as f32);
+            let along = (seed * 1.7 + i_f * 2.3).sin();
+            let down = (seed * 1.3 + i_f).cos();
+            let want = line + right * along * 0.066 - up * down * 0.066;
+            assert!(near(*c, want), "flip {flip} joint {i}: {c} vs {want}");
+            let stray = *c - line;
+            assert!(
+                close(stray.length(), 0.066 * (along * along + down * down).sqrt()),
+                "joint {i} strays {}",
+                stray.length()
+            );
+            assert!(
+                stray.dot(forward).abs() < 1e-4,
+                "joint {i} leaves the camera's plane"
+            );
+        }
+        frames.push((flip, centres));
+    }
+    // Within a flip the zig-zag holds; across a flip boundary it moves.
+    let (mut held, mut moved) = (0, 0);
+    for pair in frames.windows(2) {
+        let ((fa, a), (fb, b)) = (&pair[0], &pair[1]);
+        let shift = (1..n).map(|i| a[i].distance(b[i])).fold(0.0f32, f32::max);
+        if fa == fb {
+            assert!(shift < 1e-5, "flip {fa}: joints moved {shift} within it");
+            held += 1;
+        } else {
+            assert!(shift > 0.01, "flip {fa} -> {fb}: joints moved only {shift}");
+            moved += 1;
+        }
+    }
+    assert!(
+        held >= 1 && moved >= 2,
+        "{held} held, {moved} moved: {:?}",
+        frames.iter().map(|f| f.0).collect::<Vec<_>>()
+    );
+}
+
 /// Through the default match camera (60 yd, 38.7 degrees, FOV 45, a 1080-line
 /// screen): each star stands in front of its body's near skin and of a
 /// stacked Corruption shroud (0.68 yd), yet projects onto its anchor; the
