@@ -4,7 +4,7 @@
 //! cast on its bearer. A root is not one: a root and a nuke go together.
 //!
 //! Each scene test runs the real class dispatch for one tick and is paired
-//! with its control, the same scene without the hold; one staged match holds
+//! with its control, the same scene without the hold; staged matches hold
 //! the auto-attack, which lands outside the dispatch, to the same rule.
 //! `tests/decision_properties.rs`'s `never_breaks_a_friendly_breakable_cc`
 //! guards the rule over the whole grid.
@@ -318,12 +318,12 @@ struct Hold {
 }
 
 /// `team1` against an enemy Priest rooted in place at the origin, everyone
-/// unkillable, `attacker` beside the Priest, and — with `hold` — the hold
-/// landed on the Priest at the gates. The Priest's Psychic Scream and every
+/// unkillable, `attacker` beside the Priest, and `holds` landed on the Priest
+/// at the gates, in order. The Priest's Psychic Scream and every
 /// Fear and Death Coil on `team1` are held on cooldown, so no crowd control
 /// but the staged one ever touches the swings. Returns how many of
 /// `attacker_log`'s swings landed while the hold lasts.
-fn swings_under(team1: &[&str], attacker: Unit, attacker_log: &str, hold: Option<Hold>) -> usize {
+fn swings_under(team1: &[&str], attacker: Unit, attacker_log: &str, holds: &[Hold]) -> usize {
     use arenasim::states::play_match::components::{ActiveAuras, Combatant};
     let unkillable = |c: &mut Combatant| {
         c.max_health = 1.0e6;
@@ -353,7 +353,7 @@ fn swings_under(team1: &[&str], attacker: Unit, attacker_log: &str, hold: Option
             .cooldown(who, AbilityType::Fear, 1000.0)
             .cooldown(who, AbilityType::DeathCoil, 1000.0);
     }
-    if let Some(hold) = hold {
+    for &hold in holds {
         stage = stage.world(move |world| {
             let caster = hold.caster.entity(world);
             let priest = priest.entity(world);
@@ -425,17 +425,273 @@ fn the_teams_breakable_holds_hold_off_the_auto_attack() {
         ),
     ];
     for (team1, attacker, label, hold) in cases {
-        let free = swings_under(team1, attacker, label, None);
+        let free = swings_under(team1, attacker, label, &[]);
         assert!(
             free > 0,
             "{label}: without the {}, its swings land in the window",
             hold.name
         );
-        let held = swings_under(team1, attacker, label, Some(hold));
+        let held = swings_under(team1, attacker, label, &[hold]);
         assert_eq!(
             held, 0,
             "{label}: under its own side's {}, no swing lands",
             hold.name
         );
     }
+}
+
+/// A hold the target's OWN side placed on it is no hold the attacker's team
+/// waits out, and it does not hide one that team did place: under the
+/// Priest's own Fear and then its Warrior's, the Warrior still swings none.
+/// The control is the Priest's own Fear alone, which the Warrior swings
+/// through.
+#[test]
+fn a_hold_from_the_targets_own_side_hides_none_of_the_teams() {
+    let warrior = Unit::new(1, 0);
+    let label = "Team 1 Warrior #1";
+    let own = Hold {
+        effect: AuraType::Fear,
+        threshold: 100.0,
+        caster: Unit::new(2, 0),
+        name: "Fear",
+    };
+    let teams = Hold {
+        caster: warrior,
+        ..own
+    };
+    assert!(
+        swings_under(&["Warrior"], warrior, label, &[own]) > 0,
+        "under the Priest's own Fear alone, the Warrior's swings land"
+    );
+    assert_eq!(
+        swings_under(&["Warrior"], warrior, label, &[own, teams]),
+        0,
+        "the Priest's own Fear does not hide its Warrior's"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A swing held off a friendly hold is never made, so it spends nothing.
+// ---------------------------------------------------------------------------
+
+/// The Heroic Strike bonus staged onto the Warrior's next swing.
+const QUEUED_STRIKE: f32 = 40.0;
+
+/// One frame at the sim's fixed step.
+const FRAME: f32 = 1.0 / 60.0;
+
+/// A Warrior and its Warlock against an enemy Priest rooted in place at the
+/// origin, everyone unkillable, the Warrior beside the Priest with an empty
+/// rage bar and a Heroic Strike queued, and — with `feared` — the Warlock's
+/// Fear landed on the Priest at the gates for [`HOLD_SECS`]. Every other
+/// crowd control on either side is held on cooldown, and nothing can strike
+/// the Warrior while the Priest is feared, so the Warrior's swings are its
+/// only source of rage.
+fn warrior_beside_its_teams_fear(feared: bool) -> common::staged::Played {
+    use arenasim::states::play_match::components::{ActiveAuras, Combatant};
+    let unkillable = |c: &mut Combatant| {
+        c.max_health = 1.0e6;
+        c.current_health = 1.0e6;
+    };
+    let warrior = Unit::new(1, 0);
+    let warlock = Unit::new(1, 1);
+    let priest = Unit::new(2, 0);
+    let mut stage = Stage::new()
+        .combatant(priest, unkillable)
+        .place(priest, 0.0, 0.0)
+        .cooldown(priest, AbilityType::PsychicScream, 1000.0)
+        .aura(
+            priest,
+            Aura {
+                effect_type: AuraType::Root,
+                duration: 30.0,
+                break_on_damage_threshold: -1.0,
+                ability_name: "Root".into(),
+                ..Default::default()
+            },
+        )
+        .combatant(warrior, move |c| {
+            unkillable(c);
+            c.current_mana = 0.0;
+            c.next_attack_bonus_damage = QUEUED_STRIKE;
+        })
+        .place(warrior, 1.5, 0.0)
+        .place(warlock, -20.0, 0.0);
+    for who in [warrior, warlock] {
+        stage = stage
+            .combatant(who, unkillable)
+            .target(who, priest)
+            .cooldown(who, AbilityType::Fear, 1000.0)
+            .cooldown(who, AbilityType::DeathCoil, 1000.0);
+    }
+    if feared {
+        stage = stage.world(move |world| {
+            let caster = warlock.entity(world);
+            let priest = priest.entity(world);
+            world
+                .get_mut::<ActiveAuras>(priest)
+                .expect("the Priest's auras")
+                .auras
+                .push(Aura {
+                    effect_type: AuraType::Fear,
+                    duration: HOLD_SECS,
+                    break_on_damage_threshold: 100.0,
+                    caster: Some(caster),
+                    ability_name: "Fear".into(),
+                    ..Default::default()
+                });
+        });
+    }
+    let config = HeadlessMatchConfig {
+        team1: vec!["Warrior".into(), "Warlock".into()],
+        team2: vec!["Priest".into()],
+        random_seed: Some(6),
+        max_duration_secs: 15.0,
+        ..Default::default()
+    };
+    play(config, stage)
+}
+
+/// The Warrior's (team 1, slot 0) observation on each staged frame, beside
+/// whether the Priest still carried the Fear on it.
+fn warrior_track(
+    played: &common::staged::Played,
+) -> Vec<(f32, arenasim::headless::ObservedCombatant, bool)> {
+    played
+        .staged_frames()
+        .map(|frame| {
+            let find = |team: u8| {
+                frame
+                    .combatants
+                    .values()
+                    .find(|c| c.team == team && c.slot == 0 && !c.is_pet)
+                    .expect("the unit is in the frame")
+            };
+            let feared = find(2).aura_types.contains(&AuraType::Fear);
+            (frame.sim_time, find(1).clone(), feared)
+        })
+        .collect()
+}
+
+/// The sim time of the Warrior's first swing after `from`: the first frame
+/// its swing timer went back down.
+fn first_swing_after(
+    track: &[(f32, arenasim::headless::ObservedCombatant, bool)],
+    from: f32,
+) -> Option<f32> {
+    track
+        .windows(2)
+        .find(|w| w[1].0 >= from && w[1].1.attack_timer < w[0].1.attack_timer)
+        .map(|w| w[1].0)
+}
+
+/// Under its Warlock's Fear the Warrior's swing is never made, so it gains no
+/// rage and keeps its queued Heroic Strike; without the Fear the first swing
+/// pays rage and spends the strike, in the same window.
+#[test]
+fn a_swing_held_off_the_teams_fear_spends_no_rage_and_no_heroic_strike() {
+    let free = warrior_track(&warrior_beside_its_teams_fear(false));
+    let held_played = warrior_beside_its_teams_fear(true);
+    let held = warrior_track(&held_played);
+    let landed = held_played.landed().app;
+    let window_end = landed + HOLD_SECS - 0.5;
+    let in_window = |track: &[(f32, arenasim::headless::ObservedCombatant, bool)]| {
+        track
+            .iter()
+            .filter(|(t, ..)| *t < window_end)
+            .map(|(_, w, _)| w.clone())
+            .collect::<Vec<_>>()
+    };
+
+    // The control: a swing lands in the window, pays rage and spends the
+    // queued strike.
+    let free_window = in_window(&free);
+    assert!(
+        first_swing_after(&free, landed).is_some_and(|t| t < window_end),
+        "without the Fear, the Warrior swings in the window"
+    );
+    assert!(
+        free_window.iter().any(|w| w.current_mana > 0.0),
+        "without the Fear, a swing pays the Warrior rage"
+    );
+    assert!(
+        free_window
+            .iter()
+            .any(|w| w.next_attack_bonus_damage == 0.0),
+        "without the Fear, the first swing spends the queued Heroic Strike"
+    );
+
+    // Under the Fear: the hold covers the window, and no swing spends a thing.
+    let held_window = in_window(&held);
+    assert!(
+        held.iter()
+            .filter(|(t, ..)| *t < window_end)
+            .all(|(_, _, feared)| *feared),
+        "the Fear holds the Priest across the whole window"
+    );
+    assert!(
+        held_window.iter().all(|w| w.current_mana == 0.0),
+        "under its team's Fear, the Warrior gains no rage: {:?}",
+        held_window
+            .iter()
+            .map(|w| w.current_mana)
+            .fold(0.0, f32::max)
+    );
+    assert!(
+        held_window
+            .iter()
+            .all(|w| w.next_attack_bonus_damage == QUEUED_STRIKE),
+        "under its team's Fear, the Warrior keeps its queued Heroic Strike"
+    );
+}
+
+/// Under its Warlock's Fear the Warrior's swing timer keeps building, so its
+/// first swing lands on the frame the Fear ends — the queued Heroic Strike
+/// with it. Without the Fear the timer swings and resets in the same window.
+#[test]
+fn a_swing_held_off_the_teams_fear_lands_the_moment_it_ends() {
+    let free = warrior_track(&warrior_beside_its_teams_fear(false));
+    let held_played = warrior_beside_its_teams_fear(true);
+    let held = warrior_track(&held_played);
+    let landed = held_played.landed().app;
+
+    // The control: the timer resets inside what would be the hold.
+    let free_swing = first_swing_after(&free, landed).expect("the free Warrior swings");
+    assert!(
+        free_swing < landed + HOLD_SECS - 0.5,
+        "without the Fear, the Warrior swings at {free_swing} inside the window"
+    );
+
+    // Under the Fear: the timer never goes back down while the Fear lasts...
+    let ended = held
+        .iter()
+        .find(|(_, _, feared)| !feared)
+        .map(|(t, ..)| *t)
+        .expect("the Fear ends inside the match");
+    assert!(
+        ended > landed + HOLD_SECS - 0.5,
+        "the Fear lasted its {HOLD_SECS}s (ended at {ended}, landed at {landed})"
+    );
+    assert!(
+        held.windows(2)
+            .filter(|w| w[1].0 < ended)
+            .all(|w| w[1].1.attack_timer >= w[0].1.attack_timer),
+        "under its team's Fear, the Warrior's swing timer keeps building"
+    );
+    // ...and the first swing lands on the frame it ends, carrying the strike.
+    let held_swing = first_swing_after(&held, landed).expect("the held Warrior swings");
+    assert!(
+        held_swing - ended <= FRAME + 1.0e-4,
+        "the Warrior's first swing lands at {held_swing}, the frame the Fear ended at {ended}"
+    );
+    let strike = "[DMG] Team 1 Warrior #1's Heroic Strike hits Team 2 Priest #1";
+    let first_hit = held_played
+        .log
+        .lines()
+        .find(|l| l.contains("[DMG] Team 1 Warrior #1's"))
+        .expect("the Warrior's first hit is logged");
+    assert!(
+        first_hit.contains(strike),
+        "the first swing after the Fear is the queued Heroic Strike: {first_hit}"
+    );
 }

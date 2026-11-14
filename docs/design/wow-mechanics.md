@@ -466,7 +466,9 @@ tests fail if a full-CC type or spell is left unlabelled.
 - The caster's team waits a Fear out, as it does a Polymorph: no damage, damage
   over time or auto-attack goes onto an enemy it holds in a Fear or a Psychic
   Scream (`class_ai::damage_breaks_friendly_hold`). A root that breaks on damage
-  is not waited out: a root and a nuke go together.
+  is not waited out: a root and a nuke go together. A swing held off such a
+  hold is never made: it grants no rage, keeps a queued Heroic Strike, and its
+  swing timer keeps building, so it lands the moment the hold ends.
 
 ### Polymorph (Incapacitate)
 - Target wanders at 50% speed
