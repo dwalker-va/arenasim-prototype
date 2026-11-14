@@ -1221,6 +1221,18 @@ cannot step it back out of range while the GCD runs. Traced as
 candidates are unreachable is traced `LosBlocked` (one in range behind cover) or
 `OutOfRange` with the distance, never `NoValidTarget`.
 
+**Pets are dispel targets** (AS-129, ruling on AS-126) — every ally dispel
+reaches its team's pets (`class_ai::ally_removal`'s `reaches_pets`), so a
+trapped Felhunter is freed like its Warlock. One rule, `ally_dispel_candidate`,
+read by the rotation's scan (`scan_ally_dispel`) and every reader of
+`owed_dispel` (the walk above, `TeamPlan`'s `DispelGoal`, the Medallion's
+wait): a pet ranks below a non-pet teammate at the same priority, and is set
+aside while any living non-pet teammate, the healer included, is dying. A pet
+counts as melee for the root tier below. Master's Call keeps its own scans and
+does not take pets. The Hunter's trap AI reads the same rule through
+`can_free_ally`, so it no longer counts a trapped pet as stuck beside an enemy
+Priest or Paladin.
+
 **Roots (Paladin Cleanse)** — a magic root (Frost Nova, Entangling Roots) that
 is HOLDING A TEAMMATE BACK (`class_ai::root_holds_back`: a melee teammate whose
 target is out of `MELEE_RANGE`, or a ranged one with an enemy melee or pet
