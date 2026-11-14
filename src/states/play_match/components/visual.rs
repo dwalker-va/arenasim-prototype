@@ -30,6 +30,21 @@ pub struct FloatingCombatText {
     pub is_crit: bool,
 }
 
+/// A floating text's offset ON SCREEN, in points, from where its
+/// `world_position` projects: a line stacked over another text at the same
+/// anchor ("Saved" over the save's heal number). Screen-space, so the stack
+/// holds at every zoom and yaw, where a world offset shrinks with distance
+/// and turns with the camera. Read by `render_floating_combat_text` through
+/// [`fct_screen_position`].
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct FctScreenOffset(pub egui::Vec2);
+
+/// Where a floating text is drawn: its projected anchor, moved by its
+/// [`FctScreenOffset`] when it has one.
+pub fn fct_screen_position(projected: egui::Pos2, offset: Option<&FctScreenOffset>) -> egui::Pos2 {
+    projected + offset.map_or(egui::Vec2::ZERO, |o| o.0)
+}
+
 /// The segment an entity the sim moves is drawn along between ticks
 /// (`rendering::interpolation`). Graphical-only; the sim never reads it.
 #[derive(Component, Clone, Copy, Debug)]
@@ -859,6 +874,10 @@ pub const MARK_OF_THE_WILD_AURA: &str = "Mark of the Wild";
 /// Shadow Word: Pain's aura name (the RON `name:` string). Its landing is the
 /// one visual the client gives it (`rendering/effects/shadow_word_pain.rs`).
 pub const SHADOW_WORD_PAIN_AURA: &str = "Shadow Word: Pain";
+/// Guardian Spirit's aura name: the RON `name:` string its face carries, and
+/// the name its rider (`guardian_spirit_riders`) is given. Its state is the
+/// spirit over the bearer's shoulders (`rendering/effects/guardian_spirit.rs`).
+pub const GUARDIAN_SPIRIT_AURA: &str = "Guardian Spirit";
 
 // The Paladin talent auras whose landings play a one-shot (AS-374,
 // `docs/design/2026-10-18-paladin-talent-client-data.md`): each name is the
@@ -1808,15 +1827,24 @@ pub enum AuraApplyOwner {
     /// HoT, Power Word: Fortitude). Lifebloom is not here: its pulse starts a
     /// beat after it lands, so the band is its only application cue.
     AuraLanding,
+    /// Guardian Spirit: the halo and wings over the bearer's shoulders, whose
+    /// own onset is its application (`guardian_spirit.rs`). Owned per aura
+    /// NAME, both the face and its rider, because their types
+    /// (`HealingReceivedIncrease`, `KillingBlowSave`) are the damage
+    /// pipeline's, which any later user meets on the band.
+    GuardianSpirit,
 }
 
 impl AuraApplyRoute {
     /// Route one aura INSTANCE's application: a named aura with a bespoke
-    /// landing ([`AuraLandingKind::for_aura`]) is owned by it; every other
+    /// landing ([`AuraLandingKind::for_aura`]) is owned by it, and so is
+    /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]); every other
     /// aura routes by its type ([`Self::for_aura`]). The renderer asks this.
     pub fn for_instance(aura_type: AuraType, name: &str) -> Self {
         if AuraLandingKind::for_aura(aura_type, name).is_some() {
             AuraApplyRoute::Owned(AuraApplyOwner::AuraLanding)
+        } else if name == GUARDIAN_SPIRIT_AURA {
+            AuraApplyRoute::Owned(AuraApplyOwner::GuardianSpirit)
         } else {
             Self::for_aura(aura_type)
         }

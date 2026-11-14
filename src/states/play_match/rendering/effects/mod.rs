@@ -22,6 +22,8 @@ mod shapeshift;
 pub use shapeshift::*;
 mod shadowform;
 pub use shadowform::*;
+mod guardian_spirit;
+pub use guardian_spirit::*;
 mod life_tap;
 pub use life_tap::*;
 mod flame;
