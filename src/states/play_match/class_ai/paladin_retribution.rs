@@ -33,7 +33,7 @@ use crate::states::play_match::decision_trace::{DecisionEventBuilder, RejectionR
 use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::cast_guard::{cast_gate, PreCastOpts};
-use super::{cast_reach, CastReach, CombatContext, Incoming, QueuedInstantAttack};
+use super::{cast_reach, CastReach, CombatContext, QueuedInstantAttack};
 
 /// Whether `combatant` keeps the mana its emergency Holy Shock heal costs
 /// after paying `def`'s: the reserve both Retribution casts hold back.
@@ -79,7 +79,7 @@ pub fn repentance_target(
                 && !ctx.has_friendly_dots_on_target(e.entity)
                 && !ctx.entity_is_immune(e.entity)
                 && !ctx.is_dr_immune(e.entity, DRCategory::Incapacitates)
-                && ctx.held_in_hard_cc(e.entity, Incoming::of(def)).is_none()
+                && ctx.held_in_hard_cc(e.entity).is_none()
         })
         .filter_map(|e| match cast_reach(ctx, def.range, my_pos, e.position) {
             CastReach::Reaches => Some((e, my_pos.distance(e.position))),

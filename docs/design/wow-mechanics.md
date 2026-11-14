@@ -463,6 +463,10 @@ tests fail if a full-CC type or spell is left unlabelled.
 - Breaks on damage (threshold: 100 damage)
 - Prevents intentional movement, attacking, casting
 - Example: Warlock Fear (8-10s duration)
+- The caster's team waits a Fear out, as it does a Polymorph: no damage, damage
+  over time or auto-attack goes onto an enemy it holds in a Fear or a Psychic
+  Scream (`class_ai::damage_breaks_friendly_hold`). A root that breaks on damage
+  is not waited out: a root and a nuke go together.
 
 ### Polymorph (Incapacitate)
 - Target wanders at 50% speed

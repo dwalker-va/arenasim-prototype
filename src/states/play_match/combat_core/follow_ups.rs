@@ -28,7 +28,7 @@ use super::super::components::*;
 use super::super::utils::combat_log_id_for;
 use super::{
     apply_damage_with_absorb, apply_healing, blocks_all_damage, credit_damage_dealt,
-    credited_damage, share_to_health, Hit, HitKind,
+    credit_healing_done, credited_damage, share_to_health, Hit, HitKind,
 };
 use crate::combat::log::{CombatLog, CombatLogEventType};
 
@@ -318,6 +318,14 @@ pub fn process_damage_follow_ups(
                 heal_fraction,
                 aura,
             } => {
+                // Who the save's heal is credited to: its caster's log id,
+                // read before the holder is borrowed.
+                let caster_id = caster.and_then(|c| {
+                    combatants
+                        .get(c)
+                        .ok()
+                        .map(|(cc, _, _)| combat_log_id_for(cc, pet_of(c)))
+                });
                 let Ok((mut combatant, auras, _)) = combatants.get_mut(holder) else {
                     continue;
                 };
@@ -353,10 +361,15 @@ pub fn process_damage_follow_ups(
                         &dampening,
                         amount,
                     );
-                    combat_log.log(
-                        CombatLogEventType::Healing,
-                        format!("[SAVED] {by} heals {holder_id} for {healed:.0}"),
-                    );
+                    let message = format!("[SAVED] {by} heals {holder_id} for {healed:.0}");
+                    // A row in its caster's breakdown, under the save's name;
+                    // a save with no caster in the match credits no one.
+                    match caster_id {
+                        Some(caster_id) => {
+                            combat_log.log_healing(caster_id, holder_id, by, healed, false, message)
+                        }
+                        None => combat_log.log(CombatLogEventType::Healing, message),
+                    }
                 }
                 if let Some((reduction, duration)) = aura {
                     commands.spawn(AuraPending {
@@ -365,7 +378,7 @@ pub fn process_damage_follow_ups(
                     });
                 }
                 if let Some(Ok((mut c, _, _))) = caster.map(|c| combatants.get_mut(c)) {
-                    c.healing_done += healed;
+                    credit_healing_done(&mut c, healed);
                 }
             }
         }

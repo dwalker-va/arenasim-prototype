@@ -99,7 +99,7 @@ fn pick_healer_to_fear(kill_target: Entity, ctx: &CombatContext) -> Option<Entit
             !ctx.entity_is_immune(healer)
                 && !ctx.is_dr_immune(healer, DRCategory::Fears)
                 // Fear breaks on damage.
-                && ctx.held_in_hard_cc(healer, super::Incoming::Breaks).is_none()
+                && ctx.held_in_hard_cc(healer).is_none()
         })
 }
 
@@ -139,8 +139,7 @@ fn pick_death_coil_peel(me: Entity, my_pos: Vec3, ctx: &CombatContext) -> Option
             // Already held — no value in re-CCing it (the horror never breaks
             // on damage) — or rooted, which already peels a melee off the
             // Warlock.
-            ctx.held_in_hard_cc(info.entity, super::Incoming::Lasts)
-                .is_none()
+            ctx.held_in_hard_cc(info.entity).is_none()
                 && !ctx
                     .active_auras
                     .get(&info.entity)
@@ -1651,8 +1650,8 @@ fn try_death_coil(
     let death_coil = AbilityType::DeathCoil;
     let def = abilities.get_unchecked(&death_coil);
 
-    // Its damage would break a friendly Polymorph or Freezing Trap, even one
-    // inside the chain window that no longer counts as a hold.
+    // Its damage would break a friendly Polymorph, Freezing Trap or Fear,
+    // even one inside the chain window that no longer counts as a hold.
     let opts = PreCastOpts {
         check_friendly_cc: true,
         ..Default::default()

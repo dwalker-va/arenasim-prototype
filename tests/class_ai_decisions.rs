@@ -504,7 +504,31 @@ fn has_friendly_breakable_cc_ignores_enemy_caster() {
 }
 
 #[test]
-fn has_friendly_breakable_cc_ignores_high_threshold_auras() {
+fn has_friendly_breakable_cc_detects_team_fear() {
+    let me = Entity::from_raw(1);
+    let ally = Entity::from_raw(2);
+    let enemy = Entity::from_raw(3);
+
+    let mut snapshot = snapshot_for(me, 1, CharacterClass::Warrior);
+    snapshot
+        .combatants
+        .insert(ally, info(ally, 1, CharacterClass::Warlock));
+    snapshot
+        .combatants
+        .insert(enemy, info(enemy, 2, CharacterClass::Rogue));
+
+    // Ally Feared the enemy — breaks after 100 damage, a hold the team waits
+    // out like a Polymorph.
+    snapshot
+        .active_auras
+        .insert(enemy, vec![aura_with(AuraType::Fear, Some(ally), 100.0)]);
+
+    let ctx = snapshot.context_for(me);
+    assert!(ctx.has_friendly_breakable_cc(enemy));
+}
+
+#[test]
+fn has_friendly_breakable_cc_ignores_a_root_that_breaks_on_damage() {
     let me = Entity::from_raw(1);
     let ally = Entity::from_raw(2);
     let enemy = Entity::from_raw(3);
@@ -517,8 +541,8 @@ fn has_friendly_breakable_cc_ignores_high_threshold_auras() {
         .combatants
         .insert(enemy, info(enemy, 2, CharacterClass::Rogue));
 
-    // Frost Nova root: break_on_damage_threshold == 80.0, not 0.0. It absorbs
-    // moderate damage before breaking, so attacking the target is fine.
+    // Frost Nova root: breaks after 80 damage, but a root is no hold — the
+    // rooted unit still casts and swings — so a root and a nuke go together.
     snapshot
         .active_auras
         .insert(enemy, vec![aura_with(AuraType::Root, Some(ally), 80.0)]);
@@ -1388,9 +1412,9 @@ fn team_hp_advantage_zero_when_self_absent() {
 /// joining the non-pet row without anyone deciding it should would silently
 /// stop every Hunter trapping its teammates.
 ///
-/// The pet row is the AS-129 seam: today only the Felhunter reaches a pet, so
-/// a trapped Felhunter is freed by nobody (it cannot act while trapped). Make
-/// the healers' dispels reach pets and this row, not the Hunter AI, changes.
+/// The pet row is the AS-129 ruling: every dispel reaches a pet, so a trapped
+/// Felhunter is freed by the same healers as its Warlock (and by another
+/// Felhunter) — this row, not the Hunter AI, is what moved.
 #[test]
 fn who_can_free_a_freezing_trap() {
     use arenasim::states::play_match::class_ai::can_free_ally;
@@ -1427,7 +1451,7 @@ fn who_can_free_a_freezing_trap() {
     );
     assert_eq!(
         freers_of(&pet_victim),
-        vec!["Felhunter"],
+        vec!["Felhunter", "Paladin", "Priest"],
         "who frees a trapped pet"
     );
 
@@ -1543,8 +1567,9 @@ fn a_paladin_walks_to_a_teammate_it_can_only_free_from_closer() {
 /// AS-125 rulings name. A healer — the dispeller the trap is FOR — is always
 /// worth one, including beside a Felhunter that could devour it (the intended
 /// counter is left to play out). Anyone else is worth one only when no
-/// teammate of its could free it — a trapped Felhunter included — however
-/// hard the Hunter's team is pressing the teammate that would.
+/// teammate of its could free it — a trapped Felhunter included, which its
+/// healer frees (AS-129) — however hard the Hunter's team is pressing the
+/// teammate that would.
 #[test]
 fn a_trap_is_worth_throwing_where_nobody_frees_it() {
     use arenasim::states::play_match::class_ai::hunter_dip::trap_victim_worth_it;
@@ -1583,11 +1608,11 @@ fn a_trap_is_worth_throwing_where_nobody_frees_it() {
     // The Shaman frees nobody (Purge strips enemy buffs), so its DPS is fair.
     assert_eq!(worth(&[(a, Shaman), (b, Warrior)], false), [true, true]);
     // Warlock + healer: two dispellers. The healer stays the target; the
-    // Warlock is freed by the Felhunter (and the Priest); the Felhunter itself
-    // nobody can free.
+    // Warlock is freed by the Felhunter (and the Priest), and the Felhunter by
+    // the Priest.
     assert_eq!(
         worth(&[(a, Priest), (b, Warlock)], true),
-        [true, false, true]
+        [true, false, false]
     );
     // Warlock + Rogue: the Felhunter frees both, so neither is worth a trap —
     // but a trapped Felhunter stays trapped.
