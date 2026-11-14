@@ -978,6 +978,27 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // The empowered ground flash of Amplify Curse and Shadow Trance, and
+        // Shadow Trance's speck halo (`empowered_flash.rs`): spawn (consumes
+        // their landing markers) -> flash -> halo, before the client
+        // particles age (the specks are `ClientParticle`s), and the specks
+        // turned after.
+        .add_systems(
+            Update,
+            (
+                (
+                    play_match::spawn_empowered_flashes,
+                    play_match::animate_empowered_flashes,
+                    play_match::update_shadow_trance_halos,
+                )
+                    .chain()
+                    .before(play_match::animate_client_particles),
+                play_match::billboard_shadow_trance_specks
+                    .after(play_match::animate_client_particles),
+            )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Shadow Word: Pain's landing (`shadow_word_pain.rs`): spawn (consumes
         // the sim's SW:P landing markers) -> emit -> particles -> billboard.
         .add_systems(

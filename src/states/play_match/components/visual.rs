@@ -859,6 +859,14 @@ pub const MARK_OF_THE_WILD_AURA: &str = "Mark of the Wild";
 /// Shadow Word: Pain's aura name (the RON `name:` string). Its landing is the
 /// one visual the client gives it (`rendering/effects/shadow_word_pain.rs`).
 pub const SHADOW_WORD_PAIN_AURA: &str = "Shadow Word: Pain";
+/// Amplify Curse's aura name (the RON `name:` string): the primed curse its
+/// cast lands on the Warlock. Its landing is the empowered ground flash
+/// (`rendering/effects/empowered_flash.rs`).
+pub const AMPLIFY_CURSE_AURA: &str = "Amplify Curse";
+/// Shadow Trance's aura name (the `name:` Nightfall's proc gives its aura in
+/// `talents.ron`). Its landing is the empowered ground flash plus the dark
+/// speck halo at the head (`rendering/effects/empowered_flash.rs`).
+pub const SHADOW_TRANCE_AURA: &str = "Shadow Trance";
 
 /// What a heal-over-time aura draws — the ONE place a HoT meets its visual,
 /// routed by the aura's RON name the way `DotStateVisual::for_dot` routes a
@@ -905,6 +913,15 @@ pub enum AuraLandingKind {
     /// of emission whose smoke trails off by about 2.3 s
     /// (`shadowwordpain_chest.m2`, kit 304). The DoT draws nothing else.
     ShadowWordPainHit,
+    /// Amplify Curse: the client's generic "empowered next cast" flash, three
+    /// teal-to-blue additive discs blooming on the ground at the Warlock's
+    /// feet for under half a second (`presenceofmind_cast_base.m2`, kit 4012).
+    /// Once, on cast; the waiting buff is its icon.
+    AmplifyFlash,
+    /// Shadow Trance (Nightfall's proc): the same flash, plus a halo of tiny
+    /// near-black specks drifting in about the head while the proc waits
+    /// (kit 4569: the flash and `shadow_impactdot_med_head.m2`).
+    ShadowTrance,
 }
 
 impl AuraLandingKind {
@@ -921,6 +938,8 @@ impl AuraLandingKind {
             AuraType::DamageOverTime if name == SHADOW_WORD_PAIN_AURA => {
                 Some(AuraLandingKind::ShadowWordPainHit)
             }
+            AuraType::NextCast if name == AMPLIFY_CURSE_AURA => Some(AuraLandingKind::AmplifyFlash),
+            AuraType::NextCast if name == SHADOW_TRANCE_AURA => Some(AuraLandingKind::ShadowTrance),
             _ => None,
         }
     }
@@ -1087,6 +1106,47 @@ pub struct ShadowPainParticle {
 pub enum ShadowPainParticlePart {
     Sprite,
     Streak,
+}
+
+/// The empowered ground flash (graphical only): the client's
+/// `presenceofmind_cast_base.m2`, three concentric additive discs on the
+/// ground at a Warlock's feet that bloom outward and fade within half a
+/// second. Amplify Curse plays it on cast and Shadow Trance on its proc
+/// (`rendering/effects/empowered_flash.rs`). It follows its Warlock's feet,
+/// and retires with a dead one.
+#[derive(Component, Debug)]
+pub struct EmpoweredFlash {
+    /// The Warlock whose feet it blooms at.
+    pub caster: Entity,
+    pub age: f32,
+    /// This flash's own material: its colour and alpha ramp are written here
+    /// each frame, so two flashes never share one.
+    pub material: Handle<StandardMaterial>,
+}
+
+/// One of an [`EmpoweredFlash`]'s three disc children; `half_width` is its
+/// client half-width in yards before the bloom scale.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct EmpoweredFlashDisc {
+    pub half_width: f32,
+}
+
+/// Shadow Trance's dark speck halo (graphical only): tiny near-black specks
+/// born on a flat shell about the Warlock's head and drifting in
+/// (`shadow_impactdot_med_head.m2`). It follows the head, emits for the
+/// client's window from the proc, and retires, specks and all, the moment
+/// Shadow Trance is spent or its Warlock dies. One halo per Warlock: a proc
+/// that refreshes Shadow Trance restarts it.
+#[derive(Component, Debug)]
+pub struct ShadowTranceHalo {
+    /// The Warlock whose head it rings.
+    pub owner: Entity,
+    /// Seconds since the (latest) proc.
+    pub age: f32,
+    /// Fractional specks owed.
+    pub carry: f32,
+    /// Specks emitted so far, the running part of every speck's seed.
+    pub emitted: u32,
 }
 
 /// A flat, per-landing piece of a heal impact (graphical only).
@@ -1578,9 +1638,10 @@ pub enum AuraApplyOwner {
     /// here would double every one of those impacts.
     SlowRing,
     /// A named aura whose LANDING has its own one-shot: Rejuvenation's ribbon
-    /// swirl and Mark of the Wild's glyph (`druid_heals.rs`), and Shadow Word:
-    /// Pain's dark hit (`shadow_word_pain.rs`). Owned per aura
-    /// NAME, not per type — see [`AuraApplyRoute::for_instance`] — because
+    /// swirl and Mark of the Wild's glyph (`druid_heals.rs`), Shadow Word:
+    /// Pain's dark hit (`shadow_word_pain.rs`), and the empowered ground flash
+    /// of Amplify Curse and Shadow Trance (`empowered_flash.rs`). Owned per
+    /// aura NAME, not per type — see [`AuraApplyRoute::for_instance`] — because
     /// their types are shared with auras that keep the band (Healing Stream's
     /// HoT, Power Word: Fortitude). Lifebloom is not here: its pulse starts a
     /// beat after it lands, so the band is its only application cue.
