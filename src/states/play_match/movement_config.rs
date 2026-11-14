@@ -493,6 +493,10 @@ pub struct DpsMovementConfig {
     /// target (the old dip's rule), so a lone DPS does not freeze the healer
     /// it is killing.
     pub trap_walk_spare_own_target: bool,
+    /// AS-498 prototype: the trap walk takes the enemy healer only while a
+    /// DPS teammate of the Hunter's is attacking someone (`team_focus` is
+    /// not empty), so someone uses the window the freeze buys.
+    pub trap_walk_needs_teammate: bool,
     /// Occlusion-timeout direct chase: seconds an ENGAGE kiter may stay
     /// continuously occluded from its kill target while in shot range (the
     /// orbit-seek stall) before it abandons orbit-seeking and walks straight at
@@ -561,6 +565,7 @@ impl Default for DpsMovementConfig {
             dip_budget: 0.0,           // Mage default off; Hunter ron turns it on
             trap_walk_worth: -1.0,     // AS-498 prototype off: the old dip
             trap_walk_spare_own_target: false,
+            trap_walk_needs_teammate: false,
             seek_chase_timeout: 3.5, // accumulated occlusion units before the chase arms
             seek_chase_decay: 0.5, // drains this per sighted second (< fill, so jukes still accrue)
         }

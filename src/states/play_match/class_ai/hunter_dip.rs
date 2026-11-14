@@ -824,6 +824,9 @@ const TRAP_WALK_STEP: f32 = 0.1;
 /// `spare` (the Hunter's own kill target, when
 /// `hunter.trap_walk_spare_own_target` is on) is never the healer victim.
 ///
+/// With `needs_teammate`, the healer is taken only while a DPS teammate is
+/// attacking someone ([`team_focus`] not empty).
+///
 /// `None` otherwise: the trap is not the trap play's to throw.
 pub fn trap_play_victim(
     ctx: &CombatContext,
@@ -831,9 +834,11 @@ pub fn trap_play_victim(
     my_team: u8,
     my_pos: Vec3,
     spare: Option<Entity>,
+    needs_teammate: bool,
 ) -> Option<(Entity, Entity)> {
-    if let Some(Ok(healer)) =
-        pressure_trap_healer(ctx, entity, my_team).filter(|v| spare.is_none() || v.ok() != spare)
+    if let Some(Ok(healer)) = pressure_trap_healer(ctx, entity, my_team)
+        .filter(|v| spare.is_none() || v.ok() != spare)
+        .filter(|_| !needs_teammate || !team_focus(ctx, entity).is_empty())
     {
         let instead = super::dps_postures::nearest_melee_threat_where(ctx, entity, my_pos, |e| {
             e != healer && !ctx.entity_is_immune(e)
@@ -996,6 +1001,7 @@ fn evaluate_trap_walk(
                 combatant
                     .target
                     .filter(|_| config.trap_walk_spare_own_target),
+                config.trap_walk_needs_teammate,
             )
         })
         .flatten();

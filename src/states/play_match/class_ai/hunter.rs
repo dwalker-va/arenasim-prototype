@@ -60,8 +60,9 @@ pub fn decide_hunter_action(
     weights: &MovementWeights,
     // AS-498 prototype: `Some` when the dip is the trap walk
     // (`hunter.trap_walk_worth` at or above zero), carrying
-    // `hunter.trap_walk_spare_own_target`.
-    trap_walk: Option<bool>,
+    // `hunter.trap_walk_spare_own_target` and
+    // `hunter.trap_walk_needs_teammate`.
+    trap_walk: Option<(bool, bool)>,
     // The Hunter's own Freezing Traps not yet sprung, so its damage does not
     // land on an enemy just after one of them freezes it.
     own_traps: &[LiveTrap],
@@ -755,7 +756,10 @@ pub fn decide_hunter_action(
             entity,
             combatant.team,
             my_pos,
-            combatant.target.filter(|_| trap_walk == Some(true)),
+            combatant
+                .target
+                .filter(|_| trap_walk.is_some_and(|(spare, _)| spare)),
+            trap_walk.is_some_and(|(_, needs)| needs),
         )
         .map(|(v, _)| (v, my_pos))
     } else {
