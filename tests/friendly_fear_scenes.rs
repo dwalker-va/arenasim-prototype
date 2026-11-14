@@ -289,12 +289,14 @@ fn a_root_from_the_team_does_not_stop_a_nuke_but_a_fear_does() {
 /// How long the staged hold lasts.
 const HOLD_SECS: f32 = 6.0;
 
-/// `attacker`'s Auto Attacks that hit the enemy Priest before `until` on the
-/// app clock (the combat log's stamps).
-fn swings_landed_before(log: &str, attacker: &str, until: f32) -> usize {
+/// The stamps of `attacker`'s Auto Attacks that hit or crit the enemy Priest
+/// before `until` on the app clock (the combat log's stamps), in order. Every
+/// hand's swing and every extra swing is logged as an Auto Attack.
+fn swings_landed_before(log: &str, attacker: &str, until: f32) -> Vec<f32> {
     let hit = format!("[DMG] {attacker}'s Auto Attack hits Team 2 Priest #1");
+    let crit = format!("[DMG] {attacker}'s Auto Attack CRITS Team 2 Priest #1");
     log.lines()
-        .filter(|l| l.contains(&hit))
+        .filter(|l| l.contains(&hit) || l.contains(&crit))
         .filter_map(|l| {
             l.trim_start_matches('[')
                 .split('s')
@@ -304,7 +306,7 @@ fn swings_landed_before(log: &str, attacker: &str, until: f32) -> usize {
                 .ok()
         })
         .filter(|t| *t < until)
-        .count()
+        .collect()
 }
 
 /// A hold of `effect` from `caster` on the enemy Priest, breaking as
@@ -318,12 +320,24 @@ struct Hold {
 }
 
 /// `team1` against an enemy Priest rooted in place at the origin, everyone
-/// unkillable, `attacker` beside the Priest, and `holds` landed on the Priest
-/// at the gates, in order. The Priest's Psychic Scream and every
-/// Fear and Death Coil on `team1` are held on cooldown, so no crowd control
-/// but the staged one ever touches the swings. Returns how many of
+/// unkillable and out of stealth, `attacker` beside the Priest, and `holds`
+/// landed on the Priest at the gates, in order. The Priest's Psychic Scream
+/// and every Fear and Death Coil on `team1` are held on cooldown, so no crowd
+/// control but the staged one ever touches the swings. Returns how many of
 /// `attacker_log`'s swings landed while the hold lasts.
 fn swings_under(team1: &[&str], attacker: Unit, attacker_log: &str, holds: &[Hold]) -> usize {
+    swings_landed_under(team1, attacker, attacker_log, holds, &[]).len()
+}
+
+/// [`swings_under`] with `attacker_auras` on the attacker from the gates,
+/// returning the stamps of its swings that landed while the hold lasts.
+fn swings_landed_under(
+    team1: &[&str],
+    attacker: Unit,
+    attacker_log: &str,
+    holds: &[Hold],
+    attacker_auras: &[Aura],
+) -> Vec<f32> {
     use arenasim::states::play_match::components::{ActiveAuras, Combatant};
     let unkillable = |c: &mut Combatant| {
         c.max_health = 1.0e6;
@@ -345,10 +359,17 @@ fn swings_under(team1: &[&str], attacker: Unit, attacker_log: &str, holds: &[Hol
                 ..Default::default()
             },
         );
+    for aura in attacker_auras {
+        stage = stage.aura(attacker, aura.clone());
+    }
     for slot in 0..team1.len() as u8 {
         let who = Unit::new(1, slot);
         stage = stage
-            .combatant(who, unkillable)
+            .combatant(who, move |c| {
+                unkillable(c);
+                // A Rogue opens in stealth, where it does not auto-attack.
+                c.stealthed = false;
+            })
             .target(who, priest)
             .cooldown(who, AbilityType::Fear, 1000.0)
             .cooldown(who, AbilityType::DeathCoil, 1000.0);
@@ -385,11 +406,12 @@ fn swings_under(team1: &[&str], attacker: Unit, attacker_log: &str, holds: &[Hol
 
 /// Each attacker's swings land on the free Priest, and none land while a
 /// hold its own team placed lasts: a Fear (the attacker's own), a teammate's
-/// Freezing Trap, and its owner's Fear for a pet.
+/// Freezing Trap, a dual-wielding Rogue's own Fear (both hands), and its
+/// owner's Fear for a pet.
 #[test]
 fn the_teams_breakable_holds_hold_off_the_auto_attack() {
     let warrior = Unit::new(1, 0);
-    let cases: [(&[&str], Unit, &str, Hold); 3] = [
+    let cases: [(&[&str], Unit, &str, Hold); 4] = [
         (
             &["Warrior"],
             warrior,
@@ -410,6 +432,18 @@ fn the_teams_breakable_holds_hold_off_the_auto_attack() {
                 threshold: 0.0,
                 caster: Unit::new(1, 1),
                 name: "Freezing Trap",
+            },
+        ),
+        // A dual-wielder: both hands wait the hold out.
+        (
+            &["Rogue"],
+            Unit::new(1, 0),
+            "Team 1 Rogue #1",
+            Hold {
+                effect: AuraType::Fear,
+                threshold: 100.0,
+                caster: Unit::new(1, 0),
+                name: "Fear",
             },
         ),
         (
@@ -438,6 +472,47 @@ fn the_teams_breakable_holds_hold_off_the_auto_attack() {
             hold.name
         );
     }
+}
+
+/// A swing held off its team's Fear carries no extra swing either. With
+/// Windfury Totem's buff at a certain chance, every free main-hand swing
+/// brings one more, landing on the same frame; under the Warrior's own Fear
+/// no swing lands at all, the extra ones included.
+#[test]
+fn a_swing_held_off_the_teams_fear_carries_no_extra_swing() {
+    let warrior = Unit::new(1, 0);
+    let label = "Team 1 Warrior #1";
+    let windfury = Aura {
+        effect_type: AuraType::WindfuryBuff,
+        duration: 30.0,
+        magnitude: 1.0,
+        break_on_damage_threshold: -1.0,
+        ability_name: "Windfury Totem".into(),
+        ..Default::default()
+    };
+    let free = swings_landed_under(
+        &["Warrior"],
+        warrior,
+        label,
+        &[],
+        std::slice::from_ref(&windfury),
+    );
+    let extra_swings = free.windows(2).filter(|w| w[0] == w[1]).count();
+    assert!(
+        extra_swings > 0,
+        "without the Fear, the Warrior's swings bring their extra swings: {free:?}"
+    );
+    let fear = Hold {
+        effect: AuraType::Fear,
+        threshold: 100.0,
+        caster: warrior,
+        name: "Fear",
+    };
+    let held = swings_landed_under(&["Warrior"], warrior, label, &[fear], &[windfury]);
+    assert!(
+        held.is_empty(),
+        "under its own Fear, no swing and no extra swing lands: {held:?}"
+    );
 }
 
 /// A hold the target's OWN side placed on it is no hold the attacker's team
