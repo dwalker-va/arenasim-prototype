@@ -60,6 +60,11 @@ pub enum HunterDipPlan {
     DipCast {
         target: Entity,
         completed_state: KitePosture,
+        /// The trap walk's throw (AS-498): the enemy the Hunter fights while
+        /// the trap holds `target` ([`TrapRetarget`]), and the landing is the
+        /// pressure trap's clean one. `None` for the old dip's point-blank
+        /// drop.
+        hold: Option<Entity>,
     },
 }
 
@@ -659,6 +664,22 @@ pub fn evaluate_hunter_dip(
     let Some(state) = posture else {
         return HunterDipPlan::Rotation;
     };
+    if config.trap_walk_worth >= 0.0 {
+        return evaluate_trap_walk(
+            commands,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            ctx,
+            state,
+            directive,
+            config,
+            now,
+            decision_trace,
+        );
+    }
 
     let def = abilities.get_unchecked(&AbilityType::FreezingTrap);
     let trap_ready = pre_cast_ok(
@@ -708,6 +729,7 @@ pub fn evaluate_hunter_dip(
             return HunterDipPlan::DipCast {
                 target,
                 completed_state: completed,
+                hold: None,
             };
         }
 
@@ -765,6 +787,273 @@ pub fn evaluate_hunter_dip(
         my_pos,
         MovementTrigger::DipEnter,
     );
+    HunterDipPlan::Walking
+}
+
+// ============================================================================
+// AS-498 prototype: the trap walk
+// ============================================================================
+
+/// Seconds an enemy melee stays on the Hunter once a walk has let it reach
+/// striking range: the time the Hunter needs to open the gap again (a
+/// Disengage or a Concussive Shot on its next GCDs). Provisional.
+pub const TRAP_WALK_STICK_SECS: f32 = 2.0;
+
+/// Within this of the Hunter an enemy melee or pet strikes it (melee range
+/// plus the slack its pursuit stops at).
+const TRAP_WALK_CONTACT: f32 = 5.0;
+
+/// Sampling step of [`walk_exposure`], in seconds.
+const TRAP_WALK_STEP: f32 = 0.1;
+
+/// Who the trap play freezes, and whom the Hunter fights while it holds:
+/// `(victim, instead)`.
+///
+/// - **The enemy healer** when the pressure trap would take it
+///   ([`pressure_trap_healer`]: eligible, not a teammate's kill, and no
+///   teammate of its could free it — `ally_freers`). The Hunter fights the
+///   nearest melee threat instead, else the nearest other enemy it sees; with
+///   nobody else to fight (1v1) there is no trap play.
+/// - **The outlast trap** when the team is killing the enemy healer
+///   ([`team_focus`] holds it): the gameplan is to drain it, so the trap goes
+///   on an enemy DPS that would stay frozen ([`trap_would_stick`], the same
+///   `ally_freers` rule), no teammate of the Hunter's is attacking it, and it
+///   is eligible — the one targeting the Hunter first, then the nearest. The
+///   Hunter fights the healer instead.
+///
+/// `None` otherwise: the trap is not the trap play's to throw.
+pub fn trap_play_victim(
+    ctx: &CombatContext,
+    entity: Entity,
+    my_team: u8,
+    my_pos: Vec3,
+) -> Option<(Entity, Entity)> {
+    if let Some(Ok(healer)) = pressure_trap_healer(ctx, entity, my_team) {
+        let instead = super::dps_postures::nearest_melee_threat_where(ctx, entity, my_pos, |e| {
+            e != healer && !ctx.entity_is_immune(e)
+        })
+        .map(|(e, _)| e)
+        .or_else(|| {
+            ctx.alive_enemies()
+                .into_iter()
+                .filter(|e| !e.is_pet && e.entity != healer && !ctx.entity_is_immune(e.entity))
+                .min_by(|a, b| {
+                    a.position
+                        .distance(my_pos)
+                        .total_cmp(&b.position.distance(my_pos))
+                })
+                .map(|e| e.entity)
+        })?;
+        return Some((healer, instead));
+    }
+    let focus = team_focus(ctx, entity);
+    let drained = ctx
+        .alive_enemies()
+        .into_iter()
+        .find(|e| !e.is_pet && e.is_healer() && focus.contains(&e.entity))?
+        .entity;
+    let victim = ctx
+        .alive_enemies()
+        .into_iter()
+        .filter(|e| !e.is_pet && !e.is_healer())
+        .filter(|e| !focus.contains(&e.entity) && !teammate_targets(ctx, entity, e.entity))
+        .filter(|e| dip_target_eligible(ctx, my_team, e.entity))
+        .filter(|e| trap_would_stick(ctx, entity, e.entity))
+        .min_by(|a, b| {
+            (a.target != Some(entity))
+                .cmp(&(b.target != Some(entity)))
+                .then(
+                    a.position
+                        .distance(my_pos)
+                        .total_cmp(&b.position.distance(my_pos)),
+                )
+        })?
+        .entity;
+    Some((victim, drained))
+}
+
+/// The extra seconds of enemy melee contact a walk from `my_pos` toward
+/// `goal`, until within `reach` of it, costs the Hunter over kiting away — the
+/// user's weighing (AS-498): the damage the kite would have prevented that the
+/// walk does not.
+///
+/// Every enemy melee or pet targeting the Hunter and free to move is a
+/// chaser. Kiting at equal speed holds the gap a chaser has, so the kite
+/// prevents a chaser's damage exactly while it is not already striking. The
+/// walk is sampled: the Hunter moves straight at `goal` at `speed`, each
+/// chaser straight at the Hunter at its own speed (the Hunter's base speed,
+/// less its slows). A chaser the kite would have kept off costs the seconds
+/// it strikes during the walk, plus [`TRAP_WALK_STICK_SECS`] when it is still
+/// striking as the walk ends. A caster's damage costs nothing: the kite does
+/// not prevent it either. `None` when the walk is longer than `budget`.
+pub fn walk_exposure(
+    ctx: &CombatContext,
+    entity: Entity,
+    my_pos: Vec3,
+    speed: f32,
+    goal: Vec3,
+    reach: f32,
+    budget: f32,
+) -> Option<f32> {
+    let me = ctx.combatants.get(&entity)?;
+    let walk_len = (flat(goal).distance(flat(my_pos)) - reach).max(0.0);
+    let walk = if speed > 0.0 {
+        walk_len / speed
+    } else {
+        f32::INFINITY
+    };
+    if walk > budget {
+        return None;
+    }
+    let heading = (flat(goal) - flat(my_pos)).normalize_or_zero();
+    let base = speed;
+    let mut extra = 0.0;
+    for chaser in ctx.combatants.values().filter(|c| {
+        c.team != me.team
+            && c.is_alive
+            && (c.is_pet || c.class.is_melee())
+            && c.target == Some(entity)
+            && !ctx.is_ccd(c.entity)
+    }) {
+        let start = flat(chaser.position);
+        if start.distance(flat(my_pos)) <= TRAP_WALK_CONTACT {
+            // Already striking: the kite does not prevent it either.
+            continue;
+        }
+        let chaser_speed = base * ctx.movement_slow_multiplier(chaser.entity);
+        let steps = (walk / TRAP_WALK_STEP).ceil() as usize;
+        let mut at = start;
+        let mut struck = 0.0;
+        let mut striking = false;
+        for i in 1..=steps {
+            let t = (i as f32 * TRAP_WALK_STEP).min(walk);
+            let hunter = flat(my_pos) + heading * speed * t;
+            let to = hunter - at;
+            let step = chaser_speed * TRAP_WALK_STEP;
+            at += to.normalize_or_zero() * step.min(to.length());
+            striking = at.distance(hunter) <= TRAP_WALK_CONTACT;
+            if striking {
+                struck += TRAP_WALK_STEP;
+            }
+        }
+        extra += struck + if striking { TRAP_WALK_STICK_SECS } else { 0.0 };
+    }
+    Some(extra)
+}
+
+/// The trap walk (AS-498 prototype): the dip, on the user's damage weighing.
+///
+/// While Freezing Trap is ready and there is a [`trap_play_victim`]:
+/// - its landing is clean from here ([`pressure_trap_landing`]): throw it now
+///   ([`HunterDipPlan::DipCast`] with the hold);
+/// - otherwise walk at it, for as long as the walk to throw range
+///   ([`trap_setup_range`]) costs at most `trap_walk_worth` seconds of extra
+///   melee contact over kiting ([`walk_exposure`]) and fits what is left of
+///   `dip_budget`.
+///
+/// A walk that stops qualifying ends (traced `DipAbort`); one that starts is
+/// traced `DipEnter`.
+#[allow(clippy::too_many_arguments)]
+fn evaluate_trap_walk(
+    commands: &mut Commands,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    state: &mut KitePosture,
+    directive: Option<&MovementDirective>,
+    config: &DpsMovementConfig,
+    now: f32,
+    decision_trace: &mut DecisionTrace,
+) -> HunterDipPlan {
+    let live = state.dipping(now);
+    let def = abilities.get_unchecked(&AbilityType::FreezingTrap);
+    let ready = pre_cast_ok(
+        AbilityType::FreezingTrap,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    );
+    let victim = ready
+        .then(|| trap_play_victim(ctx, entity, combatant.team, my_pos))
+        .flatten();
+    let mut end = |state: &mut KitePosture, decision_trace: &mut DecisionTrace| {
+        if live {
+            let target = state.dip_target.expect("live");
+            state.dip_target = None;
+            state.dip_until = 0.0;
+            if directive.is_some() {
+                commands.entity(entity).remove::<MovementDirective>();
+            }
+            emit_dip(
+                decision_trace,
+                ctx,
+                target,
+                my_pos,
+                MovementTrigger::DipAbort,
+            );
+        }
+        HunterDipPlan::Rotation
+    };
+    let Some((victim, instead)) = victim else {
+        return end(state, decision_trace);
+    };
+    if pressure_trap_landing(ctx, abilities, combatant.team, my_pos, victim).is_ok() {
+        let mut completed = *state;
+        completed.dip_target = None;
+        completed.dip_until = 0.0;
+        return HunterDipPlan::DipCast {
+            target: victim,
+            completed_state: completed,
+            hold: Some(instead),
+        };
+    }
+    let Some(goal) = ctx.combatants.get(&victim).map(|v| v.position) else {
+        return end(state, decision_trace);
+    };
+    let budget = if live {
+        state.dip_until - now
+    } else {
+        config.dip_budget
+    };
+    let speed = combatant.base_movement_speed * ctx.movement_slow_multiplier(entity);
+    let worth = walk_exposure(
+        ctx,
+        entity,
+        my_pos,
+        speed,
+        goal,
+        trap_setup_range(abilities),
+        budget,
+    )
+    .is_some_and(|extra| extra <= config.trap_walk_worth);
+    if !worth {
+        return end(state, decision_trace);
+    }
+    if !live || state.dip_target != Some(victim) {
+        state.dip_target = Some(victim);
+        if !live {
+            state.dip_until = now + config.dip_budget;
+        }
+        emit_dip(
+            decision_trace,
+            ctx,
+            victim,
+            my_pos,
+            MovementTrigger::DipEnter,
+        );
+    }
+    commands.entity(entity).try_insert(MovementDirective {
+        goal: MovementGoal::Entity(victim),
+        expires: state.dip_until,
+        committed_until: state.dip_until,
+    });
     HunterDipPlan::Walking
 }
 

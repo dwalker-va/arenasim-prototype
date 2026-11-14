@@ -482,6 +482,13 @@ pub struct DpsMovementConfig {
     /// trap on the healer). Mirrors the Paladin/Priest `dip_budget`.
     /// Ignored by the Mage.
     pub dip_budget: f32,
+    /// AS-498 prototype (Hunter only): the trap walk. Below zero (the
+    /// default) the old dip runs. At or above zero the dip becomes the trap
+    /// walk: it walks toward the trap victim (`hunter_dip::trap_play_victim`)
+    /// whenever the extra seconds of melee contact the walk costs over kiting
+    /// away (`hunter_dip::walk_exposure`) are at most this many, and throws
+    /// from range the moment the landing is clean.
+    pub trap_walk_worth: f32,
     /// Occlusion-timeout direct chase: seconds an ENGAGE kiter may stay
     /// continuously occluded from its kill target while in shot range (the
     /// orbit-seek stall) before it abandons orbit-seeking and walks straight at
@@ -548,6 +555,7 @@ impl Default for DpsMovementConfig {
             kite_entry_radius: 20.0,   // Hunter closing-range band
             kite_sustain_radius: 24.0, // hold a touch past entry
             dip_budget: 0.0,           // Mage default off; Hunter ron turns it on
+            trap_walk_worth: -1.0,     // AS-498 prototype off: the old dip
             seek_chase_timeout: 3.5,   // accumulated occlusion units before the chase arms
             seek_chase_decay: 0.5, // drains this per sighted second (< fill, so jukes still accrue)
         }

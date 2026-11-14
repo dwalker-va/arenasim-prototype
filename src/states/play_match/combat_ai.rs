@@ -1514,6 +1514,7 @@ pub fn dispatch_class_decision(
                 instant_attacks,
                 dip_plan,
                 &movement_config.hunter.weights,
+                movement_config.hunter.trap_walk_worth >= 0.0,
                 own_freezing_traps
                     .get(&entity)
                     .map_or(&[][..], Vec::as_slice),
