@@ -163,9 +163,14 @@
 //! behind the root-dispel bar and the Paladin's while-CC Divine Shield) would
 //! start following a retune of `urgency_hp_threshold`; the Druid's own
 //! `DRUID_EMERGENCY_HP` (0.45) and `DRUID_URGENT_HP` (0.6) are different
-//! numbers; and the Priest's `attack_prevented_by_cc` leaves Cyclone out of
-//! the set [`locks_healer`] names. Unifying any of them is a behaviour change
-//! with its own card.
+//! numbers. Unifying either is a behaviour change with its own card.
+//!
+//! One set that does look alike IS the same set: the crowd control that
+//! stops a unit acting. [`locks_healer`], the Priest's
+//! `attack_prevented_by_cc` (an enemy it holds is not focusing the Priest)
+//! and `utils::is_incapacitating` all read
+//! [`holds`](super::class_ai::holds), so none can leave Cyclone, or a hold
+//! added later, out of another's list.
 //!
 //! ## Where it is classified, and why there
 //!
