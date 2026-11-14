@@ -477,6 +477,11 @@ lines, 671 / 576 / 13), and `TeamPlan` with the focus withheld reproduces
 
 ### 9.1 The shape
 
+**Superseded in part by AS-404 (§10):** the stations and the hold rule below
+are replaced by an active pincer, and the hunt now holds while the healer is
+in its pillar's shadow from the team. The rest of §9 records AS-394 as built
+and measured.
+
 `class_ai::hunt`, a `TeamPlan` play; the module docs and CLAUDE.md (*Plays*)
 carry the rules. In short:
 
@@ -681,3 +686,120 @@ south-east face (-34°). The Mage steps east onto the 56° station by 59.2. The
 Priest walks the other way, round the west face, to the -124° station by
 66.6. From then on they stand about 176°
 apart.
+
+## 10. AS-404: the active pincer
+
+The 0.8 review's replays read as idle: a hunter stood on its station without
+sight of the hider (seed 723's Mage for 5.5s, seed 732's Hunter for 2s), and
+the hunt ended while the hider was still behind the pillar from one hunter.
+Read per frame on v0.8.0, both idle units were held by the hold rule:
+`covered` counted the partner's sight, so a unit that had reached its station
+stayed parked there blind. Both had seen the hider at onset and lost it by
+walking onto a station fixed at the onset bearing ±90°. The user ruled
+(2026-11-13) for an active pincer with kept sides; the edge-of-sight cast
+stall the prototype showed is AS-492's.
+
+### 10.1 The rule
+
+- **The hunt holds in the shadow.** It holds while the healer is within
+  `HUNT_LEAVE` of its pillar's skin, or, out to `HUNT_SHADOW_LEAVE` (16yd off
+  the skin), while the pillar hides it from any living teammate: it is in that
+  teammate's widened shadow, or the pillar blocks the teammate's plain sight.
+  It ends once the healer is out in the open (or reaches another pillar). The
+  shadow is AS-206's (`formation::shadow_exits` at `SIGHT_MARGIN`): the wedge
+  behind the pillar's footprint from the viewer, widened by 2.5yd, out to the
+  near-obstacle limit. The widening is the release hysteresis; the plain
+  block carries the hold past the limit, where the widened shadow is cut off
+  by distance alone (seed 758, round 3). A hunt that starts again on the same
+  healer at the same pillar within `HUNT_REMEMBER` (3s) keeps each unit's
+  side.
+- **Sides.** At onset each hunter takes a side, paired with the axis ±90° by
+  the shorter total walk round the pillar (AS-403's assignment), and keeps it.
+  Sides are measured from the healer's live bearing.
+- **Seeing.** A hunter that sees the healer from within its own reach (its
+  book's damaging abilities' range bands: a Hunter's 8-35yd shots, a Mage's
+  40yd Frostbolt) stands where it is and casts. The latch sets on sight clear
+  of the widened shadow from `REACH_MARGIN` (2yd) inside reach, and clears on
+  losing plain sight or reach.
+- **Blind or out of reach.** Any other hunter walks to the nearest spot on its
+  own side, 4-14yd off the skin, that sees the healer clear of the widened
+  shadow from within its reach. It keeps that spot at least `REAIM_SECS`
+  (0.5s), then while the spot still sees the healer within reach.
+- **The onset walk.** Until a hunter first sees the healer, it takes the
+  shorter way round to its side's onset point (where its station stood) and
+  stops to cast if it gets sight on the way. After that, a blind hunter on the
+  wrong side always walks round the back of the pillar to its own side, never
+  across the healer's face.
+
+The onset walk's route is chosen against the onset point, not the nearest
+spot that sees: measured to that spot, a hunter trailing a healer that runs
+away round the pillar always finds the chase across the face shorter, so both
+hunters trailed it round one side (Warlock+Priest against Warrior+Priest,
+Nagrand, seed 754, `TeamPlan`, before this rule). Against the onset point the
+same hunter goes round the back and meets the healer head-on.
+
+### 10.2 Tests
+
+`tests/hunt_pincer_staged.rs` asserts geometry over a bank of staged endgames
+(the 723 and 732 onsets reconstructed as 2v1s, two "both hunters on one
+side" starts, and a Hunter starting in sight of the healer beyond its reach;
+four seeds each), each claim with its situation counted and its
+control:
+
+| claim | control |
+|---|---|
+| no hunter stands blind and free to move (not held, casting or channelling) for more than a GCD | the play excepted: a unit stands blind 3.0s |
+| two blind hunters on one side never both close on the healer's face | excepted: both close for seconds |
+| a wrong-side hunter whose onset walk is over goes round the back, and the two end on opposite sides (staged hunt under way) | the same stage with the onset walk not over: it closes on the face |
+| the far hunter's onset walk goes round the back when that is the shorter way to its side (real onset) | excepted: it closes on the face |
+| the hunt holds while the hider stands beyond `HUNT_LEAVE` in a hunter's shadow, and lets go only out of every shadow | the same hider with both hunters in clear sight: the hunt ends at once |
+| no hunter stands in sight of the healer beyond its own reach for more than a GCD | the scene pair: in reach it stands, beyond it walks |
+| the hunt holds where the pillar blocks a hunter's plain sight past the widened shadow's limit | the same with both hunters in sight: it ends at once |
+| a walk is re-aimed when its point moves on, never every frame | (mutations) |
+
+The scene tests (`tests/hunt_scenes.rs`) pin the sides, the latch and the
+shadow hold one classification at a time.
+
+### 10.3 Measured
+
+**Tier: DIRECTIONAL.** AS-394's bank (`sweeps/2026-10-25-as394-gen.py uni`,
+both teams `TeamPlan`, Nagrand and TwinPillars), three fresh seed blocks
+747-750, 751-754 and 755-758, 5,040 matches per arm per block; `main`
+(`5300b998`) against this branch, paired by seed; endgames read per frame by
+`tests/hunt_endgame_sweep.rs`.
+
+Endgame length, paired (the same match reaching the same endgame in both
+arms; "staffed" is a hunting side fielding two of the Mage, Hunter, Warlock
+and Priest, the endgames the play can change):
+
+| block | endgames | staffed | staffed mean, main → branch | staffed paired Δ (t) | matches that differ |
+|---|---|---|---|---|---|
+| 747-750 | 3,528 | 719 | 29.8 → 29.6s | −0.18s (−0.4) | 341 |
+| 751-754 | 3,539 | 719 | 26.0 → 25.3s | −0.72s (−1.8) | 295 |
+| 755-758 | 3,497 | 722 | 25.5 → 25.1s | −0.32s (−0.9) | 302 |
+| pooled | 10,564 | 2,160 | 27.1 → 26.7s | −0.41s (−1.8) | 938 |
+
+Seed-clustered bootstrap over the 12 seeds: staffed −0.41s (95% −0.81 to
+−0.01), every endgame −0.08s (−0.17 to 0.00). **The pincer is level with the
+stations on endgame length**: the three blocks lean the same way, none by a
+margin the block can resolve. Win rate from the hunting side, staffed
+endgames, pooled: 2,045 / 108 / 7 (win / lose / draw) → 2,050 / 103 / 7; 17
+winners flip to the hunters and 12 away (McNemar z +0.93). Draws over all
+15,120 matches: 89 → 89. The share of endgame frames the healer is in a
+hunter's sight is 0.947 → 0.941 on staffed endgames.
+
+The claim this card makes is how the hunt reads, and the geometry tests carry
+it (§10.2). The measurement shows the change costs nothing.
+
+**Round 3 (the reach latch, the plain-block hold, the restart memory),
+re-checked on one block.** Block 747-750, `main` at `80e32c11` against the
+branch: staffed endgames 748, 28.4 → 28.1s, paired −0.34s (t −0.9;
+seed-clustered 95% −0.69 to 0.05); every endgame (3,549) −0.07s; hunting
+side win / lose / draw 703/39/6 → 702/40/6 (6 flips to the hunters, 7 away);
+draws over the 5,040 matches 28 → 28; 334 matches differ. Still level.
+
+`Legacy`: 144 configs (six comps, a 3v3 among them, on BasicArena,
+PillaredArena and TwinPillars, seeds 721-728), full `--headless` logs on the
+merged tree against `main` (`5300b998`): identical. 326 eliminations, 128
+distinct durations, 852 crits. `camp_sweep` (seeds 1-12): identical to
+`main`.

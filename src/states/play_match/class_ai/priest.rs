@@ -2016,22 +2016,15 @@ const MANA_BURN_RANGE_BUFFER: f32 = 2.0;
 /// lock ends, so a lock adds nothing a burn could spend.
 const MANA_BURN_HEALTH_FLOOR: f32 = 0.90;
 
-/// Cast/attack-preventing CC on an entity (Stun/Fear/Polymorph/Incapacitate —
-/// deliberately NOT Root: a rooted caster still casts). The set
-/// `situation::locks_healer` names, LESS CYCLONE: a cycloned enemy still
-/// counts as focusing the Priest here, and so still holds its Mana Burn back,
-/// though it can no more act than a feared one. Adding Cyclone would change
-/// what a Priest does beside a Druid that cyclones its attacker, so it is a
-/// behaviour change of its own, not part of the situation port.
+/// Cast/attack-preventing CC on an entity: crowd control that HOLDS it
+/// ([`holds`](super::holds) — a stun, a fear, a polymorph, an incapacitate, a
+/// cyclone; never a root, since a rooted caster still casts). The same set
+/// `situation::locks_healer` is, read from the same predicate, so a cycloned
+/// attacker is as harmless here as a feared one.
 fn attack_prevented_by_cc(ctx: &CombatContext, entity: Entity) -> bool {
-    ctx.active_auras.get(&entity).is_some_and(|auras| {
-        auras.iter().any(|a| {
-            matches!(
-                a.effect_type,
-                AuraType::Stun | AuraType::Fear | AuraType::Polymorph | AuraType::Incapacitate
-            )
-        })
-    })
+    ctx.active_auras
+        .get(&entity)
+        .is_some_and(|auras| auras.iter().any(|a| super::holds(a.effect_type)))
 }
 
 /// Any living, visible enemy currently targeting `entity` AND able to act on
