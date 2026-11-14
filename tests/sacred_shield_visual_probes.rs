@@ -878,6 +878,171 @@ fn the_card_flickers_bright_for_as_long_as_the_absorb_holds() {
     assert!(lo < 0.17 && hi > 0.48, "the flicker spans {lo}..{hi}");
 }
 
+/// The bench's `hh`, written out: `fract(sin(n × 12.9898) × 43758.5453)` in
+/// double precision, as JavaScript computes it.
+fn bench_hh(n: u32) -> f32 {
+    let x = (n as f64 * 12.9898).sin() * 43758.5453;
+    (x - x.floor()) as f32
+}
+
+/// One sprite as the bench's `customDraw` draws it: its offset from the
+/// card's centre (bench units), width, colour (0..255), alpha and roll.
+#[derive(Debug)]
+struct BenchSprite {
+    offset: Vec3,
+    width: f32,
+    rgb: [f32; 3],
+    alpha: f32,
+    roll: f32,
+}
+
+/// The bench's `[t, [r, g, b]]` keys at `t`.
+fn bench_rgb(track: &[(f32, [f32; 3])], t: f32) -> [f32; 3] {
+    let channel = |c: usize| {
+        let keyed: Vec<(f32, f32)> = track.iter().map(|(at, rgb)| (*at, rgb[c])).collect();
+        bench_keys(&keyed, t)
+    };
+    [channel(0), channel(1), channel(2)]
+}
+
+/// Flare `k` (of the bench's eight), `d` ms after the card's birth, or `None`
+/// where the bench draws none (`d <= 300`, or the death has begun).
+fn bench_flare(k: u32, d: f32, dying: bool) -> Option<BenchSprite> {
+    if dying || d <= 300.0 {
+        return None;
+    }
+    let ph = ((d / 1000.0) + k as f32 / 8.0) % 1.0;
+    Some(BenchSprite {
+        offset: Vec3::new(
+            (bench_hh(k) - 0.5) * 1.4,
+            (bench_hh(k + 3) - 0.5) * 1.6 + 0.3 * ph,
+            (bench_hh(k + 5) - 0.5) * 0.4,
+        ),
+        width: 0.3,
+        rgb: bench_rgb(
+            &[
+                (0.0, [255.0, 255.0, 255.0]),
+                (0.3, [241.0, 234.0, 44.0]),
+                (1.0, [255.0, 255.0, 255.0]),
+            ],
+            ph,
+        ),
+        alpha: bench_keys(&[(0.0, 0.0), (0.3, 0.61), (1.0, 0.0)], ph),
+        roll: k as f32,
+    })
+}
+
+/// Spark `k` (of six), `e` ms into the death, or `None` past 330 ms.
+fn bench_spark(k: u32, e: f32) -> Option<BenchSprite> {
+    if e >= 330.0 {
+        return None;
+    }
+    let ang = k as f32 / 6.0 * TAU;
+    let r = 1.667 * e / 1000.0 * 1.2;
+    Some(BenchSprite {
+        offset: Vec3::new(r * ang.cos(), 0.15, r * ang.sin()),
+        width: 0.25,
+        rgb: [240.0, 191.0, 59.0],
+        alpha: bench_keys(&[(0.0, 0.6), (0.3, 1.0), (1.0, 0.0)], e / 330.0),
+        roll: ang,
+    })
+}
+
+/// Every flare and spark, frame by frame from the card's birth through its
+/// death's sparks, against the bench's `customDraw` written out above: each
+/// sprite's place, width, colour, alpha and roll (read off its world up
+/// axis, in the camera's view plane). The bench's sprites stand in bench
+/// units round its card; here they stand round the card's own centre, both
+/// at the rig's client scale ([`PWS_CLIENT_TO_RIG`], as the card itself).
+#[test]
+fn every_flare_and_spark_is_the_benchs_frame_by_frame() {
+    let r = PWS_CLIENT_TO_RIG;
+    let mut h = Harness::new();
+    let at = Vec3::new(-1.0, 1.0, 2.0);
+    let rogue = h.unit(CharacterClass::Rogue, at);
+    let cam = h.camera(at + Vec3::new(9.0, 25.0, 20.0), at);
+    let centre =
+        at - Vec3::Y * HALF_HEIGHT + Vec3::Y * (SS_CARD_QUAD[2] + SS_CARD_QUAD[3]) / 2.0 * r;
+    let (cam_up, cam_right) = (cam.rotation * Vec3::Y, cam.rotation * Vec3::X);
+    h.give_absorb(rogue, 40.0);
+    h.tick(1);
+
+    let (mut lit_flares, mut lit_sparks, mut frames, mut died) = (0, 0, 0, false);
+    while let Some(rig) = h.rig(rogue) {
+        let ms = rig.t * 1000.0;
+        let dying = rig.phase == ShieldPhase::Death;
+        if dying && ms > 400.0 {
+            break;
+        }
+        let d = match rig.phase {
+            ShieldPhase::Birth => ms,
+            _ => 700.0 + ms,
+        };
+        for drawn in h.drawn(rogue, ShieldKind::SacredShield) {
+            let want = match drawn.layer {
+                ShieldLayer::Flare(k) => bench_flare(k as u32, d, dying),
+                ShieldLayer::Spark(k) => dying.then(|| bench_spark(k as u32, ms)).flatten(),
+                _ => continue,
+            };
+            let alpha = drawn.material.base_color.alpha();
+            let Some(want) = want else {
+                assert_eq!(alpha, 0.0, "{:?} lit off the bench at {ms} ms", drawn.layer);
+                continue;
+            };
+            let what = format!("{:?} at {:?} {ms:.0} ms", drawn.layer, rig.phase);
+            assert!(
+                (alpha - want.alpha).abs() < 1e-4,
+                "{what}: alpha {alpha} vs {}",
+                want.alpha
+            );
+            let rgb = srgb(drawn.material.base_color).map(|c| c * 255.0);
+            for (got, w) in rgb.iter().zip(want.rgb) {
+                assert!(
+                    (got - w).abs() < 0.05,
+                    "{what}: colour {rgb:?} vs {:?}",
+                    want.rgb
+                );
+            }
+            let place = centre + want.offset * r;
+            assert!(
+                (drawn.g.translation - place).length() < 1e-3,
+                "{what}: at {} vs {place}",
+                drawn.g.translation
+            );
+            assert!(
+                (drawn.g.scale.x * 2.0 - want.width * r).abs() < 1e-4,
+                "{what}: width"
+            );
+            // The roll: its up axis turned `roll` in the view plane.
+            let up = drawn.g.rotation * Vec3::Y;
+            let (c, s) = (up.dot(cam_up), -up.dot(cam_right));
+            assert!(
+                (c - want.roll.cos()).abs() < 1e-3 && (s - want.roll.sin()).abs() < 1e-3,
+                "{what}: roll {} vs {}",
+                s.atan2(c),
+                want.roll
+            );
+            if alpha > 0.0 {
+                match drawn.layer {
+                    ShieldLayer::Flare(_) => lit_flares += 1,
+                    _ => lit_sparks += 1,
+                }
+            }
+        }
+        frames += 1;
+        // Through the birth and a whole 1.466 s loop, then into the death.
+        if !died && rig.phase == ShieldPhase::Loop && rig.t > 1.6 {
+            h.auras(rogue).auras.clear();
+            died = true;
+        }
+        h.tick(1);
+    }
+    assert!(died, "the card never died");
+    assert!(frames > 150, "{frames} frames");
+    assert!(lit_flares > 8 * 100, "{lit_flares} lit flares");
+    assert!(lit_sparks > 6 * 15, "{lit_sparks} lit sparks");
+}
+
 /// The flares: eight stars over the card from 300 ms into its birth, rising
 /// as they cycle, white -> yellow -> white, inside their box over the card's
 /// centre; none in the death.
