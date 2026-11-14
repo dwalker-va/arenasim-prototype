@@ -7,7 +7,6 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 use std::sync::Arc;
 
 use super::school_impact::{impact_origin, ImpactStyle};
-use super::shield::disc_texture;
 use super::spell_bolts::{soft_band_texture, soft_dot_texture, star_flash_texture};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::*;
@@ -146,8 +145,8 @@ pub enum EmitterSprite {
     /// A soft glow stretched along the particle's own flight (the ribbon-blur
     /// and streak emitters), facing the camera.
     Streak,
-    /// A hard-edged disc at 0.7 of the sprite's radius (the benches' `blob`
-    /// draw: Shadow Trance's dark specks), facing the camera.
+    /// A hard-edged disc at 0.7 of the sprite's radius, facing the camera —
+    /// the benches' `blob` (Blessing of Sacrifice's `beerbubble` motes).
     Blob,
 }
 
@@ -895,6 +894,17 @@ fn ring_texture() -> Image {
     )
 }
 
+/// Generated blob sprite, pixels on a side.
+const BLOB_PX: u32 = 64;
+
+/// The blob: a hard white disc at 0.7 of the radius, a pixel's antialiasing
+/// at its rim (the benches' `blob`, as `shadow_word_pain.rs` draws it).
+pub fn blob_texture() -> Image {
+    super::shield::disc_texture(BLOB_PX, |r, _| {
+        ((0.7 - r) * BLOB_PX as f32 * 0.5 + 0.5).clamp(0.0, 1.0)
+    })
+}
+
 /// Sprites and the ramp palettes every client emitter draws with. Built once
 /// per system, lazily; a palette is built the first time its emitter plays and
 /// shared by every particle it ever emits.
@@ -977,20 +987,6 @@ impl EmitterAssets {
         self.palettes.insert(e.name, palette.clone());
         palette
     }
-}
-
-/// Side of the [`EmitterSprite::Blob`] texture, pixels.
-const BLOB_PX: u32 = 64;
-/// The blob's edge, as a fraction of the sprite's radius (the benches draw
-/// `arc(r * 0.7)`).
-pub const BLOB_EDGE: f32 = 0.7;
-
-/// A hard white disc at [`BLOB_EDGE`] of the sprite's radius, a pixel of
-/// antialiasing at its rim: the benches' `blob` sprite.
-pub fn blob_texture() -> Image {
-    disc_texture(BLOB_PX, |r, _| {
-        ((BLOB_EDGE - r) * BLOB_PX as f32 * 0.5 + 0.5).clamp(0.0, 1.0)
-    })
 }
 
 fn emissive_of(color: Color, strength: f32) -> LinearRgba {

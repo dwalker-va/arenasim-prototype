@@ -512,6 +512,12 @@ impl DruidEffect {
             AuraLandingKind::RejuvenationSwirl => Some(DruidEffect::RejuvenationSwirl),
             AuraLandingKind::MarkOfTheWildGlyph => Some(DruidEffect::MarkOfTheWildGlyph),
             AuraLandingKind::ShadowWordPainHit
+            | AuraLandingKind::DivineFavorBurst
+            | AuraLandingKind::AuraMasteryWard
+            | AuraLandingKind::SacrificeShell
+            | AuraLandingKind::RetributionDisc
+            | AuraLandingKind::InfusionHalo
+            | AuraLandingKind::ArtOfWarRing
             | AuraLandingKind::AmplifyFlash
             | AuraLandingKind::ShadowTrance => None,
         }

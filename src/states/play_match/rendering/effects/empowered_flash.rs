@@ -43,8 +43,8 @@ use crate::states::play_match::components::*;
 // living Warlock even once the curse or the bolt has spent the buff (Amplify
 // Curse is usually spent 20 ms after it lands). The halo shows the proc
 // WAITING: it emits for the client's window from the proc and retires, specks
-// and all, the moment Shadow Trance is spent or its Warlock dies. Neither is
-// drawn on a corpse.
+// and all, the moment Shadow Trance is spent or its Warlock dies
+// ([`SHADOW_TRANCE_HALO_ENDS_WITH_PROC`]). Neither is drawn on a corpse.
 //
 // Spawning rides the sim's `AuraLanding` marker (`apply_pending_auras`, on a
 // fresh application or a refresh). Scatter is the shared deterministic hash
@@ -66,6 +66,12 @@ pub const SHADOW_TRANCE_SPECKS: bool = true;
 pub const SHADOW_TRANCE_SPECK_SIZE: f32 = 0.028;
 pub const SHADOW_TRANCE_SPECK_LIFE_SECS: f32 = 4.00;
 // The instant Shadow Bolt: unchanged (shipped missile and impact).
+
+/// Whether the halo retires the moment Shadow Trance is spent. `true` ties it
+/// to the waiting proc; `false` plays it as the client's one-shot impact
+/// (kit 4569 has no state), its whole window whatever the buff does. Either
+/// way it retires with a dead Warlock.
+pub const SHADOW_TRANCE_HALO_ENDS_WITH_PROC: bool = true;
 
 // ── The flash (presenceofmind_cast_base.m2) ──────────────────────────────────
 
@@ -285,7 +291,13 @@ pub fn spawn_empowered_flashes(
             AuraLandingKind::ShadowTrance => (SHADOW_TRANCE_FLASH, SHADOW_TRANCE_SPECKS),
             AuraLandingKind::RejuvenationSwirl
             | AuraLandingKind::MarkOfTheWildGlyph
-            | AuraLandingKind::ShadowWordPainHit => continue,
+            | AuraLandingKind::ShadowWordPainHit
+            | AuraLandingKind::DivineFavorBurst
+            | AuraLandingKind::AuraMasteryWard
+            | AuraLandingKind::SacrificeShell
+            | AuraLandingKind::RetributionDisc
+            | AuraLandingKind::InfusionHalo
+            | AuraLandingKind::ArtOfWarRing => continue,
         };
         commands.entity(marker).despawn();
         let Ok((holder, transform, pet)) = holders.get(landing.target) else {
@@ -426,7 +438,10 @@ pub fn update_shadow_trance_halos(
         let waiting = holders
             .get(halo.owner)
             .ok()
-            .filter(|(holder, _, auras, _)| holder.is_alive() && shadow_trance_waiting(*auras));
+            .filter(|(holder, _, auras, _)| {
+                holder.is_alive()
+                    && (!SHADOW_TRANCE_HALO_ENDS_WITH_PROC || shadow_trance_waiting(*auras))
+            });
         let Some((_, at, _, pet)) = waiting else {
             commands.entity(entity).despawn();
             continue;

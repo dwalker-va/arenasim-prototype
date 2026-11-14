@@ -40,8 +40,9 @@ use arenasim::states::play_match::talents::{TalentDefinitions, TalentEffect, Tal
 use arenasim::states::play_match::{
     animate_client_particles, animate_druid_effects, animate_druid_particles,
     animate_empowered_flashes, billboard_druid_particles, billboard_shadow_trance_specks,
-    cleanup_druid_effects, flash_frame, spawn_druid_effects, spawn_empowered_flashes, speck_launch,
-    update_shadow_trance_halos, AbilityDefinitions, AbilityType,
+    cleanup_druid_effects, flash_frame, spawn_druid_effects, spawn_empowered_flashes,
+    spawn_paladin_oneshots, speck_launch, update_shadow_trance_halos, AbilityDefinitions,
+    AbilityType, SHADOW_TRANCE_HALO_ENDS_WITH_PROC,
 };
 use arenasim::CharacterClass;
 
@@ -217,8 +218,9 @@ impl Harness {
         app.init_asset::<StandardMaterial>();
         app.init_asset::<Image>();
         app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
-        // The Druid's chain consumes the same marker type, so it runs here
-        // too, ahead of this one: it must leave these landings alone.
+        // The Druid's chain and the Paladin one-shots consume the same marker
+        // type, so they run here too, ahead of this one: they must leave these
+        // landings alone.
         app.add_systems(
             Update,
             (
@@ -227,6 +229,7 @@ impl Harness {
                 animate_druid_particles,
                 billboard_druid_particles,
                 cleanup_druid_effects,
+                spawn_paladin_oneshots,
             )
                 .chain()
                 .before(spawn_empowered_flashes),
@@ -285,7 +288,13 @@ impl Harness {
     }
 
     fn land(&mut self, target: Entity, kind: AuraLandingKind) {
-        self.app.world_mut().spawn(AuraLanding { target, kind });
+        // A Warlock's own cast: Amplify Curse is self-cast, and Nightfall
+        // lands Shadow Trance with its owner as the caster.
+        self.app.world_mut().spawn(AuraLanding {
+            target,
+            kind,
+            caster: Some(target),
+        });
     }
 
     fn kill(&mut self, unit: Entity) {
@@ -738,26 +747,77 @@ fn the_specks_face_a_rotated_camera() {
     }
 }
 
+/// A Warlock waiting on Shadow Trance with two other auras that stay up when
+/// the bolt spends it: a primed Amplify Curse (another next-cast aura) and a
+/// Fortitude-style stat buff.
+fn waiting_with_company(h: &mut Harness) -> Entity {
+    let warlock = h.warlock(Vec3::new(0.0, COMBATANT_Y, 0.0), true);
+    let mut auras = h.app.world_mut().get_mut::<ActiveAuras>(warlock).unwrap();
+    auras.auras.push(primed(AMPLIFY_CURSE_AURA));
+    auras.auras.push(Aura {
+        effect_type: AuraType::MaxHealthIncrease,
+        duration: 1800.0,
+        magnitude: 50.0,
+        ability_name: "Power Word: Fortitude".into(),
+        ..Default::default()
+    });
+    warlock
+}
+
 #[test]
 fn the_halo_goes_the_moment_shadow_trance_is_spent() {
     // Control: still waiting, the halo stays.
     let mut kept = Harness::new();
-    let w = kept.warlock(Vec3::new(0.0, COMBATANT_Y, 0.0), true);
+    let w = waiting_with_company(&mut kept);
     kept.land(w, AuraLandingKind::ShadowTrance);
     kept.tick_secs(1.5);
     kept.tick(1);
     assert_eq!(kept.halos().len(), 1);
     assert!(kept.particle_count() > 0);
 
+    // Spent: only Shadow Trance comes off. The other next-cast aura and the
+    // stat buff stay up, and neither holds the halo.
     let mut h = Harness::new();
-    let warlock = h.warlock(Vec3::new(0.0, COMBATANT_Y, 0.0), true);
+    let warlock = waiting_with_company(&mut h);
     h.land(warlock, AuraLandingKind::ShadowTrance);
     h.tick_secs(1.5);
     assert!(h.particle_count() > 0);
     h.spend_trance(warlock);
+    assert_eq!(
+        h.app
+            .world()
+            .get::<ActiveAuras>(warlock)
+            .unwrap()
+            .auras
+            .len(),
+        2,
+        "Amplify Curse and the stat buff are still up"
+    );
     h.tick(1);
-    assert!(h.halos().is_empty());
-    assert_eq!(h.particle_count(), 0, "no speck outlives the proc");
+    if SHADOW_TRANCE_HALO_ENDS_WITH_PROC {
+        assert!(h.halos().is_empty());
+        assert_eq!(h.particle_count(), 0, "no speck outlives the proc");
+    } else {
+        // The client's one-shot: the spend does not touch it.
+        assert_eq!(h.halos().len(), 1);
+        assert!(h.particle_count() > 0);
+    }
+}
+
+/// Two Nightfall procs landing in one frame (two Corruption ticks) raise one
+/// halo, emitting at one halo's rate.
+#[test]
+fn two_procs_in_one_frame_raise_one_halo() {
+    let mut h = Harness::new();
+    let warlock = h.warlock(Vec3::new(0.0, COMBATANT_Y, 0.0), true);
+    h.land(warlock, AuraLandingKind::ShadowTrance);
+    h.land(warlock, AuraLandingKind::ShadowTrance);
+    h.tick(1);
+    assert_eq!(h.halos().len(), 1, "one halo per Warlock");
+    h.tick_secs(1.0);
+    assert_eq!(h.halos().len(), 1);
+    let specks = h.specks().len();
+    assert!((11..=13).contains(&specks), "12 a second, saw {specks}");
 }
 
 #[test]
