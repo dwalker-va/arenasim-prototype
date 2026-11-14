@@ -28,7 +28,7 @@ use std::collections::BTreeSet;
 use arenasim::headless::{run_headless_match_with, HeadlessMatchConfig, Stage, Unit};
 use arenasim::states::match_config::{CharacterClass, RogueOpener};
 use arenasim::states::play_match::ability_config::load_ability_definitions;
-use arenasim::states::play_match::class_ai::scene::{Scene, SceneAvoided, Who};
+use arenasim::states::play_match::class_ai::scene::{Scene, SceneAvoided, SceneInstantMarker, Who};
 use arenasim::states::play_match::combat_core::{effective_attack_interval, Avoidance};
 use arenasim::states::play_match::components::{Aura, AuraType, Combatant};
 use arenasim::states::play_match::{
@@ -340,22 +340,39 @@ fn expose_armor_is_avoided_and_exposes_nothing() {
     );
 }
 
-/// Rupture (the Assassination bleed): avoided, it opens no bleed.
+/// Rupture (the Assassination bleed): avoided, it opens no bleed — but the
+/// Rogue still strikes, so every run, landed or avoided, spawns exactly one
+/// Rupture gesture marker from the attacker at the defender (the backhand and
+/// the hand flash play on a dodge or parry; only the spray waits for a bleed).
 #[test]
 fn rupture_is_avoided_and_bleeds_nothing() {
-    assert_avoidable(
-        AbilityType::Rupture,
-        "Rupture",
-        |a| {
-            rogue_scene(None, a)
-                .grant(ATTACKER, AbilityType::Rupture)
-                .cooldown(ATTACKER, AbilityType::KidneyShot, 10.0)
-        },
-        |v| {
-            v.auras_queued
-                .contains(&(DEFENDER, AuraType::DamageOverTime))
-        },
-    );
+    let build = |a| {
+        rogue_scene(None, a)
+            .grant(ATTACKER, AbilityType::Rupture)
+            .cooldown(ATTACKER, AbilityType::KidneyShot, 10.0)
+    };
+    assert_avoidable(AbilityType::Rupture, "Rupture", build, |v| {
+        v.auras_queued
+            .contains(&(DEFENDER, AuraType::DamageOverTime))
+    });
+    for (run, avoidance) in [("control", NONE), ("dodge", DODGE), ("parry", PARRY)] {
+        let view = build(avoidance).decide(ATTACKER);
+        let markers: Vec<SceneInstantMarker> = view
+            .instant_markers
+            .iter()
+            .copied()
+            .filter(|m| m.ability == AbilityType::Rupture)
+            .collect();
+        assert_eq!(
+            markers,
+            vec![SceneInstantMarker {
+                caster: ATTACKER,
+                target: Some(DEFENDER),
+                ability: AbilityType::Rupture,
+            }],
+            "{run}: the Rogue strikes whether or not the blow lands"
+        );
+    }
 }
 
 /// Crusader Strike (the Retribution capstone): avoided, it deals nothing.

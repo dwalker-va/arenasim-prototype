@@ -143,10 +143,14 @@ impl SwingProfile {
         self.release_secs + self.impact_hold_secs + self.follow_secs
     }
 
-    /// Seconds from the start of the stroke to full extension — see
-    /// [`SwingStyle::impact_at`].
+    /// Seconds from the start of the stroke to the blade's contact — see
+    /// [`SwingStyle::impact_at`]. Full extension for every stroke but the
+    /// backhand, whose contact is the MIDDLE of its sweep.
     pub(crate) fn impact_at(&self) -> f32 {
-        self.release_secs
+        match self.arc {
+            SwingArc::Backhand => BACKHAND_CONTACT_SECS,
+            _ => self.release_secs,
+        }
     }
 }
 
@@ -251,6 +255,19 @@ pub(crate) enum SwingArc {
         /// `arc_rotation` directly (lean 1.0), matching its sibling interrupt.
         body_drive: f32,
     },
+    /// A BACKHAND sweep (Rupture's apply stroke, AS-336): a keyed grip PATH
+    /// rather than a rotation about a fixed grip. The grip winds up from rest
+    /// across the body to the off shoulder, sweeps outward through a contact
+    /// point in front of the chest along one quadratic curve, follows through
+    /// on the weapon side, holds, and returns to rest — the blade laid along
+    /// the cut through the sweep, as the bench draws it (`backhand_cut`).
+    ///
+    /// Its swing parameter is a PHASE in `[0, 3]` (see [`backhand_phase`]),
+    /// not the `[-1, 1]` every other arc uses: the sweep never passes the rest
+    /// pose, so rest cannot sit at one point of the parameter as it does for a
+    /// windup-and-release. Its body moves by a keyed weight shift alone
+    /// ([`backhand_step`]); the capsule does not turn.
+    Backhand,
 }
 
 /// How far a style's swing PLANE leans off vertical, or `None` for a stroke that
@@ -260,7 +277,10 @@ pub fn swing_plane_tilt(style: SwingStyle) -> Option<f32> {
     match style.profile().arc {
         SwingArc::TiltedPlane { tilt, .. } => Some(tilt),
         SwingArc::Sagittal => Some(0.0),
-        SwingArc::Lunge { .. } | SwingArc::Unarmed { .. } | SwingArc::PommelStrike { .. } => None,
+        SwingArc::Lunge { .. }
+        | SwingArc::Unarmed { .. }
+        | SwingArc::PommelStrike { .. }
+        | SwingArc::Backhand => None,
     }
 }
 
@@ -284,8 +304,11 @@ impl SwingStyle {
     /// spawned when the marker is consumed therefore goes off with the weapon
     /// still wound up, and on a slow signature stroke it is over before the
     /// blade has travelled halfway.
+    ///
+    /// The backhand's contact is mid-sweep, before its follow-through, so it
+    /// answers [`BACKHAND_CONTACT_SECS`] rather than its full extension.
     pub fn impact_at(self) -> f32 {
-        self.profile().release_secs
+        self.profile().impact_at()
     }
 
     pub(crate) fn profile(self) -> SwingProfile {
@@ -413,6 +436,19 @@ impl SwingStyle {
                     release: SINISTER_RELEASE,
                 },
                 lean: SINISTER_LEAN,
+            },
+            // The apply stroke, at the AS-336 bench's timings. It plays its own
+            // windup from rest INSIDE the stroke, so the "release" spans the
+            // windup and the sweep (0.44s), the hold runs to 0.54s and the
+            // recovery to 0.9s; the contact is mid-sweep (`impact_at`, 0.33s).
+            // `lean` is 0: the body steps into the sweep (`backhand_step`) but
+            // never turns.
+            SwingStyle::Backhand => SwingProfile {
+                release_secs: BACKHAND_WINDUP_SECS + BACKHAND_SWEEP_SECS,
+                impact_hold_secs: BACKHAND_HOLD_SECS,
+                follow_secs: BACKHAND_RECOVER_SECS,
+                arc: SwingArc::Backhand,
+                lean: 0.0,
             },
         }
     }
@@ -657,6 +693,178 @@ const SINISTER_LEAN: f32 = 0.18;
 /// pin it in a test before "fixing" the signs to match.
 const KICK_DRIVE: f32 = -0.50;
 
+// --- Backhand (Rupture's apply stroke; Expose Armor's, AS-366) ---------------
+//
+// Authored, not client data: the client plays a generic Special1H, and the
+// user ruled at the AS-336 bench (`docs/design/benches/2026-10-17-rogue-talent-
+// bench.html`, signed off as version 1792302646-d16f, `applyStroke`) for a
+// BACKHAND sweep that reads apart from the Rogue's thrusts and Sinister
+// Strike's rising slash. Its timings are the bench's own; its positions are
+// the bench's path re-anchored on this rig — the rest pose is the weapon's
+// mount, the heights are taken from the chest (`IMPACT_CHEST_Y`, 0.55 above
+// the unit's origin, where the bench's chest is 1.45 above the ground) and the
+// contact sits at the bench's reach short of a victim at the Rogue's 2yd
+// standoff, so the blade, not the hand, meets the chest.
+//
+// Positions are body-local yards in the socket's aim frame: +X the weapon
+// side, +Z toward the victim, +Y up from the unit's origin.
+
+/// Rest to wound: the grip crosses the body to the off shoulder (bench 0-220ms).
+pub const BACKHAND_WINDUP_SECS: f32 = 0.22;
+/// The sweep, wound to follow-through (bench 220-440ms).
+pub const BACKHAND_SWEEP_SECS: f32 = 0.22;
+/// Contact, mid-sweep (the bench's `APPLY_CONTACT_MS`, 330): the landing's
+/// moment.
+pub const BACKHAND_CONTACT_SECS: f32 = BACKHAND_WINDUP_SECS + 0.5 * BACKHAND_SWEEP_SECS;
+/// Held at the follow-through (bench 440-540ms).
+pub const BACKHAND_HOLD_SECS: f32 = 0.10;
+/// Back to rest (bench 540-900ms).
+pub const BACKHAND_RECOVER_SECS: f32 = 0.36;
+/// The wound grip: across the body on the OFF side, at shoulder height (the
+/// bench's `wind`, 0.1yd above its chest). Far enough across to clear the
+/// capsule (radius 0.5) the weapon must never dip into.
+pub const BACKHAND_WOUND: Vec3 = Vec3::new(-0.60, 0.65, 0.40);
+/// The grip at contact: centred on the victim's chest line, at chest height,
+/// at the reach that puts the blade into a victim 2yd off.
+pub const BACKHAND_CONTACT: Vec3 = Vec3::new(0.0, 0.55, 1.30);
+/// The follow-through: out on the WEAPON side and drawn back past the contact
+/// — the bench's `fol`, 0.85 yd out from the contact's line, 0.35 yd back and
+/// 0.1 yd below it, as the bench places it.
+pub const BACKHAND_FOLLOW: Vec3 = Vec3::new(0.85, 0.45, 0.95);
+/// How far the windup bows FORWARD at its middle. The bench draws a straight
+/// line from rest to wound, which on this rig runs through the alpha-blended
+/// capsule; the bow keeps the weapon in front of the body as it crosses.
+pub const BACKHAND_WINDUP_BOW: f32 = 0.35;
+/// Extra forward pitch while the stroke plays, laying the dagger's raised
+/// rest (0.9 rad off vertical) nearly level for a cut across the chest.
+pub const BACKHAND_LEVEL: f32 = 0.55;
+/// The body's weight shift, in yards along the aim: back by this much at the
+/// wound (the bench's `-0.06`)...
+pub const BACKHAND_STEP_BACK: f32 = 0.06;
+/// ...and into the sweep by this much (the bench's `0.28`), reached at 0.625
+/// of the sweep (`BACKHAND_STEP_RATE`) and held through the hold.
+pub const BACKHAND_STEP_IN: f32 = 0.28;
+/// How fast the step reaches `BACKHAND_STEP_IN` across the sweep (the bench's
+/// `k * 1.6`).
+const BACKHAND_STEP_RATE: f32 = 1.6;
+
+fn smoothstep01(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
+/// The backhand's phase at `t` seconds into its stroke: 0 at rest, 1 wound,
+/// 1.5 at contact, 2 at the follow-through (held), 3 at rest again. The windup
+/// and the recovery ease; the sweep is even, as the bench's is.
+pub(crate) fn backhand_phase(t: f32) -> f32 {
+    let sweep_end = BACKHAND_WINDUP_SECS + BACKHAND_SWEEP_SECS;
+    let hold_end = sweep_end + BACKHAND_HOLD_SECS;
+    if t < BACKHAND_WINDUP_SECS {
+        smoothstep01(t / BACKHAND_WINDUP_SECS)
+    } else if t < sweep_end {
+        1.0 + (t - BACKHAND_WINDUP_SECS) / BACKHAND_SWEEP_SECS
+    } else if t < hold_end {
+        2.0
+    } else {
+        2.0 + smoothstep01((t - hold_end) / BACKHAND_RECOVER_SECS)
+    }
+}
+
+/// The grip at backhand `phase`, for a weapon resting at `rest`.
+///
+/// The sweep is ONE quadratic curve from the wound grip to the follow-through
+/// whose midpoint is the contact (its control point is `2·contact − ½(wound +
+/// follow)`, the bench's `ctl`), so the blade meets the chest mid-arc.
+pub(crate) fn backhand_grip(rest: Vec3, phase: f32) -> Vec3 {
+    if phase <= 1.0 {
+        let k = phase.clamp(0.0, 1.0);
+        rest.lerp(BACKHAND_WOUND, k)
+            + Vec3::Z * BACKHAND_WINDUP_BOW * (std::f32::consts::PI * k).sin()
+    } else if phase <= 2.0 {
+        let k = phase - 1.0;
+        let control = 2.0 * BACKHAND_CONTACT - 0.5 * (BACKHAND_WOUND + BACKHAND_FOLLOW);
+        (1.0 - k) * (1.0 - k) * BACKHAND_WOUND
+            + 2.0 * (1.0 - k) * k * control
+            + k * k * BACKHAND_FOLLOW
+    } else {
+        BACKHAND_FOLLOW.lerp(rest, (phase - 2.0).clamp(0.0, 1.0))
+    }
+}
+
+/// The grip's direction of travel through the sweep at sweep fraction `k`, in
+/// the aim frame: the curve's own tangent plus the body stepping in under it
+/// (both per unit of `k`). The bench lays the blade along exactly this — along
+/// the cut, never at the victim, which would be the thrust line the user
+/// rejected.
+fn backhand_cut(k: f32) -> Vec3 {
+    let control = 2.0 * BACKHAND_CONTACT - 0.5 * (BACKHAND_WOUND + BACKHAND_FOLLOW);
+    let tangent =
+        2.0 * (1.0 - k) * (control - BACKHAND_WOUND) + 2.0 * k * (BACKHAND_FOLLOW - control);
+    let stepping = if k * BACKHAND_STEP_RATE < 1.0 {
+        (BACKHAND_STEP_IN + BACKHAND_STEP_BACK) * BACKHAND_STEP_RATE
+    } else {
+        0.0
+    };
+    tangent + Vec3::Z * stepping
+}
+
+/// The blade's heading about world up along the cut at sweep fraction `k`:
+/// positive turns the tip to the weapon side.
+pub(crate) fn backhand_cut_heading(k: f32) -> f32 {
+    let cut = backhand_cut(k.clamp(0.0, 1.0));
+    cut.x.atan2(cut.z)
+}
+
+/// The blade's turn at backhand `phase`: its heading about world up, then its
+/// extra forward pitch. Through the sweep the blade lies along the cut, as the
+/// bench draws it; the windup eases it there from the mount, the hold keeps
+/// the heading the sweep ended on, and the recovery eases it home. Both are
+/// zero at rest, so the stroke begins and ends on the mount.
+fn backhand_turn(phase: f32) -> Quat {
+    let (heading, level) = if phase <= 1.0 {
+        let k = phase.clamp(0.0, 1.0);
+        (backhand_cut_heading(0.0) * k, BACKHAND_LEVEL * k)
+    } else if phase <= 2.0 {
+        (backhand_cut_heading(phase - 1.0), BACKHAND_LEVEL)
+    } else {
+        let k = 1.0 - (phase - 2.0).clamp(0.0, 1.0);
+        (backhand_cut_heading(1.0) * k, BACKHAND_LEVEL * k)
+    };
+    Quat::from_rotation_y(heading) * Quat::from_rotation_x(level)
+}
+
+/// The backhand's pose, composed LEFT of a rest mount whose grip is at
+/// `rest`: it carries the grip from `rest` to [`backhand_grip`] and turns the
+/// weapon about that grip, so the mount's own roll and scale ride along.
+fn backhand_pose(rest: Vec3, phase: f32) -> Transform {
+    let turn = backhand_turn(phase);
+    let grip = backhand_grip(rest, phase);
+    // T(grip) · R · T(−rest): the rest grip lands on `grip`, turned by R.
+    Transform::from_translation(grip - turn * rest).with_rotation(turn)
+}
+
+/// The body's weight shift at backhand `phase`, in yards along the aim:
+/// back through the windup, into the sweep, held, and home with the weapon.
+pub(crate) fn backhand_step(phase: f32) -> f32 {
+    if phase <= 1.0 {
+        -BACKHAND_STEP_BACK * phase.clamp(0.0, 1.0)
+    } else if phase <= 2.0 {
+        let k = ((phase - 1.0) * BACKHAND_STEP_RATE).min(1.0);
+        -BACKHAND_STEP_BACK + (BACKHAND_STEP_IN + BACKHAND_STEP_BACK) * k
+    } else {
+        BACKHAND_STEP_IN * (1.0 - (phase - 2.0).clamp(0.0, 1.0))
+    }
+}
+
+/// The weight shift a stroke's body takes at swing parameter `s`, in yards
+/// along the aim.
+fn body_step(s: f32, arc: SwingArc) -> f32 {
+    match arc {
+        SwingArc::Backhand => backhand_step(s),
+        _ => s * SWING_WEIGHT_SHIFT,
+    }
+}
+
 /// Normalized swing parameter in `[-1, 1]`.
 ///
 /// * `s < 0` — windup: eases 0 -> -1 over the anticipation window as
@@ -787,6 +995,11 @@ fn swing_param_timed(
     profile: SwingProfile,
 ) -> f32 {
     if let Some(t) = release_t {
+        // The backhand plays its own windup from rest, so it starts nowhere
+        // near `release_from`, and its parameter is a phase (see `SwingArc`).
+        if let SwingArc::Backhand = profile.arc {
+            return backhand_phase(t);
+        }
         let from = release_from.clamp(-1.0, 0.0);
         if t < profile.release_secs {
             let p = (t / profile.release_secs).clamp(0.0, 1.0);
@@ -959,6 +1172,21 @@ fn arc_rotation(s: f32, arc: SwingArc) -> (Vec3, f32) {
             };
             (Vec3::X, scaled * s)
         }
+        // The bench's capsule steps into the sweep and never turns: a turn
+        // about up is invisible on a capsule, and would swing the off hand
+        // round with it. Its weight shift is `backhand_step`.
+        SwingArc::Backhand => (Vec3::X, 0.0),
+    }
+}
+
+/// The socket's whole local pose for a stroke at swing parameter `s`: the
+/// arc's pose composed onto the rest mount. The backhand's pose moves the
+/// grip itself, so it is the one arc that needs to know where the mount holds
+/// it.
+fn stroke_pose(kind: WeaponKind, rest: &Transform, s: f32, arc: SwingArc) -> Transform {
+    match arc {
+        SwingArc::Backhand => backhand_pose(rest.translation, s) * *rest,
+        _ => swing_pose_arc(kind, s, arc) * *rest,
     }
 }
 
@@ -1032,6 +1260,9 @@ fn swing_pose_arc(kind: WeaponKind, s: f32, arc: SwingArc) -> Transform {
             let (axis, angle) = arc_rotation(s, arc);
             Transform::from_rotation(Quat::from_axis_angle(axis, angle))
         }
+        // About a mount whose grip is the socket origin; `stroke_pose` passes
+        // the real mount's.
+        SwingArc::Backhand => backhand_pose(Vec3::ZERO, s),
     }
 }
 
@@ -1364,8 +1595,7 @@ pub fn animate_weapon_swings(
         // Composed model-side, the axe's chop became a flat-faced sideways
         // slap and the dagger's lunge became a sideways drag.
         *transform = Transform::from_rotation(Quat::from_rotation_y(socket.yaw_local))
-            * swing_pose_arc(socket.kind, s, profile.arc)
-            * socket.rest;
+            * stroke_pose(socket.kind, &socket.rest, s, profile.arc);
 
         // Publish for `animate_body_lean`, which must turn the body on exactly
         // this value rather than recomputing it.
@@ -1439,7 +1669,7 @@ pub fn animate_body_lean(
             // Step into the blow: back through the windup, forward through the
             // release — along the AIM bearing, and `s` already carries the
             // sign. Horizontal only: `translation.y` belongs to the gaits.
-            let step = socket.last_s * SWING_WEIGHT_SHIFT;
+            let step = body_step(socket.last_s, socket.swing_style.profile().arc);
             let step_dir = aim * Vec3::Z;
             body.translation.x = step_dir.x * step;
             body.translation.z = step_dir.z * step;
@@ -2244,6 +2474,7 @@ mod swing_tests {
             SwingStyle::HammerOfJustice,
             SwingStyle::Ambush,
             SwingStyle::SinisterStrike,
+            SwingStyle::Backhand,
         ]
         .iter()
         .map(|s| s.profile().total())
@@ -2256,6 +2487,86 @@ mod swing_tests {
                  signature (quickest is {quickest_signature:.2}s)"
             );
         }
+    }
+
+    // -- the backhand ---------------------------------------------------------
+
+    #[test]
+    fn the_backhand_phase_keys_the_benchs_timeline() {
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-5;
+        assert_eq!(backhand_phase(0.0), 0.0);
+        assert!(close(backhand_phase(0.22), 1.0));
+        assert!(close(backhand_phase(0.33), 1.5), "contact mid-sweep");
+        assert!(close(backhand_phase(0.44), 2.0));
+        assert!(close(backhand_phase(0.5), 2.0), "held");
+        assert!(close(backhand_phase(0.9), 3.0));
+        // Eased out of rest and into it, even through the sweep.
+        assert!(backhand_phase(0.05) < 0.05 / 0.22);
+        assert!(close(backhand_phase(0.275), 1.25));
+        // Monotonic: the stroke never plays backwards.
+        let mut last = -1.0;
+        for i in 0..=90 {
+            let p = backhand_phase(i as f32 * 0.01);
+            assert!(p >= last, "{i}");
+            last = p;
+        }
+    }
+
+    #[test]
+    fn the_backhand_routes_through_its_own_clock() {
+        let profile = SwingStyle::Backhand.profile();
+        // Whatever depth the router froze, the stroke starts at rest.
+        let s = swing_param_timed(0.0, 0.0, 0.0, Some(0.0), -1.0, profile);
+        assert_eq!(s, 0.0);
+        let s = swing_param_timed(0.0, 0.0, 0.0, Some(0.33), -1.0, profile);
+        assert!((s - 1.5).abs() < 1e-5);
+        assert!((profile.total() - 0.9).abs() < 1e-6);
+        assert!((profile.impact_at() - 0.33).abs() < 1e-6);
+        // No other stroke's contact moves.
+        for style in [SwingStyle::MortalStrike, SwingStyle::KidneyShot] {
+            assert_eq!(style.impact_at(), style.profile().release_secs);
+        }
+    }
+
+    #[test]
+    fn the_backhand_path_runs_wound_contact_follow() {
+        let rest = Vec3::new(0.7, -0.05, 0.3);
+        assert_eq!(backhand_grip(rest, 0.0), rest);
+        assert!(backhand_grip(rest, 1.0).distance(BACKHAND_WOUND) < 1e-5);
+        assert!(backhand_grip(rest, 1.5).distance(BACKHAND_CONTACT) < 1e-5);
+        assert!(backhand_grip(rest, 2.0).distance(BACKHAND_FOLLOW) < 1e-5);
+        assert!(backhand_grip(rest, 3.0).distance(rest) < 1e-5);
+        // The windup bows forward of the straight line by its middle.
+        let mid = backhand_grip(rest, 0.5);
+        assert!((mid.z - (rest.z + BACKHAND_WOUND.z) * 0.5 - BACKHAND_WINDUP_BOW).abs() < 1e-5);
+    }
+
+    #[test]
+    fn the_backhand_pose_is_rest_at_both_ends() {
+        let rest = Vec3::new(0.7, -0.05, 0.3);
+        for phase in [0.0, 3.0] {
+            let pose = backhand_pose(rest, phase);
+            assert!(pose.translation.length() < 1e-5, "{phase}");
+            assert!(
+                pose.rotation.angle_between(Quat::IDENTITY) < 1e-5,
+                "{phase}"
+            );
+        }
+        // Mid-stroke, the pose carries the rest grip to the path's grip.
+        let pose = backhand_pose(rest, 1.5);
+        assert!(pose.transform_point(rest).distance(BACKHAND_CONTACT) < 1e-5);
+    }
+
+    #[test]
+    fn the_backhand_body_steps_back_then_in() {
+        assert_eq!(backhand_step(0.0), 0.0);
+        assert!((backhand_step(1.0) + BACKHAND_STEP_BACK).abs() < 1e-6);
+        assert!((backhand_step(2.0) - BACKHAND_STEP_IN).abs() < 1e-6);
+        assert!((backhand_step(1.0 + 1.0 / BACKHAND_STEP_RATE) - BACKHAND_STEP_IN).abs() < 1e-6);
+        assert_eq!(backhand_step(3.0), 0.0);
+        // Every other arc keeps the shared weight shift.
+        assert_eq!(body_step(0.5, SwingArc::Sagittal), 0.5 * SWING_WEIGHT_SHIFT);
+        assert_eq!(body_step(1.5, SwingArc::Backhand), backhand_step(1.5));
     }
 
     /// Signed pitch (rotation about local X) of a pose, for the direction

@@ -45,7 +45,8 @@ impl DotStateVisual {
     pub fn for_dot(name: &str) -> Option<DotStateVisual> {
         match name {
             "Serpent Sting" => Some(DotStateVisual::Drip(DripKind::Poison)),
-            "Rend" => Some(DotStateVisual::Drip(DripKind::Bleed)),
+            // Rupture has no client state; it bleeds as Rend does (AS-336).
+            "Rend" | "Rupture" => Some(DotStateVisual::Drip(DripKind::Bleed)),
             CORRUPTION_AURA => Some(DotStateVisual::CorruptionShroud),
             UA_AURA => Some(DotStateVisual::UnstableAfflictionState),
             IMMOLATE_AURA => Some(DotStateVisual::ImmolateBurn),
