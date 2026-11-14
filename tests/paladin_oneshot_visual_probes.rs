@@ -266,9 +266,10 @@ fn each_talent_aura_routes_to_its_landing_and_owns_its_application() {
             owned
         );
     }
-    // A primed cast with no one-shot keeps the band.
+    // A primed cast with no one-shot keeps the band. (Shadow Trance has its
+    // own landing since AS-346.)
     assert_eq!(
-        AuraApplyRoute::for_instance(AuraType::NextCast, "Shadow Trance"),
+        AuraApplyRoute::for_instance(AuraType::NextCast, "A Primed Cast With No Landing"),
         AuraApplyRoute::Band
     );
     // The hands: Divine Favor's are Moonfire's arcane kit; Aura Mastery's and

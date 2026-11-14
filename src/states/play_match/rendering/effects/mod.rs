@@ -26,6 +26,8 @@ mod guardian_spirit;
 pub use guardian_spirit::*;
 mod life_tap;
 pub use life_tap::*;
+mod empowered_flash;
+pub use empowered_flash::*;
 mod flame;
 pub use flame::*;
 mod drain_life;

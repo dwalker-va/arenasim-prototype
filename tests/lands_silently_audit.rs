@@ -1017,6 +1017,9 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             {
                 Some("Mark of the Wild glyph on landing (druid_heals.rs)")
             }
+            _ if AuraLandingKind::for_aura(t, &c.name) == Some(AuraLandingKind::AmplifyFlash) => {
+                Some("empowered ground flash on cast (empowered_flash.rs)")
+            }
             // The Paladin talent one-shots (AS-374), each routed by its
             // aura's name: the landing marks it, the band does not.
             _ if paladin_oneshot(t, &c.name).is_some() => paladin_oneshot(t, &c.name),
@@ -1042,10 +1045,6 @@ fn paladin_oneshot(t: AuraType, name: &str) -> Option<&'static str> {
 const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     // A totem's OBJECT is drawn; the buff it pulses onto allies is not.
     (AirTotem, "AS-134 (aura application — totem pulse)"),
-    (
-        AmplifyCurse,
-        "AS-346 (Amplify Curse and Shadow Trance, the primed casts)",
-    ),
     (ArcaneIntellect, "AS-134 (aura application)"),
     (BattleShout, "AS-134 (aura application)"),
     (CommandingShout, "AS-134 (aura application)"),
@@ -1857,7 +1856,6 @@ const TALENT_PROC_KNOWN_SILENT: &[(TalentId, &str)] = &[
         TalentId::BlessedRecovery,
         "AS-352 (Blessed Recovery's palm glow and Renew's amber rings)",
     ),
-    (TalentId::Nightfall, "AS-346 (Shadow Trance's speck halo)"),
     (
         TalentId::Vengeance,
         "AS-377 (Vengeance: both hands glow pale blue while the buff lasts)",
