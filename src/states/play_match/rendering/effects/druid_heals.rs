@@ -519,7 +519,8 @@ impl DruidEffect {
             | AuraLandingKind::InfusionHalo
             | AuraLandingKind::ArtOfWarRing
             | AuraLandingKind::AmplifyFlash
-            | AuraLandingKind::ShadowTrance => None,
+            | AuraLandingKind::ShadowTrance
+            | AuraLandingKind::RepentanceImpact => None,
         }
     }
 }

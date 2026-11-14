@@ -5,6 +5,10 @@ use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, TAU};
 use super::druid_heals::{body_point, keyed, keyed_color};
 use super::heal_cast::{flash_instant_hands, HealCastAssets};
 use super::hunter_shots::{draw, ClientEmitter, EmitterAssets, EmitterSprite};
+use super::repentance::{
+    REPENTANCE_HANDS, REPENTANCE_IMPACT_CAMERA_LIFT, REPENTANCE_IMPACT_LAYERS,
+    REPENTANCE_IMPACT_SECS, REPENTANCE_KNOBS,
+};
 use super::school_impact::IMPACT_PET_STATURE;
 use super::shield::disc_texture;
 use super::spell_bolts::star_flash_texture;
@@ -42,6 +46,9 @@ use crate::states::play_match::components::*;
 // - **The Art of War** (§12): `the_art_of_war_impact.m2` at the chest on the
 //   proc, 2.0 s: a small gold disc and a ring of gold sparks opening out.
 // - **Light's Grace** (§10) has no client visual at any build: icon only.
+// - **Repentance**'s impact (§6, AS-378): the instant Holy hand flash on the
+//   Paladin, then `holy_impactdd_low_chest.m2` at the VICTIM's chest, 0.93 s.
+//   Its tables, and the head swirl that follows, are `repentance.rs`.
 //
 // Played as the signed-off AS-337 Paladin Talent Visuals Bench plays them
 // (https://claude.ai/artifact/31rnhhKpACF51iUsqK5g7k, version 1792379243-e3d6,
@@ -209,7 +216,7 @@ impl OneShotLayer {
 }
 
 /// A layer at an effect's knobs.
-const fn at_knobs(layer: OneShotLayer, k: OneShotKnobs) -> OneShotLayer {
+pub(super) const fn at_knobs(layer: OneShotLayer, k: OneShotKnobs) -> OneShotLayer {
     let mut e = layer.emitter;
     e.size = e.size.scaled(k.size);
     if let Some((w, h)) = e.column {
@@ -245,7 +252,7 @@ const fn at_knobs(layer: OneShotLayer, k: OneShotKnobs) -> OneShotLayer {
 /// A [`ClientEmitter`] with the fields every table here shares: additive
 /// (every layer is M2 blend 4), no gravity, no rise.
 #[allow(clippy::too_many_arguments)]
-const fn emitter(
+pub(super) const fn emitter(
     name: &'static str,
     sprite: EmitterSprite,
     rate: f32,
@@ -281,7 +288,7 @@ const fn emitter(
 
 /// A two-key ramp's middle key, `t` of the way along — so a bench ramp keyed
 /// only at birth and death stays a straight line through the middle key.
-const fn mid_of(a: f32, b: f32, t: f32) -> f32 {
+pub(super) const fn mid_of(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
@@ -746,6 +753,23 @@ pub fn oneshot_layers(kind: PaladinOneShotKind) -> &'static [OneShotLayer] {
         PaladinOneShotKind::Retribution => &[],
         PaladinOneShotKind::InfusionOfLight => &INFUSION_LAYERS,
         PaladinOneShotKind::ArtOfWar => &ART_OF_WAR_LAYERS,
+        PaladinOneShotKind::RepentanceImpact => &REPENTANCE_IMPACT_LAYERS,
+    }
+}
+
+/// How far toward the camera a one-shot's particles are born, yards: zero
+/// but for Repentance's impact, whose particles all stay inside the body
+/// capsule's reach and would be hidden by it (`repentance.rs`).
+pub fn oneshot_camera_lift(kind: PaladinOneShotKind) -> f32 {
+    match kind {
+        PaladinOneShotKind::RepentanceImpact => REPENTANCE_IMPACT_CAMERA_LIFT,
+        PaladinOneShotKind::DivineFavor
+        | PaladinOneShotKind::AuraMastery
+        | PaladinOneShotKind::SacrificeAlly
+        | PaladinOneShotKind::SacrificePaladin
+        | PaladinOneShotKind::Retribution
+        | PaladinOneShotKind::InfusionOfLight
+        | PaladinOneShotKind::ArtOfWar => 0.0,
     }
 }
 
@@ -758,6 +782,7 @@ pub fn oneshot_knobs(kind: PaladinOneShotKind) -> OneShotKnobs {
         PaladinOneShotKind::Retribution => RETRIBUTION_AURA_KNOBS,
         PaladinOneShotKind::InfusionOfLight => INFUSION_KNOBS,
         PaladinOneShotKind::ArtOfWar => ART_OF_WAR_KNOBS,
+        PaladinOneShotKind::RepentanceImpact => REPENTANCE_KNOBS,
     }
 }
 
@@ -770,6 +795,7 @@ pub fn oneshot_secs(kind: PaladinOneShotKind) -> f32 {
         PaladinOneShotKind::Retribution => RETRIBUTION_AURA_SECS,
         PaladinOneShotKind::InfusionOfLight => INFUSION_SECS,
         PaladinOneShotKind::ArtOfWar => ART_OF_WAR_SECS,
+        PaladinOneShotKind::RepentanceImpact => REPENTANCE_IMPACT_SECS,
     };
     secs * oneshot_knobs(kind).duration
 }
@@ -795,13 +821,17 @@ pub fn oneshot_visual(kind: PaladinOneShotKind) -> &'static str {
         PaladinOneShotKind::ArtOfWar => {
             "gold spark ring opening round the chest (paladin_oneshots.rs)"
         }
+        PaladinOneShotKind::RepentanceImpact => {
+            "Holy hand flash + gold impact at the victim's chest (repentance.rs)"
+        }
     }
 }
 
 /// Where a landing plays: the rigs it spawns (unit, one-shot), and the unit
 /// whose hands flash, if any. Aura Mastery and Retribution Aura play only on
 /// the landing whose bearer is the caster — the client draws nothing on the
-/// teammates they cover — and Blessing of Sacrifice plays at both ends.
+/// teammates they cover — Blessing of Sacrifice plays at both ends, and
+/// Repentance's impact plays on its victim while its caster's hands flash.
 pub fn oneshot_plan(
     landing: AuraLandingKind,
     bearer: Entity,
@@ -831,6 +861,9 @@ pub fn oneshot_plan(
         }
         PaladinOneShotKind::InfusionOfLight | PaladinOneShotKind::ArtOfWar => {
             (vec![(bearer, kind)], None)
+        }
+        PaladinOneShotKind::RepentanceImpact => {
+            (vec![(bearer, kind)], caster.filter(|_| REPENTANCE_HANDS))
         }
     }
 }
@@ -1042,6 +1075,8 @@ pub fn oneshot_pieces(kind: PaladinOneShotKind) -> Vec<OneShotPieceRole> {
                 pieces.extend((0..AOW_SPARKS).map(|index| R::ArtOfWarSpark { index }));
             }
         }
+        // All particles: its swirl is the incapacitate's state, drawn apart.
+        PaladinOneShotKind::RepentanceImpact => {}
     }
     pieces
 }
@@ -1503,6 +1538,7 @@ pub fn update_paladin_oneshots(
 ) {
     let dt = time.delta_secs();
     let cam_rotation = camera.iter().next().map(|c| c.rotation);
+    let cam_at = camera.iter().next().map(|c| c.translation);
     for (entity, mut rig, mut transform, children) in rigs.iter_mut() {
         let Ok(unit) = units.get(rig.bearer) else {
             commands.entity(entity).despawn();
@@ -1528,7 +1564,13 @@ pub fn update_paladin_oneshots(
             let e = &layer.emitter;
             let palette = assets.palette(&mut materials, e);
             let quad = assets.quad();
-            let anchor = body_point(layer.height, unit.translation, rig.is_pet);
+            let mut anchor = body_point(layer.height, unit.translation, rig.is_pet);
+            // Brought along the line of sight toward the camera, so a
+            // particle the body would hide stands in front of it where the
+            // camera sees it.
+            if let Some(cam_at) = cam_at {
+                anchor += (cam_at - anchor).normalize_or_zero() * oneshot_camera_lift(rig.kind) * s;
+            }
             while rig.carry[i] >= 1.0 {
                 rig.carry[i] -= 1.0;
                 let seed = entity
@@ -1652,6 +1694,28 @@ mod tests {
 
     const SPHERE: OneShotLaunch = OneShotLaunch::Sphere;
     const UP: OneShotLaunch = OneShotLaunch::Vertical { speed_var: 0.0 };
+
+    #[test]
+    fn only_repentances_impact_is_lifted_toward_the_camera() {
+        for kind in PaladinOneShotKind::ALL {
+            let want = if kind == PaladinOneShotKind::RepentanceImpact {
+                REPENTANCE_IMPACT_CAMERA_LIFT
+            } else {
+                0.0
+            };
+            assert_eq!(oneshot_camera_lift(kind), want, "{kind:?}");
+        }
+        assert_eq!(
+            oneshot_layers(PaladinOneShotKind::RepentanceImpact).len(),
+            2,
+            "stars and streaks"
+        );
+        assert!(oneshot_pieces(PaladinOneShotKind::RepentanceImpact).is_empty());
+        assert_eq!(
+            oneshot_secs(PaladinOneShotKind::RepentanceImpact),
+            REPENTANCE_IMPACT_SECS
+        );
+    }
 
     #[test]
     fn every_knob_is_the_clients() {
@@ -2207,6 +2271,16 @@ mod tests {
         assert_eq!(
             plan(L::ArtOfWarRing, paladin, Some(paladin)),
             (vec![(paladin, P::ArtOfWar)], None)
+        );
+        // Repentance: the impact on its victim, the Paladin's hands.
+        let victim = Entity::from_raw(3);
+        assert_eq!(
+            plan(L::RepentanceImpact, victim, Some(paladin)),
+            (vec![(victim, P::RepentanceImpact)], Some(paladin))
+        );
+        assert_eq!(
+            plan(L::RepentanceImpact, victim, None),
+            (vec![(victim, P::RepentanceImpact)], None)
         );
         // Another renderer's landing plays nothing here.
         assert_eq!(

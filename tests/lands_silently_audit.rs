@@ -77,6 +77,7 @@ use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::client_landing_style;
 use arenasim::states::play_match::combat_core::ExtraSwingSource;
 use arenasim::states::play_match::components::Aura;
+use arenasim::states::play_match::components::AuraApplyOwner;
 use arenasim::states::play_match::components::AuraApplyRoute;
 use arenasim::states::play_match::components::AuraLandingKind;
 use arenasim::states::play_match::components::AuraType;
@@ -804,7 +805,8 @@ const CONTROL_MEMBERS: &[AbilityType] = &[
 
 /// The victim treatment of a member's control aura. Keyed on the aura TYPE
 /// (the renderers poll `ActiveAuras` for it), except Incapacitate, whose ice
-/// block is spawned by the trap trigger rather than by the aura, a slow,
+/// block is spawned by the trap trigger rather than by the aura and whose
+/// Repentance is routed by its name (`AuraApplyRoute::for_instance`), a slow,
 /// whose ring is tinted through `SlowTint::for_slow` by the aura's RON
 /// `name:` — so a slow with no tint arm lands silently — and a root, whose
 /// restraint `root_style_for` picks from its name and school.
@@ -828,8 +830,10 @@ fn control_treatment(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> 
 /// The victim treatment one control aura draws: its type, its name (`name`:
 /// the slow tint and the root style route by it), its school where it has one
 /// (the root style), and whether Freezing Trap's trigger spawned it (the only
-/// incapacitate drawn as the ice block). Shared by the crowd-control family
-/// and the talent-proc family.
+/// incapacitate drawn as the ice block). Repentance's incapacitate is the
+/// swirl's by its route, and its landing the impact's
+/// ([`paladin_oneshot`]): both must answer. Shared by the crowd-control
+/// family and the talent-proc family.
 fn control_visual(
     t: AuraType,
     name: &str,
@@ -846,6 +850,14 @@ fn control_visual(
         AuraType::Fear => Some("fear shroud (fear.rs)"),
         AuraType::Polymorph => Some("sheep swap (polymorph.rs)"),
         AuraType::Incapacitate if freezing_trap => Some("ice block (traps.rs)"),
+        AuraType::Incapacitate
+            if AuraApplyRoute::for_instance(t, name)
+                == AuraApplyRoute::Owned(AuraApplyOwner::Repentance) =>
+        {
+            paladin_oneshot(t, name).map(|_| {
+                "gold chest impact, then the violet head swirl while it holds (repentance.rs)"
+            })
+        }
         AuraType::MovementSpeedSlow => {
             SlowTint::for_slow(name).map(|_| "slow bind ring + scuff (slow_ring.rs)")
         }
@@ -858,17 +870,10 @@ fn control_finds_every_member() {
     assert_finds("crowd-control", is_control, CONTROL_MEMBERS);
 }
 
-/// Repentance is an `Incapacitate`, which draws the ice block only for the
-/// Freezing Trap that spawns it: it lands silently until AS-378 gives it its
-/// own visual.
 const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (
         CurseOfExhaustion,
         "AS-334 (the talent visuals: Curse of Exhaustion's slow)",
-    ),
-    (
-        Repentance,
-        "AS-378 (Repentance, the Retribution incapacitate; never Freezing Trap's ice block)",
     ),
     (
         Silence,

@@ -124,3 +124,5 @@ mod shadow_word_pain;
 pub use shadow_word_pain::*;
 mod paladin_oneshots;
 pub use paladin_oneshots::*;
+mod repentance;
+pub use repentance::*;
