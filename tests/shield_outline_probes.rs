@@ -24,7 +24,7 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::{
     place_shield_cards, shield_outline_alpha, shield_tuning, update_shield_visuals,
     AEGIS_AURA_NAME, AEGIS_OUTLINE_RGB, DIVINE_SHIELD_AURA_NAME, DS_FILL_RGB, DS_FILL_TINT,
-    ICE_BARRIER_AURA_NAME, OUTLINE_INNER, PW_SHIELD_AURA_NAME,
+    ICE_BARRIER_AURA_NAME, OUTLINE_INNER, PW_SHIELD_AURA_NAME, SACRED_SHIELD_AURA_NAME,
 };
 use arenasim::CharacterClass;
 
@@ -102,13 +102,17 @@ impl Harness {
                 ability_name: DIVINE_SHIELD_AURA_NAME.to_string(),
                 ..Default::default()
             },
-            ShieldKind::PowerWordShield | ShieldKind::IceBarrier | ShieldKind::Aegis => Aura {
+            ShieldKind::PowerWordShield
+            | ShieldKind::IceBarrier
+            | ShieldKind::Aegis
+            | ShieldKind::SacredShield => Aura {
                 effect_type: AuraType::Absorb,
                 duration: 30.0,
                 magnitude: 70.0,
                 ability_name: match kind {
                     ShieldKind::IceBarrier => ICE_BARRIER_AURA_NAME,
                     ShieldKind::Aegis => AEGIS_AURA_NAME,
+                    ShieldKind::SacredShield => SACRED_SHIELD_AURA_NAME,
                     _ => PW_SHIELD_AURA_NAME,
                 }
                 .to_string(),
@@ -199,6 +203,8 @@ fn class_of(kind: ShieldKind) -> CharacterClass {
         ShieldKind::IceBarrier => CharacterClass::Mage,
         // A trinket: anyone can wear it.
         ShieldKind::Aegis => CharacterClass::Warrior,
+        // A Paladin's ally.
+        ShieldKind::SacredShield => CharacterClass::Rogue,
     }
 }
 
@@ -405,10 +411,14 @@ fn every_outline_wears_its_rim_colour_and_the_bubble_wears_the_shields_gold() {
 /// full at the pop, held through the wobble between `alpha` (the rim at its
 /// peak) and `alpha × (1 - pulse × 0.6)` (the rim's trough is 0.4 of its
 /// peak on both client tracks), reaching both, then faded out with the death
-/// — not cut.
+/// — not cut. Sacred Shield's card has no delay and flickers deeper: its own
+/// test follows.
 #[test]
 fn the_outline_pops_holds_pulses_and_fades_with_the_rim() {
-    for kind in ShieldKind::ALL {
+    let pws_skeleton = ShieldKind::ALL
+        .into_iter()
+        .filter(|k| *k != ShieldKind::SacredShield);
+    for kind in pws_skeleton {
         let o = shield_tuning(kind).outline;
         let mut h = Harness::new(class_of(kind));
         h.give(kind);
@@ -450,6 +460,61 @@ fn the_outline_pops_holds_pulses_and_fades_with_the_rim() {
         let w = h.card(kind, ShieldLayer::Outline).map_or(0.0, |c| c.weight);
         assert!(w < 0.02, "{kind:?} outline outlived the rim's fade: {w}");
     }
+}
+
+/// Sacred Shield's outline follows its card: lit from the card's first frame
+/// (the card has no delay), full at the 300 ms spike, held through the loop
+/// between `alpha` (the card at its 0.49 peak) and `alpha × (1 - pulse ×
+/// (1 - 0.16 / 0.49))` (its 0.16 trough), reaching both, then faded out with
+/// the death, gone by 800 ms when the card's own death weight is.
+#[test]
+fn the_sacred_shield_outline_follows_its_card() {
+    let kind = ShieldKind::SacredShield;
+    let o = shield_tuning(kind).outline;
+    let floor = o.alpha * (1.0 - o.pulse * (1.0 - 0.16 / 0.49));
+    let mut h = Harness::new(class_of(kind));
+    h.give(kind);
+    h.run_to(kind, ShieldPhase::Birth, 0.05);
+    let w = h.card(kind, ShieldLayer::Outline).unwrap().weight;
+    assert!(w > 0.8 * o.alpha, "the outline is dark at the birth: {w}");
+    h.run_to(kind, ShieldPhase::Birth, 0.296);
+    let w = h.card(kind, ShieldLayer::Outline).unwrap().weight;
+    assert!(w > 0.98 * o.alpha, "the outline did not peak: {w}");
+
+    h.run_to(kind, ShieldPhase::Loop, 0.0);
+    let (mut lo, mut hi) = (f32::MAX, 0.0_f32);
+    for _ in 0..100 {
+        h.tick(1);
+        let w = h.card(kind, ShieldLayer::Outline).unwrap().weight;
+        assert!(
+            w >= floor - 1e-3 && w <= o.alpha + 1e-3,
+            "held outline {w} outside [{floor}, {}]",
+            o.alpha
+        );
+        lo = lo.min(w);
+        hi = hi.max(w);
+    }
+    assert!(hi > o.alpha * 0.97, "never reached full: {hi}");
+    assert!(lo < floor + 0.02, "never reached its trough: {lo}");
+
+    let before = h.card(kind, ShieldLayer::Outline).unwrap().weight;
+    h.take_all();
+    h.tick(2);
+    assert_eq!(h.rig(kind).unwrap().phase, ShieldPhase::Death);
+    let early = h.card(kind, ShieldLayer::Outline).unwrap().weight;
+    assert!(
+        early > 0.9 * before,
+        "outline cut at the death, not faded: {before} -> {early}"
+    );
+    h.run_to(kind, ShieldPhase::Death, 0.4);
+    let mid = h.card(kind, ShieldLayer::Outline).unwrap().weight;
+    assert!(
+        mid < 0.6 * before && mid > 0.3 * before,
+        "half way out: {mid}"
+    );
+    h.run_to(kind, ShieldPhase::Death, 0.8);
+    let w = h.card(kind, ShieldLayer::Outline).map_or(0.0, |c| c.weight);
+    assert!(w < 0.02, "the outline outlived the card: {w}");
 }
 
 /// Divine Shield's tint lies over the body at its own opacity, through the
