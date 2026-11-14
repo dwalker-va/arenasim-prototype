@@ -112,6 +112,7 @@ use arenasim::states::play_match::talents::TalentEffect;
 use arenasim::states::play_match::talents::TalentId;
 use arenasim::states::play_match::wears_guardian_spirit;
 use arenasim::states::play_match::wears_shadowform_look;
+use arenasim::states::play_match::ChannelVisual;
 use arenasim::states::play_match::DotStateVisual;
 use arenasim::states::play_match::InterruptLanding;
 use arenasim::states::play_match::SlowTint;
@@ -554,6 +555,11 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
         LightningBolt => Some("forked-arc strike (casting.rs → lightning_bolt.rs)"),
         Immolate => Some("landing flame burst (casting.rs → flame.rs)"),
         DrainLife => Some("drain beam (drain_life.rs, keyed on the channel's ability)"),
+        // The channel is its landing: the client draws no per-tick impact,
+        // only the stars at both ends and the beam, held while it runs.
+        MindFlay if ChannelVisual::for_channel(a).is_some() => {
+            Some("mana-funnel stars + mana beam (mind_flay.rs, ChannelVisual::for_channel)")
+        }
         Moonfire => Some("moon orb + beam landing (casting.rs → moonfire.rs)"),
         // The empowered swing carries `HeroicStrikeSwing` (auto_attack.rs);
         // heroic_strike.rs lays its trail and lands it through the client
@@ -581,10 +587,6 @@ const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (
         HolyNova,
         "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
-    ),
-    (
-        MindFlay,
-        "AS-356 (Mind Flay, the channel and its slow; scoped by AS-335)",
     ),
     (
         Shadowburn,
@@ -863,10 +865,6 @@ const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (
         CurseOfExhaustion,
         "AS-334 (the talent visuals: Curse of Exhaustion's slow)",
-    ),
-    (
-        MindFlay,
-        "AS-356 (Mind Flay, the channel and its slow; scoped by AS-335)",
     ),
     (
         Repentance,

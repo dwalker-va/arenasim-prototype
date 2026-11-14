@@ -595,6 +595,11 @@ fn every_slow_source_routes_to_its_tint() {
         SlowTint::for_slow(&name(AbilityType::CripplingPoison)),
         Some(SlowTint::Nature)
     );
+    // Mind Flay's slow: the channel's own aura, stamped with its RON name.
+    assert_eq!(
+        SlowTint::for_slow(&name(AbilityType::MindFlay)),
+        Some(SlowTint::Shadow)
+    );
     // The two code-applied slows, through the names the sim actually stamps.
     let chill = frost_armor_movement_slow_aura();
     assert_eq!(chill.effect_type, AuraType::MovementSpeedSlow);
@@ -657,6 +662,7 @@ fn frost_trap_zone_slow_name() -> String {
 fn tints_come_from_the_school_authority_and_the_daze_is_hueless() {
     assert_eq!(SlowTint::Frost.color(), SpellSchool::Frost.color());
     assert_eq!(SlowTint::Nature.color(), SpellSchool::Nature.color());
+    assert_eq!(SlowTint::Shadow.color(), SpellSchool::Shadow.color());
     let physical = SlowTint::Physical.color().to_srgba();
     let spread = physical.red.max(physical.green).max(physical.blue)
         - physical.red.min(physical.green).min(physical.blue);
@@ -682,6 +688,33 @@ fn the_ring_takes_the_hardest_slows_tint() {
         assert!(
             (d - n).abs() < 1e-4,
             "drawn {drawn:?}, Nature is {nature:?}"
+        );
+    }
+}
+
+/// Mind Flay's slow draws the ring in the Shadow school's colour, read off the
+/// material the renderer draws, while its victim walks — and nothing while it
+/// stands, as for every slow.
+#[test]
+fn a_mind_flay_slow_draws_the_ring_in_shadow() {
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, 1.0, 0.0), vec![slow("Mind Flay", 0.5)]);
+    h.idle(10);
+    assert!(h.rings().is_empty(), "a standing victim shows no ring");
+    h.walk(unit, Vec3::X, 2.5, 2);
+    let drawn = h
+        .core_color()
+        .expect("a walking Mind Flay victim draws the ring")
+        .to_srgba();
+    let shadow = SpellSchool::Shadow.color().to_srgba();
+    for (d, n) in [
+        (drawn.red, shadow.red),
+        (drawn.green, shadow.green),
+        (drawn.blue, shadow.blue),
+    ] {
+        assert!(
+            (d - n).abs() < 1e-4,
+            "drawn {drawn:?}, Shadow is {shadow:?}"
         );
     }
 }

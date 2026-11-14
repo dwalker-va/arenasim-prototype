@@ -1231,6 +1231,29 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Mind Flay's channel (visual 277, Drain Mana's): the mana-funnel
+        // stars at the Priest's hand and the victim's chest, and the mana beam
+        // between them — graphical only. The victim star's particles are
+        // client particles: emitted before `animate_client_particles` ages
+        // them, turned after.
+        .add_systems(
+            Update,
+            (
+                play_match::sync_mind_flay_channels,
+                play_match::animate_mind_flay_channels,
+            )
+                .chain()
+                .before(play_match::animate_client_particles)
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        .add_systems(
+            Update,
+            play_match::billboard_mind_flay_particles
+                .after(play_match::animate_client_particles)
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Trap visual effects (ground circles + trigger bursts)
         .add_systems(
             Update,

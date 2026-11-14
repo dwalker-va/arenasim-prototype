@@ -30,6 +30,8 @@ mod flame;
 pub use flame::*;
 mod drain_life;
 pub use drain_life::*;
+mod mind_flay;
+pub use mind_flay::*;
 mod heal_cast;
 pub use heal_cast::*;
 mod heal_impact;
