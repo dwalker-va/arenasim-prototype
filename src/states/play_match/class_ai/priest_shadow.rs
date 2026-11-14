@@ -89,9 +89,7 @@ pub fn mind_flay_peel_target(
         })
         .filter(|e| {
             !impaired(ctx.active_auras.get(&e.entity))
-                && ctx
-                    .held_in_hard_cc(e.entity, super::Incoming::Breaks)
-                    .is_none()
+                && ctx.held_in_hard_cc(e.entity).is_none()
                 && !ctx.entity_is_immune(e.entity)
         })
         .filter(|e| reaches(e))

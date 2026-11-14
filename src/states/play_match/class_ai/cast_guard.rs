@@ -106,7 +106,6 @@ pub fn pre_cast_ok(
             && ctx
                 .held_in_hard_cc_at(
                     target_entity,
-                    super::Incoming::of(def),
                     hold_lands_after(def, caster_pos, auras, target, ctx),
                 )
                 .is_some()
@@ -413,7 +412,6 @@ pub fn classify_pre_cast_failure(
         if let Some(cc_type) = ctx
             .held_in_hard_cc_at(
                 target_entity,
-                super::Incoming::of(def),
                 hold_lands_after(def, caster_pos, auras, target, ctx),
             )
             .filter(|_| applies_hold(def))

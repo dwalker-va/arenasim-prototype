@@ -671,23 +671,20 @@ impl<'a> CombatContext<'a> {
     /// one CHAINS onto it instead (the Rogue's Kidney Shot onto its own
     /// expiring Cheap Shot).
     ///
-    /// `incoming` is how the CC about to be cast takes damage. The team holds
-    /// its damage for every hold damage breaks, a Fear included
-    /// ([`damage_breaks_friendly_hold`], [`Self::has_friendly_breakable_cc`]),
-    /// so such a hold lasts and counts. The one exception is a hold that
-    /// breaks once enough damage accumulates (a Fear, a Psychic Scream) on a
-    /// bearer the team's damage over time is already ticking on: those ticks
-    /// are about to break it, so a CC that [`Incoming::Lasts`] (a stun, a
-    /// horror, a Cyclone) is not stacked on it but becomes the lock that
-    /// lasts. One that [`Incoming::Breaks`] itself would only be broken the
-    /// same way, so every hold counts against it.
+    /// Every hold counts, whatever the CC about to be cast is, a Fear and a
+    /// Psychic Scream included: the team holds its damage for every hold
+    /// damage breaks ([`damage_breaks_friendly_hold`],
+    /// [`Self::has_friendly_breakable_cc`]), so such a hold lasts. Damage over
+    /// time the team had already put on its bearer still ticks, but it rarely
+    /// breaks the Fear first (22 of 1,006 such Fears in the AS-436 review), so
+    /// a stun stacked on one would almost always be wasted.
     ///
     /// Asked of enemies, whose crowd control can only be the deciding unit's
     /// own team's: no hold lands on its caster's side. So the caster is not
     /// looked up — a hold whose caster has died or left the view holds all the
     /// same.
-    pub fn held_in_hard_cc(&self, entity: Entity, incoming: Incoming) -> Option<AuraType> {
-        self.held_in_hard_cc_at(entity, incoming, 0.0)
+    pub fn held_in_hard_cc(&self, entity: Entity) -> Option<AuraType> {
+        self.held_in_hard_cc_at(entity, 0.0)
     }
 
     /// [`Self::held_in_hard_cc`], asked of the moment a cast begun now LANDS,
@@ -697,18 +694,11 @@ impl<'a> CombatContext<'a> {
     /// started to land in a lock's last moments is not refused at its start
     /// for the lock it will chain onto. With `lands_after` 0 it is
     /// [`Self::held_in_hard_cc`] exactly.
-    pub fn held_in_hard_cc_at(
-        &self,
-        entity: Entity,
-        incoming: Incoming,
-        lands_after: f32,
-    ) -> Option<AuraType> {
-        let breaking = incoming == Incoming::Lasts && self.has_friendly_dots_on_target(entity);
+    pub fn held_in_hard_cc_at(&self, entity: Entity, lands_after: f32) -> Option<AuraType> {
         self.active_auras
             .get(&entity)?
             .iter()
             .filter(|a| holds(a.effect_type) && a.duration - lands_after > CC_CHAIN_WINDOW)
-            .filter(|a| !(breaking && a.break_on_damage_threshold > 0.0))
             .max_by(|a, b| a.duration.total_cmp(&b.duration))
             .map(|a| a.effect_type)
     }
@@ -1698,8 +1688,9 @@ pub fn damage_breaks_friendly_hold(aura: &Aura) -> bool {
         || (holds(aura.effect_type) && aura.break_on_damage_threshold > 0.0)
 }
 
-/// How a hard CC about to be cast takes damage — what
-/// [`CombatContext::held_in_hard_cc`] needs to know of it.
+/// How a hard CC about to be cast takes damage — what the Chain play's
+/// hand-off asks of it (`chain::suits`): one that breaks is not handed onto
+/// an enemy the team is hitting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Incoming {
     /// It breaks on damage (a Polymorph, a Fear, a Freezing Trap).

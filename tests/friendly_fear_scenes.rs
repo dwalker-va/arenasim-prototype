@@ -283,17 +283,18 @@ fn a_root_from_the_team_does_not_stop_a_nuke_but_a_fear_does() {
 }
 
 // ---------------------------------------------------------------------------
-// The auto-attack waits out a friendly Fear too.
+// The auto-attack waits out the team's breakable holds too.
 // ---------------------------------------------------------------------------
 
-/// How long the staged Fear holds.
-const FEAR_SECS: f32 = 6.0;
+/// How long the staged hold lasts.
+const HOLD_SECS: f32 = 6.0;
 
-/// The Warrior's own Auto Attacks that hit the Priest before `until` on the
+/// `attacker`'s Auto Attacks that hit the enemy Priest before `until` on the
 /// app clock (the combat log's stamps).
-fn swings_landed_before(log: &str, until: f32) -> usize {
+fn swings_landed_before(log: &str, attacker: &str, until: f32) -> usize {
+    let hit = format!("[DMG] {attacker}'s Auto Attack hits Team 2 Priest #1");
     log.lines()
-        .filter(|l| l.contains("[DMG] Team 1 Warrior #1's Auto Attack hits Team 2 Priest #1"))
+        .filter(|l| l.contains(&hit))
         .filter_map(|l| {
             l.trim_start_matches('[')
                 .split('s')
@@ -306,69 +307,135 @@ fn swings_landed_before(log: &str, until: f32) -> usize {
         .count()
 }
 
-/// The Warrior beside an enemy Priest rooted in place, both unkillable; with
-/// `feared`, a Fear from the Warrior's own side on the Priest. The Fear stops
-/// every swing until it ends; without it, the same Warrior swings.
-#[test]
-fn a_friendly_fear_holds_off_the_auto_attack() {
+/// A hold of `effect` from `caster` on the enemy Priest, breaking as
+/// `threshold` says.
+#[derive(Clone, Copy)]
+struct Hold {
+    effect: AuraType,
+    threshold: f32,
+    caster: Unit,
+    name: &'static str,
+}
+
+/// `team1` against an enemy Priest rooted in place at the origin, everyone
+/// unkillable, `attacker` beside the Priest, and — with `hold` — the hold
+/// landed on the Priest at the gates. The Priest's Psychic Scream and every
+/// Fear and Death Coil on `team1` are held on cooldown, so no crowd control
+/// but the staged one ever touches the swings. Returns how many of
+/// `attacker_log`'s swings landed while the hold lasts.
+fn swings_under(team1: &[&str], attacker: Unit, attacker_log: &str, hold: Option<Hold>) -> usize {
     use arenasim::states::play_match::components::{ActiveAuras, Combatant};
-    let stage = |feared: bool| {
-        let unkillable = |c: &mut Combatant| {
-            c.max_health = 1.0e6;
-            c.current_health = 1.0e6;
-        };
-        let stage = Stage::new()
-            .combatant(Unit::new(1, 0), unkillable)
-            .combatant(Unit::new(2, 0), unkillable)
-            .place(Unit::new(1, 0), 0.0, 0.0)
-            .place(Unit::new(2, 0), 1.5, 0.0)
-            .aura(
-                Unit::new(2, 0),
-                Aura {
-                    effect_type: AuraType::Root,
-                    duration: 30.0,
-                    break_on_damage_threshold: -1.0,
-                    ability_name: "Root".into(),
-                    ..Default::default()
-                },
-            );
-        if !feared {
-            return stage;
-        }
-        stage.world(|world| {
-            let warrior = Unit::new(1, 0).entity(world);
-            let priest = Unit::new(2, 0).entity(world);
+    let unkillable = |c: &mut Combatant| {
+        c.max_health = 1.0e6;
+        c.current_health = 1.0e6;
+    };
+    let priest = Unit::new(2, 0);
+    let mut stage = Stage::new()
+        .combatant(priest, unkillable)
+        .place(priest, 0.0, 0.0)
+        .place(attacker, 1.5, 0.0)
+        .cooldown(priest, AbilityType::PsychicScream, 1000.0)
+        .aura(
+            priest,
+            Aura {
+                effect_type: AuraType::Root,
+                duration: 30.0,
+                break_on_damage_threshold: -1.0,
+                ability_name: "Root".into(),
+                ..Default::default()
+            },
+        );
+    for slot in 0..team1.len() as u8 {
+        let who = Unit::new(1, slot);
+        stage = stage
+            .combatant(who, unkillable)
+            .target(who, priest)
+            .cooldown(who, AbilityType::Fear, 1000.0)
+            .cooldown(who, AbilityType::DeathCoil, 1000.0);
+    }
+    if let Some(hold) = hold {
+        stage = stage.world(move |world| {
+            let caster = hold.caster.entity(world);
+            let priest = priest.entity(world);
             world
                 .get_mut::<ActiveAuras>(priest)
                 .expect("the Priest's auras")
                 .auras
                 .push(Aura {
-                    effect_type: AuraType::Fear,
-                    duration: FEAR_SECS,
-                    break_on_damage_threshold: 100.0,
-                    caster: Some(warrior),
-                    ability_name: "Fear".into(),
+                    effect_type: hold.effect,
+                    duration: HOLD_SECS,
+                    break_on_damage_threshold: hold.threshold,
+                    caster: Some(caster),
+                    ability_name: hold.name.into(),
                     ..Default::default()
                 });
-        })
-    };
+        });
+    }
     let config = HeadlessMatchConfig {
-        team1: vec!["Warrior".into()],
+        team1: team1.iter().map(|c| c.to_string()).collect(),
         team2: vec!["Priest".into()],
         random_seed: Some(6),
         max_duration_secs: 15.0,
         ..Default::default()
     };
-    let open = play(config.clone(), stage(false));
-    let window = open.landed().app + FEAR_SECS - 0.5;
-    assert!(
-        swings_landed_before(&open.log, window) > 0,
-        "without the Fear, the Warrior's swings land in the window"
-    );
-    let feared = play(config, stage(true));
-    assert_eq!(
-        swings_landed_before(&feared.log, window),
-        0,
-        "under its own side's Fear, no swing lands"
-    );
+    let played = play(config, stage);
+    let window = played.landed().app + HOLD_SECS - 0.5;
+    swings_landed_before(&played.log, attacker_log, window)
+}
+
+/// Each attacker's swings land on the free Priest, and none land while a
+/// hold its own team placed lasts: a Fear (the attacker's own), a teammate's
+/// Freezing Trap, and its owner's Fear for a pet.
+#[test]
+fn the_teams_breakable_holds_hold_off_the_auto_attack() {
+    let warrior = Unit::new(1, 0);
+    let cases: [(&[&str], Unit, &str, Hold); 3] = [
+        (
+            &["Warrior"],
+            warrior,
+            "Team 1 Warrior #1",
+            Hold {
+                effect: AuraType::Fear,
+                threshold: 100.0,
+                caster: warrior,
+                name: "Fear",
+            },
+        ),
+        (
+            &["Warrior", "Hunter"],
+            warrior,
+            "Team 1 Warrior #1",
+            Hold {
+                effect: AuraType::Incapacitate,
+                threshold: 0.0,
+                caster: Unit::new(1, 1),
+                name: "Freezing Trap",
+            },
+        ),
+        (
+            &["Warlock"],
+            Unit::pet_of(1, 0),
+            "Team 1 Felhunter #1",
+            Hold {
+                effect: AuraType::Fear,
+                threshold: 100.0,
+                caster: Unit::new(1, 0),
+                name: "Fear",
+            },
+        ),
+    ];
+    for (team1, attacker, label, hold) in cases {
+        let free = swings_under(team1, attacker, label, None);
+        assert!(
+            free > 0,
+            "{label}: without the {}, its swings land in the window",
+            hold.name
+        );
+        let held = swings_under(team1, attacker, label, Some(hold));
+        assert_eq!(
+            held, 0,
+            "{label}: under its own side's {}, no swing lands",
+            hold.name
+        );
+    }
 }

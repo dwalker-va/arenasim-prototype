@@ -123,7 +123,7 @@ pub fn hoj_target_eligible(ctx: &CombatContext, my_team: u8, target: Entity) -> 
 /// Asked where the stun is CAST, never by the dip's entry or abort: a dip may
 /// walk to a held healer, and stuns it once the hold is about to end.
 fn hoj_held_by(ctx: &CombatContext, target: Entity) -> Option<AuraType> {
-    ctx.held_in_hard_cc(target, super::Incoming::Lasts)
+    ctx.held_in_hard_cc(target)
 }
 
 /// DIP target selection (pure over the snapshot): the nearest living enemy

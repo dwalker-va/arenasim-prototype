@@ -256,7 +256,7 @@ pub fn decide_priest_action(
     {
         // The dip may walk to a healer its team holds; the fear waits for the
         // hold to end (`CombatContext::held_in_hard_cc`) and the dip with it.
-        if let Some(cc_type) = ctx.held_in_hard_cc(*target, super::Incoming::Breaks) {
+        if let Some(cc_type) = ctx.held_in_hard_cc(*target) {
             builder.reject(
                 AbilityType::PsychicScream,
                 RejectionReason::TargetAlreadyCCd { cc_type },

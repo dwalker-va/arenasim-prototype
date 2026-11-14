@@ -7,10 +7,12 @@
 //!
 //! `tests/decision_properties.rs`'s `never_stacks_hard_cc_on_a_unit_its_team_holds`
 //! guards the rule over the whole grid; these pin the edges the grid does not
-//! walk: the chain window, a root not counting as a hold, and a Fear the
-//! team's damage over time is ticking on not counting against a stun (those
-//! ticks are about to break it). A Fear the team is only targeting holds: the
-//! team waits it out (`tests/friendly_fear_scenes.rs`).
+//! walk: the chain window, a root not counting as a hold, and a friendly Fear
+//! counting against a stun even while the team's damage over time ticks on its
+//! bearer — the team waits a Fear out (`tests/friendly_fear_scenes.rs`), so it
+//! lasts. They also pin Death Coil's own friendly-CC gate (AS-280): its damage
+//! never breaks a teammate's Polymorph or Fear, even one inside the chain
+//! window, where it no longer counts as a hold.
 
 use arenasim::states::match_config::CharacterClass::{Priest, Rogue, Warlock, Warrior};
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
@@ -199,34 +201,46 @@ fn the_warlock_does_not_fear_a_healer_its_team_holds() {
 }
 
 // ---------------------------------------------------------------------------
-// A Fear the team waits out holds; one its damage over time is breaking does
-// not.
+// A friendly Fear holds off a stun, whatever ticks on its bearer.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn a_fear_the_team_waits_out_holds_but_one_its_dots_are_breaking_does_not() {
-    // The Rogue's own target, feared by its Warlock. The team holds its
-    // damage for the Fear, so it lasts, and no stun is stacked on it: the
-    // stun's chooser passes the held target over.
+fn a_friendly_fear_holds_off_a_stun_even_with_the_teams_dots_ticking() {
     let scene = || rogue_scene().unit(WARLOCK, 1, Warlock).at(-20.0, 0.0);
-    let waited = held(scene(), ENEMY, WARLOCK, AuraType::Fear, 6.0).decide(ROGUE);
-    assert_ne!(
-        waited.chose().map(|(a, _)| a),
-        Some(AbilityType::KidneyShot),
-        "a Fear the team waits out is a hold: {}",
-        describe(&waited)
-    );
-    assert!(
-        matches!(
-            waited.rejected(AbilityType::KidneyShot),
-            Some(RejectionReason::NoValidTarget)
-        ),
-        "the stun finds no target it does not already hold: {}",
-        describe(&waited)
+
+    // The control: the Rogue's target is free, and is stunned.
+    let free = scene().decide(ROGUE);
+    assert_eq!(
+        free.chose(),
+        Some((AbilityType::KidneyShot, Some(ENEMY))),
+        "the control stuns the free Warrior: {}",
+        describe(&free)
     );
 
-    // The same Fear with the Warlock's Corruption ticking on its bearer: the
-    // ticks are about to break it, so the stun is the lock that lasts.
+    // Feared by the Rogue's Warlock. The team holds its damage for the Fear,
+    // so it lasts, and no stun is stacked on it: the stun's chooser passes
+    // the held target over.
+    let refused = |view: &DecisionView, why: &str| {
+        assert_ne!(
+            view.chose().map(|(a, _)| a),
+            Some(AbilityType::KidneyShot),
+            "{why}: {}",
+            describe(view)
+        );
+        assert!(
+            matches!(
+                view.rejected(AbilityType::KidneyShot),
+                Some(RejectionReason::NoValidTarget)
+            ),
+            "the stun finds no target it does not already hold: {}",
+            describe(view)
+        );
+    };
+    let waited = held(scene(), ENEMY, WARLOCK, AuraType::Fear, 6.0).decide(ROGUE);
+    refused(&waited, "a Fear the team waits out is a hold");
+
+    // The same Fear with the Warlock's Corruption ticking on its bearer. The
+    // ticks rarely break a Fear before it ends, so it is still a hold.
     let warlock = scene().entity(WARLOCK);
     let ticking = held(scene(), ENEMY, WARLOCK, AuraType::Fear, 6.0)
         .aura_full(
@@ -237,11 +251,9 @@ fn a_fear_the_team_waits_out_holds_but_one_its_dots_are_breaking_does_not() {
             },
         )
         .decide(ROGUE);
-    assert_eq!(
-        ticking.chose(),
-        Some((AbilityType::KidneyShot, Some(ENEMY))),
-        "a Fear the team's damage over time is breaking is not a hold: {}",
-        describe(&ticking)
+    refused(
+        &ticking,
+        "a Fear the team's damage over time ticks on is still a hold",
     );
 
     // The Warlock's CC target, feared by a teammate and attacked by nobody:
@@ -260,14 +272,63 @@ fn a_fear_the_team_waits_out_holds_but_one_its_dots_are_breaking_does_not() {
 }
 
 // ---------------------------------------------------------------------------
-// A Fear the team is breaking still holds off a CC that breaks the same way.
+// Death Coil's damage never breaks a friendly Polymorph or Fear, even one
+// ending (AS-280).
+// ---------------------------------------------------------------------------
+
+/// The Warlock with an enemy Warrior on it, in Death Coil's peel radius.
+fn peel_scene() -> Scene {
+    Scene::new()
+        .unit(WARLOCK, 1, Warlock)
+        .targeting(ENEMY)
+        .unit(ALLY, 1, Warrior)
+        .at(-10.0, 0.0)
+        .unit(ENEMY, 2, Warrior)
+        .at(2.0, 0.0)
+        .targeting(WARLOCK)
+}
+
+#[test]
+fn death_coil_does_not_break_a_friendly_polymorph_or_fear_inside_the_chain_window() {
+    // The control: the Warrior is free, and is peeled.
+    let free = peel_scene().decide(WARLOCK);
+    assert_eq!(
+        free.chose(),
+        Some((AbilityType::DeathCoil, Some(ENEMY))),
+        "the control peels the free Warrior: {}",
+        describe(&free)
+    );
+
+    // A teammate's Polymorph or Fear in its last moments is no longer a hold,
+    // but Death Coil's damage would still break it.
+    for effect in [AuraType::Polymorph, AuraType::Fear] {
+        let ending = held(peel_scene(), ENEMY, ALLY, effect, CC_CHAIN_WINDOW - 0.1).decide(WARLOCK);
+        assert_ne!(
+            ending.chose(),
+            Some((AbilityType::DeathCoil, Some(ENEMY))),
+            "Death Coil broke a friendly {effect:?}: {}",
+            describe(&ending)
+        );
+        assert!(
+            matches!(
+                ending.rejected(AbilityType::DeathCoil),
+                Some(RejectionReason::FriendlyBreakableCC)
+            ),
+            "the refusal is traced as the friendly CC: {}",
+            describe(&ending)
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A Fear with the team's damage over time ticking on it still holds off a
+// Fear.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn a_fear_the_team_is_breaking_still_holds_off_a_fear() {
-    // The Warlock's Corruption is ticking on the feared healer, about to
-    // break the Fear. A stun would take over from it; another Fear would only
-    // be broken the same way.
+fn a_fear_the_teams_dots_tick_on_still_holds_off_a_fear() {
+    // The Warlock's Corruption is ticking on the feared healer. Another Fear
+    // would be wasted on a unit already held.
     let scene = warlock_scene();
     let me = scene.entity(WARLOCK);
     let scene = scene.aura_full(
@@ -285,7 +346,7 @@ fn a_fear_the_team_is_breaking_still_holds_off_a_fear() {
                 cc_type: AuraType::Fear
             })
         ),
-        "a Fear the team is breaking still holds off a Fear: {}",
+        "a Fear the team's damage over time ticks on still holds off a Fear: {}",
         describe(&breaking)
     );
 }
