@@ -2243,8 +2243,8 @@ impl WeaponSet {
 /// [`FloatingCombatText`] / [`WindfuryTornado`]): a bare marker entity, inert in
 /// headless, consumed and despawned by the graphical swing systems in
 /// `rendering/effects.rs` (registered only in `states/mod.rs`). Spawned in the
-/// apply loop rather than the queue loop so an attack dropped by the
-/// friendly-CC guard or a same-frame death never telegraphs a phantom release.
+/// apply loop rather than the queue loop so an attack dropped by a same-frame
+/// death never telegraphs a phantom release.
 #[derive(Component)]
 pub struct AutoAttackSwing {
     pub attacker: Entity,
