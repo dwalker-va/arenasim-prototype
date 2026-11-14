@@ -1829,7 +1829,12 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
                 )
             });
             let shifted = d.alive && d.aura_types.contains(&AuraType::TravelForm);
-            // The frame before: the one the Druid decided on.
+            // The frame before: the one the Druid decided on. The clearance
+            // is measured as the AI measures it (`visible_enemies_within`):
+            // the 3D distance between positions, the metric every reach in
+            // the sim uses, a pet's melee swing included. A pet floats above
+            // the height a unit stands at, so on the plane it can read inside
+            // the clearance while the AI, and its own swing, see it outside.
             let emergency_clear = std::mem::replace(&mut dying_and_clear, {
                 let dying = d.current_health < d.max_health * DRUID_EMERGENCY_HP;
                 dying
@@ -1838,8 +1843,7 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
                             && c.alive
                             && !c.stealthed
                             && (c.is_pet || c.class.is_melee())
-                            && xz(c.position).distance(xz(d.position))
-                                <= DRUID_EMERGENCY_LEAVE_YARDS
+                            && c.position.distance(d.position) <= DRUID_EMERGENCY_LEAVE_YARDS
                     })
             });
             match (shifted_at, shifted) {

@@ -75,7 +75,10 @@ Scored from the side holding the healer+pet team, McNemar on the flips
 | **Hunter v Rogue+healer** | 0 flips | 0 flips | +3.2 (z=+1.9, ns) |
 
 `paired_sweep.py --affects Priest,Paladin,Hunter,Warlock`: 2v2 BasicArena +0.1pt
-team1 over 8,190 reachable matches (156 flips, floor 0.3pt); Nagrand -0.0pt (75
+team1 over 8,190 reachable matches (156 flips, floor 0.3pt), with one of its
+three slices significant: AGAINST (only team2 fields an affected class) -0.4pt
+for team1, 7 flips all toward team2 (z=2.27), the same direction as the
+side-scored healer+pet gain; Nagrand -0.0pt (75
 flips, floor 0.8pt); 3v3 -2.3pt team1 (z=3.1), all of it in the MIRRORED slice,
 where the tool flags it as noise unless corroborated. Nothing corroborates it:
 it is a seat effect, which a side-scored slice cannot express, and the 3v3
@@ -114,7 +117,10 @@ cells, same seeds:
   alone moves the Warlock side -1.9, the Hunter's re-aim moves it back +1.9, and
   the net is 27 flips each way. The Warlock matchup stays as hard for the
   Hunter as it was (the Hunter side wins 24.7% before and after on BasicArena,
-  25.9-26.6% on Nagrand).
+  25.9-26.6% on Nagrand). The exact cancel is a property of `325265cc`: on the
+  branch merged with `main` at `4cbd3506` the same slice reads +2.8 for the
+  Warlock side, not significant, while the headline healer+pet gain holds at
+  +1.9 (z=3.6).
 
 The pet root tier is almost inert: with it reverted (`root_holds_back` taking
 pets down the ranged branch) 41 of 2,240 BasicArena matches and 17 of 2,240
