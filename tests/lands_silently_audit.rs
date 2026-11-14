@@ -1021,6 +1021,9 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             {
                 Some("Mark of the Wild glyph on landing (druid_heals.rs)")
             }
+            _ if AuraLandingKind::for_aura(t, &c.name) == Some(AuraLandingKind::AmplifyFlash) => {
+                Some("empowered ground flash on cast (empowered_flash.rs)")
+            }
             // The Paladin talent one-shots (AS-374), each routed by its
             // aura's name: the landing marks it, the band does not.
             _ if paladin_oneshot(t, &c.name).is_some() => paladin_oneshot(t, &c.name),
@@ -1046,10 +1049,6 @@ fn paladin_oneshot(t: AuraType, name: &str) -> Option<&'static str> {
 const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     // A totem's OBJECT is drawn; the buff it pulses onto allies is not.
     (AirTotem, "AS-134 (aura application — totem pulse)"),
-    (
-        AmplifyCurse,
-        "AS-346 (Amplify Curse and Shadow Trance, the primed casts)",
-    ),
     (ArcaneIntellect, "AS-134 (aura application)"),
     (BattleShout, "AS-134 (aura application)"),
     (CommandingShout, "AS-134 (aura application)"),
@@ -1079,7 +1078,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
         "AS-353 (Power Infusion, the infusion on the ally)",
     ),
     (PowerWordFortitude, "AS-134 (aura application)"),
-    (SacredShield, "AS-375 (Sacred Shield disc and absorb card)"),
     (
         ShadowDance,
         "AS-336 (Shadow Dance, the Subtlety capstone's window; AS-368 builds it)",
@@ -1518,6 +1516,63 @@ fn triggered_absorbs_land_nothing_silently() {
     }
 }
 
+// ── family: triggered absorbs (abilities) ───────────────────────────────────
+//
+// An ability whose aura ARMS a triggered absorb (Sacred Shield) lands twice:
+// its arming buff lands with the cast (the aura-application family judges
+// that landing), and later `fire_triggered_absorbs` raises an absorb named
+// after it. This family judges the absorb: it must reach a client shield rig
+// (`is_live_shield`), built through the constructor the simulation raises it
+// with, from an arming aura as `apply_pending_auras` lands it.
+
+fn arms_triggered_absorb(_a: AbilityType, c: &AbilityConfig) -> bool {
+    c.applies_aura
+        .as_ref()
+        .is_some_and(|aura| aura.triggered_absorb.is_some())
+}
+
+const TRIGGERED_ABSORB_ABILITY_MEMBERS: &[AbilityType] = &[SacredShield];
+
+fn triggered_absorb_ability_visual(_a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
+    let applies = c.applies_aura.as_ref()?;
+    let absorb = applies.triggered_absorb.as_ref()?;
+    let arming = Aura {
+        effect_type: applies.aura_type,
+        ability_name: c.name.clone(),
+        ..Default::default()
+    };
+    let shield = absorb.shield_aura(
+        &c.name,
+        arenasim::states::play_match::triggered_absorbs::ShieldFrom::Aura(&arming),
+        1.0,
+    );
+    ShieldKind::ALL
+        .into_iter()
+        .any(|kind| is_live_shield(kind, &shield))
+        .then_some("client shield cards (shield.rs)")
+}
+
+const TRIGGERED_ABSORB_ABILITY_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
+
+#[test]
+fn triggered_absorb_abilities_find_every_member() {
+    assert_finds(
+        "triggered-absorb ability",
+        arms_triggered_absorb,
+        TRIGGERED_ABSORB_ABILITY_MEMBERS,
+    );
+}
+
+#[test]
+fn triggered_absorb_abilities_land_nothing_silently() {
+    assert_judged(
+        "triggered-absorb ability",
+        arms_triggered_absorb,
+        triggered_absorb_ability_visual,
+        TRIGGERED_ABSORB_ABILITY_KNOWN_SILENT,
+    );
+}
+
 // ── the families cover the config ───────────────────────────────────────────
 
 /// Abilities no family scans, each with the visual that covers it. Anything
@@ -1860,7 +1915,6 @@ const TALENT_PROC_KNOWN_SILENT: &[(TalentId, &str)] = &[
         TalentId::BlessedRecovery,
         "AS-352 (Blessed Recovery's palm glow and Renew's amber rings)",
     ),
-    (TalentId::Nightfall, "AS-346 (Shadow Trance's speck halo)"),
     (
         TalentId::Vengeance,
         "AS-377 (Vengeance: both hands glow pale blue while the buff lasts)",

@@ -442,7 +442,7 @@ pub fn globe_piece_pose(piece: GlobePiece, age: f32, remaining: f32) -> PiecePos
                 ),
                 size: Vec2::splat(GLOBE_GLINT_SIZE),
                 // The canvas turns a sprite clockwise on screen.
-                facing: PieceFacing::CameraRolled { roll: -a },
+                facing: PieceFacing::Roll { roll: -a },
                 rgb: globe_track_rgb(&GLOBE_GLINT_RGB, ph),
                 alpha: if lit {
                     keyed(&GLOBE_GLINT_ALPHA, ph) * env

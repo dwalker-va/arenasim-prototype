@@ -28,6 +28,8 @@ mod divine_protection;
 pub use divine_protection::*;
 mod life_tap;
 pub use life_tap::*;
+mod empowered_flash;
+pub use empowered_flash::*;
 mod flame;
 pub use flame::*;
 mod drain_life;
