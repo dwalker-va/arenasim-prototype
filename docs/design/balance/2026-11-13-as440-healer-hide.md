@@ -1,11 +1,13 @@
 # AS-440: the healer that hides and the partner it exposes
 
-**Card:** AS-440. **Status: PROPOSED, awaiting the user's ruling (§5).**
-Every rule measured here is a prototype on this branch: `situation::HideRule`,
-a per-team measurement switch (`team{1,2}_hide_rule`), and the Pillar play's
-existing withhold. Nothing is shipped. With the prototype in, `Legacy` and the
-shipped `TeamPlan` are byte-identical to main: 1,392 matches of each, compared
-CSV for CSV at 5300b998 and again at 0ca55319.
+**Card:** AS-440. **Status: RULED (user, 2026-11-14): the cover rule is
+built (§4, `team_solve::SolveWorld::cover_waived`); the stance stays as it
+is (§5, option 4), with the eight comps of §2's starred rows on the
+milestone sweep's watch list.** §2-§4 were measured with a prototype
+measurement switch (`team{1,2}_hide_rule`, removed when the rule shipped;
+its banks are the committed CSVs, played by the binary at cfbf3a54) and the
+Pillar play's existing withhold. The shipped rule's switch is
+`team{1,2}_handoff_rule: false`.
 **Tier: DIRECTIONAL** (`sweep-tiers.md`). 2v2, the 30 x 30 play-bank cells,
 PillaredArena and TwinPillars, both seats, head-to-head: the option runs on one
 healer + DPS side, paired with the same cell and seed with both sides shipped.
@@ -155,11 +157,18 @@ not tied to a pillar ring keeps more healing on its partner, which lives
 longer and deals more damage. In the losing comps, the reverse holds. Which
 healer-side behaviour sets the sign per comp is not identified (Gaps).
 
-## 4. The cover rule (`NoCover`)
+## 4. The cover rule
 
-While an enemy ranged DPS sees a teammate of the healer within the focus's
-35yd reach, the PRESSURED solve gives no credit for cover from any enemy
-caster. CC-reach avoidance and sight of the partner are unchanged.
+While an enemy that follows a focus could take one of the healer's teammates
+(`target_focus::could_turn_on_teammate`: targetable, within `FOCUS_REACH`,
+in its sight; never on a map with no obstacles), the PRESSURED solve gives no
+credit for cover from any enemy caster. CC-reach avoidance, sight of the
+partner, a dying teammate's reach and an owed dispel are unchanged.
+
+The figures in this section's first three bullets were measured with the
+prototype's definition (a Mage, Hunter or Warlock; 2D distance; no
+targetability test). The shipped rule asks the focus machinery itself. On the
+fresh block 851-854 the two definitions measure the same (+0.1 and +0.1).
 
 - **Effect:** **+1.0*** [+0.8, +1.3] at 12 seeds (blocks +0.8 / +0.8 /
   +1.5). On fresh blocks: +0.8* (841-844), and +0.1 in 831-834 (the sides
@@ -188,8 +197,35 @@ caster. CC-reach avoidance and sight of the partner are unchanged.
   moved onto its partner.
 - On the six gaining comps, adding the cover rule to the targeted stance
   withhold did not add to it on the fresh block (+2.0 against +2.6).
+- **The shipped rule on main f366815d**, head-to-head (the side running it
+  against the same side with `team{n}_handoff_rule: false`, both seats,
+  paired with both off):
+  - fresh block 851-854: +0.1 [−0.1, +0.4] (9,600 sides; the prototype's
+    definition on the same block: +0.1 [−0.2, +0.5]);
+  - block 841-844 again: **+0.7*** [+0.5, +0.9], against +0.8 with the
+    prototype on 0ca55319.
 
-## 5. Options for the ruling
+  Over the six blocks measured, the blocks run +0.8 / +0.8 / +1.5 / +0.7 /
+  +0.1 / +0.1. That is a positive effect of about +0.7pt, with two weak
+  blocks. 851-854 is low under both definitions, so the low reading comes
+  from those seeds, not from how the rule is defined.
+- **Determinism.** Full match logs from main f366815d and the rule's head
+  are byte-identical:
+  - 120 BasicArena `TeamPlan` and 60 BasicArena `Legacy` matches;
+  - 120 `Legacy` matches on the pillar maps;
+  - 120 `TeamPlan` pillar-map matches with the rule switched off for both
+    teams.
+
+  The 300 matches outside the switched-off set saw 856 deaths and 1,717 crits.
+  With the rule on, 68 of 120 `TeamPlan` pillar-map matches diverge. In 54
+  of them, the first unit whose traced position differs is a healer, 51 of
+  them PRESSURED. In the other 14, the first difference is a reordered event:
+  a sight-yield change, a healer movement decision, or a decision whose target
+  moved.
+
+## 5. Options put to the user
+
+Ruled: option 2 built; for the stance, option 4.
 
 1. **Recommended: a Pillar-play exception table keyed by (healer, partner)
    for 2v2**, following Peel's pair gates. It names the four comps that
@@ -210,6 +246,9 @@ caster. CC-reach avoidance and sight of the partner are unchanged.
 4. **No change.**
 
 ## Gaps
+
+- The cover rule is measured in 2v2 only. It also runs in 3v3, where a healer
+  has two teammates the rule can protect.
 
 - DIRECTIONAL, 2v2 only. Neither change is measured in 3v3, where the stance
   measured +4.3 in AS-391's bank at 0.8.
@@ -235,7 +274,7 @@ From `docs/design/balance/sweeps/` (`R=2026-11-13-as440-reduce.py`,
 | §3 decomposition | `$R local …-r2-ctl.csv.gz <arm> --eligible`, arm `…-r2-np.csv.gz`, `…-r2-d_StancePartnerHalf.csv.gz`, `…-r2-d_StanceHealerHalf.csv.gz` |
 | §3 event study | `$R event ctl.rows np.rows`: the harness over `$G ctl` / `$G h2h NoPillar` at seeds 801-802, 811-812, 821-822, restricted to nine comps: the five largest gaining comps of §2 (Rogue + Druid aside) and the four losing ones |
 | §3 per-comp table | `$R partner ctl.rows np.rows local.txt`: the harness over `$G h2h-eligible NoPillar 801,811,821` and the matching control rows; damage dealt from `$R mechreport …-r2-mech-np.jsonl.gz` |
-| §4 | `$R local …-r2-ctl.csv.gz …-r2-nc.csv.gz`; `…-r2-c5_ctl.csv.gz …-r2-c5_nc.csv.gz`; mechanism `$R mechreport …-r2-mech-nc.jsonl.gz` |
+| §4 | `$R local …-r2-ctl.csv.gz …-r2-nc.csv.gz`; `…-r2-c5_ctl.csv.gz …-r2-c5_nc.csv.gz`; mechanism `$R mechreport …-r2-mech-nc.jsonl.gz`; shipped rule `$R local …-r3-cover851-ctl.csv.gz …-r3-cover851-arm.csv.gz` (`$G cover 851-854`), `…-r3-cover851-protodef.csv.gz`, `…-r3-cover841-{ctl,arm}.csv.gz` (`$G cover 841-844`) |
 
 The banks: `$G ctl|h2h <rule>|h2h-eligible <rule>|targeted <seeds> <comps> [NoCover]`, played with
 `--batch --jobs 4 --trace-mode off`; the harness banks with

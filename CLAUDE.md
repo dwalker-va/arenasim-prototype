@@ -1325,9 +1325,10 @@ of a ready Polymorph or Fear, which hiding behind the pillar may do. A map with
 no obstacles never waives (no focus moves there), so BasicArena is
 byte-identical; so is `Legacy`, which never solves. `team{1,2}_handoff_rule:
 false` is the measurement switch. Measured head-to-head (DIRECTIONAL, 2v2,
-pillar maps): +1.0pt at 12 seeds, broad (no comp significantly negative), with
-no extra crowd control on the healer: the enemy's fire comes back from the
-partner to the healer. Scenes `tests/handoff_cover_scenes.rs`, staged
+pillar maps): about +0.7pt over six seed blocks (+1.0 over the first three;
+two blocks near zero), broad (no comp significantly negative), with no extra
+crowd control on the healer: the enemy's fire comes back from the partner to
+the healer. Scenes `tests/handoff_cover_scenes.rs`, staged
 `tests/handoff_cover_staged.rs`; findings
 `docs/design/balance/2026-11-13-as440-healer-hide.md`.
 
