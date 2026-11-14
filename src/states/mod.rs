@@ -992,6 +992,20 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // The Paladin talent one-shots (`paladin_oneshots.rs`, AS-374): spawn
+        // (consumes the sim's Paladin landing markers, flashes the cast's
+        // hands) -> emit and pose, before the client particles age; they are
+        // turned by `billboard_hunter_shots`.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_paladin_oneshots,
+                play_match::update_paladin_oneshots.before(play_match::animate_client_particles),
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Dispel burst visual effects (separate group to avoid tuple size limits)
         // Still used by Concussive Shot impact and Master's Call — NOT the dispel.
         .add_systems(

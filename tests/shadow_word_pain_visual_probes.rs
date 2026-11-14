@@ -192,6 +192,7 @@ impl Harness {
         self.app.world_mut().spawn(AuraLanding {
             target,
             kind: AuraLandingKind::ShadowWordPainHit,
+            caster: None,
         });
     }
 
@@ -483,6 +484,7 @@ fn the_druid_and_the_priest_landings_stay_apart() {
     h.app.world_mut().spawn(AuraLanding {
         target: ally,
         kind: AuraLandingKind::RejuvenationSwirl,
+        caster: None,
     });
     h.tick(2);
     let world = h.app.world_mut();
