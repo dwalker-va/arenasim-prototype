@@ -5,6 +5,7 @@
 use super::abilities::AbilityType;
 use super::ability_book::AbilityBook;
 use super::ability_config::AbilityDefinitions;
+use super::combat_core::credit_healing_done;
 use super::combat_core::leech::{self, LeechRecipient};
 use super::components::*;
 use super::constants::CRIT_DAMAGE_MULTIPLIER;
@@ -425,7 +426,7 @@ pub fn process_projectile_hits(
                         caster_auras.as_deref(),
                         &caster_id,
                     );
-                    caster.healing_done += effective;
+                    credit_healing_done(&mut caster, effective);
                 }
                 talent_procs::push_for(
                     &mut commands,
@@ -662,6 +663,6 @@ fn land_party_leech(
         },
     );
     if let Ok((_, _, mut caster_combatant, _)) = combatants.get_mut(caster) {
-        caster_combatant.healing_done += credited;
+        credit_healing_done(&mut caster_combatant, credited);
     }
 }

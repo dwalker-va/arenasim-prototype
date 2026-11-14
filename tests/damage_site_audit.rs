@@ -508,11 +508,15 @@ const UNSTRUCTURED_DAMAGE_LINES: &[(&str, &str, usize, &str)] = &[
 
 #[test]
 fn every_damage_line_with_a_dealer_is_a_row() {
-    // A glob or renamed import would let a bare `Damage` past the pattern.
-    let aliased = Regex::new(r"\bCombatLogEventType\s*(::\s*[*{]|as\b)").unwrap();
+    // A glob or renamed import, or a type alias (`type Ev = CombatLogEventType;`
+    // then `Ev::Damage`), would let a `Damage` past the pattern.
+    let aliased = Regex::new(
+        r"\bCombatLogEventType\s*(::\s*[*{]|as\b)|\btype\s+[A-Za-z_][A-Za-z0-9_]*\s*=[^;]*\bCombatLogEventType\b",
+    )
+    .unwrap();
     assert_same(
-        "`CombatLogEventType` is imported by glob or alias, so this audit cannot see \
-         its `Damage`. Name it in full.",
+        "`CombatLogEventType` is imported by glob or alias, or named by a type alias, so \
+         this audit cannot see its `Damage`. Name it in full.",
         sites(&aliased, |_, _| true),
         BTreeSet::new(),
     );
