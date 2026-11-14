@@ -573,6 +573,15 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // A prevented killing blow (`KillingBlowPrevented`): the save's heal
+        // landing and the shared "Saved" cue (`guardian_spirit.rs`). Same
+        // FixedUpdate rationale as `consume_cast_ending_signals`.
+        .add_systems(
+            FixedUpdate,
+            play_match::consume_killing_blow_signals
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Interrupt landings: the mark an interrupt ability lands on its
         // victim, read off the `InterruptedBy` riding the `CastEnding` marker
         // — which `consume_cast_ending_signals` despawns, so `.before` it.
@@ -934,6 +943,29 @@ impl Plugin for StatesPlugin {
                 play_match::update_shadowform_shrouds.before(play_match::animate_client_particles),
                 play_match::billboard_shadowform_shrouds
                     .after(play_match::animate_client_particles),
+            )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Guardian Spirit over its bearer's shoulders: raised and posed
+        // before the client particles age (its sparks are client particles),
+        // its sparks turned after; and the "Saved" cue's gold body flash.
+        .add_systems(
+            Update,
+            (
+                (
+                    play_match::update_guardian_spirit_states,
+                    play_match::animate_guardian_spirits,
+                )
+                    .chain()
+                    .before(play_match::animate_client_particles),
+                play_match::billboard_guardian_spirit_sparks
+                    .after(play_match::animate_client_particles),
+                (
+                    play_match::spawn_saved_flashes,
+                    play_match::animate_saved_flashes,
+                )
+                    .chain(),
             )
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),

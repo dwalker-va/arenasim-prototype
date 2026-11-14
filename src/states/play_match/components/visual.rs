@@ -859,6 +859,10 @@ pub const MARK_OF_THE_WILD_AURA: &str = "Mark of the Wild";
 /// Shadow Word: Pain's aura name (the RON `name:` string). Its landing is the
 /// one visual the client gives it (`rendering/effects/shadow_word_pain.rs`).
 pub const SHADOW_WORD_PAIN_AURA: &str = "Shadow Word: Pain";
+/// Guardian Spirit's aura name: the RON `name:` string its face carries, and
+/// the name its rider (`guardian_spirit_riders`) is given. Its state is the
+/// spirit over the bearer's shoulders (`rendering/effects/guardian_spirit.rs`).
+pub const GUARDIAN_SPIRIT_AURA: &str = "Guardian Spirit";
 
 /// What a heal-over-time aura draws — the ONE place a HoT meets its visual,
 /// routed by the aura's RON name the way `DotStateVisual::for_dot` routes a
@@ -1585,15 +1589,24 @@ pub enum AuraApplyOwner {
     /// HoT, Power Word: Fortitude). Lifebloom is not here: its pulse starts a
     /// beat after it lands, so the band is its only application cue.
     AuraLanding,
+    /// Guardian Spirit: the halo and wings over the bearer's shoulders, whose
+    /// own onset is its application (`guardian_spirit.rs`). Owned per aura
+    /// NAME, both the face and its rider, because their types
+    /// (`HealingReceivedIncrease`, `KillingBlowSave`) are the damage
+    /// pipeline's, which any later user meets on the band.
+    GuardianSpirit,
 }
 
 impl AuraApplyRoute {
     /// Route one aura INSTANCE's application: a named aura with a bespoke
-    /// landing ([`AuraLandingKind::for_aura`]) is owned by it; every other
+    /// landing ([`AuraLandingKind::for_aura`]) is owned by it, and so is
+    /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]); every other
     /// aura routes by its type ([`Self::for_aura`]). The renderer asks this.
     pub fn for_instance(aura_type: AuraType, name: &str) -> Self {
         if AuraLandingKind::for_aura(aura_type, name).is_some() {
             AuraApplyRoute::Owned(AuraApplyOwner::AuraLanding)
+        } else if name == GUARDIAN_SPIRIT_AURA {
+            AuraApplyRoute::Owned(AuraApplyOwner::GuardianSpirit)
         } else {
             Self::for_aura(aura_type)
         }
