@@ -4636,6 +4636,41 @@ mod u9_seek_reset {
             .collect()
     }
 
+    /// sim_times of Mage decisions that refused a Frostbolt `LosBlocked` while
+    /// its target stood within the Mage's preferred range: occluded IN SHOT
+    /// RANGE, the one situation the ENGAGE machine answers with `SeekLos`
+    /// (`dps_postures::occluded_in_range`). A block from beyond preferred range
+    /// (inside Frostbolt's 40yd, outside the 38yd the Mage parks at) is
+    /// answered by pursuit, which closes and rounds the pillar, and is no
+    /// SeekLos situation.
+    fn mage_frostbolt_blocked_in_shot_range(lines: &[serde_json::Value]) -> Vec<f32> {
+        let shot_range = CharacterClass::Mage.preferred_range();
+        lines
+            .iter()
+            .filter(|v| {
+                v.get("kind").and_then(|k| k.as_str()) == Some("ability_decision")
+                    && v.get("actor")
+                        .and_then(|a| a.get("class"))
+                        .and_then(|c| c.as_str())
+                        == Some("Mage")
+                    && v.get("target")
+                        .and_then(|t| t.get("distance"))
+                        .and_then(|d| d.as_f64())
+                        .is_some_and(|d| d as f32 <= shot_range)
+            })
+            .filter_map(|v| {
+                let blocked = v.get("candidates")?.as_array()?.iter().any(|c| {
+                    c.get("ability").and_then(|a| a.as_str()) == Some("Frostbolt")
+                        && c.get("reason").and_then(|x| x.as_str()) == Some("LosBlocked")
+                });
+                blocked
+                    .then(|| v.get("sim_time").and_then(|t| t.as_f64()))
+                    .flatten()
+                    .map(|t| t as f32)
+            })
+            .collect()
+    }
+
     /// Count of Mage `SeekLos` movement decisions — the ENGAGE repositioning
     /// adds, fired when the Mage is occluded from its kill target in shot range.
     fn mage_seek_count(lines: &[serde_json::Value]) -> usize {
@@ -4722,17 +4757,21 @@ mod u9_seek_reset {
                 "TwinPillars",
             );
             let blocked = mage_frostbolt_times(&lines, "", Some("LosBlocked"));
-            // The situation: the scenario actually exercises LoS denial.
-            if blocked.len() < 3 {
+            // The situation: the scenario actually exercises LoS denial in
+            // shot range, where SeekLos is the answer. (A block from beyond
+            // preferred range is pursuit's to close: seed 39 after AS-497
+            // held fourteen frames at 38.3-39.9yd, then cast.)
+            let in_shot_range = mage_frostbolt_blocked_in_shot_range(&lines);
+            if in_shot_range.len() < 3 {
                 continue;
             }
             let casts = mage_frostbolt_times(&lines, "chosen", None);
             let seeks = mage_seek_count(&lines);
             assert!(
                 seeks >= 1,
-                "seed {seed}: Mage was occluded ({} blocks) but never emitted SeekLos — it stood \
-                 still instead of repositioning",
-                blocked.len()
+                "seed {seed}: Mage was occluded in shot range ({} blocks) but never emitted \
+                 SeekLos — it stood still instead of repositioning",
+                in_shot_range.len()
             );
             // Recovery: despite heavy occlusion the Mage still lands casts, and
             // at least one lands after occlusion began (never permanently locked

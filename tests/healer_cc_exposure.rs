@@ -244,6 +244,8 @@ fn the_caster_filter_counts_only_pets_that_reach() {
         formation: None,
         casting: None,
         channeling: None,
+        attack_timer: 0.0,
+        next_attack_bonus_damage: 0.0,
         healer_state: None,
     };
     use CharacterClass::{Hunter, Mage, Warlock, Warrior};
