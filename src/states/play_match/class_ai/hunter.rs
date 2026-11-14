@@ -396,8 +396,18 @@ pub fn decide_hunter_action(
         }
 
         // Priority 3: Frost Trap at feet — unless it would replace the
-        // Hunter's own Freezing Trap still waiting to spring.
+        // Hunter's own Freezing Trap still waiting to spring, or the shared
+        // cooldown is about to buy a freeze on the enemy healer.
         if !frost_trap_held_for_freezing(own_traps, combatant, &mut builder)
+            && !frost_trap_held_for_healer(
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                &mut builder,
+            )
             && try_place_trap_at(
                 commands,
                 combat_log,
@@ -478,8 +488,10 @@ pub fn decide_hunter_action(
         // or a stray-closest caster). Falls back to the nearest enemy when no
         // melee threat exists. The traps share one cooldown, so this peel locks
         // the Freezing Trap out for as long; the pressure trap above was tried
-        // first and could not land cleanly. Keeping the cooldown for it
-        // instead froze more healers but lost more fights (AS-196). An immune
+        // first and could not land cleanly. The peel waits for it only while
+        // it would freeze the healer within `HEALER_FREEZE_HOLD_SECS`
+        // (`frost_trap_held_for_healer`): keeping the cooldown for it whatever
+        // the reach froze more healers but lost more fights (AS-196). An immune
         // unit (Divine Shield, Cyclone) takes no slow, so it is no anchor: the
         // peel passes to the nearest melee that is not, and the fallback to
         // the nearest enemy only when that enemy is not.
@@ -495,6 +507,15 @@ pub fn decide_hunter_action(
         if let Some((frost_anchor_entity, anchor_pos)) = frost_anchor {
             let midpoint = (my_pos + anchor_pos) / 2.0;
             if !frost_trap_held_for_freezing(own_traps, combatant, &mut builder)
+                && !frost_trap_held_for_healer(
+                    abilities,
+                    entity,
+                    combatant,
+                    my_pos,
+                    auras,
+                    ctx,
+                    &mut builder,
+                )
                 && try_place_trap_at(
                     commands,
                     combat_log,
@@ -957,10 +978,7 @@ fn try_pressure_trap(
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let ability = AbilityType::FreezingTrap;
-    // The closing band: the same 20yd the rotation's range blocks switch on.
-    let Some((melee, _)) = super::dps_postures::nearest_melee_threat(ctx, entity, my_pos)
-        .filter(|(_, pos)| pos.distance(my_pos) < 20.0)
-    else {
+    let Some(melee) = pressure_trap_melee(ctx, entity, my_pos) else {
         return false;
     };
     let def = abilities.get_unchecked(&ability);
@@ -1026,6 +1044,145 @@ fn try_pressure_trap(
     combatant.trap_retarget = Some(super::hunter_dip::pressure_trap_hold(
         my_pos, landing, healer, melee, now,
     ));
+    true
+}
+
+/// The melee the pressure trap answers: the nearest melee kite-threat inside
+/// the closing band, the same 20yd the rotation's range blocks switch on.
+/// `None` when there is none, and then no pressure trap is thrown.
+fn pressure_trap_melee(ctx: &CombatContext, entity: Entity, my_pos: Vec3) -> Option<Entity> {
+    super::dps_postures::nearest_melee_threat(ctx, entity, my_pos)
+        .filter(|(_, pos)| pos.distance(my_pos) < 20.0)
+        .map(|(melee, _)| melee)
+}
+
+/// How far ahead, in seconds, [`healer_freeze_in_reach`] looks for the
+/// pressure trap to freeze the enemy healer. The Frost Trap peel is held only
+/// for a freeze this close: the traps share one cooldown, so a peel thrown now
+/// puts the freeze off for the whole of it, but every second the peel is held
+/// is a second the melee closes unslowed. And the forecast is this frame's
+/// headings carried forward, guesswork past the few seconds a lane trap's
+/// own prediction trusts ([`TRAP_SPRING_WINDOW`](super::hunter_dip::TRAP_SPRING_WINDOW)).
+pub const HEALER_FREEZE_HOLD_SECS: f32 = 3.0;
+
+/// The sampling step of [`healer_freeze_in_reach`], in seconds.
+const HEALER_FREEZE_HOLD_STEP: f32 = 0.25;
+
+/// How many seconds from now the pressure trap ([`try_pressure_trap`]) would
+/// freeze the enemy healer, if that is within [`HEALER_FREEZE_HOLD_SECS`] —
+/// `None` when it is not.
+///
+/// Asked through the pressure trap's own predicates, never a second copy of
+/// them: a melee in the closing band ([`pressure_trap_melee`]), Freezing Trap
+/// ready to cast, a [`pressure_trap_healer`](super::hunter_dip::pressure_trap_healer)
+/// (eligible, not the team's kill, not freeable), its
+/// [`pressure_trap_landing`](super::hunter_dip::pressure_trap_landing) (in
+/// range, sprung cleanly by the healer) and the placement's own refusals
+/// ([`trap_landing`]: already held, immune, range, sight). A healer the
+/// pressure trap passes over now for who it is is passed over for the whole
+/// horizon; only where the Hunter stands relative to it is projected forward.
+///
+/// The projection is relative: the Hunter is moved along its velocity less the
+/// healer's ([`forecast_velocity`]: at the speed its auras leave it, and not
+/// at all while it cannot move), and everyone else is asked where they stand
+/// now. Positions and headings are this frame's, and every unit re-decides its
+/// path each tick, so the answer is a forecast, which is why the horizon is
+/// short.
+fn healer_freeze_in_reach(
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+) -> Option<f32> {
+    let ability = AbilityType::FreezingTrap;
+    pressure_trap_melee(ctx, entity, my_pos)?;
+    let def = abilities.get(&ability)?;
+    if !pre_cast_ok(
+        ability,
+        def,
+        combatant,
+        my_pos,
+        auras,
+        None,
+        ctx,
+        PreCastOpts::default(),
+    ) {
+        return None;
+    }
+    let healer = super::hunter_dip::pressure_trap_healer(ctx, entity, combatant.team)?.ok()?;
+    let relative = forecast_velocity(ctx, entity) - forecast_velocity(ctx, healer);
+    let relative = Vec3::new(relative.x, 0.0, relative.z);
+    let steps = (HEALER_FREEZE_HOLD_SECS / HEALER_FREEZE_HOLD_STEP).round() as usize;
+    (0..=steps)
+        .map(|i| i as f32 * HEALER_FREEZE_HOLD_STEP)
+        .find(|&t| {
+            let at = my_pos + relative * t;
+            super::hunter_dip::pressure_trap_landing(ctx, abilities, combatant.team, at, healer)
+                .is_ok_and(|landing| trap_landing(ctx, def, at, landing, Some(healer)).is_ok())
+        })
+}
+
+/// How `e` is forecast to move over the next few seconds: along its heading
+/// (`CombatantInfo::velocity`, zero while it casts) at the speed its slows
+/// leave it ([`effective_movement_speed`](crate::states::play_match::combat_core::effective_movement_speed),
+/// the one derivation movement uses), and not at all while it is rooted or
+/// held in hard crowd control ([`CombatContext::is_ccd`], which counts both).
+fn forecast_velocity(ctx: &CombatContext, e: Entity) -> Vec3 {
+    let Some(info) = ctx.combatants.get(&e) else {
+        return Vec3::ZERO;
+    };
+    // `is_ccd` counts a root with the holds: rooted, stunned, feared,
+    // polymorphed, incapacitated or cycloned, the unit goes nowhere.
+    if ctx.is_ccd(e) {
+        return Vec3::ZERO;
+    }
+    let auras = ActiveAuras {
+        auras: ctx.active_auras.get(&e).cloned().unwrap_or_default(),
+    };
+    let speed = crate::states::play_match::combat_core::effective_movement_speed(
+        info.velocity.length(),
+        Some(&auras),
+    );
+    info.velocity.normalize_or_zero() * speed
+}
+
+/// Trace note for a Frost Trap peel held because the pressure trap would
+/// freeze the enemy healer within [`HEALER_FREEZE_HOLD_SECS`]
+/// ([`frost_trap_held_for_healer`]).
+pub const FROST_TRAP_HELD_FOR_HEALER: &str =
+    "frost trap held: a Freezing Trap on the enemy healer is in reach";
+
+/// Should the Frost Trap peel be held for a freeze on the enemy healer? The
+/// traps share one cooldown (`cooldown_category: Trap`), so a peel thrown now
+/// locks the healer trap out for all of it. Held only while that freeze is in
+/// reach ([`healer_freeze_in_reach`]): a blanket hold froze more healers and
+/// lost more fights (AS-196).
+///
+/// Traced only while the Frost Trap is off cooldown, so a trap on cooldown
+/// still records `OnCooldown` (the caller falls through to it).
+fn frost_trap_held_for_healer(
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    ctx: &CombatContext,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> bool {
+    let ability = AbilityType::FrostTrap;
+    if combatant.ability_cooldowns.contains_key(&ability)
+        || healer_freeze_in_reach(abilities, entity, combatant, my_pos, auras, ctx).is_none()
+    {
+        return false;
+    }
+    builder.reject(
+        ability,
+        RejectionReason::PreconditionUnmet {
+            note: FROST_TRAP_HELD_FOR_HEALER.to_string(),
+        },
+    );
     true
 }
 
@@ -1579,6 +1736,66 @@ pub fn spawn_trap(
     replace_previous_trap(commands, owner, new_trap);
 }
 
+/// Where a trap (`def`) thrown from `my_pos` at `position`, aimed at
+/// `intended`, lands — or why the throw is refused. Every placement asks it
+/// ([`try_place_trap_at`], after the cast gate), and so does the Frost Trap
+/// hold that asks whether a healer freeze is in reach
+/// ([`healer_freeze_in_reach`]), so the two cannot disagree on what lands.
+fn trap_landing(
+    ctx: &CombatContext,
+    def: &crate::states::play_match::ability_config::AbilityConfig,
+    my_pos: Vec3,
+    position: Vec3,
+    intended: Option<Entity>,
+) -> Result<Vec3, RejectionReason> {
+    // The cast gate has no target to ask about, so the trap asks it of the
+    // enemy it is aimed at: no hold is thrown at a unit the team already holds.
+    if let Some(cc_type) = intended
+        .filter(|_| applies_hold(def))
+        .and_then(|victim| ctx.held_in_hard_cc(victim, super::Incoming::of(def)))
+    {
+        return Err(RejectionReason::TargetAlreadyCCd { cc_type });
+    }
+    // Nor at an immune one (Divine Shield, Cyclone): its aura is blocked when
+    // the trap springs on it.
+    if intended.is_some_and(|victim| ctx.entity_is_immune(victim)) {
+        return Err(RejectionReason::TargetImmune);
+    }
+
+    // Clamp to octagonal arena bounds (midpoint can land outside corners)
+    let position = crate::states::play_match::combat_core::clamp_to_arena(&ctx.bounds, position);
+
+    // The trap's configured `range` is a real limit on where it lands. Traps
+    // are PLACED AT RANGE on purpose — the later-expansion Trap Launcher
+    // model, not Classic's drop-at-feet, which left traps underpowered — so do
+    // not "restore" a feet-only drop here. A landing beyond range is REFUSED,
+    // not pulled in: the placement was chosen for where it lands (a lane, a
+    // lead on a victim), and a clamped landing is a different decision nobody
+    // made. The caller holds and asks again next tick, closer. Measured on the
+    // clamped landing, planar, exactly as `spawn_trap` measures its throw.
+    let distance =
+        Vec3::new(my_pos.x, 0.0, my_pos.z).distance(Vec3::new(position.x, 0.0, position.z));
+    if distance > def.range {
+        return Err(RejectionReason::OutOfRange {
+            distance,
+            max: def.range,
+        });
+    }
+
+    // A throw needs sight of where it lands, as a ground-targeted placement
+    // does: no trap is thrown into or behind a pillar. Measured to the landing
+    // at the height of the point it was aimed at (a unit's centre, a lane
+    // between two, the Hunter's own feet), after range so an out-of-range
+    // landing fails on range. Like range, a hidden landing is HELD, not moved:
+    // the landing was chosen for where it lands. Every placement path ends
+    // here, so no picker asks it again. A no-op with no obstacles.
+    if !crate::states::play_match::map_geometry::has_line_of_sight(ctx.obstacles, my_pos, position)
+    {
+        return Err(RejectionReason::LosBlocked);
+    }
+    Ok(position)
+}
+
 fn try_place_trap_at(
     commands: &mut Commands,
     combat_log: &mut CombatLog,
@@ -1620,58 +1837,13 @@ fn try_place_trap_at(
         }
     };
 
-    // The gate had no target to ask about, so the trap asks it of the enemy
-    // it is aimed at: no hold is thrown at a unit the team already holds.
-    if let Some(cc_type) = intended
-        .filter(|_| applies_hold(def))
-        .and_then(|victim| ctx.held_in_hard_cc(victim, super::Incoming::of(def)))
-    {
-        builder.reject(ability, RejectionReason::TargetAlreadyCCd { cc_type });
-        return false;
-    }
-    // Nor at an immune one (Divine Shield, Cyclone): its aura is blocked when
-    // the trap springs on it.
-    if intended.is_some_and(|victim| ctx.entity_is_immune(victim)) {
-        builder.reject(ability, RejectionReason::TargetImmune);
-        return false;
-    }
-
-    // Clamp to octagonal arena bounds (midpoint can land outside corners)
-    let position = crate::states::play_match::combat_core::clamp_to_arena(&ctx.bounds, position);
-
-    // The trap's configured `range` is a real limit on where it lands. Traps
-    // are PLACED AT RANGE on purpose — the later-expansion Trap Launcher
-    // model, not Classic's drop-at-feet, which left traps underpowered — so do
-    // not "restore" a feet-only drop here. A landing beyond range is REFUSED,
-    // not pulled in: the placement was chosen for where it lands (a lane, a
-    // lead on a victim), and a clamped landing is a different decision nobody
-    // made. The caller holds and asks again next tick, closer. Measured on the
-    // clamped landing, planar, exactly as `spawn_trap` measures its throw.
-    let distance =
-        Vec3::new(my_pos.x, 0.0, my_pos.z).distance(Vec3::new(position.x, 0.0, position.z));
-    if distance > def.range {
-        builder.reject(
-            ability,
-            RejectionReason::OutOfRange {
-                distance,
-                max: def.range,
-            },
-        );
-        return false;
-    }
-
-    // A throw needs sight of where it lands, as a ground-targeted placement
-    // does: no trap is thrown into or behind a pillar. Measured to the landing
-    // at the height of the point it was aimed at (a unit's centre, a lane
-    // between two, the Hunter's own feet), after range so an out-of-range
-    // landing fails on range. Like range, a hidden landing is HELD, not moved:
-    // the landing was chosen for where it lands. Every placement path ends
-    // here, so no picker asks it again. A no-op with no obstacles.
-    if !crate::states::play_match::map_geometry::has_line_of_sight(ctx.obstacles, my_pos, position)
-    {
-        builder.reject(ability, RejectionReason::LosBlocked);
-        return false;
-    }
+    let position = match trap_landing(ctx, def, my_pos, position, intended) {
+        Ok(position) => position,
+        Err(reason) => {
+            builder.reject(ability, reason);
+            return false;
+        }
+    };
 
     // Trace the INTENDED victim, not just the ability. A trap is placed at a
     // POSITION and springs on whoever reaches it first, so the entity the

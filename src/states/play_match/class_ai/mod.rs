@@ -1681,9 +1681,10 @@ pub const fn is_hard_cc(aura: AuraType) -> bool {
 /// hard-CC aura joins it without anyone remembering to.
 ///
 /// The one copy of the set: [`CombatContext::held_in_hard_cc`] and the cast
-/// gate ask it of a target, and `situation::locks_healer` (the
-/// `enemy_healer_locked` window) and `utils::is_incapacitating` (the engine's
-/// "cannot act" test) are it.
+/// gate ask it of a target, the Priest's Mana Burn focus gate
+/// (`priest::attack_prevented_by_cc`) asks it of an enemy targeting the
+/// Priest, and `situation::locks_healer` (the `enemy_healer_locked` window)
+/// and `utils::is_incapacitating` (the engine's "cannot act" test) are it.
 pub const fn holds(aura: AuraType) -> bool {
     is_hard_cc(aura) && !matches!(aura, AuraType::Root)
 }

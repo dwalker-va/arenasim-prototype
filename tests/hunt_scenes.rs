@@ -1,4 +1,4 @@
-//! AS-394 — the endgame Hunt play, scene by scene (tier 1).
+//! AS-394, AS-404 — the endgame Hunt play, scene by scene (tier 1).
 //!
 //! One pillar of radius 6 at the origin. The enemy's last unit, a Priest,
 //! hugs its east face at (7, 0); our Mage and Priest stand west of it, out of
@@ -6,20 +6,23 @@
 //! condition removed.
 //!
 //! The hunt's axis is the hider's bearing round the pillar's centre (east,
-//! 0°), so its two stations stand 14yd off the skin at +90° (north, z = 20)
-//! and -90° (south, z = -20); the Mage, the nearer to the north one, takes
-//! it, and the Priest takes the south.
+//! 0°). The Mage, the nearer to the north, takes the north side (counter-
+//! clockwise of the hider) and the Priest the south. A blind hunter walks to
+//! the nearest spot on its own side that sees the hider clear of the pillar's
+//! widened shadow; a hunter that sees the hider stands where it is.
 
 use arenasim::states::match_config::CharacterClass::{Mage, Paladin, Priest, Warlock, Warrior};
 use arenasim::states::play_match::ai_profile::AiProfile;
-use arenasim::states::play_match::class_ai::hunt::{HuntWindow, HUNT_ENTER, HUNT_LEAVE};
+use arenasim::states::play_match::class_ai::hunt::{
+    in_shadow, HuntWindow, HUNT_ENTER, HUNT_LEAVE, HUNT_SHADOW_LEAVE,
+};
 use arenasim::states::play_match::class_ai::scene::Scene;
 use arenasim::states::play_match::components::MovementGoal;
 use arenasim::states::play_match::decision_trace::{MovementTrigger, PlayTag};
-use arenasim::states::play_match::map_geometry::ObstacleVolume;
+use arenasim::states::play_match::map_geometry::{has_line_of_sight, ObstacleVolume};
 use arenasim::states::play_match::situation::{ClassSet, Play, PlaySet};
 use arenasim::states::play_match::AuraType;
-use bevy::prelude::Vec2;
+use bevy::prelude::{Vec2, Vec3};
 
 const MAGE: &str = "mage";
 const WARLOCK: &str = "warlock";
@@ -28,8 +31,10 @@ const WARRIOR: &str = "warrior";
 const HIDER: &str = "enemy priest";
 const ENEMY_WARRIOR: &str = "enemy warrior";
 
-const NORTH: Vec2 = Vec2::new(0.0, 20.0);
 const SOUTH: Vec2 = Vec2::new(0.0, -20.0);
+
+/// Where the hider hugs the pillar's east face.
+const HIDER_AT: Vec2 = Vec2::new(7.0, 0.0);
 
 fn pillar() -> ObstacleVolume {
     ObstacleVolume::Cylinder {
@@ -70,20 +75,40 @@ fn near(a: Vec2, b: Vec2) -> bool {
     a.distance(b) < 0.5
 }
 
+fn slot(h: &HuntWindow, scene: &Scene, who: &'static str) -> Option<u8> {
+    let unit = scene.entity(who);
+    h.stations.iter().find(|s| s.unit == unit).map(|s| s.slot)
+}
+
+/// Whether a unit at `p` sees a hider at `hider` clear of the pillar's
+/// widened shadow — what a pincer spot must do.
+fn sees_clear(p: Vec2, hider: Vec2) -> bool {
+    let eye = |q: Vec2| Vec3::new(q.x, 1.0, q.y);
+    has_line_of_sight(&[pillar()], eye(p), eye(hider)) && !in_shadow(&[pillar()], 0, p, hider)
+}
+
+/// The signed angle from the hider's bearing to `p`'s round the pillar, in
+/// degrees: positive is counter-clockwise (the north side here).
+fn side_of(p: Vec2, hider: Vec2) -> f32 {
+    let d = (p.to_angle() - hider.to_angle() + std::f32::consts::PI)
+        .rem_euclid(std::f32::consts::TAU)
+        - std::f32::consts::PI;
+    d.to_degrees()
+}
+
 #[test]
 fn a_hidden_lone_healer_is_hunted_from_opposite_sides() {
     let mut s = scene();
     let h = hunt(&mut s).expect("the team hunts");
     assert_eq!(h.subject, s.entity(HIDER));
     assert_eq!(h.pillar, 0);
-    let mage = station(&h, &s, MAGE).expect("the Mage holds a station");
-    let priest = station(&h, &s, PRIEST).expect("the Priest holds a station");
-    assert!(near(mage, NORTH), "{mage}");
-    assert!(near(priest, SOUTH), "{priest}");
-    assert!(
-        (mage.to_angle() - priest.to_angle()).abs() > 3.1,
-        "half a turn apart"
-    );
+    assert_eq!(slot(&h, &s, MAGE), Some(0), "the Mage takes the north side");
+    assert_eq!(slot(&h, &s, PRIEST), Some(1), "the Priest the south");
+    let mage = station(&h, &s, MAGE).expect("the Mage hunts");
+    let priest = station(&h, &s, PRIEST).expect("the Priest hunts");
+    assert!(side_of(mage, HIDER_AT) > 0.0, "{mage}: north of the hider");
+    assert!(side_of(priest, HIDER_AT) < 0.0, "{priest}: south of it");
+    assert!(sees_clear(mage, HIDER_AT) && sees_clear(priest, HIDER_AT));
 
     // Control: the same team on the healer's side of the pillar sees it, so
     // nothing is hidden and no hunt begins.
@@ -104,13 +129,34 @@ fn the_healer_must_stand_at_a_pillar() {
 }
 
 #[test]
-fn a_hunt_is_held_out_to_the_leave_radius_and_ends_beyond_it() {
+fn a_hunt_holds_in_the_pillars_shadow_and_ends_in_the_open() {
     let mut s = scene();
     assert!(hunt(&mut s).is_some());
     s.set_position(HIDER, 6.0 + HUNT_LEAVE - 0.5, 0.0);
     assert!(hunt(&mut s).is_some(), "held between enter and leave");
+    // Beyond the leave radius, but behind the pillar from both hunters: the
+    // hider still uses it as cover.
     s.set_position(HIDER, 6.0 + HUNT_LEAVE + 0.5, 0.0);
-    assert_eq!(hunt(&mut s), None, "released beyond leave");
+    assert!(hunt(&mut s).is_some(), "held in the shadow");
+    // Control: the same spot with the hunters out where they see it clear.
+    s.set_position(MAGE, 5.0, 25.0);
+    s.set_position(PRIEST, 5.0, -25.0);
+    assert_eq!(hunt(&mut s), None, "released in the open");
+    // Behind the pillar from both, but out beyond `HUNT_SHADOW_LEAVE`: in
+    // the open whoever the pillar hides it from.
+    let mut s = scene();
+    assert!(hunt(&mut s).is_some());
+    s.set_position(HIDER, 6.0 + HUNT_SHADOW_LEAVE - 0.5, 0.0);
+    assert!(hunt(&mut s).is_some(), "held while the pillar hides it");
+    s.set_position(HIDER, 6.0 + HUNT_SHADOW_LEAVE + 0.5, 0.0);
+    assert_eq!(hunt(&mut s), None, "released beyond the shadow's reach");
+    // And within the leave radius, in the open, it is still held.
+    let mut s = scene();
+    assert!(hunt(&mut s).is_some());
+    s.set_position(MAGE, 5.0, 25.0);
+    s.set_position(PRIEST, 5.0, -25.0);
+    s.set_position(HIDER, 6.0 + HUNT_LEAVE - 0.5, 0.0);
+    assert!(hunt(&mut s).is_some(), "near the pillar");
 }
 
 #[test]
@@ -128,6 +174,28 @@ fn a_healer_that_runs_to_another_pillar_is_hunted_there() {
     let h = hunt(&mut s).expect("a new hunt");
     assert_eq!(h.pillar, 1);
     assert_eq!(h.stations.len(), 2);
+
+    // A second pillar close behind the first: at it, the hider is still in
+    // the first one's shadow from the hunters, but it is hunted at the
+    // pillar it reached.
+    let behind = ObstacleVolume::Cylinder {
+        center_xz: Vec2::new(22.0, 0.0),
+        radius: 3.0,
+        base_y: 0.0,
+        height: 10.0,
+    };
+    let mut s = scene().obstacles(vec![pillar(), behind]);
+    s.set_position(MAGE, -30.0, 2.0);
+    s.set_position(PRIEST, -30.0, -2.0);
+    assert_eq!(hunt(&mut s).unwrap().pillar, 0);
+    s.set_position(HIDER, 26.5, 0.0);
+    assert!(in_shadow(
+        &[pillar()],
+        0,
+        Vec2::new(-30.0, 2.0),
+        Vec2::new(26.5, 0.0)
+    ));
+    assert_eq!(hunt(&mut s).map(|h| h.pillar), Some(1));
 }
 
 #[test]
@@ -281,21 +349,23 @@ fn the_shipped_table_excepts_every_healer_but_the_priest() {
 }
 
 #[test]
-fn a_station_is_kept_by_the_unit_that_took_it() {
+fn a_side_is_kept_by_the_unit_that_took_it() {
     let mut s = scene();
-    let first = hunt(&mut s).unwrap();
+    hunt(&mut s).unwrap();
     // Swap the two units' sides: the crossed pairing is now the shorter walk,
-    // but each keeps the station it took.
+    // but each keeps the side it took, and walks to a spot on it.
     s.set_position(MAGE, -10.0, -22.0);
     s.set_position(PRIEST, -10.0, 22.0);
     let held = hunt(&mut s).unwrap();
-    assert_eq!(station(&held, &s, MAGE), station(&first, &s, MAGE));
+    assert_eq!(slot(&held, &s, MAGE), Some(0));
+    assert!(side_of(station(&held, &s, MAGE).unwrap(), HIDER_AT) > 0.0);
     // Control: a fresh hunt from those positions pairs them the other way.
     let mut fresh = scene();
     fresh.set_position(MAGE, -10.0, -22.0);
     fresh.set_position(PRIEST, -10.0, 22.0);
     let other = hunt(&mut fresh).unwrap();
-    assert!(near(station(&other, &fresh, MAGE).unwrap(), SOUTH));
+    assert_eq!(slot(&other, &fresh, MAGE), Some(1));
+    assert!(side_of(station(&other, &fresh, MAGE).unwrap(), HIDER_AT) < 0.0);
 }
 
 #[test]
@@ -309,8 +379,8 @@ fn a_hunt_with_one_station_left_holds_neither() {
     // A wall across the north half takes every spot the north station could
     // be pulled in or turned to.
     let wall = ObstacleVolume::Aabb {
-        min: bevy::prelude::Vec3::new(-30.0, 0.0, 8.0),
-        max: bevy::prelude::Vec3::new(30.0, 5.0, 23.0),
+        min: Vec3::new(-30.0, 0.0, 8.0),
+        max: Vec3::new(30.0, 5.0, 23.0),
     };
     let mut s = scene().obstacles(vec![pillar(), wall]);
     let h = hunt(&mut s).expect("the hunt is classified");
@@ -330,7 +400,7 @@ fn an_excepted_class_takes_no_station() {
 }
 
 #[test]
-fn the_axis_carries_while_the_healer_runs_round_its_pillar() {
+fn the_sides_carry_while_the_healer_runs_round_its_pillar() {
     let mut s = scene();
     let first = hunt(&mut s).unwrap();
     s.set_position(HIDER, 5.0, 5.0);
@@ -338,7 +408,15 @@ fn the_axis_carries_while_the_healer_runs_round_its_pillar() {
     let held = hunt(&mut s).unwrap();
     assert_eq!(held.axis, first.axis);
     assert_eq!(held.since, first.since, "the onset carries");
-    assert_eq!(held.stations, first.stations);
+    assert_eq!(slot(&held, &s, MAGE), slot(&first, &s, MAGE));
+    assert_eq!(slot(&held, &s, PRIEST), slot(&first, &s, PRIEST));
+    // The sides move with the hider: each walks to a spot on its own side
+    // of the hider's new bearing (45°), from which it sees it.
+    let hider = Vec2::new(5.0, 5.0);
+    let mage = station(&held, &s, MAGE).unwrap();
+    let priest = station(&held, &s, PRIEST).unwrap();
+    assert!(side_of(mage, hider) > 0.0 && side_of(priest, hider) < 0.0);
+    assert!(sees_clear(mage, hider) && sees_clear(priest, hider));
     // Control: a hunt that begins with the healer on the north-east face takes
     // its axis there.
     let mut fresh = scene();
@@ -347,51 +425,50 @@ fn the_axis_carries_while_the_healer_runs_round_its_pillar() {
     assert!((other.axis - first.axis).abs() > 0.5);
 }
 
-/// Two small blockers that hide the hider from both stations.
-fn shields() -> Vec<ObstacleVolume> {
-    [Vec2::new(3.5, 10.0), Vec2::new(3.5, -10.0)]
-        .into_iter()
-        .map(|c| ObstacleVolume::Cylinder {
-            center_xz: c,
-            radius: 1.5,
-            base_y: 0.0,
-            height: 10.0,
-        })
-        .collect()
+#[test]
+fn a_hunter_that_sees_stands_and_one_that_is_blind_walks() {
+    // The Mage out east, in front of the hider: it sees it, and stands where
+    // it is. The Priest, west and blind, walks.
+    let mut s = scene();
+    s.set_position(MAGE, 20.0, 5.0);
+    let h = hunt(&mut s).unwrap();
+    assert_eq!(station(&h, &s, MAGE), Some(Vec2::new(20.0, 5.0)), "stands");
+    let priest = station(&h, &s, PRIEST).unwrap();
+    assert!(priest.distance(Vec2::new(-22.0, -4.0)) > 5.0, "walks");
+    // The hider steps round to the west face: the Mage has lost it, and
+    // walks too.
+    s.set_position(HIDER, -7.0, 0.0);
+    let h = hunt(&mut s).unwrap();
+    let mage = station(&h, &s, MAGE).unwrap();
+    assert!(mage.distance(Vec2::new(20.0, 5.0)) > 5.0, "{mage}: walks");
+    assert!(sees_clear(mage, Vec2::new(-7.0, 0.0)));
 }
 
 #[test]
-fn two_units_on_their_stations_that_both_lose_the_healer_give_them_up() {
-    let mut obstacles = vec![pillar()];
-    obstacles.extend(shields());
-    let mut s = scene().obstacles(obstacles);
-    s.set_position(MAGE, NORTH.x, NORTH.y);
-    s.set_position(PRIEST, SOUTH.x, SOUTH.y);
+fn a_hunter_keeps_standing_until_it_loses_plain_sight() {
+    // At (-2, 18) the Mage sees the hider, but inside the pillar's widened
+    // shadow: not clear.
+    let edge = Vec2::new(-2.0, 18.0);
+    let eye = |q: Vec2| Vec3::new(q.x, 1.0, q.y);
+    assert!(has_line_of_sight(&[pillar()], eye(edge), eye(HIDER_AT)));
+    assert!(in_shadow(&[pillar()], 0, edge, HIDER_AT));
+    // Arriving there from where it saw clear, it keeps standing.
+    let mut s = scene();
+    s.set_position(MAGE, 20.0, 5.0);
+    hunt(&mut s).unwrap();
+    s.set_position(MAGE, edge.x, edge.y);
     let h = hunt(&mut s).unwrap();
-    assert_eq!(h.stations.len(), 2);
-    assert!(h.stations.iter().all(|st| st.arrived && !st.hold));
-    assert_eq!(station(&h, &s, MAGE), None);
-    // Leaving the station for sight does not make it walk back: the arrival
-    // is latched.
-    s.set_position(MAGE, -5.0, 25.0);
+    assert_eq!(station(&h, &s, MAGE), Some(edge), "still stands");
+    // Control: a Mage that starts there has not yet seen it clear, and walks
+    // on to a spot that does.
+    let mut s = scene();
+    s.set_position(MAGE, edge.x, edge.y);
     let h = hunt(&mut s).unwrap();
-    assert_eq!(station(&h, &s, MAGE), None);
-
-    // Control: one blocker only — the south station sees the healer, so both
-    // hold.
-    let mut obstacles = vec![pillar()];
-    obstacles.push(shields()[0]);
-    let mut s = scene().obstacles(obstacles);
-    s.set_position(MAGE, NORTH.x, NORTH.y);
-    s.set_position(PRIEST, SOUTH.x, SOUTH.y);
-    let h = hunt(&mut s).unwrap();
-    assert!(h.stations.iter().all(|st| st.hold));
-    // And a unit still on its way holds, whoever sees.
-    let mut obstacles = vec![pillar()];
-    obstacles.extend(shields());
-    let mut s = scene().obstacles(obstacles);
-    let h = hunt(&mut s).unwrap();
-    assert!(h.stations.iter().all(|st| !st.arrived && st.hold));
+    let mage = station(&h, &s, MAGE).unwrap();
+    assert!(
+        mage.distance(edge) > 1.0 && sees_clear(mage, HIDER_AT),
+        "{mage}"
+    );
 }
 
 fn play_of(view: &arenasim::states::play_match::class_ai::scene::DecisionView) -> Option<PlayTag> {
@@ -406,16 +483,18 @@ fn point_goal(view: &arenasim::states::play_match::class_ai::scene::DecisionView
 }
 
 #[test]
-fn the_mage_walks_to_its_station() {
+fn the_mage_walks_round_its_side_toward_sight() {
     let mut s = scene();
-    s.reclassify();
+    let h = s.reclassify().teams[0].hunt.clone().unwrap();
+    let goal = station(&h, &s, MAGE).unwrap();
     let view = s.decide(MAGE);
     assert_eq!(play_of(&view), Some(PlayTag::Hunt));
     assert!(
-        point_goal(&view).is_some_and(|p| near(p, NORTH)),
+        point_goal(&view).is_some_and(|p| near(p, goal)),
         "{:?}",
         view.directive
     );
+    assert!(side_of(goal, HIDER_AT) > 0.0 && sees_clear(goal, HIDER_AT));
     assert!(view
         .movement
         .iter()
@@ -425,7 +504,7 @@ fn the_mage_walks_to_its_station() {
     s.reclassify();
     let view = s.decide(MAGE);
     assert_eq!(play_of(&view), None);
-    assert!(!point_goal(&view).is_some_and(|p| near(p, NORTH)));
+    assert!(!point_goal(&view).is_some_and(|p| near(p, goal)));
     assert!(view
         .movement
         .iter()
@@ -433,24 +512,26 @@ fn the_mage_walks_to_its_station() {
 }
 
 #[test]
-fn the_priest_walks_to_its_station() {
+fn the_priest_walks_round_its_side_toward_sight() {
     let mut s = scene();
-    s.reclassify();
+    let h = s.reclassify().teams[0].hunt.clone().unwrap();
+    let goal = station(&h, &s, PRIEST).unwrap();
     let view = s.decide(PRIEST);
     assert_eq!(play_of(&view), Some(PlayTag::Hunt));
     assert!(
-        point_goal(&view).is_some_and(|p| near(p, SOUTH)),
+        point_goal(&view).is_some_and(|p| near(p, goal)),
         "{:?}",
         view.directive
     );
+    assert!(side_of(goal, HIDER_AT) < 0.0 && sees_clear(goal, HIDER_AT));
     let mut s = scene().except_everywhere(1, PlaySet::of(&[Play::Hunt]));
     s.reclassify();
     let view = s.decide(PRIEST);
-    assert!(!point_goal(&view).is_some_and(|p| near(p, SOUTH)));
+    assert!(!point_goal(&view).is_some_and(|p| near(p, goal)));
 }
 
 #[test]
-fn the_warlock_walks_to_its_station() {
+fn the_warlock_walks_round_its_side_toward_sight() {
     let warlock = || {
         Scene::new()
             .obstacles(vec![pillar()])
@@ -464,13 +545,15 @@ fn the_warlock_walks_to_its_station() {
             .at(7.0, 0.0)
     };
     let mut s = warlock();
-    s.reclassify();
+    let h = s.reclassify().teams[0].hunt.clone().unwrap();
+    let goal = station(&h, &s, WARLOCK).unwrap();
     let view = s.decide(WARLOCK);
     assert!(
-        point_goal(&view).is_some_and(|p| near(p, NORTH)),
+        point_goal(&view).is_some_and(|p| near(p, goal)),
         "{:?}",
         view.directive
     );
+    assert!(side_of(goal, HIDER_AT) > 0.0 && sees_clear(goal, HIDER_AT));
     let mut s = warlock().except_everywhere(1, PlaySet::of(&[Play::Hunt]));
     s.reclassify();
     assert!(s.decide(WARLOCK).directive.is_none());
@@ -478,11 +561,16 @@ fn the_warlock_walks_to_its_station() {
 
 #[test]
 fn the_hunt_stands_down_while_the_healer_is_locked() {
+    let goal = {
+        let mut s = scene();
+        let h = hunt(&mut s).unwrap();
+        station(&h, &s, MAGE).unwrap()
+    };
     let mut s = scene().aura(HIDER, AuraType::Stun, 4.0);
     s.reclassify();
     let view = s.decide(MAGE);
     assert_ne!(play_of(&view), Some(PlayTag::Hunt));
-    assert!(!point_goal(&view).is_some_and(|p| near(p, NORTH)));
+    assert!(!point_goal(&view).is_some_and(|p| near(p, goal)));
     // Control: a Root holds its legs but not its casts — not a lock.
     let mut s = scene().aura(HIDER, AuraType::Root, 4.0);
     s.reclassify();
@@ -492,8 +580,13 @@ fn the_hunt_stands_down_while_the_healer_is_locked() {
 #[test]
 fn a_stale_station_walk_is_renewed_and_a_live_one_is_left_alone() {
     use arenasim::states::play_match::components::MovementDirective;
+    let goal = {
+        let mut s = scene();
+        let h = hunt(&mut s).unwrap();
+        station(&h, &s, MAGE).unwrap()
+    };
     let walk = |expires: f32| MovementDirective {
-        goal: MovementGoal::Point(bevy::prelude::Vec3::new(NORTH.x, 1.0, NORTH.y)),
+        goal: MovementGoal::Point(Vec3::new(goal.x, 1.0, goal.y)),
         expires,
         committed_until: expires,
     };
@@ -506,7 +599,7 @@ fn a_stale_station_walk_is_renewed_and_a_live_one_is_left_alone() {
         view.movement
             .iter()
             .all(|m| m.trigger != MovementTrigger::Hunt),
-        "same station: no new walk traced"
+        "same point: no new walk traced"
     );
     // Live: left as it is.
     let mut s = scene().directive(MAGE, walk(30.4));
@@ -519,7 +612,7 @@ fn a_stale_station_walk_is_renewed_and_a_live_one_is_left_alone() {
 fn a_healer_whose_hunt_ends_gives_its_station_walk_back() {
     use arenasim::states::play_match::components::{HealerPosture, MovementDirective, Posture};
     let walk = MovementDirective {
-        goal: MovementGoal::Point(bevy::prelude::Vec3::new(SOUTH.x, 1.0, SOUTH.y)),
+        goal: MovementGoal::Point(Vec3::new(SOUTH.x, 1.0, SOUTH.y)),
         expires: 60.0,
         committed_until: 60.0,
     };
@@ -547,4 +640,140 @@ fn a_healer_whose_hunt_ends_gives_its_station_walk_back() {
     assert!(!pressed(Some(SOUTH)));
     // Control: a walk the hunt never gave is the posture's own, and is kept.
     assert!(pressed(None));
+}
+
+/// A hunter in sight of the healer but beyond its reach (the Mage's
+/// Frostbolt, 40yd) does not stand there: it walks to a spot on its side it
+/// can attack from. The pillar stands at (20, 0) with the hider on its west
+/// face, so the Mage sees it across open ground from the west.
+#[test]
+fn a_hunter_in_sight_beyond_reach_walks_into_reach() {
+    let hider = Vec2::new(13.0, 0.0);
+    let column = ObstacleVolume::Cylinder {
+        center_xz: Vec2::new(20.0, 0.0),
+        radius: 6.0,
+        base_y: 0.0,
+        height: 10.0,
+    };
+    let at = |mage: Vec2| {
+        let mut s = Scene::new()
+            .obstacles(vec![column])
+            .ai_profile(1, AiProfile::TeamPlan)
+            .unit(MAGE, 1, Mage)
+            .at(mage.x, mage.y)
+            .targeting(HIDER)
+            .unit(PRIEST, 1, Priest)
+            .at(34.0, -4.0)
+            .targeting(HIDER)
+            .unit(HIDER, 2, Priest)
+            .at(hider.x, hider.y)
+            .targeting(MAGE);
+        let h = hunt(&mut s).expect("the team hunts");
+        station(&h, &s, MAGE).expect("the Mage hunts")
+    };
+    let eye = |q: Vec2| Vec3::new(q.x, 1.0, q.y);
+    // In reach (37yd): it stands.
+    let near = Vec2::new(-24.0, 0.0);
+    assert!(has_line_of_sight(&[column], eye(near), eye(hider)));
+    assert_eq!(at(near), near, "in reach: stands");
+    // Beyond it (43yd), in plain sight: it walks to a spot in reach.
+    let far = Vec2::new(-30.0, 0.0);
+    assert!(has_line_of_sight(&[column], eye(far), eye(hider)));
+    let goal = at(far);
+    assert!(goal.distance(far) > 5.0, "{goal}: walks");
+    assert!(goal.distance(hider) <= 40.0, "{goal}: within reach");
+}
+
+/// A hunt that ends and starts again a moment later on the same healer at
+/// the same pillar is the same hunt: each unit keeps its side, though the
+/// two now stand where a fresh hunt would pair them the other way. The
+/// control: the same restart after `HUNT_REMEMBER` deals the sides afresh.
+#[test]
+fn a_hunt_that_starts_again_at_once_keeps_its_sides() {
+    use arenasim::states::play_match::class_ai::hunt::HUNT_REMEMBER;
+    let restart = |gap: f32| {
+        let mut s = scene();
+        assert_eq!(slot(&hunt(&mut s).unwrap(), &s, MAGE), Some(0));
+        // The hider steps into the open, in sight of both: the hunt ends.
+        s.set_position(MAGE, 5.0, 25.0);
+        s.set_position(PRIEST, 5.0, -25.0);
+        s.set_position(HIDER, 6.0 + HUNT_LEAVE + 5.0, 0.0);
+        s.set_now(31.0);
+        assert_eq!(hunt(&mut s), None, "the hunt ended");
+        // It hides again on the east face; the two now stand swapped.
+        s.set_position(MAGE, -10.0, -22.0);
+        s.set_position(PRIEST, -10.0, 22.0);
+        s.set_position(HIDER, 7.0, 0.0);
+        s.set_now(31.0 + gap);
+        let h = hunt(&mut s).expect("a hunt again");
+        slot(&h, &s, MAGE)
+    };
+    assert_eq!(restart(1.0), Some(0), "the Mage keeps its side");
+    assert_eq!(
+        restart(HUNT_REMEMBER + 1.0),
+        Some(1),
+        "the control: later, a fresh pairing"
+    );
+}
+
+/// A walk point is kept only while the healer is still in the hunter's
+/// reach from it: once the healer stands where the point cannot attack it
+/// (here, inside a Hunter's 8yd dead zone), past the re-aim floor, the
+/// hunter walks to another. The control: a healer the kept point still
+/// reaches leaves it kept.
+#[test]
+fn a_walk_point_out_of_reach_is_given_up() {
+    use arenasim::states::match_config::CharacterClass::Hunter;
+    use arenasim::states::play_match::class_ai::hunt::REAIM_SECS;
+    const HUNTER: &str = "hunter";
+    let eye = |q: Vec2| Vec3::new(q.x, 1.0, q.y);
+    let sees = |a: Vec2, b: Vec2| has_line_of_sight(&[pillar()], eye(a), eye(b));
+    let (hunter, priest) = (Vec2::new(-20.0, 2.0), Vec2::new(-22.0, -4.0));
+    let scene = || {
+        Scene::new()
+            .obstacles(vec![pillar()])
+            .ai_profile(1, AiProfile::TeamPlan)
+            .ai_profile(2, AiProfile::TeamPlan)
+            .unit(HUNTER, 1, Hunter)
+            .at(hunter.x, hunter.y)
+            .targeting(HIDER)
+            .unit(PRIEST, 1, Priest)
+            .at(priest.x, priest.y)
+            .targeting(HIDER)
+            .unit(HIDER, 2, Priest)
+            .at(HIDER_AT.x, HIDER_AT.y)
+            .targeting(PRIEST)
+    };
+    let mut s = scene();
+    let g = station(&hunt(&mut s).unwrap(), &s, HUNTER).expect("the Hunter walks");
+    // A step that puts the healer inside the kept spot's dead zone, in its
+    // sight, still at the pillar and on the far side of the spot from the
+    // Hunter's side, and hidden from the Hunter where it stands.
+    let step = (0..72)
+        .flat_map(|k| {
+            (1..8).map(move |r| g + Vec2::from_angle((k as f32 * 5.0).to_radians()) * r as f32)
+        })
+        .find(|&p| {
+            p.length() - 6.0 > 1.0
+                && p.length() - 6.0 <= HUNT_ENTER
+                && sees(g, p)
+                && side_of(g, p) > 5.0
+                && !sees(hunter, p)
+        })
+        .expect("the situation: a step into the spot's dead zone");
+    s.set_position(HIDER, step.x, step.y);
+    s.set_now(30.0 + REAIM_SECS + 0.5);
+    let h = hunt(&mut s).expect("still hunted");
+    let next = station(&h, &s, HUNTER).expect("the Hunter walks");
+    assert!(
+        next.distance(g) > 1.0,
+        "{next}: the old spot given up ({step})"
+    );
+    assert!(next.distance(step) >= 8.0, "{next}: out of the dead zone");
+    // Control: the healer stays put; past the floor the spot is kept.
+    let mut s = scene();
+    assert_eq!(station(&hunt(&mut s).unwrap(), &s, HUNTER), Some(g));
+    s.set_now(30.0 + REAIM_SECS + 0.5);
+    let h = hunt(&mut s).unwrap();
+    assert_eq!(station(&h, &s, HUNTER), Some(g), "kept while it reaches");
 }

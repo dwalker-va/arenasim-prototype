@@ -16,7 +16,7 @@
 //! those sites meets an absorb: Power Word: Shield, Aegis of the Last Stand
 //! and Sacred Shield; Retribution Aura and a Reflective Shield; Soul Link and
 //! Blessing of Sacrifice; Unstable Affliction under a Priest's and a Paladin's
-//! dispels; a Warlock draining a Sacrifice holder. Four checks over it:
+//! dispels; a Warlock draining a Sacrifice holder. Five checks over it:
 //!
 //! 1. every primary combatant's total equals the sum of its breakdown rows;
 //! 2. every damage row whose line names its numbers counts what reached health
@@ -24,7 +24,9 @@
 //!    see (a site that dropped the absorb from both would still agree);
 //! 3. every transferred share's row is one of its dealer's own rows — the
 //!    row the hit it was split from was logged under ("Drain Life (tick)");
-//! 4. the batch is not vacuous: each kind of event it exists for occurred.
+//! 4. every death a hit caused is its killer's killing blow, so the K column
+//!    counts every kill once (AS-439);
+//! 5. the batch is not vacuous: each kind of event it exists for occurred.
 //!
 //! And one damage-over-time tick in a world of its own, for the caster no
 //! match reliably stages: one with no auras of its own, as a dead Warlock
@@ -465,6 +467,54 @@ fn every_transfer_row_is_one_of_its_dealers_own_rows() {
         }
     }
     assert!(shares > 0, "no transfer rows");
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+/// Every death a hit caused is its killer's killing blow (AS-439): the
+/// `[DEATH]` lines that name a killer and the rows that carry a killing blow
+/// are one multiset of (victim, killer). A site whose lethal hit logged no
+/// row, or a row with no flag, leaves a death off the K column; one that
+/// flagged a blow that killed nothing adds a kill.
+#[test]
+fn every_death_by_a_hit_is_its_killers_killing_blow() {
+    let mut kills = 0;
+    let mut bad = Vec::new();
+    for played in batch() {
+        let mut deaths: BTreeMap<(&str, &str), i32> = BTreeMap::new();
+        for entry in &played.log.entries {
+            match &entry.structured_data {
+                Some(StructuredEventData::Death {
+                    victim,
+                    killer: Some(killer),
+                }) => {
+                    kills += 1;
+                    *deaths
+                        .entry((victim.as_str(), killer.as_str()))
+                        .or_default() += 1;
+                }
+                Some(StructuredEventData::Damage {
+                    source,
+                    target,
+                    is_killing_blow: true,
+                    ..
+                }) => {
+                    *deaths
+                        .entry((target.as_str(), source.as_str()))
+                        .or_default() -= 1
+                }
+                _ => {}
+            }
+        }
+        for ((victim, killer), n) in deaths {
+            if n != 0 {
+                bad.push(format!(
+                    "{}: {victim} killed by {killer}: {} deaths more than killing blows",
+                    played.label, n
+                ));
+            }
+        }
+    }
+    assert!(kills >= 40, "only {kills} deaths by a hit");
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 

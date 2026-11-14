@@ -369,7 +369,11 @@ mod tests {
                     slot: 0,
                     point: Vec2::ZERO,
                     hold: true,
-                    arrived: false,
+                    sighted: false,
+                    onset_walk_done: false,
+                    onset_round_back: false,
+                    aimed_at: 0.0,
+                    round_back: false,
                 }]
                 .into_iter()
                 .collect(),
