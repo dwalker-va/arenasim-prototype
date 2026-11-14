@@ -87,7 +87,11 @@ pub struct Endgame {
     pub seeds: &'static [u64],
 }
 
-/// The bank (module docs).
+/// The bank (module docs). Eight seeds an endgame: the excepted control of
+/// claim 2 (two blind hunters trailing the hider round one side) is a rare
+/// situation, and at four seeds it rested on two runs in twenty (AS-496
+/// moved both: a unit a Priest feared stopped pressuring that Priest at once).
+/// At eight it occurs in two runs in forty.
 pub fn bank() -> Vec<Endgame> {
     vec![
         Endgame {
@@ -100,7 +104,7 @@ pub fn bank() -> Vec<Endgame> {
                 (40.36, -13.92, 1.0, 0.02),
                 (33.63, -17.46, 0.925, 0.391),
             ],
-            seeds: &[723, 1, 2, 3],
+            seeds: &[723, 1, 2, 3, 4, 5, 6, 7],
         },
         Endgame {
             name: "732 onset",
@@ -112,7 +116,7 @@ pub fn bank() -> Vec<Endgame> {
                 (44.36, 27.85, 1.0, 0.092),
                 (45.26, 9.37, 0.514, 0.055),
             ],
-            seeds: &[732, 1, 2, 3],
+            seeds: &[732, 1, 2, 3, 4, 5, 6, 7],
         },
         Endgame {
             name: "one side, Mage+Priest v Priest",
@@ -125,7 +129,7 @@ pub fn bank() -> Vec<Endgame> {
                 (44.0, -10.0, 0.9, 0.6),
                 (40.0, -27.0, 0.8, 0.6),
             ],
-            seeds: &[1, 2, 3, 4],
+            seeds: &[1, 2, 3, 4, 5, 6, 7, 8],
         },
         Endgame {
             name: "far sight, Hunter+Priest v Druid",
@@ -140,7 +144,7 @@ pub fn bank() -> Vec<Endgame> {
                 (55.0, -24.0, 0.9, 0.6),
                 (33.5, -20.0, 0.8, 0.6),
             ],
-            seeds: &[1, 2, 3, 4],
+            seeds: &[1, 2, 3, 4, 5, 6, 7, 8],
         },
         Endgame {
             name: "one side, Warlock+Priest v Priest",
@@ -153,7 +157,7 @@ pub fn bank() -> Vec<Endgame> {
                 (-53.0, -16.0, 0.9, 0.6),
                 (-33.0, -20.0, 0.8, 0.6),
             ],
-            seeds: &[1, 2, 3, 4],
+            seeds: &[1, 2, 3, 4, 5, 6, 7, 8],
         },
     ]
 }

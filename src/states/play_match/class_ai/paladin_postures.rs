@@ -23,10 +23,10 @@ use crate::states::play_match::movement_config::{MovementConfig, SharedMovementC
 
 use super::cast_guard::{pre_cast_ok, PreCastOpts};
 use super::healer_postures::{
-    compound_pressure_onset, compound_pressure_trigger, dispel_chase_override, dispel_walk_tick,
-    escape_tick, escape_window_from, healer_pressured_tick_shared, hunt_station_tick,
-    medic_chase_override, medic_chase_tick, release_ally_walk, start_movement_event,
-    start_movement_event_with_target, HealerDispel,
+    compound_held_attacker, compound_pressure_onset, compound_pressure_trigger,
+    dispel_chase_override, dispel_walk_tick, escape_entry_window, escape_tick,
+    healer_pressured_tick_shared, hunt_station_tick, medic_chase_override, medic_chase_tick,
+    release_ally_walk, start_movement_event, start_movement_event_with_target, HealerDispel,
 };
 use super::paladin::{
     dip_target_candidate, hoj_target_eligible, rotation_hoj_allowed, HojPlan, PaladinMovementPlan,
@@ -141,18 +141,18 @@ pub fn evaluate_paladin_posture(
 
     let prev = state.posture;
 
-    // --- ESCAPE entry window (R7 machinery, reused) ---
-    let escape_window_secs = if prev == Posture::Pressured && trigger {
-        escape_window_from(
-            ctx.visible_enemies_within(entity, my_pos, shared.danger_radius)
-                .iter()
-                .map(|t| ctx.attacker_escape_window(t.entity)),
-            ctx.movement_slow_multiplier(entity),
-            shared.escape_min_window,
-        )
-    } else {
-        None
-    };
+    // --- ESCAPE entry window (R7 machinery, reused) --- a held attacker
+    // opens it as the Priest's does (AS-496), under the same no-teammate gate
+    // as the trigger.
+    let escape_window_secs = escape_entry_window(
+        prev,
+        trigger,
+        compound_held_attacker(entity, ctx) && has_teammate,
+        entity,
+        my_pos,
+        ctx,
+        shared,
+    );
 
     // --- DIP abort check (only while mid-dip) --- independent of focus: the
     // `focused_onset` preemption below outranks it, and under `Legacy` a
@@ -173,9 +173,9 @@ pub fn evaluate_paladin_posture(
         Posture::Escape if now < state.escape_until => Posture::Escape,
         Posture::Escape if trigger => Posture::Pressured,
         Posture::Escape => Posture::Free,
-        // PRESSURED hysteresis, then escape-window upgrade (same as Priest).
-        Posture::Pressured if !trigger && now >= state.hold_until => Posture::Free,
+        // Escape-window upgrade, then PRESSURED hysteresis (same as Priest).
         Posture::Pressured if escape_window_secs.is_some() => Posture::Escape,
+        Posture::Pressured if !trigger && now >= state.hold_until => Posture::Free,
         Posture::Pressured => Posture::Pressured,
         // DIP: becoming focused preempts UNCONDITIONALLY (PressuredEnter,
         // never DipAbort). Healing-heavy alone does NOT preempt a dip — the

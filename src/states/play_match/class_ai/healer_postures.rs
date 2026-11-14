@@ -188,6 +188,37 @@ pub(super) fn escape_window_from<I: IntoIterator<Item = Option<f32>>>(
     Some(window)
 }
 
+/// The ESCAPE window a healer opens this tick, if any (R7): only from
+/// PRESSURED, only while it is still `pressured` (its machine's live
+/// trigger) or `held` — an attacker that would pressure it is held in crowd
+/// control ([`compound_held_attacker`]) — and only when every visible enemy
+/// within the danger radius is movement-impaired ([`escape_window_from`]).
+///
+/// The `held` half is why a held attacker, which no longer pressures the
+/// healer (AS-496), still opens the window: the hold is no threat, but it is
+/// a window to open distance in (user ruling, AS-496). One gate for the
+/// Priest's, the Paladin's and the caster healers' machines.
+pub(super) fn escape_entry_window(
+    prev: Posture,
+    pressured: bool,
+    held: bool,
+    entity: Entity,
+    my_pos: Vec3,
+    ctx: &CombatContext,
+    shared: &SharedMovementConfig,
+) -> Option<f32> {
+    if prev != Posture::Pressured || !(pressured || held) {
+        return None;
+    }
+    escape_window_from(
+        ctx.visible_enemies_within(entity, my_pos, shared.danger_radius)
+            .iter()
+            .map(|t| ctx.attacker_escape_window(t.entity)),
+        ctx.movement_slow_multiplier(entity),
+        shared.escape_min_window,
+    )
+}
+
 /// A FREE formation point the healer can actually stand on (AS-190).
 ///
 /// The formation point is the ally centroid offset "behind the line" and
@@ -223,6 +254,14 @@ pub fn escape_distance_gained(window: f32, base_speed: f32, slow_multiplier: f32
 /// threat to be near enough that intent matters.
 pub(super) fn compound_pressure_trigger(entity: Entity, ctx: &CombatContext) -> bool {
     ctx.situation().is_pressured(entity)
+}
+
+/// An enemy that would make the healer PRESSURED is held in crowd control
+/// instead ([`AllyStanding::held_attacker`](crate::states::play_match::situation::AllyStanding::held_attacker)).
+/// It does not pressure the healer (a held enemy is no threat), but it keeps
+/// a PRESSURED healer's ESCAPE window open to it ([`escape_entry_window`]).
+pub(super) fn compound_held_attacker(entity: Entity, ctx: &CombatContext) -> bool {
+    ctx.situation().has_held_attacker(entity)
 }
 
 /// The ONSET half of the PRESSURED hysteresis under `Legacy`

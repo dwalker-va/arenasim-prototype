@@ -687,6 +687,15 @@ impl<'a> CombatContext<'a> {
         self.held_in_hard_cc_at(entity, 0.0)
     }
 
+    /// Is `entity` held at all — under any crowd control that stops it acting
+    /// ([`holds`]), however little of it is left? The threat question
+    /// (`situation::is_held`): a held enemy pressures no one and chases no
+    /// one. [`Self::held_in_hard_cc`] is the CASTER's question, which lets a
+    /// hold in its last [`CC_CHAIN_WINDOW`] be chained onto.
+    pub fn is_held(&self, entity: Entity) -> bool {
+        crate::states::play_match::situation::is_held(self.active_auras, entity)
+    }
+
     /// [`Self::held_in_hard_cc`], asked of the moment a cast begun now LANDS,
     /// `lands_after` seconds from now: a hold counts only if more than
     /// [`CC_CHAIN_WINDOW`] of it will be left then. The Chain play's hand-off
