@@ -17,7 +17,7 @@ root_cause: "Class AI try_*() functions lacked awareness of friendly breakable C
 
 ## Problem
 
-AI classes (Warlock, Warrior, Mage) applied DoTs or direct damage to targets that had friendly breakable CC (Polymorph, Freezing Trap), immediately breaking their own team's CC. This is an AI decision bug — the break-on-damage combat system correctly follows WoW Classic behavior where ANY damage breaks Polymorph.
+AI classes (Warlock, Warrior, Mage) applied DoTs or direct damage to targets that had friendly breakable CC (Polymorph, Freezing Trap, and — until AS-436 — Fear), immediately breaking their own team's CC. This is an AI decision bug — the break-on-damage combat system correctly follows WoW Classic behavior where ANY damage breaks Polymorph.
 
 **Observed in bug hunt (2026-03-16):**
 - Warlock's Curse of Agony tick breaks own Mage's Polymorph
@@ -33,16 +33,22 @@ No check existed to determine whether a target was under a break-on-damage CC ca
 ### 1. Helper Methods on `CombatContext` (class_ai/mod.rs)
 
 ```rust
-/// Check if target has a break-on-any-damage CC from a friendly caster.
-/// Uses threshold-based detection: any aura with break_on_damage_threshold == 0.0
-/// from a same-team caster is protected.
+/// The one rule (beside `holds()` in class_ai/mod.rs): every aura that breaks
+/// on ANY damage, and every hold that breaks once enough damage accumulates
+/// (a Fear, a Psychic Scream). Never a root.
+pub fn damage_breaks_friendly_hold(aura: &Aura) -> bool {
+    aura.break_on_damage_threshold == 0.0
+        || (holds(aura.effect_type) && aura.break_on_damage_threshold > 0.0)
+}
+
+/// Does `target` carry such crowd control from a same-team caster?
 pub fn has_friendly_breakable_cc(&self, target: Entity) -> bool {
     let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
     self.active_auras
         .get(&target)
         .map(|auras| {
             auras.iter().any(|a| {
-                a.break_on_damage_threshold == 0.0
+                damage_breaks_friendly_hold(a)
                     && a.caster
                         .and_then(|c| self.combatants.get(&c).map(|info| info.team))
                         == Some(my_team)
@@ -131,9 +137,10 @@ Look for `check_friendly_dots: true` (e.g. `class_ai/mage.rs::try_polymorph`, `c
 
 ## Prevention: Adding New CC Abilities
 
-**When adding a CC with `break_on_damage_threshold: 0.0`** (Blind, Sap, Gouge, Intimidating Shout, Repentance, Hibernate, Scatter Shot, etc.):
+**When adding a CC that breaks on damage** (Blind, Sap, Gouge, Intimidating Shout, Hibernate, Scatter Shot, etc.):
 
-- [ ] No code changes needed — `has_friendly_breakable_cc()` is threshold-based and automatically detects any aura with `break_on_damage_threshold == 0.0` from a friendly caster
+- [ ] No code changes needed — `damage_breaks_friendly_hold()` detects any aura with `break_on_damage_threshold == 0.0`, and any hold (`holds()`: stun, fear, polymorph, incapacitate, cyclone) with a positive threshold, from a friendly caster
+- [ ] Add the ability to the named set in `tests/friendly_fear_scenes.rs::the_holds_the_team_waits_out_are_named`
 - [ ] Verify all existing damage/DoT `try_*()` functions already call `pre_cast_ok(..., PreCastOpts { check_friendly_cc: true, ... })`
 - [ ] Test with headless matches using a team comp that has both the new CC class and a DoT class
 
@@ -144,16 +151,19 @@ Look for `check_friendly_dots: true` (e.g. `class_ai/mage.rs::try_polymorph`, `c
 - [ ] For AoE abilities, filter CC'd targets from the target list (the helper guards a single `target` entity; AoE selection happens before `pre_cast_ok`)
 - [ ] For pet abilities, ensure pet AI also respects the check (see `class_ai/pet_ai.rs`)
 
-**Rule of thumb:** Every damage/DoT/CC cast should route through `pre_cast_ok` with the appropriate `PreCastOpts`. Any new CC with `break_on_damage_threshold: 0.0` in `abilities.ron` is automatically protected because the underlying `has_friendly_breakable_cc` check is threshold-based.
+**Rule of thumb:** Every damage/DoT/CC cast should route through `pre_cast_ok` with the appropriate `PreCastOpts`. Any new CC that breaks on damage in `abilities.ron` is automatically protected, because `has_friendly_breakable_cc` and the auto-attack both ask `damage_breaks_friendly_hold`.
 
 ## Currently Covered CC Types
 
 | AuraType | Ability | break_on_damage | In `has_friendly_breakable_cc`? |
 |----------|---------|-----------------|-------------------------------|
 | Polymorph | Polymorph | 0.0 (any) | Yes |
-| Incapacitate | Freezing Trap | 0.0 (any) | Yes |
-| Root | Frost Nova, Frost Trap | 35.0 | No (threshold-based, OK to DoT) |
-| Fear | Fear | 100.0 | No (threshold-based, OK to DoT) |
+| Incapacitate | Freezing Trap, Repentance | 0.0 (any) | Yes |
+| Fear | Fear, Psychic Scream | 100.0 | Yes — a hold the team waits out, like a Polymorph (AS-436) |
+| Fear (horror) | Death Coil | -1.0 (never) | No — nothing breaks it |
+| Root | Frost Nova, Entangling Roots, Spider Web | 80.0 | No — a root is not a hold; a root and a nuke go together |
+
+`tests/friendly_fear_scenes.rs` names the set by equality, so a new ability that joins it fails until it is listed.
 
 ## Related Documentation
 

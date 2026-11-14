@@ -932,8 +932,7 @@ fn fallback_trap(
         };
         (lane, victim)
     };
-    let trap = super::Incoming::of(abilities.get_unchecked(&AbilityType::FreezingTrap));
-    if ctx.held_in_hard_cc(victim, trap).is_some() {
+    if ctx.held_in_hard_cc(victim).is_some() {
         return held(TRAP_HELD_ALREADY_HELD);
     }
     // An immune victim (Divine Shield, Cyclone) would not take the trap, and
@@ -1752,7 +1751,7 @@ fn trap_landing(
     // enemy it is aimed at: no hold is thrown at a unit the team already holds.
     if let Some(cc_type) = intended
         .filter(|_| applies_hold(def))
-        .and_then(|victim| ctx.held_in_hard_cc(victim, super::Incoming::of(def)))
+        .and_then(|victim| ctx.held_in_hard_cc(victim))
     {
         return Err(RejectionReason::TargetAlreadyCCd { cc_type });
     }
@@ -2873,7 +2872,7 @@ fn dispatch_predicates_for_damaging(
     }
     // Boar Charge stuns: never onto a unit the team already holds.
     if ability == AbilityType::BoarCharge {
-        if let Some(cc_type) = ctx.held_in_hard_cc(target_entity, super::Incoming::of(def)) {
+        if let Some(cc_type) = ctx.held_in_hard_cc(target_entity) {
             return Some(RejectionReason::TargetAlreadyCCd { cc_type });
         }
     }

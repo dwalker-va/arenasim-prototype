@@ -1615,10 +1615,7 @@ fn try_shadow_dance(
         .unwrap_or(0.0);
     let unmet = if my_pos.distance(target_pos) > MELEE_RANGE {
         Some("the kill target is out of melee")
-    } else if ctx
-        .held_in_hard_cc(target, super::Incoming::Lasts)
-        .is_some()
-    {
+    } else if ctx.held_in_hard_cc(target).is_some() {
         Some("the kill target is already held")
     } else if ctx.dr_level(target, DRCategory::Stuns) > 0
         || ctx.dr_level(target, DRCategory::KidneyShotStun) > 0
@@ -1810,9 +1807,8 @@ fn select_melee_cc_target(
     my_pos: Vec3,
     ctx: &CombatContext,
 ) -> Option<(Entity, Vec3)> {
-    const STUN: super::Incoming = super::Incoming::Lasts;
     if let Some(cc_entity) = cc_target {
-        if !ctx.entity_is_immune(cc_entity) && ctx.held_in_hard_cc(cc_entity, STUN).is_none() {
+        if !ctx.entity_is_immune(cc_entity) && ctx.held_in_hard_cc(cc_entity).is_none() {
             if let Some(info) = ctx.combatants.get(&cc_entity) {
                 if my_pos.distance(info.position) <= MELEE_RANGE {
                     return Some((cc_entity, info.position));
@@ -1822,7 +1818,7 @@ fn select_melee_cc_target(
     }
 
     if let Some(kill_entity) = kill_target {
-        if !ctx.entity_is_immune(kill_entity) && ctx.held_in_hard_cc(kill_entity, STUN).is_none() {
+        if !ctx.entity_is_immune(kill_entity) && ctx.held_in_hard_cc(kill_entity).is_none() {
             if let Some(info) = ctx.combatants.get(&kill_entity) {
                 if my_pos.distance(info.position) <= MELEE_RANGE {
                     return Some((kill_entity, info.position));

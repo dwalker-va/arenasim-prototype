@@ -53,9 +53,6 @@ fn create_config(
 ///   Shield, but the reference matchups don't reliably produce that state
 ///   (depends on Paladin HP trajectory). Future refinement: add a scripted
 ///   matchup with forced Paladin shield activation.
-/// - `DRImmune`: requires chained CC of the same category against the same
-///   target. Possible in long matches but seed-dependent. Future refinement:
-///   add a scripted matchup with two consecutive Polymorphs / Stuns.
 /// - `Rooted`: Warrior emits this when trying Charge while rooted by Mage
 ///   Frost Nova. The window is narrow: Warrior must be both rooted AND
 ///   beyond CHARGE_MIN_RANGE. Future refinement: add a Frost Nova → break
@@ -92,6 +89,10 @@ const EXPECTED_REJECTION_REASONS: &[&str] = &[
     // A Warlock's Life Tap held: not mana-starved, or not safe to spend
     // health on it (`class_ai::warlock::life_tap_hold`).
     "TapHeld",
+    // A Fear refused on a target immune to fears by diminishing returns: the
+    // Priest v Warlock reference match, where the Warlock waits out its own
+    // Fear on its target (AS-436) and fears it again into immunity.
+    "DRImmune",
 ];
 
 /// Variants of `TargetRejectionReason` that production code currently emits.

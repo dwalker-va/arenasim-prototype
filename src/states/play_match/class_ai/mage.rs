@@ -891,8 +891,7 @@ fn try_polymorph_on(
     // A Chain play hand-off is judged where it lands (`hold_lands_after`).
     let lands_after =
         super::cast_guard::hold_lands_after(def, my_pos, auras, Some((cc_target, target_pos)), ctx);
-    if let Some(cc_type) = ctx.held_in_hard_cc_at(cc_target, super::Incoming::of(def), lands_after)
-    {
+    if let Some(cc_type) = ctx.held_in_hard_cc_at(cc_target, lands_after) {
         builder.reject(ability, RejectionReason::TargetAlreadyCCd { cc_type });
         return false;
     }

@@ -41,7 +41,7 @@ use bevy::prelude::*;
 use smallvec::SmallVec;
 
 use super::plays::{own_class, own_team_size, PlayStage};
-use super::{CombatContext, Incoming};
+use super::CombatContext;
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::{AuraType, PetType};
@@ -71,7 +71,7 @@ pub fn peel_call(ctx: &CombatContext, role: Role) -> Option<PeelCall> {
         .copied()
         .filter(|e| ctx.combatants.get(e).is_some_and(|info| info.is_alive))
         // `Breaks`: every hold counts, whatever the team is doing to it.
-        .filter(|e| ctx.held_in_hard_cc(*e, Incoming::Breaks).is_none())
+        .filter(|e| ctx.held_in_hard_cc(*e).is_none())
         .collect();
     (!attackers.is_empty()).then_some(PeelCall { ally, attackers })
 }
