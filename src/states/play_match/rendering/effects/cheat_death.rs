@@ -6,7 +6,6 @@ use bevy::prelude::*;
 
 use super::druid_heals::{body_point, keyed, keyed_color};
 use super::guardian_spirit::panel_glow_alpha;
-use super::heal_impact::COMBATANT_BODY_RADIUS;
 use super::hunter_shots::{
     draw, particle_rotation, ramp3, ramp_color, ClientEmitter, EmitterSprite, PALETTE_STEPS,
 };
@@ -51,13 +50,13 @@ use crate::states::play_match::components::*;
 // Everything but the sockets and the flames adds light, as the bench's
 // `lighter` composite does: colour × sprite × alpha, unlit.
 //
-// **Departures from the bench**, each forced by the 3D world:
+// The flames stand where the bench puts them, 0.4 -> 0.26 yd from the axis,
+// inside the 0.5 yd body capsule. The body is alpha-blended and writes no
+// depth, so the flames are not hidden by it: each draws before or after the
+// body by its origin's distance from the camera.
 //
-// - The flames hug the body capsule's outline 0.05 yd out
-//   ([`flame_ring_radius`]) instead of the bench's 0.4 -> 0.26 yd: the
-//   capsule is 0.5 yd across its radius and would bury them, where the bench
-//   paints them over the body in 2D. The far side's flames are hidden by the
-//   body.
+// **Departures from the bench:**
+//
 // - A tail is a camera-facing quad without the canvas stroke's round caps
 //   (a cap's radius is at most 0.02 yd once the streak settles).
 // - The thin rings keep the bench's stroke in yards (3 and 4 px at its 8 yd
@@ -260,31 +259,6 @@ pub fn fire_alpha(age: f32, ended: Option<f32>) -> f32 {
     fade_in * fade_out * CHEAT_DEATH_OPACITY_MUL
 }
 
-/// The combatant capsule's radius `y` yards above the feet: 0.5, its
-/// cylinder from 0.25 to 1.75 yd, its hemispheres closing to the floor and to
-/// 2.25 yd (`Capsule3d::new(0.5, 1.5)` centred 1.0 above the floor).
-pub fn body_radius_at(y: f32) -> f32 {
-    let beyond = ((y - 1.0).abs() - 0.75).max(0.0);
-    (COMBATANT_BODY_RADIUS * COMBATANT_BODY_RADIUS - beyond * beyond)
-        .max(0.0)
-        .sqrt()
-}
-
-/// How far outside the body a flame stands.
-pub const CHEAT_DEATH_FLAME_CLEARANCE: f32 = 0.05;
-
-/// The radius a flame `y` yards up stands at: just outside the body.
-///
-/// A departure from the bench, whose flames run 0.4 -> 0.26 yd from the
-/// axis (the client's 0.8 yd cylinder about its thinner body). The bench
-/// paints them over the body in 2D; here the body is a 0.5 yd capsule that
-/// would bury every one of them (the AS-10 lesson, as `immolate.rs`'s flame
-/// ring). So each flame hugs the capsule's outline, and the far side's are
-/// hidden by the body, as fire round a body is.
-pub fn flame_ring_radius(y: f32) -> f32 {
-    body_radius_at(y) + CHEAT_DEATH_FLAME_CLEARANCE
-}
-
 /// One flame's place in its rise, 0..1 (the bench's `ph`).
 pub fn flame_phase(k: u8, ms: f32) -> f32 {
     let period = 520.0 + (k % 5) as f32 * 60.0;
@@ -420,7 +394,7 @@ pub fn cheat_death_pose(
             let angle = k as f32 / CHEAT_DEATH_FLAMES as f32 * TAU + ms / 900.0;
             let ph = flame_phase(k, ms);
             let y = -0.1 + ph * 2.3 * s;
-            let r = flame_ring_radius(y);
+            let r = 0.4 * s * (1.0 - ph * 0.35);
             pose(
                 Vec3::new(r * angle.cos(), y, r * angle.sin()),
                 Vec3::ZERO,
@@ -620,6 +594,8 @@ pub enum CheatDeathLaunch {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct CheatDeathLayer {
     pub on: bool,
+    /// The record. Its `sprite` is not read: [`CheatDeathLayer::soft`] names
+    /// the bench sprite each particle is drawn with.
     pub emitter: ClientEmitter,
     /// The bench sprite's radial alpha stops at its centre, 0.45 of the way
     /// out and its rim (`sprite()`'s `soft`): `glow` is `[1, 0.45, 0]`,

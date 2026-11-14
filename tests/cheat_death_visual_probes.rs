@@ -32,7 +32,7 @@ use arenasim::states::play_match::{
     build_cheat_death_rigs, cheat_death_pose, cheat_death_sprite_image,
     consume_killing_blow_signals, fire_alpha, particle_sprite_image, spawn_saved_flashes,
     tail_length, update_cheat_death, CheatDeathLaunch, CheatDeathPart, CheatDeathPiece,
-    CheatDeathPose, CheatDeathRig, CheatDeathSprite, CheatDeathTail, EmitterSprite, SavedFlash,
+    CheatDeathPose, CheatDeathRig, CheatDeathSprite, CheatDeathTail, SavedFlash,
     CHEAT_DEATH_LAYERS, CHEAT_DEATH_SPRITE_PX, GLOW_SOFT, SMOKE_SOFT,
 };
 use arenasim::CharacterClass;
@@ -276,29 +276,15 @@ fn the_light_column_is_the_benchs() {
     }
 }
 
-/// The combatant capsule (`Capsule3d::new(0.5, 1.5)`, centred 1.0 above the
-/// floor), its radius `y` yards up: 0.5 from 0.25 to 1.75, its hemispheres
-/// closing to 0 and 2.25.
-fn capsule_radius(y: f32) -> f32 {
-    if (0.25..=1.75).contains(&y) {
-        0.5
-    } else {
-        let d = if y < 0.25 { 0.25 - y } else { y - 1.75 };
-        (0.25 - d * d).max(0.0).sqrt()
-    }
-}
-
 /// The bench's `ghostFire`, worked here: flame `k` at `ms` stands at angle
-/// `k / 18 τ + ms / 900`, `−0.1 + 2.3 ph` up, `0.42 (1 − 0.5 ph)` across, at
-/// `a sin(ph π) 0.8`; `ph` its place in a `520 + (k % 5) 60` ms rise, offset
-/// `97 k` ms. Its radius is the one named departure: 0.05 yd outside the
-/// body capsule at its height, where the bench's `0.4 (1 − 0.35 ph)` would
-/// stand inside the 0.5 yd capsule.
+/// `k / 18 τ + ms / 900` and radius `0.4 (1 − 0.35 ph)`, `−0.1 + 2.3 ph` up,
+/// `0.42 (1 − 0.5 ph)` across, at `a sin(ph π) 0.8`; `ph` its place in a
+/// `520 + (k % 5) 60` ms rise, offset `97 k` ms.
 fn bench_flame(k: u8, ms: f32, a: f32) -> (Vec3, f32, f32) {
     let per = 520.0 + (k % 5) as f32 * 60.0;
     let ph = ((ms + k as f32 * 97.0) % per) / per;
     let angle = k as f32 / 18.0 * TAU + ms / 900.0;
-    let r = capsule_radius(-0.1 + ph * 2.3) + 0.05;
+    let r = 0.4 * (1.0 - ph * 0.35);
     (
         Vec3::new(r * angle.cos(), -0.1 + ph * 2.3, r * angle.sin()),
         0.42 * (1.0 - ph * 0.5),
@@ -331,21 +317,32 @@ fn the_ghost_fire_comes_in_holds_and_goes_as_the_bench_has_it() {
     // Flame 7 at 2 s, by hand: ph = (2679 mod 640) / 640.
     let p = pose_of(P::Flame(7), 2.0, None);
     assert!(close(p.world.y, 0.327_656), "{}", p.world.y);
-    assert!(close(p.world.xz().length(), 0.55), "0.05 outside the body");
-    // Near the crown (2.2 yd up) the capsule has closed to 0.218 yd.
+    assert!(
+        close(p.world.xz().length(), 0.373_969),
+        "the bench's radius"
+    );
+    // The bench's tapering column: every flame's radius is 0.4 at the foot of
+    // its rise (−0.1 yd) narrowing to 0.26 at its top (2.2 yd), so the
+    // column is 0.8 yd across at the feet and 0.52 at the crown.
+    let (mut widest, mut narrowest) = (0.0f32, f32::MAX);
     for k in 0..18 {
         for ms in (0..3000).step_by(7) {
             let age = ms as f32 / 1000.0;
             if let Some(p) = cheat_death_pose(P::Flame(k), age, None) {
                 let r = p.world.xz().length();
+                let ph = (p.world.y + 0.1) / 2.3;
                 assert!(
-                    r >= capsule_radius(p.world.y) + 0.05 - 1e-4,
-                    "flame {k} at {age}s: {r} inside the body at {}",
+                    close(r, 0.4 * (1.0 - 0.35 * ph)),
+                    "flame {k} at {age}s: {r} at {}",
                     p.world.y
                 );
+                widest = widest.max(r);
+                narrowest = narrowest.min(r);
             }
         }
     }
+    assert!(widest <= 0.4 + 1e-4 && widest > 0.39, "{widest}");
+    assert!((0.26 - 1e-4..0.27).contains(&narrowest), "{narrowest}");
     assert!(close(p.size.x, 0.380_953) && close(p.size.y, 0.380_953));
     assert!(close(p.alpha, 0.441_186), "{}", p.alpha);
     // Every flame, through the fire's whole life.
@@ -390,7 +387,6 @@ fn the_streaks_and_smoke_are_the_benchs() {
 
     let e = &streaks.emitter;
     assert!(streaks.on);
-    assert_eq!(e.sprite, EmitterSprite::Glow);
     assert_eq!(streaks.soft, [1.0, 0.45, 0.0], "sprite('glow')'s stops");
     assert_eq!(streaks.tail, 3.0);
     assert!(e.additive);
@@ -415,7 +411,6 @@ fn the_streaks_and_smoke_are_the_benchs() {
 
     let e = &smoke.emitter;
     assert!(smoke.on);
-    assert_eq!(e.sprite, EmitterSprite::Glow);
     assert_eq!(smoke.soft, [0.85, 0.5, 0.0], "sprite('smoke')'s stops");
     assert_eq!(smoke.tail, 0.0);
     assert!(e.additive);
