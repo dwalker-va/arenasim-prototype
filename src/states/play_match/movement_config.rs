@@ -489,6 +489,10 @@ pub struct DpsMovementConfig {
     /// away (`hunter_dip::walk_exposure`) are at most this many, and throws
     /// from range the moment the landing is clean.
     pub trap_walk_worth: f32,
+    /// AS-498 prototype: the trap walk never takes the Hunter's own kill
+    /// target (the old dip's rule), so a lone DPS does not freeze the healer
+    /// it is killing.
+    pub trap_walk_spare_own_target: bool,
     /// Occlusion-timeout direct chase: seconds an ENGAGE kiter may stay
     /// continuously occluded from its kill target while in shot range (the
     /// orbit-seek stall) before it abandons orbit-seeking and walks straight at
@@ -556,7 +560,8 @@ impl Default for DpsMovementConfig {
             kite_sustain_radius: 24.0, // hold a touch past entry
             dip_budget: 0.0,           // Mage default off; Hunter ron turns it on
             trap_walk_worth: -1.0,     // AS-498 prototype off: the old dip
-            seek_chase_timeout: 3.5,   // accumulated occlusion units before the chase arms
+            trap_walk_spare_own_target: false,
+            seek_chase_timeout: 3.5, // accumulated occlusion units before the chase arms
             seek_chase_decay: 0.5, // drains this per sighted second (< fill, so jukes still accrue)
         }
     }

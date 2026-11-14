@@ -821,14 +821,20 @@ const TRAP_WALK_STEP: f32 = 0.1;
 ///   is eligible — the one targeting the Hunter first, then the nearest. The
 ///   Hunter fights the healer instead.
 ///
+/// `spare` (the Hunter's own kill target, when
+/// `hunter.trap_walk_spare_own_target` is on) is never the healer victim.
+///
 /// `None` otherwise: the trap is not the trap play's to throw.
 pub fn trap_play_victim(
     ctx: &CombatContext,
     entity: Entity,
     my_team: u8,
     my_pos: Vec3,
+    spare: Option<Entity>,
 ) -> Option<(Entity, Entity)> {
-    if let Some(Ok(healer)) = pressure_trap_healer(ctx, entity, my_team) {
+    if let Some(Ok(healer)) =
+        pressure_trap_healer(ctx, entity, my_team).filter(|v| spare.is_none() || v.ok() != spare)
+    {
         let instead = super::dps_postures::nearest_melee_threat_where(ctx, entity, my_pos, |e| {
             e != healer && !ctx.entity_is_immune(e)
         })
@@ -981,7 +987,17 @@ fn evaluate_trap_walk(
         PreCastOpts::default(),
     );
     let victim = ready
-        .then(|| trap_play_victim(ctx, entity, combatant.team, my_pos))
+        .then(|| {
+            trap_play_victim(
+                ctx,
+                entity,
+                combatant.team,
+                my_pos,
+                combatant
+                    .target
+                    .filter(|_| config.trap_walk_spare_own_target),
+            )
+        })
         .flatten();
     let mut end = |state: &mut KitePosture, decision_trace: &mut DecisionTrace| {
         if live {

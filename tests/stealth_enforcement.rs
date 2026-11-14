@@ -537,7 +537,7 @@ fn run_with(class: CharacterClass, rogue_state: Rogue, distance: f32, setup: Set
                         .expect("assets/config/movement.ron must load")
                         .hunter
                         .weights,
-                    false,
+                    None,
                     &[],
                     None,
                     &mut trace,
