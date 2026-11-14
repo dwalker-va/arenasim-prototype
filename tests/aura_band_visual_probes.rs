@@ -24,7 +24,9 @@ use arenasim::states::match_config::RoguePoison;
 use arenasim::states::play_match::abilities::{AbilityType, SpellSchool};
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
-use arenasim::states::play_match::combat_core::compound_riders;
+use arenasim::states::play_match::combat_core::{
+    cheat_death_aura, compound_riders, CHEAT_DEATH_NAME,
+};
 use arenasim::states::play_match::components::{
     weapon_poison_marker_aura, ActiveAuras, Aura, AuraApplyOwner, AuraApplyRoute, AuraBand,
     AuraBandPolarity, AuraType, Combatant, CompoundDebuff, DispelType, Pet, PetType, TotemElement,
@@ -701,6 +703,43 @@ fn guardian_spirit_raises_no_band_but_another_healing_boost_does() {
     );
     h.tick(3);
     assert_eq!(h.bands().len(), 1, "another healing boost keeps the band");
+}
+
+/// Cheat Death's damage cut is owned by its skull and ghost-fire, by NAME
+/// (`cheat_death.rs`): the save raises them, and they are its landing. The
+/// cut's type is shared, so Devotion Aura (and any other aura of that type)
+/// keeps the band.
+#[test]
+fn cheat_death_owns_its_cut_and_its_type_siblings_keep_the_band() {
+    let cut = cheat_death_aura(0.9, 3.0);
+    assert_eq!(cut.ability_name, CHEAT_DEATH_NAME, "the cut's name");
+    assert_eq!(cut.ability_name, "Cheat Death");
+    assert_eq!(
+        AuraApplyRoute::for_instance(cut.effect_type, &cut.ability_name),
+        AuraApplyRoute::Owned(AuraApplyOwner::CheatDeath)
+    );
+    assert_eq!(
+        AuraApplyRoute::for_instance(cut.effect_type, "Devotion Aura"),
+        AuraApplyRoute::Band,
+        "another damage cut keeps the band"
+    );
+}
+
+#[test]
+fn cheat_death_raises_no_band_but_another_damage_cut_does() {
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(unit, vec![cheat_death_aura(0.9, 3.0)]);
+    h.tick(3);
+    assert!(h.bands().is_empty(), "the skull and ghost-fire own the cut");
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    let mut devotion = cheat_death_aura(0.9, 3.0);
+    devotion.ability_name = "Devotion Aura".into();
+    h.set_auras(unit, vec![devotion]);
+    h.tick(3);
+    assert_eq!(h.bands().len(), 1, "another damage cut keeps the band");
 }
 
 #[test]
