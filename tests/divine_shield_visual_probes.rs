@@ -333,7 +333,7 @@ fn divine_shield_wears_the_client_cards_not_the_sphere() {
         .iter()
         .map(|c| c.layer)
         .collect();
-    layers.sort_by_key(|l| *l as u8);
+    layers.sort();
     assert_eq!(
         layers,
         vec![
@@ -425,6 +425,9 @@ fn the_bubble_fills_the_body_blue_where_pws_is_hollow() {
                 ShieldLayer::Rim | ShieldLayer::StreakB => assert!(is_gold(c.rgb), "{:?}", c.rgb),
                 ShieldLayer::Icicles | ShieldLayer::Glint => {
                     panic!("Divine Shield wears no icicles")
+                }
+                ShieldLayer::Flare(_) | ShieldLayer::Spark(_) => {
+                    panic!("Divine Shield wears no sprites")
                 }
             }
         }
@@ -922,7 +925,10 @@ fn the_bubble_spends_only_its_client_blues() {
             ShieldLayer::FillOuter | ShieldLayer::FillInner | ShieldLayer::Tint => {
                 assert_eq!(ds, [0.318, 0.396, 1.0], "{layer:?}")
             }
-            ShieldLayer::Icicles | ShieldLayer::Glint => unreachable!("not a Divine Shield layer"),
+            ShieldLayer::Icicles
+            | ShieldLayer::Glint
+            | ShieldLayer::Flare(_)
+            | ShieldLayer::Spark(_) => unreachable!("not a Divine Shield layer"),
         }
     }
 }

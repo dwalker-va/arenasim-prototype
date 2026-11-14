@@ -297,7 +297,8 @@ pub fn spawn_empowered_flashes(
             | AuraLandingKind::SacrificeShell
             | AuraLandingKind::RetributionDisc
             | AuraLandingKind::InfusionHalo
-            | AuraLandingKind::ArtOfWarRing => continue,
+            | AuraLandingKind::ArtOfWarRing
+            | AuraLandingKind::SacredShieldDisc => continue,
         };
         commands.entity(marker).despawn();
         let Ok((holder, transform, pet)) = holders.get(landing.target) else {
