@@ -120,6 +120,45 @@ fn sees(obstacles: &[ObstacleVolume], from: Vec3, to: Vec3) -> bool {
     has_line_of_sight(obstacles, from, to)
 }
 
+/// Whether `dps` could take `enemy` as its focus: a target it can take
+/// ([`targetable`]), within [`FOCUS_REACH`] and in its sight — the test a
+/// focus moves onto an enemy by ([`classify`]).
+pub fn could_take(
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    obstacles: &[ObstacleVolume],
+    dps: &CombatantInfo,
+    enemy: &CombatantInfo,
+) -> bool {
+    targetable(auras, dps, enemy)
+        && enemy.position.distance(dps.position) <= FOCUS_REACH
+        && sees(obstacles, dps.position, enemy.position)
+}
+
+/// Whether an enemy of `healer` that follows a focus ([`follows_focus`])
+/// could turn on one of the healer's living teammates ([`could_take`]): the
+/// case in which the healer's cover from it only hands its fire to that
+/// teammate (AS-440, `team_solve::SolveWorld::cover_waived`). `false` on a
+/// map with no obstacles, where no focus ever moves. `roster` is the view
+/// the healer decides from.
+pub fn could_turn_on_teammate(
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    obstacles: &[ObstacleVolume],
+    healer: &CombatantInfo,
+) -> bool {
+    !obstacles.is_empty()
+        && roster
+            .values()
+            .filter(|d| d.team != healer.team && d.is_alive && !d.is_pet && follows_focus(d.role))
+            .any(|d| {
+                roster.values().any(|mate| {
+                    mate.team == healer.team
+                        && mate.entity != healer.entity
+                        && could_take(auras, obstacles, d, mate)
+                })
+            })
+}
+
 /// The nearest enemy other than `besides` that `dps` can take: in
 /// [`FOCUS_REACH`] and in its sight. Entity order on a tie.
 fn nearest_in_sight(
@@ -131,9 +170,7 @@ fn nearest_in_sight(
 ) -> Option<Entity> {
     roster
         .values()
-        .filter(|e| e.entity != besides && targetable(auras, dps, e))
-        .filter(|e| e.position.distance(dps.position) <= FOCUS_REACH)
-        .filter(|e| sees(obstacles, dps.position, e.position))
+        .filter(|e| e.entity != besides && could_take(auras, obstacles, dps, e))
         .min_by(|a, b| {
             a.position
                 .distance(dps.position)
@@ -276,6 +313,49 @@ pub fn retarget(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `could_turn_on_teammate` (AS-440): an enemy ranged DPS at the origin,
+    /// our healer and its Warrior somewhere around it, the reach fixture's
+    /// pillar 8yd down +X. Each case is the Warrior in the Mage's sight and
+    /// focus reach, against one condition removed: the pillar between them,
+    /// beyond `FOCUS_REACH`, an enemy that follows no focus, a map with no
+    /// obstacles (where no focus moves).
+    #[test]
+    fn a_teammate_in_a_ranged_dps_reach_and_sight_can_be_turned_on() {
+        use crate::states::match_config::CharacterClass::{Druid, Mage, Priest, Warrior};
+        use crate::states::play_match::class_ai::reach_fixture::{
+            pillar, roster, unit, BEHIND, IN_SIGHT,
+        };
+        let mut world = World::new();
+        let (enemy, healer, mate) = (
+            world.spawn_empty().id(),
+            world.spawn_empty().id(),
+            world.spawn_empty().id(),
+        );
+        let auras = BTreeMap::new();
+        let case = |enemy_class, mate_at: Vec3, obstacles: &[ObstacleVolume]| {
+            let r = roster(vec![
+                unit(enemy, 2, enemy_class, Vec3::new(0.0, 1.0, 0.0), 1.0),
+                unit(healer, 1, Priest, Vec3::new(-6.0, 1.0, 6.0), 1.0),
+                unit(mate, 1, Warrior, mate_at, 1.0),
+            ]);
+            could_turn_on_teammate(&r, &auras, obstacles, &r[&healer])
+        };
+        assert!(case(Mage, IN_SIGHT, &pillar()));
+        assert!(
+            !case(Mage, BEHIND, &pillar()),
+            "the pillar hides the Warrior"
+        );
+        assert!(
+            !case(Mage, Vec3::new(0.0, 1.0, FOCUS_REACH + 1.0), &pillar()),
+            "beyond the focus's reach"
+        );
+        assert!(
+            !case(Druid, IN_SIGHT, &pillar()),
+            "a Druid follows no focus"
+        );
+        assert!(!case(Mage, IN_SIGHT, &[]), "no obstacles, no focus");
+    }
 
     /// A focus's onset, a move to a new subject (a new onset), its end, and
     /// nothing while it holds.

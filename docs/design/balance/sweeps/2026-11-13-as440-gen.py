@@ -18,6 +18,11 @@ on PillaredArena and TwinPillars, both teams TeamPlan, 300s cap.
 - ctl: the h2h cells with both teams shipped, label `ctl|...` — the twin every
   h2h row is paired with.
 
+- cover <seeds>: the shipped hand-off cover rule, head-to-head (AS-440
+  round 3). Every cell whose team 1 (seat 1) or team 2 (seat 2) is a healer +
+  DPS team: that team runs the rule, the other has it off
+  (`team{n}_handoff_rule: false`), label `h2h-Cover-t<seat>`; and the twin
+  with it off for both, label `ctl|...`.
 - h2h-eligible <rule> <seeds>: as h2h, only the sides the pillar stance can
   reach — a Priest, Shaman or Druid side against an enemy that fields a crowd
   control the stance defends against (the nine enemies in `NO_STANCE_ENEMIES`
@@ -56,15 +61,19 @@ def healer_team(t):
 
 
 def rule_config(rule, seat):
-    """A rule's config for team `seat`: a `HideRule`, or `NoPillar` — the
-    Pillar play withheld (no pillar stance, so no healer hug). `A+B` sets
-    both."""
+    """A rule's config for team `seat`: `NoPillar`, the Pillar play withheld
+    (no pillar stance, so no healer hug). The round-1/2 prototype rules
+    (`NoCover`, `NoHandoff`, `Follow`, `StanceHealerHalf`, `StancePartnerHalf`)
+    were measurement switches on `team{n}_hide_rule`, removed when the cover
+    rule shipped (AS-440 round 3); their banks are the committed CSVs, played
+    by the binary at cfbf3a54. The shipped rule's own control is the `cover`
+    bank."""
     out = {}
     for part in rule.split("+"):
         if part == "NoPillar":
             out[f"team{seat}_withheld_plays"] = ["Pillar"]
         else:
-            out[f"team{seat}_hide_rule"] = part
+            sys.exit(f"{part}: a round-1/2 prototype rule, removed (see the docstring)")
     return out
 
 
@@ -109,6 +118,23 @@ def main(argv):
                     continue
                 for s in ss:
                     emit([g.row("ctl", m, a, b, s, ai_profile="TeamPlan")])
+    elif bank == "cover":
+        ss = g.seeds(argv[1])
+        off = {"team1_handoff_rule": False, "team2_handoff_rule": False}
+        for m in MAPS:
+            for a, b in cells:
+                if not (healer_team(a) or healer_team(b)):
+                    continue
+                for s in ss:
+                    emit([g.row("ctl", m, a, b, s, ai_profile="TeamPlan", **off)])
+        for seat in (1, 2):
+            for m in MAPS:
+                for a, b in cells:
+                    if not healer_team((a, b)[seat - 1]):
+                        continue
+                    for s in ss:
+                        emit([g.row(f"h2h-Cover-t{seat}", m, a, b, s, ai_profile="TeamPlan",
+                                    **{f"team{3 - seat}_handoff_rule": False})])
     elif bank in ("h2h-eligible", "targeted"):
         if bank == "h2h-eligible":
             rule, ss, named, nc = argv[1], g.seeds(argv[2]), None, False

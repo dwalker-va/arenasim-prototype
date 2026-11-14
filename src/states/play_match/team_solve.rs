@@ -9,6 +9,7 @@
 //! | `OccupyCover` via [`solve_position`] | **LIVE** under `TeamPlan` (healer PRESSURED/FREE, `healer_postures.rs`). Measured at n=100 head-to-head: +36pt Warlock+Priest, +14pt Hunter+Priest, +10pt Warrior+Priest, -6pt (noise) Rogue+Priest. |
 //! | [`DispelGoal`] on `OccupyCover` | **LIVE** under `TeamPlan` (Priest, Paladin PRESSURED; AS-187). The `Legacy` dispel walk's job: while a teammate is owed an urgent dispel the healer cannot reach, reaching it is the only constraint scored, and the goal holds on reach until the dispel lands. |
 //! | [`C_CC_REACH`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-362). Out of the reach of every enemy crowd control ready to land on the healer (`class_ai::cc_reach`), ranked above cover and below sight of the anchor. |
+//! | [`SolveWorld::cover_waived`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-440). While an enemy ranged DPS could turn on a teammate (`target_focus::could_turn_on_teammate`), cover from casters counts for nothing; the other constraints are unchanged. |
 //! | [`C_DYING`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-198). While the healer can heal, the most hurt teammate below `urgency_hp_threshold` anchors it, and reaching that teammate ranks above cover. Which teammate that is, [`dying_anchor`], is the `TeamPlan` medic walk the Druid holds its damage for (AS-218). The Paladin's band-hold parks only where it reaches that teammate ([`dying_unreached`], AS-209). |
 //! | `HoldRange` | Wired to the Mage/Hunter kiter, **measured ~-17pt, reverted — and the ending is now DECIDED: ranged DPS stays on the scorer permanently** (design doc, 2026-08-06). Constraint definition kept for the lone-healer fallback and future melee use; do not re-wire kiters absent step 8's reopening condition. |
 //! | `ScreenPartner`, `PressTarget`, `StackAnchor` | **NEVER RUN IN BATTLE.** Unit-tested against their written definitions only. All three consumed intents were under-specified in ways only measurement exposed (sight-of-ally, castability, the range ceiling) — assume these carry the same debt and budget a measurement pass before trusting them. |
@@ -138,14 +139,15 @@ pub struct SolveWorld {
     /// the ring ([`C_RING`]) and the sight margin ([`C_MARGIN`]). `None` — the
     /// default — when it plays the open.
     pub hug: Option<HugRing>,
-    /// AS-440 prototype ("no hand-off cover"): enemy casters cover from which
-    /// is worth nothing to the unit being solved — each would shoot one of its
-    /// teammates instead. Empty — the default — counts every caster.
-    pub cover_ignores: Vec<Entity>,
-    /// AS-440 prototype ("follow the partner"): per teammate, the point it is
-    /// heading to (a melee's lead toward its target). A spot sees the anchor
-    /// only if it sees this point too. Empty — the default — leads nobody.
-    pub ally_leads: Vec<(Entity, Vec2)>,
+    /// The hand-off cover rule (AS-440): while an enemy ranged DPS could turn
+    /// on a teammate of the unit being solved
+    /// (`target_focus::could_turn_on_teammate`), cover from enemy casters is
+    /// worth nothing to it — hiding would only hand that DPS's fire to the
+    /// teammate. `OccupyCover` then scores no occlusion ([`C_OCCLUDED`]) and
+    /// samples no shadows; crowd-control reach, sight of the anchor, a dying
+    /// teammate and an owed dispel are scored as before. `false` — the
+    /// default — counts every caster.
+    pub cover_waived: bool,
 }
 
 /// The pillar ring an `OccupyCover` healer hugs ([`SolveWorld::hug`]).
@@ -226,36 +228,16 @@ impl SolveWorld {
         self
     }
 
-    /// AS-440 prototype: this world with `ignores` as the casters cover from
-    /// which counts for nothing ([`SolveWorld::cover_ignores`]).
-    pub fn with_cover_ignores(mut self, ignores: Vec<Entity>) -> Self {
-        self.cover_ignores = ignores;
+    /// This world with cover waived ([`SolveWorld::cover_waived`]).
+    pub fn with_cover_waived(mut self, waived: bool) -> Self {
+        self.cover_waived = waived;
         self
     }
 
-    /// AS-440 prototype: this world with `leads` as where each teammate is
-    /// heading ([`SolveWorld::ally_leads`]).
-    pub fn with_ally_leads(mut self, leads: Vec<(Entity, Vec2)>) -> Self {
-        self.ally_leads = leads;
-        self
-    }
-
-    /// The enemy casters cover is FOR ([`Self::enemy_casters_of`], less the
-    /// AS-440 prototype's [`Self::cover_ignores`]).
+    /// The enemy casters cover is FOR: [`Self::enemy_casters_of`], or none
+    /// while cover is waived ([`SolveWorld::cover_waived`]).
     fn cover_casters_of(&self, team: u8) -> impl Iterator<Item = &SolveUnit> {
-        self.enemy_casters_of(team)
-            .filter(|u| !self.cover_ignores.contains(&u.entity))
-    }
-
-    /// Whether `p` sees `ally` and, under the AS-440 prototype's follow rule,
-    /// where it is heading ([`Self::ally_leads`]).
-    fn sees_ally(&self, p: Vec2, ally: &SolveUnit, ally_pos: Vec2) -> bool {
-        self.sees(p, ally_pos)
-            && self
-                .ally_leads
-                .iter()
-                .find(|(e, _)| *e == ally.entity)
-                .is_none_or(|(_, lead)| self.sees(p, *lead))
+        self.enemy_casters_of(team).filter(|_| !self.cover_waived)
     }
 
     fn unit(&self, entity: Entity) -> Option<&SolveUnit> {
@@ -507,18 +489,13 @@ impl SolveContext<'_> {
     /// nearest living non-pet teammate. `None` for a lone unit, which makes the
     /// leash vacuous rather than unsatisfiable.
     fn anchor_ally_pos(&self) -> Option<Vec2> {
-        self.anchor_ally().map(|a| self.ally_pos(a))
-    }
-
-    /// The anchor itself, as [`Self::anchor_ally_pos`] picks it.
-    fn anchor_ally(&self) -> Option<&SolveUnit> {
-        self.dying_ally().or_else(|| {
+        self.dying_ally_pos().or_else(|| {
             self.world
                 .allies_of(self.unit.team, self.unit.entity)
+                .map(|a| self.ally_pos(a))
                 .min_by(|a, b| {
-                    self.ally_pos(a)
-                        .distance(self.unit.pos)
-                        .partial_cmp(&self.ally_pos(b).distance(self.unit.pos))
+                    a.distance(self.unit.pos)
+                        .partial_cmp(&b.distance(self.unit.pos))
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
         })
@@ -665,8 +642,7 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
                     v |= C_DYING;
                 }
             }
-            if let Some(anchor) = ctx.anchor_ally() {
-                let ally = ctx.ally_pos(anchor);
+            if let Some(ally) = ctx.anchor_ally_pos() {
                 if candidate.distance(ally) > world.heal_range {
                     v |= C_LEASH;
                 }
@@ -687,7 +663,7 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
                 // cannot express that — sight either outranks safety always
                 // (measured: 5.0s of cover, 9.1s of hard CC) or never. It is
                 // temporal, not a tradeoff.
-                if ctx.unit.can_cast_heal && !world.sees_ally(candidate, anchor, ally) {
+                if ctx.unit.can_cast_heal && !world.sees(candidate, ally) {
                     v |= C_SIGHT;
                 }
             }
@@ -1585,8 +1561,7 @@ pub fn world_from_context(
         urgency_hp_threshold: 0.0,
         cc: CcField::default(),
         hug: None,
-        cover_ignores: Vec::new(),
-        ally_leads: Vec::new(),
+        cover_waived: false,
     }
 }
 
@@ -1713,8 +1688,7 @@ mod tests {
             urgency_hp_threshold: 0.5,
             cc: CcField::default(),
             hug: None,
-            cover_ignores: Vec::new(),
-            ally_leads: Vec::new(),
+            cover_waived: false,
         }
     }
 

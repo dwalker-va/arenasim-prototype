@@ -576,15 +576,10 @@ fn build_kiter_inputs(
         // The side of the pillar the team holds its stance on, while this
         // kiter runs the Pillar play (AS-385; `TeamPlan` only, so `None`
         // under `Legacy` and the scorer is unchanged there).
-        stance_point: ctx
-            .pillar_stance()
-            .filter(|_| {
-                ctx.hide_rule() != crate::states::play_match::situation::HideRule::StanceHealerHalf
-            })
-            .and_then(|stance| {
-                super::pillar_stance::side_point(ctx.obstacles, &stance)
-                    .map(|p| Vec3::new(p.x, my_pos.y, p.y))
-            }),
+        stance_point: ctx.pillar_stance().and_then(|stance| {
+            super::pillar_stance::side_point(ctx.obstacles, &stance)
+                .map(|p| Vec3::new(p.x, my_pos.y, p.y))
+        }),
         avoid_dead_ends: false,
         flee_reach: 0.0,
     }

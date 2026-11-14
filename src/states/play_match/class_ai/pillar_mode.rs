@@ -613,9 +613,7 @@ pub fn update(
     let anchor = mates.first().copied();
     let rings = rings(ctx.obstacles);
     let heal_reach = shared.heal_range - HEAL_REACH_MARGIN;
-    let stance = ctx.pillar_stance().filter(|_| {
-        ctx.hide_rule() != crate::states::play_match::situation::HideRule::StancePartnerHalf
-    });
+    let stance = ctx.pillar_stance();
 
     let hugged = match state.pillar.mode {
         PillarMode::Hug { pillar } => rings.iter().find(|r| r.pillar == pillar).copied(),
