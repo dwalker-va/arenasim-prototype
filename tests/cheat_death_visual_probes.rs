@@ -1111,6 +1111,13 @@ fn the_ghost_fire_holds_with_the_buff_and_goes_with_it() {
     let age = h.posed_age(rig);
     assert!(close(age, 2.5), "{age}");
     assert_eq!(h.rig(rig).ended, None, "held");
+    // The streaks are long spent (by 1.73 s): retired, not left under the rig.
+    assert!(h.particles(rig).iter().all(|p| p.0.life == 2.5));
+    assert_eq!(
+        h.children(rig).len(),
+        CheatDeathPiece::all().len() + h.particles(rig).len(),
+        "spent particles are retired"
+    );
     let flame = |h: &Harness| {
         h.parts(rig)
             .into_iter()
@@ -1153,6 +1160,23 @@ fn the_ghost_fire_holds_with_the_buff_and_goes_with_it() {
     assert!(h.rigs_of(rogue).is_empty(), "played out by 3.6 s");
     assert_eq!(h.count::<CheatDeathPart>(), 0);
     assert_eq!(h.count::<ClientParticle>(), 0);
+}
+
+/// The fire ends with the buff whenever the buff ends, the onset or not: a
+/// buff seen and then gone at 1.0 s (nothing in the sim removes it that
+/// early; the rule is the buff, not the clock) ends the fire then.
+#[test]
+fn a_buff_seen_and_gone_ends_the_fire_then() {
+    let mut h = Harness::new();
+    let rogue = h.spawn_rogue(Vec3::new(0.0, 1.0, 0.0));
+    h.cheat_death(rogue);
+    h.tick(21);
+    let rig = h.rig_of(rogue);
+    assert!(close(h.posed_age(rig), 0.95));
+    h.set_auras(rogue, vec![]);
+    h.tick(1);
+    let ended = h.rig(rig).ended.expect("the buff ended");
+    assert!(close(ended, 1.0), "{ended}");
 }
 
 /// A save whose buff is never seen ends its fire at the end of the onset
