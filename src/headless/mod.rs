@@ -33,6 +33,6 @@ pub use matrix::run_matrix;
 pub use runner::{
     run_headless_match, run_headless_match_observed, run_headless_match_staged,
     run_headless_match_staged_prepared, run_headless_match_with, CombatantResult, EndReason,
-    FrameObservation, HeadlessMatchState, MatchResult, ObservedCombatant,
+    FrameObservation, HeadlessMatchState, MatchResult, ObservedCombatant, ObservedHealerState,
 };
 pub use stage::{Stage, Unit};

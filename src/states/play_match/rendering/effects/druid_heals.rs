@@ -511,7 +511,13 @@ impl DruidEffect {
         match kind {
             AuraLandingKind::RejuvenationSwirl => Some(DruidEffect::RejuvenationSwirl),
             AuraLandingKind::MarkOfTheWildGlyph => Some(DruidEffect::MarkOfTheWildGlyph),
-            AuraLandingKind::ShadowWordPainHit => None,
+            AuraLandingKind::ShadowWordPainHit
+            | AuraLandingKind::DivineFavorBurst
+            | AuraLandingKind::AuraMasteryWard
+            | AuraLandingKind::SacrificeShell
+            | AuraLandingKind::RetributionDisc
+            | AuraLandingKind::InfusionHalo
+            | AuraLandingKind::ArtOfWarRing => None,
         }
     }
 }
