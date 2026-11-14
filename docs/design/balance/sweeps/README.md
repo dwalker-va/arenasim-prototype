@@ -535,3 +535,12 @@ frames with five or more casters alive, occluded 18.6s -> 17.8s. On Nagrand the
 a whole-match figure there measures the divergence, not the rule. Over the
 whole bank every mean is unchanged to 0.01s. `tests/camp_sweep.rs` (three
 casters) is identical before and after.
+
+## `2026-11-13-as129-pet-dispel.py`
+
+Behind `2026-11-13-as129-healers-dispel-pets.md` (card AS-129). No JSONL is
+committed: the 2v2 input is `gen_sweep.py`'s own deterministic output, and the
+script derives the Nagrand/`TeamPlan` set (`nagrand`) and the 3v3 sample (`r3`)
+from it; the commands are in its docstring. `sides before.csv after.csv`
+scores an arm pair from the side holding a healer+pet team, after checking
+that every match without one is unchanged.

@@ -1895,18 +1895,22 @@ pub struct AllyRemoval {
 /// Every `is_dispel` ability is answered here BY NAME —
 /// `ally_removal_names_every_dispel` fails until a new one is classified, so a
 /// dispel cannot join the game without deciding whether it frees allies. The
-/// `reaches_pets` column is the pet rule the casting AIs apply: the healers'
-/// shared scan ([`try_dispel_ally`]) skips pets, Devour Magic's
-/// (`pet_ai::try_devour_magic`) takes any living teammate. Both scans read
-/// their scope and pet reach from here, so change a dispel here and its cast
-/// and every question asked of it (the Hunter's "can anyone free my trap's
-/// victim?") move together. Master's Call shares only its scope
-/// ([`MASTERS_CALL_IMPAIRMENTS`]): it frees roots and slows, never a trap.
+/// `reaches_pets` column is the pet rule the casting AIs apply. Every DISPEL
+/// reaches the team's pets (user ruling on AS-126, AS-129): the healers'
+/// shared scan ([`scan_ally_dispel`]) and their walk ([`owed_dispel`]) rank a
+/// pet below a non-pet teammate and set it aside while one is dying
+/// ([`ally_dispel_candidate`]); Devour Magic's (`pet_ai::try_devour_magic`)
+/// prefers a non-pet too. Every scan reads its scope and pet reach from here,
+/// so change a dispel here and its cast and every question asked of it (the
+/// Hunter's "can anyone free my trap's victim?") move together. Master's Call
+/// shares only its scope ([`MASTERS_CALL_IMPAIRMENTS`]): it frees roots and
+/// slows, never a trap, and its own scans pick the Hunter or a non-pet
+/// teammate.
 pub fn ally_removal(ability: AbilityType) -> Option<AllyRemoval> {
     match ability {
         AbilityType::DispelMagic | AbilityType::PaladinCleanse => Some(AllyRemoval {
             scope: ally_dispel_scope(ability),
-            reaches_pets: false,
+            reaches_pets: true,
         }),
         AbilityType::DevourMagic => Some(AllyRemoval {
             scope: ally_dispel_scope(ability),
@@ -2045,7 +2049,8 @@ pub const ROOT_DISPEL_PRIORITY: i32 = 85;
 
 /// Whether the root on `ally` is keeping it from doing its job — the situation
 /// that makes a root worth a dispel's GCD ahead of a heal:
-/// - a MELEE teammate ([`CharacterClass::is_melee`]) whose target has stepped
+/// - a MELEE teammate ([`CharacterClass::is_melee`]) or a pet — every pet
+///   fights in melee, whatever its owner's class — whose target has stepped
 ///   out of its swing range ([`MELEE_RANGE`]) — Frost Nova's whole purpose, the
 ///   Mage walking off the Rogue it froze; or
 /// - a RANGED teammate being trained: a visible enemy chaser (a melee class or
@@ -2065,7 +2070,7 @@ pub fn root_holds_back(ctx: &CombatContext, ally: &CombatantInfo) -> bool {
     if ally.entity == ctx.self_entity {
         return false;
     }
-    if ally.class.is_melee() && !ally.is_pet {
+    if ally.class.is_melee() || ally.is_pet {
         return ally
             .target
             .and_then(|t| ctx.combatants.get(&t))
@@ -2178,7 +2183,8 @@ pub fn can_cast_dispel(
 }
 
 /// The teammate a healer should WALK to so that `dispel` can free it: the
-/// nearest living non-pet teammate (never the healer itself) holding crowd
+/// nearest living teammate (never the healer itself; a pet only after every
+/// non-pet one, [`ally_dispel_candidate`]) holding crowd
 /// control that `dispel` removes at the urgent bar — or, for the Paladin's
 /// Cleanse, a root holding it back within a short walk ([`owed_dispel`]) —
 /// which `dispel` does not
@@ -2223,8 +2229,9 @@ pub enum OwedDispel {
 /// removes at the urgent bar, and whether the dispel reaches one from `my_pos`.
 /// A reached teammate wins over every unreached one (the rotation frees it
 /// first, where the healer stands); otherwise the nearest unreached one, entity
-/// order breaking ties. `None` when no teammate holds such crowd control, or the
-/// healer cannot afford the dispel.
+/// order breaking ties. A pet is owed only as [`ally_dispel_candidate`] allows,
+/// and ranks below a non-pet teammate within each of the two. `None` when no
+/// teammate holds such crowd control, or the healer cannot afford the dispel.
 ///
 /// Only when nothing is owed at the urgent bar, a dispel whose rotation clears
 /// roots at the root bar ([`clears_held_roots`] — the Paladin's Cleanse) also
@@ -2245,7 +2252,10 @@ pub fn owed_dispel(
     dispel: AbilityType,
 ) -> Option<OwedDispel> {
     let def = abilities.get(&dispel)?;
-    let AllyRemoval { scope, .. } = ally_removal(dispel)?;
+    let AllyRemoval {
+        scope,
+        reaches_pets,
+    } = ally_removal(dispel)?;
     if current_mana < def.mana_cost {
         return None;
     }
@@ -2256,7 +2266,7 @@ pub fn owed_dispel(
                 .any(|a| scope.takes(a) && ally_dispel_priority(a) >= URGENT_DISPEL_PRIORITY)
         })
     };
-    if let Some(owed) = owed_by(ctx, def.range, entity, my_pos, urgent) {
+    if let Some(owed) = owed_by(ctx, def.range, reaches_pets, entity, my_pos, urgent) {
         return Some(owed);
     }
     if !clears_held_roots(dispel) || !root_dispel_allowed(ctx) {
@@ -2283,37 +2293,51 @@ pub fn owed_dispel(
                 })
             })
     };
-    owed_by(ctx, def.range, entity, my_pos, held_root)
+    owed_by(ctx, def.range, reaches_pets, entity, my_pos, held_root)
 }
 
-/// [`owed_dispel`]'s scan over the healer's living non-pet teammates that
-/// `owes` picks out: the first one the dispel reaches, else the nearest
-/// unreached one, entity order breaking ties.
+/// [`owed_dispel`]'s scan over the healer's living teammates — its pets too
+/// where the dispel reaches them ([`ally_dispel_candidate`]) — that `owes`
+/// picks out: one the dispel reaches, else the nearest unreached one. A non-pet
+/// teammate ranks above a pet within each, as in [`scan_ally_dispel`]; entity
+/// order breaks the remaining ties.
 fn owed_by(
     ctx: &CombatContext,
     range: f32,
+    reaches_pets: bool,
     entity: Entity,
     my_pos: Vec3,
     owes: impl Fn(&CombatantInfo) -> bool,
 ) -> Option<OwedDispel> {
-    let mut nearest: Option<(f32, Entity)> = None;
-    for ally in ctx.alive_allies() {
+    let my_team = ctx.self_info().map(|i| i.team).unwrap_or(0);
+    let mut reached_pet: Option<Entity> = None;
+    let mut nearest: Option<(bool, f32, Entity)> = None;
+    for ally in ctx.combatants.values() {
+        if ally.team != my_team || !ally.is_alive {
+            continue;
+        }
         // Never itself, and never a cycloned teammate: no dispel reaches one.
         if ally.entity == entity || ctx.is_cycloned(ally.entity) {
             continue;
         }
-        if !owes(ally) {
+        if !owes(ally) || !ally_dispel_candidate(ctx, ally, reaches_pets) {
             continue;
         }
         if cast_reach(ctx, range, my_pos, ally.position) == CastReach::Reaches {
-            return Some(OwedDispel::Reached(ally.entity));
+            if !ally.is_pet {
+                return Some(OwedDispel::Reached(ally.entity));
+            }
+            reached_pet.get_or_insert(ally.entity);
+            continue;
         }
-        let distance = my_pos.distance(ally.position);
-        if nearest.is_none_or(|(d, e)| (distance, ally.entity) < (d, e)) {
-            nearest = Some((distance, ally.entity));
+        let key = (ally.is_pet, my_pos.distance(ally.position), ally.entity);
+        if nearest.is_none_or(|best| key < best) {
+            nearest = Some(key);
         }
     }
-    nearest.map(|(_, e)| OwedDispel::Unreached(e))
+    reached_pet
+        .map(OwedDispel::Reached)
+        .or(nearest.map(|(_, _, e)| OwedDispel::Unreached(e)))
 }
 
 /// The dispels whose rotation clears a root holding a teammate back at
@@ -2366,11 +2390,27 @@ pub struct AllyDispelScan {
     pub los_blocked: bool,
 }
 
+/// Whether a healer's ally dispel may take teammate `ally` as a candidate, by
+/// what it IS: any non-pet teammate; a pet only when the dispel reaches pets
+/// ([`AllyRemoval::reaches_pets`]) and no living non-pet teammate — the healer
+/// included — is dying ([`TeamSituation::dying_allies`]). The one pet rule the
+/// healers' dispel scan ([`scan_ally_dispel`]) and their walk ([`owed_dispel`])
+/// both apply: a pet in crowd control is a GCD worth spending, a dying
+/// teammate's heal is worth more.
+pub fn ally_dispel_candidate(
+    ctx: &CombatContext,
+    ally: &CombatantInfo,
+    reaches_pets: bool,
+) -> bool {
+    !ally.is_pet || (reaches_pets && ctx.situation().dying_allies().next().is_none())
+}
+
 /// The healers' ally-dispel candidate scan (Priest's Dispel Magic, Paladin's
 /// Cleanse): among living teammates `dispel` may free ([`ally_removal`] — scope
-/// and pet reach), the one whose highest-priority debuff the dispel TAKES
-/// ([`DispelScope::takes`]) is worth at least `min_priority`, and which the
-/// dispel reaches ([`cast_reach`]).
+/// and pet reach, [`ally_dispel_candidate`]), the one whose highest-priority
+/// debuff the dispel TAKES ([`DispelScope::takes`]) is worth at least
+/// `min_priority`, and which the dispel reaches ([`cast_reach`]). At equal
+/// priority a non-pet teammate ranks above a pet, then entity order.
 ///
 /// Two exclusions are structural, never a low score:
 /// - a debuff the scope does not take is not a candidate at all — a Cyclone is
@@ -2394,12 +2434,15 @@ pub fn scan_ally_dispel(
         return AllyDispelScan::default();
     };
     let mut scan = AllyDispelScan::default();
-    let mut best: Option<(Entity, i32)> = None;
+    // The best candidate's rank: its priority, then non-pet over pet.
+    let mut best: Option<(Entity, (i32, bool))> = None;
 
     for (e, info) in ctx.combatants.iter() {
-        // Must be alive ally; pets only where this dispel reaches them
-        // (`ally_removal` — the healers' dispels do not).
-        if info.team != my_team || info.current_health <= 0.0 || (info.is_pet && !reaches_pets) {
+        // Must be alive ally; a pet only as `ally_dispel_candidate` allows.
+        if info.team != my_team
+            || info.current_health <= 0.0
+            || !ally_dispel_candidate(ctx, info, reaches_pets)
+        {
             continue;
         }
         if ctx.is_cycloned(*e) {
@@ -2436,8 +2479,9 @@ pub fn scan_ally_dispel(
             }
         }
 
-        if best.is_none_or(|(_, best_prio)| highest_priority > best_prio) {
-            best = Some((*e, highest_priority));
+        let rank = (highest_priority, !info.is_pet);
+        if best.is_none_or(|(_, best_rank)| rank > best_rank) {
+            best = Some((*e, rank));
         }
     }
     scan.target = best.map(|(e, _)| e);
@@ -2794,9 +2838,9 @@ mod dispel_reach_tests {
             freeing,
             vec![
                 (AbilityType::DevourMagic, true),
-                (AbilityType::DispelMagic, false),
+                (AbilityType::DispelMagic, true),
                 (AbilityType::MastersCall, false),
-                (AbilityType::PaladinCleanse, false),
+                (AbilityType::PaladinCleanse, true),
             ]
         );
     }
