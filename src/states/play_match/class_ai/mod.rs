@@ -987,6 +987,22 @@ impl<'a> CombatContext<'a> {
     /// The team waits such a hold out, so no damage or damage over time is
     /// cast on its bearer.
     pub fn has_friendly_breakable_cc(&self, target: Entity) -> bool {
+        self.has_friendly_breakable_cc_landing(target, None)
+    }
+
+    /// [`Self::has_friendly_breakable_cc`], with the deciding unit's OWN Fear
+    /// on `target` judged where a cast begun now LANDS, `lands_after` seconds
+    /// from now (AS-495, the Fear window): that Fear counts only while more
+    /// than [`FEAR_WINDOW_LEAD`] of it will be left then, so damage timed to
+    /// land in its last moments goes. Every other friendly hold — a
+    /// teammate's Polymorph, Freezing Trap or Fear — counts as it always has.
+    /// With `lands_after` `None` it is [`Self::has_friendly_breakable_cc`]
+    /// exactly.
+    pub fn has_friendly_breakable_cc_landing(
+        &self,
+        target: Entity,
+        lands_after: Option<f32>,
+    ) -> bool {
         let my_team = self.self_info().map(|i| i.team).unwrap_or(0);
         self.active_auras
             .get(&target)
@@ -996,9 +1012,23 @@ impl<'a> CombatContext<'a> {
                         && a.caster
                             .and_then(|c| self.combatants.get(&c).map(|info| info.team))
                             == Some(my_team)
+                        && !lands_after.is_some_and(|after| {
+                            is_own_breakable_fear(a, self.self_entity)
+                                && a.duration - after <= FEAR_WINDOW_LEAD
+                        })
                 })
             })
             .unwrap_or(false)
+    }
+
+    /// The deciding unit's own breakable Fear on `target` (AS-495): the Fear
+    /// window it reads. A Death Coil horror never breaks and is not one.
+    pub fn own_fear_on(&self, target: Entity) -> Option<&Aura> {
+        self.active_auras
+            .get(&target)?
+            .iter()
+            .filter(|a| is_own_breakable_fear(a, self.self_entity))
+            .max_by(|a, b| a.duration.total_cmp(&b.duration))
     }
 
     /// Check if target has DoTs from a friendly caster that would break Polymorph/Freezing Trap.
@@ -1716,6 +1746,19 @@ impl Incoming {
 /// ([`CombatContext::held_in_hard_cc`]). The Rogue's Kidney Shot chain onto
 /// its own Cheap Shot fires at exactly this point.
 pub const CC_CHAIN_WINDOW: f32 = 0.5;
+
+/// How early before its own Fear ends a unit's damage on the feared target
+/// may land (AS-495): the Chain play's hand-off lead, so a cast and a re-Fear
+/// are timed by the one clock.
+pub const FEAR_WINDOW_LEAD: f32 = chain::HANDOFF_LEAD;
+
+/// Is `aura` a Fear `caster` cast that damage breaks — its own Fear, not a
+/// Death Coil horror (which never breaks) nor a teammate's?
+pub fn is_own_breakable_fear(aura: &Aura, caster: Entity) -> bool {
+    aura.effect_type == AuraType::Fear
+        && aura.break_on_damage_threshold > 0.0
+        && aura.caster == Some(caster)
+}
 
 /// Does this aura make its holder IMMUNE TO DAMAGE — a target no attacker,
 /// interrupt or Mana Burn should spend a cast on?
@@ -2605,6 +2648,7 @@ pub fn try_purge_enemy(
         check_friendly_dots: false,
         check_target_immune: true,
         bypass_silence: false,
+        time_own_fear: false,
     };
 
     // Value floor: `min_priority` is PURGE_MIN_PRIORITY for the ordinary purge

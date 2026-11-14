@@ -45,6 +45,12 @@ pub struct PreCastOpts {
     /// Allow the cast even if the caster is silenced. Reserved for
     /// abilities that explicitly bypass silence (Divine Shield).
     pub bypass_silence: bool,
+
+    /// With `check_friendly_cc`: judge the caster's OWN Fear on the target
+    /// where the cast LANDS (AS-495, the Fear window): damage that lands in
+    /// the Fear's last [`super::FEAR_WINDOW_LEAD`] goes, so the Warlock's
+    /// damage lands as its Fear ends instead of a cast after it.
+    pub time_own_fear: bool,
 }
 
 /// The note a cast the slot's per-match choices lock is rejected with
@@ -132,7 +138,12 @@ pub fn pre_cast_ok_but_hold(
     opts: PreCastOpts,
 ) -> bool {
     if let Some((target_entity, _)) = target {
-        if opts.check_friendly_cc && ctx.has_friendly_breakable_cc(target_entity) {
+        if opts.check_friendly_cc
+            && ctx.has_friendly_breakable_cc_landing(
+                target_entity,
+                own_fear_lands_after(def, caster_pos, auras, target, opts),
+            )
+        {
             return false;
         }
         if opts.check_friendly_dots && ctx.has_friendly_dots_on_target(target_entity) {
@@ -232,9 +243,10 @@ pub fn fits_window(
 /// ([`super::CombatContext::held_in_hard_cc_at`]): under the Chain play, a
 /// hand-off onto the subject of the lock being handed off is judged at the
 /// moment it LANDS ([`lands_after`]) — a 1.5s Polymorph begun to land in the
-/// lock's last moments starts while more than the chain window is left.
-/// Every other cast is judged now (0), as the hold rule always has: so this
-/// changes nothing outside the play.
+/// lock's last moments starts while more than the chain window is left. So is
+/// a hold the caster casts onto a target its own Fear holds (AS-495, the Fear
+/// window's re-Fear). Every other cast is judged now (0), as the hold rule
+/// always has.
 pub fn hold_lands_after(
     def: &AbilityConfig,
     caster_pos: Vec3,
@@ -243,11 +255,29 @@ pub fn hold_lands_after(
     ctx: &CombatContext,
 ) -> f32 {
     match target {
-        Some((entity, target_pos)) if ctx.chain_window().is_some_and(|w| w.subject == entity) => {
+        Some((entity, target_pos))
+            if ctx.chain_window().is_some_and(|w| w.subject == entity)
+                || ctx.own_fear_on(entity).is_some() =>
+        {
             lands_after(def, caster_pos, target_pos, auras)
         }
         _ => 0.0,
     }
+}
+
+/// When `opts.time_own_fear` asks for it, how long after now a cast of `def`
+/// on `target` lands ([`lands_after`]): the moment the friendly-CC gate judges
+/// the caster's own Fear at. `None` otherwise — the gate judges every hold now.
+fn own_fear_lands_after(
+    def: &AbilityConfig,
+    caster_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target: Option<(Entity, Vec3)>,
+    opts: PreCastOpts,
+) -> Option<f32> {
+    let (_, target_pos) = target?;
+    opts.time_own_fear
+        .then(|| lands_after(def, caster_pos, target_pos, auras))
 }
 
 /// Does this ability HOLD what it lands on — apply crowd control that stops
@@ -418,7 +448,12 @@ pub fn classify_pre_cast_failure(
         {
             return RejectionReason::TargetAlreadyCCd { cc_type };
         }
-        if opts.check_friendly_cc && ctx.has_friendly_breakable_cc(target_entity) {
+        if opts.check_friendly_cc
+            && ctx.has_friendly_breakable_cc_landing(
+                target_entity,
+                own_fear_lands_after(def, caster_pos, auras, target, opts),
+            )
+        {
             return RejectionReason::FriendlyBreakableCC;
         }
         if opts.check_friendly_dots && ctx.has_friendly_dots_on_target(target_entity) {
