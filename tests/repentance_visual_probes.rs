@@ -135,6 +135,20 @@ impl Harness {
         self.app.world_mut().spawn(pending);
     }
 
+    /// Arcane Intellect on `unit`, a lasting buff a match's victim carries
+    /// beside the incapacitate (it outlives Repentance and no break or
+    /// hostile-magic dispel takes it).
+    fn buff(&mut self, unit: Entity) {
+        let defs = AbilityDefinitions::default();
+        let pending = AuraPending::from_ability(
+            unit,
+            unit,
+            defs.get_unchecked(&AbilityType::ArcaneIntellect),
+        )
+        .expect("Arcane Intellect lands an aura");
+        self.app.world_mut().spawn(pending);
+    }
+
     fn tick(&mut self, frames: u32) {
         for _ in 0..frames {
             self.app.update();
@@ -374,6 +388,22 @@ fn the_landing_flashes_the_paladins_hands_and_bursts_gold_at_the_victims_chest()
     for (p, _) in &particles {
         assert!((*p - chest).length() < 0.55, "{p} off the chest {chest}");
     }
+    // The bench's emitters draw `lighter`: every impact palette is additive.
+    let modes: Vec<AlphaMode> = {
+        let mut q = h.app.world_mut().query::<&ClientParticle>();
+        let handles: Vec<Handle<StandardMaterial>> = q
+            .iter(h.app.world())
+            .filter(|p| !p.owned)
+            .flat_map(|p| p.palette.iter().cloned().collect::<Vec<_>>())
+            .collect();
+        let materials = h.app.world().resource::<Assets<StandardMaterial>>();
+        handles
+            .iter()
+            .map(|m| materials.get(m).unwrap().alpha_mode)
+            .collect()
+    };
+    assert!(!modes.is_empty());
+    assert!(modes.iter().all(|m| *m == AlphaMode::Add), "{modes:?}");
     h.tick_secs(oneshot_secs(PaladinOneShotKind::RepentanceImpact) - 0.25);
     assert!(h.rigs().is_empty(), "the impact retires at 0.93 s");
     assert_eq!(h.swirls().len(), 1, "the swirl holds on");
@@ -460,9 +490,10 @@ fn the_swirl_rings_the_victims_head_while_repentance_holds() {
             let up = g.rotation() * Vec3::Y;
             let rolled = cam * Quat::from_rotation_z(-angle) * Vec3::Y;
             assert!(up.dot(rolled) > 0.999, "rolled along the orbit");
-            // Drawn as the bench draws it: an additive, unlit star, held at
-            // its alpha once faded in.
-            assert_eq!(material.alpha_mode, AlphaMode::Add);
+            // Drawn as the bench draws it: its `customDraw` sprite sets no
+            // composite operation, so `source-over` — an alpha-blended,
+            // unlit star, held at its alpha once faded in.
+            assert_eq!(material.alpha_mode, AlphaMode::Blend);
             assert!(material.unlit);
             let want = 0.6 - star.trail as f32 * 0.13;
             assert!(
@@ -626,36 +657,55 @@ fn the_sparkles_draw_the_benchs_two_ramps() {
 
 // ── how it ends ─────────────────────────────────────────────────────────────
 
+/// The name Arcane Intellect's aura carries (the buff the probes below give
+/// the victim).
+fn buff_name() -> String {
+    AbilityDefinitions::default()
+        .get_unchecked(&AbilityType::ArcaneIntellect)
+        .name
+        .clone()
+}
+
 /// Damage breaks Repentance (`process_aura_breaks`), and the swirl goes
-/// with it — stars, sparkles and all — and is not raised again.
+/// with it — stars, sparkles and all — and is not raised again, while the
+/// victim keeps the buff it also holds.
 #[test]
 fn the_swirl_ends_when_damage_breaks_repentance() {
     let mut h = Harness::new();
     let (paladin, mage, _) = paladin_and_mage(&mut h);
+    h.buff(mage);
     h.repent(paladin, mage);
     h.tick_secs(1.0);
     assert_eq!(h.swirls().len(), 1);
+    assert_eq!(h.auras(mage).len(), 2, "the buff and the incapacitate");
     assert!(!h.sparkles().is_empty() && h.count::<RepentanceStar>() == 12);
     h.app
         .world_mut()
         .entity_mut(mage)
         .insert(DamageTakenThisFrame { amount: 12.0 });
     h.tick(2);
-    assert!(h.auras(mage).is_empty(), "the damage broke it");
+    assert_eq!(
+        h.auras(mage),
+        vec![buff_name()],
+        "the damage broke it alone"
+    );
     assert!(h.swirl_gone(), "the swirl breaks with it");
     h.tick(10);
     assert!(h.swirl_gone(), "and stays gone");
 }
 
-/// A dispel takes Repentance (`process_dispels`), and the swirl with it.
+/// A dispel takes Repentance (`process_dispels`), and the swirl with it,
+/// while the victim keeps its buff.
 #[test]
 fn the_swirl_ends_when_repentance_is_dispelled() {
     let mut h = Harness::new();
     let (paladin, mage, _) = paladin_and_mage(&mut h);
     let priest = h.unit(2, CharacterClass::Priest, Vec3::new(6.0, 1.0, 4.0));
+    h.buff(mage);
     h.repent(paladin, mage);
     h.tick_secs(1.0);
     assert_eq!(h.swirls().len(), 1);
+    assert_eq!(h.auras(mage).len(), 2, "the buff and the incapacitate");
     h.app.world_mut().spawn(DispelPending {
         target: mage,
         dispeller: priest,
@@ -665,46 +715,66 @@ fn the_swirl_ends_when_repentance_is_dispelled() {
         scope: DispelScope::Magic,
     });
     h.tick(2);
-    assert!(!h.auras(mage).contains(&REPENTANCE_AURA.to_string()));
+    assert_eq!(h.auras(mage), vec![buff_name()], "the dispel took it alone");
     assert!(h.swirl_gone(), "the dispel takes the swirl");
 }
 
-/// Repentance runs out (`update_auras`, which removes the victim's last
-/// aura's component): the stars fade over its last 0.2 s and the swirl goes
-/// when it does.
+/// Repentance runs out (`update_auras`): the stars fade over its last 0.2 s
+/// and the swirl goes when it does — whether it was the victim's last aura
+/// (the component is removed) or the victim keeps a buff (the component
+/// stays, without it).
 #[test]
 fn the_swirl_fades_out_and_ends_when_repentance_expires() {
-    let mut h = Harness::new();
-    let (paladin, mage, _) = paladin_and_mage(&mut h);
-    h.repent(paladin, mage);
-    h.tick(1);
-    let alpha = |h: &mut Harness| {
-        h.stars()
-            .iter()
-            .find(|(s, _, _)| s.point == 1 && s.trail == 0)
-            .map(|(_, _, m)| m.base_color.alpha())
-            .unwrap()
-    };
-    let left = |h: &Harness| h.app.world().get::<ActiveAuras>(mage).unwrap().auras[0].duration;
-    h.tick(2);
-    let early = alpha(&mut h);
-    assert!(early > 0.0 && early < 0.6 * 0.5, "fading in: {early}");
-    // On to 0.1 s before it runs out.
-    h.tick_secs(left(&h) - 0.1);
-    let remaining = left(&h);
-    assert!((0.05..0.15).contains(&remaining), "{remaining}");
-    let late = alpha(&mut h);
-    let want = 0.6 * remaining / 0.2;
-    assert!(
-        (late - want).abs() < 0.6 * DT / 0.2 + 1e-3,
-        "{late} vs {want}"
-    );
-    h.tick_secs(0.2);
-    assert!(
-        h.app.world().get::<ActiveAuras>(mage).is_none(),
-        "the last aura's component is removed"
-    );
-    assert!(h.swirl_gone(), "the swirl ends with it");
+    for buffed in [false, true] {
+        let mut h = Harness::new();
+        let (paladin, mage, _) = paladin_and_mage(&mut h);
+        if buffed {
+            h.buff(mage);
+        }
+        h.repent(paladin, mage);
+        h.tick(1);
+        let alpha = |h: &mut Harness| {
+            h.stars()
+                .iter()
+                .find(|(s, _, _)| s.point == 1 && s.trail == 0)
+                .map(|(_, _, m)| m.base_color.alpha())
+                .unwrap()
+        };
+        let left = |h: &Harness| {
+            h.app
+                .world()
+                .get::<ActiveAuras>(mage)
+                .unwrap()
+                .auras
+                .iter()
+                .find(|a| a.ability_name == REPENTANCE_AURA)
+                .unwrap()
+                .duration
+        };
+        h.tick(2);
+        let early = alpha(&mut h);
+        assert!(early > 0.0 && early < 0.6 * 0.5, "fading in: {early}");
+        // On to 0.1 s before it runs out.
+        h.tick_secs(left(&h) - 0.1);
+        let remaining = left(&h);
+        assert!((0.05..0.15).contains(&remaining), "{remaining}");
+        let late = alpha(&mut h);
+        let want = 0.6 * remaining / 0.2;
+        assert!(
+            (late - want).abs() < 0.6 * DT / 0.2 + 1e-3,
+            "{late} vs {want}"
+        );
+        h.tick_secs(0.2);
+        if buffed {
+            assert_eq!(h.auras(mage), vec![buff_name()], "the buff outlives it");
+        } else {
+            assert!(
+                h.app.world().get::<ActiveAuras>(mage).is_none(),
+                "the last aura's component is removed"
+            );
+        }
+        assert!(h.swirl_gone(), "buffed {buffed}: the swirl ends with it");
+    }
 }
 
 /// A killing blow leaves the aura on the corpse (`process_aura_breaks`

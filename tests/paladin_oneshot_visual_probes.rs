@@ -684,6 +684,9 @@ fn bench_piece(role: OneShotPieceRole) -> (Option<[u8; 3]>, Sprite) {
         R::ArtOfWarDisc => (Some([221, 181, 57]), Sprite::Glyph(10)),
         R::ArtOfWarGlow => (Some([255, 230, 140]), Sprite::Glow),
         R::ArtOfWarSpark { .. } => (None, Sprite::Star),
+        R::SacredDisc => (Some([243, 211, 82]), Sprite::Glyph(10)),
+        R::SacredRune { .. } => (Some([253, 218, 112]), Sprite::Star),
+        R::SacredBase => (Some([253, 218, 112]), Sprite::Glyph(6)),
     }
 }
 
@@ -704,6 +707,7 @@ fn every_piece_draws_the_benchs_colour_and_sprite() {
         AuraLandingKind::RetributionDisc,
         AuraLandingKind::InfusionHalo,
         AuraLandingKind::ArtOfWarRing,
+        AuraLandingKind::SacredShieldDisc,
     ]
     .into_iter()
     .enumerate()
@@ -761,7 +765,7 @@ fn every_piece_draws_the_benchs_colour_and_sprite() {
         seen.insert(format!("{sprite:?}"));
     }
     // Every sprite the bench uses is drawn somewhere: the probe is not vacuous.
-    assert_eq!(seen.len(), 8, "{seen:?}");
+    assert_eq!(seen.len(), 9, "{seen:?}");
 }
 
 /// Blessing of Sacrifice's motes are the bench's `blob`: a hard disc, not a

@@ -46,7 +46,15 @@ use crate::states::play_match::components::*;
 // bench `scale` key is a sprite RADIUS; a hand-drawn sprite's size is its
 // full width.
 //
-// Two departures from the bench, each for the match it plays in:
+// **Blending follows the bench's canvas.** Its emitters draw `lighter`
+// (additive, M2 blend 4): the impact's stars and streaks and the falling
+// sparkles are `AlphaMode::Add`. Its `customDraw` sprites set no composite
+// operation, so they draw `source-over`: the circling stars are
+// `AlphaMode::Blend`, which keeps their violet saturated where an additive
+// star would wash pale — and they are the cue that tells this swirl from
+// the hueless Stun whirl.
+//
+// Three departures from the bench, each for the match it plays in:
 //
 // - **The impact stands in front of the body.** The bench draws without
 //   depth; here a camera-facing quad at the chest is inside the 0.5 yd body
@@ -62,6 +70,11 @@ use crate::states::play_match::components::*;
 //   instant whose incapacitate holds from the frame it lands, and the client
 //   fires the cast, impact and state kits together for an instant — as every
 //   AS-374 one-shot plays its hands and its landing.
+// - **No flinch.** The bench leans the victim's capsule for 300 ms as the
+//   impact lands (kit 6499's body anim 9). We draw no body animation for
+//   crowd control, and this visual touches no body (no transform, no
+//   material), so it never contends with the Polymorph and Fear body
+//   treatments — the same ruling that leaves out the Stun pose.
 //
 // **Lifetimes.** The impact is a landing: it plays its 0.93 s on the victim
 // whatever the incapacitate does. The swirl shows the incapacitate HOLDING:
@@ -558,9 +571,10 @@ pub fn update_repentance_swirls(
             let material = materials.add(StandardMaterial {
                 base_color: Color::srgb_u8(pose.rgb[0], pose.rgb[1], pose.rgb[2]).with_alpha(0.0),
                 base_color_texture: Some(texture.clone()),
-                // The bench adds colour × sprite × alpha and nothing else.
+                // The bench draws these `source-over`: colour × sprite at
+                // the star's alpha, blended over what is behind it, unlit.
                 unlit: true,
-                alpha_mode: AlphaMode::Add,
+                alpha_mode: AlphaMode::Blend,
                 cull_mode: None,
                 double_sided: true,
                 ..default()

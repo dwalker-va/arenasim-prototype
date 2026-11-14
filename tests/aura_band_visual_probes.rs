@@ -93,8 +93,8 @@ const BAND_TYPES: &[AuraType] = &[
     // The healing increase (AS-415). Guardian Spirit's own face and rider are
     // owned by NAME by its spirit (AS-354); any other user meets the band.
     AuraType::HealingReceivedIncrease,
-    // Sacred Shield's arming buff (AS-421): the band until AS-375 draws its
-    // disc and absorb card.
+    // A triggered absorb's arming buff (AS-421): the band for an unnamed one;
+    // Sacred Shield's own is owned by its named landing (AS-375).
     AuraType::TriggeredAbsorb,
     // Aura Mastery's immunity (AS-420): the band for an unnamed one; Aura
     // Mastery's own is owned by its named landing (AS-374).
