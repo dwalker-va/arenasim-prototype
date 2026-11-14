@@ -451,11 +451,15 @@ const UNSTRUCTURED_HEAL_LINES: &[(&str, &str, usize, &str)] = &[
 
 #[test]
 fn every_heal_line_with_a_healer_is_a_row() {
-    // A glob or renamed import would let a bare `Healing` past the pattern.
-    let aliased = Regex::new(r"\bCombatLogEventType\s*(::\s*[*{]|as\b)").unwrap();
+    // A glob or renamed import, or a type alias (`type Ev = CombatLogEventType;`
+    // then `Ev::Healing`), would let a `Healing` past the pattern.
+    let aliased = Regex::new(
+        r"\bCombatLogEventType\s*(::\s*[*{]|as\b)|\btype\s+[A-Za-z_][A-Za-z0-9_]*\s*=[^;]*\bCombatLogEventType\b",
+    )
+    .unwrap();
     assert_same(
-        "`CombatLogEventType` is imported by glob or alias, so this audit cannot see \
-         its `Healing`. Name it in full.",
+        "`CombatLogEventType` is imported by glob or alias, or named by a type alias, so \
+         this audit cannot see its `Healing`. Name it in full.",
         sites(&aliased, |_, _| true),
         BTreeSet::new(),
     );

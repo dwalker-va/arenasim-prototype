@@ -39,6 +39,7 @@ use bevy::prelude::App;
 const PRIEST: Unit = Unit::new(1, 0);
 const WARRIOR: Unit = Unit::new(1, 1);
 const MAGE: Unit = Unit::new(2, 0);
+const ENEMY_WARRIOR: Unit = Unit::new(2, 0);
 
 /// Every Holy node, Guardian Spirit among them.
 fn full_holy() -> Build {
@@ -319,4 +320,107 @@ fn with_no_save_there_is_no_guardian_spirit_row() {
     );
     assert_eq!(breakdown(&control), BTreeMap::new(), "{}", text(log));
     assert_eq!(control.priest_healing_done, 0.0);
+}
+
+// ---------------------------------------------------------------------------
+// Holy Nova's heal on a teammate
+// ---------------------------------------------------------------------------
+
+/// Weakened Soul, so the Priest does not spend its global cooldowns on Power
+/// Word: Shield.
+fn weakened() -> Aura {
+    Aura {
+        effect_type: AuraType::WeakenedSoul,
+        duration: 15.0,
+        ability_name: "Weakened Soul".into(),
+        ..Default::default()
+    }
+}
+
+/// Every heal row in `log`, as (source, target, ability, amount).
+fn heal_rows(log: &CombatLog) -> Vec<(String, String, String, f32)> {
+    log.entries
+        .iter()
+        .filter_map(|e| match &e.structured_data {
+            Some(StructuredEventData::Healing {
+                source,
+                target,
+                ability,
+                amount,
+                ..
+            }) => Some((source.clone(), target.clone(), ability.clone(), *amount)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A Priest at 60% with an enemy Warrior on it, Psychic Scream on cooldown, so
+/// it novas; its Warrior teammate 4 yards off, inside the nova, at `teammate`
+/// health.
+fn nova(teammate: f32) -> Finished {
+    let config = HeadlessMatchConfig {
+        team1: vec!["Priest".into(), "Warrior".into()],
+        team2: vec!["Warrior".into()],
+        random_seed: Some(2),
+        max_duration_secs: 4.0,
+        team1_builds: vec![full_holy()],
+        ..Default::default()
+    };
+    let stage = Stage::new()
+        .place(PRIEST, 0.0, 0.0)
+        .place(WARRIOR, 4.0, 0.0)
+        .place(ENEMY_WARRIOR, 1.5, 0.0)
+        .health(PRIEST, 0.6)
+        .health(WARRIOR, teammate)
+        .target(ENEMY_WARRIOR, PRIEST)
+        .resource(ENEMY_WARRIOR, 30.0)
+        .cooldown(PRIEST, AbilityType::PsychicScream, 30.0)
+        .aura(PRIEST, weakened())
+        .aura(WARRIOR, weakened());
+    run(build_headless_app_staged(&config, true, None, stage))
+}
+
+/// A Holy Nova heal on a hurt teammate is credited to the Priest who cast it,
+/// not to the teammate it landed on: the Priest's HEAL total is the sum of
+/// its rows, the teammate's share included, and the teammate's own total
+/// stays 0. In the control the teammate is unhurt, so the nova heals it
+/// nothing and every nova row is the Priest's heal on itself.
+#[test]
+fn a_holy_nova_heal_on_a_teammate_is_its_priests() {
+    let (priest, warrior) = (priest_id(), warrior_id());
+    let novas_on = |finished: &Finished, who: &str| -> f32 {
+        heal_rows(&finished.log)
+            .iter()
+            .filter(|(s, t, a, _)| s == &priest && t == who && a == "Holy Nova")
+            .map(|(.., amount)| amount)
+            .sum()
+    };
+
+    let hurt = nova(0.6);
+    let on_teammate = novas_on(&hurt, &warrior);
+    assert!(
+        on_teammate > 0.0 && novas_on(&hurt, &priest) > 0.0,
+        "the nova healed the Priest and its teammate:\n{}",
+        text(&hurt.log)
+    );
+    let (total, rows) = (hurt.totals[&priest], hurt.log.total_healing_done(&priest));
+    assert!(
+        (total - rows).abs() < 1e-3,
+        "the Priest's HEAL total {total} is its rows {rows}, {on_teammate} on its teammate \
+         included"
+    );
+    assert_eq!(hurt.totals[&warrior], 0.0, "the teammate healed no one");
+
+    let unhurt = nova(1.0);
+    assert!(
+        novas_on(&unhurt, &priest) > 0.0 && novas_on(&unhurt, &warrior) == 0.0,
+        "the nova healed the Priest and not its unhurt teammate:\n{}",
+        text(&unhurt.log)
+    );
+    let (total, rows) = (
+        unhurt.totals[&priest],
+        unhurt.log.total_healing_done(&priest),
+    );
+    assert!((total - rows).abs() < 1e-3, "HEAL {total}, rows {rows}");
+    assert_eq!(unhurt.totals[&warrior], 0.0);
 }
