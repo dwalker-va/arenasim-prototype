@@ -3,6 +3,7 @@ use std::f32::consts::PI;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::cheat_death::{plays_cheat_death, spawn_cheat_death, CHEAT_DEATH_SAVED_CUE};
 use super::hunter_shots::{
     particle_rotation, spawn_client_particle, ClientEmitter, EmitterAssets, EmitterSprite,
 };
@@ -796,7 +797,8 @@ pub fn spawn_saved_cue(commands: &mut Commands, holder: Entity, text_anchor: Vec
 
 /// Play every prevented killing blow: the client's heal landing (kit 232,
 /// Heal's rising gold stream) and the heal's number when the save landed a
-/// heal, and the shared "Saved" cue for every save its holder lived through.
+/// heal, the shared "Saved" cue for every save its holder lived through, and
+/// for Cheat Death its skull and ghost-fire (`cheat_death.rs`).
 /// A save whose holder another blow of the same frame killed plays nothing:
 /// there is no one saved to show it on. Consumes the marker.
 ///
@@ -841,9 +843,22 @@ pub fn consume_killing_blow_signals(
                 PlayMatchEntity,
             ));
         }
-        if GUARDIAN_SPIRIT_SAVED_CUE {
+        if saved_cue_plays(&saved.by) {
             spawn_saved_cue(&mut commands, saved.holder, anchor);
         }
+        if plays_cheat_death(&saved.by) {
+            spawn_cheat_death(&mut commands, saved.holder);
+        }
+    }
+}
+
+/// Whether a save, by what saved it, lands the shared "Saved" cue: each
+/// bench's own knob (Cheat Death's, or Guardian Spirit's for every other).
+pub fn saved_cue_plays(saved_by: &str) -> bool {
+    if plays_cheat_death(saved_by) {
+        CHEAT_DEATH_SAVED_CUE
+    } else {
+        GUARDIAN_SPIRIT_SAVED_CUE
     }
 }
 

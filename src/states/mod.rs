@@ -574,7 +574,8 @@ impl Plugin for StatesPlugin {
                 .run_if(in_combat_scene),
         )
         // A prevented killing blow (`KillingBlowPrevented`): the save's heal
-        // landing and the shared "Saved" cue (`guardian_spirit.rs`). Same
+        // landing, the shared "Saved" cue (`guardian_spirit.rs`) and Cheat
+        // Death's rig (`cheat_death.rs`). Same
         // FixedUpdate rationale as `consume_cast_ending_signals`.
         .add_systems(
             FixedUpdate,
@@ -966,6 +967,24 @@ impl Plugin for StatesPlugin {
                     play_match::animate_saved_flashes,
                 )
                     .chain(),
+            )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Cheat Death's skull and ghost-fire on the Rogue it saved: built and
+        // posed before the client particles age (its streaks and smoke are
+        // client particles), its particles turned after.
+        .add_systems(
+            Update,
+            (
+                (
+                    play_match::build_cheat_death_rigs,
+                    play_match::update_cheat_death,
+                )
+                    .chain()
+                    .before(play_match::animate_client_particles),
+                play_match::billboard_cheat_death_particles
+                    .after(play_match::animate_client_particles),
             )
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),

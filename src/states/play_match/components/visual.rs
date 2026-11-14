@@ -1,4 +1,5 @@
 use super::super::abilities::{AbilityType, SpellSchool};
+use super::super::combat_core::CHEAT_DEATH_NAME;
 use super::super::match_config::CharacterClass;
 use super::auras::AuraType;
 use super::combatant::AutoAttackKind;
@@ -1900,18 +1901,26 @@ pub enum AuraApplyOwner {
     /// (`HealingReceivedIncrease`, `KillingBlowSave`) are the damage
     /// pipeline's, which any later user meets on the band.
     GuardianSpirit,
+    /// Cheat Death's damage cut: the skull over the Rogue's head and the
+    /// ghost-fire round it, raised by the save itself (`cheat_death.rs`).
+    /// Owned per aura NAME, because its type (`DamageTakenReduction`) is
+    /// shared with auras that keep the band (Devotion Aura).
+    CheatDeath,
 }
 
 impl AuraApplyRoute {
     /// Route one aura INSTANCE's application: a named aura with a bespoke
-    /// landing ([`AuraLandingKind::for_aura`]) is owned by it, and so is
-    /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]); every other
-    /// aura routes by its type ([`Self::for_aura`]). The renderer asks this.
+    /// landing ([`AuraLandingKind::for_aura`]) is owned by it, and so are
+    /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]) and Cheat
+    /// Death by its save ([`CHEAT_DEATH_NAME`]); every other aura routes by
+    /// its type ([`Self::for_aura`]). The renderer asks this.
     pub fn for_instance(aura_type: AuraType, name: &str) -> Self {
         if AuraLandingKind::for_aura(aura_type, name).is_some() {
             AuraApplyRoute::Owned(AuraApplyOwner::AuraLanding)
         } else if name == GUARDIAN_SPIRIT_AURA {
             AuraApplyRoute::Owned(AuraApplyOwner::GuardianSpirit)
+        } else if name == CHEAT_DEATH_NAME {
+            AuraApplyRoute::Owned(AuraApplyOwner::CheatDeath)
         } else {
             Self::for_aura(aura_type)
         }

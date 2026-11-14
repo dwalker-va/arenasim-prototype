@@ -75,8 +75,11 @@ use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::bolt_kind_for;
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::client_landing_style;
+use arenasim::states::play_match::combat_core::cheat_death_aura;
 use arenasim::states::play_match::combat_core::ExtraSwingSource;
+use arenasim::states::play_match::combat_core::CHEAT_DEATH_NAME;
 use arenasim::states::play_match::components::Aura;
+use arenasim::states::play_match::components::AuraApplyOwner;
 use arenasim::states::play_match::components::AuraApplyRoute;
 use arenasim::states::play_match::components::AuraLandingKind;
 use arenasim::states::play_match::components::AuraType;
@@ -100,6 +103,7 @@ use arenasim::states::play_match::is_live_shield;
 use arenasim::states::play_match::lands_poison_cloud;
 use arenasim::states::play_match::on_use_items::OnUseEffect;
 use arenasim::states::play_match::oneshot_visual;
+use arenasim::states::play_match::plays_cheat_death;
 use arenasim::states::play_match::proc_trinkets::ProcEffect;
 use arenasim::states::play_match::root_style_for;
 use arenasim::states::play_match::talent_mechanics::MechanicKind;
@@ -1624,9 +1628,17 @@ fn mechanic_of(effect: &TalentEffect) -> Option<MechanicKind> {
 /// must answer it.
 fn mechanic_visual(kind: MechanicKind) -> Option<&'static str> {
     match kind {
+        // The save raises the skull and the ghost-fire, and the damage cut it
+        // leaves is owned by them rather than the generic band.
+        MechanicKind::CheatDeath => {
+            let cut = cheat_death_aura(0.9, 3.0);
+            (plays_cheat_death(CHEAT_DEATH_NAME)
+                && AuraApplyRoute::for_instance(cut.effect_type, &cut.ability_name)
+                    == AuraApplyRoute::Owned(AuraApplyOwner::CheatDeath))
+            .then_some("the skull over the head and the lavender ghost-fire (cheat_death.rs)")
+        }
         MechanicKind::SoulLink
         | MechanicKind::ReflectiveShield
-        | MechanicKind::CheatDeath
         | MechanicKind::MasterDemonologist
         | MechanicKind::DemonicSacrifice
         | MechanicKind::UnbreakableWill => None,
@@ -1653,10 +1665,6 @@ const TALENT_MECHANIC_MEMBERS: &[TalentId] = &[
 ];
 
 const TALENT_MECHANIC_KNOWN_SILENT: &[(TalentId, &str)] = &[
-    (
-        TalentId::CheatDeath,
-        "AS-336 (Cheat Death's save; AS-369 builds it on AS-354's shared Saved cue)",
-    ),
     (
         TalentId::DemonicSacrifice,
         "AS-350 (the sacrifice triad; the Felhunter's death is the ordinary one)",
