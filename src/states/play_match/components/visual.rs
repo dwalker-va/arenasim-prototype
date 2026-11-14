@@ -272,7 +272,11 @@ pub enum ShieldPhase {
 /// the cards frost blue at its own weights and adds icicles, a glint and a
 /// falling frost mist (`docs/design/2026-10-17-ice-barrier-client-data.md`).
 /// Aegis is PW:S's model with a silver outline
-/// (`docs/design/2026-10-29-trinket-effects-client-data.md` §1).
+/// (`docs/design/2026-10-29-trinket-effects-client-data.md` §1). Sacred
+/// Shield's absorb is a sibling model on PW:S's textures: one tall card, no
+/// bone scale until its death swell, gold flares through the loop and gold
+/// sparks as it dies (`docs/design/2026-10-18-paladin-talent-client-data.md`
+/// §5).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum ShieldKind {
     /// `holydivineshield_state_base.m2` (fdid 166342): hollow, all gold.
@@ -285,14 +289,19 @@ pub enum ShieldKind {
     /// own item absorbs wear its state kit 847), with a SILVER outline in
     /// place of PW:S's gold so the two can be told apart (AS-338 ruling).
     Aegis,
+    /// Sacred Shield's absorb (Wrath 58597, `blessed_mending_proc_impact.m2`,
+    /// kit 11040): `genericglow2b` and `shockwave10d` on one 3.2 x 4.1 yd
+    /// card, flickering bright, held for as long as the absorb lasts.
+    SacredShield,
 }
 
 impl ShieldKind {
-    pub const ALL: [ShieldKind; 4] = [
+    pub const ALL: [ShieldKind; 5] = [
         ShieldKind::PowerWordShield,
         ShieldKind::DivineShield,
         ShieldKind::IceBarrier,
         ShieldKind::Aegis,
+        ShieldKind::SacredShield,
     ];
 
     /// The cards this shield wears, in draw order.
@@ -320,6 +329,25 @@ impl ShieldKind {
                 ShieldLayer::StreakB,
                 ShieldLayer::Icicles,
                 ShieldLayer::Glint,
+            ],
+            ShieldKind::SacredShield => &[
+                ShieldLayer::Outline,
+                ShieldLayer::Rim,
+                ShieldLayer::StreakA,
+                ShieldLayer::Flare(0),
+                ShieldLayer::Flare(1),
+                ShieldLayer::Flare(2),
+                ShieldLayer::Flare(3),
+                ShieldLayer::Flare(4),
+                ShieldLayer::Flare(5),
+                ShieldLayer::Flare(6),
+                ShieldLayer::Flare(7),
+                ShieldLayer::Spark(0),
+                ShieldLayer::Spark(1),
+                ShieldLayer::Spark(2),
+                ShieldLayer::Spark(3),
+                ShieldLayer::Spark(4),
+                ShieldLayer::Spark(5),
             ],
         }
     }
@@ -350,8 +378,8 @@ pub struct ShieldVisual {
     pub from_env: f32,
 }
 
-/// The cards of the client shield models.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+/// The cards of the client shield models. Ordered as declared.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum ShieldLayer {
     /// `genericglow2b1`: the gold outline with a hard inner edge.
     Rim,
@@ -380,6 +408,13 @@ pub enum ShieldLayer {
     /// wash, so the bubble reads filled on the sand. Drawn over the outline
     /// and behind every additive card.
     Tint,
+    /// Sacred Shield only: one of the eight `t_vfx_flare07` stars that rise
+    /// over the card through its loop, white -> yellow -> white. A sprite,
+    /// facing the camera, not a card.
+    Flare(u8),
+    /// Sacred Shield only: one of the six `flare1_tc` gold sparks thrown out
+    /// in a ring as the card dies. A sprite, facing the camera.
+    Spark(u8),
 }
 
 impl ShieldLayer {
@@ -874,6 +909,14 @@ pub const MARK_OF_THE_WILD_AURA: &str = "Mark of the Wild";
 /// Shadow Word: Pain's aura name (the RON `name:` string). Its landing is the
 /// one visual the client gives it (`rendering/effects/shadow_word_pain.rs`).
 pub const SHADOW_WORD_PAIN_AURA: &str = "Shadow Word: Pain";
+/// Amplify Curse's aura name (the RON `name:` string): the primed curse its
+/// cast lands on the Warlock. Its landing is the empowered ground flash
+/// (`rendering/effects/empowered_flash.rs`).
+pub const AMPLIFY_CURSE_AURA: &str = "Amplify Curse";
+/// Shadow Trance's aura name (the `name:` Nightfall's proc gives its aura in
+/// `talents.ron`). Its landing is the empowered ground flash plus the dark
+/// speck halo at the head (`rendering/effects/empowered_flash.rs`).
+pub const SHADOW_TRANCE_AURA: &str = "Shadow Trance";
 /// Guardian Spirit's aura name: the RON `name:` string its face carries, and
 /// the name its rider (`guardian_spirit_riders`) is given. Its state is the
 /// spirit over the bearer's shoulders (`rendering/effects/guardian_spirit.rs`).
@@ -896,6 +939,11 @@ pub const RETRIBUTION_AURA_NAME: &str = "Retribution Aura";
 pub const INFUSION_OF_LIGHT_AURA: &str = "Infusion of Light";
 /// The Art of War's proc buff.
 pub const ART_OF_WAR_AURA: &str = "The Art of War";
+/// Sacred Shield: its 30 s arming buff, and the absorb that buff raises
+/// (`triggered_absorbs.rs` names the shield after its arming aura). The buff's
+/// landing plays the disc; the absorb wears its card
+/// (`rendering/effects/shield.rs`, `ShieldKind::SacredShield`).
+pub const SACRED_SHIELD_AURA: &str = "Sacred Shield";
 
 /// What a heal-over-time aura draws — the ONE place a HoT meets its visual,
 /// routed by the aura's RON name the way `DotStateVisual::for_dot` routes a
@@ -964,11 +1012,26 @@ pub enum AuraLandingKind {
     /// The Art of War's proc: `the_art_of_war_impact.m2` (kit 11038), a gold
     /// spark ring opening round the Paladin's chest, 2 s.
     ArtOfWarRing,
+    /// Sacred Shield's 30 s buff: the instant Holy hand flash and
+    /// `holy_precast_high_base.m2`'s brief gold disc at the Paladin's feet,
+    /// then `blessed_mending_impact.m2` (kit 11039) on the ally, 2 s: a flat
+    /// gold rune disc at the chest, streaks and two counter-turning runes.
+    /// The buff draws nothing after; its absorb wears a shield card.
+    SacredShieldDisc,
+    /// Amplify Curse: the client's generic "empowered next cast" flash, three
+    /// teal-to-blue additive discs blooming on the ground at the Warlock's
+    /// feet for under half a second (`presenceofmind_cast_base.m2`, kit 4012).
+    /// Once, on cast; the waiting buff is its icon.
+    AmplifyFlash,
+    /// Shadow Trance (Nightfall's proc): the same flash, plus a halo of tiny
+    /// near-black specks drifting in about the head while the proc waits
+    /// (kit 4569: the flash and `shadow_impactdot_med_head.m2`).
+    ShadowTrance,
 }
 
 impl AuraLandingKind {
     /// Every landing, in declaration order.
-    pub const ALL: [AuraLandingKind; 9] = [
+    pub const ALL: [AuraLandingKind; 12] = [
         AuraLandingKind::RejuvenationSwirl,
         AuraLandingKind::MarkOfTheWildGlyph,
         AuraLandingKind::ShadowWordPainHit,
@@ -978,6 +1041,9 @@ impl AuraLandingKind {
         AuraLandingKind::RetributionDisc,
         AuraLandingKind::InfusionHalo,
         AuraLandingKind::ArtOfWarRing,
+        AuraLandingKind::SacredShieldDisc,
+        AuraLandingKind::AmplifyFlash,
+        AuraLandingKind::ShadowTrance,
     ];
 
     /// The landing an aura of `aura_type` named `name` plays, or `None`.
@@ -993,6 +1059,8 @@ impl AuraLandingKind {
             AuraType::DamageOverTime if name == SHADOW_WORD_PAIN_AURA => {
                 Some(AuraLandingKind::ShadowWordPainHit)
             }
+            AuraType::NextCast if name == AMPLIFY_CURSE_AURA => Some(AuraLandingKind::AmplifyFlash),
+            AuraType::NextCast if name == SHADOW_TRANCE_AURA => Some(AuraLandingKind::ShadowTrance),
             AuraType::NextCast if name == DIVINE_FAVOR_AURA => {
                 Some(AuraLandingKind::DivineFavorBurst)
             }
@@ -1009,13 +1077,16 @@ impl AuraLandingKind {
                 Some(AuraLandingKind::InfusionHalo)
             }
             AuraType::NextCast if name == ART_OF_WAR_AURA => Some(AuraLandingKind::ArtOfWarRing),
+            AuraType::TriggeredAbsorb if name == SACRED_SHIELD_AURA => {
+                Some(AuraLandingKind::SacredShieldDisc)
+            }
             _ => None,
         }
     }
 
     /// The ability whose cast-side hand flash rides this landing, if any.
     ///
-    /// The three Paladin talent casts are applied inline by the class AI
+    /// The Paladin talent casts are applied inline by the class AI
     /// with no cast state, so no `Landed` marker names them; the landing of
     /// the aura they cast is where their hands flash
     /// (`rendering/effects/paladin_oneshots.rs`). Their routes in
@@ -1025,12 +1096,15 @@ impl AuraLandingKind {
             AuraLandingKind::DivineFavorBurst => Some(AbilityType::DivineFavor),
             AuraLandingKind::AuraMasteryWard => Some(AbilityType::AuraMastery),
             AuraLandingKind::SacrificeShell => Some(AbilityType::BlessingOfSacrifice),
+            AuraLandingKind::SacredShieldDisc => Some(AbilityType::SacredShield),
             AuraLandingKind::RejuvenationSwirl
             | AuraLandingKind::MarkOfTheWildGlyph
             | AuraLandingKind::ShadowWordPainHit
             | AuraLandingKind::RetributionDisc
             | AuraLandingKind::InfusionHalo
-            | AuraLandingKind::ArtOfWarRing => None,
+            | AuraLandingKind::ArtOfWarRing
+            | AuraLandingKind::AmplifyFlash
+            | AuraLandingKind::ShadowTrance => None,
         }
     }
 
@@ -1076,11 +1150,16 @@ pub enum PaladinOneShotKind {
     Retribution,
     InfusionOfLight,
     ArtOfWar,
+    /// Sacred Shield's rune disc at the ally's chest (the buff's bearer).
+    SacredShield,
+    /// `holy_precast_high_base.m2` at the Paladin's feet: the cast's brief
+    /// gold disc, the other end of the cast.
+    SacredShieldBase,
 }
 
 impl PaladinOneShotKind {
     /// Every one-shot, in declaration order.
-    pub const ALL: [PaladinOneShotKind; 7] = [
+    pub const ALL: [PaladinOneShotKind; 9] = [
         PaladinOneShotKind::DivineFavor,
         PaladinOneShotKind::AuraMastery,
         PaladinOneShotKind::SacrificeAlly,
@@ -1088,11 +1167,14 @@ impl PaladinOneShotKind {
         PaladinOneShotKind::Retribution,
         PaladinOneShotKind::InfusionOfLight,
         PaladinOneShotKind::ArtOfWar,
+        PaladinOneShotKind::SacredShield,
+        PaladinOneShotKind::SacredShieldBase,
     ];
 
     /// The one-shot a landing plays on its bearer, or `None` for another
     /// renderer's. (Blessing of Sacrifice's other end, at its caster, is
-    /// added where the landing is read.)
+    /// added where the landing is read, as is Sacred Shield's cast disc at
+    /// its caster's feet.)
     pub fn for_landing(kind: AuraLandingKind) -> Option<Self> {
         match kind {
             AuraLandingKind::DivineFavorBurst => Some(PaladinOneShotKind::DivineFavor),
@@ -1101,9 +1183,12 @@ impl PaladinOneShotKind {
             AuraLandingKind::RetributionDisc => Some(PaladinOneShotKind::Retribution),
             AuraLandingKind::InfusionHalo => Some(PaladinOneShotKind::InfusionOfLight),
             AuraLandingKind::ArtOfWarRing => Some(PaladinOneShotKind::ArtOfWar),
+            AuraLandingKind::SacredShieldDisc => Some(PaladinOneShotKind::SacredShield),
             AuraLandingKind::RejuvenationSwirl
             | AuraLandingKind::MarkOfTheWildGlyph
-            | AuraLandingKind::ShadowWordPainHit => None,
+            | AuraLandingKind::ShadowWordPainHit
+            | AuraLandingKind::AmplifyFlash
+            | AuraLandingKind::ShadowTrance => None,
         }
     }
 }
@@ -1154,6 +1239,14 @@ pub enum OneShotPieceRole {
     ArtOfWarSpark {
         index: u8,
     },
+    /// Sacred Shield's flat gold rune disc at the ally's chest, and its two
+    /// counter-turning rune stars (`index` 0 above the disc, 1 below).
+    SacredDisc,
+    SacredRune {
+        index: u8,
+    },
+    /// The cast's gold glyph disc at the Paladin's feet.
+    SacredBase,
 }
 
 /// One drawn piece of a [`PaladinOneShot`], a child of the rig.
@@ -1311,6 +1404,47 @@ pub enum ShadowPainParticlePart {
     Streak,
 }
 
+/// The empowered ground flash (graphical only): the client's
+/// `presenceofmind_cast_base.m2`, three concentric additive discs on the
+/// ground at a Warlock's feet that bloom outward and fade within half a
+/// second. Amplify Curse plays it on cast and Shadow Trance on its proc
+/// (`rendering/effects/empowered_flash.rs`). It follows its Warlock's feet,
+/// and retires with a dead one.
+#[derive(Component, Debug)]
+pub struct EmpoweredFlash {
+    /// The Warlock whose feet it blooms at.
+    pub caster: Entity,
+    pub age: f32,
+    /// This flash's own material: its colour and alpha ramp are written here
+    /// each frame, so two flashes never share one.
+    pub material: Handle<StandardMaterial>,
+}
+
+/// One of an [`EmpoweredFlash`]'s three disc children; `half_width` is its
+/// client half-width in yards before the bloom scale.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct EmpoweredFlashDisc {
+    pub half_width: f32,
+}
+
+/// Shadow Trance's dark speck halo (graphical only): tiny near-black specks
+/// born on a flat shell about the Warlock's head and drifting in
+/// (`shadow_impactdot_med_head.m2`). It follows the head, emits for the
+/// client's window from the proc, and retires, specks and all, the moment
+/// Shadow Trance is spent or its Warlock dies. One halo per Warlock: a proc
+/// that refreshes Shadow Trance restarts it.
+#[derive(Component, Debug)]
+pub struct ShadowTranceHalo {
+    /// The Warlock whose head it rings.
+    pub owner: Entity,
+    /// Seconds since the (latest) proc.
+    pub age: f32,
+    /// Fractional specks owed.
+    pub carry: f32,
+    /// Specks emitted so far, the running part of every speck's seed.
+    pub emitted: u32,
+}
+
 /// A flat, per-landing piece of a heal impact (graphical only).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum HealSpriteRole {
@@ -1460,12 +1594,13 @@ impl HealCastKind {
             // class AI with no cast state; their hands flash off their aura's
             // landing (`AuraLandingKind::cast_ability`). Divine Favor's cast
             // kit 425 is Moonfire's `magic_cast_hand.m2`; Aura Mastery (kit
-            // 191) and Blessing of Sacrifice (kits 186/189) are the Holy
-            // hands, played as the instant flash.
+            // 191), Blessing of Sacrifice (kits 186/189) and Sacred Shield
+            // (kit 193, AS-375) are the Holy hands, played as the instant
+            // flash.
             AbilityType::DivineFavor => Some(HealCastKind::Arcane),
-            AbilityType::AuraMastery | AbilityType::BlessingOfSacrifice => {
-                Some(HealCastKind::HolyFlash)
-            }
+            AbilityType::AuraMastery
+            | AbilityType::BlessingOfSacrifice
+            | AbilityType::SacredShield => Some(HealCastKind::HolyFlash),
             _ => None,
         }
     }
@@ -1820,8 +1955,9 @@ pub enum AuraApplyOwner {
     SlowRing,
     /// A named aura whose LANDING has its own one-shot: Rejuvenation's ribbon
     /// swirl and Mark of the Wild's glyph (`druid_heals.rs`), Shadow Word:
-    /// Pain's dark hit (`shadow_word_pain.rs`), and the Paladin talent
-    /// one-shots (`paladin_oneshots.rs`). Owned per aura
+    /// Pain's dark hit (`shadow_word_pain.rs`), the Paladin talent one-shots
+    /// (`paladin_oneshots.rs`), and the empowered ground flash of Amplify
+    /// Curse and Shadow Trance (`empowered_flash.rs`). Owned per aura
     /// NAME, not per type — see [`AuraApplyRoute::for_instance`] — because
     /// their types are shared with auras that keep the band (Healing Stream's
     /// HoT, Power Word: Fortitude). Lifebloom is not here: its pulse starts a

@@ -1,5 +1,5 @@
-//! Power Word: Shield, Divine Shield and Ice Barrier — the client's three
-//! shield models on our rig (AS-344, AS-359, AS-358).
+//! Power Word: Shield, Divine Shield, Ice Barrier and Sacred Shield's absorb —
+//! the client's shield models on our rig (AS-344, AS-359, AS-358, AS-375).
 //!
 //! The Classic and TBC clients draw the shield as `holydivineshield_state_base.m2`
 //! (fdid 166342, kit 847, SpellVisual 784; research and measurements in
@@ -89,6 +89,28 @@
 //! two shields. Its birth pop is the moment the wearer's health crosses the
 //! threshold, and its death swell plays when the absorb is used up.
 //!
+//! **Sacred Shield's absorb** (AS-375) wears `blessed_mending_proc_impact.m2`
+//! (Wrath 58597, visual 12581, kit 11040;
+//! `docs/design/2026-10-18-paladin-talent-client-data.md` §5): PW:S's own
+//! textures, `genericglow2b` and `shockwave10d`, tinted the same pale golds, on
+//! ONE flat card 3.2 x 4.1 client units at the feet. It has no birth pop and
+//! no wobble: the card stands at its size and its weights flicker, far
+//! brighter than PW:S's (0.26 -> 1.0 at 300 ms in the 700 ms birth, then
+//! 0.16-0.49 through a 1466 ms loop); eight `t_vfx_flare07` stars rise over it
+//! through the loop, white -> yellow -> white; and its 1100 ms death widens
+//! the card by a quarter as it fades, throwing six `flare1_tc` gold sparks out
+//! in a ring. Every number is the AS-337 bench's
+//! (`docs/design/benches/2026-10-18-paladin-talent-bench.html`, artifact
+//! 31rnhhKpACF51iUsqK5g7k, version 1792379243-e3d6), signed off at the
+//! client's values: the card's weight tracks, the flares and the sparks are
+//! its drawing code, ported. The card is HELD for as long as the absorb
+//! exists (the ruling: Wrath's form), so it is born when the absorb is raised
+//! and dies when it is used up, purged or runs out, or its bearer dies. The 30
+//! s buff that arms it has no state (`paladin_oneshots.rs` plays its cast).
+//! It wears a gold outline like every shield here (AS-401, below), at PW:S's
+//! signed-off values in its own rim gold: the Paladin bench predates the sand
+//! work, and the client card is additive light.
+//!
 //! **Legibility (AS-401).** All of the above is additive light, and on the
 //! bright arena sand, which sits on the tonemapper's shoulder, added light
 //! barely moves a pixel: at the client's values the held shields were all but
@@ -118,6 +140,7 @@ use super::ice_barrier::{
     IB_MIST_COLOUR, IB_MIST_LIFE, IB_MIST_PER_SEC, IB_MIST_PUFF_SIZE, IB_MIST_ROLL,
     IB_MIST_STOP_MS, IB_MIST_VARIANTS,
 };
+use super::paladin_oneshots::bench_hash;
 use super::spell_bolts::star_flash_texture;
 use crate::states::play_match::components::*;
 
@@ -292,6 +315,95 @@ pub const IB_OUTLINE_PULSE: f32 = 0.3;
 /// shield from a Priest's Power Word: Shield.
 pub const AEGIS_OUTLINE_RGB: [f32; 3] = [0.80, 0.84, 0.92];
 
+// --- Sacred Shield's absorb: the AS-337 bench's signed-off values (AS-375) ----
+//
+// `blessed_mending_proc_impact.m2` @Base, Wrath 3.4.5 (kit 11040). The bench's
+// constants block, signed off at version 1792379243-e3d6: the card, the flares
+// and the death sparks all on, held while the absorb lasts, size and opacity
+// ×1.0. Client units are PW:S's (× [`PWS_CLIENT_TO_RIG`] on our rig).
+
+/// × the client card, flare and spark sizes (`SACRED_SHIELD_SIZE_MUL`).
+pub const SS_SIZE: f32 = 1.0;
+/// × the card's weights and the sprites' alpha (`SACRED_SHIELD_OPACITY_MUL`).
+pub const SS_OPACITY: f32 = 1.0;
+/// The card in client units: width, height, bottom z and top z above the
+/// feet (the research doc rounds its 4.09 height to 4.1).
+pub const SS_CARD_QUAD: [f32; 4] = [3.2, 4.09, -0.84, 3.25];
+/// The card's two layers, sRGB: `genericglow2b` and `shockwave10d`.
+pub const SS_RIM_RGB: [f32; 3] = [1.0, 0.91, 0.32];
+pub const SS_STREAK_RGB: [f32; 3] = [0.97, 0.99, 0.32];
+/// The loop's length, ms (the birth and death are PW:S's 700 and 1100).
+pub const SS_LOOP_MS: f32 = 1466.0;
+/// The card's weight, both layers: birth (the 300 ms spike), loop (the
+/// flicker), death (a flicker and a fade, raised by [`SS_DEATH_GAIN`] as it
+/// goes).
+const SS_BIRTH: &[(f32, f32)] = &[
+    (0.0, 0.26),
+    (200.0, 0.26),
+    (300.0, 1.0),
+    (400.0, 0.38),
+    (500.0, 0.26),
+    (600.0, 0.38),
+    (700.0, 0.26),
+];
+const SS_LOOP: &[(f32, f32)] = &[
+    (0.0, 0.18),
+    (100.0, 0.49),
+    (200.0, 0.26),
+    (300.0, 0.45),
+    (400.0, 0.16),
+    (533.0, 0.46),
+    (700.0, 0.38),
+    (1000.0, 0.3),
+    (1466.0, 0.18),
+];
+const SS_DEATH: &[(f32, f32)] = &[
+    (0.0, 0.44),
+    (66.0, 0.1),
+    (166.0, 0.45),
+    (800.0, 0.0),
+    (1100.0, 0.0),
+];
+/// The death's weight is × (1 + this × its fraction run).
+pub const SS_DEATH_GAIN: f32 = 0.3;
+/// The death swell: the card widens by this fraction over
+/// [`SS_DEATH_SWELL_MS`]; its height holds.
+pub const SS_DEATH_SWELL: f32 = 0.25;
+pub const SS_DEATH_SWELL_MS: f32 = 800.0;
+/// The card's held peak (the loop's brightest key): the outline's envelope is
+/// the card's weight over it.
+const SS_PEAK: f32 = 0.49;
+/// The death's weight is out by here, ms; the outline fades out with it.
+const SS_FADE_MS: f32 = 800.0;
+
+/// The `t_vfx_flare07` stars: eight, each rising over a one-second cycle the
+/// eight share an eighth apart, from 300 ms into the birth until the death,
+/// scattered in a box over the card's centre (width, height, depth, client
+/// units), rising [`SS_FLARE_RISE`] a cycle, 0.3 across: white -> yellow ->
+/// white, alpha 0 -> 0.61 -> 0, both keyed 0.3 of the way.
+pub const SS_FLARES: u8 = 8;
+pub const SS_FLARE_FROM_MS: f32 = 300.0;
+pub const SS_FLARE_CYCLE_MS: f32 = 1000.0;
+pub const SS_FLARE_BOX: [f32; 3] = [1.4, 1.6, 0.4];
+pub const SS_FLARE_RISE: f32 = 0.3;
+pub const SS_FLARE_SIZE: f32 = 0.3;
+pub const SS_FLARE_RGB: [(f32, [u8; 3]); 3] = [
+    (0.0, [255, 255, 255]),
+    (0.3, [241, 234, 44]),
+    (1.0, [255, 255, 255]),
+];
+pub const SS_FLARE_ALPHA: [(f32, f32); 3] = [(0.0, 0.0), (0.3, 0.61), (1.0, 0.0)];
+/// The `flare1_tc` sparks: six, thrown out in a ring from the card's centre
+/// as the death starts, 0.15 above it, at 2.0 client units a second, for 330
+/// ms, 0.25 across, gold; alpha 0.6 -> 1.0 at 0.3 -> 0.
+pub const SS_SPARKS: u8 = 6;
+pub const SS_SPARK_MS: f32 = 330.0;
+pub const SS_SPARK_SPEED: f32 = 1.667 * 1.2;
+pub const SS_SPARK_LIFT: f32 = 0.15;
+pub const SS_SPARK_SIZE: f32 = 0.25;
+pub const SS_SPARK_RGB: [u8; 3] = [240, 191, 59];
+pub const SS_SPARK_ALPHA: [(f32, f32); 3] = [(0.0, 0.6), (0.3, 1.0), (1.0, 0.0)];
+
 /// The two readings of the halo emitter's `enabled` track.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum HaloMode {
@@ -423,6 +535,29 @@ pub const AEGIS_TUNING: ShieldTuning = ShieldTuning {
     ..PWS_TUNING
 };
 
+/// Sacred Shield: the bench's size and opacity, client time, and PW:S's
+/// outline in its own rim gold. It has no bone scale but its death swell, so
+/// `spread` scales that swell; `birth_gain` is unread (its birth spike is a
+/// key of its own track).
+pub const SS_TUNING: ShieldTuning = ShieldTuning {
+    size: SS_SIZE,
+    spread: 1.0,
+    lift: 0.0,
+    push: 0.0,
+    rim_gain: SS_OPACITY,
+    streak_gain: SS_OPACITY,
+    birth_gain: 1.0,
+    fill_gain: 0.0,
+    icicle_gain: 0.0,
+    glint_gain: 0.0,
+    time_scale: 1.0,
+    outline: OutlineTuning {
+        rgb: SS_RIM_RGB,
+        ..PWS_TUNING.outline
+    },
+    fill_tint: 0.0,
+};
+
 /// A shield kind's tuning.
 pub fn shield_tuning(kind: ShieldKind) -> &'static ShieldTuning {
     match kind {
@@ -430,6 +565,7 @@ pub fn shield_tuning(kind: ShieldKind) -> &'static ShieldTuning {
         ShieldKind::Aegis => &AEGIS_TUNING,
         ShieldKind::DivineShield => &DS_TUNING,
         ShieldKind::IceBarrier => &IB_TUNING,
+        ShieldKind::SacredShield => &SS_TUNING,
     }
 }
 
@@ -446,6 +582,10 @@ pub const DIVINE_SHIELD_AURA_NAME: &str = "Divine Shield";
 /// The aura name Ice Barrier is keyed on (`abilities.ron`'s `name`;
 /// `the_aura_name_is_the_ability_name` in its probes pins the two together).
 pub const ICE_BARRIER_AURA_NAME: &str = "Ice Barrier";
+/// The aura name Sacred Shield's absorb is keyed on: its arming aura's name,
+/// which `triggered_absorbs.rs` gives the shield it raises (the arming aura
+/// itself is a `TriggeredAbsorb` and wears no card).
+pub const SACRED_SHIELD_AURA_NAME: &str = SACRED_SHIELD_AURA;
 /// The aura name Aegis of the Last Stand's shield is keyed on: its item's
 /// `name` in `items.ron`, which `Combatant::apply_equipment` gives the
 /// triggered absorb (`the_aegis_aura_name_is_the_item_name` in its probes pins
@@ -647,13 +787,6 @@ const IB_TRACKS: WeightTracks = WeightTracks {
     rim_peak: 0.3,
 };
 
-fn weight_tracks(kind: ShieldKind) -> &'static WeightTracks {
-    match kind {
-        ShieldKind::PowerWordShield | ShieldKind::DivineShield | ShieldKind::Aegis => &HOLY_TRACKS,
-        ShieldKind::IceBarrier => &IB_TRACKS,
-    }
-}
-
 /// Bone scale (width, height): the bone's y and z axes.
 const SCALE_BIRTH: &[(f32, [f32; 2])] = &[
     (0.0, [0.0, 0.0]),
@@ -847,10 +980,11 @@ fn spread(v: f32, spread: f32) -> f32 {
 
 /// One phase's length in seconds, for one kind of shield.
 pub fn shield_phase_secs(kind: ShieldKind, phase: ShieldPhase) -> f32 {
-    let ms = match phase {
-        ShieldPhase::Birth => PWS_BIRTH_MS,
-        ShieldPhase::Loop => PWS_LOOP_MS,
-        ShieldPhase::Death => PWS_DEATH_MS,
+    let ms = match (kind, phase) {
+        (_, ShieldPhase::Birth) => PWS_BIRTH_MS,
+        (ShieldKind::SacredShield, ShieldPhase::Loop) => SS_LOOP_MS,
+        (_, ShieldPhase::Loop) => PWS_LOOP_MS,
+        (_, ShieldPhase::Death) => PWS_DEATH_MS,
     };
     ms / 1000.0 * shield_tuning(kind).time_scale
 }
@@ -869,8 +1003,10 @@ pub struct ShieldSample {
 }
 
 impl ShieldSample {
+    /// A card's weight. A sprite carries its own alpha
+    /// ([`sacred_sprite_pose`]), so its weight here is zero.
     pub fn weight(&self, layer: ShieldLayer) -> f32 {
-        self.weights[match layer {
+        let slot = match layer {
             ShieldLayer::Rim => 0,
             ShieldLayer::StreakA => 1,
             ShieldLayer::StreakB => 2,
@@ -880,14 +1016,149 @@ impl ShieldSample {
             ShieldLayer::Glint => 5,
             ShieldLayer::Outline => 6,
             ShieldLayer::Tint => 7,
-        }]
+            ShieldLayer::Flare(_) | ShieldLayer::Spark(_) => return 0.0,
+        };
+        self.weights[slot]
     }
 }
 
 /// Samples a shield. `t` is seconds into `phase`; the loop wraps on its own.
 pub fn shield_sample(shield: &ShieldVisual) -> ShieldSample {
+    match shield.kind {
+        ShieldKind::PowerWordShield | ShieldKind::DivineShield | ShieldKind::Aegis => {
+            client_card_sample(shield, &HOLY_TRACKS)
+        }
+        ShieldKind::IceBarrier => client_card_sample(shield, &IB_TRACKS),
+        ShieldKind::SacredShield => sacred_shield_sample(shield),
+    }
+}
+
+/// Sacred Shield's card: no bone scale until the death's swell, both layers
+/// on one weight track, the outline's envelope the card's weight over its
+/// peak (`pulse` of it while held), fading out with the death.
+fn sacred_shield_sample(shield: &ShieldVisual) -> ShieldSample {
     let k = shield_tuning(shield.kind);
-    let tr = weight_tracks(shield.kind);
+    let ms = shield.t / k.time_scale * 1000.0;
+    let held = |w: f32| 1.0 - k.outline.pulse * (1.0 - (w / SS_PEAK).clamp(0.0, 1.0));
+    let (w, scale, env) = match shield.phase {
+        ShieldPhase::Birth => {
+            let w = keys(SS_BIRTH, ms);
+            (w, Vec2::ONE, held(w))
+        }
+        ShieldPhase::Loop => {
+            let w = keys(SS_LOOP, ms.rem_euclid(SS_LOOP_MS));
+            (w, Vec2::ONE, held(w))
+        }
+        ShieldPhase::Death => {
+            let w = keys(SS_DEATH, ms) * (1.0 + SS_DEATH_GAIN * ms / PWS_DEATH_MS);
+            let swell = 1.0 + SS_DEATH_SWELL * k.spread * (ms / SS_DEATH_SWELL_MS).min(1.0);
+            let fade = (1.0 - ms / SS_FADE_MS).max(0.0);
+            (w, Vec2::new(swell, 1.0), shield.from_env * fade)
+        }
+    };
+    ShieldSample {
+        scale,
+        weights: [
+            w * k.rim_gain,
+            w * k.streak_gain,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            k.outline.alpha * env,
+            0.0,
+        ],
+        env,
+    }
+}
+
+/// One Sacred Shield sprite at a moment: where it stands above the bearer's
+/// rendered FEET (yards, world axes), its width (yards), its colour (sRGB),
+/// its alpha, and its turn in the view plane (radians).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpritePose {
+    pub at: Vec3,
+    pub diameter: f32,
+    pub rgb: [f32; 3],
+    pub alpha: f32,
+    pub roll: f32,
+}
+
+/// The card's centre above the feet, yards: the flares and sparks stand on it.
+pub fn sacred_shield_centre() -> f32 {
+    let r = PWS_CLIENT_TO_RIG * SS_SIZE;
+    (SS_CARD_QUAD[2] + SS_CARD_QUAD[3]) / 2.0 * r
+}
+
+/// A Sacred Shield flare's or spark's pose on `rig`, or `None` while it is
+/// not drawn (a flare before 300 ms of the birth and in the death; a spark
+/// outside the death's first 330 ms) and for any other layer. The bench's
+/// `customDraw`, ported: its scatter is the bench's own hash (`hh`).
+pub fn sacred_sprite_pose(rig: &ShieldVisual, layer: ShieldLayer) -> Option<SpritePose> {
+    let k = shield_tuning(rig.kind);
+    let r = PWS_CLIENT_TO_RIG * SS_SIZE;
+    let ms = rig.t / k.time_scale * 1000.0;
+    let centre = Vec3::Y * sacred_shield_centre();
+    let srgb = |c: [u8; 3]| c.map(|v| v as f32 / 255.0);
+    match layer {
+        ShieldLayer::Flare(index) => {
+            let since_birth = match rig.phase {
+                ShieldPhase::Birth => ms,
+                ShieldPhase::Loop => PWS_BIRTH_MS + ms,
+                ShieldPhase::Death => return None,
+            };
+            if since_birth <= SS_FLARE_FROM_MS {
+                return None;
+            }
+            let i = index as u32;
+            let ph =
+                (since_birth / SS_FLARE_CYCLE_MS + index as f32 / SS_FLARES as f32).rem_euclid(1.0);
+            let colour = keyed_srgb(&SS_FLARE_RGB, ph);
+            Some(SpritePose {
+                at: centre
+                    + Vec3::new(
+                        (bench_hash(i) - 0.5) * SS_FLARE_BOX[0],
+                        (bench_hash(i + 3) - 0.5) * SS_FLARE_BOX[1] + SS_FLARE_RISE * ph,
+                        (bench_hash(i + 5) - 0.5) * SS_FLARE_BOX[2],
+                    ) * r,
+                diameter: SS_FLARE_SIZE * r,
+                rgb: colour,
+                alpha: keys(&SS_FLARE_ALPHA, ph) * SS_OPACITY,
+                roll: index as f32,
+            })
+        }
+        ShieldLayer::Spark(index) => {
+            if rig.phase != ShieldPhase::Death || ms >= SS_SPARK_MS {
+                return None;
+            }
+            let angle = index as f32 / SS_SPARKS as f32 * TAU;
+            let out = SS_SPARK_SPEED * ms / 1000.0;
+            Some(SpritePose {
+                at: centre + Vec3::new(out * angle.cos(), SS_SPARK_LIFT, out * angle.sin()) * r,
+                diameter: SS_SPARK_SIZE * r,
+                rgb: srgb(SS_SPARK_RGB),
+                alpha: keys(&SS_SPARK_ALPHA, ms / SS_SPARK_MS) * SS_OPACITY,
+                roll: angle,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// A three-key sRGB track (0..255) at `t`, as 0..1.
+fn keyed_srgb(track: &[(f32, [u8; 3]); 3], t: f32) -> [f32; 3] {
+    let channel = |c: usize| {
+        let keyed: [(f32, f32); 3] = track.map(|(at, rgb)| (at, rgb[c] as f32 / 255.0));
+        keys(&keyed, t)
+    };
+    [channel(0), channel(1), channel(2)]
+}
+
+/// PW:S's skeleton (shared by Divine Shield, Ice Barrier and Aegis): the
+/// bone scale and the three texture weights on `tr`, and the outline's
+/// envelope on the rim.
+fn client_card_sample(shield: &ShieldVisual, tr: &WeightTracks) -> ShieldSample {
+    let k = shield_tuning(shield.kind);
     let ms = shield.t / k.time_scale * 1000.0;
     let gains = [
         k.rim_gain,
@@ -981,17 +1252,28 @@ pub fn shield_sample(shield: &ShieldVisual) -> ShieldSample {
 /// for one kind of shield. Every bone scales about the shared pivot, so a
 /// taller card also rises.
 pub fn shield_card_extent(kind: ShieldKind, layer: ShieldLayer, scale: Vec2) -> (f32, Vec2) {
-    let quad = match layer {
-        ShieldLayer::Rim | ShieldLayer::FillOuter | ShieldLayer::Outline | ShieldLayer::Tint => {
-            PWS_RIM_QUAD
-        }
+    let quad = match (kind, layer) {
+        // Sacred Shield's layers share one card; its sprites float on it.
+        (ShieldKind::SacredShield, _) => SS_CARD_QUAD,
+        (
+            _,
+            ShieldLayer::Rim
+            | ShieldLayer::FillOuter
+            | ShieldLayer::Outline
+            | ShieldLayer::Tint
+            | ShieldLayer::Flare(_)
+            | ShieldLayer::Spark(_),
+        ) => PWS_RIM_QUAD,
         // Ice Barrier's icicles ride bone 3, as streak B does: their card
         // stands at the streak card's centre.
-        ShieldLayer::StreakA
-        | ShieldLayer::StreakB
-        | ShieldLayer::FillInner
-        | ShieldLayer::Icicles
-        | ShieldLayer::Glint => PWS_STREAK_QUAD,
+        (
+            _,
+            ShieldLayer::StreakA
+            | ShieldLayer::StreakB
+            | ShieldLayer::FillInner
+            | ShieldLayer::Icicles
+            | ShieldLayer::Glint,
+        ) => PWS_STREAK_QUAD,
     };
     let r = PWS_CLIENT_TO_RIG * shield_tuning(kind).size;
     let centre = (quad[2] + quad[3]) / 2.0 * r;
@@ -1071,6 +1353,15 @@ pub fn is_live_aegis(aura: &Aura) -> bool {
         && aura.magnitude > 0.0
 }
 
+/// Whether this aura is a live Sacred Shield absorb (an absorb with
+/// something left). Its 30 s arming buff, a `TriggeredAbsorb` of the same
+/// name, is not.
+pub fn is_live_sacred_shield(aura: &Aura) -> bool {
+    aura.effect_type == AuraType::Absorb
+        && aura.ability_name == SACRED_SHIELD_AURA_NAME
+        && aura.magnitude > 0.0
+}
+
 /// Whether this aura is a live shield of `kind`.
 pub fn is_live_shield(kind: ShieldKind, aura: &Aura) -> bool {
     match kind {
@@ -1078,6 +1369,7 @@ pub fn is_live_shield(kind: ShieldKind, aura: &Aura) -> bool {
         ShieldKind::Aegis => is_live_aegis(aura),
         ShieldKind::DivineShield => is_divine_shield(aura),
         ShieldKind::IceBarrier => is_live_ice_barrier(aura),
+        ShieldKind::SacredShield => is_live_sacred_shield(aura),
     }
 }
 
@@ -1241,12 +1533,13 @@ pub(super) fn disc_texture(size: u32, alpha: impl Fn(f32, f32) -> f32) -> Image 
     )
 }
 
-/// Shared by every shield: one card quad and eight textures (rim, the two
-/// streak rings, fill, and each kind's outline), Divine Shield's particle quad and two palettes, and
-/// Ice Barrier's icicle mesh and mist palettes (one per puff shape).
+/// Shared by every shield: one card quad and ten textures (rim, the two
+/// streak rings, fill, each kind's outline, and the star Sacred Shield's
+/// sprites wear), Divine Shield's particle quad and two palettes, and Ice
+/// Barrier's icicle mesh and mist palettes (one per puff shape).
 pub struct ShieldAssets {
     quad: Handle<Mesh>,
-    textures: [Handle<Image>; 8],
+    textures: [Handle<Image>; 10],
     particle_quad: Handle<Mesh>,
     sparkle_palette: Arc<[Handle<StandardMaterial>]>,
     halo_palette: Arc<[Handle<StandardMaterial>]>,
@@ -1277,6 +1570,8 @@ impl ShieldAssets {
                 images.add(outline_texture(ShieldKind::DivineShield)),
                 images.add(outline_texture(ShieldKind::IceBarrier)),
                 images.add(outline_texture(ShieldKind::Aegis)),
+                images.add(outline_texture(ShieldKind::SacredShield)),
+                star.clone(),
             ],
             // 1 × 1, so a particle's scale IS its diameter (`ClientParticle`).
             particle_quad: meshes.add(Rectangle::new(1.0, 1.0)),
@@ -1353,6 +1648,8 @@ fn texture_slot(kind: ShieldKind, layer: ShieldLayer) -> Option<usize> {
         (ShieldKind::DivineShield, ShieldLayer::Outline) => Some(5),
         (ShieldKind::IceBarrier, ShieldLayer::Outline) => Some(6),
         (ShieldKind::Aegis, ShieldLayer::Outline) => Some(7),
+        (ShieldKind::SacredShield, ShieldLayer::Outline) => Some(8),
+        (_, ShieldLayer::Flare(_) | ShieldLayer::Spark(_)) => Some(9),
     }
 }
 
@@ -1368,6 +1665,12 @@ pub fn shield_layer_rgb(kind: ShieldKind, layer: ShieldLayer) -> [f32; 3] {
         (ShieldKind::IceBarrier, ShieldLayer::Rim) => IB_RIM_RGB,
         (ShieldKind::IceBarrier, ShieldLayer::StreakA) => IB_STREAK_A_RGB,
         (ShieldKind::IceBarrier, ShieldLayer::StreakB) => IB_STREAK_B_RGB,
+        (ShieldKind::SacredShield, ShieldLayer::Rim) => SS_RIM_RGB,
+        (ShieldKind::SacredShield, ShieldLayer::StreakA) => SS_STREAK_RGB,
+        // A sprite's colour is keyed over its life ([`sacred_sprite_pose`]);
+        // this is where each starts.
+        (_, ShieldLayer::Flare(_)) => [1.0, 1.0, 1.0],
+        (_, ShieldLayer::Spark(_)) => SS_SPARK_RGB.map(|v| v as f32 / 255.0),
         // The icicles carry their colour in their vertices.
         (_, ShieldLayer::Icicles | ShieldLayer::Glint) => [1.0, 1.0, 1.0],
         (_, ShieldLayer::Rim) => RIM_RGB,
@@ -1566,7 +1869,7 @@ pub fn update_shield_visuals(
             ShieldKind::IceBarrier => {
                 rig.insert(IceBarrierEmitters::default());
             }
-            ShieldKind::PowerWordShield | ShieldKind::Aegis => {}
+            ShieldKind::PowerWordShield | ShieldKind::Aegis | ShieldKind::SacredShield => {}
         }
         rig.with_children(|rig| {
             for &layer in kind.layers() {
@@ -1755,7 +2058,8 @@ const PWS_MIN_SCALE: f32 = 1e-4;
 
 /// PostUpdate (graphical-only), after every writer of a body's transform and
 /// before propagation: stand each card on its bearer's rendered body, turn it
-/// to the camera, and set its weight.
+/// to the camera, and set its weight. Sacred Shield's sprites stand on its
+/// card, face the camera outright, and take their colour as well.
 pub fn place_shield_cards(
     camera: Query<&Transform, (With<Camera3d>, Without<ShieldCard>)>,
     rigs: Query<(&ShieldVisual, &Children)>,
@@ -1791,6 +2095,31 @@ pub fn place_shield_cards(
             let Ok((card, mut tf, mesh, material, sheen)) = cards.get_mut(child) else {
                 continue;
             };
+            if let ShieldLayer::Flare(_) | ShieldLayer::Spark(_) = card.layer {
+                let pose = sacred_sprite_pose(rig, card.layer);
+                if let Some(pose) = pose {
+                    let lift = shield_tuning(rig.kind).lift;
+                    tf.translation = body_centre + Vec3::Y * (lift - BODY_HALF_HEIGHT) + pose.at;
+                    tf.rotation = cam.rotation * Quat::from_rotation_z(pose.roll);
+                    // The quad is 2 × 2: its scale is half its width.
+                    tf.scale = Vec3::new(pose.diameter / 2.0, pose.diameter / 2.0, 1.0)
+                        .max(Vec3::splat(PWS_MIN_SCALE));
+                }
+                // A sprite off its window stays where it was, unlit.
+                if let Some(m) = materials.get(&material.0) {
+                    let want = match pose {
+                        Some(p) => Color::srgb(p.rgb[0], p.rgb[1], p.rgb[2])
+                            .with_alpha(p.alpha.clamp(0.0, 1.0)),
+                        None => m.base_color.with_alpha(0.0),
+                    };
+                    if m.base_color != want {
+                        if let Some(m) = materials.get_mut(&material.0) {
+                            m.base_color = want;
+                        }
+                    }
+                }
+                continue;
+            }
             let at = pws_card_translation(
                 rig.kind,
                 body_centre,
