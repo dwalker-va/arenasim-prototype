@@ -884,6 +884,15 @@ impl Plugin for StatesPlugin {
                 .before(TransformSystem::TransformPropagate)
                 .run_if(in_combat_scene),
         )
+        // Divine Protection's globe stands on the rendered chest for the same
+        // reason (`divine_protection.rs`).
+        .add_systems(
+            PostUpdate,
+            play_match::place_divine_protection_globes
+                .after(play_match::apply_cyclone_lift)
+                .before(TransformSystem::TransformPropagate)
+                .run_if(in_combat_scene),
+        )
         // Frostbolt and Shadow Bolt: the bespoke missiles and the bursts
         // they leave on their victims.
         //
@@ -967,6 +976,15 @@ impl Plugin for StatesPlugin {
                 )
                     .chain(),
             )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Divine Protection's globe at the Paladin's chest (AS-376): raised,
+        // aged and taken down (and its Holy hands flashed) here; posed on the
+        // rendered body in PostUpdate (`place_divine_protection_globes`).
+        .add_systems(
+            Update,
+            play_match::update_divine_protection_globes
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
