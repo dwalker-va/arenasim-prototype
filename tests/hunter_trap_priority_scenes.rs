@@ -345,25 +345,30 @@ fn peel_is_not_held_when_a_slow_puts_the_freeze_past_the_horizon() {
     assert_peeled(&slowed(build(), ME, 0.5).decide(ME));
 }
 
+/// The Priest just beyond throw range, walking away along +X as fast as the
+/// Hunter walks after it. Out of range even standing still, so the pressure
+/// trap holds this tick and the forecast decides.
+fn walking_away_beyond_range() -> Scene {
+    Scene::new()
+        .unit(ME, 1, Hunter)
+        .at(0.0, 0.0)
+        .facing(1.0, 0.0)
+        .targeting(WARRIOR)
+        .unit(WARRIOR, 2, Warrior)
+        .at(10.0, 0.0)
+        .targeting(ME)
+        .unit(PRIEST, 2, Priest)
+        .at(trap_range() + 2.0, 0.0)
+        .facing(1.0, 0.0)
+        .cooldown(ME, AbilityType::ConcussiveShot, 5.0)
+}
+
 /// The healer's own motion is forecast the same way: one walking away as fast
 /// as the Hunter closes stays out of reach, and the same healer rooted is
 /// caught up with.
 #[test]
 fn a_rooted_healer_is_forecast_standing_still() {
-    let build = || {
-        Scene::new()
-            .unit(ME, 1, Hunter)
-            .at(0.0, 0.0)
-            .facing(1.0, 0.0)
-            .targeting(WARRIOR)
-            .unit(WARRIOR, 2, Warrior)
-            .at(10.0, 0.0)
-            .targeting(ME)
-            .unit(PRIEST, 2, Priest)
-            .at(trap_range() - 2.0, 0.0)
-            .facing(1.0, 0.0)
-            .cooldown(ME, AbilityType::ConcussiveShot, 5.0)
-    };
+    let build = walking_away_beyond_range;
     assert_peeled(&build().decide(ME));
     assert_held(&build().aura(PRIEST, AuraType::Root, 4.0).decide(ME));
 }
@@ -408,29 +413,18 @@ fn the_peel_play_frost_trap_is_not_held_for_a_freeze() {
 /// free, it is not.
 #[test]
 fn a_healer_in_crowd_control_is_forecast_standing_still() {
-    let build = || {
-        Scene::new()
-            .unit(ME, 1, Hunter)
-            .at(0.0, 0.0)
-            .facing(1.0, 0.0)
-            .targeting(WARRIOR)
-            .unit(WARRIOR, 2, Warrior)
-            .at(10.0, 0.0)
-            .targeting(ME)
-            .unit(PRIEST, 2, Priest)
-            .at(trap_range() - 2.0, 0.0)
-            .facing(1.0, 0.0)
-            .cooldown(ME, AbilityType::ConcussiveShot, 5.0)
-    };
+    let build = walking_away_beyond_range;
     assert_peeled(&build().decide(ME));
     assert_held(&build().aura(PRIEST, AuraType::Stun, 0.3).decide(ME));
 }
 
 /// The healer's slows are forecast too, apart from the Hunter's. The Priest
 /// walking away as fast as the Hunter closes stays out of reach. At 30% of its
-/// speed the Hunter gains enough to bring the freeze inside the horizon, so
-/// the peel is held. At 40%, the freeze stays just past the horizon and the
-/// peel goes out.
+/// speed the Hunter gains enough, and its lead is short enough, to bring the
+/// freeze inside the horizon, so the peel is held. At 70%, the freeze stays
+/// past the horizon and the peel goes out. (The Priest starts inside throw
+/// range: its lead carries the landing beyond it, so the pressure trap holds
+/// this tick.)
 #[test]
 fn a_slowed_healer_is_forecast_at_its_slowed_speed() {
     let build = || {
@@ -449,5 +443,5 @@ fn a_slowed_healer_is_forecast_at_its_slowed_speed() {
     };
     assert_peeled(&build().decide(ME));
     assert_held(&slowed(build(), PRIEST, 0.3).decide(ME));
-    assert_peeled(&slowed(build(), PRIEST, 0.4).decide(ME));
+    assert_peeled(&slowed(build(), PRIEST, 0.7).decide(ME));
 }
