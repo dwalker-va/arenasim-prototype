@@ -9,6 +9,7 @@
 //! | `OccupyCover` via [`solve_position`] | **LIVE** under `TeamPlan` (healer PRESSURED/FREE, `healer_postures.rs`). Measured at n=100 head-to-head: +36pt Warlock+Priest, +14pt Hunter+Priest, +10pt Warrior+Priest, -6pt (noise) Rogue+Priest. |
 //! | [`DispelGoal`] on `OccupyCover` | **LIVE** under `TeamPlan` (Priest, Paladin PRESSURED; AS-187). The `Legacy` dispel walk's job: while a teammate is owed an urgent dispel the healer cannot reach, reaching it is the only constraint scored, and the goal holds on reach until the dispel lands. |
 //! | [`C_CC_REACH`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-362). Out of the reach of every enemy crowd control ready to land on the healer (`class_ai::cc_reach`), ranked above cover and below sight of the anchor. |
+//! | [`SolveWorld::cover_waived`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-440). While an enemy ranged DPS could turn on a teammate (`target_focus::could_turn_on_teammate`), cover from casters counts for nothing; the other constraints are unchanged. |
 //! | [`C_DYING`] on `OccupyCover` | **LIVE** under `TeamPlan` (AS-198). While the healer can heal, the most hurt teammate below `urgency_hp_threshold` anchors it, and reaching that teammate ranks above cover. Which teammate that is, [`dying_anchor`], is the `TeamPlan` medic walk the Druid holds its damage for (AS-218). The Paladin's band-hold parks only where it reaches that teammate ([`dying_unreached`], AS-209). |
 //! | `HoldRange` | Wired to the Mage/Hunter kiter, **measured ~-17pt, reverted — and the ending is now DECIDED: ranged DPS stays on the scorer permanently** (design doc, 2026-08-06). Constraint definition kept for the lone-healer fallback and future melee use; do not re-wire kiters absent step 8's reopening condition. |
 //! | `ScreenPartner`, `PressTarget`, `StackAnchor` | **NEVER RUN IN BATTLE.** Unit-tested against their written definitions only. All three consumed intents were under-specified in ways only measurement exposed (sight-of-ally, castability, the range ceiling) — assume these carry the same debt and budget a measurement pass before trusting them. |
@@ -138,6 +139,17 @@ pub struct SolveWorld {
     /// the ring ([`C_RING`]) and the sight margin ([`C_MARGIN`]). `None` — the
     /// default — when it plays the open.
     pub hug: Option<HugRing>,
+    /// The hand-off cover rule (AS-440): while an enemy ranged DPS could turn
+    /// on a teammate of the unit being solved
+    /// (`target_focus::could_turn_on_teammate`), cover from enemy casters is
+    /// worth nothing to it — hiding would only hand that DPS's fire to the
+    /// teammate. `OccupyCover` then scores no occlusion ([`C_OCCLUDED`]) and
+    /// samples no shadows — with no credit a shadow sample ties every other
+    /// spot on cost, and the nearest-spot tie-break would still walk the
+    /// healer into it; crowd-control reach, sight of the anchor, a dying
+    /// teammate and an owed dispel are scored as before. `false` — the
+    /// default — counts every caster.
+    pub cover_waived: bool,
 }
 
 /// The pillar ring an `OccupyCover` healer hugs ([`SolveWorld::hug`]).
@@ -216,6 +228,18 @@ impl SolveWorld {
     pub fn with_hug(mut self, hug: Option<HugRing>) -> Self {
         self.hug = hug;
         self
+    }
+
+    /// This world with cover waived ([`SolveWorld::cover_waived`]).
+    pub fn with_cover_waived(mut self, waived: bool) -> Self {
+        self.cover_waived = waived;
+        self
+    }
+
+    /// The enemy casters cover is FOR: [`Self::enemy_casters_of`], or none
+    /// while cover is waived ([`SolveWorld::cover_waived`]).
+    fn cover_casters_of(&self, team: u8) -> impl Iterator<Item = &SolveUnit> {
+        self.enemy_casters_of(team).filter(|_| !self.cover_waived)
     }
 
     fn unit(&self, entity: Entity) -> Option<&SolveUnit> {
@@ -597,7 +621,7 @@ pub fn violations(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) -> u1
 
     let occluded_from_casters = |p: Vec2| {
         !world
-            .enemy_casters_of(ctx.unit.team)
+            .cover_casters_of(ctx.unit.team)
             .any(|e| world.sees(p, e.pos))
     };
 
@@ -855,7 +879,7 @@ pub fn candidates_for(ctx: &SolveContext) -> Vec<Vec2> {
     for obstacle in &world.obstacles {
         let (center, radius) = obstacle.footprint_disc();
         let ring = radius + MOVER_RADIUS + COVER_STANDOFF;
-        for caster in world.enemy_casters_of(ctx.unit.team) {
+        for caster in world.cover_casters_of(ctx.unit.team) {
             let away = (center - caster.pos).normalize_or_zero();
             if away == Vec2::ZERO {
                 continue;
@@ -1006,7 +1030,7 @@ fn infeasibility_parts(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) 
         return (cost, 0.0);
     }
     let mut cost = 0.0;
-    let casters = world.enemy_casters_of(ctx.unit.team).count() as f32;
+    let casters = world.cover_casters_of(ctx.unit.team).count() as f32;
 
     // Binary constraints contribute their full scale — there is no "partly in
     // line of sight". The gradient for these comes from the geometry moving the
@@ -1027,7 +1051,7 @@ fn infeasibility_parts(intent: RoleIntent, candidate: Vec2, ctx: &SolveContext) 
         // Graded by HOW MANY casters still see the spot, so a healer breaking one
         // of two sightlines is scored better than breaking neither.
         let seen = world
-            .enemy_casters_of(ctx.unit.team)
+            .cover_casters_of(ctx.unit.team)
             .filter(|e| world.sees(candidate, e.pos))
             .count();
         cost += W_OCCLUDED * seen.max(1) as f32;
@@ -1539,6 +1563,7 @@ pub fn world_from_context(
         urgency_hp_threshold: 0.0,
         cc: CcField::default(),
         hug: None,
+        cover_waived: false,
     }
 }
 
@@ -1654,6 +1679,47 @@ mod tests {
         }
     }
 
+    /// The hand-off cover rule (AS-440) takes the shadow samples out of the
+    /// `OccupyCover` candidates, not only their credit: with cover waived,
+    /// a shadow sample would tie every other spot on cost and the nearest-
+    /// spot tie-break would still walk the healer into it. Each shadow point
+    /// behind the pillar from the caster is a candidate with cover counted,
+    /// and none is with cover waived.
+    #[test]
+    fn waived_cover_offers_no_shadow_samples() {
+        let healer_unit = healer(1, 1, 0, -2.0, 6.0);
+        let mut w = world(vec![
+            healer_unit,
+            melee(2, 1, 1, -6.0, -14.0),
+            unit(3, 2, 0, 9.0, 3.0),
+        ]);
+        w.obstacles = vec![pillar_at(0.0, 0.0)];
+        let shadows: Vec<Vec2> = {
+            let (center, radius) = w.obstacles[0].footprint_disc();
+            let ring = radius + MOVER_RADIUS + COVER_STANDOFF;
+            let away = (center - Vec2::new(9.0, 3.0)).normalize();
+            SHADOW_DEPTHS
+                .iter()
+                .map(|d| center + away * (ring + d))
+                .collect()
+        };
+        let offered = |w: &SolveWorld| {
+            let ctx = SolveContext {
+                world: w,
+                unit: healer_unit,
+                focus: None,
+                placed: &BTreeMap::new(),
+            };
+            candidates_for(&ctx)
+        };
+        let has = |cands: &[Vec2], p: Vec2| cands.iter().any(|c| c.distance(p) < 1e-4);
+        let counted = offered(&w);
+        assert!(shadows.iter().all(|p| has(&counted, *p)), "{shadows:?}");
+        w.cover_waived = true;
+        let waived = offered(&w);
+        assert!(shadows.iter().all(|p| !has(&waived, *p)), "{shadows:?}");
+    }
+
     fn world(units: Vec<SolveUnit>) -> SolveWorld {
         SolveWorld {
             units,
@@ -1665,6 +1731,7 @@ mod tests {
             urgency_hp_threshold: 0.5,
             cc: CcField::default(),
             hug: None,
+            cover_waived: false,
         }
     }
 
