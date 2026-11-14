@@ -376,6 +376,10 @@ pub struct TeamSituation {
     /// which station (the module docs' `hunt`). Classified only by
     /// [`update_situations`], which has the map's bounds its stations need.
     pub hunt: Option<super::class_ai::hunt::HuntWindow>,
+    /// The hunt that ended a moment ago, kept for `hunt::HUNT_REMEMBER`: a
+    /// hunt that starts again on the same healer at the same pillar keeps
+    /// each unit's side.
+    pub hunt_memory: Option<super::class_ai::hunt::HuntMemory>,
     /// The pillar the team takes together, while it holds one (the module
     /// docs' `pillar_stance`). Classified only by [`update_situations`],
     /// which has the ability data its crowd-control key reads.
@@ -1379,6 +1383,7 @@ fn classify_roster_before_yield(
         pillar_stance: None,
         stance_memory: StanceMemory::default(),
         hunt: None,
+        hunt_memory: None,
         exceptions: PlayExceptions::resolve(&cfg.exceptions),
         allies,
         in_danger: danger.in_danger,
@@ -1929,6 +1934,12 @@ pub fn update_situations(
         let cfg = cfg.for_team(team, snapshot.ai_profile.for_team(team));
         let mut next = classify_before_yield(snapshot, team, &prev, clock, &cfg);
         next.hunt = super::class_ai::hunt::classify(snapshot, team, &prev, &next, clock, &cfg);
+        next.hunt_memory = super::class_ai::hunt::remember(
+            prev.hunt.as_ref(),
+            prev.hunt_memory.as_ref(),
+            next.hunt.as_ref(),
+            clock.now,
+        );
         let (stance, memory) = pillar_stance::classify(snapshot, team, &prev, &next, clock, &cfg);
         next.pillar_stance = stance;
         next.stance_memory = memory;

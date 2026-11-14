@@ -6,19 +6,26 @@
 //! match then plays on, and our team hunts it.
 //!
 //! - With the play, the team puts its Mage and Priest on opposite sides of
-//!   the pillar: each walks to a station, and their bearings round its centre
-//!   come 150° or more apart.
+//!   the pillar: each walks round its own side toward sight, and their
+//!   bearings round its centre come 150° or more apart.
 //! - With the play excepted everywhere (its control: it graduated and cannot
-//!   be withheld), the hunt is still classified but nobody takes a station,
+//!   be withheld), the hunt is still classified but nobody hunts,
 //!   and the two never split round the pillar.
-//! - Two hunters that start on one side fan out, each to the station on its
-//!   own hand: the one under a station holds it, the other walks round
-//!   (AS-403; the walk is measured round the pillar, not through it).
+//! - A hunter's walk takes it off its healer posture's formation point
+//!   (AS-469).
+//!
+//! - Two hunters that start on one side fan out, each to the side on its
+//!   own hand: the other walks round the back to the south (AS-403; the
+//!   walk is measured round the pillar).
+//!
+//! The pincer's own geometry (nobody blind, opposite sides, the walk round
+//! the back, the hunt held in the shadow) is pinned in
+//! `tests/hunt_pincer_staged.rs`.
 //!
 //! The play's sight gain needs a healer that moves round its pillar away from
 //! its hunters. That was the TakeCover play's lone healer, deleted at the 0.8
 //! sweep; no AI does it now, and a rooted healer cannot, so this test pins
-//! the stations and not the sight. The situation holds by construction (a 2v1
+//! the split and not the sight. The situation holds by construction (a 2v1
 //! from the gates); the seed governs only the rolls.
 
 mod common;
@@ -207,22 +214,21 @@ fn the_hunters_split_round_the_hiders_pillar() {
 }
 
 /// Bearings round the pillar, in degrees: the hider's east face is 0, so
-/// the hunt's two stations stand north (90) and south (-90).
+/// the north side is counter-clockwise of it and the south side clockwise.
 fn deg(p: Vec3) -> f32 {
     bearing(p).to_degrees()
 }
 
 /// AS-403 — both hunters start on the pillar's NORTH side, out of the
-/// hider's sight: our Priest hugging it just east of north, under the north
-/// station; our Mage out to the north-west. Measured through the pillar, the
-/// pairing that sends the Mage north and the Priest round to the south is
-/// the shorter; walked round it, the Priest's half-turn is the longer walk by
-/// far. The team takes the walk round the pillar: the Priest holds the north
-/// side, and the Mage walks round the back to the south.
+/// hider's sight: our Priest hugging it just east of north; our Mage out to
+/// the north-west. Measured through the pillar, the pairing that sends the
+/// Mage north and the Priest round to the south is the shorter; walked round
+/// it, the Priest's half-turn is the longer walk by far. The team takes the
+/// walk round the pillar: the Priest takes the north side, and the Mage
+/// walks round the back to the south.
 ///
-/// - With the play, the Priest never leaves the north quarter (45° to 135°),
-///   the Mage reaches the south quarter, and the two stand 150° apart within
-///   [`SPLIT_BY`].
+/// - With the play, the Mage reaches the south quarter, and the two stand
+///   150° apart within [`SPLIT_BY`].
 /// - The control, with the play excepted: nobody walks round, so the Mage
 ///   never reaches the south quarter and the two never split.
 #[test]
@@ -238,7 +244,6 @@ fn hunters_on_one_side_fan_out_each_to_its_own_hand() {
             let played = play(config(seed, hunt), stage());
             let start = played.landed().app;
             let mut split_at = None;
-            let mut priest_wandered = 0.0f32;
             let mut mage_south = false;
             for f in played.staged_frames() {
                 let t = f.sim_time - start;
@@ -246,8 +251,7 @@ fn hunters_on_one_side_fan_out_each_to_its_own_hand() {
                 if t > WINDOW || !hider.alive || !mage.alive || !priest.alive {
                     break;
                 }
-                let (m, p) = (deg(mage.position), deg(priest.position));
-                priest_wandered = priest_wandered.max((p - 90.0).abs());
+                let m = deg(mage.position);
                 mage_south |= (-135.0..=-45.0).contains(&m);
                 if split_at.is_none()
                     && gap(bearing(mage.position), bearing(priest.position)) >= 150.0
@@ -256,14 +260,10 @@ fn hunters_on_one_side_fan_out_each_to_its_own_hand() {
                 }
             }
             println!(
-                "seed {seed} hunt {hunt}: split at {split_at:?}, Priest off north by {priest_wandered:.0}°, \
-                 Mage reached the south {mage_south}"
+                "seed {seed} hunt {hunt}: split at {split_at:?}, Mage reached the south \
+                 {mage_south}"
             );
             if hunt {
-                assert!(
-                    priest_wandered <= 45.0,
-                    "seed {seed}: the Priest left the north side ({priest_wandered:.0}° off it)"
-                );
                 assert!(
                     mage_south,
                     "seed {seed}: the Mage never walked round to the south"
