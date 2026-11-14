@@ -1416,10 +1416,12 @@ mod escape_windows {
     /// (c) CRITICAL-HEAL PROBE (AE1) — an ally below the urgency threshold
     /// during a live window is healed anyway: a Flash Heal STARTS in-window.
     ///
-    /// STAGED (tier 3): the Priest, the lowest ally at 20%, with the enemy
-    /// Rogue on it held by the Paladin's Hammer of Justice — a threat in its
-    /// face, every proximate threat impaired, so the window opens — and the
-    /// enemy Mage out of the picture. The seeded match this replaced (Priest+
+    /// STAGED (tier 3): the Priest PRESSURED, the lowest ally at 20%, with
+    /// the enemy Rogue on it held by the Paladin's Hammer of Justice — an
+    /// attacker in its face, every proximate threat impaired, so the window
+    /// opens — and the enemy Mage out of the picture. The Priest is staged
+    /// PRESSURED because a held attacker opens a window but is no pressure of
+    /// its own (AS-496): a FREE Priest never enters PRESSURED for it. The seeded match this replaced (Priest+
     /// Paladin v Rogue+Mage, pinned at 14, then 5, then 16) carried the
     /// moment on a knife-edge of timing: on `main` the window opened at 6.8s
     /// with the Priest at 66% and a Flash Heal started at 9.85s in nearly
@@ -1431,6 +1433,7 @@ mod escape_windows {
     fn critical_heal_fires_despite_live_window() {
         use arenasim::headless::{Stage, Unit};
         use arenasim::states::play_match::abilities::AbilityType;
+        use arenasim::states::play_match::components::{HealerPosture, Posture};
         const PRIEST: Unit = Unit::new(1, 0);
         const PALADIN: Unit = Unit::new(1, 1);
         const ROGUE: Unit = Unit::new(2, 0);
@@ -1447,6 +1450,14 @@ mod escape_windows {
             let stage = Stage::new()
                 .place(PRIEST, -10.0, 0.0)
                 .health(PRIEST, 0.2)
+                .healer_posture(
+                    PRIEST,
+                    HealerPosture {
+                        posture: Posture::Pressured,
+                        hold_until: 0.0,
+                        ..HealerPosture::new(0.0)
+                    },
+                )
                 // Mid-GCD, so the posture opens its window before the first
                 // heal can go out — the heal is then a decision made inside it.
                 .combatant(PRIEST, |c| c.global_cooldown = 0.5)
@@ -7396,8 +7407,11 @@ mod nagrand_teamplan {
     }
 
     /// The anti-statue probe's seed bank, floors and vacuity bound (see
-    /// [`teamplan_healer_is_not_a_statue_on_basicarena`]).
-    const STATUE_SEEDS: std::ops::RangeInclusive<u64> = 1..=24;
+    /// [`teamplan_healer_is_not_a_statue_on_basicarena`]). 36 seeds: once a
+    /// held Rogue stopped pressuring the Priest (AS-496), seeds 1-24 held
+    /// 49.4s of counted pressure, under the minute the bank must hold; 1-36
+    /// hold 73.2s (the key disarmed: 156.7s, and seed 4 fails its bar).
+    const STATUE_SEEDS: std::ops::RangeInclusive<u64> = 1..=36;
     const STATUE_POOLED_FLOOR: f32 = 1.2;
     const STATUE_SEED_AIM_FLOOR: f32 = 0.25;
     const STATUE_POOLED_AIM_FLOOR: f32 = 0.3;

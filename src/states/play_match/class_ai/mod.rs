@@ -535,6 +535,13 @@ impl<'a> CombatContext<'a> {
         self.ai_profile.is_team_plan() && self.situation.as_ref().is_some_and(|s| s.pillar_modes)
     }
 
+    /// Whether this unit's healers run the hand-off cover rule (AS-440,
+    /// `team_solve::SolveWorld::cover_waived`): its team runs `TeamPlan` and
+    /// no measurement turned it off. `false` on a context nobody classified.
+    pub fn handoff_rule(&self) -> bool {
+        self.ai_profile.is_team_plan() && self.situation.as_ref().is_some_and(|s| s.handoff_rule)
+    }
+
     /// The healer this unit must keep in sight: `Some` while it is a DPS whose
     /// team's `sight_yield` says it yields to that healer (AS-386,
     /// `situation::SightPair`). `None` on a context nobody classified, and
@@ -685,6 +692,15 @@ impl<'a> CombatContext<'a> {
     /// same.
     pub fn held_in_hard_cc(&self, entity: Entity) -> Option<AuraType> {
         self.held_in_hard_cc_at(entity, 0.0)
+    }
+
+    /// Is `entity` held at all — under any crowd control that stops it acting
+    /// ([`holds`]), however little of it is left? The threat question
+    /// (`situation::is_held`): a held enemy pressures no one and chases no
+    /// one. [`Self::held_in_hard_cc`] is the CASTER's question, which lets a
+    /// hold in its last [`CC_CHAIN_WINDOW`] be chained onto.
+    pub fn is_held(&self, entity: Entity) -> bool {
+        crate::states::play_match::situation::is_held(self.active_auras, entity)
     }
 
     /// [`Self::held_in_hard_cc`], asked of the moment a cast begun now LANDS,

@@ -151,7 +151,7 @@
 //! | fact | threshold | sites that read it |
 //! |---|---|---|
 //! | dying | `health_pct < urgency_hp_threshold` | healer cover denial (`teammate_needs_saving`), the dispel walk's dying-first rule (`another_teammate_dying`) |
-//! | pressured | `danger_radius`, `threat_intent_radius`; an enemy healer never closing (`TeamPlan` only) | the healers' PRESSURED trigger (its hold) |
+//! | pressured | `danger_radius`, `threat_intent_radius`; an enemy healer never closing (`TeamPlan` only); a held enemy never | the healers' PRESSURED trigger (its hold) |
 //! | pressure onset | the same, a closing threat `danger_edge_margin` inside both its edges | the healers' PRESSURED onset |
 //! | tempo | onset `press_advantage_margin`, release `press_release_margin` (`TeamPlan` only) | healer cover denial, the Warrior tempo reset |
 //! | danger window | dwell `danger_dwell` at a `danger_edge_margin` edge, release `danger_release` | the Peel play (`TeamPlan` only) |
@@ -305,6 +305,8 @@ pub struct AllyStanding {
     /// caster holding position does not pressure, and neither does a melee
     /// targeting from across the arena. Under `TeamPlan` an enemy healer is
     /// never closing ([`closes`]): it pressures from `danger_radius` only.
+    /// An enemy held in crowd control ([`is_held`]) pressures no one
+    /// ([`Self::held_attacker`] names it instead).
     pub pressured: bool,
     /// Pressured with the CLOSING branch given width ([`pressure_onset`]): a
     /// caster or ranged enemy counts as closing only `danger_edge_margin`
@@ -316,6 +318,11 @@ pub struct AllyStanding {
     /// healer off for `pressured_hold`, and its formation point walked it
     /// straight back in: a ~3s bob across the caster's 30yd ring (AS-249).
     pub pressure_onset: bool,
+    /// An enemy that WOULD pressure it but is held in crowd control
+    /// ([`is_held`]): no pressure, but a window. A PRESSURED healer whose
+    /// attacker is held still opens its ESCAPE window on it, to use the hold
+    /// to open distance (user ruling, AS-496).
+    pub held_attacker: bool,
 }
 
 /// Everything one team's units know about the situation this frame.
@@ -368,6 +375,11 @@ pub struct TeamSituation {
     /// Whether this team's healers play the pillar modes (AS-373,
     /// [`SituationConfig::pillar_modes`]).
     pub pillar_modes: bool,
+    /// Whether this team's healers run the hand-off cover rule (AS-440,
+    /// [`SituationConfig::handoff_rule`]) — and the enemy team runs a target
+    /// focus for it to answer (`update_situations`): against a team that
+    /// never moves a focus, hiding hands nothing to the partner.
+    pub handoff_rule: bool,
     /// Each DPS–healer pair's sight yield: which of the two must not break
     /// the pair's line of sight (the module docs' `sight_yield`). Empty
     /// unless the team runs it ([`SituationConfig::sight_yield`]).
@@ -537,6 +549,14 @@ impl TeamSituation {
     /// Whether teammate `ally` is pressured ([`AllyStanding::pressured`]).
     pub fn is_pressured(&self, ally: Entity) -> bool {
         self.allies.iter().any(|a| a.entity == ally && a.pressured)
+    }
+
+    /// Whether an enemy held in crowd control would pressure teammate `ally`
+    /// but for its hold ([`AllyStanding::held_attacker`]).
+    pub fn has_held_attacker(&self, ally: Entity) -> bool {
+        self.allies
+            .iter()
+            .any(|a| a.entity == ally && a.held_attacker)
     }
 
     /// Whether teammate `ally` meets the ONSET of pressure
@@ -902,6 +922,11 @@ pub struct SituationConfig {
     /// `TeamPlan` ([`Self::under`]) unless a measurement turns it off
     /// ([`WithheldPlays::no_target_focus`]).
     pub target_focus: bool,
+    /// Whether the team's healers run the hand-off cover rule (AS-440,
+    /// `team_solve::SolveWorld::cover_waived`): `true` under `TeamPlan`
+    /// ([`Self::under`]) unless a measurement turns it off
+    /// ([`WithheldPlays::no_handoff_rule`]).
+    pub handoff_rule: bool,
 }
 
 impl Default for SituationConfig {
@@ -934,6 +959,7 @@ impl SituationConfig {
             yield_counts_healer_cast: true,
             cc_reach_margin: config.shared.cc_reach_margin,
             target_focus: false,
+            handoff_rule: false,
         }
     }
 
@@ -951,6 +977,7 @@ impl SituationConfig {
                 pillar_modes: true,
                 sight_yield: true,
                 target_focus: true,
+                handoff_rule: true,
                 ..self
             },
             AiProfile::Legacy => Self {
@@ -960,6 +987,7 @@ impl SituationConfig {
                 pillar_modes: false,
                 sight_yield: false,
                 target_focus: false,
+                handoff_rule: false,
                 ..self
             },
         }
@@ -985,6 +1013,7 @@ impl SituationConfig {
             pillar_modes: cfg.pillar_modes && !self.withheld.no_pillar_modes(team),
             sight_yield: cfg.sight_yield && !self.withheld.no_sight_yield(team),
             target_focus: cfg.target_focus && !self.withheld.no_target_focus(team),
+            handoff_rule: cfg.handoff_rule && !self.withheld.no_handoff_rule(team),
             yield_counts_healer_cast: cfg.yield_counts_healer_cast
                 && !self.withheld.yield_cast_moves(team),
             ..cfg
@@ -1114,6 +1143,12 @@ pub struct WithheldPlays {
     pub team1_no_target_focus: bool,
     /// Team 2's, as [`Self::team1_no_target_focus`].
     pub team2_no_target_focus: bool,
+    /// Team 1 plays without the hand-off cover rule (AS-440): a measurement
+    /// control, as the target focus is (`team1_handoff_rule: false` in a
+    /// headless config).
+    pub team1_no_handoff_rule: bool,
+    /// Team 2's, as [`Self::team1_no_handoff_rule`].
+    pub team2_no_handoff_rule: bool,
 }
 
 impl WithheldPlays {
@@ -1124,6 +1159,16 @@ impl WithheldPlays {
             self.team2_yield_cast_moves
         } else {
             self.team1_yield_cast_moves
+        }
+    }
+
+    /// Whether team `team` plays without the hand-off cover rule; team 1's
+    /// for a team id outside 1..=2.
+    pub fn no_handoff_rule(&self, team: u8) -> bool {
+        if team == 2 {
+            self.team2_no_handoff_rule
+        } else {
+            self.team1_no_handoff_rule
         }
     }
 
@@ -1380,6 +1425,7 @@ fn classify_roster_before_yield(
         danger_attackers,
         runs: cfg.runs,
         pillar_modes: cfg.pillar_modes,
+        handoff_rule: cfg.handoff_rule,
         pillar_stance: None,
         stance_memory: StanceMemory::default(),
         hunt: None,
@@ -1527,6 +1573,7 @@ fn allies(
             dying: info.health_pct() < cfg.urgency_hp_threshold,
             pressured: pressured(roster, auras, info, cfg),
             pressure_onset: pressure_onset(roster, auras, info, cfg),
+            held_attacker: held_attacker(roster, auras, info, cfg),
         })
         .collect()
 }
@@ -1562,7 +1609,36 @@ fn pressuring(
 }
 
 /// [`pressured`]'s rule, as the threats that satisfy it, in entity order.
+///
+/// An enemy held in crowd control ([`is_held`]) is no threat, wherever it
+/// stands: a stunned, feared, polymorphed, incapacitated or cycloned unit
+/// cannot act (user ruling, AS-496). A rooted one still can: a root is no
+/// hold, so a rooted caster still pressures and a rooted melee still does in
+/// range. The threat returns the frame its hold ends.
 fn pressure_threats<'r>(
+    roster: &'r BTreeMap<Entity, CombatantInfo>,
+    auras: &'r BTreeMap<Entity, Vec<Aura>>,
+    subject: &'r CombatantInfo,
+    cfg: &'r SituationConfig,
+) -> impl Iterator<Item = &'r CombatantInfo> + 'r {
+    threats_by_rule(roster, auras, subject, cfg).filter(move |c| !is_held(auras, c.entity))
+}
+
+/// [`AllyStanding::held_attacker`]: an enemy the pressure rule would count
+/// against `subject` but for the crowd control that holds it.
+fn held_attacker(
+    roster: &BTreeMap<Entity, CombatantInfo>,
+    auras: &BTreeMap<Entity, Vec<Aura>>,
+    subject: &CombatantInfo,
+    cfg: &SituationConfig,
+) -> bool {
+    threats_by_rule(roster, auras, subject, cfg).any(|c| is_held(auras, c.entity))
+}
+
+/// The pressure rule's reach, held or not: every visible living enemy
+/// targeting `subject` from within `danger_radius`, or from within
+/// `threat_intent_radius` as a melee, a pet or a ranged enemy still closing.
+fn threats_by_rule<'r>(
     roster: &'r BTreeMap<Entity, CombatantInfo>,
     auras: &'r BTreeMap<Entity, Vec<Aura>>,
     subject: &'r CombatantInfo,
@@ -1589,6 +1665,16 @@ fn pressure_threats<'r>(
                         || threat.class.is_melee()
                         || (closes(threat, cfg) && closing(threat, subject))))
         })
+}
+
+/// Whether `entity` is held: under a crowd control that stops it acting
+/// ([`holds`](super::class_ai::holds), the one copy of that set). A held
+/// enemy is no pressure ([`pressure_threats`]) and no chaser (the Druid's
+/// escape shift).
+pub fn is_held(auras: &BTreeMap<Entity, Vec<Aura>>, entity: Entity) -> bool {
+    auras
+        .get(&entity)
+        .is_some_and(|list| list.iter().any(|a| super::class_ai::holds(a.effect_type)))
 }
 
 /// `threat`, targeting `subject`, is still beyond its own preferred range of
@@ -1931,7 +2017,14 @@ pub fn update_situations(
 ) {
     for (index, team) in [1u8, 2].into_iter().enumerate() {
         let prev = std::mem::take(&mut situations.teams[index]);
-        let cfg = cfg.for_team(team, snapshot.ai_profile.for_team(team));
+        let enemy = 3 - team;
+        let enemy_focus = cfg
+            .for_team(enemy, snapshot.ai_profile.for_team(enemy))
+            .target_focus;
+        let mut cfg = cfg.for_team(team, snapshot.ai_profile.for_team(team));
+        // The hand-off cover rule answers the ENEMY's target focus: against a
+        // team that runs none, cover hands nothing to the partner (AS-440).
+        cfg.handoff_rule &= enemy_focus;
         let mut next = classify_before_yield(snapshot, team, &prev, clock, &cfg);
         next.hunt = super::class_ai::hunt::classify(snapshot, team, &prev, &next, clock, &cfg);
         next.hunt_memory = super::class_ai::hunt::remember(
@@ -2470,6 +2563,7 @@ mod tests {
                 pillar_modes: true,
                 sight_yield: true,
                 target_focus: true,
+                handoff_rule: true,
                 ..SituationConfig::default()
             }
         );
@@ -2483,10 +2577,11 @@ mod tests {
                 pillar_modes: false,
                 sight_yield: false,
                 target_focus: false,
+                handoff_rule: false,
                 ..teamplan
             },
             "only the release, the closing rule, the gated plays, the pillar modes, the \
-             sight yield and the target focus differ"
+             sight yield, the target focus and the hand-off rule differ"
         );
         // With no band the latch is the plain test from each side, whatever
         // the previous tempo.
@@ -2851,6 +2946,7 @@ mod tests {
                 dying: true,
                 pressured: false,
                 pressure_onset: false,
+                held_attacker: false,
             }]
             .into_iter()
             .collect(),

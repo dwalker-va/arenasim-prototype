@@ -26,9 +26,9 @@ use crate::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementCo
 use crate::states::match_config::CharacterClass;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::{
-    ActiveAuras, AuraType, CastingState, ChannelingState, DRTracker, FormationMemory,
-    HealerPosture, HealingRefused, MovementDirective, MovementGoal, Pet, PetType, Totem,
-    TotemElement, TrapLaunchProjectile, TrapType,
+    ActiveAuras, AuraType, CastingState, ChannelingState, DRTracker, DispelWalkPhase,
+    FormationMemory, HealerPosture, HealingRefused, MovementDirective, MovementGoal, Pet, PetType,
+    PillarMode, Posture, Totem, TotemElement, TrapLaunchProjectile, TrapType,
 };
 use crate::states::play_match::constants::PET_SLOT_BASE;
 use crate::states::play_match::decision_trace::{DecisionTrace, TraceWriter};
@@ -110,6 +110,27 @@ pub struct ObservedCombatant {
     /// The bonus queued onto the next main-hand swing (a Heroic Strike), 0.0
     /// when none is queued (`Combatant::next_attack_bonus_damage`).
     pub next_attack_bonus_damage: f32,
+    /// A healer's posture machine as it stands this frame
+    /// ([`ObservedHealerState`]); `None` for a unit with no healer posture.
+    pub healer_state: Option<ObservedHealerState>,
+}
+
+/// What a healer's posture machine (`HealerPosture`) holds on a frame, reduced
+/// to what names WHY the healer stands where it does: its posture, the walks
+/// that override it, and its pillar mode. Lets a probe attribute a position to
+/// the machine that chose it without reading the sparse trace.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ObservedHealerState {
+    pub posture: Posture,
+    /// The PRESSURED anchor ally.
+    pub anchor: Option<Entity>,
+    /// `TeamPlan`: walking out of enemy crowd-control reach (AS-362).
+    pub cc_walk: bool,
+    /// `TeamPlan`: hugging a pillar (AS-373), and which.
+    pub hug: Option<usize>,
+    /// A medic chase, dispel walk, dying-teammate walk or hunt station holds
+    /// the healer's legs.
+    pub walk: bool,
 }
 
 /// A read-only snapshot of one Shaman totem on a frame. Totems are NOT
@@ -1201,6 +1222,22 @@ fn observe_frame(world: &World) -> FrameObservation {
                 channeling: entity_ref.get::<ChannelingState>().map(|c| c.ability),
                 attack_timer: combatant.attack_timer,
                 next_attack_bonus_damage: combatant.next_attack_bonus_damage,
+                healer_state: entity_ref
+                    .get::<HealerPosture>()
+                    .map(|p| ObservedHealerState {
+                        posture: p.posture,
+                        anchor: p.anchor,
+                        cc_walk: p.cc_walk,
+                        hug: match p.pillar.mode {
+                            PillarMode::Hug { pillar } => Some(pillar),
+                            PillarMode::Open => None,
+                        },
+                        walk: p.medic_target.is_some()
+                            || p.solve_dispel.is_some()
+                            || p.solve_dying.is_some()
+                            || p.hunt_station.is_some()
+                            || p.dispel_walk != DispelWalkPhase::Off,
+                    }),
             },
         );
     }
