@@ -1388,9 +1388,9 @@ fn team_hp_advantage_zero_when_self_absent() {
 /// joining the non-pet row without anyone deciding it should would silently
 /// stop every Hunter trapping its teammates.
 ///
-/// The pet row is the AS-129 seam: today only the Felhunter reaches a pet, so
-/// a trapped Felhunter is freed by nobody (it cannot act while trapped). Make
-/// the healers' dispels reach pets and this row, not the Hunter AI, changes.
+/// The pet row is the AS-129 ruling: every dispel reaches a pet, so a trapped
+/// Felhunter is freed by the same healers as its Warlock (and by another
+/// Felhunter) — this row, not the Hunter AI, is what moved.
 #[test]
 fn who_can_free_a_freezing_trap() {
     use arenasim::states::play_match::class_ai::can_free_ally;
@@ -1427,7 +1427,7 @@ fn who_can_free_a_freezing_trap() {
     );
     assert_eq!(
         freers_of(&pet_victim),
-        vec!["Felhunter"],
+        vec!["Felhunter", "Paladin", "Priest"],
         "who frees a trapped pet"
     );
 
@@ -1543,8 +1543,9 @@ fn a_paladin_walks_to_a_teammate_it_can_only_free_from_closer() {
 /// AS-125 rulings name. A healer — the dispeller the trap is FOR — is always
 /// worth one, including beside a Felhunter that could devour it (the intended
 /// counter is left to play out). Anyone else is worth one only when no
-/// teammate of its could free it — a trapped Felhunter included — however
-/// hard the Hunter's team is pressing the teammate that would.
+/// teammate of its could free it — a trapped Felhunter included, which its
+/// healer frees (AS-129) — however hard the Hunter's team is pressing the
+/// teammate that would.
 #[test]
 fn a_trap_is_worth_throwing_where_nobody_frees_it() {
     use arenasim::states::play_match::class_ai::hunter_dip::trap_victim_worth_it;
@@ -1583,11 +1584,11 @@ fn a_trap_is_worth_throwing_where_nobody_frees_it() {
     // The Shaman frees nobody (Purge strips enemy buffs), so its DPS is fair.
     assert_eq!(worth(&[(a, Shaman), (b, Warrior)], false), [true, true]);
     // Warlock + healer: two dispellers. The healer stays the target; the
-    // Warlock is freed by the Felhunter (and the Priest); the Felhunter itself
-    // nobody can free.
+    // Warlock is freed by the Felhunter (and the Priest), and the Felhunter by
+    // the Priest.
     assert_eq!(
         worth(&[(a, Priest), (b, Warlock)], true),
-        [true, false, true]
+        [true, false, false]
     );
     // Warlock + Rogue: the Felhunter frees both, so neither is worth a trap —
     // but a trapped Felhunter stays trapped.

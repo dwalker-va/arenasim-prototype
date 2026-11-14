@@ -1053,8 +1053,13 @@ fn a_shift_frees_the_druid_and_it_holds_its_heading() {
         .shared
         .commit_window;
     let window_frames = (commit_window * 60.0).round() as usize;
-    for (t1, t2, map, seed) in SHIFT_MATCHES.iter().chain(ESCAPE_MATCHES) {
-        let played = play(t1, t2, map, *seed);
+    for (t1, t2, map, seed) in SHIFT_MATCHES
+        .iter()
+        .chain(ESCAPE_MATCHES)
+        .copied()
+        .chain(root_bank())
+    {
+        let played = play(t1, t2, map, seed);
         let druid_of = |f: &FrameObservation| {
             f.combatants
                 .iter()
@@ -1788,8 +1793,13 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
     let mut safe_checks = 0;
     let mut rooted_exits = 0;
     let mut emergency_leaves = 0;
-    for (t1, t2, map, seed) in SHIFT_MATCHES.iter().chain(IDLE_MATCHES) {
-        let played = play(t1, t2, map, *seed);
+    for (t1, t2, map, seed) in SHIFT_MATCHES
+        .iter()
+        .chain(IDLE_MATCHES)
+        .copied()
+        .chain(root_bank())
+    {
+        let played = play(t1, t2, map, seed);
         let mut shifted_at: Option<f32> = None;
         let mut safe_since: Option<f32> = None;
         let mut rooted_since: Option<f32> = None;
@@ -1953,7 +1963,10 @@ fn the_druid_neither_strobes_nor_idles_in_the_form() {
 /// Hunter's Web or Frost Trap roots, against a Hunter with each healer, over a
 /// few seeds. It was a hand-picked list that four cards in a row (AS-240,
 /// AS-247, AS-249 among them) had to top up when the seeds they held moved off
-/// the roots its floors count; a bank holds them by breadth instead.
+/// the roots its floors count; a bank holds them by breadth instead. The
+/// heading and strobe probes play it too, beside their hand-picked lists, since
+/// AS-129 (a healer frees the Spider the Druid roots) thinned the roots and
+/// shifts those lists held.
 fn root_bank() -> Vec<(
     &'static [&'static str],
     &'static [&'static str],
@@ -1973,7 +1986,7 @@ fn root_bank() -> Vec<(
     let mut out = Vec::new();
     for t1 in DRUID_TEAMS {
         for t2 in ROOTING_TEAMS {
-            for seed in 1..=12 {
+            for seed in 1..=16 {
                 out.push((t1, t2, "BasicArena", seed));
             }
         }

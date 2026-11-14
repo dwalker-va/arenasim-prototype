@@ -130,8 +130,8 @@ pub fn trap_focus(
 ///   — the Hunter still takes the healer and lets that dispeller spend itself
 ///   undoing it. That is the intended counter being PLAYED.
 /// - Anyone else is worth it only when it would stay trapped
-///   ([`trap_would_stick`]) — a trapped Felhunter included, which nobody can
-///   free.
+///   ([`trap_would_stick`]) — a pet included: a healer's dispel frees a
+///   trapped pet as it frees any teammate (AS-129).
 ///
 /// Otherwise the trap would be lifted for nothing — AS-68 measured the median
 /// removal at 0.28s — and is held. That holds even when the only teammate who
