@@ -1059,6 +1059,17 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Repentance's head swirl (`repentance.rs`, AS-378): raised, posed
+        // and retired off the incapacitate it shows, its sparkles emitted
+        // before the client particles age them. (Its landing's gold impact
+        // and hands are a Paladin one-shot above.)
+        .add_systems(
+            Update,
+            play_match::update_repentance_swirls
+                .before(play_match::animate_client_particles)
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Dispel burst visual effects (separate group to avoid tuple size limits)
         // Still used by Concussive Shot impact and Master's Call — NOT the dispel.
         .add_systems(
