@@ -241,7 +241,9 @@ pub fn update_ice_blocks(
     }
 }
 
-/// Cleanup ice blocks when the Incapacitate aura breaks or target dies.
+/// Cleanup ice blocks when Freezing Trap's incapacitate breaks or the target
+/// dies. Keyed on the aura's NAME, not its type: Repentance is an
+/// `Incapacitate` too, and never holds an ice block up (AS-378).
 pub fn cleanup_ice_blocks(
     mut commands: Commands,
     time: Res<Time>,
@@ -261,12 +263,9 @@ pub fn cleanup_ice_blocks(
                 if !combatant.is_alive() {
                     true
                 } else {
-                    // Despawn if target no longer has Incapacitate aura
-                    auras.is_none_or(|a| {
-                        !a.auras
-                            .iter()
-                            .any(|aura| aura.effect_type == AuraType::Incapacitate)
-                    })
+                    // Despawn if target no longer holds Freezing Trap's
+                    // incapacitate
+                    auras.is_none_or(|a| !a.auras.iter().any(holds_ice_block))
                 }
             }
             Err(_) => true, // Target entity gone
@@ -276,4 +275,10 @@ pub fn cleanup_ice_blocks(
             commands.entity(block_entity).despawn();
         }
     }
+}
+
+/// Whether an aura is the one an ice block encloses: Freezing Trap's
+/// incapacitate, by name.
+pub fn holds_ice_block(aura: &Aura) -> bool {
+    aura.effect_type == AuraType::Incapacitate && aura.ability_name == FREEZING_TRAP_AURA
 }

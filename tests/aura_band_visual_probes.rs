@@ -30,8 +30,10 @@ use arenasim::states::play_match::combat_core::{
 use arenasim::states::play_match::components::{
     weapon_poison_marker_aura, ActiveAuras, Aura, AuraApplyOwner, AuraApplyRoute, AuraBand,
     AuraBandPolarity, AuraType, Combatant, CompoundDebuff, DispelType, Pet, PetType, TotemElement,
-    GUARDIAN_SPIRIT_AURA,
+    DIVINE_PROTECTION_AURA, GUARDIAN_SPIRIT_AURA, VENGEANCE_AURA,
 };
+use arenasim::states::play_match::talent_procs::{effect_aura, ProcEvent, TalentProcSlot};
+use arenasim::states::play_match::talents::{TalentDefinitions, TalentEffect, TalentId};
 use arenasim::states::play_match::{
     aura_band_alpha, aura_band_progress, cleanup_aura_bands, detect_aura_applications,
     update_aura_bands, AuraBandArc, AuraBandMaterial, AURA_BAND_ARCS, AURA_BAND_SECS,
@@ -703,6 +705,136 @@ fn guardian_spirit_raises_no_band_but_another_healing_boost_does() {
     );
     h.tick(3);
     assert_eq!(h.bands().len(), 1, "another healing boost keeps the band");
+}
+
+/// The auras Vengeance's procs land, through the engine's own constructor
+/// (both of its procs, a melee crit and a Crusader Strike crit).
+fn vengeance_auras() -> Vec<Aura> {
+    let node = TalentDefinitions::shipped()
+        .get(TalentId::Vengeance)
+        .expect("Vengeance is a node");
+    let (owner, other) = (Entity::from_raw(1), Entity::from_raw(2));
+    let auras: Vec<Aura> = node
+        .per_rank
+        .iter()
+        .filter_map(|effect| match effect {
+            TalentEffect::Proc(proc) => Some(proc.clone()),
+            _ => None,
+        })
+        .map(|proc| {
+            let slot = TalentProcSlot::new(TalentId::Vengeance, &node.name, proc);
+            let event = ProcEvent::new(owner, slot.proc.trigger)
+                .amount(50.0)
+                .other(other);
+            effect_aura(&slot, owner, &event).unwrap().aura
+        })
+        .collect();
+    assert_eq!(auras.len(), 2, "a melee crit and a Crusader Strike crit");
+    auras
+}
+
+/// Vengeance is owned by its hands, by NAME: their onset is its landing
+/// (`vengeance.rs`). Its type is the damage pipeline's, so another damage
+/// boost keeps the band. The name is the one its procs give the aura.
+#[test]
+fn vengeance_owns_its_application_and_its_type_siblings_keep_the_band() {
+    let owned = AuraApplyRoute::Owned(AuraApplyOwner::VengeanceHands);
+    for aura in vengeance_auras() {
+        assert_eq!(aura.ability_name, VENGEANCE_AURA, "the procs' aura name");
+        assert_eq!(aura.effect_type, AuraType::DamageDealtIncrease);
+        assert_eq!(
+            AuraApplyRoute::for_instance(aura.effect_type, &aura.ability_name),
+            owned
+        );
+    }
+    assert_eq!(
+        AuraApplyRoute::for_instance(AuraType::DamageDealtIncrease, "Some Other Fury"),
+        AuraApplyRoute::Band,
+        "another damage boost keeps the band"
+    );
+    // The name alone does not own another type.
+    for other in AuraType::ALL
+        .into_iter()
+        .filter(|o| *o != AuraType::DamageDealtIncrease)
+    {
+        assert_eq!(
+            AuraApplyRoute::for_instance(other, VENGEANCE_AURA),
+            AuraApplyRoute::for_aura(other),
+            "{other:?}"
+        );
+    }
+}
+
+#[test]
+fn vengeance_raises_no_band_but_another_damage_boost_does() {
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(unit, vec![vengeance_auras().remove(0)]);
+    h.tick(3);
+    assert!(h.bands().is_empty(), "the hands own its landing");
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(
+        unit,
+        vec![aura(AuraType::DamageDealtIncrease, "Some Other Fury", None)],
+    );
+    h.tick(3);
+    assert_eq!(h.bands().len(), 1, "another damage boost keeps the band");
+}
+
+/// Divine Protection is owned by its globe, by NAME: the globe's onset is
+/// its landing (`divine_protection.rs`). Its type is the damage pipeline's,
+/// so another damage-taken reduction keeps the band. The name is the one the
+/// RON gives the ability.
+#[test]
+fn divine_protection_owns_its_application_and_its_type_siblings_keep_the_band() {
+    let owned = AuraApplyRoute::Owned(AuraApplyOwner::DivineProtectionGlobe);
+    let defs = AbilityDefinitions::shipped();
+    let def = defs.get_unchecked(&AbilityType::DivineProtection);
+    assert_eq!(def.name, DIVINE_PROTECTION_AURA, "the RON name");
+    let t = def.applies_aura.as_ref().unwrap().aura_type;
+    assert_eq!(t, AuraType::DamageTakenReduction);
+    assert_eq!(AuraApplyRoute::for_instance(t, &def.name), owned);
+    assert_eq!(
+        AuraApplyRoute::for_instance(t, "Some Other Ward"),
+        AuraApplyRoute::Band,
+        "another damage-taken reduction keeps the band"
+    );
+    // The name alone does not own another type.
+    for other in AuraType::ALL
+        .into_iter()
+        .filter(|o| *o != AuraType::DamageTakenReduction)
+    {
+        assert_eq!(
+            AuraApplyRoute::for_instance(other, DIVINE_PROTECTION_AURA),
+            AuraApplyRoute::for_aura(other),
+            "{other:?}"
+        );
+    }
+}
+
+#[test]
+fn divine_protection_raises_no_band_but_another_ward_does() {
+    let ward = |name: &str| {
+        aura(
+            AuraType::DamageTakenReduction,
+            name,
+            Some(SpellSchool::Holy),
+        )
+    };
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(unit, vec![ward(DIVINE_PROTECTION_AURA)]);
+    h.tick(3);
+    assert!(h.bands().is_empty(), "the globe owns its landing");
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(unit, vec![ward("Some Other Ward")]);
+    h.tick(3);
+    assert_eq!(h.bands().len(), 1, "another ward keeps the band");
 }
 
 /// Cheat Death's damage cut is owned by its skull and ghost-fire, by NAME

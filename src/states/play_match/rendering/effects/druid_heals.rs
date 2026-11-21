@@ -520,7 +520,8 @@ impl DruidEffect {
             | AuraLandingKind::ArtOfWarRing
             | AuraLandingKind::SacredShieldDisc
             | AuraLandingKind::AmplifyFlash
-            | AuraLandingKind::ShadowTrance => None,
+            | AuraLandingKind::ShadowTrance
+            | AuraLandingKind::RepentanceImpact => None,
         }
     }
 }
