@@ -1434,7 +1434,7 @@ pub fn piece_rotation(facing: PieceFacing, rig: Quat, camera: Option<Quat>) -> Q
 const PIECE_PX: u32 = 128;
 /// A drawn ring's stroke: its centre radius and half-width over the sprite's
 /// radius (the bench's 2-3 px `ring3` stroke).
-const RING_STROKE: (f32, f32) = (0.965, 0.035);
+pub const RING_STROKE: (f32, f32) = (0.965, 0.035);
 /// A glyph disc's inner ring sits at 0.78 of the outer (the bench's
 /// `glyphDisc`), its ticks run from the inner ring to the outer, slanted
 /// 0.12 rad, and its soft fill is a quarter of the ground disc.

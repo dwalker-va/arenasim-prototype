@@ -952,6 +952,17 @@ pub const FREEZING_TRAP_AURA: &str = "Freezing Trap";
 /// landing plays the disc; the absorb wears its card
 /// (`rendering/effects/shield.rs`, `ShieldKind::SacredShield`).
 pub const SACRED_SHIELD_AURA: &str = "Sacred Shield";
+/// Divine Protection's damage reduction (AS-376). Not a landing: its state is
+/// the red-gold globe at the Paladin's chest for the buff's life
+/// (`rendering/effects/divine_protection.rs`), whose onset is its application.
+pub const DIVINE_PROTECTION_AURA: &str = "Divine Protection";
+
+/// Whether an aura of `aura_type` named `name` is Divine Protection's: the
+/// one predicate its globe, its band routing and the lands-silently audit
+/// all ask.
+pub fn is_divine_protection(aura_type: AuraType, name: &str) -> bool {
+    aura_type == AuraType::DamageTakenReduction && name == DIVINE_PROTECTION_AURA
+}
 
 /// What a heal-over-time aura draws — the ONE place a HoT meets its visual,
 /// routed by the aura's RON name the way `DotStateVisual::for_dot` routes a
@@ -1604,7 +1615,7 @@ pub enum HealCastKind {
     /// The instant Holy hand flash (AS-374): the Holy glow and wisps of
     /// `holy_precast_*_hand.m2` played once, 0.7 s on both hands, for a Holy
     /// instant with no cast window (Aura Mastery, Blessing of Sacrifice,
-    /// Repentance). Only ever a launch.
+    /// Repentance, Divine Protection). Only ever a launch.
     HolyFlash,
 }
 
@@ -1652,10 +1663,13 @@ impl HealCastKind {
             // 193, AS-375) and Repentance (kit 190, AS-378) are the Holy
             // hands, played as the instant flash.
             AbilityType::DivineFavor => Some(HealCastKind::Arcane),
+            // Divine Protection (AS-376) too; its hands flash at its globe's
+            // onset (`divine_protection.rs`).
             AbilityType::AuraMastery
             | AbilityType::BlessingOfSacrifice
             | AbilityType::SacredShield
-            | AbilityType::Repentance => Some(HealCastKind::HolyFlash),
+            | AbilityType::Repentance
+            | AbilityType::DivineProtection => Some(HealCastKind::HolyFlash),
             _ => None,
         }
     }
@@ -2037,14 +2051,21 @@ pub enum AuraApplyOwner {
     /// Owned per aura NAME, because its type (`DamageTakenReduction`) is
     /// shared with auras that keep the band (Devotion Aura).
     CheatDeath,
+    /// Divine Protection: the red-gold globe at the Paladin's chest, whose
+    /// onset (with the instant Holy hand flash) is its application
+    /// (`divine_protection.rs`, AS-376). Owned per aura NAME, because its type
+    /// (`DamageTakenReduction`) is the damage pipeline's, which any other user
+    /// meets on the band.
+    DivineProtectionGlobe,
 }
 
 impl AuraApplyRoute {
     /// Route one aura INSTANCE's application: Repentance's incapacitate is
     /// owned by its impact and head swirl ([`REPENTANCE_AURA`]), a named aura
-    /// with a bespoke landing ([`AuraLandingKind::for_aura`]) by that, and
-    /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]) and Cheat Death
-    /// by its save ([`CHEAT_DEATH_NAME`]); every other aura routes by its type
+    /// with a bespoke landing ([`AuraLandingKind::for_aura`]) by that,
+    /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]), Cheat Death by
+    /// its save ([`CHEAT_DEATH_NAME`]) and Divine Protection by its globe
+    /// ([`DIVINE_PROTECTION_AURA`]); every other aura routes by its type
     /// ([`Self::for_aura`]). The renderers ask this — the band, and the
     /// Repentance swirl to find its incapacitate.
     pub fn for_instance(aura_type: AuraType, name: &str) -> Self {
@@ -2056,6 +2077,8 @@ impl AuraApplyRoute {
             AuraApplyRoute::Owned(AuraApplyOwner::GuardianSpirit)
         } else if name == CHEAT_DEATH_NAME {
             AuraApplyRoute::Owned(AuraApplyOwner::CheatDeath)
+        } else if is_divine_protection(aura_type, name) {
+            AuraApplyRoute::Owned(AuraApplyOwner::DivineProtectionGlobe)
         } else {
             Self::for_aura(aura_type)
         }
