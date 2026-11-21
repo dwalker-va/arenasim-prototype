@@ -360,3 +360,80 @@ fn inside_throw_range_a_crowded_landing_is_held_not_walked_at() {
         describe(&clear)
     );
 }
+
+/// The headless key withholds the walk from the team it names, and only from
+/// that team: `team1_trap_walk: false` is team 1's control.
+#[test]
+fn the_trap_walk_key_withholds_the_walk_per_team() {
+    use arenasim::headless::HeadlessMatchConfig;
+    let withheld = |t1: Option<bool>, t2: Option<bool>| {
+        let w = HeadlessMatchConfig {
+            team1_trap_walk: t1,
+            team2_trap_walk: t2,
+            ..Default::default()
+        }
+        .withheld_plays()
+        .expect("a valid config");
+        (w.no_trap_walk(1), w.no_trap_walk(2))
+    };
+    assert_eq!(withheld(None, None), (false, false));
+    assert_eq!(withheld(Some(false), None), (true, false));
+    assert_eq!(withheld(None, Some(false)), (false, true));
+    assert_eq!(withheld(Some(true), Some(true)), (false, false));
+}
+
+/// A victim the walk holds back from is not held for: with no DPS teammate
+/// attacking, the Freezing Trap is not reserved for the healer, so the
+/// rotation's lane throw decides it (here it throws, or holds for its own
+/// reason). Withheld, the old dip reserves the trap for that healer and walks
+/// in, and the lane throw is never asked.
+#[test]
+fn a_victim_the_walk_holds_back_from_does_not_reserve_the_trap() {
+    let scene = |withheld: bool| {
+        let s = Scene::new()
+            .now(NOW)
+            .ai_profile(1, AiProfile::TeamPlan)
+            .unit(ME, 1, Hunter)
+            .at(0.0, 0.0)
+            .targeting(WARRIOR)
+            .kite_posture(ME, KitePosture::new(NOW))
+            .unit(PARTNER, 1, Warrior)
+            .at(-45.0, 0.0)
+            .unit(WARRIOR, 2, Warrior)
+            .at(-28.0, 0.0)
+            .targeting(PARTNER)
+            .unit(HEALER, 2, Priest)
+            .at(40.0, 0.0)
+            .cooldown(ME, AbilityType::ConcussiveShot, 5.0)
+            .cooldown(ME, AbilityType::SerpentSting, 5.0);
+        if withheld {
+            s.without_trap_walk(1)
+        } else {
+            s
+        }
+    };
+    // The lane throw's own verdicts: anything recorded on Freezing Trap that
+    // is not the walk's note, or the throw itself.
+    let lane_asked = |view: &DecisionView| {
+        view.choices
+            .iter()
+            .any(|(a, _)| *a == AbilityType::FreezingTrap)
+            || notes(view, AbilityType::FreezingTrap)
+                .iter()
+                .any(|n| !n.starts_with("trap walk"))
+            || view.candidates.iter().any(|c| {
+                c.ability == AbilityType::FreezingTrap
+                    && !matches!(c.reason, Some(RejectionReason::PreconditionUnmet { .. }))
+            })
+    };
+    let walk = scene(false).decide(ME);
+    assert_eq!(
+        trap_notes(&walk),
+        vec![TRAP_WALK_NO_TEAMMATE.to_string()],
+        "{}",
+        describe(&walk)
+    );
+    assert!(lane_asked(&walk), "{}", describe(&walk));
+    let old = scene(true).decide(ME);
+    assert!(!lane_asked(&old), "{}", describe(&old));
+}
