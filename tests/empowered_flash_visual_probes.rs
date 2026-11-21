@@ -14,9 +14,9 @@
 //!   halo's near-black alpha-blended blob specks at the head (count, sprite,
 //!   colour, blend, size, inward drift), the specks turned to a ROTATED camera,
 //!   and the edges: nothing on a corpse, the flash playing out after the curse
-//!   spends its buff, the halo gone the moment Shadow Trance is spent or its
-//!   Warlock dies, one halo per Warlock, and both read through the default
-//!   match camera.
+//!   spends its buff, the halo playing its whole client one-shot after Shadow
+//!   Trance is spent (AS-500) and gone the moment its Warlock dies, one halo
+//!   per Warlock, and both read through the default match camera.
 
 use std::collections::BTreeSet;
 use std::f32::consts::PI;
@@ -42,7 +42,7 @@ use arenasim::states::play_match::{
     animate_empowered_flashes, billboard_druid_particles, billboard_shadow_trance_specks,
     cleanup_druid_effects, flash_frame, spawn_druid_effects, spawn_empowered_flashes,
     spawn_paladin_oneshots, speck_launch, update_shadow_trance_halos, AbilityDefinitions,
-    AbilityType, SHADOW_TRANCE_HALO_ENDS_WITH_PROC,
+    AbilityType,
 };
 use arenasim::CharacterClass;
 
@@ -764,44 +764,77 @@ fn waiting_with_company(h: &mut Harness) -> Entity {
     warlock
 }
 
-#[test]
-fn the_halo_goes_the_moment_shadow_trance_is_spent() {
-    // Control: still waiting, the halo stays.
-    let mut kept = Harness::new();
-    let w = waiting_with_company(&mut kept);
-    kept.land(w, AuraLandingKind::ShadowTrance);
-    kept.tick_secs(1.5);
-    kept.tick(1);
-    assert_eq!(kept.halos().len(), 1);
-    assert!(kept.particle_count() > 0);
-
-    // Spent: only Shadow Trance comes off. The other next-cast aura and the
-    // stat buff stay up, and neither holds the halo.
-    let mut h = Harness::new();
-    let warlock = waiting_with_company(&mut h);
+/// Spend Shadow Trance the frame after its proc lands — the bolt going at
+/// once — and check only it came off: the other next-cast aura and the stat
+/// buff stay up.
+fn spent_at_once(h: &mut Harness) -> Entity {
+    let warlock = waiting_with_company(h);
     h.land(warlock, AuraLandingKind::ShadowTrance);
-    h.tick_secs(1.5);
-    assert!(h.particle_count() > 0);
-    h.spend_trance(warlock);
-    assert_eq!(
-        h.app
-            .world()
-            .get::<ActiveAuras>(warlock)
-            .unwrap()
-            .auras
-            .len(),
-        2,
-        "Amplify Curse and the stat buff are still up"
-    );
     h.tick(1);
-    if SHADOW_TRANCE_HALO_ENDS_WITH_PROC {
-        assert!(h.halos().is_empty());
-        assert_eq!(h.particle_count(), 0, "no speck outlives the proc");
-    } else {
-        // The client's one-shot: the spend does not touch it.
-        assert_eq!(h.halos().len(), 1);
-        assert!(h.particle_count() > 0);
-    }
+    assert_eq!(h.halos().len(), 1, "the proc raised its halo");
+    h.spend_trance(warlock);
+    let left: Vec<String> = h
+        .app
+        .world()
+        .get::<ActiveAuras>(warlock)
+        .unwrap()
+        .auras
+        .iter()
+        .map(|a| a.ability_name.clone())
+        .collect();
+    assert_eq!(
+        left,
+        [
+            AMPLIFY_CURSE_AURA.to_string(),
+            "Power Word: Fortitude".into()
+        ],
+        "only Shadow Trance is spent"
+    );
+    warlock
+}
+
+/// The client's one-shot (ruled 2026-11-14): a Shadow Trance spent at once
+/// still plays its whole halo — 12 specks a second for 4.5 s, the last of
+/// them gone by 8.5 s — and the spend neither stops its emission nor retires
+/// it early.
+#[test]
+fn a_shadow_trance_spent_at_once_still_plays_its_whole_halo() {
+    let mut h = Harness::new();
+    spent_at_once(&mut h);
+    // Past the emission window, with every speck it owes emitted.
+    h.tick_secs(6.0);
+    assert_eq!(h.halos().len(), 1, "the spend does not retire the halo");
+    let emitted = h.halo_emitted();
+    assert!(
+        (53..=54).contains(&emitted),
+        "12 a second for 4.5 s after a spend, saw {emitted}"
+    );
+    // Its last specks are still drifting in just short of 8.5 s.
+    h.tick_secs(2.2); // about 8.2 s from the proc
+    assert_eq!(h.halos().len(), 1, "still playing at 8.2 s");
+    assert!(h.particle_count() > 0, "its last specks are alive at 8.2 s");
+    // And gone by 8.5 s, specks and all.
+    h.tick_secs(0.35); // past 8.5 s
+    assert!(h.halos().is_empty(), "retired by 8.5 s");
+    assert_eq!(h.particle_count(), 0, "no speck outlives the one-shot");
+}
+
+/// The one-shot ignores the spend, never the Warlock's death: a halo playing
+/// on after a spend still goes, specks and all, the moment its Warlock dies.
+#[test]
+fn a_spent_shadow_trance_halo_still_dies_with_its_warlock() {
+    let mut h = Harness::new();
+    let warlock = spent_at_once(&mut h);
+    h.tick_secs(2.0);
+    assert_eq!(h.halos().len(), 1);
+    assert!(
+        h.particle_count() > 0,
+        "the halo is emitting after the spend"
+    );
+    h.kill(warlock);
+    h.tick(1);
+    assert!(h.halos().is_empty(), "the corpse keeps no halo");
+    assert_eq!(h.particle_count(), 0, "no speck outlives its Warlock");
 }
 
 /// Two Nightfall procs landing in one frame (two Corruption ticks) raise one
