@@ -1,4 +1,5 @@
 use super::super::abilities::{AbilityType, SpellSchool};
+use super::super::combat_core::CHEAT_DEATH_NAME;
 use super::super::match_config::CharacterClass;
 use super::auras::AuraType;
 use super::combatant::AutoAttackKind;
@@ -2031,15 +2032,21 @@ pub enum AuraApplyOwner {
     /// (`repentance.rs`). Owned per aura NAME, because its type
     /// (`Incapacitate`) is Freezing Trap's, whose ice block it never draws.
     Repentance,
+    /// Cheat Death's damage cut: the skull over the Rogue's head and the
+    /// ghost-fire round it, raised by the save itself (`cheat_death.rs`).
+    /// Owned per aura NAME, because its type (`DamageTakenReduction`) is
+    /// shared with auras that keep the band (Devotion Aura).
+    CheatDeath,
 }
 
 impl AuraApplyRoute {
     /// Route one aura INSTANCE's application: Repentance's incapacitate is
     /// owned by its impact and head swirl ([`REPENTANCE_AURA`]), a named aura
     /// with a bespoke landing ([`AuraLandingKind::for_aura`]) by that, and
-    /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]); every other
-    /// aura routes by its type ([`Self::for_aura`]). The renderers ask this —
-    /// the band, and the Repentance swirl to find its incapacitate.
+    /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]) and Cheat Death
+    /// by its save ([`CHEAT_DEATH_NAME`]); every other aura routes by its type
+    /// ([`Self::for_aura`]). The renderers ask this — the band, and the
+    /// Repentance swirl to find its incapacitate.
     pub fn for_instance(aura_type: AuraType, name: &str) -> Self {
         if aura_type == AuraType::Incapacitate && name == REPENTANCE_AURA {
             AuraApplyRoute::Owned(AuraApplyOwner::Repentance)
@@ -2047,6 +2054,8 @@ impl AuraApplyRoute {
             AuraApplyRoute::Owned(AuraApplyOwner::AuraLanding)
         } else if name == GUARDIAN_SPIRIT_AURA {
             AuraApplyRoute::Owned(AuraApplyOwner::GuardianSpirit)
+        } else if name == CHEAT_DEATH_NAME {
+            AuraApplyRoute::Owned(AuraApplyOwner::CheatDeath)
         } else {
             Self::for_aura(aura_type)
         }
