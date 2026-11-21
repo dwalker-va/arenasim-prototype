@@ -17,7 +17,10 @@
 //!   window ends (or on the frame that ends it), and the hits landing in the
 //!   window before that last second;
 //! - the **gap** from the window's end to the Warlock's first direct hit on
-//!   that enemy (capped at 15s, a window followed by no hit counts 15s).
+//!   that enemy (capped at 15s, a window followed by no hit counts 15s);
+//! - of the windows a full-length Fear opened, those its **own hit broke
+//!   early**: shorter than the full Fear less `FEAR_WINDOW_LEAD`, ended on
+//!   the frame a Warlock hit landed, and the seconds that cut off.
 //!
 //! ```text
 //! FEAR_PROBE_BANK=bank.jsonl FEAR_PROBE_OUT=out.csv \
@@ -36,6 +39,11 @@ use bevy::prelude::Entity;
 const WORKERS: usize = 4;
 const FRAME: f32 = 1.0 / 60.0;
 const GAP_CAP: f32 = 15.0;
+/// Fear's full duration (`abilities.ron`).
+const FULL_FEAR: f32 = 8.0;
+/// `class_ai::FEAR_WINDOW_LEAD`, written out so the probe also builds on a
+/// tree without it (it measures main as the paired baseline).
+const FEAR_WINDOW_LEAD: f32 = 0.25;
 
 /// One frame, as much of it as the probe reads.
 struct Slim {
@@ -62,6 +70,16 @@ struct Row {
     windows_hit_last_sec: u32,
     early_hits: u32,
     gap_sum: f32,
+    /// Windows opened by a full-length Fear (diminishing returns 100%).
+    full_windows: u32,
+    /// ...of them broken by damage early: shorter than the full Fear less
+    /// `FEAR_WINDOW_LEAD`, ended by the log's "Fear broke from damage".
+    full_broken_early: u32,
+    /// ...of those, with a direct hit of the Warlock's own (not its wand,
+    /// which fires the frame a hold ends) landing on the breaking frame.
+    full_broken_by_own_hit: u32,
+    /// The seconds the early breaks cut off the full Fear.
+    full_broken_secs: f32,
 }
 
 fn log_time(line: &str) -> Option<f32> {
@@ -158,7 +176,7 @@ fn measure(config: HeadlessMatchConfig) -> (Option<u8>, Row) {
     // Own Fear landings: (app time, victim name, DR percent or None = immune).
     let lands_prefix = format!("{w_name}'s Fear lands on ");
     let mut landings: Vec<(f32, String)> = Vec::new();
-    let mut hits: Vec<(f32, String, f32)> = Vec::new();
+    let mut hits: Vec<(f32, String, f32, bool)> = Vec::new();
     let hit_prefix = format!("{w_name}'s ");
     for line in log.lines() {
         let Some(t) = log_time(line) else { continue };
@@ -185,14 +203,18 @@ fn measure(config: HeadlessMatchConfig) -> (Option<u8>, Row) {
             continue;
         }
         if let Some(rest) = line.split(&hit_prefix).nth(1) {
-            if let Some((_, after)) = rest.split_once(" hits ") {
+            // A crit logs CRITS for hits.
+            if let Some((spell, after)) = rest
+                .split_once(" hits ")
+                .or_else(|| rest.split_once(" CRITS "))
+            {
                 if let Some((victim, dmg)) = after.split_once(" for ") {
                     let dmg: f32 = dmg
                         .split_whitespace()
                         .next()
                         .and_then(|d| d.parse().ok())
                         .unwrap_or(0.0);
-                    hits.push((t, victim.to_string(), dmg));
+                    hits.push((t, victim.to_string(), dmg, spell.starts_with("Wand")));
                 }
             }
         }
@@ -200,6 +222,7 @@ fn measure(config: HeadlessMatchConfig) -> (Option<u8>, Row) {
     // DR level of each own landing: the "[CC] Fear on X (Ns, DR: P%)" line
     // that follows it.
     let lines: Vec<&str> = log.lines().collect();
+    let mut landing_dr: Vec<(f32, String, Option<u32>)> = Vec::new();
     for (t, victim) in &landings {
         let tag = format!("[CC] Fear on {victim} (");
         let dr = lines.iter().find_map(|l| {
@@ -214,6 +237,7 @@ fn measure(config: HeadlessMatchConfig) -> (Option<u8>, Row) {
                 .parse::<u32>()
                 .ok()
         });
+        landing_dr.push((*t, victim.clone(), dr));
         match dr {
             Some(100) => row.land_100 += 1,
             Some(50) => row.land_50 += 1,
@@ -256,6 +280,27 @@ fn measure(config: HeadlessMatchConfig) -> (Option<u8>, Row) {
             }
             row.windows += 1;
             row.window_secs += t1 - t0;
+            let full = landing_dr
+                .iter()
+                .any(|(lt, v, dr)| v == name && (lt - t0).abs() <= 0.1 && *dr == Some(100));
+            if full {
+                row.full_windows += 1;
+                let short = FULL_FEAR - (t1 - t0);
+                let broke = format!("{name}'s Fear broke from damage");
+                let broke_here = lines.iter().any(|l| {
+                    l.contains(&broke) && log_time(l).is_some_and(|t| (t - t1).abs() <= 2.0 * FRAME)
+                });
+                if short > FEAR_WINDOW_LEAD + 2.0 * FRAME && broke_here {
+                    row.full_broken_early += 1;
+                    row.full_broken_secs += short;
+                    if hits
+                        .iter()
+                        .any(|(t, v, _, wand)| v == name && !wand && (t - t1).abs() <= 2.0 * FRAME)
+                    {
+                        row.full_broken_by_own_hit += 1;
+                    }
+                }
+            }
             for (t, held) in &idle {
                 if *t >= t0 && *t < t1 {
                     row.idle_secs += FRAME;
@@ -265,7 +310,7 @@ fn measure(config: HeadlessMatchConfig) -> (Option<u8>, Row) {
                 }
             }
             let mut hit_last = false;
-            for (t, victim, dmg) in &hits {
+            for (t, victim, dmg, _) in &hits {
                 if victim != name {
                     continue;
                 }
@@ -282,8 +327,8 @@ fn measure(config: HeadlessMatchConfig) -> (Option<u8>, Row) {
             }
             let gap = hits
                 .iter()
-                .filter(|(t, v, _)| v == name && *t >= t1 - 1.0)
-                .map(|(t, _, _)| (t - t1).max(0.0))
+                .filter(|(t, v, _, _)| v == name && *t >= t1 - 1.0)
+                .map(|(t, _, _, _)| (t - t1).max(0.0))
                 .fold(GAP_CAP, f32::min);
             row.gap_sum += gap;
         }
@@ -323,7 +368,7 @@ fn fear_window_probe() {
                 };
                 let (winner, r) = measure(config);
                 let line = format!(
-                    "{key},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{:.1},{},{},{:.3}",
+                    "{key},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{:.1},{},{},{:.3},{},{},{},{:.3}",
                     winner.map_or("draw".to_string(), |w| format!("team{w}")),
                     r.windows,
                     r.window_secs,
@@ -338,6 +383,10 @@ fn fear_window_probe() {
                     r.windows_hit_last_sec,
                     r.early_hits,
                     r.gap_sum,
+                    r.full_windows,
+                    r.full_broken_early,
+                    r.full_broken_by_own_hit,
+                    r.full_broken_secs,
                 );
                 rows.lock().unwrap().push((i, line));
             })
@@ -350,7 +399,8 @@ fn fear_window_probe() {
     rows.sort();
     let mut text = String::from(
         "label,seed,winner,windows,window_secs,idle_secs,hold_secs,land_100,land_50,land_25,\
-         land_immune,last_sec_hits,last_sec_dmg,windows_hit_last_sec,early_hits,gap_sum\n",
+         land_immune,last_sec_hits,last_sec_dmg,windows_hit_last_sec,early_hits,gap_sum,\
+         full_windows,full_broken_early,full_broken_by_own_hit,full_broken_secs\n",
     );
     for (_, line) in rows {
         text.push_str(&line);
