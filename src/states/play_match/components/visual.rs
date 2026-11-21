@@ -1506,10 +1506,11 @@ pub struct EmpoweredFlashDisc {
 
 /// Shadow Trance's dark speck halo (graphical only): tiny near-black specks
 /// born on a flat shell about the Warlock's head and drifting in
-/// (`shadow_impactdot_med_head.m2`). It follows the head, emits for the
-/// client's window from the proc, and retires, specks and all, the moment
-/// Shadow Trance is spent or its Warlock dies. One halo per Warlock: a proc
-/// that refreshes Shadow Trance restarts it.
+/// (`shadow_impactdot_med_head.m2`). It follows the head and plays as the
+/// client's one-shot: it emits for the client's window from the proc and
+/// retires after its last speck, whether or not Shadow Trance is spent
+/// meanwhile, or at once, specks and all, when its Warlock dies. One halo per
+/// Warlock: a proc that refreshes Shadow Trance restarts it.
 #[derive(Component, Debug)]
 pub struct ShadowTranceHalo {
     /// The Warlock whose head it rings.
