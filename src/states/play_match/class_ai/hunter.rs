@@ -20,7 +20,7 @@ use bevy::prelude::*;
 
 use super::super::utils::log_ability_use;
 use super::cast_guard::{applies_hold, cast_gate, pre_cast_ok, PreCastOpts};
-use super::hunter_dip::{emit_dip_complete, HunterDipPlan, LiveTrap};
+use super::hunter_dip::{emit_dip_complete, forecast_velocity, HunterDipPlan, LiveTrap};
 use super::{CombatContext, CombatantInfo};
 use crate::combat::log::CombatLog;
 use crate::states::match_config::CharacterClass;
@@ -1121,30 +1121,6 @@ fn healer_freeze_in_reach(
             super::hunter_dip::pressure_trap_landing(ctx, abilities, combatant.team, at, healer)
                 .is_ok_and(|landing| trap_landing(ctx, def, at, landing, Some(healer)).is_ok())
         })
-}
-
-/// How `e` is forecast to move over the next few seconds: along its heading
-/// (`CombatantInfo::velocity`, zero while it casts) at the speed its slows
-/// leave it ([`effective_movement_speed`](crate::states::play_match::combat_core::effective_movement_speed),
-/// the one derivation movement uses), and not at all while it is rooted or
-/// held in hard crowd control ([`CombatContext::is_ccd`], which counts both).
-fn forecast_velocity(ctx: &CombatContext, e: Entity) -> Vec3 {
-    let Some(info) = ctx.combatants.get(&e) else {
-        return Vec3::ZERO;
-    };
-    // `is_ccd` counts a root with the holds: rooted, stunned, feared,
-    // polymorphed, incapacitated or cycloned, the unit goes nowhere.
-    if ctx.is_ccd(e) {
-        return Vec3::ZERO;
-    }
-    let auras = ActiveAuras {
-        auras: ctx.active_auras.get(&e).cloned().unwrap_or_default(),
-    };
-    let speed = crate::states::play_match::combat_core::effective_movement_speed(
-        info.velocity.length(),
-        Some(&auras),
-    );
-    info.velocity.normalize_or_zero() * speed
 }
 
 /// Trace note for a Frost Trap peel held because the pressure trap would

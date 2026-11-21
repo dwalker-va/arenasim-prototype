@@ -573,6 +573,16 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // A prevented killing blow (`KillingBlowPrevented`): the save's heal
+        // landing, the shared "Saved" cue (`guardian_spirit.rs`) and Cheat
+        // Death's rig (`cheat_death.rs`). Same
+        // FixedUpdate rationale as `consume_cast_ending_signals`.
+        .add_systems(
+            FixedUpdate,
+            play_match::consume_killing_blow_signals
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Interrupt landings: the mark an interrupt ability lands on its
         // victim, read off the `InterruptedBy` riding the `CastEnding` marker
         // — which `consume_cast_ending_signals` despawns, so `.before` it.
@@ -938,6 +948,47 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Guardian Spirit over its bearer's shoulders: raised and posed
+        // before the client particles age (its sparks are client particles),
+        // its sparks turned after; and the "Saved" cue's gold body flash.
+        .add_systems(
+            Update,
+            (
+                (
+                    play_match::update_guardian_spirit_states,
+                    play_match::animate_guardian_spirits,
+                )
+                    .chain()
+                    .before(play_match::animate_client_particles),
+                play_match::billboard_guardian_spirit_sparks
+                    .after(play_match::animate_client_particles),
+                (
+                    play_match::spawn_saved_flashes,
+                    play_match::animate_saved_flashes,
+                )
+                    .chain(),
+            )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Cheat Death's skull and ghost-fire on the Rogue it saved: built and
+        // posed before the client particles age (its streaks and smoke are
+        // client particles), its particles turned after.
+        .add_systems(
+            Update,
+            (
+                (
+                    play_match::build_cheat_death_rigs,
+                    play_match::update_cheat_death,
+                )
+                    .chain()
+                    .before(play_match::animate_client_particles),
+                play_match::billboard_cheat_death_particles
+                    .after(play_match::animate_client_particles),
+            )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Pet mesh tilt must run after movement sets Y-facing rotation
         .add_systems(
             Update,
@@ -978,6 +1029,27 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // The empowered ground flash of Amplify Curse and Shadow Trance, and
+        // Shadow Trance's speck halo (`empowered_flash.rs`): spawn (consumes
+        // their landing markers) -> flash -> halo, before the client
+        // particles age (the specks are `ClientParticle`s), and the specks
+        // turned after.
+        .add_systems(
+            Update,
+            (
+                (
+                    play_match::spawn_empowered_flashes,
+                    play_match::animate_empowered_flashes,
+                    play_match::update_shadow_trance_halos,
+                )
+                    .chain()
+                    .before(play_match::animate_client_particles),
+                play_match::billboard_shadow_trance_specks
+                    .after(play_match::animate_client_particles),
+            )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Shadow Word: Pain's landing (`shadow_word_pain.rs`): spawn (consumes
         // the sim's SW:P landing markers) -> emit -> particles -> billboard.
         .add_systems(
@@ -987,6 +1059,20 @@ impl Plugin for StatesPlugin {
                 play_match::animate_shadow_pain_hits,
                 play_match::animate_shadow_pain_particles,
                 play_match::billboard_shadow_pain_particles,
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // The Paladin talent one-shots (`paladin_oneshots.rs`, AS-374): spawn
+        // (consumes the sim's Paladin landing markers, flashes the cast's
+        // hands) -> emit and pose, before the client particles age; they are
+        // turned by `billboard_hunter_shots`.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_paladin_oneshots,
+                play_match::update_paladin_oneshots.before(play_match::animate_client_particles),
             )
                 .chain()
                 .after(CombatSystemPhase::CombatResolution)
@@ -1182,6 +1268,29 @@ impl Plugin for StatesPlugin {
                 play_match::update_drain_particles, // Move particles toward caster
                 play_match::cleanup_drain_life_beams, // Remove beam when channel ends
             )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Mind Flay's channel (visual 277, Drain Mana's): the mana-funnel
+        // stars at the Priest's hand and the victim's chest, and the mana beam
+        // between them — graphical only. The victim star's particles are
+        // client particles: emitted before `animate_client_particles` ages
+        // them, turned after.
+        .add_systems(
+            Update,
+            (
+                play_match::sync_mind_flay_channels,
+                play_match::animate_mind_flay_channels,
+            )
+                .chain()
+                .before(play_match::animate_client_particles)
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        .add_systems(
+            Update,
+            play_match::billboard_mind_flay_particles
+                .after(play_match::animate_client_particles)
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )

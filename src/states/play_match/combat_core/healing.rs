@@ -29,6 +29,11 @@
 //! this function: a write elsewhere, or a heal system that stops calling it,
 //! fails `cargo test`. Absorb shields are not healing and do not come here
 //! (only dampening applies to them, at `apply_pending_auras`).
+//!
+//! What a heal is credited as is one path too: the healer through
+//! [`credit_healing_done`], and the Results breakdown through a structured
+//! row (`CombatLog::log_healing`) naming the healer and its ability. The same
+//! audit holds every heal line to a row and every row to a credit.
 
 use bevy::prelude::*;
 
@@ -140,4 +145,13 @@ pub fn apply_healing(
     let effective = healing.min(target.max_health - target.current_health);
     target.current_health = (target.current_health + healing).min(target.max_health);
     effective
+}
+
+/// Credit `healer` with one heal's effective healing (what [`apply_healing`]
+/// returned): the only write to `Combatant::healing_done`, the Results
+/// screen's HEAL total. A site credits its healer here and logs the same heal
+/// as its breakdown row (`CombatLog::log_healing`), so the two cannot part;
+/// `tests/heal_site_audit.rs` holds every heal site to both.
+pub fn credit_healing_done(healer: &mut Combatant, healed: f32) {
+    healer.healing_done += healed;
 }

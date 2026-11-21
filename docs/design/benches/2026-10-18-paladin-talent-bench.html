@@ -1,0 +1,804 @@
+<title>Paladin Talent Visuals Bench</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one stage + a control rail; single dark theme by choice (an effects bench reads against the arena floor). */
+:root{
+  color-scheme: dark;
+  --bg:#141317; --panel:#1c1a21; --panel2:#25222c; --line:#353140;
+  --text:#e7e4ec; --muted:#968fa3; --accent:#9482c9; --warn:#e8b04a; --stage:#0d0c10;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --sans:"IBM Plex Sans", system-ui, -apple-system, sans-serif;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+body{padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));padding-block:16px 32px}
+h1{font-size:18px;font-weight:600;margin:0;letter-spacing:.01em;text-wrap:balance}
+.sub{color:var(--muted);font-size:12.5px;margin-top:2px;max-width:72ch}
+header{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:end;justify-content:space-between;margin-bottom:12px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tab{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+.tab[aria-selected="true"]{border-color:var(--accent);color:var(--accent);background:var(--panel2)}
+.tab:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px}
+@media (max-width:860px){.grid{grid-template-columns:1fr}}
+.stage{background:var(--stage);border:1px solid var(--line);border-radius:8px;position:relative;overflow:hidden}
+canvas{display:block;width:100%;height:auto;aspect-ratio:16/10;max-width:100%;cursor:grab}
+.hud{position:absolute;left:10px;top:8px;font-family:var(--mono);font-size:11.5px;color:var(--muted);pointer-events:none;white-space:pre}
+.transport{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px;border-top:1px solid var(--line);background:var(--panel)}
+button.btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:6px 10px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+button.btn.primary{border-color:var(--accent);color:var(--accent)}
+select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:4px;font:inherit}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;min-width:0}
+.card h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;font-weight:600}
+.layer{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--line)}
+.layer:first-of-type{border-top:0}
+.layer label{flex:1;cursor:pointer;min-width:0}
+.layer .nm{font-weight:500}
+.layer .ds{display:block;color:var(--muted);font-size:12px;line-height:1.35}
+.layer.aid .nm::after{content:" · viewing aid";color:var(--muted);font-weight:400;font-size:12px}
+.layer.authored .nm::after{content:" · authored, not client";color:var(--warn);font-weight:400;font-size:12px}
+.sw{width:10px;height:10px;border-radius:2px;margin-top:5px;flex:none}
+.knob{display:grid;grid-template-columns:118px minmax(0,1fr) 86px;gap:8px;align-items:center;padding:3px 0}
+.knob span{font-size:12.5px;color:var(--muted)}
+.knob output{font-family:var(--mono);font-size:12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.notes{color:var(--muted);font-size:12.5px;line-height:1.5;margin:0;padding-left:16px}
+.notes li{margin:3px 0}
+.notes b{color:var(--text);font-weight:500}
+.inferred{color:var(--warn)}
+.ask{color:var(--text);border-left:2px solid var(--accent);padding-left:8px;margin:6px 0 0;font-size:12.5px;line-height:1.5}
+pre{font-family:var(--mono);font-size:12px;line-height:1.5;background:var(--stage);border:1px solid var(--line);border-radius:6px;padding:10px;overflow-x:auto;margin:0;color:#d9d0ec}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+</style>
+
+<header>
+  <div>
+    <h1>Paladin Talent Visuals Bench <span style="color:var(--muted);font-weight:400">· AS-337</span></h1>
+    <div class="sub">Client values from TBC 2.5.6, and from Wrath Classic 3.4.5 for the Wrath-form spells (Aura Mastery, Divine Protection, Sacred Shield, Infusion of Light, The Art of War), parsed from each model's M2 file. Each slider starts at the client value (×1.0), and playback starts at real time. Untick the layers you don't want, then copy the constants block. Layers marked "authored" are not in the client. They are proposals for you to rule on.</div>
+  </div>
+  <div class="legend"><span>drag = orbit</span><span>wheel = zoom</span><span>body: capsule ±1.25 about y=1.0</span></div>
+</header>
+
+<nav class="tabs" role="tablist" id="tabs"></nav>
+
+<div class="grid">
+  <div style="min-width:0">
+    <div class="stage">
+      <canvas id="cv" width="1280" height="800" aria-label="Effect preview"></canvas>
+      <div class="hud" id="hud"></div>
+      <div class="transport">
+        <button class="btn primary" id="replay">Replay</button>
+        <button class="btn" id="pause">Pause</button>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="loop" checked> loop</label>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px">speed
+          <select id="speed"><option value="1" selected>1.0× (real)</option><option value="0.5">0.5×</option><option value="0.25">0.25×</option></select></label>
+        <input type="checkbox" id="moving" hidden>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="row"><h2 style="margin:0">Rust constants for this effect</h2><button class="btn" id="copy">Copy</button></div>
+      <pre id="out"></pre>
+    </div>
+  </div>
+  <div class="side">
+    <div class="card"><h2>Layers</h2><div id="layers"></div></div>
+    <div class="card"><h2>Multipliers over client</h2><div id="knobs"></div></div>
+    <div class="card"><h2>What the client data says</h2><ul class="notes" id="notes"></ul><div id="asks"></div></div>
+  </div>
+</div>
+
+<script>
+
+"use strict";
+// ---------- small math ----------
+const TAU=Math.PI*2, rnd=Math.random;
+const lerp=(a,b,t)=>a+(b-a)*t, clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function keys(k,t){ if(t<=k[0][0]) return k[0][1];
+  for(let i=1;i<k.length;i++){ if(t<=k[i][0]){const a=k[i-1],b=k[i],u=(t-a[0])/(b[0]-a[0]||1);
+    return Array.isArray(a[1])?a[1].map((x,j)=>lerp(x,b[1][j],u)):lerp(a[1],b[1],u);} }
+  return k[k.length-1][1]; }
+function windowOn(win,ms){ if(!win) return true; let on=win[0][1]; for(const [t,v] of win){ if(ms>=t) on=v; } return !!on; }
+const rgb=(c,a)=>`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const norm=a=>{const l=Math.hypot(...a)||1;return[a[0]/l,a[1]/l,a[2]/l]};
+
+// ---------- camera ----------
+const cv=document.getElementById('cv'), g=cv.getContext('2d');
+const cam={yaw:0.65,pitch:0.42,dist:12,target:[0,1.2,0]};
+let drag=null;
+cv.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing'});
+cv.addEventListener('pointermove',e=>{if(!drag)return;cam.yaw-=(e.clientX-drag[0])*0.008;cam.pitch=clamp(cam.pitch+(e.clientY-drag[1])*0.006,0.05,1.35);drag=[e.clientX,e.clientY]});
+cv.addEventListener('pointerup',()=>{drag=null;cv.style.cursor='grab'});
+cv.addEventListener('wheel',e=>{e.preventDefault();cam.dist=clamp(cam.dist*(1+e.deltaY*0.001),3,60)},{passive:false});
+let VIEW;
+function setupView(){
+  const cp=Math.cos(cam.pitch),sp=Math.sin(cam.pitch);
+  const eye=[cam.target[0]+cam.dist*cp*Math.sin(cam.yaw),cam.target[1]+cam.dist*sp,cam.target[2]+cam.dist*cp*Math.cos(cam.yaw)];
+  const f=norm(sub(cam.target,eye)), r=norm(cross(f,[0,1,0])), u=cross(r,f);
+  VIEW={eye,f,r,u,fl:cv.height*1.25};
+}
+function proj(p){const d=sub(p,VIEW.eye),z=dot(d,VIEW.f); if(z<0.1) return null;
+  const s=VIEW.fl/z; return {x:cv.width/2+dot(d,VIEW.r)*s,y:cv.height/2-dot(d,VIEW.u)*s,s,z};}
+
+// ---------- scene primitives ----------
+const FLOOR=[0.79*255,0.66*255,0.46*255];
+const CLASS={warlock:[148,130,201],priest:[235,235,235],rogue:[255,245,105],warrior:[199,156,110],victim:[150,160,175]};
+function drawFloor(){
+  const pts=[];for(let i=0;i<48;i++){const a=i/48*TAU;const q=proj([9*Math.cos(a),0,9*Math.sin(a)]);if(q)pts.push(q)}
+  g.fillStyle=rgb(FLOOR.map(c=>c*0.82),1);g.beginPath();pts.forEach((q,i)=>i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y));g.closePath();g.fill();
+  g.strokeStyle='rgba(0,0,0,0.08)';g.lineWidth=1;
+  for(let i=-8;i<=8;i+=2){line3([i,0,-8],[i,0,8]);line3([-8,0,i],[8,0,i]);}
+}
+function line3(a,b){const p=proj(a),q=proj(b);if(!p||!q)return;g.beginPath();g.moveTo(p.x,p.y);g.lineTo(q.x,q.y);g.stroke();}
+function drawCapsule(c,col,alpha=1){
+  const top=proj([c[0],c[1]+0.75,c[2]]),bot=proj([c[0],c[1]-0.75,c[2]]);if(!top||!bot)return;
+  const w=0.5*top.s;
+  g.globalAlpha=alpha;
+  const gr=g.createLinearGradient(top.x-w,0,top.x+w,0);
+  gr.addColorStop(0,rgb(col.map(x=>x*0.55),1));gr.addColorStop(0.45,rgb(col,1));gr.addColorStop(1,rgb(col.map(x=>x*0.45),1));
+  g.fillStyle=gr;g.beginPath();
+  g.arc(top.x,top.y,w,Math.PI,0);g.lineTo(bot.x+w,bot.y);g.arc(bot.x,bot.y,w,0,Math.PI);g.closePath();g.fill();
+  g.globalAlpha=1;
+}
+function shadow(c,r=0.55){const p=proj([c[0],0.01,c[2]]);if(!p)return;g.fillStyle='rgba(0,0,0,0.22)';g.beginPath();g.ellipse(p.x,p.y,r*p.s,r*p.s*Math.max(0.15,Math.sin(cam.pitch)),0,0,TAU);g.fill();}
+
+function sprite(kind,p,size,col,a,ang=0,streak=null){
+  const q=proj(p);if(!q||a<=0.003)return;const r=Math.max(0.6,size*q.s*0.5);
+  g.save();g.translate(q.x,q.y);
+  if(kind==='glow'||kind==='cloud'||kind==='smoke'||kind==='dust'||kind==='flame'){
+    const gr=g.createRadialGradient(0,0,0,0,0,r);
+    const soft=kind==='glow'?[1,0.45,0]:kind==='cloud'?[0.9,0.6,0]:kind==='flame'?[0.8,0.55,0]:[0.85,0.5,0];
+    gr.addColorStop(0,rgb(col,a*soft[0]));gr.addColorStop(0.45,rgb(col,a*soft[1]));gr.addColorStop(1,rgb(col,0));
+    g.fillStyle=gr;g.beginPath();
+    if(kind==='flame'){g.ellipse(0,-r*0.25,r*0.6,r,0,0,TAU);}else g.arc(0,0,r,0,TAU);
+    g.fill();
+  } else if(kind==='star'){
+    g.rotate(ang);g.fillStyle=rgb(col,a);
+    for(let k=0;k<2;k++){g.rotate(Math.PI/4*k*2);g.beginPath();g.ellipse(0,0,r,r*0.12,0,0,TAU);g.fill();g.beginPath();g.ellipse(0,0,r*0.12,r,0,0,TAU);g.fill();}
+    const gr=g.createRadialGradient(0,0,0,0,0,r*0.45);gr.addColorStop(0,rgb([255,255,255],a));gr.addColorStop(1,rgb(col,0));g.fillStyle=gr;g.beginPath();g.arc(0,0,r*0.45,0,TAU);g.fill();
+  } else if(kind==='blob'){
+    g.fillStyle=rgb(col,a);g.beginPath();g.arc(0,0,r*0.7,0,TAU);g.fill();
+  }
+  g.restore();
+  if(streak){const q2=proj(streak);if(!q2)return;
+    g.strokeStyle=rgb(col,a*0.85);g.lineCap='round';g.lineWidth=Math.max(1,r*0.7);
+    g.beginPath();g.moveTo(q.x,q.y);g.lineTo(q2.x,q2.y);g.stroke();}
+}
+
+// ---------- particle emitter (M2-shaped) ----------
+// spec: anchor, pos:[x,z,y], vRange (0 = straight up, >=3.1 = sphere), speed, life, rate, win:[[ms,on]],
+//  color/alpha/scale keyed over life 0..1, gravity (negative rises), drag, tail, kind, blend 'add'|'alpha',
+//  area (xz box), areaY, inward: shell radius (yd) the particle starts on, moving toward the anchor,
+//  trig: name of the fx trigger list that (re)starts this emitter's timeline.
+class Emitter{
+  constructor(s,fx){this.s=s;this.fx=fx;this.ps=[];this.acc=0;}
+  reset(){this.ps=[];this.acc=0;}
+  update(dt,ms,origin){
+    const s=this.s,K=this.fx.knobs,dmul=(K.density??1)*(this.fx.rateMul?this.fx.rateMul(this.fx,ms):1);
+    const add=lm=>{ if(windowOn(s.win,lm)){ const rate=Array.isArray(s.rate)?keys(s.rate,lm):s.rate; this.acc+=rate*dt*dmul; } };
+    const tl=this.fx.trig && this.fx.trig[s.trig||'main'];
+    if(tl){ const span=(s.span||this.fx.durMs)*(K.duration??1);
+      for(const t of tl){ const lm=ms-t; if(lm>=0 && lm<=span) add(lm/(K.duration??1)); } }
+    else { const lm=s.loopMs?(ms%s.loopMs):ms; if(!this.fx.loopFx || true) add(s.loopMs?lm:ms/(K.duration??1)); }
+    while(this.acc>=1){this.acc-=1;this.spawn(origin);}
+    const gy=-(s.gravity||0);
+    for(const p of this.ps){
+      p.age+=dt; p.v[1]+=gy*dt; const dr=Math.max(0,1-(s.drag||0)*dt*3); p.v=p.v.map(x=>x*dr);
+      p.x=[p.x[0]+p.v[0]*dt,p.x[1]+p.v[1]*dt,p.x[2]+p.v[2]*dt];
+      if(s.follow){p.x[0]+=origin[0]-p.o[0];p.x[2]+=origin[2]-p.o[2];p.o=[...origin];}
+      if(s.floorKill&&p.x[1]<0.02){p.x[1]=0.02;p.v=[0,0,0];}
+      p.ang+=(s.spin||0)*TAU*dt;
+    }
+    this.ps=this.ps.filter(p=>p.age<p.life);
+  }
+  spawn(origin){
+    if(this.s.at){const k=Array.isArray(this.s.at)?this.s.at[(rnd()*this.s.at.length)|0]:this.s.at; if(AT[k]) origin=AT[k];}
+    const s=this.s,K=this.fx.knobs,spread=K.spread??1;
+    const off=s.pos||[0,0,0], area=(s.area||0)*spread, areaY=(s.areaY||0)*spread;
+    const c=[origin[0]+off[0]*spread,origin[1]+this.fx.anchorY(s.anchor)+off[2],origin[2]+off[1]*spread];
+    if(s.orbit){const k=(rnd()*3)|0, ang=(simMs/1000)*(this.fx.knobs.spin??s.orbitRevS??1)*TAU+k*TAU/3, R=s.orbit*spread; c[0]+=R*Math.cos(ang); c[2]+=R*Math.sin(ang);}
+    let start,v;
+    if(s.inward){ const d=norm([rnd()*2-1,(rnd()*2-1)*(s.inwardFlat??1),rnd()*2-1]), R=s.inward*spread*(0.6+0.4*rnd());
+      start=[c[0]+d[0]*R,c[1]+d[1]*R,c[2]+d[2]*R]; v=d.map(x=>-x*Math.abs(s.speed)*spread); }
+    else {
+      let dir; if((s.vRange||0)>=3.1) dir=norm([rnd()*2-1,rnd()*2-1,rnd()*2-1]);
+      else {const pol=(rnd()*2-1)*(s.vRange||0), az=rnd()*TAU; dir=[Math.sin(pol)*Math.cos(az),Math.cos(pol),Math.sin(pol)*Math.sin(az)];}
+      start=[c[0]+(rnd()-0.5)*area,c[1]+(rnd()-0.5)*areaY,c[2]+(rnd()-0.5)*area];
+      const sp=s.speed*spread*(1+(s.speedVar||0)*(rnd()*2-1)); v=dir.map(d=>d*sp); }
+    this.ps.push({x:start,v,age:0,life:s.life*(K.duration??1),ang:rnd()*TAU,o:[...origin]});
+  }
+  draw(){
+    const s=this.s,K=this.fx.knobs,size=K.size??1;
+    g.globalCompositeOperation=s.blend==='alpha'?'source-over':'lighter';
+    for(const p of this.ps){
+      const t=p.age/p.life; let col=keys(s.color,t); if(this.fx.colorMap) col=this.fx.colorMap(col,s);
+      const a=keys(s.alpha,t)*(K.opacity??1), sc=keys(s.scale,t)*size*2;
+      let streak=null;
+      if(s.tail){const sp=Math.hypot(...p.v);if(sp>0.2){const L=Math.min(s.tail*0.12,sp*0.06)*size;const vv=norm(p.v);streak=[p.x[0]-vv[0]*L,p.x[1]-vv[1]*L,p.x[2]-vv[2]*L];}}
+      sprite(s.kind||'glow',p.x,sc,col,a,p.ang,streak);
+    }
+    g.globalCompositeOperation='source-over';
+  }
+}
+
+// ---------- floating combat text (matches floating_text.rs: rise 1.5 yd/s, 1.5 s life, fade over the last 0.5 s) ----------
+let FCT=[];
+function fct(text,col,px,pos,bold=true){FCT.push({text,col,px,pos:[...pos],age:0,bold});}
+function drawFct(dt){
+  for(const f of FCT){f.age+=dt;}
+  FCT=FCT.filter(f=>f.age<1.5);
+  for(const f of FCT){
+    const q=proj([f.pos[0],f.pos[1]+1.5*f.age,f.pos[2]]); if(!q) continue;
+    const a=f.age>1.0?(1.5-f.age)/0.5:1;
+    const px=f.px*1.6;
+    g.font=`${f.bold?700:600} ${px}px "IBM Plex Sans", system-ui, sans-serif`;g.textAlign='center';g.textBaseline='middle';
+    g.lineWidth=Math.max(2,px*0.14);g.strokeStyle=`rgba(0,0,0,${a})`;g.strokeText(f.text,q.x,q.y);
+    g.fillStyle=rgb(f.col,a);g.fillText(f.text,q.x,q.y);
+  }
+}
+
+// ---------- effect registry ----------
+const ANCH={feet:0.0,origin:0.0,chest:1.45,head:2.25,hands:1.35};
+function mkFx(def){
+  const fx={...def,knobs:{},layersOn:{},emitters:[]};
+  for(const k of def.knobDefs) fx.knobs[k.key]=k.def;
+  for(const L of def.layers) fx.layersOn[L.id]=L.on!==false;
+  fx.anchorY=a=>ANCH[a]??0;
+  for(const L of def.layers) if(L.emitter) fx.emitters.push({id:L.id,e:new Emitter(L.emitter,fx)});
+  return fx;
+}
+const STD=[
+  {key:'size',label:'size ×',min:0.2,max:2,step:0.05,def:1},
+  {key:'spread',label:'spread ×',min:0.2,max:2,step:0.05,def:1},
+  {key:'duration',label:'duration ×',min:0.3,max:2,step:0.05,def:1},
+  {key:'density',label:'density ×',min:0.1,max:2,step:0.05,def:1},
+];
+const on=(l,id)=>l.layersOn[id];
+const b=(v)=>v?'true':'false', f2=v=>(+v).toFixed(2), f3=v=>(+v).toFixed(3);
+const hex=c=>'0x'+c.map(x=>(x|0).toString(16).padStart(2,'0')).join('').toUpperCase();
+
+// ---------- bench helpers ----------
+const AT={rogue:[-1.5,0,0],victim:[0,0,0],far:[3.2,0,1.6]};
+function groundDisc(c,y,r,col,a){ if(a<=0.003||r<=0.001) return;
+  const pts=[];for(let i=0;i<40;i++){const t=i/40*TAU;const q=proj([c[0]+r*Math.cos(t),y,c[2]+r*Math.sin(t)]);if(!q)return;pts.push(q);}
+  const ctr=proj([c[0],y,c[2]]); if(!ctr) return;
+  g.save();g.globalCompositeOperation='lighter';
+  const rx=Math.max(...pts.map(p=>Math.abs(p.x-ctr.x)))||1;
+  const gr=g.createRadialGradient(ctr.x,ctr.y,0,ctr.x,ctr.y,rx);
+  gr.addColorStop(0,rgb(col,a));gr.addColorStop(0.55,rgb(col,a*0.55));gr.addColorStop(1,rgb(col,0));
+  g.fillStyle=gr;g.beginPath();pts.forEach((p,i)=>i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y));g.closePath();g.fill();g.restore(); }
+function ring3(c,y,r,col,a,lw=2){ if(a<=0.003||r<=0.001) return;
+  g.save();g.globalCompositeOperation='lighter';g.strokeStyle=rgb(col,a);g.lineWidth=lw;g.beginPath();
+  for(let i=0;i<=48;i++){const t=i/48*TAU;const q=proj([c[0]+r*Math.cos(t),y,c[2]+r*Math.sin(t)]);if(!q){g.restore();return;}i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y);}
+  g.stroke();g.restore(); }
+// A camera-facing soft glow panel w x h yd centred on p (the client's billboard quads).
+function bbGlow(p,w,h,col,a){ if(a<=0.003) return; const q=proj(p); if(!q) return;
+  const rx=Math.max(1,w*0.5*q.s), ry=Math.max(1,h*0.5*q.s);
+  g.save();g.globalCompositeOperation='lighter';g.translate(q.x,q.y);g.scale(1,ry/rx);
+  const gr=g.createRadialGradient(0,0,0,0,0,rx);gr.addColorStop(0,rgb(col,a));gr.addColorStop(0.5,rgb(col,a*0.45));gr.addColorStop(1,rgb(col,0));
+  g.fillStyle=gr;g.beginPath();g.arc(0,0,rx,0,TAU);g.fill();g.restore(); }
+const hands=c=>[[c[0]+0.45,1.3,c[2]+0.15],[c[0]-0.45,1.3,c[2]+0.15]];
+const SHIP='<span class="inferred">shipped</span>';
+
+
+// ---------- AS-337 helpers ----------
+CLASS.paladin=[245,140,186]; CLASS.mage=[105,204,240];
+AT.pal=[-1.5,0,0]; AT.palR=[-1.5,0,0.45]; AT.palL=[-1.5,0,-0.45]; AT.ally=[0,0,0]; AT.enemy=[1.6,0,0.2];
+const GOLD=[253,218,112], RED=[220,20,10];
+const hh=n=>{const x=Math.sin(n*12.9898)*43758.5453;return x-Math.floor(x);};
+const palHands=()=>[[AT.pal[0]+0.15,1.3,AT.pal[2]+0.45],[AT.pal[0]+0.15,1.3,AT.pal[2]-0.45]];
+const tl=(fx,ms)=>(ms)/(fx.knobs.duration??1);
+// The holy precast / cast hand kits (holy_precast_*_hand.m2, magic_cast_hand.m2): a glow and motes on both hands.
+function castHands(u,cols,s,op,len=700){ if(u<0||u>len) return; const a=keys([[0,0],[80,1],[len*0.6,0.8],[len,0]],u)*op;
+  for(const [i,h] of palHands().entries()){ bbGlow(h,0.7*s,0.7*s,cols[0],a*0.6);
+    for(let k=0;k<7;k++){ const ph=((u/len)*1.6+k/7)%1, ang=k*2.4+i;
+      sprite('star',[h[0]+0.2*s*Math.cos(ang)*ph,h[1]+0.35*s*ph,h[2]+0.2*s*Math.sin(ang)*ph],0.16*s*(1-ph),cols[(k%cols.length)],a*(1-ph)); } } }
+// A flat glyph ring on the floor (or at height y): ring + tick marks, scaled.
+function glyphDisc(c,y,r,col,a,ticks=12,rot=0){ if(a<=0.003) return; ring3(c,y,r,col,a,2); ring3(c,y,r*0.78,col,a*0.7,1.5);
+  g.save();g.globalCompositeOperation='lighter';g.strokeStyle=rgb(col,a);g.lineWidth=2;
+  for(let k=0;k<ticks;k++){const t=rot+k/ticks*TAU;const p=proj([c[0]+r*0.78*Math.cos(t),y,c[2]+r*0.78*Math.sin(t)]),q=proj([c[0]+r*Math.cos(t+0.12),y,c[2]+r*Math.sin(t+0.12)]);if(!p||!q)continue;g.beginPath();g.moveTo(p.x,p.y);g.lineTo(q.x,q.y);g.stroke();}
+  g.restore(); groundDisc(c,y,r,col,a*0.25); }
+// A camera-facing card (the client's flat shield cards): rounded outline + soft fill, w x h yd, centred at p.
+function card(p,w,h,col,a,fillA=0.35){ if(a<=0.003) return; const q=proj(p); if(!q) return; const W=w*0.5*q.s, H=h*0.5*q.s;
+  g.save();g.translate(q.x,q.y);g.globalCompositeOperation='lighter';
+  const gr=g.createRadialGradient(0,0,0,0,0,Math.max(W,H));gr.addColorStop(0,rgb(col,a*fillA*0.3));gr.addColorStop(0.7,rgb(col,a*fillA));gr.addColorStop(1,rgb(col,0));
+  g.fillStyle=gr;g.beginPath();g.ellipse(0,0,W,H,0,0,TAU);g.fill();
+  g.lineWidth=Math.max(1.5,W*0.05);g.strokeStyle=rgb(col,a);g.beginPath();g.ellipse(0,0,W*0.92,H*0.92,0,0,TAU);g.stroke();g.restore(); }
+// A simple arm swing for a strike: returns the weapon hand's world position at u ms (contact at CONTACT).
+const STRIKE_CONTACT_MS=230;
+function strikeHand(c,vp,u,style){ const d=norm(sub([vp[0],0,vp[2]],[c[0],0,c[2]])), r=[-d[2],0,d[0]];
+  const at=(rs,ds,y)=>[c[0]+r[0]*rs+d[0]*ds,y,c[2]+r[2]*rs+d[2]*ds];
+  // Special1H (Mortal Strike's stroke): wound low on the weapon side, rising diagonally across to the off shoulder.
+  const rest=at(0.4,0.15,1.2), wind=at(0.55,-0.2,0.85), hit=at(0.1,0.85,1.5), fol=at(-0.5,0.55,1.85);
+  const e=x=>x*x*(3-2*x);
+  if(u<0) return rest; if(u<150) return rest.map((v,i)=>lerp(v,wind[i],e(u/150)));
+  if(u<STRIKE_CONTACT_MS) return wind.map((v,i)=>lerp(v,hit[i],(u-150)/(STRIKE_CONTACT_MS-150)));
+  if(u<380) return hit.map((v,i)=>lerp(v,fol[i],(u-STRIKE_CONTACT_MS)/(380-STRIKE_CONTACT_MS)));
+  if(u<800) return fol.map((v,i)=>lerp(v,rest[i],e((u-380)/420))); return rest; }
+function drawStrike(c,vp,u,trailOn,trailCol,trailMs,op){ const lean=u>150&&u<600?0.18*Math.sin(Math.min(1,(u-150)/450)*Math.PI):0, d=norm(sub([vp[0],0,vp[2]],[c[0],0,c[2]]));
+  drawCapsule([c[0]+lean*d[0],1.0,c[2]+lean*d[2]],CLASS.paladin);
+  const h=strikeHand(c,vp,u); const q=proj(h); if(q){g.fillStyle=rgb([200,200,210],1);g.beginPath();g.arc(q.x,q.y,Math.max(2,0.1*q.s),0,TAU);g.fill();}
+  if(trailOn&&u>150){ g.save();g.globalCompositeOperation='lighter';g.lineCap='round';let prev=null;
+    for(let k=0;k<=14;k++){const uu=u-k*(trailMs/14);if(uu<150)break;const p=proj(strikeHand(c,vp,uu));if(!p)continue;
+      if(prev){const age=(u-uu)/trailMs;g.strokeStyle=rgb(trailCol,(1-age)*0.85*op);g.lineWidth=Math.max(1.5,0.12*p.s*(1-age*0.5));g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();}prev=p;}
+    g.restore(); } }
+// The generic aura band (AuraBand, shipped): one soft ring rising feet -> crown.
+function auraBand(c,u,col=[235,235,225]){ if(u<0||u>900) return; const ph=u/900; ring3([c[0],0,c[2]],0.05+ph*2.3,0.62+0.12*ph,col,Math.sin(ph*Math.PI)*0.8,3); }
+// Holy damage text on an attacker (FCT is shipped; it is not a visual for the audit).
+const HOLY_FCT=[255,240,140];
+
+const EFFECTS=[
+// ================================================================ Divine Favor
+mkFx({id:'favor',name:'Divine Favor',sub:'instant · magic_cast_hand.m2 on both hands + innerfocus_impact_chest.m2 (0.4 s) · next heal crits',durMs:2400,frame:{dist:6,ty:1.3},loopTotal:3200,
+ notes:[
+  'The client\'s chain is the same at Era, TBC and Wrath (visual 7424). Its precast kit never plays, since Divine Favor is instant.',
+  '<b>Cast</b>: <code>magic_cast_hand.m2</code> on both hands for 1.0 s: violet-to-cyan glows, green-to-gold stars and a yellow-to-violet ring.',
+  '<b>Impact on the Paladin</b>: <code>innerfocus_impact_chest.m2</code>, a 0.4 s burst at the chest. It is Priest Inner Focus\'s model, so its colours are <b>blue, violet and red</b>, not gold.',
+  '<b>The buff has no state.</b> The icon carries "next heal crits" until Flash of Light or Holy Light spends it.'],
+ asks:['Keep both kits at client values, blue-violet colours included?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'hands',name:'Cast flash on both hands',desc:'magic_cast_hand.m2, 1.0 s: violet → cyan → yellow; green → gold',sw:[62,227,229],custom:true},
+  {id:'flare',name:'Flare burst',desc:'flare 100/s at 340–400 ms, 2.2 yd/s, blue → yellow → red',sw:[64,121,251],emitter:{at:'pal',anchor:'chest',vRange:3.14,speed:2.22,life:1.0,rate:[[0,0],[40,0],[41,100],[100,100],[101,0]],trig:'imp',span:400,area:0.28,areaY:0.28,
+    color:[[0,[64,121,251]],[0.5,[255,255,0]],[1,[220,0,0]]],alpha:[[0,1],[0.5,1],[1,0]],scale:[[0,0.25],[1,0.12]],kind:'star'}},
+  {id:'streak',name:'Violet streaks',desc:'gradient64flipa 60/s, 0.8 s, 3.3 yd/s, violet → red → sky',sw:[88,0,248],emitter:{at:'pal',anchor:'chest',vRange:3.14,speed:3.33,life:0.8,rate:60,trig:'imp',span:400,tail:2,
+    color:[[0,[88,0,248]],[0.5,[255,0,0]],[1,[98,181,239]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0.15],[1,0.08]],kind:'glow'}},
+  {id:'points',name:'Blue points',desc:'4 × flare 70/s on a 0.36 yd box, deep blue → cyan → lavender',sw:[44,155,225],emitter:{at:'pal',anchor:'chest',vRange:3.14,speed:0.56,life:0.8,rate:280,trig:'imp',span:400,area:0.72,areaY:0.72,
+    color:[[0,[16,29,126]],[0.5,[44,155,225]],[1,[185,172,223]]],alpha:[[0,1],[0.5,1],[1,0]],scale:[[0,0.12],[1,0.05]],kind:'glow'}},
+ ],
+ reset(fx){fx.trig={imp:[300]};},
+ hud(fx){return simMs<300?'—':'Divine Favor: next heal crits (icon)';},
+ bodies(fx,vp,ms){drawCapsule([AT.pal[0],1,AT.pal[2]],CLASS.paladin);drawCapsule(vp,CLASS.rogue);},
+ customDraw(fx,ms){ if(on(fx,'hands')) castHands(tl(fx,ms-300),[[167,84,244],[62,227,229],[250,230,2],[0,221,62]],fx.knobs.size,fx.knobs.opacity,1000); },
+ constants(fx){const K=fx.knobs;return [
+  `// Divine Favor (visual 7424): kit 425 magic_cast_hand.m2 @Hands on cast; kit 3772 innerfocus_impact_chest.m2 @Chest on the Paladin. AS-337 bench.`,
+  `pub const DIVINE_FAVOR_CAST_HANDS: bool = ${b(on(fx,'hands'))};`,
+  `pub const DIVINE_FAVOR_FLARE: bool = ${b(on(fx,'flare'))};`,
+  `pub const DIVINE_FAVOR_STREAKS: bool = ${b(on(fx,'streak'))};`,
+  `pub const DIVINE_FAVOR_POINTS: bool = ${b(on(fx,'points'))};`,
+  `pub const DIVINE_FAVOR_SIZE_MUL: f32 = ${f2(K.size)}; pub const DIVINE_FAVOR_SPREAD_MUL: f32 = ${f2(K.spread)};`,
+  `pub const DIVINE_FAVOR_DURATION_MUL: f32 = ${f2(K.duration)}; pub const DIVINE_FAVOR_OPACITY_MUL: f32 = ${f2(K.opacity)};`,
+  `// Buff: no state; the icon carries it.`];}
+}),
+// ================================================================ Aura Mastery
+mkFx({id:'mastery',name:'Aura Mastery',sub:'Wrath 31821 · holy_precast_high_hand.m2 + holyward_impact_chest.m2 (3 s) on the Paladin · team immune to silence/interrupt 6 s',durMs:3400,frame:{dist:9,ty:1.4},loopTotal:4600,
+ notes:[
+  'At TBC Aura Mastery is a passive with no visual. <b>Wrath</b> makes it the activated 6 s immunity on AS-302, with visual 13619.',
+  '<b>Cast</b>: <code>holy_precast_high_hand.m2</code> on both hands (gold).',
+  '<b>Impact on the Paladin</b>: <code>holyward_impact_chest.m2</code>, 3.0 s, played once:',
+  '• a camera-facing <b>4.4 yd gold glow</b> that fades in by 0.67 s, holds to 2.33 s and fades out by 3 s;',
+  '• gold water ripples, a white-to-gold star burst (67–600 ms) and amber glows;',
+  '• a ring of stars at 1.0 yd round the chest.',
+  'The team-wide effect (Wrath 64364) <b>has no visual</b>: the client draws the ward on the Paladin only. The bench can also put the ward on each teammate (authored, off by default).'],
+ asks:['The ward on the Paladin only (client), or on every teammate it covers too?','Keep the 4.4 yd glow at client size? It is the biggest layer on this bench.'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'hands',name:'Cast flash on both hands',desc:'holy_precast_high_hand.m2, gold',sw:GOLD,custom:true},
+  {id:'quad',name:'Big gold glow',desc:'yellow_glow, 4.4 yd camera-facing quad, weight 0.6, 0.67–2.33 s',sw:[255,230,120],custom:true},
+  {id:'ripple',name:'Gold ripples',desc:'shockwavewater1 10.8/s, 1 s, (253,221,94), alpha 0.4',sw:[253,221,94],emitter:{at:'pal',anchor:'chest',vRange:3.14,speed:0.06,life:1.0,rate:10.8,trig:'imp',span:3000,area:0.1,
+    color:[[0,[253,221,94]],[0.5,[240,213,60]],[1,[253,222,13]]],alpha:[[0,0.4],[0.5,0.38],[1,0]],scale:[[0,0.4],[1,1.2]],kind:'glow'}},
+  {id:'burst',name:'Star burst',desc:'star8b 45/s, 67–600 ms, 2.56 yd/s, drag 3.35, white → gold',sw:[243,200,27],emitter:{at:'pal',anchor:'chest',vRange:3.14,speed:2.56,drag:3.35,life:0.75,rate:45,trig:'imp',span:3000,win:[[0,0],[67,1],[600,0]],
+    color:[[0,[255,255,255]],[0.5,[243,200,27]],[1,[255,245,191]]],alpha:[[0,1],[0.5,0.68],[1,0]],scale:[[0,0.22],[1,0.1]],kind:'star'}},
+  {id:'amber',name:'Amber glows',desc:'genericglow2c 7.5/s, 1.2 s',sw:[228,159,49],emitter:{at:'pal',anchor:'chest',vRange:3.14,speed:0.06,life:1.2,rate:7.5,trig:'imp',span:3000,
+    color:[[0,[228,159,49]],[0.5,[232,166,25]],[1,[196,154,25]]],alpha:[[0,0.5],[0.5,0.65],[1,0]],scale:[[0,0.6],[1,0.9]],kind:'glow'}},
+  {id:'ring',name:'Star ring',desc:'star8b ring emitter 61/s at 1.0 yd, gold → white',sw:[250,225,57],emitter:{at:'pal',anchor:'chest',orbit:1.0,orbitRevS:0.5,speed:0.17,vRange:3.14,life:0.81,rate:61,trig:'imp',span:3000,
+    color:[[0,[250,225,57]],[0.5,[255,255,255]],[1,[255,255,255]]],alpha:[[0,0.51],[0.5,0.72],[1,0]],scale:[[0,0.14],[1,0.08]],kind:'star'}},
+  {id:'team',name:'Ward on each teammate (authored)',desc:'the big glow and star ring on the two allies too',sw:[255,240,180],on:false,custom:true},
+ ],
+ reset(fx){fx.trig={imp:[300]};},
+ hud(fx){return simMs<300?'—':simMs<6300?'team immune to silence and interrupts (6 s, icons)':'—';},
+ bodies(fx,vp,ms){drawCapsule([AT.pal[0],1,AT.pal[2]],CLASS.paladin);drawCapsule(vp,CLASS.mage);drawCapsule([AT.far[0],1,AT.far[2]],CLASS.priest);},
+ customDraw(fx,ms,vp){ const K=fx.knobs,op=K.opacity,s=K.size,t=tl(fx,ms-300);
+  if(on(fx,'hands')) castHands(ms-300,[GOLD,[255,250,200]],s,op);
+  const w=keys([[0,0],[667,0.6],[2334,0.6],[3000,0]],t);
+  const ward=(c)=>bbGlow([c[0],1.45,c[2]],4.4*s,4.4*s,[255,232,130],w*op*0.55);
+  if(t>=0&&t<=3000){ if(on(fx,'quad')) ward(AT.pal);
+    if(on(fx,'team')) for(const c of [vp,AT.far]){ ward(c); for(let k=0;k<10;k++){const a=k/10*TAU+t/1000*TAU*0.5;sprite('star',[c[0]+Math.cos(a)*s,1.45,c[2]+Math.sin(a)*s],0.14*s,[250,225,57],w*op*1.2,a);} } } },
+ constants(fx){const K=fx.knobs;return [
+  `// Aura Mastery (Wrath visual 13619): kit 191 holy_precast_high_hand.m2 @Hands; kit 489 holyward_impact_chest.m2 @Chest, 3.0 s. AS-337 bench.`,
+  `pub const AURA_MASTERY_LAYERS: [(&str, bool); 6] = [("hands", ${b(on(fx,'hands'))}), ("glow_quad", ${b(on(fx,'quad'))}), ("ripples", ${b(on(fx,'ripple'))}), ("star_burst", ${b(on(fx,'burst'))}), ("amber", ${b(on(fx,'amber'))}), ("star_ring", ${b(on(fx,'ring'))})];`,
+  `pub const AURA_MASTERY_ON_TEAMMATES: bool = ${b(on(fx,'team'))}; // authored: the client draws the ward on the Paladin only`,
+  `pub const AURA_MASTERY_SIZE_MUL: f32 = ${f2(K.size)}; pub const AURA_MASTERY_SPREAD_MUL: f32 = ${f2(K.spread)};`,
+  `pub const AURA_MASTERY_DURATION_MUL: f32 = ${f2(K.duration)}; pub const AURA_MASTERY_OPACITY_MUL: f32 = ${f2(K.opacity)};`];}
+}),
+// ================================================================ Divine Protection
+mkFx({id:'dprot',name:'Divine Protection',sub:'Wrath 498 · Divine Shield\'s hand kits · wrongfully_accused_impact.m2 @Chest held 8 s (2.63 s cycle) · 30 % less damage',durMs:8800,frame:{dist:6,ty:1.3},loopTotal:9800,
+ notes:[
+  'At Era and TBC, 498 is the old immunity and is drawn exactly as Divine Shield. <b>Wrath\'s</b> 498 is the damage reduction on AS-302, with its own visual 11817.',
+  '<b>Cast</b>: Divine Shield\'s gold hand kits (already shipped for Divine Shield).',
+  '<b>State on the Paladin for the whole 8 s</b>: <code>wrongfully_accused_impact.m2</code> at the chest. It is a <b>globe of radius ≈ 0.75 yd round the torso</b>, cycling every 2.63 s:',
+  '• a pale-gold ring layer (0.17–0.83 s), a flare layer (0.6–1.2 s), a red lava layer (1.03–1.63 s) and a white fire layer (1.27–1.83 s);',
+  '• at the pulse (1.3 s) a fire burst and a flash, white to orange; red-tinted glints from 0.2 to 1.4 s.',
+  'It differs from Divine Shield at a glance: Divine Shield is gold cards at the feet, this a red-gold globe at the chest. AS-302 gives them no shared lockout, so both can be up at once.',
+  '<b>A sustained channel on the Paladin</b> (8 s). The other Paladin sustained channels are Vengeance\'s hands and the Divine Shield cards.'],
+ asks:['Keep the globe for the whole 8 s at client values?','The over-bright pale gold is the client\'s; keep it?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'hands',name:'Cast flash on both hands (shipped)',desc:'Divine Shield\'s holy_precast_low_hand.m2',sw:GOLD,custom:true},
+  {id:'gold',name:'Pale-gold globe',desc:'aura_02_h + flare1_tc layers, 0.17–1.2 s of each 2.63 s cycle, weight 0.8',sw:[252,240,200],custom:true},
+  {id:'red',name:'Red lava and fire layers',desc:'lavalump2 1.03–1.63 s, fire1white_invert 1.27–1.83 s; red (0.97,0.14,0.14) → white flash',sw:[246,35,35],custom:true},
+  {id:'pulse',name:'Pulse burst',desc:'fire1white_invert 111/s at 1.30–1.33 s, 2.8 yd/s, white → orange; flare07 flash 1.27–1.47 s',sw:[233,98,32],custom:true},
+  {id:'glint',name:'Red glints',desc:'crystalball_large 11/s, 0.2–1.4 s of each cycle, white → red',sw:[223,32,32],custom:true},
+ ],
+ reset(fx){},
+ hud(fx){return simMs<300?'—':simMs<8300?'Divine Protection: 30 % less damage taken (8 s)':'—';},
+ tick(fx,ms){ for(const t of [2000,4200,6400]) if(ms>=t&&ms-t<34&&!fx['hit'+t]){fx['hit'+t]=1;fct('-49',[255,255,255],18,[AT.pal[0],2.2,AT.pal[2]]);} if(ms<100){fx.hit2000=fx.hit4200=fx.hit6400=0;} },
+ bodies(fx,vp,ms){drawCapsule([AT.pal[0],1,AT.pal[2]],CLASS.paladin);drawCapsule(vp,CLASS.warrior);},
+ customDraw(fx,ms){ const K=fx.knobs,op=K.opacity,s=K.size, u=ms-300; if(on(fx,'hands')) castHands(u,[GOLD,[255,250,210]],s,op);
+  const dur=8000*(K.duration??1); if(u<0||u>dur) return; const env=keys([[0,0],[200,1],[dur-300,1],[dur,0]],u)*op;
+  const cyc=(u%2634), c=[AT.pal[0],1.45,AT.pal[2]], R=0.75*s;
+  const wG=Math.max(keys([[0,0],[167,0],[267,0.8],[734,0.8],[834,0]],cyc),keys([[0,0],[600,0],[700,0.8],[1100,0.8],[1200,0]],cyc));
+  const wR=Math.max(keys([[0,0],[1034,0],[1134,0.8],[1534,0.8],[1634,0]],cyc),keys([[0,0],[1267,0],[1500,1],[1834,0]],cyc));
+  const red=keys([[0,[246,35,35]],[1267,[255,255,255]],[1500,[249,58,44]],[1800,[246,35,35]]],cyc);
+  if(on(fx,'gold')&&wG>0){ bbGlow(c,2*R*1.15,2*R*1.15,[252,236,190],wG*env*0.5); ring3([c[0],0,c[2]],c[1],R,[252,240,200],wG*env*0.8,2); ring3([c[0],0,c[2]],c[1]+0.35*s,R*0.8,[252,240,200],wG*env*0.5,1.5); ring3([c[0],0,c[2]],c[1]-0.35*s,R*0.8,[252,240,200],wG*env*0.5,1.5); }
+  if(on(fx,'red')&&wR>0){ bbGlow(c,2*R,2*R,red,wR*env*0.55); ring3([c[0],0,c[2]],c[1],R*1.02,red,wR*env*0.8,2.5); }
+  if(on(fx,'pulse')){ const pu=cyc-1267; if(pu>=0&&pu<700){ bbGlow(c,1.4*s,1.4*s,[255,200,150],keys([[0,0],[33,1],[200,0.6],[400,0]],pu)*env);
+    for(let k=0;k<14;k++){ const life=500, a=pu-(k%3)*12; if(a<0||a>life) continue; const ph=a/life, dir=norm([hh(k)-0.5,hh(k+7)-0.5,hh(k+13)-0.5]);
+      sprite('flame',[c[0]+dir[0]*2.8*s*ph*0.5,c[1]+dir[1]*2.8*s*ph*0.5,c[2]+dir[2]*2.8*s*ph*0.5],0.3*s,keys([[0,[255,255,255]],[0.5,[233,98,32]],[1,[255,255,255]]],ph),keys([[0,0.51],[0.5,0.29],[1,0]],ph)*env); } } }
+  if(on(fx,'glint')&&cyc>200&&cyc<1900){ for(let k=0;k<6;k++){ const ph=((cyc-200)/500+k/6)%1, a=k*1.7+Math.floor((cyc-200)/500);
+    sprite('star',[c[0]+R*0.9*Math.cos(a),c[1]+R*0.8*Math.sin(a*1.3),c[2]+R*0.9*Math.sin(a)],0.2*s,keys([[0,[255,255,255]],[0.5,[223,32,32]],[1,[255,255,255]]],ph),keys([[0,0],[0.5,0.5],[1,0]],ph)*env,a); } } },
+ constants(fx){const K=fx.knobs;return [
+  `// Divine Protection (Wrath visual 11817): Divine Shield's hand kits on cast; kit 11101 wrongfully_accused_impact.m2 @Chest as the 8 s state, 2.634 s cycle. AS-337 bench.`,
+  `pub const DIVINE_PROTECTION_LAYERS: [(&str, bool); 5] = [("hands", ${b(on(fx,'hands'))}), ("gold_globe", ${b(on(fx,'gold'))}), ("red_layers", ${b(on(fx,'red'))}), ("pulse", ${b(on(fx,'pulse'))}), ("glints", ${b(on(fx,'glint'))})];`,
+  `pub const DIVINE_PROTECTION_GLOBE_RADIUS: f32 = ${f2(0.75*K.size)}; // yd`,
+  `pub const DIVINE_PROTECTION_CYCLE_SECS: f32 = 2.634;`,
+  `pub const DIVINE_PROTECTION_SIZE_MUL: f32 = ${f2(K.size)}; pub const DIVINE_PROTECTION_OPACITY_MUL: f32 = ${f2(K.opacity)};`,
+  `// AuraApplyRoute: owned by the globe (by name), not the band.`];}
+}),
+// ================================================================ Blessing of Sacrifice
+mkFx({id:'sac',name:'Blessing of Sacrifice',sub:'TBC 6940 · holy_precast_med_hand.m2 · blessingofsacrifice_impact.m2 @Base on BOTH units (1.9 s) · no link',durMs:7000,frame:{dist:8,ty:1.3},loopTotal:7400,
+ notes:[
+  '<b>Cast</b>: <code>holy_precast_med_hand.m2</code> on both hands (gold).',
+  '<b>Impact on both the Paladin and the ally</b>: <code>blessingofsacrifice_impact.m2</code> at the feet, 1.9 s. A red shell 3.6 yd wide and 3.3 yd tall fades in by 0.57 s, holds to 1.5 s and fades by 1.73 s. Red-to-orange motes fall through it, and faint red streaks fly out.',
+  'TBC and Wrath agree on this red impact. Era drew a violet ground rune instead.',
+  '<b>The client draws no link</b>, and nothing while damage is transferred. The same impact on both ends at the cast is what pairs them. The icon carries the 12 s buff.',
+  'The bench shows the ally hit three times. 30 % of each hit moves to the Paladin (combat text on both). Two authored options draw the transfer: a <b>pulse</b> from ally to Paladin on each transfer, or a standing <b>tether</b>. Both are off by default.'],
+ asks:['Client only: the impact on both ends, then the icon (recommended)?','Or add the authored per-transfer pulse? (The tether would be a sustained channel on two units.)'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'hands',name:'Cast flash on both hands',desc:'holy_precast_med_hand.m2, gold',sw:GOLD,custom:true},
+  {id:'shell',name:'Red shell',desc:'blessingofsacrifice / aurarune8 / glow layers, 3.6 × 3.3 yd, 0–0.57–1.5–1.73 s',sw:[220,10,0],custom:true},
+  {id:'motes',name:'Falling motes (Paladin)',desc:'beerbubble 75/s over 1.78 yd, falling 1.67 yd/s, dark red → orange',sw:[223,0,0],emitter:{at:'pal',anchor:'feet',pos:[0,0,1.0],vRange:0,speed:-1.67,life:1.5,rate:75,trig:'imp',span:1900,area:1.78,areaY:0.4,
+    color:[[0,[42,0,0]],[0.5,[223,0,0]],[1,[255,60,0]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0.12],[1,0.08]],kind:'blob'}},
+  {id:'motes2',name:'Falling motes (ally)',desc:'the same, on the ally',sw:[223,0,0],emitter:{at:'ally',anchor:'feet',pos:[0,0,1.0],vRange:0,speed:-1.67,life:1.5,rate:75,trig:'imp',span:1900,area:1.78,areaY:0.4,
+    color:[[0,[42,0,0]],[0.5,[223,0,0]],[1,[255,60,0]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0.12],[1,0.08]],kind:'blob'}},
+  {id:'streak',name:'Red streaks',desc:'gradient64flipa 33/s, 6.1 yd/s, alpha ≤ 0.25 (both units)',sw:[255,12,0],emitter:{at:['pal','ally'],anchor:'feet',pos:[0,0,1.28],vRange:3.14,speed:6.1,life:0.7,rate:66,trig:'imp',span:1900,tail:2.8,
+    color:[[0,[124,0,0]],[0.5,[255,12,0]],[1,[248,111,0]]],alpha:[[0,0],[0.5,0.25],[1,0]],scale:[[0,0.12],[1,0.06]],kind:'glow'}},
+  {id:'pulse',name:'Transfer pulse (authored)',desc:'a red mote from the ally to the Paladin on each transfer, 0.35 s',sw:[255,60,30],on:false,custom:true},
+  {id:'tether',name:'Standing tether (authored)',desc:'a faint red line ally → Paladin for the 12 s',sw:[200,30,30],on:false,custom:true},
+ ],
+ reset(fx){fx.trig={imp:[300]};fx.hits={};},
+ hud(fx){return simMs<300?'—':'Blessing of Sacrifice: 30 % of the ally\'s damage moves to the Paladin (12 s, icon)';},
+ tick(fx,ms){ for(const t of [2500,4000,5500]) if(ms>=t&&!fx.hits[t]){fx.hits[t]=1;fct('-56',[255,255,255],18,[0,2.2,0]);fct('-24',[255,255,255],16,[AT.pal[0],2.2,AT.pal[2]]);} },
+ bodies(fx,vp,ms){drawCapsule([AT.pal[0],1,AT.pal[2]],CLASS.paladin);drawCapsule([0,1,0],CLASS.rogue);
+  const sw=[2500,4000,5500].some(t=>ms>t-250&&ms<t+100); drawCapsule([AT.enemy[0]-(sw?0.2:0),1,AT.enemy[2]],CLASS.warrior);},
+ customDraw(fx,ms){ const K=fx.knobs,op=K.opacity,s=K.size,t=tl(fx,ms-300);
+  if(on(fx,'hands')) castHands(ms-300,[GOLD],s,op);
+  if(on(fx,'shell')&&t>=0&&t<=1900){ const w=keys([[0,0],[567,1],[1500,1],[1733,0]],t)*op;
+    for(const c of [AT.pal,AT.ally]){ bbGlow([c[0],1.4,c[2]],3.6*s*0.75,3.3*s*0.75,[220,10,0],w*0.45); ring3(c,0.05,1.2*s,[255,54,0],w*0.6,2); glyphDisc(c,0.04,0.9*s,[243,137,0],w*0.5,8,t/1000); } }
+  if(on(fx,'tether')&&ms>300){ const p=proj([0,1.45,0]),q=proj([AT.pal[0],1.45,AT.pal[2]]); if(p&&q){g.save();g.globalCompositeOperation='lighter';g.strokeStyle=rgb([200,30,30],0.35*op);g.lineWidth=3;g.beginPath();g.moveTo(p.x,p.y);g.lineTo(q.x,q.y);g.stroke();g.restore();} }
+  if(on(fx,'pulse')) for(const h of [2500,4000,5500]){ const u=ms-h; if(u<0||u>350) continue; const k=u/350, pos=[lerp(0,AT.pal[0],k),1.45+0.5*Math.sin(k*Math.PI),lerp(0,AT.pal[2],k)];
+    sprite('glow',pos,0.45*s,[255,60,30],op*(1-k*0.3)); bbGlow(pos,0.25*s,0.25*s,[255,200,170],op); } },
+ constants(fx){const K=fx.knobs;return [
+  `// Blessing of Sacrifice (TBC visual 299): kits 186/189 holy_precast_med_hand.m2; kit 7815 blessingofsacrifice_impact.m2 @Base on caster AND target, 1.9 s. AS-337 bench.`,
+  `pub const SACRIFICE_LAYERS: [(&str, bool); 5] = [("hands", ${b(on(fx,'hands'))}), ("shell", ${b(on(fx,'shell'))}), ("motes_paladin", ${b(on(fx,'motes'))}), ("motes_ally", ${b(on(fx,'motes2'))}), ("streaks", ${b(on(fx,'streak'))})];`,
+  `pub const SACRIFICE_TRANSFER_PULSE: bool = ${b(on(fx,'pulse'))}; // authored`,
+  `pub const SACRIFICE_TETHER: bool = ${b(on(fx,'tether'))}; // authored, sustained`,
+  `pub const SACRIFICE_SIZE_MUL: f32 = ${f2(K.size)}; pub const SACRIFICE_OPACITY_MUL: f32 = ${f2(K.opacity)};`];}
+}),
+// ================================================================ Sacred Shield
+mkFx({id:'sacred',name:'Sacred Shield',sub:'Wrath 53601 / 58597 · blessed_mending_impact.m2 on cast (2 s) · blessed_mending_proc_impact.m2 card while the absorb holds',durMs:7600,frame:{dist:8,ty:1.5},loopTotal:8000,
+ notes:[
+  '<b>Cast</b>: <code>holy_precast_high_base.m2</code> at the Paladin\'s feet and <code>holy_precast_high_hand.m2</code> on both hands.',
+  '<b>Impact on the ally</b>: <code>blessed_mending_impact.m2</code> at the chest, 2 s. It is a flat 1.6 yd gold rune disc, with gold streaks flying out (0.1–0.43 s) and two counter-turning rune sprites.',
+  '<b>The 30 s buff has no state.</b> The icon carries it.',
+  '<b>The absorb</b> (58597): <code>blessed_mending_proc_impact.m2</code> at the feet while the absorb holds. It is a <b>tall flat gold card</b> with Power Word: Shield\'s own textures (<code>shockwave10d</code>, <code>genericglow2b</code>): birth 0.7 s, a flickering loop, and death 1.1 s. It fits <code>pw_shield.rs</code> as a fourth <code>ShieldKind</code>.',
+  'The client\'s card is 3.2 × 4.1 yd. PW:S\'s client card was drawn at its own size after the AS-344 bench.',
+  'The bench: the ally is hit at 3.0 s, triggering the absorb. "Hold" picks how long the card stays, which depends on how the build card implements the absorb.'],
+ asks:['Keep the cast disc and the absorb card at client values?','Absorb card: held until used (as Wrath, up to 6 s) or birth-then-death on the hit it eats?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1},{key:'hold',label:'absorb',min:0,max:1,step:1,def:0,names:['held until used','eats the hit at once']}],
+ layers:[
+  {id:'hands',name:'Cast flash (hands + base)',desc:'holy_precast_high_hand.m2 + holy_precast_high_base.m2, gold',sw:GOLD,custom:true},
+  {id:'disc',name:'Gold rune disc on the ally',desc:'blessed_mending_impact: rune1d + aurarune_b, 1.6 yd, flat at the chest, (0.95,0.83,0.32)',sw:[243,211,82],custom:true},
+  {id:'dstreak',name:'Disc streaks',desc:'gradient64flipa 66/s, 0.1–0.43 s, 6.7 yd/s outward',sw:[252,217,77],emitter:{at:'ally',anchor:'chest',vRange:1.5,speed:3.3,life:0.5,rate:66,trig:'imp',span:2000,win:[[0,0],[100,1],[434,0]],tail:6,
+    color:[[0,[252,217,77]],[0.5,[253,218,112]],[1,[244,252,255]]],alpha:[[0,1],[0.5,0.5],[1,0]],scale:[[0,0.1],[1,0.05]],kind:'glow'}},
+  {id:'card',name:'Absorb card',desc:'blessed_mending_proc_impact: shockwave10d + genericglow2b, pale gold, 3.2 × 4.1 yd, birth 0.7 / loop / death 1.1 s',sw:[248,240,81],custom:true},
+  {id:'flares',name:'Card flares',desc:'t_vfx_flare07 44/s through the loop, white → yellow; inward burst at birth',sw:[241,234,44],custom:true},
+  {id:'sparks',name:'Death sparks',desc:'flare1_tc 111/s for 33 ms at death, gold',sw:[240,191,59],custom:true},
+ ],
+ reset(fx){fx.trig={imp:[350]};fx.hit=0;},
+ hud(fx){const h=fx.knobs.hold;return simMs<350?'—':simMs<3000?'Sacred Shield (30 s, icon)':'absorb: '+(h?'eats the hit':'held until used — next hit at 5.0 s');},
+ tick(fx,ms){ if(ms>=3000&&!fx.hit){fx.hit=1;fct('Absorb',[255,255,255],16,[0,2.3,0]);} if(ms>=5000&&fx.hit===1&&!fx.knobs.hold){fx.hit=2;fct('Absorb',[255,255,255],16,[0,2.3,0]);} },
+ bodies(fx,vp,ms){drawCapsule([AT.pal[0],1,AT.pal[2]],CLASS.paladin);drawCapsule([0,1,0],CLASS.rogue);
+  const sw=[3000,5000].some(t=>ms>t-250&&ms<t+100); drawCapsule([AT.enemy[0]-(sw?0.2:0),1,AT.enemy[2]],CLASS.warrior);},
+ customDraw(fx,ms){ const K=fx.knobs,op=K.opacity,s=K.size;
+  if(on(fx,'hands')){ castHands(ms-350,[GOLD],s,op); const u=ms-350; if(u>=0&&u<700) glyphDisc(AT.pal,0.04,0.8*s,GOLD,keys([[0,0],[100,0.8],[700,0]],u)*op,6); }
+  const t=tl(fx,ms-350); if(on(fx,'disc')&&t>=0&&t<=1967){ const w=Math.max(keys([[0,0],[67,0],[134,1],[734,0]],t),keys([[0,0],[34,1],[267,0]],t))*op;
+    glyphDisc([0,0,0],1.45,0.8*s,[243,211,82],w,10,t/700); for(const sg of [1,-1]){ if(t<434+800){ const a=keys([[0,0],[400,0.78],[1234,0]],t)*op; sprite('star',[0,1.45+sg*0.25,0],0.5*s,[253,218,112],a,sg*t/500);} } }
+  // absorb card: birth at 3000, death at 5000 (held) or at once (eats the hit)
+  const b0=3000, dStart=K.hold?b0+700:5000, d=ms-b0; if(d<0) return; const cen=[0,1.2,0], W=3.2*s*0.62, H=4.1*s*0.62;
+  let a=0; if(ms<dStart){ a=d<700?keys([[0,0.26],[200,0.26],[300,1],[400,0.38],[500,0.26],[600,0.38],[700,0.26]],d):keys([[0,0.18],[100,0.49],[200,0.26],[300,0.45],[400,0.16],[533,0.46],[700,0.38],[1000,0.3],[1466,0.18]],(d-700)%1466); }
+  else { const e=ms-dStart; if(e>1100) return; a=keys([[0,0.44],[66,0.1],[166,0.45],[800,0],[1100,0]],e)*(1+0.3*(e/1100)); }
+  if(on(fx,'card')) card(cen,W*(ms>=dStart?1+0.25*Math.min(1,(ms-dStart)/800):1),H,[248,240,81],a*op*1.4);
+  if(on(fx,'flares')&&ms<dStart&&d>300){ for(let k=0;k<8;k++){const ph=((d/1000)+k/8)%1;sprite('star',[cen[0]+(hh(k)-0.5)*1.4*s,cen[1]+(hh(k+3)-0.5)*1.6*s+0.3*ph,cen[2]+(hh(k+5)-0.5)*0.4],0.3*s,keys([[0,[255,255,255]],[0.3,[241,234,44]],[1,[255,255,255]]],ph),keys([[0,0],[0.3,0.61],[1,0]],ph)*op,k);} }
+  if(on(fx,'sparks')&&ms>=dStart&&ms-dStart<330){ const e=ms-dStart; for(let k=0;k<6;k++){const ang=k/6*TAU,r=1.667*s*e/1000*1.2; sprite('star',[cen[0]+r*Math.cos(ang),cen[1]+0.15,cen[2]+r*Math.sin(ang)],0.25*s,[240,191,59],keys([[0,0.6],[0.3,1],[1,0]],e/330)*op,ang);} } },
+ constants(fx){const K=fx.knobs;return [
+  `// Sacred Shield (Wrath 53601 visual 11956 / 58597 visual 12581). AS-337 bench.`,
+  `pub const SACRED_SHIELD_CAST_FLASH: bool = ${b(on(fx,'hands'))};`,
+  `pub const SACRED_SHIELD_DISC: bool = ${b(on(fx,'disc'))}; pub const SACRED_SHIELD_DISC_STREAKS: bool = ${b(on(fx,'dstreak'))};`,
+  `// The absorb: ShieldKind::SacredShield in pw_shield.rs (blessed_mending_proc_impact.m2 @Base): birth 0.7 s, loop 1.466 s, death 1.1 s.`,
+  `pub const SACRED_SHIELD_CARD_LAYERS: [(&str, bool); 3] = [("card", ${b(on(fx,'card'))}), ("flares", ${b(on(fx,'flares'))}), ("death_sparks", ${b(on(fx,'sparks'))})];`,
+  `pub const SACRED_SHIELD_CARD_HOLDS: bool = ${K.hold?'false':'true'}; // true: held while the absorb lasts; false: birth then death on the hit it eats`,
+  `pub const SACRED_SHIELD_SIZE_MUL: f32 = ${f2(K.size)}; pub const SACRED_SHIELD_OPACITY_MUL: f32 = ${f2(K.opacity)};`];}
+}),
+// ================================================================ Repentance
+mkFx({id:'repent',name:'Repentance',sub:'6 s incapacitate · holy_impactdd_low_chest.m2 + flinch · then the Stun pose + shadowwordbefuddle_head.m2 @Head',durMs:6800,frame:{dist:7,ty:1.6},loopTotal:7600,
+ notes:[
+  'The same at Era, TBC and Wrath (visual 5539).',
+  '<b>Cast</b>: <code>holy_precast_high_hand.m2</code> on both hands.',
+  '<b>Impact on the victim</b>: a flinch and <code>holy_impactdd_low_chest.m2</code>, 0.93 s: yellow-to-white stars and gold streaks.',
+  '<b>State for the duration</b>: the <b>Stun pose</b> and <code>shadowwordbefuddle_head.m2</code>. Sky-blue-to-violet and indigo-to-lavender sparkles fall through a 1.5 yd box round the head, and three violet star points circle it (the circling is inferred).',
+  '<b>Our grammar</b> reserves "over the head" for Stun (a hueless whirl of beads, shown for comparison) and "enclosure" for Incapacitate (Freezing Trap\'s ice block). The client\'s Repentance sits over the head, in colour. Either way it needs its own route by name, since <code>Incapacitate</code> routes to the ice block today.',
+  'We draw no body poses for crowd control, so the Stun pose is not on the bench.'],
+ asks:['Draw Repentance as the client does: the gold flash, then the violet head swirl (recommended)?','Is the violet swirl distinct enough from our hueless Stun whirl? Toggle the comparison layer to judge.'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'hands',name:'Cast flash on both hands',desc:'holy_precast_high_hand.m2, gold',sw:GOLD,custom:true},
+  {id:'stars',name:'Impact stars',desc:'starflashyellowa 75/s, 67–400 ms, yellow → white',sw:[255,255,0],emitter:{at:'enemy',anchor:'chest',vRange:3.14,speed:-0.42,life:0.5,rate:75,trig:'imp',span:934,win:[[0,0],[67,1],[400,0]],area:0.3,areaY:0.3,
+    color:[[0,[255,255,0]],[0.5,[255,255,255]],[1,[254,255,180]]],alpha:[[0,0.29],[0.5,1],[1,0]],scale:[[0,0.35],[1,0.2]],kind:'star'}},
+  {id:'ribbon',name:'Impact gold streaks',desc:'ribbonblur1bea_gold, peak 250/s at 134 ms',sw:[255,220,120],emitter:{at:'enemy',anchor:'chest',vRange:3.14,speed:0.33,life:0.75,rate:[[0,0],[67,0],[100,75],[134,250],[167,100],[234,25],[300,10],[400,0]],trig:'imp',span:934,tail:5,area:0.2,
+    color:[[0,[255,240,190]],[1,[255,220,120]]],alpha:[[0,0.84],[0.25,0.78],[1,0]],scale:[[0,0.14],[1,0.06]],kind:'glow'}},
+  {id:'sparkA',name:'Head sparkles, sky → violet',desc:'sparkle 111/s on a 1.5 yd box, falling 3.3 yd/s, 0.5 s',sw:[184,0,245],emitter:{at:'enemy',anchor:'head',vRange:0,speed:-3.33,life:0.5,rate:111,trig:'state',span:6000,area:1.53,areaY:0.2,pos:[0,0,0.6],
+    color:[[0,[104,182,242]],[0.5,[184,0,245]],[1,[255,255,255]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0.08],[1,0.04]],kind:'star'}},
+  {id:'sparkB',name:'Head sparkles, indigo → lavender',desc:'the second sparkle emitter, 111/s',sw:[162,77,241],emitter:{at:'enemy',anchor:'head',vRange:0,speed:-3.33,life:0.5,rate:111,trig:'state',span:6000,area:1.53,areaY:0.2,pos:[0,0,0.6],
+    color:[[0,[102,35,225]],[0.5,[162,77,241]],[1,[255,255,255]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0.08],[1,0.04]],kind:'star'}},
+  {id:'points',name:'Three circling star points',desc:'star8b 40/s each at ~0.7–1.2 yd, violet → white (circling inferred)',sw:[180,0,247],custom:true},
+  {id:'stunref',name:'Comparison: our Stun whirl (shipped)',desc:'hard_cc.rs: a hueless whirl of beads over the head, one turn a second',sw:[220,220,220],on:false,custom:true},
+ ],
+ reset(fx){fx.trig={imp:[400],state:[500]};},
+ hud(fx){return simMs<400?'—':simMs<6500?'Repentance: incapacitated (breaks on damage)':'—';},
+ bodies(fx,vp,ms){drawCapsule([AT.pal[0],1,AT.pal[2]],CLASS.paladin); const u=ms-400, lean=u>0&&u<300?0.12*Math.sin(u/300*Math.PI):0; drawCapsule([AT.enemy[0]+lean,1,AT.enemy[2]],CLASS.mage);},
+ customDraw(fx,ms){ const K=fx.knobs,op=K.opacity,s=K.size; if(on(fx,'hands')) castHands(ms-100,[GOLD],s,op);
+  const u=tl(fx,ms-500); if(u<0||u>6000) return; const env=keys([[0,0],[200,1],[5800,1],[6000,0]],u)*op, hd=[AT.enemy[0],2.25,AT.enemy[2]];
+  if(on(fx,'points')) for(let k=0;k<3;k++){ const a=k/3*TAU+u/1000*TAU*0.6, r=[0.7,1.2,1.05][k]*s; for(let j=0;j<4;j++){const aa=a-j*0.12; sprite('star',[hd[0]+r*Math.cos(aa),hd[1]+0.35+[0.45,0,-0.45][k]*0.4,hd[2]+r*Math.sin(aa)],0.32*s*(1-j*0.2),keys([[0,[180,0,247]],[0.2,[185,91,228]],[1,[255,255,255]]],j/4),env*(0.6-j*0.13),aa);} }
+  if(on(fx,'stunref')) for(let k=0;k<6;k++){ const a=k/6*TAU+u/1000*TAU; sprite('blob',[hd[0]+0.42*Math.cos(a),hd[1]+0.45,hd[2]+0.42*Math.sin(a)],0.18,[225,225,225],env); } },
+ constants(fx){const K=fx.knobs;return [
+  `// Repentance (visual 5539): kit 6499 holy_impactdd_low_chest.m2 @Chest on landing; kit 4949 shadowwordbefuddle_head.m2 @Head for the duration. AS-337 bench.`,
+  `// Route: AuraApplyRoute::for_instance(Incapacitate, "Repentance") -> its own owner (Incapacitate alone routes to IceBlock).`,
+  `pub const REPENTANCE_LAYERS: [(&str, bool); 6] = [("hands", ${b(on(fx,'hands'))}), ("impact_stars", ${b(on(fx,'stars'))}), ("impact_streaks", ${b(on(fx,'ribbon'))}), ("sparkles_sky_violet", ${b(on(fx,'sparkA'))}), ("sparkles_indigo_lavender", ${b(on(fx,'sparkB'))}), ("circling_points", ${b(on(fx,'points'))})];`,
+  `pub const REPENTANCE_SIZE_MUL: f32 = ${f2(K.size)}; pub const REPENTANCE_SPREAD_MUL: f32 = ${f2(K.spread)};`,
+  `pub const REPENTANCE_DENSITY_MUL: f32 = ${f2(K.density)}; pub const REPENTANCE_OPACITY_MUL: f32 = ${f2(K.opacity)};`];}
+}),
+// ================================================================ Crusader Strike
+mkFx({id:'crusader',name:'Crusader Strike',sub:'TBC 35395 · Special1H + red trail 0xF82929 600 ms · strike_impact_chest.m2 (TBC) or decisivestrike (Wrath = shipped Heroic Strike landing)',durMs:1600,frame:{dist:5.5,ty:1.4},loopTotal:2000,
+ notes:[
+  '<b>Swing</b>: body anim 57, Special1H, the anim Mortal Strike plays. Our Mortal Strike stroke (<code>SwingStyle::MortalStrike</code>, rising diagonal) is the match.',
+  '<b>Trail</b>: procedural type 8, <b>0xF82929, 600 ms</b>. It is the same red trail as Mortal Strike and Heroic Strike, which <code>heroic_strike.rs</code> already draws (0xF82A29).',
+  '<b>Impact</b>, kit 437, which differs by build:',
+  '• <b>TBC</b>: <code>strike_impact_chest.m2</code>, 0.67 s: gold-to-dark-red sparks (50/s, 2.8 yd/s) and a red-grey-orange plume puff;',
+  '• <b>Wrath</b>: <code>decisivestrike_impact_chest.m2</code>, the landing Heroic Strike already ships.',
+  'With TBC\'s impact, Crusader Strike shares Mortal Strike\'s stroke and Heroic Strike\'s trail and has a landing of its own. With Wrath\'s, it shares Heroic Strike\'s landing too.'],
+ asks:['Mortal Strike\'s stroke and the shipped red trail?','Which landing: TBC strike_impact_chest (recommended), or the shipped decisivestrike?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1},{key:'impact',label:'landing',min:0,max:1,step:1,def:0,names:['TBC strike_impact_chest','Wrath decisivestrike (shipped)']}],
+ layers:[
+  {id:'trail',name:'Red weapon trail (shipped)',desc:'heroic_strike_trail(): 0xF82A29, 600 ms',sw:[248,42,41],custom:true},
+  {id:'sparks',name:'Landing sparks',desc:'TBC: flare 50/s from 67 ms, 2.8 yd/s, gold → orange → dark red',sw:[255,209,0],emitter:{at:'enemy',anchor:'chest',vRange:3.14,speed:2.78,life:0.5,rate:[[0,0],[67,50],[667,50]],trig:'hit',span:667,tail:10,
+    color:[[0,[255,209,0]],[0.5,[255,159,35]],[1,[101,0,0]]],alpha:[[0,0],[0.5,1],[1,0]],scale:[[0,0.16],[1,0.08]],kind:'glow'}},
+  {id:'plume',name:'Landing plume',desc:'TBC: fireplume64 30/s at 34–67 ms, 5.6 yd/s, red → grey → orange',sw:[174,0,0],emitter:{at:'enemy',anchor:'chest',vRange:3.14,speed:5.56,life:0.3,rate:[[0,0],[34,30],[67,0]],trig:'hit',span:667,tail:10,
+    color:[[0,[174,0,0]],[0.5,[181,181,181]],[1,[238,90,0]]],alpha:[[0,1],[1,1]],scale:[[0,0.3],[1,0.2]],kind:'flame'}},
+  {id:'ring',name:'Wrath ring (decisivestrike)',desc:'shipped: whiteringthin, red → violet; shown when the Wrath landing is picked',sw:[129,35,189],custom:true},
+ ],
+ reset(fx){fx.trig={hit:[300+STRIKE_CONTACT_MS]};},
+ rateMul(fx,ms){return 1;},
+ bodies(fx,vp,ms){ drawStrike(AT.pal,AT.enemy,ms-300,on(fx,'trail'),[248,42,41],600,fx.knobs.opacity); drawCapsule([AT.enemy[0],1,AT.enemy[2]],CLASS.warrior); },
+ tick(fx,ms){ const wr=fx.knobs.impact==1; for(const e of fx.emitters) if(e.id==='sparks'||e.id==='plume'){ if(wr){e.e.s.color=[[0,[114,35,159]],[0.5,[190,0,9]],[1,[70,35,142]]];} else {e.e.s.color=e.id==='sparks'?[[0,[255,209,0]],[0.5,[255,159,35]],[1,[101,0,0]]]:[[0,[174,0,0]],[0.5,[181,181,181]],[1,[238,90,0]]];} } },
+ customDraw(fx,ms){ const K=fx.knobs; if(K.impact==1&&on(fx,'ring')){ const u=ms-300-STRIKE_CONTACT_MS; if(u>=67&&u<700){ const ph=(u-67)/633; bbGlow([AT.enemy[0],1.45,AT.enemy[2]],0.2,0.2,[208,0,0],0);
+    const q=proj([AT.enemy[0],1.45,AT.enemy[2]]); if(q){g.save();g.globalCompositeOperation='lighter';g.strokeStyle=rgb(keys([[0,[208,0,0]],[0.5,[129,35,189]],[1,[63,0,134]]],ph),keys([[0,0],[0.3,1],[1,0]],ph)*K.opacity);g.lineWidth=2;g.beginPath();g.arc(q.x,q.y,(0.2+0.6*ph)*q.s*K.size,0,TAU);g.stroke();g.restore();} } } },
+ constants(fx){const K=fx.knobs;return [
+  `// Crusader Strike (TBC visual 8316): kit 324 Special1H + type-8 trail 0xF82929 600 ms; kit 437 landing. AS-337 bench.`,
+  `// swing_style_for_ability(CrusaderStrike) = SwingStyle::MortalStrike; trail = heroic_strike_trail() (${b(on(fx,'trail'))})`,
+  `pub const CRUSADER_STRIKE_LANDING: &str = "${K.impact==1?'decisivestrike_impact_chest (shipped)':'strike_impact_chest'}";`,
+  `pub const CRUSADER_STRIKE_LANDING_LAYERS: [(&str, bool); 2] = [("sparks", ${b(on(fx,'sparks'))}), ("plume", ${b(on(fx,'plume'))})];`,
+  `pub const CRUSADER_STRIKE_SIZE_MUL: f32 = ${f2(K.size)}; pub const CRUSADER_STRIKE_OPACITY_MUL: f32 = ${f2(K.opacity)};`];}
+}),
+// ================================================================ Retribution Aura
+mkFx({id:'retaura',name:'Retribution Aura',sub:'retributionaurared_base.m2 @Base on cast (1.43 s) · nothing standing · no hit visual · 4 Holy to each melee attacker per hit',durMs:7000,frame:{dist:9,ty:1.2},loopTotal:7400,
+ notes:[
+  '<b>On cast</b>: <code>retributionaurared_base.m2</code> at the Paladin\'s feet, 1.43 s. It is a flat 2.9 yd rune disc with red and orange glyphs and four arrows pointing out. The arrows grow 1.0 → 1.62 by 0.8 s and the glyph rings 1.0 → 1.31 by 0.4 s. The client plays this for every Paladin aura as it goes up.',
+  '<b>Nothing standing</b>, on the Paladin or on any ally in the aura. Our other auras draw nothing standing either.',
+  '<b>Nothing on the hit.</b> The damage comes from the aura itself, with no spell of its own, so the client shows only combat text. <code>lands_silently_audit</code> does not count combat text, so the hit needs a world visual or a <code>SilentByDesign</code> entry citing the research doc.',
+  'The bench: the Paladin raises the aura at 0.3 s, and the ally takes a melee hit every 1.4 s, each answered by 4 Holy damage on the attacker. Two authored options are off by default: a standing rune ring at each bearer\'s feet, and a small holy spark on the attacker per hit.'],
+ asks:['Client only: the rune disc on cast, and combat text for the hit with a SilentByDesign entry (recommended)?','Or add the authored per-hit spark on the attacker? A standing on-body aura would be a departure for Paladin auras.'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'disc',name:'Rune disc on cast',desc:'aurarune10 glyphs + 4 aurarunearrow1 arrows, red / orange / amber, 2.9 yd, 1.43 s',sw:[252,93,12],custom:true},
+  {id:'under',name:'Pale-gold underlay',desc:'blue_glow2 tinted (1,0.78,0.11), weight 0.4',sw:[255,199,29],custom:true},
+  {id:'stand',name:'Standing ring on bearers (authored)',desc:'a faint red rune ring at each bearer\'s feet while the aura is up',sw:[200,40,20],on:false,custom:true},
+  {id:'spark',name:'Holy spark on the attacker (authored)',desc:'a small gold-red flash at the attacker\'s chest per reflected hit, 0.3 s',sw:[255,180,60],on:false,custom:true},
+ ],
+ reset(fx){fx.hits={};},
+ hud(fx){return simMs<300?'—':'Retribution Aura (team, icon): 4 Holy to each melee attacker per hit';},
+ tick(fx,ms){ for(let t=1500;t<7000;t+=1400) if(ms>=t&&!fx.hits[t]){fx.hits[t]=1;fct('-61',[255,255,255],18,[0,2.2,0]);fct('4',HOLY_FCT,14,[AT.enemy[0],2.2,AT.enemy[2]]);} },
+ bodies(fx,vp,ms){drawCapsule([AT.pal[0],1,AT.pal[2]],CLASS.paladin);drawCapsule([0,1,0],CLASS.priest);
+  let sw=false; for(let t=1500;t<7000;t+=1400) if(ms>t-250&&ms<t+100) sw=true; drawCapsule([AT.enemy[0]-(sw?0.2:0),1,AT.enemy[2]],CLASS.rogue);},
+ customDraw(fx,ms){ const K=fx.knobs,op=K.opacity,s=K.size,u=tl(fx,ms-300);
+  if(on(fx,'disc')&&u>=0&&u<=1434){ const gl=keys([[0,0],[100,0.8],[634,0.8],[1034,0]],u), ar=keys([[0,0],[500,0],[900,1],[1300,0]],u), sA=keys([[0,1],[800,1.62]],u), sG=keys([[0,1],[400,1.31]],u);
+    glyphDisc(AT.pal,0.03,0.83*sG*s*0.9,[252,93,12],gl*op,16,u/2000); ring3(AT.pal,0.03,0.6*sG*s,[255,0,0],keys([[0,0],[400,0.8],[834,0.8],[1234,0]],u)*op,2);
+    g.save();g.globalCompositeOperation='lighter';g.fillStyle=rgb([255,162,0],ar*op*0.9);
+    for(let k=0;k<4;k++){ const a=k/4*TAU+Math.PI/4, R=0.91*s*0.95, L=0.4*sA*s; const p0=proj([AT.pal[0]+R*Math.cos(a),0.03,AT.pal[2]+R*Math.sin(a)]),p1=proj([AT.pal[0]+(R+L)*Math.cos(a),0.03,AT.pal[2]+(R+L)*Math.sin(a)]),
+      pl=proj([AT.pal[0]+R*Math.cos(a+0.15),0.03,AT.pal[2]+R*Math.sin(a+0.15)]),pr=proj([AT.pal[0]+R*Math.cos(a-0.15),0.03,AT.pal[2]+R*Math.sin(a-0.15)]); if(!p0||!p1||!pl||!pr) continue;
+      g.beginPath();g.moveTo(pl.x,pl.y);g.lineTo(p1.x,p1.y);g.lineTo(pr.x,pr.y);g.closePath();g.fill(); } g.restore(); }
+  if(on(fx,'under')&&u>=0&&u<=1434) groundDisc(AT.pal,0.02,1.44*s,[255,199,29],keys([[0,0],[100,0.4],[1034,0.4],[1434,0]],u)*op*0.6);
+  if(on(fx,'stand')&&u>1434) for(const c of [AT.pal,[0,0,0]]) glyphDisc(c,0.03,0.7*s,[200,40,20],0.35*op,8,ms/3000);
+  if(on(fx,'spark')) for(let t=1500;t<7000;t+=1400){ const e=ms-t; if(e<0||e>300) continue; const c=[AT.enemy[0],1.45,AT.enemy[2]], a=keys([[0,0],[40,1],[300,0]],e)*op;
+    bbGlow(c,0.7*s,0.7*s,[255,180,60],a*0.8); for(let k=0;k<5;k++){const ang=k/5*TAU;sprite('star',[c[0]+0.3*s*Math.cos(ang)*e/300,c[1]+0.3*s*Math.sin(ang)*e/300,c[2]],0.18*s,[255,90,30],a,ang);} } },
+ constants(fx){const K=fx.knobs;return [
+  `// Retribution Aura (visual 682): kits 753/810 retributionaurared_base.m2 @Base, 1.434 s, on cast. No state; the damage-shield hit has no visual. AS-337 bench.`,
+  `pub const RETRIBUTION_AURA_CAST_DISC: bool = ${b(on(fx,'disc'))}; pub const RETRIBUTION_AURA_UNDERLAY: bool = ${b(on(fx,'under'))};`,
+  `pub const RETRIBUTION_AURA_STANDING_RING: bool = ${b(on(fx,'stand'))}; // authored, sustained`,
+  `pub const RETRIBUTION_AURA_HIT_SPARK: bool = ${b(on(fx,'spark'))}; // authored; false => SilentByDesign entry for the hit`,
+  `pub const RETRIBUTION_AURA_SIZE_MUL: f32 = ${f2(K.size)}; pub const RETRIBUTION_AURA_OPACITY_MUL: f32 = ${f2(K.opacity)};`];}
+}),
+// ================================================================ Infusion of Light (+ Light's Grace)
+mkFx({id:'infusion',name:'Infusion of Light',sub:'Wrath 53672 · infusion_of_light_impact.m2 on the proc (~1.8 s visible) · Light\'s Grace: no visual',durMs:2600,frame:{dist:6,ty:1.8},loopTotal:3400,
+ notes:[
+  '<b>On the proc</b> (Holy Shock cast): <code>infusion_of_light_impact.m2</code> on the Paladin. Its sequence is 3.83 s, but every emitter has stopped by 1.4 s, so it reads for about 1.8 s:',
+  '• a <b>small gold ring just above the head</b> (0.3 yd, 2.5 yd up), weight 0.55 from 0.57 to 1.43 s, with gold glows and a pulse there;',
+  '• four gold runes at the chest rising and falling (to 0.5 s);',
+  '• gold flare bursts at 3.8 yd (to 0.23 s) and at 2.2 yd (0.27–0.87 s).',
+  'Read: a gold halo pops above the head. <b>The buff has no state</b>: the icon carries "next Flash of Light +25 % crit".',
+  '<b>Light\'s Grace has no visual at any build</b> (TBC 31834). Its icon alone carries "next Holy Light 0.5 s faster". It has no tab.',
+  'The bench shows a Holy Shock cast at 0.3 s (its shipped visuals are not drawn) and the proc at 0.35 s.'],
+ asks:['Keep the proc halo at client values?','Light\'s Grace: icon only (no client visual)?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'halo',name:'Gold ring above the head',desc:'timebar2 ring, 0.3 yd, 2.5 yd up, weight 0.55, 0.57–1.43 s',sw:[237,192,72],custom:true},
+  {id:'orb',name:'Overhead glows',desc:'crystalball_large 3/s and shockwave_hip1 15/s at 2.5 yd, pale gold → amber',sw:[241,189,49],emitter:{at:'pal',anchor:'feet',pos:[0,0,2.5],vRange:0,speed:0,life:0.7,rate:[[0,15],[1367,15],[1400,0]],trig:'imp',span:3834,
+    color:[[0,[251,243,157]],[0.35,[241,189,49]],[1,[236,162,44]]],alpha:[[0,0],[0.35,0.46],[1,0]],scale:[[0,0.35],[1,0.6]],kind:'glow'}},
+  {id:'flash',name:'Opening flash',desc:'flare1_tc + flare05, 0–67 ms, at the head and the chest',sw:[255,255,255],emitter:{at:'pal',anchor:'feet',pos:[0,0,2.49],vRange:0,speed:0,life:0.4,rate:[[0,150],[67,0]],trig:'imp',span:3834,
+    color:[[0,[255,255,255]],[0.5,[237,192,72]],[1,[255,255,255]]],alpha:[[0,1],[0.5,0.64],[1,0]],scale:[[0,0.5],[1,0.3]],kind:'glow'}},
+  {id:'runes',name:'Chest runes',desc:'4 × rune1d 11/s to 0.5 s, 1.1 yd/s up and down, white → gold',sw:[253,218,112],emitter:{at:'pal',anchor:'feet',pos:[0,0,1.4],vRange:0,speed:1.11,speedVar:2,life:0.6,rate:[[0,44],[500,44],[534,0]],trig:'imp',span:3834,area:0.1,
+    color:[[0,[255,255,255]],[0.5,[253,218,112]],[1,[244,252,255]]],alpha:[[0,0],[0.5,0.78],[1,0]],scale:[[0,0.25],[1,0.2]],kind:'star'}},
+  {id:'bursts',name:'Flare bursts',desc:'flare09 at 3.8 yd (0–0.23 s) and 2.2 yd (0.27–0.87 s), white → gold',sw:[233,193,32],emitter:{at:'pal',anchor:'feet',pos:[0,0,2.9],vRange:3.14,speed:1.11,life:0.45,rate:[[0,111],[234,0],[267,77],[800,66],[867,0]],trig:'imp',span:3834,area:0.5,areaY:1.6,tail:3,
+    color:[[0,[254,253,242]],[0.5,[233,193,32]],[1,[255,255,255]]],alpha:[[0,0],[0.5,0.54],[1,0]],scale:[[0,0.18],[1,0.1]],kind:'glow'}},
+ ],
+ reset(fx){fx.trig={imp:[350]};},
+ hud(fx){return simMs<350?'Holy Shock at 0.3 s':'Infusion of Light: next Flash of Light +25 % crit (icon)';},
+ bodies(fx,vp,ms){drawCapsule([AT.pal[0],1,AT.pal[2]],CLASS.paladin);drawCapsule(vp,CLASS.warrior);},
+ customDraw(fx,ms){ const K=fx.knobs,u=tl(fx,ms-350); if(!on(fx,'halo')||u<0||u>1834) return; const w=keys([[0,0],[567,0.55],[1434,0.55],[1834,0]],u)*K.opacity;
+  ring3(AT.pal,2.5,0.15*K.size*1.6,[237,192,72],w*1.4,3); bbGlow([AT.pal[0],2.5,AT.pal[2]],0.6*K.size,0.3*K.size,[255,230,150],w*0.6); },
+ constants(fx){const K=fx.knobs;return [
+  `// Infusion of Light (Wrath visual 12008): kit 11091 infusion_of_light_impact.m2 @Base on the proc. AS-337 bench.`,
+  `pub const INFUSION_LAYERS: [(&str, bool); 5] = [("halo", ${b(on(fx,'halo'))}), ("overhead_glows", ${b(on(fx,'orb'))}), ("flash", ${b(on(fx,'flash'))}), ("chest_runes", ${b(on(fx,'runes'))}), ("bursts", ${b(on(fx,'bursts'))})];`,
+  `pub const INFUSION_SIZE_MUL: f32 = ${f2(K.size)}; pub const INFUSION_OPACITY_MUL: f32 = ${f2(K.opacity)};`,
+  `// Light's Grace: no client visual at any build; icon only.`];}
+}),
+// ================================================================ Vengeance
+mkFx({id:'vengeance',name:'Vengeance',sub:'vengeance_state_hand.m2 on both hands for the buff (30 s, 1.0 s loop) · refreshed by every melee crit',durMs:6000,frame:{dist:5,ty:1.3},loopFx:true,
+ notes:[
+  'The same at Era, TBC and Wrath (visual 6597, on the buff 20050–20055).',
+  '<b>State on both hands for the whole buff</b>: <code>vengeance_state_hand.m2</code>, a 1.0 s loop. A small blue quad (0.37 yd), soft white-to-pale-gold glows (15/s) and sky-blue sparks (50/s) on each hand.',
+  '<b>Every melee crit refreshes it</b>, so a Retribution Paladin in melee wears it nearly all match. It is a sustained channel on the Paladin, beside Divine Protection\'s globe and the Divine Shield cards.',
+  'The bench crits at 0.5 s and keeps swinging.'],
+ asks:['Keep the hand glow for the whole buff, at client values?','Or, for the budget: hands only for a beat when it procs or refreshes, then the icon?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1},{key:'mode',label:'shown',min:0,max:1,step:1,def:0,names:['whole buff (client)','1.5 s on proc / refresh']}],
+ layers:[
+  {id:'quad',name:'Blue hand quad',desc:'whiteringfat128 quad, 0.37 yd, blue (0.37,0.74,1.0), weight 0.8',sw:[94,189,255],custom:true},
+  {id:'glow',name:'White-gold glows',desc:'shockwave10b 15/s, 0.8 s, white → (255,244,180)',sw:[255,244,180],emitter:{at:['palR','palL'],anchor:'hands',vRange:0,speed:0,life:0.8,rate:30,trig:'state',span:60000,
+    color:[[0,[255,255,255]],[0.65,[255,244,180]],[1,[255,255,255]]],alpha:[[0,0],[0.65,1],[1,0]],scale:[[0,0.2],[1,0.3]],kind:'glow'}},
+  {id:'sparks',name:'Sky-blue sparks',desc:'flare 50/s, 0.4 s, 0.44 yd/s, white → (75,177,255)',sw:[75,177,255],emitter:{at:['palR','palL'],anchor:'hands',vRange:3.14,speed:0.44,life:0.4,rate:100,trig:'state',span:60000,area:0.2,areaY:0.28,tail:2,
+    color:[[0,[255,255,255]],[0.65,[75,177,255]],[1,[255,255,255]]],alpha:[[0,0],[0.65,1],[1,0]],scale:[[0,0.08],[1,0.05]],kind:'glow'}},
+ ],
+ reset(fx){fx.trig={state:[500]};fx.crit=0;},
+ rateMul(fx,ms){ if(!fx.knobs.mode) return 1; const u=(ms-500)%3000; return u>=0&&u<1500?1:0; },
+ hud(fx){return simMs<500?'—':'Vengeance: +5 % damage (30 s, refreshed by melee crits; icon)'+(fx.knobs.mode?' — crit every 3 s':'');},
+ tick(fx,ms){ const n=Math.floor((ms-500)/3000); if(ms>=500&&n>=fx.crit){fx.crit=n+1;fct('124',[255,255,255],24,[AT.enemy[0],2.2,AT.enemy[2]]);} },
+ bodies(fx,vp,ms){ const u=(ms-350)%1500, lean=u<300?0.15*Math.sin(u/300*Math.PI):0; drawCapsule([AT.pal[0]+lean,1,AT.pal[2]],CLASS.paladin); drawCapsule([AT.enemy[0]-1.2,1,AT.enemy[2]],CLASS.warrior); },
+ customDraw(fx,ms){ const K=fx.knobs; if(!on(fx,'quad')||ms<500) return; let a=0.8*K.opacity; if(K.mode){const u=(ms-500)%3000; a*=keys([[0,0],[100,1],[1300,1],[1500,0],[3000,0]],u);}
+  for(const h of [AT.palR,AT.palL]){ const p=[h[0],1.35,h[2]]; bbGlow(p,0.37*K.size*2,0.37*K.size*2,[94,189,255],a*0.8); ring3([p[0],0,p[2]],p[1],0.12*K.size,[200,230,255],a,1.5);} },
+ constants(fx){const K=fx.knobs;return [
+  `// Vengeance (visual 6597): kit 5898 vengeance_state_hand.m2 @Hands (21, 22) for the buff, 1.0 s loop. AS-337 bench.`,
+  `pub const VENGEANCE_LAYERS: [(&str, bool); 3] = [("blue_quad", ${b(on(fx,'quad'))}), ("glows", ${b(on(fx,'glow'))}), ("sparks", ${b(on(fx,'sparks'))})];`,
+  `pub const VENGEANCE_WHOLE_BUFF: bool = ${K.mode?'false':'true'}; // false: 1.5 s on each proc / refresh`,
+  `pub const VENGEANCE_SIZE_MUL: f32 = ${f2(K.size)}; pub const VENGEANCE_OPACITY_MUL: f32 = ${f2(K.opacity)};`];}
+}),
+// ================================================================ The Art of War
+mkFx({id:'aow',name:'The Art of War',sub:'Wrath 53489 · the_art_of_war_impact.m2 @Chest on the proc (2 s) · next Flash of Light instant and free',durMs:2400,frame:{dist:5.5,ty:1.4},loopTotal:3000,
+ notes:[
+  '<b>On the proc</b> (a melee hit): <code>the_art_of_war_impact.m2</code> at the Paladin\'s chest, 2.0 s:',
+  '• a small flat gold disc (0.35 yd) flashing at 100 ms, out by 634 ms;',
+  '• gold sparks on a <b>ring that opens from 0.1 to 1.0 yd</b> over 0.9 s (333/s to 0.8 s), pale gold → orange → yellow;',
+  '• gold glows and runes, and a burst 1.33 yd above the chest at the start.',
+  'Read: a gold ring of sparks opens out round the chest.',
+  'At Era the kit has no model (the SoD row is empty); this is Wrath\'s. <b>The buff has no state</b>: the icon carries "next Flash of Light instant and free".'],
+ asks:['Keep the proc ring at client values?'],
+ knobDefs:[...STD,{key:'opacity',label:'opacity ×',min:0.1,max:1.5,step:0.05,def:1}],
+ layers:[
+  {id:'disc',name:'Gold disc',desc:'shockwave_fullrays1, 0.35 yd, (0.87,0.71,0.22), 0–100–634 ms',sw:[221,181,57],custom:true},
+  {id:'ring',name:'Opening spark ring',desc:'flare1_tc 333/s to 0.8 s on a ring 0.1 → 1.0 yd, 0.7 s life, pale gold → orange → yellow',sw:[229,148,62],custom:true},
+  {id:'glow',name:'Gold glows',desc:'flare09 11/s to 0.87 s',sw:[233,193,32],emitter:{at:'pal',anchor:'chest',vRange:0,speed:0,life:0.7,rate:[[0,11],[800,11],[867,0]],trig:'imp',span:2000,area:0.14,
+    color:[[0,[244,235,141]],[0.5,[233,193,32]],[1,[255,255,255]]],alpha:[[0,1],[0.5,0.36],[1,0]],scale:[[0,0.4],[1,0.3]],kind:'glow'}},
+  {id:'runes',name:'Runes',desc:'rune1d 6/s to 0.5 s, white',sw:[255,255,255],emitter:{at:'pal',anchor:'chest',vRange:0,speed:0,life:0.7,rate:[[0,6],[434,6],[500,0]],trig:'imp',span:2000,
+    color:[[0,[255,255,255]],[1,[255,255,255]]],alpha:[[0,0],[0.5,0.38],[1,0]],scale:[[0,0.4],[1,0.4]],kind:'star'}},
+  {id:'burst',name:'Burst above the chest',desc:'flare09 77/s to 0.2 s, 1.33 yd above, white → gold',sw:[254,253,242],emitter:{at:'pal',anchor:'chest',pos:[0,0,1.33],vRange:3.14,speed:1.11,life:0.4,rate:[[0,77],[134,66],[200,0]],trig:'imp',span:2000,area:0.6,tail:2.6,
+    color:[[0,[254,253,242]],[0.5,[233,193,32]],[1,[255,255,255]]],alpha:[[0,0],[0.5,0.54],[1,0]],scale:[[0,0.16],[1,0.08]],kind:'glow'}},
+ ],
+ reset(fx){fx.trig={imp:[350]};},
+ hud(fx){return simMs<350?'—':'The Art of War: next Flash of Light instant and free (icon)';},
+ bodies(fx,vp,ms){ const u=ms-100, lean=u>0&&u<300?0.15*Math.sin(u/300*Math.PI):0; drawCapsule([AT.pal[0]+lean,1,AT.pal[2]],CLASS.paladin); drawCapsule([AT.enemy[0]-1.2,1,AT.enemy[2]],CLASS.warrior); },
+ customDraw(fx,ms){ const K=fx.knobs,op=K.opacity,s=K.size,u=tl(fx,ms-350); if(u<0||u>2000) return; const c=[AT.pal[0],1.45,AT.pal[2]];
+  if(on(fx,'disc')){ const w=keys([[0,0],[100,1],[634,0]],u)*op; glyphDisc([c[0],0,c[2]],c[1],0.35*s*0.5,[221,181,57],w,10,u/500); bbGlow(c,0.5*s,0.5*s,[255,230,140],w*0.6); }
+  if(on(fx,'ring')) for(let k=0;k<40;k++){ const born=hh(k)*800; const age=u-born; if(age<0||age>700) continue; const ph=age/700, R=keys([[0,0.1],[900,1.0]],born)*(K.spread??1)*0.5+0.05, ang=hh(k+40)*TAU;
+    sprite('star',[c[0]+R*Math.cos(ang),c[1]+(hh(k+80)-0.5)*0.1,c[2]+R*Math.sin(ang)],0.22*s,keys([[0,[255,249,181]],[0.5,[229,148,62]],[1,[242,227,65]]],ph),keys([[0,0],[0.5,0.48],[1,0]],ph)*op*1.6,ang); } },
+ constants(fx){const K=fx.knobs;return [
+  `// The Art of War (Wrath visual 11955): kit 11038 the_art_of_war_impact.m2 @Chest on the proc, 2.0 s. AS-337 bench.`,
+  `pub const ART_OF_WAR_LAYERS: [(&str, bool); 5] = [("disc", ${b(on(fx,'disc'))}), ("spark_ring", ${b(on(fx,'ring'))}), ("glows", ${b(on(fx,'glow'))}), ("runes", ${b(on(fx,'runes'))}), ("burst", ${b(on(fx,'burst'))})];`,
+  `pub const ART_OF_WAR_SIZE_MUL: f32 = ${f2(K.size)}; pub const ART_OF_WAR_SPREAD_MUL: f32 = ${f2(K.spread)};`,
+  `pub const ART_OF_WAR_OPACITY_MUL: f32 = ${f2(K.opacity)};`];}
+}),
+];
+// ---------- UI wiring ----------
+let cur=EFFECTS[0], simMs=0, paused=false, lastNow=performance.now();
+const $=id=>document.getElementById(id);
+function buildTabs(){const nav=$('tabs');nav.innerHTML='';
+  for(const fx of EFFECTS){const bt=document.createElement('button');bt.className='tab';bt.role='tab';bt.id='tab-'+fx.id;bt.textContent=fx.name;bt.setAttribute('aria-selected',fx===cur);
+    bt.onclick=()=>{cur=fx;try{localStorage.setItem('as337bench.tab',fx.id)}catch(e){};select();};nav.appendChild(bt);} }
+const knobText=(k,v)=>k.names?k.names[v|0]:(+v).toFixed(2);
+function select(){
+  document.querySelectorAll('.tab').forEach(bt=>bt.setAttribute('aria-selected',bt.id==='tab-'+cur.id));
+  cam.dist=cur.frame.dist;cam.target=[0,cur.frame.ty,0];
+  $('moving').checked=!!cur.moverDefault;
+  const L=$('layers');L.innerHTML='';
+  for(const l of cur.layers){const d=document.createElement('div');d.className='layer'+(l.cls?' '+l.cls:'');const id='ly-'+cur.id+'-'+l.id;
+    d.innerHTML=`<input type="checkbox" id="${id}" ${cur.layersOn[l.id]?'checked':''}><span class="sw" style="background:${rgb(l.sw,1)}"></span><label for="${id}"><span class="nm">${l.name}</span><span class="ds">${l.desc}</span></label>`;
+    d.querySelector('input').onchange=e=>{cur.layersOn[l.id]=e.target.checked;renderOut();};L.appendChild(d);}
+  const Kn=$('knobs');Kn.innerHTML='';
+  for(const k of cur.knobDefs){const d=document.createElement('div');d.className='knob';const id='kn-'+cur.id+'-'+k.key;
+    d.innerHTML=`<span>${k.label}</span><input type="range" id="${id}" min="${k.min}" max="${k.max}" step="${k.step}" value="${cur.knobs[k.key]}"><output for="${id}">${knobText(k,cur.knobs[k.key])}</output>`;
+    const inp=d.querySelector('input'),o=d.querySelector('output');inp.oninput=()=>{cur.knobs[k.key]=+inp.value;o.textContent=knobText(k,+inp.value);renderOut();if(k.names)restart();};Kn.appendChild(d);}
+  const rs=document.createElement('button');rs.className='btn';rs.textContent='Reset to client values';rs.style.marginTop='8px';
+  rs.onclick=()=>{for(const k of cur.knobDefs)cur.knobs[k.key]=k.def;for(const l of cur.layers)cur.layersOn[l.id]=l.on!==false;select();};Kn.appendChild(rs);
+  $('notes').innerHTML=cur.notes.map(n=>`<li>${n}</li>`).join('');
+  $('asks').innerHTML=(cur.asks||[]).map(a=>`<p class="ask">${a}</p>`).join('');
+  restart();renderOut();
+}
+function renderOut(){$('out').textContent=cur.constants(cur).join('\n');}
+function restart(){simMs=0;FCT=[];cur.emitters.forEach(x=>x.e.reset());cur.swingAt=null;if(cur.reset)cur.reset(cur);}
+$('replay').onclick=restart;
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Play':'Pause';};
+$('copy').onclick=()=>{const txt=$('out').textContent;const done=()=>{$('copy').textContent='Copied';setTimeout(()=>$('copy').textContent='Copy',1200)};
+  const sel=()=>{const r=document.createRange();r.selectNodeContents($('out'));const s=getSelection();s.removeAllRanges();s.addRange(r);};
+  try{navigator.clipboard.writeText(txt).then(done,sel);}catch(e){sel();}};
+
+// ---------- main loop ----------
+function victimPos(ms){ if(!$('moving').checked) return [0,1.0,0];
+  const R=3.2, a=(ms/1000)*3/R; return [R*Math.cos(a)-R,1.0,R*Math.sin(a)]; }
+function frame(now){
+  const dt=Math.min(0.05,(now-lastNow)/1000)*(+$('speed').value); lastNow=now;
+  const step=paused?0:dt; simMs+=step*1000;
+  const total=cur.loopFx?Infinity:(cur.loopTotal??(cur.durMs*(cur.knobs.duration??1)+1200));
+  if(simMs>total){ if($('loop').checked) restart(); else simMs=total; }
+  setupView();
+  g.fillStyle='#0d0c10';g.fillRect(0,0,cv.width,cv.height);
+  drawFloor();
+  const vp=victimPos(simMs); cur.vp=vp; const origin=[vp[0],0,vp[2]];
+  if(!paused && cur.tick) cur.tick(cur,simMs);
+  for(const {id,e} of cur.emitters){ if(!cur.layersOn[id]){e.ps=[];continue;} if(!paused) e.update(step,simMs,origin); }
+  shadow(vp);
+  cur.bodies(cur,vp,simMs);
+  if(cur.customDraw) cur.customDraw(cur,simMs,vp);
+  for(const {id,e} of cur.emitters) if(cur.layersOn[id]) e.draw();
+  drawFct(step);
+  $('hud').textContent=`${cur.name} — ${cur.sub}\nt = ${(simMs/1000).toFixed(2)} s${cur.hud?'\n'+cur.hud(cur):''}`;
+  requestAnimationFrame(frame);
+}
+buildTabs();
+try{const saved=localStorage.getItem('as337bench.tab');const fx=EFFECTS.find(x=>x.id===saved);if(fx)cur=fx;}catch(e){}
+select();
+requestAnimationFrame(frame);
+</script>

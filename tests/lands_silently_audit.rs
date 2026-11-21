@@ -75,8 +75,11 @@ use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::bolt_kind_for;
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::client_landing_style;
+use arenasim::states::play_match::combat_core::cheat_death_aura;
 use arenasim::states::play_match::combat_core::ExtraSwingSource;
+use arenasim::states::play_match::combat_core::CHEAT_DEATH_NAME;
 use arenasim::states::play_match::components::Aura;
+use arenasim::states::play_match::components::AuraApplyOwner;
 use arenasim::states::play_match::components::AuraApplyRoute;
 use arenasim::states::play_match::components::AuraLandingKind;
 use arenasim::states::play_match::components::AuraType;
@@ -86,6 +89,7 @@ use arenasim::states::play_match::components::HealImpactKind;
 use arenasim::states::play_match::components::HotVisual;
 use arenasim::states::play_match::components::InstantAbilityFired;
 use arenasim::states::play_match::components::LifeTapGlow;
+use arenasim::states::play_match::components::PaladinOneShotKind;
 use arenasim::states::play_match::components::RootStyle;
 use arenasim::states::play_match::components::SchoolImpact;
 use arenasim::states::play_match::components::ShieldKind;
@@ -98,6 +102,8 @@ use arenasim::states::play_match::hunter_shot_for;
 use arenasim::states::play_match::is_live_shield;
 use arenasim::states::play_match::lands_poison_cloud;
 use arenasim::states::play_match::on_use_items::OnUseEffect;
+use arenasim::states::play_match::oneshot_visual;
+use arenasim::states::play_match::plays_cheat_death;
 use arenasim::states::play_match::proc_trinkets::ProcEffect;
 use arenasim::states::play_match::root_style_for;
 use arenasim::states::play_match::talent_mechanics::MechanicKind;
@@ -108,7 +114,9 @@ use arenasim::states::play_match::talent_procs::TalentProcSlot;
 use arenasim::states::play_match::talents::TalentDefinitions;
 use arenasim::states::play_match::talents::TalentEffect;
 use arenasim::states::play_match::talents::TalentId;
+use arenasim::states::play_match::wears_guardian_spirit;
 use arenasim::states::play_match::wears_shadowform_look;
+use arenasim::states::play_match::ChannelVisual;
 use arenasim::states::play_match::DotStateVisual;
 use arenasim::states::play_match::InterruptLanding;
 use arenasim::states::play_match::SlowTint;
@@ -479,8 +487,20 @@ fn heal_lands_nothing_silently() {
 /// config's damage fields, so no config predicate can see it.
 const CODE_RESOLVED_DAMAGE: &[AbilityType] = &[HeroicStrike];
 
+/// A damage shield: an aura whose damage lands on each attacker that hits its
+/// bearer, from the aura itself (Retribution Aura's `DamageReflect`). No
+/// damage field declares it, so the config predicate below asks the aura.
+fn is_damage_shield(c: &AbilityConfig) -> bool {
+    c.applies_aura
+        .iter()
+        .any(|a| a.aura_type == AuraType::DamageReflect)
+}
+
 fn is_direct_damage(a: AbilityType, c: &AbilityConfig) -> bool {
-    c.is_damage() || c.mana_burn_amount > 0.0 || CODE_RESOLVED_DAMAGE.contains(&a)
+    c.is_damage()
+        || c.mana_burn_amount > 0.0
+        || CODE_RESOLVED_DAMAGE.contains(&a)
+        || is_damage_shield(c)
 }
 
 const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
@@ -505,6 +525,7 @@ const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
     MindFlay,
     Moonfire,
     MortalStrike,
+    RetributionAura,
     Shadowbolt,
     Shadowburn,
     SinisterStrike,
@@ -538,6 +559,11 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
         LightningBolt => Some("forked-arc strike (casting.rs → lightning_bolt.rs)"),
         Immolate => Some("landing flame burst (casting.rs → flame.rs)"),
         DrainLife => Some("drain beam (drain_life.rs, keyed on the channel's ability)"),
+        // The channel is its landing: the client draws no per-tick impact,
+        // only the stars at both ends and the beam, held while it runs.
+        MindFlay if ChannelVisual::for_channel(a).is_some() => {
+            Some("mana-funnel stars + mana beam (mind_flay.rs, ChannelVisual::for_channel)")
+        }
         Moonfire => Some("moon orb + beam landing (casting.rs → moonfire.rs)"),
         // The empowered swing carries `HeroicStrikeSwing` (auto_attack.rs);
         // heroic_strike.rs lays its trail and lands it through the client
@@ -567,10 +593,6 @@ const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[
         "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
     ),
     (
-        MindFlay,
-        "AS-356 (Mind Flay, the channel and its slow; scoped by AS-335)",
-    ),
-    (
         Shadowburn,
         "AS-348 (Shadowburn and Conflagrate, the Destruction casts; AS-334's talent visuals)",
     ),
@@ -581,13 +603,23 @@ fn direct_damage_finds_every_member() {
     assert_finds("direct-damage", is_direct_damage, DIRECT_DAMAGE_MEMBERS);
 }
 
+/// Direct damage that lands with no visual by ruling.
+const DIRECT_DAMAGE_SILENT_BY_DESIGN: &[SilentByDesign] = &[SilentByDesign {
+    ability: RetributionAura,
+    doc: "docs/design/2026-10-18-paladin-talent-client-data.md",
+    reason: "the damage shield's hit is dealt by the aura itself, with no spell of its own, \
+             so the client draws only combat text (§8, finding 2); the user ruled it silent \
+             (Rulings, 2026-10-18) — the rune disc as the aura goes up is its whole visual",
+}];
+
 #[test]
 fn direct_damage_lands_nothing_silently() {
-    assert_judged(
+    assert_judged_with_rulings(
         "direct-damage",
         is_direct_damage,
         damage_landing,
         DIRECT_DAMAGE_KNOWN_SILENT,
+        DIRECT_DAMAGE_SILENT_BY_DESIGN,
     );
 }
 
@@ -839,10 +871,6 @@ const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[
         "AS-334 (the talent visuals: Curse of Exhaustion's slow)",
     ),
     (
-        MindFlay,
-        "AS-356 (Mind Flay, the channel and its slow; scoped by AS-335)",
-    ),
-    (
         Repentance,
         "AS-378 (Repentance, the Retribution incapacitate; never Freezing Trap's ice block)",
     ),
@@ -985,11 +1013,20 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             _ if wears_shadowform_look(c.applies_aura.as_ref().and_then(|a| a.compound)) => {
                 Some("violet translucent body + feet shroud while the form holds (shadowform.rs)")
             }
+            _ if wears_guardian_spirit(c.applies_aura.as_ref().and_then(|a| a.compound)) => Some(
+                "halo and wings over the shoulders while the spirit holds (guardian_spirit.rs)",
+            ),
             _ if AuraLandingKind::for_aura(t, &c.name)
                 == Some(AuraLandingKind::MarkOfTheWildGlyph) =>
             {
                 Some("Mark of the Wild glyph on landing (druid_heals.rs)")
             }
+            _ if AuraLandingKind::for_aura(t, &c.name) == Some(AuraLandingKind::AmplifyFlash) => {
+                Some("empowered ground flash on cast (empowered_flash.rs)")
+            }
+            // The Paladin talent one-shots (AS-374), each routed by its
+            // aura's name: the landing marks it, the band does not.
+            _ if paladin_oneshot(t, &c.name).is_some() => paladin_oneshot(t, &c.name),
             // Mind-numbing Poison's cast slow: the poison cloud on every
             // application. (Wound Poison's reduction is the heal-refused tell
             // above, which keys on the type.)
@@ -1002,28 +1039,22 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
     visual
 }
 
+/// The Paladin talent one-shot an aura's landing plays, routed by its name.
+fn paladin_oneshot(t: AuraType, name: &str) -> Option<&'static str> {
+    AuraLandingKind::for_aura(t, name)
+        .and_then(PaladinOneShotKind::for_landing)
+        .map(oneshot_visual)
+}
+
 const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     // A totem's OBJECT is drawn; the buff it pulses onto allies is not.
     (AirTotem, "AS-134 (aura application — totem pulse)"),
-    (
-        AmplifyCurse,
-        "AS-346 (Amplify Curse and Shadow Trance, the primed casts)",
-    ),
     (ArcaneIntellect, "AS-134 (aura application)"),
-    (
-        AuraMastery,
-        "AS-374 (the Holy talent visuals: Aura Mastery's immunity)",
-    ),
     (BattleShout, "AS-134 (aura application)"),
-    (BlessingOfSacrifice, "AS-374 (Blessing of Sacrifice impact)"),
     (CommandingShout, "AS-134 (aura application)"),
     (ConcentrationAura, "AS-134 (aura application)"),
     (DemoralizingShout, "AS-134 (aura application)"),
     (DevotionAura, "AS-134 (aura application)"),
-    (
-        DivineFavor,
-        "AS-374 (the Holy talent visuals: Divine Favor and Infusion of Light, the primed heals)",
-    ),
     (DivineProtection, "AS-376 (Divine Protection globe)"),
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (
@@ -1032,11 +1063,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     ),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
     (FrostArmor, "AS-134 (aura application)"),
-    (
-        GuardianSpirit,
-        "AS-354 (Guardian Spirit, the spirit on the ally and the shared \"Saved\" cue; \
-         scoped by AS-335)",
-    ),
     (
         Hemorrhage,
         "AS-336 (Hemorrhage, the Subtlety strike and its wound; AS-367 builds it)",
@@ -1053,8 +1079,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
         "AS-353 (Power Infusion, the infusion on the ally)",
     ),
     (PowerWordFortitude, "AS-134 (aura application)"),
-    (RetributionAura, "AS-374 (Retribution Aura rune disc)"),
-    (SacredShield, "AS-375 (Sacred Shield disc and absorb card)"),
     (
         ShadowDance,
         "AS-336 (Shadow Dance, the Subtlety capstone's window; AS-368 builds it)",
@@ -1493,6 +1517,63 @@ fn triggered_absorbs_land_nothing_silently() {
     }
 }
 
+// ── family: triggered absorbs (abilities) ───────────────────────────────────
+//
+// An ability whose aura ARMS a triggered absorb (Sacred Shield) lands twice:
+// its arming buff lands with the cast (the aura-application family judges
+// that landing), and later `fire_triggered_absorbs` raises an absorb named
+// after it. This family judges the absorb: it must reach a client shield rig
+// (`is_live_shield`), built through the constructor the simulation raises it
+// with, from an arming aura as `apply_pending_auras` lands it.
+
+fn arms_triggered_absorb(_a: AbilityType, c: &AbilityConfig) -> bool {
+    c.applies_aura
+        .as_ref()
+        .is_some_and(|aura| aura.triggered_absorb.is_some())
+}
+
+const TRIGGERED_ABSORB_ABILITY_MEMBERS: &[AbilityType] = &[SacredShield];
+
+fn triggered_absorb_ability_visual(_a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
+    let applies = c.applies_aura.as_ref()?;
+    let absorb = applies.triggered_absorb.as_ref()?;
+    let arming = Aura {
+        effect_type: applies.aura_type,
+        ability_name: c.name.clone(),
+        ..Default::default()
+    };
+    let shield = absorb.shield_aura(
+        &c.name,
+        arenasim::states::play_match::triggered_absorbs::ShieldFrom::Aura(&arming),
+        1.0,
+    );
+    ShieldKind::ALL
+        .into_iter()
+        .any(|kind| is_live_shield(kind, &shield))
+        .then_some("client shield cards (shield.rs)")
+}
+
+const TRIGGERED_ABSORB_ABILITY_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
+
+#[test]
+fn triggered_absorb_abilities_find_every_member() {
+    assert_finds(
+        "triggered-absorb ability",
+        arms_triggered_absorb,
+        TRIGGERED_ABSORB_ABILITY_MEMBERS,
+    );
+}
+
+#[test]
+fn triggered_absorb_abilities_land_nothing_silently() {
+    assert_judged(
+        "triggered-absorb ability",
+        arms_triggered_absorb,
+        triggered_absorb_ability_visual,
+        TRIGGERED_ABSORB_ABILITY_KNOWN_SILENT,
+    );
+}
+
 // ── the families cover the config ───────────────────────────────────────────
 
 /// Abilities no family scans, each with the visual that covers it. Anything
@@ -1603,9 +1684,17 @@ fn mechanic_of(effect: &TalentEffect) -> Option<MechanicKind> {
 /// must answer it.
 fn mechanic_visual(kind: MechanicKind) -> Option<&'static str> {
     match kind {
+        // The save raises the skull and the ghost-fire, and the damage cut it
+        // leaves is owned by them rather than the generic band.
+        MechanicKind::CheatDeath => {
+            let cut = cheat_death_aura(0.9, 3.0);
+            (plays_cheat_death(CHEAT_DEATH_NAME)
+                && AuraApplyRoute::for_instance(cut.effect_type, &cut.ability_name)
+                    == AuraApplyRoute::Owned(AuraApplyOwner::CheatDeath))
+            .then_some("the skull over the head and the lavender ghost-fire (cheat_death.rs)")
+        }
         MechanicKind::SoulLink
         | MechanicKind::ReflectiveShield
-        | MechanicKind::CheatDeath
         | MechanicKind::MasterDemonologist
         | MechanicKind::DemonicSacrifice
         | MechanicKind::UnbreakableWill => None,
@@ -1632,10 +1721,6 @@ const TALENT_MECHANIC_MEMBERS: &[TalentId] = &[
 ];
 
 const TALENT_MECHANIC_KNOWN_SILENT: &[(TalentId, &str)] = &[
-    (
-        TalentId::CheatDeath,
-        "AS-336 (Cheat Death's save; AS-369 builds it on AS-354's shared Saved cue)",
-    ),
     (
         TalentId::DemonicSacrifice,
         "AS-350 (the sacrifice triad; the Felhunter's death is the ordinary one)",
@@ -1834,15 +1919,6 @@ const TALENT_PROC_KNOWN_SILENT: &[(TalentId, &str)] = &[
     (
         TalentId::BlessedRecovery,
         "AS-352 (Blessed Recovery's palm glow and Renew's amber rings)",
-    ),
-    (
-        TalentId::InfusionOfLight,
-        "AS-374 (Infusion of Light: the gold halo above the Paladin's head)",
-    ),
-    (TalentId::Nightfall, "AS-346 (Shadow Trance's speck halo)"),
-    (
-        TalentId::TheArtOfWar,
-        "AS-374 (The Art of War: the gold spark ring opening round the chest)",
     ),
     (
         TalentId::Vengeance,

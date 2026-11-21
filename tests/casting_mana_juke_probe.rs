@@ -17,8 +17,14 @@
 //! NOTE ON DURATION: this 2v1 endgame is DAMPENING-gated, not mana-gated — the
 //! lone Shaman survives on healing until arena dampening ramps its healing to
 //! zero, so the fix does NOT shorten this match; it restores the Mage's mana
-//! economy. The load-bearing assertion here is therefore the mana trajectory,
-//! not the duration. Duration is only sanity-bounded well under the cap.
+//! economy. The load-bearing assertion here is therefore the mana each juked
+//! cast costs, not the duration. Duration is only sanity-bounded well under
+//! the cap.
+//!
+//! The mana is read across each juked cast's own frame, not as a floor under
+//! the whole 2v1: a Mage may run itself dry on casts that LANDED (AS-496's
+//! seed 53 does, through a longer 2v1, with its one juke costing nothing),
+//! and a floor cannot tell that from the bug.
 //!
 //! Observed via `run_headless_match_staged`, whose observer is read-only by
 //! construction.
@@ -48,6 +54,7 @@ const MIN_JUKED_MATCHES: usize = 4;
 struct Frame {
     sim_time: f32,
     mage_mana_pct: Option<f32>,
+    mage_max_mana: Option<f32>,
     mage_alive: bool,
     warrior_alive: bool,
     shaman_alive: bool,
@@ -80,6 +87,20 @@ struct Measured {
     /// The Mage's Frostbolts that fizzled for line of sight after the Warrior
     /// died — the juked casts the fix stops charging for.
     window_juke_fizzles: usize,
+    /// Each of those juked casts: (log time, the mana it cost the Mage, in
+    /// Frostbolts). The cost is the mana the Mage lost over the fizzle's own
+    /// frame: an observation is taken as its frame begins, so it is the
+    /// fizzle frame's observation less the next one's. The Mage decides that
+    /// frame while still casting, so nothing else is spent in it.
+    juke_costs: Vec<(f32, f32)>,
+}
+
+/// The Frostbolt's mana cost, read from the shipped config.
+fn frostbolt_cost() -> f32 {
+    arenasim::states::play_match::ability_config::load_ability_definitions()
+        .expect("abilities.ron loads")
+        .get_unchecked(&arenasim::states::play_match::AbilityType::Frostbolt)
+        .mana_cost
 }
 
 /// Parse a `[  12.34s] ...` leading timestamp off a combat-log line.
@@ -124,6 +145,7 @@ fn measure(seed: u64) -> Measured {
         frames.push(Frame {
             sim_time: frame.sim_time,
             mage_mana_pct: mage.map(|m| m.current_mana / m.max_mana),
+            mage_max_mana: mage.map(|m| m.max_mana),
             mage_alive: mage.map(|m| m.alive).unwrap_or(false),
             warrior_alive,
             shaman_alive,
@@ -149,6 +171,25 @@ fn measure(seed: u64) -> Measured {
             .collect()
     });
     let window_juke_fizzles = window_juke_times.len();
+    let cost = frostbolt_cost();
+    let juke_costs = window_juke_times
+        .iter()
+        .map(|&t| {
+            // The fizzle's frame: the log stamps a frame's own time to 0.01s,
+            // and frames are 1/60s apart, so the nearest frame is the one.
+            let at = (0..frames.len() - 1)
+                .min_by(|&a, &b| {
+                    (frames[a].sim_time - t)
+                        .abs()
+                        .total_cmp(&(frames[b].sim_time - t).abs())
+                })
+                .expect("frames");
+            let (before, after) = (&frames[at], &frames[at + 1]);
+            let lost = before.mage_mana_pct.unwrap_or(0.0) - after.mage_mana_pct.unwrap_or(0.0);
+            let max = after.mage_max_mana.expect("the Mage");
+            (t, lost * max / cost)
+        })
+        .collect();
     let first_juke = window_juke_times.first().copied().unwrap_or(f32::INFINITY);
 
     // The 2v1 window: every frame after the Warrior's last alive one, while the
@@ -173,6 +214,7 @@ fn measure(seed: u64) -> Measured {
         min_window_mana: min_mana(&mut window.iter().copied().filter(|f| f.sim_time >= first_juke)),
         min_overall_mana: min_mana(&mut frames.iter()),
         window_juke_fizzles,
+        juke_costs,
     }
 }
 
@@ -184,11 +226,12 @@ fn juked_2v1(m: &Measured) -> bool {
     m.window_frames.is_some_and(|w| w > 300) && m.window_juke_fizzles >= 1
 }
 
-/// (1) The Mage does not bankrupt itself on juked Frostbolts. In every match
-/// of the bank where the lone Shaman juked the Mage (every frame of the 2v1
-/// from the first juke on), the Mage's mana stays well above the near-zero
-/// floor the bug produced. An activity guard proves the floor isn't trivially satisfied by a
-/// Mage sitting at full mana.
+/// (1) A juked Frostbolt costs the Mage nothing. In every match of the bank
+/// where the lone Shaman juked the Mage, every juked cast in the 2v1 costs
+/// less than half a Frostbolt across its own frame (the bug charged a whole
+/// one, and drained the Mage to 0.004 over a 2v1). An activity guard proves
+/// the Mage IS spending mana in these matches, so a free juke is not a Mage
+/// that casts nothing.
 #[test]
 fn mage_mana_survives_juked_frostbolts() {
     let juked: Vec<(u64, Measured)> = SEED_BANK
@@ -206,14 +249,15 @@ fn mage_mana_survives_juked_frostbolts() {
     );
 
     for (seed, m) in &juked {
-        // Load-bearing assertion: the Mage's mana never collapses to near-zero
-        // during the 2v1. The buggy build hit 0.004 here; 0.04 is ten times that.
-        assert!(
-            m.min_window_mana > 0.04,
-            "seed {seed}: Mage mana collapsed during the 2v1 (min mana_pct = {:.3}); the \
-             fizzle-drain bug is back — juked Frostbolts are charging mana again",
-            m.min_window_mana
-        );
+        // Load-bearing assertion: no juked Frostbolt is charged.
+        for &(t, frostbolts) in &m.juke_costs {
+            assert!(
+                frostbolts < 0.5,
+                "seed {seed}: the Frostbolt juked at {t:.2}s cost the Mage {frostbolts:.2} \
+                 Frostbolts of mana; the fizzle-drain bug is back — juked Frostbolts are \
+                 charging mana again"
+            );
+        }
         // Duration sanity only (this endgame is dampening-gated, not
         // mana-gated — see module docs). Do NOT assert a speedup.
         assert!(
@@ -246,7 +290,7 @@ fn scan_juke_mana_seeds() {
         let good = juked_2v1(&m);
         eprintln!(
             "seed {seed:2}: winner={:?} t={:5.1} window={:>5} juked={:2} min_window_mana={:.3} \
-             min_mana={:.3}{}",
+             min_mana={:.3} juke_costs={:?}{}",
             m.result.winner,
             m.result.match_time,
             m.window_frames
@@ -255,6 +299,7 @@ fn scan_juke_mana_seeds() {
             m.window_juke_fizzles,
             m.min_window_mana,
             m.min_overall_mana,
+            m.juke_costs,
             if good { " <-- juked 2v1" } else { "" },
         );
     }

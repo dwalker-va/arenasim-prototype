@@ -145,6 +145,9 @@ pub enum EmitterSprite {
     /// A soft glow stretched along the particle's own flight (the ribbon-blur
     /// and streak emitters), facing the camera.
     Streak,
+    /// A hard-edged disc at 0.7 of the sprite's radius, facing the camera —
+    /// the benches' `blob` (Blessing of Sacrifice's `beerbubble` motes).
+    Blob,
 }
 
 /// One particle emitter, transcribed from its M2 record.
@@ -768,7 +771,9 @@ pub fn spawn_client_particle(
         EmitterSprite::Rune => ParticleFacing::Flat,
         EmitterSprite::Seal => ParticleFacing::Seal,
         EmitterSprite::Streak => ParticleFacing::Streak,
-        EmitterSprite::Glow | EmitterSprite::Flare | EmitterSprite::Ring => ParticleFacing::Camera,
+        EmitterSprite::Glow | EmitterSprite::Flare | EmitterSprite::Ring | EmitterSprite::Blob => {
+            ParticleFacing::Camera
+        }
     };
     let mut particle = commands.spawn((
         ClientParticle {
@@ -889,6 +894,17 @@ fn ring_texture() -> Image {
     )
 }
 
+/// Generated blob sprite, pixels on a side.
+const BLOB_PX: u32 = 64;
+
+/// The blob: a hard white disc at 0.7 of the radius, a pixel's antialiasing
+/// at its rim (the benches' `blob`, as `shadow_word_pain.rs` draws it).
+pub fn blob_texture() -> Image {
+    super::shield::disc_texture(BLOB_PX, |r, _| {
+        ((0.7 - r) * BLOB_PX as f32 * 0.5 + 0.5).clamp(0.0, 1.0)
+    })
+}
+
 /// Sprites and the ramp palettes every client emitter draws with. Built once
 /// per system, lazily; a palette is built the first time its emitter plays and
 /// shared by every particle it ever emits.
@@ -898,6 +914,7 @@ pub struct EmitterAssets {
     star: Handle<Image>,
     rune: Handle<Image>,
     ring: Handle<Image>,
+    blob: Handle<Image>,
     palettes: HashMap<&'static str, Arc<[Handle<StandardMaterial>]>>,
 }
 
@@ -909,6 +926,7 @@ impl EmitterAssets {
             star: images.add(star_flash_texture()),
             rune: images.add(rune_texture()),
             ring: images.add(ring_texture()),
+            blob: images.add(blob_texture()),
             palettes: HashMap::new(),
         }
     }
@@ -931,6 +949,7 @@ impl EmitterAssets {
             EmitterSprite::Flare => self.star.clone(),
             EmitterSprite::Rune | EmitterSprite::Seal => self.rune.clone(),
             EmitterSprite::Ring => self.ring.clone(),
+            EmitterSprite::Blob => self.blob.clone(),
         };
         let palette: Arc<[Handle<StandardMaterial>]> = (0..PALETTE_STEPS)
             .map(|i| {

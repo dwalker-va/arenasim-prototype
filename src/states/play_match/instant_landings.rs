@@ -569,6 +569,9 @@ pub fn land_instant_effects(
             caster_id, name, verb, target_id, healed
         );
         combat_log.log_healing(caster_id, target_id, name, healed, is_crit, message);
+        if let Ok((_, mut caster, _, _)) = combatants.get_mut(caster_entity) {
+            super::combat_core::credit_healing_done(&mut caster, healed);
+        }
         // A critical heal is its caster's `HealCrit`.
         if is_crit {
             if let Ok((_, caster, _, _)) = combatants.get(caster_entity) {

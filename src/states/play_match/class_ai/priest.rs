@@ -69,10 +69,10 @@ use crate::states::play_match::utils::{combatant_id, log_ability_use};
 
 use super::cast_guard::{cast_gate, pre_cast_ok, unreached_reason, Cleared, PreCastOpts};
 use super::healer_postures::{
-    compound_pressure_onset, compound_pressure_trigger, dispel_chase_override, dispel_walk_tick,
-    escape_tick, escape_window_from, healer_pressured_tick_shared, hunt_station_tick,
-    medic_chase_override, medic_chase_tick, release_ally_walk, start_movement_event,
-    start_movement_event_with_target, HealerDispel,
+    compound_held_attacker, compound_pressure_onset, compound_pressure_trigger,
+    dispel_chase_override, dispel_walk_tick, escape_entry_window, escape_tick,
+    healer_pressured_tick_shared, hunt_station_tick, medic_chase_override, medic_chase_tick,
+    release_ally_walk, start_movement_event, start_movement_event_with_target, HealerDispel,
 };
 
 use super::{CombatContext, CombatantInfo};
@@ -2560,23 +2560,23 @@ pub fn evaluate_priest_posture(
     let prev = state.posture;
 
     // --- ESCAPE entry window (R7) --- evaluated only while currently
-    // PRESSURED with the trigger still live: every visible threat within the
-    // danger radius must be movement-impaired (Root/Stun/Incapacitate — Fear
-    // excluded by `attacker_escape_window`: a feared attacker self-solves,
-    // and a Fear-only window must NOT trigger ESCAPE). One unimpaired
-    // proximate threat voids the window; sub-cutoff windows (slow-adjusted)
-    // are ignored. See `escape_window` for the full rule set.
-    let escape_window_secs = if prev == Posture::Pressured && trigger {
-        escape_window_from(
-            ctx.visible_enemies_within(entity, my_pos, shared.danger_radius)
-                .iter()
-                .map(|t| ctx.attacker_escape_window(t.entity)),
-            ctx.movement_slow_multiplier(entity),
-            shared.escape_min_window,
-        )
-    } else {
-        None
-    };
+    // PRESSURED with the trigger still live, or with an attacker held in
+    // crowd control (no pressure, but a window — AS-496): every visible
+    // threat within the danger radius must be movement-impaired
+    // (Root/Stun/Incapacitate — Fear excluded by `attacker_escape_window`: a
+    // feared attacker self-solves, and a Fear-only window must NOT trigger
+    // ESCAPE). One unimpaired proximate threat voids the window; sub-cutoff
+    // windows (slow-adjusted) are ignored. See `escape_window` for the full
+    // rule set.
+    let escape_window_secs = escape_entry_window(
+        prev,
+        trigger,
+        compound_held_attacker(entity, ctx),
+        entity,
+        my_pos,
+        ctx,
+        shared,
+    );
 
     // --- DIP abort check (only while mid-dip) --- independent of pressure:
     // the `onset` preemption below outranks it, and under `Legacy` a closing
@@ -2602,11 +2602,13 @@ pub fn evaluate_priest_posture(
         // Window expired: → PRESSURED if still threatened, else FREE.
         Posture::Escape if trigger => Posture::Pressured,
         Posture::Escape => Posture::Free,
+        // An escape window comes first: a held attacker opens one with the
+        // trigger down (AS-496).
+        Posture::Pressured if escape_window_secs.is_some() => Posture::Escape,
         // Hysteresis: PRESSURED may not relax before `hold_until` even when
         // the trigger momentarily drops (threat hovering at the radius must
         // not strobe the posture). Exiting requires the trigger false.
         Posture::Pressured if !trigger && now >= state.hold_until => Posture::Free,
-        Posture::Pressured if escape_window_secs.is_some() => Posture::Escape,
         Posture::Pressured => Posture::Pressured,
         // DIP (U4): becoming focused preempts UNCONDITIONALLY (→ PRESSURED,
         // never DipAbort — the defensive self-peel takes over). Otherwise the

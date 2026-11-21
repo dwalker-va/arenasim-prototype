@@ -135,8 +135,9 @@ macro_rules! proc_triggers {
 proc_triggers! {
     /// A melee auto-attack that LANDED on a living enemy. Rolled in the apply
     /// pass of `combat_auto_attack`, alongside the Crippling Poison roll, so
-    /// a swing dropped by the friendly-CC guard or by a same-frame death never
-    /// procs. Ranged auto-attacks do not fire it.
+    /// a swing dropped by a same-frame death never procs. (A swing onto a hold
+    /// its own team placed is never queued at all.) Ranged auto-attacks do not
+    /// fire it.
     MeleeHit,
     /// A cast with a cast time that COMPLETED and landed — the same resolution
     /// point at which mana is charged. A cast interrupted, or fizzled at
@@ -553,8 +554,9 @@ pub fn roll_procs(
 /// Called by `combat_auto_attack` where the swing is QUEUED — the site Windfury
 /// Totem's bonus swing is rolled at — rather than with [`roll_procs`] after the
 /// apply pass, because the extra swing is queued beside the swing that procced
-/// it. A swing the friendly-CC guard or a same-frame death later drops has
-/// still rolled, and its extra swing is dropped with it.
+/// it. A swing a same-frame death later drops has still rolled, and its extra
+/// swing is dropped with it. A swing onto a hold its own team placed is
+/// skipped before it is queued, so it rolls nothing.
 ///
 /// **Draws nothing for a wearer with no extra-swing proc**, so every loadout
 /// without one keeps its RNG stream. At most one extra swing per hit: the

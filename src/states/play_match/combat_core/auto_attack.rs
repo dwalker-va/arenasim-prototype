@@ -171,32 +171,39 @@ pub fn combat_auto_attack(
     // auto-attacks bypass that guard. Two tiers, each mapping a target entity to
     // the team of the caster who placed the CC (only one caster team recorded
     // per target — a target carrying the same CC class from two teams at once
-    // does not occur):
-    //  - `incap_cc_team`: break-on-ANY-damage incapacitates (Freezing Trap /
-    //    Polymorph, threshold 0.0). NO attacker may break these — most visibly a
-    //    Hunter's melee pet sitting on a trapped target.
+    // does not occur). Both are asked BEFORE a swing is queued, so a swing held
+    // off spends nothing: no RNG draw, no rage, no queued Heroic Strike, and its
+    // timer keeps building so it lands the instant the hold ends.
+    //  - `friendly_hold_team`: the holds the attacker's team waits out, by the
+    //    cast gate's own rule (`class_ai::damage_breaks_friendly_hold` — a
+    //    Polymorph, a Freezing Trap, a Repentance, a Fear, a Psychic Scream;
+    //    never a root that breaks only after enough damage). NO attacker may
+    //    break these — most visibly a Hunter's melee pet sitting on a trapped
+    //    target, or a Warrior beside its Warlock's Fear.
     //  - `root_cc_team`: damage-breakable Roots (Spider Web, Frost Nova). A PET
     //    must not break these: it webs a target to peel it off the owner, and
     //    meleeing through the Web both defeats the peel and shatters it. A ranged
     //    player legitimately nukes a rooted target (root + nuke), so this tier is
-    //    pet-only. A stun never breaks, so the pet attacks through it; a Fear
-    //    is held off by `friendly_cc_team` below, for every attacker.
+    //    pet-only. A stun never breaks, so the pet attacks through it.
     let caster_team = |a: &Aura| {
         a.caster
             .and_then(|c| combatant_info.get(&c))
             .map(|(team, ..)| *team)
     };
-    let incap_cc_team: std::collections::HashMap<Entity, u8> = combatants
+    let friendly_hold_team: std::collections::BTreeMap<Entity, u8> = combatants
         .iter()
-        .filter_map(|(entity, _, _, _, _, auras)| {
+        .filter_map(|(entity, _, combatant, _, _, auras)| {
             let auras = auras?;
             auras
                 .auras
                 .iter()
                 .find_map(|a| {
-                    (a.break_on_damage_threshold == 0.0)
+                    // Only a hold the target's ENEMY placed: that team is the
+                    // one whose swings wait it out.
+                    crate::states::play_match::class_ai::damage_breaks_friendly_hold(a)
                         .then(|| caster_team(a))
                         .flatten()
+                        .filter(|&team| team != combatant.team)
                 })
                 .map(|team| (entity, team))
         })
@@ -210,7 +217,7 @@ pub fn combat_auto_attack(
                 .iter()
                 .find_map(|a| {
                     // `> 0.0` (not `>= 0.0`): a Root at threshold 0.0 is an
-                    // any-damage break and belongs to the incap tier above, which
+                    // any-damage break and belongs to the hold tier above, which
                     // blocks ALL attackers — keep the two tiers a clean partition.
                     (a.effect_type == AuraType::Root && a.break_on_damage_threshold > 0.0)
                         .then(|| caster_team(a))
@@ -219,32 +226,6 @@ pub fn combat_auto_attack(
                 .map(|team| (entity, team))
         })
         .collect();
-
-    // Build a map of targets with breakable CC from friendly casters: the
-    // holds the attacker's team waits out, by the cast gate's own rule
-    // (`class_ai::damage_breaks_friendly_hold` — a Polymorph, a Freezing Trap,
-    // a Fear; never a root).
-    let mut friendly_cc_team: std::collections::BTreeMap<Entity, u8> =
-        std::collections::BTreeMap::new();
-    for (entity, _, combatant, _, _, auras) in combatants.iter() {
-        if let Some(auras) = auras {
-            for aura in &auras.auras {
-                if crate::states::play_match::class_ai::damage_breaks_friendly_hold(aura) {
-                    // Look up the caster's team
-                    if let Some(caster_entity) = aura.caster {
-                        if let Some(&(caster_team, _, _, _, _)) = combatant_info.get(&caster_entity)
-                        {
-                            // Only track if the CC is from the opposing team of the target
-                            // (i.e., the CC caster is an enemy of the CC'd target)
-                            if caster_team != combatant.team {
-                                friendly_cc_team.insert(entity, caster_team);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     // Every combatant that can dodge or parry, and its chances. Empty in a
     // match without avoidance, and then no swing below rolls for it — so the
@@ -363,13 +344,16 @@ pub fn combat_auto_attack(
                 {
                     continue;
                 }
-                // Don't shatter our own team's CC. The timer keeps building so
-                // the attack resumes the instant the CC ends.
-                //  - incapacitates (Freezing Trap / Polymorph): no attacker.
+                // Don't shatter our own team's CC. The swing is skipped before
+                // it is queued, for every hand and every extra swing it would
+                // carry, so it spends nothing; the timers keep building so the
+                // attack resumes the instant the CC ends.
+                //  - holds the team waits out (Polymorph, Freezing Trap,
+                //    Repentance, Fear, Psychic Scream): no attacker.
                 //  - Roots (Spider Web): pets only — a ranged owner still nukes
                 //    a rooted target.
                 let attacker_is_pet = auto_attack_pet_query.get(attacker_entity).is_ok();
-                if incap_cc_team.get(&target_entity) == Some(&combatant.team)
+                if friendly_hold_team.get(&target_entity) == Some(&combatant.team)
                     || (attacker_is_pet
                         && root_cc_team.get(&target_entity) == Some(&combatant.team))
                 {
@@ -432,17 +416,11 @@ pub fn combat_auto_attack(
                     // Apply Divine Shield outgoing damage penalty (50%)
                     let ds_penalty = get_divine_shield_damage_penalty(auras.as_deref());
                     // The target's dodge and parry, rolled against each melee
-                    // swing below — but not against a swing the apply loop
-                    // will drop for breaking this team's own Fear or
-                    // Polymorph: an attack that never lands is not avoided.
-                    let (defense, defender_auras) =
-                        if friendly_cc_team.get(&target_entity) == Some(&combatant.team) {
-                            (MeleeDefense::default(), &no_auras)
-                        } else {
-                            melee_defense
-                                .get(&target_entity)
-                                .map_or((MeleeDefense::default(), &no_auras), |(d, a)| (*d, a))
-                        };
+                    // swing below. (A swing onto a hold this team waits out
+                    // never gets here, so it is never avoided either.)
+                    let (defense, defender_auras) = melee_defense
+                        .get(&target_entity)
+                        .map_or((MeleeDefense::default(), &no_auras), |(d, a)| (*d, a));
 
                     // The main-hand swings, in a fixed order: the live socket's
                     // (every attacker's), then a Hunter's melee main hand. The
@@ -731,16 +709,6 @@ pub fn combat_auto_attack(
         // mirror matchups. Mutual lethal now kills both, and check_match_end
         // records the draw.
 
-        // Bug fix: Don't auto-attack targets with breakable CC from a friendly caster.
-        // This prevents, e.g., a Warlock pet from breaking its team's Polymorph.
-        if let Some(&cc_caster_team) = friendly_cc_team.get(&target_entity) {
-            if let Some(&(attacker_team, _, _, _, _)) = combatant_info.get(&attacker_entity) {
-                if attacker_team == cc_caster_team {
-                    continue;
-                }
-            }
-        }
-
         // The attacker's damage-dealt increases, read before the target is
         // borrowed.
         let dealt = combatants
@@ -795,7 +763,7 @@ pub fn combat_auto_attack(
                 // Proc trinkets, MeleeHit: recorded here — beside the
                 // Crippling Poison roll, inside the branch that only a swing
                 // landing on a LIVING target reaches — so a swing dropped by
-                // the friendly-CC guard or by a same-frame death never procs.
+                // a same-frame death never procs.
                 // The roll itself waits until after this loop, because it
                 // needs the ATTACKER's combatant mutably and this loop holds
                 // the TARGET's.
@@ -901,8 +869,8 @@ pub fn combat_auto_attack(
                 // One landed auto-attack = one swing signal for the graphical
                 // animation layer. Spawned here in the APPLY loop — not at the
                 // queue site like WindfuryTornado — so an attack dropped above
-                // by the friendly-CC guard or a same-frame death never
-                // telegraphs a phantom release stroke. Inert in headless: like
+                // by a same-frame death never telegraphs a phantom release
+                // stroke. Inert in headless: like
                 // FloatingCombatText, the consuming systems live in
                 // rendering/effects.rs and are registered only in states/mod.rs.
                 {

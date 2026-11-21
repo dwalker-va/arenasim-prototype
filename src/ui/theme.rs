@@ -459,6 +459,7 @@ pub mod hud {
 /// type sizes live here too.
 pub mod fct {
     use super::Color32;
+    use bevy_egui::egui::{vec2, Vec2};
 
     /// Ability damage, DoT ticks included.
     pub const DAMAGE: Color32 = Color32::from_rgb(255, 255, 0);
@@ -488,6 +489,12 @@ pub mod fct {
     pub const CRIT_SIZE: f32 = 32.0;
     /// The word after an absorbed number.
     pub const LABEL_SIZE: f32 = 14.0;
+    /// From one floating line to the next stacked above it at the same
+    /// anchor ("Saved" over a heal number): a number's row and its outline,
+    /// with a gap, so two number-size lines never touch.
+    pub const LINE_STEP: f32 = 36.0;
+    /// The screen offset of a line stacked one [`LINE_STEP`] above another.
+    pub const LINE_ABOVE: Vec2 = vec2(0.0, -LINE_STEP);
 }
 
 /// The annotated arena layout (`states/arena_layout_debug.rs`): a developer's

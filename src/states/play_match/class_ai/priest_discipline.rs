@@ -405,6 +405,7 @@ mod tests {
             dying,
             pressured: dying,
             pressure_onset: dying,
+            held_attacker: false,
         }
     }
 

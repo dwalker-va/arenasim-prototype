@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use smallvec::SmallVec;
 
 use crate::combat::log::{CombatLog, CombatLogEventType};
-use crate::states::play_match::combat_core::apply_healing;
+use crate::states::play_match::combat_core::{apply_healing, credit_healing_done};
 use crate::states::play_match::components::*;
 use crate::states::play_match::effects::backlash::{
     BacklashPending, DISPEL_BACKLASH_SILENCE_DURATION,
@@ -169,12 +169,18 @@ pub fn process_dispels(
             if actual_heal > 0.0 {
                 // Devour Magic is a Felhunter (pet) self-heal — resolve pet-aware.
                 let healer_id = combat_log_id_for(&heal_combatant, pet_query.get(heal_entity).ok());
-                combat_log.log(
-                    CombatLogEventType::Healing,
-                    format!(
-                        "[DEVOUR] {} heals for {:.0} from Devour Magic",
-                        healer_id, actual_heal
-                    ),
+                credit_healing_done(&mut heal_combatant, actual_heal);
+                let message = format!(
+                    "[DEVOUR] {} heals for {:.0} from Devour Magic",
+                    healer_id, actual_heal
+                );
+                combat_log.log_healing(
+                    healer_id.clone(),
+                    healer_id,
+                    "Devour Magic".to_string(),
+                    actual_heal,
+                    false,
+                    message,
                 );
             }
         }
