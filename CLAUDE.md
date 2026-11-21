@@ -1054,7 +1054,7 @@ with the context-steering mask refactor.
 - `flee` (0.0 for healers + Mage; Hunter 6.0; Druid 6.0, read only in Travel Form) — constant pull away from the nearest threat, NOT proximity-weighted (distance-maximization), so a chased ranged DPS outruns an un-impaired chaser at all ranges. Wherever `flee` is on, `corner_penalty` must EXCEED it or the kiter flees into corners — Hunter and Druid both 8.0 over 6.0, and `validate()` refuses a block that breaks it.
 - `commitment_bonus` (1.5/1.5) — bonus toward the committed direction during the commit window
 - `los_seek` (0.0 for healers; Mage 2.0 / Hunter 1.0) — reward for candidate steps that have/restore line of sight to the kill target; drives occluded-in-range casters to orbit to a sighted angle instead of idling
-- `cover_pull` (Priest/Shaman 1.5, Paladin 1.0, 0.0 for DPS) — reward for candidate steps occluded from threats; drives pressured-healer pillar denial. Kept below `threat_repulsion` so denial shapes retreat direction without overriding escape; zeroed when a healable teammate is below `urgency_hp_threshold` or the team is pressing (tempo, `press_advantage_margin` / `press_release_margin`)
+- `cover_pull` (Priest/Shaman 1.5, Paladin 1.0, 0.0 for DPS) — reward for candidate steps occluded from threats; drives pressured-healer pillar denial. Kept below `threat_repulsion` so denial shapes retreat direction without overriding escape; zeroed when a healable teammate is below `urgency_hp_threshold` or the team is pressing (tempo, `press_advantage_margin` / `press_release_margin`). A `Legacy` scorer term: under `TeamPlan` the PRESSURED healer's cover is the team solve's occlusion, which the hand-off rule waives while an enemy ranged DPS could turn on its partner (*No cover that hands the fire to the partner* below)
 - `trap_setup` (Hunter 3.0, 0.0 for everyone else) — while Freezing Trap is ready and an enemy healer would be caught by it (`hunter_dip::trap_setup_healer`), pull toward that healer once a KITE step would leave it beyond throw range (the trap's `range` less its trigger radius); zero inside that range, absent while the trap is on cooldown. Kept below `flee` so the kite still escapes the melee, bent toward the healer. Disengage bends its leap by the same two weights (`hunter_dip::trap_setup_disengage`) and names the healer as the Disengage's `target_id` in the trace when it did; KITE decisions carry the term as a `trap_setup` scorer term
 - `stance_pull` (Mage/Hunter 1.0, 0.0 for everyone else; `TeamPlan`) — while the kiter runs the Pillar play, a `formation_pull`-shaped pull toward the ring point at its team's pillar stance side (`pillar_stance::side_point`); absent otherwise. Below `range_band`/`los_seek` and far below `flee`, so it bends a kite, never overrides it; traced as a `stance_pull` scorer term
 
@@ -1070,6 +1070,18 @@ backed the healer off, and its formation point walked it back in: a ~3s
 in-and-out bob (AS-249; `tests/healer_positioning.rs` pins the reversal rate).
 `TeamPlan` enters on the plain trigger: there PRESSURED is the team solve's,
 which holds cover in reach of the ally, and the gap measurably cost its heal line.
+
+**A held enemy is no pressure** (AS-496; no RON knob). An enemy under crowd
+control that stops it acting (`class_ai::holds`: stun, fear, polymorph,
+incapacitate, cyclone — never a root) does not pressure its target
+(`situation::pressure_threats`), so it neither enters nor holds a healer's
+PRESSURED posture, puts no teammate in danger (no Peel on it), and chases no
+Druid out of a snare. Its pressure returns the frame the hold ends. The hold
+is still a window: a PRESSURED healer whose attacker is held
+(`AllyStanding::held_attacker`) still opens its ESCAPE window on it
+(`healer_postures::escape_entry_window`, the one gate all three posture
+machines ask). Both profiles. Scenes `tests/held_attacker_scenes.rs`, staged
+`tests/held_attacker_staged.rs`.
 
 **Out of reach of a focused teammate (`Legacy` PRESSURED)** — the scorer's
 anchor mask keeps a PRESSURED healer in heal range and sight of its anchor ally.
@@ -1322,6 +1334,32 @@ kept FREE longer by the reach rule reversed heading about once a second.
 `Legacy` builds no field and is byte-identical. Pinned by
 `tests/healer_cc_avoidance.rs` (staged pairs, each against its CC on
 cooldown). Design: `docs/design/2026-10-18-healer-cc-avoidance.md`.
+
+**No cover that hands the fire to the partner (`TeamPlan`, AS-440).** The
+team target focus (*Team target focus* below) turns an enemy ranged DPS off a
+healer it cannot see onto a teammate it can. So while the enemy team runs a
+target focus (`update_situations` reads its profile and
+`team{1,2}_target_focus`, as the focus's own classification does) and one of
+its units that follows a focus could take one of the healer's teammates
+(`target_focus::could_turn_on_teammate`: `could_take`, the focus's own test —
+targetable, within `FOCUS_REACH`, in its sight), the PRESSURED `OccupyCover`
+solve gives no credit for cover from enemy casters
+(`team_solve::SolveWorld::cover_waived`): no `C_OCCLUDED`, and no shadow
+samples — with no credit a shadow sample ties every other spot, and the
+nearest-spot tie-break would still walk the healer into it.
+Crowd-control reach, sight of the anchor, a dying teammate's reach and an
+owed dispel are scored exactly as before, so a healer still leaves the reach
+of a ready Polymorph or Fear, which hiding behind the pillar may do. A map with
+no obstacles never waives (no focus moves there), so BasicArena is
+byte-identical; so is `Legacy`, which never solves. `team{1,2}_handoff_rule:
+false` is the measurement switch. Measured head-to-head (DIRECTIONAL, 2v2,
+pillar maps): the shipped rule **+0.5pt** [+0.3, +0.7] (seed-clustered, 12
+seeds in three blocks, +0.7 / +0.1 / +0.6), against +1.0 for its prototype
+over its first 12 seeds. Broad (no comp significantly negative), with no
+extra crowd control on the healer: the enemy's fire comes back from the
+partner to the healer. Scenes `tests/handoff_cover_scenes.rs`, staged
+`tests/handoff_cover_staged.rs`; findings
+`docs/design/balance/2026-11-13-as440-healer-hide.md`.
 
 **Target choice needs sight.** Every cast that CHOOSES its target from
 several candidates filters by reach before it ranks: `class_ai::cast_reach`,

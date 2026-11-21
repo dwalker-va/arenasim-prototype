@@ -274,6 +274,8 @@ fn build_config(
         team2_sight_yield: None,
         team1_target_focus: None,
         team2_target_focus: None,
+        team1_handoff_rule: None,
+        team2_handoff_rule: None,
         team1_yield_healer_cast: None,
         team2_yield_healer_cast: None,
         team1_exceptions: Default::default(),

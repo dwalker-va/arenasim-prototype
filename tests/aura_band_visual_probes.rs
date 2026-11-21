@@ -24,9 +24,13 @@ use arenasim::states::match_config::RoguePoison;
 use arenasim::states::play_match::abilities::{AbilityType, SpellSchool};
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::class_ai::shaman::totem_spec;
+use arenasim::states::play_match::combat_core::{
+    cheat_death_aura, compound_riders, CHEAT_DEATH_NAME,
+};
 use arenasim::states::play_match::components::{
     weapon_poison_marker_aura, ActiveAuras, Aura, AuraApplyOwner, AuraApplyRoute, AuraBand,
-    AuraBandPolarity, AuraType, Combatant, DispelType, Pet, PetType, TotemElement,
+    AuraBandPolarity, AuraType, Combatant, CompoundDebuff, DispelType, Pet, PetType, TotemElement,
+    DIVINE_PROTECTION_AURA, GUARDIAN_SPIRIT_AURA,
 };
 use arenasim::states::play_match::{
     aura_band_alpha, aura_band_progress, cleanup_aura_bands, detect_aura_applications,
@@ -88,13 +92,14 @@ const BAND_TYPES: &[AuraType] = &[
     AuraType::DamageTransfer,
     AuraType::KillingBlowSave,
     AuraType::DamageReflect,
-    // Guardian Spirit's healing increase (AS-415): the band until AS-354
-    // draws the spirit on the ally.
+    // The healing increase (AS-415). Guardian Spirit's own face and rider are
+    // owned by NAME by its spirit (AS-354); any other user meets the band.
     AuraType::HealingReceivedIncrease,
-    // Sacred Shield's arming buff (AS-421): the band until AS-375 draws its
-    // disc and absorb card.
+    // A triggered absorb's arming buff (AS-421): the band for an unnamed one;
+    // Sacred Shield's own is owned by its named landing (AS-375).
     AuraType::TriggeredAbsorb,
-    // Aura Mastery's immunity (AS-420): the band until AS-374 draws it.
+    // Aura Mastery's immunity (AS-420): the band for an unnamed one; Aura
+    // Mastery's own is owned by its named landing (AS-374).
     AuraType::SilenceInterruptImmunity,
     // Shadow Dance's window (AS-419): the band until AS-368 draws it.
     AuraType::ShadowDance,
@@ -637,6 +642,158 @@ fn rejuvenation_and_mark_of_the_wild_raise_no_band_but_lifebloom_does() {
     h.set_auras(unit, vec![fortitude()]);
     h.tick(3);
     assert_eq!(h.bands().len(), 1, "Fortitude keeps the band");
+}
+
+/// Guardian Spirit's face and rider are owned by its spirit, by NAME: the
+/// spirit's onset is the landing (`guardian_spirit.rs`). Their types are the
+/// damage pipeline's, so another aura of either type keeps the band. The name
+/// is the one the RON gives the face and the code gives the rider.
+#[test]
+fn guardian_spirit_owns_its_application_and_its_type_siblings_keep_the_band() {
+    let owned = AuraApplyRoute::Owned(AuraApplyOwner::GuardianSpirit);
+    let defs = AbilityDefinitions::shipped();
+    let face = defs.get_unchecked(&AbilityType::GuardianSpirit);
+    assert_eq!(face.name, GUARDIAN_SPIRIT_AURA, "the face's RON name");
+    let face_type = face.applies_aura.as_ref().unwrap().aura_type;
+    assert_eq!(AuraApplyRoute::for_instance(face_type, &face.name), owned);
+    let riders = compound_riders(CompoundDebuff::GuardianSpirit);
+    assert!(!riders.is_empty(), "the save rides the face");
+    for rider in &riders {
+        assert_eq!(rider.ability_name, GUARDIAN_SPIRIT_AURA, "the rider's name");
+        assert_eq!(
+            AuraApplyRoute::for_instance(rider.effect_type, &rider.ability_name),
+            owned
+        );
+    }
+    for t in [face_type, AuraType::KillingBlowSave] {
+        assert_eq!(
+            AuraApplyRoute::for_instance(t, "Some Other Boost"),
+            AuraApplyRoute::Band,
+            "{t:?} under another name keeps the band"
+        );
+    }
+}
+
+#[test]
+fn guardian_spirit_raises_no_band_but_another_healing_boost_does() {
+    let mut riders = compound_riders(CompoundDebuff::GuardianSpirit);
+    let mut face = aura(
+        AuraType::HealingReceivedIncrease,
+        GUARDIAN_SPIRIT_AURA,
+        Some(SpellSchool::Holy),
+    );
+    face.compound = Some(CompoundDebuff::GuardianSpirit);
+    riders.insert(0, face);
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(unit, riders);
+    h.tick(3);
+    assert!(h.bands().is_empty(), "the spirit owns its landing");
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(
+        unit,
+        vec![aura(
+            AuraType::HealingReceivedIncrease,
+            "Some Other Boost",
+            Some(SpellSchool::Holy),
+        )],
+    );
+    h.tick(3);
+    assert_eq!(h.bands().len(), 1, "another healing boost keeps the band");
+}
+
+/// Divine Protection is owned by its globe, by NAME: the globe's onset is
+/// its landing (`divine_protection.rs`). Its type is the damage pipeline's,
+/// so another damage-taken reduction keeps the band. The name is the one the
+/// RON gives the ability.
+#[test]
+fn divine_protection_owns_its_application_and_its_type_siblings_keep_the_band() {
+    let owned = AuraApplyRoute::Owned(AuraApplyOwner::DivineProtectionGlobe);
+    let defs = AbilityDefinitions::shipped();
+    let def = defs.get_unchecked(&AbilityType::DivineProtection);
+    assert_eq!(def.name, DIVINE_PROTECTION_AURA, "the RON name");
+    let t = def.applies_aura.as_ref().unwrap().aura_type;
+    assert_eq!(t, AuraType::DamageTakenReduction);
+    assert_eq!(AuraApplyRoute::for_instance(t, &def.name), owned);
+    assert_eq!(
+        AuraApplyRoute::for_instance(t, "Some Other Ward"),
+        AuraApplyRoute::Band,
+        "another damage-taken reduction keeps the band"
+    );
+    // The name alone does not own another type.
+    for other in AuraType::ALL
+        .into_iter()
+        .filter(|o| *o != AuraType::DamageTakenReduction)
+    {
+        assert_eq!(
+            AuraApplyRoute::for_instance(other, DIVINE_PROTECTION_AURA),
+            AuraApplyRoute::for_aura(other),
+            "{other:?}"
+        );
+    }
+}
+
+#[test]
+fn divine_protection_raises_no_band_but_another_ward_does() {
+    let ward = |name: &str| {
+        aura(
+            AuraType::DamageTakenReduction,
+            name,
+            Some(SpellSchool::Holy),
+        )
+    };
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(unit, vec![ward(DIVINE_PROTECTION_AURA)]);
+    h.tick(3);
+    assert!(h.bands().is_empty(), "the globe owns its landing");
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(unit, vec![ward("Some Other Ward")]);
+    h.tick(3);
+    assert_eq!(h.bands().len(), 1, "another ward keeps the band");
+}
+
+/// Cheat Death's damage cut is owned by its skull and ghost-fire, by NAME
+/// (`cheat_death.rs`): the save raises them, and they are its landing. The
+/// cut's type is shared, so Devotion Aura (and any other aura of that type)
+/// keeps the band.
+#[test]
+fn cheat_death_owns_its_cut_and_its_type_siblings_keep_the_band() {
+    let cut = cheat_death_aura(0.9, 3.0);
+    assert_eq!(cut.ability_name, CHEAT_DEATH_NAME, "the cut's name");
+    assert_eq!(cut.ability_name, "Cheat Death");
+    assert_eq!(
+        AuraApplyRoute::for_instance(cut.effect_type, &cut.ability_name),
+        AuraApplyRoute::Owned(AuraApplyOwner::CheatDeath)
+    );
+    assert_eq!(
+        AuraApplyRoute::for_instance(cut.effect_type, "Devotion Aura"),
+        AuraApplyRoute::Band,
+        "another damage cut keeps the band"
+    );
+}
+
+#[test]
+fn cheat_death_raises_no_band_but_another_damage_cut_does() {
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(unit, vec![cheat_death_aura(0.9, 3.0)]);
+    h.tick(3);
+    assert!(h.bands().is_empty(), "the skull and ghost-fire own the cut");
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    let mut devotion = cheat_death_aura(0.9, 3.0);
+    devotion.ability_name = "Devotion Aura".into();
+    h.set_auras(unit, vec![devotion]);
+    h.tick(3);
+    assert_eq!(h.bands().len(), 1, "another damage cut keeps the band");
 }
 
 #[test]

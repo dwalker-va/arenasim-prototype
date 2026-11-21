@@ -16,9 +16,9 @@ use crate::states::play_match::decision_trace::{
 use crate::states::play_match::movement_config::{CasterHealerMovementConfig, MovementConfig};
 
 use super::healer_postures::{
-    compound_pressure_onset, compound_pressure_trigger, escape_tick, escape_window_from,
-    healer_pressured_tick_shared, hunt_station_tick, medic_chase_override, medic_chase_tick,
-    solve_dying_walk, start_movement_event,
+    compound_held_attacker, compound_pressure_onset, compound_pressure_trigger,
+    escape_entry_window, escape_tick, healer_pressured_tick_shared, hunt_station_tick,
+    medic_chase_override, medic_chase_tick, solve_dying_walk, start_movement_event,
 };
 use super::CombatContext;
 
@@ -102,27 +102,26 @@ pub fn evaluate_caster_healer_posture(
 
     let prev = state.posture;
 
-    // ESCAPE entry window: only while PRESSURED with the trigger still live and
-    // every proximate visible threat movement-impaired.
-    let escape_window_secs = if prev == Posture::Pressured && trigger {
-        escape_window_from(
-            ctx.visible_enemies_within(entity, my_pos, shared.danger_radius)
-                .iter()
-                .map(|t| ctx.attacker_escape_window(t.entity)),
-            ctx.movement_slow_multiplier(entity),
-            shared.escape_min_window,
-        )
-    } else {
-        None
-    };
+    // ESCAPE entry window: only while PRESSURED with the trigger still live
+    // or an attacker held (AS-496), and every proximate visible threat
+    // movement-impaired.
+    let escape_window_secs = escape_entry_window(
+        prev,
+        trigger,
+        compound_held_attacker(entity, ctx),
+        entity,
+        my_pos,
+        ctx,
+        shared,
+    );
 
     let next = match prev {
         _ if shifted => Posture::Escape,
         Posture::Escape if now < state.escape_until => Posture::Escape,
         Posture::Escape if trigger => Posture::Pressured,
         Posture::Escape => Posture::Free,
-        Posture::Pressured if !trigger && now >= state.hold_until => Posture::Free,
         Posture::Pressured if escape_window_secs.is_some() => Posture::Escape,
+        Posture::Pressured if !trigger && now >= state.hold_until => Posture::Free,
         Posture::Pressured => Posture::Pressured,
         _ if onset => Posture::Pressured,
         _ => Posture::Free,

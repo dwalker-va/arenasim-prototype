@@ -125,12 +125,17 @@ impl DamageFollowUps {
 pub struct PendingDamageFollowUp(pub DamageFollowUp);
 
 /// A killing blow prevented: what the shared "Saved" cue (AS-354) reads.
-/// Cosmetic; spawned in both modes, read only by the graphical client.
+/// Cosmetic; spawned in both modes, read only by the graphical client
+/// (`rendering/effects/guardian_spirit.rs`, which despawns it).
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct KillingBlowPrevented {
     pub holder: Entity,
     /// What saved it ("Guardian Spirit", "Cheat Death").
     pub by: String,
+    /// The heal the save landed, when it carries one and its holder lived to
+    /// take it (Guardian Spirit): the client's heal landing plays with it.
+    /// `None` for a save with no heal (Cheat Death).
+    pub heal: Option<f32>,
 }
 
 /// Land every follow-up the frame's hits queued: transfers on their
@@ -343,13 +348,15 @@ pub fn process_damage_follow_ups(
                     )
                 };
                 combat_log.log(CombatLogEventType::MatchEvent, message);
-                commands.spawn((
-                    KillingBlowPrevented {
-                        holder,
-                        by: by.clone(),
-                    },
-                    PlayMatchEntity,
-                ));
+                // Spawned ahead of the heal, so its place in the frame's
+                // spawn order does not hang on whether the heal spawns a tell;
+                // the heal it landed is written onto it once it has.
+                let mark = KillingBlowPrevented {
+                    holder,
+                    by: by.clone(),
+                    heal: None,
+                };
+                let marker = commands.spawn((mark.clone(), PlayMatchEntity)).id();
                 let mut healed = 0.0;
                 if let Some(fraction) = heal_fraction.filter(|_| survived) {
                     let amount = combatant.max_health * fraction;
@@ -361,6 +368,10 @@ pub fn process_damage_follow_ups(
                         &dampening,
                         amount,
                     );
+                    commands.entity(marker).insert(KillingBlowPrevented {
+                        heal: Some(healed),
+                        ..mark
+                    });
                     let message = format!("[SAVED] {by} heals {holder_id} for {healed:.0}");
                     // A row in its caster's breakdown, under the save's name;
                     // a save with no caster in the match credits no one.

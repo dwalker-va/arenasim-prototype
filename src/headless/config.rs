@@ -106,6 +106,16 @@ pub struct HeadlessMatchConfig {
     pub team1_target_focus: Option<bool>,
     #[serde(default)]
     pub team2_target_focus: Option<bool>,
+    /// `false` turns the hand-off cover rule off for that team, for
+    /// measurement (AS-440, `team_solve::SolveWorld::cover_waived`): its
+    /// `TeamPlan` healer keeps taking cover from enemy casters while an enemy
+    /// ranged DPS could turn on its partner, as `TeamPlan` did before the
+    /// rule. Omitted — the default — leaves it on (it runs only under
+    /// `TeamPlan`).
+    #[serde(default)]
+    pub team1_handoff_rule: Option<bool>,
+    #[serde(default)]
+    pub team2_handoff_rule: Option<bool>,
     /// `false` makes that team's sight yield leave its healer's cast in
     /// progress out of rule 1's "cannot move" (AS-385's package
     /// measurement, the variant arm). Omitted — the default — counts it.
@@ -266,6 +276,8 @@ impl Default for HeadlessMatchConfig {
             team2_sight_yield: None,
             team1_target_focus: None,
             team2_target_focus: None,
+            team1_handoff_rule: None,
+            team2_handoff_rule: None,
             team1_yield_healer_cast: None,
             team2_yield_healer_cast: None,
             team1_exceptions: BTreeMap::new(),
@@ -355,6 +367,8 @@ impl HeadlessMatchConfig {
             team2_no_sight_yield: self.team2_sight_yield == Some(false),
             team1_no_target_focus: self.team1_target_focus == Some(false),
             team2_no_target_focus: self.team2_target_focus == Some(false),
+            team1_no_handoff_rule: self.team1_handoff_rule == Some(false),
+            team2_no_handoff_rule: self.team2_handoff_rule == Some(false),
             team1_yield_cast_moves: self.team1_yield_healer_cast == Some(false),
             team2_yield_cast_moves: self.team2_yield_healer_cast == Some(false),
             ..Default::default()
