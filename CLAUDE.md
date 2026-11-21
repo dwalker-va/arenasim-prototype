@@ -47,6 +47,9 @@ cargo run --release -- --headless /tmp/test.json
   measurement control like `team{1,2}_withheld_plays`. A `TeamPlan` team
   without them plays exactly as `TeamPlan` did before them (byte-identical),
   so one side on and one off is the modes' head-to-head.
+- `team1_trap_walk`, `team2_trap_walk`: `false` keeps that team's Hunters
+  on the old Freezing Trap dip instead of the trap walk (AS-498, *Trap walk*
+  below) — the walk's head-to-head control, as the pillar modes' key is.
 - `map`: "BasicArena", "TwinPillars", "PillaredArena", or "TestVerticality"
   ("PillaredArena" is the Nagrand Arena replica — a ~120yd circular bowl with four
   octagonal pillars and 10yd starting rooms; "TwinPillars" is the original
@@ -1057,6 +1060,27 @@ with the context-steering mask refactor.
 - `cover_pull` (Priest/Shaman 1.5, Paladin 1.0, 0.0 for DPS) — reward for candidate steps occluded from threats; drives pressured-healer pillar denial. Kept below `threat_repulsion` so denial shapes retreat direction without overriding escape; zeroed when a healable teammate is below `urgency_hp_threshold` or the team is pressing (tempo, `press_advantage_margin` / `press_release_margin`). A `Legacy` scorer term: under `TeamPlan` the PRESSURED healer's cover is the team solve's occlusion, which the hand-off rule waives while an enemy ranged DPS could turn on its partner (*No cover that hands the fire to the partner* below)
 - `trap_setup` (Hunter 3.0, 0.0 for everyone else) — while Freezing Trap is ready and an enemy healer would be caught by it (`hunter_dip::trap_setup_healer`), pull toward that healer once a KITE step would leave it beyond throw range (the trap's `range` less its trigger radius); zero inside that range, absent while the trap is on cooldown. Kept below `flee` so the kite still escapes the melee, bent toward the healer. Disengage bends its leap by the same two weights (`hunter_dip::trap_setup_disengage`) and names the healer as the Disengage's `target_id` in the trace when it did; KITE decisions carry the term as a `trap_setup` scorer term
 - `stance_pull` (Mage/Hunter 1.0, 0.0 for everyone else; `TeamPlan`) — while the kiter runs the Pillar play, a `formation_pull`-shaped pull toward the ring point at its team's pillar stance side (`pillar_stance::side_point`); absent otherwise. Below `range_band`/`los_seek` and far below `flee`, so it bends a kite, never overrides it; traced as a `stance_pull` scorer term
+
+**Trap walk (Hunter, `TeamPlan`)** — `hunter_dip::evaluate_trap_walk`
+(AS-498; no RON knob, reuses `dip_budget`), on the user's ruling that a
+Hunter is aggressive with Freezing Trap unless its gameplan is to outlast.
+It replaces the Freezing Trap dip under `TeamPlan`: while the trap is ready
+it throws from range the moment the pressure trap's landing is clean, and
+otherwise walks at its victim whenever the walk to throw range costs no melee
+contact that kiting away would have prevented (`walk_exposure`: a chaser
+targeting the Hunter, sampled along the walk; a chaser behind costs nothing,
+one between the Hunter and the healer stops the walk; casters cost nothing).
+Frost Trap and Aimed Shot wait while it walks. The victim
+(`trap_play_victim`) is the enemy healer the pressure trap would take, only
+while a DPS teammate is attacking someone (a Hunter whose only teammate is a
+healer has nobody to use the window); when that teammate is killing the
+enemy healer — the outlast plan — it is an enemy DPS nobody can free
+(`trap_would_stick`, `ally_freers`), and the Hunter fights the healer. Traced
+as `TrapWalk` / `TrapWalkEnd` movement triggers (`walk_secs`, `thrown`) and a
+Freezing Trap note naming why it walked or held. `team{1,2}_trap_walk:
+false` keeps a team on the old dip; `Legacy` runs the old dip and is
+byte-identical. Scenes: `tests/hunter_trap_walk_scenes.rs`; measurement:
+`tests/hunter_trap_dip_measure.rs` (ignored).
 
 **PRESSURED onset (`Legacy`)** — no RON knob; reuses `danger_edge_margin`. A
 caster targeting a healer pressures it only while CLOSING: between its own

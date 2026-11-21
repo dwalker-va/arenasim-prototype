@@ -399,9 +399,9 @@ pub fn acquire_targets(
             })
         };
         if let Some(hold) = combatant.trap_retarget {
-            let healer_alive = enemy_combatants.iter().any(|(e, ..)| *e == hold.healer);
+            let healer_alive = enemy_combatants.iter().any(|(e, ..)| *e == hold.victim);
             if !healer_alive
-                || (decision_trace.current_sim_time > hold.spring_by && !own_trap_on(hold.healer))
+                || (decision_trace.current_sim_time > hold.spring_by && !own_trap_on(hold.victim))
             {
                 combatant.trap_retarget = None;
             }
@@ -416,7 +416,7 @@ pub fn acquire_targets(
         };
         if let Some(avoid) = combatant
             .target
-            .filter(|t| held.is_some_and(|h| h.healer == *t) || (own_trap_on(*t) && is_healer(*t)))
+            .filter(|t| held.is_some_and(|h| h.victim == *t) || (own_trap_on(*t) && is_healer(*t)))
         {
             let my_pos = transform.translation;
             let fightable = |(e, _, stealthed, enemy_ss, _, _, immune, _): &&(
@@ -435,7 +435,7 @@ pub fn acquire_targets(
                 enemy_combatants
                     .iter()
                     .filter(fightable)
-                    .find(|(e, ..)| *e == h.melee)
+                    .find(|(e, ..)| *e == h.fight)
             });
             let nearest = || {
                 enemy_combatants
@@ -1514,10 +1514,6 @@ pub fn dispatch_class_decision(
                 instant_attacks,
                 dip_plan,
                 &movement_config.hunter.weights,
-                (movement_config.hunter.trap_walk_worth >= 0.0).then_some((
-                    movement_config.hunter.trap_walk_spare_own_target,
-                    movement_config.hunter.trap_walk_needs_teammate,
-                )),
                 own_freezing_traps
                     .get(&entity)
                     .map_or(&[][..], Vec::as_slice),

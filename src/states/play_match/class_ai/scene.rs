@@ -442,6 +442,17 @@ impl Scene {
         self
     }
 
+    /// Team `team`'s Hunters play without the trap walk (AS-498,
+    /// `situation::WithheldPlays::team1_no_trap_walk`): the paired control
+    /// of a scene that tests it.
+    pub fn without_trap_walk(mut self, team: u8) -> Self {
+        match team {
+            1 => self.withheld.team1_no_trap_walk = true,
+            _ => self.withheld.team2_no_trap_walk = true,
+        }
+        self
+    }
+
     /// Team `team` plays without the hand-off cover rule (AS-440,
     /// `situation::WithheldPlays::team1_no_handoff_rule`): the paired control
     /// of a scene that tests it.

@@ -133,7 +133,6 @@ fn decide_at(since_gates: f32) -> Decision {
         &mut instant_attacks,
         HunterDipPlan::default(),
         &movement.hunter.weights,
-        None,
         &[],
         None,
         &mut trace,

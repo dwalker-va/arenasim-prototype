@@ -45,6 +45,9 @@ struct HunterRow {
     label: String,
     map: String,
     profile: String,
+    /// This side's Hunter runs the trap walk: `TeamPlan`, and the config does
+    /// not set `team{N}_trap_walk: false`.
+    trap_walk: bool,
     team: u8,
     comp: String,
     enemy: String,
@@ -95,6 +98,9 @@ struct HunterRow {
     dip_enter: u32,
     dip_complete: u32,
     dip_abort: u32,
+    /// The trap walk's (`TeamPlan`): walks begun, and walks ended by a throw.
+    trap_walks: u32,
+    trap_walk_throws: u32,
     trap_chosen: u32,
 }
 
@@ -137,6 +143,10 @@ fn run_one(
     let label = cfg.label.clone().unwrap_or_default();
     let map = cfg.map.clone();
     let profile = cfg.ai_profile.clone().unwrap_or_else(|| "Legacy".into());
+    let walk_on = [
+        cfg.team1_trap_walk != Some(false),
+        cfg.team2_trap_walk != Some(false),
+    ];
     let (team1, team2) = (cfg.team1.join("+"), cfg.team2.join("+"));
     let seed = cfg.random_seed.unwrap_or(0);
     let geometry = load_map_geometry_config()
@@ -267,6 +277,7 @@ fn run_one(
                 label: label.clone(),
                 map: map.clone(),
                 profile: profile.clone(),
+                trap_walk: profile == "TeamPlan" && walk_on[acc.team as usize - 1],
                 team: acc.team,
                 comp,
                 enemy,
@@ -344,6 +355,10 @@ fn run_one(
                         Some("DipEnter") => row.dip_enter += 1,
                         Some("DipComplete") => row.dip_complete += 1,
                         Some("DipAbort") => row.dip_abort += 1,
+                        Some("TrapWalk") => row.trap_walks += 1,
+                        Some("TrapWalkEnd") if ev["scorer_terms"]["thrown"].is_number() => {
+                            row.trap_walk_throws += 1
+                        }
                         _ => {}
                     },
                     Some("ability_decision")

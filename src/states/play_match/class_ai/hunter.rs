@@ -30,8 +30,8 @@ use crate::states::play_match::combat_core::calculate_cast_time;
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::*;
 use crate::states::play_match::decision_trace::{
-    ActorView, DecisionEventBuilder, DecisionTrace, NoActionReason, PlayStep, RejectionReason,
-    TargetView,
+    ActorView, DecisionEventBuilder, DecisionTrace, MovementTrigger, NoActionReason, PlayStep,
+    RejectionReason, TargetView,
 };
 use crate::states::play_match::movement_config::MovementWeights;
 use crate::states::play_match::situation::Role;
@@ -58,11 +58,6 @@ pub fn decide_hunter_action(
     // The Hunter's KITE weights (`movement.ron`), so Disengage bends toward a
     // trap on the enemy healer exactly as the kite does.
     weights: &MovementWeights,
-    // AS-498 prototype: `Some` when the dip is the trap walk
-    // (`hunter.trap_walk_worth` at or above zero), carrying
-    // `hunter.trap_walk_spare_own_target` and
-    // `hunter.trap_walk_needs_teammate`.
-    trap_walk: Option<(bool, bool)>,
     // The Hunter's own Freezing Traps not yet sprung, so its damage does not
     // land on an enemy just after one of them freezes it.
     own_traps: &[LiveTrap],
@@ -94,6 +89,11 @@ pub fn decide_hunter_action(
     if combatant.global_cooldown > 0.0 {
         return false;
     }
+
+    // The trap walk (AS-498, `TeamPlan`): while it walks, the shared trap
+    // cooldown and the Hunter's feet are its, so neither a Frost Trap nor a
+    // cast-time Aimed Shot spends them.
+    let walking = ctx.trap_walk() && matches!(dip_plan, HunterDipPlan::Walking);
 
     // Flare first, and before the target check: it is for an enemy the Hunter
     // cannot see, which in 1v1 against a Rogue is the only enemy there is, so
@@ -170,6 +170,7 @@ pub fn decide_hunter_action(
         target,
         completed_state,
         hold: Some(instead),
+        walked,
     } = dip_plan
     {
         // The trap walk's throw: the pressure trap's clean landing, and the
@@ -196,7 +197,16 @@ pub fn decide_hunter_action(
                 ));
                 builder.finish();
                 commands.entity(entity).try_insert(completed_state);
-                emit_dip_complete(decision_trace, ctx, target, my_pos);
+                if walked {
+                    super::hunter_dip::emit_trap_walk(
+                        decision_trace,
+                        ctx,
+                        target,
+                        my_pos,
+                        MovementTrigger::TrapWalkEnd,
+                        Some(("thrown", 1.0)),
+                    );
+                }
                 return true;
             }
         }
@@ -205,6 +215,7 @@ pub fn decide_hunter_action(
         target,
         completed_state,
         hold: None,
+        ..
     } = dip_plan
     {
         if ctx.combatants.get(&target).is_some_and(|i| i.is_alive) {
@@ -235,6 +246,23 @@ pub fn decide_hunter_action(
                 return true;
             }
         }
+    }
+
+    // The trap walk names why it walked or held this frame.
+    match dip_plan {
+        HunterDipPlan::TrapHeld { note } => builder.reject(
+            AbilityType::FreezingTrap,
+            RejectionReason::PreconditionUnmet {
+                note: note.to_string(),
+            },
+        ),
+        HunterDipPlan::Walking if ctx.trap_walk() => builder.reject(
+            AbilityType::FreezingTrap,
+            RejectionReason::PreconditionUnmet {
+                note: super::hunter_dip::TRAP_WALK_WALKING.to_string(),
+            },
+        ),
+        _ => {}
     }
 
     // The Peel play (TeamPlan): a teammate is in danger, so a snare on its
@@ -272,23 +300,21 @@ pub fn decide_hunter_action(
         if let Some(call) = super::burst::burst_call(ctx) {
             if let Some(subject) = ctx.combatants.get(&call.subject) {
                 let aimed = if nearest_dist >= 20.0 {
-                    !aimed_shot_held_for_walk(
-                        trap_walk.is_some() && dip_plan.owns_movement(),
-                        &mut builder,
-                    ) && try_aimed_shot(
-                        commands,
-                        combat_log,
-                        abilities,
-                        entity,
-                        combatant,
-                        my_pos,
-                        call.subject,
-                        subject,
-                        auras,
-                        ctx,
-                        own_traps,
-                        &mut builder,
-                    )
+                    !aimed_shot_held_for_walk(walking, &mut builder)
+                        && try_aimed_shot(
+                            commands,
+                            combat_log,
+                            abilities,
+                            entity,
+                            combatant,
+                            my_pos,
+                            call.subject,
+                            subject,
+                            auras,
+                            ctx,
+                            own_traps,
+                            &mut builder,
+                        )
                 } else {
                     builder.reject(
                         AbilityType::AimedShot,
@@ -442,10 +468,8 @@ pub fn decide_hunter_action(
         // Priority 3: Frost Trap at feet — unless it would replace the
         // Hunter's own Freezing Trap still waiting to spring, or the shared
         // cooldown is about to buy a freeze on the enemy healer.
-        if !frost_trap_held_for_walk(
-            trap_walk.is_some() && dip_plan.owns_movement(),
-            &mut builder,
-        ) && !frost_trap_held_for_freezing(own_traps, combatant, &mut builder)
+        if !frost_trap_held_for_walk(walking, &mut builder)
+            && !frost_trap_held_for_freezing(own_traps, combatant, &mut builder)
             && !frost_trap_held_for_healer(
                 abilities,
                 entity,
@@ -553,10 +577,8 @@ pub fn decide_hunter_action(
             });
         if let Some((frost_anchor_entity, anchor_pos)) = frost_anchor {
             let midpoint = (my_pos + anchor_pos) / 2.0;
-            if !frost_trap_held_for_walk(
-                trap_walk.is_some() && dip_plan.owns_movement(),
-                &mut builder,
-            ) && !frost_trap_held_for_freezing(own_traps, combatant, &mut builder)
+            if !frost_trap_held_for_walk(walking, &mut builder)
+                && !frost_trap_held_for_freezing(own_traps, combatant, &mut builder)
                 && !frost_trap_held_for_healer(
                     abilities,
                     entity,
@@ -629,10 +651,7 @@ pub fn decide_hunter_action(
             .is_some_and(|lock| lock.subject != target_entity);
     if lock_window
         && distance_to_target >= 20.0
-        && !aimed_shot_held_for_walk(
-            trap_walk.is_some() && dip_plan.owns_movement(),
-            &mut builder,
-        )
+        && !aimed_shot_held_for_walk(walking, &mut builder)
         && try_aimed_shot(
             commands,
             combat_log,
@@ -691,10 +710,7 @@ pub fn decide_hunter_action(
         && distance_to_target >= 20.0
         && sting_due(abilities, entity, target_entity, target_info, ctx)
         && aimed_shot_before_sting(abilities, entity, my_pos, auras, ctx)
-        && !aimed_shot_held_for_walk(
-            trap_walk.is_some() && dip_plan.owns_movement(),
-            &mut builder,
-        )
+        && !aimed_shot_held_for_walk(walking, &mut builder)
         && try_aimed_shot(
             commands,
             combat_log,
@@ -746,27 +762,18 @@ pub fn decide_hunter_action(
     // the healer IS the kill target and nobody else is worth a trap) the
     // fallback throws the trap into the lane toward the trap candidate, where
     // the enemy runs — when the enemy predicted to spring it is worth trapping
-    // (`fallback_trap`).
-    let focused = super::hunter_dip::trap_focus(ctx, entity, combatant.target);
-    // The trap walk holds the trap only for its own victim; with none, the
-    // lane fallback may throw it.
-    let off_target = if trap_walk.is_some() {
-        super::hunter_dip::trap_play_victim(
-            ctx,
-            entity,
-            combatant.team,
-            my_pos,
-            combatant
-                .target
-                .filter(|_| trap_walk.is_some_and(|(spare, _)| spare)),
-            trap_walk.is_some_and(|(_, needs)| needs),
-        )
-        .map(|(v, _)| (v, my_pos))
+    // (`fallback_trap`). Under the trap walk (`TeamPlan`, AS-498) the trap is
+    // held only for the walk's own victim (`trap_play_victim`); a victim it
+    // holds back from (no DPS teammate to use the window) is not held for.
+    let held_for_dip = if ctx.trap_walk() {
+        super::hunter_dip::trap_play_victim(ctx, entity, combatant.team, my_pos)
+            .is_some_and(|v| v.is_ok())
     } else {
+        let focused = super::hunter_dip::trap_focus(ctx, entity, combatant.target);
         super::hunter_dip::opportunistic_off_target(ctx, entity, combatant.team, &focused, my_pos)
+            .is_some()
     };
-    // With an off-target the trap is held for the dip.
-    let fallback = off_target.is_none().then(|| {
+    let fallback = (!held_for_dip).then(|| {
         fallback_trap(
             ctx,
             abilities,
@@ -832,23 +839,22 @@ pub fn decide_hunter_action(
     }
 
     if distance_to_target >= 20.0 {
-        if !aimed_shot_held_for_walk(
-            trap_walk.is_some() && dip_plan.owns_movement(),
-            &mut builder,
-        ) && try_aimed_shot(
-            commands,
-            combat_log,
-            abilities,
-            entity,
-            combatant,
-            my_pos,
-            target_entity,
-            target_info,
-            auras,
-            ctx,
-            own_traps,
-            &mut builder,
-        ) {
+        if !aimed_shot_held_for_walk(walking, &mut builder)
+            && try_aimed_shot(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                target_entity,
+                target_info,
+                auras,
+                ctx,
+                own_traps,
+                &mut builder,
+            )
+        {
             builder.finish();
             return true;
         }
@@ -1139,7 +1145,8 @@ pub const FROST_TRAP_HELD_FOR_WALK: &str = "frost trap held: walking to Freezing
 /// would plant the Hunter mid-walk.
 pub const AIMED_SHOT_HELD_FOR_WALK: &str = "aimed shot held: walking to Freezing Trap";
 
-/// Hold Aimed Shot while the trap walk is walking (AS-498 prototype).
+/// Hold Aimed Shot while the trap walk walks (AS-498): its cast would plant
+/// the Hunter short of throw range.
 fn aimed_shot_held_for_walk(walking: bool, builder: &mut DecisionEventBuilder<'_>) -> bool {
     if !walking {
         return false;
@@ -1153,7 +1160,8 @@ fn aimed_shot_held_for_walk(walking: bool, builder: &mut DecisionEventBuilder<'_
     true
 }
 
-/// Hold the Frost Trap while the trap walk owns movement (AS-498 prototype).
+/// Hold the Frost Trap while the trap walk walks (AS-498): the traps share
+/// one cooldown, and the walk is there to spend it on a Freezing Trap.
 fn frost_trap_held_for_walk(walking: bool, builder: &mut DecisionEventBuilder<'_>) -> bool {
     if !walking {
         return false;

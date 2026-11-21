@@ -184,7 +184,6 @@ impl Harness {
             &mut instant_attacks,
             HunterDipPlan::default(),
             &movement.hunter.weights,
-            None,
             &[],
             None,
             &mut trace,
