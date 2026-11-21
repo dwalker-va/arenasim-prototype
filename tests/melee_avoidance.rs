@@ -926,6 +926,16 @@ fn a_swing_held_off_a_friendly_fear_is_not_avoided() {
 /// scratch build of AS-496's tree with `roll_avoidance` returning before any
 /// draw plays each cell's match log byte-identically to the tree itself.
 /// (The logs carry 13 crits and 8 eliminations.)
+///
+/// Re-recorded for AS-498, the Hunter's trap walk under `TeamPlan`: the 3v3
+/// 223 -> 272; the two `Legacy` cells held. Its trace first differs as the
+/// Hunter begins a trap walk at the enemy Paladin 8.5s after the gates; its
+/// log first differs at 21.77s, where the Warrior's swing reaches the walking
+/// Hunter 0.15s sooner, and at 22.47s the Hunter throws Freezing Trap where
+/// it used Disengage. The evidence is the same: a scratch build of AS-498's
+/// tree with `roll_avoidance` returning before any draw plays each cell's
+/// match log byte-identically to the tree itself. (The logs carry 16 crits
+/// and 7 eliminations.)
 #[test]
 fn a_match_without_avoidance_draws_what_it_drew_before() {
     for (team1, team2, map, profile, seed, recorded) in ZERO_AVOIDANCE_DRAWS {
@@ -969,7 +979,7 @@ const ZERO_AVOIDANCE_DRAWS: &[DrawPin] = &[
         "PillaredArena",
         "TeamPlan",
         5,
-        223,
+        272,
     ),
     (&["Rogue"], &["Warrior"], "BasicArena", "Legacy", 3, 59),
 ];

@@ -994,9 +994,11 @@ pub fn walk_exposure(
 ///
 /// - its landing is clean from here ([`pressure_trap_landing`]): throw now,
 ///   from range ([`HunterDipPlan::DipCast`] with the target hold);
-/// - otherwise walk at it while the walk to throw range ([`trap_setup_range`])
-///   costs no melee contact the kite would have prevented ([`walk_exposure`])
-///   and fits what is left of `dip_budget`.
+/// - beyond throw range ([`trap_setup_range`]), walk at it while the walk to
+///   throw range costs no melee contact the kite would have prevented
+///   ([`walk_exposure`]) and fits what is left of `dip_budget`;
+/// - inside it with the landing not clean, hold, traced with the pressure
+///   trap's own reason: walking closer does not clear the landing.
 ///
 /// Traced: `TrapWalk` as a walk starts (or turns to a new victim),
 /// `TrapWalkEnd` as it ends unthrown; the ability decision names why it
@@ -1055,7 +1057,8 @@ fn evaluate_trap_walk(
         Some(Err(note)) => return end(state, decision_trace, HunterDipPlan::TrapHeld { note }),
         Some(Ok(pair)) => pair,
     };
-    if pressure_trap_landing(ctx, abilities, combatant.team, my_pos, victim).is_ok() {
+    let landing = pressure_trap_landing(ctx, abilities, combatant.team, my_pos, victim);
+    if landing.is_ok() {
         let mut completed = *state;
         completed.dip_target = None;
         completed.dip_until = 0.0;
@@ -1069,6 +1072,13 @@ fn evaluate_trap_walk(
     let Some(goal) = ctx.combatants.get(&victim).map(|v| v.position) else {
         return end(state, decision_trace, HunterDipPlan::Rotation);
     };
+    // Inside throw range already, a walk buys nothing the kite does not: the
+    // landing is held for the reason the pressure trap names (another enemy
+    // beside the victim, or the victim not the one to spring it).
+    if flat(goal).distance(flat(my_pos)) <= trap_setup_range(abilities) {
+        let note = landing.err().unwrap_or(PRESSURE_TRAP_NOT_CLEAN);
+        return end(state, decision_trace, HunterDipPlan::TrapHeld { note });
+    }
     let budget = if live {
         state.dip_until - now
     } else {
