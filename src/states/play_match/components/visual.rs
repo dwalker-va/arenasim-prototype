@@ -944,6 +944,17 @@ pub const ART_OF_WAR_AURA: &str = "The Art of War";
 /// landing plays the disc; the absorb wears its card
 /// (`rendering/effects/shield.rs`, `ShieldKind::SacredShield`).
 pub const SACRED_SHIELD_AURA: &str = "Sacred Shield";
+/// Vengeance's damage buff (AS-377): the name its node gives its procs'
+/// aura in `talents.ron`. Not a landing: its state is the pale-blue glow on
+/// both of the Paladin's hands for the buff's life
+/// (`rendering/effects/vengeance.rs`), whose onset is its application.
+pub const VENGEANCE_AURA: &str = "Vengeance";
+
+/// Whether an aura of `aura_type` named `name` is Vengeance's: the one
+/// predicate its hands, its band routing and the lands-silently audit all ask.
+pub fn is_vengeance(aura_type: AuraType, name: &str) -> bool {
+    aura_type == AuraType::DamageDealtIncrease && name == VENGEANCE_AURA
+}
 
 /// What a heal-over-time aura draws — the ONE place a HoT meets its visual,
 /// routed by the aura's RON name the way `DotStateVisual::for_dot` routes a
@@ -1969,18 +1980,26 @@ pub enum AuraApplyOwner {
     /// (`HealingReceivedIncrease`, `KillingBlowSave`) are the damage
     /// pipeline's, which any later user meets on the band.
     GuardianSpirit,
+    /// Vengeance: the pale-blue glow on both of the Paladin's hands, whose
+    /// onset is its application (`vengeance.rs`, AS-377). Owned per aura
+    /// NAME, because its type (`DamageDealtIncrease`) is the damage
+    /// pipeline's, which any other user meets on the band.
+    VengeanceHands,
 }
 
 impl AuraApplyRoute {
     /// Route one aura INSTANCE's application: a named aura with a bespoke
     /// landing ([`AuraLandingKind::for_aura`]) is owned by it, and so is
-    /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]); every other
-    /// aura routes by its type ([`Self::for_aura`]). The renderer asks this.
+    /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]), and Vengeance
+    /// by its hands ([`VENGEANCE_AURA`]); every other aura routes by its type
+    /// ([`Self::for_aura`]). The renderer asks this.
     pub fn for_instance(aura_type: AuraType, name: &str) -> Self {
         if AuraLandingKind::for_aura(aura_type, name).is_some() {
             AuraApplyRoute::Owned(AuraApplyOwner::AuraLanding)
         } else if name == GUARDIAN_SPIRIT_AURA {
             AuraApplyRoute::Owned(AuraApplyOwner::GuardianSpirit)
+        } else if is_vengeance(aura_type, name) {
+            AuraApplyRoute::Owned(AuraApplyOwner::VengeanceHands)
         } else {
             Self::for_aura(aura_type)
         }
