@@ -2075,6 +2075,11 @@ pub enum AuraApplyOwner {
     /// (`DamageTakenReduction`) is the damage pipeline's, which any other user
     /// meets on the band.
     DivineProtectionGlobe,
+    /// Shadow Dance: the dark-red shadow state on the Rogue's chest for the
+    /// whole window, thinning and flickering over its last 1.5 s
+    /// (`shadow_dance.rs`, AS-368). Owned by TYPE: `ShadowDance` has no other
+    /// user.
+    ShadowDanceState,
 }
 
 impl AuraApplyRoute {
@@ -2155,8 +2160,6 @@ impl AuraApplyRoute {
             // on the Paladin (`for_instance`, AS-374); an unnamed one keeps
             // the family cue.
             AuraType::SilenceInterruptImmunity => AuraApplyRoute::Band,
-            // Shadow Dance likewise (its visual card is AS-368).
-            AuraType::ShadowDance => AuraApplyRoute::Band,
 
             // Travel Form has no bespoke apply treatment of its own, so the
             // family cue draws it.
@@ -2179,6 +2182,8 @@ impl AuraApplyRoute {
             AuraType::SpellSchoolLockout => AuraApplyRoute::Owned(AuraApplyOwner::InterruptSputter),
             AuraType::Silence => AuraApplyRoute::Owned(AuraApplyOwner::BacklashBurst),
             AuraType::ShadowSight => AuraApplyRoute::Owned(AuraApplyOwner::ShadowSightOrb),
+            // Shadow Dance's window: its state on the Rogue is its landing.
+            AuraType::ShadowDance => AuraApplyRoute::Owned(AuraApplyOwner::ShadowDanceState),
 
             AuraType::MovementSpeedSlow | AuraType::AttackSpeedSlow => {
                 AuraApplyRoute::Owned(AuraApplyOwner::SlowRing)

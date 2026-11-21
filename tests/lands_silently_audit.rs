@@ -1016,6 +1016,13 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             AuraType::TravelForm => {
                 Some("pill on all fours + shift puff (TravelFormVisual → shapeshift.rs)")
             }
+            // Its own type: the state on the Rogue owns the window, not the band.
+            AuraType::ShadowDance
+                if AuraApplyRoute::for_aura(t)
+                    == AuraApplyRoute::Owned(AuraApplyOwner::ShadowDanceState) =>
+            {
+                Some("dark-red shadow state on the Rogue's chest for the window (shadow_dance.rs)")
+            }
             _ if wears_shadowform_look(c.applies_aura.as_ref().and_then(|a| a.compound)) => {
                 Some("violet translucent body + feet shroud while the form holds (shadowform.rs)")
             }
@@ -1087,10 +1094,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
         "AS-353 (Power Infusion, the infusion on the ally)",
     ),
     (PowerWordFortitude, "AS-134 (aura application)"),
-    (
-        ShadowDance,
-        "AS-336 (Shadow Dance, the Subtlety capstone's window; AS-368 builds it)",
-    ),
     (ShadowResistanceAura, "AS-134 (aura application)"),
     (
         VampiricEmbrace,

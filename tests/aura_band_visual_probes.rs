@@ -29,8 +29,8 @@ use arenasim::states::play_match::combat_core::{
 };
 use arenasim::states::play_match::components::{
     weapon_poison_marker_aura, ActiveAuras, Aura, AuraApplyOwner, AuraApplyRoute, AuraBand,
-    AuraBandPolarity, AuraType, Combatant, CompoundDebuff, DispelType, Pet, PetType, TotemElement,
-    DIVINE_PROTECTION_AURA, GUARDIAN_SPIRIT_AURA, VENGEANCE_AURA,
+    AuraBandPolarity, AuraPending, AuraType, Combatant, CompoundDebuff, DispelType, Pet, PetType,
+    TotemElement, DIVINE_PROTECTION_AURA, GUARDIAN_SPIRIT_AURA, VENGEANCE_AURA,
 };
 use arenasim::states::play_match::talent_procs::{effect_aura, ProcEvent, TalentProcSlot};
 use arenasim::states::play_match::talents::{TalentDefinitions, TalentEffect, TalentId};
@@ -103,8 +103,6 @@ const BAND_TYPES: &[AuraType] = &[
     // Aura Mastery's immunity (AS-420): the band for an unnamed one; Aura
     // Mastery's own is owned by its named landing (AS-374).
     AuraType::SilenceInterruptImmunity,
-    // Shadow Dance's window (AS-419): the band until AS-368 draws it.
-    AuraType::ShadowDance,
     // Vampiric Embrace's leech (AS-416): the band until AS-357 draws it.
     AuraType::LeechMark,
 ];
@@ -150,6 +148,7 @@ fn every_bespoke_owner_is_one_that_exists() {
         (AuraType::SpellSchoolLockout, InterruptSputter),
         (AuraType::Silence, BacklashBurst),
         (AuraType::ShadowSight, ShadowSightOrb),
+        (AuraType::ShadowDance, ShadowDanceState),
         (AuraType::MovementSpeedSlow, SlowRing),
         (AuraType::AttackSpeedSlow, SlowRing),
     ];
@@ -872,6 +871,59 @@ fn cheat_death_raises_no_band_but_another_damage_cut_does() {
     h.set_auras(unit, vec![devotion]);
     h.tick(3);
     assert_eq!(h.bands().len(), 1, "another damage cut keeps the band");
+}
+
+/// Shadow Dance's aura as the Rogue AI lands it, through the engine's own
+/// constructor.
+fn shadow_dance_aura() -> Aura {
+    let defs = AbilityDefinitions::default();
+    let def = defs.get(&AbilityType::ShadowDance).expect("Shadow Dance");
+    let rogue = Entity::from_raw(1);
+    AuraPending::from_ability(rogue, rogue, def)
+        .expect("Shadow Dance applies an aura")
+        .aura
+}
+
+/// Shadow Dance is owned by its state on the Rogue, by TYPE
+/// (`shadow_dance.rs`): the window's state is its landing. Its type has no
+/// other user, so the name does not enter the routing.
+#[test]
+fn shadow_dance_owns_its_window_by_type() {
+    let dance = shadow_dance_aura();
+    assert_eq!(dance.effect_type, AuraType::ShadowDance);
+    let owned = AuraApplyRoute::Owned(AuraApplyOwner::ShadowDanceState);
+    assert_eq!(AuraApplyRoute::for_aura(AuraType::ShadowDance), owned);
+    assert_eq!(
+        AuraApplyRoute::for_instance(dance.effect_type, &dance.ability_name),
+        owned
+    );
+    assert_eq!(
+        AuraApplyRoute::for_instance(AuraType::ShadowDance, "Some Other Dance"),
+        owned,
+        "by type, whatever its name"
+    );
+}
+
+/// The Dance raises no band, and a buff landing beside it still does.
+#[test]
+fn shadow_dance_raises_no_band_but_a_buff_beside_it_does() {
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(unit, vec![shadow_dance_aura()]);
+    h.tick(3);
+    assert!(h.bands().is_empty(), "the state owns the Dance's landing");
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(
+        unit,
+        vec![
+            shadow_dance_aura(),
+            aura(AuraType::AttackPowerIncrease, "Battle Shout", None),
+        ],
+    );
+    h.tick(3);
+    assert_eq!(h.bands().len(), 1, "a buff beside it keeps its band");
 }
 
 #[test]
