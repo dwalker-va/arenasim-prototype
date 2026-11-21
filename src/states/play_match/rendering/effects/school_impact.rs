@@ -386,8 +386,8 @@ pub fn impact_style(school: SpellSchool) -> ImpactStyle {
 /// Aimed, Arcane and Concussive Shot share ONE landing (`magic_impact_chest`)
 /// whatever their RON schools say, and Serpent Sting has its own lingering
 /// cloud. Both are defined once, in `hunter_shots.rs`. Mind Blast, Holy
-/// Shock's damage leg, Heroic Strike and the interrupts play their client
-/// models' emitters in the same way (`client_landings.rs`).
+/// Shock's damage leg, Heroic Strike, Crusader Strike and the interrupts play
+/// their client models' emitters in the same way (`client_landings.rs`).
 ///
 /// Mana Burn is the other override. It is Shadow, but the client gives
 /// it its own model (`manaburn_chest.m2`, chest attachment 34) where Mind
@@ -400,8 +400,8 @@ pub fn landing_style(ability: AbilityType, school: SpellSchool) -> ImpactStyle {
     if let Some(kind) = hunter_shot_for(ability) {
         return kind.landing_style();
     }
-    // Mind Blast, Holy Shock's damage leg, Heroic Strike and the four
-    // interrupts: client emitter tables (`client_landings.rs`).
+    // Mind Blast, Holy Shock's damage leg, Heroic Strike, Crusader Strike
+    // and the four interrupts: client emitter tables (`client_landings.rs`).
     if let Some(style) = client_landing_style(ability) {
         return style;
     }
