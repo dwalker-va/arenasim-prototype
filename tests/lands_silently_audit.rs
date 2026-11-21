@@ -79,6 +79,7 @@ use arenasim::states::play_match::combat_core::cheat_death_aura;
 use arenasim::states::play_match::combat_core::ExtraSwingSource;
 use arenasim::states::play_match::combat_core::CHEAT_DEATH_NAME;
 use arenasim::states::play_match::components::is_divine_protection;
+use arenasim::states::play_match::components::is_vengeance;
 use arenasim::states::play_match::components::Aura;
 use arenasim::states::play_match::components::AuraApplyOwner;
 use arenasim::states::play_match::components::AuraApplyRoute;
@@ -1878,6 +1879,8 @@ fn talent_proc_aura_visual(aura: &Aura) -> Option<&'static str> {
                 .any(|kind| is_live_shield(kind, aura))
             {
                 Some("client shield cards (shield.rs)")
+            } else if is_vengeance(t, name) {
+                Some("both hands glow pale blue while it lasts (vengeance.rs)")
             } else {
                 // The aura band (`AuraApplyRoute::Band`) is not this proc's
                 // own visual: see the family's header.
@@ -1926,10 +1929,6 @@ const TALENT_PROC_KNOWN_SILENT: &[(TalentId, &str)] = &[
     (
         TalentId::BlessedRecovery,
         "AS-352 (Blessed Recovery's palm glow and Renew's amber rings)",
-    ),
-    (
-        TalentId::Vengeance,
-        "AS-377 (Vengeance: both hands glow pale blue while the buff lasts)",
     ),
 ];
 
@@ -2090,6 +2089,11 @@ fn the_talent_proc_judge_names_each_drawn_members_treatment() {
     assert_eq!(
         talent_proc_judge(defs, TalentId::Blackout),
         Some("stun whirl (hard_cc.rs)")
+    );
+    // Both of Vengeance's procs land the one buff its hands draw (AS-377).
+    assert_eq!(
+        talent_proc_judge(defs, TalentId::Vengeance),
+        Some("both hands glow pale blue while it lasts (vengeance.rs)")
     );
     // Inspiration's armor buff routes to the band, which is not its own.
     let inspiration = talent_procs_in(defs)

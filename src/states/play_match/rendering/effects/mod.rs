@@ -24,6 +24,8 @@ mod shadowform;
 pub use shadowform::*;
 mod guardian_spirit;
 pub use guardian_spirit::*;
+mod vengeance;
+pub use vengeance::*;
 mod cheat_death;
 pub use cheat_death::*;
 mod divine_protection;

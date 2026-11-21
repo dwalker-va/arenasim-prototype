@@ -885,6 +885,15 @@ impl Plugin for StatesPlugin {
                 .before(TransformSystem::TransformPropagate)
                 .run_if(in_combat_scene),
         )
+        // Vengeance's hands stand on the rendered body's spell hands for the
+        // same reason (`vengeance.rs`).
+        .add_systems(
+            PostUpdate,
+            play_match::place_vengeance_hands
+                .after(play_match::apply_cyclone_lift)
+                .before(TransformSystem::TransformPropagate)
+                .run_if(in_combat_scene),
+        )
         // Divine Protection's globe stands on the rendered chest for the same
         // reason (`divine_protection.rs`).
         .add_systems(
@@ -977,6 +986,15 @@ impl Plugin for StatesPlugin {
                 )
                     .chain(),
             )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Vengeance's pale-blue hands (AS-377): raised, aged, hidden on a
+        // sheep and taken down here; posed on the rendered body in
+        // PostUpdate (`place_vengeance_hands`).
+        .add_systems(
+            Update,
+            play_match::update_vengeance_hands
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )

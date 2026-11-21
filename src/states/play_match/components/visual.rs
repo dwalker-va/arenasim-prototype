@@ -952,6 +952,18 @@ pub const FREEZING_TRAP_AURA: &str = "Freezing Trap";
 /// landing plays the disc; the absorb wears its card
 /// (`rendering/effects/shield.rs`, `ShieldKind::SacredShield`).
 pub const SACRED_SHIELD_AURA: &str = "Sacred Shield";
+/// Vengeance's damage buff (AS-377): the name its node gives its procs'
+/// aura in `talents.ron`. Not a landing: its state is the pale-blue glow on
+/// both of the Paladin's hands for the buff's life
+/// (`rendering/effects/vengeance.rs`), whose onset is its application.
+pub const VENGEANCE_AURA: &str = "Vengeance";
+
+/// Whether an aura of `aura_type` named `name` is Vengeance's: the one
+/// predicate its hands, its band routing and the lands-silently audit all ask.
+pub fn is_vengeance(aura_type: AuraType, name: &str) -> bool {
+    aura_type == AuraType::DamageDealtIncrease && name == VENGEANCE_AURA
+}
+
 /// Divine Protection's damage reduction (AS-376). Not a landing: its state is
 /// the red-gold globe at the Paladin's chest for the buff's life
 /// (`rendering/effects/divine_protection.rs`), whose onset is its application.
@@ -2041,6 +2053,11 @@ pub enum AuraApplyOwner {
     /// (`HealingReceivedIncrease`, `KillingBlowSave`) are the damage
     /// pipeline's, which any later user meets on the band.
     GuardianSpirit,
+    /// Vengeance: the pale-blue glow on both of the Paladin's hands, whose
+    /// onset is its application (`vengeance.rs`, AS-377). Owned per aura
+    /// NAME, because its type (`DamageDealtIncrease`) is the damage
+    /// pipeline's, which any other user meets on the band.
+    VengeanceHands,
     /// Repentance (AS-378): the gold impact at the victim's chest as it lands,
     /// then the violet head swirl for as long as the incapacitate holds
     /// (`repentance.rs`). Owned per aura NAME, because its type
@@ -2063,8 +2080,9 @@ impl AuraApplyRoute {
     /// Route one aura INSTANCE's application: Repentance's incapacitate is
     /// owned by its impact and head swirl ([`REPENTANCE_AURA`]), a named aura
     /// with a bespoke landing ([`AuraLandingKind::for_aura`]) by that,
-    /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]), Cheat Death by
-    /// its save ([`CHEAT_DEATH_NAME`]) and Divine Protection by its globe
+    /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]), Vengeance by
+    /// its hands ([`VENGEANCE_AURA`]), Cheat Death by its save
+    /// ([`CHEAT_DEATH_NAME`]) and Divine Protection by its globe
     /// ([`DIVINE_PROTECTION_AURA`]); every other aura routes by its type
     /// ([`Self::for_aura`]). The renderers ask this — the band, and the
     /// Repentance swirl to find its incapacitate.
@@ -2075,6 +2093,8 @@ impl AuraApplyRoute {
             AuraApplyRoute::Owned(AuraApplyOwner::AuraLanding)
         } else if name == GUARDIAN_SPIRIT_AURA {
             AuraApplyRoute::Owned(AuraApplyOwner::GuardianSpirit)
+        } else if is_vengeance(aura_type, name) {
+            AuraApplyRoute::Owned(AuraApplyOwner::VengeanceHands)
         } else if name == CHEAT_DEATH_NAME {
             AuraApplyRoute::Owned(AuraApplyOwner::CheatDeath)
         } else if is_divine_protection(aura_type, name) {
