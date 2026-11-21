@@ -3,7 +3,10 @@
 //! Handles AI decision-making for the Warlock class.
 //!
 //! ## Priority Order
-//! After the plays and the Death Coil peel:
+//! After the plays and the Death Coil peel, the Fear window
+//! ([`fear_window_step`]): while its own Fear holds its target, Shadow Bolt is
+//! timed to land as the Fear ends and the globals before then go on what does
+//! not break it. Then:
 //! 0. Shadow Bolt while Shadow Trance (Nightfall) makes it instant: see
 //!    [`shadow_trance_up`]
 //! 0. Life Tap (health into mana) — when short of mana and healthy: see
@@ -15,7 +18,8 @@
 //!    amplifies
 //! 3. Immolate (2s cast Fire DoT) - skipped when being kited; then
 //!    Conflagrate (a talent) consumes the Warlock's own Immolate for its burst
-//! 4. Fear (CC on non-CC'd target)
+//! 4. Fear (CC on non-CC'd target), only at full length: never into
+//!    diminishing returns ([`fear_lands_full`])
 //! 5. Drain Life (when HP < 80% and target has DoTs)
 //! 6. Shadow Bolt (main damage spell) - skipped when being kited
 //!
@@ -43,7 +47,7 @@ use crate::states::play_match::components::{
     ActiveAuras, AuraPending, AuraType, CastingState, ChannelingState, Combatant, DRCategory,
     InstantAbilityFired, PlayMatchEntity, Projectile,
 };
-use crate::states::play_match::constants::{DR_MULTIPLIERS, GCD};
+use crate::states::play_match::constants::GCD;
 use crate::states::play_match::decision_trace::{
     DecisionEventBuilder, DecisionTrace, PlayStep, RejectionReason, TapHold,
 };
@@ -430,10 +434,9 @@ pub fn decide_warlock_action(
         }
     }
 
-    // The Fear window (AS-495): the Warlock's own Fear holds its target. The
-    // re-Fear is timed to land as it ends (when another Fear pays at the
-    // target's diminishing returns), else the damage is; the globals before
-    // that moment go on what does not break the Fear.
+    // The Fear window (AS-495): the Warlock's own Fear holds its target.
+    // Shadow Bolt is timed to land as it ends; the globals before that moment
+    // go on what does not break the Fear.
     match fear_window_step(
         commands,
         combat_log,
@@ -747,18 +750,11 @@ pub fn decide_warlock_action(
                 AbilityType::Fear,
                 RejectionReason::TargetAlreadyCCd { cc_type },
             );
-        } else if ctx.own_fear_on(fear_target_entity).is_some() {
+        } else if !fear_lands_full(ctx, fear_target_entity) {
             builder.reject(
                 AbilityType::Fear,
                 RejectionReason::PreconditionUnmet {
-                    note: FEAR_WINDOW_DECIDES_NOTE.into(),
-                },
-            );
-        } else if !fear_pays(ctx, fear_target_entity, abilities) {
-            builder.reject(
-                AbilityType::Fear,
-                RejectionReason::PreconditionUnmet {
-                    note: FEAR_DOES_NOT_PAY_NOTE.into(),
+                    note: FEAR_DIMINISHED_NOTE.into(),
                 },
             );
         } else if let Some(fear_target_info) = ctx.combatants.get(&fear_target_entity) {
@@ -845,36 +841,24 @@ pub fn decide_warlock_action(
     acted
 }
 
-/// The shortest Fear worth casting on the Warlock's own target, after
-/// diminishing returns (AS-495): a shorter one costs its 1.5s cast, delays the
-/// Shadow Bolt timed to the window's end and spends a step of diminishing
-/// returns for too little denial. WIP, awaiting the user's ruling: 8s casts
-/// only a full-length Fear (no chain); 3s would chain one 4s Fear at 50%, and
-/// 2s a 2s one at 25% too. Measured in the AS-495 report: full-length only
-/// won most, the 25% link cost most.
-pub const FEAR_CHAIN_MIN_SECS: f32 = 8.0;
+/// The rotation's Fear on a target whose diminishing returns would shorten
+/// it ([`fear_lands_full`]).
+pub const FEAR_DIMINISHED_NOTE: &str =
+    "Fear only at full length: diminishing returns would shorten it";
 
-/// The rotation's Fear on a target its own Fear already holds: the Fear
-/// window times that re-Fear ([`fear_window_step`]).
-pub const FEAR_WINDOW_DECIDES_NOTE: &str = "Fear window: the re-Fear is timed to the Fear's end";
-
-/// A Fear the target's diminishing returns cut below [`FEAR_CHAIN_MIN_SECS`].
-pub const FEAR_DOES_NOT_PAY_NOTE: &str = "Fear would be diminished below the time it costs";
-
-/// A global cooldown held for the Fear window's next moment.
+/// A global cooldown held so the Shadow Bolt it would delay lands as the
+/// Warlock's own Fear ends ([`fear_window_step`]).
 pub const FEAR_WINDOW_HOLD_NOTE: &str =
     "Fear window: holding the global cooldown for the Fear's end";
 
-/// Would a Fear on `target` now hold it for at least
-/// [`FEAR_CHAIN_MIN_SECS`] after its diminishing returns?
-pub fn fear_pays(ctx: &CombatContext, target: Entity, abilities: &AbilityBook) -> bool {
-    let full = abilities
-        .get_unchecked(&AbilityType::Fear)
-        .applies_aura
-        .as_ref()
-        .map_or(0.0, |a| a.duration);
-    let level = ctx.dr_level(target, DRCategory::Fears).min(3) as usize;
-    full * DR_MULTIPLIERS[level] >= FEAR_CHAIN_MIN_SECS
+/// Would a Fear on `target` land at full length — its diminishing returns on
+/// Fears fresh? The rotation Fears only then (AS-495, user ruling: "full 8
+/// second fears"). A diminished Fear costs its 1.5s cast and the Shadow Bolt
+/// timed to its end for half the denial or less: measured, one 4s Fear
+/// chained at 50% cost the Warlock 2.6pt of 1v1 against full-length only, and
+/// chaining down to 25% cost 10pt.
+pub fn fear_lands_full(ctx: &CombatContext, target: Entity) -> bool {
+    ctx.dr_level(target, DRCategory::Fears) == 0
 }
 
 /// What the Fear window step did this tick.
@@ -882,7 +866,7 @@ pub fn fear_pays(ctx: &CombatContext, target: Entity, abilities: &AbilityBook) -
 enum WindowStep {
     /// It cast something.
     Acted,
-    /// It holds the global cooldown for the window's next moment.
+    /// It holds the global cooldown for the Fear's end.
     Held,
     /// No window, or nothing for the step: the rotation decides, its damage
     /// on the feared target timed by the cast gate (`time_own_fear`).
@@ -890,20 +874,19 @@ enum WindowStep {
 }
 
 /// The Fear window (AS-495): while the Warlock's OWN Fear holds its target,
-/// the window has one moment that matters, its end, and the step fills it:
+/// the moment that matters is the Fear's end. A Fear only lands at full length
+/// ([`fear_lands_full`]), so the target's diminishing returns rule out a
+/// re-Fear onto it; the step fills the window instead:
 ///
-/// 1. **The chain.** When another Fear pays ([`fear_pays`]), it is cast to
-///    land in the Fear's last `HANDOFF_LEAD` — the Chain play's hand-off
-///    timing (`chain::handoff_timing`), on the Warlock's own lock.
-/// 2. **The damage.** When it does not, Shadow Bolt is begun to land in that
-///    same last moment, never before (the cast gate's `time_own_fear` lets
-///    every damage cast on the target through only then).
-/// 3. **The free globals.** Until one global cooldown before that moment,
-///    the Warlock spends what does not break the Fear: Life Tap (the pool
-///    topped up, not only when starved), its curses (a curse that deals no
-///    damage goes on the feared target itself), and Corruption or a Shadow
-///    Bolt that finishes in time on another enemy. Inside that last global
-///    cooldown it holds.
+/// 1. **The damage.** Shadow Bolt is begun to land in the Fear's last
+///    [`super::FEAR_WINDOW_LEAD`] (the Chain play's hand-off lead), never
+///    before: the cast gate's `time_own_fear` lets every damage cast on the
+///    target through only then. Inside the last global cooldown before that
+///    moment the Warlock holds, so nothing it casts delays the bolt.
+/// 2. **The free globals.** Until then it spends what does not break the
+///    Fear: Life Tap (the pool topped up, not only when starved), its curses
+///    (a curse that deals no damage goes on the feared target itself), and
+///    Corruption, or a Shadow Bolt that finishes in time, on another enemy.
 #[allow(clippy::too_many_arguments)]
 fn fear_window_step(
     commands: &mut Commands,
@@ -920,77 +903,41 @@ fn fear_window_step(
     movement: &MovementConfig,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> WindowStep {
-    use super::cast_guard::lands_after;
-    use super::chain::{handoff_timing, HandoffTiming};
+    use super::cast_guard::lands_on_feared;
     use super::FEAR_WINDOW_LEAD;
 
     let Some(fear) = ctx.own_fear_on(target_entity) else {
         return WindowStep::Open;
     };
-    let left = fear.duration;
-    let fear_def = abilities.get_unchecked(&AbilityType::Fear);
     let bolt_def = abilities.get_unchecked(&AbilityType::Shadowbolt);
 
-    // 1. The chain: seconds until the re-Fear is due, when one pays.
-    let mut chain_wait = None;
-    if !being_kited
-        && !ctx.is_dr_immune(target_entity, DRCategory::Fears)
-        && fear_pays(ctx, target_entity, abilities)
-    {
-        match handoff_timing(lands_after(fear_def, my_pos, target_pos, auras), left) {
-            HandoffTiming::Due => {
-                if try_fear(
-                    commands,
-                    combat_log,
-                    abilities,
-                    entity,
-                    combatant,
-                    my_pos,
-                    auras,
-                    target_entity,
-                    target_pos,
-                    ctx,
-                    builder,
-                ) {
-                    return WindowStep::Acted;
-                }
-            }
-            HandoffTiming::Early { wait } => chain_wait = Some(wait),
-            HandoffTiming::Late => {}
+    // 1. The damage: seconds until Shadow Bolt is due to land at the end.
+    let wait = fear.duration
+        - FEAR_WINDOW_LEAD
+        - lands_on_feared(bolt_def, my_pos, auras, target_entity, target_pos, ctx);
+    if wait <= 0.0 {
+        if !being_kited
+            && try_shadowbolt(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                target_entity,
+                target_pos,
+                ctx,
+                builder,
+            )
+        {
+            return WindowStep::Acted;
         }
+        return WindowStep::Open;
     }
-
-    // 2. The damage: seconds until Shadow Bolt is due to land at the end.
-    let next = match chain_wait {
-        Some(wait) => wait,
-        None => {
-            let wait = left - FEAR_WINDOW_LEAD - lands_after(bolt_def, my_pos, target_pos, auras);
-            if wait <= 0.0 {
-                if !being_kited
-                    && try_shadowbolt(
-                        commands,
-                        combat_log,
-                        abilities,
-                        entity,
-                        combatant,
-                        my_pos,
-                        auras,
-                        target_entity,
-                        target_pos,
-                        ctx,
-                        builder,
-                    )
-                {
-                    return WindowStep::Acted;
-                }
-                return WindowStep::Open;
-            }
-            wait
-        }
-    };
-    if next <= GCD {
+    if wait <= GCD {
         builder.reject(
-            AbilityType::Fear,
+            AbilityType::Shadowbolt,
             RejectionReason::PreconditionUnmet {
                 note: FEAR_WINDOW_HOLD_NOTE.into(),
             },
@@ -998,7 +945,7 @@ fn fear_window_step(
         return WindowStep::Held;
     }
 
-    // 3. The free globals.
+    // 2. The free globals.
     if try_life_tap(
         commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, movement, true,
         builder,
@@ -1035,7 +982,7 @@ fn fear_window_step(
             return WindowStep::Acted;
         }
     }
-    if !being_kited && bolt_cast.max(GCD) <= next {
+    if !being_kited && bolt_cast.max(GCD) <= wait {
         for other in &others {
             if try_shadowbolt(
                 commands,
@@ -1054,17 +1001,7 @@ fn fear_window_step(
             }
         }
     }
-    if chain_wait.is_some() {
-        builder.reject(
-            AbilityType::Fear,
-            RejectionReason::PreconditionUnmet {
-                note: FEAR_WINDOW_HOLD_NOTE.into(),
-            },
-        );
-        WindowStep::Held
-    } else {
-        WindowStep::Open
-    }
+    WindowStep::Open
 }
 
 /// Whether Shadow Trance (Nightfall's proc) is up: a live next-cast modifier
@@ -1367,20 +1304,16 @@ fn try_amplify_curse(
     }
     // Only for a curse that would go out now: an Amplify Curse spent ahead of
     // a curse that cannot be cast waits out its 30s for nothing.
-    let curse_opts = PreCastOpts {
-        check_friendly_cc: true,
-        time_own_fear: true,
-        ..Default::default()
-    };
+    let curse_def = abilities.get_unchecked(&curse);
     if cast_gate(
         curse,
-        abilities.get_unchecked(&curse),
+        curse_def,
         combatant,
         my_pos,
         auras,
         Some(target),
         ctx,
-        curse_opts,
+        curse_gate_opts(curse_def),
     )
     .is_err()
     {
@@ -2346,6 +2279,26 @@ fn curse_effect(
     }
 }
 
+/// The cast gate's options for a curse. A curse that deals damage (Agony)
+/// would break a hold the team waits out, so it asks the friendly-CC gate,
+/// timed to the Warlock's own Fear (`time_own_fear`). A curse that deals none
+/// (Tongues, Weakness, Exhaustion) breaks no hold: only damage breaks a
+/// Polymorph, a Freezing Trap or a Fear, so it goes on an enemy the team
+/// holds (AS-495) — the window's free global on the Warlock's own feared
+/// target, and as much on a teammate's Polymorph or Fear.
+pub fn curse_gate_opts(
+    def: &crate::states::play_match::ability_config::AbilityConfig,
+) -> PreCastOpts {
+    PreCastOpts {
+        check_friendly_cc: def
+            .applies_aura
+            .as_ref()
+            .is_some_and(|a| a.aura_type == AuraType::DamageOverTime),
+        time_own_fear: true,
+        ..Default::default()
+    }
+}
+
 /// Cast a specific curse on a target.
 fn try_cast_curse(
     commands: &mut Commands,
@@ -2378,17 +2331,6 @@ fn try_cast_curse(
         }
     }
 
-    // A curse that deals no damage (Tongues, Weakness, Exhaustion) breaks no
-    // hold: it goes on a feared or polymorphed enemy too.
-    let deals_damage = ability_def
-        .applies_aura
-        .as_ref()
-        .is_some_and(|a| a.aura_type == AuraType::DamageOverTime);
-    let opts = PreCastOpts {
-        check_friendly_cc: deals_damage,
-        time_own_fear: true,
-        ..Default::default()
-    };
     let cleared = match cast_gate(
         ability,
         ability_def,
@@ -2397,7 +2339,7 @@ fn try_cast_curse(
         auras,
         Some((target_entity, target_pos)),
         ctx,
-        opts,
+        curse_gate_opts(ability_def),
     ) {
         Ok(cleared) => cleared,
         Err(reason) => {

@@ -141,7 +141,7 @@ pub fn pre_cast_ok_but_hold(
         if opts.check_friendly_cc
             && ctx.has_friendly_breakable_cc_landing(
                 target_entity,
-                own_fear_lands_after(def, caster_pos, auras, target, opts),
+                own_fear_lands_after(def, caster_pos, auras, target, ctx, opts),
             )
         {
             return false;
@@ -243,10 +243,9 @@ pub fn fits_window(
 /// ([`super::CombatContext::held_in_hard_cc_at`]): under the Chain play, a
 /// hand-off onto the subject of the lock being handed off is judged at the
 /// moment it LANDS ([`lands_after`]) — a 1.5s Polymorph begun to land in the
-/// lock's last moments starts while more than the chain window is left. So is
-/// a hold the caster casts onto a target its own Fear holds (AS-495, the Fear
-/// window's re-Fear). Every other cast is judged now (0), as the hold rule
-/// always has.
+/// lock's last moments starts while more than the chain window is left.
+/// Every other cast is judged now (0), as the hold rule always has: so this
+/// changes nothing outside the play.
 pub fn hold_lands_after(
     def: &AbilityConfig,
     caster_pos: Vec3,
@@ -255,10 +254,7 @@ pub fn hold_lands_after(
     ctx: &CombatContext,
 ) -> f32 {
     match target {
-        Some((entity, target_pos))
-            if ctx.chain_window().is_some_and(|w| w.subject == entity)
-                || ctx.own_fear_on(entity).is_some() =>
-        {
+        Some((entity, target_pos)) if ctx.chain_window().is_some_and(|w| w.subject == entity) => {
             lands_after(def, caster_pos, target_pos, auras)
         }
         _ => 0.0,
@@ -266,18 +262,51 @@ pub fn hold_lands_after(
 }
 
 /// When `opts.time_own_fear` asks for it, how long after now a cast of `def`
-/// on `target` lands ([`lands_after`]): the moment the friendly-CC gate judges
-/// the caster's own Fear at. `None` otherwise — the gate judges every hold now.
+/// on `target` lands ([`lands_on_feared`]): the moment the friendly-CC gate
+/// judges the caster's own Fear at. `None` otherwise — the gate judges every
+/// hold now.
 fn own_fear_lands_after(
     def: &AbilityConfig,
     caster_pos: Vec3,
     auras: Option<&ActiveAuras>,
     target: Option<(Entity, Vec3)>,
+    ctx: &CombatContext,
     opts: PreCastOpts,
 ) -> Option<f32> {
-    let (_, target_pos) = target?;
+    let (entity, target_pos) = target?;
     opts.time_own_fear
-        .then(|| lands_after(def, caster_pos, target_pos, auras))
+        .then(|| lands_on_feared(def, caster_pos, auras, entity, target_pos, ctx))
+}
+
+/// The shortest straight leg of a feared unit's run: a Fear turns its bearer
+/// every one to two seconds (`auras::update_auras`), so the heading it runs on
+/// now holds for at least this long.
+pub const FEAR_LEG_SECS: f32 = 1.0;
+
+/// When a cast of `def`, begun now, lands on `target` standing at
+/// `target_pos` ([`lands_after`]) — with a target the caster's OWN Fear holds
+/// led along the heading it is seen running on (`CombatantInfo::velocity`)
+/// for as much of the cast as that heading is sure to hold
+/// ([`FEAR_LEG_SECS`]). A feared Druid running at the Warlock through a 2s
+/// Shadow Bolt shortens its flight by a third of a second or more, and the
+/// bolt timed to the Fear's last quarter second would break it early. Every
+/// other target lands as [`lands_after`] says.
+pub fn lands_on_feared(
+    def: &AbilityConfig,
+    caster_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target: Entity,
+    target_pos: Vec3,
+    ctx: &CombatContext,
+) -> f32 {
+    let led = match ctx.combatants.get(&target) {
+        Some(info) if ctx.own_fear_on(target).is_some() => {
+            let cast = calculate_cast_time(def.cast_time, auras);
+            target_pos + Vec3::new(info.velocity.x, 0.0, info.velocity.z) * cast.min(FEAR_LEG_SECS)
+        }
+        _ => target_pos,
+    };
+    lands_after(def, caster_pos, led, auras)
 }
 
 /// Does this ability HOLD what it lands on — apply crowd control that stops
@@ -451,7 +480,7 @@ pub fn classify_pre_cast_failure(
         if opts.check_friendly_cc
             && ctx.has_friendly_breakable_cc_landing(
                 target_entity,
-                own_fear_lands_after(def, caster_pos, auras, target, opts),
+                own_fear_lands_after(def, caster_pos, auras, target, ctx, opts),
             )
         {
             return RejectionReason::FriendlyBreakableCC;
