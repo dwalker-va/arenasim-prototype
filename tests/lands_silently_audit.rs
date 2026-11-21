@@ -78,6 +78,7 @@ use arenasim::states::play_match::client_landing_style;
 use arenasim::states::play_match::combat_core::cheat_death_aura;
 use arenasim::states::play_match::combat_core::ExtraSwingSource;
 use arenasim::states::play_match::combat_core::CHEAT_DEATH_NAME;
+use arenasim::states::play_match::components::is_divine_protection;
 use arenasim::states::play_match::components::Aura;
 use arenasim::states::play_match::components::AuraApplyOwner;
 use arenasim::states::play_match::components::AuraApplyRoute;
@@ -1016,6 +1017,9 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             _ if wears_guardian_spirit(c.applies_aura.as_ref().and_then(|a| a.compound)) => Some(
                 "halo and wings over the shoulders while the spirit holds (guardian_spirit.rs)",
             ),
+            _ if is_divine_protection(t, &c.name) => Some(
+                "Holy hand flash + red-gold globe at the chest while it holds (divine_protection.rs)",
+            ),
             _ if AuraLandingKind::for_aura(t, &c.name)
                 == Some(AuraLandingKind::MarkOfTheWildGlyph) =>
             {
@@ -1055,7 +1059,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (ConcentrationAura, "AS-134 (aura application)"),
     (DemoralizingShout, "AS-134 (aura application)"),
     (DevotionAura, "AS-134 (aura application)"),
-    (DivineProtection, "AS-376 (Divine Protection globe)"),
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (
         ExposeArmor,
