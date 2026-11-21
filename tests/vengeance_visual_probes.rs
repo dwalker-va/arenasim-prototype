@@ -251,10 +251,10 @@ fn keys(k: &[(f64, f64)], t: f64) -> f64 {
     k[k.len() - 1].1
 }
 
-/// The bench's `keys` over colours, truncated as `rgb()` does.
-fn keys3(k: &[(f64, [f64; 3])], t: f64) -> [u8; 3] {
+/// The bench's `keys` over colours, before `rgb()` truncates them.
+fn keys3(k: &[(f64, [f64; 3])], t: f64) -> [f64; 3] {
     let channel = |c: usize| keys(&k.iter().map(|(t, v)| (*t, v[c])).collect::<Vec<_>>(), t);
-    [channel(0), channel(1), channel(2)].map(|v| v as u8)
+    [channel(0), channel(1), channel(2)]
 }
 
 /// One emitter as the bench declares it, per hand (its `rate` is over both
@@ -305,6 +305,9 @@ const SPARKS: Emitter = Emitter {
 #[derive(Debug, Clone, Copy)]
 struct Particle {
     rgb: [u8; 3],
+    /// The bench's colour before `rgb()`'s `|0` truncates it (the drawn
+    /// side carries its bytes here).
+    raw: [f64; 3],
     alpha: f64,
     diameter: f64,
     age: f64,
@@ -320,8 +323,10 @@ fn bench_particles(e: &Emitter, age: f64) -> Vec<Particle> {
         let own = age - born;
         if own < e.life - 1e-6 {
             let t = own / e.life;
+            let raw = keys3(&e.color, t);
             out.push(Particle {
-                rgb: keys3(&e.color, t),
+                rgb: raw.map(|v| v as u8),
+                raw,
                 alpha: keys(&e.alpha, t),
                 diameter: keys(&e.scale, t) * 2.0,
                 age: own,
@@ -358,10 +363,19 @@ fn compare(what: &str, drawn: Vec<Particle>, bench: Vec<Particle>) -> usize {
         );
         assert!((d.alpha - b.alpha).abs() < 1e-2, "{what}: {d:?} vs {b:?}");
         for c in 0..3 {
-            assert!(
-                (d.rgb[c] as i32 - b.rgb[c] as i32).abs() <= 2,
-                "{what}: {d:?} vs {b:?}"
-            );
+            // The bench truncates (`rgb()`'s `|0`). Away from an integer the
+            // truncated byte is exact: the f32 module and this f64
+            // transcription differ by about 0.007 of a channel at most. Only
+            // within 0.02 of an integer can that noise cross it.
+            let frac = b.raw[c] - b.raw[c].floor();
+            if (0.02..=0.98).contains(&frac) {
+                assert_eq!(d.rgb[c], b.rgb[c], "{what}: channel {c}: {d:?} vs {b:?}");
+            } else {
+                assert!(
+                    (d.rgb[c] as i32 - b.rgb[c] as i32).abs() <= 1,
+                    "{what}: channel {c}: {d:?} vs {b:?}"
+                );
+            }
         }
     }
     drawn.len()
@@ -494,6 +508,7 @@ fn every_piece_draws_what_the_bench_draws() {
                 let t = (d.scale.x as f64 - d0) / (d1 - d0);
                 Particle {
                     rgb: d.rgb,
+                    raw: d.rgb.map(f64::from),
                     alpha: d.alpha as f64,
                     diameter: d.scale.x as f64,
                     age: t * life,
@@ -645,20 +660,64 @@ fn a_refresh_keeps_the_glow_going() {
     );
 }
 
+/// The other buffs a Paladin wears beside Vengeance: another damage boost
+/// (the same type) and an unrelated buff, each outlasting it.
+fn other_buffs() -> Vec<Aura> {
+    vec![
+        Aura {
+            effect_type: AuraType::DamageDealtIncrease,
+            duration: 120.0,
+            magnitude: 0.1,
+            ability_name: "Some Other Fury".into(),
+            ..Default::default()
+        },
+        Aura {
+            effect_type: AuraType::ArmorIncrease,
+            duration: 120.0,
+            magnitude: 50.0,
+            ability_name: "Some Ward".into(),
+            ..Default::default()
+        },
+    ]
+}
+
+/// A Paladin wearing Vengeance between two other buffs.
+fn avenged_among_others(h: &mut Harness, paladin: Entity) {
+    let others = other_buffs();
+    let mut auras = h.auras(paladin);
+    auras.push(others[0].clone());
+    auras.push(vengeance());
+    auras.push(others[1].clone());
+}
+
+fn names(h: &mut Harness, unit: Entity) -> Vec<String> {
+    h.auras(unit)
+        .iter()
+        .map(|a| a.ability_name.clone())
+        .collect()
+}
+
 /// The hands go, pieces and all, on the frame the buff runs out, is purged,
-/// or its Paladin dies (auras stay on a corpse) or is gone; and a new buff
-/// after one ends starts a new onset.
+/// or its Paladin dies (auras stay on a corpse) or is gone, while the
+/// Paladin keeps its other buffs — another damage boost among them — through
+/// the ending; and a new buff after one ends starts a new onset.
 #[test]
 fn the_hands_go_when_the_buff_ends_or_the_paladin_dies() {
     type End = fn(&mut Harness, Entity);
     let endings: [(&str, End); 4] = [
         ("runs out", |h, p| {
-            // The sim drops an aura whose time is spent.
-            h.auras(p)[0].duration = DT / 2.0;
+            // Vengeance's time is spent; the sim drops it and keeps the rest.
+            for aura in h.auras(p).iter_mut() {
+                if aura.ability_name == VENGEANCE_AURA {
+                    aura.duration = DT / 2.0;
+                }
+            }
             h.step();
             h.auras(p).retain(|a| a.duration > 0.0);
         }),
-        ("purged", |h, p| h.auras(p).clear()),
+        ("purged", |h, p| {
+            h.auras(p).retain(|a| a.ability_name != VENGEANCE_AURA)
+        }),
         ("dies", |h, p| {
             h.app
                 .world_mut()
@@ -670,10 +729,11 @@ fn the_hands_go_when_the_buff_ends_or_the_paladin_dies() {
             h.app.world_mut().entity_mut(p).despawn();
         }),
     ];
+    let others: Vec<String> = other_buffs().into_iter().map(|a| a.ability_name).collect();
     for (how, end) in endings {
         let mut h = Harness::new();
         let (paladin, _) = h.unit(Vec3::new(0.0, 1.0, 0.0));
-        h.avenge(paladin);
+        avenged_among_others(&mut h, paladin);
         h.tick(20);
         assert_eq!(h.rigs().len(), 1, "{how}");
         assert_eq!(h.count::<VengeanceHandPiece>(), 68, "{how}");
@@ -684,15 +744,30 @@ fn the_hands_go_when_the_buff_ends_or_the_paladin_dies() {
         assert_eq!(h.count::<VengeanceHandPiece>(), 0, "{how}: the pieces");
         h.tick(10);
         assert!(h.rigs().is_empty(), "{how}: nothing comes back");
+        if how == "gone" {
+            continue;
+        }
+        // The other buffs are still worn (and Vengeance too, on a corpse).
+        let worn = names(&mut h, paladin);
+        for other in &others {
+            assert!(worn.contains(other), "{how}: {other} stays: {worn:?}");
+        }
+        assert_eq!(
+            worn.iter().any(|n| n == VENGEANCE_AURA),
+            how == "dies",
+            "{how}: {worn:?}"
+        );
     }
 
     // A new buff after a purge is a new onset.
     let mut h = Harness::new();
     let (paladin, _) = h.unit(Vec3::new(0.0, 1.0, 0.0));
-    h.avenge(paladin);
+    avenged_among_others(&mut h, paladin);
     h.tick(20);
-    h.auras(paladin).clear();
+    h.auras(paladin)
+        .retain(|a| a.ability_name != VENGEANCE_AURA);
     h.tick(1);
+    assert!(h.rigs().is_empty(), "purged among the others");
     h.avenge(paladin);
     h.tick(1);
     let rigs = h.rigs();
