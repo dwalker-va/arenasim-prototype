@@ -242,10 +242,15 @@ impl Harness {
     }
 
     fn with_victim(pet: bool) -> Self {
+        Self::with_tick(pet, TICK)
+    }
+
+    /// A harness whose frames are `tick` long.
+    fn with_tick(pet: bool, tick: Duration) -> Self {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, TransformPlugin));
         add_crest_assets(&mut app);
-        app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(tick));
         app.insert_resource(AbilityDefinitions::default());
         // The registration order of `states/mod.rs`: the router claims the
         // stroke, the swing and lean write the rig, the flash lands on it,
@@ -1104,35 +1109,45 @@ fn play_out(h: &mut Harness) -> BTreeMap<Entity, Vec<(f32, Seen)>> {
 /// 0.134-0.667 s, 25/s for 0.5-2.6 s, 150/s for 0.4-0.8 s.
 #[test]
 fn each_layer_emits_the_benchs_count_inside_its_window() {
-    let mut h = Harness::new();
-    h.camera();
-    h.landed();
-    let seen = play_out(&mut h);
-    for (i, layer) in LAYERS.iter().enumerate() {
-        let births: Vec<f32> = seen
-            .values()
-            .filter(|v| v[0].1.layer == i)
-            .map(|v| v[0].0 - v[0].1.age * 1000.0)
-            .collect();
-        let want = (layer.rate * (layer.window_ms.1 - layer.window_ms.0) / 1000.0 + 1e-3).floor();
-        assert_eq!(births.len() as f32, want, "{}", layer.name);
-        let (first, last) = births
-            .iter()
-            .fold((f32::MAX, f32::MIN), |(a, b), t| (a.min(*t), b.max(*t)));
-        assert!(
-            first >= layer.window_ms.0 - 1.0
-                && first < layer.window_ms.0 + 1000.0 / layer.rate + 10.0,
-            "{}: first born at {first} ms",
-            layer.name
-        );
-        assert!(
-            last < layer.window_ms.1 + 1.0 && last > layer.window_ms.1 - 1000.0 / layer.rate - 10.0,
-            "{}: last born at {last} ms",
-            layer.name
-        );
+    // At 10 ms frames, and at 8 ms and 33 ms: the count is the bench's
+    // integral of the rate over the window whatever the frame length, so a
+    // window that opens or closes mid-frame emits its share of that frame.
+    for tick_ms in [10, 8, 33] {
+        let tick = tick_ms as f32;
+        let mut h = Harness::with_tick(false, Duration::from_millis(tick_ms));
+        h.camera();
+        h.landed();
+        let seen = play_out(&mut h);
+        for (i, layer) in LAYERS.iter().enumerate() {
+            // A particle is first seen one frame old: its birth frame began
+            // a frame before.
+            let births: Vec<f32> = seen
+                .values()
+                .filter(|v| v[0].1.layer == i)
+                .map(|v| v[0].0 - v[0].1.age * 1000.0)
+                .collect();
+            let want =
+                (layer.rate * (layer.window_ms.1 - layer.window_ms.0) / 1000.0 + 1e-3).floor();
+            assert_eq!(births.len() as f32, want, "{} at {tick_ms} ms", layer.name);
+            let (first, last) = births
+                .iter()
+                .fold((f32::MAX, f32::MIN), |(a, b), t| (a.min(*t), b.max(*t)));
+            assert!(
+                first > layer.window_ms.0 - tick - 1e-2
+                    && first < layer.window_ms.0 + 1000.0 / layer.rate + tick,
+                "{} at {tick_ms} ms: first born in the frame from {first} ms",
+                layer.name
+            );
+            assert!(
+                last < layer.window_ms.1 + 1e-2
+                    && last > layer.window_ms.1 - 1000.0 / layer.rate - tick,
+                "{} at {tick_ms} ms: last born in the frame from {last} ms",
+                layer.name
+            );
+        }
+        // The landing retires with its last haze puff: 2.6 s + its 1 s life.
+        assert_eq!(h.count::<ExposeArmorParticle>(), 0, "at {tick_ms} ms");
     }
-    // The landing retires with its last haze puff: 2.6 s + its 1 s life.
-    assert_eq!(h.count::<ExposeArmorParticle>(), 0);
 }
 
 /// Every particle, every frame of its life, is drawn in its layer's colour,
@@ -1555,6 +1570,79 @@ fn every_piece_stands_in_front_of_the_body_where_the_bench_draws_it() {
     }
 }
 
+/// The hold is judged against the body where it stands NOW. A victim running
+/// toward the camera and round it every frame, under cameras where the hold
+/// binds (level with the crest, low pitch, near zoom) and the match pitch,
+/// a pet too: every frame, every drawn piece stands nearer the camera than
+/// the victim's current body and projects onto its own true point.
+#[test]
+fn the_hold_follows_a_victim_running_under_the_camera() {
+    let start = VICTIM_POS;
+    let mut held = 0;
+    let mut checked = 0;
+    for pet in [false, true] {
+        for (eye, label) in [
+            (Vec3::new(0.0, 3.25, 10.0), "level with the crest"),
+            (Vec3::new(-9.0, 2.0, 9.0), "low and near"),
+            (Vec3::new(8.0, 0.9, 4.0), "at the floor"),
+            (match_camera(start, 1.2).translation, "the match camera"),
+        ] {
+            let mut h = Harness::with_victim(pet);
+            let cam = h.camera_at(eye, start + Vec3::Y * 1.5);
+            h.landed();
+            let toward = (eye - start).with_y(0.0).normalize();
+            let across = Vec3::new(-toward.z, 0.0, toward.x);
+            let mut t = 0.0_f32;
+            while !h.rigs().is_empty() {
+                t += DT;
+                // Up to 3 yd toward the camera and 2 across, and back, at
+                // up to about 4.5 yd/s.
+                let at = start + toward * 3.0 * (t * 1.5).sin() + across * 2.0 * (t * 2.3).sin();
+                h.move_victim(at);
+                h.tick();
+                if h.rigs().is_empty() {
+                    break;
+                }
+                let nearest = body_nearest(&cam, at, pet);
+                let crest_true = h.global(h.rig_entity()).translation;
+                for which in [
+                    ExposeArmorPiece::Glow,
+                    ExposeArmorPiece::CrestFill,
+                    ExposeArmorPiece::CrestLine,
+                ] {
+                    let p = h.global(h.piece(which)).translation;
+                    assert!(
+                        depth(&cam, p) < nearest,
+                        "{which:?} behind the body {label}, pet {pet}, at {t}s"
+                    );
+                    assert!(project(&cam, p).distance(project(&cam, crest_true)) < 1e-4);
+                    held += usize::from(p.distance(crest_true) > 1e-3);
+                    checked += 1;
+                }
+                for p in h.particles() {
+                    for (part, which) in h.parts_of(p.entity) {
+                        let g = h.global(part);
+                        let head = match which {
+                            ExposeArmorParticlePart::Sprite => g.translation,
+                            ExposeArmorParticlePart::Streak => {
+                                g.translation - g.rotation * Vec3::X * g.scale.x * 0.5
+                            }
+                        };
+                        assert!(
+                            depth(&cam, g.translation) < nearest,
+                            "{which:?} behind the body {label}, pet {pet}, at {t}s"
+                        );
+                        assert!(project(&cam, head).distance(project(&cam, p.at)) < 1e-4);
+                        held += usize::from(head.distance(p.at) > 1e-3);
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked > 20_000 && held > 5_000, "{held} held of {checked}");
+}
+
 /// At the match camera the crest reads as a mark ON the victim: on screen it
 /// stands straight over the victim, above the top of its head, at the bench's
 /// size — at the landing about 12 × 16 px of a 1080p screen.
@@ -1796,7 +1884,8 @@ fn combat_rogue_match(stage: Stage) -> App {
             (TalentId::Deflection, 2),
             (TalentId::SwiftBlades, 1),
             (TalentId::ExposeArmor, 1),
-        ])],
+        ])
+        .into()],
         ..Default::default()
     };
     let mut app = build_headless_app_staged(&config, true, None, stage);

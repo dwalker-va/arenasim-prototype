@@ -83,9 +83,10 @@ use crate::states::play_match::components::*;
 //    ratio: Siphon Life's hold, `siphon_drawn_point` against
 //    `siphon_body_capsule`, so it projects where the bench puts it.
 // 2. **The crest is a texture.** Its outline and cross are a sprite at the
-//    crest's rest aspect, so the line widens and narrows with the squash
-//    (the bench strokes a fixed 0.16 of the half-width), and its corners are
-//    rounded where the bench mitres them.
+//    crest's rest aspect, so the line's width follows both axes of the
+//    squash; the bench strokes 0.16 of the CURRENT half-width, which follows
+//    the width squash only. Its corners are rounded where the bench mitres
+//    them.
 // 3. **A star's white-hot centre is tinted.** The shared star sprite is one
 //    shape in the layer's colour, as Conflagrate's and Siphon Life's stars
 //    are; the bench paints its core white.
@@ -122,7 +123,7 @@ use crate::states::play_match::components::*;
 
 // Expose Armor: kit 394 (finisher hand flash) on cast; kit 3069 (exposearmor_head.m2 @Head, 3 s) on the victim. AS-336 bench.
 // swing_style_for_ability(ExposeArmor) = SwingStyle::Backhand: wind up across the body 0.22 s, outward sweep through contact at 0.33 s (mid-arc) to 0.44 s, hold to 0.54 s, recover by 0.9 s; landing at impact_at.
-pub const EXPOSE_ARMOR_HAND_FLASH: bool = true;
+pub const EXPOSE_ARMOR_HAND_FLASH: bool = true; // kept: the router plays Rupture's flash for both
 pub const EXPOSE_ARMOR_CREST: bool = true; // ~0.38 x 0.5 yd x1.5, 1.0 yd over the head; gold -> blue 0.667-1.0 s
 pub const EXPOSE_ARMOR_GLOW: bool = true;
 pub const EXPOSE_ARMOR_SPARKLES: bool = true;

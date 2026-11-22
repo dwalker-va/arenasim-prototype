@@ -29,7 +29,7 @@
 use super::backhand_trail::{spawn_backhand_trail, BackhandTrailAssets};
 use super::bleed_spray::spawn_bleed_spray_pending;
 use super::crusader_strike::spawn_crusader_strike_flourish;
-use super::expose_armor::{spawn_expose_armor_pending, EXPOSE_ARMOR_HAND_FLASH};
+use super::expose_armor::spawn_expose_armor_pending;
 use super::finisher_flash::{spawn_finisher_hand_flash, FinisherFlashAssets};
 use super::frost_nova::spawn_frost_nova;
 use super::holy_justice::spawn_holy_justice;
@@ -278,8 +278,7 @@ pub fn consume_instant_ability_signals(
             // draws nothing on the victim. Rupture's landing is the bleed
             // spray; Expose Armor's the crest over the head (AS-366).
             AbilityType::Rupture | AbilityType::ExposeArmor => {
-                let flash = signal.ability == AbilityType::Rupture || EXPOSE_ARMOR_HAND_FLASH;
-                if let (true, Some(caster_pos)) = (flash, caster_pos) {
+                if let Some(caster_pos) = caster_pos {
                     spawn_finisher_hand_flash(
                         &mut commands,
                         &mut meshes,
