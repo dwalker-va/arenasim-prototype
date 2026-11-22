@@ -30,6 +30,15 @@ gen_sweep.py --t1 'Hunter+Priest+Warrior' --t2-size 3 --n 20 > /tmp/h3v3.jsonl
 gen_sweep.py --full 2 --exclude-double-healer --affects Shaman --n 10 \
   > /tmp/shaman_directional.jsonl    # 2,330 matches, not 62,500
 
+# Talent arms (AS-299): every Warlock, on either side, plays the Demonology
+# reference build -- named, not copied out of talents.ron -- or that build
+# with a rank moved. A per-slot choice goes the same way with --for-class.
+gen_sweep.py --full 2 --exclude-double-healer --affects Warlock --n 10 \
+  --build Warlock=Demonology > /tmp/demo.jsonl
+gen_sweep.py --full 2 --exclude-double-healer --affects Warlock --n 10 \
+  --build 'Warlock={"reference":"Demonology","remove":{"SoulLink":1},"add":{"DemonicSacrifice":1}}' \
+  --for-class Warlock warlock_demons '"Sacrifice"' > /tmp/sacrifice.jsonl
+
 # Strategy-var sweep: run the generator once per variant with --extra and
 # --label-suffix, then concatenate. --extra is merged into every config and the
 # suffix keeps the variants distinct when aggregating.
@@ -49,6 +58,16 @@ Notes
 - `--extra` is shallow-merged into each config (JSON object). Any field of
   HeadlessMatchConfig works: team1_hunter_pet_types, team1_rogue_openers,
   team1_warrior_shouts, team1_mage_armors, team1_paladin_auras, equipment, etc.
+- `--build CLASS=SPEC` gives every slot of CLASS, on BOTH sides, the build
+  SPEC names: a reference build's name (`Demonology`), or the JSON of any
+  form a headless config takes (a talent-to-rank map, or
+  `{"reference": .., "remove": .., "add": ..}`). `--for-class CLASS FIELD JSON`
+  does the same for any per-slot field (`warlock_demons`, ...): the slots of
+  other classes before it get that field's default. Both touch only the
+  configs whose teams field CLASS, so the control cells' lines are byte for
+  byte what they are without them, and two arms that differ only in a build
+  pair on (label, seed). The runner checks every build against its class's
+  trees before it plays a match.
 - `--affects` is the DIRECTIONAL tier's one lever: keep the cells the change
   can reach and a sample of the ones it cannot, at the same seeds. It cuts
   CELLS and never seeds, because in a paired design the significance comes
@@ -66,6 +85,54 @@ import sys
 
 CLASSES = ["Warrior", "Mage", "Rogue", "Priest", "Warlock", "Paladin", "Hunter", "Shaman", "Druid"]
 HEALERS = {"Priest", "Paladin", "Shaman", "Druid"}
+
+
+# Per-slot fields `--build` / `--for-class` can set, and the value that fills
+# a slot of another class standing before one that gets it: each field's own
+# default in `HeadlessMatchConfig`. A field missing here is refused rather
+# than filled with a guess.
+SLOT_FIELD_DEFAULTS = {
+    "builds": {},
+    "warlock_demons": "Felhunter",
+    "warlock_curse_prefs": None,
+    "rogue_offhand_poisons": None,
+}
+
+
+def parse_build_arg(arg):
+    """`CLASS=SPEC` -> (class, spec). SPEC is JSON when it starts with `{` or
+    `"`, and otherwise a bare reference build name."""
+    cls, sep, spec = arg.partition("=")
+    cls, spec = cls.strip(), spec.strip()
+    if not sep or not cls or not spec:
+        raise ValueError("--build takes CLASS=SPEC, got %r" % arg)
+    if spec[0] in "{\"":
+        try:
+            spec = json.loads(spec)
+        except json.JSONDecodeError as e:
+            raise ValueError("--build %s: SPEC is not valid JSON: %s" % (cls, e))
+    return cls, spec
+
+
+def apply_slot_fields(cfg, per_class):
+    """Set `team{1,2}_<field>` for every slot whose class `per_class` names.
+
+    `per_class` is a list of (class, field, value). A team that fields none
+    of those classes gets no key at all, so a config the flags cannot reach
+    is exactly the config the generator writes without them.
+    """
+    for team_key in ("team1", "team2"):
+        team = cfg[team_key]
+        fields = {}
+        for cls, field, value in per_class:
+            for slot, member in enumerate(team):
+                if member == cls:
+                    fields.setdefault(field, {})[slot] = value
+        for field, slots in fields.items():
+            fill = SLOT_FIELD_DEFAULTS[field]
+            cfg["%s_%s" % (team_key, field)] = [
+                slots.get(i, fill) for i in range(max(slots) + 1)]
+    return cfg
 
 
 # Fields the generator owns. `--extra` overwriting one of these would leave the
@@ -315,7 +382,41 @@ def main(argv=None):
                          "so a count below the fewest cells that can do that "
                          "is refused; 0 drops the control entirely, which is "
                          "warned about")
+    ap.add_argument("--build", action="append", default=[], metavar="CLASS=SPEC",
+                    help="every slot of CLASS, on both sides, plays the build "
+                         "SPEC: a reference build name, or a headless config "
+                         "build as JSON. Repeatable, one per class.")
+    ap.add_argument("--for-class", action="append", default=[], nargs=3,
+                    metavar=("CLASS", "FIELD", "JSON"),
+                    help="set the per-slot field team{1,2}_FIELD to JSON for "
+                         "every slot of CLASS on both sides (known fields: %s)"
+                         % ", ".join(sorted(SLOT_FIELD_DEFAULTS)))
     args = ap.parse_args(argv)
+
+    per_class = []
+    try:
+        for arg in args.build:
+            cls, spec = parse_build_arg(arg)
+            per_class.append((cls, "builds", spec))
+    except ValueError as e:
+        sys.exit(str(e))
+    for cls, field, raw in args.for_class:
+        if field not in SLOT_FIELD_DEFAULTS:
+            sys.exit("--for-class cannot set %r; known per-slot fields: %s"
+                     % (field, ", ".join(sorted(SLOT_FIELD_DEFAULTS))))
+        try:
+            per_class.append((cls, field, json.loads(raw)))
+        except json.JSONDecodeError as e:
+            sys.exit("--for-class %s %s: not valid JSON: %s" % (cls, field, e))
+    unknown = sorted(set(c for c, _, _ in per_class) - set(CLASSES))
+    if unknown:
+        sys.exit("--build/--for-class name unknown class(es) %s; known: %s"
+                 % (", ".join(unknown), ", ".join(CLASSES)))
+    twice = sorted(set((c, f) for c, f, _ in per_class
+                       if sum(1 for c2, f2, _ in per_class if (c2, f2) == (c, f)) > 1))
+    if twice:
+        sys.exit("--build/--for-class set %s more than once"
+                 % ", ".join("%s's %s" % t for t in twice))
 
     affected = set()
     if args.affects:
@@ -335,11 +436,14 @@ def main(argv=None):
             sys.exit(f"--extra is not valid JSON: {e}")
         if not isinstance(extra, dict):
             sys.exit("--extra must be a JSON object, got %s" % type(extra).__name__)
-        clobbered = [f for f in GENERATED_FIELDS if f in extra]
+        slot_keys = ["team%d_%s" % (t, f) for t in (1, 2) for _, f, _ in per_class]
+        clobbered = [f for f in GENERATED_FIELDS if f in extra] + sorted(
+            set(k for k in slot_keys if k in extra))
         if clobbered:
             sys.exit(
-                "--extra may not set %s: the generator owns those, and the label "
-                "the aggregation groups by would then name a different team"
+                "--extra may not set %s: the generator owns those (the label "
+                "the aggregation groups by would then name a different team, "
+                "and a --build or --for-class field would be overwritten)"
                 % ", ".join(clobbered)
             )
 
@@ -412,6 +516,7 @@ def main(argv=None):
                 "label": label,
             }
             cfg.update(extra)
+            apply_slot_fields(cfg, per_class)
             out.write(json.dumps(cfg) + "\n")
             count += 1
     if count == 0:

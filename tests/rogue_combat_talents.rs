@@ -187,7 +187,7 @@ fn spawned_rogue(build: &Build) -> Combatant {
         team1: vec!["Warrior".into()],
         team2: vec!["Rogue".into()],
         random_seed: Some(7),
-        team2_builds: vec![build.clone()],
+        team2_builds: vec![build.clone().into()],
         ..Default::default()
     };
     let mut app = build_headless_app(&config, true, None);
@@ -291,7 +291,7 @@ fn rogue_avoidances(build: &Build) -> Vec<String> {
         team2: vec!["Rogue".into()],
         random_seed: Some(3),
         max_duration_secs: 240.0,
-        team2_builds: vec![build.clone()],
+        team2_builds: vec![build.clone().into()],
         ..Default::default()
     };
     let played = play(config, unkillable());
@@ -517,7 +517,7 @@ fn expose_armor_lands_on_a_warrior_in_a_match_for_fifteen_seconds() {
             team2: vec!["Rogue".into()],
             random_seed: Some(5),
             max_duration_secs: 60.0,
-            team2_builds: vec![build.clone()],
+            team2_builds: vec![build.clone().into()],
             ..Default::default()
         };
         let played = play(config, unkillable());

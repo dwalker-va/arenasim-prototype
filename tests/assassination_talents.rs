@@ -259,7 +259,7 @@ fn spawned_rogue(build: &Build, main: &str, off: Option<&str>) -> Combatant {
         team1: vec!["Rogue".into()],
         team2: vec!["Warrior".into()],
         random_seed: Some(7),
-        team1_builds: vec![build.clone()],
+        team1_builds: vec![build.clone().into()],
         team1_rogue_poisons: vec![main.into()],
         team1_rogue_offhand_poisons: vec![off.map(String::from)],
         ..Default::default()
@@ -390,7 +390,7 @@ fn master_poisoner_opens_the_off_hand_poison() {
     let refused = HeadlessMatchConfig {
         team1: vec!["Rogue".into()],
         team2: vec!["Warrior".into()],
-        team1_builds: vec![poison_build()],
+        team1_builds: vec![poison_build().into()],
         team1_rogue_poisons: vec!["Crippling".into()],
         team1_rogue_offhand_poisons: vec![Some("Deadly".into())],
         ..Default::default()
@@ -997,7 +997,7 @@ fn poisoned_match(
         team2: vec!["Warrior".into()],
         random_seed: Some(seed),
         max_duration_secs: 70.0,
-        team1_builds: vec![build],
+        team1_builds: vec![build.into()],
         team1_rogue_poisons: vec![main.into()],
         team1_rogue_offhand_poisons: vec![off.map(String::from)],
         ..Default::default()

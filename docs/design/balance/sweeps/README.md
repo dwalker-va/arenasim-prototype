@@ -544,3 +544,19 @@ script derives the Nagrand/`TeamPlan` set (`nagrand`) and the 3v3 sample (`r3`)
 from it; the commands are in its docstring. `sides before.csv after.csv`
 scores an arm pair from the side holding a healer+pet team, after checking
 that every match without one is unchanged.
+
+## `2026-11-22-as299-arms.*`
+
+Behind `2026-11-22-as299-warlock-talent-sweep.md` (card AS-299): the Warlock
+reference builds and node arms. 24 arms of 5,088 2v2 matches each (every
+Warlock cell plus 8 control cells, three maps, 4 seeds a cell a map,
+`TeamPlan`), every Warlock on either side playing the arm's build. The arms
+are configs on one binary, so there is no patch:
+
+- `-arms.py` — `gen` writes the arms (through `scripts/gen_sweep.py --build`
+  / `--for-class`), `table` and `replicate` print the findings doc's tables
+  from the CSVs, `sample` replays 60 Warlock matches an arm with full logs for
+  the non-vacuity counts.
+- `-arms.jsonl.tar.gz` — the inputs as run: `block1/` (20 arms, seeds 0-3)
+  and `block2/` (the 4 replicated arms, seeds 4-7).
+- `-arms.csv.tar.gz` — their batch CSVs, same layout.

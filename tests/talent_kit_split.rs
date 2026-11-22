@@ -63,6 +63,12 @@ fn granting(abilities: &AbilityDefinitions) -> TalentDefinitions {
             "requires: Some((FelStamina, 1)),",
             1,
         );
+    // The reference builds take Fel Stamina 2/2, which this tree no longer
+    // has; the fixture draws no reference build, so it carries none.
+    let start = text
+        .find("    reference_builds: {")
+        .expect("the reference builds");
+    let text = format!("{}{}", &text[..start], &text[text.rfind(')').unwrap()..]);
     TalentDefinitions::from_ron(&text, abilities).expect("the fixture validates")
 }
 

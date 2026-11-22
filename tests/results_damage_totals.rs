@@ -88,7 +88,7 @@ fn duo(seed: u64, side: u8) -> HeadlessMatchConfig {
         vec!["Warlock".to_string(), "Paladin".to_string()],
         vec!["Warrior".to_string(), "Priest".to_string()],
     );
-    let builds = vec![soul_link(), protection()];
+    let builds = vec![soul_link().into(), protection().into()];
     // Per slot: the Paladin is the second.
     let auras = vec!["Devotion".to_string(), "Retribution".to_string()];
     let gear = vec![HashMap::new(), aegis()];
@@ -124,7 +124,11 @@ fn trio(seed: u64, striker: &str) -> HeadlessMatchConfig {
         random_seed: Some(seed),
         max_duration_secs: 120.0,
         team1_equipment: vec![aegis()],
-        team2_builds: vec![soul_link(), protection(), Build::default()],
+        team2_builds: vec![
+            soul_link().into(),
+            protection().into(),
+            Build::default().into(),
+        ],
         team2_paladin_auras: vec!["Devotion".into(), "Retribution".into()],
         ..Default::default()
     }
@@ -170,7 +174,7 @@ fn drain(seed: u64) -> HeadlessMatchConfig {
         map: "BasicArena".into(),
         random_seed: Some(seed),
         max_duration_secs: 120.0,
-        team2_builds: vec![Build::default(), protection()],
+        team2_builds: vec![Build::default().into(), protection().into()],
         ..Default::default()
     }
 }

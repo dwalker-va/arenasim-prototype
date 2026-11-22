@@ -121,7 +121,7 @@ fn the_headless_config_takes_the_form() {
         team1: vec!["Warrior".into(), "Priest".into()],
         team2: vec!["Mage".into()],
         team1_priest_forms: forms.iter().map(|s| s.to_string()).collect(),
-        team1_builds: builds,
+        team1_builds: builds.into_iter().map(Into::into).collect(),
         ..Default::default()
     };
     let ok = config(
