@@ -43,9 +43,22 @@ fn abilities() -> &'static AbilityDefinitions {
     AbilityDefinitions::shipped()
 }
 
-/// The shipped talents file with `from` replaced by `to` (which must occur).
-fn edited(from: &str, to: &str) -> String {
+/// The shipped trees without their reference builds: an edit to a tree
+/// (Fel Stamina down to one rank, a node moved to another class) would leave
+/// a reference build taking it illegal, and the loader would refuse the
+/// reference before the rule under test. `tests/reference_builds.rs` holds
+/// the references to their rules over the real file.
+fn tree_text() -> String {
     let text = shipped_text();
+    let start = text
+        .find("    reference_builds: {")
+        .expect("the reference builds");
+    format!("{}{}", &text[..start], &text[text.rfind(')').unwrap()..])
+}
+
+/// The shipped trees with `from` replaced by `to` (which must occur).
+fn edited(from: &str, to: &str) -> String {
+    let text = tree_text();
     assert!(text.contains(from), "the shipped file has no {from:?}");
     text.replacen(from, to, 1)
 }
@@ -1236,7 +1249,7 @@ fn headless_config(build: &Build) -> HeadlessMatchConfig {
         team1: vec!["Warlock".into()],
         team2: vec!["Warrior".into()],
         random_seed: Some(7),
-        team1_builds: vec![build.clone()],
+        team1_builds: vec![build.clone().into()],
         ..Default::default()
     }
 }

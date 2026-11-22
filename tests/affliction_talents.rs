@@ -292,7 +292,7 @@ fn spawned_warlock(build: &Build) -> Combatant {
         team1: vec!["Warlock".into()],
         team2: vec!["Warrior".into()],
         random_seed: Some(7),
-        team1_builds: vec![build.clone()],
+        team1_builds: vec![build.clone().into()],
         ..Default::default()
     };
     let mut app = build_headless_app(&config, true, None);
@@ -742,7 +742,7 @@ fn held_match(build: Build, curse: &str) -> common::staged::Played {
         team2: vec!["Warrior".into()],
         random_seed: Some(3),
         max_duration_secs: 70.0,
-        team1_builds: vec![build],
+        team1_builds: vec![build.into()],
         team1_warlock_curse_prefs: vec![Some(vec![curse.into()])],
         ..Default::default()
     };
@@ -960,7 +960,7 @@ fn improved_life_tap_gives_more_mana_for_the_same_health() {
             team2: vec!["Warrior".into()],
             random_seed: Some(3),
             max_duration_secs: 15.0,
-            team1_builds: vec![build],
+            team1_builds: vec![build.into()],
             ..Default::default()
         };
         let held = Aura {
@@ -1014,7 +1014,8 @@ fn curse_of_exhaustion_without_its_talent_is_refused() {
             (ImprovedDrainLife, 2),
             (AmplifyCurse, 1),
             (CurseOfExhaustion, 1),
-        ])],
+        ])
+        .into()],
         ..config
     };
     assert!(talented.to_match_config().is_ok());

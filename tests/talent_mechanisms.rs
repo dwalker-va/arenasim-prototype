@@ -520,7 +520,7 @@ fn a_proc_resolved_from_a_build_fires_in_the_match() {
     preloaded.talents = talents;
     let run = |build: Build| {
         let config = HeadlessMatchConfig {
-            team1_builds: vec![build],
+            team1_builds: vec![build.into()],
             ..config(&["Warlock"], &["Priest"], 30.0)
         };
         let mut app = build_headless_app(&config, true, Some(&preloaded));

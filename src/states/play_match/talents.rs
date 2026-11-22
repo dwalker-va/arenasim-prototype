@@ -51,6 +51,7 @@ use super::equipment::{
     resolve_equipped_loadout, validate_class_restrictions, DefaultLoadouts, ItemDefinitions,
     Loadout,
 };
+use super::reference_builds::ReferenceBuild;
 use super::talent_choices::{ranked_effects, ChoiceOption, ChoiceRule, ChoiceSlot, SlotChoices};
 use super::talent_mechanics::{TalentMechanic, TalentMechanics};
 use super::talent_procs::{TalentProc, TalentProcSlot};
@@ -951,6 +952,8 @@ struct TalentsFile {
     #[serde(default)]
     reference: BTreeMap<CharacterClass, Loadout>,
     #[serde(default)]
+    reference_builds: BTreeMap<CharacterClass, Vec<ReferenceBuild>>,
+    #[serde(default)]
     choice_rules: Vec<ChoiceRule>,
 }
 
@@ -998,6 +1001,7 @@ pub struct TalentDefinitions {
     trees: BTreeMap<CharacterClass, Vec<TreeConfig>>,
     talents: BTreeMap<TalentId, TalentConfig>,
     reference: BTreeMap<CharacterClass, Loadout>,
+    reference_builds: BTreeMap<CharacterClass, Vec<ReferenceBuild>>,
     choice_rules: Vec<ChoiceRule>,
 }
 
@@ -1018,6 +1022,7 @@ impl TalentDefinitions {
             trees: file.trees,
             talents: file.talents,
             reference: file.reference,
+            reference_builds: file.reference_builds,
             choice_rules: file.choice_rules,
         };
         defs.validate(abilities)?;
@@ -1069,6 +1074,21 @@ impl TalentDefinitions {
         self.reference.keys().copied()
     }
 
+    /// `class`'s reference builds, in `talents.ron` order (empty for a class
+    /// with none). See [`reference_builds`](super::reference_builds).
+    pub fn reference_builds(&self, class: CharacterClass) -> &[ReferenceBuild] {
+        self.reference_builds.get(&class).map_or(&[], Vec::as_slice)
+    }
+
+    /// Every class's reference builds, in class order.
+    pub fn all_reference_builds(
+        &self,
+    ) -> impl Iterator<Item = (CharacterClass, &[ReferenceBuild])> + '_ {
+        self.reference_builds
+            .iter()
+            .map(|(class, builds)| (*class, builds.as_slice()))
+    }
+
     /// This table with only the nodes `keep` names, and only the trees that
     /// still hold one: a catalogue whose membership does not grow when
     /// `talents.ron` does. The encyclopedia snapshots draw one
@@ -1101,6 +1121,7 @@ impl TalentDefinitions {
             trees,
             talents,
             reference: self.reference.clone(),
+            reference_builds: self.reference_builds.clone(),
             choice_rules: self.choice_rules.clone(),
         }
     }
@@ -1213,6 +1234,7 @@ impl TalentDefinitions {
         }
 
         self.validate_choice_shapes(abilities)?;
+        super::reference_builds::validate(self)?;
 
         // Each talent ability is granted by exactly one node.
         for ability in abilities.talent_abilities() {

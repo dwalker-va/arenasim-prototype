@@ -305,7 +305,7 @@ fn config(build: Build, seed: u64) -> HeadlessMatchConfig {
         team2: vec!["Warrior".into()],
         random_seed: Some(seed),
         max_duration_secs: 150.0,
-        team1_builds: vec![build],
+        team1_builds: vec![build.into()],
         ..Default::default()
     }
 }

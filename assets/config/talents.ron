@@ -1245,4 +1245,50 @@
             Legs: ArcanistLeggings,
         },
     },
+
+    // Each class's reference builds (AS-299; design §4, "Sweeps measure nodes
+    // and reference builds"): named builds at the points cap, one deep in
+    // each tree. An authored Gauntlet opponent carries one, the bot's default
+    // policy plays one, and a milestone sweep reports a class's standing with
+    // each beside its untalented baseline. A headless config names one by its
+    // name ("team1_builds": ["Demonology"]), or one with ranks moved
+    // ({"reference": "Demonology", "remove": {..}, "add": {..}}), the node arm
+    // of a sweep. The loader holds each to: a legal build of its class at
+    // exactly 8 points, deep in its `tree` (it takes that tree's capstone),
+    // its name unique within the class.
+    reference_builds: {
+        Warlock: [
+            // Siphon Life and the drains keep it alive; Shadow Trance turns
+            // the DoT spread into instant Shadow Bolts, which Bane quickens.
+            (
+                name: "Affliction",
+                tree: Affliction,
+                build: {
+                    ImprovedDrainLife: 2, Nightfall: 2, SiphonLife: 1, ShadowMastery: 1,
+                    Bane: 2,
+                },
+            ),
+            // Sturdier, with a linked Felhunter and an Improved Drain Life
+            // splash.
+            (
+                name: "Demonology",
+                tree: Demonology,
+                build: {
+                    ImprovedDrainLife: 2,
+                    DemonicEmbrace: 1, FelStamina: 2, UnholyPower: 1, MasterDemonologist: 1,
+                    SoulLink: 1,
+                },
+            ),
+            // Shadow Vulnerability windows, faster Shadow Bolts and
+            // Conflagrate, with a sturdier Felhunter to keep its Spell Lock.
+            (
+                name: "Destruction",
+                tree: Destruction,
+                build: {
+                    ImprovedShadowBolt: 2, Bane: 2, ImprovedImmolate: 1, Conflagrate: 1,
+                    FelStamina: 2,
+                },
+            ),
+        ],
+    },
 )
