@@ -95,6 +95,7 @@ use arenasim::states::play_match::components::PaladinOneShotKind;
 use arenasim::states::play_match::components::RootStyle;
 use arenasim::states::play_match::components::SchoolImpact;
 use arenasim::states::play_match::components::ShieldKind;
+use arenasim::states::play_match::components::SwingStyle;
 use arenasim::states::play_match::components::TotemElement;
 use arenasim::states::play_match::curse_spec;
 use arenasim::states::play_match::equipment::load_item_definitions;
@@ -108,6 +109,7 @@ use arenasim::states::play_match::oneshot_visual;
 use arenasim::states::play_match::plays_cheat_death;
 use arenasim::states::play_match::proc_trinkets::ProcEffect;
 use arenasim::states::play_match::root_style_for;
+use arenasim::states::play_match::swing_style_for_ability;
 use arenasim::states::play_match::talent_mechanics::MechanicKind;
 use arenasim::states::play_match::talent_procs::effect_aura;
 use arenasim::states::play_match::talent_procs::ProcEvent;
@@ -122,6 +124,7 @@ use arenasim::states::play_match::ChannelVisual;
 use arenasim::states::play_match::DotStateVisual;
 use arenasim::states::play_match::InterruptLanding;
 use arenasim::states::play_match::SlowTint;
+use arenasim::states::play_match::CRUSADER_STRIKE_LANDING;
 use arenasim::states::play_match::DIVINE_SHIELD_AURA_NAME;
 use arenasim::states::play_match::ICE_BARRIER_AURA_NAME;
 use arenasim::states::play_match::PW_SHIELD_AURA_NAME;
@@ -583,10 +586,6 @@ const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[
         "AS-348 (Shadowburn and Conflagrate, the Destruction casts; AS-334's talent visuals)",
     ),
     (
-        CrusaderStrike,
-        "AS-379 (Crusader Strike, the Retribution capstone's strike)",
-    ),
-    (
         Hemorrhage,
         "AS-336 (Hemorrhage, the Subtlety strike and its wound; AS-367 builds it)",
     ),
@@ -645,6 +644,24 @@ fn the_hunter_shots_land_through_the_client_landing() {
             "{a:?} must reach the client Hunter shot landing"
         );
     }
+}
+
+/// Crusader Strike lands as its card says (AS-379): the drain's marker
+/// strokes it (the sweep above reads only that), Mortal Strike's stroke, and
+/// TBC's `strike_impact_chest` through the client landing router — never
+/// Heroic Strike's decisivestrike, and never the Physical school row. A pin
+/// on the router, so a dropped arm fails here and not only by eye.
+#[test]
+fn crusader_strike_strokes_and_lands_strike_impact_chest() {
+    assert!(InstantAbilityFired::is_spawned_for(CrusaderStrike));
+    assert_eq!(
+        swing_style_for_ability(CrusaderStrike),
+        Some(SwingStyle::MortalStrike)
+    );
+    let landing = client_landing_style(CrusaderStrike).expect("a client landing");
+    assert!(std::ptr::eq(landing.emitters, &CRUSADER_STRIKE_LANDING[..]));
+    let heroic = client_landing_style(HeroicStrike).expect("Heroic Strike's");
+    assert!(!std::ptr::eq(landing.emitters, heroic.emitters));
 }
 
 // ── family: damage over time ────────────────────────────────────────────────
@@ -1016,6 +1033,13 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             AuraType::TravelForm => {
                 Some("pill on all fours + shift puff (TravelFormVisual → shapeshift.rs)")
             }
+            // Its own type: the state on the Rogue owns the window, not the band.
+            AuraType::ShadowDance
+                if AuraApplyRoute::for_aura(t)
+                    == AuraApplyRoute::Owned(AuraApplyOwner::ShadowDanceState) =>
+            {
+                Some("dark-red shadow state on the Rogue's chest for the window (shadow_dance.rs)")
+            }
             _ if wears_shadowform_look(c.applies_aura.as_ref().and_then(|a| a.compound)) => {
                 Some("violet translucent body + feet shroud while the form holds (shadowform.rs)")
             }
@@ -1087,10 +1111,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
         "AS-353 (Power Infusion, the infusion on the ally)",
     ),
     (PowerWordFortitude, "AS-134 (aura application)"),
-    (
-        ShadowDance,
-        "AS-336 (Shadow Dance, the Subtlety capstone's window; AS-368 builds it)",
-    ),
     (ShadowResistanceAura, "AS-134 (aura application)"),
     (
         VampiricEmbrace,
