@@ -15,3 +15,4 @@
 pub mod pinned_catalogue;
 pub mod source_audit;
 pub mod staged;
+pub mod talents_ron;
