@@ -928,8 +928,10 @@ fn a_swing_held_off_a_friendly_fear_is_not_avoided() {
 /// (The logs carry 13 crits and 8 eliminations.)
 ///
 /// Re-recorded for AS-498, the Hunter's trap walk under `TeamPlan`: the 3v3
-/// 223 -> 272; the two `Legacy` cells held. Its trace first differs as the
-/// Hunter begins a trap walk at the enemy Paladin 9.1s after the gates; its
+/// 223 -> 272; the two `Legacy` cells held. Its trace first differs 0.017s
+/// after the gates, in a trap walk note on the Hunter's Freezing Trap (no
+/// behaviour), and its movement first differs as the Hunter begins a trap
+/// walk at the enemy Paladin 9.1s after the gates; its
 /// log first differs at 21.77s, where the Warrior's swing reaches the Hunter,
 /// placed by that walk, 0.15s sooner, and at 22.47s the Hunter throws
 /// Freezing Trap where it used Disengage. The evidence is the same: a scratch build of AS-498's

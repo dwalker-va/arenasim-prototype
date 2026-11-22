@@ -893,3 +893,57 @@ fn a_held_healer_is_not_walked_at() {
     let free = chase(AiProfile::TeamPlan, -15.0, true).decide(ME);
     assert!(walked(&free), "{}", describe(&free));
 }
+
+/// The walk's length to its stop: from the Priest 40yd off to
+/// `TRAP_WALK_EDGE` inside throw range (`trap_setup_range`, 25yd), 18yd.
+const WALK_TO_EDGE: f32 = 40.0 - (25.0 - 3.0);
+
+/// The walk counts contact all the way to where it stops, 3yd inside throw
+/// range, not only to throw range: a Warrior head-on, waiting by the Priest,
+/// that the Hunter would meet 2yd short of the walk's end (16yd in, when the
+/// Hunter is 24yd from the Priest) holds the walk; the same Warrior 5yd
+/// farther back, met only past the walk's end, does not.
+#[test]
+fn a_walk_counts_contact_in_its_last_yards_inside_throw_range() {
+    // Head-on at equal speed the gap closes twice as fast as the Hunter walks,
+    // so a Warrior at `x` reaches striking range (5yd) once the Hunter has
+    // walked (x - 5) / 2.
+    let met_at = |x: f32| (x - 5.0) / 2.0;
+    let near = 37.0;
+    let far = 42.0;
+    assert!(met_at(near) > WALK_TO_EDGE - 3.0 && met_at(near) < WALK_TO_EDGE);
+    assert!(met_at(far) > WALK_TO_EDGE);
+
+    let met = field(40.0, (near, 0.0), ME, false).decide(ME);
+    assert!(!walked(&met), "{}", describe(&met));
+    assert_eq!(trap_notes(&met), vec![TRAP_WALK_MELEE.to_string()]);
+    let missed = field(40.0, (far, 0.0), ME, false).decide(ME);
+    assert!(walked(&missed), "{}", describe(&missed));
+}
+
+/// Any contact the kite would have prevented holds the walk, however brief:
+/// a Warrior head-on that reaches striking range only at the walk's last
+/// sample (one `walk_exposure` step, a tenth of a second) holds it; the same
+/// Warrior far enough back to miss that sample does not.
+#[test]
+fn a_walk_is_held_for_one_step_of_contact() {
+    let speed = field(40.0, (40.0, 0.0), ME, false)
+        .combatant(ME)
+        .base_movement_speed;
+    // `walk_exposure` samples every 0.1s to the walk's end. Head-on, after
+    // sample k the Hunter has walked `speed * t_k` and the Warrior, stepping
+    // `speed * 0.1` a sample, `speed * 0.1 * k`; it strikes within 5yd. The
+    // Warrior's start `x` that is outside 5yd at the next-to-last sample and
+    // inside it at the last lies in (prev, last].
+    const STEP: f32 = 0.1;
+    let walk = WALK_TO_EDGE / speed;
+    let steps = (walk / STEP).ceil();
+    let last = 5.0 + speed * walk + speed * STEP * steps;
+    let prev = 5.0 + speed * STEP * (steps - 1.0) + speed * STEP * (steps - 1.0);
+    assert!(prev < last, "the last sample closes the gap");
+    let one_step = field(40.0, ((prev + last) / 2.0, 0.0), ME, false).decide(ME);
+    assert!(!walked(&one_step), "{}", describe(&one_step));
+    assert_eq!(trap_notes(&one_step), vec![TRAP_WALK_MELEE.to_string()]);
+    let none = field(40.0, (last + 0.5, 0.0), ME, false).decide(ME);
+    assert!(walked(&none), "{}", describe(&none));
+}

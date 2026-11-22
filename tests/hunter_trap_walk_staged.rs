@@ -114,11 +114,13 @@ fn trap_considered(played: &Played) -> usize {
 #[test]
 fn the_walk_does_not_restart_within_its_commit_window_at_the_edge() {
     let mut considered = 0;
+    let mut ended = 0;
     for seed in [1, 2, 3] {
         for edge in [24.5, 25.0, 25.5, 28.0] {
             let played = edge_match(seed, edge);
             considered += trap_considered(&played);
             let events = walk_events(&played);
+            ended += events.iter().filter(|(_, t)| t == "TrapWalkEnd").count();
             for pair in events.windows(2) {
                 let ((t_end, end), (t_start, start)) = (&pair[0], &pair[1]);
                 if end == "TrapWalkEnd" && start == "TrapWalk" {
@@ -132,9 +134,14 @@ fn the_walk_does_not_restart_within_its_commit_window_at_the_edge() {
             }
         }
     }
-    // Not vacuous: the Hunter weighed the trap walk at the edge, decision
-    // after decision (about 50 over the bank; a walk that strobes there
-    // restarts within the window on every seed).
+    // Not vacuous: walks at the edge do end in the bank, so a restart after
+    // one could have been seen; and the Hunter weighed the trap walk there,
+    // decision after decision (about 50 over the bank; a walk that strobes
+    // there restarts within the window on every seed).
+    assert!(
+        ended >= 1,
+        "no trap walk ended at the edge, so no restart could be seen"
+    );
     assert!(
         considered >= 20,
         "the stage no longer puts the trap walk's choice in front of the Hunter \
