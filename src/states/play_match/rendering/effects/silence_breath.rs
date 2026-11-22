@@ -11,6 +11,7 @@ use super::hunter_shots::draw;
 use super::school_impact::IMPACT_PET_STATURE;
 use super::shield::disc_texture;
 use super::siphon_life::{siphon_body_capsule, siphon_drawn_point};
+use super::vampiric_embrace::rendered_root;
 use crate::states::play_match::components::*;
 
 // ==============================================================================
@@ -111,7 +112,15 @@ use crate::states::play_match::components::*;
 // ~12 px, a sparkle ~2 px. Small and mostly idle, as the client draws it
 // ("small... a puff every 4.2 s"); client size, by the ruling.
 //
-// House rules: spawn / animate / age / billboard / cleanup systems,
+// **Rides the rendered body.** The mouth is measured from the victim's
+// `VisualBody`, not its root, and so is the body the breath is held in front
+// of (`rendered_root`): the walk bob, the fear bob (a silenced caster is
+// often feared too) and the swing step carry it, as `shield.rs`,
+// `vengeance.rs` and `shadow_dance.rs` ride the body. So the placement runs
+// in PostUpdate, after every writer of a body's transform and before
+// propagation (`place_silence_breaths`).
+//
+// House rules: spawn / animate / age / place / cleanup systems,
 // `Res<Time>`, registered in `states/mod.rs` only (headless never runs any of
 // it), no `game_rng` — all scatter is hash-seeded off the rig's entity index
 // and emission count.
@@ -305,15 +314,13 @@ fn stature(is_pet: bool) -> f32 {
     }
 }
 
-/// The mouth of a victim standing at `transform`: the head anchor, dropped
-/// and brought forward along its facing (local +Z, the way the sim turns
-/// every unit).
-pub fn silence_mouth(transform: &Transform, is_pet: bool) -> Vec3 {
-    body_point(
-        SILENCE_HEAD_ABOVE_FLOOR - SILENCE_MOUTH_DROP,
-        transform.translation,
-        is_pet,
-    ) + transform.rotation * Vec3::Z * (SILENCE_MOUTH_FORWARD * stature(is_pet))
+/// The mouth of a victim whose rendered body stands as a unit at `root`
+/// would at rest (`rendered_root`), facing `facing`: the head anchor, dropped
+/// and brought forward along its facing (local +Z, the way the sim turns every
+/// unit).
+pub fn silence_mouth(root: Vec3, facing: Quat, is_pet: bool) -> Vec3 {
+    body_point(SILENCE_HEAD_ABOVE_FLOOR - SILENCE_MOUTH_DROP, root, is_pet)
+        + facing * Vec3::Z * (SILENCE_MOUTH_FORWARD * stature(is_pet))
 }
 
 /// Where a particle of `e` is born, relative to the mouth, and how it
@@ -390,9 +397,8 @@ pub struct SilenceBreathRig {
     pub carry: [f32; 4],
     pub emitted: u32,
     pub stature: f32,
-    /// Where the victim stood this frame, and whether it is a pet — the body
-    /// the billboard pass holds the particles in front of.
-    pub victim_at: Vec3,
+    /// Whether the victim is a pet: its mouth and the body the particles are
+    /// held in front of are a pet's.
     pub is_pet: bool,
 }
 
@@ -471,20 +477,23 @@ pub fn spawn_silence_breaths(
                 carry: [0.0; 4],
                 emitted: 0,
                 stature: stature(is_pet),
-                victim_at: transform.translation,
                 is_pet,
             },
-            Transform::from_translation(silence_mouth(transform, is_pet)),
+            Transform::from_translation(silence_mouth(
+                transform.translation,
+                transform.rotation,
+                is_pet,
+            )),
             Visibility::default(),
             PlayMatchEntity,
         ));
     }
 }
 
-/// Animate (graphical-only): stand each breath at its victim's mouth (hidden
-/// while it is a sheep) and emit every layer whose window is open, integrating
-/// the rate over the frame so a frame-rate change does not change the
-/// density.
+/// Animate (graphical-only): hide each breath while its victim is a sheep,
+/// and emit every layer whose window is open, integrating the rate over the
+/// frame so a frame-rate change does not change the density. Where it stands
+/// is [`place_silence_breaths`]'s.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn animate_silence_breaths(
     mut commands: Commands,
@@ -493,31 +502,18 @@ pub fn animate_silence_breaths(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut assets: Local<Option<SilenceAssets>>,
-    mut rigs: Query<(
-        Entity,
-        &mut SilenceBreathRig,
-        &mut Transform,
-        &mut Visibility,
-    )>,
-    victims: Query<
-        (&Transform, Option<&Pet>, Has<PolymorphedVisual>),
-        (With<Combatant>, Without<SilenceBreathRig>),
-    >,
+    mut rigs: Query<(Entity, &mut SilenceBreathRig, &mut Visibility)>,
+    victims: Query<Has<PolymorphedVisual>, (With<Combatant>, Without<SilenceBreathRig>)>,
 ) {
     let dt = time.delta_secs();
     let assets = assets
         .get_or_insert_with(|| SilenceAssets::build(&mut meshes, &mut images))
         .clone();
-    for (rig_entity, mut rig, mut transform, mut visibility) in rigs.iter_mut() {
-        let Ok((victim, pet, sheep)) = victims.get(rig.target) else {
+    for (rig_entity, mut rig, mut visibility) in rigs.iter_mut() {
+        let Ok(sheep) = victims.get(rig.target) else {
             continue;
         };
-        let is_pet = pet.is_some();
         rig.age += dt;
-        rig.is_pet = is_pet;
-        rig.stature = stature(is_pet);
-        rig.victim_at = victim.translation;
-        transform.translation = silence_mouth(victim, is_pet);
         visibility.set_if_neq(if sheep {
             Visibility::Hidden
         } else {
@@ -585,28 +581,73 @@ pub fn age_silence_breath_particles(
     }
 }
 
-/// Billboard (graphical-only): place each particle where it is drawn — held
-/// in front of its victim's body for the camera (departure 1) — turned to the
-/// camera and rolled as the bench rolls it, sized and coloured along its life.
+/// PostUpdate (graphical-only), after every writer of a body's transform and
+/// before propagation: stand each breath at its victim's RENDERED mouth, and
+/// place each particle where it is drawn — held in front of that rendered
+/// body for the camera (departure 1) — turned to the camera and rolled as the
+/// bench rolls it, sized and coloured along its life. The rig is unrotated,
+/// so a particle's local pose is its world offset.
 #[allow(clippy::type_complexity)]
-pub fn billboard_silence_breath_particles(
+pub fn place_silence_breaths(
     mut materials: ResMut<Assets<StandardMaterial>>,
-    camera: Query<&GlobalTransform, With<Camera3d>>,
-    rigs: Query<(&SilenceBreathRig, &Transform, &Children), Without<SilenceBreathParticle>>,
+    camera: Query<
+        &Transform,
+        (
+            With<Camera3d>,
+            Without<SilenceBreathRig>,
+            Without<SilenceBreathParticle>,
+        ),
+    >,
+    mut rigs: Query<
+        (&SilenceBreathRig, &mut Transform, &Children),
+        (
+            Without<SilenceBreathParticle>,
+            Without<Combatant>,
+            Without<VisualBody>,
+            Without<Camera3d>,
+        ),
+    >,
+    victims: Query<
+        (&Transform, Option<&Children>),
+        (
+            With<Combatant>,
+            Without<SilenceBreathRig>,
+            Without<SilenceBreathParticle>,
+        ),
+    >,
+    bodies: Query<
+        (&Transform, &VisualBody),
+        (
+            Without<Combatant>,
+            Without<SilenceBreathRig>,
+            Without<SilenceBreathParticle>,
+        ),
+    >,
     mut particles: Query<
         (
             &SilenceBreathParticle,
             &mut Transform,
             &MeshMaterial3d<StandardMaterial>,
         ),
-        Without<SilenceBreathRig>,
+        (
+            Without<SilenceBreathRig>,
+            Without<Combatant>,
+            Without<VisualBody>,
+            Without<Camera3d>,
+        ),
     >,
 ) {
-    let view = camera.iter().next().map(|c| c.compute_transform());
+    let view = camera.iter().next();
     let cam = view.map(|c| c.rotation).unwrap_or(Quat::IDENTITY);
-    for (rig, rig_transform, children) in rigs.iter() {
-        let mouth = rig_transform.translation;
-        let capsule = siphon_body_capsule(rig.victim_at, rig.is_pet);
+    for (rig, mut rig_transform, children) in rigs.iter_mut() {
+        let Ok((victim, victim_children)) = victims.get(rig.target) else {
+            continue;
+        };
+        let body = victim_children.and_then(|kids| kids.iter().find_map(|k| bodies.get(k).ok()));
+        let root = rendered_root(victim, body);
+        let mouth = silence_mouth(root, victim.rotation, rig.is_pet);
+        rig_transform.translation = mouth;
+        let capsule = siphon_body_capsule(root, rig.is_pet);
         for child in children.iter() {
             let Ok((p, mut transform, material)) = particles.get_mut(child) else {
                 continue;

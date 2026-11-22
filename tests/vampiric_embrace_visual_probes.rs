@@ -35,17 +35,17 @@ use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, Aura, AuraApplyOwner, AuraApplyRoute, AuraLanding,
     AuraLandingKind, AuraType, CastingState, Combatant, GameRng, HealImpact, HealImpactKind,
     HealImpactRig, HealMote, MatchCountdown, Pet, PetType, PlayMatchEntity, ShadowPainHit,
+    VisualBody,
 };
 use arenasim::states::play_match::map_config::ActiveMapGeometry;
 use arenasim::states::play_match::{
     age_vampiric_embrace_motes, animate_heal_impacts, animate_shadow_pain_hits,
-    animate_vampiric_embrace_implosions, billboard_heal_impacts, billboard_vampiric_embrace_motes,
-    cleanup_play_match, spawn_heal_impacts, spawn_shadow_pain_hits,
+    animate_vampiric_embrace_implosions, billboard_heal_impacts, cleanup_play_match,
+    place_vampiric_embrace_implosions, spawn_heal_impacts, spawn_shadow_pain_hits,
     spawn_vampiric_embrace_implosions, VampiricEmbraceImplosion, VampiricEmbraceMote,
 };
 use arenasim::CharacterClass;
 
-const TICK: Duration = Duration::from_millis(16);
 const DT: f32 = 0.016;
 /// Combatants stand with capsule centres at world y = 1.0 over the floor.
 const COMBATANT_Y: f32 = 1.0;
@@ -194,10 +194,17 @@ fn count_streams(
 
 struct Harness {
     app: App,
+    /// The frame's length, seconds.
+    dt: f32,
 }
 
 impl Harness {
     fn new() -> Self {
+        Harness::with_tick(DT)
+    }
+
+    /// A harness whose frames are `dt` seconds long.
+    fn with_tick(dt: f32) -> Self {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -207,22 +214,24 @@ impl Harness {
         app.init_asset::<Mesh>();
         app.init_asset::<StandardMaterial>();
         app.init_asset::<Image>();
-        app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK))
-            .insert_resource(MatchCountdown {
-                time_remaining: 0.0,
-                gates_opened: true,
-            })
-            .insert_resource(CombatLog::default())
-            .insert_resource(GameRng::from_seed(0))
-            .insert_resource(AbilityDefinitions::default())
-            .insert_resource(ArenaDampening::default())
-            .insert_resource(StreamsBuilt::default())
-            .insert_resource(Frame::default())
-            .insert_resource(ActiveMapGeometry {
-                bounds: Default::default(),
-                volumes: Vec::new(),
-                cover_anchors: Vec::new(),
-            });
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
+            dt,
+        )))
+        .insert_resource(MatchCountdown {
+            time_remaining: 0.0,
+            gates_opened: true,
+        })
+        .insert_resource(CombatLog::default())
+        .insert_resource(GameRng::from_seed(0))
+        .insert_resource(AbilityDefinitions::default())
+        .insert_resource(ArenaDampening::default())
+        .insert_resource(StreamsBuilt::default())
+        .insert_resource(Frame::default())
+        .insert_resource(ActiveMapGeometry {
+            bounds: Default::default(),
+            volumes: Vec::new(),
+            cover_anchors: Vec::new(),
+        });
         // The sim's cast and its aura's landing, then the chains
         // `states/mod.rs` registers.
         app.add_systems(Update, (process_casting, apply_pending_auras).chain());
@@ -232,7 +241,6 @@ impl Harness {
                 spawn_vampiric_embrace_implosions,
                 animate_vampiric_embrace_implosions,
                 age_vampiric_embrace_motes,
-                billboard_vampiric_embrace_motes,
             )
                 .chain()
                 .after(apply_pending_auras),
@@ -241,9 +249,11 @@ impl Harness {
             Update,
             (
                 spawn_heal_impacts,
+                // Counted as the rig is built, before a long frame can age it
+                // out the same frame.
+                count_streams,
                 animate_heal_impacts,
                 billboard_heal_impacts,
-                count_streams,
             )
                 .chain()
                 .after(apply_pending_auras),
@@ -254,9 +264,16 @@ impl Harness {
                 .chain()
                 .after(apply_pending_auras),
         );
+        // Posed on the rendered body in PostUpdate, before propagation, as
+        // `states/mod.rs` registers it.
+        app.add_systems(
+            PostUpdate,
+            place_vampiric_embrace_implosions
+                .before(bevy::transform::TransformSystem::TransformPropagate),
+        );
         // Warm the clock: Bevy's first update has a zero delta.
         app.update();
-        Harness { app }
+        Harness { app, dt }
     }
 
     fn tick(&mut self, frames: u32) {
@@ -266,7 +283,7 @@ impl Harness {
     }
 
     fn tick_secs(&mut self, secs: f32) {
-        self.tick((secs / DT).round() as u32);
+        self.tick((secs / self.dt).round() as u32);
     }
 
     fn world(&mut self) -> &mut World {
@@ -753,9 +770,10 @@ struct Birth {
     launch: Vec3,
 }
 
-/// Land an implosion on a still enemy and record every birth.
-fn implosion_births() -> (Vec<Birth>, Vec3) {
-    let mut h = Harness::new();
+/// Land an implosion on a still enemy, on frames `dt` long, and record every
+/// birth.
+fn implosion_births(dt: f32) -> (Vec<Birth>, Vec3) {
+    let mut h = Harness::with_tick(dt);
     let s = scene(&mut h);
     h.cast(s.priest, s.enemy, AbilityType::VampiricEmbrace);
     let mut seen = BTreeSet::new();
@@ -770,11 +788,11 @@ fn implosion_births() -> (Vec<Birth>, Vec3) {
             if !seen.insert(e) {
                 continue;
             }
-            assert!((mote_age - DT).abs() < 1e-5, "first seen one frame old");
+            assert!((mote_age - dt).abs() < 1e-5, "first seen one frame old");
             assert!((life - implode::LIFE).abs() < 1e-6, "lives {life}");
             out.push(Birth {
                 ms: age * 1000.0,
-                born: offset - velocity * DT,
+                born: offset - velocity * dt,
                 launch: velocity,
             });
         }
@@ -786,13 +804,21 @@ fn implosion_births() -> (Vec<Birth>, Vec3) {
 /// Every mote is born on the bench's shell — 0.6 to 1.0 of it out from the
 /// chest, filling that band in every direction — and travels straight IN at
 /// 1.67 yd/s; motes are born only inside the 1967 ms window, at 80 a second.
+/// The same at 8 ms and 33 ms frames as at 16: the rate, the ageing and the
+/// flight are per second, never per frame.
 #[test]
 fn the_dust_is_born_on_the_shell_and_falls_in_for_the_window() {
-    let (births, _) = implosion_births();
+    for dt in [DT, 0.008, 0.033] {
+        dust_is_born_on_the_shell(dt);
+    }
+}
+
+fn dust_is_born_on_the_shell(dt: f32) {
+    let (births, _) = implosion_births(dt);
     let expected = implode::RATE * implode::WIN_MS / 1000.0;
     assert!(
-        (births.len() as f32 - expected).abs() <= 2.0,
-        "{} motes against the bench's {expected}",
+        (births.len() as f32 - expected).abs() <= implode::RATE * dt + 1.0,
+        "{} motes against the bench's {expected} at {dt} s frames",
         births.len()
     );
     let (mut near, mut far) = (f32::MAX, 0.0_f32);
@@ -820,7 +846,7 @@ fn the_dust_is_born_on_the_shell_and_falls_in_for_the_window() {
     assert_eq!(octants.len(), 8, "from every side");
     let last = births.iter().map(|b| b.ms).fold(0.0, f32::max);
     assert!(
-        last > implode::WIN_MS - 40.0,
+        last > implode::WIN_MS - 1000.0 * dt - 25.0,
         "emits to the window's end: {last}"
     );
 }
@@ -1144,4 +1170,182 @@ fn the_implosion_outlives_a_death_but_not_a_despawn_or_the_match() {
     let mut q = h.world().query::<&HealMote>();
     assert_eq!(q.iter(h.app.world()).count(), 0);
     assert!(h.implosions().is_empty());
+}
+
+// ── The rendered body ────────────────────────────────────────────────────────
+
+/// How far a unit's rendered body (its `VisualBody` child) stands from its
+/// rest pose: `local` is the child's translation, `rest_y` its rest height.
+/// The point the body's anchors are measured from, as a unit at rest there.
+fn rendered_root(unit: &Transform, local: Vec3, rest_y: f32) -> Vec3 {
+    unit.translation + unit.rotation * (local - Vec3::Y * rest_y)
+}
+
+/// A unit's chest above a rendered root, a combatant's or a pet's.
+fn chest_above(root: Vec3, pet: bool) -> Vec3 {
+    if pet {
+        root + Vec3::Y * (PET_BODY_Y + (BENCH_CHEST - COMBATANT_Y) * PET_STATURE)
+    } else {
+        root + Vec3::Y * (BENCH_CHEST - COMBATANT_Y)
+    }
+}
+
+/// The depth along `forward` of the nearest point of the body standing at a
+/// rendered `root`: a combatant's upright capsule, or the sphere bounding a
+/// pet's (`Capsule3d::new(0.35, 0.6)` centred 0.45 below its transform, laid
+/// along its facing).
+fn nearest_depth(root: Vec3, pet: bool, eye: Vec3, forward: Vec3) -> f32 {
+    if pet {
+        (root + Vec3::Y * PET_BODY_Y - eye).dot(forward) - (0.35 + 0.3)
+    } else {
+        body_nearest_depth(root, eye, forward)
+    }
+}
+
+/// The implosion stands at the chest of its victim's RENDERED body — the
+/// `VisualBody` child, wherever the walk bob, fear bob or swing step has
+/// carried it — and every mote is held in front of that body, on its true
+/// point's view ray. Checked on a combatant and on a pet (whose body rests
+/// 0.45 below its transform), still, then after the victim runs four yards
+/// across the view and its body bobs, so the anchor and the body the motes
+/// are held against are both read afresh each frame.
+#[test]
+fn the_implosion_rides_the_rendered_body_and_is_held_in_front_of_it() {
+    let mut held = 0;
+    let mut checked = 0;
+    for pet in [false, true] {
+        let mut h = Harness::new();
+        let s = scene(&mut h);
+        let rest_y = if pet { PET_BODY_Y } else { 0.0 };
+        let at = Vec3::new(2.0, COMBATANT_Y, -3.0);
+        let facing = Quat::from_rotation_y(0.7);
+        let mut unit = h.world().spawn((
+            Combatant::new(2, 2, CharacterClass::Hunter),
+            Transform::from_translation(at).with_rotation(facing),
+        ));
+        if pet {
+            unit.insert(Pet {
+                owner: s.enemy,
+                pet_type: PetType::Spider,
+            });
+        }
+        let victim = unit
+            .with_child((
+                VisualBody { rest_y },
+                Transform::from_translation(Vec3::new(0.3, rest_y + 0.25, -0.2)),
+            ))
+            .id();
+        let cam = match_camera(at, 60.0, 38.7f32.to_radians(), 0.4);
+        h.camera(cam);
+        h.cast(s.priest, victim, AbilityType::VampiricEmbrace);
+        h.tick(12);
+        let eye = cam.translation;
+        let forward = cam.forward().as_vec3();
+        for step in 0..2 {
+            if step == 1 {
+                // Run four yards across the view, and bob the body.
+                let right = cam.right().as_vec3().with_y(0.0).normalize();
+                h.world().get_mut::<Transform>(victim).unwrap().translation = at + right * 4.0;
+                let body = h.app.world().get::<Children>(victim).unwrap()[0];
+                h.world().get_mut::<Transform>(body).unwrap().translation =
+                    Vec3::new(-0.25, rest_y + 0.1, 0.35);
+                h.tick(1);
+            }
+            let world = h.app.world();
+            let unit = *world.get::<Transform>(victim).unwrap();
+            let body = world.get::<Children>(victim).unwrap()[0];
+            let local = world.get::<Transform>(body).unwrap().translation;
+            let root = rendered_root(&unit, local, rest_y);
+            let chest = chest_above(root, pet);
+            let rigs = h.implosions();
+            assert_eq!(rigs.len(), 1);
+            assert!(
+                (rigs[0].3 - chest).length() < 1e-4,
+                "pet {pet}, step {step}: the rig at {} is not the rendered chest {chest}",
+                rigs[0].3
+            );
+            let stature = if pet { PET_STATURE } else { 1.0 };
+            let nearest = nearest_depth(root, pet, eye, forward);
+            let world = h.app.world_mut();
+            let mut q = world.query::<(&VampiricEmbraceMote, &GlobalTransform)>();
+            let motes: Vec<(Vec3, f32, f32, GlobalTransform)> = q
+                .iter(world)
+                .map(|(m, g)| (m.offset, m.age, m.life, *g))
+                .collect();
+            assert!(motes.len() > 5, "{} motes", motes.len());
+            for (offset, age, life, g) in motes {
+                let g = g.compute_transform();
+                let truly = chest + offset;
+                let depth = (g.translation - eye).dot(forward);
+                assert!(
+                    depth < nearest,
+                    "pet {pet}, step {step}: buried, {depth} behind {nearest}"
+                );
+                assert!(
+                    (g.translation - eye)
+                        .normalize()
+                        .dot((truly - eye).normalize())
+                        > 0.999_999,
+                    "pet {pet}, step {step}: off its true view ray"
+                );
+                let k = depth / (truly - eye).dot(forward);
+                let r = bench_keys(&implode::SCALE, age / life) * stature;
+                assert!((g.scale.x - 2.0 * r * k).abs() < 1e-4, "screen size");
+                if k < 0.999 {
+                    assert!(
+                        depth > nearest - 0.1,
+                        "pet {pet}: held {} in front of the body, farther than it must be",
+                        nearest - depth
+                    );
+                    held += 1;
+                }
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 60, "{checked} motes checked");
+    assert!(held > 20, "{held} needed holding");
+}
+
+/// The throttle's edge, to the millisecond: a heal 2.990 s after the stream
+/// last played on an ally is still throttled, and one 2.9995 s after — past
+/// 2.999, the bench's `ms - lastHeal >= every*1000 - 1` — plays.
+#[test]
+fn the_stream_throttle_turns_over_at_three_seconds_to_the_millisecond() {
+    for (gap, plays) in [(2.990_f32, false), (2.9995, true)] {
+        let mut h = Harness::new();
+        h.world()
+            .resource_mut::<Time<Virtual>>()
+            .set_max_delta(Duration::from_secs(10));
+        let s = scene(&mut h);
+        h.cast(s.priest, s.enemy, AbilityType::VampiricEmbrace);
+        h.cast(s.priest, s.enemy, AbilityType::MindBlast);
+        assert_eq!(
+            h.streams().iter().filter(|(e, _)| *e == s.ally).count(),
+            1,
+            "the first heal plays"
+        );
+        // One frame, `gap` long, in which the second heal lands.
+        h.world()
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
+                gap,
+            )));
+        h.world().entity_mut(s.priest).insert(CastingState::new(
+            AbilityType::MindBlast,
+            s.enemy,
+            0.0,
+        ));
+        h.tick(1);
+        assert!(
+            h.app.world().get::<CastingState>(s.priest).is_none(),
+            "landed"
+        );
+        let delta = h.app.world().resource::<Time<Virtual>>().delta_secs();
+        assert!((delta - gap).abs() < 1e-6, "a {delta} s frame");
+        assert_eq!(
+            h.streams().iter().filter(|(e, _)| *e == s.ally).count(),
+            1 + plays as usize,
+            "a heal {gap} s after the last stream"
+        );
+    }
 }

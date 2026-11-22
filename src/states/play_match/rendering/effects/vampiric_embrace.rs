@@ -96,7 +96,14 @@ use crate::states::play_match::components::*;
 // to ~6 px as it reaches the chest; a stream glow is ~4 px, shrinking to ~2.
 // Client size, by the ruling.
 //
-// House rules: spawn / animate / age / billboard systems, `Res<Time>`,
+// **Rides the rendered body.** The rig stands at the chest of the victim's
+// `VisualBody`, not its root, and the hold measures that body
+// (`rendered_root`): the walk bob, the fear bob and the swing step carry the
+// dust with them, as `shield.rs`, `vengeance.rs` and `shadow_dance.rs` ride
+// it. So the placement runs in PostUpdate, after every writer of a body's
+// transform and before propagation (`place_vampiric_embrace_implosions`).
+//
+// House rules: spawn / animate / age / place systems, `Res<Time>`,
 // registered in `states/mod.rs` only (headless never runs any of it), no
 // `game_rng` — all scatter is hash-seeded off the rig's entity index and
 // emission count.
@@ -170,9 +177,24 @@ fn stature(is_pet: bool) -> f32 {
     }
 }
 
-/// The chest the implosion stands at, for a victim at `translation`.
+/// The chest the implosion stands at, for a victim whose rendered body stands
+/// as a unit at `translation` would at rest ([`rendered_root`]).
 pub fn ve_chest(translation: Vec3, is_pet: bool) -> Vec3 {
     body_point(VE_CHEST_ABOVE_FLOOR, translation, is_pet)
+}
+
+/// Where a unit at `unit` would stand for its RENDERED body to be where it is
+/// now: its root, moved by however far its `VisualBody` has left the body's
+/// rest pose (`rest_y`) — the walk bob, the fear bob, the swing step, the
+/// Cyclone lift. Every body point the sim's anchors measure from the root
+/// (`body_point`, `siphon_body_capsule`) is then measured from the body the
+/// player sees, as `shield.rs`, `vengeance.rs` and `shadow_dance.rs` stand on
+/// it. With no body (headless tests), the root itself.
+pub fn rendered_root(unit: &Transform, body: Option<(&Transform, &VisualBody)>) -> Vec3 {
+    match body {
+        Some((local, body)) => unit.transform_point(local.translation - Vec3::Y * body.rest_y),
+        None => unit.translation,
+    }
 }
 
 /// The rig's whole life: until its last mote, born as the window shuts, has
@@ -221,9 +243,8 @@ pub struct VampiricEmbraceImplosion {
     pub carry: f32,
     pub emitted: u32,
     pub stature: f32,
-    /// Where the victim stood this frame, and whether it is a pet — the body
-    /// the billboard pass holds the motes in front of.
-    pub victim_at: Vec3,
+    /// Whether the victim is a pet: its chest and the body the motes are
+    /// held in front of are a pet's.
     pub is_pet: bool,
     quad: Handle<Mesh>,
     sprite: Handle<Image>,
@@ -279,7 +300,6 @@ pub fn spawn_vampiric_embrace_implosions(
                 carry: 0.0,
                 emitted: 0,
                 stature: stature(is_pet),
-                victim_at: victim.translation,
                 is_pet,
                 quad,
                 sprite,
@@ -291,34 +311,28 @@ pub fn spawn_vampiric_embrace_implosions(
     }
 }
 
-/// Animate (graphical-only): stand each implosion at its victim's chest and
-/// emit its dust, integrating the rate over the frame so a frame-rate change
-/// does not change the density; retire it once its last mote has died, or at
-/// once when its victim is gone.
+/// Animate (graphical-only): emit each implosion's dust, integrating the rate
+/// over the frame so a frame-rate change does not change the density; retire
+/// it once its last mote has died, or at once when its victim is gone. Where
+/// it stands is [`place_vampiric_embrace_implosions`]'s.
 pub fn animate_vampiric_embrace_implosions(
     mut commands: Commands,
     time: Res<Time>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut rigs: Query<(Entity, &mut VampiricEmbraceImplosion, &mut Transform)>,
-    victims: Query<
-        (&Transform, Option<&Pet>),
-        (With<Combatant>, Without<VampiricEmbraceImplosion>),
-    >,
+    mut rigs: Query<(Entity, &mut VampiricEmbraceImplosion)>,
+    victims: Query<(), With<Combatant>>,
 ) {
     let dt = time.delta_secs();
-    for (rig_entity, mut rig, mut transform) in rigs.iter_mut() {
-        let Ok((victim, pet)) = victims.get(rig.target) else {
+    for (rig_entity, mut rig) in rigs.iter_mut() {
+        if victims.get(rig.target).is_err() {
             commands.entity(rig_entity).despawn();
             continue;
-        };
+        }
         if rig.age >= ve_implosion_life() {
             commands.entity(rig_entity).despawn();
             continue;
         }
         rig.age += dt;
-        rig.is_pet = pet.is_some();
-        rig.victim_at = victim.translation;
-        transform.translation = ve_chest(victim.translation, rig.is_pet);
         if !ve_implosion_emitting(rig.age) {
             continue;
         }
@@ -376,28 +390,73 @@ pub fn age_vampiric_embrace_motes(
     }
 }
 
-/// Billboard (graphical-only): place each mote where it is drawn — held in
-/// front of its victim's body for the camera (departure 1) — turned to the
-/// camera, sized and coloured along its life.
+/// PostUpdate (graphical-only), after every writer of a body's transform and
+/// before propagation: stand each implosion at its victim's RENDERED chest,
+/// and place each mote where it is drawn — held in front of that rendered
+/// body for the camera (departure 1) — turned to the camera, sized and
+/// coloured along its life. The rig is unrotated, so a mote's local pose is
+/// its world offset.
 #[allow(clippy::type_complexity)]
-pub fn billboard_vampiric_embrace_motes(
+pub fn place_vampiric_embrace_implosions(
     mut materials: ResMut<Assets<StandardMaterial>>,
-    camera: Query<&GlobalTransform, With<Camera3d>>,
-    rigs: Query<(&VampiricEmbraceImplosion, &Transform, &Children), Without<VampiricEmbraceMote>>,
+    camera: Query<
+        &Transform,
+        (
+            With<Camera3d>,
+            Without<VampiricEmbraceImplosion>,
+            Without<VampiricEmbraceMote>,
+        ),
+    >,
+    mut rigs: Query<
+        (&VampiricEmbraceImplosion, &mut Transform, &Children),
+        (
+            Without<VampiricEmbraceMote>,
+            Without<Combatant>,
+            Without<VisualBody>,
+            Without<Camera3d>,
+        ),
+    >,
+    victims: Query<
+        (&Transform, Option<&Children>),
+        (
+            With<Combatant>,
+            Without<VampiricEmbraceImplosion>,
+            Without<VampiricEmbraceMote>,
+        ),
+    >,
+    bodies: Query<
+        (&Transform, &VisualBody),
+        (
+            Without<Combatant>,
+            Without<VampiricEmbraceImplosion>,
+            Without<VampiricEmbraceMote>,
+        ),
+    >,
     mut motes: Query<
         (
             &VampiricEmbraceMote,
             &mut Transform,
             &MeshMaterial3d<StandardMaterial>,
         ),
-        Without<VampiricEmbraceImplosion>,
+        (
+            Without<VampiricEmbraceImplosion>,
+            Without<Combatant>,
+            Without<VisualBody>,
+            Without<Camera3d>,
+        ),
     >,
 ) {
-    let view = camera.iter().next().map(|c| c.compute_transform());
+    let view = camera.iter().next();
     let cam = view.map(|c| c.rotation).unwrap_or(Quat::IDENTITY);
-    for (rig, rig_transform, children) in rigs.iter() {
-        let chest = rig_transform.translation;
-        let capsule = siphon_body_capsule(rig.victim_at, rig.is_pet);
+    for (rig, mut rig_transform, children) in rigs.iter_mut() {
+        let Ok((victim, victim_children)) = victims.get(rig.target) else {
+            continue;
+        };
+        let body = victim_children.and_then(|kids| kids.iter().find_map(|k| bodies.get(k).ok()));
+        let root = rendered_root(victim, body);
+        let chest = ve_chest(root, rig.is_pet);
+        rig_transform.translation = chest;
+        let capsule = siphon_body_capsule(root, rig.is_pet);
         for child in children.iter() {
             let Ok((mote, mut transform, material)) = motes.get_mut(child) else {
                 continue;
