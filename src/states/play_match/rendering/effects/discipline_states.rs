@@ -77,7 +77,7 @@
 //! with its body (the sheep wears nothing), its clock running on. Stealth
 //! owns the body's material, which nothing here touches, so a state is the
 //! same in and out of stealth. A swirl lives its 1.067 s, or until its
-//! caster dies.
+//! caster dies, and is hidden while its caster is a sheep.
 //!
 //! **The particles are fixed pools** (the Shadow Dance idiom): each emitter
 //! owns [`state_slots`] pieces, more than it can hold alive, births come off
@@ -1145,8 +1145,8 @@ fn spawn_pieces(
 /// Pain Suppression, raise the swirl at its caster's feet); age each state
 /// and emit what the frame owes, replaying the cast on a refresh; hide it
 /// while its bearer is a sheep; take it down when its buff ends or its bearer
-/// dies or is gone. Age each swirl and take it down after its life or with
-/// its caster.
+/// dies or is gone. Age each swirl, hide it while its Priest is a sheep, and
+/// take it down after its life or with its caster.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn update_discipline_states(
     mut commands: Commands,
@@ -1157,14 +1157,18 @@ pub fn update_discipline_states(
     mut assets: Local<Option<DisciplineStateAssets>>,
     mut hand_assets: Local<Option<HealCastAssets>>,
     bearers: Query<(Entity, &Combatant, &ActiveAuras, Has<PolymorphedVisual>)>,
-    combatants: Query<&Combatant>,
+    combatants: Query<(&Combatant, Has<PolymorphedVisual>)>,
     casters: Query<&Children>,
     bodies: Query<(), With<VisualBody>>,
     mut rigs: Query<(Entity, &mut DisciplineStateRig, &mut Visibility)>,
-    mut swirls: Query<(Entity, &mut SuppressionSwirl)>,
+    mut swirls: Query<
+        (Entity, &mut SuppressionSwirl, &mut Visibility),
+        Without<DisciplineStateRig>,
+    >,
 ) {
     let dt = time.delta_secs();
-    let alive = |e: Entity| combatants.get(e).is_ok_and(|c| c.is_alive());
+    let alive = |e: Entity| combatants.get(e).is_ok_and(|(c, _)| c.is_alive());
+    let sheep = |e: Entity| combatants.get(e).is_ok_and(|(_, sheep)| sheep);
     let hidden = |sheep: bool| {
         if sheep {
             Visibility::Hidden
@@ -1173,11 +1177,14 @@ pub fn update_discipline_states(
         }
     };
 
-    for (entity, mut swirl) in swirls.iter_mut() {
+    for (entity, mut swirl, mut visibility) in swirls.iter_mut() {
         swirl.age += dt;
         if swirl.age >= SUPPRESSION_SWIRL_SECS || !alive(swirl.caster) {
             commands.entity(entity).despawn();
+            continue;
         }
+        // A Priest sheeped mid-swirl: hidden with its body, as the states.
+        visibility.set_if_neq(hidden(sheep(swirl.caster)));
     }
 
     // Casts to cue this frame: (state, caster).
@@ -1262,7 +1269,7 @@ pub fn update_discipline_states(
                 .spawn((
                     SuppressionSwirl { caster, age: 0.0 },
                     Transform::default(),
-                    Visibility::default(),
+                    hidden(sheep(caster)),
                     PlayMatchEntity,
                 ))
                 .id();

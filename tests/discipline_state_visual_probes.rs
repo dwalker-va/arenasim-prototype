@@ -35,6 +35,7 @@ use arenasim::states::play_match::components::{
     CastEndingKind, Combatant, HealCastHand, HealCastKind, LandedCast, PlayMatchEntity,
     PolymorphedVisual, ShieldCard, VisualBody, PAIN_SUPPRESSION_AURA, POWER_INFUSION_AURA,
 };
+use arenasim::states::play_match::state_particle_pose;
 use arenasim::states::play_match::{
     cleanup_play_match, consume_cast_ending_signals, detect_aura_applications,
     place_discipline_states, place_shield_cards, spawn_instant_cast_hands,
@@ -2153,4 +2154,199 @@ fn the_match_ending_takes_everything() {
     assert!(h.rigs().is_empty());
     assert!(h.swirls().is_empty());
     assert_eq!(h.count::<DisciplineStatePiece>(), 0);
+}
+
+// ── facing and roll at the match camera ─────────────────────────────────────
+
+/// Every piece turns to the camera as the bench draws it, through the real
+/// chain, at the match camera's distance over a spread of pitches and yaws,
+/// with the ally facing away: each panel (the discs, the onset star and
+/// streak, the shell's quads) faces the camera and stays square to its
+/// screen axes, so the streak lies screen-horizontal and the quads stand
+/// screen-upright; each lit particle faces the camera, rolled in its plane by
+/// the bench's own `ang` for its birth; and each streak's tail runs on screen
+/// from the streak's head to the point 0.24 yd back along its flight, as the
+/// bench's screen line does. Non-vacuous: the sparks' rolls spread over the
+/// whole turn.
+#[test]
+fn every_piece_turns_to_the_camera_as_the_bench_draws_it() {
+    let pitches = [0.4_f32, 38.7_f32.to_radians(), 1.0, 1.3];
+    let yaws = [0.0_f32, 1.3, 2.9, 4.4];
+    let mut h = Harness::new();
+    let (priest, ally) = h.pair();
+    h.app
+        .world_mut()
+        .get_mut::<Transform>(ally)
+        .unwrap()
+        .rotation = Quat::from_rotation_y(2.5);
+    let cam = h.camera(Transform::default());
+    let target = Vec3::new(2.0, 1.0, 1.0);
+    h.infuse(ally, priest);
+    h.suppress(ally, priest);
+    let tail_length = bench_emitters()[2].tail_length() as f32;
+    let (mut panels, mut particles, mut tails) = (0usize, 0usize, 0usize);
+    let mut spark_rolls = BTreeSet::new();
+    for frame in 0..160_usize {
+        let (pitch, yaw) = (
+            pitches[frame % pitches.len()],
+            yaws[(frame / pitches.len()) % yaws.len()],
+        );
+        *h.app.world_mut().get_mut::<Transform>(cam).unwrap() =
+            match_camera(target, 60.0, pitch, yaw);
+        h.tick(1);
+        let view = *h.app.world().get::<GlobalTransform>(cam).unwrap();
+        let cam_rot = view.rotation();
+        let rigs: BTreeMap<Entity, (DisciplineStateRigView, Vec3)> = {
+            let mut q = h
+                .app
+                .world_mut()
+                .query::<(Entity, &DisciplineStateRig, &GlobalTransform)>();
+            q.iter(h.app.world())
+                .map(|(e, r, g)| (e, (DisciplineStateRigView::of(r), g.translation())))
+                .collect()
+        };
+        for d in h.pieces() {
+            let what = format!("{:?} at frame {frame}, pitch {pitch}, yaw {yaw}", d.piece);
+            let faces = (d.rotation * Vec3::Z).dot(cam_rot * Vec3::Z);
+            match d.piece {
+                StatePiece::WideDisc
+                | StatePiece::MidDisc
+                | StatePiece::CoreDisc
+                | StatePiece::OnsetStar
+                | StatePiece::OnsetStreak
+                | StatePiece::Shell(_) => {
+                    assert!(faces > 0.9999, "{what}: does not face the camera");
+                    assert!(
+                        (d.rotation * Vec3::X).dot(cam_rot * Vec3::X) > 0.9999,
+                        "{what}: turned in the camera's plane"
+                    );
+                    panels += 1;
+                }
+                StatePiece::Particle { layer, slot } => {
+                    let (rig, _) = &rigs[&d.rig];
+                    let Some((j, age)) = rig.particle(layer, slot as usize) else {
+                        continue;
+                    };
+                    let pose = state_particle_pose(layer, j, age).unwrap();
+                    assert!(faces > 0.9999, "{what}: does not face the camera");
+                    let want = cam_rot * Quat::from_rotation_z(pose.roll);
+                    assert!(
+                        // `angle_between` is an acos, coarse near 0 in f32.
+                        d.rotation.angle_between(want) < 5e-3,
+                        "{what}: rolled {} from its birth's roll",
+                        d.rotation.angle_between(want)
+                    );
+                    if layer == StateLayer::InfusionSparks {
+                        // Its roll on screen, in tenths of a turn.
+                        let x = cam_rot.inverse() * (d.rotation * Vec3::X);
+                        spark_rolls.insert(
+                            ((x.y.atan2(x.x) / std::f32::consts::TAU).rem_euclid(1.0) * 10.0)
+                                as i32,
+                        );
+                    }
+                    particles += 1;
+                }
+                StatePiece::Tail { layer, slot } => {
+                    let (rig, anchor) = &rigs[&d.rig];
+                    let Some((j, age)) = rig.particle(layer, slot as usize) else {
+                        continue;
+                    };
+                    let pose = state_particle_pose(layer, j, age).unwrap();
+                    if pose.alpha <= 1e-3 {
+                        continue;
+                    }
+                    assert!(faces > 0.9999, "{what}: does not face the camera");
+                    let head = *anchor + pose.at;
+                    let back = head - pose.velocity.normalize() * tail_length;
+                    let half = d.rotation * Vec3::X * (d.scale.x * 0.5);
+                    let (_, depth) = project(&view, *anchor);
+                    let screen = |q: Vec3| project(&view, q).0 * depth;
+                    let (e0, e1) = (screen(d.at - half), screen(d.at + half));
+                    let (w0, w1) = (screen(head), screen(back));
+                    let err = ((e0 - w0).length() + (e1 - w1).length())
+                        .min((e0 - w1).length() + (e1 - w0).length());
+                    assert!(err < 2e-3, "{what}: its ends are off by {err}");
+                    tails += 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(panels, 160 * 8, "eight panels a frame");
+    assert!(particles > 9_000, "{particles}");
+    assert!(tails > 3000, "{tails}");
+    assert_eq!(
+        spark_rolls,
+        (0..10).collect::<BTreeSet<i32>>(),
+        "the sparks' rolls spread over the whole turn"
+    );
+}
+
+/// A rig's particle bookkeeping, copied out so the world can be queried
+/// again: which birth sits in each slot, and how old it is.
+struct DisciplineStateRigView {
+    slots: Vec<Vec<Option<(u32, f32)>>>,
+}
+
+impl DisciplineStateRigView {
+    fn of(rig: &DisciplineStateRig) -> Self {
+        Self {
+            slots: StateLayer::ALL
+                .iter()
+                .map(|layer| {
+                    (0..rig.slots[layer.index()].len())
+                        .map(|slot| rig.particle(*layer, slot))
+                        .collect()
+                })
+                .collect(),
+        }
+    }
+
+    fn particle(&self, layer: StateLayer, slot: usize) -> Option<(u32, f32)> {
+        *self.slots[layer.index()].get(slot)?
+    }
+}
+
+/// A buff landing on an ally already a sheep is hidden from its first
+/// frame, never flashing up on the sheep; and the swirl at a Priest sheeped
+/// mid-swirl is hidden with it, and shown again when the sheep ends.
+#[test]
+fn a_sheep_hides_a_state_from_its_first_frame_and_the_swirl_with_its_priest() {
+    let mut h = Harness::new();
+    let (priest, ally) = h.pair();
+    h.app.world_mut().entity_mut(ally).insert(PolymorphedVisual);
+    h.infuse(ally, priest);
+    h.suppress(ally, priest);
+    h.tick(1);
+    let rigs = h.rigs();
+    assert_eq!(rigs.len(), 2, "both states rise");
+    for r in &rigs {
+        assert_eq!(r.age, 0.0, "on their first frame");
+        assert_eq!(
+            r.visibility,
+            Visibility::Hidden,
+            "{:?} shows on a sheep",
+            r.state
+        );
+    }
+    let swirl_visibility = |h: &mut Harness| {
+        let mut q = h
+            .app
+            .world_mut()
+            .query_filtered::<&Visibility, With<SuppressionSwirl>>();
+        q.iter(h.app.world()).copied().collect::<Vec<_>>()
+    };
+    assert_eq!(swirl_visibility(&mut h), vec![Visibility::Inherited]);
+    h.app
+        .world_mut()
+        .entity_mut(priest)
+        .insert(PolymorphedVisual);
+    h.tick(1);
+    assert_eq!(swirl_visibility(&mut h), vec![Visibility::Hidden]);
+    h.app
+        .world_mut()
+        .entity_mut(priest)
+        .remove::<PolymorphedVisual>();
+    h.tick(1);
+    assert_eq!(swirl_visibility(&mut h), vec![Visibility::Inherited]);
 }
