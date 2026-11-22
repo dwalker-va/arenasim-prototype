@@ -137,6 +137,9 @@ impl SchoolImpact {
             // docs/design/2026-09-06-frost-shock-client-data.md.
             | AbilityType::FrostShock => Some(ImpactAnchor::Chest),
             AbilityType::MindBlast => Some(ImpactAnchor::Head),
+            // Mind Blast's visual 3057 in the client, so Mind Blast's head
+            // landing (kit 2709) — see `client_landing_style`.
+            AbilityType::Shadowburn => Some(ImpactAnchor::Head),
             _ => None,
         }
     }
@@ -223,6 +226,30 @@ pub struct MoonfireLanding {
     /// Victim position at the landing — where the landing stays if the victim
     /// is gone.
     pub origin: Vec3,
+}
+
+/// Conflagrate's landing — `fire_impactdd_high_chest.m2` (kit 4551) detonating
+/// at the victim's chest, and the victim's wound flinch.
+///
+/// Spawned deterministically at the hit in `process_casting` (no `game_rng`
+/// draw), so it is byte-neutral in headless like [`MoonfireLanding`]. The
+/// graphical-only systems in `rendering/effects/conflagrate.rs` consume it.
+/// The Immolate the hit consumes needs nothing here: its burn ends with the
+/// aura (`cleanup_immolate_burns`).
+#[derive(Component)]
+pub struct ConflagrateLanding {
+    /// The victim. The burst's rings track it while they play.
+    pub target: Entity,
+    /// Cosmetic only — deepens the flinch, never read by sim code.
+    pub is_crit: bool,
+}
+
+impl ConflagrateLanding {
+    /// Which abilities land this burst — the one list the spawn site and the
+    /// lands-silently audit read.
+    pub fn is_spawned_for(ability: AbilityType) -> bool {
+        ability == AbilityType::Conflagrate
+    }
 }
 
 /// Component for tracking death fall animation.

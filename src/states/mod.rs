@@ -1322,6 +1322,26 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Conflagrate's landing (rendering/effects/conflagrate.rs): client kit
+        // 4551's fire detonation at the victim's chest and its wound flinch,
+        // off the sim's `ConflagrateLanding` marker. The Immolate it consumes
+        // ends with the aura, in the burn's own chain below. Graphical only —
+        // never registered in headless systems.rs. Chained: the emitter must
+        // see the rig `spawn` just built, and the billboard runs on final
+        // positions.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_conflagrate_landings, // Marker -> rig + flinch
+                play_match::animate_conflagrate_bursts, // Follow the chest, emit five layers
+                play_match::pose_conflagrate_rings,     // Fire disc + rune ring
+                play_match::animate_conflagrate_particles, // Fly, rise, retire
+                play_match::billboard_conflagrate_particles, // Face the camera, colour
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Immolate's burn STATE (rendering/effects/immolate.rs): client kit
         // 235's flame licks climbing the victim from the feet plus crown
         // embers, for as long as the DoT runs. Routed through the shared
