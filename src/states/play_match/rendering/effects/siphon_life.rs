@@ -457,7 +457,7 @@ impl SiphonAssets {
 /// discard the emissive); an alpha layer is a flat, unlit colour with
 /// `AlphaMode::Blend`, so the dark streaks DARKEN what is behind them — the
 /// client's blend 2. Neither writes depth (both are transparent passes).
-fn particle_material(
+pub(super) fn particle_material(
     additive: bool,
     color: Color,
     alpha: f32,
