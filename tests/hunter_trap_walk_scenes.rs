@@ -44,6 +44,14 @@ const HEALER: &str = "enemy healer";
 
 const NOW: f32 = 30.0;
 
+/// The Hunter's `commit_window`, read from the shipped `movement.ron`.
+fn commit_window() -> f32 {
+    arenasim::states::play_match::movement_config::load_movement_config()
+        .expect("movement.ron loads")
+        .hunter
+        .commit_window
+}
+
 fn describe(view: &DecisionView) -> String {
     format!(
         "chose {:?}; movement {:?}; directive {:?}; candidates {:?}",
@@ -581,6 +589,14 @@ fn a_live_walk_ends_when_its_budget_runs_out() {
     let spent = walking_on_healer(field(40.0, (-15.0, 0.0), ME, false), 0.5).decide(ME);
     assert!(ended(&spent), "{}", describe(&spent));
     assert_eq!(trap_notes(&spent), vec![TRAP_WALK_TOO_FAR.to_string()]);
+    // A walk that ends unthrown arms the re-arm wait: `commit_window` from now.
+    let posture = spent.kite_posture.expect("the Hunter's posture");
+    assert_eq!(posture.dip_target, None);
+    assert!(
+        (posture.trap_walk_rearm - (NOW + commit_window())).abs() < 1e-4,
+        "re-arm at {} (now {NOW})",
+        posture.trap_walk_rearm
+    );
     let left = walking_on_healer(field(40.0, (-15.0, 0.0), ME, false), 5.0).decide(ME);
     assert!(!ended(&left), "{}", describe(&left));
     assert_eq!(trap_notes(&left), vec![TRAP_WALK_WALKING.to_string()]);
@@ -862,4 +878,18 @@ fn every_aimed_shot_step_waits_for_the_walk() {
             .cooldown(ME, AbilityType::ConcussiveShot, 5.0)
             .cooldown(ME, AbilityType::SerpentSting, 5.0)
     });
+}
+
+/// A healer already held is no victim yet, near or far: the feared Priest
+/// 40yd off is not walked at (the throw onto it would be refused on
+/// arrival); unheld, it is.
+#[test]
+fn a_held_healer_is_not_walked_at() {
+    let feared = chase(AiProfile::TeamPlan, -15.0, true)
+        .aura(HEALER, AuraType::Fear, 6.0)
+        .decide(ME);
+    assert!(!walked(&feared), "{}", describe(&feared));
+    assert_eq!(trap_notes(&feared), vec![TRAP_WALK_VICTIM_HELD.to_string()]);
+    let free = chase(AiProfile::TeamPlan, -15.0, true).decide(ME);
+    assert!(walked(&free), "{}", describe(&free));
 }

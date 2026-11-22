@@ -1052,6 +1052,10 @@ impl Scene {
                 cast_time: cast.time_remaining,
             });
         view.directive = exec_world.get::<MovementDirective>(unit.entity).copied();
+        view.kite_posture = exec_world
+            .get::<KitePosture>(unit.entity)
+            .or_else(|| posture_world.get::<KitePosture>(unit.entity))
+            .copied();
         let mut used = exec_world.query::<&OnUsePending>();
         view.items_used.extend(
             used.iter(&exec_world)
@@ -1381,6 +1385,10 @@ pub struct DecisionView {
     /// decision replaced or removed it. A tick that refreshes nothing leaves
     /// no movement event in the trace, so this is how a walk is seen to go on.
     pub directive: Option<MovementDirective>,
+    /// The kiter's posture state once the decision has run: the scene's
+    /// ([`Scene::kite_posture`]) as the decision left it, or the one its
+    /// commands put in its place. `None` for a unit with none.
+    pub kite_posture: Option<KitePosture>,
     /// Every `InstantAbilityFired` the decision spawned — the cosmetic marker
     /// a graphical consumer turns into a caster gesture — with its units named,
     /// so a test can replay it against a rendered stand-in for the scene.
@@ -1471,6 +1479,7 @@ impl DecisionView {
             movement: Vec::new(),
             situation: None,
             directive: None,
+            kite_posture: None,
             instant_markers: Vec::new(),
             landed: Vec::new(),
             auras_queued: Vec::new(),

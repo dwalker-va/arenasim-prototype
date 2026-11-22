@@ -1104,14 +1104,17 @@ fn evaluate_trap_walk(
     let reach = trap_setup_range(abilities);
     match pressure_trap_landing(ctx, abilities, combatant.team, my_pos, victim) {
         // A clean landing: the throw owns this frame only if it would go —
-        // past the placement's own refusals (`hunter::trap_landing`: a victim
-        // already held, an immune one, range, sight) and the global cooldown.
+        // past the placement's own refusals (`hunter::trap_landing`) and the
+        // global cooldown.
         Ok(landing) => {
             if let Err(reason) =
                 super::hunter::trap_landing(ctx, def, my_pos, landing, Some(victim))
             {
+                // A victim already held never gets here (`trap_play_victim`
+                // passes it over), nor an immune one (`dip_target_eligible`),
+                // nor a landing out of range (`pressure_trap_landing`); sight
+                // is the refusal the walk's own checks do not ask.
                 let note = match reason {
-                    RejectionReason::TargetAlreadyCCd { .. } => TRAP_WALK_VICTIM_HELD,
                     RejectionReason::LosBlocked => TRAP_WALK_NO_SIGHT,
                     _ => TRAP_WALK_REFUSED,
                 };

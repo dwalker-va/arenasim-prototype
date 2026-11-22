@@ -15,8 +15,13 @@ use arenasim::headless::{HeadlessMatchConfig, Stage, Unit};
 use arenasim::states::play_match::{Aura, AuraType};
 use common::staged::{entity_id, of_class, play, sim_time, Played};
 
-/// The Hunter's `commit_window` in the shipped `movement.ron`.
-const COMMIT_WINDOW: f32 = 0.6;
+/// The Hunter's `commit_window`, read from the shipped `movement.ron`.
+fn commit_window() -> f32 {
+    arenasim::states::play_match::movement_config::load_movement_config()
+        .expect("movement.ron loads")
+        .hunter
+        .commit_window
+}
 
 const HUNTER: Unit = Unit::new(1, 0);
 const PARTNER: Unit = Unit::new(1, 1);
@@ -118,7 +123,7 @@ fn the_walk_does_not_restart_within_its_commit_window_at_the_edge() {
                 let ((t_end, end), (t_start, start)) = (&pair[0], &pair[1]);
                 if end == "TrapWalkEnd" && start == "TrapWalk" {
                     assert!(
-                        t_start - t_end >= COMMIT_WINDOW - 1e-3,
+                        t_start - t_end >= commit_window() - 1e-3,
                         "seed {seed}, edge {edge}: a walk restarted {:.3}s after it ended: \
                          {events:?}",
                         t_start - t_end
