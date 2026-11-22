@@ -523,7 +523,8 @@ impl DruidEffect {
             | AuraLandingKind::ShadowTrance
             | AuraLandingKind::RepentanceImpact
             | AuraLandingKind::SacrificeTriad
-            | AuraLandingKind::VampiricEmbraceImplosion => None,
+            | AuraLandingKind::VampiricEmbraceImplosion
+            | AuraLandingKind::AftermathFireHit => None,
         }
     }
 }

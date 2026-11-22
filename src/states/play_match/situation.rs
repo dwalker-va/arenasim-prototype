@@ -380,6 +380,9 @@ pub struct TeamSituation {
     /// focus for it to answer (`update_situations`): against a team that
     /// never moves a focus, hiding hands nothing to the partner.
     pub handoff_rule: bool,
+    /// Whether this team's Hunters run the trap walk (AS-498,
+    /// [`SituationConfig::trap_walk`]).
+    pub trap_walk: bool,
     /// Each DPS–healer pair's sight yield: which of the two must not break
     /// the pair's line of sight (the module docs' `sight_yield`). Empty
     /// unless the team runs it ([`SituationConfig::sight_yield`]).
@@ -927,6 +930,11 @@ pub struct SituationConfig {
     /// ([`Self::under`]) unless a measurement turns it off
     /// ([`WithheldPlays::no_handoff_rule`]).
     pub handoff_rule: bool,
+    /// Whether the team's Hunters run the trap walk (AS-498,
+    /// `class_ai::hunter_dip::evaluate_trap_walk`): `true` under `TeamPlan`
+    /// ([`Self::under`]) unless a measurement turns it off
+    /// ([`WithheldPlays::no_trap_walk`]).
+    pub trap_walk: bool,
 }
 
 impl Default for SituationConfig {
@@ -960,6 +968,7 @@ impl SituationConfig {
             cc_reach_margin: config.shared.cc_reach_margin,
             target_focus: false,
             handoff_rule: false,
+            trap_walk: false,
         }
     }
 
@@ -978,6 +987,7 @@ impl SituationConfig {
                 sight_yield: true,
                 target_focus: true,
                 handoff_rule: true,
+                trap_walk: true,
                 ..self
             },
             AiProfile::Legacy => Self {
@@ -988,6 +998,7 @@ impl SituationConfig {
                 sight_yield: false,
                 target_focus: false,
                 handoff_rule: false,
+                trap_walk: false,
                 ..self
             },
         }
@@ -1014,6 +1025,7 @@ impl SituationConfig {
             sight_yield: cfg.sight_yield && !self.withheld.no_sight_yield(team),
             target_focus: cfg.target_focus && !self.withheld.no_target_focus(team),
             handoff_rule: cfg.handoff_rule && !self.withheld.no_handoff_rule(team),
+            trap_walk: cfg.trap_walk && !self.withheld.no_trap_walk(team),
             yield_counts_healer_cast: cfg.yield_counts_healer_cast
                 && !self.withheld.yield_cast_moves(team),
             ..cfg
@@ -1149,6 +1161,12 @@ pub struct WithheldPlays {
     pub team1_no_handoff_rule: bool,
     /// Team 2's, as [`Self::team1_no_handoff_rule`].
     pub team2_no_handoff_rule: bool,
+    /// Team 1's Hunters play without the trap walk (AS-498): a measurement
+    /// control, as the hand-off rule is (`team1_trap_walk: false` in a
+    /// headless config). They keep the old Freezing Trap dip.
+    pub team1_no_trap_walk: bool,
+    /// Team 2's, as [`Self::team1_no_trap_walk`].
+    pub team2_no_trap_walk: bool,
 }
 
 impl WithheldPlays {
@@ -1159,6 +1177,16 @@ impl WithheldPlays {
             self.team2_yield_cast_moves
         } else {
             self.team1_yield_cast_moves
+        }
+    }
+
+    /// Whether team `team`'s Hunters play without the trap walk; team 1's for
+    /// a team id outside 1..=2.
+    pub fn no_trap_walk(&self, team: u8) -> bool {
+        if team == 2 {
+            self.team2_no_trap_walk
+        } else {
+            self.team1_no_trap_walk
         }
     }
 
@@ -1426,6 +1454,7 @@ fn classify_roster_before_yield(
         runs: cfg.runs,
         pillar_modes: cfg.pillar_modes,
         handoff_rule: cfg.handoff_rule,
+        trap_walk: cfg.trap_walk,
         pillar_stance: None,
         stance_memory: StanceMemory::default(),
         hunt: None,
@@ -2564,6 +2593,7 @@ mod tests {
                 sight_yield: true,
                 target_focus: true,
                 handoff_rule: true,
+                trap_walk: true,
                 ..SituationConfig::default()
             }
         );
@@ -2578,10 +2608,11 @@ mod tests {
                 sight_yield: false,
                 target_focus: false,
                 handoff_rule: false,
+                trap_walk: false,
                 ..teamplan
             },
             "only the release, the closing rule, the gated plays, the pillar modes, the \
-             sight yield, the target focus and the hand-off rule differ"
+             sight yield, the target focus, the hand-off rule and the trap walk differ"
         );
         // With no band the latch is the plain test from each side, whatever
         // the previous tempo.

@@ -582,6 +582,34 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // The finisher hand flash (`finisher_flash.rs`) rides the striking
+        // hand, and the backhand's trail (`backhand_trail.rs`) follows its
+        // path: both placed from the sockets' local transforms after the swing
+        // and the lean have written them, so they sit on the hand this frame.
+        .add_systems(
+            Update,
+            (
+                play_match::update_finisher_hand_flashes,
+                play_match::update_backhand_trails,
+            )
+                .after(play_match::animate_body_lean)
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // The bleed spray (`bleed_spray.rs`): held for the stroke's contact,
+        // fired only on a landing, its droplets flown by
+        // `animate_client_particles` and turned to the camera here.
+        .add_systems(
+            Update,
+            (
+                play_match::fire_bleed_sprays,
+                play_match::update_bleed_sprays,
+                play_match::billboard_bleed_droplets,
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Cast-ending signal consumption: same rationale as
         // `consume_swing_signals` above — FixedUpdate can tick several
         // times per rendered frame, and a CastEnding marker consumed one
@@ -1418,6 +1446,25 @@ impl Plugin for StatesPlugin {
                 play_match::cleanup_silence_breaths, // End the breath with the silence
             )
                 .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Aftermath's fire hit (rendering/effects/aftermath.rs): kit 728's
+        // small burst at the victim's chest. Spawn (consumes Aftermath's
+        // landing markers and starts the wound flinch) -> follow and emit ->
+        // fly -> held in front of the body. `.before(tick_hit_flinch)`, so
+        // the dip renders on the landing frame, as a melee auto's does. Its
+        // slow is the slow ring's (`SlowTint::Fire`). Graphical only.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_aftermath_hits,
+                play_match::animate_aftermath_hits,
+                play_match::age_aftermath_hit_particles,
+                play_match::billboard_aftermath_hit_particles,
+            )
+                .chain()
+                .before(play_match::tick_hit_flinch)
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )

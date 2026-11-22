@@ -270,6 +270,8 @@ fn build_config(
         team2_withheld_plays: Vec::new(),
         team1_pillar_modes: None,
         team2_pillar_modes: None,
+        team1_trap_walk: None,
+        team2_trap_walk: None,
         team1_sight_yield: None,
         team2_sight_yield: None,
         team1_target_focus: None,

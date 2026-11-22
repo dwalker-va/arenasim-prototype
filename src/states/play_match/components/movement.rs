@@ -360,6 +360,11 @@ pub struct KitePosture {
     /// live dip. While a dip is live the Hunter arm skips the ENGAGE/KITE
     /// evaluation so the dip directive owns movement.
     pub dip_until: f32,
+    /// The trap walk (AS-498, `TeamPlan`): the sim time before which no new
+    /// walk starts, set to `commit_window` past a walk that ended unthrown,
+    /// so a walk and the kite cannot trade the Hunter frame by frame. `0.0`
+    /// = no wait.
+    pub trap_walk_rearm: f32,
     /// OOM wand-pull hysteresis latch (Mage only). `true` while the Mage is
     /// out of mana for its primary nuke and should pull toward wand range so
     /// its equipped wand auto-attack can fire. Set/cleared by
@@ -440,6 +445,7 @@ impl KitePosture {
             occluded_target: None,
             dip_target: None,
             dip_until: 0.0,
+            trap_walk_rearm: 0.0,
             wand_oom: false,
         }
     }

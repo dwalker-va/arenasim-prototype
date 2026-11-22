@@ -90,6 +90,14 @@ pub struct HeadlessMatchConfig {
     pub team1_pillar_modes: Option<bool>,
     #[serde(default)]
     pub team2_pillar_modes: Option<bool>,
+    /// `false` turns the Hunter trap walk off for that team, for measurement
+    /// (AS-498, `hunter_dip::evaluate_trap_walk`): its Hunters keep the old
+    /// Freezing Trap dip. Omitted, the default, leaves it on (it runs only
+    /// under `TeamPlan`).
+    #[serde(default)]
+    pub team1_trap_walk: Option<bool>,
+    #[serde(default)]
+    pub team2_trap_walk: Option<bool>,
     /// `false` turns the team sight yield off for that team, for measurement
     /// (AS-386, `situation::SightPair`): a `TeamPlan` team without it plays
     /// as `TeamPlan` did before it. Omitted — the default — leaves it on (it
@@ -272,6 +280,8 @@ impl Default for HeadlessMatchConfig {
             team2_withheld_plays: Vec::new(),
             team1_pillar_modes: None,
             team2_pillar_modes: None,
+            team1_trap_walk: None,
+            team2_trap_walk: None,
             team1_sight_yield: None,
             team2_sight_yield: None,
             team1_target_focus: None,
@@ -369,6 +379,8 @@ impl HeadlessMatchConfig {
             team2_no_target_focus: self.team2_target_focus == Some(false),
             team1_no_handoff_rule: self.team1_handoff_rule == Some(false),
             team2_no_handoff_rule: self.team2_handoff_rule == Some(false),
+            team1_no_trap_walk: self.team1_trap_walk == Some(false),
+            team2_no_trap_walk: self.team2_trap_walk == Some(false),
             team1_yield_cast_moves: self.team1_yield_healer_cast == Some(false),
             team2_yield_cast_moves: self.team2_yield_healer_cast == Some(false),
             ..Default::default()

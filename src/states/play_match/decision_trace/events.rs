@@ -621,6 +621,16 @@ pub enum MovementTrigger {
     /// the pillar a lone enemy healer hides at (a `point` goal). Fires when
     /// the play takes the unit's movement and whenever its station moves.
     Hunt,
+    /// `TeamPlan` (AS-498, `hunter_dip::evaluate_trap_walk`): the Hunter
+    /// starts to walk at the enemy it will Freezing Trap (an `entity` goal,
+    /// the victim in `target`), or turns the walk to a new victim. The scorer
+    /// term `walk_secs` is how long it expects to walk to throw range.
+    TrapWalk,
+    /// `TeamPlan` (AS-498): the trap walk ends. With the scorer term
+    /// `thrown` it ended in the throw; without, it stopped qualifying (the
+    /// trap no longer ready, the victim gone, a melee on the way, the budget
+    /// spent) and the Hunter kites again.
+    TrapWalkEnd,
     /// `TeamPlan` (AS-362): the healer's goal was chosen to take it out of
     /// the reach of an enemy crowd control ready to land on it — the team
     /// solve's `C_CC_REACH` (PRESSURED), the Paladin's band-hold stepping to

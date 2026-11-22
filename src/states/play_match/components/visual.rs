@@ -962,6 +962,11 @@ pub const AMPLIFY_CURSE_AURA: &str = "Amplify Curse";
 /// `talents.ron`). Its landing is the empowered ground flash plus the dark
 /// speck halo at the head (`rendering/effects/empowered_flash.rs`).
 pub const SHADOW_TRANCE_AURA: &str = "Shadow Trance";
+/// Aftermath's aura name (the `name:` its proc gives the slow in
+/// `talents.ron`). Its landing is the client's small fire hit at the chest
+/// (`rendering/effects/aftermath.rs`); its state is the slow ring in the Fire
+/// tint (`SlowTint::for_slow`).
+pub const AFTERMATH_AURA: &str = "Aftermath";
 /// Guardian Spirit's aura name: the RON `name:` string its face carries, and
 /// the name its rider (`guardian_spirit_riders`) is given. Its state is the
 /// spirit over the bearer's shoulders (`rendering/effects/guardian_spirit.rs`).
@@ -1134,11 +1139,16 @@ pub enum AuraLandingKind {
     /// (`vampiric_embrace.rs`, AS-357). The 60 s mark draws nothing after;
     /// its heals play the violet stream on each ally.
     VampiricEmbraceImplosion,
+    /// Aftermath's daze: `fire_impactdd_chest.m2` (kit 728), a small
+    /// red-orange burst of falling flares and a gold-to-red glow at the
+    /// victim's chest, about 1.7 s, with the victim's wound flinch
+    /// (`aftermath.rs`, AS-349). The slow it lands is the slow ring's.
+    AftermathFireHit,
 }
 
 impl AuraLandingKind {
     /// Every landing, in declaration order.
-    pub const ALL: [AuraLandingKind; 15] = [
+    pub const ALL: [AuraLandingKind; 16] = [
         AuraLandingKind::RejuvenationSwirl,
         AuraLandingKind::MarkOfTheWildGlyph,
         AuraLandingKind::ShadowWordPainHit,
@@ -1154,6 +1164,7 @@ impl AuraLandingKind {
         AuraLandingKind::RepentanceImpact,
         AuraLandingKind::SacrificeTriad,
         AuraLandingKind::VampiricEmbraceImplosion,
+        AuraLandingKind::AftermathFireHit,
     ];
 
     /// The landing an aura of `aura_type` named `name` plays, or `None`.
@@ -1199,6 +1210,9 @@ impl AuraLandingKind {
             AuraType::LeechMark if name == VAMPIRIC_EMBRACE_AURA => {
                 Some(AuraLandingKind::VampiricEmbraceImplosion)
             }
+            AuraType::MovementSpeedSlow if name == AFTERMATH_AURA => {
+                Some(AuraLandingKind::AftermathFireHit)
+            }
             _ => None,
         }
     }
@@ -1226,7 +1240,8 @@ impl AuraLandingKind {
             | AuraLandingKind::AmplifyFlash
             | AuraLandingKind::ShadowTrance
             | AuraLandingKind::SacrificeTriad
-            | AuraLandingKind::VampiricEmbraceImplosion => None,
+            | AuraLandingKind::VampiricEmbraceImplosion
+            | AuraLandingKind::AftermathFireHit => None,
         }
     }
 
@@ -1317,7 +1332,8 @@ impl PaladinOneShotKind {
             | AuraLandingKind::AmplifyFlash
             | AuraLandingKind::ShadowTrance
             | AuraLandingKind::SacrificeTriad
-            | AuraLandingKind::VampiricEmbraceImplosion => None,
+            | AuraLandingKind::VampiricEmbraceImplosion
+            | AuraLandingKind::AftermathFireHit => None,
         }
     }
 }
@@ -2135,15 +2151,18 @@ pub enum AuraApplyOwner {
     /// arrow impact, the swing into Frost Armor, the Frost Trap zone's decal),
     /// plus Crippling Poison's landing, which has no hit of its own and plays
     /// the weapon poison cloud (`poison_landing.rs`). A band
-    /// here would double every one of those impacts.
+    /// here would double every one of those impacts. (Aftermath's slow is
+    /// drawn by the ring too, but its apply moment is a named landing of its
+    /// own, so it routes [`AuraApplyOwner::AuraLanding`].)
     SlowRing,
     /// A named aura whose LANDING has its own one-shot: Rejuvenation's ribbon
     /// swirl and Mark of the Wild's glyph (`druid_heals.rs`), Shadow Word:
     /// Pain's dark hit (`shadow_word_pain.rs`), the Paladin talent one-shots
     /// (`paladin_oneshots.rs`), the empowered ground flash of Amplify
-    /// Curse and Shadow Trance (`empowered_flash.rs`), and Touch of Shadow's
-    /// sacrifice triad (`demonology_landings.rs`), and Vampiric Embrace's
-    /// dust implosion (`vampiric_embrace.rs`). Owned per aura
+    /// Curse and Shadow Trance (`empowered_flash.rs`), Touch of Shadow's
+    /// sacrifice triad (`demonology_landings.rs`), Aftermath's fire hit
+    /// (`aftermath.rs`), and Vampiric Embrace's dust implosion
+    /// (`vampiric_embrace.rs`). Owned per aura
     /// NAME, not per type — see [`AuraApplyRoute::for_instance`] — because
     /// their types are shared with auras that keep the band (Healing Stream's
     /// HoT, Power Word: Fortitude). Lifebloom is not here: its pulse starts a
@@ -2601,7 +2620,7 @@ pub struct WarlockDotRigAssets {
 pub enum DripKind {
     /// Green drips — Serpent Sting today; future rogue poisons join the table.
     Poison,
-    /// Red drips — Rend today; future Rupture/Garrote join the table.
+    /// Red drips — Rend and Rupture; a future Garrote joins the table.
     Bleed,
 }
 
@@ -2992,6 +3011,16 @@ pub enum SwingStyle {
     /// effect in magenta). Stroke-only here: the tilt of its swing plane is
     /// what separates the spammed builder from Cheap Shot's near-sagittal jab.
     SinisterStrike,
+    /// The Rogue's apply stroke for a finisher that puts a debuff ON its
+    /// target — Rupture, and Expose Armor (AS-366). A BACKHAND sweep, authored
+    /// at the AS-336 bench (the client plays a generic Special1H here): the
+    /// weapon hand winds up across the body to the off shoulder, sweeps outward
+    /// across the victim's chest with contact mid-arc, and follows through
+    /// wide on the weapon side. A sweep, never a thrust, so it reads apart
+    /// from Ambush's and Kidney Shot's lunges and Sinister Strike's rising
+    /// slash. Unlike every other signature it plays its own windup from rest,
+    /// inside the stroke.
+    Backhand,
 }
 
 /// One instant ability performed by a caster, spawned by combat code at that
@@ -3054,6 +3083,10 @@ impl InstantAbilityFired {
             // carries its Holy launch hands (`spawn_instant_cast_hands`).
             // Ice Barrier's carries its Frost launch hands the same way.
             | CheapShot | KidneyShot | HammerOfJustice | FrostNova | PowerWordShield | IceBarrier
+            // The Rogue's apply stroke (AS-336): an aura-only finisher applied
+            // inline in the Rogue AI, its marker spawned before the avoidance
+            // roll, so a dodged one still strikes.
+            | Rupture
             // The melee interrupts: spawned at the committed-use site in
             // combat_ai.rs's interrupt system (roadmap B). Wind Shear is
             // deliberately absent — the Shaman has no weapon sockets and its
