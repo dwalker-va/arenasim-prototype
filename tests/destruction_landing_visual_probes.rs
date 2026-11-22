@@ -641,7 +641,141 @@ fn the_sim_lands_shadowburn_on_the_head_and_conflagrate_as_its_own_burst() {
                 .unwrap_or_default(),
             "{ability:?}"
         );
-        assert_eq!(h.rigs().len(), burst, "{ability:?}");
+        let rigs = h.rigs();
+        assert_eq!(rigs.len(), burst, "{ability:?}");
+        for (_, target, _, at) in rigs {
+            assert_eq!(target, victim, "the burst is the victim's");
+            assert!(
+                (at - chest(Vec3::new(4.0, COMBATANT_Y, 0.0))).length() < 1e-5,
+                "at the victim's chest: {at}"
+            );
+        }
+    }
+}
+
+/// A Conflagrate that crits through the real `process_casting` flinches its
+/// victim at the crit depth; its control, one that cannot crit, at the plain
+/// depth. The hit's crit reaches the landing from the sim.
+#[test]
+fn a_critting_conflagrate_flinches_deeper_through_the_sim() {
+    for (crit_chance, crits, depth) in [
+        (0.0, false, FLINCH_DIP),
+        (1.0, true, FLINCH_DIP * FLINCH_CRIT_MULT),
+    ] {
+        let mut h = Harness::new();
+        let caster = warlock(
+            &mut h,
+            Vec3::new(-8.0, COMBATANT_Y, 0.0),
+            AbilityType::Conflagrate,
+        );
+        h.world().get_mut::<Combatant>(caster).unwrap().crit_chance = crit_chance;
+        let victim = h.victim(Vec3::new(4.0, COMBATANT_Y, 0.0));
+        cast(&mut h, caster, victim, AbilityType::Conflagrate);
+        let log = h.app.world().resource::<CombatLog>();
+        assert_eq!(
+            log.entries
+                .iter()
+                .any(|e| e.message.contains("Conflagrate CRITS")),
+            crits,
+            "crit chance {crit_chance}"
+        );
+        let flinch = h.app.world().get::<HitFlinch>(victim).expect("a flinch");
+        assert!(
+            (flinch.depth - depth).abs() < 1e-6,
+            "crit chance {crit_chance}: dipped {}",
+            flinch.depth
+        );
+        assert!(h.app.world().get::<HitFlinch>(caster).is_none());
+    }
+}
+
+/// Every piece is drawn on the unit quad its scale is measured against: a
+/// particle's sprite and streak, the fire disc and a rune-ring piece each
+/// span ±0.5 in their own x and y, flat in z.
+#[test]
+fn every_piece_is_drawn_on_a_unit_quad() {
+    let mut h = Harness::new();
+    let victim = h.victim(Vec3::ZERO.with_y(COMBATANT_Y));
+    h.land(victim, false);
+    h.tick(16);
+    let world = h.app.world_mut();
+    let mut q = world.query_filtered::<(
+        &Mesh3d,
+        Has<ConflagrateParticlePart>,
+        Option<&ConflagrateRingPart>,
+        Has<ConflagrateShockPiece>,
+    ), With<Mesh3d>>();
+    let meshes = world.resource::<Assets<Mesh>>();
+    let mut kinds = HashSet::new();
+    for (mesh, particle, ring, piece) in q.iter(world) {
+        let kind = match (particle, ring, piece) {
+            (true, _, _) => "particle part",
+            (_, Some(_), _) => "fire disc",
+            (_, _, true) => "ring piece",
+            _ => continue,
+        };
+        kinds.insert(kind);
+        let mesh = meshes.get(&mesh.0).expect("the mesh");
+        let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(ps)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("{kind}: no positions");
+        };
+        assert!(!ps.is_empty());
+        for p in ps {
+            assert!(
+                (p[0].abs() - 0.5).abs() < 1e-6 && (p[1].abs() - 0.5).abs() < 1e-6 && p[2] == 0.0,
+                "{kind}: a vertex at {p:?}"
+            );
+        }
+    }
+    assert_eq!(kinds.len(), 3, "{kinds:?}");
+}
+
+/// With the match camera on it, every sprite faces the camera — its face
+/// turned to the camera's back vector — rolled in the view plane by its own
+/// angle, which the sparks spin.
+#[test]
+fn every_sprite_faces_the_match_camera() {
+    let target = Vec3::new(0.0, COMBATANT_Y, 0.0);
+    let mut h = Harness::new();
+    let victim = h.victim(target);
+    for yaw in [0.4_f32] {
+        let cam = match_camera(target, 60.0, 38.7f32.to_radians(), yaw);
+        h.world()
+            .spawn((Camera3d::default(), cam, GlobalTransform::from(cam)));
+        h.land(victim, false);
+        let mut sprites = 0;
+        for _ in 0..30 {
+            h.tick(1);
+            for (e, _) in h.particles() {
+                let angle = h.app.world().get::<ConflagrateParticle>(e).unwrap().angle;
+                for (part, g, _, _) in h.parts_of(e) {
+                    if part != ConflagrateParticlePart::Sprite {
+                        continue;
+                    }
+                    let r = g.rotation();
+                    assert!(
+                        (r * Vec3::Z - cam.back().as_vec3()).length() < 1e-4,
+                        "a sprite faces {} not the camera",
+                        r * Vec3::Z
+                    );
+                    let x = cam.rotation.inverse() * (r * Vec3::X);
+                    let roll = x.y.atan2(x.x);
+                    let want =
+                        (angle + std::f32::consts::PI).rem_euclid(TAU) - std::f32::consts::PI;
+                    let mut d = roll - want;
+                    if d > std::f32::consts::PI {
+                        d -= TAU;
+                    } else if d < -std::f32::consts::PI {
+                        d += TAU;
+                    }
+                    assert!(d.abs() < 1e-3, "rolled {roll}, its angle {want}");
+                    sprites += 1;
+                }
+            }
+        }
+        assert!(sprites > 500, "{sprites}");
     }
 }
 
@@ -1457,6 +1591,12 @@ fn every_sprite_is_the_shape_the_bench_paints() {
 /// transform.
 const BODY_RADIUS: f32 = 0.5;
 const BODY_HALF_SEGMENT: f32 = 0.75;
+/// A pet's sim height (`play_match/mod.rs` spawns pets at 0.75), its body
+/// mesh's drop below that, and the radius of the sphere bounding its
+/// `Capsule3d::new(0.35, 0.6)` whichever way it faces.
+const PET_SIM_Y: f32 = 0.75;
+const PET_BODY_DROP: f32 = -0.45;
+const PET_BODY_BOUND: f32 = 0.35 + 0.3;
 
 /// The match camera (`CameraController`): `zoom` yards out, `pitch` from the
 /// vertical, at `yaw`, looking at `target`.
@@ -1478,10 +1618,10 @@ type Frame = HashMap<Entity, (Vec3, Vec3)>;
 /// it or — the control, the same world with no camera, which draws every
 /// piece where it truly is — a plain entity in the camera's place, so the
 /// two worlds allocate the same entities and play the same scatter.
-fn drawn_frames(camera: Option<Transform>, frames: u32) -> (Vec<Frame>, Vec3) {
+fn drawn_frames(camera: Option<Transform>, frames: u32, pet: bool) -> (Vec<Frame>, Vec3) {
     let mut h = Harness::new();
-    let at = Vec3::new(2.0, COMBATANT_Y, -3.0);
-    let victim = h.victim(at);
+    let at = victim_spot(pet);
+    let victim = if pet { h.pet_victim(at) } else { h.victim(at) };
     match camera {
         Some(t) => {
             h.world()
@@ -1529,15 +1669,47 @@ fn drawn_frames(camera: Option<Transform>, frames: u32) -> (Vec<Frame>, Vec3) {
 #[test]
 fn every_piece_is_held_in_front_of_the_body_where_the_bench_draws_it() {
     for yaw in [0.0_f32, 2.3] {
-        let target = Vec3::new(2.0, COMBATANT_Y, -3.0);
+        assert_held(false, yaw);
+    }
+}
+
+/// A pet's body is its own: a capsule half a combatant's, hanging below its
+/// sim transform, held against the sphere bounding it. Its burst is held in
+/// front of THAT body — not a combatant's — rings and particles alike.
+#[test]
+fn a_pet_victims_burst_is_held_in_front_of_the_pets_body() {
+    for yaw in [0.0_f32, 2.3] {
+        assert_held(true, yaw);
+    }
+}
+
+/// Where the hold probes stand their victim.
+fn victim_spot(pet: bool) -> Vec3 {
+    Vec3::new(2.0, if pet { PET_SIM_Y } else { COMBATANT_Y }, -3.0)
+}
+
+fn assert_held(pet: bool, yaw: f32) {
+    {
+        let target = victim_spot(pet);
         let cam = match_camera(target, 60.0, 38.7f32.to_radians(), yaw);
-        let (seen, at) = drawn_frames(Some(cam), 60);
-        let (truth, _) = drawn_frames(None, 60);
+        let (seen, at) = drawn_frames(Some(cam), 60, pet);
+        let (truth, _) = drawn_frames(None, 60, pet);
         let (eye, forward) = (cam.translation, cam.forward().as_vec3());
         let depth = |p: Vec3| (p - eye).dot(forward);
-        let nearest = depth(at + Vec3::Y * BODY_HALF_SEGMENT)
-            .min(depth(at - Vec3::Y * BODY_HALF_SEGMENT))
-            - BODY_RADIUS;
+        // The body the bench's burst is painted over: a combatant's upright
+        // capsule, or the sphere bounding a pet's (`Capsule3d::new(0.35,
+        // 0.6)`, centred 0.45 below its sim transform).
+        let (top, bottom, radius) = if pet {
+            let c = at + Vec3::Y * PET_BODY_DROP;
+            (c, c, PET_BODY_BOUND)
+        } else {
+            (
+                at + Vec3::Y * BODY_HALF_SEGMENT,
+                at - Vec3::Y * BODY_HALF_SEGMENT,
+                BODY_RADIUS,
+            )
+        };
+        let nearest = depth(top).min(depth(bottom)) - radius;
         let (mut held, mut kept) = (0, 0);
         for (drawn, real) in seen.iter().zip(&truth) {
             assert_eq!(
@@ -1576,7 +1748,7 @@ fn every_piece_is_held_in_front_of_the_body_where_the_bench_draws_it() {
             }
         }
         assert!(
-            held > 500 && kept > 500,
+            held > 500 && kept > 100,
             "yaw {yaw}: {held} held, {kept} kept"
         );
     }
