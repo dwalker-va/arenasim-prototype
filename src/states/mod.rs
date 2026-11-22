@@ -524,6 +524,27 @@ impl Plugin for StatesPlugin {
                 .after(play_match::consume_swing_signals)
                 .run_if(in_combat_scene),
         )
+        // A dodged or parried Crusader Strike still swings (AS-379). The sim
+        // spawns no `InstantAbilityFired` for an avoided strike, so its
+        // `MeleeAvoided` is noted BETWEEN the phase that spawns it (the class
+        // AI, Phase 2) and the one that retires it (`resolve_melee_avoidances`,
+        // Phase 3) — a real window, not a preference. The stroke then starts
+        // after `consume_swing_signals`, as the landed strikes' does, so a
+        // same-tick auto cannot reset the socket over it.
+        .add_systems(
+            FixedUpdate,
+            play_match::note_avoided_strikes
+                .after(CombatSystemPhase::CombatAndMovement)
+                .before(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        .add_systems(
+            FixedUpdate,
+            play_match::consume_avoided_strike_signals
+                .after(CombatSystemPhase::CombatResolution)
+                .after(play_match::consume_swing_signals)
+                .run_if(in_combat_scene),
+        )
         // Mortal Wounds heal fracture: also a core-spawned marker consumer,
         // so it takes the same FixedUpdate slot as its siblings above
         // rather than Update. Several heals can resolve in one rendered
@@ -602,7 +623,8 @@ impl Plugin for StatesPlugin {
                 .run_if(in_combat_scene),
         )
         // A prevented killing blow (`KillingBlowPrevented`): the save's heal
-        // landing and the shared "Saved" cue (`guardian_spirit.rs`). Same
+        // landing, the shared "Saved" cue (`guardian_spirit.rs`) and Cheat
+        // Death's rig (`cheat_death.rs`). Same
         // FixedUpdate rationale as `consume_cast_ending_signals`.
         .add_systems(
             FixedUpdate,
@@ -912,6 +934,33 @@ impl Plugin for StatesPlugin {
                 .before(TransformSystem::TransformPropagate)
                 .run_if(in_combat_scene),
         )
+        // Vengeance's hands stand on the rendered body's spell hands for the
+        // same reason (`vengeance.rs`).
+        .add_systems(
+            PostUpdate,
+            play_match::place_vengeance_hands
+                .after(play_match::apply_cyclone_lift)
+                .before(TransformSystem::TransformPropagate)
+                .run_if(in_combat_scene),
+        )
+        // Divine Protection's globe stands on the rendered chest for the same
+        // reason (`divine_protection.rs`).
+        .add_systems(
+            PostUpdate,
+            play_match::place_divine_protection_globes
+                .after(play_match::apply_cyclone_lift)
+                .before(TransformSystem::TransformPropagate)
+                .run_if(in_combat_scene),
+        )
+        // Shadow Dance's state stands on the rendered chest for the same
+        // reason (`shadow_dance.rs`).
+        .add_systems(
+            PostUpdate,
+            play_match::place_shadow_dance
+                .after(play_match::apply_cyclone_lift)
+                .before(TransformSystem::TransformPropagate)
+                .run_if(in_combat_scene),
+        )
         // Frostbolt and Shadow Bolt: the bespoke missiles and the bursts
         // they leave on their victims.
         //
@@ -995,6 +1044,51 @@ impl Plugin for StatesPlugin {
                 )
                     .chain(),
             )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Vengeance's pale-blue hands (AS-377): raised, aged, hidden on a
+        // sheep and taken down here; posed on the rendered body in
+        // PostUpdate (`place_vengeance_hands`).
+        .add_systems(
+            Update,
+            play_match::update_vengeance_hands
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Cheat Death's skull and ghost-fire on the Rogue it saved: built and
+        // posed before the client particles age (its streaks and smoke are
+        // client particles), its particles turned after.
+        .add_systems(
+            Update,
+            (
+                (
+                    play_match::build_cheat_death_rigs,
+                    play_match::update_cheat_death,
+                )
+                    .chain()
+                    .before(play_match::animate_client_particles),
+                play_match::billboard_cheat_death_particles
+                    .after(play_match::animate_client_particles),
+            )
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Divine Protection's globe at the Paladin's chest (AS-376): raised,
+        // aged and taken down (and its Holy hands flashed) here; posed on the
+        // rendered body in PostUpdate (`place_divine_protection_globes`).
+        .add_systems(
+            Update,
+            play_match::update_divine_protection_globes
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Shadow Dance's dark-red state on the Rogue (AS-368): raised, aged,
+        // emitted, hidden on a sheep and taken down here; posed on the
+        // rendered body in PostUpdate (`place_shadow_dance`).
+        .add_systems(
+            Update,
+            play_match::update_shadow_dance
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
@@ -1084,6 +1178,17 @@ impl Plugin for StatesPlugin {
                 play_match::update_paladin_oneshots.before(play_match::animate_client_particles),
             )
                 .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Repentance's head swirl (`repentance.rs`, AS-378): raised, posed
+        // and retired off the incapacitate it shows, its sparkles emitted
+        // before the client particles age them. (Its landing's gold impact
+        // and hands are a Paladin one-shot above.)
+        .add_systems(
+            Update,
+            play_match::update_repentance_swirls
+                .before(play_match::animate_client_particles)
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )

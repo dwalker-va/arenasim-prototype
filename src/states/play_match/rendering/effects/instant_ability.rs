@@ -28,6 +28,7 @@
 
 use super::backhand_trail::{spawn_backhand_trail, BackhandTrailAssets};
 use super::bleed_spray::spawn_bleed_spray_pending;
+use super::crusader_strike::spawn_crusader_strike_flourish;
 use super::finisher_flash::{spawn_finisher_hand_flash, FinisherFlashAssets};
 use super::frost_nova::spawn_frost_nova;
 use super::holy_justice::spawn_holy_justice;
@@ -75,7 +76,42 @@ pub fn swing_style_for_ability(ability: AbilityType) -> Option<SwingStyle> {
         // victim sweeps a backhand across its chest. Expose Armor (AS-366)
         // joins this arm.
         AbilityType::Rupture => Some(SwingStyle::Backhand),
+        // Crusader Strike (TBC kit 324) plays body anim 57, Special1H — the
+        // anim Mortal Strike plays — so it swings Mortal Strike's stroke
+        // (AS-337 bench; `crusader_strike.rs` draws its trail and landing).
+        AbilityType::CrusaderStrike => Some(SwingStyle::MortalStrike),
         _ => None,
+    }
+}
+
+/// Start `style`'s stroke on `caster`'s main-hand socket, aimed at `aim`.
+///
+/// Main hand only. A styled ability stroke is a whole-body arc, so an
+/// off-hand twin swinging along with it would read as two weapons doing the
+/// same special. A caster with no sockets (Mage, Priest, Warlock, Shaman)
+/// simply never matches — a silent no-op, never a panic.
+pub(crate) fn start_signature_stroke(
+    sockets: &mut Query<&mut WeaponSocket>,
+    caster: Entity,
+    aim: Option<Vec3>,
+    style: SwingStyle,
+) {
+    for mut socket in sockets.iter_mut() {
+        if socket.owner != caster || socket.hand != WeaponHand::Main {
+            continue;
+        }
+        if let Some(pos) = aim {
+            socket.aim = pos;
+        }
+        socket.release_t = Some(0.0);
+        socket.swing_style = style;
+        // Start the stroke from a full windup rather than wherever the
+        // auto-attack timer happened to sit. A signature arc that began from
+        // a random partial depth would play at a different size every cast,
+        // which reads as a broken animation rather than a varied one — and
+        // this stroke REVERSES the auto's direction, so a partial start can
+        // leave it beginning halfway up.
+        socket.windup_s = -1.0;
     }
 }
 
@@ -117,29 +153,8 @@ pub fn consume_instant_ability_signals(
             .unwrap_or(0);
 
         // ---- Weapon stroke (only for abilities that swing something) --------
-        //
-        // Main hand only. A styled ability stroke is a whole-body arc, so an
-        // off-hand twin swinging along with it would read as two weapons doing
-        // the same special. A caster with no sockets (Mage, Priest, Warlock,
-        // Shaman) simply never matches — a silent no-op, never a panic.
         if let Some(style) = style {
-            for mut socket in sockets.iter_mut() {
-                if socket.owner != signal.caster || socket.hand != WeaponHand::Main {
-                    continue;
-                }
-                if let Some(pos) = target_pos {
-                    socket.aim = pos;
-                }
-                socket.release_t = Some(0.0);
-                socket.swing_style = style;
-                // Start the stroke from a full windup rather than wherever the
-                // auto-attack timer happened to sit. A signature arc that began
-                // from a random partial depth would play at a different size
-                // every cast, which reads as a broken animation rather than a
-                // varied one — and this stroke REVERSES the auto's direction,
-                // so a partial start can leave it beginning halfway up.
-                socket.windup_s = -1.0;
-            }
+            start_signature_stroke(&mut sockets, signal.caster, target_pos, style);
             // The backhand draws its sweep's trail along the hand's path,
             // whichever ability swings it.
             if style == SwingStyle::Backhand {
@@ -170,6 +185,28 @@ pub fn consume_instant_ability_signals(
                         signal.is_crit,
                         style.stroke_secs(),
                         style.impact_at(),
+                    );
+                }
+            }
+            // The red trail along the stroke, and TBC's strike landing on
+            // the victim's chest when the blade arrives (this marker is the
+            // LANDED strike; a dodged or parried one strokes without it,
+            // `crusader_strike.rs`).
+            AbilityType::CrusaderStrike => {
+                if let (Some(style), Some(victim), Some(target_pos)) =
+                    (style, signal.target, target_pos)
+                {
+                    let from = caster_pos
+                        .map(|c| (c - target_pos).normalize_or_zero())
+                        .unwrap_or(Vec3::ZERO);
+                    spawn_crusader_strike_flourish(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        signal.caster,
+                        Some((victim, from)),
+                        signal.is_crit,
+                        style,
                     );
                 }
             }

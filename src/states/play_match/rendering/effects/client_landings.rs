@@ -7,7 +7,8 @@ use crate::states::play_match::ability_config::AbilityDefinitions;
 use crate::states::play_match::components::*;
 
 // ==============================================================================
-// Client landings — the interrupts, Heroic Strike, Mind Blast, Holy Shock
+// Client landings — the interrupts, Heroic Strike, Mind Blast, Holy Shock,
+// Crusader Strike
 // ==============================================================================
 //
 // From the Classic Era client data (build 1.15.9.69547), joined in
@@ -28,6 +29,10 @@ use crate::states::play_match::components::*;
 //   licks rising under negative gravity, embers, and alpha-blended grey smoke.
 // - **Holy Shock's damage leg** lands as Holy Smite's `holysmite_low_chest.m2`,
 //   thirteen emitters grouped here, as at the bench, into seven layers.
+// - **Crusader Strike** lands TBC's kit 437, `strike_impact_chest.m2` (the
+//   TBC 2.5.6 client; Wrath points the same kit at the decisivestrike model
+//   above). Its table is transcribed from the AS-337 Paladin Talent Visuals
+//   Bench instead; see [`STRIKE_IMPACT_CHEST`] and `crusader_strike.rs`.
 //
 // The tables below are TRANSCRIPTIONS of the parsed M2 records as the AS-137
 // Interrupt Landing Bench carries them per emitter. The user signed off the
@@ -85,6 +90,14 @@ pub const MIND_BLAST_SMOULDER_TIME: f32 = 1.0;
 pub const HOLY_SHOCK_DAMAGE_IMPACT_SIZE: f32 = 1.0;
 pub const HOLY_SHOCK_DAMAGE_IMPACT_SPREAD: f32 = 1.0;
 pub const HOLY_SHOCK_DAMAGE_IMPACT_TIME: f32 = 1.0;
+
+/// Crusader Strike's landing, at the AS-337 bench's knobs (version
+/// 1792379243-e3d6, its "Crusader Strike" tab): client size, spread and
+/// duration. Its density and opacity knobs are 1.0 too, and both its layers,
+/// the sparks and the plume, are on.
+pub const CRUSADER_STRIKE_IMPACT_SIZE: f32 = 1.0;
+pub const CRUSADER_STRIKE_IMPACT_SPREAD: f32 = 1.0;
+pub const CRUSADER_STRIKE_IMPACT_TIME: f32 = 1.0;
 
 /// Wind Shear's ring: `#bee1ff`, i.e. `Color::srgb(0.75, 0.88, 1.00)`. It
 /// replaces the Kick ring's whole colour ramp; the alpha and size ramps stay.
@@ -250,6 +263,67 @@ const DECISIVESTRIKE_IMPACT_CHEST: [ClientEmitter; 3] = [
         size: ParticleSize::radii([0.028, 0.139, 0.028]),
         mid: 0.5,
         track: None,
+    },
+];
+
+/// `strike_impact_chest.m2`'s sparks: nothing at the blade's contact, ramping
+/// to 50/s by 67 ms and held there to 667 ms — the bench's `rate` keys,
+/// interpolated as it interpolates them. About 32 sparks.
+const STRIKE_SPARK_TRACK: &[(f32, f32)] = &[(0.0, 0.0), (0.067, 50.0), (0.667, 50.0)];
+/// Its plume: up to 30/s at 34 ms and back to nothing at 67 ms. One puff.
+const STRIKE_PLUME_TRACK: &[(f32, f32)] = &[(0.0, 0.0), (0.034, 30.0), (0.067, 0.0)];
+
+/// `strike_impact_chest.m2` (TBC kit 437) — Crusader Strike's landing at the
+/// victim's chest, 0.67 s, as the AS-337 bench transcribes it (its "sparks"
+/// and "plume" layers). Both draw `lighter` there (M2 blend 4): additive.
+///
+/// The bench draws the sparks as soft glows with a tail (`kind: 'glow'`,
+/// `tail: 10`): here a [`EmitterSprite::Streak`], the soft glow stretched
+/// along its flight, as every bench glow with a tail is drawn. It draws the
+/// plume as an upright flame ellipse with a tail (`kind: 'flame'`): the
+/// client-particle kit has no flame sprite, so it is the round
+/// [`EmitterSprite::Glow`] the shipped decisivestrike plume draws the same
+/// `fireplume64` with. A bench `scale` key is a sprite radius.
+pub const STRIKE_IMPACT_CHEST: [ClientEmitter; 2] = [
+    // `flare`: gold -> orange -> dark red sparks flying out at 2.78 yd/s,
+    // fading in to full at half-life and out again.
+    ClientEmitter {
+        name: "strike_impact_chest/sparks flare",
+        sprite: EmitterSprite::Streak,
+        additive: true,
+        rate: 0.0,
+        window: ClientEmitter::tracked(STRIKE_SPARK_TRACK),
+        life: 0.5,
+        speed: 2.78,
+        gravity: 0.0,
+        area: 0.0,
+        column: None,
+        rise: false,
+        color: [[255, 209, 0], [255, 159, 35], [101, 0, 0]],
+        alpha: [0.0, 1.0, 0.0],
+        size: ParticleSize::radii([0.16, 0.12, 0.08]),
+        mid: 0.5,
+        track: Some(STRIKE_SPARK_TRACK),
+    },
+    // `fireplume64`: one red -> grey -> orange puff thrown out at 5.56 yd/s,
+    // at full alpha for its 0.3 s life.
+    ClientEmitter {
+        name: "strike_impact_chest/plume fireplume64",
+        sprite: EmitterSprite::Glow,
+        additive: true,
+        rate: 0.0,
+        window: ClientEmitter::tracked(STRIKE_PLUME_TRACK),
+        life: 0.3,
+        speed: 5.56,
+        gravity: 0.0,
+        area: 0.0,
+        column: None,
+        rise: false,
+        color: [[174, 0, 0], [181, 181, 181], [238, 90, 0]],
+        alpha: [1.0, 1.0, 1.0],
+        size: ParticleSize::radii([0.3, 0.25, 0.2]),
+        mid: 0.5,
+        track: Some(STRIKE_PLUME_TRACK),
     },
 ];
 
@@ -556,6 +630,14 @@ static HEROIC_STRIKE_LANDING: [ClientEmitter; 3] = scale_all(
     HEROIC_STRIKE_IMPACT_SPREAD,
     HEROIC_STRIKE_IMPACT_TIME,
 );
+/// Crusader Strike's landing at its bench knobs. Public so its probes read
+/// the table the router plays.
+pub static CRUSADER_STRIKE_LANDING: [ClientEmitter; 2] = scale_all(
+    STRIKE_IMPACT_CHEST,
+    CRUSADER_STRIKE_IMPACT_SIZE,
+    CRUSADER_STRIKE_IMPACT_SPREAD,
+    CRUSADER_STRIKE_IMPACT_TIME,
+);
 static MIND_BLAST_LANDING: [ClientEmitter; 3] = scale_all(
     MINDBLAST_HEAD,
     MIND_BLAST_SMOULDER_SIZE,
@@ -640,6 +722,12 @@ pub fn client_landing_style(ability: AbilityType) -> Option<ImpactStyle> {
             Color::srgb_u8(208, 0, 0),
             &HEROIC_STRIKE_LANDING,
         )),
+        // TBC's `strike_impact_chest`, so it reads apart from Heroic
+        // Strike's decisivestrike ring (the user's ruling, 2026-10-18).
+        AbilityType::CrusaderStrike => Some(emitter_landing(
+            Color::srgb_u8(255, 209, 0),
+            &CRUSADER_STRIKE_LANDING,
+        )),
         AbilityType::MindBlast => Some(emitter_landing(
             Color::srgb_u8(126, 55, 255),
             &MIND_BLAST_LANDING,
@@ -705,6 +793,7 @@ mod tests {
             &WIND_SHEAR_LANDING,
             &SPELL_LOCK_LANDING,
             &HEROIC_STRIKE_LANDING,
+            &CRUSADER_STRIKE_LANDING,
             &MIND_BLAST_LANDING,
             &HOLY_SHOCK_LANDING,
         ]
@@ -715,7 +804,7 @@ mod tests {
     /// draws it), times the effect's size knob.
     #[test]
     fn every_particle_is_drawn_at_twice_its_client_key() {
-        let bench: [(&[ClientEmitter], f32, &[[f32; 3]]); 6] = [
+        let bench: [(&[ClientEmitter], f32, &[[f32; 3]]); 7] = [
             (&KICK_LANDING, KICK_IMPACT_SIZE, &[[0.278, 0.556, 0.972]]),
             (
                 &WIND_SHEAR_LANDING,
@@ -739,6 +828,13 @@ mod tests {
                     [0.028, 0.069, 0.028],
                     [0.028, 0.139, 0.028],
                 ],
+            ),
+            (
+                &CRUSADER_STRIKE_LANDING,
+                CRUSADER_STRIKE_IMPACT_SIZE,
+                // The AS-337 bench's `scale` keys, birth to death, with the
+                // middle key on the straight line between them.
+                &[[0.16, 0.12, 0.08], [0.3, 0.25, 0.2]],
             ),
             (
                 &MIND_BLAST_LANDING,
@@ -817,6 +913,22 @@ mod tests {
         for (got, want) in counts.iter().zip([1.0, 6.0, 3.0]) {
             assert!((got - want).abs() < 1e-3, "{counts:?}");
         }
+    }
+
+    /// The strike's bench `rate` keys, integrated as the bench integrates
+    /// them: 1.675 sparks over the 67 ms ramp, 30 over the held 600 ms, and
+    /// one plume puff.
+    #[test]
+    fn the_crusader_strike_landing_emits_the_benchs_counts() {
+        let [sparks, plume] = &CRUSADER_STRIKE_LANDING;
+        assert!((sparks.count_between(-1.0, 2.0) - 31.675).abs() < 1e-3);
+        assert!((sparks.count_between(0.0, 0.067) - 1.675).abs() < 1e-3);
+        assert_eq!(sparks.window, Some((0.0, 0.667)));
+        assert!((plume.count_between(-1.0, 2.0) - 1.005).abs() < 1e-3);
+        assert_eq!(plume.window, Some((0.0, 0.067)));
+        // Nothing before the blade arrives.
+        assert_eq!(sparks.count_between(-1.0, 0.0), 0.0);
+        assert_eq!(plume.count_between(-1.0, 0.0), 0.0);
     }
 
     #[test]
