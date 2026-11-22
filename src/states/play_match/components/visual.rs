@@ -1,5 +1,6 @@
 use super::super::abilities::{AbilityType, SpellSchool};
 use super::super::combat_core::CHEAT_DEATH_NAME;
+use super::super::demonology::TOUCH_OF_SHADOW_NAME;
 use super::super::match_config::CharacterClass;
 use super::auras::AuraType;
 use super::combatant::AutoAttackKind;
@@ -1091,11 +1092,17 @@ pub enum AuraLandingKind {
     /// is the incapacitate's state, drawn while it holds
     /// (`rendering/effects/repentance.rs`).
     RepentanceImpact,
+    /// Touch of Shadow, the buff Demonic Sacrifice grants:
+    /// `demonicsacrifice_succubus_chest.m2` (kit 5134), three violet orbs
+    /// spinning round the Warlock's chest trailing ribbons, then motes rising
+    /// off three outer points, 2.37 s (`demonology_landings.rs`, AS-350). The
+    /// buff draws nothing after; the Felhunter's death is its own.
+    SacrificeTriad,
 }
 
 impl AuraLandingKind {
     /// Every landing, in declaration order.
-    pub const ALL: [AuraLandingKind; 13] = [
+    pub const ALL: [AuraLandingKind; 14] = [
         AuraLandingKind::RejuvenationSwirl,
         AuraLandingKind::MarkOfTheWildGlyph,
         AuraLandingKind::ShadowWordPainHit,
@@ -1109,6 +1116,7 @@ impl AuraLandingKind {
         AuraLandingKind::AmplifyFlash,
         AuraLandingKind::ShadowTrance,
         AuraLandingKind::RepentanceImpact,
+        AuraLandingKind::SacrificeTriad,
     ];
 
     /// The landing an aura of `aura_type` named `name` plays, or `None`.
@@ -1148,6 +1156,9 @@ impl AuraLandingKind {
             AuraType::TriggeredAbsorb if name == SACRED_SHIELD_AURA => {
                 Some(AuraLandingKind::SacredShieldDisc)
             }
+            AuraType::DamageDealtIncrease if name == TOUCH_OF_SHADOW_NAME => {
+                Some(AuraLandingKind::SacrificeTriad)
+            }
             _ => None,
         }
     }
@@ -1173,7 +1184,8 @@ impl AuraLandingKind {
             | AuraLandingKind::InfusionHalo
             | AuraLandingKind::ArtOfWarRing
             | AuraLandingKind::AmplifyFlash
-            | AuraLandingKind::ShadowTrance => None,
+            | AuraLandingKind::ShadowTrance
+            | AuraLandingKind::SacrificeTriad => None,
         }
     }
 
@@ -1262,7 +1274,8 @@ impl PaladinOneShotKind {
             | AuraLandingKind::MarkOfTheWildGlyph
             | AuraLandingKind::ShadowWordPainHit
             | AuraLandingKind::AmplifyFlash
-            | AuraLandingKind::ShadowTrance => None,
+            | AuraLandingKind::ShadowTrance
+            | AuraLandingKind::SacrificeTriad => None,
         }
     }
 }
@@ -2068,8 +2081,9 @@ pub enum AuraApplyOwner {
     /// A named aura whose LANDING has its own one-shot: Rejuvenation's ribbon
     /// swirl and Mark of the Wild's glyph (`druid_heals.rs`), Shadow Word:
     /// Pain's dark hit (`shadow_word_pain.rs`), the Paladin talent one-shots
-    /// (`paladin_oneshots.rs`), and the empowered ground flash of Amplify
-    /// Curse and Shadow Trance (`empowered_flash.rs`). Owned per aura
+    /// (`paladin_oneshots.rs`), the empowered ground flash of Amplify
+    /// Curse and Shadow Trance (`empowered_flash.rs`), and Touch of Shadow's
+    /// sacrifice triad (`demonology_landings.rs`). Owned per aura
     /// NAME, not per type — see [`AuraApplyRoute::for_instance`] — because
     /// their types are shared with auras that keep the band (Healing Stream's
     /// HoT, Power Word: Fortitude). Lifebloom is not here: its pulse starts a

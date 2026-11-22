@@ -4,12 +4,12 @@ use bevy::color::LinearRgba;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
-use super::body_hold::{body_capsule, held_in_front};
 use super::druid_heals::{body_point, keyed, keyed_color};
 use super::hit_reaction::{insert_flinch, PendingDepth};
 use super::hunter_shots::draw;
 use super::school_impact::IMPACT_PET_STATURE;
 use super::shield::disc_texture;
+use super::siphon_life::{siphon_body_capsule, siphon_drawn_point};
 use crate::states::play_match::components::*;
 
 // ==============================================================================
@@ -79,11 +79,12 @@ use crate::states::play_match::components::*;
 //    born at the chest, and the back of the rings — is drawn first and the
 //    body paints over it. Every particle, the fire disc and every piece of
 //    the rune ring is therefore drawn on its own view ray, slid in front of
-//    the victim's body and scaled by the same ratio (`body_hold.rs`, the rule
-//    AS-347 wrote for Siphon Life): it projects exactly where the bench puts
-//    it. A particle's true flight is `ConflagrateParticle::at`; a streak is
-//    laid in the camera's plane at its particle's depth, with its projected
-//    length, as the bench's screen line is.
+//    the victim's body and scaled by the same ratio — Siphon Life's hold,
+//    `siphon_drawn_point` against `siphon_body_capsule` (one shared helper
+//    is AS-501) — so it projects exactly where the bench puts it. A
+//    particle's true flight is `ConflagrateParticle::at`; a streak is laid in
+//    the camera's plane at its particle's depth, with its projected length,
+//    as the bench's screen line is.
 //
 // ## Lifecycle
 //
@@ -880,9 +881,9 @@ pub fn pose_conflagrate_rings(
         let hold = |local: Vec3| -> (Vec3, f32) {
             match (view, victims.get(rig.target)) {
                 (Some(c), Ok((victim, pet))) => {
-                    let (drawn, k) = held_in_front(
+                    let (drawn, k) = siphon_drawn_point(
                         chest + local,
-                        body_capsule(victim.translation, pet.is_some()),
+                        siphon_body_capsule(victim.translation, pet.is_some()),
                         c.translation,
                         c.forward().as_vec3(),
                     );
@@ -1002,9 +1003,9 @@ pub fn billboard_conflagrate_particles(
     let cam = view.map(|c| c.rotation).unwrap_or(Quat::IDENTITY);
     for (p, mut particle_transform, children) in particles.iter_mut() {
         let (drawn, k) = match (view, victims.get(p.victim)) {
-            (Some(c), Ok((victim, pet))) => held_in_front(
+            (Some(c), Ok((victim, pet))) => siphon_drawn_point(
                 p.at,
-                body_capsule(victim.translation, pet.is_some()),
+                siphon_body_capsule(victim.translation, pet.is_some()),
                 c.translation,
                 c.forward().as_vec3(),
             ),

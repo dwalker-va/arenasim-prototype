@@ -6,6 +6,7 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 use super::dot_state::{has_dot_state, DotStateVisual};
 use super::heal_impact::COMBATANT_BODY_RADIUS;
 use super::school_impact::{IMPACT_HEAD_Y, IMPACT_PET_BODY_Y, IMPACT_PET_STATURE};
+use super::siphon_life::{spawn_siphon_life_rig, SiphonLifeRig};
 use super::spell_bolts::{soft_dot_texture, star_flash_texture};
 use crate::states::play_match::components::*;
 
@@ -756,6 +757,8 @@ fn additive_material(
 /// - Corruption newly present → shroud state rig + shared apply burst.
 /// - Unstable Affliction newly present → UA state rig + the SAME apply burst
 ///   (client kit 117 is shared — see module docs).
+/// - Siphon Life newly present → its chest-glow rig (`siphon_life.rs`) + the
+///   same apply burst (its TBC impact row is kit 117 too).
 /// - Any curse in `CURSE_APPARITIONS` newly present → that curse's one-shot
 ///   apply apparition, latched by a bit in `CurseApparitionsFired` (the
 ///   apparitions are apply-only, so a live rig can't be the dedup key). The
@@ -782,10 +785,12 @@ pub fn spawn_warlock_dot_visuals(
     )>,
     shrouds: Query<&CorruptionShroudRig>,
     ua_rigs: Query<&UaStateRig>,
+    siphon_rigs: Query<&SiphonLifeRig>,
 ) {
     use std::collections::HashSet;
     let shrouded: HashSet<Entity> = shrouds.iter().map(|r| r.target).collect();
     let ua_lit: HashSet<Entity> = ua_rigs.iter().map(|r| r.target).collect();
+    let siphoned: HashSet<Entity> = siphon_rigs.iter().map(|r| r.target).collect();
 
     for (entity, combatant, transform, auras, pet, curse_latch) in afflicted.iter() {
         if !combatant.is_alive() {
@@ -836,6 +841,19 @@ pub fn spawn_warlock_dot_visuals(
             );
         }
 
+        if has_dot_state(auras, DotStateVisual::SiphonLifeGlow) && !siphoned.contains(&entity) {
+            spawn_siphon_life_rig(&mut commands, entity, transform.translation, is_pet);
+            // Siphon Life's impact row is kit 117 in both builds.
+            spawn_apply_burst(
+                &mut commands,
+                &mut materials,
+                assets,
+                entity,
+                transform.translation,
+                is_pet,
+            );
+        }
+
         // Every curse's apply apparition, table-driven and latched by bit so
         // a victim can carry two different Warlocks' curses at once.
         let already = curse_latch.map(|l| l.fired).unwrap_or(0);
@@ -868,6 +886,7 @@ pub fn spawn_warlock_dot_visuals(
 /// Build the shared kit-117 apply burst: the expanding shadow ring at the
 /// chest plus its spark-sphere emitter (sparks are emitted over the ring
 /// window by `animate_dot_apply_bursts`).
+/// Siphon Life lands it too: kit 117 is its impact row in both builds.
 fn spawn_apply_burst(
     commands: &mut Commands,
     materials: &mut Assets<StandardMaterial>,

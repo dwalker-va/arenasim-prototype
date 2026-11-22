@@ -85,6 +85,7 @@ use arenasim::states::play_match::components::AuraApplyOwner;
 use arenasim::states::play_match::components::AuraApplyRoute;
 use arenasim::states::play_match::components::AuraLandingKind;
 use arenasim::states::play_match::components::AuraType;
+use arenasim::states::play_match::components::Combatant;
 use arenasim::states::play_match::components::ConflagrateLanding;
 use arenasim::states::play_match::components::CurseKind;
 use arenasim::states::play_match::components::HealImpact;
@@ -99,6 +100,7 @@ use arenasim::states::play_match::components::ShieldKind;
 use arenasim::states::play_match::components::SwingStyle;
 use arenasim::states::play_match::components::TotemElement;
 use arenasim::states::play_match::curse_spec;
+use arenasim::states::play_match::demonology::touch_of_shadow_aura;
 use arenasim::states::play_match::equipment::load_item_definitions;
 use arenasim::states::play_match::equipment::ItemDefinitions;
 use arenasim::states::play_match::equipment::ItemId;
@@ -110,8 +112,11 @@ use arenasim::states::play_match::oneshot_visual;
 use arenasim::states::play_match::plays_cheat_death;
 use arenasim::states::play_match::proc_trinkets::ProcEffect;
 use arenasim::states::play_match::root_style_for;
+use arenasim::states::play_match::soul_link_forms;
 use arenasim::states::play_match::swing_style_for_ability;
 use arenasim::states::play_match::talent_mechanics::MechanicKind;
+use arenasim::states::play_match::talent_mechanics::TalentMechanic;
+use arenasim::states::play_match::talent_mechanics::TalentMechanics;
 use arenasim::states::play_match::talent_procs::effect_aura;
 use arenasim::states::play_match::talent_procs::ProcEvent;
 use arenasim::states::play_match::talent_procs::TalentProc;
@@ -130,6 +135,7 @@ use arenasim::states::play_match::DIVINE_SHIELD_AURA_NAME;
 use arenasim::states::play_match::ICE_BARRIER_AURA_NAME;
 use arenasim::states::play_match::PW_SHIELD_AURA_NAME;
 
+use arenasim::CharacterClass;
 use AbilityType::*;
 
 // ── the harness ─────────────────────────────────────────────────────────────
@@ -681,16 +687,10 @@ const DOT_MEMBERS: &[AbilityType] = &[
 ];
 
 /// DoTs that land with nothing drawn yet.
-const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[
-    (
-        Rupture,
-        "AS-336 (Rupture, the Assassination bleed; AS-365 builds it on Rend's bleed drips)",
-    ),
-    (
-        SiphonLife,
-        "AS-347 (Siphon Life, the Affliction drain; its heal-back is icon-only by ruling)",
-    ),
-];
+const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
+    Rupture,
+    "AS-336 (Rupture, the Assassination bleed; AS-365 builds it on Rend's bleed drips)",
+)];
 
 /// The DoT STATE a member's aura routes to. The aura carries the ability's
 /// RON `name:`, so this sweeps the config name through the very router every
@@ -709,6 +709,7 @@ fn dot_state(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
         DotStateVisual::CorruptionShroud => "Corruption shroud (warlock_dots.rs)",
         DotStateVisual::UnstableAfflictionState => "UA glow + crackle (warlock_dots.rs)",
         DotStateVisual::ImmolateBurn => "Immolate burn (immolate.rs)",
+        DotStateVisual::SiphonLifeGlow => "Siphon Life chest glow (siphon_life.rs)",
         DotStateVisual::ApplyApparitionOnly(_) => "curse apply apparition (warlock_dots.rs)",
     })
 }
@@ -777,6 +778,7 @@ fn the_dot_router_names_each_members_state() {
         Some(DotStateVisual::UnstableAfflictionState)
     );
     assert_eq!(route(Immolate), Some(DotStateVisual::ImmolateBurn));
+    assert_eq!(route(SiphonLife), Some(DotStateVisual::SiphonLifeGlow));
     assert_eq!(
         route(CurseOfAgony),
         Some(DotStateVisual::ApplyApparitionOnly(CurseKind::Agony))
@@ -1717,10 +1719,27 @@ fn mechanic_visual(kind: MechanicKind) -> Option<&'static str> {
                     == AuraApplyRoute::Owned(AuraApplyOwner::CheatDeath))
             .then_some("the skull over the head and the lavender ghost-fire (cheat_death.rs)")
         }
-        MechanicKind::SoulLink
-        | MechanicKind::ReflectiveShield
+        // The link raises the rune column at the Warlock's feet as the gates
+        // open, while its Felhunter lives.
+        MechanicKind::SoulLink => {
+            let mut holder = Combatant::new(1, 0, CharacterClass::Warlock);
+            holder.talent_mechanics =
+                TalentMechanics::of(&[TalentMechanic::SoulLink { share: 0.2 }]);
+            (soul_link_forms(&holder, true) && !soul_link_forms(&holder, false))
+                .then_some("the red rune column at the Warlock's feet (demonology_landings.rs)")
+        }
+        // The sacrifice's Touch of Shadow lands with the violet triad at the
+        // chest, which owns its application; the Felhunter's death is its own.
+        MechanicKind::DemonicSacrifice => {
+            let buff = touch_of_shadow_aura(0.15, Entity::from_raw(1));
+            (AuraLandingKind::for_aura(buff.effect_type, &buff.ability_name)
+                == Some(AuraLandingKind::SacrificeTriad)
+                && AuraApplyRoute::for_instance(buff.effect_type, &buff.ability_name)
+                    == AuraApplyRoute::Owned(AuraApplyOwner::AuraLanding))
+            .then_some("the violet orb triad at the Warlock's chest (demonology_landings.rs)")
+        }
+        MechanicKind::ReflectiveShield
         | MechanicKind::MasterDemonologist
-        | MechanicKind::DemonicSacrifice
         | MechanicKind::UnbreakableWill => None,
     }
 }
@@ -1744,27 +1763,17 @@ const TALENT_MECHANIC_MEMBERS: &[TalentId] = &[
     TalentId::UnbreakableWill,
 ];
 
-const TALENT_MECHANIC_KNOWN_SILENT: &[(TalentId, &str)] = &[
-    (
-        TalentId::DemonicSacrifice,
-        "AS-350 (the sacrifice triad; the Felhunter's death is the ordinary one)",
-    ),
-    (
-        TalentId::ReflectiveShield,
-        "AS-355 (Reflective Shield's reflect; it shows only as the attacker's damage taken)",
-    ),
-    (
-        TalentId::SoulLink,
-        "AS-350 (the Soul Link rune column; the transfer shows only on the Felhunter's bar)",
-    ),
-];
+const TALENT_MECHANIC_KNOWN_SILENT: &[(TalentId, &str)] = &[(
+    TalentId::ReflectiveShield,
+    "AS-355 (Reflective Shield's reflect; it shows only as the attacker's damage taken)",
+)];
 
 const TALENT_MECHANIC_SILENT_BY_DESIGN: &[SilentByDesign<TalentId>] = &[
     SilentByDesign {
         ability: TalentId::MasterDemonologist,
-        doc: "docs/design/proposals/2026-10-11-talents-and-gauntlet.md",
-        reason: "icon-only by ruling: its footprint is the aura icon on the Warlock and the \
-                 Felhunter (§5.1)",
+        doc: "docs/design/2026-10-17-warlock-talent-client-data.md",
+        reason: "icon-only, as in the client: none of its ids has a SpellXSpellVisual row, so \
+                 its footprint is the aura icon on the Warlock and the Felhunter (§8)",
     },
     SilentByDesign {
         ability: TalentId::UnbreakableWill,
@@ -1960,7 +1969,8 @@ const TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING: &[(TalentId, &str, &str)] = &[
         TalentId::ImprovedShadowBolt,
         "AS-334",
         "Shadow Vulnerability needs no visual of its own (AS-411's Visuals line); the \
-         proposal's footprint is the debuff icon on the target (§5.1)",
+         proposal's footprint is the debuff icon on the target (§5.1), and the client has \
+         none (NO-VISUAL, docs/design/2026-10-17-warlock-talent-client-data.md §6)",
     ),
     (
         TalentId::Initiative,
