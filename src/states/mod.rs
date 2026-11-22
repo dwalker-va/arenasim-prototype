@@ -1381,6 +1381,46 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Vampiric Embrace's landing (rendering/effects/vampiric_embrace.rs,
+        // AS-357): client kit 3109's dust implosion at the victim's chest,
+        // off the sim's `AuraLanding` marker. (Its heals' violet stream is a
+        // heal landing, in the heal-impact chain.) Graphical only — never
+        // registered in headless systems.rs. Chained: the emitter must see
+        // the rig `spawn` just built, and the billboard runs on final
+        // positions.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_vampiric_embrace_implosions, // Marker -> rig
+                play_match::animate_vampiric_embrace_implosions, // Follow the chest, emit dust
+                play_match::age_vampiric_embrace_motes,        // Fly in, retire
+                play_match::billboard_vampiric_embrace_motes,  // Held in front of the body
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Priest Silence's state (rendering/effects/silence_breath.rs,
+        // AS-357): client kit 297's breath at the victim's mouth while the
+        // silence holds — the inhale, then an exhale each 4.167 s loop.
+        // Raised and retired off `ActiveAuras`; the Unstable Affliction
+        // backlash's silence keeps its burst. Graphical only — never
+        // registered in headless systems.rs. Chained: the emitter must see
+        // the rig `spawn` just built, and the billboard runs on final
+        // positions.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_silence_breaths, // Detect the silence, build the rig
+                play_match::animate_silence_breaths, // Follow the mouth, emit
+                play_match::age_silence_breath_particles, // Fly, spin, retire
+                play_match::billboard_silence_breath_particles, // Held in front of the body
+                play_match::cleanup_silence_breaths, // End the breath with the silence
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // DoT drip indicators: green poison / red bleed drops on afflicted
         // targets (graphical only — never registered in headless systems.rs).
         .add_systems(

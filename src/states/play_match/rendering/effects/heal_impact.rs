@@ -1,10 +1,19 @@
 use bevy::color::LinearRgba;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
+use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_2, TAU};
 
+use super::conflagrate::{conflagrate_material, ConflagrateSprite, CONFLAGRATE_GLOW};
+use super::druid_heals::{keyed, keyed_color};
 use super::school_impact::{IMPACT_HEAD_Y, IMPACT_PET_BODY_Y, IMPACT_PET_STATURE};
+use super::shield::disc_texture;
+use super::siphon_life::{siphon_body_capsule, siphon_drawn_point};
 use super::spell_bolts::{soft_dot_texture, star_flash_texture};
+use super::vampiric_embrace::{
+    VAMPIRIC_EMBRACE_HEAL_STREAM, VAMPIRIC_EMBRACE_HEAL_VISUAL_MIN_INTERVAL_SECS, VE_HEAL_AREA,
+    VE_HEAL_CONE, VE_HEAL_LIFE, VE_HEAL_LOOK, VE_HEAL_RATE, VE_HEAL_SPAN_SECS, VE_HEAL_SPEED,
+};
 use crate::states::play_match::components::*;
 
 // ==============================================================================
@@ -74,6 +83,11 @@ pub const FLASH_HEAL_EMIT_SECS: f32 = 1.2;
 pub const FLASH_HEAL_RAY_WIDTH: f32 = 0.20;
 /// Radius of the central lens-flare quad.
 pub const FLASH_HEAL_FLARE_RADIUS: f32 = 0.65;
+
+/// Emissive gain of a [`HealMoteKind::Glow`] mote over its colour — the
+/// house's 2-4x glow convention for bench-transcribed particles, and the gain
+/// `conflagrate_material` builds its first frame with.
+pub const HEAL_GLOW_GAIN: f32 = CONFLAGRATE_GLOW;
 
 /// Global tuning knobs over every landing's transcribed emitter constants.
 pub const HEAL_MOTE_RATE_SCALE: f32 = 1.0;
@@ -232,31 +246,69 @@ pub enum HealAnchor {
 }
 
 /// A 3-point piecewise-linear parameter over the emit window, keyed at
-/// start / midpoint / end — how the source keys its ramped rates and areas.
+/// start / `knot` / end — how the source keys its ramped rates and areas.
+/// The middle key sits at the window's midpoint unless the source keys it
+/// elsewhere (Vampiric Embrace's ribbon rate peaks 100 ms into 633).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Ramp {
     pub start: f32,
     pub mid: f32,
     pub end: f32,
+    /// Where in the window, 0..1, the middle key sits.
+    pub knot: f32,
 }
 
 impl Ramp {
-    pub const fn flat(v: f32) -> Self {
+    /// Keyed at the window's start, midpoint and end.
+    pub const fn new(start: f32, mid: f32, end: f32) -> Self {
+        Ramp::knotted(start, mid, end, 0.5)
+    }
+
+    /// Keyed at the window's start, `knot` of the way in, and end.
+    pub const fn knotted(start: f32, mid: f32, end: f32, knot: f32) -> Self {
         Ramp {
-            start: v,
-            mid: v,
-            end: v,
+            start,
+            mid,
+            end,
+            knot,
         }
+    }
+
+    pub const fn flat(v: f32) -> Self {
+        Ramp::new(v, v, v)
     }
 
     /// Value at normalized window position `k` in 0..1.
     pub fn at(&self, k: f32) -> f32 {
         let k = k.clamp(0.0, 1.0);
-        if k < 0.5 {
-            self.start + (self.mid - self.start) * (k / 0.5)
+        let m = self.knot.clamp(1e-3, 1.0 - 1e-3);
+        if k < m {
+            self.start + (self.mid - self.start) * (k / m)
         } else {
-            self.mid + (self.end - self.mid) * ((k - 0.5) / 0.5)
+            self.mid + (self.end - self.mid) * ((k - m) / (1.0 - m))
         }
+    }
+}
+
+/// A bench-transcribed mote's look over its normalised life: its colour, its
+/// alpha and its sprite RADIUS in yards, each keyed and linear between keys
+/// (the benches' `keys`). Every [`HealMoteKind::Glow`] mote of a style wears
+/// its style's look, on a material of its own.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct HealMoteLook {
+    pub color: &'static [(f32, [u8; 3])],
+    pub alpha: &'static [(f32, f32)],
+    pub scale: &'static [(f32, f32)],
+}
+
+impl HealMoteLook {
+    /// `(colour, alpha, sprite radius)` `t` of the way through a life.
+    pub fn at(&self, t: f32) -> (Color, f32, f32) {
+        (
+            keyed_color(self.color, t),
+            keyed(self.alpha, t),
+            keyed(self.scale, t),
+        )
     }
 }
 
@@ -326,6 +378,15 @@ pub struct HealStyle {
     /// depth-rejected inside the capsule. Must clear
     /// [`COMBATANT_BODY_RADIUS`] with margin to mean anything.
     pub mote_ring: Option<f32>,
+    /// The look of the style's [`HealMoteKind::Glow`] motes: colour, alpha
+    /// and size over each mote's life, as a bench keys them.
+    pub mote_look: Option<HealMoteLook>,
+    /// Draw every mote held in front of the recipient's body, on its own
+    /// view ray and scaled to hold its screen size (`siphon_drawn_point`),
+    /// as a bench that paints the motes over the body draws them. The bodies
+    /// are `AlphaMode::Blend` and write no depth, so a mote deeper than the
+    /// body's centre would otherwise sort behind it and vanish.
+    pub held_before_body: bool,
     pub emitters: Vec<HealEmitter>,
 }
 
@@ -361,6 +422,8 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             torso_glows: Vec::new(),
             mote_tint: None,
             mote_ring: None,
+            mote_look: None,
+            held_before_body: false,
             butterflies: false,
             // Mote SIZES here and in HealStream are render tuning, not M2
             // transcription (the source records carry no world-size), and the
@@ -405,16 +468,8 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     origin: Vec3::new(0.0, 0.63, 0.0),
                     speed: 2.22,
                     life: 0.9,
-                    rate: Ramp {
-                        start: 11.0,
-                        mid: 15.0,
-                        end: 0.0,
-                    },
-                    area: Ramp {
-                        start: 0.14,
-                        mid: 0.69,
-                        end: 0.14,
-                    },
+                    rate: Ramp::new(11.0, 15.0, 0.0),
+                    area: Ramp::new(0.14, 0.69, 0.14),
                     spread: 0.0,
                     kind: HealMoteKind::Ribbon,
                     size: 0.09,
@@ -423,16 +478,8 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     origin: Vec3::new(0.0, 1.35, 0.0),
                     speed: 2.22,
                     life: 0.9,
-                    rate: Ramp {
-                        start: 11.0,
-                        mid: 15.0,
-                        end: 0.0,
-                    },
-                    area: Ramp {
-                        start: 0.14,
-                        mid: 0.69,
-                        end: 0.14,
-                    },
+                    rate: Ramp::new(11.0, 15.0, 0.0),
+                    area: Ramp::new(0.14, 0.69, 0.14),
                     spread: 0.0,
                     kind: HealMoteKind::Ribbon,
                     size: 0.09,
@@ -449,6 +496,8 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             torso_glows: Vec::new(),
             mote_tint: None,
             mote_ring: None,
+            mote_look: None,
+            held_before_body: false,
             butterflies: false,
             // Mote sizes raised with Flash Heal's — see the note there.
             emitters: vec![
@@ -456,16 +505,8 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     origin: Vec3::new(0.0, 1.35, 0.0),
                     speed: 2.22,
                     life: 0.9,
-                    rate: Ramp {
-                        start: 15.0,
-                        mid: 20.0,
-                        end: 5.0,
-                    },
-                    area: Ramp {
-                        start: 0.14,
-                        mid: 0.69,
-                        end: 0.14,
-                    },
+                    rate: Ramp::new(15.0, 20.0, 5.0),
+                    area: Ramp::new(0.14, 0.69, 0.14),
                     spread: 0.0,
                     kind: HealMoteKind::Ribbon,
                     size: 0.09,
@@ -563,6 +604,8 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             ],
             mote_tint: None,
             mote_ring: None,
+            mote_look: None,
+            held_before_body: false,
             butterflies: true,
             emitters: vec![
                 // The above-head burst star emitter.
@@ -570,16 +613,8 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     origin: Vec3::new(0.0, 2.66, 0.0),
                     speed: 2.78,
                     life: 0.7,
-                    rate: Ramp {
-                        start: 17.85,
-                        mid: 35.25,
-                        end: 13.25,
-                    },
-                    area: Ramp {
-                        start: 0.2,
-                        mid: 1.03,
-                        end: 0.2,
-                    },
+                    rate: Ramp::new(17.85, 35.25, 13.25),
+                    area: Ramp::new(0.2, 1.03, 0.2),
                     spread: 0.0,
                     kind: HealMoteKind::Star,
                     size: 0.08,
@@ -607,6 +642,8 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
             torso_glows: Vec::new(),
             mote_tint: Some(nature_green()),
             mote_ring: Some(TOTEM_PULSE_RING_RADIUS),
+            mote_look: None,
+            held_before_body: false,
             butterflies: false,
             // A handful of motes per tick — the client's rising-sparkle shape
             // (source speeds 3.33/2.22, the 0.56 area as the annulus depth)
@@ -643,11 +680,7 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                     origin: Vec3::new(0.0, 0.47, 0.0),
                     speed: 2.22,
                     life: 0.5,
-                    rate: Ramp {
-                        start: 8.0,
-                        mid: 6.0,
-                        end: 0.0,
-                    },
+                    rate: Ramp::new(8.0, 6.0, 0.0),
                     area: Ramp::flat(0.14),
                     spread: 0.0,
                     kind: HealMoteKind::Ribbon,
@@ -655,8 +688,84 @@ pub fn heal_style(kind: HealImpactKind) -> HealStyle {
                 },
             ],
         },
+        // Vampiric Embrace's party heal: kit 3072 is `heal_low_base.m2`'s rig
+        // recoloured violet, and its stream is played as the signed-off
+        // AS-335 bench plays it ("Vampiric Embrace" tab, `heals` layer): ONE
+        // emitter of soft violet glows rising from the feet for 633 ms, its
+        // rate 20 -> 40/s at 100 ms -> 0, from a 0.69 yd square, each glow
+        // coloured, faded and shrunk over its 1.1 s life. Held in front of
+        // the body, as the bench paints it over the body. The research's
+        // second ribbon pair and red-to-gold star emitter are not on the
+        // bench, which was signed off, so they are not drawn here
+        // (`vampiric_embrace.rs` names every departure).
+        HealImpactKind::VampiricEmbrace => HealStyle {
+            anchor: HealAnchor::Base,
+            emit_secs: VE_HEAL_SPAN_SECS,
+            intensity: 1.0,
+            flash: None,
+            head_glow: None,
+            under_glow: None,
+            torso_glows: Vec::new(),
+            butterflies: false,
+            mote_tint: None,
+            mote_ring: None,
+            mote_look: Some(VE_HEAL_LOOK),
+            held_before_body: true,
+            emitters: if VAMPIRIC_EMBRACE_HEAL_STREAM {
+                vec![HealEmitter {
+                    // The bench's `feet` anchor is the floor plane, which
+                    // stands this far above the shipped Base attach.
+                    origin: Vec3::Y * HEAL_BASE_FLOOR_LIFT,
+                    speed: VE_HEAL_SPEED,
+                    life: VE_HEAL_LIFE,
+                    rate: VE_HEAL_RATE,
+                    area: Ramp::flat(VE_HEAL_AREA),
+                    spread: VE_HEAL_CONE,
+                    kind: HealMoteKind::Glow,
+                    size: VE_HEAL_LOOK.scale[0].1,
+                }]
+            } else {
+                Vec::new()
+            },
+        },
     }
 }
+
+/// How far the floor plane stands above the Base attach of a combatant
+/// standing on it (its capsule centre 1.0 above the floor): the bench's
+/// `feet` anchor in the rig's frame.
+pub const HEAL_BASE_FLOOR_LIFT: f32 = -(1.0 + HEAL_BASE_Y);
+
+/// The least time between two of a kind's landings on one recipient, or
+/// `None` for a kind that plays on every heal. Vampiric Embrace's stream
+/// plays on an ally at most once every
+/// [`VAMPIRIC_EMBRACE_HEAL_VISUAL_MIN_INTERVAL_SECS`] (the AS-335 ruling);
+/// its heals land about once a second, and every one still counts.
+pub fn heal_landing_interval(kind: HealImpactKind) -> Option<f32> {
+    match kind {
+        HealImpactKind::VampiricEmbrace => Some(VAMPIRIC_EMBRACE_HEAL_VISUAL_MIN_INTERVAL_SECS),
+        HealImpactKind::FlashHeal
+        | HealImpactKind::HealStream
+        | HealImpactKind::HolyLight
+        | HealImpactKind::FlashOfLight
+        | HealImpactKind::HealingWave
+        | HealImpactKind::TotemPulse => None,
+    }
+}
+
+/// Slack on [`heal_landing_interval`]: the bench plays its heal visual once
+/// `ms - last >= every - 1`, a millisecond early.
+pub const HEAL_LANDING_INTERVAL_SLACK: f32 = 0.001;
+
+/// Whether a landing throttled to `interval` plays `now`, when it last played
+/// on the same recipient at `last` (`None`: never).
+pub fn heal_landing_due(last: Option<f32>, now: f32, interval: f32) -> bool {
+    last.is_none_or(|last| now - last >= interval - HEAL_LANDING_INTERVAL_SLACK)
+}
+
+/// The soft round glow a [`HealMoteKind::Glow`] mote wears: the benches'
+/// `glow` falloff, full at the centre, 0.45 halfway out, nothing at the rim.
+const HEAL_GLOW_PX: u32 = 64;
 
 /// Holy Light's recipe, shared with Flash of Light's scaled borrow. Twelve
 /// source emitters collapse into seven origin bands staggered down from the
@@ -711,6 +820,8 @@ fn holy_light_style(duration: f32, intensity: f32) -> HealStyle {
         butterflies: false,
         mote_tint: None,
         mote_ring: None,
+        mote_look: None,
+        held_before_body: false,
         emitters,
     }
 }
@@ -785,6 +896,7 @@ pub struct HealAssets {
     quad: Handle<Mesh>,
     star: Handle<Image>,
     dot: Handle<Image>,
+    glow: Handle<Image>,
 }
 
 impl HealAssets {
@@ -793,6 +905,9 @@ impl HealAssets {
             quad: meshes.add(Rectangle::new(1.0, 1.0)),
             star: images.add(star_flash_texture()),
             dot: images.add(soft_dot_texture()),
+            glow: images.add(disc_texture(HEAL_GLOW_PX, |r, a| {
+                ConflagrateSprite::Glow.alpha_at(r, a)
+            })),
         }
     }
 }
@@ -803,12 +918,17 @@ impl HealAssets {
 /// Light's head shower), follows the recipient, and emits its motes from
 /// [`animate_heal_impacts`]. Every piece is a child, so the whole thing dies
 /// with the rig.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_heal_impacts(
     mut commands: Commands,
+    time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut assets: Local<Option<HealAssets>>,
+    // When each throttled kind last played on each recipient
+    // ([`heal_landing_interval`]).
+    mut last_played: Local<HashMap<(Entity, HealImpactKind), f32>>,
     new_impacts: Query<(Entity, &HealImpact), Added<HealImpact>>,
     targets: Query<(&Transform, Option<&Pet>)>,
 ) {
@@ -816,8 +936,19 @@ pub fn spawn_heal_impacts(
         return;
     }
     let assets = assets.get_or_insert_with(|| HealAssets::build(&mut meshes, &mut images));
+    let now = time.elapsed_secs();
 
     for (entity, impact) in new_impacts.iter() {
+        // A throttled kind played on this recipient too lately draws
+        // nothing: its marker goes, the heal itself having landed.
+        if let Some(interval) = heal_landing_interval(impact.kind) {
+            let key = (impact.target, impact.kind);
+            if !heal_landing_due(last_played.get(&key).copied(), now, interval) {
+                commands.entity(entity).despawn();
+                continue;
+            }
+            last_played.insert(key, now);
+        }
         let style = heal_style(impact.kind);
         let at = targets
             .get(impact.target)
@@ -1023,6 +1154,7 @@ pub fn spawn_heal_impacts(
                 star_material,
                 ribbon_material,
                 puff_material,
+                glow_texture: assets.glow.clone(),
             },
         ));
         commands.entity(entity).add_children(&parts);
@@ -1069,7 +1201,11 @@ pub fn animate_heal_impacts(
         ),
     >,
     mut motes: Query<
-        (&mut HealMote, &mut Transform),
+        (
+            &mut HealMote,
+            &mut Transform,
+            &MeshMaterial3d<StandardMaterial>,
+        ),
         (
             Without<HealImpact>,
             Without<HealSprite>,
@@ -1140,6 +1276,19 @@ pub fn animate_heal_impacts(
                         HealMoteKind::Star => rig.star_material.clone(),
                         HealMoteKind::Ribbon => rig.ribbon_material.clone(),
                         HealMoteKind::Puff => rig.puff_material.clone(),
+                        // Its own material, recoloured over its life.
+                        HealMoteKind::Glow => {
+                            let (color, alpha, _) = style
+                                .mote_look
+                                .map(|look| look.at(0.0))
+                                .unwrap_or((Color::WHITE, 0.0, 0.0));
+                            materials.add(conflagrate_material(
+                                true,
+                                color,
+                                alpha,
+                                Some(rig.glow_texture.clone()),
+                            ))
+                        }
                     };
                     let mote = commands
                         .spawn((
@@ -1149,6 +1298,7 @@ pub fn animate_heal_impacts(
                                 age: 0.0,
                                 life: emitter.life,
                                 radius: emitter.size,
+                                offset: local,
                             },
                             Mesh3d(rig.quad.clone()),
                             MeshMaterial3d(material),
@@ -1237,13 +1387,15 @@ pub fn animate_heal_impacts(
                 }
             }
 
-            if let Ok((mut mote, mut part)) = motes.get_mut(child) {
+            if let Ok((mut mote, mut part, material)) = motes.get_mut(child) {
                 mote.age += dt;
                 if mote.age > mote.life {
                     part.scale = Vec3::ZERO;
                     continue;
                 }
-                part.translation += mote.velocity * dt;
+                let step = mote.velocity * dt;
+                mote.offset += step;
+                part.translation = mote.offset;
                 let k = 1.0 - mote.age / mote.life;
                 match mote.kind {
                     HealMoteKind::Star => {
@@ -1262,6 +1414,25 @@ pub fn animate_heal_impacts(
                         let swell = 1.0 + 0.6 * (1.0 - k);
                         part.scale =
                             Vec3::splat((mote.radius * 2.0 * swell * k.powf(0.4)).max(1e-4));
+                    }
+                    HealMoteKind::Glow => {
+                        // The bench's look: a sprite as wide as twice its
+                        // keyed radius, coloured and faded along its life.
+                        let Some(look) = style.mote_look else {
+                            part.scale = Vec3::ZERO;
+                            continue;
+                        };
+                        let (color, alpha, radius) = look.at(mote.age / mote.life);
+                        part.scale = Vec3::splat((radius * 2.0).max(1e-4));
+                        if let Some(m) = materials.get_mut(&material.0) {
+                            let c = color.to_linear();
+                            m.base_color = color.with_alpha(alpha);
+                            m.emissive = LinearRgba::rgb(
+                                c.red * HEAL_GLOW_GAIN,
+                                c.green * HEAL_GLOW_GAIN,
+                                c.blue * HEAL_GLOW_GAIN,
+                            );
+                        }
                     }
                 }
             }
@@ -1294,6 +1465,7 @@ pub fn animate_heal_impacts(
 /// roll about the view axis so the fan stays a fan. Butterfly wings are NOT
 /// billboarded — their 3D flutter is the design — and neither is the feet
 /// under-glow, which lies in the ground plane.
+#[allow(clippy::type_complexity)]
 pub fn billboard_heal_impacts(
     camera: Query<
         &Transform,
@@ -1304,21 +1476,47 @@ pub fn billboard_heal_impacts(
             Without<HealMote>,
         ),
     >,
-    rigs: Query<(&Transform, &Children), With<HealImpact>>,
+    rigs: Query<(&HealImpact, &Transform, &Children)>,
+    recipients: Query<
+        (&Transform, Option<&Pet>),
+        (
+            With<Combatant>,
+            Without<HealImpact>,
+            Without<HealSprite>,
+            Without<HealMote>,
+            Without<Camera3d>,
+        ),
+    >,
     mut sprites: Query<
         (&HealSprite, &mut Transform),
-        (Without<HealImpact>, Without<Camera3d>, Without<HealMote>),
+        (
+            Without<HealImpact>,
+            Without<Camera3d>,
+            Without<HealMote>,
+            Without<Combatant>,
+        ),
     >,
     mut motes: Query<
         (&HealMote, &mut Transform),
-        (Without<HealImpact>, Without<Camera3d>, Without<HealSprite>),
+        (
+            Without<HealImpact>,
+            Without<Camera3d>,
+            Without<HealSprite>,
+            Without<Combatant>,
+        ),
     >,
 ) {
     let Some(cam) = camera.iter().next() else {
         return;
     };
-    for (rig, children) in rigs.iter() {
+    for (impact, rig, children) in rigs.iter() {
         let facing = rig.rotation.inverse() * cam.rotation;
+        // A held style's motes stand in front of their recipient's body.
+        let body = heal_style(impact.kind)
+            .held_before_body
+            .then(|| recipients.get(impact.target).ok())
+            .flatten()
+            .map(|(t, pet)| siphon_body_capsule(t.translation, pet.is_some()));
         for child in children.iter() {
             if let Ok((sprite, mut part)) = sprites.get_mut(child) {
                 match sprite.role {
@@ -1337,8 +1535,15 @@ pub fn billboard_heal_impacts(
                     }
                 }
             }
-            if let Ok((_, mut part)) = motes.get_mut(child) {
+            if let Ok((mote, mut part)) = motes.get_mut(child) {
                 part.rotation = facing;
+                if let Some(capsule) = body {
+                    let at = rig.translation + rig.rotation * mote.offset;
+                    let (drawn, k) =
+                        siphon_drawn_point(at, capsule, cam.translation, cam.forward().as_vec3());
+                    part.translation = rig.rotation.inverse() * (drawn - rig.translation);
+                    part.scale *= k;
+                }
             }
         }
     }
