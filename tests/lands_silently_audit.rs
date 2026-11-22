@@ -685,16 +685,10 @@ const DOT_MEMBERS: &[AbilityType] = &[
 ];
 
 /// DoTs that land with nothing drawn yet.
-const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[
-    (
-        Rupture,
-        "AS-336 (Rupture, the Assassination bleed; AS-365 builds it on Rend's bleed drips)",
-    ),
-    (
-        SiphonLife,
-        "AS-347 (Siphon Life, the Affliction drain; its heal-back is icon-only by ruling)",
-    ),
-];
+const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
+    Rupture,
+    "AS-336 (Rupture, the Assassination bleed; AS-365 builds it on Rend's bleed drips)",
+)];
 
 /// The DoT STATE a member's aura routes to. The aura carries the ability's
 /// RON `name:`, so this sweeps the config name through the very router every
@@ -713,6 +707,7 @@ fn dot_state(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
         DotStateVisual::CorruptionShroud => "Corruption shroud (warlock_dots.rs)",
         DotStateVisual::UnstableAfflictionState => "UA glow + crackle (warlock_dots.rs)",
         DotStateVisual::ImmolateBurn => "Immolate burn (immolate.rs)",
+        DotStateVisual::SiphonLifeGlow => "Siphon Life chest glow (siphon_life.rs)",
         DotStateVisual::ApplyApparitionOnly(_) => "curse apply apparition (warlock_dots.rs)",
     })
 }
@@ -781,6 +776,7 @@ fn the_dot_router_names_each_members_state() {
         Some(DotStateVisual::UnstableAfflictionState)
     );
     assert_eq!(route(Immolate), Some(DotStateVisual::ImmolateBurn));
+    assert_eq!(route(SiphonLife), Some(DotStateVisual::SiphonLifeGlow));
     assert_eq!(
         route(CurseOfAgony),
         Some(DotStateVisual::ApplyApparitionOnly(CurseKind::Agony))

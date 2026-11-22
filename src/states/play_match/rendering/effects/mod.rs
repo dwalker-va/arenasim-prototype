@@ -76,6 +76,8 @@ mod dot_state;
 pub use dot_state::*;
 mod immolate;
 pub use immolate::*;
+mod siphon_life;
+pub use siphon_life::*;
 mod gait;
 pub use gait::*;
 mod totems;
