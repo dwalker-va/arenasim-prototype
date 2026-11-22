@@ -327,7 +327,7 @@ fn resolved(build: Build, demon: &str) -> Combatant {
     let config = HeadlessMatchConfig {
         team1: vec!["Warlock".into()],
         team2: vec!["Warrior".into()],
-        team1_builds: vec![build],
+        team1_builds: vec![build.into()],
         team1_warlock_demons: vec![demon.into()],
         ..Default::default()
     };

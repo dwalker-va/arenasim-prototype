@@ -70,7 +70,7 @@ fn config(enemy: &str, build: Build, demon: &str, seed: u64, secs: f32) -> Headl
         team2: vec![enemy.into()],
         random_seed: Some(seed),
         max_duration_secs: secs,
-        team1_builds: vec![build],
+        team1_builds: vec![build.into()],
         team1_warlock_demons: vec![demon.into()],
         ..Default::default()
     }

@@ -27,8 +27,8 @@ fn config(form: &str) -> HeadlessMatchConfig {
         team1: vec!["Warrior".into(), "Priest".into()],
         team2: vec!["Warrior".into(), "Mage".into()],
         team1_builds: vec![
-            Build::default(),
-            Build::of(&[(TalentId::ImprovedMindBlast, 2), (TalentId::Shadowform, 1)]),
+            Build::default().into(),
+            Build::of(&[(TalentId::ImprovedMindBlast, 2), (TalentId::Shadowform, 1)]).into(),
         ],
         team1_priest_forms: vec!["NoForm".into(), form.into()],
         map: "BasicArena".into(),
@@ -128,7 +128,8 @@ fn an_occluded_shadowform_priest_walks_for_sight() {
         team2_builds: vec![Build::of(&[
             (TalentId::ImprovedMindBlast, 2),
             (TalentId::Shadowform, 1),
-        ])],
+        ])
+        .into()],
         team2_priest_forms: vec!["Shadowform".into()],
         map: map.into(),
         random_seed: Some(1),
@@ -213,8 +214,8 @@ fn a_shadowform_priest_takes_a_hunt_station() {
         team1: vec!["Mage".into(), "Priest".into()],
         team2: vec!["Priest".into()],
         team1_builds: vec![
-            Build::default(),
-            Build::of(&[(TalentId::ImprovedMindBlast, 2), (TalentId::Shadowform, 1)]),
+            Build::default().into(),
+            Build::of(&[(TalentId::ImprovedMindBlast, 2), (TalentId::Shadowform, 1)]).into(),
         ],
         team1_priest_forms: vec!["NoForm".into(), "Shadowform".into()],
         map: "PillaredArena".into(),

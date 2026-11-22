@@ -241,6 +241,79 @@ class DegenerateInputTests(GenTestCase):
         self.assertEqual(len(self.configs(run)), 9)
 
 
+class SlotFieldTests(GenTestCase):
+    """`--build` / `--for-class` (AS-299): a talent arm names its build, and
+    it reaches every slot of its class on both sides and nothing else."""
+
+    def full(self, *extra):
+        return self.configs(self.assertOk(
+            self.gen("--full", "2", "--exclude-double-healer", "--n", "1", *extra)))
+
+    def test_a_named_build_reaches_every_slot_of_its_class_on_both_sides(self):
+        cfgs = self.full("--build", "Warlock=Demonology")
+        touched = 0
+        for cfg in cfgs:
+            for team in ("team1", "team2"):
+                key = team + "_builds"
+                if "Warlock" in cfg[team]:
+                    touched += 1
+                    slot = cfg[team].index("Warlock")
+                    self.assertEqual(cfg[key][slot], "Demonology", cfg)
+                    # the slots before it are padded with no talents, and
+                    # none after it is written
+                    self.assertEqual(cfg[key][:slot], [{}] * slot, cfg)
+                    self.assertEqual(len(cfg[key]), slot + 1, cfg)
+                else:
+                    self.assertNotIn(key, cfg)
+        # 8 Warlock teams x 30 opponents, both sides, less the 8x8 cells
+        # that field it twice and are counted once per side anyway
+        self.assertEqual(touched, 2 * 8 * 30)
+
+    def test_a_config_the_flags_cannot_reach_is_byte_identical(self):
+        """So the control cells pair, and two arms pair on (label, seed)."""
+        plain = self.full()
+        armed = self.full("--build", "Warlock=Demonology",
+                          "--for-class", "Warlock", "warlock_demons", '"Sacrifice"')
+        self.assertEqual(len(plain), len(armed))
+        same = [a == b for a, b in zip(plain, armed)]
+        for a, b in zip(plain, armed):
+            self.assertEqual((a["label"], a["random_seed"]), (b["label"], b["random_seed"]))
+            reach = "Warlock" in a["team1"] or "Warlock" in a["team2"]
+            self.assertEqual(a == b, not reach, a)
+        self.assertEqual(same.count(True), 22 * 22)
+
+    def test_a_json_spec_and_a_per_slot_choice_are_written_as_given(self):
+        spec = {"reference": "Demonology", "remove": {"SoulLink": 1},
+                "add": {"DemonicSacrifice": 1}}
+        run = self.assertOk(self.gen(
+            "--t1", "Mage+Warlock", "--t2-size", "2", "--n", "1",
+            "--build", "Warlock=" + json.dumps(spec),
+            "--for-class", "Warlock", "warlock_demons", '"Sacrifice"',
+            "--for-class", "Warlock", "warlock_curse_prefs", '["Exhaustion","Exhaustion"]'))
+        cfg = [c for c in self.configs(run) if c["team2"] == ["Warrior", "Mage"]][0]
+        self.assertEqual(cfg["team1_builds"], [{}, spec])
+        self.assertEqual(cfg["team1_warlock_demons"], ["Felhunter", "Sacrifice"])
+        self.assertEqual(cfg["team1_warlock_curse_prefs"], [None, ["Exhaustion", "Exhaustion"]])
+        self.assertNotIn("team2_builds", cfg)
+
+    def test_bad_slot_flags_are_refused(self):
+        base = ["--t1", "Warlock", "--t2-size", "1", "--n", "1"]
+        for argv, needle in [
+            (["--build", "Warlock"], "CLASS=SPEC"),
+            (["--build", "Wizard=Fire"], "Wizard"),
+            (["--build", "Warlock={oops"], "not valid JSON"),
+            (["--build", "Warlock=Demonology", "--build", "Warlock=Affliction"],
+             "more than once"),
+            (["--for-class", "Warlock", "warlock_pets", '"Imp"'], "warlock_pets"),
+            (["--for-class", "Warlock", "warlock_demons", "Sacrifice"], "not valid JSON"),
+            (["--build", "Warlock=Demonology",
+              "--extra", '{"team1_builds": [{}]}'], "team1_builds"),
+        ]:
+            run = self.gen(*(base + argv))
+            self.assertIsInstance(run.code, str, argv)
+            self.assertIn(needle, run.code, argv)
+
+
 class AffectsTests(GenTestCase):
     """The directional tier's one lever: cut CELLS, keep the seeds.
 

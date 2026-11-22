@@ -32,6 +32,8 @@ mod divine_protection;
 pub use divine_protection::*;
 mod shadow_dance;
 pub use shadow_dance::*;
+mod discipline_states;
+pub use discipline_states::*;
 mod life_tap;
 pub use life_tap::*;
 mod empowered_flash;

@@ -1009,6 +1009,30 @@ pub fn is_divine_protection(aura_type: AuraType, name: &str) -> bool {
     aura_type == AuraType::DamageTakenReduction && name == DIVINE_PROTECTION_AURA
 }
 
+/// Power Infusion's spell power buff (AS-353). Not a landing: its state is
+/// the electric crackle at the ally's chest for the buff's life
+/// (`rendering/effects/discipline_states.rs`), whose onset is its
+/// application.
+pub const POWER_INFUSION_AURA: &str = "Power Infusion";
+
+/// Whether an aura of `aura_type` named `name` is Power Infusion's: the one
+/// predicate its state, its band routing and the lands-silently audit ask.
+pub fn is_power_infusion(aura_type: AuraType, name: &str) -> bool {
+    aura_type == AuraType::SpellPowerIncrease && name == POWER_INFUSION_AURA
+}
+
+/// Pain Suppression's damage reduction (AS-353). Not a landing: its state is
+/// the gold-and-teal shell in front of the ally for the buff's life
+/// (`rendering/effects/discipline_states.rs`), whose onset is its
+/// application.
+pub const PAIN_SUPPRESSION_AURA: &str = "Pain Suppression";
+
+/// Whether an aura of `aura_type` named `name` is Pain Suppression's: the one
+/// predicate its shell, its band routing and the lands-silently audit ask.
+pub fn is_pain_suppression(aura_type: AuraType, name: &str) -> bool {
+    aura_type == AuraType::DamageTakenReduction && name == PAIN_SUPPRESSION_AURA
+}
+
 /// Hemorrhage's wound (AS-367): its RON `name`. Not a state — the client
 /// has none, and the stacks are on the icon — but the name its strike's
 /// bleed spray owns the application by.
@@ -1744,12 +1768,17 @@ impl HealCastKind {
             // hands, played as the instant flash.
             AbilityType::DivineFavor => Some(HealCastKind::Arcane),
             // Divine Protection (AS-376) too; its hands flash at its globe's
-            // onset (`divine_protection.rs`).
+            // onset (`divine_protection.rs`). So do the Priest's Power
+            // Infusion (kit 191, Aura Mastery's) and Pain Suppression (kit
+            // 165's high hands), at their states' onsets
+            // (`discipline_states.rs`, AS-353).
             AbilityType::AuraMastery
             | AbilityType::BlessingOfSacrifice
             | AbilityType::SacredShield
             | AbilityType::Repentance
-            | AbilityType::DivineProtection => Some(HealCastKind::HolyFlash),
+            | AbilityType::DivineProtection
+            | AbilityType::PowerInfusion
+            | AbilityType::PainSuppression => Some(HealCastKind::HolyFlash),
             _ => None,
         }
     }
@@ -2151,6 +2180,16 @@ pub enum AuraApplyOwner {
     /// (`shadow_dance.rs`, AS-368). Owned by TYPE: `ShadowDance` has no other
     /// user.
     ShadowDanceState,
+    /// Power Infusion: the electric crackle at the ally's chest for the
+    /// buff's life (`discipline_states.rs`, AS-353). Owned per aura NAME,
+    /// because its type (`SpellPowerIncrease`) is shared with auras that
+    /// keep the band (Flametongue Totem's pulse).
+    InfusionCrackle,
+    /// Pain Suppression: the gold-and-teal shell in front of the ally for the
+    /// buff's life (`discipline_states.rs`, AS-353). Owned per aura NAME,
+    /// because its type (`DamageTakenReduction`) is shared with auras that
+    /// keep the band (Devotion Aura).
+    SuppressionShell,
     /// Hemorrhage's wound (AS-367): the bleed spray at the victim's chest on
     /// every hit that lands it, fresh or a refresh of its stacks
     /// (`bleed_spray.rs`, fired off the strike by `instant_ability.rs`).
@@ -2166,7 +2205,9 @@ impl AuraApplyRoute {
     /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]), Vengeance by
     /// its hands ([`VENGEANCE_AURA`]), Cheat Death by its save
     /// ([`CHEAT_DEATH_NAME`]), Divine Protection by its globe
-    /// ([`DIVINE_PROTECTION_AURA`]) and Hemorrhage by its strike's bleed spray
+    /// ([`DIVINE_PROTECTION_AURA`]), Power Infusion by its crackle
+    /// ([`POWER_INFUSION_AURA`]), Pain Suppression by its shell
+    /// ([`PAIN_SUPPRESSION_AURA`]) and Hemorrhage by its strike's bleed spray
     /// ([`HEMORRHAGE_AURA`]); every other aura routes by its type
     /// ([`Self::for_aura`]). The renderers ask this — the band, and the
     /// Repentance swirl to find its incapacitate.
@@ -2183,6 +2224,10 @@ impl AuraApplyRoute {
             AuraApplyRoute::Owned(AuraApplyOwner::CheatDeath)
         } else if is_divine_protection(aura_type, name) {
             AuraApplyRoute::Owned(AuraApplyOwner::DivineProtectionGlobe)
+        } else if is_power_infusion(aura_type, name) {
+            AuraApplyRoute::Owned(AuraApplyOwner::InfusionCrackle)
+        } else if is_pain_suppression(aura_type, name) {
+            AuraApplyRoute::Owned(AuraApplyOwner::SuppressionShell)
         } else if is_hemorrhage(aura_type, name) {
             AuraApplyRoute::Owned(AuraApplyOwner::BleedSpray)
         } else {

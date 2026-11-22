@@ -375,7 +375,7 @@ fn spawned_priest(build: &Build) -> Combatant {
         team1: vec!["Warrior".into()],
         team2: vec!["Priest".into()],
         random_seed: Some(7),
-        team2_builds: vec![build.clone()],
+        team2_builds: vec![build.clone().into()],
         ..Default::default()
     };
     let mut app = build_headless_app(&config, true, None);
@@ -535,7 +535,7 @@ fn a_mind_blast_that_lands_stuns_through_blackout() {
             team2: vec!["Mage".into()],
             random_seed: Some(5),
             max_duration_secs: 4.0,
-            team1_builds: vec![Build::of(&[(ImprovedMindBlast, 2), (Blackout, 2)])],
+            team1_builds: vec![Build::of(&[(ImprovedMindBlast, 2), (Blackout, 2)]).into()],
             ..Default::default()
         };
         let stage = Stage::new()
@@ -1572,7 +1572,7 @@ fn mind_flay_channels_ticks_of_ten() {
         team2: vec!["Warrior".into()],
         random_seed: Some(4),
         max_duration_secs: 6.0,
-        team1_builds: vec![mind_flay_build()],
+        team1_builds: vec![mind_flay_build().into()],
         ..Default::default()
     };
     let stage = Stage::new()
@@ -1655,7 +1655,8 @@ fn embrace_run(embraced: bool, stage: impl FnOnce(Stage) -> Stage) -> common::st
             embrace_build()
         } else {
             Build::of(&[(ImprovedMindBlast, 2), (TalentId::Shadowform, 1)])
-        }],
+        }
+        .into()],
         team1_priest_forms: vec!["Shadowform".into()],
         ..Default::default()
     };
@@ -1819,7 +1820,7 @@ fn silence_run(priests: usize, build: Build) -> String {
         team2: vec!["Priest".into(), "Warrior".into()],
         random_seed: Some(8),
         max_duration_secs: 6.0,
-        team1_builds: vec![build; priests],
+        team1_builds: vec![build.into(); priests],
         team1_priest_forms: vec!["Shadowform".into(); priests],
         ..Default::default()
     };
@@ -1887,7 +1888,7 @@ fn a_shadowform_priest_with_mind_flay_closes_in() {
             team2: vec!["Warlock".into()],
             random_seed: Some(9),
             max_duration_secs: 6.0,
-            team1_builds: vec![build],
+            team1_builds: vec![build.into()],
             team1_priest_forms: vec!["Shadowform".into()],
             ..Default::default()
         };
@@ -1937,7 +1938,7 @@ fn mind_flay_peels_a_pet() {
         team2: vec!["Hunter".into()],
         random_seed: Some(4),
         max_duration_secs: 8.0,
-        team1_builds: vec![mind_flay_build()],
+        team1_builds: vec![mind_flay_build().into()],
         ..Default::default()
     };
     let stage = Stage::new()
@@ -1991,7 +1992,7 @@ fn mind_flay_does_not_peel_for_a_pet() {
             team2: vec!["Warrior".into()],
             random_seed: Some(4),
             max_duration_secs: 2.0,
-            team1_builds: vec![mind_flay_build()],
+            team1_builds: vec![mind_flay_build().into()],
             ..Default::default()
         };
         let (victim, other) = if on_pet { (PET, T1B) } else { (T1B, PET) };
@@ -2029,7 +2030,7 @@ fn mind_flays_slow_ends_with_its_priests_death() {
             team2: vec!["Warrior".into()],
             random_seed: Some(4),
             max_duration_secs: 6.0,
-            team1_builds: vec![mind_flay_build()],
+            team1_builds: vec![mind_flay_build().into()],
             ..Default::default()
         };
         let mut stage = Stage::new()

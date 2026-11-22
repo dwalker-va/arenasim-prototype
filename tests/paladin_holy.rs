@@ -996,7 +996,7 @@ fn emergency_match(build: Build, mage_health: f32) -> common::staged::Played {
         team2: vec!["Warrior".into()],
         random_seed: Some(5),
         max_duration_secs: 4.0,
-        team1_builds: vec![build],
+        team1_builds: vec![build.into()],
         ..Default::default()
     };
     play(
@@ -1109,7 +1109,7 @@ fn kick_match(build: Build, secs: f32, shock_ready_in: f32) -> common::staged::P
         team2: vec!["Rogue".into()],
         random_seed: Some(5),
         max_duration_secs: secs,
-        team1_builds: vec![build],
+        team1_builds: vec![build.into()],
         ..Default::default()
     };
     play(
@@ -1211,7 +1211,7 @@ fn lights_grace_shortens_the_next_holy_light_in_a_match() {
         random_seed: Some(5),
         max_duration_secs: 6.0,
         ai_profile: Some("TeamPlan".into()),
-        team1_builds: vec![holy_to_mastery()],
+        team1_builds: vec![holy_to_mastery().into()],
         ..Default::default()
     };
     let stage = Stage::new()
@@ -1287,7 +1287,8 @@ fn divine_favor_and_aura_mastery_start_their_cooldowns() {
             (ImprovedHolyShock, 2),
             (InfusionOfLight, 2),
             (DivineFavor, 1),
-        ])],
+        ])
+        .into()],
         ..Default::default()
     };
     let log = play(
@@ -1336,7 +1337,7 @@ fn aura_mastery_passes_a_pet_by() {
         team2: vec!["Rogue".into()],
         random_seed: Some(5),
         max_duration_secs: 6.0,
-        team1_builds: vec![holy_to_mastery()],
+        team1_builds: vec![holy_to_mastery().into()],
         ..Default::default()
     };
     let log = play(
