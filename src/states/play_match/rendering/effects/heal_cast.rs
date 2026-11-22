@@ -705,6 +705,9 @@ pub fn spawn_instant_cast_hands(
                 // (`divine_protection.rs`).
                 && !AuraLandingKind::flashes_hands_for(cast.ability)
                 && !super::divine_protection::flashes_hands_at_onset(cast.ability)
+                // Power Infusion's and Pain Suppression's off their states'
+                // onsets (`discipline_states.rs`).
+                && !super::discipline_states::discipline_hands_at_onset(cast.ability)
         })
         .map(|(ending, cast)| (ending.caster, cast.ability));
     let marked = fired.iter().map(|signal| (signal.caster, signal.ability));
