@@ -30,8 +30,8 @@ use bevy::transform::TransformSystem;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
-    ActiveAuras, Aura, AuraPending, AuraType, CameraController, Combatant, PolymorphedVisual,
-    VisualBody,
+    ActiveAuras, Aura, AuraPending, AuraType, CameraController, Combatant, PlayMatchEntity,
+    PolymorphedVisual, VisualBody,
 };
 use arenasim::states::play_match::{
     place_shadow_dance, update_shadow_dance, update_stealth_visuals, DanceLayer, ShadowDancePiece,
@@ -498,6 +498,12 @@ fn a_dancing_rogue_wears_one_state_at_its_chest() {
     let rigs = h.rigs();
     assert_eq!(rigs.len(), 1);
     assert_eq!(rigs[0].1, rogue);
+    // Tagged for the match's teardown: a match ending mid-Dance takes the rig
+    // and its pieces (its children) with it.
+    assert!(
+        h.app.world().get::<PlayMatchEntity>(rigs[0].0).is_some(),
+        "the rig is a PlayMatchEntity"
+    );
     assert!((h.rig_at() - chest(at)).length() < 1e-5, "{}", h.rig_at());
     let pieces = h.pieces();
     let per_layer = |l: DanceLayer| pieces.iter().filter(|d| d.layer == l).count();
@@ -701,6 +707,7 @@ fn the_ribbons_drift_out_and_the_shadow_is_drawn_in() {
     let (mut red_dirs, mut black_births) = (Vec::new(), Vec::new());
     let (mut red_steps, mut black_steps) = (0, 0);
     let mut shell: HashMap<Entity, Vec3> = HashMap::new();
+    let mut red_births: Vec<Vec3> = Vec::new();
     for _ in 0..240 {
         h.step();
         let lit = h.lit();
@@ -749,6 +756,7 @@ fn the_ribbons_drift_out_and_the_shadow_is_drawn_in() {
                                     && off.z.abs() <= 0.25 + grow,
                                 "a ribbon is born in its box: {off}"
                             );
+                            red_births.push(off);
                         }
                         DanceLayer::BlackInward => {
                             assert!(
@@ -777,6 +785,13 @@ fn the_ribbons_drift_out_and_the_shadow_is_drawn_in() {
         assert!(red_dirs.iter().any(|d| d.dot(axis) > 0.8), "{axis}");
         assert!(red_dirs.iter().any(|d| d.dot(axis) < -0.8), "-{axis}");
     }
+    // The ribbons' births fill their box, 0.5 x 1.2 x 0.5 yd: some well up
+    // or down the chest's 0.6 yd half-height, some near the 0.25 yd edges.
+    assert!(red_births.len() > 100, "{}", red_births.len());
+    assert!(red_births.iter().any(|b| b.y > 0.5), "high in the box");
+    assert!(red_births.iter().any(|b| b.y < -0.5), "low in the box");
+    assert!(red_births.iter().any(|b| b.x.abs() > 0.2), "out along x");
+    assert!(red_births.iter().any(|b| b.z.abs() > 0.2), "out along z");
     // The shadow comes from every side, with births high above and below
     // the chest (its directions stretched 1.2 up and down).
     assert!(black_births.len() > 100, "{}", black_births.len());
