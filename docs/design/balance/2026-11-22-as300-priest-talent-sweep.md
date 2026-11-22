@@ -40,8 +40,9 @@ These are in `assets/config/talents.ron`, under `reference_builds`:
 | Holy | 2/6/0 | Improved Power Word: Shield 2; Holy Specialization 2, Inspiration 2, Holy Concentration 1, **Guardian Spirit** 1 |
 | Shadow | 2/0/6 | Unbreakable Will 2; Improved Mind Blast 2, Shadowform 1, Blackout 1, Mind Flay 1, **Silence** 1 |
 
-**The hybrid is not a reference build.** Design §5.2's third sketch, a
-Discipline-Shadow hybrid at 5/0/3, takes no capstone:
+**This departs from §5.2's sketch, following §4's "one deep in each tree":
+the third reference is a Shadow-deep 2/0/6, not §5.2's Discipline-Shadow
+5/0/3.** The hybrid is not a reference build because it takes no capstone:
 
 - Pain Suppression would be its sixth Discipline point.
 - Silence needs five Shadow points below it.
@@ -190,7 +191,32 @@ stem's: a locked Silence changes nothing.
 | Shadow (healing) + Spiritual Healing | 49.5% | 50.6% | +1.1 | 298 (+181/−117) | 3.65 | 0.6 |
 
 A stat rank is worth +0.5 to +1.1pt here. The Warlock's Demonic Embrace rank
-was worth +1.4 to +2.0pt (AS-299).
+was worth +1.4 to +2.0pt (AS-299). The yardstick is a small positive, not a
+neutral rank, so a node "within" it is worth about that much, not nothing.
+
+### Each comparison arm against its reference
+
+| comparison arm | reference | after | delta (pt) | flips | z | floor (pt) |
+|---|---|---|---|---|---|---|
+| Discipline stem + Spiritual Healing | 64.4% | 60.4% | −4.0 | 839 (+301/−538) | 8.15 | 1.0 |
+| Discipline stem − Unbreakable Will rank + 2 Spiritual Healing | 64.4% | 60.1% | −4.2 | 1027 (+387/−640) | 7.86 | 1.1 |
+| Discipline stem − Inner Focus + 2 Spiritual Healing | 64.4% | 59.4% | −5.0 | 904 (+303/−601) | 9.88 | 1.0 |
+| Discipline stem − Reflective Shield + 2 Spiritual Healing | 64.4% | 56.0% | −8.4 | 1248 (+373/−875) | 14.18 | 1.2 |
+| Holy stem + Spiritual Healing | 63.1% | 54.2% | −8.9 | 818 (+143/−675) | 18.57 | 1.0 |
+| Holy stem − Inspiration rank + 2 Spiritual Healing | 63.1% | 55.0% | −8.2 | 847 (+179/−668) | 16.77 | 1.0 |
+| Shadow stem + Imp. PW:Shield (Shadowform) | 44.7% | 38.3% | −6.4 | 806 (+212/−594) | 13.42 | 0.9 |
+| Shadow stem − Blackout + 2 Imp. PW:Shield (Shadowform) | 44.7% | 39.1% | −5.5 | 1078 (+373/−705) | 10.08 | 1.1 |
+| Shadow stem − Mind Flay + 2 Imp. PW:Shield (Shadowform) | 44.7% | 43.0% | −1.6 | 1579 (+741/−838) | 2.42 | 1.3 |
+| Shadow stem + Spiritual Healing (healing) | 49.5% | 50.6% | +1.1 | 298 (+181/−117) | 3.65 | 0.6 |
+| Shadow stem − Blackout + 2 Spiritual Healing (healing) | 49.5% | 50.6% | +1.1 | 879 (+472/−407) | 2.16 | 1.0 |
+| Shadow stem − Mind Flay + 2 Spiritual Healing (healing) | 49.5% | 53.4% | +3.9 | 953 (+593/−360) | 7.52 | 1.0 |
+
+Every comparison arm also gives up the reference's capstone. So these
+deltas are mostly the capstone's worth, with the node's worth on top: the
+Discipline, Holy and Shadowform arms sit 4 to 9pt under their references
+because Pain Suppression, Guardian Spirit and Silence dominate. The Shadow
+build played healing has a locked Silence, so there its yardstick arms sit
+at or above the reference (Mind Flay's removal +3.9).
 
 ### Replication
 

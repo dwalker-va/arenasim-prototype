@@ -167,6 +167,23 @@ REFERENCES = [
     ("Hybrid 5/0/3, Shadowform", "hybrid_sf"),
 ]
 
+# Each arm a node is compared against, beside its reference: how far the
+# yardstick itself sits from the build it stands in for.
+YARDSTICK_ARMS = [
+    ("Discipline stem + Spiritual Healing", "disc_y", "disc"),
+    ("Discipline stem - Unbreakable Will rank + 2 Spiritual Healing", "disc_uw_y", "disc"),
+    ("Discipline stem - Inner Focus + 2 Spiritual Healing", "disc_if_y", "disc"),
+    ("Discipline stem - Reflective Shield + 2 Spiritual Healing", "disc_rs_y", "disc"),
+    ("Holy stem + Spiritual Healing", "holy_y", "holy"),
+    ("Holy stem - Inspiration rank + 2 Spiritual Healing", "holy_insp_y", "holy"),
+    ("Shadow stem + Imp. PW:Shield (Shadowform)", "shadow_y", "shadow"),
+    ("Shadow stem - Blackout + 2 Imp. PW:Shield (Shadowform)", "shadow_bl_y", "shadow"),
+    ("Shadow stem - Mind Flay + 2 Imp. PW:Shield (Shadowform)", "shadow_mf_y", "shadow"),
+    ("Shadow stem + Spiritual Healing (healing)", "shadow_y_heal", "shadow_heal"),
+    ("Shadow stem - Blackout + 2 Spiritual Healing (healing)", "shadow_bl_y_heal", "shadow_heal"),
+    ("Shadow stem - Mind Flay + 2 Spiritual Healing (healing)", "shadow_mf_y_heal", "shadow_heal"),
+]
+
 # Shadowform as an arm: the same build, the form chosen against not.
 FORM_ARMS = [
     ("Hybrid 5/0/3: Shadowform vs healing", "hybrid_sf", "hybrid"),
@@ -300,6 +317,11 @@ def table(outdir):
         note = " (allowance %+.1f)" % allowance if ranks == 2 else ""
         print(row(label, s, " %+.1f | %s%s |" % (s.delta - max(allowance, 0.0),
                                                 verdict(s, allowance, z_bonf), note)))
+    print("\n## Each comparison arm against its reference\n")
+    print(HEADER % ("comparison arm", "", ""))
+    for label, arm, ref in YARDSTICK_ARMS:
+        s, _, _ = compare(outdir, cache, arm, ref)
+        print(row(label, s))
     print("\n## For scale (no verdict)\n")
     print(HEADER % ("comparison", "", ""))
     for label, arm, base in SCALE_ARMS:
