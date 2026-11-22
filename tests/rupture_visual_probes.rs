@@ -19,17 +19,19 @@ use bevy::render::mesh::VertexAttributeValues;
 use bevy::time::TimeUpdateStrategy;
 
 use arenasim::states::play_match::abilities::AbilityType;
+use arenasim::states::play_match::ability_book::AbilityBook;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
+use arenasim::states::play_match::combat_core::{Avoidance, MeleeAvoided};
 use arenasim::states::play_match::components::{
     ActiveAuras, AuraPending, ClientParticle, Combatant, InstantAbilityFired, SwingStyle,
     VisualBody, WeaponHand, WeaponKind, WeaponSocket,
 };
 use arenasim::states::play_match::{
     animate_body_lean, animate_client_particles, animate_weapon_swings, billboard_bleed_droplets,
-    consume_instant_ability_signals, fire_bleed_sprays, update_backhand_trails,
-    update_bleed_sprays, update_finisher_hand_flashes, BackhandTrail, BackhandTrailSegment,
-    BleedDroplet, BleedSpray, BleedSprayPending, FinisherFlashPiece, FinisherHandFlash,
-    BACKHAND_CONTACT_SECS,
+    consume_avoided_strike_signals, consume_instant_ability_signals, fire_bleed_sprays,
+    note_avoided_strikes, update_backhand_trails, update_bleed_sprays,
+    update_finisher_hand_flashes, BackhandTrail, BackhandTrailSegment, BleedDroplet, BleedSpray,
+    BleedSprayPending, FinisherFlashPiece, FinisherHandFlash, BACKHAND_CONTACT_SECS,
 };
 use arenasim::CharacterClass;
 
@@ -53,6 +55,13 @@ fn dagger_mount(hand: WeaponHand) -> Transform {
             Quat::from_rotation_x(0.9) * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
         )
         .with_scale(Vec3::splat(0.8))
+}
+
+/// The resolution phase's retirement of avoidance markers.
+fn retire_avoidances(mut commands: Commands, avoided: Query<Entity, With<MeleeAvoided>>) {
+    for e in avoided.iter() {
+        commands.entity(e).despawn();
+    }
 }
 
 struct Harness {
@@ -83,7 +92,13 @@ impl Harness {
         app.add_systems(
             Update,
             (
+                // AS-379's avoided-strike path, as the client orders it: the
+                // avoidance is noted before the resolution phase retires it,
+                // and both strokes start after it.
+                note_avoided_strikes,
+                retire_avoidances,
                 consume_instant_ability_signals,
+                consume_avoided_strike_signals,
                 animate_weapon_swings,
                 animate_body_lean,
                 update_finisher_hand_flashes,
@@ -100,7 +115,10 @@ impl Harness {
             .world_mut()
             .spawn((
                 Transform::from_translation(ROGUE_POS),
-                Combatant::new(0, 0, CharacterClass::Rogue),
+                Combatant::new(0, 0, CharacterClass::Rogue).with_book(
+                    AbilityBook::for_class(&AbilityDefinitions::default(), CharacterClass::Rogue)
+                        .granting(&AbilityDefinitions::default(), AbilityType::Rupture),
+                ),
             ))
             .id();
         let body = app
@@ -1198,4 +1216,55 @@ fn the_blade_never_jumps_between_frames() {
         fastest = fastest.max(d.abs());
     }
     assert!(fastest > 5.0, "the blade turns at all: {fastest}");
+}
+
+/// A dodged or parried Rupture beside AS-379's avoided-strike path: the Rogue
+/// AI's marker swings the one backhand and its one trail and hand flash, the
+/// sim's `MeleeAvoided` adds no second stroke or blade trail (Rupture is not
+/// one of the strikes that path swings), and nothing sprays.
+#[test]
+fn an_avoided_rupture_strikes_once_and_sprays_nothing() {
+    for avoidance in [Avoidance::Dodge, Avoidance::Parry] {
+        let mut h = Harness::new();
+        let (rogue, victim) = (h.rogue, h.victim);
+        h.fire();
+        h.app.world_mut().spawn(MeleeAvoided {
+            attacker: rogue,
+            defender: victim,
+            attack: "Rupture".to_string(),
+            avoidance,
+        });
+        h.tick();
+        assert_eq!(
+            h.socket(h.main).swing_style,
+            SwingStyle::Backhand,
+            "{avoidance:?}"
+        );
+        assert_eq!(h.count::<BackhandTrail>(), 1, "{avoidance:?}: one trail");
+        assert_eq!(
+            h.count::<FinisherHandFlash>(),
+            1,
+            "{avoidance:?}: one flash"
+        );
+        assert_eq!(
+            h.count::<arenasim::states::play_match::WeaponTrail>(),
+            0,
+            "{avoidance:?}: no blade trail from the avoided-strike path"
+        );
+        // The stroke plays through once, never restarted.
+        let mut last = 0.0;
+        for _ in 0..95 {
+            h.tick();
+            if let Some(t) = h.socket(h.main).release_t {
+                assert!(t > last, "{avoidance:?}: the stroke restarted at {t}");
+                last = t;
+            }
+        }
+        assert!(
+            last > 0.85,
+            "{avoidance:?}: the whole stroke played ({last})"
+        );
+        assert_eq!(h.count::<BleedSpray>(), 0, "{avoidance:?}: no spray");
+        assert_eq!(h.count::<BleedDroplet>(), 0);
+    }
 }
