@@ -521,7 +521,8 @@ impl DruidEffect {
             | AuraLandingKind::SacredShieldDisc
             | AuraLandingKind::AmplifyFlash
             | AuraLandingKind::ShadowTrance
-            | AuraLandingKind::RepentanceImpact => None,
+            | AuraLandingKind::RepentanceImpact
+            | AuraLandingKind::SacrificeTriad => None,
         }
     }
 }
