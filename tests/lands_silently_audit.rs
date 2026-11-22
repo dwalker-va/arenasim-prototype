@@ -99,6 +99,7 @@ use arenasim::states::play_match::components::SchoolImpact;
 use arenasim::states::play_match::components::ShieldKind;
 use arenasim::states::play_match::components::SwingStyle;
 use arenasim::states::play_match::components::TotemElement;
+use arenasim::states::play_match::components::{is_pain_suppression, is_power_infusion};
 use arenasim::states::play_match::curse_spec;
 use arenasim::states::play_match::demonology::touch_of_shadow_aura;
 use arenasim::states::play_match::equipment::load_item_definitions;
@@ -1057,6 +1058,12 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             _ if is_divine_protection(t, &c.name) => Some(
                 "Holy hand flash + red-gold globe at the chest while it holds (divine_protection.rs)",
             ),
+            _ if is_power_infusion(t, &c.name) => Some(
+                "Holy hand flash + electric crackle at the ally's chest while it holds (discipline_states.rs)",
+            ),
+            _ if is_pain_suppression(t, &c.name) => Some(
+                "Holy hand flash + gold-and-teal shell before the ally while it holds (discipline_states.rs)",
+            ),
             _ if AuraLandingKind::for_aura(t, &c.name)
                 == Some(AuraLandingKind::MarkOfTheWildGlyph) =>
             {
@@ -1110,14 +1117,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (InnerFocus, "AS-352 (Inner Focus, the focus on the Priest)"),
     (MageArmorSpell, "AS-134 (aura application)"),
     (MoltenArmor, "AS-134 (aura application)"),
-    (
-        PainSuppression,
-        "AS-353 (Pain Suppression, the save on the ally)",
-    ),
-    (
-        PowerInfusion,
-        "AS-353 (Power Infusion, the infusion on the ally)",
-    ),
     (PowerWordFortitude, "AS-134 (aura application)"),
     (ShadowResistanceAura, "AS-134 (aura application)"),
     (
