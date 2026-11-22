@@ -3,7 +3,10 @@
 //! Handles AI decision-making for the Warlock class.
 //!
 //! ## Priority Order
-//! After the plays and the Death Coil peel:
+//! After the plays and the Death Coil peel, the Fear window
+//! ([`fear_window_step`]): while its own Fear holds its target, Shadow Bolt is
+//! timed to land as the Fear ends and the globals before then go on what does
+//! not break it. Then:
 //! 0. Shadow Bolt while Shadow Trance (Nightfall) makes it instant: see
 //!    [`shadow_trance_up`]
 //! 0. Life Tap (health into mana) — when short of mana and healthy: see
@@ -15,7 +18,8 @@
 //!    amplifies
 //! 3. Immolate (2s cast Fire DoT) - skipped when being kited; then
 //!    Conflagrate (a talent) consumes the Warlock's own Immolate for its burst
-//! 4. Fear (CC on non-CC'd target)
+//! 4. Fear (CC on non-CC'd target), only at full length: never into
+//!    diminishing returns ([`fear_lands_full`])
 //! 5. Drain Life (when HP < 80% and target has DoTs)
 //! 6. Shadow Bolt (main damage spell) - skipped when being kited
 //!
@@ -430,6 +434,35 @@ pub fn decide_warlock_action(
         }
     }
 
+    // The Fear window (AS-495): the Warlock's own Fear holds its target.
+    // Shadow Bolt is timed to land as it ends; the globals before that moment
+    // go on what does not break the Fear.
+    match fear_window_step(
+        commands,
+        combat_log,
+        abilities,
+        entity,
+        combatant,
+        my_pos,
+        auras,
+        target_entity,
+        target_pos,
+        being_kited,
+        ctx,
+        movement,
+        &mut builder,
+    ) {
+        WindowStep::Acted => {
+            builder.finish();
+            return true;
+        }
+        WindowStep::Held => {
+            builder.finish();
+            return false;
+        }
+        WindowStep::Open => {}
+    }
+
     // Shadow Trance (Nightfall): a primed instant Shadow Bolt goes next, ahead
     // of the rotation. It is instant, so being kited does not hold it.
     if shadow_trance_up(auras) {
@@ -465,6 +498,7 @@ pub fn decide_warlock_action(
         auras,
         ctx,
         movement,
+        false,
         &mut builder,
     ) {
         builder.finish();
@@ -698,6 +732,33 @@ pub fn decide_warlock_action(
                     category: DRCategory::Fears,
                 },
             );
+        } else if let Some(cc_type) = ctx.combatants.get(&fear_target_entity).and_then(|info| {
+            // The cast gate's own hold rule, asked first so a Fear on a held
+            // target is traced as the hold it meets.
+            ctx.held_in_hard_cc_at(
+                fear_target_entity,
+                super::cast_guard::hold_lands_after(
+                    abilities.get_unchecked(&AbilityType::Fear),
+                    my_pos,
+                    auras,
+                    Some((fear_target_entity, info.position)),
+                    ctx,
+                ),
+            )
+        }) {
+            builder.reject(
+                AbilityType::Fear,
+                RejectionReason::TargetAlreadyCCd { cc_type },
+            );
+        } else if combatant.target == Some(fear_target_entity)
+            && !fear_lands_full(ctx, fear_target_entity)
+        {
+            builder.reject(
+                AbilityType::Fear,
+                RejectionReason::PreconditionUnmet {
+                    note: FEAR_DIMINISHED_NOTE.into(),
+                },
+            );
         } else if let Some(fear_target_info) = ctx.combatants.get(&fear_target_entity) {
             let fear_target_pos = fear_target_info.position;
             if try_fear(
@@ -782,6 +843,183 @@ pub fn decide_warlock_action(
     acted
 }
 
+/// The rotation's Fear on a target whose diminishing returns would shorten
+/// it ([`fear_lands_full`]).
+pub const FEAR_DIMINISHED_NOTE: &str =
+    "Fear only at full length: diminishing returns would shorten it";
+
+/// A global cooldown held so the Shadow Bolt it would delay lands as the
+/// Warlock's own Fear ends ([`fear_window_step`]).
+pub const FEAR_WINDOW_HOLD_NOTE: &str =
+    "Fear window: holding the global cooldown for the Fear's end";
+
+/// Would a Fear on `target` land at full length — its diminishing returns on
+/// Fears fresh? The rotation Fears only then (AS-495, user ruling: "full 8
+/// second fears"). A diminished Fear costs its 1.5s cast and the Shadow Bolt
+/// timed to its end for half the denial or less: measured, one 4s Fear
+/// chained at 50% cost the Warlock 2.6pt of 1v1 against full-length only, and
+/// chaining down to 25% cost 10pt.
+pub fn fear_lands_full(ctx: &CombatContext, target: Entity) -> bool {
+    ctx.dr_level(target, DRCategory::Fears) == 0
+}
+
+/// What the Fear window step did this tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowStep {
+    /// It cast something.
+    Acted,
+    /// It holds the global cooldown for the Fear's end.
+    Held,
+    /// No window, or nothing for the step: the rotation decides, its damage
+    /// on the feared target timed by the cast gate (`time_own_fear`).
+    Open,
+}
+
+/// The Fear window (AS-495): while the Warlock's OWN Fear holds its target,
+/// the moment that matters is the Fear's end. A Fear only lands at full length
+/// ([`fear_lands_full`]), so the target's diminishing returns rule out a
+/// re-Fear onto it; the step fills the window instead:
+///
+/// 1. **The damage.** Shadow Bolt is begun to land in the Fear's last
+///    [`super::FEAR_WINDOW_LEAD`] (the Chain play's hand-off lead), aimed at
+///    its middle ([`super::FEAR_WINDOW_AIM`]) so a landing the prediction
+///    gets wrong still tends to fall inside it. Never before: the cast gate's
+///    `time_own_fear` lets every damage cast on the target through only in
+///    that last lead. Inside the last global cooldown before the bolt is due
+///    the Warlock holds, so nothing it casts delays it — when the bolt could
+///    go but for the Fear (in range and sight, affordable, not locked out,
+///    not being kited); a bolt it cannot cast holds nothing up.
+/// 2. **The free globals.** Until then it spends what does not break the
+///    Fear: Life Tap (the pool topped up, not only when starved), its curses
+///    (a curse that deals no damage goes on the feared target itself), and
+///    Corruption, or a Shadow Bolt that finishes in time, on another enemy.
+#[allow(clippy::too_many_arguments)]
+fn fear_window_step(
+    commands: &mut Commands,
+    combat_log: &mut CombatLog,
+    abilities: &AbilityBook,
+    entity: Entity,
+    combatant: &mut Combatant,
+    my_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target_entity: Entity,
+    target_pos: Vec3,
+    being_kited: bool,
+    ctx: &CombatContext,
+    movement: &MovementConfig,
+    builder: &mut DecisionEventBuilder<'_>,
+) -> WindowStep {
+    use super::cast_guard::{lands_on_feared, pre_cast_ok};
+    use super::FEAR_WINDOW_AIM;
+
+    let Some(fear) = ctx.own_fear_on(target_entity) else {
+        return WindowStep::Open;
+    };
+    let bolt_def = abilities.get_unchecked(&AbilityType::Shadowbolt);
+
+    // 1. The damage: seconds until Shadow Bolt is due, aimed at the middle of
+    // the Fear's last lead — when the Warlock could cast it but for the Fear.
+    let wait = fear.duration
+        - FEAR_WINDOW_AIM
+        - lands_on_feared(bolt_def, my_pos, auras, target_entity, target_pos, ctx);
+    let bolt_castable = !being_kited
+        && pre_cast_ok(
+            AbilityType::Shadowbolt,
+            bolt_def,
+            combatant,
+            my_pos,
+            auras,
+            Some((target_entity, target_pos)),
+            ctx,
+            PreCastOpts::default(),
+        );
+    if bolt_castable && wait <= 0.0 {
+        if try_shadowbolt(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            ctx,
+            builder,
+        ) {
+            return WindowStep::Acted;
+        }
+        return WindowStep::Open;
+    }
+    if bolt_castable && wait <= GCD {
+        builder.reject(
+            AbilityType::Shadowbolt,
+            RejectionReason::PreconditionUnmet {
+                note: FEAR_WINDOW_HOLD_NOTE.into(),
+            },
+        );
+        return WindowStep::Held;
+    }
+
+    // 2. The free globals.
+    if try_life_tap(
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, movement, true,
+        builder,
+    ) || try_spread_curses(
+        commands, combat_log, abilities, entity, combatant, my_pos, auras, ctx, builder,
+    ) {
+        return WindowStep::Acted;
+    }
+    let bolt_cast = calculate_cast_time(bolt_def.cast_time, auras);
+    let mut others: Vec<&super::CombatantInfo> = ctx
+        .alive_enemies()
+        .into_iter()
+        .filter(|e| e.entity != target_entity && !e.is_pet && !ctx.entity_is_immune(e.entity))
+        .collect();
+    others.sort_by(|a, b| {
+        (a.current_health / a.max_health.max(1.0))
+            .total_cmp(&(b.current_health / b.max_health.max(1.0)))
+            .then(a.entity.cmp(&b.entity))
+    });
+    for other in &others {
+        if try_corruption(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            other.entity,
+            other.position,
+            ctx,
+            builder,
+        ) {
+            return WindowStep::Acted;
+        }
+    }
+    if !being_kited && (!bolt_castable || bolt_cast.max(GCD) <= wait) {
+        for other in &others {
+            if try_shadowbolt(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                other.entity,
+                other.position,
+                ctx,
+                builder,
+            ) {
+                return WindowStep::Acted;
+            }
+        }
+    }
+    WindowStep::Open
+}
+
 /// Whether Shadow Trance (Nightfall's proc) is up: a live next-cast modifier
 /// makes the Warlock's next Shadow Bolt instant. Shadow Bolt goes next.
 pub fn shadow_trance_up(auras: Option<&ActiveAuras>) -> bool {
@@ -822,6 +1060,7 @@ fn try_siphon_life(
     }
     let opts = PreCastOpts {
         check_friendly_cc: true,
+        time_own_fear: true,
         ..Default::default()
     };
     let cleared = match cast_gate(
@@ -999,6 +1238,7 @@ fn cast_instant_hit(
     let def = abilities.get_unchecked(&ability);
     let opts = PreCastOpts {
         check_friendly_cc: true,
+        time_own_fear: true,
         ..Default::default()
     };
     let cleared = match cast_gate(
@@ -1080,19 +1320,16 @@ fn try_amplify_curse(
     }
     // Only for a curse that would go out now: an Amplify Curse spent ahead of
     // a curse that cannot be cast waits out its 30s for nothing.
-    let curse_opts = PreCastOpts {
-        check_friendly_cc: true,
-        ..Default::default()
-    };
+    let curse_def = abilities.get_unchecked(&curse);
     if cast_gate(
         curse,
-        abilities.get_unchecked(&curse),
+        curse_def,
         combatant,
         my_pos,
         auras,
         Some(target),
         ctx,
-        curse_opts,
+        curse_gate_opts(curse_def),
     )
     .is_err()
     {
@@ -1158,7 +1395,25 @@ pub fn life_tap_hold(
     amount: f32,
     movement: &MovementConfig,
 ) -> Result<(), TapHold> {
-    let starved_below = combatant.max_mana * LIFE_TAP_STARVED_FRACTION;
+    life_tap_hold_in(combatant, amount, None, movement)
+}
+
+/// [`life_tap_hold`], or — inside the Fear window (AS-495), `window_mana`
+/// the mana the tap gives — with the starved line raised to every pool the
+/// tap would not overfill: a global cooldown the Warlock would otherwise
+/// idle is spent topping the pool up.
+pub fn life_tap_hold_in(
+    combatant: &Combatant,
+    amount: f32,
+    window_mana: Option<f32>,
+    movement: &MovementConfig,
+) -> Result<(), TapHold> {
+    let starved_below = match window_mana {
+        Some(mana) => {
+            (combatant.max_mana - mana).max(combatant.max_mana * LIFE_TAP_STARVED_FRACTION)
+        }
+        None => combatant.max_mana * LIFE_TAP_STARVED_FRACTION,
+    };
     if combatant.current_mana >= starved_below {
         return Err(TapHold::NotStarved {
             mana: combatant.current_mana,
@@ -1206,6 +1461,7 @@ fn try_life_tap(
     auras: Option<&ActiveAuras>,
     ctx: &CombatContext,
     movement: &MovementConfig,
+    in_window: bool,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> bool {
     let life_tap = AbilityType::LifeTap;
@@ -1216,7 +1472,7 @@ fn try_life_tap(
     let amount = conversion.amount(combatant.spell_power);
     let mana = conversion.mana_for(amount);
 
-    if let Err(hold) = life_tap_hold(combatant, amount, movement) {
+    if let Err(hold) = life_tap_hold_in(combatant, amount, in_window.then_some(mana), movement) {
         builder.reject(life_tap, RejectionReason::TapHeld { hold });
         return false;
     }
@@ -1307,6 +1563,7 @@ fn try_corruption(
 
     let opts = PreCastOpts {
         check_friendly_cc: true,
+        time_own_fear: true,
         ..Default::default()
     };
     let cleared = match cast_gate(
@@ -1387,6 +1644,7 @@ fn try_unstable_affliction(
 
     let opts = PreCastOpts {
         check_friendly_cc: true,
+        time_own_fear: true,
         ..Default::default()
     };
     let cleared = match cast_gate(
@@ -1460,6 +1718,7 @@ fn try_immolate(
 
     let opts = PreCastOpts {
         check_friendly_cc: true,
+        time_own_fear: true,
         ..Default::default()
     };
     let cleared = match cast_gate(
@@ -1654,6 +1913,7 @@ fn try_death_coil(
     // even one inside the chain window that no longer counts as a hold.
     let opts = PreCastOpts {
         check_friendly_cc: true,
+        time_own_fear: true,
         ..Default::default()
     };
     let cleared = match cast_gate(
@@ -1736,6 +1996,7 @@ fn try_shadowbolt(
 
     let opts = PreCastOpts {
         check_friendly_cc: true,
+        time_own_fear: true,
         ..Default::default()
     };
     let cleared = match cast_gate(
@@ -1840,6 +2101,7 @@ fn try_drain_life(
 
     let opts = PreCastOpts {
         check_friendly_cc: true,
+        time_own_fear: true,
         ..Default::default()
     };
     let cleared = match cast_gate(
@@ -2033,6 +2295,26 @@ fn curse_effect(
     }
 }
 
+/// The cast gate's options for a curse. A curse that deals damage (Agony)
+/// would break a hold the team waits out, so it asks the friendly-CC gate,
+/// timed to the Warlock's own Fear (`time_own_fear`). A curse that deals none
+/// (Tongues, Weakness, Exhaustion) breaks no hold: only damage breaks a
+/// Polymorph, a Freezing Trap or a Fear, so it goes on an enemy the team
+/// holds (AS-495) — the window's free global on the Warlock's own feared
+/// target, and as much on a teammate's Polymorph or Fear.
+pub fn curse_gate_opts(
+    def: &crate::states::play_match::ability_config::AbilityConfig,
+) -> PreCastOpts {
+    PreCastOpts {
+        check_friendly_cc: def
+            .applies_aura
+            .as_ref()
+            .is_some_and(|a| a.aura_type == AuraType::DamageOverTime),
+        time_own_fear: true,
+        ..Default::default()
+    }
+}
+
 /// Cast a specific curse on a target.
 fn try_cast_curse(
     commands: &mut Commands,
@@ -2065,10 +2347,6 @@ fn try_cast_curse(
         }
     }
 
-    let opts = PreCastOpts {
-        check_friendly_cc: true,
-        ..Default::default()
-    };
     let cleared = match cast_gate(
         ability,
         ability_def,
@@ -2077,7 +2355,7 @@ fn try_cast_curse(
         auras,
         Some((target_entity, target_pos)),
         ctx,
-        opts,
+        curse_gate_opts(ability_def),
     ) {
         Ok(cleared) => cleared,
         Err(reason) => {
