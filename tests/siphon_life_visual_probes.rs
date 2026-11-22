@@ -121,6 +121,8 @@ const PET_SIM_Y: f32 = 0.75;
 /// combatant (`IMPACT_PET_BODY_Y`, `IMPACT_PET_STATURE`).
 const PET_BODY_Y: f32 = -0.45;
 const PET_STATURE: f32 = 0.55;
+/// How close in front of the body's nearest point a held quad stands.
+const HELD_WITHIN: f32 = 0.1;
 /// The combatant body mesh, `Capsule3d::new(0.5, 1.5)`.
 const BODY_RADIUS: f32 = 0.5;
 const BODY_HALF_SEGMENT: f32 = 0.75;
@@ -144,6 +146,22 @@ const TICK_SECS: f32 = 0.016;
 
 struct Harness {
     app: App,
+}
+
+/// How many Siphon Life rigs and apply bursts have been built so far.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+struct Built {
+    rigs: usize,
+    bursts: usize,
+}
+
+fn count_built(
+    mut built: ResMut<Built>,
+    rigs: Query<(), Added<SiphonLifeRig>>,
+    bursts: Query<(), Added<DotApplyBurst>>,
+) {
+    built.rigs += rigs.iter().count();
+    built.bursts += bursts.iter().count();
 }
 
 /// One live particle, read back from the world.
@@ -205,6 +223,17 @@ impl Harness {
                 cleanup_siphon_life_glows,
             )
                 .chain(),
+        );
+        // Counts every rig and apply burst as it is BUILT, before either
+        // cleanup can take it down the same frame.
+        app.init_resource::<Built>();
+        app.add_systems(
+            Update,
+            count_built
+                .after(spawn_siphon_life_glows)
+                .after(spawn_warlock_dot_visuals)
+                .before(cleanup_siphon_life_glows)
+                .before(cleanup_warlock_dot_visuals),
         );
         // Warm the clock: Bevy's first update has a zero delta.
         app.update();
@@ -268,6 +297,10 @@ impl Harness {
 
     fn add(&mut self, victim: Entity, name: &str) {
         self.auras(victim).auras.push(Self::dot(name));
+    }
+
+    fn built(&self) -> Built {
+        *self.app.world().resource::<Built>()
     }
 
     fn count<C: Component>(&mut self) -> usize {
@@ -570,7 +603,10 @@ fn a_streak_trails_back_along_its_flight() {
                 offset.normalize().dot(p.velocity.normalize()) < -0.9999,
                 "the streak must trail BEHIND the flight"
             );
-            assert!((g.compute_transform().scale.x - STREAK_LENGTH).abs() < 1e-4);
+            let scale = g.compute_transform().scale;
+            assert!((scale.x - STREAK_LENGTH).abs() < 1e-4);
+            // The bench's line is 0.7 of the sprite's radius wide.
+            assert!((scale.y - 0.7 * BENCH[STREAKS].scale[0]).abs() < 1e-4);
             checked += 1;
         }
     }
@@ -840,6 +876,13 @@ fn every_quad_stands_in_front_of_the_body_where_the_bench_puts_it_on_screen() {
                     2.0 * radius * k
                 );
                 if k < 0.999 {
+                    // Held only as far as it must be: just in front of the
+                    // body, never floated off toward the camera.
+                    assert!(
+                        depth > nearest - HELD_WITHIN,
+                        "held {} in front of the body",
+                        nearest - depth
+                    );
                     moved += 1;
                 }
                 checked += 1;
@@ -897,6 +940,56 @@ fn at_the_camera_a_streak_lies_in_the_screen_plane_behind_its_flight() {
         }
     }
     assert!(checked >= 8, "only {checked} streaks checked");
+}
+
+/// A pet's smaller body (`Capsule3d::new(0.35, 0.6)`, hung 0.45 below its
+/// sim transform) holds its glow in front of it the same way.
+#[test]
+fn a_pets_glow_stands_in_front_of_the_pets_body() {
+    let mut h = Harness::new();
+    let at = Vec3::new(-3.0, PET_SIM_Y, 1.0);
+    // Steep, so the body's height decides its nearest point.
+    let cam = match_camera(at, 20.0, 0.3, 0.4);
+    h.camera(cam);
+    let owner = h.app.world_mut().spawn_empty().id();
+    h.app.world_mut().spawn((
+        Combatant::new(2, 1, CharacterClass::Hunter),
+        Pet {
+            owner,
+            pet_type: PetType::Felhunter,
+        },
+        Transform::from_translation(at),
+        ActiveAuras {
+            auras: vec![Harness::dot(AURA)],
+        },
+    ));
+    h.tick_secs(1.0);
+    let eye = cam.translation;
+    let forward = cam.forward().as_vec3();
+    let centre = at + Vec3::Y * PET_BODY_Y;
+    let nearest = [centre - Vec3::Y * 0.3, centre + Vec3::Y * 0.3]
+        .iter()
+        .map(|e| (*e - eye).dot(forward))
+        .fold(f32::MAX, f32::min)
+        - 0.35;
+    let world = h.app.world_mut();
+    let depths: Vec<f32> = world
+        .query::<(&SiphonLifePart, &GlobalTransform)>()
+        .iter(world)
+        .map(|(_, g)| (g.translation() - eye).dot(forward))
+        .collect();
+    assert!(depths.len() > 40, "only {} quads", depths.len());
+    let held = depths
+        .iter()
+        .filter(|d| **d > nearest - HELD_WITHIN)
+        .count();
+    assert!(held > 20, "only {held} quads held just in front of the pet");
+    for depth in depths {
+        assert!(
+            depth < nearest,
+            "a quad at {depth} behind the pet's {nearest}"
+        );
+    }
 }
 
 #[test]
@@ -1018,6 +1111,11 @@ fn siphon_life_lands_corruptions_apply_and_a_refresh_replays_nothing() {
     h.tick(3);
     assert_eq!(h.rigs().len(), 1);
     assert_eq!(h.rigs()[0].0, rig, "a refresh keeps the rig");
+    assert_eq!(
+        h.built(),
+        Built { rigs: 1, bursts: 2 },
+        "and builds nothing"
+    );
     assert!(
         h.entities::<DotApplyBurst>().is_subset(&bursts),
         "a refresh replays no apply"
@@ -1079,9 +1177,13 @@ fn death_takes_the_glow_and_the_corpse_wears_nothing() {
     assert!(h.rigs().is_empty(), "nothing on a corpse");
     assert_eq!(h.count::<SiphonLifeParticle>(), 0);
     assert_eq!(h.count::<DotApplyBurst>(), 0, "nor its apply");
-    // Auras linger on corpses: the dead victim must not be re-rigged.
+    // Auras linger on corpses: the dead victim must never be re-rigged, nor
+    // its apply replayed, not even for the frame before a cleanup.
+    let built = h.built();
+    assert_eq!(built, Built { rigs: 1, bursts: 2 });
     h.tick(5);
     assert!(h.rigs().is_empty());
+    assert_eq!(h.built(), built, "a corpse builds nothing");
 }
 
 #[test]
