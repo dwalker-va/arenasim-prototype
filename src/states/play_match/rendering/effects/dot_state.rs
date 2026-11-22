@@ -1,3 +1,4 @@
+use super::siphon_life::SIPHON_LIFE_AURA;
 use super::warlock_dots::{curse_spec, CORRUPTION_AURA, UA_AURA};
 use crate::states::play_match::components::*;
 
@@ -28,6 +29,8 @@ pub enum DotStateVisual {
     UnstableAfflictionState,
     /// Immolate's flames licking up the victim from the feet (`immolate.rs`).
     ImmolateBurn,
+    /// Siphon Life's violet chest glow, TBC kit 234 (`siphon_life.rs`).
+    SiphonLifeGlow,
     /// A curse whose client identity is its APPLY apparition alone — the era
     /// client draws nothing for the rest of the curse (`CURSE_SUSTAIN_WHISPER`
     /// in `warlock_dots.rs` records why that is deliberate). A named decision,
@@ -50,6 +53,7 @@ impl DotStateVisual {
             CORRUPTION_AURA => Some(DotStateVisual::CorruptionShroud),
             UA_AURA => Some(DotStateVisual::UnstableAfflictionState),
             IMMOLATE_AURA => Some(DotStateVisual::ImmolateBurn),
+            SIPHON_LIFE_AURA => Some(DotStateVisual::SiphonLifeGlow),
             // A curse that is itself a DoT (Curse of Agony) is drawn by the
             // curse table, so derive it from that table rather than naming it
             // twice.
