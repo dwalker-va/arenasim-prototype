@@ -72,6 +72,10 @@ pub fn swing_style_for_ability(ability: AbilityType) -> Option<SwingStyle> {
         // ModelAttach rows add; these kits have none).
         AbilityType::Ambush => Some(SwingStyle::Ambush),
         AbilityType::SinisterStrike => Some(SwingStyle::SinisterStrike),
+        // Hemorrhage (AS-367) takes Sinister Strike's place in the rotation,
+        // so it swings Sinister Strike's stroke. The client's Special1H and
+        // its deep-red weapon trail are not drawn, as for Sinister Strike.
+        AbilityType::Hemorrhage => Some(SwingStyle::SinisterStrike),
         // The apply stroke (AS-336): a finisher that puts its debuff ON the
         // victim sweeps a backhand across its chest. Expose Armor (AS-366)
         // joins this arm.
@@ -290,6 +294,24 @@ pub fn consume_instant_ability_signals(
                 }
                 if let (Some(style), Some(victim)) = (style, signal.target) {
                     if let Some(aura) = ability_defs.get(&AbilityType::Rupture) {
+                        spawn_bleed_spray_pending(
+                            &mut commands,
+                            victim,
+                            signal.caster,
+                            aura.name.clone(),
+                            style.impact_at(),
+                        );
+                    }
+                }
+            }
+            // Hemorrhage (AS-367): Rupture's bleed spray on the victim's chest
+            // at the stroke's contact, every hit — a refresh of the stacking
+            // debuff included. This marker is the LANDED strike (the drain
+            // spawns it inside its landed-hit gate), so a dodge or a parry
+            // strokes without it (`crusader_strike.rs`) and sprays nothing.
+            AbilityType::Hemorrhage => {
+                if let (Some(style), Some(victim)) = (style, signal.target) {
+                    if let Some(aura) = ability_defs.get(&AbilityType::Hemorrhage) {
                         spawn_bleed_spray_pending(
                             &mut commands,
                             victim,

@@ -597,16 +597,21 @@ impl Plugin for StatesPlugin {
                 .run_if(in_combat_scene),
         )
         // The bleed spray (`bleed_spray.rs`): held for the stroke's contact,
-        // fired only on a landing, its droplets flown by
-        // `animate_client_particles` and turned to the camera here.
+        // fired only on a landing, its droplets emitted before
+        // `animate_client_particles` flies them, then held in front of the
+        // victim's body and turned to the camera after it (the hold scales
+        // the size the animator writes).
         .add_systems(
             Update,
             (
-                play_match::fire_bleed_sprays,
-                play_match::update_bleed_sprays,
-                play_match::billboard_bleed_droplets,
+                (
+                    play_match::fire_bleed_sprays,
+                    play_match::update_bleed_sprays,
+                )
+                    .chain()
+                    .before(play_match::animate_client_particles),
+                play_match::billboard_bleed_droplets.after(play_match::animate_client_particles),
             )
-                .chain()
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )

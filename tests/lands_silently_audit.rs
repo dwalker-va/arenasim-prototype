@@ -590,16 +590,10 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
     }
 }
 
-const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[
-    (
-        Hemorrhage,
-        "AS-336 (Hemorrhage, the Subtlety strike and its wound; AS-367 builds it)",
-    ),
-    (
-        HolyNova,
-        "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
-    ),
-];
+const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
+    HolyNova,
+    "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
+)];
 
 #[test]
 fn direct_damage_finds_every_member() {
@@ -1057,6 +1051,13 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             _ if is_divine_protection(t, &c.name) => Some(
                 "Holy hand flash + red-gold globe at the chest while it holds (divine_protection.rs)",
             ),
+            // Hemorrhage's wound: its strike's bleed spray on every landing,
+            // owned by name; the stacks are on the icon.
+            _ if AuraApplyRoute::for_instance(t, &c.name)
+                == AuraApplyRoute::Owned(AuraApplyOwner::BleedSpray) =>
+            {
+                Some("bleed spray at the victim's chest on every hit (instant_ability.rs → bleed_spray.rs)")
+            }
             _ if AuraLandingKind::for_aura(t, &c.name)
                 == Some(AuraLandingKind::MarkOfTheWildGlyph) =>
             {
@@ -1103,10 +1104,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     ),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
     (FrostArmor, "AS-134 (aura application)"),
-    (
-        Hemorrhage,
-        "AS-336 (Hemorrhage, the Subtlety strike and its wound; AS-367 builds it)",
-    ),
     (InnerFocus, "AS-352 (Inner Focus, the focus on the Priest)"),
     (MageArmorSpell, "AS-134 (aura application)"),
     (MoltenArmor, "AS-134 (aura application)"),
