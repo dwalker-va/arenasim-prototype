@@ -86,6 +86,7 @@ use arenasim::states::play_match::components::AuraApplyRoute;
 use arenasim::states::play_match::components::AuraLandingKind;
 use arenasim::states::play_match::components::AuraType;
 use arenasim::states::play_match::components::Combatant;
+use arenasim::states::play_match::components::ConflagrateLanding;
 use arenasim::states::play_match::components::CurseKind;
 use arenasim::states::play_match::components::HealImpact;
 use arenasim::states::play_match::components::HealImpactKind;
@@ -576,6 +577,9 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
             Some("mana-funnel stars + mana beam (mind_flay.rs, ChannelVisual::for_channel)")
         }
         Moonfire => Some("moon orb + beam landing (casting.rs → moonfire.rs)"),
+        Conflagrate if ConflagrateLanding::is_spawned_for(a) => {
+            Some("fire detonation + wound flinch (casting.rs → conflagrate.rs)")
+        }
         // The empowered swing carries `HeroicStrikeSwing` (auto_attack.rs);
         // heroic_strike.rs lays its trail and lands it through the client
         // landing router, so the router must answer for it.
@@ -588,20 +592,12 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
 
 const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (
-        Conflagrate,
-        "AS-348 (Shadowburn and Conflagrate, the Destruction casts; AS-334's talent visuals)",
-    ),
-    (
         Hemorrhage,
         "AS-336 (Hemorrhage, the Subtlety strike and its wound; AS-367 builds it)",
     ),
     (
         HolyNova,
         "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
-    ),
-    (
-        Shadowburn,
-        "AS-348 (Shadowburn and Conflagrate, the Destruction casts; AS-334's talent visuals)",
     ),
 ];
 
@@ -691,10 +687,7 @@ const DOT_MEMBERS: &[AbilityType] = &[
 ];
 
 /// DoTs that land with nothing drawn yet.
-const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
-    Rupture,
-    "AS-336 (Rupture, the Assassination bleed; AS-365 builds it on Rend's bleed drips)",
-)];
+const DOT_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
 
 /// The DoT STATE a member's aura routes to. The aura carries the ability's
 /// RON `name:`, so this sweeps the config name through the very router every
@@ -772,6 +765,8 @@ fn the_dot_router_names_each_members_state() {
     let defs = AbilityDefinitions::default();
     let route = |a: AbilityType| DotStateVisual::for_dot(&defs.get(&a).unwrap().name);
     assert_eq!(route(Rend), Some(DotStateVisual::Drip(DripKind::Bleed)));
+    // Rupture has no client state; it bleeds as Rend does (AS-336, AS-365).
+    assert_eq!(route(Rupture), Some(DotStateVisual::Drip(DripKind::Bleed)));
     assert_eq!(
         route(SerpentSting),
         Some(DotStateVisual::Drip(DripKind::Poison))

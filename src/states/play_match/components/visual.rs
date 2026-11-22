@@ -137,6 +137,9 @@ impl SchoolImpact {
             // docs/design/2026-09-06-frost-shock-client-data.md.
             | AbilityType::FrostShock => Some(ImpactAnchor::Chest),
             AbilityType::MindBlast => Some(ImpactAnchor::Head),
+            // Mind Blast's visual 3057 in the client, so Mind Blast's head
+            // landing (kit 2709) — see `client_landing_style`.
+            AbilityType::Shadowburn => Some(ImpactAnchor::Head),
             _ => None,
         }
     }
@@ -223,6 +226,30 @@ pub struct MoonfireLanding {
     /// Victim position at the landing — where the landing stays if the victim
     /// is gone.
     pub origin: Vec3,
+}
+
+/// Conflagrate's landing — `fire_impactdd_high_chest.m2` (kit 4551) detonating
+/// at the victim's chest, and the victim's wound flinch.
+///
+/// Spawned deterministically at the hit in `process_casting` (no `game_rng`
+/// draw), so it is byte-neutral in headless like [`MoonfireLanding`]. The
+/// graphical-only systems in `rendering/effects/conflagrate.rs` consume it.
+/// The Immolate the hit consumes needs nothing here: its burn ends with the
+/// aura (`cleanup_immolate_burns`).
+#[derive(Component)]
+pub struct ConflagrateLanding {
+    /// The victim. The burst's rings track it while they play.
+    pub target: Entity,
+    /// Cosmetic only — deepens the flinch, never read by sim code.
+    pub is_crit: bool,
+}
+
+impl ConflagrateLanding {
+    /// Which abilities land this burst — the one list the spawn site and the
+    /// lands-silently audit read.
+    pub fn is_spawned_for(ability: AbilityType) -> bool {
+        ability == AbilityType::Conflagrate
+    }
 }
 
 /// Component for tracking death fall animation.
@@ -2527,7 +2554,7 @@ pub struct WarlockDotRigAssets {
 pub enum DripKind {
     /// Green drips — Serpent Sting today; future rogue poisons join the table.
     Poison,
-    /// Red drips — Rend today; future Rupture/Garrote join the table.
+    /// Red drips — Rend and Rupture; a future Garrote joins the table.
     Bleed,
 }
 
@@ -2918,6 +2945,16 @@ pub enum SwingStyle {
     /// effect in magenta). Stroke-only here: the tilt of its swing plane is
     /// what separates the spammed builder from Cheap Shot's near-sagittal jab.
     SinisterStrike,
+    /// The Rogue's apply stroke for a finisher that puts a debuff ON its
+    /// target — Rupture, and Expose Armor (AS-366). A BACKHAND sweep, authored
+    /// at the AS-336 bench (the client plays a generic Special1H here): the
+    /// weapon hand winds up across the body to the off shoulder, sweeps outward
+    /// across the victim's chest with contact mid-arc, and follows through
+    /// wide on the weapon side. A sweep, never a thrust, so it reads apart
+    /// from Ambush's and Kidney Shot's lunges and Sinister Strike's rising
+    /// slash. Unlike every other signature it plays its own windup from rest,
+    /// inside the stroke.
+    Backhand,
 }
 
 /// One instant ability performed by a caster, spawned by combat code at that
@@ -2980,6 +3017,10 @@ impl InstantAbilityFired {
             // carries its Holy launch hands (`spawn_instant_cast_hands`).
             // Ice Barrier's carries its Frost launch hands the same way.
             | CheapShot | KidneyShot | HammerOfJustice | FrostNova | PowerWordShield | IceBarrier
+            // The Rogue's apply stroke (AS-336): an aura-only finisher applied
+            // inline in the Rogue AI, its marker spawned before the avoidance
+            // roll, so a dodged one still strikes.
+            | Rupture
             // The melee interrupts: spawned at the committed-use site in
             // combat_ai.rs's interrupt system (roadmap B). Wind Shear is
             // deliberately absent — the Shaman has no weapon sockets and its

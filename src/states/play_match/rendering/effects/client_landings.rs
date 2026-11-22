@@ -27,6 +27,8 @@ use crate::states::play_match::components::*;
 //   draws its trail).
 // - **Mind Blast** smoulders on the HEAD (`mindblast_head.m2`): violet flame
 //   licks rising under negative gravity, embers, and alpha-blended grey smoke.
+//   Shadowburn plays the same landing: its visual (3057) is Mind Blast's
+//   (docs/design/2026-10-17-warlock-talent-client-data.md §4).
 // - **Holy Shock's damage leg** lands as Holy Smite's `holysmite_low_chest.m2`,
 //   thirteen emitters grouped here, as at the bench, into seven layers.
 // - **Crusader Strike** lands TBC's kit 437, `strike_impact_chest.m2` (the
@@ -98,6 +100,12 @@ pub const HOLY_SHOCK_DAMAGE_IMPACT_TIME: f32 = 1.0;
 pub const CRUSADER_STRIKE_IMPACT_SIZE: f32 = 1.0;
 pub const CRUSADER_STRIKE_IMPACT_SPREAD: f32 = 1.0;
 pub const CRUSADER_STRIKE_IMPACT_TIME: f32 = 1.0;
+
+// Shadowburn landing: reuse the shipped Mind Blast landing (mindblast_head.m2, kit 2709). AS-334 bench.
+// landing_style(Shadowburn) => the MINDBLAST_HEAD client landing; cast hands: shipped shadow hands.
+// (AS-334 Warlock Talent Visuals Bench, version 1792203924-603a, "Shadowburn"
+// tab; source committed as docs/design/benches/2026-10-17-warlock-talent-bench.html.)
+pub const SHADOWBURN_REUSES_MIND_BLAST_LANDING: bool = true;
 
 /// Wind Shear's ring: `#bee1ff`, i.e. `Color::srgb(0.75, 0.88, 1.00)`. It
 /// replaces the Kick ring's whole colour ramp; the alpha and size ramps stay.
@@ -729,6 +737,12 @@ pub fn client_landing_style(ability: AbilityType) -> Option<ImpactStyle> {
             &CRUSADER_STRIKE_LANDING,
         )),
         AbilityType::MindBlast => Some(emitter_landing(
+            Color::srgb_u8(126, 55, 255),
+            &MIND_BLAST_LANDING,
+        )),
+        // Mind Blast's whole visual in the client (visual 3057): its head
+        // landing, the very table, at Mind Blast's knobs.
+        AbilityType::Shadowburn if SHADOWBURN_REUSES_MIND_BLAST_LANDING => Some(emitter_landing(
             Color::srgb_u8(126, 55, 255),
             &MIND_BLAST_LANDING,
         )),
