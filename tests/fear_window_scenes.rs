@@ -63,12 +63,17 @@ fn dot(name: &str, caster: bevy::prelude::Entity) -> Aura {
 /// Druid, its Corruption, Unstable Affliction and Immolate already on it, so
 /// the rotation's own turn reaches its Fear.
 fn lone() -> Scene {
+    lone_at(20.0)
+}
+
+/// [`lone`], with the Druid `yards` from the Warlock.
+fn lone_at(yards: f32) -> Scene {
     let scene = Scene::new()
         .unit(WARLOCK, 1, Warlock)
         .at(0.0, 0.0)
         .targeting(HEALER)
         .unit(HEALER, 2, Druid)
-        .at(20.0, 0.0)
+        .at(yards, 0.0)
         .targeting(WARLOCK);
     let me = scene.entity(WARLOCK);
     scene
@@ -383,6 +388,123 @@ fn a_bolt_it_cannot_cast_holds_nothing_up() {
         Some((AbilityType::LifeTap, None)),
         "short of a bolt's mana, it taps instead of holding: {}",
         describe(&broke)
+    );
+}
+
+/// Slowed and beyond its preferred range (28 yards): the Warlock is being
+/// kited, so a cast would be interrupted by its own movement.
+fn kited(scene: Scene) -> Scene {
+    scene.aura_full(
+        WARLOCK,
+        Aura {
+            effect_type: AuraType::MovementSpeedSlow,
+            duration: 6.0,
+            magnitude: 0.5,
+            break_on_damage_threshold: -1.0,
+            ..Default::default()
+        },
+    )
+}
+
+#[test]
+fn a_kited_warlock_holds_nothing_up_for_its_bolt() {
+    // 29 yards: in Shadow Bolt's range, beyond the preferred range.
+    let lands = bolt_lands_after(&lone_at(29.0));
+    let band =
+        || own_fear(lone_at(29.0), lands + FEAR_WINDOW_LEAD + GCD / 2.0).mana_of(WARLOCK, 0.35);
+    // In the hold band: unkited, it holds; kited, the bolt would be
+    // interrupted, so the global goes on a Life Tap.
+    let free = band().decide(WARLOCK);
+    assert_eq!(free.chose(), None, "{}", describe(&free));
+    assert!(
+        noted(&free, AbilityType::Shadowbolt, FEAR_WINDOW_HOLD_NOTE),
+        "unkited, it holds for the bolt: {}",
+        describe(&free)
+    );
+    let kited_band = kited(band()).decide(WARLOCK);
+    assert_eq!(
+        kited_band.chose(),
+        Some((AbilityType::LifeTap, None)),
+        "kited, it spends the global: {}",
+        describe(&kited_band)
+    );
+
+    // At the bolt's moment: unkited it bolts the feared Druid, kited it
+    // begins no bolt on it.
+    let due = || own_fear(lone_at(29.0), lands + FEAR_WINDOW_AIM - 0.05);
+    let bolts = due().decide(WARLOCK);
+    assert_eq!(
+        bolts.chose(),
+        Some((AbilityType::Shadowbolt, Some(HEALER))),
+        "{}",
+        describe(&bolts)
+    );
+    let kited_due = kited(due()).decide(WARLOCK);
+    assert_ne!(
+        kited_due.chose(),
+        Some((AbilityType::Shadowbolt, Some(HEALER))),
+        "kited, no bolt begins on the feared target: {}",
+        describe(&kited_due)
+    );
+}
+
+#[test]
+fn a_bolt_out_of_reach_at_its_moment_leaves_the_global_free() {
+    // At the bolt's moment, the Druid 32 yards off, beyond Shadow Bolt's 30:
+    // the bolt cannot go, so the global goes on the window's Life Tap.
+    let far = own_fear(
+        lone_at(32.0),
+        bolt_lands_after(&lone_at(32.0)) + FEAR_WINDOW_AIM - 0.05,
+    )
+    .mana_of(WARLOCK, 0.35)
+    .decide(WARLOCK);
+    assert_eq!(
+        far.chose(),
+        Some((AbilityType::LifeTap, None)),
+        "out of reach, the global goes free: {}",
+        describe(&far)
+    );
+    // The control: in reach, it bolts.
+    let near = own_fear(lone(), bolt_lands_after(&lone()) + FEAR_WINDOW_AIM - 0.05)
+        .mana_of(WARLOCK, 0.35)
+        .decide(WARLOCK);
+    assert_eq!(
+        near.chose(),
+        Some((AbilityType::Shadowbolt, Some(HEALER))),
+        "{}",
+        describe(&near)
+    );
+}
+
+#[test]
+fn another_enemy_is_bolted_only_when_it_cannot_delay_the_timed_bolt() {
+    // A second enemy in range, its Corruption already on, full mana: the only
+    // free global left is a Shadow Bolt on it, a 2s cast, and the timed bolt
+    // is due in a second.
+    let two = |yards: f32| {
+        let scene = lone_at(yards).unit(OTHER, 2, Warrior).at(18.0, 8.0);
+        let me = scene.entity(WARLOCK);
+        let scene = scene.aura_full(OTHER, dot("Corruption", me));
+        let lands = bolt_lands_after(&scene);
+        own_fear(scene, lands + FEAR_WINDOW_AIM + 1.7).decide(WARLOCK)
+    };
+    // The feared Druid beyond Shadow Bolt's range: no timed bolt to delay, so
+    // the other enemy is bolted.
+    let far = two(32.0);
+    assert_eq!(
+        far.chose(),
+        Some((AbilityType::Shadowbolt, Some(OTHER))),
+        "with no timed bolt to delay, the other enemy is bolted: {}",
+        describe(&far)
+    );
+    // The control: the Druid in range, its bolt due in 1.7s, sooner than a
+    // 2s cast on the other enemy would finish: it is not begun.
+    let near = two(20.0);
+    assert_ne!(
+        near.chose(),
+        Some((AbilityType::Shadowbolt, Some(OTHER))),
+        "a cast that would delay the timed bolt is not begun: {}",
+        describe(&near)
     );
 }
 

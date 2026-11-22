@@ -41,7 +41,7 @@ const WINDOW: f32 = 0.25;
 const MEDIAN_LATEST: f32 = -0.05;
 /// ...and no further before the end than this: short of the window's first
 /// instant, so a window aimed half a second wider fails here.
-const MEDIAN_EARLIEST: f32 = 0.2;
+const MEDIAN_EARLIEST: f32 = 0.17;
 /// The most any one bolt lands before the Fear ends. Measured 0.45s over this
 /// bank: a feared Druid that turns to run at the Warlock mid-cast shortens
 /// the flight past the prediction.
