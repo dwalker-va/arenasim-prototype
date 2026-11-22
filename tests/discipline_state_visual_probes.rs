@@ -2350,3 +2350,44 @@ fn a_sheep_hides_a_state_from_its_first_frame_and_the_swirl_with_its_priest() {
     h.tick(1);
     assert_eq!(swirl_visibility(&mut h), vec![Visibility::Inherited]);
 }
+
+/// Pain Suppression landing on the frame its Priest is already a sheep: the
+/// ring at the Priest's feet is hidden from its first frame, never drawing
+/// under the sheep, and shows once the sheep ends.
+#[test]
+fn a_swirl_raised_under_a_sheeped_priest_is_hidden_from_its_first_frame() {
+    let mut h = Harness::new();
+    let (priest, ally) = h.pair();
+    h.app
+        .world_mut()
+        .entity_mut(priest)
+        .insert(PolymorphedVisual);
+    h.suppress(ally, priest);
+    h.tick(1);
+    let swirls = |h: &mut Harness| {
+        let mut q = h
+            .app
+            .world_mut()
+            .query::<(&SuppressionSwirl, &Visibility)>();
+        q.iter(h.app.world())
+            .map(|(s, v)| (s.caster, s.age, *v))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        swirls(&mut h),
+        vec![(priest, 0.0, Visibility::Hidden)],
+        "one swirl, on its first frame, hidden under the sheep"
+    );
+    h.app
+        .world_mut()
+        .entity_mut(priest)
+        .remove::<PolymorphedVisual>();
+    h.tick(1);
+    let after = swirls(&mut h);
+    assert_eq!(after.len(), 1);
+    assert_eq!(
+        after[0].2,
+        Visibility::Inherited,
+        "shown once the sheep ends"
+    );
+}
