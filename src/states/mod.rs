@@ -1125,6 +1125,23 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Soul Link's rune column and Demonic Sacrifice's triad
+        // (`demonology_landings.rs`): spawn (off the gates opening, and
+        // consuming Touch of Shadow's landing markers) -> column -> triad,
+        // before the client particles age (the sparks and motes are
+        // world-space `ClientParticle`s, turned by `billboard_hunter_shots`).
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_demonology_landings,
+                play_match::animate_soul_link_columns,
+                play_match::animate_sacrifice_triads,
+            )
+                .chain()
+                .before(play_match::animate_client_particles)
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // Shadow Word: Pain's landing (`shadow_word_pain.rs`): spawn (consumes
         // the sim's SW:P landing markers) -> emit -> particles -> billboard.
         .add_systems(
