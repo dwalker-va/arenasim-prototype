@@ -124,6 +124,8 @@ mod client_landings;
 pub use client_landings::*;
 mod heroic_strike;
 pub use heroic_strike::*;
+mod crusader_strike;
+pub use crusader_strike::*;
 mod web_missile;
 pub use web_missile::*;
 mod moonfire;

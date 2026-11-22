@@ -44,6 +44,7 @@ const VIA_DRAIN: &[AbilityType] = &[
     AbilityType::MortalStrike,
     AbilityType::Ambush,
     AbilityType::SinisterStrike,
+    AbilityType::CrusaderStrike,
 ];
 
 /// Abilities that reach the marker through the interrupt system
@@ -165,13 +166,14 @@ fn every_listed_ability_has_a_spawn_site() {
 
 #[test]
 fn the_drain_abilities_still_queue_instant_attacks() {
-    // The three that reach the marker generically. If one stopped pushing a
+    // The ones that reach the marker generically. If one stopped pushing a
     // QueuedInstantAttack it would drop out of the pipeline silently, and the
     // scan above cannot see it because the drain forwards a variable.
     let all = format!(
-        "{}{}",
+        "{}{}{}",
         read("src/states/play_match/class_ai/rogue.rs"),
-        read("src/states/play_match/class_ai/warrior.rs")
+        read("src/states/play_match/class_ai/warrior.rs"),
+        read("src/states/play_match/class_ai/paladin_retribution.rs")
     );
     for ability in VIA_DRAIN {
         let name = format!("{ability:?}");

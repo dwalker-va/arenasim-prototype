@@ -480,6 +480,7 @@ const FROST_SHOCK_OPTS: PreCastOpts = PreCastOpts {
     check_friendly_dots: false,
     check_target_immune: true,
     bypass_silence: false,
+    time_own_fear: false,
 };
 
 /// Cast Frost Shock on `target_entity` through the cast gate: the rotation's

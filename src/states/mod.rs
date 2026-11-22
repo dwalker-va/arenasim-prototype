@@ -524,6 +524,27 @@ impl Plugin for StatesPlugin {
                 .after(play_match::consume_swing_signals)
                 .run_if(in_combat_scene),
         )
+        // A dodged or parried Crusader Strike still swings (AS-379). The sim
+        // spawns no `InstantAbilityFired` for an avoided strike, so its
+        // `MeleeAvoided` is noted BETWEEN the phase that spawns it (the class
+        // AI, Phase 2) and the one that retires it (`resolve_melee_avoidances`,
+        // Phase 3) — a real window, not a preference. The stroke then starts
+        // after `consume_swing_signals`, as the landed strikes' does, so a
+        // same-tick auto cannot reset the socket over it.
+        .add_systems(
+            FixedUpdate,
+            play_match::note_avoided_strikes
+                .after(CombatSystemPhase::CombatAndMovement)
+                .before(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        .add_systems(
+            FixedUpdate,
+            play_match::consume_avoided_strike_signals
+                .after(CombatSystemPhase::CombatResolution)
+                .after(play_match::consume_swing_signals)
+                .run_if(in_combat_scene),
+        )
         // Mortal Wounds heal fracture: also a core-spawned marker consumer,
         // so it takes the same FixedUpdate slot as its siblings above
         // rather than Update. Several heals can resolve in one rendered
