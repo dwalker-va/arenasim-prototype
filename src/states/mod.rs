@@ -596,6 +596,24 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Expose Armor's crest (`expose_armor.rs`, AS-366): held for the
+        // backhand's contact, fired only on a landing, then the crest, its
+        // glow and three particle layers over the victim's head, held in
+        // front of the body and turned to the camera. Chained: the emitter
+        // sees the rig `fire` just built, and the pose runs on final
+        // positions.
+        .add_systems(
+            Update,
+            (
+                play_match::fire_expose_armor_crests,
+                play_match::animate_expose_armor_crests,
+                play_match::age_expose_armor_particles,
+                play_match::pose_expose_armor_crests,
+            )
+                .chain()
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // The bleed spray (`bleed_spray.rs`): held for the stroke's contact,
         // fired only on a landing, its droplets flown by
         // `animate_client_particles` and turned to the camera here.
