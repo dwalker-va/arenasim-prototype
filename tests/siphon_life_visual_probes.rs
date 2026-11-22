@@ -992,6 +992,65 @@ fn the_hold_follows_a_victim_walking_toward_the_camera() {
     }
 }
 
+/// A flare's roll is drawn once, at its birth, and held for its whole life:
+/// the bench draws `ang` at spawn and gives its flares no `spin`. With the
+/// camera fixed, every flare still alive a few frames on wears the roll it
+/// wore before — a spin or a per-frame re-draw would keep the spread uniform
+/// and so pass the spread probe below.
+#[test]
+fn a_flares_roll_is_held_for_its_life() {
+    let mut h = Harness::new();
+    let victim = Vec3::new(-2.0, COMBATANT_Y, 3.0);
+    let cam = match_camera(victim, 60.0, 38.7f32.to_radians(), 2.0);
+    h.camera(cam);
+    h.victim(victim, &[AURA]);
+    // Past one flare life (1.5 s), so the flares are at their steady ~45.
+    h.tick_secs(2.0);
+    let (right, up) = (cam.rotation * Vec3::X, cam.rotation * Vec3::Y);
+    let rolls = |h: &mut Harness| -> Vec<(Entity, f32)> {
+        let world = h.app.world_mut();
+        let flares: Vec<(Entity, Vec<Entity>)> = world
+            .query::<(Entity, &SiphonLifeParticle, &Children)>()
+            .iter(world)
+            .filter(|(_, p, _)| p.emitter == FLARES)
+            .map(|(e, _, c)| (e, c.iter().collect()))
+            .collect();
+        flares
+            .into_iter()
+            .filter_map(|(e, children)| {
+                children.into_iter().find_map(|c| {
+                    (*world.get::<SiphonLifePart>(c)? == SiphonLifePart::Sprite).then(|| {
+                        let x = world
+                            .get::<GlobalTransform>(c)
+                            .unwrap()
+                            .compute_transform()
+                            .rotation
+                            * Vec3::X;
+                        (e, x.dot(up).atan2(x.dot(right)))
+                    })
+                })
+            })
+            .collect()
+    };
+    let before = rolls(&mut h);
+    h.tick(6);
+    let after = rolls(&mut h);
+    let mut compared = 0;
+    for (e, roll) in &after {
+        let Some((_, was)) = before.iter().find(|(b, _)| b == e) else {
+            continue;
+        };
+        let d = (roll - was + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+            - std::f32::consts::PI;
+        assert!(
+            d.abs() < 1e-4,
+            "a flare's roll moved by {d} rad in six frames"
+        );
+        compared += 1;
+    }
+    assert!(compared > 30, "only {compared} flares compared");
+}
+
 /// Each flare is rolled at random in the camera plane, as the bench draws
 /// every star after `g.rotate(ang)`: its in-plane angles (modulo the star's
 /// quarter-turn symmetry) spread over the whole quarter turn.
