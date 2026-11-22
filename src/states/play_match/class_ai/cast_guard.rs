@@ -45,6 +45,12 @@ pub struct PreCastOpts {
     /// Allow the cast even if the caster is silenced. Reserved for
     /// abilities that explicitly bypass silence (Divine Shield).
     pub bypass_silence: bool,
+
+    /// With `check_friendly_cc`: judge the caster's OWN Fear on the target
+    /// where the cast LANDS (AS-495, the Fear window): damage that lands in
+    /// the Fear's last [`super::FEAR_WINDOW_LEAD`] goes, so the Warlock's
+    /// damage lands as its Fear ends instead of a cast after it.
+    pub time_own_fear: bool,
 }
 
 /// The note a cast the slot's per-match choices lock is rejected with
@@ -132,7 +138,12 @@ pub fn pre_cast_ok_but_hold(
     opts: PreCastOpts,
 ) -> bool {
     if let Some((target_entity, _)) = target {
-        if opts.check_friendly_cc && ctx.has_friendly_breakable_cc(target_entity) {
+        if opts.check_friendly_cc
+            && ctx.has_friendly_breakable_cc_landing(
+                target_entity,
+                own_fear_lands_after(def, caster_pos, auras, target, ctx, opts),
+            )
+        {
             return false;
         }
         if opts.check_friendly_dots && ctx.has_friendly_dots_on_target(target_entity) {
@@ -248,6 +259,57 @@ pub fn hold_lands_after(
         }
         _ => 0.0,
     }
+}
+
+/// When `opts.time_own_fear` asks for it, how long after now a cast of `def`
+/// on `target` lands ([`lands_on_feared`]): the moment the friendly-CC gate
+/// judges the caster's own Fear at. `None` otherwise — the gate judges every
+/// hold now.
+fn own_fear_lands_after(
+    def: &AbilityConfig,
+    caster_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target: Option<(Entity, Vec3)>,
+    ctx: &CombatContext,
+    opts: PreCastOpts,
+) -> Option<f32> {
+    let (entity, target_pos) = target?;
+    opts.time_own_fear
+        .then(|| lands_on_feared(def, caster_pos, auras, entity, target_pos, ctx))
+}
+
+/// How long the Warlock leads a feared target along the heading it is seen
+/// running on: the shortest leg of a fear run. A Fear turns its bearer every
+/// one to two seconds (`auras::update_auras`), each leg timed from its own
+/// start, so the turn can come at any moment after the decision; this is a
+/// heuristic, not a promise.
+pub const FEAR_LEG_SECS: f32 = 1.0;
+
+/// When a cast of `def`, begun now, lands on `target` standing at
+/// `target_pos` ([`lands_after`]) — with a target the caster's OWN Fear holds
+/// led along the heading it is seen running on (`CombatantInfo::velocity`)
+/// for at most [`FEAR_LEG_SECS`] of the cast. A heuristic: the run may turn
+/// sooner, and a unit clamped against a wall faces a heading it is not
+/// moving along. A feared Druid running at the Warlock through a 2s
+/// Shadow Bolt shortens its flight by a third of a second or more, and the
+/// bolt timed to the Fear's last quarter second would break it early. Every
+/// other target lands as [`lands_after`] says.
+pub fn lands_on_feared(
+    def: &AbilityConfig,
+    caster_pos: Vec3,
+    auras: Option<&ActiveAuras>,
+    target: Entity,
+    target_pos: Vec3,
+    ctx: &CombatContext,
+) -> f32 {
+    let led = match ctx.combatants.get(&target) {
+        Some(info) if ctx.own_fear_on(target).is_some() => {
+            let cast = calculate_cast_time(def.cast_time, auras);
+            target_pos + Vec3::new(info.velocity.x, 0.0, info.velocity.z) * cast.min(FEAR_LEG_SECS)
+        }
+        _ => target_pos,
+    };
+    lands_after(def, caster_pos, led, auras)
 }
 
 /// Does this ability HOLD what it lands on — apply crowd control that stops
@@ -418,7 +480,12 @@ pub fn classify_pre_cast_failure(
         {
             return RejectionReason::TargetAlreadyCCd { cc_type };
         }
-        if opts.check_friendly_cc && ctx.has_friendly_breakable_cc(target_entity) {
+        if opts.check_friendly_cc
+            && ctx.has_friendly_breakable_cc_landing(
+                target_entity,
+                own_fear_lands_after(def, caster_pos, auras, target, ctx, opts),
+            )
+        {
             return RejectionReason::FriendlyBreakableCC;
         }
         if opts.check_friendly_dots && ctx.has_friendly_dots_on_target(target_entity) {
