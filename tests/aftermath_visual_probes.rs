@@ -24,7 +24,7 @@
 //! back from the module's own tables.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::f32::consts::PI;
+use std::f32::consts::{PI, TAU};
 use std::time::Duration;
 
 use bevy::ecs::system::RunSystemOnce;
@@ -347,10 +347,17 @@ struct Seen {
 
 struct Harness {
     app: App,
+    /// Seconds a frame lasts.
+    frame: f32,
 }
 
 impl Harness {
     fn new() -> Self {
+        Self::ticking(TICK)
+    }
+
+    /// A harness whose frames are `tick` long.
+    fn ticking(tick: Duration) -> Self {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -360,7 +367,7 @@ impl Harness {
         app.init_asset::<Mesh>();
         app.init_asset::<StandardMaterial>();
         app.init_asset::<Image>();
-        app.insert_resource(TimeUpdateStrategy::ManualDuration(TICK));
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(tick));
         app.init_resource::<Births>();
         app.add_systems(
             Update,
@@ -375,7 +382,10 @@ impl Harness {
         );
         // Warm the clock: Bevy's first update has a zero delta.
         app.update();
-        Harness { app }
+        Harness {
+            app,
+            frame: tick.as_secs_f32(),
+        }
     }
 
     fn tick(&mut self, frames: u32) {
@@ -385,7 +395,7 @@ impl Harness {
     }
 
     fn tick_secs(&mut self, secs: f32) {
-        self.tick((secs / TICK_SECS).round() as u32);
+        self.tick((secs / self.frame).round() as u32);
     }
 
     fn victim(&mut self, at: Vec3, auras: Vec<Aura>) -> Entity {
@@ -698,10 +708,21 @@ fn a_corpse_gets_no_hit_and_no_flinch() {
 // ── emission ─────────────────────────────────────────────────────────────────
 
 /// Each layer emits only inside its window, fills it from end to end, and
-/// lays down the bench's count over it.
+/// lays down the bench's count over it — at 60 frames a second, and at
+/// twice and half that, so the count is the rate's and not the frame rate's.
 #[test]
 fn each_layer_emits_its_count_across_its_window() {
-    let (h, _, _) = played(1.8);
+    for ms in [16, 8, 33] {
+        assert_bench_emission(Duration::from_millis(ms));
+    }
+}
+
+fn assert_bench_emission(tick: Duration) {
+    let frame = tick.as_secs_f32();
+    let mut h = Harness::ticking(tick);
+    let victim = h.victim(Vec3::new(3.0, COMBATANT_Y, -2.0), vec![]);
+    h.land(victim, AuraLandingKind::AftermathFireHit);
+    h.tick_secs(1.8);
     let births = h.births();
     for (i, layer) in BENCH.iter().enumerate() {
         let ages: Vec<f32> = births
@@ -712,21 +733,21 @@ fn each_layer_emits_its_count_across_its_window() {
         let expected = layer.rate * (WINDOW.1 - WINDOW.0);
         assert!(
             (ages.len() as f32 - expected).abs() <= 1.0,
-            "layer {i}: {} births, the bench lays {expected}",
+            "{frame} s frames, layer {i}: {} births, the bench lays {expected}",
             ages.len()
         );
         let first = ages.iter().copied().fold(f32::MAX, f32::min);
         let last = ages.iter().copied().fold(0.0, f32::max);
         // Births stand inside the window, and fill it: the first within a
         // gap of the opening, the last within a gap of the close.
-        let gap = 1.0 / layer.rate + TICK_SECS;
+        let gap = 1.0 / layer.rate + frame;
         assert!(
             first >= WINDOW.0 - 1e-4 && first < WINDOW.0 + gap,
-            "layer {i}: first birth at {first}"
+            "{frame} s frames, layer {i}: first birth at {first}"
         );
         assert!(
             last < WINDOW.1 && last > WINDOW.1 - gap,
-            "layer {i}: last birth at {last}"
+            "{frame} s frames, layer {i}: last birth at {last}"
         );
     }
 }
@@ -1026,10 +1047,22 @@ fn the_sprites_are_the_benchs_star_and_cloud() {
 /// bench's screen footprint.
 #[test]
 fn every_particle_is_drawn_in_front_of_the_body() {
-    for yaw in [0.0, 1.3, 2.6, 4.0, 5.5] {
+    // The match camera from every side, then the pitches and zooms its
+    // controller allows either side of it.
+    let views = [0.0, 1.3, 2.6, 4.0, 5.5]
+        .map(|yaw| (60.0, 38.7, yaw))
+        .into_iter()
+        .chain([
+            (60.0, 15.0, 0.5),
+            (60.0, 60.0, 3.0),
+            (60.0, 80.0, 5.0),
+            (25.0, 38.7, 1.0),
+            (100.0, 50.0, 2.0),
+        ]);
+    for (zoom, pitch, yaw) in views {
         let mut h = Harness::new();
         let at = Vec3::new(1.0, COMBATANT_Y, 2.0);
-        let cam = match_camera(at, 60.0, 38.7f32.to_radians(), yaw);
+        let cam = match_camera(at, zoom, f32::to_radians(pitch), yaw);
         h.camera(cam);
         let victim = h.victim(at, vec![]);
         h.land(victim, AuraLandingKind::AftermathFireHit);
@@ -1050,7 +1083,8 @@ fn every_particle_is_drawn_in_front_of_the_body() {
             let depth = (p.drawn - eye).dot(forward);
             assert!(
                 depth < body_near,
-                "yaw {yaw}: drawn at depth {depth}, the body starts at {body_near}"
+                "{zoom} yd, pitch {pitch}, yaw {yaw}: drawn at depth {depth}, the body starts \
+                 at {body_near}"
             );
             // On its own view ray.
             let ray = (p.truly - eye).normalize();
@@ -1071,8 +1105,154 @@ fn every_particle_is_drawn_in_front_of_the_body() {
         }
         assert!(
             held > 10,
-            "yaw {yaw}: only {held} of {} particles needed holding",
+            "{zoom} yd, pitch {pitch}, yaw {yaw}: only {held} of {} particles needed holding",
             particles.len()
+        );
+    }
+}
+
+/// How close in front of the body's nearest point a held particle stands
+/// (`SIPHON_BODY_CLEARANCE`, the hold the hit reuses).
+const HOLD_CLEARANCE: f32 = 0.05;
+
+/// The depth a particle at true depth `truly` is drawn at, in front of a body
+/// whose nearest point stands at depth `body_near`: where it is if already
+/// in front, else just in front of the body.
+fn held_depth(truly: f32, body_near: f32) -> f32 {
+    truly.min(body_near - HOLD_CLEARANCE)
+}
+
+/// The hold is judged against where the body IS: a victim that runs at the
+/// camera under its burst (Aftermath is a slow, and the slowed run) still
+/// has every particle drawn in front of it.
+#[test]
+fn the_burst_stays_in_front_of_a_victim_running_at_the_camera() {
+    let at = Vec3::new(1.0, COMBATANT_Y, 2.0);
+    let cam = match_camera(at, 60.0, 38.7f32.to_radians(), 0.0);
+    let mut h = Harness::new();
+    h.camera(cam);
+    let victim = h.victim(at, vec![]);
+    h.land(victim, AuraLandingKind::AftermathFireHit);
+    h.tick_secs(0.1);
+    let eye = cam.translation;
+    let forward = cam.forward().as_vec3();
+    let toward = Vec3::new(-forward.x, 0.0, -forward.z).normalize();
+    // Half a second at 7 yd/s.
+    let mut now = at;
+    for _ in 0..31 {
+        now += toward * 7.0 * TICK_SECS;
+        h.move_to(victim, now);
+        h.tick(1);
+    }
+    let body_near = [
+        now - Vec3::Y * BODY_HALF_SEGMENT,
+        now + Vec3::Y * BODY_HALF_SEGMENT,
+    ]
+    .iter()
+    .map(|p| (*p - eye).dot(forward))
+    .fold(f32::MAX, f32::min)
+        - BODY_RADIUS;
+    let particles = h.particles();
+    assert!(particles.len() > 20, "{} particles", particles.len());
+    let mut held = 0;
+    for p in &particles {
+        let truly = (p.truly - eye).dot(forward);
+        let drawn = (p.drawn - eye).dot(forward);
+        assert!(
+            (drawn - held_depth(truly, body_near)).abs() < 1e-3,
+            "drawn at depth {drawn}, held against the moved body it stands at {}",
+            held_depth(truly, body_near)
+        );
+        if drawn < truly - 1e-3 {
+            held += 1;
+        }
+    }
+    assert!(held > 10, "only {held} particles needed holding");
+}
+
+/// A pet's burst is held against the PET's body — the sphere bounding its
+/// laid-down capsule, centred 0.45 below its sim position, 0.35 + 0.3 in
+/// radius — from every side: each particle is drawn just in front of that
+/// sphere, on its own view ray.
+#[test]
+fn a_pets_burst_is_held_in_front_of_the_pet() {
+    const PET_BOUND: f32 = 0.35 + 0.3;
+    for yaw in [0.0f32, 2.0, 4.5] {
+        let at = Vec3::new(-1.0, PET_SIM_Y, 4.0);
+        let centre = at + Vec3::Y * PET_BODY_Y;
+        let cam = match_camera(centre, 60.0, 38.7f32.to_radians(), yaw);
+        let mut h = Harness::new();
+        h.camera(cam);
+        let pet = h.pet_victim(at);
+        h.land(pet, AuraLandingKind::AftermathFireHit);
+        h.tick_secs(0.4);
+        let eye = cam.translation;
+        let forward = cam.forward().as_vec3();
+        let body_near = (centre - eye).dot(forward) - PET_BOUND;
+        let particles = h.particles();
+        assert!(particles.len() > 20, "yaw {yaw}: {}", particles.len());
+        let mut held = 0;
+        for p in &particles {
+            let truly = (p.truly - eye).dot(forward);
+            let drawn = (p.drawn - eye).dot(forward);
+            assert!(
+                (drawn - held_depth(truly, body_near)).abs() < 1e-3,
+                "yaw {yaw}: drawn at depth {drawn}, held against the pet it stands at {}",
+                held_depth(truly, body_near)
+            );
+            if drawn < truly - 1e-3 {
+                held += 1;
+            }
+        }
+        // The pet's chest is inside its bounding sphere, so at this burst's
+        // reach every particle needs the hold: none is left where it is.
+        assert!(held > 20, "yaw {yaw}: only {held} held");
+    }
+}
+
+/// Every sprite faces the camera, from any view, and wears its own roll in
+/// the camera's plane (the bench's `ang`), spread all the way round.
+#[test]
+fn every_sprite_faces_the_camera_at_its_own_roll() {
+    for (pitch, yaw) in [(38.7f32, 0.0f32), (38.7, 2.2), (20.0, 4.0), (70.0, 1.0)] {
+        let mut h = Harness::new();
+        let at = Vec3::new(1.0, COMBATANT_Y, 2.0);
+        let cam = match_camera(at, 60.0, pitch.to_radians(), yaw);
+        h.camera(cam);
+        let victim = h.victim(at, vec![]);
+        h.land(victim, AuraLandingKind::AftermathFireHit);
+        h.tick_secs(0.4);
+        let world = h.app.world_mut();
+        let drawn: Vec<(f32, Quat)> = world
+            .query::<(&AftermathHitParticle, &GlobalTransform)>()
+            .iter(world)
+            .map(|(p, g)| (p.angle, g.to_scale_rotation_translation().1))
+            .collect();
+        assert!(drawn.len() > 20, "pitch {pitch} yaw {yaw}: {}", drawn.len());
+        let (back, right, up) = (
+            cam.rotation * Vec3::Z,
+            cam.rotation * Vec3::X,
+            cam.rotation * Vec3::Y,
+        );
+        let mut quadrants = BTreeSet::new();
+        for (angle, rotation) in drawn {
+            assert!(
+                (rotation * Vec3::Z).dot(back) > 1.0 - 1e-5,
+                "pitch {pitch} yaw {yaw}: a sprite does not face the camera"
+            );
+            let x = rotation * Vec3::X;
+            let roll = x.dot(up).atan2(x.dot(right));
+            let off = (roll - angle).rem_euclid(TAU);
+            assert!(
+                off < 1e-3 || off > TAU - 1e-3,
+                "pitch {pitch} yaw {yaw}: rolled {roll}, its own roll is {angle}"
+            );
+            quadrants.insert((roll.rem_euclid(TAU) / (PI / 2.0)) as u8);
+        }
+        assert_eq!(
+            quadrants,
+            BTreeSet::from([0, 1, 2, 3]),
+            "pitch {pitch} yaw {yaw}: rolls are not spread round"
         );
     }
 }
