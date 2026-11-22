@@ -522,7 +522,8 @@ impl DruidEffect {
             | AuraLandingKind::AmplifyFlash
             | AuraLandingKind::ShadowTrance
             | AuraLandingKind::RepentanceImpact
-            | AuraLandingKind::SacrificeTriad => None,
+            | AuraLandingKind::SacrificeTriad
+            | AuraLandingKind::AftermathFireHit => None,
         }
     }
 }

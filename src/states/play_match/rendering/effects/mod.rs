@@ -82,6 +82,8 @@ mod immolate;
 pub use immolate::*;
 mod siphon_life;
 pub use siphon_life::*;
+mod aftermath;
+pub use aftermath::*;
 mod gait;
 pub use gait::*;
 mod totems;
