@@ -655,6 +655,18 @@ carrying every slot's build.
   one that is not a positive number or is more than 5x off its reference
   either way (`TalentConfig::price_sanity`). Never give armor or another free
   stat an item weight to price a talent: that re-prices every item.
+- **Reference builds** (`reference_builds` in `talents.ron`,
+  `src/states/play_match/reference_builds.rs`): each class's named builds,
+  one deep in each tree, which the loader holds legal at exactly 8 points and
+  taking that tree's capstone. They are what authored Gauntlet opponents
+  carry, what the bot's default policy plays, and what a sweep reports a
+  class's standing with. A headless config names one by name
+  (`"team1_builds": ["Demonology"]`) or moves its ranks
+  (`{"reference": "Demonology", "remove": {"SoulLink": 1}, "add":
+  {"DemonicEmbrace": 1}}`, a node arm); `gen_sweep.py --build
+  Warlock=Demonology` gives one to every slot of a class. A test that edits
+  a tree drops them first (`tree_text` in `tests/talents.rs`). The Warlock's
+  node-arm sweep: `docs/design/balance/2026-11-22-as299-warlock-talent-sweep.md`.
 - **Adding a talent ability:** mark it `talent: true` in `abilities.ron` (it
   leaves its class's base book) and `Grant` it from exactly one node. Its
   class AI decides it with `abilities.get(..)`, never `get_unchecked`: an

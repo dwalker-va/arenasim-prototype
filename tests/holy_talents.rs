@@ -348,7 +348,7 @@ fn spawned_priest(build: &Build) -> Combatant {
         team1: vec!["Warrior".into()],
         team2: vec!["Priest".into()],
         random_seed: Some(7),
-        team2_builds: vec![build.clone()],
+        team2_builds: vec![build.clone().into()],
         ..Default::default()
     };
     let mut app = build_headless_app(&config, true, None);
@@ -593,7 +593,7 @@ fn the_spirits_save_heals_thirty_percent_and_spends_the_whole_spirit() {
             team2: vec!["Mage".into()],
             random_seed: Some(3),
             max_duration_secs: 8.0,
-            team1_builds: vec![full_holy()],
+            team1_builds: vec![full_holy().into()],
             ..Default::default()
         };
         let stage = Stage::new()
@@ -714,7 +714,7 @@ fn guardian_spirit_costs_seventeen_and_no_global_cooldown() {
         team2: vec!["Warrior".into(), "Warrior".into()],
         random_seed: Some(2),
         max_duration_secs: 4.0,
-        team1_builds: vec![full_holy()],
+        team1_builds: vec![full_holy().into()],
         ..Default::default()
     };
     let stage = Stage::new()
@@ -752,7 +752,7 @@ fn holy_nova_heals_and_strikes_inside_for_fifty_on_the_global_cooldown() {
         team2: vec!["Warrior".into(), "Warrior".into()],
         random_seed: Some(2),
         max_duration_secs: 4.0,
-        team1_builds: vec![nova_build()],
+        team1_builds: vec![nova_build().into()],
         ..Default::default()
     };
     const T1C: Unit = Unit::new(1, 2);
@@ -918,7 +918,7 @@ fn lone_nova(stage: impl FnOnce(Stage) -> Stage, build: Build) -> String {
         team2: vec!["Warrior".into()],
         random_seed: Some(2),
         max_duration_secs: 3.0,
-        team1_builds: vec![build],
+        team1_builds: vec![build.into()],
         ..Default::default()
     };
     let base = Stage::new()
@@ -1070,7 +1070,7 @@ fn guardian_spirit_cools_down_for_sixty_seconds() {
         team2: vec!["Warrior".into()],
         random_seed: Some(3),
         max_duration_secs: 3.0,
-        team1_builds: vec![full_holy()],
+        team1_builds: vec![full_holy().into()],
         ..Default::default()
     };
     let stage = Stage::new()
@@ -1144,7 +1144,8 @@ fn a_critical_holy_nova_heal_is_its_priests_heal_crit() {
             (Inspiration, 2),
             (HolyConcentration, 1),
             (TalentId::HolyNova, 1),
-        ])],
+        ])
+        .into()],
         ..Default::default()
     };
     let stage = Stage::new()

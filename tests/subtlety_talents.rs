@@ -315,7 +315,7 @@ fn spawned_rogue(build: &Build) -> Combatant {
         team1: vec!["Rogue".into()],
         team2: vec!["Warrior".into()],
         random_seed: Some(7),
-        team1_builds: vec![build.clone()],
+        team1_builds: vec![build.clone().into()],
         ..Default::default()
     };
     let mut app = build_headless_app(&config, true, None);
@@ -1235,7 +1235,7 @@ fn held_match(build: Build, seed: u64) -> common::staged::Played {
         team2: vec!["Warrior".into()],
         random_seed: Some(seed),
         max_duration_secs: 90.0,
-        team1_builds: vec![build],
+        team1_builds: vec![build.into()],
         ..Default::default()
     };
     let tough = |c: &mut Combatant| {
@@ -1362,7 +1362,7 @@ fn cheat_death_saves_the_rogue_once() {
             team2: vec!["Warrior".into()],
             random_seed: Some(4),
             max_duration_secs: 120.0,
-            team1_builds: vec![build],
+            team1_builds: vec![build.into()],
             ..Default::default()
         };
         let stage = Stage::new().combatant(Unit::new(2, 0), |c: &mut Combatant| {

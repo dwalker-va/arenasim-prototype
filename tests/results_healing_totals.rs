@@ -132,8 +132,8 @@ fn every_heal_total_is_the_sum_of_its_breakdown() {
                     team2: t2.iter().map(|c| c.to_string()).collect(),
                     random_seed: Some(seed),
                     map: map.into(),
-                    team1_builds: builds(t1),
-                    team2_builds: builds(t2),
+                    team1_builds: builds(t1).into_iter().map(Into::into).collect(),
+                    team2_builds: builds(t2).into_iter().map(Into::into).collect(),
                     ..Default::default()
                 };
                 let finished = run(build_headless_app(&config, true, None));
@@ -201,7 +201,7 @@ fn play(spirited: bool) -> Played {
         team2: vec!["Mage".into()],
         random_seed: Some(3),
         max_duration_secs: 8.0,
-        team1_builds: vec![full_holy()],
+        team1_builds: vec![full_holy().into()],
         ..Default::default()
     };
     let stage = Stage::new()
@@ -363,7 +363,7 @@ fn nova(teammate: f32) -> Finished {
         team2: vec!["Warrior".into()],
         random_seed: Some(2),
         max_duration_secs: 4.0,
-        team1_builds: vec![full_holy()],
+        team1_builds: vec![full_holy().into()],
         ..Default::default()
     };
     let stage = Stage::new()

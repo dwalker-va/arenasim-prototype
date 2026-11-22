@@ -58,6 +58,7 @@ pub mod next_cast;
 pub mod on_use_items;
 pub mod proc_trinkets;
 pub mod projectiles;
+pub mod reference_builds;
 pub mod rendering;
 pub mod selection;
 pub mod shadow_sight;

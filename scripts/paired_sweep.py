@@ -21,6 +21,14 @@ reach, given by `--affects`:
     AGAINST    only team2 fields one. The same effect, pointed the other way.
     MIRRORED   both sides field one, so the effect is expected to WASH.
 
+Those four, and the reachable aggregate, are scored as TEAM1's win rate. A
+change to one class, carried by that class on both sides (a talent build, a
+class loadout), shows its effect in CLEAN and the same effect reversed in
+AGAINST, so the reachable aggregate washes to about zero by construction.
+`--headline affected` adds the AFFECTED SIDE aggregate -- CLEAN and AGAINST
+together, each scored for the side that fields the affected class -- and
+makes it the verdict's headline: the affected class's own win rate, paired.
+
 `--affects` names classes, so the slicing is only right for a change that
 reaches a CLASS — an ability, a class loadout, a spell coefficient. A change
 scoped to ONE SIDE instead (a `team1_equipment` override, a per-team AI
@@ -151,7 +159,10 @@ class Slice:
     """One named subset of the paired matches, and what it measured."""
 
     def __init__(self, name, keys, before, after, expected_to_wash=False,
-                 aggregate=False):
+                 aggregate=False, side=None):
+        """`side(key)` names the team a match is scored for ("team1" unless
+        given): a win is that team winning."""
+        side = side or (lambda key: "team1")
         self.name = name
         self.n = len(keys)
         self.expected_to_wash = expected_to_wash
@@ -160,12 +171,12 @@ class Slice:
         # denominator by one and make "one significant slice of two" the
         # normal reading of a single real effect.
         self.aggregate = aggregate
-        self.before_wins = sum(1 for k in keys if before[k][0] == "team1")
-        self.after_wins = sum(1 for k in keys if after[k][0] == "team1")
+        self.before_wins = sum(1 for k in keys if before[k][0] == side(k))
+        self.after_wins = sum(1 for k in keys if after[k][0] == side(k))
         self.to_win = sum(1 for k in keys
-                          if before[k][0] != "team1" and after[k][0] == "team1")
+                          if before[k][0] != side(k) and after[k][0] == side(k))
         self.to_loss = sum(1 for k in keys
-                           if before[k][0] == "team1" and after[k][0] != "team1")
+                           if before[k][0] == side(k) and after[k][0] != side(k))
         self.moved = sum(1 for k in keys if before[k][0] != after[k][0])
         self.durations_moved = sum(1 for k in keys if before[k][3] != after[k][3])
         self.z = mcnemar(self.to_win, self.to_loss)
@@ -354,8 +365,10 @@ def report_slice_count(slices):
               "this number is cited." % len(tested))
 
 
-def report_verdict(overall, expect):
-    """Answer the success condition the card stated, in its own terms."""
+def report_verdict(overall, expect, scope="the reachable matches"):
+    """Answer the success condition the card stated, in its own terms.
+
+    `scope` names what `overall` aggregates, as the verdict states it."""
     if expect is None:
         print("NO SUCCESS CONDITION DECLARED (--expect). This report says what "
               "moved; it cannot say whether that is the answer the card wanted. "
@@ -366,12 +379,13 @@ def report_verdict(overall, expect):
     if expect == "nothing":
         if overall.significant:
             print("VERDICT: the run CONTRADICTS its success condition — expected "
-                  "no movement, measured %+.1fpt (z=%.2f) over the reachable "
-                  "matches." % (overall.delta, overall.z))
+                  "no movement, measured %+.1fpt (z=%.2f) over %s."
+                  % (overall.delta, overall.z, scope))
         elif overall.floor is None:
-            print("VERDICT: nothing flipped anywhere in the reachable matches. "
+            print("VERDICT: nothing flipped anywhere in %s. "
                   "The change is inert on this sweep — which is the expected "
-                  "answer only if it was expected to be inert, not merely small.")
+                  "answer only if it was expected to be inert, not merely small."
+                  % scope)
         else:
             print("VERDICT: consistent with no movement. This run could have "
                   "resolved a delta of %.1fpt or more and measured %+.1fpt, so it "
@@ -379,12 +393,12 @@ def report_verdict(overall, expect):
                   % (overall.floor, overall.delta))
     elif expect == "move":
         if overall.significant:
-            print("VERDICT: %+.1fpt over the reachable matches (z=%.2f), resolved."
-                  % (overall.delta, overall.z))
+            print("VERDICT: %+.1fpt over %s (z=%.2f), resolved."
+                  % (overall.delta, scope, overall.z))
         else:
-            print("VERDICT: %+.1fpt over the reachable matches, NOT resolvable at "
+            print("VERDICT: %+.1fpt over %s, NOT resolvable at "
                   "this size (%s). Report the direction; do not cite the magnitude."
-                  % (overall.delta,
+                  % (overall.delta, scope,
                      "floor %.1fpt" % overall.floor if overall.floor is not None
                      else "nothing flipped"))
 
@@ -412,6 +426,14 @@ def main(argv=None):
                          "'a separate Hunter arm, <file>'). Printed into the "
                          "report; without it such a run exits non-zero. It "
                          "never excuses a control that moved.")
+    ap.add_argument("--headline", choices=("reachable", "affected"),
+                    default="reachable",
+                    help="the aggregate the verdict answers: 'reachable' (every "
+                         "match the change can reach, as team1's win rate; the "
+                         "default) or 'affected' (the matches where ONE side "
+                         "fields an affected class, scored for that side: the "
+                         "class's own win rate, for a change it carries on "
+                         "both sides)")
     ap.add_argument("--per-cell", action="store_true",
                     help="also print per-cell deltas, each with its own "
                          "half-width. Off by default: at directional n a cell "
@@ -455,9 +477,19 @@ def main(argv=None):
         Slice("MIRRORED (both sides)", buckets["mirrored"], before, after,
               expected_to_wash=True),
     ]
+    headline = slices[0]
+    if args.headline == "affected":
+        clean = set(buckets["clean"])
+        headline = Slice("AFFECTED SIDE (scored for it)",
+                         buckets["clean"] + buckets["against"], before, after,
+                         aggregate=True,
+                         side=lambda k: "team1" if k in clean else "team2")
     print("team1 win rate, paired at identical seeds; McNemar z on the flips:")
     for one in slices:
         print("  " + one.line())
+    if args.headline == "affected":
+        print("the affected side's win rate, over CLEAN and AGAINST:")
+        print("  " + headline.line())
     print()
 
     report_non_vacuity(keys, before, after)
@@ -470,7 +502,9 @@ def main(argv=None):
     report_slice_count(slices)
     print()
 
-    report_verdict(slices[0], args.expect)
+    report_verdict(headline, args.expect,
+                   "the reachable matches" if args.headline == "reachable"
+                   else "the affected side's matches")
     if args.tier == "directional":
         print("Directional tier: this is which-way-and-roughly-how-much. It may "
               "not be cited as a class's standing.")

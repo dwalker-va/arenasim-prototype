@@ -886,7 +886,7 @@ fn ret_match(
         team2: vec!["Warrior".into(), "Priest".into()],
         random_seed: Some(5),
         max_duration_secs: 14.0,
-        team1_builds: vec![build],
+        team1_builds: vec![build.into()],
         team1_equipment: vec![reaper],
         ..Default::default()
     };
@@ -1163,7 +1163,7 @@ fn a_teammate_deciding_later_in_the_frame_sees_the_repentance() {
             team2: vec!["Warrior".into(), "Priest".into()],
             random_seed: Some(5),
             max_duration_secs: 2.0,
-            team1_builds: vec![build],
+            team1_builds: vec![build.into()],
             team1_cc_target: Some(1),
             ..Default::default()
         };
