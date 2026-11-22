@@ -278,16 +278,19 @@ fn own_fear_lands_after(
         .then(|| lands_on_feared(def, caster_pos, auras, entity, target_pos, ctx))
 }
 
-/// The shortest straight leg of a feared unit's run: a Fear turns its bearer
-/// every one to two seconds (`auras::update_auras`), so the heading it runs on
-/// now holds for at least this long.
+/// How long the Warlock leads a feared target along the heading it is seen
+/// running on: the shortest leg of a fear run. A Fear turns its bearer every
+/// one to two seconds (`auras::update_auras`), each leg timed from its own
+/// start, so the turn can come at any moment after the decision; this is a
+/// heuristic, not a promise.
 pub const FEAR_LEG_SECS: f32 = 1.0;
 
 /// When a cast of `def`, begun now, lands on `target` standing at
 /// `target_pos` ([`lands_after`]) — with a target the caster's OWN Fear holds
 /// led along the heading it is seen running on (`CombatantInfo::velocity`)
-/// for as much of the cast as that heading is sure to hold
-/// ([`FEAR_LEG_SECS`]). A feared Druid running at the Warlock through a 2s
+/// for at most [`FEAR_LEG_SECS`] of the cast. A heuristic: the run may turn
+/// sooner, and a unit clamped against a wall faces a heading it is not
+/// moving along. A feared Druid running at the Warlock through a 2s
 /// Shadow Bolt shortens its flight by a third of a second or more, and the
 /// bolt timed to the Fear's last quarter second would break it early. Every
 /// other target lands as [`lands_after`] says.

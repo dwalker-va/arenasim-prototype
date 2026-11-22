@@ -1768,6 +1768,15 @@ pub const CC_CHAIN_WINDOW: f32 = 0.5;
 /// are timed by the one clock.
 pub const FEAR_WINDOW_LEAD: f32 = chain::HANDOFF_LEAD;
 
+/// Where in that last lead the Warlock aims its Shadow Bolt to land: the
+/// middle. Its landing is a prediction (a feared target turns at random), so
+/// a bolt aimed at the lead's first instant broke the Fear early on every
+/// early error. Measured in 1v1 against healers: aimed at the first instant,
+/// 41% of the timed bolts landed before the lead; at the middle, 23% (0.37s
+/// early on average) with 11% after the Fear's end; at the end itself, 11%
+/// early but 41% late, the target free in between.
+pub const FEAR_WINDOW_AIM: f32 = FEAR_WINDOW_LEAD / 2.0;
+
 /// Is `aura` a Fear `caster` cast that damage breaks — its own Fear, not a
 /// Death Coil horror (which never breaks) nor a teammate's?
 pub fn is_own_breakable_fear(aura: &Aura, caster: Entity) -> bool {

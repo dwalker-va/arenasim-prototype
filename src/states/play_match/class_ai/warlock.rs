@@ -750,7 +750,9 @@ pub fn decide_warlock_action(
                 AbilityType::Fear,
                 RejectionReason::TargetAlreadyCCd { cc_type },
             );
-        } else if !fear_lands_full(ctx, fear_target_entity) {
+        } else if combatant.target == Some(fear_target_entity)
+            && !fear_lands_full(ctx, fear_target_entity)
+        {
             builder.reject(
                 AbilityType::Fear,
                 RejectionReason::PreconditionUnmet {
@@ -879,10 +881,14 @@ enum WindowStep {
 /// re-Fear onto it; the step fills the window instead:
 ///
 /// 1. **The damage.** Shadow Bolt is begun to land in the Fear's last
-///    [`super::FEAR_WINDOW_LEAD`] (the Chain play's hand-off lead), never
-///    before: the cast gate's `time_own_fear` lets every damage cast on the
-///    target through only then. Inside the last global cooldown before that
-///    moment the Warlock holds, so nothing it casts delays the bolt.
+///    [`super::FEAR_WINDOW_LEAD`] (the Chain play's hand-off lead), aimed at
+///    its middle ([`super::FEAR_WINDOW_AIM`]) so a landing the prediction
+///    gets wrong still tends to fall inside it. Never before: the cast gate's
+///    `time_own_fear` lets every damage cast on the target through only in
+///    that last lead. Inside the last global cooldown before the bolt is due
+///    the Warlock holds, so nothing it casts delays it — when the bolt could
+///    go but for the Fear (in range and sight, affordable, not locked out,
+///    not being kited); a bolt it cannot cast holds nothing up.
 /// 2. **The free globals.** Until then it spends what does not break the
 ///    Fear: Life Tap (the pool topped up, not only when starved), its curses
 ///    (a curse that deals no damage goes on the feared target itself), and
@@ -903,39 +909,49 @@ fn fear_window_step(
     movement: &MovementConfig,
     builder: &mut DecisionEventBuilder<'_>,
 ) -> WindowStep {
-    use super::cast_guard::lands_on_feared;
-    use super::FEAR_WINDOW_LEAD;
+    use super::cast_guard::{lands_on_feared, pre_cast_ok};
+    use super::FEAR_WINDOW_AIM;
 
     let Some(fear) = ctx.own_fear_on(target_entity) else {
         return WindowStep::Open;
     };
     let bolt_def = abilities.get_unchecked(&AbilityType::Shadowbolt);
 
-    // 1. The damage: seconds until Shadow Bolt is due to land at the end.
+    // 1. The damage: seconds until Shadow Bolt is due, aimed at the middle of
+    // the Fear's last lead — when the Warlock could cast it but for the Fear.
     let wait = fear.duration
-        - FEAR_WINDOW_LEAD
+        - FEAR_WINDOW_AIM
         - lands_on_feared(bolt_def, my_pos, auras, target_entity, target_pos, ctx);
-    if wait <= 0.0 {
-        if !being_kited
-            && try_shadowbolt(
-                commands,
-                combat_log,
-                abilities,
-                entity,
-                combatant,
-                my_pos,
-                auras,
-                target_entity,
-                target_pos,
-                ctx,
-                builder,
-            )
-        {
+    let bolt_castable = !being_kited
+        && pre_cast_ok(
+            AbilityType::Shadowbolt,
+            bolt_def,
+            combatant,
+            my_pos,
+            auras,
+            Some((target_entity, target_pos)),
+            ctx,
+            PreCastOpts::default(),
+        );
+    if bolt_castable && wait <= 0.0 {
+        if try_shadowbolt(
+            commands,
+            combat_log,
+            abilities,
+            entity,
+            combatant,
+            my_pos,
+            auras,
+            target_entity,
+            target_pos,
+            ctx,
+            builder,
+        ) {
             return WindowStep::Acted;
         }
         return WindowStep::Open;
     }
-    if wait <= GCD {
+    if bolt_castable && wait <= GCD {
         builder.reject(
             AbilityType::Shadowbolt,
             RejectionReason::PreconditionUnmet {
@@ -982,7 +998,7 @@ fn fear_window_step(
             return WindowStep::Acted;
         }
     }
-    if !being_kited && bolt_cast.max(GCD) <= wait {
+    if !being_kited && (!bolt_castable || bolt_cast.max(GCD) <= wait) {
         for other in &others {
             if try_shadowbolt(
                 commands,

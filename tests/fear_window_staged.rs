@@ -2,14 +2,17 @@
 //! healer: the Warlock's own Fear lands on the Druid as the gates open, its
 //! Corruption and Curse of Agony already ticking, and its mana short of full.
 //!
-//! What the window must show, frame by frame:
+//! What the window must show, over a bank of seeds, in literal seconds (the
+//! ruling's quarter second, never derived from the constants under test):
 //!
-//! - the Fear holds its full eight seconds: nothing the Warlock does breaks
-//!   it, and no direct hit of the Warlock's lands, before its last
-//!   `FEAR_WINDOW_LEAD` — less the flight a feared Druid's unseen run can cut
-//!   (the bolt is aimed with the Druid led one leg along its run, and the
-//!   Fear turns it at random after that);
-//! - a Shadow Bolt lands as the Fear ends;
+//! - the timed Shadow Bolt lands around the Fear's end: the median bolt lands
+//!   inside its last quarter second, short of its first instant, and none
+//!   lands more than [`EARLY_MAX`] early or [`LATE_MAX`] late. The bolt is
+//!   aimed at the middle of that quarter second, its landing predicted with
+//!   the feared Druid led along the heading it runs on; the Fear turns the
+//!   Druid at random, which spreads it;
+//! - no direct hit of the Warlock's lands earlier in the Fear, and the Fear
+//!   holds its full eight seconds to within that spread;
 //! - the Warlock spends the window's globals (a Life Tap topping its mana up)
 //!   instead of idling through it: its idle time in the window is bounded by
 //!   the window less the tap's global cooldown and the bolt's cast.
@@ -20,13 +23,8 @@
 
 mod common;
 
-use std::sync::{Arc, Mutex};
-
 use arenasim::headless::{HeadlessMatchConfig, Stage, Unit};
-use arenasim::states::play_match::ability_config::AbilityDefinitions;
-use arenasim::states::play_match::class_ai::FEAR_WINDOW_LEAD;
 use arenasim::states::play_match::components::AuraType;
-use arenasim::states::play_match::components::Combatant;
 use arenasim::states::play_match::AbilityType;
 use common::staged::{entity_id, play, sim_time, Played};
 
@@ -35,11 +33,21 @@ const DRUID: Unit = Unit::new(2, 0);
 const FRAME: f32 = 1.0 / 60.0;
 /// Fear's full duration (`abilities.ron`).
 const FEAR_SECS: f32 = 8.0;
-/// How late after the Fear's end its bolt may land. The bolt is timed to its
-/// last `FEAR_WINDOW_LEAD` with the feared Druid led along its run for one
-/// leg (`cast_guard::lands_on_feared`); a Druid that turns away mid-cast
-/// lengthens the flight past the prediction.
-const LATE: f32 = 0.25;
+const SEEDS: std::ops::RangeInclusive<u64> = 1..=12;
+/// The ruling's window: damage lands in the Fear's last quarter second.
+const WINDOW: f32 = 0.25;
+/// The median bolt lands no closer to the end than this: inside the window,
+/// clear of its last instant.
+const MEDIAN_LATEST: f32 = -0.05;
+/// ...and no further before the end than this: short of the window's first
+/// instant, so a window aimed half a second wider fails here.
+const MEDIAN_EARLIEST: f32 = 0.2;
+/// The most any one bolt lands before the Fear ends. Measured 0.45s over this
+/// bank: a feared Druid that turns to run at the Warlock mid-cast shortens
+/// the flight past the prediction.
+const EARLY_MAX: f32 = 0.6;
+/// The most any one bolt lands after it: one that turns away lengthens it.
+const LATE_MAX: f32 = 0.25;
 
 fn config(seed: u64) -> HeadlessMatchConfig {
     HeadlessMatchConfig {
@@ -51,27 +59,8 @@ fn config(seed: u64) -> HeadlessMatchConfig {
     }
 }
 
-/// The stage, and a slot it fills with the bolt's flight slack: the most an
-/// unseen run at the Warlock can shorten a Shadow Bolt's cast and flight onto
-/// the feared Druid — through the whole cast and the longest flight (the
-/// bolt's range), at the Druid's speed over the bolt's. The lead
-/// (`cast_guard::lands_on_feared`) sees one leg of the run; the rest is the
-/// Fear's random turns.
-fn stage(slack: Arc<Mutex<f32>>) -> Stage {
+fn stage() -> Stage {
     Stage::new()
-        .world(move |world| {
-            let bolt = world
-                .resource::<AbilityDefinitions>()
-                .get_unchecked(&AbilityType::Shadowbolt)
-                .clone();
-            let druid = DRUID.entity(world);
-            let speed = world
-                .get::<Combatant>(druid)
-                .expect("the Druid")
-                .base_movement_speed;
-            let flies = bolt.projectile_speed.expect("a bolt flies");
-            *slack.lock().unwrap() = (bolt.cast_time + bolt.range / flies) * speed / flies;
-        })
         .place(WARLOCK, 0.0, 0.0)
         .place(DRUID, 20.0, 0.0)
         .target(WARLOCK, DRUID)
@@ -83,14 +72,15 @@ fn stage(slack: Arc<Mutex<f32>>) -> Stage {
 }
 
 /// App-clock times of the Warlock's direct hits on the Druid (DoT ticks are
-/// not hits), read off the combat log.
+/// not hits, and neither is the wand, which fires the frame a hold ends),
+/// read off the combat log.
 fn bolt_hits(played: &Played) -> Vec<f32> {
     played
         .log
         .lines()
         .filter(|l| {
             l.contains("Team 1 Warlock #1's ")
-                && l.contains(" hits Team 2 Druid #1 ")
+                && (l.contains(" hits Team 2 Druid #1 ") || l.contains(" CRITS Team 2 Druid #1 "))
                 && !l.contains("Wand")
         })
         .filter_map(|l| {
@@ -103,11 +93,11 @@ fn bolt_hits(played: &Played) -> Vec<f32> {
 
 #[test]
 fn the_fear_window_holds_its_full_length_and_its_damage_lands_as_it_ends() {
-    for seed in [1, 2, 3] {
-        let slack = Arc::new(Mutex::new(f32::NAN));
-        let played = play(config(seed), stage(slack.clone()));
-        let slack = *slack.lock().unwrap();
-        let early = FEAR_WINDOW_LEAD + slack;
+    // How long before the Fear's end each seed's timed bolt landed (negative:
+    // after it).
+    let mut offsets = Vec::new();
+    for seed in SEEDS {
+        let played = play(config(seed), stage());
         let landed = played.landed().app;
         let druid = played.frames[0]
             .combatants
@@ -116,43 +106,43 @@ fn the_fear_window_holds_its_full_length_and_its_damage_lands_as_it_ends() {
             .map(|(e, _)| *e)
             .expect("the Druid");
 
-        // The Fear: from the stage to the first frame without it.
+        // The Fear: from its first frame to the first frame without it.
+        let feared = played
+            .staged_frames()
+            .find(|f| f.combatants[&druid].aura_types.contains(&AuraType::Fear))
+            .map(|f| f.sim_time)
+            .unwrap_or_else(|| panic!("seed {seed}: the Fear lands"));
         let ended = played
             .staged_frames()
             .skip(1)
             .find(|f| !f.combatants[&druid].aura_types.contains(&AuraType::Fear))
             .map(|f| f.sim_time)
             .unwrap_or_else(|| panic!("seed {seed}: the Fear ends"));
-        let feared = played
-            .staged_frames()
-            .find(|f| f.combatants[&druid].aura_types.contains(&AuraType::Fear))
-            .map(|f| f.sim_time)
-            .unwrap_or_else(|| panic!("seed {seed}: the Fear lands"));
         let held = ended - feared;
         assert!(
-            held >= FEAR_SECS - early - 2.0 * FRAME && held <= FEAR_SECS + 2.0 * FRAME,
-            "seed {seed}: the Fear held {held:.3}s, broken more than {early:.2}s early; \
-             on the Druid: {:#?}",
-            played
-                .log
-                .lines()
-                .filter(|l| l.contains("Druid #1"))
-                .collect::<Vec<_>>()
+            (FEAR_SECS - EARLY_MAX - 2.0 * FRAME..=FEAR_SECS + 2.0 * FRAME).contains(&held),
+            "seed {seed}: the Fear held {held:.3}s"
         );
 
-        // No direct hit before the last moment; a bolt in it.
+        // No direct hit earlier in the Fear; the timed bolt around its end.
         let hits = bolt_hits(&played);
         let until = feared + FEAR_SECS;
         assert!(
             hits.iter()
-                .all(|&t| t < landed || t >= until - early - FRAME),
-            "seed {seed}: a hit landed early in the window {landed:.2}..{until:.2}: {hits:?}"
+                .all(|&t| t < landed || t >= until - EARLY_MAX - FRAME),
+            "seed {seed}: a hit landed early in the Fear {feared:.2}..{until:.2}: {hits:?}"
         );
+        let bolt = hits
+            .iter()
+            .copied()
+            .find(|&t| t >= until - EARLY_MAX - FRAME)
+            .unwrap_or_else(|| panic!("seed {seed}: no bolt around the Fear's end: {hits:?}"));
+        let offset = until - bolt;
         assert!(
-            hits.iter()
-                .any(|&t| t >= until - early - FRAME && t <= until + LATE),
-            "seed {seed}: a bolt lands as the Fear ends (ends {until:.2}): {hits:?}"
+            (-LATE_MAX - FRAME..=EARLY_MAX + FRAME).contains(&offset),
+            "seed {seed}: the bolt landed {offset:.3}s before the Fear's end"
         );
+        offsets.push(offset);
         assert!(
             played
                 .log
@@ -189,4 +179,24 @@ fn the_fear_window_holds_its_full_length_and_its_damage_lands_as_it_ends() {
             "seed {seed}: the Warlock idled {idle:.2}s of the {FEAR_SECS}s window"
         );
     }
+
+    offsets.sort_by(f32::total_cmp);
+    let median = (offsets[offsets.len() / 2 - 1] + offsets[offsets.len() / 2]) / 2.0;
+    assert!(
+        (MEDIAN_LATEST..=MEDIAN_EARLIEST).contains(&median),
+        "the median bolt landed {median:.3}s before the Fear's end, outside \
+         {MEDIAN_LATEST}..={MEDIAN_EARLIEST} (the window is the last {WINDOW}s): {offsets:?}"
+    );
+    // As the Fear ends: in its last quarter second, or a tenth of a second
+    // after it (the late side of the spread, where the target was free for
+    // that tenth).
+    let inside = offsets
+        .iter()
+        .filter(|&&o| (-0.1..=WINDOW + FRAME).contains(&o))
+        .count();
+    assert!(
+        inside * 3 >= offsets.len() * 2,
+        "two bolts in three land as the Fear ends: {inside} of {}: {offsets:?}",
+        offsets.len()
+    );
 }

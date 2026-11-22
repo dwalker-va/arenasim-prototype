@@ -20,7 +20,10 @@
 //!   that enemy (capped at 15s, a window followed by no hit counts 15s);
 //! - of the windows a full-length Fear opened, those its **own hit broke
 //!   early**: shorter than the full Fear less `FEAR_WINDOW_LEAD`, ended on
-//!   the frame a Warlock hit landed, and the seconds that cut off.
+//!   the frame a Warlock hit landed, and the seconds that cut off;
+//! - where the Warlock's timed bolt lands in a full-length window: its first
+//!   direct hit within a second of the full Fear's end, before the Fear's
+//!   last `FEAR_WINDOW_LEAD` (early), inside it, or after the end (late).
 //!
 //! ```text
 //! FEAR_PROBE_BANK=bank.jsonl FEAR_PROBE_OUT=out.csv \
@@ -80,6 +83,15 @@ struct Row {
     full_broken_by_own_hit: u32,
     /// The seconds the early breaks cut off the full Fear.
     full_broken_secs: f32,
+    /// Of the full-length windows, the Warlock's first direct hit (not its
+    /// wand) landing within a second either side of the full Fear's end:
+    /// before its last `FEAR_WINDOW_LEAD`, inside it, or after the end.
+    bolts_early: u32,
+    bolts_inside: u32,
+    bolts_late: u32,
+    /// Summed seconds before the end of the early ones, after it of the late.
+    bolts_early_secs: f32,
+    bolts_late_secs: f32,
 }
 
 fn log_time(line: &str) -> Option<f32> {
@@ -285,18 +297,41 @@ fn measure(config: HeadlessMatchConfig) -> (Option<u8>, Row) {
                 .any(|(lt, v, dr)| v == name && (lt - t0).abs() <= 0.1 && *dr == Some(100));
             if full {
                 row.full_windows += 1;
+                let end = t0 + FULL_FEAR;
+                if let Some(t) = hits
+                    .iter()
+                    .filter(|(t, v, _, wand)| v == name && !wand && (t - end).abs() <= 1.0)
+                    .map(|(t, ..)| *t)
+                    .reduce(f32::min)
+                {
+                    let before = end - t;
+                    if before > FEAR_WINDOW_LEAD + FRAME {
+                        row.bolts_early += 1;
+                        row.bolts_early_secs += before;
+                    } else if before >= -FRAME {
+                        row.bolts_inside += 1;
+                    } else {
+                        row.bolts_late += 1;
+                        row.bolts_late_secs -= before;
+                    }
+                }
                 let short = FULL_FEAR - (t1 - t0);
                 let broke = format!("{name}'s Fear broke from damage");
-                let broke_here = lines.iter().any(|l| {
-                    l.contains(&broke) && log_time(l).is_some_and(|t| (t - t1).abs() <= 2.0 * FRAME)
+                // The break line, logged a frame or two before the first
+                // Fear-free frame.
+                let broke_at = lines.iter().find_map(|l| {
+                    let t = log_time(l)?;
+                    (l.contains(&broke) && (t - t1).abs() <= 3.0 * FRAME).then_some(t)
                 });
-                if short > FEAR_WINDOW_LEAD + 2.0 * FRAME && broke_here {
+                if let Some(broke_at) = broke_at.filter(|_| short > FEAR_WINDOW_LEAD + 2.0 * FRAME)
+                {
                     row.full_broken_early += 1;
                     row.full_broken_secs += short;
-                    if hits
-                        .iter()
-                        .any(|(t, v, _, wand)| v == name && !wand && (t - t1).abs() <= 2.0 * FRAME)
-                    {
+                    // The Warlock's own hit, logged on the breaking frame or
+                    // the one before it.
+                    if hits.iter().any(|(t, v, _, wand)| {
+                        v == name && !wand && *t <= broke_at + FRAME && *t >= broke_at - 2.0 * FRAME
+                    }) {
                         row.full_broken_by_own_hit += 1;
                     }
                 }
@@ -368,7 +403,7 @@ fn fear_window_probe() {
                 };
                 let (winner, r) = measure(config);
                 let line = format!(
-                    "{key},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{:.1},{},{},{:.3},{},{},{},{:.3}",
+                    "{key},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{:.1},{},{},{:.3},{},{},{},{:.3},{},{},{},{:.3},{:.3}",
                     winner.map_or("draw".to_string(), |w| format!("team{w}")),
                     r.windows,
                     r.window_secs,
@@ -387,6 +422,11 @@ fn fear_window_probe() {
                     r.full_broken_early,
                     r.full_broken_by_own_hit,
                     r.full_broken_secs,
+                    r.bolts_early,
+                    r.bolts_inside,
+                    r.bolts_late,
+                    r.bolts_early_secs,
+                    r.bolts_late_secs,
                 );
                 rows.lock().unwrap().push((i, line));
             })
@@ -400,7 +440,8 @@ fn fear_window_probe() {
     let mut text = String::from(
         "label,seed,winner,windows,window_secs,idle_secs,hold_secs,land_100,land_50,land_25,\
          land_immune,last_sec_hits,last_sec_dmg,windows_hit_last_sec,early_hits,gap_sum,\
-         full_windows,full_broken_early,full_broken_by_own_hit,full_broken_secs\n",
+         full_windows,full_broken_early,full_broken_by_own_hit,full_broken_secs,\
+         bolts_early,bolts_inside,bolts_late,bolts_early_secs,bolts_late_secs\n",
     );
     for (_, line) in rows {
         text.push_str(&line);

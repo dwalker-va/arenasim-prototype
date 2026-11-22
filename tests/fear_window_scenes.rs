@@ -22,11 +22,11 @@ use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::class_ai::warlock::{
     FEAR_DIMINISHED_NOTE, FEAR_WINDOW_HOLD_NOTE,
 };
-use arenasim::states::play_match::class_ai::{CC_CHAIN_WINDOW, FEAR_WINDOW_LEAD};
+use arenasim::states::play_match::class_ai::{CC_CHAIN_WINDOW, FEAR_WINDOW_AIM, FEAR_WINDOW_LEAD};
 use arenasim::states::play_match::components::{DRCategory, DRTracker};
 use arenasim::states::play_match::constants::GCD;
 use arenasim::states::play_match::decision_trace::RejectionReason;
-use arenasim::states::play_match::{AbilityType, Aura, AuraType};
+use arenasim::states::play_match::{AbilityType, Aura, AuraType, SpellSchool};
 
 const WARLOCK: &str = "warlock";
 const HEALER: &str = "enemy druid";
@@ -163,6 +163,44 @@ fn the_warlock_fears_its_own_target_only_at_full_length() {
 }
 
 #[test]
+fn only_its_own_target_is_held_to_full_length_its_cc_target_is_not() {
+    // The rotation's Fear goes to its CC target when it has one. That target
+    // is not the Warlock's own (the ruling's scope), so a diminished Fear on
+    // it still goes, as on main.
+    let with_cc_target = |cc_target: bool| {
+        let scene = lone().unit(OTHER, 2, Warrior).at(18.0, 8.0);
+        let mut scene = feared_before(feared_before(scene, HEALER, 1), OTHER, 1);
+        if cc_target {
+            let other = scene.entity(OTHER);
+            scene.combatant_mut(WARLOCK).cc_target = Some(other);
+        }
+        scene.decide(WARLOCK)
+    };
+    let cc = with_cc_target(true);
+    assert_eq!(
+        cc.chose(),
+        Some((AbilityType::Fear, Some(OTHER))),
+        "a diminished Fear on the CC target still goes: {}",
+        describe(&cc)
+    );
+
+    // The control: no CC target, so the rotation's Fear is on its own
+    // target, diminished, and is not cast.
+    let own = with_cc_target(false);
+    assert_ne!(
+        chose_ability(&own),
+        Some(AbilityType::Fear),
+        "{}",
+        describe(&own)
+    );
+    assert!(
+        noted(&own, AbilityType::Fear, FEAR_DIMINISHED_NOTE),
+        "its own target is held to full length: {}",
+        describe(&own)
+    );
+}
+
+#[test]
 fn no_re_fear_onto_its_own_fear_in_the_chain_window() {
     // Inside the hold rule's chain window, where the rotation's Fear used to
     // go out and land a second after the Fear ended, at 50%.
@@ -198,7 +236,7 @@ fn shadow_bolt_is_timed_to_land_as_the_fear_ends() {
 
     let lands = bolt_lands_after(&lone());
     // Begun now, it lands in the Fear's last FEAR_WINDOW_LEAD: it goes.
-    let due = own_fear(lone(), lands + FEAR_WINDOW_LEAD - 0.05).decide(WARLOCK);
+    let due = own_fear(lone(), lands + FEAR_WINDOW_AIM - 0.05).decide(WARLOCK);
     assert_eq!(
         due.chose(),
         Some((AbilityType::Shadowbolt, Some(HEALER))),
@@ -234,6 +272,120 @@ fn shadow_bolt_is_timed_to_land_as_the_fear_ends() {
     );
 }
 
+/// The ruling's window in literal seconds — a quarter second — so that a
+/// change of `FEAR_WINDOW_LEAD` or of the gate's exemption fails here, where
+/// every other scene derives its times from the constant.
+#[test]
+fn the_gate_lets_damage_land_only_in_the_fears_last_quarter_second() {
+    // Locked out of Shadow (an interrupt's lockout), the Warlock cannot bolt,
+    // so nothing holds its global cooldown, and its Fire Immolate (a 2s cast,
+    // its hit landing as the cast ends) meets the gate alone.
+    let immolate = |left: f32| {
+        let scene = Scene::new()
+            .unit(WARLOCK, 1, Warlock)
+            .at(0.0, 0.0)
+            .targeting(HEALER)
+            .unit(HEALER, 2, Druid)
+            .at(20.0, 0.0)
+            .targeting(WARLOCK);
+        let me = scene.entity(WARLOCK);
+        let scene = scene
+            .aura_full(HEALER, dot("Corruption", me))
+            .aura_full(HEALER, dot("Unstable Affliction", me))
+            .aura_full(
+                WARLOCK,
+                Aura {
+                    effect_type: AuraType::SpellSchoolLockout,
+                    duration: 4.0,
+                    magnitude: SpellSchool::Shadow.to_lockout_magnitude(),
+                    caster: Some(me),
+                    ability_name: "Spell Lock".into(),
+                    ..Default::default()
+                },
+            );
+        own_fear(scene, left).decide(WARLOCK)
+    };
+    let in_window = immolate(2.0 + 0.2);
+    assert_eq!(
+        in_window.chose(),
+        Some((AbilityType::Immolate, Some(HEALER))),
+        "landing 0.2s before the Fear ends, it goes: {}",
+        describe(&in_window)
+    );
+    let early = immolate(2.0 + 0.35);
+    assert_ne!(
+        chose_ability(&early),
+        Some(AbilityType::Immolate),
+        "{}",
+        describe(&early)
+    );
+    assert!(
+        matches!(
+            early.rejected(AbilityType::Immolate),
+            Some(RejectionReason::FriendlyBreakableCC)
+        ),
+        "landing 0.35s before the Fear ends, it is refused: {}",
+        describe(&early)
+    );
+}
+
+#[test]
+fn the_bolt_is_aimed_inside_the_quarter_second_not_at_its_edge() {
+    let lands = bolt_lands_after(&lone());
+    // Landing 0.1s before the end, inside the window: it goes.
+    let inside = own_fear(lone(), lands + 0.1).decide(WARLOCK);
+    assert_eq!(
+        inside.chose(),
+        Some((AbilityType::Shadowbolt, Some(HEALER))),
+        "{}",
+        describe(&inside)
+    );
+    // Landing 0.2s before the end, inside the window but short of its middle:
+    // the gate would let it go, but the Warlock waits for the middle.
+    let edge = own_fear(lone(), lands + 0.2).decide(WARLOCK);
+    assert_eq!(edge.chose(), None, "{}", describe(&edge));
+    assert!(
+        noted(&edge, AbilityType::Shadowbolt, FEAR_WINDOW_HOLD_NOTE),
+        "held for the window's middle: {}",
+        describe(&edge)
+    );
+}
+
+#[test]
+fn a_bolt_it_cannot_cast_holds_nothing_up() {
+    // Inside the hold band. With the mana for a bolt the Warlock holds its
+    // global cooldown for it; without, the bolt holds nothing up and the
+    // global goes on a Life Tap.
+    let lands = bolt_lands_after(&lone());
+    let with_mana = |fraction: f32| {
+        own_fear(lone(), lands + FEAR_WINDOW_LEAD + GCD / 2.0)
+            .mana_of(WARLOCK, fraction)
+            .decide(WARLOCK)
+    };
+    let affordable = with_mana(0.35);
+    assert_eq!(
+        affordable.chose(),
+        None,
+        "the control holds: {}",
+        describe(&affordable)
+    );
+    let broke = with_mana(0.1);
+    assert!(
+        matches!(
+            broke.rejected(AbilityType::Shadowbolt),
+            None | Some(RejectionReason::InsufficientMana { .. })
+        ),
+        "{}",
+        describe(&broke)
+    );
+    assert_eq!(
+        broke.chose(),
+        Some((AbilityType::LifeTap, None)),
+        "short of a bolt's mana, it taps instead of holding: {}",
+        describe(&broke)
+    );
+}
+
 #[test]
 fn the_timed_bolt_goes_ahead_of_the_rotation() {
     // Starved of mana, the rotation would Life Tap first and the bolt would
@@ -250,7 +402,7 @@ fn the_timed_bolt_goes_ahead_of_the_rotation() {
     );
 
     let lands = bolt_lands_after(&lone());
-    let due = own_fear(lone(), lands + FEAR_WINDOW_LEAD - 0.05)
+    let due = own_fear(lone(), lands + FEAR_WINDOW_AIM - 0.05)
         .mana_of(WARLOCK, starved)
         .decide(WARLOCK);
     assert_eq!(
@@ -281,7 +433,7 @@ fn the_bolt_leads_a_feared_target_along_its_run() {
             .aura_full(HEALER, dot("Corruption", me))
             .aura_full(HEALER, dot("Unstable Affliction", me))
             .aura_full(HEALER, dot("Immolate", me));
-        own_fear(scene, lands + FEAR_WINDOW_LEAD - 0.05).decide(WARLOCK)
+        own_fear(scene, lands + FEAR_WINDOW_AIM - 0.05).decide(WARLOCK)
     };
     let away = running(1.0);
     assert_eq!(
@@ -352,6 +504,26 @@ fn the_window_tops_mana_up_with_life_tap() {
         Some(AbilityType::LifeTap),
         "outside the window the tap waits for starvation: {}",
         describe(&free)
+    );
+}
+
+#[test]
+fn the_window_tap_never_overfills_the_pool() {
+    // Near full, one tap would overfill: no tap, in the window or out.
+    let full = own_fear(lone(), 6.0).mana_of(WARLOCK, 0.95).decide(WARLOCK);
+    assert_ne!(
+        chose_ability(&full),
+        Some(AbilityType::LifeTap),
+        "{}",
+        describe(&full)
+    );
+    assert!(
+        matches!(
+            full.rejected(AbilityType::LifeTap),
+            Some(RejectionReason::TapHeld { .. })
+        ),
+        "a tap that would overfill is held: {}",
+        describe(&full)
     );
 }
 
