@@ -933,6 +933,16 @@ impl Plugin for StatesPlugin {
                 .before(TransformSystem::TransformPropagate)
                 .run_if(in_combat_scene),
         )
+        // Power Infusion's and Pain Suppression's states (and the swirl at
+        // the Priest's feet) stand on the rendered body for the same reason
+        // (`discipline_states.rs`).
+        .add_systems(
+            PostUpdate,
+            play_match::place_discipline_states
+                .after(play_match::apply_cyclone_lift)
+                .before(TransformSystem::TransformPropagate)
+                .run_if(in_combat_scene),
+        )
         // Frostbolt and Shadow Bolt: the bespoke missiles and the bursts
         // they leave on their victims.
         //
@@ -1061,6 +1071,17 @@ impl Plugin for StatesPlugin {
         .add_systems(
             Update,
             play_match::update_shadow_dance
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Power Infusion's crackle and Pain Suppression's shell on the ally
+        // (AS-353): raised (with the Priest's Holy hands and, for Pain
+        // Suppression, the swirl at its feet), aged, emitted, hidden on a
+        // sheep and taken down here; posed in PostUpdate
+        // (`place_discipline_states`).
+        .add_systems(
+            Update,
+            play_match::update_discipline_states
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
