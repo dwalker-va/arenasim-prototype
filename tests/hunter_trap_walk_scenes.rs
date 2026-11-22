@@ -268,6 +268,8 @@ fn the_walk_does_not_stop_for_aimed_shot() {
     };
     let walking = safe().decide(ME);
     assert!(walked(&walking), "{}", describe(&walking));
+    // The trap is the walk's: the lane throw is not asked about it.
+    assert!(!lane_asked(&walking), "{}", describe(&walking));
     assert!(
         notes(&walking, AbilityType::AimedShot).contains(&AIMED_SHOT_HELD_FOR_WALK.to_string()),
         "{}",
@@ -394,6 +396,21 @@ fn the_trap_walk_key_withholds_the_walk_per_team() {
     assert_eq!(withheld(Some(true), Some(true)), (false, false));
 }
 
+/// Whether the rotation's lane throw was asked: anything recorded on Freezing
+/// Trap that is not a trap walk note, or the throw itself.
+fn lane_asked(view: &DecisionView) -> bool {
+    view.choices
+        .iter()
+        .any(|(a, _)| *a == AbilityType::FreezingTrap)
+        || notes(view, AbilityType::FreezingTrap)
+            .iter()
+            .any(|n| !n.starts_with("trap walk"))
+        || view.candidates.iter().any(|c| {
+            c.ability == AbilityType::FreezingTrap
+                && !matches!(c.reason, Some(RejectionReason::PreconditionUnmet { .. }))
+        })
+}
+
 /// A victim the walk holds back from is not held for: with no DPS teammate
 /// attacking, the Freezing Trap is not reserved for the healer, so the
 /// rotation's lane throw decides it (here it throws, or holds for its own
@@ -423,20 +440,6 @@ fn a_victim_the_walk_holds_back_from_does_not_reserve_the_trap() {
         } else {
             s
         }
-    };
-    // The lane throw's own verdicts: anything recorded on Freezing Trap that
-    // is not the walk's note, or the throw itself.
-    let lane_asked = |view: &DecisionView| {
-        view.choices
-            .iter()
-            .any(|(a, _)| *a == AbilityType::FreezingTrap)
-            || notes(view, AbilityType::FreezingTrap)
-                .iter()
-                .any(|n| !n.starts_with("trap walk"))
-            || view.candidates.iter().any(|c| {
-                c.ability == AbilityType::FreezingTrap
-                    && !matches!(c.reason, Some(RejectionReason::PreconditionUnmet { .. }))
-            })
     };
     let walk = scene(false).decide(ME);
     assert_eq!(
@@ -794,8 +797,8 @@ fn a_live_walk_waits_out_the_global_cooldown_walking() {
 /// The walk keeps the Hunter's feet from every Aimed Shot step that would
 /// plant it: the Burst step (a kill window on the Warrior chasing 25yd behind,
 /// the healer out of mana), the opener (a sting due and a closing Warrior
-/// 31yd behind) and the lock window (the Druid feared, Burst excepted for the
-/// Hunter, an outlast walk on a Mage 40yd off). Each is held while walking
+/// 26yd behind) and the lock window (the Druid feared, Burst excepted for the
+/// Hunter, an outlast walk on a Mage 33yd off). Each is held while walking
 /// and not when the walk is withheld.
 #[test]
 fn every_aimed_shot_step_waits_for_the_walk() {
@@ -806,8 +809,16 @@ fn every_aimed_shot_step_waits_for_the_walk() {
         let walking = scene().decide(ME);
         assert!(walked(&walking), "{name}: {}", describe(&walking));
         assert!(held(&walking), "{name}: {}", describe(&walking));
+        // The control reaches the step and takes Aimed Shot there, so the
+        // hold above is that step's.
         let withheld = scene().without_trap_walk(1).decide(ME);
         assert!(!held(&withheld), "{name}: {}", describe(&withheld));
+        assert_eq!(
+            withheld.chosen.map(|(a, _)| a),
+            Some(AbilityType::AimedShot),
+            "{name}: {}",
+            describe(&withheld)
+        );
     };
 
     // Burst: the Warrior low and the Priest out of mana, so nothing heals it.
@@ -817,11 +828,15 @@ fn every_aimed_shot_step_waits_for_the_walk() {
             .mana_of(HEALER, 0.0)
     });
 
-    // The opener: no Aimed Shot or sting yet, a sting due, and the Warrior
-    // closing from 31yd — in reach after a sting's global cooldown and the
-    // cast, but not within the cast alone.
+    // The opener: no Aimed Shot or sting yet, a sting due on the Mage the
+    // Hunter shoots, and the Warrior closing from 26yd — in reach after a
+    // sting's global cooldown and the cast, but not within the cast alone.
     check("opener", &|| {
-        field(40.0, (-31.0, 0.0), ME, false).cooldown(ME, AbilityType::ConcussiveShot, 5.0)
+        field(40.0, (-26.0, 0.0), ME, false)
+            .unit(MAGE, 2, CharacterClass::Mage)
+            .at(0.0, 25.0)
+            .target(ME, MAGE)
+            .cooldown(ME, AbilityType::ConcussiveShot, 5.0)
     });
 
     // The lock window: the Druid feared, the Hunter excepted from Burst, and
@@ -839,7 +854,7 @@ fn every_aimed_shot_step_waits_for_the_walk() {
             .at(-20.0, -20.0)
             .targeting(HEALER)
             .unit(MAGE, 2, CharacterClass::Mage)
-            .at(40.0, 0.0)
+            .at(33.0, 0.0)
             .targeting(PARTNER)
             .unit(HEALER, 2, Druid)
             .at(-22.0, -20.0)
