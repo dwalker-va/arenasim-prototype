@@ -38,6 +38,8 @@ mod empowered_flash;
 pub use empowered_flash::*;
 mod flame;
 pub use flame::*;
+mod conflagrate;
+pub use conflagrate::*;
 mod drain_life;
 pub use drain_life::*;
 mod mind_flay;
