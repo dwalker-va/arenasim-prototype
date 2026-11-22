@@ -1319,21 +1319,22 @@ impl Plugin for StatesPlugin {
                 .run_if(in_combat_scene),
         )
         // Siphon Life's DoT state (rendering/effects/siphon_life.rs): TBC
-        // kit 234's violet chest glow, plus Corruption's apply burst as it
-        // lands. Routed through the shared DoT router (`DotStateVisual`).
-        // Graphical only — never registered in headless systems.rs. Chained:
-        // the animate pass must see the rig `spawn` just built, and the
-        // billboard runs on final positions.
+        // kit 234's violet chest glow. Its rig and its kit-117 apply burst
+        // are built by `spawn_warlock_dot_visuals` (the Warlock DoT chain
+        // above), so this chain runs after it. Routed through the shared DoT
+        // router (`DotStateVisual`). Graphical only — never registered in
+        // headless systems.rs. Chained: the billboard runs on final
+        // positions.
         .add_systems(
             Update,
             (
-                play_match::spawn_siphon_life_glows, // Detect Siphon Life, rig + apply burst
                 play_match::animate_siphon_life_glows, // Follow the victim, emit three layers
                 play_match::age_siphon_life_particles, // Fly, retire
                 play_match::billboard_siphon_life_particles, // Held in front of the body
                 play_match::cleanup_siphon_life_glows, // End the glow with the DoT
             )
                 .chain()
+                .after(play_match::spawn_warlock_dot_visuals)
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )

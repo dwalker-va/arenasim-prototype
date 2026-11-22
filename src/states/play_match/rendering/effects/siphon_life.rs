@@ -1,7 +1,6 @@
 use bevy::color::LinearRgba;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::dot_state::{has_dot_state, DotStateVisual};
@@ -11,7 +10,6 @@ use super::hunter_shots::draw;
 use super::school_impact::{IMPACT_PET_BODY_Y, IMPACT_PET_STATURE};
 use super::shield::disc_texture;
 use super::spell_bolts::{soft_band_texture, star_flash_texture};
-use super::warlock_dots::{spawn_apply_burst, DotAssets};
 use crate::states::play_match::components::*;
 
 // ==============================================================================
@@ -28,9 +26,10 @@ use crate::states::play_match::components::*;
 // around it. Additive, constant (no pulse key), following the victim.
 //
 // - **Landing:** Corruption's shipped apply (kit 117, the same `(6,13)` row
-//   in both builds), raised through `warlock_dots::spawn_apply_burst` as the
-//   state appears — transition-in only, as Corruption's and UA's are, so a
-//   refresh does not replay it.
+//   in both builds). `warlock_dots::spawn_warlock_dot_visuals` is the one
+//   detector that lands kit 117: as the state appears it builds this rig
+//   ([`spawn_siphon_life_rig`]) beside the burst, as it does for UA —
+//   transition-in only, so a refresh does not replay it.
 // - **The heal back to the Warlock** draws nothing: aura 53 is a periodic
 //   leech with no missile, channel or caster row in either build. The green
 //   heal numbers carry it. (The lands-silently audit's heal family does not
@@ -46,15 +45,18 @@ use crate::states::play_match::components::*;
 //
 // ## Departures from the bench (each deliberate)
 //
-// 1. **Held in front of the body.** The bench is a 2D canvas: its particles
-//    draw over the capsule wherever they are. Here the body is an opaque
-//    mesh, and a ring born at the chest is born INSIDE it. Each particle is
-//    therefore drawn on its own view ray, slid toward the camera until it
-//    stands nearer than the body capsule's nearest point
-//    ([`siphon_drawn_point`]) and scaled by the same ratio, so it covers the
-//    exact screen footprint the bench gives it and is never buried — the
-//    AS-10 lesson, solved the way UA's glow is (`UA_CAMERA_LIFT`) but exactly.
-//    The lift also sorts the glow in front of a stacked Corruption shroud.
+// 1. **Held in front of the body.** The bench is a 2D canvas: it draws the
+//    bodies first and every particle over them. Here the body is an
+//    `AlphaMode::Blend` mesh, which writes no depth, so what decides the
+//    overlap is the transparent pass's sort by each mesh's translation: a
+//    particle deeper than the body's centre is drawn first and the body
+//    paints over it — about half the burst would vanish behind the victim.
+//    Each particle is therefore drawn on its own view ray, slid toward the
+//    camera until it stands nearer than the body's nearest point
+//    ([`siphon_drawn_point`]; stricter than the sort needs, and the same
+//    rule keeps it clear of an opaque body if one ever is), and scaled by the
+//    same ratio, so it covers the exact screen footprint the bench gives it.
+//    The hold also sorts the glow in front of a stacked Corruption shroud.
 // 2. **The flare's white-hot core is tinted.** The bench draws a star's
 //    centre white over its coloured rays; the shared star sprite here is
 //    white throughout and takes the flare colour, as Shadow Word: Pain's do.
@@ -63,6 +65,9 @@ use crate::states::play_match::components::*;
 //    keeps its glow.
 // 4. **Hidden on a sheep.** A polymorphed victim's rig is hidden (its clock
 //    runs on), the Shadow Dance precedent: the sheep wears nothing.
+// 5. **The streak is a soft band.** The bench strokes a solid line with round
+//    caps; here it is the shared `soft_band_texture` quad, which fades across
+//    its width and has square ends. At the match camera it is ~2 px wide.
 //
 // Where the research doc's table and the bench differ, the bench was signed
 // off and wins: the rings' alpha (0.55 → 0.7 → 0.4, not 0.78 → 1 → 0.78), the
@@ -121,9 +126,11 @@ pub const SIPHON_BODY_CLEARANCE: f32 = 0.05;
 /// (`play_match/mod.rs`), so its swept segment runs ±0.75 about the centre.
 const COMBATANT_BODY_HALF_SEGMENT: f32 = 0.75;
 /// The pet body: `Capsule3d::new(0.35, 0.6)`, centred `IMPACT_PET_BODY_Y`
-/// below the pet's sim transform.
-const PET_BODY_RADIUS: f32 = 0.35;
-const PET_BODY_HALF_SEGMENT: f32 = 0.3;
+/// below the pet's sim transform and laid along its facing by
+/// `apply_pet_mesh_tilt`. Held against its bounding sphere — the capsule's
+/// radius plus its half-segment, about its centre — which contains the body
+/// whichever way the pet faces.
+const PET_BODY_BOUND: f32 = 0.35 + 0.3;
 
 // ── The emitter model (the bench's `Emitter`, as Shadow Word: Pain ports it) ─
 
@@ -286,14 +293,16 @@ pub fn siphon_palette_step(t: f32) -> usize {
     ((t.clamp(0.0, 1.0) * last).round() as usize).min(SIPHON_PALETTE_STEPS - 1)
 }
 
-/// The victim's body capsule: the two ends of its swept segment and its
-/// radius, for a victim at `translation`.
+/// The victim's body as a swept segment: its two ends and its radius, for a
+/// victim at `translation`. A combatant's is its upright capsule; a pet's,
+/// whose capsule lies along its facing, is the sphere bounding it (both ends
+/// at its centre).
 pub fn siphon_body_capsule(translation: Vec3, is_pet: bool) -> (Vec3, Vec3, f32) {
     let (centre, half, radius) = if is_pet {
         (
             translation + Vec3::Y * IMPACT_PET_BODY_Y,
-            PET_BODY_HALF_SEGMENT,
-            PET_BODY_RADIUS,
+            0.0,
+            PET_BODY_BOUND,
         )
     } else {
         (
@@ -308,9 +317,10 @@ pub fn siphon_body_capsule(translation: Vec3, is_pet: bool) -> (Vec3, Vec3, f32)
 /// Where a particle truly at `at` is drawn, for a camera at `eye` looking
 /// along `forward`, and the factor its quad is scaled by (departure 1).
 ///
-/// A camera-facing quad has one view depth across its whole face, so it is
-/// buried nowhere if that depth is nearer than the body capsule's nearest
-/// point — the nearer end of its segment, less its radius. A particle already
+/// A camera-facing quad has one view depth across its whole face, so it
+/// stands wholly in front of the body — and sorts in front of it — if that
+/// depth is nearer than the body's nearest point: the nearer end of its
+/// segment, less its radius. A particle already
 /// nearer stays put; one deeper slides along its own view ray (so it holds
 /// its screen position) to that depth less [`SIPHON_BODY_CLEARANCE`], and is
 /// scaled by the same ratio (so it holds its screen size).
@@ -362,6 +372,9 @@ pub struct SiphonLifeParticle {
     pub age: f32,
     pub life: f32,
     pub stature: f32,
+    /// The sprite's roll in the camera plane (the bench's `ang = rnd()*TAU`;
+    /// it shows on the four-point flare, the glows being round).
+    pub angle: f32,
     pub sprite_palette: Arc<[Handle<StandardMaterial>]>,
     pub streak_palette: Arc<[Handle<StandardMaterial>]>,
 }
@@ -481,59 +494,30 @@ fn particle_material(
 
 // ── Systems ──────────────────────────────────────────────────────────────────
 
-/// Build a rig on every living victim whose Siphon Life routes to
-/// [`DotStateVisual::SiphonLifeGlow`] and has none yet, and land Corruption's
-/// apply burst on it. Keyed on the aura's PRESENCE, so a refresh replays
-/// nothing; dead victims get nothing (auras linger on corpses).
-#[allow(clippy::too_many_arguments)]
-pub fn spawn_siphon_life_glows(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-    mut assets: Local<Option<DotAssets>>,
-    victims: Query<(
-        Entity,
-        &Combatant,
-        &Transform,
-        Option<&ActiveAuras>,
-        Option<&Pet>,
-    )>,
-    rigs: Query<&SiphonLifeRig>,
+/// Build the rig for a victim at `translation` whose Siphon Life has just
+/// appeared. Called by `warlock_dots::spawn_warlock_dot_visuals`, the one
+/// detector that lands kit 117, beside the apply burst it lands for the same
+/// transition — so a refresh (the aura already present, the rig already
+/// built) replays neither, and a corpse gets neither.
+pub(super) fn spawn_siphon_life_rig(
+    commands: &mut Commands,
+    target: Entity,
+    translation: Vec3,
+    is_pet: bool,
 ) {
-    let glowing: HashSet<Entity> = rigs.iter().map(|r| r.target).collect();
-    for (entity, combatant, transform, auras, pet) in victims.iter() {
-        if !combatant.is_alive()
-            || glowing.contains(&entity)
-            || !has_dot_state(auras, DotStateVisual::SiphonLifeGlow)
-        {
-            continue;
-        }
-        let is_pet = pet.is_some();
-        commands.spawn((
-            SiphonLifeRig {
-                target: entity,
-                age: 0.0,
-                carry: [0.0; 3],
-                emitted: 0,
-                victim_at: transform.translation,
-                is_pet,
-            },
-            Transform::from_translation(siphon_chest(transform.translation, is_pet)),
-            Visibility::default(),
-            PlayMatchEntity,
-        ));
-        // The landing: Corruption's kit 117, the same row in both builds.
-        let dot = assets.get_or_insert_with(|| DotAssets::build(&mut meshes, &mut images));
-        spawn_apply_burst(
-            &mut commands,
-            &mut materials,
-            dot,
-            entity,
-            transform.translation,
+    commands.spawn((
+        SiphonLifeRig {
+            target,
+            age: 0.0,
+            carry: [0.0; 3],
+            emitted: 0,
+            victim_at: translation,
             is_pet,
-        );
-    }
+        },
+        Transform::from_translation(siphon_chest(translation, is_pet)),
+        Visibility::default(),
+        PlayMatchEntity,
+    ));
 }
 
 /// Follow the victim (hidden while it is a sheep), and emit every kept layer
@@ -619,6 +603,7 @@ pub fn animate_siphon_life_glows(
                             age: 0.0,
                             life: e.life,
                             stature: s,
+                            angle: draw(seed, 5) * std::f32::consts::TAU,
                             sprite_palette: sprite_palette.clone(),
                             streak_palette: streak_palette.clone(),
                         },
@@ -699,7 +684,7 @@ pub fn billboard_siphon_life_particles(
                 };
                 match part {
                     SiphonLifePart::Sprite => {
-                        transform.rotation = rotation;
+                        transform.rotation = rotation * Quat::from_rotation_z(p.angle);
                         transform.translation = Vec3::ZERO;
                         transform.scale = Vec3::splat((radius * 2.0).max(1e-4));
                         material.0 = p.sprite_palette[step].clone();

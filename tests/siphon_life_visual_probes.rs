@@ -34,9 +34,8 @@ use arenasim::states::play_match::{
     animate_curse_apparitions, animate_dot_apply_bursts, animate_siphon_life_glows,
     animate_ua_states, billboard_siphon_life_particles, billboard_warlock_dot_visuals,
     cleanup_play_match, cleanup_siphon_life_glows, cleanup_warlock_dot_visuals,
-    orient_curse_apparitions, spawn_siphon_life_glows, spawn_warlock_dot_visuals,
-    AbilityDefinitions, AbilityType, DotStateVisual, SiphonLifePart, SiphonLifeParticle,
-    SiphonLifeRig, CORRUPTION_AURA,
+    orient_curse_apparitions, spawn_warlock_dot_visuals, AbilityDefinitions, AbilityType,
+    DotStateVisual, SiphonLifePart, SiphonLifeParticle, SiphonLifeRig, CORRUPTION_AURA,
 };
 use arenasim::CharacterClass;
 
@@ -216,13 +215,14 @@ impl Harness {
         app.add_systems(
             Update,
             (
-                spawn_siphon_life_glows,
                 animate_siphon_life_glows,
                 age_siphon_life_particles,
                 billboard_siphon_life_particles,
                 cleanup_siphon_life_glows,
             )
-                .chain(),
+                .chain()
+                // The Warlock DoT detector builds the rig (`states/mod.rs`).
+                .after(spawn_warlock_dot_visuals),
         );
         // Counts every rig and apply burst as it is BUILT, before either
         // cleanup can take it down the same frame.
@@ -230,7 +230,6 @@ impl Harness {
         app.add_systems(
             Update,
             count_built
-                .after(spawn_siphon_life_glows)
                 .after(spawn_warlock_dot_visuals)
                 .before(cleanup_siphon_life_glows)
                 .before(cleanup_warlock_dot_visuals),
@@ -336,6 +335,29 @@ impl Harness {
                 at: g.translation(),
                 velocity: p.velocity,
                 age: p.age,
+            })
+            .collect()
+    }
+
+    /// (emitter, part, world rotation) of every drawn quad.
+    fn quads_with_rotation(&mut self) -> Vec<(usize, SiphonLifePart, Quat)> {
+        let world = self.app.world_mut();
+        let owners: Vec<(usize, Vec<Entity>)> = world
+            .query::<(&SiphonLifeParticle, &Children)>()
+            .iter(world)
+            .map(|(p, c)| (p.emitter, c.iter().collect()))
+            .collect();
+        owners
+            .into_iter()
+            .flat_map(|(e, children)| {
+                children
+                    .into_iter()
+                    .map(|c| {
+                        let part = *world.get::<SiphonLifePart>(c).unwrap();
+                        let g = world.get::<GlobalTransform>(c).unwrap();
+                        (e, part, g.compute_transform().rotation)
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect()
     }
@@ -812,6 +834,7 @@ fn body_nearest_depth(victim: Vec3, eye: Vec3, forward: Vec3) -> f32 {
 fn every_quad_stands_in_front_of_the_body_where_the_bench_puts_it_on_screen() {
     let mut moved = 0;
     let mut checked = 0;
+    let mut streaks = 0;
     for (zoom, pitch, yaw) in [
         (60.0, 38.7f32.to_radians(), 0.0),
         (60.0, 38.7f32.to_radians(), 2.3),
@@ -830,14 +853,25 @@ fn every_quad_stands_in_front_of_the_body_where_the_bench_puts_it_on_screen() {
         let centre_depth = (victim - eye).dot(forward);
 
         let world = h.app.world_mut();
-        let particles: Vec<(Vec3, f32, usize, Vec<Entity>)> = world
-            .query::<(&SiphonLifeParticle, &Children)>()
+        let particles: Vec<(Vec3, Vec3, Vec3, f32, usize, Vec<Entity>)> = world
+            .query::<(&SiphonLifeParticle, &GlobalTransform, &Children)>()
             .iter(world)
-            .map(|(p, c)| (p.offset, p.age, p.emitter, c.iter().collect()))
+            .map(|(p, g, c)| {
+                (
+                    p.offset,
+                    g.translation(),
+                    p.velocity,
+                    p.age,
+                    p.emitter,
+                    c.iter().collect(),
+                )
+            })
             .collect();
-        for (offset, age, emitter, children) in particles {
+        for (offset, drawn, velocity, age, emitter, children) in particles {
             let truly = chest(victim) + offset;
             let true_depth = (truly - eye).dot(forward);
+            // The hold's ratio, from where the particle is drawn.
+            let k = (drawn - eye).dot(forward) / true_depth;
             for child in children {
                 let part = *world.get::<SiphonLifePart>(child).unwrap();
                 let g = world
@@ -857,7 +891,25 @@ fn every_quad_stands_in_front_of_the_body_where_the_bench_puts_it_on_screen() {
                     "a quad at depth {depth} behind the body's nearest point {nearest}"
                 );
                 assert!(depth < centre_depth);
-                if part != SiphonLifePart::Sprite {
+                if part == SiphonLifePart::Streak {
+                    // The streak's screen line, held by the same ratio: its
+                    // tail projected into the screen plane, and 0.7 of the
+                    // sprite's radius wide.
+                    let back = -velocity.normalize();
+                    let flat = (back - forward * back.dot(forward)).length();
+                    assert!(
+                        (g.scale.x - STREAK_LENGTH * flat * k).abs() < 1e-4,
+                        "streak length {} vs {}",
+                        g.scale.x,
+                        STREAK_LENGTH * flat * k
+                    );
+                    assert!(
+                        (g.scale.y - 0.7 * BENCH[STREAKS].scale[0] * k).abs() < 1e-5,
+                        "streak width {} vs {}",
+                        g.scale.y,
+                        0.7 * BENCH[STREAKS].scale[0] * k
+                    );
+                    streaks += 1;
                     continue;
                 }
                 // On the true point's view ray, scaled to keep its screen size.
@@ -866,7 +918,7 @@ fn every_quad_stands_in_front_of_the_body_where_the_bench_puts_it_on_screen() {
                     (g.translation - eye).normalize().dot(ray) > 0.999_999,
                     "a held quad left its screen position"
                 );
-                let k = depth / true_depth;
+                assert!((depth / true_depth - k).abs() < 1e-4);
                 let layer = &BENCH[emitter];
                 let radius = track(layer.scale, age / layer.life);
                 assert!(
@@ -891,6 +943,105 @@ fn every_quad_stands_in_front_of_the_body_where_the_bench_puts_it_on_screen() {
     }
     assert!(checked > 200, "only {checked} sprites checked");
     assert!(moved > 50, "only {moved} sprites needed holding — vacuous");
+    assert!(streaks > 30, "only {streaks} streaks checked");
+}
+
+/// The hold follows the body: a victim that walks toward the camera after
+/// its rig is built keeps every quad in front of where it now stands.
+#[test]
+fn the_hold_follows_a_victim_walking_toward_the_camera() {
+    let mut h = Harness::new();
+    let start = Vec3::new(0.0, COMBATANT_Y, -4.0);
+    let cam = match_camera(
+        Vec3::new(0.0, COMBATANT_Y, 0.0),
+        60.0,
+        38.7f32.to_radians(),
+        0.0,
+    );
+    h.camera(cam);
+    let victim = h.victim(start, &[AURA]);
+    h.tick_secs(0.8);
+    let eye = cam.translation;
+    let forward = cam.forward().as_vec3();
+    // Eight yards nearer the camera, in one step.
+    let moved = start + Vec3::new(0.0, 0.0, 8.0);
+    h.app
+        .world_mut()
+        .get_mut::<Transform>(victim)
+        .unwrap()
+        .translation = moved;
+    h.tick(1);
+    let nearest = body_nearest_depth(moved, eye, forward);
+    let world = h.app.world_mut();
+    let depths: Vec<f32> = world
+        .query::<(&SiphonLifePart, &GlobalTransform)>()
+        .iter(world)
+        .map(|(_, g)| (g.translation() - eye).dot(forward))
+        .collect();
+    assert!(depths.len() > 60, "only {} quads", depths.len());
+    let held = depths
+        .iter()
+        .filter(|d| **d > nearest - HELD_WITHIN)
+        .count();
+    assert!(held > 20, "only {held} quads held at the new body");
+    for depth in depths {
+        assert!(
+            depth < nearest,
+            "a quad at {depth} behind the moved body's {nearest}"
+        );
+    }
+}
+
+/// Each flare is rolled at random in the camera plane, as the bench draws
+/// every star after `g.rotate(ang)`: its in-plane angles (modulo the star's
+/// quarter-turn symmetry) spread over the whole quarter turn.
+#[test]
+fn the_flares_are_rolled_at_random_in_the_camera_plane() {
+    for camera in [
+        None,
+        Some(match_camera(
+            Vec3::new(2.0, COMBATANT_Y, 1.0),
+            60.0,
+            38.7f32.to_radians(),
+            1.1,
+        )),
+    ] {
+        let mut h = Harness::new();
+        if let Some(cam) = camera {
+            h.camera(cam);
+        }
+        h.victim(Vec3::new(2.0, COMBATANT_Y, 1.0), &[AURA]);
+        h.tick_secs(2.0);
+        let (right, up) = match camera {
+            Some(c) => (c.rotation * Vec3::X, c.rotation * Vec3::Y),
+            None => (Vec3::X, Vec3::Y),
+        };
+        let quarter = std::f32::consts::FRAC_PI_2;
+        let angles: Vec<f32> = h
+            .quads_with_rotation()
+            .into_iter()
+            .filter(|(e, part, _)| *e == FLARES && *part == SiphonLifePart::Sprite)
+            .map(|(_, _, rotation)| {
+                let x = rotation * Vec3::X;
+                x.dot(up).atan2(x.dot(right)).rem_euclid(quarter)
+            })
+            .collect();
+        assert!(angles.len() > 30, "only {} flares", angles.len());
+        let mut bins = [0usize; 8];
+        for a in &angles {
+            bins[((a / quarter * 8.0) as usize).min(7)] += 1;
+        }
+        assert!(
+            bins.iter().all(|&n| n > 0),
+            "the flares' rolls must fill the quarter turn: {bins:?}"
+        );
+        let most = *bins.iter().max().unwrap();
+        assert!(
+            most * 3 < angles.len(),
+            "no roll dominates: {bins:?} of {}",
+            angles.len()
+        );
+    }
 }
 
 /// At the match camera a streak is the bench's screen line: in the camera's
@@ -943,13 +1094,20 @@ fn at_the_camera_a_streak_lies_in_the_screen_plane_behind_its_flight() {
 }
 
 /// A pet's smaller body (`Capsule3d::new(0.35, 0.6)`, hung 0.45 below its
-/// sim transform) holds its glow in front of it the same way.
+/// sim transform and laid along its facing by `apply_pet_mesh_tilt`) holds
+/// its glow in front of it the same way — steep, and looking straight down
+/// the body's length, where its near end is nearest.
 #[test]
 fn a_pets_glow_stands_in_front_of_the_pets_body() {
+    for (pitch, yaw) in [(0.3, 0.4), (1.5, 0.0)] {
+        a_pets_glow_stands_in_front_of_the_pets_body_from(pitch, yaw);
+    }
+}
+
+fn a_pets_glow_stands_in_front_of_the_pets_body_from(pitch: f32, yaw: f32) {
     let mut h = Harness::new();
     let at = Vec3::new(-3.0, PET_SIM_Y, 1.0);
-    // Steep, so the body's height decides its nearest point.
-    let cam = match_camera(at, 20.0, 0.3, 0.4);
+    let cam = match_camera(at, 20.0, pitch, yaw);
     h.camera(cam);
     let owner = h.app.world_mut().spawn_empty().id();
     h.app.world_mut().spawn((
@@ -966,8 +1124,9 @@ fn a_pets_glow_stands_in_front_of_the_pets_body() {
     h.tick_secs(1.0);
     let eye = cam.translation;
     let forward = cam.forward().as_vec3();
+    // The pet faces +Z (an unrotated transform); its capsule lies along it.
     let centre = at + Vec3::Y * PET_BODY_Y;
-    let nearest = [centre - Vec3::Y * 0.3, centre + Vec3::Y * 0.3]
+    let nearest = [centre - Vec3::Z * 0.3, centre + Vec3::Z * 0.3]
         .iter()
         .map(|e| (*e - eye).dot(forward))
         .fold(f32::MAX, f32::min)
@@ -979,9 +1138,11 @@ fn a_pets_glow_stands_in_front_of_the_pets_body() {
         .map(|(_, g)| (g.translation() - eye).dot(forward))
         .collect();
     assert!(depths.len() > 40, "only {} quads", depths.len());
+    // Held against the body's bounding sphere, so at most the capsule's
+    // half-segment (0.3) nearer than it must be.
     let held = depths
         .iter()
-        .filter(|d| **d > nearest - HELD_WITHIN)
+        .filter(|d| **d > nearest - HELD_WITHIN - 0.3)
         .count();
     assert!(held > 20, "only {held} quads held just in front of the pet");
     for depth in depths {
@@ -1072,6 +1233,22 @@ fn a_pets_glow_sits_at_its_chest_at_its_stature() {
     assert_nonempty("rings", &rings);
     for p in &rings {
         assert!((p.velocity.length() - BENCH[RINGS].speed * PET_STATURE).abs() < 1e-4);
+    }
+    // The streaks' shell and speed shrink with the pet too.
+    let mut births: Vec<f32> = Vec::new();
+    for _ in 0..120 {
+        h.tick(1);
+        for p in h.particles().into_iter().filter(|p| p.emitter == STREAKS) {
+            assert!((p.velocity.length() - BENCH[STREAKS].speed * PET_STATURE).abs() < 1e-4);
+            births.push((p.at - p.velocity * p.age - pet_chest).length());
+        }
+    }
+    assert!(births.len() > 40, "only {} streaks", births.len());
+    for r in births {
+        assert!(
+            (0.6 * SHELL * PET_STATURE - 1e-3..=SHELL * PET_STATURE + 1e-3).contains(&r),
+            "a pet's streak born {r} yd out"
+        );
     }
 }
 
