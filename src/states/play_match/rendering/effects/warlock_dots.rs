@@ -708,7 +708,7 @@ pub struct DotAssets {
 }
 
 impl DotAssets {
-    fn build(meshes: &mut Assets<Mesh>, images: &mut Assets<Image>) -> Self {
+    pub(super) fn build(meshes: &mut Assets<Mesh>, images: &mut Assets<Image>) -> Self {
         Self {
             quad: meshes.add(Rectangle::new(1.0, 1.0)),
             // Unit-radius ring in the XZ plane; the ring ramp drives scale.
@@ -868,7 +868,9 @@ pub fn spawn_warlock_dot_visuals(
 /// Build the shared kit-117 apply burst: the expanding shadow ring at the
 /// chest plus its spark-sphere emitter (sparks are emitted over the ring
 /// window by `animate_dot_apply_bursts`).
-fn spawn_apply_burst(
+/// Siphon Life lands it too (`siphon_life.rs`): kit 117 is its impact row in
+/// both builds.
+pub(super) fn spawn_apply_burst(
     commands: &mut Commands,
     materials: &mut Assets<StandardMaterial>,
     assets: &DotAssets,
