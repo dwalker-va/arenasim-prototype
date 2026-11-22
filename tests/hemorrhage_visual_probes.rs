@@ -69,7 +69,12 @@ fn body_capsule(at: Vec3, pet: bool) -> (Vec3, Vec3, f32) {
 
 /// The match camera: 20 yd off at a 55° pitch, looking at `target`.
 fn match_camera(target: Vec3, yaw: f32) -> Transform {
-    let (zoom, pitch) = (20.0_f32, 55.0_f32.to_radians());
+    camera_at(target, 55.0, yaw)
+}
+
+/// A camera 20 yd off at `pitch_deg` from straight down, from `yaw`.
+fn camera_at(target: Vec3, pitch_deg: f32, yaw: f32) -> Transform {
+    let (zoom, pitch) = (20.0_f32, pitch_deg.to_radians());
     let at = target
         + Vec3::new(
             zoom * pitch.sin() * yaw.sin(),
@@ -788,6 +793,57 @@ fn every_droplet_is_drawn_in_front_of_its_victims_body() {
 #[test]
 fn a_pets_spray_is_at_its_chest_and_drawn_in_front_of_its_body() {
     assert_held_in_front_from_four_sides(true);
+}
+
+/// The burial the hold exists for: Bevy sorts transparent draws by
+/// translation, so a droplet whose translation is deeper than the body's sort
+/// point (the centre of its capsule, transcribed: the Warrior's origin; the
+/// pet's body 0.45 below its origin) draws first and the body paints over it.
+/// From low, middle and high pitches all round, the droplets thrown away
+/// from the camera truly are deeper than that point — and every one is drawn
+/// nearer than it.
+#[test]
+fn droplets_thrown_behind_the_body_are_drawn_before_it() {
+    for pet in [false, true] {
+        let sort_point = if pet {
+            VICTIM_POS - Vec3::Y * 0.45
+        } else {
+            VICTIM_POS
+        };
+        let mut would_bury = 0;
+        let mut drawn = 0;
+        for pitch in [30.0, 55.0, 75.0] {
+            for yaw in [0.0, 1.6, 3.1, 4.7] {
+                let mut h = Harness::new(pet);
+                let cam = camera_at(VICTIM_POS, pitch, yaw);
+                h.camera(cam);
+                h.wound();
+                h.land(AbilityType::Hemorrhage);
+                let (eye, fwd) = (cam.translation, cam.forward().as_vec3());
+                let behind = (sort_point - eye).dot(fwd);
+                for _ in 0..90 {
+                    h.tick();
+                    for (_, truly, at, ..) in h.droplets() {
+                        if (truly - eye).dot(fwd) > behind {
+                            would_bury += 1;
+                        }
+                        assert!(
+                            (at - eye).dot(fwd) < behind,
+                            "pet {pet}, pitch {pitch}, yaw {yaw}: drawn behind the body's sort point"
+                        );
+                        drawn += 1;
+                    }
+                }
+            }
+        }
+        // Not vacuous: a real share of the spray flies behind the body
+        // (measured: about 8% of the Warrior's droplet-frames here).
+        eprintln!("pet {pet}: {would_bury} of {drawn} droplet-frames truly behind");
+        assert!(
+            would_bury * 50 > drawn,
+            "pet {pet}: {would_bury} of {drawn} droplet-frames truly behind"
+        );
+    }
 }
 
 /// The hold follows its victim: a victim that runs at the camera after the
