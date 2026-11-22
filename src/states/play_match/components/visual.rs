@@ -940,11 +940,30 @@ pub const RETRIBUTION_AURA_NAME: &str = "Retribution Aura";
 pub const INFUSION_OF_LIGHT_AURA: &str = "Infusion of Light";
 /// The Art of War's proc buff.
 pub const ART_OF_WAR_AURA: &str = "The Art of War";
+/// Repentance's incapacitate (AS-378). Its landing is the gold impact at the
+/// victim's chest and its state the violet head swirl
+/// (`rendering/effects/repentance.rs`) — never Freezing Trap's ice block.
+pub const REPENTANCE_AURA: &str = "Repentance";
+/// Freezing Trap's incapacitate, as `traps::freezing_trap_aura` names it:
+/// the one incapacitate the ice block encloses (`rendering/effects/traps.rs`).
+pub const FREEZING_TRAP_AURA: &str = "Freezing Trap";
 /// Sacred Shield: its 30 s arming buff, and the absorb that buff raises
 /// (`triggered_absorbs.rs` names the shield after its arming aura). The buff's
 /// landing plays the disc; the absorb wears its card
 /// (`rendering/effects/shield.rs`, `ShieldKind::SacredShield`).
 pub const SACRED_SHIELD_AURA: &str = "Sacred Shield";
+/// Vengeance's damage buff (AS-377): the name its node gives its procs'
+/// aura in `talents.ron`. Not a landing: its state is the pale-blue glow on
+/// both of the Paladin's hands for the buff's life
+/// (`rendering/effects/vengeance.rs`), whose onset is its application.
+pub const VENGEANCE_AURA: &str = "Vengeance";
+
+/// Whether an aura of `aura_type` named `name` is Vengeance's: the one
+/// predicate its hands, its band routing and the lands-silently audit all ask.
+pub fn is_vengeance(aura_type: AuraType, name: &str) -> bool {
+    aura_type == AuraType::DamageDealtIncrease && name == VENGEANCE_AURA
+}
+
 /// Divine Protection's damage reduction (AS-376). Not a landing: its state is
 /// the red-gold globe at the Paladin's chest for the buff's life
 /// (`rendering/effects/divine_protection.rs`), whose onset is its application.
@@ -1039,11 +1058,17 @@ pub enum AuraLandingKind {
     /// near-black specks drifting in about the head while the proc waits
     /// (kit 4569: the flash and `shadow_impactdot_med_head.m2`).
     ShadowTrance,
+    /// Repentance: `holy_impactdd_low_chest.m2` (kit 6499), 0.93 s of
+    /// yellow-to-white stars and gold streaks at the victim's chest, after
+    /// the Holy hand flash on the Paladin. The violet head swirl that follows
+    /// is the incapacitate's state, drawn while it holds
+    /// (`rendering/effects/repentance.rs`).
+    RepentanceImpact,
 }
 
 impl AuraLandingKind {
     /// Every landing, in declaration order.
-    pub const ALL: [AuraLandingKind; 12] = [
+    pub const ALL: [AuraLandingKind; 13] = [
         AuraLandingKind::RejuvenationSwirl,
         AuraLandingKind::MarkOfTheWildGlyph,
         AuraLandingKind::ShadowWordPainHit,
@@ -1056,6 +1081,7 @@ impl AuraLandingKind {
         AuraLandingKind::SacredShieldDisc,
         AuraLandingKind::AmplifyFlash,
         AuraLandingKind::ShadowTrance,
+        AuraLandingKind::RepentanceImpact,
     ];
 
     /// The landing an aura of `aura_type` named `name` plays, or `None`.
@@ -1089,6 +1115,9 @@ impl AuraLandingKind {
                 Some(AuraLandingKind::InfusionHalo)
             }
             AuraType::NextCast if name == ART_OF_WAR_AURA => Some(AuraLandingKind::ArtOfWarRing),
+            AuraType::Incapacitate if name == REPENTANCE_AURA => {
+                Some(AuraLandingKind::RepentanceImpact)
+            }
             AuraType::TriggeredAbsorb if name == SACRED_SHIELD_AURA => {
                 Some(AuraLandingKind::SacredShieldDisc)
             }
@@ -1109,6 +1138,7 @@ impl AuraLandingKind {
             AuraLandingKind::AuraMasteryWard => Some(AbilityType::AuraMastery),
             AuraLandingKind::SacrificeShell => Some(AbilityType::BlessingOfSacrifice),
             AuraLandingKind::SacredShieldDisc => Some(AbilityType::SacredShield),
+            AuraLandingKind::RepentanceImpact => Some(AbilityType::Repentance),
             AuraLandingKind::RejuvenationSwirl
             | AuraLandingKind::MarkOfTheWildGlyph
             | AuraLandingKind::ShadowWordPainHit
@@ -1167,11 +1197,14 @@ pub enum PaladinOneShotKind {
     /// `holy_precast_high_base.m2` at the Paladin's feet: the cast's brief
     /// gold disc, the other end of the cast.
     SacredShieldBase,
+    /// Repentance's gold impact at the victim's chest (AS-378). Its head
+    /// swirl is the incapacitate's state, a [`RepentanceSwirl`].
+    RepentanceImpact,
 }
 
 impl PaladinOneShotKind {
     /// Every one-shot, in declaration order.
-    pub const ALL: [PaladinOneShotKind; 9] = [
+    pub const ALL: [PaladinOneShotKind; 10] = [
         PaladinOneShotKind::DivineFavor,
         PaladinOneShotKind::AuraMastery,
         PaladinOneShotKind::SacrificeAlly,
@@ -1181,6 +1214,7 @@ impl PaladinOneShotKind {
         PaladinOneShotKind::ArtOfWar,
         PaladinOneShotKind::SacredShield,
         PaladinOneShotKind::SacredShieldBase,
+        PaladinOneShotKind::RepentanceImpact,
     ];
 
     /// The one-shot a landing plays on its bearer, or `None` for another
@@ -1196,6 +1230,7 @@ impl PaladinOneShotKind {
             AuraLandingKind::InfusionHalo => Some(PaladinOneShotKind::InfusionOfLight),
             AuraLandingKind::ArtOfWarRing => Some(PaladinOneShotKind::ArtOfWar),
             AuraLandingKind::SacredShieldDisc => Some(PaladinOneShotKind::SacredShield),
+            AuraLandingKind::RepentanceImpact => Some(PaladinOneShotKind::RepentanceImpact),
             AuraLandingKind::RejuvenationSwirl
             | AuraLandingKind::MarkOfTheWildGlyph
             | AuraLandingKind::ShadowWordPainHit
@@ -1265,6 +1300,36 @@ pub enum OneShotPieceRole {
 #[derive(Component, Clone, Copy, Debug)]
 pub struct PaladinOneShotPiece {
     pub role: OneShotPieceRole,
+}
+
+/// Repentance's head swirl on its victim (graphical only, AS-378,
+/// `rendering/effects/repentance.rs`): `shadowwordbefuddle_head.m2`'s two
+/// falling sparkle emitters and its three circling violet star points, for
+/// as long as the incapacitate holds. A world-space rig at the victim's head
+/// that follows it; the sparkles and stars are its children, so all of it
+/// goes the moment the incapacitate ends, breaks, is dispelled or its victim
+/// dies. Never a child of the victim, and it touches no body.
+#[derive(Component, Debug)]
+pub struct RepentanceSwirl {
+    /// The victim.
+    pub owner: Entity,
+    /// Whether the victim is a pet (a smaller body, lower head).
+    pub is_pet: bool,
+    /// Seconds since the swirl began.
+    pub age: f32,
+    /// Sparkles owed per emitter (fractional carry).
+    pub carry: [f32; 2],
+    /// Sparkles emitted so far — the scatter seed.
+    pub emitted: u32,
+}
+
+/// One drawn star of a [`RepentanceSwirl`]: `point` is which of the three
+/// circling points (0..3), `trail` its place in the point's trail (0 the
+/// lead, then three fainter, smaller stars behind it).
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RepentanceStar {
+    pub point: u8,
+    pub trail: u8,
 }
 
 /// What an aura's BLOOM draws when it lands, routed by the aura's RON name.
@@ -1441,10 +1506,11 @@ pub struct EmpoweredFlashDisc {
 
 /// Shadow Trance's dark speck halo (graphical only): tiny near-black specks
 /// born on a flat shell about the Warlock's head and drifting in
-/// (`shadow_impactdot_med_head.m2`). It follows the head, emits for the
-/// client's window from the proc, and retires, specks and all, the moment
-/// Shadow Trance is spent or its Warlock dies. One halo per Warlock: a proc
-/// that refreshes Shadow Trance restarts it.
+/// (`shadow_impactdot_med_head.m2`). It follows the head and plays as the
+/// client's one-shot: it emits for the client's window from the proc and
+/// retires after its last speck, whether or not Shadow Trance is spent
+/// meanwhile, or at once, specks and all, when its Warlock dies. One halo per
+/// Warlock: a proc that refreshes Shadow Trance restarts it.
 #[derive(Component, Debug)]
 pub struct ShadowTranceHalo {
     /// The Warlock whose head it rings.
@@ -1562,8 +1628,7 @@ pub enum HealCastKind {
     /// The instant Holy hand flash (AS-374): the Holy glow and wisps of
     /// `holy_precast_*_hand.m2` played once, 0.7 s on both hands, for a Holy
     /// instant with no cast window (Aura Mastery, Blessing of Sacrifice,
-    /// Divine Protection).
-    /// Only ever a launch.
+    /// Repentance, Divine Protection). Only ever a launch.
     HolyFlash,
 }
 
@@ -1607,15 +1672,16 @@ impl HealCastKind {
             // class AI with no cast state; their hands flash off their aura's
             // landing (`AuraLandingKind::cast_ability`). Divine Favor's cast
             // kit 425 is Moonfire's `magic_cast_hand.m2`; Aura Mastery (kit
-            // 191), Blessing of Sacrifice (kits 186/189) and Sacred Shield
-            // (kit 193, AS-375) are the Holy hands, played as the instant
-            // flash.
+            // 191), Blessing of Sacrifice (kits 186/189), Sacred Shield (kit
+            // 193, AS-375) and Repentance (kit 190, AS-378) are the Holy
+            // hands, played as the instant flash.
             AbilityType::DivineFavor => Some(HealCastKind::Arcane),
             // Divine Protection (AS-376) too; its hands flash at its globe's
             // onset (`divine_protection.rs`).
             AbilityType::AuraMastery
             | AbilityType::BlessingOfSacrifice
             | AbilityType::SacredShield
+            | AbilityType::Repentance
             | AbilityType::DivineProtection => Some(HealCastKind::HolyFlash),
             _ => None,
         }
@@ -1933,7 +1999,10 @@ pub enum AuraApplyOwner {
     FearShroud,
     /// Sheep body swap and transform puffs (`polymorph.rs`).
     Polymorph,
-    /// Freezing Trap's ice block (`ice_block.rs`).
+    /// Freezing Trap's ice block (`traps.rs`), spawned by the trap's
+    /// trigger and kept while its victim holds the incapacitate NAMED
+    /// [`FREEZING_TRAP_AURA`]. An incapacitate by any other name raises no
+    /// band and no block; Repentance's is [`AuraApplyOwner::Repentance`].
     IceBlock,
     /// The shields: the client cards of Power Word: Shield, Divine Shield
     /// and Ice Barrier (`shield.rs`), and Weakened Soul, which only ever
@@ -1985,6 +2054,16 @@ pub enum AuraApplyOwner {
     /// (`HealingReceivedIncrease`, `KillingBlowSave`) are the damage
     /// pipeline's, which any later user meets on the band.
     GuardianSpirit,
+    /// Vengeance: the pale-blue glow on both of the Paladin's hands, whose
+    /// onset is its application (`vengeance.rs`, AS-377). Owned per aura
+    /// NAME, because its type (`DamageDealtIncrease`) is the damage
+    /// pipeline's, which any other user meets on the band.
+    VengeanceHands,
+    /// Repentance (AS-378): the gold impact at the victim's chest as it lands,
+    /// then the violet head swirl for as long as the incapacitate holds
+    /// (`repentance.rs`). Owned per aura NAME, because its type
+    /// (`Incapacitate`) is Freezing Trap's, whose ice block it never draws.
+    Repentance,
     /// Cheat Death's damage cut: the skull over the Rogue's head and the
     /// ghost-fire round it, raised by the save itself (`cheat_death.rs`).
     /// Owned per aura NAME, because its type (`DamageTakenReduction`) is
@@ -1996,20 +2075,32 @@ pub enum AuraApplyOwner {
     /// (`DamageTakenReduction`) is the damage pipeline's, which any other user
     /// meets on the band.
     DivineProtectionGlobe,
+    /// Shadow Dance: the dark-red shadow state on the Rogue's chest for the
+    /// whole window, thinning and flickering over its last 1.5 s
+    /// (`shadow_dance.rs`, AS-368). Owned by TYPE: `ShadowDance` has no other
+    /// user.
+    ShadowDanceState,
 }
 
 impl AuraApplyRoute {
-    /// Route one aura INSTANCE's application: a named aura with a bespoke
-    /// landing ([`AuraLandingKind::for_aura`]) is owned by it, and so are
-    /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]), Cheat Death by
-    /// its save ([`CHEAT_DEATH_NAME`]) and Divine Protection by its globe
+    /// Route one aura INSTANCE's application: Repentance's incapacitate is
+    /// owned by its impact and head swirl ([`REPENTANCE_AURA`]), a named aura
+    /// with a bespoke landing ([`AuraLandingKind::for_aura`]) by that,
+    /// Guardian Spirit by its state ([`GUARDIAN_SPIRIT_AURA`]), Vengeance by
+    /// its hands ([`VENGEANCE_AURA`]), Cheat Death by its save
+    /// ([`CHEAT_DEATH_NAME`]) and Divine Protection by its globe
     /// ([`DIVINE_PROTECTION_AURA`]); every other aura routes by its type
-    /// ([`Self::for_aura`]). The renderer asks this.
+    /// ([`Self::for_aura`]). The renderers ask this — the band, and the
+    /// Repentance swirl to find its incapacitate.
     pub fn for_instance(aura_type: AuraType, name: &str) -> Self {
-        if AuraLandingKind::for_aura(aura_type, name).is_some() {
+        if aura_type == AuraType::Incapacitate && name == REPENTANCE_AURA {
+            AuraApplyRoute::Owned(AuraApplyOwner::Repentance)
+        } else if AuraLandingKind::for_aura(aura_type, name).is_some() {
             AuraApplyRoute::Owned(AuraApplyOwner::AuraLanding)
         } else if name == GUARDIAN_SPIRIT_AURA {
             AuraApplyRoute::Owned(AuraApplyOwner::GuardianSpirit)
+        } else if is_vengeance(aura_type, name) {
+            AuraApplyRoute::Owned(AuraApplyOwner::VengeanceHands)
         } else if name == CHEAT_DEATH_NAME {
             AuraApplyRoute::Owned(AuraApplyOwner::CheatDeath)
         } else if is_divine_protection(aura_type, name) {
@@ -2069,8 +2160,6 @@ impl AuraApplyRoute {
             // on the Paladin (`for_instance`, AS-374); an unnamed one keeps
             // the family cue.
             AuraType::SilenceInterruptImmunity => AuraApplyRoute::Band,
-            // Shadow Dance likewise (its visual card is AS-368).
-            AuraType::ShadowDance => AuraApplyRoute::Band,
 
             // Travel Form has no bespoke apply treatment of its own, so the
             // family cue draws it.
@@ -2093,6 +2182,8 @@ impl AuraApplyRoute {
             AuraType::SpellSchoolLockout => AuraApplyRoute::Owned(AuraApplyOwner::InterruptSputter),
             AuraType::Silence => AuraApplyRoute::Owned(AuraApplyOwner::BacklashBurst),
             AuraType::ShadowSight => AuraApplyRoute::Owned(AuraApplyOwner::ShadowSightOrb),
+            // Shadow Dance's window: its state on the Rogue is its landing.
+            AuraType::ShadowDance => AuraApplyRoute::Owned(AuraApplyOwner::ShadowDanceState),
 
             AuraType::MovementSpeedSlow | AuraType::AttackSpeedSlow => {
                 AuraApplyRoute::Owned(AuraApplyOwner::SlowRing)
@@ -2850,7 +2941,7 @@ impl InstantAbilityFired {
         matches!(
             ability,
             // Resolved through the `QueuedInstantAttack` drain in instant_landings.rs.
-            MortalStrike | Ambush | SinisterStrike
+            MortalStrike | Ambush | SinisterStrike | CrusaderStrike
             // Instant AND aura-only: applied inline in class AI, entering
             // neither generic caster hook (A2). Power Word: Shield's marker
             // carries its Holy launch hands (`spawn_instant_cast_hands`).

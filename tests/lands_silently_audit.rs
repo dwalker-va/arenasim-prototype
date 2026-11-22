@@ -79,6 +79,7 @@ use arenasim::states::play_match::combat_core::cheat_death_aura;
 use arenasim::states::play_match::combat_core::ExtraSwingSource;
 use arenasim::states::play_match::combat_core::CHEAT_DEATH_NAME;
 use arenasim::states::play_match::components::is_divine_protection;
+use arenasim::states::play_match::components::is_vengeance;
 use arenasim::states::play_match::components::Aura;
 use arenasim::states::play_match::components::AuraApplyOwner;
 use arenasim::states::play_match::components::AuraApplyRoute;
@@ -94,6 +95,7 @@ use arenasim::states::play_match::components::PaladinOneShotKind;
 use arenasim::states::play_match::components::RootStyle;
 use arenasim::states::play_match::components::SchoolImpact;
 use arenasim::states::play_match::components::ShieldKind;
+use arenasim::states::play_match::components::SwingStyle;
 use arenasim::states::play_match::components::TotemElement;
 use arenasim::states::play_match::curse_spec;
 use arenasim::states::play_match::equipment::load_item_definitions;
@@ -107,6 +109,7 @@ use arenasim::states::play_match::oneshot_visual;
 use arenasim::states::play_match::plays_cheat_death;
 use arenasim::states::play_match::proc_trinkets::ProcEffect;
 use arenasim::states::play_match::root_style_for;
+use arenasim::states::play_match::swing_style_for_ability;
 use arenasim::states::play_match::talent_mechanics::MechanicKind;
 use arenasim::states::play_match::talent_procs::effect_aura;
 use arenasim::states::play_match::talent_procs::ProcEvent;
@@ -121,6 +124,7 @@ use arenasim::states::play_match::ChannelVisual;
 use arenasim::states::play_match::DotStateVisual;
 use arenasim::states::play_match::InterruptLanding;
 use arenasim::states::play_match::SlowTint;
+use arenasim::states::play_match::CRUSADER_STRIKE_LANDING;
 use arenasim::states::play_match::DIVINE_SHIELD_AURA_NAME;
 use arenasim::states::play_match::ICE_BARRIER_AURA_NAME;
 use arenasim::states::play_match::PW_SHIELD_AURA_NAME;
@@ -582,10 +586,6 @@ const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[
         "AS-348 (Shadowburn and Conflagrate, the Destruction casts; AS-334's talent visuals)",
     ),
     (
-        CrusaderStrike,
-        "AS-379 (Crusader Strike, the Retribution capstone's strike)",
-    ),
-    (
         Hemorrhage,
         "AS-336 (Hemorrhage, the Subtlety strike and its wound; AS-367 builds it)",
     ),
@@ -644,6 +644,24 @@ fn the_hunter_shots_land_through_the_client_landing() {
             "{a:?} must reach the client Hunter shot landing"
         );
     }
+}
+
+/// Crusader Strike lands as its card says (AS-379): the drain's marker
+/// strokes it (the sweep above reads only that), Mortal Strike's stroke, and
+/// TBC's `strike_impact_chest` through the client landing router — never
+/// Heroic Strike's decisivestrike, and never the Physical school row. A pin
+/// on the router, so a dropped arm fails here and not only by eye.
+#[test]
+fn crusader_strike_strokes_and_lands_strike_impact_chest() {
+    assert!(InstantAbilityFired::is_spawned_for(CrusaderStrike));
+    assert_eq!(
+        swing_style_for_ability(CrusaderStrike),
+        Some(SwingStyle::MortalStrike)
+    );
+    let landing = client_landing_style(CrusaderStrike).expect("a client landing");
+    assert!(std::ptr::eq(landing.emitters, &CRUSADER_STRIKE_LANDING[..]));
+    let heroic = client_landing_style(HeroicStrike).expect("Heroic Strike's");
+    assert!(!std::ptr::eq(landing.emitters, heroic.emitters));
 }
 
 // ── family: damage over time ────────────────────────────────────────────────
@@ -809,7 +827,8 @@ const CONTROL_MEMBERS: &[AbilityType] = &[
 
 /// The victim treatment of a member's control aura. Keyed on the aura TYPE
 /// (the renderers poll `ActiveAuras` for it), except Incapacitate, whose ice
-/// block is spawned by the trap trigger rather than by the aura, a slow,
+/// block is spawned by the trap trigger rather than by the aura and whose
+/// Repentance is routed by its name (`AuraApplyRoute::for_instance`), a slow,
 /// whose ring is tinted through `SlowTint::for_slow` by the aura's RON
 /// `name:` — so a slow with no tint arm lands silently — and a root, whose
 /// restraint `root_style_for` picks from its name and school.
@@ -833,8 +852,10 @@ fn control_treatment(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> 
 /// The victim treatment one control aura draws: its type, its name (`name`:
 /// the slow tint and the root style route by it), its school where it has one
 /// (the root style), and whether Freezing Trap's trigger spawned it (the only
-/// incapacitate drawn as the ice block). Shared by the crowd-control family
-/// and the talent-proc family.
+/// incapacitate drawn as the ice block). Repentance's incapacitate is the
+/// swirl's by its route, and its landing the impact's
+/// ([`paladin_oneshot`]): both must answer. Shared by the crowd-control
+/// family and the talent-proc family.
 fn control_visual(
     t: AuraType,
     name: &str,
@@ -851,6 +872,14 @@ fn control_visual(
         AuraType::Fear => Some("fear shroud (fear.rs)"),
         AuraType::Polymorph => Some("sheep swap (polymorph.rs)"),
         AuraType::Incapacitate if freezing_trap => Some("ice block (traps.rs)"),
+        AuraType::Incapacitate
+            if AuraApplyRoute::for_instance(t, name)
+                == AuraApplyRoute::Owned(AuraApplyOwner::Repentance) =>
+        {
+            paladin_oneshot(t, name).map(|_| {
+                "gold chest impact, then the violet head swirl while it holds (repentance.rs)"
+            })
+        }
         AuraType::MovementSpeedSlow => {
             SlowTint::for_slow(name).map(|_| "slow bind ring + scuff (slow_ring.rs)")
         }
@@ -863,17 +892,10 @@ fn control_finds_every_member() {
     assert_finds("crowd-control", is_control, CONTROL_MEMBERS);
 }
 
-/// Repentance is an `Incapacitate`, which draws the ice block only for the
-/// Freezing Trap that spawns it: it lands silently until AS-378 gives it its
-/// own visual.
 const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (
         CurseOfExhaustion,
         "AS-334 (the talent visuals: Curse of Exhaustion's slow)",
-    ),
-    (
-        Repentance,
-        "AS-378 (Repentance, the Retribution incapacitate; never Freezing Trap's ice block)",
     ),
     (
         Silence,
@@ -1011,6 +1033,13 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             AuraType::TravelForm => {
                 Some("pill on all fours + shift puff (TravelFormVisual → shapeshift.rs)")
             }
+            // Its own type: the state on the Rogue owns the window, not the band.
+            AuraType::ShadowDance
+                if AuraApplyRoute::for_aura(t)
+                    == AuraApplyRoute::Owned(AuraApplyOwner::ShadowDanceState) =>
+            {
+                Some("dark-red shadow state on the Rogue's chest for the window (shadow_dance.rs)")
+            }
             _ if wears_shadowform_look(c.applies_aura.as_ref().and_then(|a| a.compound)) => {
                 Some("violet translucent body + feet shroud while the form holds (shadowform.rs)")
             }
@@ -1082,10 +1111,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
         "AS-353 (Power Infusion, the infusion on the ally)",
     ),
     (PowerWordFortitude, "AS-134 (aura application)"),
-    (
-        ShadowDance,
-        "AS-336 (Shadow Dance, the Subtlety capstone's window; AS-368 builds it)",
-    ),
     (ShadowResistanceAura, "AS-134 (aura application)"),
     (
         VampiricEmbrace,
@@ -1874,6 +1899,8 @@ fn talent_proc_aura_visual(aura: &Aura) -> Option<&'static str> {
                 .any(|kind| is_live_shield(kind, aura))
             {
                 Some("client shield cards (shield.rs)")
+            } else if is_vengeance(t, name) {
+                Some("both hands glow pale blue while it lasts (vengeance.rs)")
             } else {
                 // The aura band (`AuraApplyRoute::Band`) is not this proc's
                 // own visual: see the family's header.
@@ -1922,10 +1949,6 @@ const TALENT_PROC_KNOWN_SILENT: &[(TalentId, &str)] = &[
     (
         TalentId::BlessedRecovery,
         "AS-352 (Blessed Recovery's palm glow and Renew's amber rings)",
-    ),
-    (
-        TalentId::Vengeance,
-        "AS-377 (Vengeance: both hands glow pale blue while the buff lasts)",
     ),
 ];
 
@@ -2086,6 +2109,11 @@ fn the_talent_proc_judge_names_each_drawn_members_treatment() {
     assert_eq!(
         talent_proc_judge(defs, TalentId::Blackout),
         Some("stun whirl (hard_cc.rs)")
+    );
+    // Both of Vengeance's procs land the one buff its hands draw (AS-377).
+    assert_eq!(
+        talent_proc_judge(defs, TalentId::Vengeance),
+        Some("both hands glow pale blue while it lasts (vengeance.rs)")
     );
     // Inspiration's armor buff routes to the band, which is not its own.
     let inspiration = talent_procs_in(defs)

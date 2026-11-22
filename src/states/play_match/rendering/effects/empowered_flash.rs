@@ -41,10 +41,12 @@ use crate::states::play_match::components::*;
 //
 // **Lifetimes.** The flash is a landing: it plays out its half second on a
 // living Warlock even once the curse or the bolt has spent the buff (Amplify
-// Curse is usually spent 20 ms after it lands). The halo shows the proc
-// WAITING: it emits for the client's window from the proc and retires, specks
-// and all, the moment Shadow Trance is spent or its Warlock dies
-// ([`SHADOW_TRANCE_HALO_ENDS_WITH_PROC`]). Neither is drawn on a corpse.
+// Curse is usually spent 20 ms after it lands). The halo is the client's
+// one-shot impact too (kit 4569 has no state; ruled 2026-11-14): it emits for
+// the client's window from the proc and retires after its last speck, 8.5 s
+// on, whatever the buff does meanwhile — a Shadow Trance spent at once still
+// gets its whole halo. Its Warlock's death retires it at once, specks and
+// all. Neither is drawn on a corpse.
 //
 // Spawning rides the sim's `AuraLanding` marker (`apply_pending_auras`, on a
 // fresh application or a refresh). Scatter is the shared deterministic hash
@@ -66,12 +68,6 @@ pub const SHADOW_TRANCE_SPECKS: bool = true;
 pub const SHADOW_TRANCE_SPECK_SIZE: f32 = 0.028;
 pub const SHADOW_TRANCE_SPECK_LIFE_SECS: f32 = 4.00;
 // The instant Shadow Bolt: unchanged (shipped missile and impact).
-
-/// Whether the halo retires the moment Shadow Trance is spent. `true` ties it
-/// to the waiting proc; `false` plays it as the client's one-shot impact
-/// (kit 4569 has no state), its whole window whatever the buff does. Either
-/// way it retires with a dead Warlock.
-pub const SHADOW_TRANCE_HALO_ENDS_WITH_PROC: bool = true;
 
 // ── The flash (presenceofmind_cast_base.m2) ──────────────────────────────────
 
@@ -238,17 +234,6 @@ pub fn speck_launch(seed: u32) -> (Vec3, Vec3) {
     (d * r, -d * TRANCE_SPECKS.speed.abs())
 }
 
-/// Whether Shadow Trance is up on a unit with these auras: the aura whose
-/// landing is the Shadow Trance treatment.
-pub fn shadow_trance_waiting(auras: Option<&ActiveAuras>) -> bool {
-    auras.is_some_and(|a| {
-        a.auras.iter().any(|aura| {
-            AuraLandingKind::for_aura(aura.effect_type, &aura.ability_name)
-                == Some(AuraLandingKind::ShadowTrance)
-        })
-    })
-}
-
 // ── Assets ───────────────────────────────────────────────────────────────────
 
 /// The flash's disc quad and texture, built once, lazily. (The specks' sprite
@@ -298,7 +283,8 @@ pub fn spawn_empowered_flashes(
             | AuraLandingKind::RetributionDisc
             | AuraLandingKind::InfusionHalo
             | AuraLandingKind::ArtOfWarRing
-            | AuraLandingKind::SacredShieldDisc => continue,
+            | AuraLandingKind::SacredShieldDisc
+            | AuraLandingKind::RepentanceImpact => continue,
         };
         commands.entity(marker).despawn();
         let Ok((holder, transform, pet)) = holders.get(landing.target) else {
@@ -411,9 +397,9 @@ pub fn animate_empowered_flashes(
 }
 
 /// Animate (graphical-only): follow each halo's Warlock at the head, retire
-/// its spent specks and emit what it owes this frame. A halo whose Shadow
-/// Trance is spent, whose Warlock has died, or whose last speck has died goes
-/// at once, specks and all.
+/// its spent specks and emit what it owes this frame. A halo whose Warlock
+/// has died, or whose last speck has died, goes at once, specks and all. The
+/// Shadow Trance buff is never read: spending it leaves the halo playing.
 #[allow(clippy::too_many_arguments)]
 pub fn update_shadow_trance_halos(
     mut commands: Commands,
@@ -428,22 +414,16 @@ pub fn update_shadow_trance_halos(
         &mut Transform,
         Option<&Children>,
     )>,
-    holders: Query<
-        (&Combatant, &Transform, Option<&ActiveAuras>, Option<&Pet>),
-        Without<ShadowTranceHalo>,
-    >,
+    holders: Query<(&Combatant, &Transform, Option<&Pet>), Without<ShadowTranceHalo>>,
     particles: Query<&ClientParticle>,
 ) {
     let dt = time.delta_secs();
     for (entity, mut halo, mut transform, children) in halos.iter_mut() {
-        let waiting = holders
+        let living = holders
             .get(halo.owner)
             .ok()
-            .filter(|(holder, _, auras, _)| {
-                holder.is_alive()
-                    && (!SHADOW_TRANCE_HALO_ENDS_WITH_PROC || shadow_trance_waiting(*auras))
-            });
-        let Some((_, at, _, pet)) = waiting else {
+            .filter(|(holder, _, _)| holder.is_alive());
+        let Some((_, at, pet)) = living else {
             commands.entity(entity).despawn();
             continue;
         };
