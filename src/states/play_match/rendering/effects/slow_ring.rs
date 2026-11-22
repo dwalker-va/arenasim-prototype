@@ -14,9 +14,10 @@ use crate::states::play_match::components::*;
 //
 // One treatment for `AuraType::MovementSpeedSlow`, keyed on the aura type and
 // never on an ability, so all seven sources share it: Frostbolt, Frost Armor's
-// chill, Frost Shock, Concussive Shot, Crippling Poison, the Frost Trap zone
-// and Mind Flay's slow (which has no client visual of its own; the AS-335
-// ruling draws it here in a Shadow tint).
+// chill, Frost Shock, Concussive Shot, Crippling Poison, the Frost Trap zone,
+// Mind Flay's slow (which has no client visual of its own; the AS-335
+// ruling draws it here in a Shadow tint) and Aftermath's daze (the client's
+// fire-slow state, kit 985, is ruled out for this ring in a Fire tint; AS-349).
 // Research and the decisions behind every choice below:
 // `docs/design/2026-09-26-slow-state-client-data.md` ("Decision", "Kit 360").
 //
@@ -62,9 +63,11 @@ use crate::states::play_match::components::*;
 // with the unit (it is paced by distance); this sits under it and does not
 // fight it.
 //
-// Crippling Poison's proc is the one slow with no hit of its own to carry its
-// apply moment. Its landing is the weapon poison cloud every poison shares
-// (`poison_landing.rs`, the client's `poison_impact_chest.m2`), not this file's.
+// Crippling Poison's proc and Aftermath's are the two slows with no hit of
+// their own to carry their apply moment. Crippling Poison's landing is the
+// weapon poison cloud every poison shares (`poison_landing.rs`, the client's
+// `poison_impact_chest.m2`); Aftermath's is the client's small fire hit at the
+// chest (`aftermath.rs`, kit 728). Neither is this file's.
 //
 // Graphical-only: registered in `states/mod.rs` alone. No `game_rng` draw, no
 // sim write — the only components it inserts are its own emitter and its own
@@ -144,6 +147,10 @@ pub enum SlowTint {
     /// the channel's stars and beam, `mind_flay.rs`); the AS-335 ruling gives
     /// it this ring in the Shadow school's colour.
     Shadow,
+    /// Aftermath's daze. The client gives it its own fire-slow state (kit 985:
+    /// a heat haze at the feet and a red body tint); the AS-334 ruling draws
+    /// this ring instead, in the Fire school's colour.
+    Fire,
 }
 
 impl SlowTint {
@@ -159,6 +166,7 @@ impl SlowTint {
             "Concussive Shot" => Some(SlowTint::Physical),
             "Crippling Poison" => Some(SlowTint::Nature),
             "Mind Flay" => Some(SlowTint::Shadow),
+            AFTERMATH_AURA => Some(SlowTint::Fire),
             _ => None,
         }
     }
@@ -173,6 +181,7 @@ impl SlowTint {
             SlowTint::Physical => PHYSICAL_COLOR,
             SlowTint::Nature => SpellSchool::Nature.color(),
             SlowTint::Shadow => SpellSchool::Shadow.color(),
+            SlowTint::Fire => SpellSchool::Fire.color(),
         }
     }
 }

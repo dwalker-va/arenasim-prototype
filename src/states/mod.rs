@@ -1361,6 +1361,25 @@ impl Plugin for StatesPlugin {
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
+        // Aftermath's fire hit (rendering/effects/aftermath.rs): kit 728's
+        // small burst at the victim's chest. Spawn (consumes Aftermath's
+        // landing markers and starts the wound flinch) -> follow and emit ->
+        // fly -> held in front of the body. `.before(tick_hit_flinch)`, so
+        // the dip renders on the landing frame, as a melee auto's does. Its
+        // slow is the slow ring's (`SlowTint::Fire`). Graphical only.
+        .add_systems(
+            Update,
+            (
+                play_match::spawn_aftermath_hits,
+                play_match::animate_aftermath_hits,
+                play_match::age_aftermath_hit_particles,
+                play_match::billboard_aftermath_hit_particles,
+            )
+                .chain()
+                .before(play_match::tick_hit_flinch)
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
         // DoT drip indicators: green poison / red bleed drops on afflicted
         // targets (graphical only — never registered in headless systems.rs).
         .add_systems(

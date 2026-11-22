@@ -513,7 +513,7 @@ pub fn consume_ranged_hit_arrivals(
 /// the caller's query order, unchanged by this map — and `max` is
 /// order-independent anyway. Graphical-only besides; nothing here reaches sim
 /// state.
-type PendingDepth = HashMap<Entity, f32>;
+pub(super) type PendingDepth = HashMap<Entity, f32>;
 
 /// Start (or refresh) a victim's flinch.
 ///
@@ -524,7 +524,7 @@ type PendingDepth = HashMap<Entity, f32>;
 /// second source a crit sharing a tick with a normal hit would be overwritten
 /// at the normal depth. Measured at 22% of landed autos under focus fire,
 /// which is exactly where the crit contrast is supposed to read.
-fn insert_flinch(
+pub(super) fn insert_flinch(
     commands: &mut Commands,
     pending: &mut PendingDepth,
     target: Entity,

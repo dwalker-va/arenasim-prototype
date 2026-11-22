@@ -858,6 +858,10 @@ fn control_treatment(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> 
 /// swirl's by its route, and its landing the impact's
 /// ([`paladin_oneshot`]): both must answer. Shared by the crowd-control
 /// family and the talent-proc family.
+/// What Aftermath's slow draws: its landing, then its state.
+const AFTERMATH_VISUAL: &str =
+    "fire hit at the chest, then the Fire-tinted slow bind ring + scuff (aftermath.rs, slow_ring.rs)";
+
 fn control_visual(
     t: AuraType,
     name: &str,
@@ -882,9 +886,16 @@ fn control_visual(
                 "gold chest impact, then the violet head swirl while it holds (repentance.rs)"
             })
         }
-        AuraType::MovementSpeedSlow => {
-            SlowTint::for_slow(name).map(|_| "slow bind ring + scuff (slow_ring.rs)")
-        }
+        // A slow's state is the ring, tinted by name. Aftermath's slow has
+        // no hit of its own to land on, so its landing must play too: the
+        // client's fire hit (`AuraLandingKind`), then the Fire-tinted ring.
+        AuraType::MovementSpeedSlow => SlowTint::for_slow(name).map(|_| {
+            if AuraLandingKind::for_aura(t, name) == Some(AuraLandingKind::AftermathFireHit) {
+                AFTERMATH_VISUAL
+            } else {
+                "slow bind ring + scuff (slow_ring.rs)"
+            }
+        }),
         _ => None,
     }
 }
@@ -1950,16 +1961,10 @@ const TALENT_PROC_MEMBERS: &[TalentId] = &[
 /// Procs whose aura lands with no treatment of its own yet, each with the
 /// card that builds one. Blackout is not here: its stun draws the stun whirl
 /// every stun does (AS-335 asked whether it would).
-const TALENT_PROC_KNOWN_SILENT: &[(TalentId, &str)] = &[
-    (
-        TalentId::Aftermath,
-        "AS-349 (Aftermath: the client fire hit, and the slow ring with a Fire tint)",
-    ),
-    (
-        TalentId::BlessedRecovery,
-        "AS-352 (Blessed Recovery's palm glow and Renew's amber rings)",
-    ),
-];
+const TALENT_PROC_KNOWN_SILENT: &[(TalentId, &str)] = &[(
+    TalentId::BlessedRecovery,
+    "AS-352 (Blessed Recovery's palm glow and Renew's amber rings)",
+)];
 
 /// Procs ruled to need no bespoke visual: the generic aura band draws each as
 /// it lands, and its buff-bar icon carries it while it lasts. (node, the card
@@ -2125,6 +2130,12 @@ fn the_talent_proc_judge_names_each_drawn_members_treatment() {
         talent_proc_judge(defs, TalentId::Vengeance),
         Some("both hands glow pale blue while it lasts (vengeance.rs)")
     );
+    // Aftermath's slow lands the fire hit and wears the Fire ring (AS-349):
+    // the judge needs both its landing and its tint.
+    assert_eq!(
+        talent_proc_judge(defs, TalentId::Aftermath),
+        Some(AFTERMATH_VISUAL)
+    );
     // Inspiration's armor buff routes to the band, which is not its own.
     let inspiration = talent_procs_in(defs)
         .into_iter()
@@ -2219,21 +2230,22 @@ fn the_talent_proc_family_catches_a_planted_untagged_proc() {
     );
 }
 
-/// A ruling on a proc the band does not draw (Aftermath's slow routes to the
-/// slow ring, which has no tint for it) fails: the ruling list holds only
-/// procs the band draws.
+/// A ruling on a proc the band does not draw (Aftermath's slow routes to its
+/// own fire-hit landing) fails: the ruling list holds only procs the band
+/// draws.
 #[test]
 fn a_ruling_on_a_proc_the_band_does_not_draw_fails() {
     let defs = TalentDefinitions::shipped();
-    let silent: Vec<(TalentId, &str)> = TALENT_PROC_KNOWN_SILENT
-        .iter()
-        .copied()
-        .filter(|(id, _)| *id != TalentId::Aftermath)
-        .collect();
     let mut rulings = TALENT_PROC_NO_BESPOKE_VISUAL_BY_RULING.to_vec();
     rulings.push((TalentId::Aftermath, "AS-0", "planted"));
     rulings.sort_by_key(|(id, _, _)| format!("{id:?}"));
-    let err = check_talent_procs(defs, TALENT_PROC_MEMBERS, &silent, &rulings).unwrap_err();
+    let err = check_talent_procs(
+        defs,
+        TALENT_PROC_MEMBERS,
+        TALENT_PROC_KNOWN_SILENT,
+        &rulings,
+    )
+    .unwrap_err();
     assert_eq!(err.lines().count(), 1, "only Aftermath fails: {err}");
     assert!(
         err.contains("Aftermath needs no bespoke visual by ruling, but its MovementSpeedSlow"),
