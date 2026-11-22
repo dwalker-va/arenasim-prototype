@@ -74,6 +74,18 @@ use crate::states::play_match::components::*;
 //   outer motes' green shows from 87.5% of their life.
 // - A ribbon is one camera-facing strip whose width and alpha taper per
 //   vertex, without the canvas's round caps.
+// - Held in front of the body. The bench is a 2D canvas that draws every
+//   piece over the capsule. Here the body is alpha-blended and writes no
+//   depth, so Bevy orders it against these additive pieces by each mesh's
+//   TRANSLATION alone: a ring low on the column, a far orb or a far mote
+//   whose translation sits deeper than the body's would be drawn first and
+//   painted over. So every piece is drawn on its own view ray, slid toward
+//   the camera until it stands nearer than the body capsule's nearest point,
+//   and scaled by the same ratio ([`demonology_held_point`]): the same
+//   pixels the bench gives it, always drawn after the body. (The ribbons
+//   need none: each one's translation is the chest on the body's axis.) The particles
+//   keep their true positions on [`BodyHeldParticle`] and are held only for
+//   the draw. (AS-347's `siphon_drawn_point` is the same rule.)
 //
 // Both rigs follow their Warlock (the bench's `customDraw` reads the body
 // each frame); their particles are world-space after birth, as the bench's
@@ -150,6 +162,47 @@ fn additive_material(color: Color, alpha: f32, texture: Option<Handle<Image>>) -
         cull_mode: None,
         double_sided: true,
         ..default()
+    }
+}
+
+/// The combatant body every piece is held in front of: `Capsule3d::new(0.5,
+/// 1.5)` centred on its transform (`play_match/mod.rs`), so its swept segment
+/// runs ±0.75 about the centre, at radius 0.5. A Warlock is never a pet.
+pub const DEMONOLOGY_BODY_RADIUS: f32 = 0.5;
+pub const DEMONOLOGY_BODY_HALF_SEGMENT: f32 = 0.75;
+/// How far in front of the body's nearest point a held piece stands.
+pub const DEMONOLOGY_BODY_CLEARANCE: f32 = 0.05;
+
+/// Where a piece truly at `at` is drawn in front of the body centred at
+/// `body`, for a camera at `eye` looking along `forward`, and the factor its
+/// size is scaled by (the header's last departure).
+///
+/// A piece already nearer than the body capsule's nearest point (the nearer
+/// end of its segment, less its radius and the clearance) stays put. One
+/// deeper slides along its own view ray to that depth and is scaled by the
+/// same ratio, so it covers exactly the pixels it would have.
+pub fn demonology_held_point(at: Vec3, body: Vec3, eye: Vec3, forward: Vec3) -> (Vec3, f32) {
+    let depth = (at - eye).dot(forward);
+    let (a, b) = (
+        body - Vec3::Y * DEMONOLOGY_BODY_HALF_SEGMENT,
+        body + Vec3::Y * DEMONOLOGY_BODY_HALF_SEGMENT,
+    );
+    let nearest = (a - eye).dot(forward).min((b - eye).dot(forward))
+        - DEMONOLOGY_BODY_RADIUS
+        - DEMONOLOGY_BODY_CLEARANCE;
+    if depth <= nearest || nearest <= 0.0 {
+        return (at, 1.0);
+    }
+    let k = nearest / depth;
+    (eye + (at - eye) * k, k)
+}
+
+/// [`demonology_held_point`] for the match camera, if there is one; with none
+/// the piece is drawn where it is.
+fn held(at: Vec3, body: Vec3, camera: Option<&Transform>) -> (Vec3, f32) {
+    match camera {
+        Some(c) => demonology_held_point(at, body, c.translation, c.forward().as_vec3()),
+        None => (at, 1.0),
     }
 }
 
@@ -235,6 +288,7 @@ pub fn demonology_ramp_rgb(keys: [Rgb; 3], t: f32) -> Rgb {
     [channel(0), channel(1), channel(2)]
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_particle(
     commands: &mut Commands,
     quad: &Handle<Mesh>,
@@ -243,6 +297,7 @@ fn spawn_particle(
     at: Vec3,
     velocity: Vec3,
     facing: ParticleFacing,
+    body: Entity,
 ) {
     commands.spawn((
         ClientParticle {
@@ -262,6 +317,7 @@ fn spawn_particle(
         Transform::from_translation(at),
         NotShadowCaster,
         PlayMatchEntity,
+        BodyHeldParticle { body, at },
     ));
 }
 
@@ -742,6 +798,16 @@ pub struct SoulLinkColumn {
     sparks: Arc<[Handle<StandardMaterial>]>,
 }
 
+/// A world-space spark or mote held in front of its Warlock's body for the
+/// draw: `at` is where it truly is, which `animate_client_particles` moves
+/// (`unhold_demonology_particles` puts it back before, and
+/// `hold_demonology_particles` draws it held after).
+#[derive(Component)]
+pub struct BodyHeldParticle {
+    pub body: Entity,
+    pub at: Vec3,
+}
+
 /// One ring of a [`SoulLinkColumn`], `index` from the bottom; it owns its
 /// material, since its alpha is its own.
 #[derive(Component)]
@@ -1041,11 +1107,25 @@ pub fn animate_soul_link_columns(
     mut columns: Query<(Entity, &mut SoulLinkColumn, &mut Transform, &Children)>,
     mut runes: Query<
         (&SoulLinkRune, &mut Transform),
-        (Without<SoulLinkColumn>, Without<Combatant>),
+        (
+            Without<SoulLinkColumn>,
+            Without<Combatant>,
+            Without<Camera3d>,
+        ),
     >,
     holders: Query<(&Combatant, &Transform), (Without<SoulLinkColumn>, Without<SacrificeTriad>)>,
+    camera: Query<
+        &Transform,
+        (
+            With<Camera3d>,
+            Without<SoulLinkColumn>,
+            Without<SoulLinkRune>,
+            Without<Combatant>,
+        ),
+    >,
 ) {
     let dt = time.delta_secs();
+    let cam = camera.iter().next();
     for (entity, mut column, mut transform, children) in columns.iter_mut() {
         let Some(at) = living_warlock(&holders, column.warlock) else {
             commands.entity(entity).despawn();
@@ -1064,8 +1144,9 @@ pub fn animate_soul_link_columns(
                 continue;
             };
             let frame = soul_link_rune_frame(rune.index, column.age);
-            part.translation = Vec3::Y * frame.height;
-            part.scale = Vec3::splat(frame.scale.max(1e-4));
+            let (drawn, k) = held(feet + Vec3::Y * frame.height, at.translation, cam);
+            part.translation = drawn - feet;
+            part.scale = Vec3::splat((frame.scale * k).max(1e-4));
             if let Some(material) = materials.get_mut(&rune.material) {
                 material.base_color.set_alpha(frame.alpha);
             }
@@ -1092,6 +1173,7 @@ pub fn animate_soul_link_columns(
                 feet + offset,
                 velocity,
                 soul_link_spark_facing(seed),
+                column.warlock,
             );
         }
     }
@@ -1158,11 +1240,22 @@ pub fn animate_sacrifice_triads(
             .unwrap_or(Vec3::new(0.0, 40.0, 40.0));
         for child in children.iter() {
             if let Ok((orb, mut part)) = orbs.get_mut(child) {
-                part.translation = sacrifice_orb_point(orb.index, t);
+                let (drawn, k) = held(
+                    chest + sacrifice_orb_point(orb.index, t),
+                    at.translation,
+                    cam.as_ref(),
+                );
+                part.translation = drawn - chest;
+                part.scale = Vec3::splat(
+                    DEMONIC_SACRIFICE_ORB_GLOW_DIAMETER * DEMONIC_SACRIFICE_SIZE_MUL * k,
+                );
                 if let Some(c) = cam {
                     part.rotation = c.rotation;
                 }
             } else if let Ok(ribbon) = ribbons.get(child) {
+                // No hold: a ribbon's translation is the chest on the body's
+                // own axis, above its centre, so it sorts in front of the
+                // body from any camera above the horizon.
                 if let Some(mesh) = meshes.get_mut(&ribbon.mesh) {
                     write_sacrifice_ribbon(mesh, &sacrifice_ribbon_trail(ribbon.index, t), eye);
                 }
@@ -1207,9 +1300,54 @@ pub fn animate_sacrifice_triads(
                     chest + offset,
                     velocity,
                     ParticleFacing::Camera,
+                    triad.warlock,
                 );
             }
         }
+    }
+}
+
+/// Before the particles age (graphical-only): put every held spark and mote
+/// back where it truly is, so `animate_client_particles` moves the true
+/// position and never the drawn one.
+pub fn unhold_demonology_particles(mut particles: Query<(&BodyHeldParticle, &mut Transform)>) {
+    for (held, mut transform) in particles.iter_mut() {
+        transform.translation = held.at;
+    }
+}
+
+/// After the particles age (graphical-only): record each spark's and mote's
+/// true position and draw it held in front of its Warlock's body, its size
+/// scaled to keep its pixels.
+#[allow(clippy::type_complexity)]
+pub fn hold_demonology_particles(
+    mut particles: Query<(&mut BodyHeldParticle, &mut Transform), Without<Camera3d>>,
+    bodies: Query<
+        &Transform,
+        (
+            With<Combatant>,
+            Without<BodyHeldParticle>,
+            Without<Camera3d>,
+        ),
+    >,
+    camera: Query<
+        &Transform,
+        (
+            With<Camera3d>,
+            Without<BodyHeldParticle>,
+            Without<Combatant>,
+        ),
+    >,
+) {
+    let cam = camera.iter().next();
+    for (mut held_particle, mut transform) in particles.iter_mut() {
+        held_particle.at = transform.translation;
+        let Ok(body) = bodies.get(held_particle.body) else {
+            continue;
+        };
+        let (drawn, k) = held(held_particle.at, body.translation, cam);
+        transform.translation = drawn;
+        transform.scale *= k;
     }
 }
 

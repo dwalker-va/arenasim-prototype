@@ -36,6 +36,7 @@ use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use bevy::render::camera::CameraProjection;
 use bevy::render::mesh::VertexAttributeValues;
+use bevy::render::view::NoFrustumCulling;
 use bevy::time::TimeUpdateStrategy;
 
 use arenasim::combat::log::CombatLog;
@@ -57,8 +58,9 @@ use arenasim::states::play_match::talent_mechanics::{TalentMechanic, TalentMecha
 use arenasim::states::play_match::talents::{Build, TalentDefinitions, TalentId};
 use arenasim::states::play_match::{
     animate_client_particles, animate_empowered_flashes, animate_sacrifice_triads,
-    animate_soul_link_columns, billboard_hunter_shots, soul_link_forms, spawn_demonology_landings,
-    spawn_empowered_flashes, star_flash_texture, SacrificeOrb, SacrificeRibbon, SacrificeTriad,
+    animate_soul_link_columns, billboard_hunter_shots, hold_demonology_particles, soul_link_forms,
+    spawn_demonology_landings, spawn_empowered_flashes, star_flash_texture,
+    unhold_demonology_particles, BodyHeldParticle, SacrificeOrb, SacrificeRibbon, SacrificeTriad,
     SoulLinkColumn, SoulLinkRune,
 };
 
@@ -389,11 +391,29 @@ const COMBATANT_Y: f32 = 1.0;
 
 struct Harness {
     app: App,
-    camera: Entity,
+    camera: Option<Entity>,
 }
 
 impl Harness {
+    /// No camera: every piece is drawn where it truly is (nothing to hold it
+    /// in front of the body for), so the bench's geometry reads off exactly.
     fn new() -> Self {
+        Self::build(None)
+    }
+
+    /// A camera at `at`: the pieces face it and are held in front of the body
+    /// for it.
+    fn with_camera(at: Transform) -> Self {
+        Self::build(Some(at))
+    }
+
+    /// A camera turned well off every axis, so a sprite left unrotated (or
+    /// turned to a fixed direction) cannot pass for one facing it.
+    fn off_axis() -> Self {
+        Self::with_camera(Transform::from_xyz(-23.0, 31.0, 17.0).looking_at(Vec3::ZERO, Vec3::Y))
+    }
+
+    fn build(camera_at: Option<Transform>) -> Self {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -416,27 +436,22 @@ impl Harness {
                 .chain()
                 .before(spawn_demonology_landings),
         );
-        // The order `states/mod.rs` registers, then the shared particle ager
-        // and the world-space billboard.
+        // The order `states/mod.rs` registers, around the shared particle
+        // ager, then the world-space billboard.
         app.add_systems(
             Update,
             (
+                unhold_demonology_particles,
                 spawn_demonology_landings,
                 animate_soul_link_columns,
                 animate_sacrifice_triads,
                 animate_client_particles,
+                hold_demonology_particles,
                 billboard_hunter_shots,
             )
                 .chain(),
         );
-        // A camera turned well off every axis.
-        let camera = app
-            .world_mut()
-            .spawn((
-                Camera3d::default(),
-                Transform::from_xyz(-23.0, 31.0, 17.0).looking_at(Vec3::ZERO, Vec3::Y),
-            ))
-            .id();
+        let camera = camera_at.map(|t| app.world_mut().spawn((Camera3d::default(), t)).id());
         app.update();
         Harness { app, camera }
     }
@@ -711,6 +726,19 @@ fn tagged(h: &Harness, e: Entity) -> bool {
     h.app.world().get::<PlayMatchEntity>(e).is_some()
 }
 
+/// A sprite's mesh is the unit quad: 1 yd on a side about its centre, flat in
+/// its own XY, so its drawn size is its scale.
+fn assert_unit_quad(mesh: &Mesh, what: &str) {
+    let vs = positions(mesh);
+    assert_eq!(vs.len(), 4, "{what}: a quad");
+    for v in &vs {
+        assert!(
+            (v.x.abs() - 0.5).abs() < 1e-6 && (v.y.abs() - 0.5).abs() < 1e-6 && v.z.abs() < 1e-6,
+            "{what}: vertex {v} of a unit quad"
+        );
+    }
+}
+
 // ── Soul Link ────────────────────────────────────────────────────────────────
 
 /// The column forms once, as the gates open, on every Warlock whose link
@@ -807,11 +835,36 @@ fn the_column_is_eleven_flat_additive_rune_rings_at_the_feet() {
             (outer - settled).abs() < 0.06,
             "ring {i}: rim {outer} vs {settled}"
         );
-        let ticks = radii
+        // Exactly eight ticks: sixteen feet at 0.82 r, two per tick, their
+        // midpoints on the eight compass angles k·TAU/8.
+        let feet_at: Vec<Vec3> = vs
             .iter()
-            .filter(|r| (*r / settled - 0.82).abs() < 0.01)
-            .count();
-        assert!(ticks >= 8 * 2, "ring {i}: {ticks} tick feet at 0.82 r");
+            .copied()
+            .filter(|v| (Vec2::new(v.x, v.z).length() / settled - 0.82).abs() < 0.01)
+            .collect();
+        assert_eq!(feet_at.len(), 16, "ring {i}: tick feet at 0.82 r");
+        let angles: BTreeSet<i32> = feet_at
+            .chunks(2)
+            .map(|pair| {
+                let mid = (pair[0] + pair[1]) * 0.5;
+                let a = mid.z.atan2(mid.x).rem_euclid(TAU);
+                (a / (TAU / 8.0)).round() as i32 % 8
+            })
+            .collect();
+        assert_eq!(
+            angles,
+            (0..8).collect::<BTreeSet<i32>>(),
+            "ring {i}: tick angles"
+        );
+        for pair in feet_at.chunks(2) {
+            let mid = (pair[0] + pair[1]) * 0.5;
+            let a = mid.z.atan2(mid.x).rem_euclid(TAU);
+            let k = (a / (TAU / 8.0)).round();
+            assert!(
+                (a - k * TAU / 8.0).abs() < 1e-3,
+                "ring {i}: a tick at {a} rad"
+            );
+        }
         // Drawn at its bone scale.
         let drawn = settled * scale.x;
         assert!(
@@ -999,6 +1052,7 @@ fn the_sparks_spiral_out_of_the_feet_for_the_first_second() {
         }
         other => panic!("a spark spins: {other:?}"),
     }
+    assert_unit_quad(&h.mesh(spark), "a spark");
     let palette = h.palette(spark);
     assert_eq!(palette.len(), STEPS);
     let star = star_flash_texture();
@@ -1061,7 +1115,6 @@ fn the_triad_is_three_violet_orbs_turning_round_the_chest() {
         vec![0, 1, 2]
     );
     let t = age;
-    let cam = h.global(h.camera).rotation() * Vec3::Z;
     let mut angles = Vec::new();
     for (orb, k) in &orbs {
         let g = h.global(*orb);
@@ -1075,7 +1128,8 @@ fn the_triad_is_three_violet_orbs_turning_round_the_chest() {
         assert!(wrap(a - want_a).abs() < 1e-3, "orb {k}: {a} vs {want_a}");
         angles.push(a);
         assert!((scale.x - ORB_GLOW).abs() < 1e-4, "{}", scale.x);
-        assert!((rotation * Vec3::Z).dot(cam) > 0.999, "faces the camera");
+        let _ = rotation;
+        assert_unit_quad(&h.mesh(*orb), "an orb");
         let m = h.material(*orb);
         assert_glow(&m, "an orb");
         assert_rgb(m.base_color, ORB_RGB, "orb colour");
@@ -1140,8 +1194,13 @@ fn each_orb_trails_one_tapering_ribbon_over_0_65_s() {
         vec![0, 1, 2]
     );
     let centre = chest(at);
-    let eye = h.global(h.camera).translation();
     for (ribbon, k) in ribbons {
+        // Rewritten every frame, so its first bounding box goes stale: it is
+        // never frustum-culled.
+        assert!(
+            h.app.world().get::<NoFrustumCulling>(ribbon).is_some(),
+            "a ribbon is never frustum-culled"
+        );
         let m = h.material(ribbon);
         assert_glow(&m, "a ribbon");
         assert_rgb(m.base_color, ORB_RGB, "ribbon colour");
@@ -1179,11 +1238,6 @@ fn each_orb_trails_one_tapering_ribbon_over_0_65_s() {
                 ((a + b) * 0.5).distance(want) < 1e-3,
                 "sample {s} of ribbon {k}"
             );
-            // Facing the camera: the strip's span is square to the view.
-            if s < RIBBON_STEPS {
-                let view = (eye - (a + b) * 0.5).normalize();
-                assert!((a - b).normalize().dot(view).abs() < 1e-3);
-            }
         }
     }
 
@@ -1317,6 +1371,7 @@ fn the_inner_motes_ramp_at_the_orbs() {
     assert_eq!(gravity, 0.0);
     assert_eq!(facing, ParticleFacing::Camera);
     assert!(diam[0].abs() < 1e-6 && (diam[1] - 0.14).abs() < 1e-5 && diam[2].abs() < 1e-6);
+    assert_unit_quad(&h.mesh(e), "an inner mote");
     let palette = h.palette(e);
     assert_eq!(palette.len(), STEPS);
     for (i, m) in palette.iter().enumerate() {
@@ -1558,11 +1613,16 @@ struct MatchCamera {
 
 const SCREEN: Vec2 = Vec2::new(1920.0, 1080.0);
 
+/// The match camera's transform, looking at `target`.
+fn match_camera_at(target: Vec3) -> Transform {
+    let pitch = 38.7f32.to_radians();
+    let eye = target + Vec3::new(0.0, 60.0 * pitch.cos(), 60.0 * pitch.sin());
+    Transform::from_translation(eye).looking_at(target, Vec3::Y)
+}
+
 impl MatchCamera {
     fn looking_at(target: Vec3) -> Self {
-        let pitch = 38.7f32.to_radians();
-        let eye = target + Vec3::new(0.0, 60.0 * pitch.cos(), 60.0 * pitch.sin());
-        let view = Transform::from_translation(eye).looking_at(target, Vec3::Y);
+        let view = match_camera_at(target);
         let projection = PerspectiveProjection {
             aspect_ratio: SCREEN.x / SCREEN.y,
             ..default()
@@ -1616,7 +1676,7 @@ fn the_landings_read_at_the_match_camera() {
         let vs = positions(&h.mesh(rune));
         let stroke = (vs[1] - vs[0]).length();
         let spx = cam.span(g.translation(), stroke);
-        assert!((1.5..3.0).contains(&spx), "ring {i} stroke {spx} px");
+        assert!((1.7..2.3).contains(&spx), "ring {i} stroke {spx} px");
     }
     let top = feet(at) + Vec3::Y * (RING_FLOOR + RISE);
     let p = cam.pixel(top);
@@ -1639,4 +1699,238 @@ fn the_landings_read_at_the_match_camera() {
     assert!((5.0..10.0).contains(&orb), "an orb {orb} px");
     let ribbon = cam.span(chest(at), RIBBON_W);
     assert!((5.0..10.0).contains(&ribbon), "a ribbon {ribbon} px");
+}
+
+// ── Held in front of the body ────────────────────────────────────────────────
+//
+// The body is alpha-blended and writes no depth, so Bevy orders it against
+// these additive pieces by each mesh's translation alone (view depth, back to
+// front). A piece whose translation is deeper than the body's is drawn first
+// and painted over by the body; the bench draws every piece over it.
+
+/// View depth along the camera's forward axis: what Bevy's rangefinder sorts
+/// transparent draws by.
+fn depth(cam: &Transform, p: Vec3) -> f32 {
+    (p - cam.translation).dot(cam.forward().as_vec3())
+}
+
+/// A Soul Link Warlock at `at` with both landings playing, under a camera at
+/// `camera`.
+fn both_landings(camera: Transform, at: Vec3) -> (Harness, Entity) {
+    let mut h = Harness::with_camera(camera);
+    let warlock = h.linked(at);
+    h.open_gates(true);
+    h.tick(1);
+    h.land(warlock, AuraLandingKind::SacrificeTriad);
+    (h, warlock)
+}
+
+/// Every ring, orb, ribbon, spark and mote sorts in front of the Warlock's
+/// body at the match camera, for the whole of both landings; the held pieces
+/// stand in front of the whole body capsule (radius 0.5, segment ±0.75), so
+/// the drawn body's bob, sink or bounce about its transform cannot reorder
+/// them. And the run is not vacuous: low rings, far orbs, sparks and motes
+/// alike truly stood deeper than the body and were held.
+#[test]
+fn every_piece_is_drawn_after_the_body_at_the_match_camera() {
+    let at = Vec3::new(0.0, COMBATANT_Y, 0.0);
+    let cam = match_camera_at(at);
+    let (mut h, _) = both_landings(cam, at);
+    let body = depth(&cam, at);
+    // The capsule's nearest point: the nearer end of its segment, less its
+    // radius.
+    let skin = depth(&cam, at + Vec3::Y * 0.75).min(depth(&cam, at - Vec3::Y * 0.75)) - 0.5;
+    let mut age = TICK_SECS;
+    let (mut runes_held, mut orbs_held, mut sparks_held, mut motes_held) = (0, 0, 0, 0);
+    while age < COLUMN_GONE - 0.02 {
+        let ms = age * 1000.0;
+        // The triad began one tick after the column.
+        let t = age - TICK_SECS;
+        for (rune, i) in h.runes() {
+            let d = depth(&cam, h.global(rune).translation());
+            assert!(d < body, "ring {i} at {ms} ms sorts behind the body");
+            if depth(&cam, feet(at) + Vec3::Y * ring_height(i, ms)) > body {
+                runes_held += 1;
+                assert!(d < skin, "a held ring clears the whole body");
+            }
+        }
+        for (orb, k) in h.orbs() {
+            let d = depth(&cam, h.global(orb).translation());
+            assert!(d < body, "orb {k}");
+            let r = ORB_R + ORB_DRIFT * (t * ORB_DRIFT_RATE).sin();
+            let a = t * ORB_REV * TAU + k as f32 * TAU / 3.0;
+            if depth(&cam, chest(at) + Vec3::new(r * a.cos(), 0.0, r * a.sin())) > body {
+                orbs_held += 1;
+                assert!(d < skin, "a held orb clears the whole body");
+            }
+        }
+        for (ribbon, k) in h.ribbons() {
+            assert!(
+                depth(&cam, h.global(ribbon).translation()) < body,
+                "ribbon {k}"
+            );
+        }
+        let held: Vec<(Entity, Vec3, f32)> = {
+            let world = h.app.world_mut();
+            world
+                .query::<(Entity, &BodyHeldParticle, &ClientParticle)>()
+                .iter(world)
+                .filter(|(_, _, p)| p.age < p.life)
+                .map(|(e, b, p)| (e, b.at, p.life))
+                .collect()
+        };
+        for (e, true_at, life) in held {
+            let d = depth(&cam, h.global(e).translation());
+            assert!(d < body, "a particle");
+            if depth(&cam, true_at) > body {
+                assert!(d < skin, "a held particle clears the whole body");
+                if life == 1.0 {
+                    sparks_held += 1;
+                } else {
+                    motes_held += 1;
+                }
+            }
+        }
+        h.tick(1);
+        age += TICK_SECS;
+    }
+    assert!(runes_held > 0 && orbs_held > 0, "{runes_held} {orbs_held}");
+    assert!(
+        sparks_held > 0 && motes_held > 0,
+        "{sparks_held} {motes_held}"
+    );
+}
+
+/// Held, a piece keeps its pixels: drawn on its own view ray, scaled by the
+/// ratio it was pulled in by, it covers exactly what the bench's geometry
+/// would — rings, orbs, ribbons and particles alike.
+#[test]
+fn the_hold_keeps_every_piece_on_its_pixels() {
+    let at = Vec3::new(2.0, COMBATANT_Y, -1.0);
+    let camera = match_camera_at(at);
+    let (mut h, _) = both_landings(camera, at);
+    let cam = MatchCamera::looking_at(at);
+    let right = camera.right().as_vec3();
+    let mut age = TICK_SECS;
+    h.tick_to(&mut age, 0.9);
+    let ms = age * 1000.0;
+    let t = age - TICK_SECS;
+    let close = |a: Vec2, b: Vec2, what: &str| assert!(a.distance(b) < 0.05, "{what}: {a} vs {b}");
+
+    for (rune, i) in h.runes() {
+        let g = h.global(rune);
+        let centre = feet(at) + Vec3::Y * ring_height(i, ms);
+        let s = keyed(&[(0.0, 2.48), (200.0, 0.91), (400.0, 0.98)], ms) / 0.98;
+        for v in positions(&h.mesh(rune)).iter().step_by(7) {
+            close(
+                cam.pixel(g.transform_point(*v)),
+                cam.pixel(centre + *v * s),
+                "a ring vertex",
+            );
+        }
+    }
+    for (orb, k) in h.orbs() {
+        let g = h.global(orb);
+        let r = ORB_R + ORB_DRIFT * (t * ORB_DRIFT_RATE).sin();
+        let a = t * ORB_REV * TAU + k as f32 * TAU / 3.0;
+        let truly = chest(at) + Vec3::new(r * a.cos(), 0.0, r * a.sin());
+        let (scale, _, drawn) = g.to_scale_rotation_translation();
+        close(cam.pixel(drawn), cam.pixel(truly), "an orb");
+        let span = |p: Vec3, w: f32| {
+            (cam.pixel(p + right * w * 0.5) - cam.pixel(p - right * w * 0.5)).length()
+        };
+        assert!(
+            (span(drawn, scale.x) - span(truly, ORB_GLOW)).abs() < 0.05,
+            "orb {k} size"
+        );
+    }
+    for (ribbon, _) in h.ribbons() {
+        let g = h.global(ribbon);
+        for v in positions(&h.mesh(ribbon)) {
+            close(
+                cam.pixel(g.transform_point(v)),
+                cam.pixel(chest(at) + v),
+                "a ribbon vertex",
+            );
+        }
+    }
+    let held: Vec<(Entity, Vec3, f32, f32)> = {
+        let world = h.app.world_mut();
+        world
+            .query::<(Entity, &BodyHeldParticle, &ClientParticle)>()
+            .iter(world)
+            .filter(|(_, _, p)| p.age < p.life && p.life == 1.0)
+            .map(|(e, b, p)| (e, b.at, p.age, p.life))
+            .collect()
+    };
+    assert!(!held.is_empty());
+    for (e, truly, p_age, life) in held {
+        let (scale, _, drawn) = h.global(e).to_scale_rotation_translation();
+        close(cam.pixel(drawn), cam.pixel(truly), "a spark");
+        let u = p_age / life;
+        let diameter = keyed(&[(0.0, 0.16), (0.5, 0.09), (1.0, 0.02)], u);
+        let k = depth(&camera, drawn) / depth(&camera, truly);
+        assert!((scale.x - diameter * k).abs() < 1e-4, "a spark's size");
+    }
+}
+
+/// The hold is for the draw only: a held spark moves on its true straight
+/// path, and is drawn on that path's pixels.
+#[test]
+fn a_held_particle_moves_on_its_true_path() {
+    let at = Vec3::new(0.0, COMBATANT_Y, 0.0);
+    let camera = match_camera_at(at);
+    let (mut h, _) = both_landings(camera, at);
+    let cam = MatchCamera::looking_at(at);
+    h.tick(5);
+    let world = h.app.world_mut();
+    let (spark, at0, v) = world
+        .query::<(Entity, &BodyHeldParticle, &ClientParticle)>()
+        .iter(world)
+        .find(|(_, b, p)| p.life == 1.0 && depth(&camera, b.at) > depth(&camera, at))
+        .map(|(e, b, p)| (e, b.at, p.velocity))
+        .expect("a spark born deeper than the body");
+    h.tick(20);
+    let now = h.app.world().get::<BodyHeldParticle>(spark).unwrap().at;
+    let want = at0 + v * 20.0 * TICK_SECS;
+    assert!(now.distance(want) < 1e-3, "{now} vs {want}");
+    let drawn = h.global(spark).translation();
+    assert!(drawn.distance(now) > 1e-3, "it is held");
+    assert!(cam.pixel(drawn).distance(cam.pixel(now)) < 0.05);
+}
+
+/// The orbs and the ribbons face a camera turned well off every axis.
+#[test]
+fn the_orbs_and_ribbons_face_a_rotated_camera() {
+    let mut h = Harness::off_axis();
+    let warlock = sacrificer(&mut h, Vec3::new(1.0, COMBATANT_Y, 1.0));
+    h.land(warlock, AuraLandingKind::SacrificeTriad);
+    h.tick(1);
+    let mut age = TICK_SECS;
+    h.tick_to(&mut age, 0.8);
+    let camera = h.global(h.camera.unwrap());
+    let toward = camera.rotation() * Vec3::Z;
+    for (orb, _) in h.orbs() {
+        let rotation = h.global(orb).rotation();
+        assert!(
+            (rotation * Vec3::Z).dot(toward) > 0.999,
+            "an orb faces the camera"
+        );
+    }
+    let eye = camera.translation();
+    for (ribbon, k) in h.ribbons() {
+        let g = h.global(ribbon);
+        let vs: Vec<Vec3> = positions(&h.mesh(ribbon))
+            .iter()
+            .map(|v| g.transform_point(*v))
+            .collect();
+        for s in 0..RIBBON_STEPS {
+            let (a, b) = (vs[2 * s], vs[2 * s + 1]);
+            let view = (eye - (a + b) * 0.5).normalize();
+            assert!(
+                (a - b).normalize().dot(view).abs() < 1e-3,
+                "ribbon {k} at {s}"
+            );
+        }
+    }
 }
