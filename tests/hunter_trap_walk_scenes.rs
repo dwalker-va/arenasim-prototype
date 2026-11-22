@@ -26,11 +26,16 @@ use arenasim::states::play_match::class_ai::hunter::{
     AIMED_SHOT_HELD_FOR_WALK, FROST_TRAP_HELD_FOR_WALK,
 };
 use arenasim::states::play_match::class_ai::hunter_dip::{
-    PRESSURE_TRAP_NOT_CLEAN, TRAP_WALK_MELEE, TRAP_WALK_NO_TEAMMATE, TRAP_WALK_WALKING,
+    TRAP_WALK_MELEE, TRAP_WALK_NO_SIGHT, TRAP_WALK_NO_TEAMMATE, TRAP_WALK_REARM, TRAP_WALK_TOO_FAR,
+    TRAP_WALK_UNCLEAN, TRAP_WALK_VICTIM_HELD, TRAP_WALK_WALKING,
 };
 use arenasim::states::play_match::class_ai::scene::{DecisionView, Scene};
 use arenasim::states::play_match::components::{KitePosture, MovementGoal};
 use arenasim::states::play_match::decision_trace::{MovementTrigger, RejectionReason};
+use arenasim::states::play_match::map_geometry::ObstacleVolume;
+use arenasim::states::play_match::situation::{ClassSet, Play};
+use arenasim::states::play_match::AuraType;
+use bevy::prelude::Vec2;
 
 const ME: &str = "me";
 const PARTNER: &str = "partner";
@@ -112,7 +117,14 @@ fn the_hunter_walks_at_the_healer_when_the_chaser_is_behind() {
         "{}",
         describe(&view)
     );
-    assert_eq!(trap_notes(&view), vec![TRAP_WALK_WALKING.to_string()]);
+    // One Freezing Trap note, the walk's: the pressure trap in the closing
+    // band waits for the walk rather than repeating why it cannot throw.
+    assert_eq!(
+        notes(&view, AbilityType::FreezingTrap),
+        vec![TRAP_WALK_WALKING.to_string()],
+        "{}",
+        describe(&view)
+    );
 }
 
 #[test]
@@ -347,7 +359,7 @@ fn inside_throw_range_a_crowded_landing_is_held_not_walked_at() {
         describe(&crowded)
     );
     assert!(
-        notes(&crowded, AbilityType::FreezingTrap).contains(&PRESSURE_TRAP_NOT_CLEAN.to_string()),
+        notes(&crowded, AbilityType::FreezingTrap).contains(&TRAP_WALK_UNCLEAN.to_string()),
         "{}",
         describe(&crowded)
     );
@@ -436,4 +448,403 @@ fn a_victim_the_walk_holds_back_from_does_not_reserve_the_trap() {
     assert!(lane_asked(&walk), "{}", describe(&walk));
     let old = scene(true).decide(ME);
     assert!(!lane_asked(&old), "{}", describe(&old));
+}
+
+// ---------------------------------------------------------------------------
+// Round 3: the edge band, the re-arm, the throw's refusals, and a scene per
+// guard of the walk.
+// ---------------------------------------------------------------------------
+
+const MAGE: &str = "enemy mage";
+const OWN_PRIEST: &str = "own priest";
+
+/// The Hunter at the origin under `TeamPlan`, its Warrior partner attacking
+/// the enemy Warrior, which stands at `warrior` attacking `warrior_targets`;
+/// the enemy Priest at `healer_x` on the axis, and — with `crowded` — the
+/// enemy Mage beside it, so a trap thrown at the Priest would not land clean.
+fn field(
+    healer_x: f32,
+    warrior: (f32, f32),
+    warrior_targets: &'static str,
+    crowded: bool,
+) -> Scene {
+    let scene = Scene::new()
+        .now(NOW)
+        .ai_profile(1, AiProfile::TeamPlan)
+        .unit(ME, 1, Hunter)
+        .at(0.0, 0.0)
+        .targeting(WARRIOR)
+        .kite_posture(ME, KitePosture::new(NOW))
+        .unit(PARTNER, 1, Warrior)
+        .at(-30.0, 10.0)
+        .targeting(WARRIOR)
+        .unit(WARRIOR, 2, Warrior)
+        .at(warrior.0, warrior.1)
+        .facing(-warrior.0.signum(), 0.0)
+        .targeting(warrior_targets)
+        .unit(HEALER, 2, Priest)
+        .at(healer_x, 0.0);
+    if crowded {
+        scene.unit(MAGE, 2, CharacterClass::Mage).at(healer_x, 2.5)
+    } else {
+        scene
+    }
+}
+
+/// `scene` with the Hunter's trap walk live on the Priest until `until`
+/// seconds from now.
+fn walking_on_healer(scene: Scene, until: f32) -> Scene {
+    let healer = scene.entity(HEALER);
+    scene.kite_posture(
+        ME,
+        KitePosture {
+            dip_target: Some(healer),
+            dip_until: NOW + until,
+            ..KitePosture::new(NOW)
+        },
+    )
+}
+
+fn ended(view: &DecisionView) -> bool {
+    view.movement
+        .iter()
+        .any(|m| m.trigger == MovementTrigger::TrapWalkEnd)
+}
+
+/// A walk starts only beyond throw range plus the edge band: with the
+/// landing crowded, a Priest 1.5yd past throw range is held for the
+/// pressure trap's reason, and one past the band is walked at.
+#[test]
+fn a_walk_starts_only_beyond_the_edge_band() {
+    let inside = field(26.5, (-15.0, 0.0), ME, true).decide(ME);
+    assert!(!walked(&inside), "{}", describe(&inside));
+    assert!(
+        notes(&inside, AbilityType::FreezingTrap).contains(&TRAP_WALK_UNCLEAN.to_string()),
+        "{}",
+        describe(&inside)
+    );
+    let beyond = field(29.5, (-15.0, 0.0), ME, true).decide(ME);
+    assert!(walked(&beyond), "{}", describe(&beyond));
+}
+
+/// A live walk keeps walking inside throw range until the edge band: at
+/// 1.5yd inside it walks on, at 4yd inside it ends and holds.
+#[test]
+fn a_live_walk_walks_on_until_the_edge_band_inside_throw_range() {
+    let near_edge = walking_on_healer(field(23.5, (-15.0, 0.0), ME, true), 3.0).decide(ME);
+    assert!(!ended(&near_edge), "{}", describe(&near_edge));
+    assert_eq!(
+        trap_notes(&near_edge),
+        vec![TRAP_WALK_WALKING.to_string()],
+        "{}",
+        describe(&near_edge)
+    );
+    let deep = walking_on_healer(field(21.0, (-15.0, 0.0), ME, true), 3.0).decide(ME);
+    assert!(ended(&deep), "{}", describe(&deep));
+    assert!(
+        notes(&deep, AbilityType::FreezingTrap).contains(&TRAP_WALK_UNCLEAN.to_string()),
+        "{}",
+        describe(&deep)
+    );
+}
+
+/// A walk re-arms only once `commit_window` has passed since the last one
+/// ended unthrown.
+#[test]
+fn a_walk_waits_out_its_rearm() {
+    let rearm = |at: f32| {
+        chase(AiProfile::TeamPlan, -15.0, true)
+            .kite_posture(
+                ME,
+                KitePosture {
+                    trap_walk_rearm: NOW + at,
+                    ..KitePosture::new(NOW)
+                },
+            )
+            .decide(ME)
+    };
+    let waiting = rearm(0.3);
+    assert!(!walked(&waiting), "{}", describe(&waiting));
+    assert_eq!(trap_notes(&waiting), vec![TRAP_WALK_REARM.to_string()]);
+    let rearmed = rearm(-0.1);
+    assert!(walked(&rearmed), "{}", describe(&rearmed));
+}
+
+/// A live walk is held to what is left of its budget: with half a second
+/// left and more than that to walk it ends; with five seconds left it walks
+/// on.
+#[test]
+fn a_live_walk_ends_when_its_budget_runs_out() {
+    let spent = walking_on_healer(field(40.0, (-15.0, 0.0), ME, false), 0.5).decide(ME);
+    assert!(ended(&spent), "{}", describe(&spent));
+    assert_eq!(trap_notes(&spent), vec![TRAP_WALK_TOO_FAR.to_string()]);
+    let left = walking_on_healer(field(40.0, (-15.0, 0.0), ME, false), 5.0).decide(ME);
+    assert!(!ended(&left), "{}", describe(&left));
+    assert_eq!(trap_notes(&left), vec![TRAP_WALK_WALKING.to_string()]);
+}
+
+/// Only a melee chasing the Hunter costs the walk anything: the Warrior
+/// ahead attacking the Hunter's partner does not stop it (the Warrior ahead
+/// attacking the Hunter does: `the_hunter_does_not_walk_into_...`).
+#[test]
+fn a_melee_ahead_on_someone_else_does_not_stop_the_walk() {
+    let view = field(40.0, (15.0, 0.0), PARTNER, false).decide(ME);
+    assert!(walked(&view), "{}", describe(&view));
+}
+
+/// A rooted melee does not chase: the Warrior ahead attacking the Hunter
+/// stops the walk, rooted it does not.
+#[test]
+fn a_rooted_melee_ahead_does_not_stop_the_walk() {
+    let rooted = field(40.0, (15.0, 0.0), ME, false)
+        .aura(WARRIOR, AuraType::Root, 5.0)
+        .decide(ME);
+    assert!(walked(&rooted), "{}", describe(&rooted));
+    let free = field(40.0, (15.0, 0.0), ME, false).decide(ME);
+    assert!(!walked(&free), "{}", describe(&free));
+}
+
+/// A melee already striking costs the walk nothing, since the kite does not
+/// shake it either: with the Warrior 4yd behind, the Hunter walks, and in
+/// the dead zone the Frost Trap peel and the pressure trap wait for the walk
+/// (one Freezing Trap note, the walk's).
+#[test]
+fn a_melee_already_striking_does_not_stop_the_walk() {
+    let view = field(40.0, (-4.0, 0.0), ME, false)
+        .cooldown(ME, AbilityType::Disengage, 10.0)
+        .decide(ME);
+    assert!(walked(&view), "{}", describe(&view));
+    assert_eq!(
+        notes(&view, AbilityType::FreezingTrap),
+        vec![TRAP_WALK_WALKING.to_string()],
+        "{}",
+        describe(&view)
+    );
+    assert!(
+        notes(&view, AbilityType::FrostTrap).contains(&FROST_TRAP_HELD_FOR_WALK.to_string()),
+        "{}",
+        describe(&view)
+    );
+}
+
+/// The walk's throw puts the target hold on the Hunter: the trapped victim
+/// is off its target and the enemy it fights instead is on — the melee for a
+/// healer trap, the healer for the outlast trap.
+#[test]
+fn the_walks_throw_holds_the_hunters_target_off_the_victim() {
+    let scene = in_range(AiProfile::TeamPlan, (-40.0, 0.0));
+    let (view, hunter) = scene.decide_keeping(ME);
+    assert!(
+        view.choices
+            .contains(&(AbilityType::FreezingTrap, Some(HEALER))),
+        "{}",
+        describe(&view)
+    );
+    let hold = hunter.trap_retarget.expect("the throw holds the target");
+    assert_eq!(
+        (hold.victim, hold.fight),
+        (scene.entity(HEALER), scene.entity(WARRIOR))
+    );
+
+    let scene = outlast(Druid);
+    let (view, hunter) = scene.decide_keeping(ME);
+    assert!(froze_warrior(&view), "{}", describe(&view));
+    let hold = hunter.trap_retarget.expect("the throw holds the target");
+    assert_eq!(
+        (hold.victim, hold.fight),
+        (scene.entity(WARRIOR), scene.entity(HEALER))
+    );
+}
+
+/// Two DPS nobody can free while the team kills the Druid: the outlast trap
+/// takes the one on the Hunter (the Mage), not the nearer one on its partner
+/// (the Warrior); with the Mage already held, it takes the Warrior.
+#[test]
+fn the_outlast_trap_takes_the_dps_on_the_hunter_first() {
+    let scene = |rogue_held: bool| {
+        let s = Scene::new()
+            .now(NOW)
+            .ai_profile(1, AiProfile::TeamPlan)
+            .unit(ME, 1, Hunter)
+            .at(0.0, 0.0)
+            .targeting(WARRIOR)
+            .kite_posture(ME, KitePosture::new(NOW))
+            .unit(PARTNER, 1, Warrior)
+            .at(28.0, 12.0)
+            .targeting(HEALER)
+            .unit(WARRIOR, 2, Warrior)
+            .at(7.0, -7.0)
+            .targeting(PARTNER)
+            .unit(MAGE, 2, CharacterClass::Mage)
+            .at(11.0, 8.0)
+            .targeting(ME)
+            .unit(HEALER, 2, Druid)
+            .at(30.0, 12.0)
+            .targeting(PARTNER);
+        if rogue_held {
+            s.aura(MAGE, AuraType::Stun, 4.0)
+        } else {
+            s
+        }
+    };
+    let free = scene(false).decide(ME);
+    assert!(
+        free.choices
+            .contains(&(AbilityType::FreezingTrap, Some(MAGE))),
+        "{}",
+        describe(&free)
+    );
+    let held = scene(true).decide(ME);
+    assert!(
+        held.choices
+            .contains(&(AbilityType::FreezingTrap, Some(WARRIOR))),
+        "{}",
+        describe(&held)
+    );
+}
+
+/// The outlast trap leaves a DPS a teammate of the Hunter's is attacking —
+/// a healer's wand counts, though a healer's target is no kill: the Warrior
+/// the Hunter's Priest is shooting is not frozen; with the Priest on nobody,
+/// it is.
+#[test]
+fn the_outlast_trap_leaves_a_dps_a_teammate_is_hitting() {
+    let scene = |priest_on_warrior: bool| {
+        let s = outlast(Druid).unit(OWN_PRIEST, 1, Priest).at(-20.0, 0.0);
+        if priest_on_warrior {
+            s.targeting(WARRIOR)
+        } else {
+            s
+        }
+    };
+    let hit = scene(true).decide(ME);
+    assert!(!froze_warrior(&hit), "{}", describe(&hit));
+    let spared = scene(false).decide(ME);
+    assert!(froze_warrior(&spared), "{}", describe(&spared));
+}
+
+/// The kite runs while the trap is not the walk's to throw: a Warrior 6yd
+/// behind the Hunter and a clean landing on the Priest 22yd off, under each
+/// refusal the throw would make — the Priest (rooted, so the trap is not
+/// led) already feared, the landing behind a pillar, the global cooldown
+/// running. Without the refusal, the
+/// trap goes.
+#[test]
+fn the_walk_owns_the_feet_only_for_a_throw_that_would_go() {
+    let base = || {
+        in_range(AiProfile::TeamPlan, (-6.0, 0.0))
+            .target(WARRIOR, ME)
+            .aura(HEALER, AuraType::Root, 6.0)
+    };
+    let kited = |view: &DecisionView| {
+        view.movement
+            .iter()
+            .any(|m| m.trigger == MovementTrigger::KiteEnter)
+    };
+
+    let clear = base().decide(ME);
+    assert!(
+        clear
+            .choices
+            .contains(&(AbilityType::FreezingTrap, Some(HEALER))),
+        "{}",
+        describe(&clear)
+    );
+
+    let feared = base().aura(HEALER, AuraType::Fear, 6.0).decide(ME);
+    assert!(kited(&feared), "{}", describe(&feared));
+    assert_eq!(trap_notes(&feared), vec![TRAP_WALK_VICTIM_HELD.to_string()]);
+
+    let pillar = base()
+        .obstacles(vec![ObstacleVolume::Cylinder {
+            center_xz: Vec2::new(11.0, 0.0),
+            radius: 2.5,
+            base_y: 0.0,
+            height: 5.0,
+        }])
+        .decide(ME);
+    assert!(kited(&pillar), "{}", describe(&pillar));
+    assert_eq!(trap_notes(&pillar), vec![TRAP_WALK_NO_SIGHT.to_string()]);
+
+    let mut on_gcd = base();
+    on_gcd.combatant_mut(ME).global_cooldown = 1.0;
+    let on_gcd = on_gcd.decide(ME);
+    assert!(kited(&on_gcd), "{}", describe(&on_gcd));
+    assert!(on_gcd.choices.is_empty(), "{}", describe(&on_gcd));
+}
+
+/// A live walk waiting out the global cooldown with its landing clean keeps
+/// walking (its directive stays the victim) rather than ending.
+#[test]
+fn a_live_walk_waits_out_the_global_cooldown_walking() {
+    let mut scene = walking_on_healer(in_range(AiProfile::TeamPlan, (-6.0, 0.0)), 3.0);
+    scene.combatant_mut(ME).global_cooldown = 1.0;
+    let view = scene.decide(ME);
+    assert!(!ended(&view), "{}", describe(&view));
+    assert!(
+        matches!(
+            view.directive.map(|d| d.goal),
+            Some(MovementGoal::Entity(_))
+        ),
+        "{}",
+        describe(&view)
+    );
+}
+
+/// The walk keeps the Hunter's feet from every Aimed Shot step that would
+/// plant it: the Burst step (a kill window on the Warrior chasing 25yd behind,
+/// the healer out of mana), the opener (a sting due and a closing Warrior
+/// 31yd behind) and the lock window (the Druid feared, Burst excepted for the
+/// Hunter, an outlast walk on a Mage 40yd off). Each is held while walking
+/// and not when the walk is withheld.
+#[test]
+fn every_aimed_shot_step_waits_for_the_walk() {
+    let held = |view: &DecisionView| {
+        notes(view, AbilityType::AimedShot).contains(&AIMED_SHOT_HELD_FOR_WALK.to_string())
+    };
+    let check = |name: &str, scene: &dyn Fn() -> Scene| {
+        let walking = scene().decide(ME);
+        assert!(walked(&walking), "{name}: {}", describe(&walking));
+        assert!(held(&walking), "{name}: {}", describe(&walking));
+        let withheld = scene().without_trap_walk(1).decide(ME);
+        assert!(!held(&withheld), "{name}: {}", describe(&withheld));
+    };
+
+    // Burst: the Warrior low and the Priest out of mana, so nothing heals it.
+    check("burst", &|| {
+        field(40.0, (-25.0, 0.0), ME, false)
+            .health_of(WARRIOR, 0.1)
+            .mana_of(HEALER, 0.0)
+    });
+
+    // The opener: no Aimed Shot or sting yet, a sting due, and the Warrior
+    // closing from 31yd — in reach after a sting's global cooldown and the
+    // cast, but not within the cast alone.
+    check("opener", &|| {
+        field(40.0, (-31.0, 0.0), ME, false).cooldown(ME, AbilityType::ConcussiveShot, 5.0)
+    });
+
+    // The lock window: the Druid feared, the Hunter excepted from Burst, and
+    // the outlast walk on the Mage the Hunter shoots.
+    check("lock window", &|| {
+        Scene::new()
+            .now(NOW)
+            .ai_profile(1, AiProfile::TeamPlan)
+            .exceptions(Play::Burst, ClassSet::of(&[Hunter]))
+            .unit(ME, 1, Hunter)
+            .at(0.0, 0.0)
+            .targeting(MAGE)
+            .kite_posture(ME, KitePosture::new(NOW))
+            .unit(PARTNER, 1, Warrior)
+            .at(-20.0, -20.0)
+            .targeting(HEALER)
+            .unit(MAGE, 2, CharacterClass::Mage)
+            .at(40.0, 0.0)
+            .targeting(PARTNER)
+            .unit(HEALER, 2, Druid)
+            .at(-22.0, -20.0)
+            .aura(HEALER, AuraType::Fear, 6.0)
+            .cooldown(ME, AbilityType::ConcussiveShot, 5.0)
+            .cooldown(ME, AbilityType::SerpentSting, 5.0)
+    });
 }

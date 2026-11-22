@@ -448,19 +448,23 @@ pub fn decide_hunter_action(
         }
 
         // Priority 2: Freezing Trap on the enemy healer — the melee is on us,
-        // so this is the moment its healer is worth freezing.
-        if try_pressure_trap(
-            commands,
-            combat_log,
-            abilities,
-            entity,
-            combatant,
-            my_pos,
-            auras,
-            ctx,
-            now,
-            &mut builder,
-        ) {
+        // so this is the moment its healer is worth freezing. Not while the
+        // trap walk walks: its landing is not clean (or the walk would have
+        // thrown), and the walk has already said so.
+        if !walking
+            && try_pressure_trap(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                now,
+                &mut builder,
+            )
+        {
             builder.finish();
             return true;
         }
@@ -508,19 +512,21 @@ pub fn decide_hunter_action(
     if nearest_dist < 20.0 {
         // Freezing Trap on the enemy healer first: the melee closing on us is
         // the moment its healer is worth freezing, and the healer's clean
-        // landing does not wait.
-        if try_pressure_trap(
-            commands,
-            combat_log,
-            abilities,
-            entity,
-            combatant,
-            my_pos,
-            auras,
-            ctx,
-            now,
-            &mut builder,
-        ) {
+        // landing does not wait. Not while the trap walk walks, as above.
+        if !walking
+            && try_pressure_trap(
+                commands,
+                combat_log,
+                abilities,
+                entity,
+                combatant,
+                my_pos,
+                auras,
+                ctx,
+                now,
+                &mut builder,
+            )
+        {
             builder.finish();
             return true;
         }
@@ -1836,7 +1842,7 @@ pub fn spawn_trap(
 /// ([`try_place_trap_at`], after the cast gate), and so does the Frost Trap
 /// hold that asks whether a healer freeze is in reach
 /// ([`healer_freeze_in_reach`]), so the two cannot disagree on what lands.
-fn trap_landing(
+pub(super) fn trap_landing(
     ctx: &CombatContext,
     def: &crate::states::play_match::ability_config::AbilityConfig,
     my_pos: Vec3,

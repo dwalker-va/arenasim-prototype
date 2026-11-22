@@ -1065,12 +1065,18 @@ with the context-steering mask refactor.
 (AS-498; no RON knob, reuses `dip_budget`), on the user's ruling that a
 Hunter is aggressive with Freezing Trap unless its gameplan is to outlast.
 It replaces the Freezing Trap dip under `TeamPlan`: while the trap is ready
-it throws from range the moment the pressure trap's landing is clean, and
-otherwise walks at its victim whenever the walk to throw range costs no melee
-contact that kiting away would have prevented (`walk_exposure`: a chaser
-targeting the Hunter, sampled along the walk; a chaser behind costs nothing,
-one between the Hunter and the healer stops the walk; casters cost nothing).
-Frost Trap and Aimed Shot wait while it walks. The victim
+it throws from range the moment the pressure trap's landing is clean and the
+throw would go (not onto a victim already held, not out of sight, not on the
+global cooldown — otherwise the kite keeps the feet), and otherwise walks at
+its victim whenever the walk costs no melee contact that kiting away would
+have prevented (`walk_exposure`: a chaser targeting the Hunter, sampled along
+the walk; a chaser behind or already striking costs nothing, one between the
+Hunter and the healer stops the walk; casters cost nothing). Closer than
+throw range plus `TRAP_WALK_EDGE` (3yd) with the landing not clean it holds;
+a live walk walks on to that band inside throw range; one that ends unthrown
+re-arms only after `commit_window`, so the walk and the kite cannot trade the
+Hunter at the edge. `dip_budget` bounds one walk. Frost Trap, Aimed Shot and
+the pressure trap wait while it walks. The victim
 (`trap_play_victim`) is the enemy healer the pressure trap would take, only
 while a DPS teammate is attacking someone (a Hunter whose only teammate is a
 healer has nobody to use the window); when that teammate is killing the

@@ -36,7 +36,7 @@ use crate::states::play_match::components::{
     ActiveAuras, Combatant, DRCategory, KitePosture, MovementDirective, MovementGoal, TrapRetarget,
 };
 use crate::states::play_match::decision_trace::{
-    DecisionTrace, MovementGoalKind, MovementTrigger, Posture as TracePosture,
+    DecisionTrace, MovementGoalKind, MovementTrigger, Posture as TracePosture, RejectionReason,
 };
 use crate::states::play_match::movement_config::DpsMovementConfig;
 
@@ -813,10 +813,11 @@ pub fn evaluate_hunter_dip(
 // The trap walk (AS-498, `TeamPlan`)
 // ============================================================================
 
-/// Seconds an enemy melee stays on the Hunter once a walk has let it reach
-/// striking range: the time the Hunter needs to open the gap again (a
-/// Disengage or a Concussive Shot on its next GCDs). Provisional.
-pub const TRAP_WALK_STICK_SECS: f32 = 2.0;
+/// The band, in yards, either side of throw range ([`trap_setup_range`])
+/// that keeps the walk from strobing at its edge: a walk starts only beyond
+/// throw range plus this, and a live walk keeps walking until it is this far
+/// inside throw range. Between, whatever was happening goes on.
+pub const TRAP_WALK_EDGE: f32 = 3.0;
 
 /// Within this of the Hunter an enemy melee or pet strikes it (melee range
 /// plus the slack its pursuit stops at).
@@ -846,6 +847,32 @@ pub const TRAP_WALK_TOO_FAR: &str = "trap walk held: throw range is beyond the w
 /// Trace note: the trap walk is walking into throw range of its victim.
 pub const TRAP_WALK_WALKING: &str = "trap walk: walking into throw range";
 
+/// Trace note: the trap walk holds because its victim is already held in
+/// hard crowd control, which a Freezing Trap is not thrown onto.
+pub const TRAP_WALK_VICTIM_HELD: &str = "trap walk held: the victim is already held";
+
+/// Trace note: the trap walk holds because the Hunter cannot see where the
+/// trap would land, and a throw needs sight of its landing.
+pub const TRAP_WALK_NO_SIGHT: &str = "trap walk held: the landing is out of sight";
+
+/// Trace note: the trap walk holds because the throw would be refused for
+/// another reason the placement names.
+pub const TRAP_WALK_REFUSED: &str = "trap walk held: the throw would be refused";
+
+/// Trace note: the trap walk holds because its victim is already close —
+/// inside throw range plus [`TRAP_WALK_EDGE`] — and the landing is not
+/// clean (another enemy by the victim, or the victim not the one to spring
+/// it): walking closer does not clear it.
+pub const TRAP_WALK_UNCLEAN: &str = "trap walk held: in reach, but the landing is not clean";
+
+/// Trace note: the trap walk holds because it is waiting out the global
+/// cooldown, and a throw cannot go until it ends.
+pub const TRAP_WALK_GCD: &str = "trap walk held: the global cooldown is running";
+
+/// Trace note: the trap walk holds because a walk ended within
+/// `commit_window`, and it re-arms only once that has passed.
+pub const TRAP_WALK_REARM: &str = "trap walk held: re-arming after a walk ended";
+
 /// Who the trap walk freezes, and whom the Hunter fights while it holds:
 /// `Some(Ok((victim, instead)))`, `Some(Err(note))` when there is a victim
 /// but the walk holds for the reason the note names, and `None` when the
@@ -855,15 +882,17 @@ pub const TRAP_WALK_WALKING: &str = "trap walk: walking into throw range";
 ///   ([`team_focus`] holds it): the gameplan is to drain that healer, so the
 ///   trap goes on an enemy DPS nobody can free ([`trap_would_stick`], the
 ///   engine's removal rules through `ally_freers`), that no teammate of the
-///   Hunter's attacks and that is eligible — the one targeting the Hunter
-///   first, then the nearest. The Hunter fights the healer instead.
+///   Hunter's attacks, that is eligible and not already held in hard crowd
+///   control — the one targeting the Hunter first, then the nearest. The
+///   Hunter fights the healer instead.
 /// - **The enemy healer** otherwise, when the pressure trap would take it
 ///   ([`pressure_trap_healer`]: eligible, not a teammate's kill, and nobody
 ///   could free it), and only while a DPS teammate is attacking someone
 ///   ([`TRAP_WALK_NO_TEAMMATE`]): a Hunter whose only teammate is a healer
-///   has nobody to use the window, and gives up its Frost Trap for it. The
-///   Hunter fights the nearest melee threat instead, else the nearest other
-///   enemy it sees.
+///   has nobody to use the window, and gives up its Frost Trap for it. A
+///   healer already held in hard crowd control is no victim yet
+///   ([`TRAP_WALK_VICTIM_HELD`]). The Hunter fights the nearest melee threat
+///   instead, else the nearest other enemy it sees.
 pub fn trap_play_victim(
     ctx: &CombatContext,
     entity: Entity,
@@ -882,6 +911,7 @@ pub fn trap_play_victim(
             .filter(|e| !e.is_pet && !e.is_healer())
             .filter(|e| !focus.contains(&e.entity) && !teammate_targets(ctx, entity, e.entity))
             .filter(|e| dip_target_eligible(ctx, my_team, e.entity))
+            .filter(|e| ctx.held_in_hard_cc(e.entity).is_none())
             .filter(|e| trap_would_stick(ctx, entity, e.entity))
             .min_by(|a, b| {
                 (a.target != Some(entity))
@@ -899,6 +929,9 @@ pub fn trap_play_victim(
     };
     if focus.is_empty() {
         return Some(Err(TRAP_WALK_NO_TEAMMATE));
+    }
+    if ctx.held_in_hard_cc(healer).is_some() {
+        return Some(Err(TRAP_WALK_VICTIM_HELD));
     }
     let instead = super::dps_postures::nearest_melee_threat_where(ctx, entity, my_pos, |e| {
         e != healer && !ctx.entity_is_immune(e)
@@ -918,21 +951,21 @@ pub fn trap_play_victim(
     Some(instead.map(|i| (healer, i)).ok_or(TRAP_WALK_NO_ONE_ELSE))
 }
 
-/// The extra seconds of enemy melee contact a walk from `my_pos` toward
-/// `goal`, until within `reach` of it, costs the Hunter over kiting away — the
-/// user's weighing (AS-498): moving toward the healer to trap is no worse
-/// than kiting while it costs none of the damage the kite would prevent.
+/// The seconds of enemy melee contact a walk from `my_pos` toward `goal`,
+/// until within `reach` of it, costs the Hunter that kiting away would have
+/// prevented: the user's weighing (AS-498). Moving toward the healer to trap
+/// is no worse than kiting while this is zero.
 ///
 /// Every enemy melee or pet targeting the Hunter and free to move is a
-/// chaser. Kiting at equal speed holds the gap a chaser has, so the kite
-/// prevents a chaser's damage exactly while it is not already striking. The
-/// walk is sampled: the Hunter moves straight at `goal` at `base_speed`
-/// times its own [`speed_share`], each chaser straight at the Hunter at
-/// `base_speed` times the chaser's — the speed share [`forecast_velocity`]
-/// forecasts with. A held or rooted chaser (`is_ccd`) does not chase. A chaser the kite would have kept off costs the seconds it strikes
-/// during the walk, plus [`TRAP_WALK_STICK_SECS`] when it is still striking
-/// as the walk ends. A caster's damage costs nothing: the kite does not
-/// prevent it either. `None` when the walk is longer than `budget`.
+/// chaser; a held or rooted one (`is_ccd`) does not chase. Kiting at equal
+/// speed holds the gap a chaser has, so the kite prevents a chaser's damage
+/// exactly while it is not already striking, and a chaser already striking
+/// costs nothing here. The walk is sampled: the Hunter moves straight at
+/// `goal` at `base_speed` times its own [`speed_share`], each chaser
+/// straight at the Hunter at `base_speed` times its own share (the share
+/// [`forecast_velocity`] forecasts with). A chaser costs the seconds it
+/// strikes during the walk. A caster's damage costs nothing: the kite does
+/// not prevent it either. `None` when the walk is longer than `budget`.
 pub fn walk_exposure(
     ctx: &CombatContext,
     entity: Entity,
@@ -970,19 +1003,15 @@ pub fn walk_exposure(
         let chaser_speed = base_speed * speed_share(ctx, chaser.entity);
         let steps = (walk / TRAP_WALK_STEP).ceil() as usize;
         let mut at = start;
-        let mut struck = 0.0;
-        let mut striking = false;
         for i in 1..=steps {
             let t = (i as f32 * TRAP_WALK_STEP).min(walk);
             let hunter = flat(my_pos) + heading * speed * t;
             let to = hunter - at;
             at += to.normalize_or_zero() * (chaser_speed * TRAP_WALK_STEP).min(to.length());
-            striking = at.distance(hunter) <= TRAP_WALK_CONTACT;
-            if striking {
-                struck += TRAP_WALK_STEP;
+            if at.distance(hunter) <= TRAP_WALK_CONTACT {
+                extra += TRAP_WALK_STEP;
             }
         }
-        extra += struck + if striking { TRAP_WALK_STICK_SECS } else { 0.0 };
     }
     Some(extra)
 }
@@ -993,16 +1022,26 @@ pub fn walk_exposure(
 /// [`trap_play_victim`]:
 ///
 /// - its landing is clean from here ([`pressure_trap_landing`]): throw now,
-///   from range ([`HunterDipPlan::DipCast`] with the target hold);
-/// - beyond throw range ([`trap_setup_range`]), walk at it while the walk to
-///   throw range costs no melee contact the kite would have prevented
-///   ([`walk_exposure`]) and fits what is left of `dip_budget`;
-/// - inside it with the landing not clean, hold, traced with the pressure
-///   trap's own reason: walking closer does not clear the landing.
+///   from range ([`HunterDipPlan::DipCast`] with the target hold) — but only
+///   a throw that would go: one the placement would refuse (the victim held,
+///   the landing out of sight) is held, and one waiting on the global
+///   cooldown holds a walk that has not started, so the kite keeps the feet;
+/// - beyond throw range ([`trap_setup_range`]) plus [`TRAP_WALK_EDGE`], walk
+///   at it while the walk to that edge inside throw range costs no melee
+///   contact the kite would have prevented ([`walk_exposure`]) and fits what
+///   is left of `dip_budget`; a live walk keeps walking until it is
+///   [`TRAP_WALK_EDGE`] inside throw range;
+/// - closer, with the landing not clean, hold ([`TRAP_WALK_UNCLEAN`]):
+///   walking closer does not clear the landing.
+///
+/// A walk that ends unthrown re-arms only after `commit_window`. With the
+/// edge band, that keeps a walk and the kite from trading the Hunter frame by
+/// frame. `dip_budget` bounds one walk, not an approach: after the re-arm a
+/// victim still worth walking at gets a new walk.
 ///
 /// Traced: `TrapWalk` as a walk starts (or turns to a new victim),
-/// `TrapWalkEnd` as it ends unthrown; the ability decision names why it
-/// walked or held ([`HunterDipPlan::TrapHeld`]).
+/// `TrapWalkEnd` as it ends; the ability decision names why it walked or
+/// held ([`HunterDipPlan::TrapHeld`]).
 #[allow(clippy::too_many_arguments)]
 fn evaluate_trap_walk(
     commands: &mut Commands,
@@ -1035,6 +1074,7 @@ fn evaluate_trap_walk(
             let target = state.dip_target.expect("a live walk has a target");
             state.dip_target = None;
             state.dip_until = 0.0;
+            state.trap_walk_rearm = now + config.commit_window;
             if directive.is_some() {
                 commands.entity(entity).remove::<MovementDirective>();
             }
@@ -1057,27 +1097,68 @@ fn evaluate_trap_walk(
         Some(Err(note)) => return end(state, decision_trace, HunterDipPlan::TrapHeld { note }),
         Some(Ok(pair)) => pair,
     };
-    let landing = pressure_trap_landing(ctx, abilities, combatant.team, my_pos, victim);
-    if landing.is_ok() {
-        let mut completed = *state;
-        completed.dip_target = None;
-        completed.dip_until = 0.0;
-        return HunterDipPlan::DipCast {
-            target: victim,
-            completed_state: completed,
-            hold: Some(instead),
-            walked: live,
-        };
-    }
     let Some(goal) = ctx.combatants.get(&victim).map(|v| v.position) else {
         return end(state, decision_trace, HunterDipPlan::Rotation);
     };
-    // Inside throw range already, a walk buys nothing the kite does not: the
-    // landing is held for the reason the pressure trap names (another enemy
-    // beside the victim, or the victim not the one to spring it).
-    if flat(goal).distance(flat(my_pos)) <= trap_setup_range(abilities) {
-        let note = landing.err().unwrap_or(PRESSURE_TRAP_NOT_CLEAN);
-        return end(state, decision_trace, HunterDipPlan::TrapHeld { note });
+    let distance = flat(goal).distance(flat(my_pos));
+    let reach = trap_setup_range(abilities);
+    match pressure_trap_landing(ctx, abilities, combatant.team, my_pos, victim) {
+        // A clean landing: the throw owns this frame only if it would go —
+        // past the placement's own refusals (`hunter::trap_landing`: a victim
+        // already held, an immune one, range, sight) and the global cooldown.
+        Ok(landing) => {
+            if let Err(reason) =
+                super::hunter::trap_landing(ctx, def, my_pos, landing, Some(victim))
+            {
+                let note = match reason {
+                    RejectionReason::TargetAlreadyCCd { .. } => TRAP_WALK_VICTIM_HELD,
+                    RejectionReason::LosBlocked => TRAP_WALK_NO_SIGHT,
+                    _ => TRAP_WALK_REFUSED,
+                };
+                return end(state, decision_trace, HunterDipPlan::TrapHeld { note });
+            }
+            if combatant.global_cooldown > 0.0 {
+                if !live {
+                    return HunterDipPlan::TrapHeld {
+                        note: TRAP_WALK_GCD,
+                    };
+                }
+                commands.entity(entity).try_insert(MovementDirective {
+                    goal: MovementGoal::Entity(victim),
+                    expires: state.dip_until,
+                    committed_until: state.dip_until,
+                });
+                return HunterDipPlan::Walking;
+            }
+            let mut completed = *state;
+            completed.dip_target = None;
+            completed.dip_until = 0.0;
+            return HunterDipPlan::DipCast {
+                target: victim,
+                completed_state: completed,
+                hold: Some(instead),
+                walked: live,
+            };
+        }
+        // Not clean, and close enough that a walk buys nothing the kite does
+        // not: inside the edge band for a walk that has not started, well
+        // inside throw range for one that has ([`TRAP_WALK_EDGE`]).
+        Err(_) => {
+            let stop = if live {
+                reach - TRAP_WALK_EDGE
+            } else {
+                reach + TRAP_WALK_EDGE
+            };
+            if distance <= stop {
+                let note = TRAP_WALK_UNCLEAN;
+                return end(state, decision_trace, HunterDipPlan::TrapHeld { note });
+            }
+        }
+    }
+    if !live && now < state.trap_walk_rearm {
+        return HunterDipPlan::TrapHeld {
+            note: TRAP_WALK_REARM,
+        };
     }
     let budget = if live {
         state.dip_until - now
@@ -1090,7 +1171,7 @@ fn evaluate_trap_walk(
         my_pos,
         combatant.base_movement_speed,
         goal,
-        trap_setup_range(abilities),
+        reach - TRAP_WALK_EDGE,
         budget,
     ) {
         None => Some(TRAP_WALK_TOO_FAR),
@@ -1106,8 +1187,7 @@ fn evaluate_trap_walk(
             state.dip_until = now + config.dip_budget;
         }
         let speed = combatant.base_movement_speed * speed_share(ctx, entity);
-        let walk = (flat(goal).distance(flat(my_pos)) - trap_setup_range(abilities)).max(0.0)
-            / speed.max(f32::EPSILON);
+        let walk = (distance - (reach - TRAP_WALK_EDGE)).max(0.0) / speed.max(f32::EPSILON);
         emit_trap_walk(
             decision_trace,
             ctx,
