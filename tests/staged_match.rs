@@ -262,10 +262,21 @@ fn component_names(world: &World, e: Entity) -> Vec<String> {
 /// (the client's systems despawn them), so they pile up; nothing in the
 /// schedule reads one.
 fn visual_only(world: &World, e: Entity) -> bool {
-    component_names(world, e)
-        .iter()
-        .all(|n| n.contains("::components::visual::") || n.ends_with("::PlayMatchEntity"))
+    component_names(world, e).iter().all(|n| {
+        n.contains("::components::visual::")
+            || n.ends_with("::PlayMatchEntity")
+            || HUNTER_VISUALS.iter().any(|v| n.ends_with(v))
+            || n.starts_with("bevy_transform::")
+    })
 }
+
+/// The Hunter's trap visuals, declared beside its pets rather than in
+/// `components::visual` (`components::pets`, "Hunter Visual Components"): a
+/// trap's burst and the ice around its victim. Both are spawned headless too,
+/// placed with a `Transform`, and outlive the frame, so a match that has
+/// frozen someone carries them. (A transform alone marks nothing in flight:
+/// a projectile or a trap carries its own simulation component.)
+const HUNTER_VISUALS: [&str; 2] = ["::TrapBurst", "::IceBlockVisual"];
 
 /// What is in progress or in flight: a combatant mid-cast, channel, Charge or
 /// Disengage, or any entity that is not a combatant.

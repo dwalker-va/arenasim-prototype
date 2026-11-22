@@ -542,6 +542,13 @@ impl<'a> CombatContext<'a> {
         self.ai_profile.is_team_plan() && self.situation.as_ref().is_some_and(|s| s.handoff_rule)
     }
 
+    /// Whether this unit's team runs the Hunter trap walk (AS-498,
+    /// `hunter_dip::evaluate_trap_walk`): its team runs `TeamPlan` and no
+    /// measurement turned it off. `false` on a context nobody classified.
+    pub fn trap_walk(&self) -> bool {
+        self.ai_profile.is_team_plan() && self.situation.as_ref().is_some_and(|s| s.trap_walk)
+    }
+
     /// The healer this unit must keep in sight: `Some` while it is a DPS whose
     /// team's `sight_yield` says it yields to that healer (AS-386,
     /// `situation::SightPair`). `None` on a context nobody classified, and

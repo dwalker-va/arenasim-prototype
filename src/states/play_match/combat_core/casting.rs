@@ -910,6 +910,20 @@ pub fn process_casting(
                 ));
             }
 
+            // Conflagrate's fire detonation at the chest. Deterministic
+            // marker, no `game_rng` draw; drawn by the graphical-only systems
+            // in `rendering/effects/conflagrate.rs`, so it is byte-neutral in
+            // headless.
+            if ConflagrateLanding::is_spawned_for(ability) {
+                commands.spawn((
+                    ConflagrateLanding {
+                        target: target_entity,
+                        is_crit: is_crit_damage,
+                    },
+                    PlayMatchEntity,
+                ));
+            }
+
             // Signature Lightning Bolt strike (graphical-only visual seam).
             // Deterministic spawn — NO game_rng draw — so this is byte-neutral
             // in headless. The forked-arc geometry and flash/impact burst are

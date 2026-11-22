@@ -86,6 +86,7 @@ use arenasim::states::play_match::components::AuraApplyRoute;
 use arenasim::states::play_match::components::AuraLandingKind;
 use arenasim::states::play_match::components::AuraType;
 use arenasim::states::play_match::components::Combatant;
+use arenasim::states::play_match::components::ConflagrateLanding;
 use arenasim::states::play_match::components::CurseKind;
 use arenasim::states::play_match::components::HealImpact;
 use arenasim::states::play_match::components::HealImpactKind;
@@ -577,6 +578,9 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
             Some("mana-funnel stars + mana beam (mind_flay.rs, ChannelVisual::for_channel)")
         }
         Moonfire => Some("moon orb + beam landing (casting.rs → moonfire.rs)"),
+        Conflagrate if ConflagrateLanding::is_spawned_for(a) => {
+            Some("fire detonation + wound flinch (casting.rs → conflagrate.rs)")
+        }
         // The empowered swing carries `HeroicStrikeSwing` (auto_attack.rs);
         // heroic_strike.rs lays its trail and lands it through the client
         // landing router, so the router must answer for it.
@@ -589,20 +593,12 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
 
 const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (
-        Conflagrate,
-        "AS-348 (Shadowburn and Conflagrate, the Destruction casts; AS-334's talent visuals)",
-    ),
-    (
         Hemorrhage,
         "AS-336 (Hemorrhage, the Subtlety strike and its wound; AS-367 builds it)",
     ),
     (
         HolyNova,
         "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
-    ),
-    (
-        Shadowburn,
-        "AS-348 (Shadowburn and Conflagrate, the Destruction casts; AS-334's talent visuals)",
     ),
 ];
 

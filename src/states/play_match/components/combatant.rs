@@ -310,17 +310,17 @@ pub struct ShadowSightOrbConsuming {
 // ============================================================================
 
 /// A Hunter's hold on its own target while its Freezing Trap is out for the
-/// enemy `healer`, from the throw — before the trap has sprung and the healer
-/// carries its aura: target acquisition keeps the Hunter on `melee` (or, with
-/// it gone, the nearest other enemy) instead of the healer — a configured kill
-/// target included — until the healer is dead, or `spring_by` (sim seconds)
-/// has passed and the healer carries none of this Hunter's Freezing Traps.
-/// Once sprung, the aura itself keeps the Hunter off it. Set by
-/// `hunter_dip::pressure_trap_hold`, read and cleared by `acquire_targets`.
+/// enemy `victim` (the enemy healer, or the DPS of the trap walk's outlast
+/// trap), from the throw: target acquisition keeps the Hunter on `fight` (or,
+/// with it gone, the nearest other enemy) instead of the victim — a
+/// configured kill target included — until the victim is dead, or
+/// `spring_by` (sim seconds) has passed and the victim carries none of this
+/// Hunter's Freezing Traps. Set by `hunter_dip::pressure_trap_hold`, read and
+/// cleared by `acquire_targets`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TrapRetarget {
-    pub healer: Entity,
-    pub melee: Entity,
+    pub victim: Entity,
+    pub fight: Entity,
     pub spring_by: f32,
 }
 
