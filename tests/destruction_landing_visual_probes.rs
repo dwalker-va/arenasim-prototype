@@ -1450,3 +1450,185 @@ fn every_sprite_is_the_shape_the_bench_paints() {
         );
     }
 }
+
+// ── Held in front of the body, at the match camera ───────────────────────────
+
+/// The combatant body mesh, `Capsule3d::new(0.5, 1.5)`, centred on its
+/// transform.
+const BODY_RADIUS: f32 = 0.5;
+const BODY_HALF_SEGMENT: f32 = 0.75;
+
+/// The match camera (`CameraController`): `zoom` yards out, `pitch` from the
+/// vertical, at `yaw`, looking at `target`.
+fn match_camera(target: Vec3, zoom: f32, pitch: f32, yaw: f32) -> Transform {
+    let at = target
+        + Vec3::new(
+            zoom * pitch.sin() * yaw.sin(),
+            zoom * pitch.cos(),
+            zoom * pitch.sin() * yaw.cos(),
+        );
+    Transform::from_translation(at).looking_at(target, Vec3::Y)
+}
+
+/// Every drawn piece of one burst, per frame: `(world position, world
+/// scale)` of each particle's sprite and of each ring piece, keyed by entity.
+type Frame = HashMap<Entity, (Vec3, Vec3)>;
+
+/// Play one burst on a still victim for `frames`, with the match camera on
+/// it or — the control, the same world with no camera, which draws every
+/// piece where it truly is — a plain entity in the camera's place, so the
+/// two worlds allocate the same entities and play the same scatter.
+fn drawn_frames(camera: Option<Transform>, frames: u32) -> (Vec<Frame>, Vec3) {
+    let mut h = Harness::new();
+    let at = Vec3::new(2.0, COMBATANT_Y, -3.0);
+    let victim = h.victim(at);
+    match camera {
+        Some(t) => {
+            h.world()
+                .spawn((Camera3d::default(), t, GlobalTransform::from(t)));
+        }
+        None => {
+            h.world()
+                .spawn((Transform::default(), GlobalTransform::default()));
+        }
+    }
+    h.land(victim, false);
+    let mut out = Vec::new();
+    for _ in 0..frames {
+        h.tick(1);
+        let world = h.app.world_mut();
+        let mut q = world
+            .query_filtered::<(Entity, &GlobalTransform, Option<&ConflagrateParticlePart>), (
+                With<Mesh3d>,
+                Or<(
+                    With<ConflagrateParticlePart>,
+                    With<ConflagrateShockPiece>,
+                    With<ConflagrateRingPart>,
+                )>,
+            )>();
+        let frame: Frame = q
+            .iter(world)
+            // A streak is a screen line, not a held quad: its own test.
+            .filter(|(_, _, part)| *part != Some(&ConflagrateParticlePart::Streak))
+            .map(|(e, g, _)| {
+                let (s, _, t) = g.to_scale_rotation_translation();
+                (e, (t, s))
+            })
+            .collect();
+        out.push(frame);
+    }
+    (out, at)
+}
+
+/// The bench paints the whole burst over its victim. Here the body writes no
+/// depth and the transparent pass sorts by translation, so every piece is
+/// drawn on its own view ray in front of the body's nearest point, scaled by
+/// the same ratio — it projects exactly where the true piece does — and a
+/// piece already in front is left alone. Checked frame by frame against the
+/// same burst drawn with no camera, at two yaws of the match camera.
+#[test]
+fn every_piece_is_held_in_front_of_the_body_where_the_bench_draws_it() {
+    for yaw in [0.0_f32, 2.3] {
+        let target = Vec3::new(2.0, COMBATANT_Y, -3.0);
+        let cam = match_camera(target, 60.0, 38.7f32.to_radians(), yaw);
+        let (seen, at) = drawn_frames(Some(cam), 60);
+        let (truth, _) = drawn_frames(None, 60);
+        let (eye, forward) = (cam.translation, cam.forward().as_vec3());
+        let depth = |p: Vec3| (p - eye).dot(forward);
+        let nearest = depth(at + Vec3::Y * BODY_HALF_SEGMENT)
+            .min(depth(at - Vec3::Y * BODY_HALF_SEGMENT))
+            - BODY_RADIUS;
+        let (mut held, mut kept) = (0, 0);
+        for (drawn, real) in seen.iter().zip(&truth) {
+            assert_eq!(
+                drawn.keys().collect::<HashSet<_>>(),
+                real.keys().collect::<HashSet<_>>()
+            );
+            for (e, (d_at, d_scale)) in drawn {
+                let (r_at, r_scale) = real[e];
+                // Sprites, streaks and ring pieces that are hidden or empty
+                // carry no footprint worth checking.
+                if r_scale.max_element() < 1e-3 {
+                    continue;
+                }
+                let k = depth(*d_at) / depth(r_at);
+                assert!(
+                    (*d_at - (eye + (r_at - eye) * k)).length() < 2e-3,
+                    "yaw {yaw}: drawn off its view ray: {d_at} for {r_at}"
+                );
+                assert!(
+                    depth(*d_at) < nearest,
+                    "yaw {yaw}: drawn behind the body's front at {d_at}"
+                );
+                if depth(r_at) < nearest - 0.06 {
+                    assert!((*d_at - r_at).length() < 1e-4, "in front already, moved");
+                    kept += 1;
+                } else if depth(r_at) >= nearest {
+                    // Behind the body's front: it would sort behind the body.
+                    assert!(k < 1.0, "yaw {yaw}: not held at {r_at}");
+                    held += 1;
+                }
+                assert!(
+                    (*d_scale - r_scale * k).length() < 2e-4 * r_scale.length().max(1.0),
+                    "yaw {yaw}: drawn {d_scale}, keeps screen size {}",
+                    r_scale * k
+                );
+            }
+        }
+        assert!(
+            held > 500 && kept > 500,
+            "yaw {yaw}: {held} held, {kept} kept"
+        );
+    }
+}
+
+/// A streak is the bench's screen line: laid in the camera's plane at its
+/// particle's depth, its far end projecting where the true segment's does.
+#[test]
+fn a_plumes_streak_is_its_flight_as_the_camera_sees_it() {
+    let target = Vec3::new(0.0, COMBATANT_Y, 0.0);
+    let cam = match_camera(target, 60.0, 38.7f32.to_radians(), 0.9);
+    let mut h = Harness::new();
+    let victim = h.victim(target);
+    h.world()
+        .spawn((Camera3d::default(), cam, GlobalTransform::from(cam)));
+    h.land(victim, false);
+    let (eye, f) = (cam.translation, cam.forward().as_vec3());
+    let (right, up) = (cam.right().as_vec3(), cam.up().as_vec3());
+    let screen = |p: Vec3| {
+        let d = p - eye;
+        Vec2::new(d.dot(right), d.dot(up)) / d.dot(f)
+    };
+    let mut streaks = 0;
+    for _ in 0..12 {
+        h.tick(1);
+        for (e, p) in h.particles() {
+            if p.layer.tail == 0.0 {
+                continue;
+            }
+            let true_at = h
+                .app
+                .world()
+                .get::<ConflagrateParticle>(e)
+                .map(|c| c.at)
+                .unwrap();
+            let len = (p.layer.tail * 0.12).min(p.velocity.length() * 0.06);
+            let far = true_at - p.velocity.normalize() * len;
+            for (part, g, _, _) in h.parts_of(e) {
+                if part != ConflagrateParticlePart::Streak {
+                    continue;
+                }
+                let (s, r, t) = g.to_scale_rotation_translation();
+                assert!(((t - p.at).dot(f)).abs() < 1e-4, "in the camera's plane");
+                let tip = t + r * Vec3::X * (s.x / 2.0) * (t - p.at).dot(r * Vec3::X).signum();
+                assert!(
+                    (screen(tip) - screen(far)).length() < 1e-4,
+                    "the tail ends where the flight projects"
+                );
+                assert!((screen(p.at) - screen(true_at)).length() < 1e-5);
+                streaks += 1;
+            }
+        }
+    }
+    assert!(streaks > 100, "{streaks}");
+}

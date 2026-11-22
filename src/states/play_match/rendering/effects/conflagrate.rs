@@ -4,6 +4,7 @@ use bevy::color::LinearRgba;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::body_hold::{body_capsule, held_in_front};
 use super::druid_heals::{body_point, keyed, keyed_color};
 use super::hit_reaction::{insert_flinch, PendingDepth};
 use super::hunter_shots::draw;
@@ -71,6 +72,18 @@ use crate::states::play_match::components::*;
 //    round cap; here it is a flat quad of the same length and width.
 // 4. **Follows in height too.** The bench's rings ride the victim in x and z
 //    only; here the rig rides its chest, so a victim on a ramp keeps them.
+// 5. **Held in front of the body.** The bench paints the body first and the
+//    whole burst over it. Here the body is an `AlphaMode::Blend` mesh that
+//    writes no depth, and the transparent pass sorts by each mesh's
+//    translation, so a piece deeper than the body's centre — half of what is
+//    born at the chest, and the back of the rings — is drawn first and the
+//    body paints over it. Every particle, the fire disc and every piece of
+//    the rune ring is therefore drawn on its own view ray, slid in front of
+//    the victim's body and scaled by the same ratio (`body_hold.rs`, the rule
+//    AS-347 wrote for Siphon Life): it projects exactly where the bench puts
+//    it. A particle's true flight is `ConflagrateParticle::at`; a streak is
+//    laid in the camera's plane at its particle's depth, with its projected
+//    length, as the bench's screen line is.
 //
 // ## Lifecycle
 //
@@ -599,6 +612,11 @@ pub enum ConflagrateShockPiece {
 pub struct ConflagrateParticle {
     /// Index into [`CONFLAGRATE_EMITTERS`].
     pub emitter: usize,
+    /// The victim whose body the particle is held in front of.
+    pub victim: Entity,
+    /// Where the particle truly is. Its `Transform` is where it is DRAWN:
+    /// here, or held in front of its victim's body (departure 5).
+    pub at: Vec3,
     pub age: f32,
     pub life: f32,
     pub velocity: Vec3,
@@ -805,6 +823,8 @@ pub fn animate_conflagrate_bursts(
                     .spawn((
                         ConflagrateParticle {
                             emitter: ei,
+                            victim: rig.target,
+                            at: position,
                             age: 0.0,
                             life: e.life,
                             velocity,
@@ -826,7 +846,17 @@ pub fn animate_conflagrate_bursts(
 #[allow(clippy::type_complexity)]
 pub fn pose_conflagrate_rings(
     mut materials: ResMut<Assets<StandardMaterial>>,
-    rigs: Query<(&ConflagrateBurst, &Children)>,
+    camera: Query<&GlobalTransform, With<Camera3d>>,
+    rigs: Query<(&ConflagrateBurst, &Transform, &Children)>,
+    victims: Query<
+        (&Transform, Option<&Pet>),
+        (
+            With<Combatant>,
+            Without<ConflagrateBurst>,
+            Without<ConflagrateRingPart>,
+            Without<ConflagrateShockPiece>,
+        ),
+    >,
     mut rings: Query<
         (
             &ConflagrateRingPart,
@@ -834,12 +864,33 @@ pub fn pose_conflagrate_rings(
             &mut Visibility,
             Option<&Children>,
         ),
-        Without<ConflagrateShockPiece>,
+        (Without<ConflagrateShockPiece>, Without<ConflagrateBurst>),
     >,
-    mut pieces: Query<(&ConflagrateShockPiece, &mut Transform), Without<ConflagrateRingPart>>,
+    mut pieces: Query<
+        (&ConflagrateShockPiece, &mut Transform),
+        (Without<ConflagrateRingPart>, Without<ConflagrateBurst>),
+    >,
 ) {
-    for (rig, children) in rigs.iter() {
+    let view = camera.iter().next().map(|c| c.compute_transform());
+    for (rig, rig_transform, children) in rigs.iter() {
         let (fire, shock) = conflagrate_rings(rig.age * 1000.0, rig.stature);
+        // Each flat piece is held in front of the body as a particle is
+        // (departure 5): scaled about the eye, so it projects where it was.
+        let chest = rig_transform.translation;
+        let hold = |local: Vec3| -> (Vec3, f32) {
+            match (view, victims.get(rig.target)) {
+                (Some(c), Ok((victim, pet))) => {
+                    let (drawn, k) = held_in_front(
+                        chest + local,
+                        body_capsule(victim.translation, pet.is_some()),
+                        c.translation,
+                        c.forward().as_vec3(),
+                    );
+                    (drawn - chest, k)
+                }
+                _ => (local, 1.0),
+            }
+        };
         for child in children.iter() {
             let Ok((part, mut transform, mut visibility, pieces_of)) = rings.get_mut(child) else {
                 continue;
@@ -851,8 +902,10 @@ pub fn pose_conflagrate_rings(
                         continue;
                     };
                     *visibility = Visibility::Inherited;
+                    let (local, k) = hold(Vec3::ZERO);
+                    transform.translation = local;
                     transform.rotation = flat_along(Vec3::X);
-                    transform.scale = Vec3::new(fire.radius * 2.0, fire.radius * 2.0, 1.0);
+                    transform.scale = Vec3::new(fire.radius * 2.0, fire.radius * 2.0, 1.0) * k;
                     if let Some(m) = materials.get_mut(&rig.disc_material) {
                         let [r, g, b] = FIRE_DISC_COLOR;
                         recolor(m, true, Color::srgb_u8(r, g, b), fire.alpha);
@@ -890,9 +943,10 @@ pub fn pose_conflagrate_rings(
                         };
                         let span = to - from;
                         let length = span.length();
-                        t.translation = (from + to) * 0.5;
+                        let (local, k) = hold((from + to) * 0.5);
+                        t.translation = local;
                         t.rotation = flat_along(span.try_normalize().unwrap_or(Vec3::X));
-                        t.scale = Vec3::new(length.max(1e-4), SHOCK_RING_LINE_WIDTH, 1.0);
+                        t.scale = Vec3::new(length.max(1e-4), SHOCK_RING_LINE_WIDTH, 1.0) * k;
                     }
                 }
             }
@@ -905,10 +959,10 @@ pub fn pose_conflagrate_rings(
 pub fn animate_conflagrate_particles(
     mut commands: Commands,
     time: Res<Time>,
-    mut particles: Query<(Entity, &mut ConflagrateParticle, &mut Transform)>,
+    mut particles: Query<(Entity, &mut ConflagrateParticle)>,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut p, mut transform) in particles.iter_mut() {
+    for (entity, mut p) in particles.iter_mut() {
         p.age += dt;
         if p.age >= p.life {
             commands.entity(entity).despawn();
@@ -917,38 +971,50 @@ pub fn animate_conflagrate_particles(
         let e = CONFLAGRATE_EMITTERS[p.emitter];
         p.velocity.y -= e.gravity * p.stature * dt;
         let velocity = p.velocity;
-        transform.translation += velocity * dt;
+        p.at += velocity * dt;
         p.angle += e.spin * TAU * dt;
     }
 }
 
-/// Billboard (graphical-only): turn each particle's sprite to the camera,
-/// sized and coloured along its life, and lay its streak back along its
-/// flight as the camera sees it.
+/// Billboard (graphical-only): place each particle where it is drawn — held
+/// in front of its victim's body for the camera (departure 5) — turn its
+/// sprite to the camera, sized and coloured along its life, and lay its
+/// streak back along its flight as the camera sees it.
 #[allow(clippy::type_complexity)]
 pub fn billboard_conflagrate_particles(
     mut materials: ResMut<Assets<StandardMaterial>>,
     camera: Query<&GlobalTransform, With<Camera3d>>,
-    particles: Query<(&ConflagrateParticle, &Children)>,
+    victims: Query<(&Transform, Option<&Pet>), (With<Combatant>, Without<ConflagrateParticle>)>,
+    mut particles: Query<
+        (&ConflagrateParticle, &mut Transform, &Children),
+        (Without<ConflagrateParticlePart>, Without<Combatant>),
+    >,
     mut parts: Query<
         (
             &ConflagrateParticlePart,
             &mut Transform,
             &MeshMaterial3d<StandardMaterial>,
         ),
-        Without<ConflagrateParticle>,
+        (Without<ConflagrateParticle>, Without<Combatant>),
     >,
 ) {
-    let cam = camera
-        .iter()
-        .next()
-        .map(|c| c.compute_transform().rotation)
-        .unwrap_or(Quat::IDENTITY);
-    for (p, children) in particles.iter() {
+    let view = camera.iter().next().map(|c| c.compute_transform());
+    let cam = view.map(|c| c.rotation).unwrap_or(Quat::IDENTITY);
+    for (p, mut particle_transform, children) in particles.iter_mut() {
+        let (drawn, k) = match (view, victims.get(p.victim)) {
+            (Some(c), Ok((victim, pet))) => held_in_front(
+                p.at,
+                body_capsule(victim.translation, pet.is_some()),
+                c.translation,
+                c.forward().as_vec3(),
+            ),
+            _ => (p.at, 1.0),
+        };
+        particle_transform.translation = drawn;
         let e = CONFLAGRATE_EMITTERS[p.emitter];
         let t = (p.age / p.life).clamp(0.0, 1.0);
         let (color, alpha, radius) = conflagrate_particle_look(&e, t);
-        let radius = radius * p.stature;
+        let radius = radius * p.stature * k;
         let speed = p.velocity.length();
         for child in children.iter() {
             let Ok((part, mut transform, material)) = parts.get_mut(child) else {
@@ -970,13 +1036,26 @@ pub fn billboard_conflagrate_particles(
                         transform.scale = Vec3::splat(1e-4);
                         continue;
                     };
+                    let back = -p.velocity / speed;
+                    // The bench's streak is a screen line: the projection of
+                    // the segment behind the particle. So the quad lies in
+                    // the camera's plane at the particle's own depth (never
+                    // deeper, so never behind the body), with the projected
+                    // length. Without a camera it lies back along the flight.
+                    let (along, length) = match view {
+                        Some(c) => {
+                            let f = c.forward().as_vec3();
+                            let flat = back - f * back.dot(f);
+                            (flat.normalize_or_zero(), length * flat.length() * k)
+                        }
+                        None => (back, length),
+                    };
                     // Roll the camera-facing quad until its long (local X)
                     // axis lies back along the flight as the camera sees it.
-                    let back = -p.velocity / speed;
                     let (right, up) = (cam * Vec3::X, cam * Vec3::Y);
                     let roll = back.dot(up).atan2(back.dot(right));
                     transform.rotation = cam * Quat::from_rotation_z(roll);
-                    transform.translation = back * (length * 0.5);
+                    transform.translation = along * (length * 0.5);
                     transform.scale = Vec3::new(
                         length.max(1e-4),
                         (radius * CONFLAGRATE_STREAK_WIDTH).max(1e-4),
