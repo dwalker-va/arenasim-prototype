@@ -903,6 +903,15 @@ impl Plugin for StatesPlugin {
                 .before(TransformSystem::TransformPropagate)
                 .run_if(in_combat_scene),
         )
+        // Shadow Dance's state stands on the rendered chest for the same
+        // reason (`shadow_dance.rs`).
+        .add_systems(
+            PostUpdate,
+            play_match::place_shadow_dance
+                .after(play_match::apply_cyclone_lift)
+                .before(TransformSystem::TransformPropagate)
+                .run_if(in_combat_scene),
+        )
         // Frostbolt and Shadow Bolt: the bespoke missiles and the bursts
         // they leave on their victims.
         //
@@ -1022,6 +1031,15 @@ impl Plugin for StatesPlugin {
         .add_systems(
             Update,
             play_match::update_divine_protection_globes
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Shadow Dance's dark-red state on the Rogue (AS-368): raised, aged,
+        // emitted, hidden on a sheep and taken down here; posed on the
+        // rendered body in PostUpdate (`place_shadow_dance`).
+        .add_systems(
+            Update,
+            play_match::update_shadow_dance
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )

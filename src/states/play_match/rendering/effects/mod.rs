@@ -30,6 +30,8 @@ mod cheat_death;
 pub use cheat_death::*;
 mod divine_protection;
 pub use divine_protection::*;
+mod shadow_dance;
+pub use shadow_dance::*;
 mod life_tap;
 pub use life_tap::*;
 mod empowered_flash;
