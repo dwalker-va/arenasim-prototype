@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::str::FromStr;
 
+use crate::states::play_match::reference_builds::BuildSpec;
 use crate::states::play_match::talents::{Build, TalentDefinitions};
 
 use crate::states::match_config::{
@@ -235,15 +236,18 @@ pub struct HeadlessMatchConfig {
     /// Team 2's priest forms (one per slot)
     #[serde(default)]
     pub team2_priest_forms: Vec<String>,
-    /// Team 1's talent builds, one per slot, each a map of talent to rank:
-    /// `[{"DemonicEmbrace": 2, "FelStamina": 2}]`. A slot with no entry (or
-    /// `{}`) takes no talents. Checked against the slot's class and the tree
-    /// rules (`talents.ron`) before the match.
+    /// Team 1's talent builds, one per slot ([`BuildSpec`]): a map of talent
+    /// to rank (`{"DemonicEmbrace": 2, "FelStamina": 2}`), the slot's class's
+    /// reference build by name (`"Demonology"`), or one with ranks moved
+    /// (`{"reference": "Demonology", "remove": {"SoulLink": 1}, "add":
+    /// {"DemonicEmbrace": 1}}`). A slot with no entry (or `{}`) takes no
+    /// talents. Checked against the slot's class and the tree rules
+    /// (`talents.ron`) before the match.
     #[serde(default)]
-    pub team1_builds: Vec<Build>,
+    pub team1_builds: Vec<BuildSpec>,
     /// Team 2's talent builds, one per slot.
     #[serde(default)]
-    pub team2_builds: Vec<Build>,
+    pub team2_builds: Vec<BuildSpec>,
 }
 
 fn default_map() -> String {
@@ -454,6 +458,20 @@ impl HeadlessMatchConfig {
         // added this check found exactly that divergence once already.
         self.ai_profiles()?;
         self.withheld_plays()?;
+
+        // Resolve every slot's build: a typo'd reference name, or a moved
+        // rank that leaves a build illegal, fails the whole batch here rather
+        // than one match at a time as error rows.
+        for (team, members, builds) in [
+            (1, &self.team1, &self.team1_builds),
+            (2, &self.team2, &self.team2_builds),
+        ] {
+            let classes = members
+                .iter()
+                .map(|s| Self::parse_class(s).map(Some))
+                .collect::<Result<Vec<_>, _>>()?;
+            Self::parse_builds(team, &classes, builds)?;
+        }
 
         // Validate kill targets
         if let Some(target) = self.team1_kill_target {
@@ -1034,14 +1052,16 @@ impl HeadlessMatchConfig {
         Ok(parsed)
     }
 
-    /// One build per slot of `team`, each checked against its slot's class
-    /// and the tree rules — the same check a spawn's resolve makes, so an
-    /// illegal build is rejected here with its slot named, never at spawn.
-    /// Reads the talent table only when a build takes a talent.
+    /// One build per slot of `team`, each resolved for its slot's class and
+    /// checked against the tree rules ([`TalentDefinitions::resolve_spec`]) —
+    /// the same check a spawn's resolve makes, so an illegal build, or a
+    /// reference the class does not have, is rejected here with its slot
+    /// named, never at spawn. Reads the talent table only when a slot names
+    /// a build that takes a talent.
     fn parse_builds(
         team: u8,
         classes: &[Option<CharacterClass>],
-        builds: &[Build],
+        builds: &[BuildSpec],
     ) -> Result<Vec<Build>, String> {
         if builds.len() > classes.len() {
             return Err(format!(
@@ -1050,18 +1070,21 @@ impl HeadlessMatchConfig {
                 classes.len()
             ));
         }
-        for (slot, build) in builds.iter().enumerate() {
-            if build.is_empty() {
-                continue;
-            }
-            let Some(class) = classes[slot] else {
-                continue;
+        let mut parsed = Vec::with_capacity(classes.len());
+        for (slot, spec) in builds.iter().enumerate() {
+            let build = match (spec, classes[slot]) {
+                (BuildSpec::Ranks(build), _) if build.is_empty() => Build::default(),
+                (_, None) => {
+                    return Err(format!(
+                        "team{team}_builds slot {slot} names a build, but the slot is empty"
+                    ))
+                }
+                (spec, Some(class)) => TalentDefinitions::shipped()
+                    .resolve_spec(class, spec)
+                    .map_err(|e| format!("team{team}_builds slot {slot} ({class:?}): {e}"))?,
             };
-            TalentDefinitions::shipped()
-                .validate_build(class, build)
-                .map_err(|e| format!("team{team}_builds slot {slot} ({class:?}): {e}"))?;
+            parsed.push(build);
         }
-        let mut parsed = builds.to_vec();
         parsed.resize(classes.len(), Build::default());
         Ok(parsed)
     }

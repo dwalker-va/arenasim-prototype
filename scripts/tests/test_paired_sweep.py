@@ -510,6 +510,56 @@ class VerdictTests(PairedTestCase):
         self.assertLacks(run, "may not be cited as a class's standing")
 
 
+class AffectedHeadlineTests(PairedTestCase):
+    """`--headline affected` (AS-299): a change one class carries on BOTH
+    sides washes out of team1's reachable aggregate by construction; scored
+    for the side that fields it, it does not."""
+
+    def arms(self):
+        ctl = arm_rows("ctl", "Mage+Priest", "Warrior+Rogue", wins(4))
+        # The Shaman side gains 10 of 20 in each orientation.
+        before = (arm_rows("clean", "Shaman+Mage", "Warrior+Rogue", wins(5) + losses(15))
+                  + arm_rows("against", "Warrior+Rogue", "Shaman+Mage",
+                             wins(15) + losses(5)))
+        after = (arm_rows("clean", "Shaman+Mage", "Warrior+Rogue", wins(15) + losses(5))
+                 + arm_rows("against", "Warrior+Rogue", "Shaman+Mage",
+                            wins(5) + losses(15)))
+        return before + ctl, after + ctl
+
+    def test_the_affected_side_aggregate_is_scored_for_the_affected_side(self):
+        before, after = self.arms()
+        run = self.run_tool(before, after, "--affects", "Shaman",
+                            "--tier", "directional", "--expect", "nothing",
+                            "--headline", "affected")
+        self.assertHas(run, "ALL reachable                      n=40    before  50.0%")
+        self.assertHas(run, "delta  +0.0pt")
+        self.assertUnderHeading(run, "the affected side's win rate",
+                                "AFFECTED SIDE (scored for it)      n=40    before  25.0%")
+        self.assertUnderHeading(run, "the affected side's win rate",
+                                "after  75.0%")
+        self.assertUnderHeading(run, "the affected side's win rate",
+                                "flips 20 (+20/-0)")
+        self.assertHas(run, "CONTRADICTS its success condition")
+        self.assertHas(run, "over the affected side's matches")
+
+    def test_without_it_the_report_is_unchanged(self):
+        before, after = self.arms()
+        run = self.run_tool(before, after, "--affects", "Shaman",
+                            "--tier", "directional", "--expect", "nothing")
+        self.assertLacks(run, "AFFECTED SIDE")
+        self.assertHas(run, "VERDICT: consistent with no movement")
+        self.assertHas(run, "rules out an effect above that floor")
+
+    def test_mirrored_matches_are_not_scored_for_either_side(self):
+        before, after = self.arms()
+        mirror = arm_rows("mirror", "Shaman+Mage", "Shaman+Rogue", wins(6))
+        flipped = arm_rows("mirror", "Shaman+Mage", "Shaman+Rogue", losses(6))
+        run = self.run_tool(before + mirror, after + flipped, "--affects", "Shaman",
+                            "--tier", "directional", "--headline", "affected")
+        self.assertUnderHeading(run, "the affected side's win rate",
+                                "AFFECTED SIDE (scored for it)      n=40 ")
+
+
 class PairingTests(PairedTestCase):
     def test_rows_with_no_twin_are_excluded_and_warned_about(self):
         before = arm_rows("hit", "Shaman+Mage", "Warrior+Rogue", wins(6))

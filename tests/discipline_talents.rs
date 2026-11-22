@@ -257,7 +257,7 @@ fn spawned_priest(build: &Build) -> Combatant {
         team1: vec!["Warrior".into()],
         team2: vec!["Priest".into()],
         random_seed: Some(7),
-        team2_builds: vec![build.clone()],
+        team2_builds: vec![build.clone().into()],
         ..Default::default()
     };
     let mut app = build_headless_app(&config, true, None);
@@ -423,7 +423,7 @@ fn unbreakable_will_shortens_a_stun_and_a_fear_landed_on_the_priest() {
             team2: vec!["Priest".into()],
             random_seed: Some(5),
             max_duration_secs: 3.0,
-            team2_builds: vec![build],
+            team2_builds: vec![build.into()],
             ..Default::default()
         };
         let stage = Stage::new()
@@ -472,7 +472,7 @@ fn reflective_shield_from_the_build_reflects_the_priests_shield() {
             team2: vec!["Priest".into()],
             random_seed: Some(3),
             max_duration_secs: 8.0,
-            team2_builds: vec![build],
+            team2_builds: vec![build.into()],
             ..Default::default()
         };
         let stage = Stage::new()
@@ -859,7 +859,8 @@ fn the_flash_heal_follows_inner_focus_at_once() {
             (UnbreakableWill, 2),
             (ImprovedPowerWordShield, 1),
             (InnerFocus, 1),
-        ])],
+        ])
+        .into()],
         ..Default::default()
     };
     let weakened = |secs| Aura {
@@ -902,7 +903,8 @@ fn power_infusion_leaves_the_priests_global_cooldown_free() {
             (ImprovedPowerWordShield, 1),
             (InnerFocus, 1),
             (PowerInfusion, 1),
-        ])],
+        ])
+        .into()],
         ..Default::default()
     };
     let stage = Stage::new()
@@ -964,7 +966,7 @@ fn dying_warrior_config(build: Build) -> HeadlessMatchConfig {
         team2: vec!["Warrior".into()],
         random_seed: Some(2),
         max_duration_secs: 4.0,
-        team1_builds: vec![build],
+        team1_builds: vec![build.into()],
         ..Default::default()
     }
 }
@@ -1057,7 +1059,8 @@ fn power_infusion_and_pain_suppression_pay_their_mana() {
                 (ImprovedPowerWordShield, 1),
                 (InnerFocus, 1),
                 (PowerInfusion, 1),
-            ])],
+            ])
+            .into()],
             ..Default::default()
         };
         let stage = Stage::new()

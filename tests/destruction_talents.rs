@@ -309,7 +309,7 @@ fn spawned_warlock(build: &Build) -> Combatant {
         team1: vec!["Warlock".into()],
         team2: vec!["Warrior".into()],
         random_seed: Some(7),
-        team1_builds: vec![build.clone()],
+        team1_builds: vec![build.clone().into()],
         ..Default::default()
     };
     let mut app = build_headless_app(&config, true, None);
@@ -977,7 +977,7 @@ fn held_match(
         team2: vec!["Warrior".into()],
         random_seed: Some(3),
         max_duration_secs: secs,
-        team1_builds: vec![build],
+        team1_builds: vec![build.into()],
         team1_warlock_curse_prefs: vec![Some(vec!["Agony".into()])],
         ..Default::default()
     };
