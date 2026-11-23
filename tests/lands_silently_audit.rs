@@ -79,6 +79,7 @@ use arenasim::states::play_match::combat_core::cheat_death_aura;
 use arenasim::states::play_match::combat_core::ExtraSwingSource;
 use arenasim::states::play_match::combat_core::CHEAT_DEATH_NAME;
 use arenasim::states::play_match::components::is_divine_protection;
+use arenasim::states::play_match::components::is_expose_armor;
 use arenasim::states::play_match::components::is_vengeance;
 use arenasim::states::play_match::components::Aura;
 use arenasim::states::play_match::components::AuraApplyOwner;
@@ -1067,6 +1068,16 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             _ if is_pain_suppression(t, &c.name) => Some(
                 "Holy hand flash + gold-and-teal shell before the ally while it holds (discipline_states.rs)",
             ),
+            // Its landing owns its application, by name (AS-366): Rupture's
+            // backhand, then the crest over the head.
+            _ if is_expose_armor(t, &c.name)
+                && AuraApplyRoute::for_instance(t, &c.name)
+                    == AuraApplyRoute::Owned(AuraApplyOwner::ExposeArmorCrest)
+                && swing_style_for_ability(a) == Some(SwingStyle::Backhand)
+                && InstantAbilityFired::is_spawned_for(a) =>
+            {
+                Some("backhand + shield crest over the head, gold cracking blue (expose_armor.rs)")
+            }
             _ if AuraLandingKind::for_aura(t, &c.name)
                 == Some(AuraLandingKind::MarkOfTheWildGlyph) =>
             {
@@ -1117,10 +1128,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (DemoralizingShout, "AS-134 (aura application)"),
     (DevotionAura, "AS-134 (aura application)"),
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
-    (
-        ExposeArmor,
-        "AS-366 (Expose Armor, the Combat capstone's armor rend)",
-    ),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
     (FrostArmor, "AS-134 (aura application)"),
     (
