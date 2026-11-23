@@ -14,8 +14,15 @@
 //! set equality with the list below, every `PostUpdate` system that reads a
 //! `VisualBody` a member of it, no hold left in `Update`, and the set's two
 //! edges.
+//!
+//! The same is true of every other ordering a visual effect depends on: its
+//! probe harness chains the systems itself, so removing an `.after(..)` or a
+//! `.chain()` from `states/mod.rs` fails nothing there. [`ORDERINGS`] names
+//! the orderings the held effects rest on, each with the reason, and
+//! [`the_client_keeps_every_ordering_the_effects_rest_on`] reads each one off
+//! the real registration.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use bevy::asset::AssetPlugin;
 use bevy::ecs::schedule::{NodeId, ScheduleLabel, Schedules};
@@ -168,6 +175,59 @@ impl Graph {
             .unwrap_or_else(|| format!("{id:?}"))
     }
 
+    /// The node and every node under it in the set hierarchy.
+    fn under(&self, id: NodeId) -> Vec<NodeId> {
+        let mut out = vec![id];
+        let mut i = 0;
+        while i < out.len() {
+            let n = out[i];
+            for (p, c) in &self.hierarchy {
+                if *p == n && !out.contains(c) {
+                    out.push(*c);
+                }
+            }
+            i += 1;
+        }
+        out
+    }
+
+    /// Whether the schedule runs every node named `first` before every node
+    /// named `then` (a system, or a set by its `Debug` name): a path of
+    /// ordering edges, where an edge between two sets orders everything
+    /// under the one before everything under the other.
+    fn orders(&self, first: &str, then: &str) -> bool {
+        let mut after: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        for (x, y) in &self.dependency {
+            let ys = self.under(*y);
+            for a in self.under(*x) {
+                after.entry(a).or_default().extend(ys.iter().copied());
+            }
+        }
+        let named = |name: &str| -> Vec<NodeId> {
+            self.systems
+                .iter()
+                .map(|(id, ..)| *id)
+                .chain(self.sets.iter().map(|(id, _)| *id))
+                .filter(|id| self.name(*id) == name)
+                .collect()
+        };
+        let (starts, ends) = (named(first), named(then));
+        assert!(!starts.is_empty(), "no node named {first}");
+        assert!(!ends.is_empty(), "no node named {then}");
+        starts.into_iter().all(|start| {
+            let mut seen = HashSet::from([start]);
+            let mut stack = vec![start];
+            while let Some(n) = stack.pop() {
+                for m in after.get(&n).into_iter().flatten() {
+                    if seen.insert(*m) {
+                        stack.push(*m);
+                    }
+                }
+            }
+            ends.iter().all(|e| seen.contains(e))
+        })
+    }
+
     /// The node and everything under it in the set hierarchy.
     fn closure(&self, id: NodeId) -> BTreeSet<String> {
         let mut out = BTreeSet::new();
@@ -282,4 +342,194 @@ fn no_hold_runs_in_update() {
         holds.contains("place_siphon_life_glows") && holds.contains("place_ua_states"),
         "{holds:?}"
     );
+}
+
+/// The orderings the held effects rest on, as `(first, then, why)`: each
+/// is a `.chain()`, `.after(..)` or `.before(..)` in `states/mod.rs` that the
+/// effect's probe harness restates in its own chain, so only this sees it
+/// dropped. `Update` systems all run before `PostUpdate`'s, so an ordering
+/// between the two schedules is the schedule's and is not listed.
+const ORDERINGS: [(&str, &str, &str); 30] = [
+    (
+        "handle_camera_input",
+        "update_camera_position",
+        "the camera moves on this frame's input",
+    ),
+    (
+        "animate_body_lean",
+        "update_finisher_hand_flashes",
+        "the flash stands on the leaned hand",
+    ),
+    (
+        "fire_bleed_sprays",
+        "update_bleed_sprays",
+        "a spray emits the frame it fires",
+    ),
+    (
+        "update_bleed_sprays",
+        "animate_client_particles",
+        "droplets are born before the ager flies them",
+    ),
+    (
+        "animate_client_particles",
+        "billboard_hunter_shots",
+        "particles are turned after they move",
+    ),
+    (
+        "unhold_demonology_particles",
+        "animate_client_particles",
+        "the ager moves the true position, never the held one",
+    ),
+    (
+        "unhold_demonology_particles",
+        "spawn_demonology_landings",
+        "a new spark is not unheld from a stale point",
+    ),
+    (
+        "spawn_demonology_landings",
+        "animate_soul_link_columns",
+        "a column animates the frame it is built",
+    ),
+    (
+        "animate_soul_link_columns",
+        "animate_sacrifice_triads",
+        "the chain the probes play",
+    ),
+    (
+        "animate_sacrifice_triads",
+        "animate_client_particles",
+        "motes are born before the ager flies them",
+    ),
+    (
+        "spawn_warlock_dot_visuals",
+        "animate_siphon_life_glows",
+        "the DoT detector builds the Siphon Life rig",
+    ),
+    (
+        "animate_siphon_life_glows",
+        "age_siphon_life_particles",
+        "a particle ages from the frame it is born",
+    ),
+    (
+        "age_siphon_life_particles",
+        "cleanup_siphon_life_glows",
+        "the glow ends after its last frame's ageing",
+    ),
+    (
+        "spawn_warlock_dot_visuals",
+        "animate_ua_states",
+        "UA's rig animates the frame it is built",
+    ),
+    (
+        "animate_ua_states",
+        "billboard_warlock_dot_visuals",
+        "the glow turns after it is sized",
+    ),
+    (
+        "billboard_warlock_dot_visuals",
+        "cleanup_warlock_dot_visuals",
+        "a state ends after its last pose",
+    ),
+    (
+        "fire_expose_armor_crests",
+        "animate_expose_armor_crests",
+        "a crest emits the frame it fires",
+    ),
+    (
+        "animate_expose_armor_crests",
+        "age_expose_armor_particles",
+        "a particle ages from the frame it is born",
+    ),
+    (
+        "spawn_conflagrate_landings",
+        "animate_conflagrate_bursts",
+        "a burst emits the frame it lands",
+    ),
+    (
+        "animate_conflagrate_bursts",
+        "animate_conflagrate_particles",
+        "a particle flies from the frame it is born",
+    ),
+    (
+        "spawn_aftermath_hits",
+        "animate_aftermath_hits",
+        "a hit emits the frame it lands",
+    ),
+    (
+        "animate_aftermath_hits",
+        "age_aftermath_hit_particles",
+        "a particle ages from the frame it is born",
+    ),
+    (
+        "spawn_aftermath_hits",
+        "tick_hit_flinch",
+        "the wound's dip renders on the landing frame",
+    ),
+    (
+        "spawn_heal_impacts",
+        "animate_heal_impacts",
+        "a landing emits the frame it lands",
+    ),
+    (
+        "sync_mind_flay_channels",
+        "animate_mind_flay_channels",
+        "a channel's stars pose the frame it starts",
+    ),
+    (
+        "animate_mind_flay_channels",
+        "animate_client_particles",
+        "the star's particles are born before they age",
+    ),
+    (
+        "animate_client_particles",
+        "billboard_mind_flay_particles",
+        "the star's particles turn after they move",
+    ),
+    (
+        "spawn_vampiric_embrace_implosions",
+        "animate_vampiric_embrace_implosions",
+        "an implosion emits the frame it lands",
+    ),
+    (
+        "spawn_silence_breaths",
+        "animate_silence_breaths",
+        "a breath emits the frame it is raised",
+    ),
+    (
+        "spawn_immolate_burns",
+        "animate_immolate_burns",
+        "a burn emits the frame it is raised",
+    ),
+];
+
+/// `PostUpdate` orderings beside the set's own.
+const POST_UPDATE_ORDERINGS: [(&str, &str, &str); 1] = [(
+    "hide_dot_states_on_sheep",
+    "VisibilityPropagate",
+    "a DoT state on a sheep is hidden the frame it is built",
+)];
+
+#[test]
+fn the_client_keeps_every_ordering_the_effects_rest_on() {
+    let mut app = client_app();
+    let update = Graph::of(&mut app, Update);
+    let broken: Vec<String> = ORDERINGS
+        .iter()
+        .filter(|(first, then, _)| !update.orders(first, then))
+        .map(|(first, then, why)| format!("{first} before {then} ({why})"))
+        .collect();
+    assert!(broken.is_empty(), "Update no longer orders: {broken:#?}");
+    let post = Graph::of(&mut app, PostUpdate);
+    let broken: Vec<String> = POST_UPDATE_ORDERINGS
+        .iter()
+        .filter(|(first, then, _)| !post.orders(first, then))
+        .map(|(first, then, why)| format!("{first} before {then} ({why})"))
+        .collect();
+    assert!(
+        broken.is_empty(),
+        "PostUpdate no longer orders: {broken:#?}"
+    );
+    // Non-vacuity: an ordering the schedule does not make is reported.
+    assert!(!update.orders("animate_client_particles", "update_bleed_sprays"));
+    assert!(!update.orders("animate_heal_impacts", "spawn_heal_impacts"));
 }
