@@ -37,7 +37,7 @@ use arenasim::states::{GameState, StatesPlugin};
 
 /// Every `BodyPlacement` system, by name. Adding one, or taking one out, is an
 /// edit here: membership is a judgement the schedule cannot make for itself.
-const PLACEMENTS: [&str; 17] = [
+const PLACEMENTS: [&str; 19] = [
     "place_shield_cards",
     "place_vengeance_hands",
     "place_divine_protection_globes",
@@ -45,6 +45,8 @@ const PLACEMENTS: [&str; 17] = [
     "place_vampiric_embrace_implosions",
     "place_silence_breaths",
     "place_discipline_states",
+    "place_inner_focus",
+    "place_blessed_recovery_bursts",
     "place_siphon_life_glows",
     "place_aftermath_hits",
     "pose_expose_armor_crests",
@@ -349,7 +351,7 @@ fn no_hold_runs_in_update() {
 /// effect's probe harness restates in its own chain, so only this sees it
 /// dropped. `Update` systems all run before `PostUpdate`'s, so an ordering
 /// between the two schedules is the schedule's and is not listed.
-const ORDERINGS: [(&str, &str, &str); 30] = [
+const ORDERINGS: [(&str, &str, &str); 34] = [
     (
         "handle_camera_input",
         "update_camera_position",
@@ -499,6 +501,26 @@ const ORDERINGS: [(&str, &str, &str); 30] = [
         "spawn_immolate_burns",
         "animate_immolate_burns",
         "a burn emits the frame it is raised",
+    ),
+    (
+        "cleanup_heal_cast_glows",
+        "update_inner_focus_palms",
+        "a palm yields to this frame's cast hands, so no frame shows both",
+    ),
+    (
+        "spawn_inner_focus_flashes",
+        "update_inner_focus_flashes",
+        "a flash animates the frame it lands",
+    ),
+    (
+        "update_inner_focus_flashes",
+        "update_inner_focus_palms",
+        "the chain the probes play",
+    ),
+    (
+        "spawn_blessed_recovery_bursts",
+        "update_blessed_recovery_bursts",
+        "a burst ages from the frame it lands",
     ),
 ];
 

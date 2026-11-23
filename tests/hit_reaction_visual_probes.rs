@@ -50,7 +50,7 @@ const TICK: Duration = Duration::from_millis(50);
 const TICK_SECS: f32 = 0.05;
 
 /// The combatant capsule's horizontal radius — the silhouette a contact burst
-/// has to stay outside of. Restated from `heal_impact::COMBATANT_BODY_RADIUS`
+/// has to stay outside of. Restated from `body_hold::COMBATANT_BODY_RADIUS`
 /// (not public through the crate root) so a probe reads as a claim about the
 /// world rather than a re-export chase.
 const BODY_RADIUS: f32 = 0.5;

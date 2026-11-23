@@ -73,7 +73,7 @@
 //! by it: the comets and pop whenever the Priest faces away from the camera,
 //! a palm on the body's far side. Every piece is drawn on its own view ray,
 //! slid toward the camera until it stands nearer than the RENDERED body's
-//! nearest point, and scaled by the same ratio ([`siphon_drawn_point`],
+//! nearest point, and scaled by the same ratio (the shared body hold, `body_hold.rs`;
 //! AS-347's rule): the same screen footprint, sorted in front. Only a Priest
 //! bears either piece, so no pet body is ever held against.
 //!
@@ -114,13 +114,12 @@ use std::f32::consts::TAU;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::body_hold::{body_capsule, held_in, BodyCapsule, BodyHold, HoldDisjoint, HoldView};
 use super::cheat_death::{particle_sprite_image, GLOW_SOFT};
 use super::druid_heals::{body_point, keyed};
 use super::heal_cast::{flash_instant_hands, spell_hand_local, HealCastAssets};
 use super::paladin_oneshots::{bench_hash, oneshot_glow_texture};
-use super::siphon_life::{siphon_body_capsule, siphon_drawn_point};
 use super::spell_bolts::star_flash_texture;
-use super::vampiric_embrace::rendered_root;
 use crate::states::play_match::components::*;
 
 // ── The bench's constants block (signed off at version 1792207490-53c9) ─────
@@ -852,24 +851,6 @@ pub fn update_inner_focus_palms(
     }
 }
 
-/// The camera, as the hold and the billboards need it.
-#[derive(Clone, Copy)]
-struct View {
-    eye: Vec3,
-    forward: Vec3,
-    rotation: Quat,
-}
-
-/// Where a piece truly at `at` is drawn, and the factor its quad is scaled
-/// by: held in front of the body `capsule` for the camera (no camera: where
-/// it is).
-fn held(at: Vec3, capsule: (Vec3, Vec3, f32), view: Option<View>) -> (Vec3, f32) {
-    match view {
-        Some(v) => siphon_drawn_point(at, capsule, v.eye, v.forward),
-        None => (at, 1.0),
-    }
-}
-
 /// Write a posed piece onto its entity: local to a parent at `parent` (an
 /// unrotated rig), held, turned to the camera, sized and coloured. A piece
 /// that draws nothing is shrunk to nothing and cleared.
@@ -877,15 +858,15 @@ fn write_piece(
     pose: Option<FocusPose>,
     anchor: Vec3,
     parent: Vec3,
-    capsule: (Vec3, Vec3, f32),
-    view: Option<View>,
+    capsule: BodyCapsule,
+    view: Option<HoldView>,
     transform: &mut Transform,
     material: &Handle<StandardMaterial>,
     materials: &mut Assets<StandardMaterial>,
 ) {
     let (rgb, alpha) = match pose {
         Some(p) => {
-            let (drawn, k) = held(anchor + p.at, capsule, view);
+            let (drawn, k) = held_in(view, anchor + p.at, capsule);
             transform.translation = drawn - parent;
             transform.rotation = match view {
                 Some(v) => v.rotation * Quat::from_rotation_z(p.roll),
@@ -934,70 +915,35 @@ pub fn focus_palm_point(priest: &Transform, body: &Transform, side: f32) -> Vec3
 /// offset.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn place_inner_focus(
-    camera: Query<
-        &Transform,
-        (
-            With<Camera3d>,
-            Without<InnerFocusFlash>,
-            Without<InnerFocusPalms>,
-            Without<InnerFocusPalm>,
-            Without<InnerFocusFlashPiece>,
-            Without<InnerFocusPalmPiece>,
-        ),
-    >,
+    hold: BodyHold,
     mut flashes: Query<
         (&InnerFocusFlash, &mut Transform, &Children),
         (
-            Without<Combatant>,
-            Without<VisualBody>,
             Without<InnerFocusPalms>,
             Without<InnerFocusPalm>,
             Without<InnerFocusFlashPiece>,
             Without<InnerFocusPalmPiece>,
+            HoldDisjoint,
         ),
     >,
     mut rigs: Query<
         (&InnerFocusPalms, &mut Transform, &Children),
         (
-            Without<Combatant>,
-            Without<VisualBody>,
             Without<InnerFocusFlash>,
             Without<InnerFocusPalm>,
             Without<InnerFocusFlashPiece>,
             Without<InnerFocusPalmPiece>,
+            HoldDisjoint,
         ),
     >,
     mut palms: Query<
         (&InnerFocusPalm, &mut Transform, &Children),
         (
-            Without<Combatant>,
-            Without<VisualBody>,
             Without<InnerFocusFlash>,
             Without<InnerFocusPalms>,
             Without<InnerFocusFlashPiece>,
             Without<InnerFocusPalmPiece>,
-        ),
-    >,
-    units: Query<
-        (&Transform, Option<&Children>),
-        (
-            With<Combatant>,
-            Without<InnerFocusFlash>,
-            Without<InnerFocusPalms>,
-            Without<InnerFocusPalm>,
-            Without<InnerFocusFlashPiece>,
-            Without<InnerFocusPalmPiece>,
-        ),
-    >,
-    bodies: Query<
-        (&Transform, &VisualBody),
-        (
-            Without<Combatant>,
-            Without<InnerFocusFlash>,
-            Without<InnerFocusPalms>,
-            Without<InnerFocusPalm>,
-            Without<InnerFocusFlashPiece>,
-            Without<InnerFocusPalmPiece>,
+            HoldDisjoint,
         ),
     >,
     mut flash_pieces: Query<
@@ -1007,12 +953,11 @@ pub fn place_inner_focus(
             &MeshMaterial3d<StandardMaterial>,
         ),
         (
-            Without<Combatant>,
-            Without<VisualBody>,
             Without<InnerFocusFlash>,
             Without<InnerFocusPalms>,
             Without<InnerFocusPalm>,
             Without<InnerFocusPalmPiece>,
+            HoldDisjoint,
         ),
     >,
     mut palm_pieces: Query<
@@ -1022,28 +967,20 @@ pub fn place_inner_focus(
             &MeshMaterial3d<StandardMaterial>,
         ),
         (
-            Without<Combatant>,
-            Without<VisualBody>,
             Without<InnerFocusFlash>,
             Without<InnerFocusPalms>,
             Without<InnerFocusPalm>,
             Without<InnerFocusFlashPiece>,
+            HoldDisjoint,
         ),
     >,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let view = camera.iter().next().map(|c| View {
-        eye: c.translation,
-        forward: c.forward().as_vec3(),
-        rotation: c.rotation,
-    });
+    let view = hold.view();
     // A unit's transform, its rendered root and its body's local transform.
     let unit_of = |unit: Entity| {
-        let (transform, children) = units.get(unit).ok()?;
-        let body = children.and_then(|kids| kids.iter().find_map(|k| bodies.get(k).ok()));
-        let root = rendered_root(transform, body);
-        let local = body.map(|(t, _)| *t).unwrap_or_default();
-        Some((*transform, root, local))
+        let body = hold.body(unit)?;
+        Some((body.unit, body.root, body.local))
     };
     for (flash, mut rig_transform, children) in flashes.iter_mut() {
         let Some((unit, root, _)) = unit_of(flash.priest) else {
@@ -1051,7 +988,7 @@ pub fn place_inner_focus(
         };
         let chest = body_point(FOCUS_CHEST, root, false);
         rig_transform.translation = chest;
-        let capsule = siphon_body_capsule(root, false);
+        let capsule = body_capsule(root, false);
         let (forward, right) = level_axes(&unit);
         for child in children.iter() {
             let Ok((piece, mut transform, material)) = flash_pieces.get_mut(child) else {
@@ -1075,7 +1012,7 @@ pub fn place_inner_focus(
             continue;
         };
         rig_transform.translation = unit.translation;
-        let capsule = siphon_body_capsule(root, false);
+        let capsule = body_capsule(root, false);
         for palm_entity in rig_children.iter() {
             let Ok((palm, mut palm_transform, palm_children)) = palms.get_mut(palm_entity) else {
                 continue;

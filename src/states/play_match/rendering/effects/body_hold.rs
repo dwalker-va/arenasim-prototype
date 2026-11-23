@@ -175,6 +175,11 @@ pub struct RenderedBody {
     /// The unit's own facing (its root's rotation).
     pub rotation: Quat,
     pub is_pet: bool,
+    /// The unit's own transform (its sim root, as interpolated for the draw).
+    pub unit: Transform,
+    /// Its `VisualBody`'s local transform this frame (identity without one):
+    /// a point on the drawn body is `unit.transform_point(local.transform_point(p))`.
+    pub local: Transform,
 }
 
 impl RenderedBody {
@@ -246,6 +251,8 @@ impl BodyHold<'_, '_> {
             root: rendered_root(transform, body),
             rotation: transform.rotation,
             is_pet,
+            unit: *transform,
+            local: body.map(|(local, _)| *local).unwrap_or_default(),
         })
     }
 }

@@ -1111,7 +1111,7 @@ fn every_particle_is_drawn_in_front_of_the_body() {
 }
 
 /// How close in front of the body's nearest point a held particle stands
-/// (`SIPHON_BODY_CLEARANCE`, the hold the hit reuses).
+/// (`BODY_HOLD_CLEARANCE`, the shared hold).
 const HOLD_CLEARANCE: f32 = 0.05;
 
 /// The depth a particle at true depth `truly` is drawn at, in front of a body

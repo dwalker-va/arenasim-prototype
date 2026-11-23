@@ -978,6 +978,10 @@ impl Plugin for StatesPlugin {
                 // Power Infusion's and Pain Suppression's states and the
                 // swirl at the Priest's feet (`discipline_states.rs`).
                 play_match::place_discipline_states,
+                // Inner Focus's comets and palms and Blessed Recovery's amber
+                // burst (`inner_focus.rs`, `blessed_recovery.rs`).
+                play_match::place_inner_focus,
+                play_match::place_blessed_recovery_bursts,
                 // The held particle effects.
                 play_match::place_siphon_life_glows,
                 play_match::place_aftermath_hits,
@@ -998,19 +1002,6 @@ impl Plugin for StatesPlugin {
             PostUpdate,
             play_match::hide_dot_states_on_sheep
                 .before(bevy::render::view::VisibilitySystems::VisibilityPropagate)
-                .run_if(in_combat_scene),
-        )
-        // Inner Focus's comets and palms and Blessed Recovery's amber burst
-        // stand on the Priest's rendered body for the same reason
-        // (`inner_focus.rs`, `blessed_recovery.rs`, AS-352).
-        .add_systems(
-            PostUpdate,
-            (
-                play_match::place_inner_focus,
-                play_match::place_blessed_recovery_bursts,
-            )
-                .after(play_match::apply_cyclone_lift)
-                .before(TransformSystem::TransformPropagate)
                 .run_if(in_combat_scene),
         )
         // Frostbolt and Shadow Bolt: the bespoke missiles and the bursts
