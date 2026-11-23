@@ -760,7 +760,7 @@ pub struct DrainParticle {
 /// Wave are the same visual 58, and Flash of Light — impact-less for players
 /// in the source — borrows Holy Light's head shower the way the non-player
 /// FoL variants (visuals 6622/7379) do, at reduced intensity.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum HealImpactKind {
     /// `flashheal_base.m2`: gold ray-fan flash + lens flare, then rising motes.
     FlashHeal,
@@ -794,6 +794,12 @@ pub enum HealImpactKind {
     /// (`TOTEM_PULSE_RING_RADIUS`) so the rise reads from the ground instead
     /// of being depth-rejected inside the body.
     TotemPulse,
+    /// Vampiric Embrace's party heal: `vampiricembrace_state_base.m2` (kit
+    /// 3072), the Heal stream's rig recoloured violet, on every ally the
+    /// leech heals — at most once every
+    /// `VAMPIRIC_EMBRACE_HEAL_VISUAL_MIN_INTERVAL_SECS` per ally (the AS-335
+    /// ruling; `rendering/effects/vampiric_embrace.rs`).
+    VampiricEmbrace,
 }
 
 /// A landed heal playing its per-spell, Classic-faithful landing on the
@@ -836,6 +842,16 @@ impl HealImpact {
             AbilityType::Swiftmend | AbilityType::Innervate => Some(HealImpactKind::HealingWave),
             _ => None,
         }
+    }
+
+    /// Which landing a LEECH heal plays on its recipient, by the leech's
+    /// source name (`LeechHeal::source`, the aura's or ability's RON name) —
+    /// the routing table for the heals `combat_core::leech::land` lands.
+    /// Only Vampiric Embrace's party heal has a client visual (kit 3072);
+    /// Death Coil's, Siphon Life's and Drain Life's heals back to the Warlock
+    /// draw nothing (their green numbers carry them).
+    pub fn kind_for_leech(source: &str) -> Option<HealImpactKind> {
+        (source == VAMPIRIC_EMBRACE_AURA).then_some(HealImpactKind::VampiricEmbrace)
     }
 
     /// Which landing an aura-tick heal plays — the routing table for heals
@@ -955,6 +971,21 @@ pub const AFTERMATH_AURA: &str = "Aftermath";
 /// the name its rider (`guardian_spirit_riders`) is given. Its state is the
 /// spirit over the bearer's shoulders (`rendering/effects/guardian_spirit.rs`).
 pub const GUARDIAN_SPIRIT_AURA: &str = "Guardian Spirit";
+/// Vampiric Embrace's leech mark (the RON `name:` string). Its landing is the
+/// dust implosion at the victim's chest, and the heals it gives each ally
+/// play the violet heal stream (`rendering/effects/vampiric_embrace.rs`).
+pub const VAMPIRIC_EMBRACE_AURA: &str = "Vampiric Embrace";
+/// Priest Silence's silence (the RON `name:` string). Its state is the breath
+/// at the victim's mouth while it holds (`rendering/effects/silence_breath.rs`);
+/// Unstable Affliction's backlash silence, named after the DoT, keeps its
+/// burst.
+pub const SILENCE_AURA: &str = "Silence";
+
+/// Whether an aura of `aura_type` named `name` is Priest Silence's: the one
+/// predicate its breath, its band routing and the lands-silently audit all ask.
+pub fn is_silence_breath(aura_type: AuraType, name: &str) -> bool {
+    aura_type == AuraType::Silence && name == SILENCE_AURA
+}
 
 // The Paladin talent auras whose landings play a one-shot (AS-374,
 // `docs/design/2026-10-18-paladin-talent-client-data.md`): each name is the
@@ -1150,6 +1181,11 @@ pub enum AuraLandingKind {
     /// off three outer points, 2.37 s (`demonology_landings.rs`, AS-350). The
     /// buff draws nothing after; the Felhunter's death is its own.
     SacrificeTriad,
+    /// Vampiric Embrace: `soothingkiss_impact_head.m2` (kit 3109), a 2 s ball
+    /// of blue-to-magenta dust collapsing into the victim's chest
+    /// (`vampiric_embrace.rs`, AS-357). The 60 s mark draws nothing after;
+    /// its heals play the violet stream on each ally.
+    VampiricEmbraceImplosion,
     /// Aftermath's daze: `fire_impactdd_chest.m2` (kit 728), a small
     /// red-orange burst of falling flares and a gold-to-red glow at the
     /// victim's chest, about 1.7 s, with the victim's wound flinch
@@ -1159,7 +1195,7 @@ pub enum AuraLandingKind {
 
 impl AuraLandingKind {
     /// Every landing, in declaration order.
-    pub const ALL: [AuraLandingKind; 15] = [
+    pub const ALL: [AuraLandingKind; 16] = [
         AuraLandingKind::RejuvenationSwirl,
         AuraLandingKind::MarkOfTheWildGlyph,
         AuraLandingKind::ShadowWordPainHit,
@@ -1174,6 +1210,7 @@ impl AuraLandingKind {
         AuraLandingKind::ShadowTrance,
         AuraLandingKind::RepentanceImpact,
         AuraLandingKind::SacrificeTriad,
+        AuraLandingKind::VampiricEmbraceImplosion,
         AuraLandingKind::AftermathFireHit,
     ];
 
@@ -1217,6 +1254,9 @@ impl AuraLandingKind {
             AuraType::DamageDealtIncrease if name == TOUCH_OF_SHADOW_NAME => {
                 Some(AuraLandingKind::SacrificeTriad)
             }
+            AuraType::LeechMark if name == VAMPIRIC_EMBRACE_AURA => {
+                Some(AuraLandingKind::VampiricEmbraceImplosion)
+            }
             AuraType::MovementSpeedSlow if name == AFTERMATH_AURA => {
                 Some(AuraLandingKind::AftermathFireHit)
             }
@@ -1247,6 +1287,7 @@ impl AuraLandingKind {
             | AuraLandingKind::AmplifyFlash
             | AuraLandingKind::ShadowTrance
             | AuraLandingKind::SacrificeTriad
+            | AuraLandingKind::VampiricEmbraceImplosion
             | AuraLandingKind::AftermathFireHit => None,
         }
     }
@@ -1338,6 +1379,7 @@ impl PaladinOneShotKind {
             | AuraLandingKind::AmplifyFlash
             | AuraLandingKind::ShadowTrance
             | AuraLandingKind::SacrificeTriad
+            | AuraLandingKind::VampiricEmbraceImplosion
             | AuraLandingKind::AftermathFireHit => None,
         }
     }
@@ -1661,6 +1703,10 @@ pub enum HealMoteKind {
     Ribbon,
     /// A soft, wide light-puff (`clouds8x8fade`).
     Puff,
+    /// A soft round glow on its own material, coloured, faded and sized over
+    /// its life by its style's `HealMoteLook` — a bench-transcribed mote
+    /// (Vampiric Embrace's violet stream).
+    Glow,
 }
 
 /// One rising or falling gold mote of a heal landing, in the rig's frame.
@@ -1671,6 +1717,10 @@ pub struct HealMote {
     pub age: f32,
     pub life: f32,
     pub radius: f32,
+    /// Where the mote truly is, in the rig's frame. Its `Transform` is where
+    /// it is DRAWN: here, or held in front of its recipient's body when its
+    /// style says so.
+    pub offset: Vec3,
 }
 
 /// One butterfly wing of the Healing Wave swirl. Wings are direct children
@@ -1695,6 +1745,9 @@ pub struct HealImpactRig {
     pub star_material: Handle<StandardMaterial>,
     pub ribbon_material: Handle<StandardMaterial>,
     pub puff_material: Handle<StandardMaterial>,
+    /// The soft glow sprite a [`HealMoteKind::Glow`] mote's own material
+    /// wears.
+    pub glow_texture: Handle<Image>,
 }
 
 /// Which cast-side family a heal's hand glow plays while the caster winds up.
@@ -2133,9 +2186,15 @@ pub enum AuraApplyOwner {
     /// An interrupt's lockout: the victim's casting orb sputters
     /// (`casting_orbs.rs`).
     InterruptSputter,
-    /// Unstable Affliction's dispel backlash burst, the only source of Silence
-    /// (`affliction.rs`).
+    /// Unstable Affliction's dispel backlash burst (`affliction.rs`): the
+    /// owner of the Silence TYPE, and so of the backlash's silence, which is
+    /// named after the DoT. Priest Silence is the other source; its instance
+    /// is routed by name to [`AuraApplyOwner::SilenceBreath`].
     BacklashBurst,
+    /// Priest Silence: the breath at the victim's mouth while it holds
+    /// (`silence_breath.rs`, AS-357), whose inhale is its application. Owned
+    /// per aura NAME ([`SILENCE_AURA`]), because its type is the backlash's.
+    SilenceBreath,
     /// Shadow Sight: the orb pickup animation (`shadow_sight` orbs).
     ShadowSightOrb,
     /// The slow family — movement slows and Frost Armor's paired attack-speed
@@ -2153,8 +2212,9 @@ pub enum AuraApplyOwner {
     /// Pain's dark hit (`shadow_word_pain.rs`), the Paladin talent one-shots
     /// (`paladin_oneshots.rs`), the empowered ground flash of Amplify
     /// Curse and Shadow Trance (`empowered_flash.rs`), Touch of Shadow's
-    /// sacrifice triad (`demonology_landings.rs`), and Aftermath's fire hit
-    /// (`aftermath.rs`). Owned per aura
+    /// sacrifice triad (`demonology_landings.rs`), Aftermath's fire hit
+    /// (`aftermath.rs`), and Vampiric Embrace's dust implosion
+    /// (`vampiric_embrace.rs`). Owned per aura
     /// NAME, not per type — see [`AuraApplyRoute::for_instance`] — because
     /// their types are shared with auras that keep the band (Healing Stream's
     /// HoT, Power Word: Fortitude). Lifebloom is not here: its pulse starts a
@@ -2225,7 +2285,8 @@ impl AuraApplyRoute {
     /// ([`CHEAT_DEATH_NAME`]), Divine Protection by its globe
     /// ([`DIVINE_PROTECTION_AURA`]), Power Infusion by its crackle
     /// ([`POWER_INFUSION_AURA`]), Pain Suppression by its shell
-    /// ([`PAIN_SUPPRESSION_AURA`]), Expose Armor by its crest
+    /// ([`PAIN_SUPPRESSION_AURA`]), Priest Silence by its breath
+    /// ([`SILENCE_AURA`]), Expose Armor by its crest
     /// ([`EXPOSE_ARMOR_AURA`]) and Hemorrhage by its strike's bleed spray
     /// ([`HEMORRHAGE_AURA`]); every other aura routes by its type
     /// ([`Self::for_aura`]). The renderers ask this — the band, and the
@@ -2247,6 +2308,8 @@ impl AuraApplyRoute {
             AuraApplyRoute::Owned(AuraApplyOwner::InfusionCrackle)
         } else if is_pain_suppression(aura_type, name) {
             AuraApplyRoute::Owned(AuraApplyOwner::SuppressionShell)
+        } else if is_silence_breath(aura_type, name) {
+            AuraApplyRoute::Owned(AuraApplyOwner::SilenceBreath)
         } else if is_expose_armor(aura_type, name) {
             AuraApplyRoute::Owned(AuraApplyOwner::ExposeArmorCrest)
         } else if is_hemorrhage(aura_type, name) {
@@ -2298,8 +2361,9 @@ impl AuraApplyRoute {
             | AuraType::HealingReceivedIncrease
             | AuraType::DamageReflect => AuraApplyRoute::Band,
 
-            // Vampiric Embrace's leech has no bespoke apply treatment yet:
-            // the family cue draws it as a debuff (its visual card is AS-357).
+            // A leech mark by any other name keeps the family cue, drawn as a
+            // debuff; Vampiric Embrace's is owned by its NAMED landing, the
+            // dust implosion (`for_instance`, AS-357).
             AuraType::LeechMark => AuraApplyRoute::Band,
 
             // Aura Mastery's immunity is owned by its NAMED landing, the ward
@@ -2326,6 +2390,8 @@ impl AuraApplyRoute {
             AuraType::DamageOverTime => AuraApplyRoute::Owned(AuraApplyOwner::DotLayer),
             AuraType::HealingReduction => AuraApplyRoute::Owned(AuraApplyOwner::MortalWounds),
             AuraType::SpellSchoolLockout => AuraApplyRoute::Owned(AuraApplyOwner::InterruptSputter),
+            // The backlash's silence; Priest Silence's is routed by its name
+            // to its breath (`for_instance`).
             AuraType::Silence => AuraApplyRoute::Owned(AuraApplyOwner::BacklashBurst),
             AuraType::ShadowSight => AuraApplyRoute::Owned(AuraApplyOwner::ShadowSightOrb),
             // Shadow Dance's window: its state on the Rogue is its landing.

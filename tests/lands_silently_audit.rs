@@ -887,6 +887,15 @@ fn control_visual(
                 "slow bind ring + scuff (slow_ring.rs)"
             }
         }),
+        // Priest Silence's breath, routed by its name; the backlash's silence
+        // (named after Unstable Affliction) is no ability's and keeps its
+        // burst.
+        AuraType::Silence
+            if AuraApplyRoute::for_instance(t, name)
+                == AuraApplyRoute::Owned(AuraApplyOwner::SilenceBreath) =>
+        {
+            Some("breath at the mouth while it holds (silence_breath.rs)")
+        }
         _ => None,
     }
 }
@@ -896,16 +905,10 @@ fn control_finds_every_member() {
     assert_finds("crowd-control", is_control, CONTROL_MEMBERS);
 }
 
-const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[
-    (
-        CurseOfExhaustion,
-        "AS-334 (the talent visuals: Curse of Exhaustion's slow)",
-    ),
-    (
-        Silence,
-        "AS-357 (Silence on the target, and the Silence aura's routing; scoped by AS-335)",
-    ),
-];
+const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
+    CurseOfExhaustion,
+    "AS-334 (the talent visuals: Curse of Exhaustion's slow)",
+)];
 
 #[test]
 fn control_lands_nothing_silently() {
@@ -1084,6 +1087,16 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             _ if AuraLandingKind::for_aura(t, &c.name) == Some(AuraLandingKind::AmplifyFlash) => {
                 Some("empowered ground flash on cast (empowered_flash.rs)")
             }
+            // Vampiric Embrace: its landing on the victim AND the heal stream
+            // its party heals play — both must answer.
+            _ if AuraLandingKind::for_aura(t, &c.name)
+                == Some(AuraLandingKind::VampiricEmbraceImplosion) =>
+            {
+                HealImpact::kind_for_leech(&c.name).map(|_| {
+                    "dust implosion at the chest on landing, violet heal stream on each healed \
+                     ally (vampiric_embrace.rs, heal_impact.rs)"
+                })
+            }
             // The Paladin talent one-shots (AS-374), each routed by its
             // aura's name: the landing marks it, the band does not.
             _ if paladin_oneshot(t, &c.name).is_some() => paladin_oneshot(t, &c.name),
@@ -1123,10 +1136,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (MoltenArmor, "AS-134 (aura application)"),
     (PowerWordFortitude, "AS-134 (aura application)"),
     (ShadowResistanceAura, "AS-134 (aura application)"),
-    (
-        VampiricEmbrace,
-        "AS-357 (Vampiric Embrace on the target, and its heals; scoped by AS-335)",
-    ),
 ];
 
 #[test]
