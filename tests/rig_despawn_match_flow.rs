@@ -224,10 +224,13 @@ fn a_shadowform_priest_dies_with_its_shroud_emitting() {
 
 /// A transform puff that ends on the frame its cloud is attached: the lobes
 /// are parented onto the puff by `spawn_transform_puff_visuals` while
-/// `cleanup_expired_transform_puffs` despawns it. The puff lives 0.45 s, so
-/// this is the frame a hitch, or a hitch at 2x or 3x speed, steps past its
-/// whole life before the cloud is built. Staged as a puff born spent, the
-/// frame after the gates open.
+/// `cleanup_expired_transform_puffs` despawns it.
+///
+/// No puff reaches this today. `spawn_transform_puff` always gives the full
+/// lifetime, and only `update_transform_puffs` lowers it, once the attach
+/// has given the puff its material, so a hitch spends a puff only after its
+/// lobes are on. A born-spent puff is staged here to pin the group's order
+/// against a future path that lowers the lifetime before the attach.
 #[test]
 fn a_transform_puff_spent_on_its_first_frame_goes_cleanly() {
     #[derive(Resource, Default)]

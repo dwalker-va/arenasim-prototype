@@ -1331,10 +1331,12 @@ impl Plugin for StatesPlugin {
         )
         // Transform puff visual effects (separate group to avoid tuple size limits)
         // The cloud pop at both ends of a polymorph — graphical only.
-        // Chained: the lobes are parented onto the puff, so their attach must
-        // flush before a cleanup that ends the puff on the same frame (a hitch,
-        // or a hitch at 3x, can step past its whole 0.45 s life), or the lobe
-        // is parented onto a despawned puff and the client panics (AS-507).
+        // Chained as a defensive ordering: the lobes' attach flushes before
+        // the cleanup can despawn the puff. Today a puff cannot expire before
+        // its lobes attach (`spawn_transform_puff` gives the full lifetime, and
+        // only `update_transform_puffs` lowers it, once the attach has given
+        // the puff its material), so this pins the order against a future
+        // path that lowers it first (AS-507).
         .add_systems(
             Update,
             (
