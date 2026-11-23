@@ -1076,6 +1076,17 @@ pub fn is_pain_suppression(aura_type: AuraType, name: &str) -> bool {
     aura_type == AuraType::DamageTakenReduction && name == PAIN_SUPPRESSION_AURA
 }
 
+/// Hemorrhage's wound (AS-367): its RON `name`. Not a state — the client
+/// has none, and the stacks are on the icon — but the name its strike's
+/// bleed spray owns the application by.
+pub const HEMORRHAGE_AURA: &str = "Hemorrhage";
+
+/// Whether an aura of `aura_type` named `name` is Hemorrhage's wound: the one
+/// predicate its band routing and the lands-silently audit ask.
+pub fn is_hemorrhage(aura_type: AuraType, name: &str) -> bool {
+    aura_type == AuraType::DamageTakenIncrease && name == HEMORRHAGE_AURA
+}
+
 /// What a heal-over-time aura draws — the ONE place a HoT meets its visual,
 /// routed by the aura's RON name the way `DotStateVisual::for_dot` routes a
 /// DoT. [`HealImpact::kind_for_hot_tick`] (the tick site) and the
@@ -2257,6 +2268,12 @@ pub enum AuraApplyOwner {
     /// (`ArmorPercentReduction`) is the damage pipeline's, which any other
     /// user meets on the band.
     ExposeArmorCrest,
+    /// Hemorrhage's wound (AS-367): the bleed spray at the victim's chest on
+    /// every hit that lands it, fresh or a refresh of its stacks
+    /// (`bleed_spray.rs`, fired off the strike by `instant_ability.rs`).
+    /// Owned per aura NAME, because its type (`DamageTakenIncrease`) is the
+    /// damage pipeline's, which any other user meets on the band.
+    BleedSpray,
 }
 
 impl AuraApplyRoute {
@@ -2269,8 +2286,9 @@ impl AuraApplyRoute {
     /// ([`DIVINE_PROTECTION_AURA`]), Power Infusion by its crackle
     /// ([`POWER_INFUSION_AURA`]), Pain Suppression by its shell
     /// ([`PAIN_SUPPRESSION_AURA`]), Priest Silence by its breath
-    /// ([`SILENCE_AURA`]) and Expose Armor by its crest
-    /// ([`EXPOSE_ARMOR_AURA`]); every other aura routes by its type
+    /// ([`SILENCE_AURA`]), Expose Armor by its crest
+    /// ([`EXPOSE_ARMOR_AURA`]) and Hemorrhage by its strike's bleed spray
+    /// ([`HEMORRHAGE_AURA`]); every other aura routes by its type
     /// ([`Self::for_aura`]). The renderers ask this — the band, and the
     /// Repentance swirl to find its incapacitate.
     pub fn for_instance(aura_type: AuraType, name: &str) -> Self {
@@ -2294,6 +2312,8 @@ impl AuraApplyRoute {
             AuraApplyRoute::Owned(AuraApplyOwner::SilenceBreath)
         } else if is_expose_armor(aura_type, name) {
             AuraApplyRoute::Owned(AuraApplyOwner::ExposeArmorCrest)
+        } else if is_hemorrhage(aura_type, name) {
+            AuraApplyRoute::Owned(AuraApplyOwner::BleedSpray)
         } else {
             Self::for_aura(aura_type)
         }
@@ -3143,7 +3163,7 @@ impl InstantAbilityFired {
         matches!(
             ability,
             // Resolved through the `QueuedInstantAttack` drain in instant_landings.rs.
-            MortalStrike | Ambush | SinisterStrike | CrusaderStrike
+            MortalStrike | Ambush | SinisterStrike | CrusaderStrike | Hemorrhage
             // Instant AND aura-only: applied inline in class AI, entering
             // neither generic caster hook (A2). Power Word: Shield's marker
             // carries its Holy launch hands (`spawn_instant_cast_hands`).

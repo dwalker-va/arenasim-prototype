@@ -66,9 +66,11 @@ use crate::states::play_match::combat_core::MeleeAvoided;
 use crate::states::play_match::components::*;
 
 /// The signature strikes that still swing when dodged or parried: the stroke
-/// and the trail, never the landing. Crusader Strike only (its card says so);
+/// (and Crusader Strike's trail), never the landing. Crusader Strike and
+/// Hemorrhage (AS-367: its stroke, no blood) only, each as its card says;
 /// every other signature strike draws nothing for an avoided blow.
-pub const STROKES_WHEN_AVOIDED: &[AbilityType] = &[AbilityType::CrusaderStrike];
+pub const STROKES_WHEN_AVOIDED: &[AbilityType] =
+    &[AbilityType::CrusaderStrike, AbilityType::Hemorrhage];
 
 /// A dodged or parried signature strike, noted off the sim's `MeleeAvoided`
 /// for [`consume_avoided_strike_signals`]. Graphical-only: spawned and
