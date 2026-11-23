@@ -185,13 +185,9 @@ fn parses_in(code: &str) -> Vec<Hit> {
             let canonical = path.join("::");
             let last = path.last().unwrap().as_str();
             let written = format!("use {}", stmt[1].trim());
-            if last == "*" {
-                hits.push(Hit {
-                    construct: canonical,
-                    line: line_of(at),
-                    written,
-                });
-            } else if PARSE_ITEMS.contains(&last) {
+            // A glob brings in what cannot be told apart, and nothing
+            // imports a parse function but to call it.
+            if last == "*" || PARSE_ITEMS.contains(&last) {
                 hits.push(Hit {
                     construct: canonical,
                     line: line_of(at),
