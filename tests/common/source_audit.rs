@@ -922,3 +922,101 @@ pub fn add_systems_blocks(body: &str, file: &str) -> Vec<AddSystemsBlock> {
     }
     out
 }
+
+// ---------------------------------------------------------------------------
+// `use` trees
+// ---------------------------------------------------------------------------
+
+/// One `use` binding: the full path it names, and the name it binds (`*` for
+/// a glob).
+pub struct UseBinding {
+    pub path: Vec<String>,
+    pub name: String,
+}
+
+/// Split at `sep` outside braces.
+pub fn split_top_level(text: &str, sep: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let (mut depth, mut start) = (0usize, 0usize);
+    for (i, c) in text.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            c if c == sep && depth == 0 => {
+                parts.push(&text[start..i]);
+                start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(&text[start..]);
+    parts
+}
+
+/// The segments of a `::` path, whitespace dropped.
+pub fn path_segments(path: &str) -> Vec<String> {
+    path.split("::")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Expand one `use` tree (`a::{b, c::d as e, self}`) under `prefix`.
+pub fn expand_use(tree: &str, prefix: &[String], out: &mut Vec<UseBinding>) {
+    for item in split_top_level(tree, ',') {
+        let item = item.trim();
+        if item.is_empty() {
+            continue;
+        }
+        if let (Some(open), Some(close)) = (item.find('{'), item.rfind('}')) {
+            let mut path = prefix.to_vec();
+            path.extend(path_segments(&item[..open]));
+            expand_use(&item[open + 1..close], &path, out);
+            continue;
+        }
+        let (path_text, alias) = match item.split_once(" as ") {
+            Some((p, a)) => (p, Some(a.trim().to_string())),
+            None => (item, None),
+        };
+        let mut path = prefix.to_vec();
+        path.extend(path_segments(path_text));
+        if path.last().map(String::as_str) == Some("self") {
+            path.pop();
+        }
+        let Some(last) = path.last().cloned() else {
+            continue;
+        };
+        let name = alias.unwrap_or(last);
+        out.push(UseBinding { path, name });
+    }
+}
+
+/// One `use` statement of a file's (comment- and string-blanked) code.
+pub struct UseStatement {
+    /// The byte range of the statement, `pub` included.
+    pub span: std::ops::Range<usize>,
+    /// Whether it re-exports: `pub use`, `pub(crate) use` and the like.
+    pub public: bool,
+    /// Its tree, as written.
+    pub tree: String,
+    /// Every binding its tree makes, braces, `self` and renames expanded.
+    pub bindings: Vec<UseBinding>,
+}
+
+/// Every `use` statement in `code`, block-local ones included.
+pub fn use_statements(code: &str) -> Vec<UseStatement> {
+    let stmt = pattern!(USE_TREE_STMT, r"\b(pub\s*(?:\([^)]*\)\s*)?)?use\s+([^;]*);");
+    stmt.captures_iter(code)
+        .map(|c| {
+            let tree = c[2].trim().to_string();
+            let mut bindings = Vec::new();
+            expand_use(tree.trim_start_matches("::"), &[], &mut bindings);
+            UseStatement {
+                span: c.get(0).unwrap().range(),
+                public: c.get(1).is_some(),
+                tree,
+                bindings,
+            }
+        })
+        .collect()
+}

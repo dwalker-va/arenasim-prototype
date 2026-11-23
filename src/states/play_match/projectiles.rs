@@ -428,7 +428,7 @@ pub fn process_projectile_hits(
                         &mut caster,
                         caster_auras.as_deref(),
                         &caster_id,
-                        leech::HealNumberAt {
+                        crate::states::play_match::heal_numbers::HealNumberAt {
                             position: caster_transform.translation,
                             pattern: pattern.as_deref_mut(),
                         },
@@ -671,7 +671,7 @@ fn land_party_leech(
                     &mut ally,
                     ally_auras.as_deref(),
                     &id,
-                    leech::HealNumberAt {
+                    crate::states::play_match::heal_numbers::HealNumberAt {
                         position: transform.translation,
                         pattern: pattern.as_deref_mut(),
                     },
