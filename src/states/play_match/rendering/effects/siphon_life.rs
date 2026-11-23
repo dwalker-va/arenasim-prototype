@@ -65,13 +65,13 @@ use crate::states::play_match::components::*;
 //    keeps its glow.
 // 4. **Hidden on a sheep.** A polymorphed victim wears no DoT state (its
 //    clock runs on): the one sheep rule, `dot_state::DotStateOn`.
+// 5. **The streak is a soft band.** The bench strokes a solid line with round
+//    caps; here it is the shared `soft_band_texture` quad, which fades across
+//    its width and has square ends. At the match camera it is ~2 px wide.
 // 6. **Rides the rendered body.** The rig stands at the chest of the
 //    victim's drawn body (`VisualBody`: the walk and fear bobs, the swing
 //    step, the Cyclone lift), placed after every writer of it
 //    ([`place_siphon_life_glows`]).
-// 5. **The streak is a soft band.** The bench strokes a solid line with round
-//    caps; here it is the shared `soft_band_texture` quad, which fades across
-//    its width and has square ends. At the match camera it is ~2 px wide.
 //
 // Where the research doc's table and the bench differ, the bench was signed
 // off and wins: the rings' alpha (0.55 → 0.7 → 0.4, not 0.78 → 1 → 0.78), the

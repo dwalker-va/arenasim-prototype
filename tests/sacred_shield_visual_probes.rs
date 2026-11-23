@@ -1469,3 +1469,56 @@ fn everything_reads_at_the_match_camera() {
         assert!(r > 1.0);
     }
 }
+
+/// Sacred Shield's flares ride the bearer's DRAWN body with its card, not its
+/// sim root: as the bearer runs, its `VisualBody` bobbing on the gait and then
+/// lifted 1.5 yd as a Cyclone lifts one, every lit flare stays in the column
+/// over the drawn body's card.
+#[test]
+fn the_flares_ride_the_drawn_body() {
+    let r = PWS_CLIENT_TO_RIG;
+    let mut h = Harness::new();
+    let start = Vec3::new(1.0, 1.0, 1.0);
+    let rogue = h.unit(CharacterClass::Rogue, start);
+    let body = h.app.world().get::<Children>(rogue).unwrap()[0];
+    h.camera(Vec3::new(0.0, 30.0, 25.0), Vec3::ZERO);
+    h.give_absorb(rogue, 40.0);
+    h.run_to(rogue, ShieldPhase::Loop, 0.5);
+    let mut checked = 0;
+    for frame in 0..60u32 {
+        let t = frame as f32 * DT;
+        let root = start + Vec3::new(2.0 * (t * 2.5).sin(), 0.0, 1.5 * (t * 2.3).sin());
+        let lift = 0.1 * (t * 9.0).sin() + if frame >= 30 { 1.5 } else { 0.0 };
+        h.app
+            .world_mut()
+            .get_mut::<Transform>(rogue)
+            .unwrap()
+            .translation = root;
+        h.app
+            .world_mut()
+            .get_mut::<Transform>(body)
+            .unwrap()
+            .translation
+            .y = lift;
+        h.tick(1);
+        let drawn = root + Vec3::Y * lift;
+        let centre =
+            drawn - Vec3::Y * HALF_HEIGHT + Vec3::Y * (SS_CARD_QUAD[2] + SS_CARD_QUAD[3]) / 2.0 * r;
+        for d in h.drawn(rogue, ShieldKind::SacredShield) {
+            if !matches!(d.layer, ShieldLayer::Flare(_)) || d.material.base_color.alpha() <= 0.0 {
+                continue;
+            }
+            let off = d.g.translation - centre;
+            assert!(
+                off.x.abs() <= 0.7 * r + 1e-3
+                    && off.z.abs() <= 0.2 * r + 1e-3
+                    && off.y >= -0.8 * r - 1e-3
+                    && off.y <= (0.8 + 0.3) * r + 1e-3,
+                "frame {frame}: {:?} at {off} off the drawn card's centre",
+                d.layer
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 300, "only {checked} lit flares checked");
+}
