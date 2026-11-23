@@ -45,6 +45,7 @@ const VIA_DRAIN: &[AbilityType] = &[
     AbilityType::Ambush,
     AbilityType::SinisterStrike,
     AbilityType::CrusaderStrike,
+    AbilityType::Hemorrhage,
 ];
 
 /// Abilities that reach the marker through the interrupt system

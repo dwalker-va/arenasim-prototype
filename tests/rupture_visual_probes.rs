@@ -782,11 +782,9 @@ fn spray(stage: impl FnOnce(&mut Harness)) -> (usize, usize, Vec<Vec3>) {
     h.run_to(0.31);
     let before = h.count::<BleedDroplet>();
     h.run_to(0.36);
-    let mut q = h
-        .app
-        .world_mut()
-        .query_filtered::<&GlobalTransform, With<BleedDroplet>>();
-    let early: Vec<Vec3> = q.iter(h.app.world()).map(|g| g.translation()).collect();
+    // Where each droplet truly is: it is drawn held in front of the body.
+    let mut q = h.app.world_mut().query::<&BleedDroplet>();
+    let early: Vec<Vec3> = q.iter(h.app.world()).map(|d| d.truly).collect();
     // A droplet lives 0.5 s, so every one is alive on some 10 ms frame.
     let mut seen = std::collections::HashSet::new();
     for _ in 0..80 {
