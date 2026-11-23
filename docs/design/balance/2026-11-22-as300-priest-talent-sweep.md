@@ -51,10 +51,15 @@ alone.
 Nothing here is retuned: tuning is AS-441's batch.
 
 Measured at `main` 27d76940 plus this card's three reference builds. Those
-leave untalented play byte-identical; see *Byte-identity*. Merged onto `main`
-f2b4dc25 (AS-357), the binary reproduces 1,700 of 1,700 sampled rows of the
-committed Shadowform, Vampiric Embrace and Guardian Spirit arms exactly, so
-nothing here was re-measured.
+leave untalented play byte-identical; see *Byte-identity*. The binary was
+re-checked after each later merge of `main`, and each time it reproduced every
+sampled row of the committed CSVs exactly (winner, end and duration), so
+nothing here was re-measured:
+
+- at f2b4dc25 (AS-357), 1,700 rows of the Shadowform, Vampiric Embrace and
+  Guardian Spirit arms;
+- at eacf3d43 (AS-301's Rogue trees), 1,700 rows of the 0-point,
+  Discipline, Holy and Shadow arms.
 
 ## Method
 
