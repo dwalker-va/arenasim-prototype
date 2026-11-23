@@ -1033,6 +1033,13 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
                     "Rejuvenation ribbon swirl on landing (druid_heals.rs)"
                 }
                 HotVisual::SustainedPulse => "Lifebloom head pulse while it lives (druid_heals.rs)",
+                HotVisual::LandingRings => {
+                    assert_eq!(
+                        AuraLandingKind::for_aura(t, &c.name),
+                        Some(AuraLandingKind::BlessedRecoveryRings)
+                    );
+                    "Renew's amber rings at the chest on landing (blessed_recovery.rs)"
+                }
             }),
             AuraType::FearImmunity if a == BerserkerRage => {
                 Some("berserk mask (effects/berserker_rage.rs → berserk.rs)")
@@ -1084,6 +1091,16 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             {
                 Some("Mark of the Wild glyph on landing (druid_heals.rs)")
             }
+            // Inner Focus (AS-352): its landing flashes the arcane hands and
+            // the comets; the palms glow while the buff waits.
+            _ if AuraLandingKind::for_aura(t, &c.name) == Some(AuraLandingKind::InnerFocusFlash)
+                && AuraLandingKind::InnerFocusFlash.cast_ability() == Some(a) =>
+            {
+                Some(
+                    "arcane hand flash + comets converging on the chest, then the palm glow \
+                     until spent (inner_focus.rs)",
+                )
+            }
             _ if AuraLandingKind::for_aura(t, &c.name) == Some(AuraLandingKind::AmplifyFlash) => {
                 Some("empowered ground flash on cast (empowered_flash.rs)")
             }
@@ -1131,7 +1148,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
     (FrostArmor, "AS-134 (aura application)"),
-    (InnerFocus, "AS-352 (Inner Focus, the focus on the Priest)"),
     (MageArmorSpell, "AS-134 (aura application)"),
     (MoltenArmor, "AS-134 (aura application)"),
     (PowerWordFortitude, "AS-134 (aura application)"),
@@ -1968,10 +1984,7 @@ const TALENT_PROC_MEMBERS: &[TalentId] = &[
 /// Procs whose aura lands with no treatment of its own yet, each with the
 /// card that builds one. Blackout is not here: its stun draws the stun whirl
 /// every stun does (AS-335 asked whether it would).
-const TALENT_PROC_KNOWN_SILENT: &[(TalentId, &str)] = &[(
-    TalentId::BlessedRecovery,
-    "AS-352 (Blessed Recovery's palm glow and Renew's amber rings)",
-)];
+const TALENT_PROC_KNOWN_SILENT: &[(TalentId, &str)] = &[];
 
 /// Procs ruled to need no bespoke visual: the generic aura band draws each as
 /// it lands, and its buff-bar icon carries it while it lasts. (node, the card
