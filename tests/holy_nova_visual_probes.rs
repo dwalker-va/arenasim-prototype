@@ -1911,3 +1911,109 @@ fn a_landing_on_a_unit_already_gone_draws_nothing() {
     );
     assert_eq!(h.count::<InstantAbilityFired>(), 0);
 }
+
+/// The particles do not ride their unit, as the bench's emitters do not
+/// (`follow` unset): on a unit running 7 yd/s, each starburst particle flies
+/// from where the chest stood on its birth frame, and each trailing star from
+/// the floor under the Priest then — not from where the unit is now.
+#[test]
+fn particles_fly_from_where_they_were_born_not_with_their_unit() {
+    for rig in [Rig::Burst(false), Rig::Dome] {
+        let mut h = Harness::new();
+        let start = Vec3::new(-4.0, COMBATANT_Y, 0.0);
+        let unit = match rig {
+            Rig::Dome => h.priest(start, None),
+            _ => h.unit(2, 0, Warrior, start),
+        };
+        match rig {
+            Rig::Dome => h.nova(unit),
+            _ => h.burst(unit, StarburstScale::Low),
+        }
+        let dt = h.dt;
+        // Per particle: the unit's anchor on its first frame, its first
+        // sighting (position, page).
+        let mut first: BTreeMap<(usize, u32), (Vec3, Vec3, f32)> = BTreeMap::new();
+        let mut checked = 0;
+        for frame in 0..40 {
+            let root = start + Vec3::X * (7.0 * frame as f32 * dt);
+            h.world().get_mut::<Transform>(unit).unwrap().translation = root;
+            h.tick(1);
+            let anchor = match rig {
+                Rig::Dome => floor_under(root),
+                _ => chest(root, false),
+            };
+            let pieces: Vec<((usize, u32), f32, f32, Vec3)> = match rig {
+                Rig::Dome => {
+                    let Some(&(r, _, _, age)) = h.domes().first() else {
+                        break;
+                    };
+                    h.drawn::<DomePiece>(r)
+                        .into_iter()
+                        .filter(|d| d.visible)
+                        .filter_map(|d| match d.piece {
+                            DomePiece::Star { j, born, .. } => Some(((0, j), born, age, d.at)),
+                            _ => None,
+                        })
+                        .collect()
+                }
+                _ => {
+                    let Some(&(r, _, _, age)) = h.bursts().first() else {
+                        break;
+                    };
+                    h.drawn::<StarburstPiece>(r)
+                        .into_iter()
+                        .filter(|d| d.visible)
+                        .filter_map(|d| match d.piece {
+                            StarburstPiece::Particle { layer, j, born, .. } => {
+                                Some(((layer, j), born, age, d.at))
+                            }
+                            _ => None,
+                        })
+                        .collect()
+                }
+            };
+            for (key, born, age, at) in pieces {
+                let page = age - born;
+                let gravity = match (rig, key.0) {
+                    (Rig::Dome, _) | (_, 1) => 0.0,
+                    _ => 6.9,
+                };
+                let flown = at + Vec3::Y * (0.5 * gravity * page * page);
+                match first.get(&key) {
+                    None => {
+                        first.insert(key, (anchor, flown, page));
+                    }
+                    Some(&(born_anchor, f0, p0)) if page - p0 > 0.05 => {
+                        // A straight line out of a fixed point: back along
+                        // it to page 0 lands on the birth frame's anchor.
+                        let v = (flown - f0) / (page - p0);
+                        let origin = f0 - v * p0;
+                        let off = origin - born_anchor;
+                        match rig {
+                            // A star is born in a square round the floor it
+                            // left, and flies at its own speed alone: one
+                            // that rode the Priest would carry its 7 yd/s.
+                            Rig::Dome => {
+                                assert!(
+                                    off.x.abs() <= stars::AREA * NOVA_SPREAD / 2.0 + 1e-2
+                                        && off.z.abs() <= stars::AREA * NOVA_SPREAD / 2.0 + 1e-2
+                                        && (off.y - stars::LIFT).abs() < 0.33,
+                                    "star {key:?} born {off} off the floor it left"
+                                );
+                                assert!(
+                                    close(v.length(), stars::SPEED * NOVA_SPREAD, 1e-2),
+                                    "star {key:?} flies at {}",
+                                    v.length()
+                                );
+                            }
+                            _ => assert!(off.length() < 2e-3, "{key:?}: {off}"),
+                        }
+                        checked += 1;
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        assert!(checked > 100, "{rig:?}: {checked}");
+    }
+}
