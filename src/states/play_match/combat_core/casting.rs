@@ -1283,9 +1283,18 @@ pub fn process_casting(
             owed,
             &members,
             |e, land| match combatants.get_mut(e) {
-                Ok((_, _, mut c, _, auras)) => {
+                Ok((_, transform, mut c, _, auras)) => {
                     let id = combat_log_id_for(&c, pet_query.get(e).ok());
-                    land(&mut c, auras.as_deref(), &id)
+                    let mut pattern = fct_states.get_mut(e).ok();
+                    land(
+                        &mut c,
+                        auras.as_deref(),
+                        &id,
+                        leech::HealNumberAt {
+                            position: transform.translation,
+                            pattern: pattern.as_deref_mut(),
+                        },
+                    )
                 }
                 Err(_) => 0.0,
             },
@@ -1752,8 +1761,9 @@ pub fn process_channeling(
 
     // The channels' own leech heals (Drain Life's), each through `leech::land`
     // once every tick of the frame has landed, so a channeler its victim's
-    // tick killed this frame is healed for nothing. The heal that landed
-    // floats over its recipient; one that landed nothing draws nothing.
+    // tick killed this frame is healed for nothing. `leech::land` floats the
+    // heal that landed over its recipient; one that landed nothing draws
+    // nothing.
     for owed in &channel_leeches {
         let members: Vec<(Entity, u8, bool, bool)> = if owed.needs_party() {
             combatants
@@ -1763,7 +1773,6 @@ pub fn process_channeling(
         } else {
             Vec::new()
         };
-        let mut healed: Vec<(Entity, Vec3, f32)> = Vec::new();
         let credited = leech::land_owed(
             &mut commands,
             &mut combat_log,
@@ -1773,37 +1782,22 @@ pub fn process_channeling(
             |e, land| match combatants.get_mut(e) {
                 Ok((_, transform, mut c, _, auras)) => {
                     let id = combat_log_id_for(&c, pet_query.get(e).ok());
-                    let effective = land(&mut c, auras.as_deref(), &id);
-                    healed.push((e, transform.translation, effective));
-                    effective
+                    let mut pattern = fct_states.get_mut(e).ok();
+                    land(
+                        &mut c,
+                        auras.as_deref(),
+                        &id,
+                        leech::HealNumberAt {
+                            position: transform.translation,
+                            pattern: pattern.as_deref_mut(),
+                        },
+                    )
                 }
                 Err(_) => 0.0,
             },
         );
         if let Ok((_, _, mut caster, _, _)) = combatants.get_mut(owed.caster) {
             credit_healing_done(&mut caster, credited);
-        }
-        for (recipient, position, effective) in healed {
-            if effective <= 0.0 {
-                continue;
-            }
-            let text_position = position + Vec3::new(0.0, FCT_HEIGHT, 0.0);
-            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(recipient) {
-                get_next_fct_offset(&mut fct_state)
-            } else {
-                (0.0, 0.0)
-            };
-            commands.spawn((
-                FloatingCombatText {
-                    world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
-                    text: format!("+{:.0}", effective),
-                    color: crate::ui::theme::fct::HEAL,
-                    lifetime: 1.5,
-                    vertical_offset: offset_y,
-                    is_crit: false,
-                },
-                PlayMatchEntity,
-            ));
         }
     }
 
@@ -1829,9 +1823,18 @@ pub fn process_channeling(
             owed,
             &members,
             |e, land| match combatants.get_mut(e) {
-                Ok((_, _, mut c, _, auras)) => {
+                Ok((_, transform, mut c, _, auras)) => {
                     let id = combat_log_id_for(&c, pet_query.get(e).ok());
-                    land(&mut c, auras.as_deref(), &id)
+                    let mut pattern = fct_states.get_mut(e).ok();
+                    land(
+                        &mut c,
+                        auras.as_deref(),
+                        &id,
+                        leech::HealNumberAt {
+                            position: transform.translation,
+                            pattern: pattern.as_deref_mut(),
+                        },
+                    )
                 }
                 Err(_) => 0.0,
             },
