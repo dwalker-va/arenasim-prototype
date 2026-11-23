@@ -1311,7 +1311,7 @@ pub fn process_dot_ticks(
     mut combat_log: ResMut<CombatLog>,
     dampening: Res<ArenaDampening>,
     mut combatants_with_auras: Query<(Entity, &mut Combatant, &Transform, &mut ActiveAuras)>,
-    mut combatants_without_auras: Query<(Entity, &mut Combatant), Without<ActiveAuras>>,
+    mut combatants_without_auras: Query<(Entity, &mut Combatant, &Transform), Without<ActiveAuras>>,
     pet_query: Query<&Pet>,
     mut fct_states: Query<&mut FloatingTextState>,
     celebration: Option<Res<VictoryCelebration>>,
@@ -1335,7 +1335,7 @@ pub fn process_dot_ticks(
         .collect();
 
     // Add combatants without auras to the map
-    for (entity, combatant) in combatants_without_auras.iter() {
+    for (entity, combatant, _) in combatants_without_auras.iter() {
         combatant_info.insert(entity, (combatant.team, combatant.slot, combatant.class));
     }
 
@@ -1608,7 +1608,7 @@ pub fn process_dot_ticks(
     for (caster_entity, landed, absorbed) in caster_damage_updates {
         if let Ok((_, mut caster, _, _)) = combatants_with_auras.get_mut(caster_entity) {
             super::combat_core::credit_damage_dealt(&mut caster, landed, absorbed);
-        } else if let Ok((_, mut caster)) = combatants_without_auras.get_mut(caster_entity) {
+        } else if let Ok((_, mut caster, _)) = combatants_without_auras.get_mut(caster_entity) {
             super::combat_core::credit_damage_dealt(&mut caster, landed, absorbed);
         }
     }
@@ -1619,7 +1619,11 @@ pub fn process_dot_ticks(
         let caster = combatants_with_auras
             .get(caster_entity)
             .map(|(_, c, _, _)| c)
-            .or_else(|_| combatants_without_auras.get(caster_entity).map(|(_, c)| c));
+            .or_else(|_| {
+                combatants_without_auras
+                    .get(caster_entity)
+                    .map(|(_, c, _)| c)
+            });
         let Ok(caster) = caster else { continue };
         if !caster
             .talent_procs
@@ -1656,7 +1660,7 @@ pub fn process_dot_ticks(
                 .chain(
                     combatants_without_auras
                         .iter()
-                        .map(|(e, c)| (e, c.team, pet_query.get(e).is_ok(), c.is_alive())),
+                        .map(|(e, c, _)| (e, c.team, pet_query.get(e).is_ok(), c.is_alive())),
                 )
                 .collect()
         } else {
@@ -1669,12 +1673,22 @@ pub fn process_dot_ticks(
             owed,
             &members,
             |e, land| {
-                if let Ok((_, mut c, _, auras)) = combatants_with_auras.get_mut(e) {
+                let mut pattern = fct_states.get_mut(e).ok();
+                let pattern = pattern.as_deref_mut();
+                if let Ok((_, mut c, transform, auras)) = combatants_with_auras.get_mut(e) {
                     let id = combat_log_id_for(&c, pet_query.get(e).ok());
-                    land(&mut c, Some(&auras), &id)
-                } else if let Ok((_, mut c)) = combatants_without_auras.get_mut(e) {
+                    let number_at = super::combat_core::leech::HealNumberAt {
+                        position: transform.translation,
+                        pattern,
+                    };
+                    land(&mut c, Some(&auras), &id, number_at)
+                } else if let Ok((_, mut c, transform)) = combatants_without_auras.get_mut(e) {
                     let id = combat_log_id_for(&c, pet_query.get(e).ok());
-                    land(&mut c, None, &id)
+                    let number_at = super::combat_core::leech::HealNumberAt {
+                        position: transform.translation,
+                        pattern,
+                    };
+                    land(&mut c, None, &id, number_at)
                 } else {
                     0.0
                 }
@@ -1683,7 +1697,7 @@ pub fn process_dot_ticks(
         if credited > 0.0 {
             if let Ok((_, mut caster, _, _)) = combatants_with_auras.get_mut(owed.caster) {
                 credit_healing_done(&mut caster, credited);
-            } else if let Ok((_, mut caster)) = combatants_without_auras.get_mut(owed.caster) {
+            } else if let Ok((_, mut caster, _)) = combatants_without_auras.get_mut(owed.caster) {
                 credit_healing_done(&mut caster, credited);
             }
         }

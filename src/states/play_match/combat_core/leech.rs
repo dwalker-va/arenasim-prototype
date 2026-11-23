@@ -14,7 +14,8 @@
 //!   of the Priest's Shadow damage to the target heals the Priest's party.
 //!
 //! Every leech heal lands through `apply_healing` ([`land`]), so healing
-//! reduction, a Cyclone and arena dampening cut it like any other heal. Its
+//! reduction, a Cyclone and arena dampening cut it like any other heal, and
+//! floats its green number over its recipient there. Its
 //! amount is the damage that reached the victim's health — the first value
 //! `apply_damage_with_absorb` returns, after the damage pipeline's dealt and
 //! taken modifiers, a transfer's share and the absorbs — as TBC's leeches heal
@@ -32,8 +33,11 @@ use serde::{Deserialize, Serialize};
 
 use super::super::abilities::SpellSchool;
 use super::super::components::{
-    ActiveAuras, ArenaDampening, Combatant, HealImpact, PlayMatchEntity,
+    ActiveAuras, ArenaDampening, Combatant, FloatingCombatText, FloatingTextState, HealImpact,
+    PlayMatchEntity,
 };
+use super::super::utils::get_next_fct_offset;
+use super::super::FCT_HEIGHT;
 use super::healing::apply_healing;
 use crate::combat::log::{CombatLog, CombatantId};
 
@@ -153,11 +157,26 @@ pub fn recipients(
     }
 }
 
-/// Land one leech heal on `recipient`, through `apply_healing`, and log it.
-/// Returns the effective healing, for the caster's `healing_done`.
+/// Where a leech heal's number floats: its recipient's position, and the
+/// recipient's floating-text pattern (`None` for a unit without one, whose
+/// number floats unoffset).
+pub struct HealNumberAt<'a> {
+    pub position: Vec3,
+    pub pattern: Option<&'a mut FloatingTextState>,
+}
+
+/// Land one leech heal on `recipient`, through `apply_healing`, log it, and
+/// float its number. Returns the effective healing, for the caster's
+/// `healing_done`.
 ///
 /// A heal to the caster logs `"<caster>'s <source> heals for N"` (Death Coil's
 /// line since it shipped); a heal to anyone else names them.
+///
+/// The heal's green number floats over its recipient exactly when its line is
+/// logged: the effective amount, so dampening and healing reduction show in
+/// it, and nothing for a heal that landed nothing (a full recipient's). A
+/// leech heal never crits. Like every floating number it is spawned in both
+/// modes and drawn only in graphical mode.
 ///
 /// A leech the client draws a heal landing for (Vampiric Embrace's party
 /// heal, [`HealImpact::kind_for_leech`]) spawns its [`HealImpact`] marker on
@@ -176,6 +195,7 @@ pub fn land(
     recipient: &mut Combatant,
     recipient_auras: Option<&ActiveAuras>,
     recipient_id: &CombatantId,
+    number_at: HealNumberAt,
 ) -> f32 {
     if !recipient.is_alive() {
         return 0.0;
@@ -217,6 +237,19 @@ pub fn land(
             false,
             message,
         );
+        let (offset_x, offset_y) = number_at.pattern.map_or((0.0, 0.0), get_next_fct_offset);
+        commands.spawn((
+            FloatingCombatText {
+                world_position: number_at.position
+                    + Vec3::new(offset_x, FCT_HEIGHT + offset_y, 0.0),
+                text: format!("+{:.0}", effective),
+                color: crate::ui::theme::fct::HEAL,
+                lifetime: 1.5,
+                vertical_offset: offset_y,
+                is_crit: false,
+            },
+            PlayMatchEntity,
+        ));
     }
     effective
 }
@@ -246,8 +279,9 @@ impl OwedLeech {
 ///
 /// A site hands each recipient over through `visit`: called with the
 /// recipient's entity and a lander, it calls the lander with that unit's
-/// combatant, auras and combat-log id, and returns what it returned (0 for a
-/// unit it cannot find). `members` lists every combatant as `(entity, team,
+/// combatant, auras, combat-log id and where its number floats
+/// ([`HealNumberAt`]), and returns what it returned (0 for a unit it cannot
+/// find). `members` lists every combatant as `(entity, team,
 /// is_pet, alive)` when [`OwedLeech::needs_party`], and may be empty when not.
 pub fn land_owed(
     commands: &mut Commands,
@@ -257,7 +291,7 @@ pub fn land_owed(
     members: &[(Entity, u8, bool, bool)],
     mut visit: impl FnMut(
         Entity,
-        &mut dyn FnMut(&mut Combatant, Option<&ActiveAuras>, &CombatantId) -> f32,
+        &mut dyn FnMut(&mut Combatant, Option<&ActiveAuras>, &CombatantId, HealNumberAt) -> f32,
     ) -> f32,
 ) -> f32 {
     let mut credited = 0.0;
@@ -268,7 +302,7 @@ pub fn land_owed(
             owed.caster_team,
             members.iter().copied(),
         ) {
-            credited += visit(recipient, &mut |combatant, auras, id| {
+            credited += visit(recipient, &mut |combatant, auras, id, number_at| {
                 land(
                     commands,
                     combat_log,
@@ -279,6 +313,7 @@ pub fn land_owed(
                     combatant,
                     auras,
                     id,
+                    number_at,
                 )
             });
         }
