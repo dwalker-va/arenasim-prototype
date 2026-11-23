@@ -96,6 +96,7 @@ SLOT_FIELD_DEFAULTS = {
     "warlock_demons": "Felhunter",
     "warlock_curse_prefs": None,
     "rogue_offhand_poisons": None,
+    "paladin_auras": "Devotion",
 }
 
 

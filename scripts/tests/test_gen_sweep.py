@@ -296,6 +296,24 @@ class SlotFieldTests(GenTestCase):
         self.assertEqual(cfg["team1_warlock_curse_prefs"], [None, ["Exhaustion", "Exhaustion"]])
         self.assertNotIn("team2_builds", cfg)
 
+    def test_a_paladin_aura_reaches_every_paladin_and_pads_with_devotion(self):
+        """`--for-class Paladin paladin_auras` (the Retribution Aura arm,
+        AS-302): every Paladin gets the aura, a slot before it the default
+        `Devotion`, and a team with no Paladin no key."""
+        spec = {"reference": "Protection", "remove": {"SacredShield": 1},
+                "add": {"RetributionAura": 1}}
+        run = self.assertOk(self.gen(
+            "--t1", "Warrior+Paladin", "--t2-size", "2", "--n", "1",
+            "--build", "Paladin=" + json.dumps(spec),
+            "--for-class", "Paladin", "paladin_auras", '"Retribution"'))
+        cfgs = self.configs(run)
+        cfg = [c for c in cfgs if c["team2"] == ["Warrior", "Mage"]][0]
+        self.assertEqual(cfg["team1_builds"], [{}, spec])
+        self.assertEqual(cfg["team1_paladin_auras"], ["Devotion", "Retribution"])
+        self.assertNotIn("team2_paladin_auras", cfg)
+        mirror = [c for c in cfgs if c["team2"] == ["Warrior", "Paladin"]][0]
+        self.assertEqual(mirror["team2_paladin_auras"], ["Devotion", "Retribution"])
+
     def test_bad_slot_flags_are_refused(self):
         base = ["--t1", "Warlock", "--t2-size", "1", "--n", "1"]
         for argv, needle in [

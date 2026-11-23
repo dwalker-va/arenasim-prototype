@@ -1290,5 +1290,45 @@
                 },
             ),
         ],
+        // The Paladin's three (AS-302). None takes Sacred Duty, so its
+        // +3% maximum health a rank, the sweep's stat rank, goes on any stem.
+        Paladin: [
+            // Holy Shock on a shorter cooldown priming a crit Flash of Light
+            // and a faster Holy Light, Divine Favor for the emergency, and
+            // Aura Mastery against the interrupts; Hammer of Justice more
+            // often.
+            (
+                name: "Holy",
+                tree: Holy,
+                build: {
+                    ImprovedHolyShock: 2, InfusionOfLight: 1, DivineFavor: 1, LightsGrace: 1,
+                    AuraMastery: 1,
+                    ImprovedHammerOfJustice: 2,
+                },
+            ),
+            // Damage taken cut, moved and absorbed: Divine Protection,
+            // Blessing of Sacrifice and Sacred Shield, over more armor and
+            // Hammer of Justice; Holy Shock more often.
+            (
+                name: "Protection",
+                tree: Protection,
+                build: {
+                    ImprovedHolyShock: 2,
+                    ImprovedHammerOfJustice: 2, DivineProtection: 1, Toughness: 1,
+                    BlessingOfSacrifice: 1, SacredShield: 1,
+                },
+            ),
+            // Crits that hit harder (Conviction into Vengeance), instant Flash
+            // of Lights off its swings, and Crusader Strike; Hammer of Justice
+            // more often.
+            (
+                name: "Retribution",
+                tree: Retribution,
+                build: {
+                    ImprovedHammerOfJustice: 2,
+                    Conviction: 2, Vengeance: 2, TheArtOfWar: 1, CrusaderStrike: 1,
+                },
+            ),
+        ],
     },
 )
