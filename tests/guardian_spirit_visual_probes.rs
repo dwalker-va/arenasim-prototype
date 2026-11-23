@@ -882,6 +882,25 @@ fn a_spirit_save_lands_the_heal_and_the_saved_cue() {
     assert_eq!(flashes, vec![holder]);
 }
 
+/// A save whose heal landed nothing — dampening took it, or it rounds to 0 —
+/// floats "Saved" at its anchor and no heal number (`heal_numbers`'s rule:
+/// a heal that rounds to 0 floats nothing).
+#[test]
+fn a_save_whose_heal_lands_nothing_floats_saved_and_no_number() {
+    for healed in [0.0, 0.3] {
+        let mut h = Harness::new();
+        let holder = h.spawn_unit(Vec3::new(3.0, 1.0, 2.0));
+        h.save(holder, "Guardian Spirit", Some(healed));
+        h.tick(1);
+        let texts = h.texts();
+        let words: Vec<&str> = texts.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(words, vec!["Saved"], "a save that healed {healed}");
+        let anchor = Vec3::new(3.0, 1.0 + FCT_HEIGHT, 2.0);
+        assert!(texts[0].world_position.distance(anchor) < 1e-4);
+        assert_eq!(texts[0].color, theme::fct::INVULNERABLE);
+    }
+}
+
 /// A save with no heal (the Rogue's Cheat Death) lands the same "Saved" cue,
 /// and no heal: no number, no heal landing.
 #[test]

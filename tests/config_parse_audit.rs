@@ -41,7 +41,10 @@
 
 mod common;
 
-use common::source_audit::{blank_comments_and_strings, blank_test_modules, load_sources};
+use common::source_audit::{
+    blank_comments_and_strings, blank_test_modules, expand_use, load_sources, path_segments,
+    UseBinding,
+};
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -79,69 +82,6 @@ const PARSE_ITEMS: &[&str] = &[
     "Options",
 ];
 
-/// One `use` binding: the full path it names, and the name it binds (`*` for
-/// a glob).
-struct Binding {
-    path: Vec<String>,
-    name: String,
-}
-
-/// Split at `sep` outside braces.
-fn split_top_level(text: &str, sep: char) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let (mut depth, mut start) = (0usize, 0usize);
-    for (i, c) in text.char_indices() {
-        match c {
-            '{' => depth += 1,
-            '}' => depth = depth.saturating_sub(1),
-            c if c == sep && depth == 0 => {
-                parts.push(&text[start..i]);
-                start = i + c.len_utf8();
-            }
-            _ => {}
-        }
-    }
-    parts.push(&text[start..]);
-    parts
-}
-
-fn path_segments(path: &str) -> Vec<String> {
-    path.split("::")
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
-/// Expand one `use` tree (`a::{b, c::d as e, self}`) under `prefix`.
-fn expand_use(tree: &str, prefix: &[String], out: &mut Vec<Binding>) {
-    for item in split_top_level(tree, ',') {
-        let item = item.trim();
-        if item.is_empty() {
-            continue;
-        }
-        if let (Some(open), Some(close)) = (item.find('{'), item.rfind('}')) {
-            let mut path = prefix.to_vec();
-            path.extend(path_segments(&item[..open]));
-            expand_use(&item[open + 1..close], &path, out);
-            continue;
-        }
-        let (path_text, alias) = match item.split_once(" as ") {
-            Some((p, a)) => (p, Some(a.trim().to_string())),
-            None => (item, None),
-        };
-        let mut path = prefix.to_vec();
-        path.extend(path_segments(path_text));
-        if path.last().map(String::as_str) == Some("self") {
-            path.pop();
-        }
-        let Some(last) = path.last().cloned() else {
-            continue;
-        };
-        let name = alias.unwrap_or(last);
-        out.push(Binding { path, name });
-    }
-}
-
 /// How each name a file binds resolves into the two format crates.
 #[derive(Default)]
 struct Names {
@@ -178,7 +118,7 @@ fn parses_in(code: &str) -> Vec<Hit> {
         let at = stmt.get(0).unwrap().start();
         let mut bindings = Vec::new();
         expand_use(stmt[1].trim_start_matches("::"), &[], &mut bindings);
-        for Binding { path, name } in bindings {
+        for UseBinding { path, name } in bindings {
             if !CRATES.contains(&path[0].as_str()) {
                 continue;
             }

@@ -22,8 +22,9 @@ use bevy::prelude::*;
 use crate::combat::log::CombatLog;
 use crate::states::play_match::combat_core::{apply_healing, credit_healing_done};
 use crate::states::play_match::components::*;
+use crate::states::play_match::heal_numbers;
 use crate::states::play_match::match_config::CharacterClass;
-use crate::states::play_match::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
+use crate::states::play_match::utils::{combat_log_id_for, combatant_id};
 
 /// A bloom waiting to land: the heal an aura owes its bearer for ending.
 #[derive(Component)]
@@ -110,23 +111,17 @@ pub fn process_blooms(
         if self_bloom {
             credit_healing_done(&mut target, actual);
         }
-        let text_position = target_position + Vec3::new(0.0, super::super::FCT_HEIGHT, 0.0);
-        let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target) {
-            get_next_fct_offset(&mut fct_state)
-        } else {
-            (0.0, 0.0)
-        };
-        commands.spawn((
-            FloatingCombatText {
-                world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
-                text: format!("+{:.0}", actual),
-                color: crate::ui::theme::fct::HEAL,
-                lifetime: 1.5,
-                vertical_offset: offset_y,
-                is_crit: false, // a bloom never crits
+        // The bloom's green number (a bloom never crits).
+        let mut pattern = fct_states.get_mut(pending.target).ok();
+        heal_numbers::spawn_heal_number(
+            &mut commands,
+            heal_numbers::HealNumberAt {
+                position: target_position,
+                pattern: pattern.as_deref_mut(),
             },
-            PlayMatchEntity,
-        ));
+            actual,
+            false,
+        );
 
         // Healing credit goes to the caster, as for a tick.
         let caster_id = match caster {

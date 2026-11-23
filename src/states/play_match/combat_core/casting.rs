@@ -6,6 +6,7 @@ use super::super::ability_book::AbilityBook;
 use super::super::components::*;
 use super::super::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
 use super::super::effects::BloomPending;
+use super::super::heal_numbers;
 use super::super::map_config::ActiveMapGeometry;
 use super::super::map_geometry::has_line_of_sight;
 use super::super::match_config;
@@ -1031,25 +1032,17 @@ pub fn process_casting(
                 caster_healing_updates.push((caster_entity, actual_healing));
             }
 
-            // Spawn floating combat text (green for healing)
-            // Get deterministic offset based on pattern state
-            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity)
-            {
-                get_next_fct_offset(&mut fct_state)
-            } else {
-                (0.0, 0.0)
-            };
-            commands.spawn((
-                FloatingCombatText {
-                    world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
-                    text: format!("+{:.0}", actual_healing),
-                    color: crate::ui::theme::fct::HEAL,
-                    lifetime: 1.5,
-                    vertical_offset: offset_y,
-                    is_crit: is_crit_heal,
+            // The heal's green number.
+            let mut pattern = fct_states.get_mut(target_entity).ok();
+            heal_numbers::spawn_heal_number(
+                &mut commands,
+                heal_numbers::HealNumberAt {
+                    position: target_pos,
+                    pattern: pattern.as_deref_mut(),
                 },
-                PlayMatchEntity,
-            ));
+                actual_healing,
+                is_crit_heal,
+            );
 
             // Log the healing with structured data
             let verb = if is_crit_heal {
@@ -1290,7 +1283,7 @@ pub fn process_casting(
                         &mut c,
                         auras.as_deref(),
                         &id,
-                        leech::HealNumberAt {
+                        crate::states::play_match::heal_numbers::HealNumberAt {
                             position: transform.translation,
                             pattern: pattern.as_deref_mut(),
                         },
@@ -1787,7 +1780,7 @@ pub fn process_channeling(
                         &mut c,
                         auras.as_deref(),
                         &id,
-                        leech::HealNumberAt {
+                        crate::states::play_match::heal_numbers::HealNumberAt {
                             position: transform.translation,
                             pattern: pattern.as_deref_mut(),
                         },
@@ -1830,7 +1823,7 @@ pub fn process_channeling(
                         &mut c,
                         auras.as_deref(),
                         &id,
-                        leech::HealNumberAt {
+                        crate::states::play_match::heal_numbers::HealNumberAt {
                             position: transform.translation,
                             pattern: pattern.as_deref_mut(),
                         },

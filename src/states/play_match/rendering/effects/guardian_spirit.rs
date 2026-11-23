@@ -823,17 +823,14 @@ pub fn consume_killing_blow_signals(
             .map_or((0.0, 0.0), |mut state| get_next_fct_offset(&mut state));
         let anchor = holder.translation + Vec3::new(dx, FCT_HEIGHT + dy, 0.0);
         if let Some(healed) = saved.heal {
-            commands.spawn((
-                FloatingCombatText {
-                    world_position: anchor,
-                    text: format!("+{healed:.0}"),
-                    color: crate::ui::theme::fct::HEAL,
-                    lifetime: SAVED_TEXT_SECS,
-                    vertical_offset: dy,
-                    is_crit: false,
-                },
-                PlayMatchEntity,
-            ));
+            crate::states::play_match::heal_numbers::spawn_heal_number_in_slot(
+                &mut commands,
+                anchor,
+                dy,
+                healed,
+                false,
+                SAVED_TEXT_SECS,
+            );
             commands.spawn((
                 HealImpact {
                     target: saved.holder,

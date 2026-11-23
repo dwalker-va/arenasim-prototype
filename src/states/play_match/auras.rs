@@ -1677,14 +1677,14 @@ pub fn process_dot_ticks(
                 let pattern = pattern.as_deref_mut();
                 if let Ok((_, mut c, transform, auras)) = combatants_with_auras.get_mut(e) {
                     let id = combat_log_id_for(&c, pet_query.get(e).ok());
-                    let number_at = super::combat_core::leech::HealNumberAt {
+                    let number_at = super::heal_numbers::HealNumberAt {
                         position: transform.translation,
                         pattern,
                     };
                     land(&mut c, Some(&auras), &id, number_at)
                 } else if let Ok((_, mut c, transform)) = combatants_without_auras.get_mut(e) {
                     let id = combat_log_id_for(&c, pet_query.get(e).ok());
-                    let number_at = super::combat_core::leech::HealNumberAt {
+                    let number_at = super::heal_numbers::HealNumberAt {
                         position: transform.translation,
                         pattern,
                     };
@@ -1870,23 +1870,17 @@ pub fn process_hot_ticks(
 
         caster_healing_updates.push((caster_entity, actual_healing));
 
-        // Spawn floating combat text (green for healing)
-        let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
-            get_next_fct_offset(&mut fct_state)
-        } else {
-            (0.0, 0.0)
-        };
-        commands.spawn((
-            FloatingCombatText {
-                world_position: target_pos + Vec3::new(offset_x, super::FCT_HEIGHT + offset_y, 0.0),
-                text: format!("+{:.0}", actual_healing),
-                color: crate::ui::theme::fct::HEAL,
-                lifetime: 1.5,
-                vertical_offset: offset_y,
-                is_crit: false, // HoT ticks never crit
+        // The tick's green number (HoT ticks never crit).
+        let mut pattern = fct_states.get_mut(target_entity).ok();
+        super::heal_numbers::spawn_heal_number(
+            &mut commands,
+            super::heal_numbers::HealNumberAt {
+                position: target_pos,
+                pattern: pattern.as_deref_mut(),
             },
-            PlayMatchEntity,
-        ));
+            actual_healing,
+            false,
+        );
 
         // The tick's landing visual — same both-modes spawn idiom as the
         // cast-resolution sites (`process_casting`, `process_holy_shock_heals`):

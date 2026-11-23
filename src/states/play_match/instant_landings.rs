@@ -545,23 +545,16 @@ pub fn land_instant_effects(
             heal,
         );
         let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
-        let text_position = target_transform.translation + Vec3::new(0.0, super::FCT_HEIGHT, 0.0);
-        let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(target_entity) {
-            get_next_fct_offset(&mut fct_state)
-        } else {
-            (0.0, 0.0)
-        };
-        commands.spawn((
-            FloatingCombatText {
-                world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
-                text: format!("+{:.0}", healed),
-                color: crate::ui::theme::fct::HEAL,
-                lifetime: 1.5,
-                vertical_offset: offset_y,
-                is_crit,
+        let mut pattern = fct_states.get_mut(target_entity).ok();
+        super::heal_numbers::spawn_heal_number(
+            &mut commands,
+            super::heal_numbers::HealNumberAt {
+                position: target_transform.translation,
+                pattern: pattern.as_deref_mut(),
             },
-            PlayMatchEntity,
-        ));
+            healed,
+            is_crit,
+        );
         let caster_id = combatant_id(caster_team, caster_slot, caster_class);
         let verb = if is_crit { "CRITICALLY heals" } else { "heals" };
         let message = format!(
