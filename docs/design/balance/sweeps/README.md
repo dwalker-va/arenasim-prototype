@@ -561,6 +561,28 @@ are configs on one binary, so there is no patch:
   and `block2/` (the 4 replicated arms, seeds 4-7).
 - `-arms.csv.tar.gz` — their batch CSVs, same layout.
 
+## `2026-11-22-as301-arms.*`
+
+Behind `2026-11-22-as301-rogue-talent-sweep.md` (card AS-301): the Rogue
+reference builds, node arms and Shadow Dance. 31 arm runs of 5,088 2v2 matches
+each (every Rogue cell plus 8 control cells, three maps, 4 seeds a cell a map,
+`TeamPlan`), every Rogue on either side playing the arm's build. The arms are
+configs on one binary, so there is no patch:
+
+- `-arms.py` — `gen` writes the arms (through `scripts/gen_sweep.py --build`
+  / `--for-class`); `table` and `replicate` print the findings doc's tables
+  from the CSVs; `sample` replays Rogue matches with full logs for the
+  non-vacuity counts; `dance` replays every Rogue match of the Subtlety
+  reference for the Shadow Dance figures, classifies each Dance by the gate
+  branch that admitted it, and replays the Vitality twin of every match with
+  a Dance for the counterfactual; `gates` traces the sample slice for why the
+  Dance did not go. `table` and `replicate` print each node row's margin z
+  against the Bonferroni threshold. `scripts/tests/test_as301_arms.py` pins
+  those printed claims.
+- `-arms.jsonl.tar.gz` — the inputs as run: `block1/` (19 arms, seeds 0-3)
+  and `block2/` (the 12 replicated arms, seeds 4-7).
+- `-arms.csv.tar.gz` — their batch CSVs, same layout.
+
 ## `2026-11-22-as300-arms.*`
 
 Behind `2026-11-22-as300-priest-talent-sweep.md` (card AS-300): the Priest
@@ -572,8 +594,12 @@ configs on one binary, so there is no patch:
 
 - `-arms.py` — `gen` writes the arms (through `scripts/gen_sweep.py --build`
   / `--for-class`), `table` and `replicate` print the findings doc's tables
-  from the CSVs, `sample` replays a fixed slice of each arm's Priest matches
-  with full logs for the non-vacuity counts.
+  from the CSVs, each node row with its per-match margin z against the
+  Bonferroni threshold; `sample` replays a fixed slice of each arm's Priest
+  matches with full logs for the non-vacuity counts; `mechanism` replays the
+  Mind Flay arms for the channel, damage, healing and damage-taken counts.
+  `scripts/tests/test_as300_arms.py` pins the margin z and how `mechanism`
+  reads a log.
 - `-arms.jsonl.tar.gz` — the inputs as run: `block1/` (seeds 0-3) and
   `block2/` (seeds 4-7), 29 arms each.
 - `-arms.csv.tar.gz` — their batch CSVs, same layout.

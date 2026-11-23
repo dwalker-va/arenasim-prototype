@@ -126,6 +126,15 @@ fn paired_sweep_fixture_suite_passes() {
     run_suite("scripts/tests/test_paired_sweep.py");
 }
 
+/// The claims the AS-301 Rogue findings doc quotes from its arms script
+/// (`docs/design/balance/sweeps/2026-11-22-as301-arms.py`): a node row's
+/// margin z and its Bonferroni mark, which gate branch admitted a Shadow
+/// Dance, what converts one, and the Vitality twin's counterfactual.
+#[test]
+fn as301_arms_fixture_suite_passes() {
+    run_suite("scripts/tests/test_as301_arms.py");
+}
+
 /// What the TBC `SpellCategories` generator refuses to write: a stale
 /// EXPLICIT or EXCLUDED entry, or an EXPLICIT spell its build lacks. Its
 /// output is the fixture `tests/prevention_tbc_audit.rs` holds the book to.

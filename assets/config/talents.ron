@@ -1290,6 +1290,48 @@
                 },
             ),
         ],
+        // Each Rogue reference holds Vitality's prerequisite (two Combat
+        // tier-1 points) and not Vitality itself, so a node arm on any of its
+        // stems can be measured against Vitality, the Rogue's one computed
+        // StatPercent node, in the node's place (AS-301).
+        Rogue: [
+            // Poisons that land more often and bite harder, a second poison on
+            // the off hand, and the bleed with its capstone; Dual Wield
+            // Specialization makes the off-hand swings that carry the second
+            // poison hit harder.
+            (
+                name: "Assassination",
+                tree: Assassination,
+                build: {
+                    ImprovedPoisons: 2, VilePoisons: 1, MasterPoisoner: 1, Rupture: 1,
+                    BloodSpatter: 1,
+                    DualWieldSpecialization: 2,
+                },
+            ),
+            // The anti-melee duellist: dodge, parry and faster swings, and
+            // Expose Armor to open an armored target; Improved Poisons lands
+            // Crippling Poison more often on the faster swings.
+            (
+                name: "Combat",
+                tree: Combat,
+                build: {
+                    ImprovedPoisons: 2,
+                    LightningReflexes: 2, Deflection: 2, SwiftBlades: 1, ExposeArmor: 1,
+                },
+            ),
+            // The opener out of stealth: Master of Subtlety on the opener,
+            // Initiative's discount feeding the energy the stun chain needs,
+            // and Shadow Dance; Lightning Reflexes keeps it alive between
+            // Dances.
+            (
+                name: "Subtlety",
+                tree: Subtlety,
+                build: {
+                    LightningReflexes: 2,
+                    MasterOfSubtlety: 2, Initiative: 2, Hemorrhage: 1, ShadowDance: 1,
+                },
+            ),
+        ],
         Priest: [
             // Resists crowd control for less time, reflects through its
             // shields and hands an ally Pain Suppression (design §5.2), with

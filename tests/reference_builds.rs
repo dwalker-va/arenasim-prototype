@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use arenasim::headless::config::HeadlessMatchConfig;
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
-use arenasim::states::play_match::reference_builds::BuildSpec;
+use arenasim::states::play_match::reference_builds::{BuildSpec, DerivedBuild};
 use arenasim::states::play_match::talents::{
     Build, TalentDefinitions, TalentId, TreeId, CAPSTONE_TIER, MAX_TALENT_POINTS,
 };
@@ -225,6 +225,67 @@ fn the_priest_reference_builds_are_as_specified() {
     }
 }
 
+/// The Rogue's three, by name: Assassination 6/2/0, Combat 2/6/0, Subtlety
+/// 0/2/6 (AS-301).
+#[test]
+fn the_rogue_reference_builds_are_as_specified() {
+    let defs = defs();
+    let names: Vec<&str> = defs
+        .reference_builds(CharacterClass::Rogue)
+        .iter()
+        .map(|r| r.name.as_str())
+        .collect();
+    assert_eq!(names, ["Assassination", "Combat", "Subtlety"]);
+    let expect = [
+        (
+            "Assassination",
+            TreeId::Assassination,
+            "6/2/0",
+            Build::of(&[
+                (ImprovedPoisons, 2),
+                (VilePoisons, 1),
+                (MasterPoisoner, 1),
+                (Rupture, 1),
+                (BloodSpatter, 1),
+                (DualWieldSpecialization, 2),
+            ]),
+        ),
+        (
+            "Combat",
+            TreeId::Combat,
+            "2/6/0",
+            Build::of(&[
+                (ImprovedPoisons, 2),
+                (LightningReflexes, 2),
+                (Deflection, 2),
+                (SwiftBlades, 1),
+                (ExposeArmor, 1),
+            ]),
+        ),
+        (
+            "Subtlety",
+            TreeId::Subtlety,
+            "0/2/6",
+            Build::of(&[
+                (LightningReflexes, 2),
+                (MasterOfSubtlety, 2),
+                (Initiative, 2),
+                (Hemorrhage, 1),
+                (ShadowDance, 1),
+            ]),
+        ),
+    ];
+    for (name, tree, short, build) in expect {
+        let reference = defs
+            .reference_build(CharacterClass::Rogue, name)
+            .unwrap_or_else(|| panic!("no Rogue reference {name:?}"));
+        assert_eq!(reference.tree, tree, "{name}");
+        assert_eq!(reference.build, build, "{name}");
+        let spec = defs.spec(CharacterClass::Rogue, &reference.build).unwrap();
+        assert_eq!(spec.short, short, "{name}");
+    }
+}
+
 /// A reference build's name is unique within its CLASS only: a Paladin's
 /// "Holy" beside the Priest's loads, and a config naming "Holy" for each
 /// class's slot gets that class's own.
@@ -276,6 +337,74 @@ fn reference_names_are_unique_within_a_class_only() {
         1,
     );
     assert!(load_err(&twice).contains("Priest names the reference build \"Holy\" twice"));
+}
+
+/// Every Rogue node arm of the AS-301 sweep is a legal build: Vitality, the
+/// comparison, fits on each reference's stem (each holds two Combat tier-1
+/// points and not Vitality), in the place of the capstone or of a node the
+/// stem holds, and each node under test fits as the stem's eighth point.
+#[test]
+fn every_rogue_node_arm_resolves() {
+    let arms: &[(&str, &[(TalentId, u8)], &[(TalentId, u8)])] = &[
+        ("Assassination", &[(BloodSpatter, 1)], &[(Vitality, 1)]),
+        (
+            "Assassination",
+            &[(BloodSpatter, 1)],
+            &[(LightningReflexes, 1)],
+        ),
+        ("Assassination", &[(BloodSpatter, 1)], &[(Deflection, 1)]),
+        (
+            "Assassination",
+            &[(BloodSpatter, 1)],
+            &[(MasterOfSubtlety, 1)],
+        ),
+        (
+            "Assassination",
+            &[(BloodSpatter, 1), (MasterPoisoner, 1)],
+            &[(Vitality, 1)],
+        ),
+        (
+            "Assassination",
+            &[(BloodSpatter, 1), (Rupture, 1)],
+            &[(Vitality, 1)],
+        ),
+        ("Combat", &[(ExposeArmor, 1)], &[(Vitality, 1)]),
+        (
+            "Combat",
+            &[(ExposeArmor, 1), (SwiftBlades, 1)],
+            &[(Vitality, 1)],
+        ),
+        ("Subtlety", &[(ShadowDance, 1)], &[(Vitality, 1)]),
+        ("Subtlety", &[(ShadowDance, 1)], &[(CheatDeath, 1)]),
+        (
+            "Subtlety",
+            &[(ShadowDance, 1), (Initiative, 1)],
+            &[(Vitality, 1)],
+        ),
+        (
+            "Subtlety",
+            &[(ShadowDance, 1), (Hemorrhage, 1)],
+            &[(Vitality, 1)],
+        ),
+    ];
+    let defs = defs();
+    for (reference, remove, add) in arms {
+        let spec = BuildSpec::Derived(DerivedBuild {
+            reference: reference.to_string(),
+            remove: Build::of(remove),
+            add: Build::of(add),
+        });
+        let build = defs
+            .resolve_spec(CharacterClass::Rogue, &spec)
+            .unwrap_or_else(|e| panic!("{reference} -{remove:?} +{add:?}: {e}"));
+        let removed: u32 = remove.iter().map(|(_, r)| u32::from(*r)).sum();
+        let added: u32 = add.iter().map(|(_, r)| u32::from(*r)).sum();
+        assert_eq!(
+            build.points(),
+            MAX_TALENT_POINTS - removed + added,
+            "{reference} -{remove:?} +{add:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
