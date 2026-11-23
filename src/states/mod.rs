@@ -260,6 +260,7 @@ impl Plugin for StatesPlugin {
             .init_resource::<animation_sandbox::SandboxConfig>()
             .init_resource::<animation_sandbox::SandboxStage>()
             .init_resource::<animation_sandbox::playback::SandboxPlayback>()
+            .init_resource::<animation_sandbox::playback::SandboxSweep>()
             .init_resource::<animation_sandbox::ui::PendingCameraPreset>()
             .add_systems(
                 OnEnter(GameState::AnimationSandbox),
@@ -294,6 +295,11 @@ impl Plugin for StatesPlugin {
                     .chain()
                     .run_if(in_state(GameState::AnimationSandbox)),
             )
+            // A pass's leftovers go once every `Update` system has run, so no
+            // effect emitter can parent a particle onto a rig the sweep is
+            // despawning in the same flush (AS-507). Drains an empty list on
+            // every other frame and in every other state.
+            .add_systems(Last, animation_sandbox::playback::sweep_sandbox_leftovers)
             // Single-stepping injects a virtual-time delta, so it MUST land in
             // `First` (after `TimeSystem` overwrites delta, before
             // `RunFixedMainLoop` spends it on the fixed accumulator). In
@@ -1325,6 +1331,10 @@ impl Plugin for StatesPlugin {
         )
         // Transform puff visual effects (separate group to avoid tuple size limits)
         // The cloud pop at both ends of a polymorph — graphical only.
+        // Chained: the lobes are parented onto the puff, so their attach must
+        // flush before a cleanup that ends the puff on the same frame (a hitch,
+        // or a hitch at 3x, can step past its whole 0.45 s life), or the lobe
+        // is parented onto a despawned puff and the client panics (AS-507).
         .add_systems(
             Update,
             (
@@ -1332,6 +1342,7 @@ impl Plugin for StatesPlugin {
                 play_match::update_transform_puffs,       // Expand, rise and fade
                 play_match::cleanup_expired_transform_puffs, // Remove expired puffs
             )
+                .chain()
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
