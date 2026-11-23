@@ -42,8 +42,9 @@ use arenasim::states::play_match::combat_core::process_casting;
 use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, AuraApplyOwner, AuraApplyRoute, AuraLanding, AuraLandingKind,
     AuraPending, AuraType, CastEnding, CastEndingKind, CastingState, Combatant, GameRng,
-    HealCastHand, HealCastKind, HealImpact, HealImpactKind, HotVisual, LandedCast, MatchCountdown,
-    PlayMatchEntity, PolymorphedVisual, VisualBody, BLESSED_RECOVERY_AURA, INNER_FOCUS_AURA,
+    HealCastHand, HealCastKind, HealImpact, HealImpactKind, HotVisual, InstantAbilityFired,
+    LandedCast, MatchCountdown, PlayMatchEntity, PolymorphedVisual, VisualBody,
+    BLESSED_RECOVERY_AURA, INNER_FOCUS_AURA,
 };
 use arenasim::states::play_match::map_config::ActiveMapGeometry;
 use arenasim::states::play_match::talent_procs::{
@@ -890,6 +891,51 @@ fn a_palm_yields_only_to_its_own_hand_of_its_own_priest() {
         BTreeSet::from([-1, 1]),
         "another Priest's hands hide nothing"
     );
+}
+
+/// The Priest's Shadow hands (AS-449) are cast-hand rigs too: a Shadow Word:
+/// Pain cast while the palms glow hides both palms for every frame of its
+/// hands, 2.2 s, and they come back when its hands end.
+#[test]
+fn the_palms_yield_to_the_shadow_hands() {
+    let mut h = Harness::new();
+    let (priest, ally, _) = h.scene();
+    h.focus(priest);
+    h.tick_secs(1.1);
+    assert!(h.hands().is_empty(), "the arcane kit is over");
+    assert_eq!(h.shown_sides(), BTreeSet::from([-1, 1]), "both palms shown");
+    h.world().spawn(InstantAbilityFired {
+        caster: priest,
+        target: Some(ally),
+        ability: AbilityType::ShadowWordPain,
+        is_crit: false,
+    });
+    h.tick(1);
+    let mut hands = h.hands();
+    hands.sort_by(|a, b| a.2.total_cmp(&b.2));
+    assert_eq!(
+        hands,
+        vec![
+            (HealCastKind::Shadow, priest, -1.0),
+            (HealCastKind::Shadow, priest, 1.0)
+        ]
+    );
+    let mut frames = 1;
+    while !h.hands().is_empty() {
+        assert!(
+            h.shown_sides().is_empty(),
+            "yielding while a Shadow hand plays"
+        );
+        h.tick(1);
+        frames += 1;
+        assert!(frames < 400, "the Shadow hands end");
+    }
+    assert!(
+        close(frames as f32 * h.dt, 2.2, 2.0 * h.dt),
+        "the Shadow hands run 2.2 s ({frames} frames)"
+    );
+    h.tick(1);
+    assert_eq!(h.shown_sides(), BTreeSet::from([-1, 1]), "both palms back");
 }
 
 /// Spent by an instant: the palms go the frame the cast is chosen, and no

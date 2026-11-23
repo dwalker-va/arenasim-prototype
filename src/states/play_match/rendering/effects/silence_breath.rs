@@ -21,9 +21,9 @@ use crate::states::play_match::components::*;
 // §8 (AS-335): Silence (15487) plays visual 179, shared by eleven silences.
 //
 // - **Cast** (kit 418): `shadow_precast_low_hand.m2` on both hands. Silence is
-//   an instant the Priest AI applies inline, with no cast state and no
-//   instant marker, and no Shadow instant draws its hands today (Shadow Word:
-//   Pain is the precedent), so nothing is drawn on the Priest.
+//   an instant the Priest AI applies inline, with no cast state; its
+//   `InstantAbilityFired` plays the Shadow hands (`heal_cast.rs`,
+//   `HealCastKind::Shadow`, AS-449).
 // - **No landing** (`(6,13)` row).
 // - **State for the silence** (kit 297): `shadowwordsilence_breath.m2` at
 //   attachment 17, Breath — the mouth. Its Stand sequence (1167 ms) is the

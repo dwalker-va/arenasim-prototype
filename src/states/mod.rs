@@ -973,6 +973,9 @@ impl Plugin for StatesPlugin {
                 play_match::place_shield_cards,
                 // Vengeance's hands, on the spell hands (`vengeance.rs`).
                 play_match::place_vengeance_hands,
+                // The Priest's Shadow cast hands' particles, born at the
+                // spell hands (`heal_cast.rs`).
+                play_match::place_shadow_hands,
                 // Divine Protection's globe (`divine_protection.rs`).
                 play_match::place_divine_protection_globes,
                 // Shadow Dance's state (`shadow_dance.rs`).

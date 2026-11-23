@@ -20,9 +20,9 @@ use crate::states::play_match::components::*;
 // §7 (AS-335):
 //
 // - **Cast** (kit 218): `shadow_precast_low_hand.m2` on both hands. Vampiric
-//   Embrace is an instant the Priest AI applies inline, with no cast state and
-//   no instant marker, and no Shadow instant draws its hands today (Shadow
-//   Word: Pain is the precedent), so nothing is drawn on the Priest.
+//   Embrace is an instant the Priest AI applies inline, with no cast state;
+//   its `InstantAbilityFired` plays the Shadow hands (`heal_cast.rs`,
+//   `HealCastKind::Shadow`, AS-449).
 // - **Landing on the victim** (kit 3109): `soothingkiss_impact_head.m2` at the
 //   chest — one emitter, `tail_dust3`, additive, 80/s for 1967 ms, travelling
 //   in at 1.67 yd/s, 0.5 s lives, 0.83 -> 0.42 -> 0.14 yd, (0,0,196) ->

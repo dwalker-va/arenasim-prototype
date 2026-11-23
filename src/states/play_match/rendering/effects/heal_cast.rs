@@ -2,16 +2,19 @@ use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 use std::f32::consts::TAU;
 
+use super::body_hold::{BodyHold, HoldDisjoint};
 use super::heal_impact::{emissive_of, heal_jitter, holy_gold_pale, nature_green};
+use super::hunter_shots::{ramp3, ramp_color, PALETTE_STEPS};
 use super::ice_barrier::{
     ib_hand_envelope, ib_hand_glow_texture, ib_hand_pulse, ib_hand_ring_texture,
     ib_hand_spark_local, IB_HAND_GLOW, IB_HAND_GLOW_RGB, IB_HAND_RING, IB_HAND_RING_ALPHA,
     IB_HAND_RING_RGB, IB_HAND_SECS, IB_HAND_SPARKS, IB_HAND_SPARK_ALPHA, IB_HAND_SPARK_RGB,
     IB_HAND_SPARK_SIZE,
 };
-use super::shield::PWS_CLIENT_TO_RIG;
+use super::shield::{disc_texture, PWS_CLIENT_TO_RIG};
 use super::spell_bolts::{soft_dot_texture, star_flash_texture};
 use crate::states::play_match::components::*;
+use std::sync::Arc;
 
 // ==============================================================================
 // Cast-side heal visuals — the caster's glowing spell hands (graphical-only)
@@ -50,6 +53,9 @@ use crate::states::play_match::components::*;
 // `docs/design/2026-10-18-paladin-talent-client-data.md`) add the fifth, the
 // instant Holy flash, and reuse the Arcane hands for Divine Favor (kit 425 is
 // Moonfire's `magic_cast_hand.m2`); both flash off their aura's landing.
+// The Priest's Shadow casts (AS-449) are the sixth, Shadow: the Warlock's
+// `shadow_precast_low_hand.m2` licks and rings (*The Shadow hands* below),
+// looped through Mind Blast's cast bar and played alone by its instants.
 //
 // Timing is event-edge-driven in the source: the precast loop lives from the
 // cast-start edge to the cast-end edge — its duration IS the actual cast
@@ -385,6 +391,265 @@ pub fn frost_piece_state(role: HealCastPieceRole, age: f32, side: f32) -> (Vec3,
     }
 }
 
+// --- The Shadow hands (AS-449, `shadow_precast_low_hand.m2`) ----------------
+//
+// Every precast and cast kit of the Priest's four Shadow visuals — Shadow
+// Word: Pain (71: kits 217/218), Vampiric Embrace (3582: 217/218), Silence
+// (179: 114/418) and Mind Blast (3057: 114/218) — attaches SpellVisualEffectName
+// 17, `spells/shadow_precast_low_hand.m2` (fdid 166807), at scale 1 to both
+// hands (attach 21 and 22). The same model is the Warlock's cast hand on kits
+// 114/118 (`docs/design/2026-09-06-warlock-dot-client-data.md` §5); nothing
+// drew it before this card, so this is its first implementation. The kits
+// differ only in the body anim (Omni or Directed), which the capsule's cast
+// posture does not distinguish.
+//
+// The model, parsed at build 1.15.9.69547: no mesh, one 1000 ms sequence, and
+// three emitters, all point emitters at the hand, none with a window, all
+// with flags 0x20129: 0x80 (model space) unset, so their particles live in
+// the WORLD — born at the hand and left where they were born as the hand
+// moves on — and 0x8 set, so they travel up in world space:
+//
+//   P0  `fire1a2`, blend 2 (alpha): 10.2/s, 1.2 s lives, rising 0.333 yd/s
+//       (±35%), radius 0.222 -> 0.083 -> 0.028 yd, colour (32,255,2) ->
+//       (2,2,2) -> (2,2,2), alpha 0.39 -> 1.0 -> 0. `fire1a2` decodes to
+//       black (RGB 0, its shape in alpha), and the colour track multiplies
+//       the texture, so the lick is a black puff from birth that thickens
+//       and shrinks away.
+//   P1  `shockwave10`, blend 4 (additive): 5/s, 0.5 s lives, still; radius
+//       0.222 -> 0.361 -> 0.222 yd, (18,255,0) -> (10,148,0) -> (18,255,0),
+//       alpha 1. A green ring that swells and shrinks.
+//   P2  the same as P1 in violet: radius 0.278 -> 0.417 -> 0.278 yd,
+//       (114,0,255) -> (55,0,124) -> (114,0,255).
+//
+// Every ramp keys its middle at half the life; a size key is the sprite's
+// radius (`ParticleSize::radii`). The two sprites are generated from the
+// decoded textures: `fire1a2`'s alpha averaged by radius over its black, and
+// `shockwave10`'s luminance averaged by radius (a streaky ring peaking at 0.24
+// at 0.72 of the radius) as white with that shape in alpha.
+//
+// Where the client gives nothing, a value is chosen and named here:
+//
+// - **How long the cast kit plays:** the model's one sequence, 1000 ms
+//   ([`SHADOW_HAND_SECS`]), as Moonfire's and Ice Barrier's do. The emitters
+//   then stop and the rig stays until its last particle has lived out its
+//   life ([`shadow_hand_tail_secs`]), so the hands go out as the client's
+//   particles do, never cut.
+// - **Mind Blast's loop:** its precast kit (114) is the same model, so its
+//   emitters run from the cast's start and the cast kit's second follows the
+//   landing on the same clock; nothing is cut or restarted.
+// - **Where in a frame a particle is born:** where the hand was at its birth,
+//   the hand's path taken as straight across the frame
+//   ([`place_shadow_hands`]); the client emits at the hand's pose then.
+// - **Scale:** client yards on the rig, as the Holy hands (the same model
+//   family) are drawn.
+// - **The rings' glow:** [`SHADOW_HAND_RING_GLOW`], the additive particles'
+//   2.5x emissive convention (`hunter_shots.rs`).
+
+/// How long a Shadow cast kit plays: the model's single 1000 ms sequence.
+pub const SHADOW_HAND_SECS: f32 = 1.0;
+/// Emissive gain of the additive rings over their ramp colour.
+pub const SHADOW_HAND_RING_GLOW: f32 = 2.5;
+/// The sprites' side, pixels.
+const SHADOW_SPRITE_PX: u32 = 64;
+
+/// Which generated sprite a Shadow emitter draws.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShadowHandSprite {
+    /// `fire1a2`: a cloudy black puff (its alpha's radial profile, over
+    /// its black).
+    Lick,
+    /// `shockwave10`: a ring (its luminance's radial profile).
+    Ring,
+}
+
+/// One emitter of `shadow_precast_low_hand.m2`, as parsed.
+#[derive(Clone, Copy, Debug)]
+pub struct ShadowHandEmitter {
+    pub name: &'static str,
+    pub sprite: ShadowHandSprite,
+    /// Blend 4 (additive) when true; blend 2 (alpha) when false.
+    pub additive: bool,
+    /// Particles a second.
+    pub rate: f32,
+    /// Seconds a particle lives.
+    pub life: f32,
+    /// Launch speed, yd/s, and its variation (a fraction either way).
+    pub speed: f32,
+    pub speed_var: f32,
+    /// sRGB 0..255 at birth, midlife and death.
+    pub color: [[u8; 3]; 3],
+    pub alpha: [f32; 3],
+    pub size: ParticleSize,
+}
+
+/// Where in a particle's life the middle ramp key sits (every key here is at
+/// 0.500015 of the life).
+pub const SHADOW_HAND_MID: f32 = 0.5;
+
+/// The model's three emitters: P0 the lick, P1 the green ring, P2 the violet.
+pub const SHADOW_HAND_EMITTERS: [ShadowHandEmitter; 3] = [
+    ShadowHandEmitter {
+        name: "shadow_precast_low_hand/p0 licks",
+        sprite: ShadowHandSprite::Lick,
+        additive: false,
+        rate: 10.2,
+        life: 1.2,
+        speed: 0.333,
+        speed_var: 0.35,
+        color: [[32, 255, 2], [2, 2, 2], [2, 2, 2]],
+        alpha: [0.392, 1.0, 0.0],
+        size: ParticleSize::radii([0.222, 0.083, 0.028]),
+    },
+    ShadowHandEmitter {
+        name: "shadow_precast_low_hand/p1 green ring",
+        sprite: ShadowHandSprite::Ring,
+        additive: true,
+        rate: 5.0,
+        life: 0.5,
+        speed: 0.0,
+        speed_var: 0.35,
+        color: [[18, 255, 0], [10, 148, 0], [18, 255, 0]],
+        alpha: [1.0, 1.0, 1.0],
+        size: ParticleSize::radii([0.222, 0.361, 0.222]),
+    },
+    ShadowHandEmitter {
+        name: "shadow_precast_low_hand/p2 violet ring",
+        sprite: ShadowHandSprite::Ring,
+        additive: true,
+        rate: 5.0,
+        life: 0.5,
+        speed: 0.0,
+        speed_var: 0.35,
+        color: [[114, 0, 255], [55, 0, 124], [114, 0, 255]],
+        alpha: [1.0, 1.0, 1.0],
+        size: ParticleSize::radii([0.278, 0.417, 0.278]),
+    },
+];
+
+/// `fire1a2`'s alpha, averaged over each twentieth of the radius (decoded
+/// from the BLP).
+const SHADOW_LICK_PROFILE: [f32; 20] = [
+    0.889, 0.929, 0.965, 0.96, 0.926, 0.877, 0.828, 0.746, 0.673, 0.619, 0.547, 0.431, 0.333,
+    0.256, 0.186, 0.11, 0.057, 0.023, 0.003, 0.0,
+];
+/// `shockwave10`'s luminance, averaged the same way.
+const SHADOW_RING_PROFILE: [f32; 20] = [
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.005, 0.01, 0.021, 0.042, 0.097, 0.202, 0.242, 0.21,
+    0.172, 0.131, 0.082, 0.027,
+];
+
+/// A radial profile of twenty bins at radius `r` (0 centre, 1 the quad's
+/// edge): linear between the bins' centres, held inside the first and
+/// falling to nothing at the edge past the last.
+pub fn shadow_profile_at(profile: &[f32; 20], r: f32) -> f32 {
+    let x = r * 20.0 - 0.5;
+    if x <= 0.0 {
+        return profile[0];
+    }
+    if r >= 1.0 {
+        return 0.0;
+    }
+    let i = x.floor() as usize;
+    if i >= 19 {
+        let u = (r - 0.975) / 0.025;
+        return profile[19] * (1.0 - u);
+    }
+    let u = x - i as f32;
+    profile[i] + (profile[i + 1] - profile[i]) * u
+}
+
+/// A Shadow sprite's alpha at radius `r` of the quad.
+pub fn shadow_sprite_alpha(sprite: ShadowHandSprite, r: f32) -> f32 {
+    match sprite {
+        ShadowHandSprite::Lick => shadow_profile_at(&SHADOW_LICK_PROFILE, r),
+        ShadowHandSprite::Ring => shadow_profile_at(&SHADOW_RING_PROFILE, r),
+    }
+}
+
+/// A Shadow sprite: its decoded radial profile in alpha, over its decoded
+/// colour — `fire1a2`'s black, or white under `shockwave10`'s luminance.
+pub fn shadow_sprite_texture(sprite: ShadowHandSprite) -> Image {
+    let mut image = disc_texture(SHADOW_SPRITE_PX, |r, _| shadow_sprite_alpha(sprite, r));
+    if sprite == ShadowHandSprite::Lick {
+        if let Some(data) = image.data.as_mut() {
+            for texel in data.as_chunks_mut::<4>().0 {
+                texel[..3].fill(0);
+            }
+        }
+    }
+    image
+}
+
+/// How long a Shadow rig outlives its cast kit: the longest particle life,
+/// so a particle born as the kit ends lives out its life.
+pub fn shadow_hand_tail_secs() -> f32 {
+    SHADOW_HAND_EMITTERS
+        .iter()
+        .map(|e| e.life)
+        .fold(0.0, f32::max)
+}
+
+/// How many particles emitter `e` has emitted once the model has emitted for
+/// `clock` seconds: one each time its rate's accumulator fills, so the first
+/// comes `1 / rate` in. The epsilon absorbs a frame clock's summing error.
+pub fn shadow_emitted_by(e: &ShadowHandEmitter, clock: f32) -> u32 {
+    (e.rate * clock + 1e-4).floor().max(0.0) as u32
+}
+
+/// The `index`th particle's launch velocity, rig-local: straight up at the
+/// emitter's speed, varied by a hashed fraction (never `game_rng`).
+pub fn shadow_mote_velocity(e: &ShadowHandEmitter, seed: u32) -> Vec3 {
+    let var = (heal_jitter(seed) * 2.0 - 1.0) * e.speed_var;
+    Vec3::Y * e.speed * (1.0 + var)
+}
+
+/// A Shadow particle's drawn diameter `age` seconds into its life.
+pub fn shadow_mote_diameter(e: &ShadowHandEmitter, age: f32) -> f32 {
+    ramp3(e.size.diameter_keys(), SHADOW_HAND_MID, age / e.life).max(1e-4)
+}
+
+/// The palette step a Shadow particle `age` seconds into its life wears.
+pub fn shadow_mote_step(e: &ShadowHandEmitter, age: f32) -> usize {
+    let t = (age / e.life).clamp(0.0, 1.0);
+    ((t * PALETTE_STEPS as f32) as usize).min(PALETTE_STEPS - 1)
+}
+
+/// The material a Shadow emitter's particles wear at palette step `step`:
+/// the colour and alpha ramps sampled at the step's middle. The rings add
+/// (blend 4, with emissive, unlit off or Bevy drops it); the lick blends
+/// (blend 2: a flat, unlit colour that can darken).
+pub fn shadow_palette_material(
+    e: &ShadowHandEmitter,
+    step: usize,
+    texture: Handle<Image>,
+) -> StandardMaterial {
+    let t = (step as f32 + 0.5) / PALETTE_STEPS as f32;
+    let color = ramp_color(e.color, SHADOW_HAND_MID, t);
+    let alpha = ramp3(e.alpha, SHADOW_HAND_MID, t);
+    if e.additive {
+        StandardMaterial {
+            base_color: color.with_alpha(alpha),
+            base_color_texture: Some(texture.clone()),
+            emissive: emissive_of(color, SHADOW_HAND_RING_GLOW),
+            emissive_texture: Some(texture),
+            alpha_mode: AlphaMode::Add,
+            cull_mode: None,
+            double_sided: true,
+            ..default()
+        }
+    } else {
+        StandardMaterial {
+            base_color: color.with_alpha(alpha),
+            base_color_texture: Some(texture),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            cull_mode: None,
+            double_sided: true,
+            ..default()
+        }
+    }
+}
+
 // --- Pure geometry (probed directly) ------------------------------------------
 
 /// How long a family's launch flare runs.
@@ -395,25 +660,43 @@ pub fn heal_cast_flare_secs(kind: HealCastKind) -> f32 {
         HealCastKind::Arcane => MOONFIRE_HAND_SECS,
         HealCastKind::Frost => IB_HAND_SECS,
         HealCastKind::HolyFlash => HOLY_INSTANT_FLASH_SECS,
+        // The cast kit's second, then the last particle's life.
+        HealCastKind::Shadow => SHADOW_HAND_SECS + shadow_hand_tail_secs(),
     }
 }
 
-/// The glow quad sizes (outer, core) for a family. Arcane and Frost hands draw
-/// no glow ball of this kind; they share Nature's numbers only so the table
-/// stays total.
+/// How long the release surge of the cast posture takes: the launch flare,
+/// or for the Shadow hands the cast kit alone (their rig outlives it while
+/// the last particles die).
+pub fn heal_cast_release_secs(kind: HealCastKind) -> f32 {
+    match kind {
+        HealCastKind::Shadow => SHADOW_HAND_SECS,
+        _ => heal_cast_flare_secs(kind),
+    }
+}
+
+/// The glow quad sizes (outer, core) for a family. Arcane, Frost and Shadow
+/// hands draw no glow ball of this kind; they share Nature's numbers only so
+/// the table stays total.
 pub fn heal_cast_glow_sizes(kind: HealCastKind) -> [f32; 2] {
     let sizes = match kind {
         HealCastKind::Holy | HealCastKind::HolyFlash => HOLY_CAST_GLOW_SIZES,
-        HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => NATURE_CAST_GLOW_SIZES,
+        HealCastKind::Nature
+        | HealCastKind::Arcane
+        | HealCastKind::Frost
+        | HealCastKind::Shadow => NATURE_CAST_GLOW_SIZES,
     };
     [sizes[0] * GLOW_SCALE, sizes[1] * GLOW_SCALE]
 }
 
-/// A family's wisp width (Arcane and Frost draw no wisps; see above).
+/// A family's wisp width (Arcane, Frost and Shadow draw no wisps; see above).
 pub fn heal_cast_wisp_width(kind: HealCastKind) -> f32 {
     match kind {
         HealCastKind::Holy | HealCastKind::HolyFlash => HOLY_CAST_WISP_WIDTH,
-        HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => NATURE_CAST_WISP_WIDTH,
+        HealCastKind::Nature
+        | HealCastKind::Arcane
+        | HealCastKind::Frost
+        | HealCastKind::Shadow => NATURE_CAST_WISP_WIDTH,
     }
 }
 
@@ -475,9 +758,10 @@ pub fn heal_cast_release_pitch(t: f32) -> f32 {
 pub fn heal_cast_wisp_color(kind: HealCastKind, index: u32) -> Color {
     match kind {
         HealCastKind::Holy | HealCastKind::HolyFlash => holy_wisp_color(index),
-        HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => {
-            nature_wisp_color(index)
-        }
+        HealCastKind::Nature
+        | HealCastKind::Arcane
+        | HealCastKind::Frost
+        | HealCastKind::Shadow => nature_wisp_color(index),
     }
 }
 
@@ -515,7 +799,10 @@ fn water_ring_blue() -> Color {
 pub fn heal_cast_glow_color(kind: HealCastKind) -> Color {
     match kind {
         HealCastKind::Holy | HealCastKind::HolyFlash => holy_gold_pale(),
-        HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => nature_green(),
+        HealCastKind::Nature
+        | HealCastKind::Arcane
+        | HealCastKind::Frost
+        | HealCastKind::Shadow => nature_green(),
     }
 }
 
@@ -523,7 +810,10 @@ pub fn heal_cast_glow_color(kind: HealCastKind) -> Color {
 fn wisp_alpha(kind: HealCastKind) -> f32 {
     match kind {
         HealCastKind::Holy | HealCastKind::HolyFlash => 0.80,
-        HealCastKind::Nature | HealCastKind::Arcane | HealCastKind::Frost => 0.70,
+        HealCastKind::Nature
+        | HealCastKind::Arcane
+        | HealCastKind::Frost
+        | HealCastKind::Shadow => 0.70,
     }
 }
 
@@ -541,6 +831,11 @@ pub struct HealCastAssets {
     /// Ice Barrier's glow card and ring sprites.
     frost_glow: Handle<Image>,
     frost_ring: Handle<Image>,
+    /// The Shadow hands' lick and ring sprites, and their emitters'
+    /// palettes (built the first time a Shadow rig spawns).
+    shadow_lick: Handle<Image>,
+    shadow_ring: Handle<Image>,
+    shadow_palettes: Option<[Arc<[Handle<StandardMaterial>]>; 3]>,
 }
 
 impl HealCastAssets {
@@ -555,7 +850,33 @@ impl HealCastAssets {
             dot: images.add(soft_dot_texture()),
             frost_glow: images.add(ib_hand_glow_texture()),
             frost_ring: images.add(ib_hand_ring_texture()),
+            shadow_lick: images.add(shadow_sprite_texture(ShadowHandSprite::Lick)),
+            shadow_ring: images.add(shadow_sprite_texture(ShadowHandSprite::Ring)),
+            shadow_palettes: None,
         }
+    }
+
+    /// The three Shadow emitters' palettes, built once.
+    fn shadow_palettes(
+        &mut self,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> [Arc<[Handle<StandardMaterial>]>; 3] {
+        let (lick, ring) = (self.shadow_lick.clone(), self.shadow_ring.clone());
+        self.shadow_palettes
+            .get_or_insert_with(|| {
+                SHADOW_HAND_EMITTERS.map(|e| {
+                    let texture = match e.sprite {
+                        ShadowHandSprite::Lick => lick.clone(),
+                        ShadowHandSprite::Ring => ring.clone(),
+                    };
+                    (0..PALETTE_STEPS)
+                        .map(|step| {
+                            materials.add(shadow_palette_material(&e, step, texture.clone()))
+                        })
+                        .collect()
+                })
+            })
+            .clone()
     }
 }
 
@@ -657,15 +978,16 @@ pub fn spawn_heal_cast_glows(
 /// state at all, so its shift into the form plays it the same way.
 ///
 /// Scoped by [`HealCastKind::for_ability`], not by the instant: only the
-/// Druid's instants, Power Word: Shield and Ice Barrier are routed, so every
-/// other instant (Frost Shock among them) still draws no hands. Runs in `FixedUpdate` after
+/// Druid's instants, Power Word: Shield, Ice Barrier and the Priest's Shadow
+/// instants are routed, so every other instant (Frost Shock among them) still
+/// draws no hands. Runs in `FixedUpdate` after
 /// `CombatResolution` and before `consume_cast_ending_signals`, which
 /// despawns the marker; a shift is read the tick it is queued, before
 /// `process_travel_form` resolves it the next tick.
 ///
-/// Power Word: Shield and Ice Barrier are applied inline by their class AIs
-/// with no cast state, so their hands play off their [`InstantAbilityFired`]
-/// markers instead (read
+/// Power Word: Shield, Ice Barrier, Shadow Word: Pain, Vampiric Embrace and
+/// Silence are applied inline by their class AIs with no cast state, so their
+/// hands play off their [`InstantAbilityFired`] markers instead (read
 /// before `consume_instant_ability_signals` despawns it). An ability that
 /// announces itself through that marker never plays through a `Landed`
 /// marker as well: the animation sandbox lands such an entry through a
@@ -833,10 +1155,12 @@ struct HandRig {
 /// `VisualBody`, with the pieces its family shows from its starting phase:
 /// a precast loop's glow and wisps; an instant Nature flash's glow (the jet
 /// is emitted by the update pass); Moonfire's motes, stars and ring disc.
+/// A Shadow rig has no pieces: its emitters, driven by the update pass, are
+/// the whole model.
 fn spawn_hand_rig(
     commands: &mut Commands,
     materials: &mut Assets<StandardMaterial>,
-    assets: &HealCastAssets,
+    assets: &mut HealCastAssets,
     spec: HandRig,
 ) {
     let HandRig {
@@ -888,6 +1212,18 @@ fn spawn_hand_rig(
         ))
         .id();
     commands.entity(body).add_child(rig);
+
+    if kind == HealCastKind::Shadow {
+        let palettes = assets.shadow_palettes(materials);
+        commands.entity(rig).insert(HealCastShadowEmitter {
+            clock: 0.0,
+            hand: None,
+            emitted: [0; 3],
+            palettes,
+            quad: assets.quad.clone(),
+        });
+        return;
+    }
 
     let instant = !matches!(phase, HealCastPhase::Loop);
     // Per-piece materials throughout: alphas (and the arcane colours) are
@@ -1035,8 +1371,9 @@ fn spawn_hand_rig(
 }
 
 /// Per-frame animation: the glow pulse, the wisp swirl, the Nature leaf
-/// shed, the launch flare/burst, and mote aging. Time comes from `Res<Time>`
-/// accumulation — never gated on per-frame sim movement.
+/// shed, the launch flare/burst, and mote aging; for a Shadow rig, its
+/// clock alone (its emitters are [`place_shadow_hands`]'). Time comes from
+/// `Res<Time>` accumulation — never gated on per-frame sim movement.
 pub fn update_heal_cast_glows(
     mut commands: Commands,
     time: Res<Time>,
@@ -1097,6 +1434,13 @@ pub fn update_heal_cast_glows(
                 }
             }
         };
+
+        // The Shadow hands are their three emitters, which emit at the hand
+        // as the body is drawn (`place_shadow_hands`): the rig keeps only
+        // the clock.
+        if rig.kind == HealCastKind::Shadow {
+            continue;
+        }
 
         // Nature emission: leaves through the loop, the jet through the flare.
         if rig.kind == HealCastKind::Nature {
@@ -1325,6 +1669,124 @@ pub fn update_heal_cast_glows(
     }
 }
 
+/// PostUpdate, a [`BodyPlacement`] system: one frame of every Shadow hand's
+/// emitters. Each particle lives in the world, as the client's do (no
+/// model-space flag): it is born at the hand as the body is drawn this frame
+/// ([`BodyHold`], after every writer of the body), rises straight up from
+/// there, and is left behind as the hand moves on. A particle born part-way
+/// through the frame is born where the hand was then (the hand's path is
+/// taken as straight across the frame) and that much aged, and its pose is
+/// its birth point plus its velocity times its age, so what is drawn does not
+/// depend on the frame rate. Particles go with their rig.
+#[allow(clippy::type_complexity)]
+pub fn place_shadow_hands(
+    mut commands: Commands,
+    time: Res<Time>,
+    hold: BodyHold,
+    mut rigs: Query<(Entity, &HealCastHand, &mut HealCastShadowEmitter)>,
+    mut motes: Query<
+        (
+            Entity,
+            &mut HealCastShadowMote,
+            &mut Transform,
+            &mut MeshMaterial3d<StandardMaterial>,
+        ),
+        HoldDisjoint,
+    >,
+) {
+    let dt = time.delta_secs();
+    let facing = hold.view().map(|view| view.rotation);
+
+    for (entity, mut mote, mut part, mut material) in motes.iter_mut() {
+        let Ok((_, _, emitter)) = rigs.get(mote.rig) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        mote.age += dt;
+        if mote.age >= mote.life {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let e = &SHADOW_HAND_EMITTERS[mote.emitter];
+        part.translation = mote.origin + mote.velocity * mote.age;
+        part.scale = Vec3::splat(shadow_mote_diameter(e, mote.age));
+        if let Some(facing) = facing {
+            // Square to the camera, unrolled: the model gives its emitters
+            // no spin and no tile rotation.
+            part.rotation = facing;
+        }
+        let step = shadow_mote_step(e, mote.age);
+        if step != mote.step {
+            mote.step = step;
+            material.0 = emitter.palettes[mote.emitter][step].clone();
+        }
+    }
+
+    for (rig_entity, rig, mut emitter) in rigs.iter_mut() {
+        let Some(body) = hold.body(rig.caster) else {
+            continue;
+        };
+        let hand = body
+            .unit
+            .transform_point(body.local.transform_point(spell_hand_local(rig.side)));
+        let before = emitter.hand.unwrap_or(hand);
+        emitter.hand = Some(hand);
+
+        // The loop emits all the while; the cast kit for its one sequence,
+        // counted from the frame the flare began.
+        let emit_dt = match rig.phase {
+            HealCastPhase::Loop => dt,
+            HealCastPhase::Flare { remaining } => {
+                let elapsed = heal_cast_flare_secs(HealCastKind::Shadow) - remaining - dt;
+                (SHADOW_HAND_SECS - elapsed).clamp(0.0, dt)
+            }
+        };
+        let start = emitter.clock;
+        emitter.clock += emit_dt;
+        for (index, e) in SHADOW_HAND_EMITTERS.iter().enumerate() {
+            let owed = shadow_emitted_by(e, emitter.clock);
+            while emitter.emitted[index] < owed {
+                emitter.emitted[index] += 1;
+                let k = emitter.emitted[index];
+                // When in this frame it was born, and so how old it is now.
+                let born = (k as f32 / e.rate - start).clamp(0.0, dt);
+                let age = dt - born;
+                if age >= e.life {
+                    continue;
+                }
+                let origin = if dt > 0.0 {
+                    before.lerp(hand, born / dt)
+                } else {
+                    hand
+                };
+                let seed = rig_entity.index().wrapping_mul(0x9E37_79B9)
+                    ^ (index as u32 + 1).wrapping_mul(0x85EB_CA6B)
+                    ^ k.wrapping_mul(0xC2B2_AE35);
+                let velocity = shadow_mote_velocity(e, seed);
+                let step = shadow_mote_step(e, age);
+                commands.spawn((
+                    HealCastShadowMote {
+                        rig: rig_entity,
+                        emitter: index,
+                        origin,
+                        velocity,
+                        age,
+                        life: e.life,
+                        step,
+                    },
+                    Mesh3d(emitter.quad.clone()),
+                    MeshMaterial3d(emitter.palettes[index][step].clone()),
+                    Transform::from_translation(origin + velocity * age)
+                        .with_rotation(facing.unwrap_or_default())
+                        .with_scale(Vec3::splat(shadow_mote_diameter(e, age))),
+                    NotShadowCaster,
+                    PlayMatchEntity,
+                ));
+            }
+        }
+    }
+}
+
 /// Consume `CastEnding` markers for heal casts, transitioning the hand rigs.
 /// Landed -> the launch (Holy re-flares its own glow; Nature swaps the loop
 /// pieces for the burst jet). Fizzled or Interrupted -> everything stops
@@ -1429,8 +1891,8 @@ pub fn update_heal_cast_posture(
                 posture.pitch = (posture.pitch - rate * dt).max(HEAL_CAST_READY_PITCH);
             }
             HealCastPhase::Flare { remaining } => {
-                let total = heal_cast_flare_secs(rig.kind);
-                posture.pitch = heal_cast_release_pitch(1.0 - remaining / total);
+                let elapsed = heal_cast_flare_secs(rig.kind) - remaining;
+                posture.pitch = heal_cast_release_pitch(elapsed / heal_cast_release_secs(rig.kind));
             }
         }
 
@@ -1554,12 +2016,27 @@ pub fn billboard_heal_cast_glows(
 /// for HUD feedback, but the hand glow stops DEAD at the interrupt, not half
 /// a second later). Flare-phase rigs own their remaining lifetime; the
 /// update system retires them.
+///
+/// A Shadow rig plays on for up to [`heal_cast_flare_secs`] after its cast,
+/// long enough to outlast its caster: it goes the frame its caster is dead
+/// or polymorphed (the sheep has no hands), in any phase.
 pub fn cleanup_heal_cast_glows(
     mut commands: Commands,
     rigs: Query<(Entity, &HealCastHand)>,
     cast_states: Query<&CastingState>,
+    casters: Query<(&Combatant, Has<PolymorphedVisual>)>,
 ) {
     for (rig_entity, rig) in rigs.iter() {
+        if rig.kind == HealCastKind::Shadow {
+            let handless = match casters.get(rig.caster) {
+                Ok((combatant, sheep)) => !combatant.is_alive() || sheep,
+                Err(_) => true,
+            };
+            if handless {
+                commands.entity(rig_entity).despawn();
+                continue;
+            }
+        }
         if !matches!(rig.phase, HealCastPhase::Loop) {
             continue;
         }

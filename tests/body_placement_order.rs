@@ -37,9 +37,10 @@ use arenasim::states::{GameState, StatesPlugin};
 
 /// Every `BodyPlacement` system, by name. Adding one, or taking one out, is an
 /// edit here: membership is a judgement the schedule cannot make for itself.
-const PLACEMENTS: [&str; 19] = [
+const PLACEMENTS: [&str; 20] = [
     "place_shield_cards",
     "place_vengeance_hands",
+    "place_shadow_hands",
     "place_divine_protection_globes",
     "place_shadow_dance",
     "place_vampiric_embrace_implosions",
