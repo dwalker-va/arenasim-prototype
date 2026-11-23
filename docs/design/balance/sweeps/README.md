@@ -560,3 +560,21 @@ are configs on one binary, so there is no patch:
 - `-arms.jsonl.tar.gz` — the inputs as run: `block1/` (20 arms, seeds 0-3)
   and `block2/` (the 4 replicated arms, seeds 4-7).
 - `-arms.csv.tar.gz` — their batch CSVs, same layout.
+
+## `2026-11-22-as301-arms.*`
+
+Behind `2026-11-22-as301-rogue-talent-sweep.md` (card AS-301): the Rogue
+reference builds, node arms and Shadow Dance. 31 arm runs of 5,088 2v2 matches
+each (every Rogue cell plus 8 control cells, three maps, 4 seeds a cell a map,
+`TeamPlan`), every Rogue on either side playing the arm's build. The arms are
+configs on one binary, so there is no patch:
+
+- `-arms.py` — `gen` writes the arms (through `scripts/gen_sweep.py --build`
+  / `--for-class`); `table` and `replicate` print the findings doc's tables
+  from the CSVs; `sample` replays Rogue matches with full logs for the
+  non-vacuity counts; `dance` replays every Rogue match of the Subtlety
+  reference for the Shadow Dance figures; `gates` traces the sample slice for
+  why the Dance did not go.
+- `-arms.jsonl.tar.gz` — the inputs as run: `block1/` (19 arms, seeds 0-3)
+  and `block2/` (the 12 replicated arms, seeds 4-7).
+- `-arms.csv.tar.gz` — their batch CSVs, same layout.
