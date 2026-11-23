@@ -334,11 +334,21 @@ impl HeadlessMatchConfig {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read config file: {}", e))?;
 
-        let config: HeadlessMatchConfig =
-            serde_json::from_str(&contents).map_err(|e| format!("Failed to parse JSON: {}", e))?;
+        let config =
+            Self::from_json(&contents).map_err(|e| format!("Failed to parse JSON: {}", e))?;
 
         config.validate()?;
         Ok(config)
+    }
+
+    /// Parse one match config from JSON text, refusing an object that names a
+    /// key twice ([`crate::config_parse`]): a talent named twice in a build
+    /// would otherwise keep its last rank and quietly measure another build.
+    /// Every headless config is read through it — `--headless` and `--replay`
+    /// by [`Self::load_from_file`], `--batch` line by line. It does not
+    /// validate; its callers do.
+    pub fn from_json(text: &str) -> Result<Self, serde_json::Error> {
+        crate::config_parse::json_from_str(text)
     }
 
     /// Resolve the three profile fields to a per-team [`AiProfiles`].

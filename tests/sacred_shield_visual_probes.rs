@@ -1469,3 +1469,100 @@ fn everything_reads_at_the_match_camera() {
         assert!(r > 1.0);
     }
 }
+
+/// Sacred Shield rides the bearer's DRAWN body, not its sim root: as the
+/// bearer runs, its `VisualBody` bobbing on the gait and then lifted 1.5 yd as
+/// a Cyclone lifts one, the card stands on the drawn body's feet (its bottom
+/// 0.84 below them, on the drawn body's axis), every lit flare stays in the
+/// column over that card, and when the absorb ends every death spark flies
+/// in the ring's plane over the drawn card's centre.
+#[test]
+fn the_card_flares_and_sparks_ride_the_drawn_body() {
+    let r = PWS_CLIENT_TO_RIG;
+    let mut h = Harness::new();
+    let start = Vec3::new(1.0, 1.0, 1.0);
+    let rogue = h.unit(CharacterClass::Rogue, start);
+    let body = h.app.world().get::<Children>(rogue).unwrap()[0];
+    h.camera(Vec3::new(0.0, 30.0, 25.0), Vec3::ZERO);
+    h.give_absorb(rogue, 40.0);
+    h.run_to(rogue, ShieldPhase::Loop, 0.5);
+    let (mut cards, mut flares, mut sparks) = (0, 0, 0);
+    let mut frame = 0u32;
+    // Moves the bearer and its drawn body on for one frame, and returns the
+    // drawn body's feet.
+    let mut step = |h: &mut Harness| -> Vec3 {
+        let t = frame as f32 * DT;
+        let root = start + Vec3::new(2.0 * (t * 2.5).sin(), 0.0, 1.5 * (t * 2.3).sin());
+        let lift = 0.1 * (t * 9.0).sin() + if frame >= 30 { 1.5 } else { 0.0 };
+        frame += 1;
+        h.app
+            .world_mut()
+            .get_mut::<Transform>(rogue)
+            .unwrap()
+            .translation = root;
+        h.app
+            .world_mut()
+            .get_mut::<Transform>(body)
+            .unwrap()
+            .translation
+            .y = lift;
+        h.tick(1);
+        root + Vec3::Y * lift - Vec3::Y * HALF_HEIGHT
+    };
+    for _ in 0..60 {
+        let feet = step(&mut h);
+        let centre = feet + Vec3::Y * (SS_CARD_QUAD[2] + SS_CARD_QUAD[3]) / 2.0 * r;
+        for d in h.drawn(rogue, ShieldKind::SacredShield) {
+            match d.layer {
+                ShieldLayer::Outline | ShieldLayer::Rim | ShieldLayer::StreakA => {
+                    let bottom = d.g.translation.y - d.g.scale.y;
+                    assert!(
+                        (bottom - (feet.y - 0.84 * r)).abs() < 1e-3,
+                        "frame {frame}: {:?} bottom {bottom}, the drawn feet {}",
+                        d.layer,
+                        feet.y
+                    );
+                    assert!(
+                        (d.g.translation.xz() - feet.xz()).length() < 1.0,
+                        "frame {frame}: {:?} off the drawn body's axis",
+                        d.layer
+                    );
+                    cards += 1;
+                }
+                ShieldLayer::Flare(_) if d.material.base_color.alpha() > 0.0 => {
+                    let off = d.g.translation - centre;
+                    assert!(
+                        off.x.abs() <= 0.7 * r + 1e-3
+                            && off.z.abs() <= 0.2 * r + 1e-3
+                            && off.y >= -0.8 * r - 1e-3
+                            && off.y <= (0.8 + 0.3) * r + 1e-3,
+                        "frame {frame}: {:?} at {off} off the drawn card's centre",
+                        d.layer
+                    );
+                    flares += 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    // The absorb ends, the body still lifted and bobbing: the death's sparks.
+    h.auras(rogue).auras.clear();
+    for _ in 0..18 {
+        let feet = step(&mut h);
+        let ring = feet + Vec3::Y * ((SS_CARD_QUAD[2] + SS_CARD_QUAD[3]) / 2.0 + 0.15) * r;
+        for d in h.drawn(rogue, ShieldKind::SacredShield) {
+            if matches!(d.layer, ShieldLayer::Spark(_)) && d.material.base_color.alpha() > 0.0 {
+                let off = d.g.translation - ring;
+                assert!(
+                    off.y.abs() < 1e-3,
+                    "frame {frame}: {:?} off the drawn ring's plane: {off}",
+                    d.layer
+                );
+                sparks += 1;
+            }
+        }
+    }
+    assert_eq!(cards, 3 * 60, "every card layer, every frame");
+    assert!(flares > 300, "only {flares} lit flares checked");
+    assert!(sparks >= 30, "only {sparks} lit sparks checked");
+}

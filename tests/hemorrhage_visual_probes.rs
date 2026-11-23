@@ -35,10 +35,10 @@ use arenasim::states::play_match::components::{
     PlayMatchEntity, SwingStyle, VisualBody, WeaponHand, WeaponKind, WeaponSocket, HEMORRHAGE_AURA,
 };
 use arenasim::states::play_match::{
-    animate_body_lean, animate_client_particles, animate_weapon_swings, billboard_bleed_droplets,
-    cleanup_play_match, consume_avoided_strike_signals, consume_instant_ability_signals,
-    detect_aura_applications, fire_bleed_sprays, note_avoided_strikes, swing_style_for_ability,
-    update_bleed_sprays, BleedDroplet, BleedSpray, BleedSprayPending, SIPHON_BODY_CLEARANCE,
+    animate_body_lean, animate_client_particles, animate_weapon_swings, cleanup_play_match,
+    consume_avoided_strike_signals, consume_instant_ability_signals, detect_aura_applications,
+    fire_bleed_sprays, note_avoided_strikes, place_bleed_droplets, swing_style_for_ability,
+    update_bleed_sprays, BleedDroplet, BleedSpray, BleedSprayPending, BODY_HOLD_CLEARANCE,
     STROKES_WHEN_AVOIDED,
 };
 use arenasim::CharacterClass;
@@ -151,7 +151,7 @@ impl Harness {
                 fire_bleed_sprays,
                 update_bleed_sprays,
                 animate_client_particles,
-                billboard_bleed_droplets,
+                place_bleed_droplets,
             )
                 .chain(),
         );
@@ -759,7 +759,7 @@ fn assert_held_in_front(pet: bool, yaw: f32) -> (usize, usize) {
     let (a, b, r) = body_capsule(VICTIM_POS, pet);
     let nearest = (a - eye).dot(fwd).min((b - eye).dot(fwd)) - r;
     // The rule holds a droplet this far in front of the body's surface.
-    let clear = nearest - SIPHON_BODY_CLEARANCE;
+    let clear = nearest - BODY_HOLD_CLEARANCE;
     let mut held = 0;
     let mut unheld = 0;
     let mut first_chest = None;
@@ -1139,4 +1139,96 @@ fn a_long_fight_retires_every_spray() {
     assert!(most <= DROPLETS + 1, "{most}");
     h.ticks(100);
     assert_eq!(h.bleed(), 0);
+}
+
+/// A Kick never cuts a strike's stroke short before its contact, which its
+/// spray is timed to: a Kick on the same frame as Hemorrhage — whichever
+/// marker the router reads first — or a frame after it, leaves Sinister
+/// Strike's stroke swinging, and the spray still fires once, at contact. A
+/// Kick after the contact takes the hand, as does a Kick with no strike in
+/// the hand; a strike always takes it, from a Kick too.
+#[test]
+fn a_kick_does_not_cut_a_strikes_stroke_short() {
+    let contact_ticks =
+        (SwingStyle::SinisterStrike.impact_at() / TICK.as_secs_f32()).ceil() as usize;
+    // (what lands, on which tick, in that order) -> the stroke after the
+    // last, and whether the spray fired.
+    type Hits = &'static [(usize, AbilityType)];
+    let cases: [(&str, Hits, SwingStyle, bool); 5] = [
+        (
+            "Kick, then Hemorrhage, one frame",
+            &[(0, AbilityType::Kick), (0, AbilityType::Hemorrhage)],
+            SwingStyle::SinisterStrike,
+            true,
+        ),
+        (
+            "Hemorrhage, then Kick, one frame",
+            &[(0, AbilityType::Hemorrhage), (0, AbilityType::Kick)],
+            SwingStyle::SinisterStrike,
+            true,
+        ),
+        (
+            "Kick a frame after Hemorrhage",
+            &[(0, AbilityType::Hemorrhage), (1, AbilityType::Kick)],
+            SwingStyle::SinisterStrike,
+            true,
+        ),
+        (
+            "Kick alone",
+            &[(0, AbilityType::Kick)],
+            SwingStyle::Kick,
+            false,
+        ),
+        (
+            "Hemorrhage a frame after Kick",
+            &[(0, AbilityType::Kick), (1, AbilityType::Hemorrhage)],
+            SwingStyle::SinisterStrike,
+            true,
+        ),
+    ];
+    for (label, hits, stroke, sprays) in cases {
+        let mut h = Harness::new(false);
+        // A warm clock, so a stroke started on one frame has moved on by the
+        // next.
+        h.tick();
+        let last = hits.iter().map(|(t, _)| *t).max().unwrap();
+        let mut bleed = 0;
+        for tick in 0..=last {
+            if tick > 0 {
+                // A frame on: the first stroke is under way, short of contact.
+                let t = h.socket().release_t.expect("a stroke under way");
+                assert!(
+                    t > 0.0 && t < SwingStyle::SinisterStrike.impact_at(),
+                    "{label}: {t}"
+                );
+            }
+            for (_, ability) in hits.iter().filter(|(t, _)| *t == tick) {
+                if *ability == AbilityType::Hemorrhage {
+                    h.wound();
+                }
+                h.land(*ability);
+            }
+            h.tick();
+            bleed += h.bleed();
+        }
+        assert_eq!(h.socket().swing_style, stroke, "{label}");
+        for _ in 0..contact_ticks + 4 {
+            h.tick();
+            bleed += h.bleed();
+        }
+        assert_eq!(bleed > 0, sprays, "{label}: {bleed} droplets");
+    }
+
+    // Past the strike's contact the hand is free: a Kick takes it.
+    let mut h = Harness::new(false);
+    h.tick();
+    h.wound();
+    h.land(AbilityType::Hemorrhage);
+    for _ in 0..contact_ticks + 1 {
+        h.tick();
+    }
+    assert_eq!(h.socket().swing_style, SwingStyle::SinisterStrike);
+    h.land(AbilityType::Kick);
+    h.tick();
+    assert_eq!(h.socket().swing_style, SwingStyle::Kick, "after contact");
 }

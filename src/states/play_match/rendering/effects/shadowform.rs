@@ -197,6 +197,14 @@ pub fn wears_shadowform_look(compound: Option<CompoundDebuff>) -> bool {
     compound == Some(CompoundDebuff::Shadowform)
 }
 
+/// Whether `combatant` wears the Shadowform look now: alive and holding the
+/// form. Death counts as an end, since a killing blow leaves the aura on the
+/// corpse. The look and the shroud both ask this, so they lift on one frame.
+fn holds_shadowform(combatant: &Combatant, auras: Option<&ActiveAuras>) -> bool {
+    combatant.is_alive()
+        && auras.is_some_and(|a| a.auras.iter().any(|au| wears_shadowform_look(au.compound)))
+}
+
 /// The body colour the form gives a body whose own colour is `base`: lerped
 /// toward `tint + SHADOWFORM_BASE_SHOW_THROUGH × base` by
 /// `SHADOWFORM_TINT_STRENGTH`, in sRGB as the bench mixes it, at
@@ -224,6 +232,11 @@ pub fn shadowform_body_color(base: Color) -> Color {
 /// material (see the module note) plus the feet shroud rig. Its marker is the
 /// [`ShadowformLook`] on the body, so the look lands once and lifts once.
 /// Death counts as an end: a killing blow leaves the aura on the corpse.
+///
+/// This system spawns the shroud but never despawns it: the rig is taken down
+/// by [`update_shadowform_shrouds`], the system that parents particles onto
+/// it, so no particle can be queued onto a rig another system is despawning
+/// in the same command flush (AS-507).
 pub fn update_shadowform_visuals(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -236,11 +249,10 @@ pub fn update_shadowform_visuals(
         ),
         With<VisualBody>,
     >,
-    shrouds: Query<(Entity, &ShadowformShroud)>,
+    shrouds: Query<&ShadowformShroud>,
 ) {
     for (entity, combatant, auras, children) in combatants.iter() {
-        let held = combatant.is_alive()
-            && auras.is_some_and(|a| a.auras.iter().any(|au| wears_shadowform_look(au.compound)));
+        let held = holds_shadowform(combatant, auras);
         let Some(body) = children.iter().find(|&c| bodies.contains(c)) else {
             continue;
         };
@@ -265,7 +277,7 @@ pub fn update_shadowform_visuals(
                 material.alpha_mode = AlphaMode::Blend;
                 commands.entity(body).try_insert(record);
 
-                if !shrouds.iter().any(|(_, s)| s.owner == entity) {
+                if !shrouds.iter().any(|s| s.owner == entity) {
                     commands.spawn((
                         ShadowformShroud {
                             owner: entity,
@@ -284,12 +296,7 @@ pub fn update_shadowform_visuals(
                     material.alpha_mode = look.alpha_mode;
                 }
                 commands.entity(body).remove::<ShadowformLook>();
-                // Owner-scoped: another Priest's shroud stays.
-                for (rig, shroud) in shrouds.iter() {
-                    if shroud.owner == entity {
-                        commands.entity(rig).despawn();
-                    }
-                }
+                // The shroud goes in `update_shadowform_shrouds`, this frame.
             }
             _ => {}
         }
@@ -351,8 +358,13 @@ fn spawn_shroud_particle(
 }
 
 /// Follow each shroud's Priest at its feet, retire its spent particles and
-/// emit what its layers owe this frame. A shroud whose Priest is gone goes
-/// with it.
+/// emit what its layers owe this frame. A shroud whose Priest is gone, dead or
+/// out of the form goes, and emits nothing on its way out.
+///
+/// The rig's end is decided HERE, beside the only `add_child` onto it, not in
+/// [`update_shadowform_visuals`]: the two systems are unordered, and when the
+/// look's despawn flushed ahead of this system's particles, the particle was
+/// parented onto a despawned rig and the client panicked (AS-507).
 ///
 /// The rig lives as long as the form, so a spent particle is despawned here
 /// rather than left collapsed under it (`animate_client_particles` only
@@ -370,15 +382,22 @@ pub fn update_shadowform_shrouds(
         &mut Transform,
         Option<&Children>,
     )>,
-    owners: Query<(&Transform, Option<&Pet>), (With<Combatant>, Without<ShadowformShroud>)>,
+    owners: Query<
+        (&Transform, &Combatant, Option<&ActiveAuras>, Option<&Pet>),
+        Without<ShadowformShroud>,
+    >,
     particles: Query<&ClientParticle>,
 ) {
     let dt = time.delta_secs();
     for (entity, mut shroud, mut transform, children) in rigs.iter_mut() {
-        let Ok((owner, pet)) = owners.get(shroud.owner) else {
+        let Ok((owner, combatant, auras, pet)) = owners.get(shroud.owner) else {
             commands.entity(entity).despawn();
             continue;
         };
+        if !holds_shadowform(combatant, auras) {
+            commands.entity(entity).despawn();
+            continue;
+        }
         transform.translation = feet_anchor(owner.translation, pet.is_some());
         for child in children.into_iter().flat_map(|c| c.iter()) {
             if particles.get(child).is_ok_and(|p| p.age >= p.life) {

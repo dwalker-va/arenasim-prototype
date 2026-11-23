@@ -1954,8 +1954,8 @@ impl DefaultLoadouts {
 /// Parse and validate the text of an `items.ron`; `origin` names it in errors.
 /// Every item must sit in its tier's band ([`validate_tier_bands`]).
 pub fn parse_item_definitions(contents: &str, origin: &str) -> Result<ItemDefinitions, String> {
-    let config: ItemsConfig =
-        ron::from_str(contents).map_err(|e| format!("Failed to parse {}: {}", origin, e))?;
+    let config: ItemsConfig = crate::config_parse::ron_from_str(contents)
+        .map_err(|e| format!("Failed to parse {}: {}", origin, e))?;
 
     let definitions = ItemDefinitions::new(config);
     validate_tier_bands(&definitions)
@@ -2067,8 +2067,22 @@ pub fn load_default_loadouts(items: &ItemDefinitions) -> Result<DefaultLoadouts,
     let contents = std::fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read {}: {}", config_path, e))?;
 
-    let config: LoadoutsConfig =
-        ron::from_str(&contents).map_err(|e| format!("Failed to parse {}: {}", config_path, e))?;
+    let loadouts = parse_default_loadouts(&contents, &config_path, items)?;
+
+    info!("Loaded default loadouts from {}", config_path);
+
+    Ok(loadouts)
+}
+
+/// Parse and validate the text of a `loadouts.ron` against `items`; `origin`
+/// names it in errors.
+pub fn parse_default_loadouts(
+    contents: &str,
+    origin: &str,
+    items: &ItemDefinitions,
+) -> Result<DefaultLoadouts, String> {
+    let config: LoadoutsConfig = crate::config_parse::ron_from_str(contents)
+        .map_err(|e| format!("Failed to parse {}: {}", origin, e))?;
 
     let loadouts = DefaultLoadouts::new(config);
 
@@ -2090,8 +2104,6 @@ pub fn load_default_loadouts(items: &ItemDefinitions) -> Result<DefaultLoadouts,
                 .map_err(|e| format!("Default loadout for {}: {}", class.name(), e))?;
         }
     }
-
-    info!("Loaded default loadouts from {}", config_path);
 
     Ok(loadouts)
 }

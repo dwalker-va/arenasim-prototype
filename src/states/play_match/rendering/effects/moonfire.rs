@@ -34,7 +34,8 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::view::NoFrustumCulling;
 use std::f32::consts::TAU;
 
-use super::heal_impact::{ARENA_FLOOR_WORLD_Y, COMBATANT_BODY_RADIUS, HEALING_WAVE_UNDERGLOW_LIFT};
+use super::body_hold::COMBATANT_BODY_RADIUS;
+use super::heal_impact::{ARENA_FLOOR_WORLD_Y, HEALING_WAVE_UNDERGLOW_LIFT};
 use crate::states::play_match::components::*;
 
 // --- Bench sign-off (AS-160) -------------------------------------------------

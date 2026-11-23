@@ -32,10 +32,11 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::{
     age_siphon_life_particles, age_warlock_dot_particles, animate_corruption_shrouds,
     animate_curse_apparitions, animate_dot_apply_bursts, animate_siphon_life_glows,
-    animate_ua_states, billboard_siphon_life_particles, billboard_warlock_dot_visuals,
-    cleanup_play_match, cleanup_siphon_life_glows, cleanup_warlock_dot_visuals,
-    orient_curse_apparitions, spawn_warlock_dot_visuals, AbilityDefinitions, AbilityType,
-    DotStateVisual, SiphonLifePart, SiphonLifeParticle, SiphonLifeRig, CORRUPTION_AURA,
+    animate_ua_states, billboard_warlock_dot_visuals, cleanup_play_match,
+    cleanup_siphon_life_glows, cleanup_warlock_dot_visuals, hide_dot_states_on_sheep,
+    orient_curse_apparitions, place_siphon_life_glows, spawn_warlock_dot_visuals,
+    AbilityDefinitions, AbilityType, DotStateVisual, SiphonLifePart, SiphonLifeParticle,
+    SiphonLifeRig, CORRUPTION_AURA,
 };
 use arenasim::CharacterClass;
 
@@ -217,8 +218,11 @@ impl Harness {
             (
                 animate_siphon_life_glows,
                 age_siphon_life_particles,
-                billboard_siphon_life_particles,
                 cleanup_siphon_life_glows,
+                // A `BodyPlacement` system in the client (PostUpdate), and
+                // the one sheep rule beside it.
+                place_siphon_life_glows,
+                hide_dot_states_on_sheep,
             )
                 .chain()
                 // The Warlock DoT detector builds the rig (`states/mod.rs`).
@@ -1490,4 +1494,91 @@ fn the_match_ending_mid_dot_leaves_nothing_behind() {
     assert!(h.rigs().is_empty());
     assert_eq!(h.count::<SiphonLifeParticle>(), 0);
     assert_eq!(h.count::<SiphonLifePart>(), 0);
+}
+
+/// The `VisualBody` a unit's client spawns under it, at its rest height.
+fn add_body(app: &mut App, unit: Entity, rest_y: f32) -> Entity {
+    let body = app
+        .world_mut()
+        .spawn((
+            arenasim::states::play_match::components::VisualBody { rest_y },
+            Transform::from_xyz(0.0, rest_y, 0.0),
+        ))
+        .id();
+    app.world_mut().entity_mut(unit).add_child(body);
+    body
+}
+
+/// Where a body point `height` yards above the floor stands on a drawn body
+/// whose root is `root` lifted `lift` off its rest pose: a pet's body hangs
+/// 0.45 below its root at 0.55 of a combatant's stature.
+fn drawn_point(root: Vec3, lift: f32, height: f32, pet: bool) -> Vec3 {
+    let local = if pet {
+        -0.45 + (height - 1.0) * 0.55
+    } else {
+        height - 1.0
+    };
+    root + Vec3::Y * (lift + local)
+}
+
+/// The bob and the lift `frame` frames in: the gait's 0.1 yd bob, then a
+/// Cyclone's 1.5 yd lift from frame 30.
+fn bob_and_lift(frame: u32, dt: f32) -> (Vec3, f32) {
+    let t = frame as f32 * dt;
+    let run = Vec3::new(2.0 * (t * 2.5).sin(), 0.0, 1.5 * (t * 2.3).sin());
+    (
+        run,
+        0.1 * (t * 9.0).sin() + if frame >= 30 { 1.5 } else { 0.0 },
+    )
+}
+
+/// Siphon Life's glow rides its victim's DRAWN body, not its sim root: every
+/// frame, as a combatant or a pet runs, its `VisualBody` bobbing on the gait
+/// and then lifted 1.5 yd as a Cyclone lifts one, the rig stands at the drawn
+/// body's chest.
+#[test]
+fn the_glow_rides_the_drawn_body() {
+    for pet in [false, true] {
+        let mut h = Harness::new();
+        let (root_y, rest) = if pet {
+            (PET_SIM_Y, PET_BODY_Y)
+        } else {
+            (COMBATANT_Y, 0.0)
+        };
+        let start = Vec3::new(1.0, root_y, -2.0);
+        let victim = h.victim(start, &[AURA]);
+        if pet {
+            let owner = h.app.world_mut().spawn_empty().id();
+            h.app.world_mut().entity_mut(victim).insert(Pet {
+                owner,
+                pet_type: PetType::Felhunter,
+            });
+        }
+        let body = add_body(&mut h.app, victim, rest);
+        h.tick(2);
+        for frame in 0..60 {
+            let (run, lift) = bob_and_lift(frame, TICK_SECS);
+            let root = start + run;
+            h.app
+                .world_mut()
+                .get_mut::<Transform>(victim)
+                .unwrap()
+                .translation = root;
+            h.app
+                .world_mut()
+                .get_mut::<Transform>(body)
+                .unwrap()
+                .translation
+                .y = rest + lift;
+            h.tick(1);
+            let rigs = h.rigs();
+            assert_eq!(rigs.len(), 1);
+            let want = drawn_point(root, lift, 1.45, pet);
+            assert!(
+                rigs[0].2.distance(want) < 1e-4,
+                "pet {pet} frame {frame}: the glow at {}, the drawn chest {want}",
+                rigs[0].2
+            );
+        }
+    }
 }

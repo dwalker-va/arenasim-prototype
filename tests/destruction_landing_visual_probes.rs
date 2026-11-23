@@ -35,12 +35,12 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::map_config::ActiveMapGeometry;
 use arenasim::states::play_match::{
     animate_client_particles, animate_conflagrate_bursts, animate_conflagrate_particles,
-    animate_immolate_burns, animate_school_impacts, billboard_conflagrate_particles,
-    cleanup_immolate_burns, cleanup_play_match, client_landing_style, landing_style,
-    pose_conflagrate_rings, spawn_conflagrate_landings, spawn_immolate_burns, spawn_school_impacts,
-    ConflagrateBurst, ConflagrateParticle, ConflagrateParticlePart, ConflagrateRingPart,
-    ConflagrateShockPiece, ImmolateBurnRig, CONFLAGRATE_EMITTERS, FLINCH_CRIT_MULT, FLINCH_DIP,
-    IMPACT_HEAD_Y, IMPACT_PET_STATURE,
+    animate_immolate_burns, animate_school_impacts, cleanup_immolate_burns, cleanup_play_match,
+    client_landing_style, landing_style, place_conflagrate_particles, pose_conflagrate_rings,
+    spawn_conflagrate_landings, spawn_immolate_burns, spawn_school_impacts, ConflagrateBurst,
+    ConflagrateParticle, ConflagrateParticlePart, ConflagrateRingPart, ConflagrateShockPiece,
+    ImmolateBurnRig, CONFLAGRATE_EMITTERS, FLINCH_CRIT_MULT, FLINCH_DIP, IMPACT_HEAD_Y,
+    IMPACT_PET_STATURE,
 };
 use arenasim::CharacterClass;
 
@@ -317,7 +317,7 @@ impl Harness {
                 animate_conflagrate_bursts,
                 pose_conflagrate_rings,
                 animate_conflagrate_particles,
-                billboard_conflagrate_particles,
+                place_conflagrate_particles,
             )
                 .chain()
                 .after(process_casting),
@@ -1803,4 +1803,80 @@ fn a_plumes_streak_is_its_flight_as_the_camera_sees_it() {
         }
     }
     assert!(streaks > 100, "{streaks}");
+}
+
+/// The `VisualBody` a unit's client spawns under it, at its rest height.
+fn add_body(app: &mut App, unit: Entity, rest_y: f32) -> Entity {
+    let body = app
+        .world_mut()
+        .spawn((
+            arenasim::states::play_match::components::VisualBody { rest_y },
+            Transform::from_xyz(0.0, rest_y, 0.0),
+        ))
+        .id();
+    app.world_mut().entity_mut(unit).add_child(body);
+    body
+}
+
+/// Where a body point `height` yards above the floor stands on a drawn body
+/// whose root is `root` lifted `lift` off its rest pose: a pet's body hangs
+/// 0.45 below its root at 0.55 of a combatant's stature.
+fn drawn_point(root: Vec3, lift: f32, height: f32, pet: bool) -> Vec3 {
+    let local = if pet {
+        -0.45 + (height - 1.0) * 0.55
+    } else {
+        height - 1.0
+    };
+    root + Vec3::Y * (lift + local)
+}
+
+/// The bob and the lift `frame` frames in: the gait's 0.1 yd bob, then a
+/// Cyclone's 1.5 yd lift from frame 30.
+fn bob_and_lift(frame: u32, dt: f32) -> (Vec3, f32) {
+    let t = frame as f32 * dt;
+    let run = Vec3::new(2.0 * (t * 2.5).sin(), 0.0, 1.5 * (t * 2.3).sin());
+    (
+        run,
+        0.1 * (t * 9.0).sin() + if frame >= 30 { 1.5 } else { 0.0 },
+    )
+}
+
+/// Conflagrate's burst rides its victim's DRAWN body, not its sim root: every
+/// frame, as a combatant or a pet runs, its `VisualBody` bobbing on the gait
+/// and then lifted 1.5 yd as a Cyclone lifts one, the rig (and with it the
+/// fire disc and the rune ring) stands at the drawn body's chest.
+#[test]
+fn the_burst_rides_the_drawn_body() {
+    for pet in [false, true] {
+        let mut h = Harness::new();
+        let (root_y, rest) = if pet {
+            (PET_SIM_Y, -0.45)
+        } else {
+            (COMBATANT_Y, 0.0)
+        };
+        let start = Vec3::new(1.0, root_y, -2.0);
+        let victim = if pet {
+            h.pet_victim(start)
+        } else {
+            h.victim(start)
+        };
+        let body = add_body(&mut h.app, victim, rest);
+        h.land(victim, false);
+        h.tick(1);
+        for frame in 0..60 {
+            let (run, lift) = bob_and_lift(frame, DT);
+            let root = start + run;
+            h.world().get_mut::<Transform>(victim).unwrap().translation = root;
+            h.world().get_mut::<Transform>(body).unwrap().translation.y = rest + lift;
+            h.tick(1);
+            let rigs = h.rigs();
+            assert_eq!(rigs.len(), 1, "pet {pet} frame {frame}");
+            let want = drawn_point(root, lift, 1.45, pet);
+            assert!(
+                rigs[0].3.distance(want) < 1e-4,
+                "pet {pet} frame {frame}: the burst at {}, the drawn chest {want}",
+                rigs[0].3
+            );
+        }
+    }
 }
