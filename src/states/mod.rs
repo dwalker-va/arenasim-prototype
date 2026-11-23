@@ -283,6 +283,7 @@ impl Plugin for StatesPlugin {
                     play_match::load_spell_icons,
                     configure_match_ui::load_class_icons,
                     animation_sandbox::restage_on_config_change,
+                    animation_sandbox::restage_caster_for_entry,
                     animation_sandbox::playback::sustain_staged_units,
                     animation_sandbox::playback::drive_playback,
                     animation_sandbox::playback::position_caster,

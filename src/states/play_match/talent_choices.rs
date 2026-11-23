@@ -612,6 +612,29 @@ impl TalentDefinitions {
             .collect()
     }
 
+    /// `base` with every option a `Requires` rule names for `ability` chosen,
+    /// each in place of what `base` chose on its menu: the choices that let a
+    /// slot cast it. `base` itself when no rule requires an option for it.
+    /// Whether the result is legal for a build, and leaves `ability`
+    /// unlocked, is [`resolve_with_choices`](TalentDefinitions::resolve_with_choices)'s
+    /// to answer.
+    pub fn choices_to_cast(&self, base: &SlotChoices, ability: AbilityType) -> SlotChoices {
+        let mut choices = base.clone();
+        for rule in self.rules() {
+            if let ChoiceRule::Requires {
+                ability: required_for,
+                option,
+            } = *rule
+            {
+                if required_for == ability {
+                    choices.chosen.retain(|o| o.menu() != option.menu());
+                    choices.chosen.insert(option);
+                }
+            }
+        }
+        choices
+    }
+
     /// Check every slot of `config` chose what its build allows.
     pub fn validate_config_choices(&self, config: &MatchConfig) -> Result<(), String> {
         for (team, classes, builds) in [
