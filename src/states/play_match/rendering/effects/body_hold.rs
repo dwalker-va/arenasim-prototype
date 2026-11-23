@@ -1,7 +1,7 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
-use super::druid_heals::{body_point, BODY_CENTRE_ABOVE_FLOOR};
+use super::druid_heals::body_point;
 use super::school_impact::IMPACT_PET_BODY_Y;
 use crate::states::play_match::components::{Combatant, Pet, VisualBody};
 
@@ -194,9 +194,10 @@ impl RenderedBody {
         body_point(height, self.root, self.is_pet)
     }
 
-    /// The centre of the drawn body.
+    /// The centre of the drawn body: its `VisualBody`'s translation under
+    /// the unit (the unit's own root when it has no body).
     pub fn centre(&self) -> Vec3 {
-        self.point(BODY_CENTRE_ABOVE_FLOOR)
+        self.unit.transform_point(self.local.translation)
     }
 }
 

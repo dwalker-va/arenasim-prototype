@@ -262,9 +262,9 @@ impl Graph {
     }
 }
 
-/// The set's members are exactly the placements, and so is every
-/// `PostUpdate` system that reads a `VisualBody` (the Cyclone lift itself
-/// only filters on one).
+/// The set's members are exactly the placements, and exactly the `PostUpdate`
+/// systems that read a `VisualBody` — every placement reads it through
+/// `BodyHold` (the Cyclone lift itself only filters on one).
 #[test]
 fn every_rendered_body_placement_is_in_the_set() {
     let mut app = client_app();
@@ -279,13 +279,10 @@ fn every_rendered_body_placement_is_in_the_set() {
         .filter(|(_, _, body, _)| *body)
         .map(|(_, n, ..)| n.clone())
         .collect();
-    assert!(
-        readers.is_subset(&expected),
-        "reads the rendered body outside BodyPlacement: {:?}",
-        readers.difference(&expected).collect::<Vec<_>>()
+    assert_eq!(
+        readers, expected,
+        "the PostUpdate systems that read the rendered body are the set's members"
     );
-    // Non-vacuity: the hold's readers are found by their access.
-    assert!(readers.contains("place_siphon_life_glows") && readers.len() >= 12);
 }
 
 /// The set runs after the Cyclone lift and before transform propagation.
