@@ -1307,12 +1307,12 @@ fn the_implosion_rides_the_rendered_body_and_is_held_in_front_of_it() {
     assert!(held > 20, "{held} needed holding");
 }
 
-/// The throttle's edge, to the millisecond: a heal 2.990 s after the stream
-/// last played on an ally is still throttled, and one 2.9995 s after — past
-/// 2.999, the bench's `ms - lastHeal >= every*1000 - 1` — plays.
+/// The throttle's edge, to the millisecond: a heal 2.990 s or 2.998 s after
+/// the stream last played on an ally is still throttled, and one 2.9995 s
+/// after — past 2.999, the bench's `ms - lastHeal >= every*1000 - 1` — plays.
 #[test]
 fn the_stream_throttle_turns_over_at_three_seconds_to_the_millisecond() {
-    for (gap, plays) in [(2.990_f32, false), (2.9995, true)] {
+    for (gap, plays) in [(2.990_f32, false), (2.998, false), (2.9995, true)] {
         let mut h = Harness::new();
         h.world()
             .resource_mut::<Time<Virtual>>()
