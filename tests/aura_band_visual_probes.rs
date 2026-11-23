@@ -30,7 +30,7 @@ use arenasim::states::play_match::combat_core::{
 use arenasim::states::play_match::components::{
     weapon_poison_marker_aura, ActiveAuras, Aura, AuraApplyOwner, AuraApplyRoute, AuraBand,
     AuraBandPolarity, AuraPending, AuraType, Combatant, CompoundDebuff, DispelType, Pet, PetType,
-    TotemElement, DIVINE_PROTECTION_AURA, GUARDIAN_SPIRIT_AURA, VENGEANCE_AURA,
+    TotemElement, DIVINE_PROTECTION_AURA, EXPOSE_ARMOR_AURA, GUARDIAN_SPIRIT_AURA, VENGEANCE_AURA,
 };
 use arenasim::states::play_match::talent_procs::{effect_aura, ProcEvent, TalentProcSlot};
 use arenasim::states::play_match::talents::{TalentDefinitions, TalentEffect, TalentId};
@@ -834,6 +834,54 @@ fn divine_protection_raises_no_band_but_another_ward_does() {
     h.set_auras(unit, vec![ward("Some Other Ward")]);
     h.tick(3);
     assert_eq!(h.bands().len(), 1, "another ward keeps the band");
+}
+
+/// Expose Armor is owned by its crest, by NAME (`expose_armor.rs`, AS-366):
+/// the crest over the head is its landing. Its type is the damage pipeline's,
+/// so another armor reduction keeps the band. The name is the one the RON
+/// gives the ability.
+#[test]
+fn expose_armor_owns_its_application_and_its_type_siblings_keep_the_band() {
+    let owned = AuraApplyRoute::Owned(AuraApplyOwner::ExposeArmorCrest);
+    let defs = AbilityDefinitions::shipped();
+    let def = defs.get_unchecked(&AbilityType::ExposeArmor);
+    assert_eq!(def.name, EXPOSE_ARMOR_AURA, "the RON name");
+    let t = def.applies_aura.as_ref().unwrap().aura_type;
+    assert_eq!(t, AuraType::ArmorPercentReduction);
+    assert_eq!(AuraApplyRoute::for_instance(t, &def.name), owned);
+    assert_eq!(
+        AuraApplyRoute::for_instance(t, "Some Other Rend"),
+        AuraApplyRoute::Band,
+        "another armor reduction keeps the band"
+    );
+    // The name alone does not own another type.
+    for other in AuraType::ALL
+        .into_iter()
+        .filter(|o| *o != AuraType::ArmorPercentReduction)
+    {
+        assert_eq!(
+            AuraApplyRoute::for_instance(other, EXPOSE_ARMOR_AURA),
+            AuraApplyRoute::for_aura(other),
+            "{other:?}"
+        );
+    }
+}
+
+#[test]
+fn expose_armor_raises_no_band_but_another_armor_rend_does() {
+    let rend = |name: &str| aura(AuraType::ArmorPercentReduction, name, None);
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(unit, vec![rend(EXPOSE_ARMOR_AURA)]);
+    h.tick(3);
+    assert!(h.bands().is_empty(), "the crest owns its landing");
+
+    let mut h = Harness::new();
+    let unit = h.spawn_unit(Vec3::new(0.0, STAND_Y, 0.0));
+    h.set_auras(unit, vec![rend("Some Other Rend")]);
+    h.tick(3);
+    assert_eq!(h.bands().len(), 1, "another armor rend keeps the band");
 }
 
 /// Cheat Death's damage cut is owned by its skull and ghost-fire, by NAME

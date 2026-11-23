@@ -29,6 +29,7 @@
 use super::backhand_trail::{spawn_backhand_trail, BackhandTrailAssets};
 use super::bleed_spray::spawn_bleed_spray_pending;
 use super::crusader_strike::spawn_crusader_strike_flourish;
+use super::expose_armor::spawn_expose_armor_pending;
 use super::finisher_flash::{spawn_finisher_hand_flash, FinisherFlashAssets};
 use super::frost_nova::spawn_frost_nova;
 use super::holy_justice::spawn_holy_justice;
@@ -73,9 +74,8 @@ pub fn swing_style_for_ability(ability: AbilityType) -> Option<SwingStyle> {
         AbilityType::Ambush => Some(SwingStyle::Ambush),
         AbilityType::SinisterStrike => Some(SwingStyle::SinisterStrike),
         // The apply stroke (AS-336): a finisher that puts its debuff ON the
-        // victim sweeps a backhand across its chest. Expose Armor (AS-366)
-        // joins this arm.
-        AbilityType::Rupture => Some(SwingStyle::Backhand),
+        // victim sweeps a backhand across its chest.
+        AbilityType::Rupture | AbilityType::ExposeArmor => Some(SwingStyle::Backhand),
         // Crusader Strike (TBC kit 324) plays body anim 57, Special1H — the
         // anim Mortal Strike plays — so it swings Mortal Strike's stroke
         // (AS-337 bench; `crusader_strike.rs` draws its trail and landing).
@@ -272,10 +272,12 @@ pub fn consume_instant_ability_signals(
                     );
                 }
             }
-            // Rupture: the finisher hand flash rides the backhand, and the
-            // bleed spray waits for its contact — and for the bleed to have
-            // landed, so a dodge, a parry or an immune victim draws no blood.
-            AbilityType::Rupture => {
+            // Rupture and Expose Armor: the finisher hand flash rides the
+            // backhand, and the landing waits for its contact — and for the
+            // debuff to have landed, so a dodge, a parry or an immune victim
+            // draws nothing on the victim. Rupture's landing is the bleed
+            // spray; Expose Armor's the crest over the head (AS-366).
+            AbilityType::Rupture | AbilityType::ExposeArmor => {
                 if let Some(caster_pos) = caster_pos {
                     spawn_finisher_hand_flash(
                         &mut commands,
@@ -289,8 +291,13 @@ pub fn consume_instant_ability_signals(
                     );
                 }
                 if let (Some(style), Some(victim)) = (style, signal.target) {
-                    if let Some(aura) = ability_defs.get(&AbilityType::Rupture) {
-                        spawn_bleed_spray_pending(
+                    if let Some(aura) = ability_defs.get(&signal.ability) {
+                        let landing = if signal.ability == AbilityType::Rupture {
+                            spawn_bleed_spray_pending
+                        } else {
+                            spawn_expose_armor_pending
+                        };
+                        landing(
                             &mut commands,
                             victim,
                             signal.caster,

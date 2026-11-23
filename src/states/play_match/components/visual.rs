@@ -1009,6 +1009,18 @@ pub fn is_divine_protection(aura_type: AuraType, name: &str) -> bool {
     aura_type == AuraType::DamageTakenReduction && name == DIVINE_PROTECTION_AURA
 }
 
+/// Expose Armor's armor rend (AS-366). Its landing is the shield crest over
+/// the victim's head that cracks blue (`rendering/effects/expose_armor.rs`),
+/// held for the Rogue's backhand to make contact.
+pub const EXPOSE_ARMOR_AURA: &str = "Expose Armor";
+
+/// Whether an aura of `aura_type` named `name` is Expose Armor's: the one
+/// predicate its crest, its band routing and the lands-silently audit all
+/// ask.
+pub fn is_expose_armor(aura_type: AuraType, name: &str) -> bool {
+    aura_type == AuraType::ArmorPercentReduction && name == EXPOSE_ARMOR_AURA
+}
+
 /// Power Infusion's spell power buff (AS-353). Not a landing: its state is
 /// the electric crackle at the ally's chest for the buff's life
 /// (`rendering/effects/discipline_states.rs`), whose onset is its
@@ -2179,6 +2191,12 @@ pub enum AuraApplyOwner {
     /// because its type (`DamageTakenReduction`) is shared with auras that
     /// keep the band (Devotion Aura).
     SuppressionShell,
+    /// Expose Armor: the shield crest over the victim's head that glints
+    /// gold and cracks blue, fired at the backhand's contact
+    /// (`expose_armor.rs`, AS-366). Owned per aura NAME, because its type
+    /// (`ArmorPercentReduction`) is the damage pipeline's, which any other
+    /// user meets on the band.
+    ExposeArmorCrest,
 }
 
 impl AuraApplyRoute {
@@ -2189,8 +2207,9 @@ impl AuraApplyRoute {
     /// its hands ([`VENGEANCE_AURA`]), Cheat Death by its save
     /// ([`CHEAT_DEATH_NAME`]), Divine Protection by its globe
     /// ([`DIVINE_PROTECTION_AURA`]), Power Infusion by its crackle
-    /// ([`POWER_INFUSION_AURA`]) and Pain Suppression by its shell
-    /// ([`PAIN_SUPPRESSION_AURA`]); every other aura routes by its type
+    /// ([`POWER_INFUSION_AURA`]), Pain Suppression by its shell
+    /// ([`PAIN_SUPPRESSION_AURA`]) and Expose Armor by its crest
+    /// ([`EXPOSE_ARMOR_AURA`]); every other aura routes by its type
     /// ([`Self::for_aura`]). The renderers ask this — the band, and the
     /// Repentance swirl to find its incapacitate.
     pub fn for_instance(aura_type: AuraType, name: &str) -> Self {
@@ -2210,6 +2229,8 @@ impl AuraApplyRoute {
             AuraApplyRoute::Owned(AuraApplyOwner::InfusionCrackle)
         } else if is_pain_suppression(aura_type, name) {
             AuraApplyRoute::Owned(AuraApplyOwner::SuppressionShell)
+        } else if is_expose_armor(aura_type, name) {
+            AuraApplyRoute::Owned(AuraApplyOwner::ExposeArmorCrest)
         } else {
             Self::for_aura(aura_type)
         }
@@ -2991,7 +3012,7 @@ pub enum SwingStyle {
     /// what separates the spammed builder from Cheap Shot's near-sagittal jab.
     SinisterStrike,
     /// The Rogue's apply stroke for a finisher that puts a debuff ON its
-    /// target — Rupture, and Expose Armor (AS-366). A BACKHAND sweep, authored
+    /// target — Rupture and Expose Armor. A BACKHAND sweep, authored
     /// at the AS-336 bench (the client plays a generic Special1H here): the
     /// weapon hand winds up across the body to the off shoulder, sweeps outward
     /// across the victim's chest with contact mid-arc, and follows through
@@ -3064,8 +3085,9 @@ impl InstantAbilityFired {
             | CheapShot | KidneyShot | HammerOfJustice | FrostNova | PowerWordShield | IceBarrier
             // The Rogue's apply stroke (AS-336): an aura-only finisher applied
             // inline in the Rogue AI, its marker spawned before the avoidance
-            // roll, so a dodged one still strikes.
-            | Rupture
+            // roll, so a dodged one still strikes. Expose Armor (AS-366) swings
+            // the same stroke.
+            | Rupture | ExposeArmor
             // The melee interrupts: spawned at the committed-use site in
             // combat_ai.rs's interrupt system (roadmap B). Wind Shear is
             // deliberately absent — the Shaman has no weapon sockets and its

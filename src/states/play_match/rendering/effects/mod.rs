@@ -148,6 +148,8 @@ mod bleed_spray;
 pub use bleed_spray::*;
 mod backhand_trail;
 pub use backhand_trail::*;
+mod expose_armor;
+pub use expose_armor::*;
 mod paladin_oneshots;
 pub use paladin_oneshots::*;
 mod repentance;
