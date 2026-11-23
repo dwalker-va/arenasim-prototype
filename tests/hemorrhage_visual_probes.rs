@@ -30,9 +30,9 @@ use arenasim::states::play_match::ability_book::AbilityBook;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::combat_core::{Avoidance, MeleeAvoided};
 use arenasim::states::play_match::components::{
-    ActiveAuras, Aura, AuraApplyOwner, AuraApplyRoute, AuraBand, AuraPending, AuraType,
-    ClientParticle, Combatant, InstantAbilityFired, Pet, PetType, PlayMatchEntity, SwingStyle,
-    VisualBody, WeaponHand, WeaponKind, WeaponSocket, HEMORRHAGE_AURA,
+    refresh_stacking_aura, ActiveAuras, Aura, AuraApplyOwner, AuraApplyRoute, AuraBand,
+    AuraPending, AuraType, ClientParticle, Combatant, InstantAbilityFired, Pet, PetType,
+    PlayMatchEntity, SwingStyle, VisualBody, WeaponHand, WeaponKind, WeaponSocket, HEMORRHAGE_AURA,
 };
 use arenasim::states::play_match::{
     animate_body_lean, animate_client_particles, animate_weapon_swings, billboard_bleed_droplets,
@@ -238,7 +238,13 @@ impl Harness {
 
     /// The drain's marker for a landed `ability` on the victim.
     fn land(&mut self, ability: AbilityType) {
-        let (rogue, victim) = (self.rogue, self.victim);
+        let rogue = self.rogue;
+        self.land_from(rogue, ability);
+    }
+
+    /// The drain's marker for `caster`'s landed `ability` on the victim.
+    fn land_from(&mut self, rogue: Entity, ability: AbilityType) {
+        let victim = self.victim;
         self.app.world_mut().spawn((
             InstantAbilityFired {
                 caster: rogue,
@@ -266,23 +272,54 @@ impl Harness {
         self.app.world_mut().get_mut::<ActiveAuras>(victim).unwrap()
     }
 
-    /// The Rogue's wound lands — or, worn already, refreshes and stacks, as
-    /// `apply_pending_auras` refreshes a stacking aura.
+    /// The Rogue's wound lands — or, worn already, refreshes and stacks.
     fn wound(&mut self) {
-        let (rogue, victim) = (self.rogue, self.victim);
+        let rogue = self.rogue;
+        self.wound_from(rogue);
+    }
+
+    /// `rogue`'s wound lands as `apply_pending_auras` lands it: through the
+    /// sim's own `refresh_stacking_aura` when the victim already wears one it
+    /// refreshes (which hands the one per-target wound to `rogue`), and as a
+    /// fresh aura otherwise.
+    fn wound_from(&mut self, rogue: Entity) {
+        let victim = self.victim;
         let fresh = aura_of(AbilityType::Hemorrhage, victim, rogue);
         let mut auras = self.auras();
-        match auras
-            .auras
-            .iter_mut()
-            .find(|a| a.caster == Some(rogue) && a.ability_name == HEMORRHAGE_AURA)
-        {
-            Some(worn) => {
-                worn.duration = fresh.duration;
-                let stacks = worn.stacks.as_mut().expect("the wound stacks");
-                stacks.count = (stacks.count + 1).min(stacks.max);
-            }
-            None => auras.auras.push(fresh),
+        if refresh_stacking_aura(&mut auras.auras, &fresh).is_none() {
+            auras.auras.push(fresh);
+        }
+    }
+
+    /// A second Subtlety Rogue on the first one's team.
+    fn second_rogue(&mut self) -> Entity {
+        let book = AbilityBook::for_class(&defs(), CharacterClass::Rogue)
+            .granting(&defs(), AbilityType::Hemorrhage);
+        self.app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(1.5, 1.0, 1.0),
+                Combatant::new(1, 1, CharacterClass::Rogue).with_book(book),
+            ))
+            .id()
+    }
+
+    /// Every droplet faces the camera `cam` exactly: its face is the
+    /// camera's back (no tilt) and its X the camera's right (no roll).
+    fn assert_faces(&mut self, cam: &Transform) {
+        let mut q = self
+            .app
+            .world_mut()
+            .query_filtered::<&Transform, With<BleedDroplet>>();
+        for tf in q.iter(self.app.world()) {
+            assert!(
+                (tf.rotation * Vec3::Z - cam.rotation * Vec3::Z).length() < 1e-5,
+                "a droplet is tilted off the camera"
+            );
+            assert!(
+                (tf.rotation * Vec3::X - cam.rotation * Vec3::X).length() < 1e-5,
+                "a droplet is rolled"
+            );
         }
     }
 
@@ -728,6 +765,7 @@ fn assert_held_in_front(pet: bool, yaw: f32) -> (usize, usize) {
     let mut first_chest = None;
     for _ in 0..90 {
         h.tick();
+        h.assert_faces(&cam);
         for (_, truly, drawn, scale, age) in h.droplets() {
             if first_chest.is_none() {
                 first_chest = Some(truly);
@@ -823,6 +861,7 @@ fn droplets_thrown_behind_the_body_are_drawn_before_it() {
                 let behind = (sort_point - eye).dot(fwd);
                 for _ in 0..90 {
                     h.tick();
+                    h.assert_faces(&cam);
                     for (_, truly, at, ..) in h.droplets() {
                         if (truly - eye).dot(fwd) > behind {
                             would_bury += 1;
@@ -865,6 +904,7 @@ fn the_hold_follows_a_victim_running_at_the_camera() {
             tf.translation += toward * 0.07;
         }
         h.tick();
+        h.assert_faces(&cam);
         let at = h.app.world().get::<Transform>(victim).unwrap().translation;
         let (a, b, r) = body_capsule(at, false);
         let nearest = (a - eye).dot(fwd).min((b - eye).dot(fwd)) - r;
@@ -874,6 +914,68 @@ fn the_hold_follows_a_victim_running_at_the_camera() {
         }
     }
     assert!(checked > 1000, "{checked}");
+}
+
+// ── Two Rogues, one wound ────────────────────────────────────────────────────
+
+/// Hemorrhage's wound is one per target, and a refresh hands it to its
+/// caster. A second Rogue's hit inside the first one's stroke takes nothing
+/// from the first's spray: each Rogue's landing holds one spray and fires
+/// it, on the same frame or 50 ms apart, either Rogue first.
+#[test]
+fn two_rogues_on_one_wound_each_spray_their_own_hit() {
+    for gap in [0, 5] {
+        for b_first in [false, true] {
+            let mut h = Harness::new(false);
+            let a = h.rogue;
+            let b = h.second_rogue();
+            let (first, second) = if b_first { (b, a) } else { (a, b) };
+            h.wound_from(first);
+            h.land_from(first, AbilityType::Hemorrhage);
+            h.ticks(gap);
+            h.wound_from(second);
+            h.land_from(second, AbilityType::Hemorrhage);
+            assert_eq!(h.auras().auras.len(), 1, "one wound on the target");
+            assert_eq!(
+                h.auras().auras[0].caster,
+                Some(second),
+                "the refresh handed it on"
+            );
+            let mut held = std::collections::HashSet::new();
+            let mut fired = std::collections::HashSet::new();
+            let mut droplets = std::collections::HashSet::new();
+            for _ in 0..150 {
+                h.tick();
+                let w = h.app.world_mut();
+                let mut q = w.query_filtered::<Entity, With<BleedSprayPending>>();
+                held.extend(q.iter(w));
+                let mut q = w.query_filtered::<Entity, With<BleedSpray>>();
+                fired.extend(q.iter(w));
+                let mut q = w.query_filtered::<Entity, With<BleedDroplet>>();
+                droplets.extend(q.iter(w));
+            }
+            let arm = format!("gap {gap}, B first {b_first}");
+            assert_eq!(held.len(), 2, "{arm}: one held spray per landing");
+            assert_eq!(fired.len(), 2, "{arm}: each fires");
+            assert_eq!(droplets.len(), 2 * DROPLETS, "{arm}: two whole sprays");
+            assert_eq!(h.bleed(), 0, "{arm}");
+        }
+    }
+}
+
+/// Rupture is kept per caster: another Rogue's Rupture on the victim is not
+/// this one's landing, even where the wound beside it is anyone's.
+#[test]
+fn another_rogues_rupture_is_still_not_this_ones_landing() {
+    let mut h = Harness::new(false);
+    let other = h.second_rogue();
+    let victim = h.victim;
+    let rupture = aura_of(AbilityType::Rupture, victim, other);
+    h.auras().auras.push(rupture);
+    h.wound_from(other);
+    h.land(AbilityType::Rupture);
+    let (seen, _) = h.play(1.5);
+    assert_eq!(seen, 0);
 }
 
 // ── Lifecycle beside other auras ─────────────────────────────────────────────
@@ -945,6 +1047,31 @@ fn the_spray_rides_out_its_victims_fate() {
             h.run_to_spray();
             h.ticks(10);
             fate(&mut h);
+            if name == "despawned" {
+                // With no body left to hold against, every droplet is drawn
+                // where it truly is, and flies on.
+                let mut last: std::collections::HashMap<Entity, Vec3> = Default::default();
+                let mut flying = 0;
+                for _ in 0..20 {
+                    h.tick();
+                    for (e, truly, drawn, ..) in h.droplets() {
+                        assert!(
+                            drawn.distance(truly) < 1e-6,
+                            "pet {pet}: a droplet drawn off its flight"
+                        );
+                        if let Some(was) = last.insert(e, truly) {
+                            // It flew this frame's step of its own flight.
+                            let v = h.app.world().get::<ClientParticle>(e).unwrap().velocity;
+                            assert!(
+                                (truly - was - v * TICK.as_secs_f32()).length() < 1e-5,
+                                "pet {pet}: a droplet stopped flying"
+                            );
+                            flying += 1;
+                        }
+                    }
+                }
+                assert!(flying > 100, "pet {pet}: {flying}");
+            }
             let (seen, _) = h.play(1.0);
             assert!(seen > 0, "{name} (pet {pet}): the spray plays on");
             assert_eq!(h.bleed(), 0, "{name} (pet {pet}): every piece retired");

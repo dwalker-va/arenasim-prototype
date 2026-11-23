@@ -35,8 +35,11 @@ use crate::states::play_match::components::*;
 // **Fired at the stroke's contact, and only on a landing.** The router holds
 // the spray for the backhand's `impact_at` (Mortal Strike's flourish waits for
 // its blade the same way), then fires it only if the victim is alive and wears
-// the caster's aura — a dodged or parried strike, an immune victim, a corpse,
-// or a bleed already gone draws no blood.
+// the aura the strike landed — a dodged or parried strike, an immune victim, a
+// corpse, or a bleed already gone draws no blood. Whose aura counts follows
+// its stack scope ([`bleed_landed`]): a per-target wound (Hemorrhage's) is one
+// wound whoever refreshed it last, so a second Rogue's hit inside the first's
+// stroke takes nothing from the first's spray.
 //
 // **Drawn in front of the victim's body.** The droplets are born on the
 // body's axis, and Bevy sorts transparent draws by translation, so a droplet
@@ -134,7 +137,11 @@ pub struct BleedDroplet {
 // ── The pure model ───────────────────────────────────────────────────────────
 
 /// Whether a strike that put `aura` on its victim landed: the victim is
-/// alive and wears the caster's `aura` now.
+/// alive and wears that `aura` now — the caster's own, or, for a stacking
+/// aura kept one per target ([`StackScope::PerTarget`], Hemorrhage's wound),
+/// the target's one, whoever refreshed it last (a refresh hands it to its
+/// caster). An aura kept per caster, or not stacking (Rupture), must be the
+/// caster's own.
 pub fn bleed_landed(
     victim_alive: bool,
     victim_auras: Option<&ActiveAuras>,
@@ -143,9 +150,11 @@ pub fn bleed_landed(
 ) -> bool {
     victim_alive
         && victim_auras.is_some_and(|a| {
-            a.auras
-                .iter()
-                .any(|x| x.caster == Some(caster) && x.ability_name == aura)
+            a.auras.iter().any(|x| {
+                x.ability_name == aura
+                    && (x.caster == Some(caster)
+                        || x.stacks.is_some_and(|s| s.scope == StackScope::PerTarget))
+            })
         })
 }
 
@@ -427,6 +436,58 @@ mod tests {
         // Clear at 0.8 of the radius, and at the corner.
         assert_eq!(alpha(c + (0.8 * c as f32) as usize, c), 0);
         assert_eq!(alpha(0, 0), 0);
+    }
+
+    /// Whose aura counts as a strike's landing follows the aura's stack
+    /// scope: a per-target stacking wound is the target's, whoever refreshed
+    /// it last; a per-caster or non-stacking aura must be the caster's own.
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn the_landing_follows_the_auras_stack_scope() {
+        let (me, other) = (Entity::from_raw(1), Entity::from_raw(2));
+        // Built field by field: a test aura is applied nowhere, so it stays
+        // out of the aura catalog audit's apply-site scan.
+        let worn = |caster: Entity, stacks: Option<StackScope>| {
+            let mut aura = Aura::default();
+            aura.ability_name = "Wound".to_string();
+            aura.caster = Some(caster);
+            aura.stacks = stacks.map(|scope| AuraStacks::new(5, scope));
+            ActiveAuras { auras: vec![aura] }
+        };
+        let per_target = Some(StackScope::PerTarget);
+        let per_caster = Some(StackScope::PerCaster);
+        // Mine counts, whatever its scope.
+        for scope in [None, per_target, per_caster] {
+            assert!(bleed_landed(true, Some(&worn(me, scope)), me, "Wound"));
+        }
+        // Another's counts only for a per-target wound.
+        assert!(bleed_landed(
+            true,
+            Some(&worn(other, per_target)),
+            me,
+            "Wound"
+        ));
+        assert!(!bleed_landed(
+            true,
+            Some(&worn(other, per_caster)),
+            me,
+            "Wound"
+        ));
+        assert!(!bleed_landed(true, Some(&worn(other, None)), me, "Wound"));
+        // Never another aura's, and never on a corpse.
+        assert!(!bleed_landed(
+            true,
+            Some(&worn(me, per_target)),
+            me,
+            "Other"
+        ));
+        assert!(!bleed_landed(
+            false,
+            Some(&worn(me, per_target)),
+            me,
+            "Wound"
+        ));
+        assert!(!bleed_landed(true, None, me, "Wound"));
     }
 
     #[test]

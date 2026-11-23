@@ -59,6 +59,14 @@ const CONFIG: &str = r#"{"team1":["Rogue"],"team2":["Warrior"],
     "team1_builds":[{"MasterOfSubtlety":2,"Initiative":2,"Hemorrhage":1}],
     "map":"BasicArena","random_seed":7}"#;
 
+/// Two Subtlety Rogues on one Warrior (with a Priest behind it): Hemorrhage's
+/// wound is one per target, so each Rogue's hit refreshes the wound the other
+/// put up, and their hits fall inside each other's strokes.
+const TWO_ROGUES: &str = r#"{"team1":["Rogue","Rogue"],"team2":["Warrior","Priest"],
+    "team1_builds":[{"MasterOfSubtlety":2,"Initiative":2,"Hemorrhage":1},
+                    {"MasterOfSubtlety":2,"Initiative":2,"Hemorrhage":1}],
+    "team1_kill_target":0,"map":"BasicArena","random_seed":1}"#;
+
 /// Sinister Strike's contact: when the spray is due after its strike.
 fn contact() -> f32 {
     SwingStyle::SinisterStrike.impact_at()
@@ -93,27 +101,29 @@ struct Fired {
 struct Seen {
     frame: usize,
     /// Hemorrhages the drain landed (its marker), and whether the victim
-    /// already wore this Rogue's wound: a refresh of its stacks.
+    /// already wore the wound — one per target, whoever's: a refresh of its
+    /// stacks.
     landed: Vec<(Strike, bool)>,
     /// Sinister Strikes the drain landed: they swing the same stroke.
-    sinister: Vec<usize>,
+    sinister: Vec<(usize, Entity)>,
     /// Hemorrhages dodged or parried (the sim's `MeleeAvoided`).
     avoided: Vec<(Strike, Avoidance)>,
     /// The avoided-strike path's signals for a Hemorrhage.
     avoided_signals: Vec<Strike>,
     held: Vec<Held>,
     fired: Vec<Fired>,
-    /// Frames on which the Rogue's main hand started Sinister Strike's stroke.
-    strokes: Vec<usize>,
-    /// Debuff bands raised on the Warrior.
+    /// Frames on which a Rogue's main hand started Sinister Strike's stroke,
+    /// and the Rogue.
+    strokes: Vec<(usize, Entity)>,
+    /// Debuff bands raised on the enemy team.
     victim_bands: usize,
     /// Bleed entities seen, and those of them the match's cleanup would miss.
     bleed_entities: usize,
     untagged: usize,
-    /// The first frame the Warrior was dead, if it died.
-    victim_died: Option<usize>,
-    /// The Warrior.
-    warrior: Option<Entity>,
+    /// The first frame each enemy was dead, for those that died.
+    died: std::collections::HashMap<Entity, usize>,
+    /// The enemy team.
+    enemies: Vec<Entity>,
     /// Droplet-frames drawn at the match camera, and those drawn behind
     /// their victim's body or at another size than they have where they
     /// truly are.
@@ -124,8 +134,8 @@ struct Seen {
 #[derive(Resource, Clone, Copy)]
 struct Stage(Option<Avoidance>);
 
-fn boot(stage: Option<Avoidance>) -> App {
-    let cfg: HeadlessMatchConfig = serde_json::from_str(CONFIG).unwrap();
+fn boot(config: &str, stage: Option<Avoidance>) -> App {
+    let cfg: HeadlessMatchConfig = serde_json::from_str(config).unwrap();
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .add_plugins(AssetPlugin::default())
@@ -245,12 +255,10 @@ fn observe_signals(
         match f.ability {
             AbilityType::Hemorrhage => {
                 // The wound this strike lands is still pending here; one the
-                // victim already wears is a refresh.
-                let refresh = auras.get(target).is_ok_and(|a| {
-                    a.auras
-                        .iter()
-                        .any(|x| x.caster == Some(f.caster) && x.ability_name == HEMORRHAGE_AURA)
-                });
+                // victim already wears (whoever's) is a refresh.
+                let refresh = auras
+                    .get(target)
+                    .is_ok_and(|a| a.auras.iter().any(|x| x.ability_name == HEMORRHAGE_AURA));
                 seen.landed.push((
                     Strike {
                         frame,
@@ -260,7 +268,7 @@ fn observe_signals(
                     refresh,
                 ));
             }
-            AbilityType::SinisterStrike => seen.sinister.push(frame),
+            AbilityType::SinisterStrike => seen.sinister.push((frame, f.caster)),
             _ => {}
         }
     }
@@ -295,11 +303,12 @@ fn observe_drawn(
     camera: Query<&Transform, With<Camera3d>>,
 ) {
     let frame = seen.frame;
-    if seen.warrior.is_none() {
-        seen.warrior = combatants
+    if seen.enemies.is_empty() {
+        seen.enemies = combatants
             .iter()
-            .find(|(_, c, _)| c.team == 2 && c.class == CharacterClass::Warrior)
-            .map(|(e, _, _)| e);
+            .filter(|(_, c, _)| c.team == 2)
+            .map(|(e, _, _)| e)
+            .collect();
     }
     // Every droplet as drawn: never deeper than its victim's body (a
     // combatant's capsule, radius 0.5 and 0.75 either side of its origin),
@@ -323,8 +332,11 @@ fn observe_drawn(
             } else {
                 0.11 + (0.02 - 0.11) * (t - 0.25) / 0.75
             };
+            // ...and facing the camera exactly: no tilt, no roll.
+            let faces = (tf.rotation * Vec3::Z - cam.rotation * Vec3::Z).length() < 1e-5
+                && (tf.rotation * Vec3::X - cam.rotation * Vec3::X).length() < 1e-5;
             seen.droplets_drawn += 1;
-            if dd > nearest + 1e-4 || (tf.scale.x / dd - 2.0 * radius / dt).abs() > 1e-4 {
+            if dd > nearest + 1e-4 || (tf.scale.x / dd - 2.0 * radius / dt).abs() > 1e-4 || !faces {
                 seen.misdrawn += 1;
             }
         }
@@ -360,14 +372,12 @@ fn observe_drawn(
             && s.swing_style == SwingStyle::SinisterStrike
             && s.release_t.is_some_and(|t| t < 0.03)
         {
-            seen.strokes.push(frame);
+            seen.strokes.push((frame, s.owner));
         }
     }
     for b in bands.iter() {
-        let on_warrior = combatants
-            .get(b.target)
-            .is_ok_and(|(_, c, _)| c.team == 2 && c.class == CharacterClass::Warrior);
-        if on_warrior && b.polarity == AuraBandPolarity::Debuff {
+        let on_enemy = combatants.get(b.target).is_ok_and(|(_, c, _)| c.team == 2);
+        if on_enemy && b.polarity == AuraBandPolarity::Debuff {
             seen.victim_bands += 1;
         }
     }
@@ -377,19 +387,17 @@ fn observe_drawn(
             seen.untagged += 1;
         }
     }
-    if seen.victim_died.is_none()
-        && combatants
-            .iter()
-            .any(|(_, c, _)| c.team == 2 && c.class == CharacterClass::Warrior && !c.is_alive())
-    {
-        seen.victim_died = Some(frame);
+    for (e, c, _) in combatants.iter() {
+        if c.team == 2 && !c.is_alive() {
+            seen.died.entry(e).or_insert(frame);
+        }
     }
 }
 
 /// Play the match, and once it has left `PlayMatch`, the number of bleed
 /// entities the match's cleanup left behind.
-fn play(stage: Option<Avoidance>) -> (Seen, Option<usize>) {
-    let mut app = boot(stage);
+fn play(config: &str, stage: Option<Avoidance>) -> (Seen, Option<usize>) {
+    let mut app = boot(config, stage);
     let mut left = None;
     for _ in 0..FRAMES {
         app.update();
@@ -432,15 +440,8 @@ fn assert_every_landing_sprays_once(seen: &Seen, arm: &str) {
         seen.sinister.len(),
         seen.bleed_entities,
         seen.droplets_drawn,
-        seen.victim_died
+        seen.died
     );
-    let rogue = seen
-        .landed
-        .iter()
-        .map(|(s, _)| s.caster)
-        .chain(seen.avoided.iter().map(|(s, _)| s.caster))
-        .next()
-        .expect("a Hemorrhage was made");
     // One held spray per landing: same frame, the strike's own target, this
     // Rogue, the wound's name, the stroke's contact (seen after its first
     // frame's count, on the frame it was held).
@@ -455,13 +456,16 @@ fn assert_every_landing_sprays_once(seen: &Seen, arm: &str) {
         .map(|(s, _)| (s.frame, s.target, s.caster))
         .collect();
     assert_eq!(held, landed, "{arm}: one held spray per landed Hemorrhage");
-    // ...each on the unit the strike hit: the Warrior.
+    // ...each on the unit the strike hit: an enemy, never the Rogue.
     for (s, _) in &seen.landed {
-        assert_eq!(Some(s.target), seen.warrior, "{arm}: struck {:?}", s.target);
+        assert!(
+            seen.enemies.contains(&s.target),
+            "{arm}: struck {:?}",
+            s.target
+        );
     }
     for h in &seen.held {
         assert_eq!(h.aura, HEMORRHAGE_AURA, "{arm}");
-        assert_eq!(h.caster, rogue, "{arm}");
         let frame = FRAME.as_secs_f32();
         assert!(
             (h.delay + frame - contact()).abs() < 1e-5,
@@ -475,7 +479,7 @@ fn assert_every_landing_sprays_once(seen: &Seen, arm: &str) {
     let mut expected = Vec::new();
     for h in &seen.held {
         let due = h.frame + due_after(h.delay);
-        if seen.victim_died.is_some_and(|d| d <= due) {
+        if seen.died.get(&h.victim).is_some_and(|d| *d <= due) {
             continue;
         }
         expected.push((due, h.victim));
@@ -495,13 +499,19 @@ fn assert_every_landing_sprays_once(seen: &Seen, arm: &str) {
     }
     // The stroke: on the frame of every Hemorrhage, landed or avoided (and of
     // every Sinister Strike, which swings the same one), and on no other.
-    let mut strikes: Vec<usize> = seen.landed.iter().map(|(s, _)| s.frame).collect();
-    strikes.extend(seen.avoided.iter().map(|(s, _)| s.frame));
+    let mut strikes: Vec<(usize, Entity)> = seen
+        .landed
+        .iter()
+        .map(|(s, _)| (s.frame, s.caster))
+        .collect();
+    strikes.extend(seen.avoided.iter().map(|(s, _)| (s.frame, s.caster)));
     strikes.extend(&seen.sinister);
     strikes.sort();
     strikes.dedup();
+    let mut strokes = seen.strokes.clone();
+    strokes.sort();
     assert_eq!(
-        seen.strokes, strikes,
+        strokes, strikes,
         "{arm}: Sinister Strike's stroke starts on each strike's frame"
     );
     // No band for the wound, fresh or refreshed.
@@ -526,19 +536,19 @@ fn assert_every_landing_sprays_once(seen: &Seen, arm: &str) {
 /// entity goes with the match.
 #[test]
 fn every_landed_hemorrhage_sprays_once_on_its_victim_in_a_real_match() {
-    let (seen, left) = play(None);
+    let (seen, left) = play(CONFIG, None);
     assert!(seen.avoided.is_empty(), "the control avoids nothing");
+    // This seed's fight: five landings, the last four refreshes, all five
+    // sprayed (counts move with the RNG stream; the claims above do not).
     let refreshes = seen.landed.iter().filter(|(_, r)| *r).count();
-    let fresh = seen.landed.len() - refreshes;
-    assert!(
-        refreshes >= 2 && fresh >= 1,
-        "landings: {fresh} fresh, {refreshes} refreshes"
+    assert_eq!(
+        (seen.landed.len(), refreshes, seen.fired.len()),
+        (5, 4, 5),
+        "landings, refreshes, sprays"
     );
-    assert!(seen.fired.len() >= 3, "sprays fired: {}", seen.fired.len());
-    assert!(seen.bleed_entities > 100, "{}", seen.bleed_entities);
     assert_every_landing_sprays_once(&seen, "control");
     // The match is won within the window, and its cleanup leaves no blood.
-    assert!(seen.victim_died.is_some(), "the Warrior dies");
+    assert_eq!(seen.died.len(), 1, "the Warrior dies");
     assert_eq!(left, Some(0), "bleed entities outlived the match");
 }
 
@@ -549,10 +559,11 @@ fn every_landed_hemorrhage_sprays_once_on_its_victim_in_a_real_match() {
 fn an_avoided_hemorrhage_strokes_once_and_sprays_nothing_in_a_real_match() {
     for kind in [Avoidance::Dodge, Avoidance::Parry] {
         let arm = format!("{kind:?}");
-        let (seen, _) = play(Some(kind));
-        assert!(
-            seen.avoided.len() >= 3,
-            "{arm}: avoided Hemorrhages {:?}",
+        let (seen, _) = play(CONFIG, Some(kind));
+        assert_eq!(
+            (seen.avoided.len(), seen.landed.len()),
+            (4, 0),
+            "{arm}: avoided and landed Hemorrhages {:?}",
             seen.avoided
         );
         assert!(
@@ -578,4 +589,37 @@ fn an_avoided_hemorrhage_strokes_once_and_sprays_nothing_in_a_real_match() {
         // Only the landings (taken stunned) hold sprays and spray.
         assert_every_landing_sprays_once(&seen, &arm);
     }
+}
+
+/// Two Rogues on one per-target wound: every landing of either holds its
+/// spray and fires it on its due frame — including each landing whose
+/// partner's hit refreshed the wound (taking it over) before its contact.
+#[test]
+fn two_rogues_on_one_wound_each_spray_every_landing_in_a_real_match() {
+    let (seen, _) = play(TWO_ROGUES, None);
+    let casters: std::collections::BTreeSet<Entity> =
+        seen.landed.iter().map(|(s, _)| s.caster).collect();
+    assert_eq!(casters.len(), 2, "both Rogues land Hemorrhage");
+    // The case: a landing whose partner landed after it and before its
+    // contact, taking the wound over while its spray was held.
+    let window = due_after(contact() - FRAME.as_secs_f32());
+    let overtaken = seen
+        .landed
+        .iter()
+        .filter(|(a, _)| {
+            seen.landed.iter().any(|(b, _)| {
+                b.caster != a.caster
+                    && b.target == a.target
+                    && b.frame >= a.frame
+                    && b.frame <= a.frame + window
+            })
+        })
+        .count();
+    eprintln!("two Rogues: {overtaken} landings overtaken before contact");
+    assert_eq!(
+        (seen.landed.len(), overtaken, seen.fired.len()),
+        (10, 3, 9),
+        "landings, overtaken before contact, sprays (one landing's victim dies before its contact)"
+    );
+    assert_every_landing_sprays_once(&seen, "two Rogues");
 }
