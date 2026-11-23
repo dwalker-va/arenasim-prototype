@@ -59,7 +59,7 @@ pub fn run_batch(input: PathBuf, output: PathBuf, jobs: Option<usize>) -> Result
         if trimmed.is_empty() {
             continue;
         }
-        let cfg: HeadlessMatchConfig = serde_json::from_str(trimmed)
+        let cfg = HeadlessMatchConfig::from_json(trimmed)
             .map_err(|e| format!("parse batch line {}: {}", i + 1, e))?;
         // Validate BEFORE running anything: the plugin `.expect()`s a valid
         // profile, so an unvalidated typo panics a worker mid-sweep and takes

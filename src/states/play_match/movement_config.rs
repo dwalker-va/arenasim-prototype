@@ -1,7 +1,7 @@
 //! Data-Driven Movement Configuration (healer posture AI)
 //!
 //! Mirrors the `ability_config.rs` loading pattern exactly: serde structs with
-//! defaults, direct `std::fs::read_to_string` + `ron::from_str` (no asset
+//! defaults, direct `std::fs::read_to_string` + `config_parse::ron_from_str` (no asset
 //! server — required for headless), `validate()`, a `Resource`, and a plugin
 //! that panics on failure. The plugin is registered in BOTH the headless
 //! runner (`src/headless/runner.rs`, next to `AbilityConfigPlugin`) and the
@@ -898,8 +898,8 @@ impl MovementConfig {
 /// Parse a movement config from RON text. `source` names the origin for
 /// error messages (a path, or "inline" in tests).
 pub fn parse_movement_config(contents: &str, source: &str) -> Result<MovementConfig, String> {
-    let config: MovementConfig =
-        ron::from_str(contents).map_err(|e| format!("Failed to parse {}: {}", source, e))?;
+    let config: MovementConfig = crate::config_parse::ron_from_str(contents)
+        .map_err(|e| format!("Failed to parse {}: {}", source, e))?;
 
     config.validate().map_err(|issues| {
         format!(

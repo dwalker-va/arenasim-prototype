@@ -1256,15 +1256,14 @@ impl AbilityDefinitions {
     }
 }
 
-/// Load ability definitions from assets/config/abilities.ron
-pub fn load_ability_definitions() -> Result<AbilityDefinitions, String> {
-    let config_path = crate::paths::asset_path_str("config/abilities.ron");
-
-    let contents = std::fs::read_to_string(&config_path)
-        .map_err(|e| format!("Failed to read {}: {}", config_path, e))?;
-
-    let config: AbilitiesConfig =
-        ron::from_str(&contents).map_err(|e| format!("Failed to parse {}: {}", config_path, e))?;
+/// Parse and validate the text of an `abilities.ron`; `origin` names it in
+/// errors.
+pub fn parse_ability_definitions(
+    contents: &str,
+    origin: &str,
+) -> Result<AbilityDefinitions, String> {
+    let config: AbilitiesConfig = crate::config_parse::ron_from_str(contents)
+        .map_err(|e| format!("Failed to parse {}: {}", origin, e))?;
 
     let definitions = AbilityDefinitions::new(config);
 
@@ -1272,6 +1271,18 @@ pub fn load_ability_definitions() -> Result<AbilityDefinitions, String> {
     definitions
         .validate()
         .map_err(|missing| format!("Missing ability definitions: {:?}", missing))?;
+
+    Ok(definitions)
+}
+
+/// Load ability definitions from assets/config/abilities.ron
+pub fn load_ability_definitions() -> Result<AbilityDefinitions, String> {
+    let config_path = crate::paths::asset_path_str("config/abilities.ron");
+
+    let contents = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read {}: {}", config_path, e))?;
+
+    let definitions = parse_ability_definitions(&contents, &config_path)?;
 
     info!(
         "Loaded {} ability definitions from {}",
