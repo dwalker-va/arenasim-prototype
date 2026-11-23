@@ -550,8 +550,8 @@ impl BanterConfig {
 /// Parse a banter config from RON text. `source` names the origin for error
 /// messages (a path, or "inline" in tests).
 pub fn parse_banter_config(contents: &str, source: &str) -> Result<BanterConfig, String> {
-    let config: BanterConfig =
-        ron::from_str(contents).map_err(|e| format!("Failed to parse {}: {}", source, e))?;
+    let config: BanterConfig = crate::config_ron::from_str(contents)
+        .map_err(|e| format!("Failed to parse {}: {}", source, e))?;
 
     config.validate().map_err(|issues| {
         format!(
