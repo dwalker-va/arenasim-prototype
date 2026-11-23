@@ -603,3 +603,22 @@ configs on one binary, so there is no patch:
 - `-arms.jsonl.tar.gz` — the inputs as run: `block1/` (seeds 0-3) and
   `block2/` (seeds 4-7), 29 arms each.
 - `-arms.csv.tar.gz` — their batch CSVs, same layout.
+
+## `2026-11-23-as302-arms.*`
+
+Behind `2026-11-23-as302-paladin-talent-sweep.md` (card AS-302): the Paladin
+reference builds and node arms. 20 arms of 3,396 2v2 matches each (every
+Paladin cell plus 8 control cells, three maps, 4 seeds a cell a map,
+`TeamPlan`), on two seed blocks, every Paladin on either side playing the
+arm's build (and, for the Retribution Aura arm, choosing that aura). The arms
+are configs on one binary, so there is no patch:
+
+- `-arms.py` — `gen` writes the arms (through `scripts/gen_sweep.py --build`
+  / `--for-class`), `table` and `replicate` print the findings doc's tables
+  from the CSVs, `sample` replays a fixed slice of each arm's Paladin matches
+  with full logs for the non-vacuity counts. Its verdict rule (the per-match
+  paired margin and its z) and its arms are pinned by
+  `scripts/tests/test_as302_arms.py`.
+- `-arms.jsonl.tar.gz` — the inputs as run: `block1/` (seeds 0-3) and
+  `block2/` (seeds 4-7), 20 arms each.
+- `-arms.csv.tar.gz` — their batch CSVs, same layout.

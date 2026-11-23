@@ -286,30 +286,12 @@ fn the_rogue_reference_builds_are_as_specified() {
     }
 }
 
-/// A reference build's name is unique within its CLASS only: a Paladin's
-/// "Holy" beside the Priest's loads, and a config naming "Holy" for each
-/// class's slot gets that class's own.
+/// A reference build's name is unique within its CLASS only: the shipped
+/// Paladin and Priest each name one "Holy", and a config naming "Holy" for
+/// each class's slot gets that class's own.
 #[test]
 fn reference_names_are_unique_within_a_class_only() {
-    let paladin_holy = "        Paladin: [
-            (
-                name: \"Holy\",
-                tree: Holy,
-                build: {
-                    ImprovedHolyShock: 2, DivineFavor: 1, InfusionOfLight: 1,
-                    LightsGrace: 1, AuraMastery: 1,
-                    SacredDuty: 2,
-                },
-            ),
-        ],
-        Priest: [
-            // Resists crowd control";
-    let text = edited(
-        "        Priest: [\n            // Resists crowd control",
-        paladin_holy,
-    );
-    let defs = TalentDefinitions::from_ron(&text, AbilityDefinitions::shipped())
-        .expect("a Paladin and a Priest may each name a reference \"Holy\"");
+    let defs = defs();
     let paladin = defs
         .reference_build(CharacterClass::Paladin, "Holy")
         .expect("the Paladin's Holy");
@@ -329,12 +311,9 @@ fn reference_names_are_unique_within_a_class_only() {
         );
     }
     // Within one class the name is still refused twice.
-    let discipline = "name: \"Discipline\",\n                tree: Discipline,";
-    assert_eq!(text.matches(discipline).count(), 1);
-    let twice = text.replacen(
-        discipline,
+    let twice = edited(
+        "name: \"Discipline\",\n                tree: Discipline,",
         "name: \"Holy\",\n                tree: Discipline,",
-        1,
     );
     assert!(load_err(&twice).contains("Priest names the reference build \"Holy\" twice"));
 }
@@ -403,6 +382,315 @@ fn every_rogue_node_arm_resolves() {
             build.points(),
             MAX_TALENT_POINTS - removed + added,
             "{reference} -{remove:?} +{add:?}"
+        );
+    }
+}
+
+/// The Paladin's three, by name: Holy 6/2/0, Protection 2/6/0, Retribution
+/// 0/2/6 (AS-302). None takes Sacred Duty, the sweep's stat rank.
+#[test]
+fn the_paladin_reference_builds_are_as_specified() {
+    let defs = defs();
+    let names: Vec<&str> = defs
+        .reference_builds(CharacterClass::Paladin)
+        .iter()
+        .map(|r| r.name.as_str())
+        .collect();
+    assert_eq!(names, ["Holy", "Protection", "Retribution"]);
+    let expect = [
+        (
+            "Holy",
+            TreeId::Holy,
+            "6/2/0",
+            Build::of(&[
+                (ImprovedHolyShock, 2),
+                (InfusionOfLight, 1),
+                (DivineFavor, 1),
+                (LightsGrace, 1),
+                (AuraMastery, 1),
+                (ImprovedHammerOfJustice, 2),
+            ]),
+        ),
+        (
+            "Protection",
+            TreeId::Protection,
+            "2/6/0",
+            Build::of(&[
+                (ImprovedHolyShock, 2),
+                (ImprovedHammerOfJustice, 2),
+                (DivineProtection, 1),
+                (Toughness, 1),
+                (BlessingOfSacrifice, 1),
+                (SacredShield, 1),
+            ]),
+        ),
+        (
+            "Retribution",
+            TreeId::Retribution,
+            "0/2/6",
+            Build::of(&[
+                (ImprovedHammerOfJustice, 2),
+                (Conviction, 2),
+                (Vengeance, 2),
+                (TheArtOfWar, 1),
+                (CrusaderStrike, 1),
+            ]),
+        ),
+    ];
+    for (name, tree, short, build) in expect {
+        let reference = defs
+            .reference_build(CharacterClass::Paladin, name)
+            .unwrap_or_else(|| panic!("no Paladin reference {name:?}"));
+        assert_eq!(reference.tree, tree, "{name}");
+        assert_eq!(reference.build, build, "{name}");
+        assert_eq!(reference.build.rank(SacredDuty), 0, "{name}");
+        let spec = defs
+            .spec(CharacterClass::Paladin, &reference.build)
+            .unwrap();
+        assert_eq!(spec.short, short, "{name}");
+    }
+}
+
+/// One arm of the AS-302 sweep: a Paladin reference with ranks moved, and the
+/// aura its slot chooses (`None` is the default, Devotion).
+struct PaladinArm {
+    name: &'static str,
+    reference: &'static str,
+    remove: &'static [(TalentId, u8)],
+    add: &'static [(TalentId, u8)],
+    aura: Option<&'static str>,
+}
+
+const fn arm(
+    name: &'static str,
+    reference: &'static str,
+    remove: &'static [(TalentId, u8)],
+    add: &'static [(TalentId, u8)],
+) -> PaladinArm {
+    PaladinArm {
+        name,
+        reference,
+        remove,
+        add,
+        aura: None,
+    }
+}
+
+/// Every arm of `docs/design/balance/sweeps/2026-11-23-as302-arms.py` but
+/// `zero`, by its name there.
+const PALADIN_ARMS: &[PaladinArm] = &[
+    arm("holy", "Holy", &[], &[]),
+    arm("holy_stem", "Holy", &[(AuraMastery, 1)], &[]),
+    arm("holy_y", "Holy", &[(AuraMastery, 1)], &[(SacredDuty, 1)]),
+    arm(
+        "holy_noiol_y2",
+        "Holy",
+        &[(AuraMastery, 1), (InfusionOfLight, 1)],
+        &[(SacredDuty, 2)],
+    ),
+    arm(
+        "holy_nodf_y2",
+        "Holy",
+        &[(AuraMastery, 1), (DivineFavor, 1)],
+        &[(SacredDuty, 2)],
+    ),
+    arm(
+        "holy_nolg_y2",
+        "Holy",
+        &[(AuraMastery, 1), (LightsGrace, 1)],
+        &[(SacredDuty, 2)],
+    ),
+    arm("prot", "Protection", &[], &[]),
+    arm("prot_stem", "Protection", &[(SacredShield, 1)], &[]),
+    arm(
+        "prot_y",
+        "Protection",
+        &[(SacredShield, 1)],
+        &[(SacredDuty, 1)],
+    ),
+    PaladinArm {
+        aura: Some("Retribution"),
+        ..arm(
+            "prot_ra",
+            "Protection",
+            &[(SacredShield, 1)],
+            &[(RetributionAura, 1)],
+        )
+    },
+    arm(
+        "prot_ra_dev",
+        "Protection",
+        &[(SacredShield, 1)],
+        &[(RetributionAura, 1)],
+    ),
+    arm(
+        "prot_nodp_y2",
+        "Protection",
+        &[(SacredShield, 1), (DivineProtection, 1)],
+        &[(SacredDuty, 2)],
+    ),
+    arm(
+        "prot_nobos_y2",
+        "Protection",
+        &[(SacredShield, 1), (BlessingOfSacrifice, 1)],
+        &[(SacredDuty, 2)],
+    ),
+    arm("ret", "Retribution", &[], &[]),
+    arm("ret_stem", "Retribution", &[(CrusaderStrike, 1)], &[]),
+    arm(
+        "ret_y",
+        "Retribution",
+        &[(CrusaderStrike, 1)],
+        &[(SacredDuty, 1)],
+    ),
+    arm(
+        "ret_rep",
+        "Retribution",
+        &[(CrusaderStrike, 1)],
+        &[(Repentance, 1)],
+    ),
+    arm(
+        "ret_noveng_y2",
+        "Retribution",
+        &[(CrusaderStrike, 1), (Vengeance, 1)],
+        &[(SacredDuty, 2)],
+    ),
+    arm(
+        "ret_noaow_y2",
+        "Retribution",
+        &[(CrusaderStrike, 1), (TheArtOfWar, 1)],
+        &[(SacredDuty, 2)],
+    ),
+];
+
+/// The arm `name` as a Paladin slot's config resolves it: through
+/// `to_match_config`, with its aura, as `--batch` checks every line.
+fn paladin_arm_build(name: &str) -> Build {
+    let arm = PALADIN_ARMS
+        .iter()
+        .find(|a| a.name == name)
+        .unwrap_or_else(|| panic!("no arm {name}"));
+    let spec = serde_json::json!({
+        "reference": arm.reference,
+        "remove": Build::of(arm.remove),
+        "add": Build::of(arm.add),
+    });
+    let aura = arm.aura.unwrap_or("Devotion");
+    let json = format!(
+        r#"{{"team1":["Warrior","Paladin"],"team2":["Mage","Paladin"],
+            "team1_builds":[{{}},{spec}],"team2_builds":[{{}},{spec}],
+            "team1_paladin_auras":["Devotion","{aura}"],
+            "team2_paladin_auras":["Devotion","{aura}"]}}"#
+    );
+    let config = parse(&json)
+        .to_match_config()
+        .unwrap_or_else(|e| panic!("{name}: {e}"));
+    assert_eq!(config.team1_builds[1], config.team2_builds[1], "{name}");
+    config.team1_builds[1].clone()
+}
+
+/// Every Paladin arm of the AS-302 sweep resolves to a legal build, aura
+/// choice included: a reference at 8 points, a stem (no capstone) at 7, every
+/// other arm at 8. Sacred Duty, the stat rank, fits on each stem in the place
+/// of the capstone, and of each node the stem holds as a second rank.
+#[test]
+fn every_paladin_sweep_arm_resolves() {
+    let defs = defs();
+    let mut stems = BTreeSet::new();
+    for arm in PALADIN_ARMS {
+        let build = paladin_arm_build(arm.name);
+        defs.validate_build(CharacterClass::Paladin, &build)
+            .unwrap_or_else(|e| panic!("{}: {e}", arm.name));
+        let expect = if arm.name.ends_with("_stem") {
+            stems.insert(arm.name);
+            MAX_TALENT_POINTS - 1
+        } else {
+            MAX_TALENT_POINTS
+        };
+        assert_eq!(build.points(), expect, "{}", arm.name);
+    }
+    assert_eq!(
+        stems,
+        BTreeSet::from(["holy_stem", "prot_stem", "ret_stem"])
+    );
+    // Only the Retribution Aura arm chooses an aura, and it chooses that one.
+    let auras: Vec<(&str, &str)> = PALADIN_ARMS
+        .iter()
+        .filter_map(|a| a.aura.map(|aura| (a.name, aura)))
+        .collect();
+    assert_eq!(auras, [("prot_ra", "Retribution")]);
+    // The aura the Retribution Aura arm chooses is refused on a build
+    // without the node: the arm's choice is what the node opens.
+    let refused = parse(
+        r#"{"team1":["Warrior","Paladin"],"team2":["Mage"],
+            "team1_builds":[{},{"reference":"Protection","remove":{"SacredShield":1},
+                "add":{"SacredDuty":1}}],
+            "team1_paladin_auras":["Devotion","Retribution"]}"#,
+    )
+    .to_match_config()
+    .unwrap_err();
+    assert!(refused.contains("Retribution"), "{refused}");
+}
+
+/// Each node comparison of the AS-302 sweep differs in exactly one point:
+/// the arm holds one more rank of the node, and its comparison that rank of
+/// Sacred Duty instead. The twelve nodes the card measures, by set equality.
+#[test]
+fn each_paladin_node_arm_is_its_comparison_with_one_point_moved() {
+    let pairs: &[(TalentId, &str, &str)] = &[
+        (InfusionOfLight, "holy_y", "holy_noiol_y2"),
+        (DivineFavor, "holy_y", "holy_nodf_y2"),
+        (LightsGrace, "holy_y", "holy_nolg_y2"),
+        (AuraMastery, "holy", "holy_y"),
+        (DivineProtection, "prot_y", "prot_nodp_y2"),
+        (RetributionAura, "prot_ra", "prot_y"),
+        (BlessingOfSacrifice, "prot_y", "prot_nobos_y2"),
+        (SacredShield, "prot", "prot_y"),
+        (Vengeance, "ret_y", "ret_noveng_y2"),
+        (TheArtOfWar, "ret_y", "ret_noaow_y2"),
+        (Repentance, "ret_rep", "ret_y"),
+        (CrusaderStrike, "ret", "ret_y"),
+    ];
+    assert_eq!(
+        pairs.iter().map(|(n, _, _)| *n).collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            InfusionOfLight,
+            DivineFavor,
+            LightsGrace,
+            AuraMastery,
+            DivineProtection,
+            RetributionAura,
+            BlessingOfSacrifice,
+            SacredShield,
+            Vengeance,
+            TheArtOfWar,
+            Repentance,
+            CrusaderStrike,
+        ])
+    );
+    for (node, with, instead) in pairs {
+        let with_build = paladin_arm_build(with);
+        let instead_build = paladin_arm_build(instead);
+        let ids: BTreeSet<TalentId> = with_build
+            .ranks
+            .keys()
+            .chain(instead_build.ranks.keys())
+            .copied()
+            .collect();
+        let moved: Vec<(TalentId, i32)> = ids
+            .into_iter()
+            .map(|id| {
+                (
+                    id,
+                    i32::from(with_build.rank(id)) - i32::from(instead_build.rank(id)),
+                )
+            })
+            .filter(|(_, d)| *d != 0)
+            .collect();
+        assert_eq!(
+            moved.into_iter().collect::<BTreeSet<_>>(),
+            BTreeSet::from([(*node, 1), (SacredDuty, -1)]),
+            "{node:?}: {with} against {instead}"
         );
     }
 }
