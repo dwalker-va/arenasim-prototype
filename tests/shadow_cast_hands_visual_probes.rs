@@ -586,13 +586,19 @@ fn the_sprites_are_the_decoded_textures_profiles() {
     let ring = motes.iter().find(|m| m.emitter == 1).expect("a ring");
     let (_, lick_texels) = texels(lick);
     assert!(
-        lick_texels.chunks_exact(4).all(|t| t[..3] == [0, 0, 0]),
+        lick_texels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|t| t[..3] == [0, 0, 0]),
         "fire1a2 is black"
     );
     let (_, ring_texels) = texels(ring);
     assert!(
         ring_texels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .all(|t| t[..3] == [255, 255, 255]),
         "the ring's shape is in its alpha, over white"
     );
@@ -660,7 +666,9 @@ fn the_licks_are_black_from_birth() {
                 .data
                 .as_ref()
                 .unwrap()
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|t| {
                     let rgb = [t[0], t[1], t[2]].map(|v| v as f32 / 255.0);
                     (c.red * rgb[0]).max(c.green * rgb[1]).max(c.blue * rgb[2])

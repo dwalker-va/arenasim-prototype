@@ -572,7 +572,7 @@ pub fn shadow_sprite_texture(sprite: ShadowHandSprite) -> Image {
     let mut image = disc_texture(SHADOW_SPRITE_PX, |r, _| shadow_sprite_alpha(sprite, r));
     if sprite == ShadowHandSprite::Lick {
         if let Some(data) = image.data.as_mut() {
-            for texel in data.chunks_exact_mut(4) {
+            for texel in data.as_chunks_mut::<4>().0 {
                 texel[..3].fill(0);
             }
         }
