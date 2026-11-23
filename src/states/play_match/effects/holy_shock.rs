@@ -13,6 +13,7 @@ use crate::states::play_match::combat_core::{
 };
 use crate::states::play_match::components::*;
 use crate::states::play_match::constants::{CRIT_DAMAGE_MULTIPLIER, CRIT_HEALING_MULTIPLIER};
+use crate::states::play_match::heal_numbers;
 use crate::states::play_match::talent_procs::{self, ProcEvent, TalentTrigger};
 use crate::states::play_match::utils::{combat_log_id_for, combatant_id, get_next_fct_offset};
 
@@ -65,26 +66,17 @@ pub fn process_holy_shock_heals(
 
             let target_id = combat_log_id_for(&target, pet_query.get(pending.target).ok());
 
-            // Spawn floating combat text (green for healing)
-            let text_position =
-                target_transform.translation + Vec3::new(0.0, super::super::FCT_HEIGHT, 0.0);
-            let (offset_x, offset_y) = if let Ok(mut fct_state) = fct_states.get_mut(pending.target)
-            {
-                get_next_fct_offset(&mut fct_state)
-            } else {
-                (0.0, 0.0)
-            };
-            commands.spawn((
-                FloatingCombatText {
-                    world_position: text_position + Vec3::new(offset_x, offset_y, 0.0),
-                    text: format!("+{:.0}", actual_heal),
-                    color: crate::ui::theme::fct::HEAL,
-                    lifetime: 1.5,
-                    vertical_offset: offset_y,
-                    is_crit,
+            // The heal's green number.
+            let mut pattern = fct_states.get_mut(pending.target).ok();
+            heal_numbers::spawn_heal_number(
+                &mut commands,
+                heal_numbers::HealNumberAt {
+                    position: target_transform.translation,
+                    pattern: pattern.as_deref_mut(),
                 },
-                PlayMatchEntity,
-            ));
+                actual_heal,
+                is_crit,
+            );
 
             // The per-spell heal landing (rendering/effects/heal_impact.rs) —
             // Holy Shock's heal resolves to Priest Heal's visual verbatim in

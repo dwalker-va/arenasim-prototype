@@ -33,11 +33,9 @@ use serde::{Deserialize, Serialize};
 
 use super::super::abilities::SpellSchool;
 use super::super::components::{
-    ActiveAuras, ArenaDampening, Combatant, FloatingCombatText, FloatingTextState, HealImpact,
-    PlayMatchEntity,
+    ActiveAuras, ArenaDampening, Combatant, HealImpact, PlayMatchEntity,
 };
-use super::super::utils::get_next_fct_offset;
-use super::super::FCT_HEIGHT;
+use super::super::heal_numbers::{spawn_heal_number, HealNumberAt};
 use super::healing::apply_healing;
 use crate::combat::log::{CombatLog, CombatantId};
 
@@ -157,14 +155,6 @@ pub fn recipients(
     }
 }
 
-/// Where a leech heal's number floats: its recipient's position, and the
-/// recipient's floating-text pattern (`None` for a unit without one, whose
-/// number floats unoffset).
-pub struct HealNumberAt<'a> {
-    pub position: Vec3,
-    pub pattern: Option<&'a mut FloatingTextState>,
-}
-
 /// Land one leech heal on `recipient`, through `apply_healing`, log it, and
 /// float its number. Returns the effective healing, for the caster's
 /// `healing_done`.
@@ -237,19 +227,7 @@ pub fn land(
             false,
             message,
         );
-        let (offset_x, offset_y) = number_at.pattern.map_or((0.0, 0.0), get_next_fct_offset);
-        commands.spawn((
-            FloatingCombatText {
-                world_position: number_at.position
-                    + Vec3::new(offset_x, FCT_HEIGHT + offset_y, 0.0),
-                text: format!("+{:.0}", effective),
-                color: crate::ui::theme::fct::HEAL,
-                lifetime: 1.5,
-                vertical_offset: offset_y,
-                is_crit: false,
-            },
-            PlayMatchEntity,
-        ));
+        spawn_heal_number(commands, number_at, effective, false);
     }
     effective
 }
