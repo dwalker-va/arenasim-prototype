@@ -123,7 +123,8 @@ fn spawn(
 
 #[cfg(test)]
 mod tests {
-    use super::heal_number_text;
+    use super::*;
+    use bevy::ecs::world::CommandQueue;
 
     #[test]
     fn a_heal_that_rounds_to_nothing_floats_no_number() {
@@ -131,5 +132,41 @@ mod tests {
         assert_eq!(heal_number_text(0.3), None);
         assert_eq!(heal_number_text(1.0).as_deref(), Some("+1"));
         assert_eq!(heal_number_text(126.4).as_deref(), Some("+126"));
+    }
+
+    /// The pattern slot `spawn_heal_number` leaves next, and the numbers it
+    /// spawned, for a heal that landed `landed` on a unit whose next slot is 1.
+    fn spawned(landed: f32) -> (u8, Vec<String>) {
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut pattern = FloatingTextState {
+            next_pattern_index: 1,
+        };
+        let mut commands = Commands::new(&mut queue, &world);
+        spawn_heal_number(
+            &mut commands,
+            HealNumberAt {
+                position: Vec3::ZERO,
+                pattern: Some(&mut pattern),
+            },
+            landed,
+            false,
+        );
+        queue.apply(&mut world);
+        let texts = world
+            .query::<&FloatingCombatText>()
+            .iter(&world)
+            .map(|t| t.text.clone())
+            .collect();
+        (pattern.next_pattern_index, texts)
+    }
+
+    /// A heal that floats no number takes no slot of its unit's pattern, so
+    /// the next number over that unit stands where it would have.
+    #[test]
+    fn a_heal_that_floats_no_number_takes_no_slot() {
+        assert_eq!(spawned(0.2), (1, vec![]));
+        // Control: a heal that lands something takes the slot.
+        assert_eq!(spawned(5.0), (2, vec!["+5".to_string()]));
     }
 }

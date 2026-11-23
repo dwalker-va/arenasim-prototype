@@ -460,12 +460,10 @@ const LOCK: Unit = Unit::new(1, 0);
 const FOE: Unit = Unit::new(2, 0);
 const LOCK_ID: &str = "Team 1 Warlock #1";
 
-/// An Affliction Warlock 3 below full drains a Warrior held stunned at its
-/// side: the first tick's heal lands the 3, and every later tick finds the
-/// Warlock full, so its heal lands nothing — no line (`leech::land` logs a
-/// leech heal only when it lands something) and no number.
-#[test]
-fn a_leech_heal_floats_what_it_landed_and_nothing_once_full() {
+/// An Affliction Warlock `missing` below full drains a Warrior held stunned
+/// at its side for five ticks. Returns the run and the stamps of the drain's
+/// damage ticks.
+fn drain(missing_health: f32) -> (Run, Vec<String>) {
     let config = HeadlessMatchConfig {
         team1: vec!["Warlock".into()],
         team2: vec!["Warrior".into()],
@@ -481,7 +479,7 @@ fn a_leech_heal_floats_what_it_landed_and_nothing_once_full() {
         .place(pet, -20.0, 30.0)
         .target(FOE, LOCK)
         .aura(FOE, held(10.0))
-        .world(missing(LOCK, 3.0))
+        .world(missing(LOCK, missing_health))
         .world(|world| {
             let target = FOE.entity(world);
             let caster = LOCK.entity(world);
@@ -497,18 +495,24 @@ fn a_leech_heal_floats_what_it_landed_and_nothing_once_full() {
             });
         });
     let run = Run::play(config, stage);
-    let drain_ticks: Vec<String> = run
+    let ticks: Vec<String> = run
         .played
         .log
         .lines()
         .filter(|l| l.contains("[DMG] Team 1 Warlock #1's Drain Life ticks on "))
         .map(|l| l[1..l.find("s]").unwrap()].trim().to_string())
         .collect();
-    assert!(
-        drain_ticks.len() >= 3,
-        "three drain ticks:\n{}",
-        run.played.log
-    );
+    assert!(ticks.len() >= 3, "three drain ticks:\n{}", run.played.log);
+    (run, ticks)
+}
+
+/// A Warlock 3 below full: the drain's first tick heals the 3 and floats
+/// "+3"; every later tick finds the Warlock full, so its heal lands nothing —
+/// no line (`leech::land` logs a leech heal only when it lands something) and
+/// no number.
+#[test]
+fn a_leech_heal_floats_what_it_landed_and_nothing_once_full() {
+    let (run, ticks) = drain(3.0);
     let heals = run.lines_of("Drain Life");
     assert_eq!(
         heals.len(),
@@ -520,11 +524,27 @@ fn a_leech_heal_floats_what_it_landed_and_nothing_once_full() {
         (heals[0].to.as_str(), heals[0].amount.as_str()),
         (LOCK_ID, "3")
     );
-    assert_eq!(heals[0].stamp, drain_ticks[0]);
-    assert_eq!(run.numbers_at(&drain_ticks[0], LOCK_ID), vec!["+3"]);
-    for stamp in &drain_ticks[1..] {
+    assert_eq!(heals[0].stamp, ticks[0]);
+    assert_eq!(run.numbers_at(&ticks[0], LOCK_ID), vec!["+3"]);
+    for stamp in &ticks[1..] {
         assert_eq!(run.numbers_at(stamp, LOCK_ID), Vec::<&str>::new());
     }
+    run.assert_heal_numbers_follow_the_rule();
+}
+
+/// A Warlock a third of a point below full: the drain's first tick heals that
+/// third, which the log prints as "for 0" and which floats no number.
+#[test]
+fn a_leech_heal_that_rounds_to_nothing_floats_nothing() {
+    let (run, ticks) = drain(0.3);
+    let heals = run.lines_of("Drain Life");
+    assert_eq!(heals.len(), 1, "the first tick healed:\n{}", run.played.log);
+    assert_eq!(
+        (heals[0].to.as_str(), heals[0].amount.as_str()),
+        (LOCK_ID, "0")
+    );
+    assert_eq!(heals[0].stamp, ticks[0]);
+    assert_eq!(run.numbers_at(&ticks[0], LOCK_ID), Vec::<&str>::new());
     run.assert_heal_numbers_follow_the_rule();
 }
 
