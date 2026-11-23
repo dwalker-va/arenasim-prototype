@@ -3,8 +3,8 @@
 //!
 //! **The rule.** A heal floats the amount it landed, rounded as the combat
 //! log prints it, in the heal green. A heal whose landed amount rounds to
-//! nothing — its target was at full health, so all of it was overheal —
-//! floats no number at all, and takes no slot of its unit's floating-text
+//! nothing — its target was at full health, so all of it was overheal, or
+//! dampening took it — floats no number at all, and takes no slot of its unit's floating-text
 //! pattern: a "+0" reads as noise. The combat log is not this module's: each
 //! site logs its heal as it always has.
 //!
@@ -18,8 +18,11 @@
 //! - a leech heal: `combat_core::leech::land`, Drain Life included;
 //! - a killing-blow save's heal: `consume_killing_blow_signals`.
 //!
-//! `tests/heal_numbers.rs` holds every site to the rule, and fails on a heal
-//! number built anywhere else.
+//! `tests/heal_numbers.rs` stages a landing of nothing and a partial one at
+//! every site but the save's, and a critical one at Holy Shock's and the area
+//! heal's, checks each against the combat log, and fails on the heal green
+//! named anywhere outside this module. `tests/guardian_spirit_visual_probes.rs` holds the save's heal to
+//! the rule.
 //!
 //! Like every floating number, a heal number is spawned in both modes and
 //! drawn only in graphical mode; nothing in the sim reads it.
@@ -46,7 +49,7 @@ pub struct HealNumberAt<'a> {
 /// rounds it, so the number is the log's.
 pub fn heal_number_text(landed: f32) -> Option<String> {
     let text = format!("+{landed:.0}");
-    (text != "+0" && text != "+-0").then_some(text)
+    (text != "+0").then_some(text)
 }
 
 /// Float the number of a heal that landed `landed` over the unit `at` names,

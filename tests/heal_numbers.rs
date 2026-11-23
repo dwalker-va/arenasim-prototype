@@ -3,8 +3,12 @@
 //! A heal floats the amount it landed, as the combat log prints it; a heal
 //! that landed nothing, because its target was at full health, floats no
 //! number (`heal_numbers::heal_number_text`). Every heal number is spawned
-//! through `heal_numbers`, whichever family the heal belongs to: a direct
-//! heal, a heal over time tick, a bloom, a leech heal, a killing-blow save.
+//! through `heal_numbers`, whichever family the heal belongs to. Here: the
+//! direct heals (a cast's, Holy Shock's and Holy Nova's), heal over time
+//! ticks, blooms and leech heals, staged at each site, and whole seeded
+//! matches; and a reader of `src/` that fails on the heal green named outside
+//! `heal_numbers`. A killing-blow save's heal is pinned in
+//! `tests/guardian_spirit_visual_probes.rs`.
 //!
 //! Each match here is played through the production schedule, with an
 //! observer that records every floating number as it is spawned: the
@@ -20,21 +24,27 @@
 mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 
 use arenasim::combat::log::CombatLog;
 use arenasim::headless::{HeadlessMatchConfig, Stage, Unit};
+use arenasim::states::play_match::class_ai::QueuedAoeHeal;
 use arenasim::states::play_match::components::{
     ActiveAuras, Aura, AuraPending, AuraType, CastingState, ChannelingState, Combatant,
-    FloatingCombatText, Pet,
+    FloatingCombatText, HolyShockHealPending, Pet, PlayMatchEntity,
 };
+use arenasim::states::play_match::instant_landings::InstantLandings;
 use arenasim::states::play_match::reference_builds::BuildSpec;
+use arenasim::states::play_match::talents::{Build, TalentId};
 use arenasim::states::play_match::utils::{combat_log_id_for, FCT_HORIZONTAL_SPREAD};
 use arenasim::states::play_match::AbilityType;
+use common::source_audit::{
+    blank_comments_and_strings, blank_test_modules, load_sources, use_statements,
+};
 use common::staged::{play, Played};
+use regex::Regex;
 
 /// One floating number as it was spawned.
 #[derive(Clone, Debug)]
@@ -189,6 +199,15 @@ impl Run {
             .collect()
     }
 
+    /// The green numbers over `unit` at `stamp`, with their crit flags.
+    fn crits_at(&self, stamp: &str, unit: &str) -> Vec<(String, bool)> {
+        self.numbers
+            .iter()
+            .filter(|n| n.heal && n.stamp == stamp && n.over == unit)
+            .map(|n| (n.text.clone(), n.crit))
+            .collect()
+    }
+
     /// At every (moment, unit) a heal line or a green number names, the green
     /// numbers are exactly the heal lines whose amount is not 0, each with
     /// the line's amount and crit. Returns (the heal lines checked, those of
@@ -270,11 +289,22 @@ const WARRIOR_ID: &str = "Team 1 Warrior #2";
 /// `healer` and a Warrior against a Mage held stunned out of reach the whole
 /// match, so nothing but the stage hurts or heals anyone.
 fn party(healer: &str, secs: f32, more: impl FnOnce(Stage) -> Stage) -> Run {
+    party_built(healer, None, secs, more)
+}
+
+/// [`party`], the healer on `build`.
+fn party_built(
+    healer: &str,
+    build: Option<BuildSpec>,
+    secs: f32,
+    more: impl FnOnce(Stage) -> Stage,
+) -> Run {
     let config = HeadlessMatchConfig {
         team1: vec![healer.into(), "Warrior".into()],
         team2: vec!["Mage".into()],
         random_seed: Some(508),
         max_duration_secs: secs,
+        team1_builds: build.map(|b| vec![b]).unwrap_or_default(),
         ..Default::default()
     };
     let stage = Stage::new()
@@ -340,6 +370,174 @@ fn a_partly_overhealed_direct_heal_floats_what_it_landed() {
         (WARRIOR_ID, "3")
     );
     assert_eq!(run.numbers_at(&heals[0].stamp, WARRIOR_ID), vec!["+3"]);
+    run.assert_heal_numbers_follow_the_rule();
+}
+
+// --- Direct heal: Holy Shock's heal --------------------------------------
+
+/// A Holy Shock heal of the Paladin's on its Warrior, staged pending as the
+/// gates open (`process_holy_shock_heals` lands it), at `crit` crit chance.
+/// The Paladin has no mana, so it casts nothing of its own.
+fn holy_shock(warrior_health: f32, crit: f32) -> Run {
+    party("Paladin", 2.0, move |s| {
+        s.mana(HEALER, 0.0)
+            .world(move |world| {
+                let e = WARRIOR.entity(world);
+                let mut c = world.get_mut::<Combatant>(e).unwrap();
+                c.current_health = c.max_health - warrior_health;
+            })
+            .world(move |world| {
+                let target = WARRIOR.entity(world);
+                let caster = HEALER.entity(world);
+                let paladin = world.get::<Combatant>(caster).unwrap();
+                let pending = HolyShockHealPending {
+                    caster,
+                    caster_book: paladin.book().clone(),
+                    caster_spell_power: paladin.spell_power,
+                    caster_crit_chance: crit,
+                    caster_team: paladin.team,
+                    caster_slot: paladin.slot,
+                    caster_class: paladin.class,
+                    target,
+                };
+                world.spawn((pending, PlayMatchEntity));
+            })
+    })
+}
+
+/// The one heal line of `ability` in `run`, on the Warrior.
+fn the_heal(run: &Run, ability: &str) -> HealLine {
+    let heals = run.lines_of(ability);
+    assert_eq!(
+        heals.len(),
+        1,
+        "the staged heal landed:\n{}",
+        run.played.log
+    );
+    assert_eq!(heals[0].to, WARRIOR_ID);
+    heals[0].clone()
+}
+
+/// A Holy Shock heal on a Warrior at full health lands 0, and floats nothing.
+#[test]
+fn a_fully_overhealed_holy_shock_floats_nothing() {
+    let run = holy_shock(0.0, 0.0);
+    let heal = the_heal(&run, "Holy Shock");
+    assert_eq!((heal.amount.as_str(), heal.crit), ("0", false));
+    assert_eq!(run.numbers_at(&heal.stamp, WARRIOR_ID), Vec::<&str>::new());
+    run.assert_heal_numbers_follow_the_rule();
+}
+
+/// A Holy Shock heal on a Warrior 3 below full lands 3, and floats "+3".
+#[test]
+fn a_partly_overhealed_holy_shock_floats_what_it_landed() {
+    let run = holy_shock(3.0, 0.0);
+    let heal = the_heal(&run, "Holy Shock");
+    assert_eq!((heal.amount.as_str(), heal.crit), ("3", false));
+    assert_eq!(run.numbers_at(&heal.stamp, WARRIOR_ID), vec!["+3"]);
+    run.assert_heal_numbers_follow_the_rule();
+}
+
+/// A critical Holy Shock heal on a Warrior far below full floats its whole
+/// amount as a crit.
+#[test]
+fn a_critical_holy_shock_floats_a_crit() {
+    let run = holy_shock(200.0, 1.0);
+    let heal = the_heal(&run, "Holy Shock");
+    assert!(heal.crit, "the heal crit: {heal:?}");
+    assert_ne!(heal.amount, "0");
+    assert_eq!(
+        run.crits_at(&heal.stamp, WARRIOR_ID),
+        vec![(format!("+{}", heal.amount), true)]
+    );
+    run.assert_heal_numbers_follow_the_rule();
+}
+
+// --- Direct heal: Holy Nova's area heal -----------------------------------
+
+/// Every Holy node, Holy Nova among them (`tests/holy_talents.rs`'s build).
+fn holy_nova_build() -> BuildSpec {
+    Build::of(&[
+        (TalentId::HolySpecialization, 1),
+        (TalentId::SpiritualHealing, 1),
+        (TalentId::Inspiration, 2),
+        (TalentId::BlessedRecovery, 1),
+        (TalentId::HolyConcentration, 1),
+        (TalentId::HolyNova, 1),
+        (TalentId::GuardianSpirit, 1),
+    ])
+    .into()
+}
+
+/// A Holy Priest's Holy Nova heal on its Warrior, `heal` before reductions,
+/// staged in the frame's instant landings as the gates open
+/// (`land_instant_effects` lands it). The Priest has no mana, so it casts
+/// nothing of its own.
+fn holy_nova(warrior_health: f32, heal: f32, is_crit: bool) -> Run {
+    party_built("Priest", Some(holy_nova_build()), 2.0, move |s| {
+        s.mana(HEALER, 0.0)
+            .world(move |world| {
+                let e = WARRIOR.entity(world);
+                let mut c = world.get_mut::<Combatant>(e).unwrap();
+                c.current_health = c.max_health - warrior_health;
+            })
+            .world(move |world| {
+                let target = WARRIOR.entity(world);
+                let caster = HEALER.entity(world);
+                let priest = world.get::<Combatant>(caster).unwrap();
+                assert!(
+                    priest.book().get(&AbilityType::HolyNova).is_some(),
+                    "the Holy Priest knows Holy Nova"
+                );
+                let queued = QueuedAoeHeal {
+                    caster,
+                    target,
+                    heal,
+                    is_crit,
+                    caster_team: priest.team,
+                    caster_slot: priest.slot,
+                    caster_class: priest.class,
+                    ability: AbilityType::HolyNova,
+                };
+                world
+                    .resource_mut::<InstantLandings>()
+                    .area_heals
+                    .push(queued);
+            })
+    })
+}
+
+/// A Holy Nova heal on a Warrior at full health lands 0, and floats nothing.
+#[test]
+fn a_fully_overhealed_holy_nova_floats_nothing() {
+    let run = holy_nova(0.0, 27.0, false);
+    let heal = the_heal(&run, "Holy Nova");
+    assert_eq!((heal.amount.as_str(), heal.crit), ("0", false));
+    assert_eq!(run.numbers_at(&heal.stamp, WARRIOR_ID), Vec::<&str>::new());
+    run.assert_heal_numbers_follow_the_rule();
+}
+
+/// A Holy Nova heal on a Warrior 3 below full lands 3, and floats "+3".
+#[test]
+fn a_partly_overhealed_holy_nova_floats_what_it_landed() {
+    let run = holy_nova(3.0, 27.0, false);
+    let heal = the_heal(&run, "Holy Nova");
+    assert_eq!((heal.amount.as_str(), heal.crit), ("3", false));
+    assert_eq!(run.numbers_at(&heal.stamp, WARRIOR_ID), vec!["+3"]);
+    run.assert_heal_numbers_follow_the_rule();
+}
+
+/// A critical Holy Nova heal on a Warrior far below full floats its whole
+/// amount as a crit.
+#[test]
+fn a_critical_holy_nova_floats_a_crit() {
+    let run = holy_nova(200.0, 40.0, true);
+    let heal = the_heal(&run, "Holy Nova");
+    assert_eq!((heal.amount.as_str(), heal.crit), ("40", true));
+    assert_eq!(
+        run.crits_at(&heal.stamp, WARRIOR_ID),
+        vec![("+40".to_string(), true)]
+    );
     run.assert_heal_numbers_follow_the_rule();
 }
 
@@ -622,36 +820,179 @@ fn every_heal_number_in_a_match_follows_the_rule() {
 // The one site
 // ---------------------------------------------------------------------------
 
-/// The heal green is written in one place outside the theme: the module that
-/// builds every heal number. A heal number built anywhere else would float
-/// without the rule.
-#[test]
-fn every_heal_number_is_built_by_heal_numbers() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut writers = BTreeSet::new();
-    let mut stack = vec![root.clone()];
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().is_some_and(|e| e == "rs")
-                && std::fs::read_to_string(&path)
-                    .unwrap()
-                    .contains("fct::HEAL")
-            {
-                writers.insert(
-                    path.strip_prefix(&root)
-                        .unwrap()
-                        .to_string_lossy()
-                        .into_owned(),
-                );
+/// The one place outside the theme that may name the heal green, and how
+/// often: the module that builds every heal number.
+const HEAL_GREEN_AT: (&str, &str) = ("src/states/play_match/heal_numbers.rs", "fct::HEAL");
+
+/// Every place `code` (comment-, string- and test-module-blanked) names the
+/// heal green, `ui::theme::fct::HEAL`, as (construct, line):
+///
+/// - a path to it, however the `fct` module is reached: in full
+///   (`crate::ui::theme::fct::HEAL`), through `theme` or `fct` imported, or
+///   through a renamed `fct` (`use ...::fct as hues; hues::HEAL`, or
+///   `use ...::{fct::{self as hues}}`), with any whitespace round the `::`;
+/// - an import of it, however the tree is written (`fct::HEAL`,
+///   `fct::{HEAL}`, `fct::{HEAL as GREEN}`), `pub use` or not: the import
+///   is the hit, since a name it binds can be used anywhere after;
+/// - a glob of `fct` (`use ...::fct::*`), which brings it in unseen;
+/// - a re-export of the `fct` module itself (`pub use ...::fct`, renamed or
+///   not), through which another file could name it under a path this
+///   reader, one file at a time, cannot follow;
+/// - in the theme file itself, any `HEAL` but its own definition, so no
+///   other theme token can be made an alias of it.
+///
+/// Known limit: a second theme token defined with the same colour value
+/// under another name is not seen here (a literal colour outside the theme
+/// is `tests/ui_token_audit.rs`'s).
+fn heal_green_names(code: &str, is_theme: bool) -> Vec<(String, usize)> {
+    let line_of = |at: usize| 1 + code[..at].matches('\n').count();
+    let uses = use_statements(code);
+    let names_fct =
+        |segment: &str, aliases: &BTreeSet<String>| segment == "fct" || aliases.contains(segment);
+    // Names that bind the `fct` module under another name.
+    let aliases: BTreeSet<String> = uses
+        .iter()
+        .flat_map(|u| &u.bindings)
+        .filter(|b| b.path.last().map(String::as_str) == Some("fct") && b.name != "fct")
+        .map(|b| b.name.clone())
+        .collect();
+    let mut hits = Vec::new();
+    for u in &uses {
+        let keyword = if u.public { "pub use" } else { "use" };
+        for b in &u.bindings {
+            let n = b.path.len();
+            let last = b.path[n - 1].as_str();
+            let parent = (n >= 2).then(|| b.path[n - 2].as_str());
+            let in_fct = parent.is_some_and(|p| names_fct(p, &aliases));
+            let hit = (in_fct && (last == "HEAL" || last == "*"))
+                || (u.public && last == "fct")
+                || (is_theme && last == "HEAL");
+            if hit {
+                hits.push((
+                    format!("{keyword} {}", b.path.join("::")),
+                    line_of(u.span.start),
+                ));
             }
         }
     }
+    // Paths outside the `use` statements, which were read above.
+    let mut rest = code.to_string();
+    for u in &uses {
+        rest.replace_range(u.span.clone(), &" ".repeat(u.span.len()));
+    }
+    let module = std::iter::once("fct".to_string()).chain(aliases.iter().cloned());
+    for name in module {
+        let path = Regex::new(&format!(r"\b{}\s*::\s*HEAL\b", regex::escape(&name))).unwrap();
+        for m in path.find_iter(&rest) {
+            // A renamed `fct` is a name at the start of its path:
+            // `other::hues::HEAL` is not it.
+            if name != "fct" && rest[..m.start()].trim_end().ends_with("::") {
+                continue;
+            }
+            hits.push(("fct::HEAL".to_string(), line_of(m.start())));
+        }
+    }
+    if is_theme {
+        // Every `HEAL` in the theme but a definition (`const HEAL`).
+        let bare = Regex::new(r"\bHEAL\b").unwrap();
+        for m in bare.find_iter(&rest) {
+            if !rest[..m.start()].trim_end().ends_with("const") {
+                hits.push(("HEAL in the theme".to_string(), line_of(m.start())));
+            }
+        }
+    }
+    hits
+}
+
+/// The heal green is named in one place outside the theme, once: the module
+/// that builds every heal number. A heal number built anywhere else would
+/// float without the rule.
+#[test]
+fn every_heal_number_is_built_by_heal_numbers() {
+    let mut found: BTreeMap<(String, String), Vec<usize>> = BTreeMap::new();
+    for file in load_sources(&["src"]).expect("read src/") {
+        let code = blank_test_modules(&blank_comments_and_strings(&file.raw));
+        let is_theme = file.rel_display() == "src/ui/theme.rs";
+        for (construct, line) in heal_green_names(&code, is_theme) {
+            found
+                .entry((file.rel_display(), construct))
+                .or_default()
+                .push(line);
+        }
+    }
+    let expected = BTreeMap::from([(
+        (HEAL_GREEN_AT.0.to_string(), HEAL_GREEN_AT.1.to_string()),
+        found
+            .get(&(HEAL_GREEN_AT.0.to_string(), HEAL_GREEN_AT.1.to_string()))
+            .filter(|lines| lines.len() == 1)
+            .cloned()
+            .unwrap_or_default(),
+    )]);
     assert_eq!(
-        writers,
-        BTreeSet::from(["states/play_match/heal_numbers.rs".to_string()]),
-        "the heal green is written outside heal_numbers"
+        found, expected,
+        "the heal green is named outside heal_numbers (or more than once in it): build a \
+         heal's number with `heal_numbers::spawn_heal_number`"
     );
+}
+
+/// The reader finds every spelling its doc names, and passes what is not the
+/// heal green. Each hit is (line, construct); the set found must be exactly
+/// the set named.
+#[test]
+fn the_audit_reads_every_spelling_of_the_heal_green() {
+    let fixture = r#"
+use crate::ui::theme::fct::HEAL;
+use crate::ui::theme::fct::{HEAL as GREEN, DAMAGE};
+use crate::ui::theme::{fct::{self as hues}};
+pub use crate::ui::theme::fct::HEAL as G2;
+pub use crate::ui::theme::fct as hue_table;
+use crate::ui::theme::fct::*;
+pub(crate) use crate::ui::theme::fct;
+use crate::ui::theme::fct::{DAMAGE as D, ABSORB};
+use crate::ui::theme;
+fn a() {
+    let _ = crate::ui::theme::fct::HEAL;
+    let _ = fct :: HEAL;
+    let _ = hues::HEAL;
+    let _ = hue_table::HEAL;
+    let _ = { use crate::ui::theme::fct::{HEAL}; HEAL };
+    let _ = theme::fct::HEAL;
+    let _ = fct::DAMAGE;
+    let _ = other::HEAL;
+    let _ = x::hues::HEAL;
+    let _ = fct::HEALTH;
+}
+"#;
+    let found: BTreeSet<String> = heal_green_names(fixture, false)
+        .into_iter()
+        .map(|(construct, line)| format!("{line}: {construct}"))
+        .collect();
+    let expected: BTreeSet<String> = [
+        "2: use crate::ui::theme::fct::HEAL",
+        "3: use crate::ui::theme::fct::HEAL",
+        "5: pub use crate::ui::theme::fct::HEAL",
+        "6: pub use crate::ui::theme::fct",
+        "7: use crate::ui::theme::fct::*",
+        "8: pub use crate::ui::theme::fct",
+        "12: fct::HEAL",
+        "13: fct::HEAL",
+        "14: fct::HEAL",
+        "15: fct::HEAL",
+        "16: use crate::ui::theme::fct::HEAL",
+        "17: fct::HEAL",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    assert_eq!(found, expected);
+
+    // In the theme, the definition is not a hit; another use of it is.
+    let theme = r#"
+pub mod fct {
+    pub const HEAL: Color32 = Color32::from_rgb(100, 255, 100);
+    pub const GREEN: Color32 = HEAL;
+}
+"#;
+    let found: Vec<(String, usize)> = heal_green_names(theme, true);
+    assert_eq!(found, vec![("HEAL in the theme".to_string(), 4)]);
 }

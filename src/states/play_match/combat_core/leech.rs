@@ -162,10 +162,11 @@ pub fn recipients(
 /// A heal to the caster logs `"<caster>'s <source> heals for N"` (Death Coil's
 /// line since it shipped); a heal to anyone else names them.
 ///
-/// The heal's green number floats over its recipient exactly when its line is
-/// logged: the effective amount, so dampening and healing reduction show in
-/// it, and nothing for a heal that landed nothing (a full recipient's). A
-/// leech heal never crits. Like every floating number it is spawned in both
+/// A heal that landed anything logs its line; its green number floats over
+/// its recipient by the one heal-number rule (`heal_numbers`): the effective
+/// amount, so dampening and healing reduction show in it, and nothing for a
+/// heal that rounds to 0 (a full recipient's, or one that landed under half a
+/// point, which logs "for 0"). A leech heal never crits. Like every floating number it is spawned in both
 /// modes and drawn only in graphical mode.
 ///
 /// A leech the client draws a heal landing for (Vampiric Embrace's party
