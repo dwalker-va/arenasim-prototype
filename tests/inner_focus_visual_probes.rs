@@ -52,12 +52,13 @@ use arenasim::states::play_match::talent_procs::{
 use arenasim::states::play_match::talents::{TalentDefinitions, TalentEffect, TalentId};
 use arenasim::states::play_match::{
     cleanup_heal_cast_glows, cleanup_play_match, consume_cast_ending_signals,
-    consume_heal_cast_endings, place_blessed_recovery_bursts, place_inner_focus,
-    spawn_blessed_recovery_bursts, spawn_heal_cast_glows, spawn_inner_focus_flashes,
-    spawn_instant_cast_hands, update_blessed_recovery_bursts, update_heal_cast_glows,
-    update_inner_focus_flashes, update_inner_focus_palms, BlessedRecoveryBurst,
-    BlessedRecoveryParticle, FlashPiece, InnerFocusFlash, InnerFocusFlashPiece, InnerFocusPalm,
-    InnerFocusPalmPiece, InnerFocusPalms, PalmPiece, RecoveryLayer,
+    consume_heal_cast_endings, flash_piece_pose, palm_piece_pose, place_blessed_recovery_bursts,
+    place_inner_focus, spawn_blessed_recovery_bursts, spawn_heal_cast_glows,
+    spawn_inner_focus_flashes, spawn_instant_cast_hands, update_blessed_recovery_bursts,
+    update_heal_cast_glows, update_inner_focus_flashes, update_inner_focus_palms,
+    BlessedRecoveryBurst, BlessedRecoveryParticle, FlashPiece, InnerFocusFlash,
+    InnerFocusFlashPiece, InnerFocusPalm, InnerFocusPalmPiece, InnerFocusPalms, PalmPiece,
+    RecoveryLayer,
 };
 use arenasim::CharacterClass;
 
@@ -1108,20 +1109,39 @@ fn the_palms_and_the_flash_live_and_die_with_the_priest() {
 /// (roll 0, X square to the view); nothing drawn from 900 ms on.
 #[test]
 fn the_comets_fly_the_benchs_paths_in_the_priests_plane() {
-    let mut h = Harness::new();
+    for dt in [0.008, 0.016, 0.033] {
+        comets_at(dt);
+    }
+}
+
+/// The comets at `dt`-second frames: the flash's clock is the harness's own
+/// (frames × dt since the landing's frame), and the flash lives its second.
+fn comets_at(dt: f32) {
+    let mut h = Harness::with_tick(dt);
     let (priest, _, _) = h.scene();
     let facing = Quat::from_rotation_y(0.7);
     h.world().get_mut::<Transform>(priest).unwrap().rotation = facing;
     h.focus(priest);
     let right = level(facing * Vec3::X);
     let forward = level(facing * Vec3::Z);
-    let mut seen = 0;
+    let (mut seen, mut comet_frames, mut frames) = (0, 0, 0);
     loop {
         let flashes = h.flashes();
         if flashes.is_empty() {
             break;
         }
+        // The landing's frame ages the flash once: its age is the harness's
+        // time since then, never a step of its own.
+        frames += 1;
+        assert!(
+            close(flashes[0].2, frames as f32 * dt, 1e-4),
+            "at {dt} s frames, frame {frames}: the flash is {} s old",
+            flashes[0].2
+        );
         let ms = flashes[0].2 * 1000.0;
+        if ms < 900.0 {
+            comet_frames += 1;
+        }
         let unit = h.app.world().get::<Transform>(priest).unwrap().translation;
         let chest = unit + Vec3::Y * (BENCH_CHEST - COMBATANT_Y);
         assert!(
@@ -1166,8 +1186,16 @@ fn the_comets_fly_the_benchs_paths_in_the_priests_plane() {
         }
         h.tick(1);
     }
-    // 900 ms at 16 ms frames: 57 frames of 24 comet pieces.
-    assert!(seen >= 56 * 24, "{seen} comet pieces checked");
+    assert_eq!(seen, comet_frames * 24, "every comet piece, every frame");
+    assert!(
+        comet_frames as f32 * dt > 0.9 - dt,
+        "{comet_frames} frames of comets at {dt}"
+    );
+    // The flash lives its 1.0 s: the last of its stars dies at 1.0 s.
+    assert!(
+        close(frames as f32 * dt, 1.0, dt),
+        "the flash lives 1.0 s ({frames} frames at {dt})"
+    );
 }
 
 /// The spark pop: 18 stars, born where the bench's rate track owes them,
@@ -1186,8 +1214,14 @@ fn the_pop_bears_the_benchs_eighteen_stars_at_any_frame_rate() {
         h.focus(priest);
         let mut stars: BTreeMap<u8, (f32, Vec3)> = BTreeMap::new();
         let mut rolls: BTreeMap<u8, Quat> = BTreeMap::new();
+        let mut frames = 0;
         while let Some(flash) = h.flashes().first().copied() {
+            frames += 1;
             let age = flash.2;
+            assert!(
+                close(age, frames as f32 * dt, 1e-4),
+                "at {dt} s frames: the flash is {age} s old at frame {frames}"
+            );
             let chest = flash.3;
             for d in h.flash_pieces() {
                 let FlashPiece::Pop { star } = d.piece else {
@@ -1243,6 +1277,10 @@ fn the_pop_bears_the_benchs_eighteen_stars_at_any_frame_rate() {
             (0..18).collect(),
             "all 18 stars fly at {dt} s frames"
         );
+        assert!(
+            close(frames as f32 * dt, 1.0, dt),
+            "the pop's flash lives 1.0 s ({frames} frames at {dt})"
+        );
         flights.entry(0).or_default().push(stars.len() as f32);
         // The rolls (no camera: the roll is the rotation about Z) spread
         // round the circle.
@@ -1279,12 +1317,18 @@ fn the_palms_glow_pulse_and_shed_as_the_bench_draws_them() {
         h.focus(priest);
         // Let the arcane hands go; the palm clock runs from the landing.
         let mut births: BTreeMap<(i32, u32), (f32, Vec3, Vec3)> = BTreeMap::new();
-        let mut last_age = 0.0;
-        for _ in 0..((2.2 / dt) as u32) {
+        let mut elapsed = 0.0;
+        for frame in 0..((2.2 / dt) as u32) {
             h.tick(1);
             let rig = h.palm_rigs()[0];
             let age = rig.2;
-            last_age = age;
+            // The palm clock is the harness's: it rises at 0 on the
+            // landing's frame and runs `dt` a frame since.
+            elapsed = (frame + 1) as f32 * dt;
+            assert!(
+                close(age, elapsed, 1e-4),
+                "at {dt} s frames: the palms are {age} s old, {elapsed} s in"
+            );
             let ms = age * 1000.0;
             let palms: BTreeMap<i32, Vec3> = h
                 .palms()
@@ -1334,11 +1378,21 @@ fn the_palms_glow_pulse_and_shed_as_the_bench_draws_them() {
                 }
             }
         }
-        let want = (last_age * motes::RATE_PER_PALM).floor() as usize;
+        // Every mote owed by the harness's own time, on each palm.
+        let want = (elapsed * motes::RATE_PER_PALM).floor() as usize;
         for side in [-1, 1] {
             let seen = births.keys().filter(|(s, _)| *s == side).count();
             assert_eq!(seen, want, "palm {side} at {dt}: {seen} of {want} motes");
         }
+        // The two palms shed their own motes: the same birth stands
+        // elsewhere on each.
+        let apart = (0..want as u32)
+            .filter(|j| {
+                let (a, b) = (births[&(-1, *j)], births[&(1, *j)]);
+                (a.1 - b.1).length() > 1e-3
+            })
+            .count();
+        assert_eq!(apart, want, "each palm's motes are its own at {dt}");
     }
 }
 
@@ -1422,10 +1476,19 @@ fn every_piece_turns_to_the_camera_and_holds_in_front_of_the_moving_body() {
                             FlashPiece::CometHead { comet } => (comet, 0),
                             FlashPiece::CometTrail { comet, dot } => (comet, dot),
                             FlashPiece::Pop { .. } => {
-                                // A star: turned and in front; its true
-                                // point is the frame's pose, checked above.
-                                assert!((d.rotation * Vec3::Z).dot(back) > 0.99999);
-                                assert!((d.at - eye).dot(fwd) < nearest, "{label}: a star buried");
+                                // A star: its true point and width are its
+                                // pose (pinned against the bench, camera-free,
+                                // in the pop's own probe); the hold must keep
+                                // it on that point's ray, at that size.
+                                let pose = flash_piece_pose(d.piece, f.2, right, facing).unwrap();
+                                held += check(
+                                    d.at,
+                                    d.rotation,
+                                    d.scale,
+                                    chest + pose.at,
+                                    pose.size,
+                                    nearest,
+                                ) as u32;
                                 checked += 1;
                                 continue;
                             }
@@ -1452,8 +1515,20 @@ fn every_piece_turns_to_the_camera_and_holds_in_front_of_the_moving_body() {
                         continue;
                     }
                     if matches!(d.piece, PalmPiece::Mote { .. }) {
-                        assert!((d.rotation * Vec3::Z).dot(back) > 0.99999);
-                        assert!((d.at - eye).dot(fwd) < nearest, "{label}: a mote buried");
+                        // A mote: on its pose's ray, at its pose's size (the
+                        // pose is pinned against the bench in the palms'
+                        // own probe).
+                        let hand = u32::from(side < 0.0);
+                        let pose = palm_piece_pose(d.piece, age, hand).unwrap();
+                        held += check(
+                            d.at,
+                            d.rotation,
+                            d.scale,
+                            palm_at(side) + pose.at,
+                            pose.size,
+                            nearest,
+                        ) as u32;
+                        checked += 1;
                         continue;
                     }
                     let (w, ..) = bench_palm(d.piece == PalmPiece::Outer, age * 1000.0);
@@ -1539,6 +1614,68 @@ fn each_proc_plays_one_burst_and_the_ticks_draw_nothing() {
     assert_eq!(n, 1, "refreshed, not stacked beside");
     // No landing marker is left unconsumed.
     assert_eq!(h.count::<AuraLanding>(), 0);
+}
+
+/// A second crit 0.3 s into the first burst refreshes the heal over time and
+/// plays a second burst BESIDE the first (procs that close are common in
+/// play): two live at once, each a full burst of twelve on its own clock
+/// (the harness's frames × dt since its own proc), each living its whole
+/// 1.412 s — at 8, 16 and 33 ms frames.
+#[test]
+fn a_proc_mid_burst_plays_a_second_burst_beside_the_first() {
+    let life = 6.0 / renew::RATE + renew::LIFE;
+    for dt in [0.008, 0.016, 0.033] {
+        let mut h = Harness::with_tick(dt);
+        let (priest, _, enemy) = h.scene();
+        h.crit(priest, enemy, 120.0);
+        h.tick(1);
+        let first = h.bursts();
+        assert_eq!(first.len(), 1);
+        let first = first[0].0;
+        let gap = (0.3 / dt).round() as u32;
+        h.tick(gap - 1);
+        h.crit(priest, enemy, 90.0);
+        h.tick(1);
+        let bursts = h.bursts();
+        assert_eq!(bursts.len(), 2, "two bursts at once at {dt}");
+        let hots = h
+            .app
+            .world()
+            .get::<ActiveAuras>(priest)
+            .unwrap()
+            .auras
+            .iter()
+            .filter(|a| a.ability_name == BLESSED_RECOVERY_AURA)
+            .count();
+        assert_eq!(hots, 1, "the second proc refreshed the heal over time");
+        let second = bursts.iter().find(|b| b.0 != first).unwrap().0;
+        // Each burst's frames seen, and its own clock.
+        let mut seen: BTreeMap<Entity, u32> = BTreeMap::from([(first, gap), (second, 0)]);
+        while !h.bursts().is_empty() {
+            for (entity, priest_of, age, ..) in h.bursts() {
+                assert_eq!(priest_of, priest);
+                let n = seen.get_mut(&entity).expect("only the two bursts");
+                *n += 1;
+                assert!(
+                    close(age, *n as f32 * dt, 1e-4),
+                    "at {dt}: a burst {age} s old at its frame {n}"
+                );
+                let mut q = h.world().query::<(&BlessedRecoveryParticle, &ChildOf)>();
+                let mine = q
+                    .iter(h.app.world())
+                    .filter(|(_, c)| c.parent() == entity)
+                    .count();
+                assert_eq!(mine, 12, "each burst its own twelve");
+            }
+            h.tick(1);
+        }
+        for (entity, n) in seen {
+            assert!(
+                close(n as f32 * dt, life, dt),
+                "at {dt}: {entity:?} lived {n} frames, not {life} s"
+            );
+        }
+    }
 }
 
 /// The burst against the bench at 8, 16 and 33 ms frames: exactly six of
