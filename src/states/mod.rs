@@ -260,6 +260,7 @@ impl Plugin for StatesPlugin {
             .init_resource::<animation_sandbox::SandboxConfig>()
             .init_resource::<animation_sandbox::SandboxStage>()
             .init_resource::<animation_sandbox::playback::SandboxPlayback>()
+            .init_resource::<animation_sandbox::playback::SandboxSweep>()
             .init_resource::<animation_sandbox::ui::PendingCameraPreset>()
             .add_systems(
                 OnEnter(GameState::AnimationSandbox),
@@ -294,6 +295,11 @@ impl Plugin for StatesPlugin {
                     .chain()
                     .run_if(in_state(GameState::AnimationSandbox)),
             )
+            // A pass's leftovers go once every `Update` system has run, so no
+            // effect emitter can parent a particle onto a rig the sweep is
+            // despawning in the same flush (AS-507). Drains an empty list on
+            // every other frame and in every other state.
+            .add_systems(Last, animation_sandbox::playback::sweep_sandbox_leftovers)
             // Single-stepping injects a virtual-time delta, so it MUST land in
             // `First` (after `TimeSystem` overwrites delta, before
             // `RunFixedMainLoop` spends it on the fixed accumulator). In
@@ -598,17 +604,16 @@ impl Plugin for StatesPlugin {
         )
         // Expose Armor's crest (`expose_armor.rs`, AS-366): held for the
         // backhand's contact, fired only on a landing, then the crest, its
-        // glow and three particle layers over the victim's head, held in
-        // front of the body and turned to the camera. Chained: the emitter
-        // sees the rig `fire` just built, and the pose runs on final
-        // positions.
+        // glow and three particle layers over the victim's head. Chained: the
+        // emitter sees the rig `fire` just built. Posed — held in front of
+        // the rendered body and turned to the camera — by
+        // `pose_expose_armor_crests`, a `BodyPlacement` system (below).
         .add_systems(
             Update,
             (
                 play_match::fire_expose_armor_crests,
                 play_match::animate_expose_armor_crests,
                 play_match::age_expose_armor_particles,
-                play_match::pose_expose_armor_crests,
             )
                 .chain()
                 .after(CombatSystemPhase::CombatResolution)
@@ -616,20 +621,20 @@ impl Plugin for StatesPlugin {
         )
         // The bleed spray (`bleed_spray.rs`): held for the stroke's contact,
         // fired only on a landing, its droplets emitted before
-        // `animate_client_particles` flies them, then held in front of the
-        // victim's body and turned to the camera after it (the hold scales
-        // the size the animator writes).
+        // `animate_client_particles` flies them. They are held in front of
+        // the victim's body and turned to the camera by
+        // `place_bleed_droplets`, a `BodyPlacement` system (below): after the
+        // animator (the hold scales the size it writes) and after
+        // `billboard_hunter_shots`, so the bleed pass's facing is the one
+        // drawn.
         .add_systems(
             Update,
             (
-                (
-                    play_match::fire_bleed_sprays,
-                    play_match::update_bleed_sprays,
-                )
-                    .chain()
-                    .before(play_match::animate_client_particles),
-                play_match::billboard_bleed_droplets.after(play_match::animate_client_particles),
+                play_match::fire_bleed_sprays,
+                play_match::update_bleed_sprays,
             )
+                .chain()
+                .before(play_match::animate_client_particles)
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
@@ -946,78 +951,63 @@ impl Plugin for StatesPlugin {
                 .before(TransformSystem::TransformPropagate)
                 .run_if(in_combat_scene),
         )
-        // Power Word: Shield's cards stand on the bearer's RENDERED body, so
-        // they are placed after every writer of it — the cyclone lift
-        // included — and before propagation. Riding the body is what keeps
-        // their draw order fixed against the blended capsule (`shield.rs`).
-        .add_systems(
+        // Every system that stands on a unit's RENDERED body, or holds a
+        // piece in front of it (`body_hold.rs`), is a `BodyPlacement`
+        // system: after every writer of a body's transform — the `Update`
+        // gaits, then the Cyclone lift above — and of the camera's
+        // (`update_camera_position`, in `Update`), and before propagation,
+        // so what it places is drawn this frame. Riding the body is also
+        // what keeps their draw order fixed against the blended capsule.
+        // `tests/body_placement_order.rs` pins the membership and the order.
+        .configure_sets(
             PostUpdate,
-            play_match::place_shield_cards
+            play_match::BodyPlacement
                 .after(play_match::apply_cyclone_lift)
                 .before(TransformSystem::TransformPropagate)
                 .run_if(in_combat_scene),
         )
-        // Vengeance's hands stand on the rendered body's spell hands for the
-        // same reason (`vengeance.rs`).
-        .add_systems(
-            PostUpdate,
-            play_match::place_vengeance_hands
-                .after(play_match::apply_cyclone_lift)
-                .before(TransformSystem::TransformPropagate)
-                .run_if(in_combat_scene),
-        )
-        // Divine Protection's globe stands on the rendered chest for the same
-        // reason (`divine_protection.rs`).
-        .add_systems(
-            PostUpdate,
-            play_match::place_divine_protection_globes
-                .after(play_match::apply_cyclone_lift)
-                .before(TransformSystem::TransformPropagate)
-                .run_if(in_combat_scene),
-        )
-        // Shadow Dance's state stands on the rendered chest for the same
-        // reason (`shadow_dance.rs`).
-        .add_systems(
-            PostUpdate,
-            play_match::place_shadow_dance
-                .after(play_match::apply_cyclone_lift)
-                .before(TransformSystem::TransformPropagate)
-                .run_if(in_combat_scene),
-        )
-        // Vampiric Embrace's dust implosion and Priest Silence's breath stand
-        // on the rendered body for the same reason (`vampiric_embrace.rs`,
-        // `silence_breath.rs`, AS-357).
         .add_systems(
             PostUpdate,
             (
+                // Power Word: Shield's cards (`shield.rs`).
+                play_match::place_shield_cards,
+                // Vengeance's hands, on the spell hands (`vengeance.rs`).
+                play_match::place_vengeance_hands,
+                // Divine Protection's globe (`divine_protection.rs`).
+                play_match::place_divine_protection_globes,
+                // Shadow Dance's state (`shadow_dance.rs`).
+                play_match::place_shadow_dance,
+                // Vampiric Embrace's implosion and Priest Silence's breath
+                // (`vampiric_embrace.rs`, `silence_breath.rs`).
                 play_match::place_vampiric_embrace_implosions,
                 play_match::place_silence_breaths,
-            )
-                .after(play_match::apply_cyclone_lift)
-                .before(TransformSystem::TransformPropagate)
-                .run_if(in_combat_scene),
-        )
-        // Power Infusion's and Pain Suppression's states (and the swirl at
-        // the Priest's feet) stand on the rendered body for the same reason
-        // (`discipline_states.rs`).
-        .add_systems(
-            PostUpdate,
-            play_match::place_discipline_states
-                .after(play_match::apply_cyclone_lift)
-                .before(TransformSystem::TransformPropagate)
-                .run_if(in_combat_scene),
-        )
-        // Inner Focus's comets and palms and Blessed Recovery's amber burst
-        // stand on the Priest's rendered body for the same reason
-        // (`inner_focus.rs`, `blessed_recovery.rs`, AS-352).
-        .add_systems(
-            PostUpdate,
-            (
+                // Power Infusion's and Pain Suppression's states and the
+                // swirl at the Priest's feet (`discipline_states.rs`).
+                play_match::place_discipline_states,
+                // Inner Focus's comets and palms and Blessed Recovery's amber
+                // burst (`inner_focus.rs`, `blessed_recovery.rs`).
                 play_match::place_inner_focus,
                 play_match::place_blessed_recovery_bursts,
+                // The held particle effects.
+                play_match::place_siphon_life_glows,
+                play_match::place_aftermath_hits,
+                play_match::pose_expose_armor_crests,
+                play_match::pose_conflagrate_rings,
+                play_match::place_conflagrate_particles,
+                play_match::place_bleed_droplets,
+                play_match::place_demonology_landings,
+                play_match::place_ua_states,
+                play_match::place_mana_funnel_stars,
+                play_match::billboard_heal_impacts,
             )
-                .after(play_match::apply_cyclone_lift)
-                .before(TransformSystem::TransformPropagate)
+                .in_set(play_match::BodyPlacement),
+        )
+        // The one sheep rule for DoT states (`dot_state.rs`): hidden on a
+        // polymorphed victim, after every system that spawns one.
+        .add_systems(
+            PostUpdate,
+            play_match::hide_dot_states_on_sheep
+                .before(bevy::render::view::VisibilitySystems::VisibilityPropagate)
                 .run_if(in_combat_scene),
         )
         // Frostbolt and Shadow Bolt: the bespoke missiles and the bursts
@@ -1196,16 +1186,15 @@ impl Plugin for StatesPlugin {
                 .run_if(in_combat_scene),
         )
         // Per-spell heal landings (separate group to avoid tuple size
-        // limits) — spawn -> animate -> billboard, the same chained
-        // contract as the shared school impact above: `animate` must see
-        // the rig `spawn` just built, and `billboard` must see the poses
-        // both just wrote.
+        // limits) — spawn -> animate, the same chained contract as the
+        // shared school impact above: `animate` must see the rig `spawn`
+        // just built. The billboard (which holds a held style's motes in
+        // front of the rendered body) is a `BodyPlacement` system, below.
         .add_systems(
             Update,
             (
                 play_match::spawn_heal_impacts,
                 play_match::animate_heal_impacts,
-                play_match::billboard_heal_impacts,
             )
                 .chain()
                 .after(CombatSystemPhase::CombatResolution)
@@ -1254,21 +1243,19 @@ impl Plugin for StatesPlugin {
         // (off the gates opening, and consuming Touch of Shadow's landing
         // markers) -> column -> triad, before the client particles age (the
         // sparks and motes are world-space `ClientParticle`s, turned by
-        // `billboard_hunter_shots`); then the particles held in front of the
-        // body once they have aged.
+        // `billboard_hunter_shots`). Everything is stood on the rendered
+        // body and held in front of it by `place_demonology_landings`, a
+        // `BodyPlacement` system (below), once the particles have aged.
         .add_systems(
             Update,
             (
-                (
-                    play_match::unhold_demonology_particles,
-                    play_match::spawn_demonology_landings,
-                    play_match::animate_soul_link_columns,
-                    play_match::animate_sacrifice_triads,
-                )
-                    .chain()
-                    .before(play_match::animate_client_particles),
-                play_match::hold_demonology_particles.after(play_match::animate_client_particles),
+                play_match::unhold_demonology_particles,
+                play_match::spawn_demonology_landings,
+                play_match::animate_soul_link_columns,
+                play_match::animate_sacrifice_triads,
             )
+                .chain()
+                .before(play_match::animate_client_particles)
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
@@ -1325,6 +1312,12 @@ impl Plugin for StatesPlugin {
         )
         // Transform puff visual effects (separate group to avoid tuple size limits)
         // The cloud pop at both ends of a polymorph — graphical only.
+        // Chained as a defensive ordering: the lobes' attach flushes before
+        // the cleanup can despawn the puff. Today a puff cannot expire before
+        // its lobes attach (`spawn_transform_puff` gives the full lifetime, and
+        // only `update_transform_puffs` lowers it, once the attach has given
+        // the puff its material), so this pins the order against a future
+        // path that lowers it first (AS-507).
         .add_systems(
             Update,
             (
@@ -1332,6 +1325,7 @@ impl Plugin for StatesPlugin {
                 play_match::update_transform_puffs,       // Expand, rise and fade
                 play_match::cleanup_expired_transform_puffs, // Remove expired puffs
             )
+                .chain()
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
@@ -1439,8 +1433,8 @@ impl Plugin for StatesPlugin {
                 play_match::animate_ua_states,         // Glow pulse + crackle
                 play_match::age_warlock_dot_particles, // Motes/wisps/bolts age out
                 play_match::orient_curse_apparitions,  // Yaw skulls / spin the rune ring
-                play_match::billboard_warlock_dot_visuals, // Face the flat pieces
-                play_match::cleanup_warlock_dot_visuals, // End states at aura end
+                play_match::billboard_warlock_dot_visuals, // Face the flat pieces (UA's held in PostUpdate)
+                play_match::cleanup_warlock_dot_visuals,   // End states at aura end
             )
                 .chain()
                 .after(CombatSystemPhase::CombatResolution)
@@ -1451,16 +1445,15 @@ impl Plugin for StatesPlugin {
         // off the sim's `ConflagrateLanding` marker. The Immolate it consumes
         // ends with the aura, in the burn's own chain below. Graphical only —
         // never registered in headless systems.rs. Chained: the emitter must
-        // see the rig `spawn` just built, and the billboard runs on final
-        // positions.
+        // see the rig `spawn` just built. The rings and particles are posed
+        // on the rendered body by `pose_conflagrate_rings` and
+        // `place_conflagrate_particles`, `BodyPlacement` systems (below).
         .add_systems(
             Update,
             (
                 play_match::spawn_conflagrate_landings, // Marker -> rig + flinch
-                play_match::animate_conflagrate_bursts, // Follow the chest, emit five layers
-                play_match::pose_conflagrate_rings,     // Fire disc + rune ring
+                play_match::animate_conflagrate_bursts, // Emit five layers
                 play_match::animate_conflagrate_particles, // Fly, rise, retire
-                play_match::billboard_conflagrate_particles, // Face the camera, colour
             )
                 .chain()
                 .after(CombatSystemPhase::CombatResolution)
@@ -1490,14 +1483,14 @@ impl Plugin for StatesPlugin {
         // are built by `spawn_warlock_dot_visuals` (the Warlock DoT chain
         // above), so this chain runs after it. Routed through the shared DoT
         // router (`DotStateVisual`). Graphical only — never registered in
-        // headless systems.rs. Chained: the billboard runs on final
-        // positions.
+        // headless systems.rs. Placed on the rendered body and held in front
+        // of it by `place_siphon_life_glows`, a `BodyPlacement` system
+        // (below).
         .add_systems(
             Update,
             (
-                play_match::animate_siphon_life_glows, // Follow the victim, emit three layers
+                play_match::animate_siphon_life_glows, // Emit three layers
                 play_match::age_siphon_life_particles, // Fly, retire
-                play_match::billboard_siphon_life_particles, // Held in front of the body
                 play_match::cleanup_siphon_life_glows, // End the glow with the DoT
             )
                 .chain()
@@ -1545,17 +1538,17 @@ impl Plugin for StatesPlugin {
         )
         // Aftermath's fire hit (rendering/effects/aftermath.rs): kit 728's
         // small burst at the victim's chest. Spawn (consumes Aftermath's
-        // landing markers and starts the wound flinch) -> follow and emit ->
-        // fly -> held in front of the body. `.before(tick_hit_flinch)`, so
-        // the dip renders on the landing frame, as a melee auto's does. Its
-        // slow is the slow ring's (`SlowTint::Fire`). Graphical only.
+        // landing markers and starts the wound flinch) -> emit -> fly; held
+        // in front of the rendered body by `place_aftermath_hits`, a
+        // `BodyPlacement` system (below). `.before(tick_hit_flinch)`, so the
+        // dip renders on the landing frame, as a melee auto's does. Its slow
+        // is the slow ring's (`SlowTint::Fire`). Graphical only.
         .add_systems(
             Update,
             (
                 play_match::spawn_aftermath_hits,
                 play_match::animate_aftermath_hits,
                 play_match::age_aftermath_hit_particles,
-                play_match::billboard_aftermath_hit_particles,
             )
                 .chain()
                 .before(play_match::tick_hit_flinch)

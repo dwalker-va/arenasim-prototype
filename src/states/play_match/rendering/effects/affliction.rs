@@ -1,4 +1,4 @@
-use super::dot_state::DotStateVisual;
+use super::dot_state::{DotStateOn, DotStateVisual};
 use crate::states::play_match::components::*;
 use bevy::color::LinearRgba;
 use bevy::prelude::*;
@@ -195,6 +195,7 @@ pub fn update_drip_emitters(
                     initial_lifetime: 0.7,
                 },
                 Transform::from_translation(target_transform.translation + offset),
+                DotStateOn::new(emitter.target, DotStateVisual::Drip(emitter.kind)),
                 PlayMatchEntity,
             ));
         }

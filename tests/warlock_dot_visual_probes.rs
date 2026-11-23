@@ -37,13 +37,13 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::{
     age_warlock_dot_particles, animate_corruption_shrouds, animate_curse_apparitions,
     animate_dot_apply_bursts, animate_ua_states, billboard_warlock_dot_visuals,
-    cleanup_warlock_dot_visuals, curse_envelope, curse_spec, dot_anchor, orient_curse_apparitions,
-    shroud_alpha, spawn_warlock_dot_visuals, ua_crackle_k, APPLY_BURST_LIFE, COA_AURA,
-    CORRUPTION_AURA, CURSE_SUSTAIN_WHISPER, PULSE_PERIOD, SHROUD_DARKNESS, SHROUD_RADIUS, UA_AURA,
-    UA_CRACKLE_PERIOD, UA_CRACKLE_SECS, UA_PULSE_PERIOD,
+    cleanup_warlock_dot_visuals, curse_envelope, curse_spec, dot_anchor, hide_dot_states_on_sheep,
+    orient_curse_apparitions, place_ua_states, shroud_alpha, spawn_warlock_dot_visuals,
+    ua_crackle_k, APPLY_BURST_LIFE, COA_AURA, CORRUPTION_AURA, CURSE_SUSTAIN_WHISPER, PULSE_PERIOD,
+    SHROUD_DARKNESS, SHROUD_RADIUS, UA_AURA, UA_CRACKLE_PERIOD, UA_CRACKLE_SECS, UA_PULSE_PERIOD,
 };
 use arenasim::states::play_match::{
-    COMBATANT_BODY_RADIUS, IMPACT_HEAD_Y, IMPACT_PET_BODY_Y, IMPACT_PET_STATURE, UA_CAMERA_LIFT,
+    COMBATANT_BODY_RADIUS, IMPACT_HEAD_Y, IMPACT_PET_BODY_Y, IMPACT_PET_STATURE, UA_GLOW_RADIUS,
 };
 use arenasim::CharacterClass;
 
@@ -88,6 +88,10 @@ impl Harness {
                 orient_curse_apparitions,
                 billboard_warlock_dot_visuals,
                 cleanup_warlock_dot_visuals,
+                // `BodyPlacement` (PostUpdate in the client) and the sheep
+                // rule beside it.
+                place_ua_states,
+                hide_dot_states_on_sheep,
             )
                 .chain(),
         );
@@ -570,7 +574,8 @@ fn corruption_wisps_swell_as_they_age() {
 // ── the shared apply burst ─────────────────────────────────────────────────
 
 /// Corruption AND Unstable Affliction fire the same kit-117 apply: an
-/// expanding ring at the chest plus an outward spark sphere, self-expiring.
+/// expanding ring at the bench's chest plus an outward spark sphere,
+/// self-expiring.
 #[test]
 fn the_apply_ring_expands_at_the_chest_for_both_corruption_and_ua() {
     for dot in [CORRUPTION_AURA, UA_AURA] {
@@ -580,6 +585,23 @@ fn the_apply_ring_expands_at_the_chest_for_both_corruption_and_ua() {
         h.tick(3);
 
         assert_eq!(h.count::<DotApplyBurst>(), 1, "{dot}: one apply burst");
+        // At the benches' chest, `ANCH.chest`: 1.45 yd above the floor, 0.45
+        // above the body's centre — where Siphon Life's glow stands over the
+        // same apply.
+        let burst_at = {
+            let mut q = h
+                .app
+                .world_mut()
+                .query_filtered::<&GlobalTransform, With<DotApplyBurst>>();
+            q.iter(h.app.world())
+                .next()
+                .expect("the burst")
+                .translation()
+        };
+        assert!(
+            burst_at.distance(at + Vec3::Y * 0.45) < 1e-4,
+            "{dot}: the apply stands at {burst_at}, not the chest"
+        );
         let ring_scale = |h: &mut Harness| -> f32 {
             h.sprites()
                 .into_iter()
@@ -661,59 +683,150 @@ fn stacked_ua_crackle_pop_reads_outside_corruptions_shroud() {
     assert_min("crackle bolt segments", bolts, 5);
 }
 
-/// Round-2: the billboard pass LIFTS the UA glow and crackle pop toward the
-/// camera. Anchored at the torso centre, the quads lose the depth test to
-/// the opaque body capsule and only the sprite's dim outer annulus reads —
-/// the round-2 "blue speckles" finding; stacked, Corruption's Blend shroud
-/// sorts in front and dims the flash besides. Asserted in WORLD SPACE off
-/// the propagated `GlobalTransform`s, per the geometry-not-bookkeeping rule.
+/// The UA glow and crackle pop are held in front of the victim's body by the
+/// shared body hold, from every camera the client allows: each stands on the
+/// torso's own view ray, nearer the camera than the body capsule's nearest
+/// point (radius 0.5, segment ±0.75 about the centre), and the glow covers
+/// its authored size on screen. Anchored at the torso centre, unheld, the
+/// quads sort behind the body and only the sprite's dim annulus reads (the
+/// round-2 "blue speckles" finding); the old fixed 0.75 yd lift buried them
+/// from a camera looking down (polar 0.1 here). World space, off the
+/// propagated `GlobalTransform`s.
 #[test]
-// Pinning a relationship between constants IS this test; const-folding is the point.
-#[allow(clippy::assertions_on_constants)]
-fn ua_glow_and_pop_lift_toward_the_camera_past_body_and_shroud() {
-    // The lift clears BOTH occluders — derived from the constants so a
-    // retune keeps the band honest.
-    assert!(
-        UA_CAMERA_LIFT > COMBATANT_BODY_RADIUS + 0.05,
-        "UA_CAMERA_LIFT ({UA_CAMERA_LIFT}) must clear the body capsule"
-    );
-    assert!(
-        UA_CAMERA_LIFT > SHROUD_RADIUS,
-        "UA_CAMERA_LIFT ({UA_CAMERA_LIFT}) must clear the stacked shroud shell"
-    );
-
-    let mut h = Harness::new();
-    let at = Vec3::new(2.0, COMBATANT_Y, -1.0);
-    h.spawn_victim(at, &[UA_AURA]);
-    let cam_from = Vec3::new(0.0, 9.0, 24.0);
-    h.spawn_camera(cam_from, at);
-    h.tick(4);
-
-    let rig_pos = {
-        let mut q = h.app.world_mut().query::<(&UaStateRig, &Transform)>();
-        q.iter(h.app.world()).next().expect("UA rig").1.translation
-    };
-    let to_cam = (cam_from - rig_pos).normalize();
-    for role in [DotSpriteRole::UaGlow, DotSpriteRole::CracklePop] {
-        let placed: Vec<Vec3> = h
-            .sprites()
-            .into_iter()
-            .filter(|(r, _)| *r == role)
-            .map(|(_, g)| g.translation())
-            .collect();
-        assert_eq!(placed.len(), 1, "one {role:?}");
-        let lift = placed[0] - rig_pos;
-        assert!(
-            lift.length() > COMBATANT_BODY_RADIUS,
-            "{role:?} sits {} yd from its anchor — buried in the body, only \
-             the sprite's dim annulus can read",
-            lift.length()
-        );
-        assert!(
-            lift.normalize().dot(to_cam) > 0.99,
-            "{role:?} lift must point at the camera, not sideways: {lift:?}"
-        );
+fn ua_glow_and_pop_are_held_in_front_of_the_body_from_every_camera() {
+    // The torso glow's anchor, 0.35 above the body's centre (the module's
+    // `UA_GLOW_Y`).
+    const TORSO: f32 = 0.35;
+    let mut checked = 0;
+    for polar in [0.1f32, 38.7f32.to_radians(), 1.0, 1.5] {
+        for zoom in [20.0f32, 60.0, 220.0] {
+            for yaw in [0.0f32, 2.5] {
+                let mut h = Harness::new();
+                let at = Vec3::new(2.0, COMBATANT_Y, -1.0);
+                h.spawn_victim(at, &[UA_AURA]);
+                let eye = at
+                    + Vec3::new(
+                        polar.sin() * yaw.sin(),
+                        polar.cos(),
+                        polar.sin() * yaw.cos(),
+                    ) * zoom;
+                h.spawn_camera(eye, at);
+                h.tick(4);
+                let forward = (at - eye).normalize();
+                let depth = |p: Vec3| (p - eye).dot(forward);
+                let nearest = depth(at - Vec3::Y * 0.75).min(depth(at + Vec3::Y * 0.75)) - 0.5;
+                let torso = at + Vec3::Y * TORSO;
+                let age = {
+                    let mut q = h.app.world_mut().query::<&UaStateRig>();
+                    q.iter(h.app.world()).next().expect("UA rig").age
+                };
+                for role in [DotSpriteRole::UaGlow, DotSpriteRole::CracklePop] {
+                    let placed: Vec<GlobalTransform> = h
+                        .sprites()
+                        .into_iter()
+                        .filter(|(r, _)| *r == role)
+                        .map(|(_, g)| g)
+                        .collect();
+                    assert_eq!(placed.len(), 1, "one {role:?}");
+                    let g = placed[0];
+                    let label = format!("{role:?} at polar {polar}, zoom {zoom}, yaw {yaw}");
+                    assert!(
+                        depth(g.translation()) < nearest,
+                        "{label}: drawn at depth {} behind the body's nearest {nearest}",
+                        depth(g.translation())
+                    );
+                    assert!(
+                        (g.translation() - eye)
+                            .normalize()
+                            .dot((torso - eye).normalize())
+                            > 1.0 - 1e-6,
+                        "{label}: off the torso's view ray"
+                    );
+                    if role == DotSpriteRole::UaGlow {
+                        // The glow's authored diameter, breathing with the
+                        // pulse, covers the same pixels from its held depth.
+                        let pulse =
+                            0.5 + 0.5 * (age * std::f32::consts::TAU / UA_PULSE_PERIOD).sin();
+                        let authored = UA_GLOW_RADIUS * 2.0 * (0.85 + 0.15 * pulse);
+                        let on_screen = g.scale().x / depth(g.translation());
+                        assert!(
+                            (on_screen - authored / depth(torso)).abs() < 1e-5,
+                            "{label}: {on_screen} per yard of depth, authored {}",
+                            authored / depth(torso)
+                        );
+                    }
+                    checked += 1;
+                }
+            }
+        }
     }
+    assert_eq!(checked, 4 * 3 * 2 * 2);
+}
+
+/// The UA state rides the victim's DRAWN body: a victim running past the
+/// camera, its body bobbing on its gait and lifted a yard as a Cyclone lifts
+/// one, keeps the glow's anchor at its drawn torso every frame, and the glow
+/// in front of that body.
+#[test]
+fn ua_rides_the_drawn_body() {
+    let mut h = Harness::new();
+    let start = Vec3::new(1.0, COMBATANT_Y, -2.0);
+    let victim = h.spawn_victim(start, &[UA_AURA]);
+    let body = h
+        .app
+        .world_mut()
+        .spawn((
+            arenasim::states::play_match::components::VisualBody { rest_y: 0.0 },
+            Transform::IDENTITY,
+        ))
+        .id();
+    h.app.world_mut().entity_mut(victim).add_child(body);
+    let eye = start + Vec3::new(0.0, 30.0, 40.0);
+    h.spawn_camera(eye, start);
+    h.tick(2);
+    let forward = (start - eye).normalize();
+    let mut checked = 0;
+    for frame in 0..60 {
+        let t = frame as f32 * TICK_SECS;
+        let root = start + Vec3::new(3.0 * (t * 2.5).sin(), 0.0, 2.0 * (t * 2.3).sin());
+        let bob = 0.1 * (t * 9.0).sin() + if t > 0.4 { 1.0 } else { 0.0 };
+        h.app
+            .world_mut()
+            .get_mut::<Transform>(victim)
+            .unwrap()
+            .translation = root;
+        h.app
+            .world_mut()
+            .get_mut::<Transform>(body)
+            .unwrap()
+            .translation
+            .y = bob;
+        h.tick(1);
+        let drawn = root + Vec3::Y * bob;
+        let rig = {
+            let mut q = h
+                .app
+                .world_mut()
+                .query_filtered::<&GlobalTransform, With<UaStateRig>>();
+            q.iter(h.app.world()).next().expect("UA rig").translation()
+        };
+        assert!(
+            rig.distance(drawn + Vec3::Y * 0.35) < 1e-4,
+            "frame {frame}: the torso anchor {rig} is not on the drawn body at {drawn}"
+        );
+        let depth = |p: Vec3| (p - eye).dot(forward);
+        let nearest = depth(drawn - Vec3::Y * 0.75).min(depth(drawn + Vec3::Y * 0.75)) - 0.5;
+        for (role, g) in h.sprites() {
+            if role == DotSpriteRole::UaGlow {
+                assert!(
+                    depth(g.translation()) < nearest,
+                    "frame {frame}: the glow behind the drawn body"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert_eq!(checked, 60);
 }
 
 /// The dispel path, all three DoTs at once: state rigs die the frame their

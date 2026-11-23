@@ -3,10 +3,11 @@ use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 use std::f32::consts::{FRAC_PI_2, TAU};
 
-use super::dot_state::{has_dot_state, DotStateVisual};
-use super::heal_impact::COMBATANT_BODY_RADIUS;
+use super::body_hold::{held_in, BodyHold, HoldDisjoint, COMBATANT_BODY_RADIUS};
+use super::dot_state::{has_dot_state, DotStateOn, DotStateVisual};
+use super::druid_heals::BODY_CENTRE_ABOVE_FLOOR;
 use super::school_impact::{IMPACT_HEAD_Y, IMPACT_PET_BODY_Y, IMPACT_PET_STATURE};
-use super::siphon_life::{spawn_siphon_life_rig, SiphonLifeRig};
+use super::siphon_life::{spawn_siphon_life_rig, SiphonLifeRig, SIPHON_CHEST_ABOVE_FLOOR};
 use super::spell_bolts::{soft_dot_texture, star_flash_texture};
 use crate::states::play_match::components::*;
 
@@ -58,9 +59,10 @@ use crate::states::play_match::components::*;
 // moment (the skull); the two sustained pulses run at deliberately different
 // periods (3.00 s vs 1.20 s), and UA's crackle pop is sized to read OUTSIDE
 // Corruption's shroud silhouette. The UA glow and pop quads are additionally
-// held `UA_CAMERA_LIFT` toward the camera by the billboard pass, so their
-// bright centres beat the body's (and the stacked shroud's) depth test
-// instead of reading as a dim annulus.
+// held in front of the victim's rendered body (the shared body hold,
+// `body_hold.rs`; `place_ua_states`), so their bright centres sort in front
+// of the body and the stacked shroud instead of reading as a dim annulus,
+// from every camera pitch, at exactly their authored size on screen.
 //
 // ## The AlphaMode::Blend exception (deliberate, justified)
 //
@@ -109,8 +111,11 @@ const APPLY_COLOR: [Color; 3] = [
     Color::srgb(0.25, 0.09, 0.76),
     Color::srgb(0.13, 0.05, 0.41),
 ];
-/// Height of the chest anchor above a combatant's transform (attach 34).
-const CHEST_Y: f32 = 0.35;
+/// Height of the chest anchor above a combatant's transform (attach 34): the
+/// benches' `ANCH.chest`, 1.45 yd above the floor
+/// (`docs/design/benches/2026-10-17-warlock-talent-bench.html`), where Siphon
+/// Life's glow stands over the same apply burst.
+const CHEST_Y: f32 = SIPHON_CHEST_ABOVE_FLOOR - BODY_CENTRE_ABOVE_FLOOR;
 
 // --- Corruption state (kit 535) ----------------------------------------------
 
@@ -493,11 +498,11 @@ const UA_BOLT_SEGMENT_LEN: f32 = 0.34;
 /// Bolt quad width. USER-TUNED (2026-09-06): 0.055 read as thin pale
 /// threads even at full intensity — widened so the discharge is an event.
 const UA_BOLT_WIDTH: f32 = 0.10;
-/// Radius of the torso glow quad. The billboard pass holds it
-/// `UA_CAMERA_LIFT` toward the camera, so the full disc — bright centre
-/// included — reads over the torso instead of only the annulus outside the
-/// body silhouette (the round-2 fix; AS-10's clear-the-capsule margin still
-/// applies to the silhouette the glow must halo past).
+/// Radius of the torso glow quad. `place_ua_states` holds it in front of
+/// the body, so the full disc — bright centre included — reads over the torso
+/// instead of only the annulus outside the body silhouette (the round-2 fix;
+/// AS-10's clear-the-capsule margin still applies to the silhouette the glow
+/// must halo past).
 pub const UA_GLOW_RADIUS: f32 = 0.9;
 /// Radius of the crackle pop BEFORE the `UA_CRACKLE_INTENSITY` multiplier.
 /// At intensity 1.4 the pop reaches 1.19 yd — outside `SHROUD_RADIUS`
@@ -511,15 +516,6 @@ const UA_GLOW_COLOR: Color = Color::srgb(0.62, 0.18, 0.92);
 const UA_BOLT_COLOR: Color = Color::srgb(0.75, 0.35, 1.0);
 /// Height of the torso glow above the victim's transform.
 const UA_GLOW_Y: f32 = 0.35;
-/// How far the billboard pass lifts the UA glow and crackle pop toward the
-/// camera. The quads are anchored at the torso CENTRE, so unlifted they lose
-/// the depth test to the body capsule and only the sprite's dim outer
-/// annulus reads (the round-2 "blue speckles" finding). The lift must clear
-/// both occluders: `COMBATANT_BODY_RADIUS` (0.5 — the opaque body) and
-/// `SHROUD_RADIUS` (0.68 — else Corruption's Blend shroud sorts in front and
-/// dims the stacked flash), so it is derived from the larger of the two.
-pub const UA_CAMERA_LIFT: f32 = SHROUD_RADIUS + 0.07;
-
 /// The exact aura names the detectors key on (the RON `name:` strings, same
 /// as the class-AI dedup checks).
 pub const CORRUPTION_AURA: &str = "Corruption";
@@ -990,6 +986,7 @@ fn spawn_shroud_rig(
                 fizz_carry: 0.0,
                 emitted: 0,
             },
+            DotStateOn::new(target, DotStateVisual::CorruptionShroud),
             WarlockDotRigAssets {
                 quad: assets.quad.clone(),
                 mote_material: fizz_material.clone(),
@@ -1350,6 +1347,7 @@ fn spawn_ua_rig(
                 age: 0.0,
                 last_crackle_cycle: u32::MAX,
             },
+            DotStateOn::new(target, DotStateVisual::UnstableAfflictionState),
             WarlockDotRigAssets {
                 quad: assets.quad.clone(),
                 mote_material: additive_material(materials, UA_BOLT_COLOR, 2.6, None),
@@ -1800,42 +1798,30 @@ fn spark_origin(spec: &CurseApparitionSpec, seed: u32, s: f32) -> Vec3 {
     }
 }
 
-/// Drive Unstable Affliction's authored state: follow the victim, pulse and
-/// flicker the violet torso glow on `UA_PULSE_PERIOD`, and fire the crackle
-/// discharge (5 jagged bolts + the bright pop) once per `UA_CRACKLE_PERIOD`.
+/// Drive Unstable Affliction's authored state: pulse and flicker the violet
+/// torso glow on `UA_PULSE_PERIOD`, and fire the crackle discharge (5 jagged
+/// bolts + the bright pop) once per `UA_CRACKLE_PERIOD`. The rig follows the
+/// victim's rendered body in [`place_ua_states`].
 pub fn animate_ua_states(
     mut commands: Commands,
     time: Res<Time>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut rigs: Query<(
-        Entity,
-        &mut UaStateRig,
-        &WarlockDotRigAssets,
-        &mut Transform,
-        &Children,
-    )>,
-    targets: Query<
-        (&Transform, Option<&Pet>),
-        (With<Combatant>, Without<UaStateRig>, Without<DotSprite>),
-    >,
+    mut rigs: Query<(Entity, &mut UaStateRig, &WarlockDotRigAssets, &Children)>,
+    targets: Query<Has<Pet>, With<Combatant>>,
     mut pieces: Query<
         (
             &DotSprite,
             &mut Transform,
             &MeshMaterial3d<StandardMaterial>,
         ),
-        (Without<UaStateRig>, Without<DotMote>),
+        Without<DotMote>,
     >,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut rig, rig_assets, mut transform, children) in rigs.iter_mut() {
+    for (entity, mut rig, rig_assets, children) in rigs.iter_mut() {
         rig.age += dt;
         let age = rig.age;
-        let mut stature = 1.0;
-        if let Ok((target, pet)) = targets.get(rig.target) {
-            transform.translation = dot_anchor(UA_GLOW_Y, target.translation, pet.is_some());
-            stature = dot_stature(pet.is_some());
-        }
+        let stature = targets.get(rig.target).map_or(1.0, dot_stature);
 
         // Glow pulse (1.2 s) with a nervous hash-seeded flicker on top —
         // deterministic (entity index + a 50 ms time bucket), never game_rng.
@@ -2125,22 +2111,12 @@ pub fn billboard_warlock_dot_visuals(
 
     for (rig, children) in rigs.iter() {
         let facing = rig.rotation.inverse() * cam.rotation;
-        // Local-frame step toward the camera for the lifted quads (rigs are
-        // top-level entities, so rig.translation IS world space).
-        let lift = rig.rotation.inverse()
-            * ((cam.translation - rig.translation).normalize_or_zero() * UA_CAMERA_LIFT);
         for child in children.iter() {
             if let Ok((sprite, mut part)) = sprites.get_mut(child) {
                 match sprite.role {
+                    // Held in front of the body by `place_ua_states`.
                     DotSpriteRole::UaGlow | DotSpriteRole::CracklePop => {
                         part.rotation = facing;
-                        // Lift the quad proud of the body capsule (and the
-                        // stacked shroud shell) so its bright centre wins
-                        // the depth test instead of only the dim annulus
-                        // outside the silhouette reading — the round-2
-                        // "blue speckles" finding. Safe to overwrite: these
-                        // two quads author no local translation.
-                        part.translation = lift;
                     }
                     DotSpriteRole::SkullCore => {
                         // Billboards but keeps its authored skull-local
@@ -2155,6 +2131,41 @@ pub fn billboard_warlock_dot_visuals(
             }
             if let Ok(mut part) = motes.get_mut(child) {
                 part.rotation = facing;
+            }
+        }
+    }
+}
+
+/// `BodyPlacement` (PostUpdate): stand each Unstable Affliction rig at its
+/// victim's rendered torso, and hold its glow and crackle pop in front of the
+/// rendered body (the shared body hold), each scaled by the hold's ratio so
+/// it keeps the size `animate_ua_states` gave it on screen. The bolts keep
+/// their kinked poses on the rig.
+#[allow(clippy::type_complexity)]
+pub fn place_ua_states(
+    hold: BodyHold,
+    mut rigs: Query<(&UaStateRig, &mut Transform, &Children), (Without<DotSprite>, HoldDisjoint)>,
+    mut sprites: Query<(&DotSprite, &mut Transform), (Without<UaStateRig>, HoldDisjoint)>,
+) {
+    let view = hold.view();
+    for (rig, mut rig_transform, children) in rigs.iter_mut() {
+        let Some(body) = hold.body(rig.target) else {
+            continue;
+        };
+        let torso = dot_anchor(UA_GLOW_Y, body.root, body.is_pet);
+        rig_transform.translation = torso;
+        let (drawn, k) = held_in(view, torso, body.capsule());
+        let local = rig_transform.rotation.inverse() * (drawn - torso);
+        for child in children.iter() {
+            let Ok((sprite, mut part)) = sprites.get_mut(child) else {
+                continue;
+            };
+            if matches!(
+                sprite.role,
+                DotSpriteRole::UaGlow | DotSpriteRole::CracklePop
+            ) {
+                part.translation = local;
+                part.scale *= k;
             }
         }
     }

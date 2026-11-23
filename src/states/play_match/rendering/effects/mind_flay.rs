@@ -5,12 +5,12 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::view::NoFrustumCulling;
 
+use super::body_hold::{held_in, BodyHold, HoldDisjoint};
 use super::heal_cast::spell_hand_local;
 use super::hunter_shots::{
     particle_rotation, spawn_client_particle, ClientEmitter, EmitterAssets, EmitterSprite,
 };
 use super::school_impact::impact_origin;
-use super::warlock_dots::UA_CAMERA_LIFT;
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::*;
 
@@ -60,14 +60,14 @@ use crate::states::play_match::components::*;
 //   (`heal_cast::spell_hand_local`, the main hand), not the bench's
 //   0.45 yd offset, which is inside the 0.5 yd capsule.
 // - Both stars, and the emitters on the victim's, are held in front of their
-//   body, [`MANA_FUNNEL_CAMERA_LIFT`] nearer the camera than its axis
-//   ([`held_before_body`]), so they sort in front of the body and a stacked
-//   Corruption shroud. Those are translucent and drawn back to front by
-//   distance with no depth write, so a star at the body's centre sorts behind
-//   it and reads as a dim annulus round the silhouette — the UA glow's fix
-//   (`warlock_dots.rs`). A hand on
-//   the far side of the Priest comes round in front of it. The move is along
-//   the view ray, so each star stays on its anchor on screen.
+//   unit's rendered body — the shared body hold (`body_hold.rs`,
+//   [`place_mana_funnel_stars`]) — so they sort in front of the body and a
+//   stacked Corruption shroud. Those are translucent and drawn back to front
+//   with no depth write, so a star at the body's centre sorts behind it and
+//   reads as a dim annulus round the silhouette — the UA glow's fix
+//   (`warlock_dots.rs`). A hand on the far side of the Priest comes round in
+//   front of it. The move is along the view ray and the star is scaled by
+//   the same ratio, so each star stays on its anchor on screen, at its size.
 // - The beam's ends stay on the hand and the chest themselves: it runs into
 //   the victim's body.
 //
@@ -185,11 +185,6 @@ pub fn mana_funnel_flicker(age: f32) -> f32 {
     MANA_FUNNEL_FLICKER[step % MANA_FUNNEL_FLICKER.len()]
 }
 
-/// How far in front of its body's axis each star (and the victim's emitters)
-/// is held, toward the camera: the UA glow's lift, which clears the body and a
-/// stacked Corruption shroud.
-pub const MANA_FUNNEL_CAMERA_LIFT: f32 = UA_CAMERA_LIFT;
-
 /// The caster's star: on the main spell hand's socket, turned with the caster.
 pub fn mana_funnel_hand(caster: &Transform) -> Vec3 {
     caster.translation + caster.rotation * spell_hand_local(1.0)
@@ -198,23 +193,6 @@ pub fn mana_funnel_hand(caster: &Transform) -> Vec3 {
 /// The victim's star: at its chest attachment (a pet's, for a pet).
 pub fn mana_funnel_chest(target: &Transform, is_pet: bool) -> Vec3 {
     impact_origin(ImpactAnchor::Chest, target.translation, is_pet)
-}
-
-/// Where a star on `anchor`, on the body standing at `body`, is drawn for a
-/// camera at `camera`: on the anchor's own view ray (so it stays on the
-/// anchor on screen), no farther from the camera than
-/// [`MANA_FUNNEL_CAMERA_LIFT`] in front of the body's axis at the anchor's
-/// height. A hand on the body's far side comes round in front of it; one
-/// already in front stays where it is.
-pub fn held_before_body(anchor: Vec3, body: Vec3, camera: Option<Vec3>) -> Vec3 {
-    let Some(eye) = camera else {
-        return anchor;
-    };
-    let axis = Vec3::new(body.x, anchor.y, body.z);
-    let depth = eye
-        .distance(anchor)
-        .min(eye.distance(axis) - MANA_FUNNEL_CAMERA_LIFT);
-    eye + (anchor - eye).normalize_or_zero() * depth
 }
 
 /// The bench's glow falloff (its `bbGlow` gradient): full at the centre, 0.45
@@ -739,8 +717,9 @@ pub fn sync_mind_flay_channels(
     }
 }
 
-/// Pose every channel visual: each star on its end, held toward the camera,
-/// its quads facing it at the flicker's scale; the beam rebuilt from hand to
+/// Pose every channel visual: each star on its end (held in front of its body
+/// by [`place_mana_funnel_stars`]), its quads facing the camera at the
+/// flicker's scale; the beam rebuilt from hand to
 /// chest; the victim star's spent particles retired and owed ones emitted.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn animate_mind_flay_channels(
@@ -804,14 +783,13 @@ pub fn animate_mind_flay_channels(
         let mut chest_star = None;
         for child in children.iter() {
             if let Ok((star, mut at, pieces)) = stars.get_mut(child) {
-                let (end, body) = match star.end {
-                    StarEnd::Hand => (hand, caster.translation),
+                at.translation = match star.end {
+                    StarEnd::Hand => hand,
                     StarEnd::Chest => {
                         chest_star = Some(child);
-                        (chest, target.translation)
+                        chest
                     }
                 };
-                at.translation = held_before_body(end, body, eye);
                 for piece in pieces.iter() {
                     if let Ok((quad, mut pose)) = quads.get_mut(piece) {
                         pose.rotation = cam_rotation;
@@ -873,6 +851,37 @@ pub fn animate_mind_flay_channels(
                 );
                 commands.entity(chest_star).add_child(spark);
             }
+        }
+    }
+}
+
+/// `BodyPlacement` (PostUpdate): hold each star — and with it the victim
+/// star's particles, its children — in front of its unit's rendered body
+/// (the shared body hold): the star slides along its own view ray and the
+/// whole star is scaled by the same ratio, so every piece of it covers the
+/// pixels it would have.
+#[allow(clippy::type_complexity)]
+pub fn place_mana_funnel_stars(
+    hold: BodyHold,
+    channels: Query<(&ManaFunnelChannel, &Children)>,
+    mut stars: Query<(&ManaFunnelStar, &mut Transform), HoldDisjoint>,
+) {
+    let view = hold.view();
+    for (channel, children) in channels.iter() {
+        for child in children.iter() {
+            let Ok((star, mut at)) = stars.get_mut(child) else {
+                continue;
+            };
+            let unit = match star.end {
+                StarEnd::Hand => channel.caster,
+                StarEnd::Chest => channel.target,
+            };
+            let Some(body) = hold.body(unit) else {
+                continue;
+            };
+            let (drawn, k) = held_in(view, at.translation, body.capsule());
+            at.translation = drawn;
+            at.scale = Vec3::splat(k);
         }
     }
 }

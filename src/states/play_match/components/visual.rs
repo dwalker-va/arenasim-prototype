@@ -626,7 +626,8 @@ pub struct ShadowformLook {
 /// The feet shroud of one Shadowform Priest (`shadow_precast_med_base.m2`,
 /// kit 3129): a rig entity of its own at the Priest's feet, parent of every
 /// flame, flare and smoke streak it emits, so the shroud moves with a running
-/// Priest. Spawned and despawned with the [`ShadowformLook`], one per Priest.
+/// Priest. Spawned with the [`ShadowformLook`], one per Priest, and despawned
+/// on the frame the look lifts by the system that emits onto it.
 #[derive(Component)]
 pub struct ShadowformShroud {
     /// The Priest (the SIM entity) the shroud follows.

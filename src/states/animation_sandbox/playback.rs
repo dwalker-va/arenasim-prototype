@@ -396,6 +396,29 @@ impl SandboxPlayback {
 /// of an effect are seen rather than being cut off by the next pass.
 pub const LOOP_TAIL_SECS: f32 = 0.6;
 
+/// What the last pass left behind, swept by [`sweep_sandbox_leftovers`] once
+/// every `Update` system has run.
+///
+/// The sweep takes the effect rigs a pass leaves (a DoT's state rig, a
+/// shroud, a spirit) while the effect systems that emit onto them still run
+/// this frame. Despawned from `drive_playback`, its despawn could flush ahead
+/// of an emitter's `add_child` onto the same rig, and the client panicked on a
+/// restart mid-effect (AS-507). Collected here, the rigs go in `Last`, after
+/// every `Update` command has been applied, children and all.
+#[derive(Resource, Default)]
+pub struct SandboxSweep(pub Vec<Entity>);
+
+/// Despawn what [`SandboxSweep`] collected. Registered in `Last`; a no-op on
+/// any frame nothing was swept. An entity already gone (its own cleanup took
+/// it this frame) is passed over.
+pub fn sweep_sandbox_leftovers(mut commands: Commands, mut sweep: ResMut<SandboxSweep>) {
+    for entity in sweep.0.drain(..) {
+        if let Ok(mut e) = commands.get_entity(entity) {
+            e.try_despawn();
+        }
+    }
+}
+
 /// Starts, advances, and loops the selected entry.
 pub fn drive_playback(
     mut commands: Commands,
@@ -410,6 +433,7 @@ pub fn drive_playback(
     mut auras: Query<&mut ActiveAuras>,
     mut combatants: Query<&mut Combatant>,
     leftovers: Query<Entity, (With<PlayMatchEntity>, Without<SandboxEntity>)>,
+    mut sweep: ResMut<SandboxSweep>,
 ) {
     let Some(caster) = stage.caster else { return };
 
@@ -434,6 +458,7 @@ pub fn drive_playback(
             &mut auras,
             &mut combatants,
             &leftovers,
+            &mut sweep,
         );
         return;
     }
@@ -449,6 +474,7 @@ pub fn drive_playback(
             &mut auras,
             &mut combatants,
             &leftovers,
+            &mut sweep,
         );
         // Snapshot the caster's identity/stats for component-mechanism entries
         // whose `*Pending` carries them to its resolver (Holy Shock scales off
@@ -585,6 +611,7 @@ pub fn drive_playback(
                 &mut auras,
                 &mut combatants,
                 &leftovers,
+                &mut sweep,
             );
         }
     }
@@ -1095,6 +1122,7 @@ fn clear_body_state(
     auras: &mut Query<&mut ActiveAuras>,
     combatants: &mut Query<&mut Combatant>,
     leftovers: &Query<Entity, (With<PlayMatchEntity>, Without<SandboxEntity>)>,
+    sweep: &mut SandboxSweep,
 ) {
     let Some(caster) = stage.caster else { return };
 
@@ -1161,10 +1189,10 @@ fn clear_body_state(
     // `PlayMatchEntity`, not `SandboxEntity` — projectiles still in flight,
     // impact bursts, casting orbs, floating text. The staged units carry BOTH
     // markers, so excluding `SandboxEntity` is what keeps this from despawning
-    // the caster and dummy along with the debris.
-    for entity in leftovers.iter() {
-        commands.entity(entity).despawn();
-    }
+    // the caster and dummy along with the debris. Swept in `Last`, not here:
+    // the effect systems still emit onto these rigs this frame
+    // ([`SandboxSweep`]).
+    sweep.0.extend(leftovers.iter());
 
     if let Ok(kids) = children.get(caster) {
         for child in kids.iter() {

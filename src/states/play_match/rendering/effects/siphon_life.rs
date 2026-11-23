@@ -3,11 +3,11 @@ use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 use std::sync::Arc;
 
-use super::dot_state::{has_dot_state, DotStateVisual};
+use super::body_hold::{held_in, BodyHold, HoldDisjoint};
+use super::dot_state::{has_dot_state, DotStateOn, DotStateVisual};
 use super::druid_heals::{body_point, keyed, keyed_color};
-use super::heal_impact::COMBATANT_BODY_RADIUS;
 use super::hunter_shots::draw;
-use super::school_impact::{IMPACT_PET_BODY_Y, IMPACT_PET_STATURE};
+use super::school_impact::IMPACT_PET_STATURE;
 use super::shield::disc_texture;
 use super::spell_bolts::{soft_band_texture, star_flash_texture};
 use crate::states::play_match::components::*;
@@ -52,8 +52,8 @@ use crate::states::play_match::components::*;
 //    particle deeper than the body's centre is drawn first and the body
 //    paints over it — about half the burst would vanish behind the victim.
 //    Each particle is therefore drawn on its own view ray, slid toward the
-//    camera until it stands nearer than the body's nearest point
-//    ([`siphon_drawn_point`]; stricter than the sort needs, and the same
+//    camera until it stands nearer than the body's nearest point (the shared
+//    body hold, `body_hold.rs`; stricter than the sort needs, and the same
 //    rule keeps it clear of an opaque body if one ever is), and scaled by the
 //    same ratio, so it covers the exact screen footprint the bench gives it.
 //    The hold also sorts the glow in front of a stacked Corruption shroud.
@@ -63,11 +63,15 @@ use crate::states::play_match::components::*;
 // 3. **Follows in height too.** The bench's `follow` moves particles with the
 //    victim in x and z only; here they ride the rig, so a victim on a ramp
 //    keeps its glow.
-// 4. **Hidden on a sheep.** A polymorphed victim's rig is hidden (its clock
-//    runs on), the Shadow Dance precedent: the sheep wears nothing.
+// 4. **Hidden on a sheep.** A polymorphed victim wears no DoT state (its
+//    clock runs on): the one sheep rule, `dot_state::DotStateOn`.
 // 5. **The streak is a soft band.** The bench strokes a solid line with round
 //    caps; here it is the shared `soft_band_texture` quad, which fades across
 //    its width and has square ends. At the match camera it is ~2 px wide.
+// 6. **Rides the rendered body.** The rig stands at the chest of the
+//    victim's drawn body (`VisualBody`: the walk and fear bobs, the swing
+//    step, the Cyclone lift), placed after every writer of it
+//    ([`place_siphon_life_glows`]).
 //
 // Where the research doc's table and the bench differ, the bench was signed
 // off and wins: the rings' alpha (0.55 → 0.7 → 0.4, not 0.78 → 1 → 0.78), the
@@ -119,18 +123,6 @@ const STREAK_ALPHA: f32 = 0.85;
 const STREAK_WIDTH: f32 = 0.7;
 /// Generated sprite textures, pixels on a side.
 const SPRITE_PX: u32 = 64;
-/// How far in front of the body's nearest point a held particle stands.
-pub const SIPHON_BODY_CLEARANCE: f32 = 0.05;
-
-/// The combatant body: `Capsule3d::new(0.5, 1.5)` centred on its transform
-/// (`play_match/mod.rs`), so its swept segment runs ±0.75 about the centre.
-const COMBATANT_BODY_HALF_SEGMENT: f32 = 0.75;
-/// The pet body: `Capsule3d::new(0.35, 0.6)`, centred `IMPACT_PET_BODY_Y`
-/// below the pet's sim transform and laid along its facing by
-/// `apply_pet_mesh_tilt`. Held against its bounding sphere — the capsule's
-/// radius plus its half-segment, about its centre — which contains the body
-/// whichever way the pet faces.
-const PET_BODY_BOUND: f32 = 0.35 + 0.3;
 
 // ── The emitter model (the bench's `Emitter`, as Shadow Word: Pain ports it) ─
 
@@ -293,54 +285,6 @@ pub fn siphon_palette_step(t: f32) -> usize {
     ((t.clamp(0.0, 1.0) * last).round() as usize).min(SIPHON_PALETTE_STEPS - 1)
 }
 
-/// The victim's body as a swept segment: its two ends and its radius, for a
-/// victim at `translation`. A combatant's is its upright capsule; a pet's,
-/// whose capsule lies along its facing, is the sphere bounding it (both ends
-/// at its centre).
-pub fn siphon_body_capsule(translation: Vec3, is_pet: bool) -> (Vec3, Vec3, f32) {
-    let (centre, half, radius) = if is_pet {
-        (
-            translation + Vec3::Y * IMPACT_PET_BODY_Y,
-            0.0,
-            PET_BODY_BOUND,
-        )
-    } else {
-        (
-            translation,
-            COMBATANT_BODY_HALF_SEGMENT,
-            COMBATANT_BODY_RADIUS,
-        )
-    };
-    (centre - Vec3::Y * half, centre + Vec3::Y * half, radius)
-}
-
-/// Where a particle truly at `at` is drawn, for a camera at `eye` looking
-/// along `forward`, and the factor its quad is scaled by (departure 1).
-///
-/// A camera-facing quad has one view depth across its whole face, so it
-/// stands wholly in front of the body — and sorts in front of it — if that
-/// depth is nearer than the body's nearest point: the nearer end of its
-/// segment, less its radius. A particle already
-/// nearer stays put; one deeper slides along its own view ray (so it holds
-/// its screen position) to that depth less [`SIPHON_BODY_CLEARANCE`], and is
-/// scaled by the same ratio (so it holds its screen size).
-pub fn siphon_drawn_point(
-    at: Vec3,
-    capsule: (Vec3, Vec3, f32),
-    eye: Vec3,
-    forward: Vec3,
-) -> (Vec3, f32) {
-    let depth = (at - eye).dot(forward);
-    let (a, b, radius) = capsule;
-    let nearest =
-        (a - eye).dot(forward).min((b - eye).dot(forward)) - radius - SIPHON_BODY_CLEARANCE;
-    if depth <= nearest || nearest <= 0.0 {
-        return (at, 1.0);
-    }
-    let k = nearest / depth;
-    (eye + (at - eye) * k, k)
-}
-
 // ── Components ───────────────────────────────────────────────────────────────
 
 /// One afflicted victim's emitter rig: a top-level entity parked at the
@@ -354,9 +298,7 @@ pub struct SiphonLifeRig {
     /// Fractional particles owed, per emitter.
     pub carry: [f32; 3],
     pub emitted: u32,
-    /// Where the victim stood this frame, and whether it is a pet — the body
-    /// the billboard pass holds the particles in front of.
-    pub victim_at: Vec3,
+    /// Whether the victim is a pet (its stature).
     pub is_pet: bool,
 }
 
@@ -511,18 +453,18 @@ pub(super) fn spawn_siphon_life_rig(
             age: 0.0,
             carry: [0.0; 3],
             emitted: 0,
-            victim_at: translation,
             is_pet,
         },
+        DotStateOn::new(target, DotStateVisual::SiphonLifeGlow),
         Transform::from_translation(siphon_chest(translation, is_pet)),
         Visibility::default(),
         PlayMatchEntity,
     ));
 }
 
-/// Follow the victim (hidden while it is a sheep), and emit every kept layer
-/// from its chest, integrating the rate over the frame so a frame-rate change
-/// does not change the density.
+/// Emit every kept layer from the victim's chest, integrating the rate over
+/// the frame so a frame-rate change does not change the density. The rig
+/// follows the victim in [`place_siphon_life_glows`].
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn animate_siphon_life_glows(
     mut commands: Commands,
@@ -531,28 +473,17 @@ pub fn animate_siphon_life_glows(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut assets: Local<Option<SiphonAssets>>,
-    mut rigs: Query<(Entity, &mut SiphonLifeRig, &mut Transform, &mut Visibility)>,
-    victims: Query<
-        (&Transform, Option<&Pet>, Has<PolymorphedVisual>),
-        (With<Combatant>, Without<SiphonLifeRig>),
-    >,
+    mut rigs: Query<(Entity, &mut SiphonLifeRig)>,
+    victims: Query<Has<Pet>, With<Combatant>>,
 ) {
     let dt = time.delta_secs();
     let assets = assets.get_or_insert_with(|| SiphonAssets::build(&mut meshes, &mut images));
-    for (rig_entity, mut rig, mut transform, mut visibility) in rigs.iter_mut() {
-        let Ok((victim, pet, sheep)) = victims.get(rig.target) else {
+    for (rig_entity, mut rig) in rigs.iter_mut() {
+        let Ok(is_pet) = victims.get(rig.target) else {
             continue;
         };
-        let is_pet = pet.is_some();
         rig.age += dt;
-        rig.victim_at = victim.translation;
         rig.is_pet = is_pet;
-        transform.translation = siphon_chest(victim.translation, is_pet);
-        visibility.set_if_neq(if sheep {
-            Visibility::Hidden
-        } else {
-            Visibility::Inherited
-        });
         let s = stature(is_pet);
 
         for (ei, e) in SIPHON_LIFE_EMITTERS.iter().enumerate() {
@@ -637,17 +568,29 @@ pub fn age_siphon_life_particles(
     }
 }
 
-/// Place every particle where it is drawn — held in front of its victim's
-/// body for the camera (departure 1) — turn its sprite to the camera, sized
-/// and coloured along its life, and lay its streak back along its flight as
-/// the camera sees it.
+/// `BodyPlacement` (PostUpdate): stand each rig at its victim's rendered
+/// chest, place every particle where it is drawn — held in front of the
+/// rendered body for the camera (departure 1) — turn its sprite to the camera,
+/// sized and coloured along its life, and lay its streak back along its
+/// flight as the camera sees it.
 #[allow(clippy::type_complexity)]
-pub fn billboard_siphon_life_particles(
-    camera: Query<&GlobalTransform, With<Camera3d>>,
-    rigs: Query<(&SiphonLifeRig, &Transform, &Children), Without<SiphonLifeParticle>>,
+pub fn place_siphon_life_glows(
+    hold: BodyHold,
+    mut rigs: Query<
+        (&SiphonLifeRig, &mut Transform, &Children),
+        (
+            Without<SiphonLifeParticle>,
+            Without<SiphonLifePart>,
+            HoldDisjoint,
+        ),
+    >,
     mut particles: Query<
         (&SiphonLifeParticle, &mut Transform, &Children),
-        (Without<SiphonLifeRig>, Without<SiphonLifePart>),
+        (
+            Without<SiphonLifeRig>,
+            Without<SiphonLifePart>,
+            HoldDisjoint,
+        ),
     >,
     mut parts: Query<
         (
@@ -655,24 +598,29 @@ pub fn billboard_siphon_life_particles(
             &mut Transform,
             &mut MeshMaterial3d<StandardMaterial>,
         ),
-        (Without<SiphonLifeParticle>, Without<SiphonLifeRig>),
+        (
+            Without<SiphonLifeParticle>,
+            Without<SiphonLifeRig>,
+            HoldDisjoint,
+        ),
     >,
 ) {
-    let cam = camera.iter().next().map(|c| c.compute_transform());
+    let cam = hold.view();
     let rotation = cam.map(|c| c.rotation).unwrap_or(Quat::IDENTITY);
-    for (rig, rig_transform, children) in rigs.iter() {
-        let chest = rig_transform.translation;
-        let capsule = siphon_body_capsule(rig.victim_at, rig.is_pet);
+    for (rig, mut rig_transform, children) in rigs.iter_mut() {
+        let Some(body) = hold.body(rig.target) else {
+            continue;
+        };
+        let chest = siphon_chest(body.root, body.is_pet);
+        rig_transform.translation = chest;
+        let capsule = body.capsule();
         for child in children.iter() {
             let Ok((p, mut particle_transform, part_children)) = particles.get_mut(child) else {
                 continue;
             };
             let e = SIPHON_LIFE_EMITTERS[p.emitter];
             let at = chest + p.offset;
-            let (drawn, k) = match cam {
-                Some(c) => siphon_drawn_point(at, capsule, c.translation, c.forward().as_vec3()),
-                None => (at, 1.0),
-            };
+            let (drawn, k) = held_in(cam, at, capsule);
             particle_transform.translation = drawn - chest;
             let t = (p.age / p.life).clamp(0.0, 1.0);
             let step = siphon_palette_step(t);
@@ -705,7 +653,7 @@ pub fn billboard_siphon_life_particles(
                         // Without a camera it lies back along the flight.
                         let (along, length) = match cam {
                             Some(c) => {
-                                let f = c.forward().as_vec3();
+                                let f = c.forward;
                                 let flat = back - f * back.dot(f);
                                 (flat.normalize_or_zero(), length * flat.length() * k)
                             }
@@ -756,14 +704,5 @@ mod tests {
         assert_eq!(siphon_palette_step(0.0), 0);
         assert_eq!(siphon_palette_step(0.5), (SIPHON_PALETTE_STEPS - 1) / 2);
         assert_eq!(siphon_palette_step(1.0), SIPHON_PALETTE_STEPS - 1);
-    }
-
-    #[test]
-    fn a_particle_already_in_front_of_the_body_stays_put() {
-        let capsule = siphon_body_capsule(Vec3::ZERO, false);
-        let eye = Vec3::new(0.0, 10.0, 10.0);
-        let forward = (Vec3::ZERO - eye).normalize();
-        let near = eye + forward * 5.0;
-        assert_eq!(siphon_drawn_point(near, capsule, eye, forward), (near, 1.0));
     }
 }

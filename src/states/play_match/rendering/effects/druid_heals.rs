@@ -75,8 +75,8 @@ pub const LIFEBLOOM_STATE_SPREAD_MUL: f32 = 1.00;
 pub const LIFEBLOOM_STATE_LIFE_MUL: f32 = 1.00;
 pub const LIFEBLOOM_STATE_DENSITY_MUL: f32 = 1.00;
 pub const LIFEBLOOM_STATE_OPACITY: f32 = 1.00;
-/// The client draws one state however many stacks there are.
-pub const LIFEBLOOM_STATE_SCALES_WITH_STACKS: bool = false;
+// The bench's LIFEBLOOM_STATE_SCALES_WITH_STACKS = false is no knob here: the client draws one
+// state however many stacks there are, and so does the state rig.
 
 // Lifebloom bloom — lifebloom_impact.m2 (kit 6965), AS-160 bench
 pub const BLOOM_SECS: f32 = 1.87;

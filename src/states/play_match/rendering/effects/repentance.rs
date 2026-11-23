@@ -2,8 +2,8 @@ use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 use std::f32::consts::TAU;
 
+use super::body_hold::COMBATANT_BODY_RADIUS;
 use super::druid_heals::{body_point, keyed_color, BODY_CENTRE_ABOVE_FLOOR};
-use super::heal_impact::COMBATANT_BODY_RADIUS;
 use super::hunter_shots::{draw, particle_rotation, ClientEmitter, EmitterAssets, EmitterSprite};
 use super::paladin_oneshots::{
     at_knobs, emitter, mid_of, oneshot_launch, OneShotKnobs, OneShotLaunch, OneShotLayer,

@@ -5,13 +5,12 @@ use bevy::color::LinearRgba;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::body_hold::{held_in, BodyHold, HoldDisjoint};
 use super::conflagrate::{conflagrate_material, ConflagrateSprite, CONFLAGRATE_GLOW};
 use super::druid_heals::{body_point, keyed, keyed_color};
 use super::hunter_shots::draw;
 use super::school_impact::IMPACT_PET_STATURE;
 use super::shield::disc_texture;
-use super::siphon_life::{siphon_body_capsule, siphon_drawn_point};
-use super::vampiric_embrace::rendered_root;
 use crate::states::play_match::components::*;
 
 // ==============================================================================
@@ -76,10 +75,9 @@ use crate::states::play_match::components::*;
 //    mesh that writes no depth, and the transparent pass sorts by each mesh's
 //    translation, so the body would paint over everything deeper than its
 //    centre. Each particle is drawn on its own view ray, slid in front of the
-//    body and scaled by the same ratio — Siphon Life's hold
-//    (`siphon_drawn_point` against `siphon_body_capsule`; one shared helper
-//    is AS-501) — so it projects where the bench puts it, whichever way the
-//    victim faces.
+//    body and scaled by the same ratio — the shared body hold
+//    (`body_hold.rs`) — so it projects where the bench puts it, whichever way
+//    the victim faces.
 // 2. **A star's white-hot centre is tinted**, as Shadow Word: Pain's,
 //    Siphon Life's and Conflagrate's are: the sprite is one shape in the
 //    layer's colour.
@@ -590,38 +588,10 @@ pub fn age_silence_breath_particles(
 #[allow(clippy::type_complexity)]
 pub fn place_silence_breaths(
     mut materials: ResMut<Assets<StandardMaterial>>,
-    camera: Query<
-        &Transform,
-        (
-            With<Camera3d>,
-            Without<SilenceBreathRig>,
-            Without<SilenceBreathParticle>,
-        ),
-    >,
+    hold: BodyHold,
     mut rigs: Query<
         (&SilenceBreathRig, &mut Transform, &Children),
-        (
-            Without<SilenceBreathParticle>,
-            Without<Combatant>,
-            Without<VisualBody>,
-            Without<Camera3d>,
-        ),
-    >,
-    victims: Query<
-        (&Transform, Option<&Children>),
-        (
-            With<Combatant>,
-            Without<SilenceBreathRig>,
-            Without<SilenceBreathParticle>,
-        ),
-    >,
-    bodies: Query<
-        (&Transform, &VisualBody),
-        (
-            Without<Combatant>,
-            Without<SilenceBreathRig>,
-            Without<SilenceBreathParticle>,
-        ),
+        (Without<SilenceBreathParticle>, HoldDisjoint),
     >,
     mut particles: Query<
         (
@@ -629,35 +599,25 @@ pub fn place_silence_breaths(
             &mut Transform,
             &MeshMaterial3d<StandardMaterial>,
         ),
-        (
-            Without<SilenceBreathRig>,
-            Without<Combatant>,
-            Without<VisualBody>,
-            Without<Camera3d>,
-        ),
+        (Without<SilenceBreathRig>, HoldDisjoint),
     >,
 ) {
-    let view = camera.iter().next();
+    let view = hold.view();
     let cam = view.map(|c| c.rotation).unwrap_or(Quat::IDENTITY);
     for (rig, mut rig_transform, children) in rigs.iter_mut() {
-        let Ok((victim, victim_children)) = victims.get(rig.target) else {
+        let Some(body) = hold.body(rig.target) else {
             continue;
         };
-        let body = victim_children.and_then(|kids| kids.iter().find_map(|k| bodies.get(k).ok()));
-        let root = rendered_root(victim, body);
-        let mouth = silence_mouth(root, victim.rotation, rig.is_pet);
+        let mouth = silence_mouth(body.root, body.rotation, rig.is_pet);
         rig_transform.translation = mouth;
-        let capsule = siphon_body_capsule(root, rig.is_pet);
+        let capsule = body.capsule();
         for child in children.iter() {
             let Ok((p, mut transform, material)) = particles.get_mut(child) else {
                 continue;
             };
             let e = &SILENCE_EMITTERS[p.emitter];
             let at = mouth + p.offset;
-            let (drawn, k) = match view {
-                Some(c) => siphon_drawn_point(at, capsule, c.translation, c.forward().as_vec3()),
-                None => (at, 1.0),
-            };
+            let (drawn, k) = held_in(view, at, capsule);
             let (color, alpha, radius) = silence_particle_look(e, (p.age / p.life).clamp(0.0, 1.0));
             transform.translation = drawn - mouth;
             transform.rotation =

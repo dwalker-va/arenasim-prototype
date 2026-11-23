@@ -104,6 +104,8 @@
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::body_hold::{BodyHold, HoldDisjoint};
+
 use super::cheat_death::{particle_sprite_image, GLOW_SOFT, SMOKE_SOFT};
 use super::druid_heals::{keyed, BODY_CENTRE_ABOVE_FLOOR};
 use super::paladin_oneshots::{bench_hash, piece_rotation, PieceFacing, PiecePose, ONESHOT_CHEST};
@@ -626,38 +628,10 @@ pub fn shadow_dance_anchor(bearer: &Transform, body_local: Vec3) -> Vec3 {
 /// pose is its world offset.
 #[allow(clippy::type_complexity)]
 pub fn place_shadow_dance(
-    camera: Query<
-        &Transform,
-        (
-            With<Camera3d>,
-            Without<ShadowDanceRig>,
-            Without<ShadowDancePiece>,
-        ),
-    >,
+    hold: BodyHold,
     mut rigs: Query<
         (&ShadowDanceRig, &mut Transform, &Children),
-        (
-            Without<Combatant>,
-            Without<VisualBody>,
-            Without<ShadowDancePiece>,
-        ),
-    >,
-    bearers: Query<
-        (&Transform, Option<&Children>),
-        (
-            With<Combatant>,
-            Without<ShadowDanceRig>,
-            Without<ShadowDancePiece>,
-        ),
-    >,
-    bodies: Query<
-        &Transform,
-        (
-            With<VisualBody>,
-            Without<Combatant>,
-            Without<ShadowDanceRig>,
-            Without<ShadowDancePiece>,
-        ),
+        (Without<ShadowDancePiece>, HoldDisjoint),
     >,
     mut pieces: Query<
         (
@@ -665,24 +639,16 @@ pub fn place_shadow_dance(
             &mut Transform,
             &MeshMaterial3d<StandardMaterial>,
         ),
-        (
-            Without<ShadowDanceRig>,
-            Without<Combatant>,
-            Without<VisualBody>,
-        ),
+        (Without<ShadowDanceRig>, HoldDisjoint),
     >,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let cam = camera.iter().next().map(|c| c.rotation);
+    let cam = hold.view().map(|c| c.rotation);
     for (rig, mut transform, children) in rigs.iter_mut() {
-        let Ok((bearer, bearer_children)) = bearers.get(rig.bearer) else {
+        let Some(body) = hold.body(rig.bearer) else {
             continue;
         };
-        let body_local = bearer_children
-            .and_then(|kids| kids.iter().find_map(|k| bodies.get(k).ok()))
-            .map(|body| body.translation)
-            .unwrap_or(Vec3::ZERO);
-        transform.translation = shadow_dance_anchor(bearer, body_local);
+        transform.translation = shadow_dance_anchor(&body.unit, body.local.translation);
         for child in children.iter() {
             let Ok((piece, mut part, material)) = pieces.get_mut(child) else {
                 continue;

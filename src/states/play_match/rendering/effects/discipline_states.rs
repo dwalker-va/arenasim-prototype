@@ -94,7 +94,7 @@
 //! camera (it stands 0.4 yd along the ally's facing). Every piece is
 //! therefore drawn on its own view ray, slid toward the camera until it
 //! stands nearer than its body's nearest point, and scaled by the same ratio
-//! ([`siphon_drawn_point`], AS-347's rule): the same screen footprint, sorted
+//! (the shared body hold, `body_hold.rs`): the same screen footprint, sorted
 //! in front. A quad scaled about the eye this way projects exactly where it
 //! did, a level ring included. Standing in front of the whole capsule also
 //! sorts every piece over a Power Word: Shield's blended outline on the same
@@ -143,6 +143,7 @@ use std::f32::consts::{PI, TAU};
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::body_hold::{held_in, BodyCapsule, BodyHold, HoldDisjoint, HoldView};
 use super::cheat_death::{particle_sprite_image, GLOW_SOFT};
 use super::druid_heals::{keyed, BODY_CENTRE_ABOVE_FLOOR};
 use super::heal_cast::{flash_instant_hands, HealCastAssets};
@@ -150,7 +151,6 @@ use super::paladin_oneshots::{
     bench_hash, oneshot_glow_texture, oneshot_ground_texture, oneshot_ring_texture, piece_rotation,
     PieceFacing, PiecePose, ONESHOT_CHEST, RING_STROKE,
 };
-use super::siphon_life::{siphon_body_capsule, siphon_drawn_point};
 use super::spell_bolts::{soft_band_texture, star_flash_texture};
 use crate::states::play_match::abilities::AbilityType;
 use crate::states::play_match::components::*;
@@ -1278,12 +1278,6 @@ pub fn update_discipline_states(
     }
 }
 
-/// The centre of a unit's rendered body: its `VisualBody`'s translation
-/// (`body_local`) under the unit.
-pub fn discipline_body_centre(unit: &Transform, body_local: Vec3) -> Vec3 {
-    unit.transform_point(body_local)
-}
-
 /// Where a rig stands, `height` yards above the feet of a rendered body
 /// centred at `centre`.
 pub fn discipline_anchor(centre: Vec3, height: f32) -> Vec3 {
@@ -1291,27 +1285,9 @@ pub fn discipline_anchor(centre: Vec3, height: f32) -> Vec3 {
 }
 
 /// A combatant's facing, level: it faces its local +Z.
-fn facing(unit: &Transform) -> Vec3 {
-    let f = unit.rotation * Vec3::Z;
+fn level_facing(rotation: Quat) -> Vec3 {
+    let f = rotation * Vec3::Z;
     Vec3::new(f.x, 0.0, f.z).normalize_or_zero()
-}
-
-/// The camera, as the hold and the billboards need it.
-#[derive(Clone, Copy)]
-struct View {
-    eye: Vec3,
-    forward: Vec3,
-    rotation: Quat,
-}
-
-/// Where a piece truly at `at` is drawn and the factor its quad is scaled
-/// by: held in front of the body `capsule` for the camera (no camera: where
-/// it is).
-fn held(at: Vec3, capsule: (Vec3, Vec3, f32), view: Option<View>) -> (Vec3, f32) {
-    match view {
-        Some(v) => siphon_drawn_point(at, capsule, v.eye, v.forward),
-        None => (at, 1.0),
-    }
 }
 
 /// The quad that draws the segment `a`-`b` as the bench strokes it, a line
@@ -1320,7 +1296,7 @@ fn held(at: Vec3, capsule: (Vec3, Vec3, f32), view: Option<View>) -> (Vec3, f32)
 /// middle, each end where the camera's ray to that end meets the plane, so
 /// both ends project exactly where the bench's do. No camera: the segment
 /// itself, unturned.
-fn screen_segment(a: Vec3, b: Vec3, view: Option<View>) -> (Vec3, Quat, f32) {
+fn screen_segment(a: Vec3, b: Vec3, view: Option<HoldView>) -> (Vec3, Quat, f32) {
     let Some(v) = view else {
         return ((a + b) * 0.5, Quat::IDENTITY, (b - a).length());
     };
@@ -1355,15 +1331,15 @@ fn place_piece(
     age: f32,
     anchor: Vec3,
     forward: Vec3,
-    capsule: (Vec3, Vec3, f32),
-    view: Option<View>,
+    capsule: BodyCapsule,
+    view: Option<HoldView>,
 ) -> Option<(Transform, [u8; 3], f32)> {
     let cam = view.map(|v| v.rotation);
     match piece {
         StatePiece::Particle { layer, slot } => {
             let (j, page) = rig?.particle(layer, slot as usize)?;
             let p = state_particle_pose(layer, j, page)?;
-            let (drawn, k) = held(anchor + p.at, capsule, view);
+            let (drawn, k) = held_in(view, anchor + p.at, capsule);
             let rotation = match cam {
                 Some(c) => c * Quat::from_rotation_z(p.roll),
                 None => Quat::IDENTITY,
@@ -1389,7 +1365,7 @@ fn place_piece(
             let at = anchor + p.at;
             let (centre, rotation, projected) =
                 screen_segment(at, at - p.velocity / speed * length, view);
-            let (drawn, k) = held(centre, capsule, view);
+            let (drawn, k) = held_in(view, centre, capsule);
             Some((
                 Transform {
                     translation: drawn - anchor,
@@ -1407,7 +1383,7 @@ fn place_piece(
                 anchor + lattice_point(strand, segment + 1, age),
                 view,
             );
-            let (drawn, k) = held(centre, capsule, view);
+            let (drawn, k) = held_in(view, centre, capsule);
             Some((
                 Transform {
                     translation: drawn - anchor,
@@ -1420,7 +1396,7 @@ fn place_piece(
         }
         _ => {
             let pose = state_piece_pose(piece, age, forward)?;
-            let (drawn, k) = held(anchor + pose.at, capsule, view);
+            let (drawn, k) = held_in(view, anchor + pose.at, capsule);
             Some((
                 Transform {
                     translation: drawn - anchor,
@@ -1441,50 +1417,21 @@ fn place_piece(
 /// offset.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn place_discipline_states(
-    camera: Query<
-        &Transform,
-        (
-            With<Camera3d>,
-            Without<DisciplineStateRig>,
-            Without<SuppressionSwirl>,
-            Without<DisciplineStatePiece>,
-        ),
-    >,
+    hold: BodyHold,
     mut rigs: Query<
         (&DisciplineStateRig, &mut Transform, &Children),
         (
-            Without<Combatant>,
-            Without<VisualBody>,
             Without<SuppressionSwirl>,
             Without<DisciplineStatePiece>,
+            HoldDisjoint,
         ),
     >,
     mut swirls: Query<
         (&SuppressionSwirl, &mut Transform, &Children),
         (
-            Without<Combatant>,
-            Without<VisualBody>,
             Without<DisciplineStateRig>,
             Without<DisciplineStatePiece>,
-        ),
-    >,
-    units: Query<
-        (&Transform, Option<&Children>),
-        (
-            With<Combatant>,
-            Without<DisciplineStateRig>,
-            Without<SuppressionSwirl>,
-            Without<DisciplineStatePiece>,
-        ),
-    >,
-    bodies: Query<
-        &Transform,
-        (
-            With<VisualBody>,
-            Without<Combatant>,
-            Without<DisciplineStateRig>,
-            Without<SuppressionSwirl>,
-            Without<DisciplineStatePiece>,
+            HoldDisjoint,
         ),
     >,
     mut pieces: Query<
@@ -1496,33 +1443,21 @@ pub fn place_discipline_states(
         (
             Without<DisciplineStateRig>,
             Without<SuppressionSwirl>,
-            Without<Combatant>,
-            Without<VisualBody>,
+            HoldDisjoint,
         ),
     >,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let view = camera.iter().next().map(|c| View {
-        eye: c.translation,
-        forward: c.forward().as_vec3(),
-        rotation: c.rotation,
-    });
+    let view = hold.view();
     let body_of = |unit: Entity| {
-        let (transform, children) = units.get(unit).ok()?;
-        let body_local = children
-            .and_then(|kids| kids.iter().find_map(|k| bodies.get(k).ok()))
-            .map(|body| body.translation)
-            .unwrap_or(Vec3::ZERO);
-        Some((
-            discipline_body_centre(transform, body_local),
-            facing(transform),
-        ))
+        let body = hold.body(unit)?;
+        Some((body.centre(), level_facing(body.rotation), body.capsule()))
     };
     let mut pose_children = |rig: Option<&DisciplineStateRig>,
                              age: f32,
                              anchor: Vec3,
                              forward: Vec3,
-                             capsule: (Vec3, Vec3, f32),
+                             capsule: BodyCapsule,
                              children: &Children| {
         for child in children.iter() {
             let Ok((piece, mut part, material)) = pieces.get_mut(child) else {
@@ -1555,21 +1490,19 @@ pub fn place_discipline_states(
         }
     };
     for (rig, mut transform, children) in rigs.iter_mut() {
-        let Some((centre, forward)) = body_of(rig.bearer) else {
+        let Some((centre, forward, capsule)) = body_of(rig.bearer) else {
             continue;
         };
         let anchor = discipline_anchor(centre, rig.state.height());
         transform.translation = anchor;
-        let capsule = siphon_body_capsule(centre, false);
         pose_children(Some(rig), rig.age, anchor, forward, capsule, children);
     }
     for (swirl, mut transform, children) in swirls.iter_mut() {
-        let Some((centre, forward)) = body_of(swirl.caster) else {
+        let Some((centre, forward, capsule)) = body_of(swirl.caster) else {
             continue;
         };
         let anchor = discipline_anchor(centre, 0.0);
         transform.translation = anchor;
-        let capsule = siphon_body_capsule(centre, false);
         pose_children(None, swirl.age, anchor, forward, capsule, children);
     }
 }

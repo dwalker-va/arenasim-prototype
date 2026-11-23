@@ -2,13 +2,13 @@ use bevy::color::LinearRgba;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::body_hold::{held_in, BodyHold, HoldDisjoint};
 use super::conflagrate::{conflagrate_material, ConflagrateSprite, CONFLAGRATE_GLOW};
 use super::druid_heals::{body_point, keyed, keyed_color};
 use super::heal_impact::{HealMoteLook, Ramp};
 use super::hunter_shots::draw;
 use super::school_impact::IMPACT_PET_STATURE;
 use super::shield::disc_texture;
-use super::siphon_life::{siphon_body_capsule, siphon_drawn_point};
 use crate::states::play_match::components::*;
 
 // ==============================================================================
@@ -65,9 +65,9 @@ use crate::states::play_match::components::*;
 //    centre — about half of a shell round the chest, and of a stream rising
 //    through the body — is drawn first and the body paints over it. Every
 //    implosion particle and every stream mote is drawn on its own view ray,
-//    slid in front of its unit's body and scaled by the same ratio, Siphon
-//    Life's hold (`siphon_drawn_point` against `siphon_body_capsule`; one
-//    shared helper is AS-501), so it projects where the bench puts it.
+//    slid in front of its unit's body and scaled by the same ratio — the
+//    shared body hold (`body_hold.rs`) — so it projects where the bench puts
+//    it.
 // 2. **The stream rides its ally.** The bench's heal motes stay where they
 //    were born (no `follow`); the shipped heal rig carries its motes with the
 //    recipient, as every heal landing does.
@@ -178,23 +178,9 @@ fn stature(is_pet: bool) -> f32 {
 }
 
 /// The chest the implosion stands at, for a victim whose rendered body stands
-/// as a unit at `translation` would at rest ([`rendered_root`]).
+/// as a unit at `translation` would at rest (`body_hold::rendered_root`).
 pub fn ve_chest(translation: Vec3, is_pet: bool) -> Vec3 {
     body_point(VE_CHEST_ABOVE_FLOOR, translation, is_pet)
-}
-
-/// Where a unit at `unit` would stand for its RENDERED body to be where it is
-/// now: its root, moved by however far its `VisualBody` has left the body's
-/// rest pose (`rest_y`) — the walk bob, the fear bob, the swing step, the
-/// Cyclone lift. Every body point the sim's anchors measure from the root
-/// (`body_point`, `siphon_body_capsule`) is then measured from the body the
-/// player sees, as `shield.rs`, `vengeance.rs` and `shadow_dance.rs` stand on
-/// it. With no body (headless tests), the root itself.
-pub fn rendered_root(unit: &Transform, body: Option<(&Transform, &VisualBody)>) -> Vec3 {
-    match body {
-        Some((local, body)) => unit.transform_point(local.translation - Vec3::Y * body.rest_y),
-        None => unit.translation,
-    }
 }
 
 /// The rig's whole life: until its last mote, born as the window shuts, has
@@ -399,38 +385,10 @@ pub fn age_vampiric_embrace_motes(
 #[allow(clippy::type_complexity)]
 pub fn place_vampiric_embrace_implosions(
     mut materials: ResMut<Assets<StandardMaterial>>,
-    camera: Query<
-        &Transform,
-        (
-            With<Camera3d>,
-            Without<VampiricEmbraceImplosion>,
-            Without<VampiricEmbraceMote>,
-        ),
-    >,
+    hold: BodyHold,
     mut rigs: Query<
         (&VampiricEmbraceImplosion, &mut Transform, &Children),
-        (
-            Without<VampiricEmbraceMote>,
-            Without<Combatant>,
-            Without<VisualBody>,
-            Without<Camera3d>,
-        ),
-    >,
-    victims: Query<
-        (&Transform, Option<&Children>),
-        (
-            With<Combatant>,
-            Without<VampiricEmbraceImplosion>,
-            Without<VampiricEmbraceMote>,
-        ),
-    >,
-    bodies: Query<
-        (&Transform, &VisualBody),
-        (
-            Without<Combatant>,
-            Without<VampiricEmbraceImplosion>,
-            Without<VampiricEmbraceMote>,
-        ),
+        (Without<VampiricEmbraceMote>, HoldDisjoint),
     >,
     mut motes: Query<
         (
@@ -438,34 +396,24 @@ pub fn place_vampiric_embrace_implosions(
             &mut Transform,
             &MeshMaterial3d<StandardMaterial>,
         ),
-        (
-            Without<VampiricEmbraceImplosion>,
-            Without<Combatant>,
-            Without<VisualBody>,
-            Without<Camera3d>,
-        ),
+        (Without<VampiricEmbraceImplosion>, HoldDisjoint),
     >,
 ) {
-    let view = camera.iter().next();
+    let view = hold.view();
     let cam = view.map(|c| c.rotation).unwrap_or(Quat::IDENTITY);
     for (rig, mut rig_transform, children) in rigs.iter_mut() {
-        let Ok((victim, victim_children)) = victims.get(rig.target) else {
+        let Some(body) = hold.body(rig.target) else {
             continue;
         };
-        let body = victim_children.and_then(|kids| kids.iter().find_map(|k| bodies.get(k).ok()));
-        let root = rendered_root(victim, body);
-        let chest = ve_chest(root, rig.is_pet);
+        let chest = ve_chest(body.root, rig.is_pet);
         rig_transform.translation = chest;
-        let capsule = siphon_body_capsule(root, rig.is_pet);
+        let capsule = body.capsule();
         for child in children.iter() {
             let Ok((mote, mut transform, material)) = motes.get_mut(child) else {
                 continue;
             };
             let at = chest + mote.offset;
-            let (drawn, k) = match view {
-                Some(c) => siphon_drawn_point(at, capsule, c.translation, c.forward().as_vec3()),
-                None => (at, 1.0),
-            };
+            let (drawn, k) = held_in(view, at, capsule);
             let (color, alpha, radius) = ve_implosion_look((mote.age / mote.life).clamp(0.0, 1.0));
             transform.translation = drawn - chest;
             transform.rotation = rig_transform.rotation.inverse() * cam;
