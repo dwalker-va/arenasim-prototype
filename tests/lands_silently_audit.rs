@@ -79,6 +79,7 @@ use arenasim::states::play_match::combat_core::cheat_death_aura;
 use arenasim::states::play_match::combat_core::ExtraSwingSource;
 use arenasim::states::play_match::combat_core::CHEAT_DEATH_NAME;
 use arenasim::states::play_match::components::is_divine_protection;
+use arenasim::states::play_match::components::is_expose_armor;
 use arenasim::states::play_match::components::is_vengeance;
 use arenasim::states::play_match::components::Aura;
 use arenasim::states::play_match::components::AuraApplyOwner;
@@ -892,6 +893,15 @@ fn control_visual(
                 "slow bind ring + scuff (slow_ring.rs)"
             }
         }),
+        // Priest Silence's breath, routed by its name; the backlash's silence
+        // (named after Unstable Affliction) is no ability's and keeps its
+        // burst.
+        AuraType::Silence
+            if AuraApplyRoute::for_instance(t, name)
+                == AuraApplyRoute::Owned(AuraApplyOwner::SilenceBreath) =>
+        {
+            Some("breath at the mouth while it holds (silence_breath.rs)")
+        }
         _ => None,
     }
 }
@@ -901,16 +911,10 @@ fn control_finds_every_member() {
     assert_finds("crowd-control", is_control, CONTROL_MEMBERS);
 }
 
-const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[
-    (
-        CurseOfExhaustion,
-        "AS-334 (the talent visuals: Curse of Exhaustion's slow)",
-    ),
-    (
-        Silence,
-        "AS-357 (Silence on the target, and the Silence aura's routing; scoped by AS-335)",
-    ),
-];
+const CONTROL_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
+    CurseOfExhaustion,
+    "AS-334 (the talent visuals: Curse of Exhaustion's slow)",
+)];
 
 #[test]
 fn control_lands_nothing_silently() {
@@ -1064,6 +1068,16 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             _ if is_pain_suppression(t, &c.name) => Some(
                 "Holy hand flash + gold-and-teal shell before the ally while it holds (discipline_states.rs)",
             ),
+            // Its landing owns its application, by name (AS-366): Rupture's
+            // backhand, then the crest over the head.
+            _ if is_expose_armor(t, &c.name)
+                && AuraApplyRoute::for_instance(t, &c.name)
+                    == AuraApplyRoute::Owned(AuraApplyOwner::ExposeArmorCrest)
+                && swing_style_for_ability(a) == Some(SwingStyle::Backhand)
+                && InstantAbilityFired::is_spawned_for(a) =>
+            {
+                Some("backhand + shield crest over the head, gold cracking blue (expose_armor.rs)")
+            }
             _ if AuraLandingKind::for_aura(t, &c.name)
                 == Some(AuraLandingKind::MarkOfTheWildGlyph) =>
             {
@@ -1071,6 +1085,16 @@ fn status_visual(a: AbilityType, c: &AbilityConfig) -> Option<&'static str> {
             }
             _ if AuraLandingKind::for_aura(t, &c.name) == Some(AuraLandingKind::AmplifyFlash) => {
                 Some("empowered ground flash on cast (empowered_flash.rs)")
+            }
+            // Vampiric Embrace: its landing on the victim AND the heal stream
+            // its party heals play — both must answer.
+            _ if AuraLandingKind::for_aura(t, &c.name)
+                == Some(AuraLandingKind::VampiricEmbraceImplosion) =>
+            {
+                HealImpact::kind_for_leech(&c.name).map(|_| {
+                    "dust implosion at the chest on landing, violet heal stream on each healed \
+                     ally (vampiric_embrace.rs, heal_impact.rs)"
+                })
             }
             // The Paladin talent one-shots (AS-374), each routed by its
             // aura's name: the landing marks it, the band does not.
@@ -1104,10 +1128,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (DemoralizingShout, "AS-134 (aura application)"),
     (DevotionAura, "AS-134 (aura application)"),
     (EarthTotem, "AS-134 (aura application — totem pulse)"),
-    (
-        ExposeArmor,
-        "AS-366 (Expose Armor, the Combat capstone's armor rend)",
-    ),
     (FireTotem, "AS-134 (aura application — totem pulse)"),
     (FrostArmor, "AS-134 (aura application)"),
     (
@@ -1119,10 +1139,6 @@ const STATUS_KNOWN_SILENT: &[(AbilityType, &str)] = &[
     (MoltenArmor, "AS-134 (aura application)"),
     (PowerWordFortitude, "AS-134 (aura application)"),
     (ShadowResistanceAura, "AS-134 (aura application)"),
-    (
-        VampiricEmbrace,
-        "AS-357 (Vampiric Embrace on the target, and its heals; scoped by AS-335)",
-    ),
 ];
 
 #[test]

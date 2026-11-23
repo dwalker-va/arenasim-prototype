@@ -286,6 +286,7 @@ pub fn spawn_empowered_flashes(
             | AuraLandingKind::SacredShieldDisc
             | AuraLandingKind::RepentanceImpact
             | AuraLandingKind::SacrificeTriad
+            | AuraLandingKind::VampiricEmbraceImplosion
             | AuraLandingKind::AftermathFireHit => continue,
         };
         commands.entity(marker).despawn();
