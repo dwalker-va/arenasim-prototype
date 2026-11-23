@@ -8,6 +8,7 @@ use super::hunter_shots::{
     blob_texture, draw, ramp3, ramp_color, ClientEmitter, EmitterSprite, PALETTE_STEPS,
 };
 use super::school_impact::impact_origin;
+use super::siphon_life::{siphon_body_capsule, siphon_drawn_point};
 use crate::states::play_match::components::*;
 
 // ==============================================================================
@@ -20,7 +21,8 @@ use crate::states::play_match::components::*;
 // texture carries the red) fanned round the chest, each bursting at 150/s for
 // 167 ms, falling to 50/s at 333 ms and off at 500 ms, its droplets flying at
 // 2.2 yd/s under gravity 6.9 for 0.5 s. Hemorrhage's impact is the same model
-// (AS-367 reuses this), and so is Rend's — which ships its drips and not this.
+// (AS-367 fires this on every Hemorrhage that lands, a refresh of its stacks
+// included), and so is Rend's — which ships its drips and not this.
 //
 // As the signed-off AS-336 bench plays it (version 1792302646-d16f,
 // `bloodSpray`, committed as `docs/design/benches/2026-10-17-rogue-talent-
@@ -33,8 +35,19 @@ use crate::states::play_match::components::*;
 // **Fired at the stroke's contact, and only on a landing.** The router holds
 // the spray for the backhand's `impact_at` (Mortal Strike's flourish waits for
 // its blade the same way), then fires it only if the victim is alive and wears
-// the caster's aura — a dodged or parried strike, an immune victim, a corpse,
-// or a bleed already gone draws no blood.
+// the aura the strike landed — a dodged or parried strike, an immune victim, a
+// corpse, or a bleed already gone draws no blood. Whose aura counts follows
+// its stack scope ([`bleed_landed`]): a per-target wound (Hemorrhage's) is one
+// wound whoever refreshed it last, so a second Rogue's hit inside the first's
+// stroke takes nothing from the first's spray.
+//
+// **Drawn in front of the victim's body.** The droplets are born on the
+// body's axis, and Bevy sorts transparent draws by translation, so a droplet
+// deeper than the body's centre would be overpainted by it (the body writes no
+// depth, but it sorts). The bench draws the whole spray over the body, so each
+// droplet keeps its true flight and is DRAWN along its own view ray in front
+// of its victim's body — a pet's smaller body for a pet — scaled to keep its
+// screen size: Siphon Life's rule, [`siphon_drawn_point`].
 //
 // Graphical-only: scattered by the shared deterministic hash (never
 // `game_rng`), writing no sim state, registered in `states/mod.rs` only —
@@ -102,16 +115,33 @@ pub struct BleedSpray {
     /// Droplets owed but not yet emitted.
     pub carry: f32,
     pub emitted: u32,
+    /// The unit it sprays from, and whether it is a pet: the body its
+    /// droplets are drawn in front of.
+    pub victim: Entity,
+    pub is_pet: bool,
 }
 
-/// One droplet of a [`BleedSpray`], turned to the camera each frame.
+/// One droplet of a [`BleedSpray`], turned to the camera and held in front of
+/// its victim's body each frame.
 #[derive(Component)]
-pub struct BleedDroplet;
+pub struct BleedDroplet {
+    /// The unit it sprayed from, and whether it is a pet.
+    pub victim: Entity,
+    pub is_pet: bool,
+    /// Where the droplet truly is: its flight, never held.
+    pub truly: Vec3,
+    /// Where it was drawn last: what `animate_client_particles` moved on from.
+    pub drawn: Vec3,
+}
 
 // ── The pure model ───────────────────────────────────────────────────────────
 
 /// Whether a strike that put `aura` on its victim landed: the victim is
-/// alive and wears the caster's `aura` now.
+/// alive and wears that `aura` now — the caster's own, or, for a stacking
+/// aura kept one per target ([`StackScope::PerTarget`], Hemorrhage's wound),
+/// the target's one, whoever refreshed it last (a refresh hands it to its
+/// caster). An aura kept per caster, or not stacking (Rupture), must be the
+/// caster's own.
 pub fn bleed_landed(
     victim_alive: bool,
     victim_auras: Option<&ActiveAuras>,
@@ -120,9 +150,11 @@ pub fn bleed_landed(
 ) -> bool {
     victim_alive
         && victim_auras.is_some_and(|a| {
-            a.auras
-                .iter()
-                .any(|x| x.caster == Some(caster) && x.ability_name == aura)
+            a.auras.iter().any(|x| {
+                x.ability_name == aura
+                    && (x.caster == Some(caster)
+                        || x.stacks.is_some_and(|s| s.scope == StackScope::PerTarget))
+            })
         })
 }
 
@@ -234,6 +266,8 @@ pub fn fire_bleed_sprays(
                 age: 0.0,
                 carry: 0.0,
                 emitted: 0,
+                victim: held.victim,
+                is_pet: pet.is_some(),
             },
             Transform::from_translation(impact_origin(
                 ImpactAnchor::Chest,
@@ -285,11 +319,19 @@ pub fn update_bleed_sprays(
                     facing: ParticleFacing::Camera,
                     owned: false,
                 },
-                BleedDroplet,
+                BleedDroplet {
+                    victim: spray.victim,
+                    is_pet: spray.is_pet,
+                    truly: transform.translation,
+                    drawn: transform.translation,
+                },
                 Mesh3d(assets.quad.clone()),
                 MeshMaterial3d(assets.palette[0].clone()),
                 Transform::from_translation(transform.translation),
                 NotShadowCaster,
+                // World-space: it outlives its spray, so the match's own
+                // cleanup takes it, not the spray's.
+                PlayMatchEntity,
             ));
         }
         if to >= BLEED_SPRAY.end() {
@@ -298,16 +340,36 @@ pub fn update_bleed_sprays(
     }
 }
 
-/// Update (graphical-only): turn every droplet to face the camera.
+/// Update (graphical-only), after `animate_client_particles`: carry each
+/// droplet's true position on by what the animator moved it this frame, then
+/// draw it held in front of its victim's body (while the victim stands),
+/// scaled to keep its screen size, and turned to face the camera.
+#[allow(clippy::type_complexity)]
 pub fn billboard_bleed_droplets(
     camera: Query<&Transform, (With<Camera3d>, Without<BleedDroplet>)>,
-    mut droplets: Query<&mut Transform, With<BleedDroplet>>,
+    victims: Query<&Transform, (With<Combatant>, Without<BleedDroplet>, Without<Camera3d>)>,
+    mut droplets: Query<(&mut Transform, &mut BleedDroplet)>,
 ) {
-    let Some(camera) = camera.iter().next() else {
-        return;
-    };
-    for mut droplet in droplets.iter_mut() {
-        droplet.rotation = camera.rotation;
+    let camera = camera.iter().next();
+    for (mut transform, mut droplet) in droplets.iter_mut() {
+        // The animator moves the drawn point: that move is the flight.
+        let flown = transform.translation - droplet.drawn;
+        droplet.truly += flown;
+        let (at, k) = match (camera, victims.get(droplet.victim)) {
+            (Some(c), Ok(victim)) => siphon_drawn_point(
+                droplet.truly,
+                siphon_body_capsule(victim.translation, droplet.is_pet),
+                c.translation,
+                c.forward().as_vec3(),
+            ),
+            _ => (droplet.truly, 1.0),
+        };
+        transform.translation = at;
+        transform.scale *= k;
+        droplet.drawn = at;
+        if let Some(c) = camera {
+            transform.rotation = c.rotation;
+        }
     }
 }
 
@@ -374,6 +436,58 @@ mod tests {
         // Clear at 0.8 of the radius, and at the corner.
         assert_eq!(alpha(c + (0.8 * c as f32) as usize, c), 0);
         assert_eq!(alpha(0, 0), 0);
+    }
+
+    /// Whose aura counts as a strike's landing follows the aura's stack
+    /// scope: a per-target stacking wound is the target's, whoever refreshed
+    /// it last; a per-caster or non-stacking aura must be the caster's own.
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn the_landing_follows_the_auras_stack_scope() {
+        let (me, other) = (Entity::from_raw(1), Entity::from_raw(2));
+        // Built field by field: a test aura is applied nowhere, so it stays
+        // out of the aura catalog audit's apply-site scan.
+        let worn = |caster: Entity, stacks: Option<StackScope>| {
+            let mut aura = Aura::default();
+            aura.ability_name = "Wound".to_string();
+            aura.caster = Some(caster);
+            aura.stacks = stacks.map(|scope| AuraStacks::new(5, scope));
+            ActiveAuras { auras: vec![aura] }
+        };
+        let per_target = Some(StackScope::PerTarget);
+        let per_caster = Some(StackScope::PerCaster);
+        // Mine counts, whatever its scope.
+        for scope in [None, per_target, per_caster] {
+            assert!(bleed_landed(true, Some(&worn(me, scope)), me, "Wound"));
+        }
+        // Another's counts only for a per-target wound.
+        assert!(bleed_landed(
+            true,
+            Some(&worn(other, per_target)),
+            me,
+            "Wound"
+        ));
+        assert!(!bleed_landed(
+            true,
+            Some(&worn(other, per_caster)),
+            me,
+            "Wound"
+        ));
+        assert!(!bleed_landed(true, Some(&worn(other, None)), me, "Wound"));
+        // Never another aura's, and never on a corpse.
+        assert!(!bleed_landed(
+            true,
+            Some(&worn(me, per_target)),
+            me,
+            "Other"
+        ));
+        assert!(!bleed_landed(
+            false,
+            Some(&worn(me, per_target)),
+            me,
+            "Wound"
+        ));
+        assert!(!bleed_landed(true, None, me, "Wound"));
     }
 
     #[test]
