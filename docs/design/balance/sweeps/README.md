@@ -573,7 +573,9 @@ are configs on one binary, so there is no patch:
 - `-arms.py` — `gen` writes the arms (through `scripts/gen_sweep.py --build`
   / `--for-class`), `table` and `replicate` print the findings doc's tables
   from the CSVs, `sample` replays a fixed slice of each arm's Paladin matches
-  with full logs for the non-vacuity counts.
+  with full logs for the non-vacuity counts. Its verdict rule (the per-match
+  paired margin and its z) and its arms are pinned by
+  `scripts/tests/test_as302_arms.py`.
 - `-arms.jsonl.tar.gz` — the inputs as run: `block1/` (seeds 0-3) and
   `block2/` (seeds 4-7), 20 arms each.
 - `-arms.csv.tar.gz` — their batch CSVs, same layout.

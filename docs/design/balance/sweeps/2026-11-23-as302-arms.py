@@ -41,6 +41,7 @@ and the resolution floor that pair bought.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -218,8 +219,10 @@ def compare(outdir, cache, after_arm, before_arm, only=None):
 
 
 def row(label, s, extra=""):
+    """A paired comparison's line. Its z is the RAW delta's McNemar z, marked
+    SIG at 1.96; a node's verdict reads its margin z instead (`margin_stats`)."""
     floor = "%.1f" % s.floor if s.floor is not None else "-"
-    mark = " B" if s.z >= BONFERRONI_Z else (" SIG" if s.significant else "")
+    mark = " SIG" if s.significant else ""
     return ("| %s | %d | %.1f%% | %.1f%% | %+.1f | %d (+%d/-%d) | %.2f%s | %s |%s"
             % (label, s.n, 100.0 * s.before_wins / s.n, 100.0 * s.after_wins / s.n,
                s.delta, s.moved, s.to_win, s.to_loss, s.z, mark, floor, extra))
@@ -228,27 +231,89 @@ def row(label, s, extra=""):
 HEADER = ("| %s | n | before | after | delta (pt) | flips | z | floor (pt) |%s\n"
           "|---|---|---|---|---|---|---|---|%s")
 
+# The Sacred Duty rank each stem's nodes are allowed against: key -> (stem +
+# a rank, stem).
+STAT_ARMS = {key: (plus, stem) for _, key, plus, stem in STAT_RANK}
+
+
+def rank_factor(price):
+    """k: how many Sacred Duty ranks beyond one a node of `price` may be worth,
+    linear in price: -0.18 for a one-rank node (11 against 13.44), +0.64 for a
+    capstone (22)."""
+    return price / YARDSTICK_PRICE - 1.0
+
 
 def allowance(price, rank_value):
-    """What a stat rank of `price` may be worth over a Sacred Duty rank,
-    scaling that rank's measured worth on the same stem linearly in price:
-    slightly negative for a one-rank node (11 against 13.44), and about
-    two-thirds of a rank for a capstone (22)."""
-    return rank_value * (price / YARDSTICK_PRICE - 1.0)
+    """What a stat rank of `price` may be worth over a Sacred Duty rank, given
+    that rank's measured worth on the same stem."""
+    return rank_value * rank_factor(price)
 
 
-def verdict(s, allow):
-    """DOMINATES when the node beats Sacred Duty by more than the allowance
-    plus the floor; below when it loses to a same-price stat rank by more than
-    the floor; otherwise within."""
-    if s.floor is None:
+def paired_mean_z(xs):
+    """(mean, se, z) of per-match values: se = sd(x)/sqrt(n), the sample sd
+    over n - 1. Every x equal is se 0: z is 0 when the mean is 0, else
+    infinite in its sign."""
+    n = len(xs)
+    if n == 0:
+        return 0.0, 0.0, 0.0
+    mean = sum(xs) / n
+    var = sum((x - mean) ** 2 for x in xs) / (n - 1) if n > 1 else 0.0
+    se = math.sqrt(var / n)
+    if se == 0.0:
+        return mean, 0.0, 0.0 if mean == 0.0 else math.copysign(math.inf, mean)
+    return mean, se, mean / se
+
+
+def margin_stats(outdir, cache, arm, base, price, stem):
+    """A node's margin over its allowance, and that margin's z, from the
+    per-match paired margin over the one-sided matches:
+
+        x_i = 100 * [(A_i - B_i) - k * (V+_i - V0_i)]
+
+    A, B, V+ and V0 are 1 when the Paladin side wins match i in the node's
+    arm, its comparison, the stem with a Sacred Duty rank and the stem, else
+    0; k is `rank_factor(price)`. mean(x) is delta - k * v, the margin; its se
+    is sd(x)/sqrt(n), so the four arms' correlation at the same match is
+    counted, not assumed away."""
+    plus, bare = STAT_ARMS[stem]
+    before, _, _, buckets = scored(cache, outdir, arm, base)
+    for name in (plus, bare):
+        if name not in cache:
+            cache[name] = read_csv(outdir, name)
+    clean = set(buckets["clean"])
+    k = rank_factor(price)
+    rows = [cache[arm], cache[base], cache[plus], cache[bare]]
+    xs = []
+    for key in buckets["clean"] + buckets["against"]:
+        if not all(key in r for r in rows):
+            continue
+        side = "team1" if key in clean else "team2"
+        a, b, vp, v0 = (1.0 if r[key][0] == side else 0.0 for r in rows)
+        xs.append(100.0 * ((a - b) - k * (vp - v0)))
+    return paired_mean_z(xs)
+
+
+def verdict(margin, floor, margin_z):
+    """DOMINATES when the margin is past the pair's floor AND its z survives
+    Bonferroni over the node comparisons; below when it is under minus the
+    floor with z past minus the threshold. Past the floor without the
+    correction is said so; otherwise within."""
+    if floor is None:
         return "unresolvable"
-    margin = s.delta - allow
-    if margin > s.floor:
-        return "DOMINATES"
-    if margin < -s.floor:
-        return "below"
+    if margin > floor:
+        return "DOMINATES" if margin_z >= BONFERRONI_Z else "past the floor, not after correction"
+    if margin < -floor:
+        return "below" if margin_z <= -BONFERRONI_Z else "below the floor, not after correction"
     return "within"
+
+
+def node_verdict(outdir, cache, label, price, arm, base, stem):
+    """(the comparison's Slice, allowance, margin, margin z, verdict)."""
+    s, _, _ = compare(outdir, cache, arm, base)
+    margin, _, z = margin_stats(outdir, cache, arm, base, price, stem)
+    plus, bare = STAT_ARMS[stem]
+    v = compare(outdir, cache, plus, bare)[0].delta
+    return s, allowance(price, v), margin, z, verdict(margin, s.floor, z)
 
 
 def stat_values(outdir):
@@ -256,9 +321,54 @@ def stat_values(outdir):
             for _, key, plus, stem in STAT_RANK}
 
 
+def by_enemy(outdir, cache, arm, base, slices):
+    """The pair's raw delta (z, n) over each named slice of the enemy team."""
+    cells = []
+    for _, only in slices:
+        s, _, _ = compare(outdir, cache, arm, base, only)
+        cells.append("%+.1f (%.2f) n=%d" % (s.delta, s.z, s.n) if s.n else "-")
+    return cells
+
+
+MELEE_OR_PET = {"Warrior", "Rogue", "Hunter", "Warlock"}  # Hunter and Warlock: a melee pet
+HEALER_SLICES = [("vs a healer", lambda t: bool(t & HEALERS)),
+                 ("vs no healer", lambda t: not t & HEALERS)]
+AURA_SLICES = ([("no melee or pet", lambda t: not t & MELEE_OR_PET)]
+               + [("with a " + c, (lambda c: lambda t: c in t)(c))
+                  for c in ("Warrior", "Rogue", "Hunter", "Warlock")])
+ENEMY_HEALER_SLICES = ([("vs a " + c, (lambda c: lambda t: c in t)(c))
+                        for c in ("Priest", "Paladin", "Shaman", "Druid")]
+                       + [("vs no healer", lambda t: not t & HEALERS)])
+# Who can take Repentance (Magic) off a teammate: a Priest's Dispel Magic or a
+# Warlock's Felhunter's Devour Magic (a Paladin's Cleanse too, but no one-sided
+# Paladin match has an enemy Paladin).
+MAGIC_DISPELLERS = {"Priest", "Warlock"}
+DISPELLER_SLICES = [("enemy can dispel Magic", lambda t: bool(t & MAGIC_DISPELLERS)),
+                    ("enemy cannot", lambda t: not t & MAGIC_DISPELLERS)]
+# The two crossed: a healer or none, a Magic dispeller or none.
+CROSS_SLICES = [
+    ("healer, dispeller", lambda t: bool(t & HEALERS) and bool(t & MAGIC_DISPELLERS)),
+    ("healer, no dispeller", lambda t: bool(t & HEALERS) and not t & MAGIC_DISPELLERS),
+    ("no healer, dispeller", lambda t: not t & HEALERS and bool(t & MAGIC_DISPELLERS)),
+    ("no healer, no dispeller", lambda t: not t & HEALERS and not t & MAGIC_DISPELLERS),
+]
+
+
+def mean_duration(outdir, cache, arm, only):
+    """An arm's mean `duration_secs` over its one-sided matches whose enemy
+    team `only` admits."""
+    import paired_sweep as ps
+    _, rows, _, buckets = scored(cache, outdir, arm, "zero")
+    clean = set(buckets["clean"])
+    durs = [rows[k][3] for k in buckets["clean"] + buckets["against"]
+            if only(ps.classes(rows[k][2] if k in clean else rows[k][1]))]
+    return sum(durs) / len(durs), len(durs)
+
+
 def table(outdir):
     cache = {}
-    print("Bonferroni over %d node comparisons: z >= %.2f (marked B)\n"
+    blocks = outdir.split(os.pathsep)
+    print("Bonferroni over %d node comparisons: margin z >= %.2f\n"
           % (len(NODE_ARMS), BONFERRONI_Z))
     print("## References against 0 points (Paladin side's win rate)\n")
     print(HEADER % ("reference", "", ""))
@@ -267,30 +377,59 @@ def table(outdir):
         print(row(label, s))
     print("\n## One Sacred Duty rank on each stem (7 -> 8 points)\n")
     print(HEADER % ("stem", "", ""))
-    stat = {}
     for label, key, plus, stem in STAT_RANK:
         s, _, _ = compare(outdir, cache, plus, stem)
-        stat[key] = s.delta
         print(row(label, s))
     print("\n## Each node against Sacred Duty in its place\n")
-    print(HEADER % ("node", " allowance | margin | verdict |", "---|---|---|"))
+    print("The verdict is pooled; with more than one block given, each block's "
+          "own verdict follows it, and a pooled DOMINATES that some block does not "
+          "repeat is 'marginally'.\n")
+    print(HEADER % ("node", " allowance | margin | margin z | verdict | per block |",
+                    "---|---|---|---|---|"))
+    block_caches = [{} for _ in blocks]
     for label, price, arm, base, stem in NODE_ARMS:
-        s, _, _ = compare(outdir, cache, arm, base)
-        allow = allowance(price, stat[stem])
-        print(row(label, s, " %+.1f | %+.1f | %s |" % (allow, s.delta - allow, verdict(s, allow))))
+        s, allow, margin, z, v = node_verdict(outdir, cache, label, price, arm, base, stem)
+        per = []
+        if len(blocks) > 1:
+            per = [node_verdict(b, c, label, price, arm, base, stem)
+                   for b, c in zip(blocks, block_caches)]
+            if v == "DOMINATES" and any(p[4] != "DOMINATES" for p in per):
+                v = "DOMINATES, marginally"
+        print(row(label, s, " %+.1f | %+.1f | %.2f | %s | %s |"
+                  % (allow, margin, z, v,
+                     " / ".join("%+.1f z %.2f %s" % (p[2], p[3], p[4]) for p in per) or "-")))
     print("\n## The Retribution Aura arm, taken apart\n")
     print(HEADER % ("comparison", "", ""))
     for label, arm, base in AURA_PARTS:
         s, _, _ = compare(outdir, cache, arm, base)
         print(row(label, s))
-    print("\n## Each node by the enemy team: a healer, or none\n")
+    print("\n## Retribution Aura chosen over Devotion (same build), by the enemy team\n")
+    print("| " + " | ".join(name for name, _ in AURA_SLICES) + " |\n|"
+          + "---|" * len(AURA_SLICES))
+    print("| " + " | ".join(by_enemy(outdir, cache, "prot_ra", "prot_ra_dev", AURA_SLICES)) + " |")
+    print("\n## Repentance against Sacred Duty, by the enemy healer\n")
+    print("| " + " | ".join(name for name, _ in ENEMY_HEALER_SLICES) + " |\n|"
+          + "---|" * len(ENEMY_HEALER_SLICES))
+    print("| " + " | ".join(by_enemy(outdir, cache, "ret_rep", "ret_y", ENEMY_HEALER_SLICES))
+          + " |")
+    print("\n| " + " | ".join(name for name, _ in DISPELLER_SLICES) + " |\n|"
+          + "---|" * len(DISPELLER_SLICES))
+    print("| " + " | ".join(by_enemy(outdir, cache, "ret_rep", "ret_y", DISPELLER_SLICES))
+          + " |")
+    print("\n| " + " | ".join(name for name, _ in CROSS_SLICES) + " |\n|"
+          + "---|" * len(CROSS_SLICES))
+    print("| " + " | ".join(by_enemy(outdir, cache, "ret_rep", "ret_y", CROSS_SLICES)) + " |")
+    print("\n## Mean match length (duration_secs), one-sided Paladin matches\n")
+    print("| arm | vs a healer | vs no healer |\n|---|---|---|")
+    for arm in ("ret_y", "ret_noaow_y2", "ret"):
+        cells = ["%.1fs n=%d" % mean_duration(outdir, cache, arm, only)
+                 for _, only in HEALER_SLICES]
+        print("| %s | %s |" % (arm, " | ".join(cells)))
+    print("\n## Each node by the enemy team: a healer, or none (raw delta z)\n")
     print("| node | vs a healer | vs no healer |\n|---|---|---|")
     for label, _, arm, base, _ in NODE_ARMS:
-        cells = []
-        for only in (lambda t: bool(t & HEALERS), lambda t: not t & HEALERS):
-            s, _, _ = compare(outdir, cache, arm, base, only)
-            cells.append("%+.1f (%.2f) n=%d" % (s.delta, s.z, s.n))
-        print("| %s | %s |" % (label, " | ".join(cells)))
+        print("| %s | %s |" % (label, " | ".join(by_enemy(outdir, cache, arm, base,
+                                                            HEALER_SLICES))))
     print("\n## Each arm against its reference\n")
     print(HEADER % ("arm", "", ""))
     refs = {"holy", "prot", "ret"}
@@ -320,23 +459,20 @@ def table(outdir):
 
 
 def replicate(block1, block2):
-    """Every node comparison and stat rank, per block and pooled; a node row's
-    verdict reads its allowance from the Sacred Duty rank on the same stem in
-    the same block(s)."""
+    """Every node comparison and stat rank, per block and pooled, each node
+    row with its own allowance, margin, margin z and verdict."""
     pooled = block1 + os.pathsep + block2
     blocks = (("seeds 0-3", block1), ("seeds 4-7", block2), ("pooled", pooled))
-    stat = {name: stat_values(dirs) for name, dirs in blocks}
-    print(HEADER % ("comparison", " block | allowance | margin | verdict |", "---|---|---|---|"))
+    print(HEADER % ("comparison", " block | allowance | margin | margin z | verdict |",
+                    "---|---|---|---|---|"))
     for label, price, arm, base, stem in NODE_ARMS:
         for name, dirs in blocks:
-            s, _, _ = compare(dirs, {}, arm, base)
-            allow = allowance(price, stat[name][stem])
-            print(row(label, s, " %s | %+.1f | %+.1f | %s |"
-                      % (name, allow, s.delta - allow, verdict(s, allow))))
+            s, allow, margin, z, v = node_verdict(dirs, {}, label, price, arm, base, stem)
+            print(row(label, s, " %s | %+.1f | %+.1f | %.2f | %s |" % (name, allow, margin, z, v)))
     for label, _, plus, stem in STAT_RANK:
         for name, dirs in blocks:
             s, _, _ = compare(dirs, {}, plus, stem)
-            print(row("Sacred Duty rank, " + label, s, " %s | | | |" % name))
+            print(row("Sacred Duty rank, " + label, s, " %s | | | | |" % name))
 
 
 # Non-vacuity: what each node does in a match, counted off full match logs.
@@ -366,6 +502,11 @@ EVENTS = [
     ("Art of War procs", P + r"'s The Art of War procs"),
     ("Art of War spent", P + r"'s The Art of War is spent on"),
     ("Repentance casts", P + r" casts Repentance"),
+    ("Repentance lands", P + r"'s Repentance incapacitates"),
+    ("Repentance lands on a healer",
+     P + r"'s Repentance incapacitates Team \d (Priest|Paladin|Shaman|Druid)"),
+    ("Repentance broken by damage", r"'s Repentance broke from damage"),
+    ("Repentance dispelled", r"\] Repentance removed from"),
     ("Crusader Strikes", P + r" uses Crusader Strike"),
 ]
 SAMPLE_PER_ARM = 60

@@ -387,6 +387,12 @@ fn every_paladin_sweep_arm_resolves() {
         stems,
         BTreeSet::from(["holy_stem", "prot_stem", "ret_stem"])
     );
+    // Only the Retribution Aura arm chooses an aura, and it chooses that one.
+    let auras: Vec<(&str, &str)> = PALADIN_ARMS
+        .iter()
+        .filter_map(|a| a.aura.map(|aura| (a.name, aura)))
+        .collect();
+    assert_eq!(auras, [("prot_ra", "Retribution")]);
     // The aura the Retribution Aura arm chooses is refused on a build
     // without the node: the arm's choice is what the node opens.
     let refused = parse(
