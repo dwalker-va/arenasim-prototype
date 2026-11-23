@@ -162,6 +162,10 @@ STAT_RANK = [
     ("Shadow stem + Spiritual Healing (healing)", "shadow_y_heal", "shadow_stem_heal"),
 ]
 
+# A capstone's allowance: its stem with one yardstick rank (V+) against the
+# bare stem (V0).
+ALLOWANCE_STEM = {plus: bare for _, plus, bare in STAT_RANK}
+
 REFERENCES = [
     ("Discipline 6/2/0", "disc"),
     ("Holy 2/6/0", "holy"),
@@ -278,18 +282,77 @@ HEADER = ("| %s | n | before | after | delta (pt) | flips | z | floor (pt) |%s\n
           "|---|---|---|---|---|---|---|---|%s")
 
 
-def verdict(s, allowance, z_bonf):
-    """AS-299's line: a node dominates when it beats the yardstick (plus a
-    capstone's second-rank allowance) by more than the pair's floor."""
-    margin = s.delta - max(allowance, 0.0)
-    floor = s.floor if s.floor is not None else 0.0
-    if s.floor is not None and margin > floor:
-        word = "DOMINATES" if s.z >= z_bonf else "over the line (not after correction)"
-    elif s.significant and s.delta < 0:
-        word = "below" if s.z >= z_bonf else "below (not after correction)"
-    else:
-        word = "within"
-    return word
+def margin_z(keys, side, a, b, v_plus=None, v0=None, k=0):
+    """The node's margin over the yardstick, per match, and its z.
+
+    For each paired match i, scored for `side(i)`:
+        x_i = 100 * [(A_i - B_i) - k * (V+_i - V0_i)]
+    where A, B, V+ and V0 are 1 when that side won in the arm's row and 0
+    otherwise. A is the node's arm, B its yardstick arm, and (V+, V0) the
+    stem with and without one yardstick rank: a capstone's second-rank
+    allowance (k = 1; k = 0 for a one-rank node). The margin is mean(x) and
+    se = sd(x) / sqrt(n). The arms share every match and a stem, so their
+    deltas correlate: a quadrature sum of the pair z-scores would be wrong.
+    Returns (margin, se, z, n).
+    """
+    def won(rows, key):
+        return 1.0 if rows[key][0] == side(key) else 0.0
+
+    xs = []
+    for key in keys:
+        x = won(a, key) - won(b, key)
+        if k:
+            x -= k * (won(v_plus, key) - won(v0, key))
+        xs.append(100.0 * x)
+    n = len(xs)
+    if n < 2:
+        return (xs[0] if xs else 0.0), None, 0.0, n
+    mean = sum(xs) / n
+    se = statistics.stdev(xs) / n ** 0.5
+    return mean, se, (abs(mean) / se if se else 0.0), n
+
+
+def verdict(margin, z, floor, z_bonf):
+    """AS-299's line, with the per-match margin z (AS-301 ruling): a node
+    dominates when its margin over the yardstick (less a capstone's
+    allowance) is past the pair's floor and its margin z survives the
+    Bonferroni correction."""
+    if floor is not None and margin > floor:
+        return "DOMINATES" if z >= z_bonf else "over the line (not after correction)"
+    if margin < 0 and z >= 1.96:
+        return "below" if z >= z_bonf else "below (not after correction)"
+    return "within"
+
+
+def node_margin(outdir, cache, arm, base, allow_arm, ranks):
+    """A node row's margin, its se and z (`margin_z`), and its n."""
+    import paired_sweep as ps
+    s, _, _ = compare(outdir, cache, arm, base)
+    for name in (arm, base, allow_arm, ALLOWANCE_STEM.get(allow_arm)):
+        if name and name not in cache:
+            cache[name] = read_csv(outdir, name)
+    before = cache[base]
+    keys = [kk for kk in before if all(kk in cache[x] for x in (arm, base))]
+    buckets = ps.build_slices(keys, before, {CLASS})
+    side = priest_side(buckets)
+    scored = buckets["clean"] + buckets["against"]
+    if ranks == 2:
+        v_plus, v0 = cache[allow_arm], cache[ALLOWANCE_STEM[allow_arm]]
+        scored = [kk for kk in scored if kk in v_plus and kk in v0]
+        return s, margin_z(scored, side, cache[arm], before, v_plus, v0, k=1)
+    return s, margin_z(scored, side, cache[arm], before)
+
+
+def node_rows(outdir, cache, z_bonf):
+    """Each node comparison as the table prints it: (label, ranks, allow_arm,
+    the pair's Slice, margin, margin z, verdict). The verdict reads the
+    per-match margin z (`node_margin`), never the pair's McNemar z."""
+    out = []
+    for label, ranks, arm, base, allow_arm in NODE_ARMS:
+        s, (margin, _, z, _) = node_margin(outdir, cache, arm, base, allow_arm, ranks)
+        out.append((label, ranks, allow_arm, s, margin, z,
+                    verdict(margin, z, s.floor, z_bonf)))
+    return out
 
 
 def table(outdir):
@@ -314,13 +377,10 @@ def table(outdir):
         print(row(label, s))
     print("\n## Each node against a yardstick rank in its place "
           "(Bonferroni over %d: z >= %.2f)\n" % (len(NODE_ARMS), z_bonf))
-    print(HEADER % ("node", " margin | verdict |", "---|---|"))
-    for label, ranks, arm, base, allow_arm in NODE_ARMS:
-        s, _, _ = compare(outdir, cache, arm, base)
-        allowance = stat.get(allow_arm, 0.0) if ranks == 2 else 0.0
-        note = " (allowance %+.1f)" % allowance if ranks == 2 else ""
-        print(row(label, s, " %+.1f | %s%s |" % (s.delta - max(allowance, 0.0),
-                                                verdict(s, allowance, z_bonf), note)))
+    print(HEADER % ("node", " margin | margin z | verdict |", "---|---|---|"))
+    for label, ranks, allow_arm, s, margin, z, word in node_rows(outdir, cache, z_bonf):
+        note = " (allowance %+.1f)" % stat[allow_arm] if ranks == 2 else ""
+        print(row(label, s, " %+.1f | %.2f | %s%s |" % (margin, z, word, note)))
     print("\n## Each comparison arm against its reference\n")
     print(HEADER % ("comparison arm", "", ""))
     for label, arm, ref in YARDSTICK_ARMS:
@@ -357,10 +417,19 @@ def table(outdir):
 
 
 def replicate(block1, block2):
-    """Every node comparison and every yardstick rank, per block and pooled."""
+    """Every node comparison and every yardstick rank, per block and pooled.
+    A node row carries its margin and the margin z its verdict reads."""
+    z_bonf = bonferroni_z(len(NODE_ARMS))
+    print(HEADER % ("node", " block | margin | margin z | verdict |", "---|---|---|---|"))
+    for label, ranks, arm, base, allow_arm in NODE_ARMS:
+        for name, dirs in (("block 1", block1), ("block 2", block2),
+                           ("pooled", block1 + os.pathsep + block2)):
+            s, (margin, _, z, _) = node_margin(dirs, {}, arm, base, allow_arm, ranks)
+            print(row(label, s, " %s | %+.1f | %.2f | %s |"
+                      % (name, margin, z, verdict(margin, z, s.floor, z_bonf))))
+    print()
     print(HEADER % ("comparison", " block |", "---|"))
-    rows = [(label, arm, base) for label, _, arm, base, _ in NODE_ARMS]
-    rows += [(label, plus, bare) for label, plus, bare in STAT_RANK]
+    rows = [(label, plus, bare) for label, plus, bare in STAT_RANK]
     rows += [(label, arm, base) for label, arm, base in FORM_ARMS]
     for label, arm, base in rows:
         for name, dirs in (("block 1", block1), ("block 2", block2),

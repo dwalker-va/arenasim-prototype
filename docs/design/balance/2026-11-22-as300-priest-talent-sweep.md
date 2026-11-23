@@ -6,25 +6,43 @@ more than the run's resolution floor beyond a stat rank of the same price.
 
 **The rule, as AS-299 applied it:** a node dominates when its pooled delta
 beats the yardstick rank (plus a capstone's allowance) by more than the pair's
-floor, and its McNemar z survives the Bonferroni correction for the 16 node
+floor, and its margin z survives the Bonferroni correction for the 16 node
 comparisons (z ≥ 2.96). Per-block replication is reported beside each verdict,
 not as part of the rule.
 
-**Verdict: the condition fails on five nodes.** Four fail clearly and
-replicate in each seed block alone. The fifth, Inner Focus, fails marginally:
+**The margin z is per match** (the AS-301 ruling, for every talent sweep). Each
+paired match i, scored for the Priest's side, gives
+
+    x_i = 100 · [(A_i − B_i) − k · (V+_i − V0_i)]
+
+where A, B, V+ and V0 are 1 when that side won in the arm's row:
+
+- A is the node's arm and B its yardstick arm;
+- V+ and V0 are the stem with and without one yardstick rank;
+- k = 1 for a capstone (its two-rank allowance) and 0 for a one-rank node.
+
+The margin is mean(x), and se = sd(x)/√n. The arms share every match and a
+stem, so their deltas correlate: a quadrature sum of the pairs' errors would
+be wrong. `margin_z` in the arms script is that formula. For a one-rank node
+the margin is the plain paired delta, and its z is McNemar's without the
+continuity correction (a few hundredths higher).
+
+**Verdict: the condition fails on five nodes.** Four fail clearly. Each of
+them clears the correction in each seed block alone, Pain Suppression's first
+block by only 0.03. The fifth, Inner Focus, fails marginally:
 0.3pt past its floor, just past the correction pooled, and in neither block
 alone.
 
-| Node | Its delta | The line | z | Over the line by |
+| Node | Its delta | The line | Margin (floor) | Margin z |
 |---|---|---|---|---|
-| Guardian Spirit | +8.9pt | +0.9pt (allowance) | 18.6 | +8.0pt (floor 1.0) |
-| Silence (in Shadowform) | +6.4pt | +1.0pt (allowance) | 13.4 | +5.3pt (floor 0.9) |
-| Reflective Shield | +4.4pt | 0 | 8.8 | +4.4pt (floor 1.0) |
-| Pain Suppression | +4.0pt | +0.5pt (allowance) | 8.2 | +3.5pt (floor 1.0) |
-| Inner Focus (marginal) | +1.0pt | 0 | 3.0 | +1.0pt, 0.3pt past its 0.7pt floor |
+| Guardian Spirit | +8.9pt | +0.9pt (allowance) | +8.0pt (1.0) | 12.44 |
+| Silence (in Shadowform) | +6.4pt | +1.0pt (allowance) | +5.3pt (0.9) | 9.39 |
+| Reflective Shield | +4.4pt | 0 | +4.4pt (1.0) | 8.90 |
+| Pain Suppression | +4.0pt | +0.5pt (allowance) | +3.5pt (1.0) | 5.37 |
+| Inner Focus (marginal) | +1.0pt | 0 | +1.0pt (0.7) | 3.09 |
 
 - Each is measured against a yardstick rank. For the three capstones, the line is the capstone's allowance: what a second yardstick rank buys on the same stem.
-- Inner Focus is not replicated per block: +0.8 (z 1.61) and +1.3 (z 2.59), neither past the correction alone.
+- Inner Focus is not replicated per block: +0.8 (margin z 1.68) and +1.3 (2.66), neither past the correction alone.
 - **Mind Flay sits well below a stat rank in both roles:** −4.8pt in Shadowform and −2.8pt healing.
 - Four more nodes sit below significantly, but none survives the correction.
 - **Guardian Spirit's save fires on 68% of its casts:** 258 saves from 381 casts, in 0.39 of the Priest's matches.
@@ -162,24 +180,33 @@ In every table:
 
 ### Each node against a yardstick rank in its place
 
-| node | before | after | delta (pt) | flips | z | floor (pt) | verdict |
-|---|---|---|---|---|---|---|---|
-| **Guardian Spirit** (capstone, allowance +0.9) | 54.2% | 63.1% | **+8.9** | 818 (+675/−143) | 18.57 | 1.0 | **dominates** (+8.0) |
-| **Silence**, Shadowform (capstone, allowance +1.0) | 38.3% | 44.7% | **+6.4** | 806 (+594/−212) | 13.42 | 0.9 | **dominates** (+5.3) |
-| **Reflective Shield** | 56.0% | 60.4% | **+4.4** | 899 (+582/−317) | 8.80 | 1.0 | **dominates** |
-| **Pain Suppression** (capstone, allowance +0.5) | 60.4% | 64.4% | **+4.0** | 839 (+538/−301) | 8.15 | 1.0 | **dominates** (+3.5) |
-| **Inner Focus** | 59.4% | 60.4% | **+1.0** | 391 (+226/−165) | 3.03 | 0.7 | **dominates** (marginal; in neither block alone) |
-| Vampiric Embrace, Shadowform | 38.3% | 39.1% | +0.8 | 1108 (+578/−530) | 1.41 | 1.1 | within |
-| Unbreakable Will (rank 2) | 60.1% | 60.4% | +0.3 | 560 (+288/−272) | 0.63 | 0.8 | within |
-| Blackout (rank 1), healing | 50.6% | 50.6% | −0.0 | 779 (+389/−390) | 0.00 | 0.9 | within |
-| Blessed Recovery | 54.2% | 53.8% | −0.4 | 333 (+154/−179) | 1.32 | 0.6 | within |
-| Holy Nova | 54.2% | 53.8% | −0.5 | 607 (+290/−317) | 1.06 | 0.8 | within |
-| Inspiration (rank 2) | 55.0% | 54.2% | −0.7 | 261 (+109/−152) | 2.60 | 0.5 | below, not after correction |
-| Blackout (rank 1), Shadowform | 39.1% | 38.3% | −0.8 | 622 (+286/−336) | 1.96 | 0.8 | below, not after correction |
-| Power Infusion | 60.4% | 59.5% | −0.9 | 490 (+217/−273) | 2.48 | 0.7 | below, not after correction |
-| Vampiric Embrace, healing | 50.6% | 49.3% | −1.3 | 1051 (+486/−565) | 2.41 | 1.1 | below, not after correction |
-| **Mind Flay**, healing | 53.4% | 50.6% | **−2.8** | 871 (+351/−520) | 5.69 | 1.0 | **below** |
-| **Mind Flay**, Shadowform | 43.0% | 38.3% | **−4.8** | 1329 (+522/−807) | 7.79 | 1.2 | **below** |
+"z" is the pair's McNemar z on its delta. The verdict reads the margin z, for
+the margin past a capstone's allowance.
+
+| node | before | after | delta (pt) | flips | z | floor (pt) | margin | margin z | verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| **Guardian Spirit** (capstone, allowance +0.9) | 54.2% | 63.1% | **+8.9** | 818 (+675/−143) | 18.57 | 1.0 | +8.0 | 12.44 | **dominates** |
+| **Silence**, Shadowform (capstone, allowance +1.0) | 38.3% | 44.7% | **+6.4** | 806 (+594/−212) | 13.42 | 0.9 | +5.3 | 9.39 | **dominates** |
+| **Reflective Shield** | 56.0% | 60.4% | **+4.4** | 899 (+582/−317) | 8.80 | 1.0 | +4.4 | 8.90 | **dominates** |
+| **Pain Suppression** (capstone, allowance +0.5) | 60.4% | 64.4% | **+4.0** | 839 (+538/−301) | 8.15 | 1.0 | +3.5 | 5.37 | **dominates** |
+| **Inner Focus** | 59.4% | 60.4% | **+1.0** | 391 (+226/−165) | 3.03 | 0.7 | +1.0 | 3.09 | **dominates** (marginal; in neither block alone) |
+| Vampiric Embrace, Shadowform | 38.3% | 39.1% | +0.8 | 1108 (+578/−530) | 1.41 | 1.1 | +0.8 | 1.44 | within |
+| Unbreakable Will (rank 2) | 60.1% | 60.4% | +0.3 | 560 (+288/−272) | 0.63 | 0.8 | +0.3 | 0.68 | within |
+| Blackout (rank 1), healing | 50.6% | 50.6% | −0.0 | 779 (+389/−390) | 0.00 | 0.9 | −0.0 | 0.04 | within |
+| Blessed Recovery | 54.2% | 53.8% | −0.4 | 333 (+154/−179) | 1.32 | 0.6 | −0.4 | 1.37 | within |
+| Holy Nova | 54.2% | 53.8% | −0.5 | 607 (+290/−317) | 1.06 | 0.8 | −0.5 | 1.10 | within |
+| Inspiration (rank 2) | 55.0% | 54.2% | −0.7 | 261 (+109/−152) | 2.60 | 0.5 | −0.7 | 2.66 | below, not after correction |
+| Blackout (rank 1), Shadowform | 39.1% | 38.3% | −0.8 | 622 (+286/−336) | 1.96 | 0.8 | −0.8 | 2.01 | below, not after correction |
+| Power Infusion | 60.4% | 59.5% | −0.9 | 490 (+217/−273) | 2.48 | 0.7 | −0.9 | 2.53 | below, not after correction |
+| Vampiric Embrace, healing | 50.6% | 49.3% | −1.3 | 1051 (+486/−565) | 2.41 | 1.1 | −1.3 | 2.44 | below, not after correction |
+| **Mind Flay**, healing | 53.4% | 50.6% | **−2.8** | 871 (+351/−520) | 5.69 | 1.0 | −2.8 | 5.74 | **below** |
+| **Mind Flay**, Shadowform | 43.0% | 38.3% | **−4.8** | 1329 (+522/−807) | 7.79 | 1.2 | −4.8 | 7.86 | **below** |
+
+Moving the verdicts onto the margin z changes no verdict and no threshold
+crossing. The capstones' z values fall, because their allowance carries noise
+of its own: Guardian Spirit 18.57 → 12.44, Silence 13.42 → 9.39, Pain
+Suppression 8.15 → 5.37. Every one-rank z rises by a few hundredths. Inner
+Focus moves from 3.03 to 3.09, still past 2.96.
 
 **For scale.** Holy Concentration, the one computed `StatPercent` node, prices
 at 3.5. Measured against a second Spiritual Healing rank, it comes out +0.6pt
@@ -231,25 +258,27 @@ at or above the reference (Mind Flay's removal +3.9).
 
 ### Replication
 
-The delta for each node comparison, block by block (each block n=3,000; z in
-brackets):
+Each node's margin, with its margin z in brackets, block by block. Each block
+is n=3,000, and a capstone's allowance is read in its own block:
 
 | comparison | seeds 0-3 | seeds 4-7 | pooled |
 |---|---|---|---|
-| Guardian Spirit | +9.4 (13.31) | +8.3 (12.91) | +8.9 (18.57) |
-| Silence, Shadowform | +6.1 (9.06) | +6.6 (9.87) | +6.4 (13.42) |
-| Reflective Shield | +4.3 (6.07) | +4.5 (6.34) | +4.4 (8.80) |
-| Pain Suppression | +3.8 (5.43) | +4.1 (6.05) | +4.0 (8.15) |
-| Inner Focus | +0.8 (1.61) | +1.3 (2.59) | +1.0 (3.03) |
-| Mind Flay, Shadowform | −4.2 (4.91) | −5.3 (6.07) | −4.8 (7.79) |
-| Mind Flay, healing | −3.0 (4.21) | −2.7 (3.79) | −2.8 (5.69) |
-| Power Infusion | −1.7 (3.12) | −0.1 (0.20) | −0.9 (2.48) |
-| Inspiration (rank 2) | −0.5 (1.05) | −1.0 (2.68) | −0.7 (2.60) |
-| Vampiric Embrace, healing | −1.4 (1.73) | −1.3 (1.63) | −1.3 (2.41) |
-| Blackout, Shadowform | −1.2 (1.98) | −0.4 (0.70) | −0.8 (1.96) |
+| Guardian Spirit | +8.2 (8.62) | +7.7 (9.02) | +8.0 (12.44) |
+| Silence, Shadowform | +4.9 (6.15) | +5.8 (7.13) | +5.3 (9.39) |
+| Reflective Shield | +4.3 (6.15) | +4.5 (6.43) | +4.4 (8.90) |
+| Pain Suppression | +2.8 (2.99) | +4.2 (4.66) | +3.5 (5.37) |
+| Inner Focus | +0.8 (1.68) | +1.3 (2.66) | +1.0 (3.09) |
+| Mind Flay, Shadowform | −4.2 (4.97) | −5.3 (6.14) | −4.8 (7.86) |
+| Mind Flay, healing | −3.0 (4.27) | −2.7 (3.85) | −2.8 (5.74) |
+| Power Infusion | −1.7 (3.18) | −0.1 (0.27) | −0.9 (2.53) |
+| Inspiration (rank 2) | −0.5 (1.14) | −1.0 (2.78) | −0.7 (2.66) |
+| Vampiric Embrace, healing | −1.4 (1.77) | −1.3 (1.67) | −1.3 (2.44) |
+| Blackout, Shadowform | −1.2 (2.03) | −0.4 (0.76) | −0.8 (2.01) |
 
-- **The four dominating nodes and both Mind Flay rows** replicate within about a
-  point, and each block alone clears the correction.
+- **The four dominating nodes and both Mind Flay rows** replicate, and each
+  block alone clears the correction. **Pain Suppression's first block clears
+  it by 0.03** (2.99 against 2.96), so its block-by-block replication is
+  marginal. Its pooled margin z is 5.37.
 - **Inner Focus** dominates pooled, marginally, and is significant in neither
   block at the corrected bar.
 - **Power Infusion's** first block is not reproduced by its second.

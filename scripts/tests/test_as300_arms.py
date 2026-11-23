@@ -161,6 +161,83 @@ class MechanismCountTests(unittest.TestCase):
         self.assertEqual(c["mind_blast_hits"], 2)
 
 
+def outcomes(wins):
+    """A Priest-side arm's rows, keyed (label, seed): `wins[i]` is 1 when the
+    Priest's side (team1 in every row) won match i."""
+    return {("Priest+Warrior_vs_Mage+Rogue", str(i)):
+            ("team1" if w else "team2", "Priest+Warrior", "Mage+Rogue", 30.0 + i)
+            for i, w in enumerate(wins)}
+
+
+class MarginZTests(unittest.TestCase):
+    """The margin z a verdict reads is the PER-MATCH paired margin (AS-301
+    ruling): x_i = 100 * [(A_i - B_i) - k * (V+_i - V0_i)], se = sd(x)/sqrt(n).
+    The arms share every match, so their deltas correlate; a quadrature sum
+    of the two pairs' standard errors gives a different, wrong z."""
+
+    A, B, V_PLUS, V0 = [1, 1, 1, 0], [0, 1, 0, 0], [1, 0, 1, 0], [0, 0, 1, 0]
+
+    def side(self, key):
+        return "team1"
+
+    def test_a_capstone_margin_subtracts_its_allowance_match_by_match(self):
+        keys = list(outcomes(self.A))
+        margin, se, z, n = arms.margin_z(keys, self.side, outcomes(self.A), outcomes(self.B),
+                                         outcomes(self.V_PLUS), outcomes(self.V0), k=1)
+        # x = [0, 0, 100, 0]: mean 25, sd 50, se 25
+        self.assertEqual((margin, n), (25.0, 4))
+        self.assertAlmostEqual(se, 25.0)
+        self.assertAlmostEqual(z, 1.0)
+        # the quadrature sum of the two pairs' se would give 25 / 38.19 = 0.65
+        self.assertNotAlmostEqual(z, 25.0 / (28.8675 ** 2 + 25.0 ** 2) ** 0.5, places=2)
+
+    def test_a_one_rank_node_is_its_plain_paired_delta(self):
+        keys = list(outcomes(self.A))
+        margin, se, z, _ = arms.margin_z(keys, self.side, outcomes(self.A), outcomes(self.B))
+        # x = [100, 0, 100, 0]: mean 50, sd 57.74, se 28.87
+        self.assertEqual(margin, 50.0)
+        self.assertAlmostEqual(z, 50.0 / (57.735027 / 2), places=4)
+
+    def test_a_capstone_row_is_wired_to_its_stem_allowance(self):
+        # The table's wiring: Pain Suppression's arm (`disc`) against the
+        # Discipline stem + Spiritual Healing (`disc_y`), which is also the
+        # allowance's V+, with the bare stem (`disc_stem`) as V0. So
+        # x = A - 2B + V0 = [100, -100, 200, 0]: mean 50, sd 129.10.
+        cache = {"disc": outcomes(self.A), "disc_y": outcomes(self.B),
+                 "disc_stem": outcomes(self.V0)}
+        _, (margin, se, z, n) = arms.node_margin("unused", cache, "disc", "disc_y",
+                                                 "disc_y", 2)
+        self.assertEqual((margin, n), (50.0, 4))
+        self.assertAlmostEqual(z, 50.0 / (129.0994 / 2), places=3)
+        # and a one-rank row reads no allowance
+        _, (margin, _, z, _) = arms.node_margin("unused", cache, "disc", "disc_y", None, 1)
+        self.assertEqual(margin, 50.0)
+        self.assertAlmostEqual(z, 50.0 / (57.735027 / 2), places=4)
+
+    def test_the_table_rows_read_the_margin_z_not_the_pairs_mcnemar_z(self):
+        # Every arm wins every match but these three: Pain Suppression's row
+        # is the only one that moves, and its verdict must read the margin z
+        # (0.77 here), not the pair's McNemar z.
+        cache = {arm: outcomes([1, 1, 1, 1]) for arm in arms.ARMS}
+        cache.update({"disc": outcomes(self.A), "disc_y": outcomes(self.B),
+                      "disc_stem": outcomes(self.V0)})
+        rows = {r[0]: r for r in arms.node_rows("unused", cache, 2.955)}
+        _, ranks, _, s, margin, z, _ = rows["Pain Suppression (capstone)"]
+        self.assertEqual((ranks, margin), (2, 50.0))
+        self.assertAlmostEqual(z, 50.0 / (129.0994 / 2), places=3)
+        self.assertNotAlmostEqual(z, s.z, places=2)
+
+    def test_the_verdict_reads_the_margin_z_it_is_given(self):
+        z_bonf = arms.bonferroni_z(16)
+        self.assertAlmostEqual(z_bonf, 2.955, places=3)
+        self.assertEqual(arms.verdict(3.5, 5.37, 1.0, z_bonf), "DOMINATES")
+        self.assertEqual(arms.verdict(3.5, 2.5, 1.0, z_bonf),
+                         "over the line (not after correction)")
+        self.assertEqual(arms.verdict(0.5, 9.0, 1.0, z_bonf), "within")
+        self.assertEqual(arms.verdict(-2.8, 5.7, 1.0, z_bonf), "below")
+        self.assertEqual(arms.verdict(-0.9, 2.5, 0.7, z_bonf), "below (not after correction)")
+
+
 class MinPythonTests(unittest.TestCase):
     def test_the_arms_script_runs_on_the_floor_interpreter(self):
         assert_file_runs_on_min_python(self, ARMS)
