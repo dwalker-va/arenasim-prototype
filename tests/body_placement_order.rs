@@ -37,7 +37,7 @@ use arenasim::states::{GameState, StatesPlugin};
 
 /// Every `BodyPlacement` system, by name. Adding one, or taking one out, is an
 /// edit here: membership is a judgement the schedule cannot make for itself.
-const PLACEMENTS: [&str; 19] = [
+const PLACEMENTS: [&str; 20] = [
     "place_shield_cards",
     "place_vengeance_hands",
     "place_divine_protection_globes",
@@ -57,6 +57,7 @@ const PLACEMENTS: [&str; 19] = [
     "place_ua_states",
     "place_mana_funnel_stars",
     "billboard_heal_impacts",
+    "place_medallion_ribbons",
 ];
 
 /// The client app with everything `StatesPlugin` needs, minus the window and
@@ -348,7 +349,7 @@ fn no_hold_runs_in_update() {
 /// effect's probe harness restates in its own chain, so only this sees it
 /// dropped. `Update` systems all run before `PostUpdate`'s, so an ordering
 /// between the two schedules is the schedule's and is not listed.
-const ORDERINGS: [(&str, &str, &str); 34] = [
+const ORDERINGS: [(&str, &str, &str); 36] = [
     (
         "handle_camera_input",
         "update_camera_position",
@@ -519,6 +520,32 @@ const ORDERINGS: [(&str, &str, &str); 34] = [
         "update_blessed_recovery_bursts",
         "a burst ages from the frame it lands",
     ),
+    (
+        "update_cc_rigs",
+        "scatter_cc_beads",
+        "a scattering stun's beads fly from the hub frozen this frame",
+    ),
+    (
+        "scatter_cc_beads",
+        "cleanup_cc_rigs",
+        "a scatter's last frame is posed before it ends",
+    ),
+];
+
+/// `FixedUpdate` orderings: the Medallion's break is read inside Phase 1,
+/// after the shifts and directly before the use resolves, so it sees the
+/// wearer exactly as the break does (`medallion.rs`).
+const FIXED_UPDATE_ORDERINGS: [(&str, &str, &str); 2] = [
+    (
+        "process_travel_form",
+        "spawn_medallion_breaks",
+        "the break is read after every Phase 1 step before the use",
+    ),
+    (
+        "spawn_medallion_breaks",
+        "process_on_use_items",
+        "the break is read before it takes the crowd control off",
+    ),
 ];
 
 /// `PostUpdate` orderings beside the set's own.
@@ -548,6 +575,17 @@ fn the_client_keeps_every_ordering_the_effects_rest_on() {
         broken.is_empty(),
         "PostUpdate no longer orders: {broken:#?}"
     );
+    let fixed = Graph::of(&mut app, FixedUpdate);
+    let broken: Vec<String> = FIXED_UPDATE_ORDERINGS
+        .iter()
+        .filter(|(first, then, _)| !fixed.orders(first, then))
+        .map(|(first, then, why)| format!("{first} before {then} ({why})"))
+        .collect();
+    assert!(
+        broken.is_empty(),
+        "FixedUpdate no longer orders: {broken:#?}"
+    );
+    assert!(!fixed.orders("process_on_use_items", "spawn_medallion_breaks"));
     // Non-vacuity: an ordering the schedule does not make is reported.
     assert!(!update.orders("animate_client_particles", "update_bleed_sprays"));
     assert!(!update.orders("animate_heal_impacts", "spawn_heal_impacts"));

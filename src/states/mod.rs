@@ -763,6 +763,18 @@ impl Plugin for StatesPlugin {
                 .before(CombatSystemPhase::ResourcesAndAuras)
                 .run_if(in_combat_scene),
         )
+        // The Medallion's break (AS-432, `medallion.rs`): its hands, its
+        // gold ribbon and the scatter it hands the hard-CC group below. Read
+        // in Phase 1, directly before `process_on_use_items` resolves the
+        // use the AI queued last tick, so it sees the wearer exactly as the
+        // break does.
+        .add_systems(
+            FixedUpdate,
+            play_match::spawn_medallion_breaks
+                .after(play_match::process_travel_form)
+                .before(play_match::process_on_use_items)
+                .run_if(in_combat_scene),
+        )
         // Combat resolution, death, and visual effects (after core combat)
         .add_systems(
             Update,
@@ -917,6 +929,9 @@ impl Plugin for StatesPlugin {
                 // After `update_cc_rigs`, which writes the hub rotation the
                 // billboard has to cancel.
                 play_match::billboard_cc_beads,
+                // A stun the Medallion broke flies apart (AS-432): after
+                // `update_cc_rigs`, which ages the scatter and freezes the hub.
+                play_match::scatter_cc_beads,
                 play_match::update_cc_flares,
                 play_match::cleanup_cc_rigs,
                 play_match::cleanup_cc_flares,
@@ -999,6 +1014,9 @@ impl Plugin for StatesPlugin {
                 play_match::place_ua_states,
                 play_match::place_mana_funnel_stars,
                 play_match::billboard_heal_impacts,
+                // The Medallion's gold ribbon, on its wearer's drawn body
+                // (`dispel_ribbon.rs`, AS-432).
+                play_match::place_medallion_ribbons,
             )
                 .in_set(play_match::BodyPlacement),
         )

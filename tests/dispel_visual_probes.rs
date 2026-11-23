@@ -15,7 +15,7 @@ use bevy::render::mesh::VertexAttributeValues;
 use bevy::time::TimeUpdateStrategy;
 
 use arenasim::states::play_match::components::{
-    Combatant, DispelRibbon, DispelRibbonRig, DispelSpark,
+    Combatant, DispelRibbon, DispelRibbonRig, DispelSpark, RibbonSource,
 };
 use arenasim::states::play_match::{
     cleanup_expired_dispel_ribbons, ribbon_climb, ribbon_consumed, ribbon_fold, ribbon_fold_amp,
@@ -82,7 +82,7 @@ impl Harness {
             .world_mut()
             .spawn(DispelRibbon {
                 target: victim,
-                caster_class: class,
+                source: RibbonSource::Dispel(class),
                 lifetime: RIBBON_LIFE,
                 initial_lifetime: RIBBON_LIFE,
                 spin: 0.0,
@@ -585,13 +585,13 @@ fn the_strip_is_drawn_dark_at_the_shared_ribbon_level_and_the_sparks_stay_bright
             )>();
             let (r, rig, m) = q.iter(h.app.world()).next().expect("a ribbon");
             (
-                r.caster_class,
+                r.source,
                 r.initial_lifetime - r.lifetime,
                 m.0.clone(),
                 rig.spark_material.clone(),
             )
         };
-        assert_eq!(ribbon, class);
+        assert_eq!(ribbon, RibbonSource::Dispel(class));
         let materials = h.app.world().resource::<Assets<StandardMaterial>>();
         let strip = materials.get(&strip).expect("strip material");
         let sparks = materials.get(&sparks).expect("spark material");

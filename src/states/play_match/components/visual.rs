@@ -2044,14 +2044,36 @@ pub struct DispelBurst {
 pub struct DispelRibbon {
     /// The entity that was dispelled (ribbon anchors above this target's head)
     pub target: Entity,
-    /// The class of the dispeller (affects color: Priest = white/silver, Paladin = golden)
-    pub caster_class: CharacterClass,
+    /// What took the aura off, which picks the ribbon's colour and anchor.
+    pub source: RibbonSource,
     /// Time remaining before despawn (seconds)
     pub lifetime: f32,
     /// Initial lifetime for fade/rise progress
     pub initial_lifetime: f32,
     /// Spin accumulator (seconds) driving the ribbon's slow Y-axis rotation
     pub spin: f32,
+}
+
+/// What a [`DispelRibbon`] marks the removal by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RibbonSource {
+    /// A dispeller's dispel, Purge or Devour Magic: the ribbon takes the
+    /// dispeller's class colour (Priest = white/silver, Paladin = golden).
+    Dispel(CharacterClass),
+    /// The Medallion of the Alliance's break (AS-432): the client's gold
+    /// `dispel_low_base.m2` ribbon on the wearer, held on its drawn body.
+    Medallion,
+}
+
+/// A Medallion break the client draws (AS-432): spawned by
+/// `spawn_medallion_breaks` as the use resolves, and read once by
+/// `update_hard_cc_visuals`, which plays the broken crowd control's own end
+/// as a scatter instead of its retract, and despawns it.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct MedallionBreak {
+    pub wearer: Entity,
+    /// The crowd-control rigs whose end the break scatters.
+    pub scatters: Vec<CcKind>,
 }
 
 /// Graphical-only state a [`DispelRibbon`] carries while it plays: the spark
@@ -3767,6 +3789,10 @@ pub struct CcRig {
     /// envelope, while bark roots grow along their own length and take longer
     /// to withdraw (`druid_control.rs`).
     pub style: Option<RootStyle>,
+    /// `Some` once a Medallion broke the CC the rig shows (AS-432): seconds
+    /// since the break. The rig scatters instead of retracting, then
+    /// despawns. A scattering rig is not "held", and never retracts.
+    pub scatter: Option<f32>,
 }
 
 /// The one-shot ring marking the instant a hard CC lands. Per VICTIM, so a Frost
@@ -3798,7 +3824,12 @@ pub struct CcFlare {
 /// they are children of a hub that SPINS, the billboard must counter-rotate by
 /// the hub's own rotation rather than simply copying the camera's.
 #[derive(Component)]
-pub struct CcBead;
+pub struct CcBead {
+    /// Where the bead sits in its whirl, in the hub's frame.
+    pub rest: Vec3,
+    /// The bead's core size; its sparkle quad spans `STUN_SPARKLE_SPAN` of it.
+    pub size: f32,
+}
 
 /// The alpha-blended disc under one [`CcBead`]'s sparkle (AS-435), so the
 /// whirl reads on the bright arena sand. A child of its bead, so it billboards,

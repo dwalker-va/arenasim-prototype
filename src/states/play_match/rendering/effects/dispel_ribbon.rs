@@ -1,4 +1,6 @@
+use super::body_hold::{BodyHold, HoldDisjoint};
 use super::dispel_burst::dispel_burst_colors;
+use super::medallion::{MEDALLION_RIBBON_GOLD, MEDALLION_RIBBON_GOLD_EMISSIVE};
 use super::sand_legibility::{emissive_level, linear_level, SAND_RIBBON_LEVEL};
 use super::spell_bolts::soft_dot_texture;
 use crate::states::match_config::CharacterClass;
@@ -32,6 +34,12 @@ use bevy::render::render_resource::PrimitiveTopology;
 //
 // The strip is drawn DARK, at a tenth of its colour, so it reads on the bright
 // arena sand (AS-435; see `dispel_ribbon_colors`). The sparks stay bright.
+//
+// The Medallion's break (AS-432, `medallion.rs`) plays the same ribbon on its
+// wearer in the client's gold (`RibbonSource::Medallion`), at the same level,
+// held on the wearer's DRAWN body (`place_medallion_ribbons`): the Medallion
+// breaks a Cyclone, whose lift sets the body down over the ribbon's life. A
+// dispeller's ribbon keeps its class colour and its anchor on the unit's root.
 
 /// Number of turns the ribbon helix coils through over its baked length. Fewer
 /// turns over the same height is a steeper, shorter strip — less ribbon to
@@ -143,7 +151,24 @@ const IGNITE_SECS: f32 = 0.28;
 /// <https://claude.ai/artifact/8qLsKmuRQTVwa5Kzdimkgo>, version id
 /// 1793335026-f991). The sparks keep the burst's full colour, additive.
 pub fn dispel_ribbon_colors(class: CharacterClass) -> (Color, LinearRgba) {
-    let (base, emissive) = dispel_burst_colors(class);
+    ribbon_source_colors(RibbonSource::Dispel(class))
+}
+
+/// The full-level colour a ribbon's source draws in: the dispeller's burst
+/// colour, or the Medallion's gold. The strip is drawn from it at
+/// [`SAND_RIBBON_LEVEL`] ([`ribbon_source_colors`]); the sparks at full level
+/// ([`ribbon_spark_colors`]).
+pub fn ribbon_source_burst_colors(source: RibbonSource) -> (Color, LinearRgba) {
+    match source {
+        RibbonSource::Dispel(class) => dispel_burst_colors(class),
+        RibbonSource::Medallion => (MEDALLION_RIBBON_GOLD, MEDALLION_RIBBON_GOLD_EMISSIVE),
+    }
+}
+
+/// [`dispel_ribbon_colors`] for any source: the strip's lit base and emissive,
+/// both at [`SAND_RIBBON_LEVEL`], the emissive trimmed to 0.6.
+pub fn ribbon_source_colors(source: RibbonSource) -> (Color, LinearRgba) {
+    let (base, emissive) = ribbon_source_burst_colors(source);
     (
         // Opaque on screen; the alpha here is inert.
         linear_level(base, SAND_RIBBON_LEVEL, 1.0),
@@ -160,10 +185,42 @@ pub fn dispel_ribbon_colors(class: CharacterClass) -> (Color, LinearRgba) {
     )
 }
 
+/// The sparks' colour: the source's full-level colour, opaque, the emissive
+/// lifted by 1.3. They stay bright, additive, over the darkened strip.
+pub fn ribbon_spark_colors(source: RibbonSource) -> (Color, LinearRgba) {
+    let (color, emissive) = ribbon_source_burst_colors(source);
+    (
+        color.with_alpha(1.0),
+        LinearRgba::rgb(
+            emissive.red * 1.3,
+            emissive.green * 1.3,
+            emissive.blue * 1.3,
+        ),
+    )
+}
+
 /// Whether this dispeller's ribbon starts at the feet (the source's BASE
 /// attachment) or around the chest (Purge's chest attachment).
 pub fn ribbon_starts_at_base(class: CharacterClass) -> bool {
     class != CharacterClass::Shaman
+}
+
+/// [`ribbon_starts_at_base`] for any source. The Medallion's is kit 226,
+/// `dispel_low_base.m2`: Dispel Magic's, at the feet.
+pub fn ribbon_source_starts_at_base(source: RibbonSource) -> bool {
+    match source {
+        RibbonSource::Dispel(class) => ribbon_starts_at_base(class),
+        RibbonSource::Medallion => true,
+    }
+}
+
+/// Whether the ribbon stands on its target's DRAWN body
+/// ([`place_medallion_ribbons`]) rather than its root. Only the Medallion's.
+pub fn ribbon_on_drawn_body(source: RibbonSource) -> bool {
+    match source {
+        RibbonSource::Dispel(_) => false,
+        RibbonSource::Medallion => true,
+    }
 }
 
 /// How far the helix has climbed, 0..1, at a lifetime progress (`1.0` = just
@@ -182,7 +239,13 @@ pub fn ribbon_consumed(progress: f32) -> f32 {
 /// that part of the strip still exists) for a given victim transform and
 /// lifetime progress. Pure, so the on-body claim can be asserted directly.
 pub fn ribbon_origin(class: CharacterClass, target: Vec3, progress: f32) -> Vec3 {
-    let (start, rise) = if ribbon_starts_at_base(class) {
+    ribbon_source_origin(RibbonSource::Dispel(class), target, progress)
+}
+
+/// [`ribbon_origin`] for any source: `target` is the root the ribbon stands
+/// on (the unit's, or a drawn body's `rendered_root`).
+pub fn ribbon_source_origin(source: RibbonSource, target: Vec3, progress: f32) -> Vec3 {
+    let (start, rise) = if ribbon_source_starts_at_base(source) {
         (RIBBON_BASE_START, RIBBON_BASE_RISE)
     } else {
         (RIBBON_CHEST_START, RIBBON_CHEST_RISE)
@@ -366,7 +429,7 @@ pub fn spawn_dispel_ribbon_visuals(
             continue;
         };
 
-        let (base_color, emissive) = dispel_ribbon_colors(ribbon.caster_class);
+        let (base_color, emissive) = ribbon_source_colors(ribbon.source);
         let ignite = ribbon_ignition(0.0);
 
         // Each ribbon owns its mesh: the positions are rewritten per frame.
@@ -395,7 +458,7 @@ pub fn spawn_dispel_ribbon_visuals(
             ..default()
         });
 
-        let position = ribbon_origin(ribbon.caster_class, target_transform.translation, 1.0);
+        let position = ribbon_source_origin(ribbon.source, target_transform.translation, 1.0);
 
         // The sparks' shared sprite and this ribbon's own spark material.
         let dot = dot
@@ -404,15 +467,11 @@ pub fn spawn_dispel_ribbon_visuals(
         let quad = quad
             .get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0)))
             .clone();
-        let (spark_color, spark_emissive) = dispel_burst_colors(ribbon.caster_class);
+        let (spark_color, spark_emissive) = ribbon_spark_colors(ribbon.source);
         let spark_material = materials.add(StandardMaterial {
-            base_color: spark_color.with_alpha(1.0),
+            base_color: spark_color,
             base_color_texture: Some(dot.clone()),
-            emissive: LinearRgba::rgb(
-                spark_emissive.red * 1.3,
-                spark_emissive.green * 1.3,
-                spark_emissive.blue * 1.3,
-            ),
+            emissive: spark_emissive,
             emissive_texture: Some(dot),
             alpha_mode: AlphaMode::Add,
             cull_mode: None,
@@ -474,10 +533,15 @@ pub fn update_dispel_ribbons(
         // Follow the target and climb it; once the play-out begins the climb
         // is complete and the base ring holds, so the top end is FIXED in the
         // unit's frame. If the target is gone (died mid-ribbon), freeze at the
-        // last anchored position — matches DispelBurst.
-        if let Ok(target_transform) = transforms.get(ribbon.target) {
-            ribbon_transform.translation =
-                ribbon_origin(ribbon.caster_class, target_transform.translation, progress);
+        // last anchored position — matches DispelBurst. A ribbon held on the
+        // drawn body is placed after the body is posed
+        // (`place_medallion_ribbons`), so its sparks leave from where it was
+        // drawn last frame.
+        if !ribbon_on_drawn_body(ribbon.source) {
+            if let Ok(target_transform) = transforms.get(ribbon.target) {
+                ribbon_transform.translation =
+                    ribbon_source_origin(ribbon.source, target_transform.translation, progress);
+            }
         }
         ribbon_transform.rotation = Quat::from_rotation_y(ribbon.spin);
 
@@ -499,7 +563,7 @@ pub fn update_dispel_ribbons(
         }
 
         // Ignite at birth and settle; the strip stays lit until it is gone.
-        let (_, emissive) = dispel_ribbon_colors(ribbon.caster_class);
+        let (_, emissive) = ribbon_source_colors(ribbon.source);
         let ignite = ribbon_ignition(age);
         if let Some(material) = materials.get_mut(&material_handle.0) {
             material.emissive = LinearRgba::new(
@@ -537,6 +601,28 @@ pub fn update_dispel_ribbons(
                 ));
             }
         }
+    }
+}
+
+/// `PostUpdate`, a `BodyPlacement` system: stand every ribbon held on its
+/// target's DRAWN body ([`ribbon_on_drawn_body`], the Medallion's) on that
+/// body as it is drawn this frame — after the gaits, the fear bob and the
+/// Cyclone lift have posed it. A wearer that broke a Cyclone is set down over
+/// the ribbon's life; one anchored on its root would coil the ribbon round the
+/// air under it. Once the target is gone the ribbon holds where it was.
+pub fn place_medallion_ribbons(
+    hold: BodyHold,
+    mut ribbons: Query<(&DispelRibbon, &mut Transform), HoldDisjoint>,
+) {
+    for (ribbon, mut transform) in ribbons.iter_mut() {
+        if !ribbon_on_drawn_body(ribbon.source) {
+            continue;
+        }
+        let Some(body) = hold.body(ribbon.target) else {
+            continue;
+        };
+        let progress = (ribbon.lifetime / ribbon.initial_lifetime).max(0.0);
+        transform.translation = ribbon_source_origin(ribbon.source, body.root, progress);
     }
 }
 

@@ -55,6 +55,11 @@ use crate::states::play_match::components::*;
 // fight the unit's facing snaps) and never a child of the `VisualBody` (whose
 // local y belongs to the gaits, which would lift a ground piece off the floor).
 //
+// A stun the Medallion of the Alliance breaks (AS-432) does not retract: its
+// beads SCATTER — each flies out from the whirl's axis, growing and fading,
+// so the eye reads the stun broken rather than expired ([`stun_scatter_bead`];
+// `medallion.rs` hands the break over as a `MedallionBreak`).
+//
 // Graphical-only: registered in `states/mod.rs` alone, never in
 // `add_core_combat_systems`. No `game_rng` draw, no sim `Transform` write, no
 // combat-code change — headless stays byte-identical by construction.
@@ -147,6 +152,25 @@ const WEB_SILK_EMISSIVE: LinearRgba = LinearRgba::new(0.16, 0.16, 0.13, 1.0);
 
 const STUN_GROW_SECS: f32 = 0.14;
 const STUN_RETRACT_SECS: f32 = 0.18;
+
+// --- The Medallion's scatter (AS-432) -----------------------------------------
+//
+// The authored scatter of the Trinket Effects Bench
+// (`docs/design/benches/2026-10-29-trinket-effects-bench.html`, artifact
+// https://claude.ai/artifact/1FRTwgEeJZWYK1iFcHPkY2, version id
+// 1793333359-b46c, the "Signed off" preset's Medallion tab): every bead, where
+// the whirl held it at the break, travels `STUN_SCATTER_TRAVEL` yards out
+// along `(cos θ, STUN_SCATTER_RISE, sin θ)` normalised over
+// `STUN_SCATTER_SECS`, its radius growing to twice its own and its light
+// fading to nothing, additive. The discs under the beads are not drawn: the
+// bench's scatter is the sparkles alone.
+
+/// How long the scatter plays.
+pub const STUN_SCATTER_SECS: f32 = 0.4;
+/// How far each bead flies, in yards (at a combatant's stature).
+pub const STUN_SCATTER_TRAVEL: f32 = 1.6;
+/// The upward component of a bead's flight before it is normalised.
+pub const STUN_SCATTER_RISE: f32 = 0.35;
 
 /// Height of the whirl above the victim's BODY CENTRE — not above its sim y.
 ///
@@ -320,6 +344,41 @@ pub fn cc_envelope(age: f32, retract: Option<f32>, grow_secs: f32, retract_secs:
 /// How long a rig takes to retract once its exit is armed. Bark roots play the
 /// state model's 1.3s death sequence; the ice and the web sink on the shared
 /// envelope.
+/// Where a scattering bead stands in its hub's frame and how large its sparkle
+/// quad is, `k` of the way (0..1) through the scatter. `rest` and `size` are
+/// the bead's ([`CcBead`]); `envelope` the whirl's grow envelope at the break,
+/// so a stun broken mid-grow scatters from the size it had reached.
+pub fn stun_scatter_bead(rest: Vec3, size: f32, envelope: f32, k: f32) -> (Vec3, f32) {
+    let k = k.clamp(0.0, 1.0);
+    let flight = stun_scatter_dir(rest) * STUN_SCATTER_TRAVEL * k;
+    (
+        rest * envelope + flight,
+        size * STUN_SPARKLE_SPAN * envelope * (1.0 + k),
+    )
+}
+
+/// The direction a bead at `rest` flies: out from the whirl's axis through
+/// the bead, tipped up by [`STUN_SCATTER_RISE`], unit length.
+pub fn stun_scatter_dir(rest: Vec3) -> Vec3 {
+    let theta = rest.z.atan2(rest.x);
+    Vec3::new(theta.cos(), STUN_SCATTER_RISE, theta.sin()).normalize()
+}
+
+/// The beads' light, × the whirl's, `k` of the way through the scatter.
+pub fn stun_scatter_fade(k: f32) -> f32 {
+    1.0 - k.clamp(0.0, 1.0)
+}
+
+/// The stun bead's sparkle quad span over its core size, for probes.
+pub fn stun_sparkle_span() -> f32 {
+    STUN_SPARKLE_SPAN
+}
+
+/// The stun bead's material colour and emissive, which a scatter fades.
+pub fn stun_bead_light() -> (Color, LinearRgba) {
+    (STUN_BEAD_COLOR, STUN_BEAD_EMISSIVE)
+}
+
 pub fn retract_secs(rig: &CcRig) -> f32 {
     match (rig.kind, rig.style) {
         (CcKind::Root, Some(RootStyle::Roots)) => root_tendrils_retract_secs(),
@@ -357,6 +416,7 @@ fn spawn_rig<B: Bundle>(
                 lift,
                 delay,
                 style,
+                scatter: None,
             },
             PlayMatchEntity,
         ))
@@ -652,7 +712,7 @@ fn build_stun_whirl(
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(material.clone()),
                 Transform::from_translation(at).with_scale(Vec3::splat(s * STUN_SPARKLE_SPAN)),
-                CcBead,
+                CcBead { rest: at, size: s },
                 // The disc under the sparkle (AS-435): a child of the bead, so
                 // it billboards, spins and scales with it.
                 children![(
@@ -751,6 +811,7 @@ pub fn update_hard_cc_visuals(
     )>,
     bodies: Query<&VisualBody>,
     mut rigs: Query<(&mut CcRig,)>,
+    breaks: Query<(Entity, &MedallionBreak)>,
 ) {
     for (entity, combatant, transform, auras, rooted, stunned_marker, pet, children, nova_delay) in
         combatants.iter()
@@ -791,8 +852,9 @@ pub fn update_hard_cc_visuals(
         // on the unit. Gating on the marker alone made that desync permanent for
         // the rest of the CC.
         let held = |rigs: &Query<(&mut CcRig,)>, kind: CcKind| {
-            rigs.iter()
-                .any(|(r,)| r.owner == entity && r.kind == kind && r.retract.is_none())
+            rigs.iter().any(|(r,)| {
+                r.owner == entity && r.kind == kind && r.retract.is_none() && r.scatter.is_none()
+            })
         };
         let root_held = held(&rigs, CcKind::Root);
         let stun_held = held(&rigs, CcKind::Stun);
@@ -802,8 +864,30 @@ pub fn update_hard_cc_visuals(
         // root and a stun on one unit never strip each other's.
         let arm_retract = |rigs: &mut Query<(&mut CcRig,)>, kind: CcKind| {
             for (mut rig,) in rigs.iter_mut() {
-                if rig.owner == entity && rig.kind == kind && rig.retract.is_none() {
+                if rig.owner == entity
+                    && rig.kind == kind
+                    && rig.retract.is_none()
+                    && rig.scatter.is_none()
+                {
                     rig.retract = Some(0.0);
+                }
+            }
+        };
+        // A Medallion that broke this unit's CC of the given kind this frame
+        // (AS-432) scatters the rig instead.
+        let broken = |kind: CcKind| {
+            breaks
+                .iter()
+                .any(|(_, b)| b.wearer == entity && b.scatters.contains(&kind))
+        };
+        let arm_scatter = |rigs: &mut Query<(&mut CcRig,)>, kind: CcKind| {
+            for (mut rig,) in rigs.iter_mut() {
+                if rig.owner == entity
+                    && rig.kind == kind
+                    && rig.retract.is_none()
+                    && rig.scatter.is_none()
+                {
+                    rig.scatter = Some(0.0);
                 }
             }
         };
@@ -921,8 +1005,19 @@ pub fn update_hard_cc_visuals(
             }
         } else if stunned_marker.is_some() {
             commands.entity(entity).remove::<StunnedVisual>();
-            arm_retract(&mut rigs, CcKind::Stun);
+            if broken(CcKind::Stun) {
+                arm_scatter(&mut rigs, CcKind::Stun);
+            } else {
+                arm_retract(&mut rigs, CcKind::Stun);
+            }
         }
+    }
+
+    // A break is read on the first frame after it, whatever it found: a
+    // unit stunned again before this frame keeps its whirl, and its next end
+    // is an ordinary one.
+    for (break_entity, _) in breaks.iter() {
+        commands.entity(break_entity).despawn();
     }
 }
 
@@ -944,6 +1039,9 @@ pub fn update_cc_rigs(
         rig.age += dt;
         if let Some(r) = rig.retract.as_mut() {
             *r += dt;
+        }
+        if let Some(k) = rig.scatter.as_mut() {
+            *k += dt;
         }
 
         let Ok((owner_transform, pet)) = owners.get(rig.owner) else {
@@ -977,6 +1075,20 @@ pub fn update_cc_rigs(
                     owner_transform.translation.z,
                 );
                 transform.scale = Vec3::splat(stature * e);
+            }
+            CcKind::Stun if rig.scatter.is_some() => {
+                // The whirl as the break left it: its spin, bob and grow all
+                // frozen at that moment. The beads fly from there
+                // (`scatter_cc_beads`), at the hub's full stature.
+                let at_break = rig.age - rig.scatter.unwrap_or(0.0);
+                let bob = STUN_BOB_AMP * (at_break * TAU / STUN_BOB_PERIOD).sin();
+                transform.translation = Vec3::new(
+                    owner_transform.translation.x,
+                    owner_transform.translation.y + rig.lift + bob,
+                    owner_transform.translation.z,
+                );
+                transform.rotation = Quat::from_rotation_y(-at_break * TAU * STUN_SPIN_HZ);
+                transform.scale = Vec3::splat(stature);
             }
             CcKind::Stun => {
                 let e = cc_envelope(
@@ -1032,6 +1144,65 @@ pub fn billboard_cc_beads(
     }
 }
 
+/// The scatter (AS-432): poses every bead of a scattering stun rig and fades
+/// its light, and hides the discs under them. After `update_cc_rigs`, which
+/// ages the scatter and freezes the hub.
+pub fn scatter_cc_beads(
+    rigs: Query<(&CcRig, &Children)>,
+    mut beads: Query<
+        (
+            &CcBead,
+            &mut Transform,
+            &MeshMaterial3d<StandardMaterial>,
+            Option<&Children>,
+        ),
+        Without<CcRig>,
+    >,
+    mut discs: Query<&mut Visibility, With<CcBeadDisc>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for (rig, children) in rigs.iter() {
+        let (CcKind::Stun, Some(scatter)) = (rig.kind, rig.scatter) else {
+            continue;
+        };
+        let k = (scatter / STUN_SCATTER_SECS).clamp(0.0, 1.0);
+        let envelope = cc_envelope(
+            (rig.age - scatter - rig.delay).max(0.0),
+            None,
+            STUN_GROW_SECS,
+            STUN_RETRACT_SECS,
+        );
+        let mut faded = None;
+        for child in children.iter() {
+            let Ok((bead, mut transform, material, bead_children)) = beads.get_mut(child) else {
+                continue;
+            };
+            let (at, span) = stun_scatter_bead(bead.rest, bead.size, envelope, k);
+            transform.translation = at;
+            transform.scale = Vec3::splat(span);
+            for disc in bead_children.into_iter().flat_map(|c| c.iter()) {
+                if let Ok(mut visibility) = discs.get_mut(disc) {
+                    *visibility = Visibility::Hidden;
+                }
+            }
+            // Every bead of a whirl shares its one sparkle material.
+            if faded.as_ref() != Some(&material.0) {
+                let fade = stun_scatter_fade(k);
+                if let Some(m) = materials.get_mut(&material.0) {
+                    m.base_color = STUN_BEAD_COLOR.with_alpha(STUN_BEAD_COLOR.alpha() * fade);
+                    m.emissive = LinearRgba::new(
+                        STUN_BEAD_EMISSIVE.red * fade,
+                        STUN_BEAD_EMISSIVE.green * fade,
+                        STUN_BEAD_EMISSIVE.blue * fade,
+                        1.0,
+                    );
+                }
+                faded = Some(material.0.clone());
+            }
+        }
+    }
+}
+
 /// Grows and fades the apply flare.
 pub fn update_cc_flares(
     time: Res<Time>,
@@ -1082,7 +1253,8 @@ pub fn cleanup_cc_rigs(
     owners: Query<(), With<Combatant>>,
 ) {
     for (entity, rig) in rigs.iter() {
-        let finished = rig.retract.is_some_and(|r| r >= retract_secs(rig));
+        let finished = rig.retract.is_some_and(|r| r >= retract_secs(rig))
+            || rig.scatter.is_some_and(|k| k >= STUN_SCATTER_SECS);
         // Recursive despawn takes the unmarked children with it.
         if finished || owners.get(rig.owner).is_err() {
             commands.entity(entity).despawn();

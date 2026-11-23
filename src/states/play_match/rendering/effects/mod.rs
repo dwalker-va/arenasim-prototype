@@ -64,6 +64,8 @@ mod dispel_burst;
 pub use dispel_burst::*;
 mod dispel_ribbon;
 pub use dispel_ribbon::*;
+mod medallion;
+pub use medallion::*;
 mod windfury;
 pub use windfury::*;
 mod scream;

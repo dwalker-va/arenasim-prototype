@@ -110,6 +110,7 @@ use arenasim::states::play_match::hunter_shot_for;
 use arenasim::states::play_match::is_live_shield;
 use arenasim::states::play_match::lands_poison_cloud;
 use arenasim::states::play_match::on_use_items::OnUseEffect;
+use arenasim::states::play_match::on_use_visual as on_use_effect_visual;
 use arenasim::states::play_match::oneshot_visual;
 use arenasim::states::play_match::plays_cheat_death;
 use arenasim::states::play_match::proc_trinkets::ProcEffect;
@@ -1332,8 +1333,8 @@ const ON_USE_MEMBERS: &[ItemId] = &[
 const GENERIC_BAND: &str = "aura band on landing (aura_band.rs) — the generic cue";
 
 /// The visual an on-use's landing reaches, by its effect kind. The
-/// Medallion's break draws nothing yet (a self-cast gold dispel ribbon, the
-/// Holy launch hands, the broken CC's own visual scattering is AS-432's).
+/// Medallion's break owns one (`medallion.rs`): the Holy launch hands, the
+/// gold dispel ribbon and the broken stun scattering.
 ///
 /// A buff lands through `apply_pending_auras`, built by the constructor
 /// `process_on_use_items` lands it with, so the family's aura band draws it
@@ -1344,7 +1345,7 @@ fn on_use_visual(items: &ItemDefinitions, id: ItemId) -> Option<&'static str> {
     let item = items.get_unchecked(&id);
     let on_use = item.on_use.as_ref().expect("a member has an on-use");
     match on_use.effect {
-        OnUseEffect::CcBreak => None,
+        OnUseEffect::CcBreak => on_use_effect_visual(on_use.effect),
         OnUseEffect::Buff(_) => {
             let buff = on_use.aura(id, &item.name);
             (AuraApplyRoute::for_instance(buff.effect_type, &buff.ability_name)
@@ -1488,7 +1489,7 @@ fn the_generic_band_guard_catches_planted_offenders() {
     assert!(err.contains("Earthstrike is both owed"), "{err}");
 }
 
-const ON_USE_KNOWN_SILENT: &[(ItemId, &str)] = &[(ItemId::MedallionOfTheAlliance, "AS-432")];
+const ON_USE_KNOWN_SILENT: &[(ItemId, &str)] = &[];
 
 fn scan_on_use() -> (BTreeSet<ItemId>, ItemDefinitions) {
     let items = load_item_definitions().expect("items.ron loads");

@@ -790,6 +790,27 @@ pub(super) fn flash_instant_hands(
     if kind == HealCastKind::Arcane && !MOONFIRE_CAST_HANDS {
         return;
     }
+    flash_hands_of_kind(
+        commands, meshes, materials, images, assets, casters, bodies, caster, kind,
+    );
+}
+
+/// The launch alone of `kind`'s hands on both of `caster`'s spell hands, for
+/// a cast that names no ability: the Medallion's break (AS-432) plays kit
+/// 270, the Holy launch, as PW:S does (`medallion.rs`). Nothing for a caster
+/// with no rendered body.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn flash_hands_of_kind(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+    assets: &mut Option<HealCastAssets>,
+    casters: &Query<&Children>,
+    bodies: &Query<(), With<VisualBody>>,
+    caster: Entity,
+    kind: HealCastKind,
+) {
     let Some(body) = casters
         .get(caster)
         .ok()

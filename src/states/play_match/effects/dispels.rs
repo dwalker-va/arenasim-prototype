@@ -118,7 +118,7 @@ pub fn process_dispels(
                 commands.spawn((
                     DispelRibbon {
                         target: pending.target,
-                        caster_class: pending.caster_class,
+                        source: RibbonSource::Dispel(pending.caster_class),
                         lifetime: 1.15,
                         initial_lifetime: 1.15,
                         spin: 0.0,
