@@ -15,9 +15,13 @@
 //! 2. **The ribbon.** The dispel ribbon on the wearer, from the feet as a
 //!    Priest's Dispel Magic, 1.15 s with its sparks, in the client's gold
 //!    (`ribbonblur1bea_gold`). The strip is darkened to the level every dispel
-//!    ribbon shares (`SAND_RIBBON_LEVEL`, AS-435's ruling), and it stands on the
-//!    wearer's DRAWN body (`place_medallion_ribbons`). Its sparks are the gold at
-//!    full level, the engine's rule for every ribbon's sparks.
+//!    ribbon shares, `SAND_RIBBON_LEVEL` (0.1): the AS-435 ruling on the Sand
+//!    Legibility Bench (<https://claude.ai/artifact/8qLsKmuRQTVwa5Kzdimkgo>,
+//!    version id 1793335026-f991) postdates this bench's 0.3 and supersedes it.
+//!    It stands on the wearer's DRAWN body (`place_medallion_ribbons`). Its
+//!    sparks are the gold at full level, the engine's rule for every ribbon's
+//!    sparks; this bench draws them silver whatever the ribbon's colour, a
+//!    bench limit rather than a choice.
 //! 3. **The broken crowd control scatters** (authored). The CC's own visual
 //!    flies apart instead of playing its end, so the eye reads it broken rather
 //!    than expired. The stun whirl's beads scatter (`hard_cc.rs`,
