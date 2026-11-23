@@ -6,7 +6,7 @@ use super::super::components::*;
 use super::super::constants::DIVINE_SHIELD_DAMAGE_PENALTY;
 use super::super::utils::combat_log_id_for;
 use super::get_lockout_duration_reduction;
-use super::{DamageFollowUp, DamageFollowUps, TransferReceiver};
+use super::{DamageFollowUp, DamageFollowUps, ReflectKind, TransferReceiver};
 use crate::combat::log::{CombatLog, CombatLogEventType};
 use bevy::prelude::*;
 
@@ -466,6 +466,7 @@ pub fn apply_damage_with_absorb(
                                 amount: absorb_amount * share,
                                 school: aura.spell_school.unwrap_or(SpellSchool::Holy),
                                 source: aura.ability_name.clone(),
+                                kind: ReflectKind::Shield,
                             });
                         }
                     }
@@ -669,6 +670,7 @@ fn retaliate(
         amount: aura.magnitude,
         school: aura.spell_school.unwrap_or(SpellSchool::Physical),
         source: aura.ability_name.clone(),
+        kind: ReflectKind::Retaliation,
     });
 }
 

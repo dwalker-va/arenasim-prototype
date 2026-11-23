@@ -34,7 +34,7 @@ use arenasim::states::play_match::abilities::{AbilityType, SpellSchool};
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
 use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, Aura, AuraType, Combatant, DispelType, HealButterflyWing,
-    HealImpact, HealImpactKind, HealMote, HealSprite, HealSpriteRole,
+    HealImpact, HealImpactKind, HealMote, HealSprite, HealSpriteRole, StarFallLanding,
 };
 use arenasim::states::play_match::{
     animate_heal_impacts, billboard_heal_impacts, butterfly_center, heal_envelope, heal_style,
@@ -252,10 +252,12 @@ fn assert_min(label: &str, actual: usize, min: usize) {
 /// Heals that land with no visual yet, each with the card that will draw it
 /// (the heal family's known-silent list in `tests/lands_silently_audit.rs`
 /// names the same).
-const KNOWN_SILENT_HEALS: &[(AbilityType, &str)] = &[(
-    AbilityType::HolyNova,
-    "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
-)];
+const KNOWN_SILENT_HEALS: &[(AbilityType, &str)] = &[];
+
+/// Heals that land per ally at the area-heal landing, outside this table,
+/// each with its own landing: Holy Nova's TBC star fall (`holy_nova.rs`,
+/// AS-355).
+const AREA_HEALS: &[AbilityType] = &[AbilityType::HolyNova];
 
 /// Every heal in the config must reach SOME landing, or be named known-silent
 /// with its card. A future heal ability with no arm in `HealImpact::kind_for`
@@ -270,13 +272,25 @@ fn every_heal_in_the_config_reaches_a_landing() {
         }
     }
     silent.sort();
-    let mut known: Vec<AbilityType> = KNOWN_SILENT_HEALS.iter().map(|(a, _)| *a).collect();
+    let mut known: Vec<AbilityType> = KNOWN_SILENT_HEALS
+        .iter()
+        .map(|(a, _)| *a)
+        .chain(AREA_HEALS.iter().copied())
+        .collect();
     known.sort();
     assert_eq!(
         silent, known,
         "heals with no landing at all — add an arm to HealImpact::kind_for, or name the card \
          that will draw it in KNOWN_SILENT_HEALS"
     );
+    // An area heal's own landing is the star fall, and only an area heal's.
+    for (ability, config) in defs.iter() {
+        assert_eq!(
+            StarFallLanding::is_spawned_for_area_heal(*ability),
+            AREA_HEALS.contains(ability) && config.is_heal(),
+            "{ability:?}"
+        );
+    }
 }
 
 /// The router names exactly the blessed per-spell mappings.

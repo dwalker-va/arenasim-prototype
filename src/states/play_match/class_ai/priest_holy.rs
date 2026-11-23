@@ -276,6 +276,7 @@ pub fn try_guardian_spirit(
 /// Holy Nova: the heal a walk allows, on every teammate inside it, with its
 /// damage on every enemy inside it, seen or not.
 pub fn try_holy_nova(
+    commands: &mut Commands,
     combat_log: &mut CombatLog,
     game_rng: &mut GameRng,
     abilities: &AbilityBook,
@@ -365,6 +366,19 @@ pub fn try_holy_nova(
         None,
         "casts",
     );
+    // The nova's gesture (AS-355): the caster-centred marker its hands and
+    // its dome play from, spawned on the committed-use branch in both modes
+    // (headless never reads it; the match-exit `PlayMatchEntity` sweep
+    // reclaims it), per `cosmetic-marker-cross-mode-spawn-parity.md`.
+    commands.spawn((
+        InstantAbilityFired {
+            caster: entity,
+            target: None,
+            ability,
+            is_crit: false,
+        },
+        PlayMatchEntity,
+    ));
 
     let self_auras = ctx
         .active_auras

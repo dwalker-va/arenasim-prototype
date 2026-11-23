@@ -14,7 +14,8 @@ use arenasim::states::play_match::abilities::SpellSchool;
 use arenasim::states::play_match::combat_core::{
     apply_damage_with_absorb, damage_dealt_multiplier, effective_armor, end_transfers_to_the_dead,
     process_damage_follow_ups, share_to_health, DamageFollowUp, DamageFollowUps, DealtMods, Hit,
-    HitKind, KillingBlowPrevented, PendingDamageFollowUp, TransferReceiver, CHEAT_DEATH_NAME,
+    HitKind, KillingBlowPrevented, PendingDamageFollowUp, ReflectKind, TransferReceiver,
+    CHEAT_DEATH_NAME,
 };
 use arenasim::states::play_match::components::{
     ActiveAuras, ArenaDampening, Aura, AuraDamageMods, AuraStacks, AuraType, Combatant,
@@ -567,6 +568,7 @@ fn a_reflecting_shield_returns_its_share_of_what_it_soaks() {
             amount: 12.5,
             school: SpellSchool::Holy,
             source: "Power Word: Shield".into(),
+            kind: ReflectKind::Shield,
         }]
     );
     // Control: a plain shield reflects nothing.
@@ -600,6 +602,7 @@ fn a_reflect_aura_answers_melee_hits_only_and_never_reflects_again() {
             amount: 6.0,
             school: SpellSchool::Holy,
             source: "Retribution Aura".into(),
+            kind: ReflectKind::Retaliation,
         }]
     );
     // A spell is not a melee strike.
@@ -1761,6 +1764,7 @@ fn a_reflect_reveals_and_can_kill_the_attacker() {
             amount: 150.0,
             school: SpellSchool::Holy,
             source: "Retribution Aura".into(),
+            kind: ReflectKind::Retaliation,
         },
     );
     let rogue = world.get::<Combatant>(attacker).unwrap();
@@ -1813,6 +1817,7 @@ fn a_reflect_on_a_reflecting_unit_stops_there() {
             amount: 10.0,
             school: SpellSchool::Holy,
             source: "Retribution Aura".into(),
+            kind: ReflectKind::Retaliation,
         },
     );
     assert_eq!(health(&world, holder), 400.0);

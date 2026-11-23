@@ -33,6 +33,7 @@ const SPAWN_SOURCES: &[&str] = &[
     "src/states/play_match/class_ai/warrior.rs",
     "src/states/play_match/class_ai/hunter.rs",
     "src/states/play_match/class_ai/priest.rs",
+    "src/states/play_match/class_ai/priest_holy.rs",
     "src/states/play_match/class_ai/warlock.rs",
     "src/states/play_match/class_ai/shaman.rs",
 ];

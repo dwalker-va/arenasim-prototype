@@ -156,6 +156,7 @@ pub fn consume_instant_ability_signals(
     mut rune_tex: Local<Option<Handle<Image>>>,
     mut finisher_assets: Local<Option<FinisherFlashAssets>>,
     mut trail_assets: Local<Option<BackhandTrailAssets>>,
+    mut nova_assets: Local<Option<super::holy_nova::HolyNovaAssets>>,
     signals: Query<(Entity, &InstantAbilityFired)>,
     mut sockets: Query<&mut WeaponSocket>,
     positions: Query<&Transform, With<Combatant>>,
@@ -294,6 +295,26 @@ pub fn consume_instant_ability_signals(
                         signal.caster,
                         caster_pos,
                         &victims,
+                    );
+                }
+            }
+            // Caster-centred too: Holy Nova's dome at the Priest's feet,
+            // growing to the reach the Priest's own book gives it (AS-355;
+            // its hands flash off the same marker in `heal_cast.rs`).
+            AbilityType::HolyNova => {
+                if let Some(reach) = teams
+                    .get(signal.caster)
+                    .ok()
+                    .and_then(|(_, _, c)| super::holy_nova::holy_nova_reach(c))
+                {
+                    super::holy_nova::spawn_holy_nova_dome(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &mut images,
+                        &mut nova_assets,
+                        signal.caster,
+                        reach,
                     );
                 }
             }

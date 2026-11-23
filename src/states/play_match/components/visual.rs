@@ -252,6 +252,75 @@ impl ConflagrateLanding {
     }
 }
 
+/// Which of the two holy starbursts a landing plays — one effect at two
+/// scales (AS-355; `docs/design/2026-10-17-priest-talent-client-data.md` §4,
+/// §12), drawn by `rendering/effects/holy_starburst.rs`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
+pub enum StarburstScale {
+    /// `holy_impactdd_high_chest.m2` (kit 3153, Holy Wrath's impact): Holy
+    /// Nova's hit on each enemy, a 3.3 yd flash and spark showers.
+    High,
+    /// `holy_impactdd_low_chest.m2` (kit 121): Reflective Shield's reflect on
+    /// the attacker, a 2.5 yd flash, showers and gold streaks, with the
+    /// attacker's CombatWound flinch.
+    Low,
+}
+
+/// A holy starburst landing at a unit's chest: Holy Nova's hit on an enemy,
+/// or a Reflective Shield's reflect on its attacker.
+///
+/// Spawned deterministically at the landing (`instant_landings.rs`'s area
+/// hits, `process_damage_follow_ups`' reflects) in both modes, with no
+/// `game_rng` draw, so it is byte-neutral in headless; the graphical-only
+/// systems in `rendering/effects/holy_starburst.rs` consume it
+/// (`cosmetic-marker-cross-mode-spawn-parity.md`).
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct StarburstLanding {
+    /// The unit struck: the enemy hit, or the attacker a reflect reaches.
+    pub target: Entity,
+    pub scale: StarburstScale,
+}
+
+impl StarburstLanding {
+    /// The starburst an area hit of `ability` lands with, if any: the one
+    /// list the area-damage landing and the lands-silently audit read.
+    pub fn scale_for_area_hit(ability: AbilityType) -> Option<StarburstScale> {
+        (ability == AbilityType::HolyNova).then_some(StarburstScale::High)
+    }
+
+    /// The starburst a reflect of `kind` lands with on its attacker, if any.
+    /// Exhaustive, so a new kind of reflect must answer it. Retribution
+    /// Aura's retaliation is silent by ruling (its client draws only combat
+    /// text, AS-337).
+    pub fn scale_for_reflect(
+        kind: super::super::combat_core::ReflectKind,
+    ) -> Option<StarburstScale> {
+        use super::super::combat_core::ReflectKind;
+        match kind {
+            ReflectKind::Shield => Some(StarburstScale::Low),
+            ReflectKind::Retaliation => None,
+        }
+    }
+}
+
+/// Holy Nova's heal landing on a healed ally: TBC's `holylight_impact_head.m2`
+/// (kit 431, Prayer of Healing's), gold stars falling from the head over a
+/// gold glow at the feet (AS-355). Spawned at the area heal's landing in both
+/// modes, byte-neutral, and consumed by `rendering/effects/holy_nova.rs`.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct StarFallLanding {
+    /// The ally healed.
+    pub target: Entity,
+}
+
+impl StarFallLanding {
+    /// Whether an area heal of `ability` lands with the star fall: the one
+    /// list the area-heal landing and the lands-silently audit read.
+    pub fn is_spawned_for_area_heal(ability: AbilityType) -> bool {
+        ability == AbilityType::HolyNova
+    }
+}
+
 /// Component for tracking death fall animation.
 /// When a combatant dies, this component is added to animate them falling over.
 #[derive(Component)]
@@ -1885,6 +1954,9 @@ impl HealCastKind {
             | AbilityType::DivineProtection
             | AbilityType::PowerInfusion
             | AbilityType::PainSuppression => Some(HealCastKind::HolyFlash),
+            // Holy Nova's cast kit 3154 carries the high Holy hands (AS-355),
+            // flashed off its caster-centred `InstantAbilityFired`.
+            AbilityType::HolyNova => Some(HealCastKind::HolyFlash),
             _ => None,
         }
     }
@@ -3225,13 +3297,19 @@ impl InstantAbilityFired {
             // Instant and caster-centred, applied inline in the Warlock AI:
             // Life Tap's landing plays on the Warlock's own chest.
             | LifeTap
+            // Instant and caster-centred, queued by the Priest AI
+            // (`priest_holy.rs`): Holy Nova's hands and its dome (AS-355).
+            | HolyNova
         )
     }
 
     /// Whether this ability's gesture is anchored on the caster rather than a
     /// victim — the `target: None` cases.
     pub fn is_caster_centred(ability: AbilityType) -> bool {
-        matches!(ability, AbilityType::FrostNova | AbilityType::LifeTap)
+        matches!(
+            ability,
+            AbilityType::FrostNova | AbilityType::LifeTap | AbilityType::HolyNova
+        )
     }
 }
 

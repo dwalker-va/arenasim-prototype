@@ -996,6 +996,18 @@ impl Plugin for StatesPlugin {
             )
                 .in_set(play_match::BodyPlacement),
         )
+        // More `BodyPlacement` systems, a group of their own past Bevy's
+        // tuple limit: Holy Nova's dome and star fall, and the holy
+        // starburst (`holy_nova.rs`, `holy_starburst.rs`).
+        .add_systems(
+            PostUpdate,
+            (
+                play_match::place_holy_nova_domes,
+                play_match::place_holy_star_falls,
+                play_match::place_holy_starbursts,
+            )
+                .in_set(play_match::BodyPlacement),
+        )
         // The one sheep rule for DoT states (`dot_state.rs`): hidden on a
         // polymorphed victim, after every system that spawns one.
         .add_systems(
@@ -1539,6 +1551,37 @@ impl Plugin for StatesPlugin {
             )
                 .chain()
                 .before(play_match::tick_hit_flinch)
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Holy Nova and Reflective Shield (AS-355; rendering/effects/
+        // holy_starburst.rs, holy_nova.rs). The holy starburst, at two
+        // scales: Holy Nova's hit on each enemy and a Reflective Shield's
+        // reflect on its attacker, off the sim's `StarburstLanding`; a
+        // reflect's carries the wound flinch, so `.before(tick_hit_flinch)`
+        // renders the dip on the landing frame. The TBC star fall on each
+        // ally a Holy Nova heals, off `StarFallLanding`. The dome is built by
+        // `consume_instant_ability_signals` off the Priest's caster-centred
+        // marker, and aged here. Each chain builds a rig before it ages it,
+        // and the ager is the one owner of a rig's end. Posed in PostUpdate
+        // (`place_holy_starbursts`, `place_holy_nova_domes`,
+        // `place_holy_star_falls`). Graphical only.
+        .add_systems(
+            Update,
+            (
+                (
+                    play_match::spawn_holy_starbursts,
+                    play_match::animate_holy_starbursts,
+                )
+                    .chain()
+                    .before(play_match::tick_hit_flinch),
+                (
+                    play_match::spawn_holy_star_falls,
+                    play_match::animate_holy_star_falls,
+                )
+                    .chain(),
+                play_match::animate_holy_nova_domes,
+            )
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
