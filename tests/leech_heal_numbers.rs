@@ -14,8 +14,10 @@
 //! the pattern's offset only). The claim is checked against the combat log
 //! the same match wrote: at every moment a leech heal line names a recipient,
 //! the green numbers over that recipient are exactly the heal lines naming it
-//! then, amount for amount — one number per heal, on the unit healed, none
-//! extra.
+//! then, amount for amount and crit for crit — one number per heal, on the
+//! unit healed, none extra. And the numbers one unit takes in one frame stand
+//! in distinct slots of its floating-text pattern, so a leech number never
+//! lands on top of that frame's other numbers.
 
 mod common;
 
@@ -54,8 +56,14 @@ struct Number {
     over: String,
     text: String,
     heal: bool,
+    crit: bool,
     /// Whether the unit it floats over carried no auras at all.
     bare: bool,
+    /// The frame it was spawned on, as the app clock's nanoseconds.
+    frame: u128,
+    /// Its slot in its unit's floating-text pattern: 0 centre, 1 right, 2
+    /// left (`utils::get_next_fct_offset`).
+    slot: usize,
 }
 
 /// A stage step that records every floating number spawned from here on into
@@ -66,22 +74,23 @@ fn record_numbers(sink: Arc<Mutex<Vec<Number>>>) -> impl FnOnce(&mut World) + Se
             move |trigger: Trigger<OnAdd, FloatingCombatText>,
                   texts: Query<&FloatingCombatText>,
                   log: Res<CombatLog>,
+                  time: Res<Time>,
                   units: Query<(&Combatant, &Transform, Option<&Pet>, Option<&ActiveAuras>)>| {
                 let text = texts.get(trigger.target()).expect("the number");
                 let at = text.world_position;
                 // The anchor is the unit's position, raised, and moved along
                 // x by one of the pattern's three offsets.
                 let offsets = [0.0, FCT_HORIZONTAL_SPREAD * 0.4, FCT_HORIZONTAL_SPREAD * -0.4];
-                let over: Vec<(String, bool)> = units
+                let over: Vec<(String, bool, usize)> = units
                     .iter()
-                    .filter(|(_, t, _, _)| {
-                        (at.z - t.translation.z).abs() < 1e-3
-                            && offsets
-                                .iter()
-                                .any(|o| (at.x - o - t.translation.x).abs() < 1e-3)
-                    })
-                    .map(|(c, _, pet, auras)| {
-                        (combat_log_id_for(c, pet).to_string(), auras.is_none())
+                    .filter_map(|(c, t, pet, auras)| {
+                        if (at.z - t.translation.z).abs() >= 1e-3 {
+                            return None;
+                        }
+                        let slot = offsets
+                            .iter()
+                            .position(|o| (at.x - o - t.translation.x).abs() < 1e-3)?;
+                        Some((combat_log_id_for(c, pet).to_string(), auras.is_none(), slot))
                     })
                     .collect();
                 assert_eq!(
@@ -95,7 +104,10 @@ fn record_numbers(sink: Arc<Mutex<Vec<Number>>>) -> impl FnOnce(&mut World) + Se
                     over: over[0].0.clone(),
                     text: text.text.clone(),
                     heal: text.color == arenasim::ui::theme::fct::HEAL,
+                    crit: text.is_crit,
                     bare: over[0].1,
+                    frame: time.elapsed().as_nanos(),
+                    slot: over[0].2,
                 });
             },
         );
@@ -111,6 +123,7 @@ struct HealLine {
     ability: String,
     to: String,
     amount: String,
+    crit: bool,
 }
 
 /// Every `[HEAL]` line of `log`. A line in a shape this cannot read fails the
@@ -124,6 +137,7 @@ fn heal_lines(log: &str) -> Vec<HealLine> {
             let (caster, rest) = message
                 .split_once("'s ")
                 .unwrap_or_else(|| panic!("an unread heal line: {l}"));
+            let crit = rest.contains(" CRITICALLY heals ");
             let (ability, healed) = rest
                 .split_once(" CRITICALLY heals ")
                 .or_else(|| rest.split_once(" heals "))
@@ -144,6 +158,7 @@ fn heal_lines(log: &str) -> Vec<HealLine> {
                     .next()
                     .expect("an amount")
                     .to_string(),
+                crit,
             }
         })
         .collect()
@@ -177,7 +192,8 @@ impl Run {
 
     /// At every (moment, recipient) a leech heal line names, the green
     /// numbers over that recipient then are exactly the heal lines naming it
-    /// then. Returns how many leech heals were checked.
+    /// then, each with the line's amount and crit. Returns how many leech
+    /// heals were checked.
     fn assert_every_leech_heal_floats_its_number(&self) -> usize {
         let heals = self.heals();
         let keys: BTreeSet<(String, String)> = heals
@@ -192,7 +208,7 @@ impl Run {
             let mut l: Vec<String> = heals
                 .iter()
                 .filter(|h| (&h.stamp, &h.to) == (&key.0, &key.1))
-                .map(|h| format!("+{}", h.amount))
+                .map(|h| format!("+{} crit={}", h.amount, h.crit))
                 .collect();
             l.sort();
             lines.insert(key, l);
@@ -200,7 +216,7 @@ impl Run {
                 .numbers
                 .iter()
                 .filter(|n| n.heal && (&n.stamp, &n.over) == (&key.0, &key.1))
-                .map(|n| n.text.clone())
+                .map(|n| format!("{} crit={}", n.text, n.crit))
                 .collect();
             f.sort();
             floats.insert(key, f);
@@ -213,6 +229,42 @@ impl Run {
             .iter()
             .filter(|h| LEECHES.contains(&h.ability.as_str()))
             .count()
+    }
+
+    /// The numbers one unit takes in one frame stand in distinct slots of its
+    /// floating-text pattern, so none is drawn over another. Returns how many
+    /// such frames (two or more numbers over one unit) hold a leech heal's
+    /// number.
+    fn assert_a_units_numbers_in_a_frame_take_distinct_slots(&self) -> usize {
+        let leech_keys: BTreeSet<(String, String)> = self
+            .heals()
+            .into_iter()
+            .filter(|h| LEECHES.contains(&h.ability.as_str()))
+            .map(|h| (h.stamp, h.to))
+            .collect();
+        let mut frames: BTreeMap<(u128, &str), Vec<&Number>> = BTreeMap::new();
+        for n in &self.numbers {
+            frames
+                .entry((n.frame, n.over.as_str()))
+                .or_default()
+                .push(n);
+        }
+        let mut with_leech = 0;
+        for numbers in frames.values().filter(|ns| ns.len() > 1) {
+            let slots: BTreeSet<usize> = numbers.iter().map(|n| n.slot).collect();
+            assert_eq!(
+                slots.len(),
+                numbers.len(),
+                "one unit's numbers in one frame share a slot: {numbers:?}"
+            );
+            if numbers
+                .iter()
+                .any(|n| n.heal && leech_keys.contains(&(n.stamp.clone(), n.over.clone())))
+            {
+                with_leech += 1;
+            }
+        }
+        with_leech
     }
 }
 
@@ -295,6 +347,7 @@ fn every_vampiric_embrace_heal_floats_its_number_over_its_recipient() {
         );
     }
     let checked = run.assert_every_leech_heal_floats_its_number();
+    run.assert_a_units_numbers_in_a_frame_take_distinct_slots();
     assert_eq!(checked, embrace.len(), "only the embrace leeches here");
 }
 
@@ -365,12 +418,30 @@ fn a_projectile_fed_embrace_heal_floats_its_number_over_each_recipient() {
 const LOCK: Unit = Unit::new(1, 0);
 const FOE: Unit = Unit::new(2, 0);
 
+/// The Warlock's Siphon Life on `target`, as the talent's ability applies
+/// it, with its first tick due in `first_tick` seconds.
+fn siphon_life(world: &mut World, target: Entity, caster: Entity, first_tick: f32) -> Aura {
+    let def = world
+        .get::<Combatant>(caster)
+        .unwrap()
+        .book()
+        .get(&AbilityType::SiphonLife)
+        .expect("the talent grants Siphon Life")
+        .clone();
+    let mut siphon = AuraPending::from_ability(target, caster, &def)
+        .expect("Siphon Life applies an aura")
+        .aura;
+    siphon.time_until_next_tick = first_tick;
+    siphon
+}
+
 /// An Affliction Warlock, hurt, drains a Warrior held stunned at its side
 /// that carries its Siphon Life: the life the Warrior loses to the Siphon's
 /// ticks (`process_dot_ticks`) and to the drain's (`process_channeling`) comes
-/// back to the Warlock. When the stun ends the Warrior is in melee of the
-/// Warlock, whose Death Coil peel (`process_projectile_hits`) heals it for
-/// the hit.
+/// back to the Warlock. The Siphon's first tick is due on the drain's, so two
+/// leech numbers float over the Warlock in one frame. When the stun ends the
+/// Warrior is in melee of the Warlock, whose Death Coil peel
+/// (`process_projectile_hits`) heals it for the hit.
 fn warlock_run() -> Run {
     let config = HeadlessMatchConfig {
         team1: vec!["Warlock".into()],
@@ -387,7 +458,6 @@ fn warlock_run() -> Run {
         .place(pet, -20.0, 30.0)
         .target(FOE, LOCK)
         .health(LOCK, 0.6)
-        .land(FOE, AbilityType::SiphonLife, LOCK)
         // Held through the drain, so no Pummel ends it.
         .aura(
             FOE,
@@ -402,6 +472,12 @@ fn warlock_run() -> Run {
         .world(|world| {
             let target = FOE.entity(world);
             let caster = LOCK.entity(world);
+            let siphon = siphon_life(world, target, caster, 0.0);
+            world
+                .get_mut::<ActiveAuras>(target)
+                .unwrap()
+                .auras
+                .push(siphon);
             world.entity_mut(caster).insert(ChannelingState {
                 ability: AbilityType::DrainLife,
                 duration_remaining: 5.0,
@@ -417,11 +493,32 @@ fn warlock_run() -> Run {
 }
 
 /// Siphon Life's, Drain Life's and Death Coil's heals each float one number,
-/// their amount, over the Warlock: never two for a heal, even where a
-/// channel's own leech and a tick's land in one frame.
+/// their amount, over the Warlock: never two for a heal, and where the
+/// drain's heal and the Siphon's land in one frame, the two stand in
+/// different slots of the Warlock's pattern rather than on top of each other.
 #[test]
 fn every_warlock_leech_heal_floats_its_number() {
     let run = warlock_run();
+    // The drain's and the Siphon's heals landed together at least once.
+    let together = run
+        .leech_lines("Siphon Life")
+        .iter()
+        .filter(|siphon| {
+            run.leech_lines("Drain Life")
+                .iter()
+                .any(|drain| drain.stamp == siphon.stamp)
+        })
+        .count();
+    assert!(
+        together > 0,
+        "a drain heal and a Siphon heal in one frame:\n{}",
+        run.played.log
+    );
+    let stacked = run.assert_a_units_numbers_in_a_frame_take_distinct_slots();
+    assert!(
+        stacked >= together,
+        "each frame with both heals is checked for its slots: {stacked} < {together}"
+    );
     for ability in ["Siphon Life", "Drain Life", "Death Coil"] {
         let lines = run.leech_lines(ability);
         assert!(
@@ -481,17 +578,7 @@ fn a_heal_to_a_unit_without_auras_floats_its_number() {
         .world(|world| {
             let target = FOE.entity(world);
             let caster = LOCK.entity(world);
-            let def = world
-                .get::<Combatant>(caster)
-                .unwrap()
-                .book()
-                .get(&AbilityType::SiphonLife)
-                .expect("the talent grants Siphon Life")
-                .clone();
-            let mut siphon = AuraPending::from_ability(target, caster, &def)
-                .expect("Siphon Life applies an aura")
-                .aura;
-            siphon.time_until_next_tick = 0.1;
+            let siphon = siphon_life(world, target, caster, 0.1);
             let stun = Aura {
                 effect_type: AuraType::Stun,
                 duration: 5.0,
