@@ -463,23 +463,69 @@ _TIME = r"\[ *([0-9.]+)s\] "
 _PRIEST = r"Team \d Priest #\d"
 
 
+CHANNEL_ENDS = ("full", "interrupt", "crowd control or silence", "death", "own cast",
+                "match end")
+_EMPTY = {"channels": 0, "channel_secs": 0.0, "ended": {}, "with_next_cast": 0,
+          "full_with_next_cast": 0, "mind_blast_hits": 0, "damage": {}, "healing": 0,
+          "damage_taken": 0}
+
+
+def channel_end(lines, start, who, target):
+    """How a Mind Flay channel begun at `start` by `who` on `target` ended,
+    and when: at the first of an interrupt of it ("interrupts <who>'s Mind
+    Flay"), crowd control or a silence cutting it ("<who>'s Mind Flay
+    interrupted by"), the death of its target or its caster, its caster's
+    next cast, or its full 3s. A log that ends first ends it at its last
+    line ("match end"). Returns (reason, seconds it ran)."""
+    who_re, target_re = re.escape(who), re.escape(target)
+    full = start + MF_CHANNEL_SECS
+    last = start
+    for line in lines:
+        m = re.match(_TIME, line)
+        if not m:
+            continue
+        t = float(m.group(1))
+        last = t
+        if re.search(r"interrupts " + who_re + r"'s Mind Flay", line):
+            reason = "interrupt"
+        elif re.search(who_re + r"'s Mind Flay interrupted by", line):
+            reason = "crowd control or silence"
+        elif re.search(r"\[DEATH\] (?:" + target_re + "|" + who_re + r") has been eliminated",
+                       line):
+            reason = "death"
+        elif re.match(_TIME + r"\[CAST\] " + who_re + r" (?:casts|begins)", line):
+            # its next cast, a frame after a full channel, is the full channel
+            if t >= full - 0.1:
+                return "full", MF_CHANNEL_SECS
+            reason = "own cast"
+        elif t >= full:
+            return "full", MF_CHANNEL_SECS
+        else:
+            continue
+        if t >= full:
+            return "full", MF_CHANNEL_SECS
+        return reason, t - start
+    return "match end", min(last, full) - start
+
+
 def mechanism_counts(text):
     """What a Priest's Mind Flay did in one match log, and what it cost.
 
     - `channels`: Mind Flay channels begun by a Priest;
-    - `channel_secs`: from each channel's start to its Priest's next cast,
-      capped at the channel's 3s: the time it stood channelling;
-    - `full_channels`: channels whose Priest cast nothing for the whole 3s;
-    - `gaps`: each channel's uncapped start-to-next-cast gap;
+    - `ended`: how many ended each way (`channel_end`): ran its `full` 3s, or
+      was cut by an interrupt, crowd control or a silence, a death, its
+      caster's own cast, or the match's end;
+    - `channel_secs`: the seconds the channels ran, each to its real end;
+    - `with_next_cast` / `full_with_next_cast`: the channels its Priest cast
+      again after, and how many of those ran their full 3s;
     - `mind_blast_hits`; `damage`: a Priest's damage by spell (Mind Blast,
       Mind Flay, Shadow Word: Pain);
     - `healing`: a Priest's heals, by any spell;
-    - `damage_taken`: damage from hits and crits (and channelled ticks,
-      "ticks on") that land on a Priest. Periodic ticks ("ticks for N damage
-      on") are not counted.
+    - `damage_taken`: direct damage on a Priest -- hits, crits and channelled
+      ticks ("ticks on"). Periodic ticks ("ticks for N damage on") are not
+      counted.
     """
-    out = {"channels": 0, "channel_secs": 0.0, "full_channels": 0, "gaps": [],
-           "mind_blast_hits": 0, "damage": {}, "healing": 0, "damage_taken": 0}
+    out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in _EMPTY.items()}
     lines = text.splitlines()
     for i, line in enumerate(lines):
         m = re.search(r"\[HEAL\] (?:\[[A-Z]+\] )?" + _PRIEST
@@ -496,53 +542,54 @@ def mechanism_counts(text):
             m = re.search(r" (?:hits|CRITS|ticks on) " + _PRIEST + r" for (\d+) damage", line)
             if m:
                 out["damage_taken"] += int(m.group(1))
-        m = re.match(_TIME + r"\[CAST\] (" + _PRIEST + r") begins channeling Mind Flay", line)
+        m = re.match(_TIME + r"\[CAST\] (" + _PRIEST + r") begins channeling Mind Flay on "
+                     r"(Team \d \w+ #\d)", line)
         if not m:
             continue
+        start, who, target = float(m.group(1)), m.group(2), m.group(3)
         out["channels"] += 1
-        start, who = float(m.group(1)), re.escape(m.group(2))
-        for later in lines[i + 1:]:
-            n = re.match(_TIME + r"\[CAST\] " + who + r" (?:casts|begins)", later)
-            if n:
-                gap = float(n.group(1)) - start
-                out["gaps"].append(gap)
-                out["channel_secs"] += min(gap, MF_CHANNEL_SECS)
-                if gap >= MF_CHANNEL_SECS - 0.1:
-                    out["full_channels"] += 1
-                break
+        reason, secs = channel_end(lines[i + 1:], start, who, target)
+        out["ended"][reason] = out["ended"].get(reason, 0) + 1
+        out["channel_secs"] += secs
+        later = lines[i + 1:]
+        if any(re.match(_TIME + r"\[CAST\] " + re.escape(who) + r" (?:casts|begins)", x)
+               for x in later):
+            out["with_next_cast"] += 1
+            if reason == "full":
+                out["full_with_next_cast"] += 1
     return out
 
 
 def merge_counts(counts):
-    total = {"channels": 0, "channel_secs": 0.0, "full_channels": 0, "gaps": [],
-             "mind_blast_hits": 0, "damage": {}, "healing": 0, "damage_taken": 0}
+    total = {k: (dict(v) if isinstance(v, dict) else v) for k, v in _EMPTY.items()}
     for c in counts:
-        for key in ("channels", "channel_secs", "full_channels", "mind_blast_hits",
-                    "healing", "damage_taken"):
+        for key in ("channels", "channel_secs", "with_next_cast", "full_with_next_cast",
+                    "mind_blast_hits", "healing", "damage_taken"):
             total[key] += c[key]
-        total["gaps"] += c["gaps"]
-        for spell, amount in c["damage"].items():
-            total["damage"][spell] = total["damage"].get(spell, 0) + amount
+        for key in ("damage", "ended"):
+            for name, amount in c[key].items():
+                total[key][name] = total[key].get(name, 0) + amount
     return total
 
 
 def mechanism_row(role, arm, n, c):
-    dmg = c["damage"]
-    gaps = c["gaps"]
-    median = "%.2f" % statistics.median(gaps) if gaps else "-"
-    return ("| %s | %s (%d) | %d | %.1f | %d of %d | %s | %d | %.1fk | %.1fk | %.1fk | %.1fk | %.1fk |"
-            % (role, arm, n, c["channels"], c["channel_secs"] / n, c["full_channels"],
-               len(gaps), median, c["mind_blast_hits"], dmg.get("Mind Blast", 0) / 1000,
-               dmg.get("Mind Flay", 0) / 1000, dmg.get("Shadow Word: Pain", 0) / 1000,
-               c["healing"] / 1000, c["damage_taken"] / 1000))
+    dmg, ended = c["damage"], c["ended"]
+    return ("| %s | %s (%d) | %d | %.1f | %s | %d of %d | %d | %.1fk | %.1fk | %.1fk | %.1fk | %.1fk |"
+            % (role, arm, n, c["channels"], c["channel_secs"] / n,
+               " / ".join(str(ended.get(r, 0)) for r in CHANNEL_ENDS),
+               c["full_with_next_cast"], c["with_next_cast"], c["mind_blast_hits"],
+               dmg.get("Mind Blast", 0) / 1000, dmg.get("Mind Flay", 0) / 1000,
+               dmg.get("Shadow Word: Pain", 0) / 1000, c["healing"] / 1000,
+               c["damage_taken"] / 1000))
 
 
 def mechanism(outdir, binary, jobs=5):
     from concurrent.futures import ThreadPoolExecutor
-    print("| role | arm (matches) | Mind Flay channels | channelling s a match | full "
-          "channels | median start-to-next-cast (s) | Mind Blast hits | Mind Blast dmg | "
-          "Mind Flay dmg | SW:P dmg | Priest healing | Priest damage taken |")
-    print("|---|---|---|---|---|---|---|---|---|---|---|---|")
+    print("| role | arm (matches) | Mind Flay channels | channelling s a match | ended: "
+          + " / ".join(CHANNEL_ENDS) + " | full, of those cast again after | Mind Blast hits "
+          "| Mind Blast dmg | Mind Flay dmg | SW:P dmg | Priest healing | Priest direct "
+          "damage taken |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for role, with_mf, without in MECHANISM_PAIRS:
         for arm in (with_mf, without):
             work = os.path.join(outdir, ".mechanism-" + arm)

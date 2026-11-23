@@ -309,8 +309,10 @@ are identical in winner and duration to the 0-point arm's.
 
 - The control fields all 8 other classes on both sides (`paired_sweep.py`'s
   `CONTROL FIELDS` line).
-- 6,764-6,785 of every arm's 6,792 matches end by elimination (the 0-point
-  arm included, at 6,780).
+- 6,764-6,785 of every arm's 6,792 matches have a winner (the 0-point arm
+  included, at 6,780). Counted by `end_reason` instead, 6,777-6,791 end by
+  elimination (0 points: 6,786); the difference is mutual kills, which are
+  draws.
 
 **The nodes fire.** The batch CSV carries outcomes only. So `sample` replays a
 fixed slice of 60 Priest matches an arm with full logs (seeds 0-3). The Holy
@@ -373,26 +375,39 @@ reference gets 600 matches, for Guardian Spirit's save rate.
    | | healing, with Mind Flay | healing, without | Shadowform, with | Shadowform, without |
    |---|---|---|---|---|
    | Mind Flay channels | 118 | 0 | 197 | 0 |
+   | Seconds channelling a match | 2.4 | 0 | 3.9 | 0 |
+   | Channels that ran their full 3s | 88 | – | 122 | – |
+   | Cut by an interrupt / crowd control or silence / a death | 25 / 2 / 3 | – | 22 / 7 / 46 | – |
    | Mind Blast hits | 101 | 142 | 140 | 169 |
    | Mind Blast damage | 8.8k | 12.2k | 12.6k | 15.0k |
    | Mind Flay damage | 2.7k | 0 | 4.5k | 0 |
    | Shadow Word: Pain damage | 2.0k | 2.6k | 6.8k | 7.2k |
    | Healing done | 63.8k | 66.1k | 0 | 0 |
-   | Damage taken (hits and crits) | **54.1k** | **48.4k** | 38.5k | 37.7k |
+   | Direct damage taken (hits, crits, channelled ticks) | **54.1k** | **48.4k** | 38.5k | 37.7k |
 
    - **Healing:** Mind Flay sits above Mind Blast in the healing chain. It
      displaces a harder hit and some heals for 2.7k of channel damage and a
-     slow, and **the healing Priest takes 12% more damage** with it.
+     slow.
+   - **Observed: the healing Priest takes 12% more direct damage with Mind
+     Flay** (54.1k against 48.4k). Nothing here shows why.
    - **Shadowform:** Mind Flay adds 4.5k damage against 2.8k of Mind Blast and
      Shadow Word: Pain it displaces, and the Priest takes about the same
      damage. Yet the arm loses 4.8pt, 6.7pt of it against a healer.
    - **Two candidate causes, neither shown:**
-     - **The channel roots its caster.** A channel is up to 3s of standing
-       still: 1.0 a match healing and 1.6 in Shadowform, so up to about 5s a
-       match. A channel ran its full 3s before the Priest's next cast in 95 of
-       115 (healing) and 125 of 137 (Shadowform) of the channels that had one.
-       A healing Priest channels it as a peel on a melee attacking a ranged
-       teammate, the Priest included, which is when standing still costs most.
+     - **The channel roots its caster.** Each channel is measured to its real
+       end: the first of an interrupt, crowd control or a silence cutting it,
+       its target's or the Priest's death, the Priest's next cast, or 3s.
+       Measured that way, the Priest stands channelling **2.4s a match
+       healing and 3.9s in Shadowform**. 88 of 118 and 122 of 197 channels
+       ran their full 3s. Of the channels its Priest cast again after, 87 of
+       115 (healing) and 113 of 137 (Shadowform) ran full. (The tester's
+       independent count was 114 of 137. The one-channel difference is an
+       interrupt that lands 2.9s or more into the channel, which this count
+       treats as a cut.) In Shadowform, 46 channels end with a death, of the
+       target or of the Priest.
+     - A healing Priest channels Mind Flay as a peel on a melee or pet
+       attacking a ranged teammate, the Priest included. As reasoning, not
+       measurement: if the standing still costs anything, it costs most there.
      - **The pursuit stand-off.** A Shadowform Priest holding Mind Flay or
        Silence stops at 18 yards instead of 28 (AS-416). This applies in
        Shadowform only. The Silence arm keeps the 18 yards on both sides of its
