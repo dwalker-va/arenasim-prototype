@@ -287,7 +287,9 @@ pub fn spawn_empowered_flashes(
             | AuraLandingKind::RepentanceImpact
             | AuraLandingKind::SacrificeTriad
             | AuraLandingKind::VampiricEmbraceImplosion
-            | AuraLandingKind::AftermathFireHit => continue,
+            | AuraLandingKind::AftermathFireHit
+            | AuraLandingKind::InnerFocusFlash
+            | AuraLandingKind::BlessedRecoveryRings => continue,
         };
         commands.entity(marker).despawn();
         let Ok((holder, transform, pet)) = holders.get(landing.target) else {

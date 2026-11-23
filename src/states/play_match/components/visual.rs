@@ -878,7 +878,9 @@ impl HealImpact {
             // decides whether a tick draws.
             AuraType::HealingOverTime => match HotVisual::for_hot(name)? {
                 HotVisual::TickPulse(kind) => Some(kind),
-                HotVisual::LandingSwirl | HotVisual::SustainedPulse => None,
+                HotVisual::LandingSwirl | HotVisual::LandingRings | HotVisual::SustainedPulse => {
+                    None
+                }
             },
             // Every other aura type's ticks do not heal the bearer. DoT
             // leeches (Death Coil, Drain Life) heal the CASTER at their own
@@ -975,6 +977,16 @@ pub const GUARDIAN_SPIRIT_AURA: &str = "Guardian Spirit";
 /// dust implosion at the victim's chest, and the heals it gives each ally
 /// play the violet heal stream (`rendering/effects/vampiric_embrace.rs`).
 pub const VAMPIRIC_EMBRACE_AURA: &str = "Vampiric Embrace";
+/// Inner Focus's primed-spell aura (the RON `name:` string). Its landing is
+/// the arcane hand flash and the blue comets converging on the Priest's
+/// chest; its state is the violet-cyan glow on both palms until a cast spends
+/// it (`rendering/effects/inner_focus.rs`, AS-352).
+pub const INNER_FOCUS_AURA: &str = "Inner Focus";
+/// Blessed Recovery's heal over time (the name its proc's aura takes, the
+/// talent's in `talents.ron`). Its landing is Renew's amber rings at the
+/// Priest's chest, once per proc; its ticks draw nothing
+/// (`rendering/effects/blessed_recovery.rs`, AS-352).
+pub const BLESSED_RECOVERY_AURA: &str = "Blessed Recovery";
 /// Priest Silence's silence (the RON `name:` string). Its state is the breath
 /// at the victim's mouth while it holds (`rendering/effects/silence_breath.rs`);
 /// Unstable Affliction's backlash silence, named after the DoT, keeps its
@@ -1090,6 +1102,10 @@ pub enum HotVisual {
     /// Lifebloom: a sustained pulse over the head for as long as the aura
     /// lives, and a gold burst when it blooms. Nothing on its ticks.
     SustainedPulse,
+    /// Blessed Recovery: Renew's amber rings at the chest when the proc lands
+    /// (or refreshes it), and nothing on its ticks — the client has no
+    /// sustained state for it.
+    LandingRings,
 }
 
 impl HotVisual {
@@ -1100,6 +1116,7 @@ impl HotVisual {
         match name {
             REJUVENATION_AURA => Some(HotVisual::LandingSwirl),
             LIFEBLOOM_AURA => Some(HotVisual::SustainedPulse),
+            BLESSED_RECOVERY_AURA => Some(HotVisual::LandingRings),
             _ if name == super::totems::TotemElement::Water.buff_name() => {
                 Some(HotVisual::TickPulse(HealImpactKind::TotemPulse))
             }
@@ -1175,6 +1192,17 @@ pub enum AuraLandingKind {
     /// (`vampiric_embrace.rs`, AS-357). The 60 s mark draws nothing after;
     /// its heals play the violet stream on each ally.
     VampiricEmbraceImplosion,
+    /// Inner Focus: `innerfocus_impact_chest.m2` (kit 3772), four blue comets
+    /// converging on the Priest's chest in 0.4 s and a small spark pop, after
+    /// the arcane hand flash (`magic_cast_hand.m2`). The primed spell's state
+    /// is the palm glow, drawn while the buff waits
+    /// (`rendering/effects/inner_focus.rs`, AS-352).
+    InnerFocusFlash,
+    /// Blessed Recovery's proc: `renew_chest.m2` (kit 435), soft amber rings
+    /// and orange-white glows swelling from the Priest's chest for 0.7 s
+    /// (`rendering/effects/blessed_recovery.rs`, AS-352). Its heal over time
+    /// draws nothing after.
+    BlessedRecoveryRings,
     /// Aftermath's daze: `fire_impactdd_chest.m2` (kit 728), a small
     /// red-orange burst of falling flares and a gold-to-red glow at the
     /// victim's chest, about 1.7 s, with the victim's wound flinch
@@ -1184,7 +1212,7 @@ pub enum AuraLandingKind {
 
 impl AuraLandingKind {
     /// Every landing, in declaration order.
-    pub const ALL: [AuraLandingKind; 16] = [
+    pub const ALL: [AuraLandingKind; 18] = [
         AuraLandingKind::RejuvenationSwirl,
         AuraLandingKind::MarkOfTheWildGlyph,
         AuraLandingKind::ShadowWordPainHit,
@@ -1201,6 +1229,8 @@ impl AuraLandingKind {
         AuraLandingKind::SacrificeTriad,
         AuraLandingKind::VampiricEmbraceImplosion,
         AuraLandingKind::AftermathFireHit,
+        AuraLandingKind::InnerFocusFlash,
+        AuraLandingKind::BlessedRecoveryRings,
     ];
 
     /// The landing an aura of `aura_type` named `name` plays, or `None`.
@@ -1208,6 +1238,7 @@ impl AuraLandingKind {
         match aura_type {
             AuraType::HealingOverTime => match HotVisual::for_hot(name)? {
                 HotVisual::LandingSwirl => Some(AuraLandingKind::RejuvenationSwirl),
+                HotVisual::LandingRings => Some(AuraLandingKind::BlessedRecoveryRings),
                 HotVisual::TickPulse(_) | HotVisual::SustainedPulse => None,
             },
             AuraType::MaxHealthIncrease if name == MARK_OF_THE_WILD_AURA => {
@@ -1220,6 +1251,9 @@ impl AuraLandingKind {
             AuraType::NextCast if name == SHADOW_TRANCE_AURA => Some(AuraLandingKind::ShadowTrance),
             AuraType::NextCast if name == DIVINE_FAVOR_AURA => {
                 Some(AuraLandingKind::DivineFavorBurst)
+            }
+            AuraType::NextCast if name == INNER_FOCUS_AURA => {
+                Some(AuraLandingKind::InnerFocusFlash)
             }
             AuraType::SilenceInterruptImmunity if name == AURA_MASTERY_AURA => {
                 Some(AuraLandingKind::AuraMasteryWard)
@@ -1255,10 +1289,10 @@ impl AuraLandingKind {
 
     /// The ability whose cast-side hand flash rides this landing, if any.
     ///
-    /// The Paladin talent casts are applied inline by the class AI
-    /// with no cast state, so no `Landed` marker names them; the landing of
-    /// the aura they cast is where their hands flash
-    /// (`rendering/effects/paladin_oneshots.rs`). Their routes in
+    /// The Paladin talent casts and the Priest's Inner Focus are applied
+    /// inline by the class AI with no cast state, so no `Landed` marker names
+    /// them; the landing of the aura they cast is where their hands flash
+    /// (`rendering/effects/paladin_oneshots.rs`, `inner_focus.rs`). Their routes in
     /// [`HealCastKind::for_ability`] give the family.
     pub fn cast_ability(self) -> Option<AbilityType> {
         match self {
@@ -1267,6 +1301,7 @@ impl AuraLandingKind {
             AuraLandingKind::SacrificeShell => Some(AbilityType::BlessingOfSacrifice),
             AuraLandingKind::SacredShieldDisc => Some(AbilityType::SacredShield),
             AuraLandingKind::RepentanceImpact => Some(AbilityType::Repentance),
+            AuraLandingKind::InnerFocusFlash => Some(AbilityType::InnerFocus),
             AuraLandingKind::RejuvenationSwirl
             | AuraLandingKind::MarkOfTheWildGlyph
             | AuraLandingKind::ShadowWordPainHit
@@ -1277,7 +1312,8 @@ impl AuraLandingKind {
             | AuraLandingKind::ShadowTrance
             | AuraLandingKind::SacrificeTriad
             | AuraLandingKind::VampiricEmbraceImplosion
-            | AuraLandingKind::AftermathFireHit => None,
+            | AuraLandingKind::AftermathFireHit
+            | AuraLandingKind::BlessedRecoveryRings => None,
         }
     }
 
@@ -1369,7 +1405,9 @@ impl PaladinOneShotKind {
             | AuraLandingKind::ShadowTrance
             | AuraLandingKind::SacrificeTriad
             | AuraLandingKind::VampiricEmbraceImplosion
-            | AuraLandingKind::AftermathFireHit => None,
+            | AuraLandingKind::AftermathFireHit
+            | AuraLandingKind::InnerFocusFlash
+            | AuraLandingKind::BlessedRecoveryRings => None,
         }
     }
 }
@@ -1821,6 +1859,9 @@ impl HealCastKind {
             // 193, AS-375) and Repentance (kit 190, AS-378) are the Holy
             // hands, played as the instant flash.
             AbilityType::DivineFavor => Some(HealCastKind::Arcane),
+            // The Priest's Inner Focus casts with the same kit 425 (AS-352),
+            // its hands flashed off its aura's landing too.
+            AbilityType::InnerFocus => Some(HealCastKind::Arcane),
             // Divine Protection (AS-376) too; its hands flash at its globe's
             // onset (`divine_protection.rs`). So do the Priest's Power
             // Infusion (kit 191, Aura Mastery's) and Pain Suppression (kit
@@ -2202,8 +2243,10 @@ pub enum AuraApplyOwner {
     /// (`paladin_oneshots.rs`), the empowered ground flash of Amplify
     /// Curse and Shadow Trance (`empowered_flash.rs`), Touch of Shadow's
     /// sacrifice triad (`demonology_landings.rs`), Aftermath's fire hit
-    /// (`aftermath.rs`), and Vampiric Embrace's dust implosion
-    /// (`vampiric_embrace.rs`). Owned per aura
+    /// (`aftermath.rs`), Vampiric Embrace's dust implosion
+    /// (`vampiric_embrace.rs`), Inner Focus's converging comets
+    /// (`inner_focus.rs`) and Blessed Recovery's amber rings
+    /// (`blessed_recovery.rs`). Owned per aura
     /// NAME, not per type — see [`AuraApplyRoute::for_instance`] — because
     /// their types are shared with auras that keep the band (Healing Stream's
     /// HoT, Power Word: Fortitude). Lifebloom is not here: its pulse starts a
