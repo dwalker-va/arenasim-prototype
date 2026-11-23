@@ -109,6 +109,14 @@ fn gen_sweep_fixture_suite_passes() {
     run_suite("scripts/tests/test_gen_sweep.py");
 }
 
+/// The AS-302 arms script: its verdict rule (the per-match paired margin and
+/// its z, Bonferroni), and its arms, one point apart a comparison and equal
+/// to `PALADIN_ARMS` in tests/reference_builds.rs.
+#[test]
+fn as302_arms_fixture_suite_passes() {
+    run_suite("scripts/tests/test_as302_arms.py");
+}
+
 /// How the AS-300 arms script's `mechanism` reads a match log: the Mind Flay
 /// channel, damage, healing and damage-taken sums its findings doc quotes.
 #[test]
