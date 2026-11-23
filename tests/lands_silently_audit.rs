@@ -77,6 +77,7 @@ use arenasim::states::play_match::class_ai::shaman::totem_spec;
 use arenasim::states::play_match::client_landing_style;
 use arenasim::states::play_match::combat_core::cheat_death_aura;
 use arenasim::states::play_match::combat_core::ExtraSwingSource;
+use arenasim::states::play_match::combat_core::ReflectKind;
 use arenasim::states::play_match::combat_core::CHEAT_DEATH_NAME;
 use arenasim::states::play_match::components::is_divine_protection;
 use arenasim::states::play_match::components::is_expose_armor;
@@ -98,6 +99,8 @@ use arenasim::states::play_match::components::PaladinOneShotKind;
 use arenasim::states::play_match::components::RootStyle;
 use arenasim::states::play_match::components::SchoolImpact;
 use arenasim::states::play_match::components::ShieldKind;
+use arenasim::states::play_match::components::StarFallLanding;
+use arenasim::states::play_match::components::StarburstLanding;
 use arenasim::states::play_match::components::SwingStyle;
 use arenasim::states::play_match::components::TotemElement;
 use arenasim::states::play_match::components::{is_pain_suppression, is_power_infusion};
@@ -115,6 +118,7 @@ use arenasim::states::play_match::plays_cheat_death;
 use arenasim::states::play_match::proc_trinkets::ProcEffect;
 use arenasim::states::play_match::root_style_for;
 use arenasim::states::play_match::soul_link_forms;
+use arenasim::states::play_match::starburst_spec;
 use arenasim::states::play_match::swing_style_for_ability;
 use arenasim::states::play_match::talent_mechanics::MechanicKind;
 use arenasim::states::play_match::talent_mechanics::TalentMechanic;
@@ -134,6 +138,7 @@ use arenasim::states::play_match::InterruptLanding;
 use arenasim::states::play_match::SlowTint;
 use arenasim::states::play_match::CRUSADER_STRIKE_LANDING;
 use arenasim::states::play_match::DIVINE_SHIELD_AURA_NAME;
+use arenasim::states::play_match::HOLY_NOVA_STAR_FALL;
 use arenasim::states::play_match::ICE_BARRIER_AURA_NAME;
 use arenasim::states::play_match::PW_SHIELD_AURA_NAME;
 
@@ -475,13 +480,14 @@ const HEAL_MEMBERS: &[AbilityType] = &[
     Swiftmend,
 ];
 
-/// Scoped by AS-335 (the Priest talents' visuals).
-const HEAL_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
-    HolyNova,
-    "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
-)];
+const HEAL_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
 
 fn heal_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
+    // An area heal lands per ally at `instant_landings.rs`, outside the
+    // per-cast table: Holy Nova's TBC star fall (AS-355).
+    if StarFallLanding::is_spawned_for_area_heal(a) && HOLY_NOVA_STAR_FALL {
+        return Some("TBC star fall (instant_landings.rs → holy_nova.rs)");
+    }
     HealImpact::kind_for(a).map(|_| "heal landing (heal_impact.rs)")
 }
 
@@ -547,6 +553,14 @@ const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
 ];
 
 fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
+    // An area hit with its own landing on each enemy (Holy Nova's starburst,
+    // AS-355) is judged by that landing alone: its caster-centred
+    // `InstantAbilityFired` is the cast's gesture, not a landing.
+    if let Some(scale) = StarburstLanding::scale_for_area_hit(a) {
+        return starburst_spec(scale)
+            .on
+            .then_some("holy starburst, the high scale (instant_landings.rs → holy_starburst.rs)");
+    }
     if bolt_kind_for(a).is_some() {
         return Some("bespoke bolt impact (spell_bolts.rs)");
     }
@@ -592,10 +606,7 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
     }
 }
 
-const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[(
-    HolyNova,
-    "AS-355 (Holy Nova, the nova on the field; scoped by AS-335)",
-)];
+const DIRECT_DAMAGE_KNOWN_SILENT: &[(AbilityType, &str)] = &[];
 
 #[test]
 fn direct_damage_finds_every_member() {
@@ -1776,9 +1787,15 @@ fn mechanic_visual(kind: MechanicKind) -> Option<&'static str> {
                     == AuraApplyRoute::Owned(AuraApplyOwner::AuraLanding))
             .then_some("the violet orb triad at the Warlock's chest (demonology_landings.rs)")
         }
-        MechanicKind::ReflectiveShield
-        | MechanicKind::MasterDemonologist
-        | MechanicKind::UnbreakableWill => None,
+        // Each reflect lands the small holy starburst and the wound flinch on
+        // the attacker (AS-355).
+        MechanicKind::ReflectiveShield => StarburstLanding::scale_for_reflect(ReflectKind::Shield)
+            .filter(|s| starburst_spec(*s).on && starburst_spec(*s).flinch)
+            .map(|_| {
+                "the small holy starburst and wound flinch on the attacker \
+                 (follow_ups.rs → holy_starburst.rs)"
+            }),
+        MechanicKind::MasterDemonologist | MechanicKind::UnbreakableWill => None,
     }
 }
 
@@ -1801,10 +1818,7 @@ const TALENT_MECHANIC_MEMBERS: &[TalentId] = &[
     TalentId::UnbreakableWill,
 ];
 
-const TALENT_MECHANIC_KNOWN_SILENT: &[(TalentId, &str)] = &[(
-    TalentId::ReflectiveShield,
-    "AS-355 (Reflective Shield's reflect; it shows only as the attacker's damage taken)",
-)];
+const TALENT_MECHANIC_KNOWN_SILENT: &[(TalentId, &str)] = &[];
 
 const TALENT_MECHANIC_SILENT_BY_DESIGN: &[SilentByDesign<TalentId>] = &[
     SilentByDesign {

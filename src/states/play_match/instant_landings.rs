@@ -388,6 +388,18 @@ pub fn land_instant_effects(
                 actual_damage = dmg;
                 absorbed_damage = absorbed;
                 nova_landed = true;
+                // The hit's landing on its victim (AS-355): a cosmetic marker
+                // for the graphical client, spawned in both modes and read by
+                // none of the sim (`cosmetic-marker-cross-mode-spawn-parity.md`).
+                if let Some(scale) = StarburstLanding::scale_for_area_hit(ability) {
+                    commands.spawn((
+                        StarburstLanding {
+                            target: target_entity,
+                            scale,
+                        },
+                        PlayMatchEntity,
+                    ));
+                }
                 // Pet-aware target id (structured fields + message text).
                 let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
 
@@ -544,6 +556,15 @@ pub fn land_instant_effects(
             dampening,
             heal,
         );
+        // The heal's landing on its ally (AS-355), cosmetic as the hit's is.
+        if StarFallLanding::is_spawned_for_area_heal(ability) {
+            commands.spawn((
+                StarFallLanding {
+                    target: target_entity,
+                },
+                PlayMatchEntity,
+            ));
+        }
         let target_id = combat_log_id_for(&target, pet_query.get(target_entity).ok());
         let mut pattern = fct_states.get_mut(target_entity).ok();
         super::heal_numbers::spawn_heal_number(

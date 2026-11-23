@@ -41,6 +41,17 @@ pub enum TransferReceiver {
     OwnPet,
 }
 
+/// What returned a reflect: what decides whether it draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReflectKind {
+    /// A melee strike on a holder of [`AuraType::DamageReflect`], answered by
+    /// the aura itself (Retribution Aura).
+    Retaliation,
+    /// A share of what a reflecting absorb soaked (Reflective Shield on a
+    /// Power Word: Shield).
+    Shield,
+}
+
 /// One effect a hit sets off beyond its victim.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DamageFollowUp {
@@ -74,6 +85,8 @@ pub enum DamageFollowUp {
         school: SpellSchool,
         /// What reflected it ("Retribution Aura").
         source: String,
+        /// Whether an aura answered a strike or a shield returned its soak.
+        kind: ReflectKind,
     },
     /// A killing blow on `holder` was prevented by `by`.
     Saved {
@@ -277,6 +290,7 @@ pub fn process_damage_follow_ups(
                 amount,
                 school,
                 source,
+                kind,
             } => {
                 let hit = Hit {
                     amount,
@@ -306,6 +320,13 @@ pub fn process_damage_follow_ups(
                         "[REFLECT] {} takes {:.0} {school:?} damage from {from_id}'s {source}",
                         landed.victim_id, landed.actual
                     );
+                    // The reflect's landing on its attacker (AS-355), for the
+                    // graphical client: a cosmetic marker, spawned in both
+                    // modes and read by none of the sim
+                    // (`cosmetic-marker-cross-mode-spawn-parity.md`).
+                    if let Some(scale) = StarburstLanding::scale_for_reflect(kind) {
+                        commands.spawn((StarburstLanding { target: to, scale }, PlayMatchEntity));
+                    }
                     record(
                         &mut combat_log,
                         &mut combatants,

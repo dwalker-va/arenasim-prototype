@@ -37,7 +37,7 @@ use arenasim::states::{GameState, StatesPlugin};
 
 /// Every `BodyPlacement` system, by name. Adding one, or taking one out, is an
 /// edit here: membership is a judgement the schedule cannot make for itself.
-const PLACEMENTS: [&str; 19] = [
+const PLACEMENTS: [&str; 22] = [
     "place_shield_cards",
     "place_vengeance_hands",
     "place_divine_protection_globes",
@@ -57,6 +57,9 @@ const PLACEMENTS: [&str; 19] = [
     "place_ua_states",
     "place_mana_funnel_stars",
     "billboard_heal_impacts",
+    "place_holy_nova_domes",
+    "place_holy_star_falls",
+    "place_holy_starbursts",
 ];
 
 /// The client app with everything `StatesPlugin` needs, minus the window and
@@ -348,7 +351,7 @@ fn no_hold_runs_in_update() {
 /// effect's probe harness restates in its own chain, so only this sees it
 /// dropped. `Update` systems all run before `PostUpdate`'s, so an ordering
 /// between the two schedules is the schedule's and is not listed.
-const ORDERINGS: [(&str, &str, &str); 34] = [
+const ORDERINGS: [(&str, &str, &str); 37] = [
     (
         "handle_camera_input",
         "update_camera_position",
@@ -518,6 +521,21 @@ const ORDERINGS: [(&str, &str, &str); 34] = [
         "spawn_blessed_recovery_bursts",
         "update_blessed_recovery_bursts",
         "a burst ages from the frame it lands",
+    ),
+    (
+        "spawn_holy_starbursts",
+        "animate_holy_starbursts",
+        "a starburst ages from the frame it lands, and its ager owns its end",
+    ),
+    (
+        "spawn_holy_starbursts",
+        "tick_hit_flinch",
+        "a reflect's wound dip renders on the landing frame",
+    ),
+    (
+        "spawn_holy_star_falls",
+        "animate_holy_star_falls",
+        "a fall ages from the frame it lands, and its ager owns its end",
     ),
 ];
 

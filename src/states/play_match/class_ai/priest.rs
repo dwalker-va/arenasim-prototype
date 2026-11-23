@@ -377,6 +377,7 @@ pub fn decide_priest_action(
     // an enemy's interrupt or a walk would stop, when its target stands inside
     // the nova.
     if super::priest_holy::try_holy_nova(
+        commands,
         combat_log,
         game_rng,
         abilities,
