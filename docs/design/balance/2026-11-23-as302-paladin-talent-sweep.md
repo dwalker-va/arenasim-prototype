@@ -6,8 +6,10 @@ than the run's resolution floor beyond a stat rank of the same price.
 
 **Verdict: the condition fails on five nodes.** Sacred Shield and The Art of
 War dominate pooled and in each seed block. Repentance, Divine Favor and Aura
-Mastery dominate pooled but not in each block: marginally. Infusion of Light is
-past its floor but does not survive the correction.
+Mastery dominate pooled but not in each block: marginally. Aura Mastery
+clears the corrected bar by 0.07 (margin z 2.94 against 2.87), the thinnest
+verdict here. Infusion of Light is past its floor but does not survive the
+correction.
 
 | Node | Delta | Allowance | Margin | Margin z | Floor | Verdict | Seeds 0-3 / 4-7 (margin, z) |
 |---|---|---|---|---|---|---|---|
@@ -358,7 +360,9 @@ ride on.
    - **Direction:** watch it in AS-441; a longer cooldown (30s today) if it
      holds up.
 4. **Divine Favor and Aura Mastery dominate, marginally**, by 1.2 and 1.4pt,
-   each in its second block only. Beside that verdict: the yardstick bought
+   each in its second block only. Aura Mastery's margin z, 2.94, clears the
+   2.87 bar by 0.07: a slightly different draw would put it past its floor
+   without the correction, as Infusion of Light is. Beside that verdict: the yardstick bought
    nothing (item 7), so against another class's stat rank they would likely
    sit within. **Direction:** watch them in AS-441 rather than act on them
    alone.
