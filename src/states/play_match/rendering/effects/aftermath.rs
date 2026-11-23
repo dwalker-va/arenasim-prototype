@@ -4,12 +4,13 @@ use std::sync::Arc;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::body_hold::{held_in, BodyHold, HoldDisjoint};
 use super::druid_heals::{body_point, keyed, keyed_color, window_on};
 use super::hit_reaction::{insert_flinch, PendingDepth};
 use super::hunter_shots::draw;
 use super::school_impact::IMPACT_PET_STATURE;
 use super::shield::disc_texture;
-use super::siphon_life::{particle_material, siphon_body_capsule, siphon_drawn_point};
+use super::siphon_life::particle_material;
 use crate::states::play_match::components::*;
 
 // ==============================================================================
@@ -78,15 +79,17 @@ use crate::states::play_match::components::*;
 //    particle deeper than the body's centre would be drawn first and painted
 //    over. Each particle is therefore drawn on its own view ray, slid toward
 //    the camera until it stands nearer than the body's nearest point, and
-//    scaled by the same ratio — Siphon Life's rule, [`siphon_drawn_point`],
-//    reused as it stands — so it covers the screen footprint the bench gives
-//    it and is always drawn after the body.
+//    scaled by the same ratio — the shared body hold (`body_hold.rs`) — so
+//    it covers the screen footprint the bench gives it and is always drawn
+//    after the body.
 // 2. **The flare's white-hot core is tinted.** The bench adds a white core
 //    over a star's coloured rays; here the star is one shape in the layer's
 //    colour, as Siphon Life's and Shadow Word: Pain's stars are.
 // 3. **Follows in height too.** The bench's `follow` moves particles with the
-//    victim in x and z only; here they ride the rig at the chest, so a victim
-//    on a ramp keeps its burst.
+//    victim in x and z only; here they ride the rig at the chest of the
+//    victim's RENDERED body (the walk and fear bobs, the swing step, the
+//    Cyclone lift: [`place_aftermath_hits`]), so a victim on a ramp keeps its
+//    burst.
 // 4. **Hidden on a sheep.** A victim polymorphed under the burst hides it (its
 //    clock runs on), as Siphon Life's chest glow is: the sheep has no chest at
 //    this height.
@@ -123,7 +126,8 @@ use crate::states::play_match::components::*;
 pub const AFTERMATH_FIRE_HIT: bool = true;
 // Ruled: the bench's AFTERMATH_HEAT_HAZE, AFTERMATH_EMBERS and
 // AFTERMATH_BODY_TINT = false (no client fire-slow state, kit 985).
-pub const AFTERMATH_SLOW_RING_FIRE: bool = true; // SlowTint::Fire arm
+// The bench's AFTERMATH_SLOW_RING_FIRE = true is no knob here: it is `SlowTint::Fire`'s arm in
+// `slow_ring.rs`, which every routed slow must have (`tests/lands_silently_audit.rs`).
 pub const AFTERMATH_SIZE_MUL: f32 = 1.00;
 
 /// The bench's chest anchor, above the floor (`ANCH.chest`; attachment 34).
@@ -313,9 +317,7 @@ pub struct AftermathHitRig {
     /// Fractional particles owed, per emitter.
     pub carry: [f32; 2],
     pub emitted: u32,
-    /// Where the victim stood this frame, and whether it is a pet — the body
-    /// the billboard pass holds the particles in front of.
-    pub victim_at: Vec3,
+    /// Whether the victim is a pet (its stature).
     pub is_pet: bool,
 }
 
@@ -409,7 +411,6 @@ pub fn spawn_aftermath_hits(
                 age: 0.0,
                 carry: [0.0; 2],
                 emitted: 0,
-                victim_at: transform.translation,
                 is_pet,
             },
             Transform::from_translation(aftermath_chest(transform.translation, is_pet)),
@@ -419,7 +420,7 @@ pub fn spawn_aftermath_hits(
     }
 }
 
-/// Follow the victim (hidden while it is a sheep), emit each kept layer while
+/// Hide the burst while its victim is a sheep, emit each kept layer while
 /// its window is open, integrating the rate over the frame so a frame-rate
 /// change does not change the count, and retire the rig once its last
 /// particle has died or its victim is gone.
@@ -431,22 +432,14 @@ pub fn animate_aftermath_hits(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut assets: Local<Option<AftermathAssets>>,
-    mut rigs: Query<(
-        Entity,
-        &mut AftermathHitRig,
-        &mut Transform,
-        &mut Visibility,
-    )>,
-    victims: Query<
-        (&Transform, Option<&Pet>, Has<PolymorphedVisual>),
-        (With<Combatant>, Without<AftermathHitRig>),
-    >,
+    mut rigs: Query<(Entity, &mut AftermathHitRig, &mut Visibility)>,
+    victims: Query<(Has<Pet>, Has<PolymorphedVisual>), With<Combatant>>,
 ) {
     let dt = time.delta_secs();
     let assets = assets
         .get_or_insert_with(|| AftermathAssets::build(&mut meshes, &mut materials, &mut images));
-    for (rig_entity, mut rig, mut transform, mut visibility) in rigs.iter_mut() {
-        let Ok((victim, pet, sheep)) = victims.get(rig.target) else {
+    for (rig_entity, mut rig, mut visibility) in rigs.iter_mut() {
+        let Ok((is_pet, sheep)) = victims.get(rig.target) else {
             commands.entity(rig_entity).despawn();
             continue;
         };
@@ -455,10 +448,7 @@ pub fn animate_aftermath_hits(
             commands.entity(rig_entity).despawn();
             continue;
         }
-        let is_pet = pet.is_some();
-        rig.victim_at = victim.translation;
         rig.is_pet = is_pet;
-        transform.translation = aftermath_chest(victim.translation, is_pet);
         visibility.set_if_neq(if sheep {
             Visibility::Hidden
         } else {
@@ -526,37 +516,42 @@ pub fn age_aftermath_hit_particles(
     }
 }
 
-/// Place every particle where it is drawn — held in front of its victim's
-/// body for the camera (departure 1) — turned to the camera, sized and
-/// coloured along its life.
+/// `BodyPlacement` (PostUpdate): stand each rig at its victim's rendered
+/// chest, and place every particle where it is drawn — held in front of the
+/// rendered body for the camera (departure 1) — turned to the camera, sized
+/// and coloured along its life.
 #[allow(clippy::type_complexity)]
-pub fn billboard_aftermath_hit_particles(
-    camera: Query<&GlobalTransform, With<Camera3d>>,
-    rigs: Query<(&AftermathHitRig, &Transform, &Children), Without<AftermathHitParticle>>,
+pub fn place_aftermath_hits(
+    hold: BodyHold,
+    mut rigs: Query<
+        (&AftermathHitRig, &mut Transform, &Children),
+        (Without<AftermathHitParticle>, HoldDisjoint),
+    >,
     mut particles: Query<
         (
             &AftermathHitParticle,
             &mut Transform,
             &mut MeshMaterial3d<StandardMaterial>,
         ),
-        Without<AftermathHitRig>,
+        (Without<AftermathHitRig>, HoldDisjoint),
     >,
 ) {
-    let cam = camera.iter().next().map(|c| c.compute_transform());
+    let cam = hold.view();
     let rotation = cam.map(|c| c.rotation).unwrap_or(Quat::IDENTITY);
-    for (rig, rig_transform, children) in rigs.iter() {
-        let chest = rig_transform.translation;
-        let capsule = siphon_body_capsule(rig.victim_at, rig.is_pet);
+    for (rig, mut rig_transform, children) in rigs.iter_mut() {
+        let Some(body) = hold.body(rig.target) else {
+            continue;
+        };
+        let chest = aftermath_chest(body.root, body.is_pet);
+        rig_transform.translation = chest;
+        let capsule = body.capsule();
         for child in children.iter() {
             let Ok((p, mut transform, mut material)) = particles.get_mut(child) else {
                 continue;
             };
             let e = &AFTERMATH_EMITTERS[p.emitter];
             let at = chest + p.offset;
-            let (drawn, k) = match cam {
-                Some(c) => siphon_drawn_point(at, capsule, c.translation, c.forward().as_vec3()),
-                None => (at, 1.0),
-            };
+            let (drawn, k) = held_in(cam, at, capsule);
             let t = (p.age / p.life).clamp(0.0, 1.0);
             transform.translation = drawn - chest;
             transform.rotation = rotation * Quat::from_rotation_z(p.angle);

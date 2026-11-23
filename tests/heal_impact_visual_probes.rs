@@ -156,6 +156,89 @@ impl Harness {
     }
 }
 
+/// Every heal landing stands on its recipient's DRAWN body, not its sim root:
+/// a combatant and a pet (whose body hangs 0.45 below its root), each walking
+/// with its gait's bob and then lifted 1.5 yd as a Cyclone lifts its body,
+/// keep the landing's Base anchor (1.15 below the drawn centre; a pet's 0.45 +
+/// 1.15 x 0.55 below its drawn root) on the drawn body every frame — Holy
+/// Light's head anchor too — while Healing Wave's pool of light stays ON the
+/// floor, 0.1 above it, under the body.
+#[test]
+fn every_heal_landing_rides_the_drawn_body_and_its_pool_stays_on_the_floor() {
+    use arenasim::states::play_match::components::{Pet, PetType, VisualBody};
+    let mut checked = 0;
+    for pet in [false, true] {
+        for kind in [HealImpactKind::HealingWave, HealImpactKind::HolyLight] {
+            let mut h = Harness::new();
+            h.spawn_camera(Vec3::new(0.0, 40.0, 40.0), Vec3::ZERO);
+            let (root_y, rest) = if pet { (0.75, -0.45) } else { (1.0, 0.0) };
+            let start = Vec3::new(2.0, root_y, -1.0);
+            let unit = h.spawn_recipient(start);
+            if pet {
+                h.app.world_mut().entity_mut(unit).insert(Pet {
+                    owner: Entity::PLACEHOLDER,
+                    pet_type: PetType::Boar,
+                });
+            }
+            let body = h
+                .app
+                .world_mut()
+                .spawn((
+                    VisualBody { rest_y: rest },
+                    Transform::from_xyz(0.0, rest, 0.0),
+                ))
+                .id();
+            h.app.world_mut().entity_mut(unit).add_child(body);
+            let rig = h.land(kind, unit);
+            for frame in 0..40 {
+                let t = frame as f32 * TICK.as_secs_f32();
+                let root = start + Vec3::new(2.0 * (t * 2.5).sin(), 0.0, 0.0);
+                // The gait's bob, then a Cyclone's lift from frame 20.
+                let lift = 0.1 * (t * 9.0).sin() + if frame >= 20 { 1.5 } else { 0.0 };
+                h.app
+                    .world_mut()
+                    .get_mut::<Transform>(unit)
+                    .unwrap()
+                    .translation = root;
+                h.app
+                    .world_mut()
+                    .get_mut::<Transform>(body)
+                    .unwrap()
+                    .translation
+                    .y = rest + lift;
+                h.tick(1);
+                let drawn = root + Vec3::Y * lift;
+                let want = match (kind, pet) {
+                    (HealImpactKind::HolyLight, false) => drawn + Vec3::Y * IMPACT_HEAD_Y,
+                    (HealImpactKind::HolyLight, true) => {
+                        drawn + Vec3::Y * (-0.45 + IMPACT_HEAD_Y * 0.55)
+                    }
+                    (_, false) => drawn + Vec3::Y * -1.15,
+                    (_, true) => drawn + Vec3::Y * (-0.45 - 1.15 * 0.55),
+                };
+                let at = h.rig_pos(rig);
+                assert!(
+                    at.distance(want) < 1e-4,
+                    "{kind:?} pet {pet} frame {frame}: the rig at {at}, the drawn body's anchor {want}"
+                );
+                for (role, _, g) in h.sprites() {
+                    if role == HealSpriteRole::UnderGlow {
+                        let y = g.translation().y;
+                        assert!(
+                            (y - (ARENA_FLOOR_WORLD_Y + HEALING_WAVE_UNDERGLOW_LIFT)).abs() < 1e-4,
+                            "pet {pet} frame {frame}: the pool at y {y}, off the floor"
+                        );
+                        assert!((g.translation().xz() - drawn.xz()).length() < 1e-4);
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    // Healing Wave's pool, both recipients, every frame.
+    assert_eq!(checked, 2 * 40);
+}
+
 /// Fail loudly if a collection-conditional probe went vacuous.
 fn assert_min(label: &str, actual: usize, min: usize) {
     assert!(

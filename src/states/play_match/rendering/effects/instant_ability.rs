@@ -88,7 +88,25 @@ pub fn swing_style_for_ability(ability: AbilityType) -> Option<SwingStyle> {
     }
 }
 
-/// Start `style`'s stroke on `caster`'s main-hand socket, aimed at `aim`.
+/// Whether a melee interrupt's stroke gives way to the stroke the hand is
+/// already swinging: a strike's (Hemorrhage, Sinister Strike, Mortal Strike,
+/// any signature but an interrupt's) that has not yet reached its contact.
+/// The strike's contact is what its landing — a bleed spray, a crest, a
+/// flinch — is timed to, so a Kick on the same frame, or one a frame after
+/// it, must not take the hand away before the blade lands; the interrupt
+/// still reads, on the victim, through its casting orb's sputter. A strike
+/// always takes the hand, and an interrupt takes it from an auto-attack or a
+/// stroke past its contact.
+pub fn interrupt_yields(style: SwingStyle, swinging: SwingStyle, release_t: Option<f32>) -> bool {
+    let interrupt = |s: SwingStyle| matches!(s, SwingStyle::Kick | SwingStyle::Pummel);
+    interrupt(style)
+        && swinging != SwingStyle::Auto
+        && !interrupt(swinging)
+        && release_t.is_some_and(|t| t < swinging.impact_at())
+}
+
+/// Start `style`'s stroke on `caster`'s main-hand socket, aimed at `aim` —
+/// unless it is an interrupt the hand's strike keeps ([`interrupt_yields`]).
 ///
 /// Main hand only. A styled ability stroke is a whole-body arc, so an
 /// off-hand twin swinging along with it would read as two weapons doing the
@@ -102,6 +120,9 @@ pub(crate) fn start_signature_stroke(
 ) {
     for mut socket in sockets.iter_mut() {
         if socket.owner != caster || socket.hand != WeaponHand::Main {
+            continue;
+        }
+        if interrupt_yields(style, socket.swing_style, socket.release_t) {
             continue;
         }
         if let Some(pos) = aim {
@@ -339,5 +360,50 @@ pub fn consume_instant_ability_signals(
         }
 
         commands.entity(signal_entity).despawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Only an interrupt yields, only to a strike, and only before the
+    /// strike's contact.
+    #[test]
+    fn an_interrupt_yields_only_to_a_strike_short_of_its_contact() {
+        let contact = SwingStyle::SinisterStrike.impact_at();
+        let before = Some(contact * 0.5);
+        for interrupt in [SwingStyle::Kick, SwingStyle::Pummel] {
+            assert!(interrupt_yields(
+                interrupt,
+                SwingStyle::SinisterStrike,
+                before
+            ));
+            assert!(interrupt_yields(
+                interrupt,
+                SwingStyle::MortalStrike,
+                Some(0.0)
+            ));
+            // Past contact, idle, an auto, or another interrupt: it takes the hand.
+            assert!(!interrupt_yields(
+                interrupt,
+                SwingStyle::SinisterStrike,
+                Some(contact)
+            ));
+            assert!(!interrupt_yields(
+                interrupt,
+                SwingStyle::SinisterStrike,
+                None
+            ));
+            assert!(!interrupt_yields(interrupt, SwingStyle::Auto, before));
+            assert!(!interrupt_yields(interrupt, SwingStyle::Kick, before));
+            assert!(!interrupt_yields(interrupt, SwingStyle::Pummel, before));
+        }
+        // A strike never yields.
+        assert!(!interrupt_yields(
+            SwingStyle::SinisterStrike,
+            SwingStyle::MortalStrike,
+            before
+        ));
     }
 }

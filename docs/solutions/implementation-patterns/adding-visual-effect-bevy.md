@@ -236,6 +236,24 @@ bug comes back. The rule and the test cover combatants only; other sim
 entities (projectiles, traps, slow zones, totems) still take Bevy's own
 table-stored render components from visual systems, and are AS-216.
 
+### 12. A Piece on the Body Is Held in Front of It, in `BodyPlacement`
+
+Combatant bodies are `AlphaMode::Blend` and write no depth, and Bevy sorts
+transparent draws by each mesh's translation, so a particle deeper than the
+body's centre is drawn first and the body paints over it (the
+`visual-burial-is-sort-order` lesson). Never lift a piece a fixed distance
+toward the camera: a fixed lift buries it from some camera pitch. Hold it with
+the shared body hold (`rendering/effects/body_hold.rs`): take a `BodyHold`
+system parameter, read the unit's rendered body with `hold.body(unit)` (its
+`VisualBody`, so the gait bob and the Cyclone lift carry it), and draw each
+piece at `held_in(hold.view(), at, body.capsule())`, scaled by the returned
+ratio. Keep every `Transform` query in that system off combatants, bodies and
+cameras with `HoldDisjoint`, and register the system in the `BodyPlacement`
+set in `states/mod.rs` (PostUpdate, after the Cyclone lift, before
+propagation). `tests/body_placement_order.rs` names every member by set
+equality, so a new one is added there too. A state a DoT draws also carries
+`DotStateOn`, which hides it on a sheep (`dot_state.rs`).
+
 ## Color Reference
 
 | Class/School | Base Color | Emissive | Used By |

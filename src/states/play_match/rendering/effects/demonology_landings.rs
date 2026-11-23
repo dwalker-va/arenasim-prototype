@@ -8,6 +8,7 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::view::NoFrustumCulling;
 
+use super::body_hold::{held_in, BodyHold, HoldDisjoint};
 use super::druid_heals::{body_point, keyed};
 use super::hunter_shots::{draw, ramp3, PALETTE_STEPS};
 use super::shield::disc_texture;
@@ -81,14 +82,16 @@ use crate::states::play_match::components::*;
 //   whose translation sits deeper than the body's would be drawn first and
 //   painted over. So every piece is drawn on its own view ray, slid toward
 //   the camera until it stands nearer than the body capsule's nearest point,
-//   and scaled by the same ratio ([`demonology_held_point`]): the same
-//   pixels the bench gives it, always drawn after the body. (The ribbons
-//   need none: each one's translation is the chest on the body's axis.) The particles
-//   keep their true positions on [`BodyHeldParticle`] and are held only for
-//   the draw. (AS-347's `siphon_drawn_point` is the same rule.)
+//   and scaled by the same ratio (the shared body hold, `body_hold.rs`):
+//   the same pixels the bench gives it, always drawn after the body. (The
+//   ribbons need none: each one's translation is the chest on the body's
+//   axis.) The particles keep their true positions on [`BodyHeldParticle`]
+//   and are held only for the draw.
 //
-// Both rigs follow their Warlock (the bench's `customDraw` reads the body
-// each frame); their particles are world-space after birth, as the bench's
+// Both rigs follow their Warlock's RENDERED body (the bench's `customDraw`
+// reads the body each frame; here the walk bob and the Cyclone lift carry
+// it), placed after every writer of it ([`place_demonology_landings`]);
+// their particles are world-space after birth, as the bench's
 // emitters are (no `follow`), and finish their own short lives. A Warlock's
 // death retires its rig at once; a polymorph does not (a landing plays out on
 // the sheep, as the empowered flash does).
@@ -162,47 +165,6 @@ fn additive_material(color: Color, alpha: f32, texture: Option<Handle<Image>>) -
         cull_mode: None,
         double_sided: true,
         ..default()
-    }
-}
-
-/// The combatant body every piece is held in front of: `Capsule3d::new(0.5,
-/// 1.5)` centred on its transform (`play_match/mod.rs`), so its swept segment
-/// runs ±0.75 about the centre, at radius 0.5. A Warlock is never a pet.
-pub const DEMONOLOGY_BODY_RADIUS: f32 = 0.5;
-pub const DEMONOLOGY_BODY_HALF_SEGMENT: f32 = 0.75;
-/// How far in front of the body's nearest point a held piece stands.
-pub const DEMONOLOGY_BODY_CLEARANCE: f32 = 0.05;
-
-/// Where a piece truly at `at` is drawn in front of the body centred at
-/// `body`, for a camera at `eye` looking along `forward`, and the factor its
-/// size is scaled by (the header's last departure).
-///
-/// A piece already nearer than the body capsule's nearest point (the nearer
-/// end of its segment, less its radius and the clearance) stays put. One
-/// deeper slides along its own view ray to that depth and is scaled by the
-/// same ratio, so it covers exactly the pixels it would have.
-pub fn demonology_held_point(at: Vec3, body: Vec3, eye: Vec3, forward: Vec3) -> (Vec3, f32) {
-    let depth = (at - eye).dot(forward);
-    let (a, b) = (
-        body - Vec3::Y * DEMONOLOGY_BODY_HALF_SEGMENT,
-        body + Vec3::Y * DEMONOLOGY_BODY_HALF_SEGMENT,
-    );
-    let nearest = (a - eye).dot(forward).min((b - eye).dot(forward))
-        - DEMONOLOGY_BODY_RADIUS
-        - DEMONOLOGY_BODY_CLEARANCE;
-    if depth <= nearest || nearest <= 0.0 {
-        return (at, 1.0);
-    }
-    let k = nearest / depth;
-    (eye + (at - eye) * k, k)
-}
-
-/// [`demonology_held_point`] for the match camera, if there is one; with none
-/// the piece is drawn where it is.
-fn held(at: Vec3, body: Vec3, camera: Option<&Transform>) -> (Vec3, f32) {
-    match camera {
-        Some(c) => demonology_held_point(at, body, c.translation, c.forward().as_vec3()),
-        None => (at, 1.0),
     }
 }
 
@@ -801,7 +763,7 @@ pub struct SoulLinkColumn {
 /// A world-space spark or mote held in front of its Warlock's body for the
 /// draw: `at` is where it truly is, which `animate_client_particles` moves
 /// (`unhold_demonology_particles` puts it back before, and
-/// `hold_demonology_particles` draws it held after).
+/// [`place_demonology_landings`] draws it held after).
 #[derive(Component)]
 pub struct BodyHeldParticle {
     pub body: Entity,
@@ -1096,37 +1058,25 @@ fn living_warlock<'a>(
         .map(|(_, t)| t)
 }
 
-/// Animate (graphical-only): follow each column's Warlock at the feet, raise,
-/// scale and fade its rings, emit its sparks over their first second, and
-/// retire it once its last ring has faded, or at once with its Warlock.
+/// Animate (graphical-only): raise, scale and fade each column's rings (their
+/// true poses: [`place_demonology_landings`] stands the column on its
+/// Warlock's rendered feet and holds them), emit its sparks over their first
+/// second, and retire it once its last ring has faded, or at once with its
+/// Warlock.
 #[allow(clippy::type_complexity)]
 pub fn animate_soul_link_columns(
     mut commands: Commands,
     time: Res<Time>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut columns: Query<(Entity, &mut SoulLinkColumn, &mut Transform, &Children)>,
+    mut columns: Query<(Entity, &mut SoulLinkColumn, &Children)>,
     mut runes: Query<
         (&SoulLinkRune, &mut Transform),
-        (
-            Without<SoulLinkColumn>,
-            Without<Combatant>,
-            Without<Camera3d>,
-        ),
+        (Without<SoulLinkColumn>, Without<Combatant>),
     >,
     holders: Query<(&Combatant, &Transform), (Without<SoulLinkColumn>, Without<SacrificeTriad>)>,
-    camera: Query<
-        &Transform,
-        (
-            With<Camera3d>,
-            Without<SoulLinkColumn>,
-            Without<SoulLinkRune>,
-            Without<Combatant>,
-        ),
-    >,
 ) {
     let dt = time.delta_secs();
-    let cam = camera.iter().next();
-    for (entity, mut column, mut transform, children) in columns.iter_mut() {
+    for (entity, mut column, children) in columns.iter_mut() {
         let Some(at) = living_warlock(&holders, column.warlock) else {
             commands.entity(entity).despawn();
             continue;
@@ -1137,16 +1087,15 @@ pub fn animate_soul_link_columns(
             commands.entity(entity).despawn();
             continue;
         }
+        // Sparks are born at the sim feet: world-space after birth.
         let feet = body_point(0.0, at.translation, false);
-        transform.translation = feet;
         for child in children.iter() {
             let Ok((rune, mut part)) = runes.get_mut(child) else {
                 continue;
             };
             let frame = soul_link_rune_frame(rune.index, column.age);
-            let (drawn, k) = held(feet + Vec3::Y * frame.height, at.translation, cam);
-            part.translation = drawn - feet;
-            part.scale = Vec3::splat((frame.scale * k).max(1e-4));
+            part.translation = Vec3::Y * frame.height;
+            part.scale = Vec3::splat(frame.scale.max(1e-4));
             if let Some(material) = materials.get_mut(&rune.material) {
                 material.base_color.set_alpha(frame.alpha);
             }
@@ -1179,40 +1128,22 @@ pub fn animate_soul_link_columns(
     }
 }
 
-/// Animate (graphical-only): follow each triad's Warlock at the chest, turn
-/// and fade its orbs, rebuild their ribbons facing the camera, emit its inner
-/// and outer motes, and retire it once its orbs have faded, or at once with
-/// its Warlock.
-#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+/// Animate (graphical-only): turn and fade each triad's orbs (their true
+/// poses: [`place_demonology_landings`] stands the triad on its Warlock's
+/// rendered chest, holds them and rebuilds their ribbons), emit its inner and
+/// outer motes, and retire it once its orbs have faded, or at once with its
+/// Warlock.
+#[allow(clippy::type_complexity)]
 pub fn animate_sacrifice_triads(
     mut commands: Commands,
     time: Res<Time>,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut triads: Query<(Entity, &mut SacrificeTriad, &mut Transform, &Children)>,
-    mut orbs: Query<
-        (&SacrificeOrb, &mut Transform),
-        (
-            Without<SacrificeTriad>,
-            Without<Combatant>,
-            Without<Camera3d>,
-        ),
-    >,
-    ribbons: Query<&SacrificeRibbon>,
+    mut triads: Query<(Entity, &mut SacrificeTriad, &Children)>,
+    mut orbs: Query<(&SacrificeOrb, &mut Transform), (Without<SacrificeTriad>, Without<Combatant>)>,
     holders: Query<(&Combatant, &Transform), (Without<SoulLinkColumn>, Without<SacrificeTriad>)>,
-    camera: Query<
-        &Transform,
-        (
-            With<Camera3d>,
-            Without<SacrificeTriad>,
-            Without<SacrificeOrb>,
-            Without<Combatant>,
-        ),
-    >,
 ) {
     let dt = time.delta_secs();
-    let cam = camera.iter().next().copied();
-    for (entity, mut triad, mut transform, children) in triads.iter_mut() {
+    for (entity, mut triad, children) in triads.iter_mut() {
         let Some(at) = living_warlock(&holders, triad.warlock) else {
             commands.entity(entity).despawn();
             continue;
@@ -1223,8 +1154,8 @@ pub fn animate_sacrifice_triads(
             commands.entity(entity).despawn();
             continue;
         }
+        // Motes are born at the sim chest: world-space after birth.
         let chest = body_point(DEMONIC_SACRIFICE_CHEST_ABOVE_FLOOR, at.translation, false);
-        transform.translation = chest;
         let scale = sacrifice_time_scale();
         let t = triad.age / scale;
 
@@ -1234,31 +1165,11 @@ pub fn animate_sacrifice_triads(
                 material.base_color.set_alpha(alpha);
             }
         }
-        // The camera in the rig's frame (the rig is never turned).
-        let eye = cam
-            .map(|c| c.translation - chest)
-            .unwrap_or(Vec3::new(0.0, 40.0, 40.0));
         for child in children.iter() {
             if let Ok((orb, mut part)) = orbs.get_mut(child) {
-                let (drawn, k) = held(
-                    chest + sacrifice_orb_point(orb.index, t),
-                    at.translation,
-                    cam.as_ref(),
-                );
-                part.translation = drawn - chest;
-                part.scale = Vec3::splat(
-                    DEMONIC_SACRIFICE_ORB_GLOW_DIAMETER * DEMONIC_SACRIFICE_SIZE_MUL * k,
-                );
-                if let Some(c) = cam {
-                    part.rotation = c.rotation;
-                }
-            } else if let Ok(ribbon) = ribbons.get(child) {
-                // No hold: a ribbon's translation is the chest on the body's
-                // own axis, above its centre, so it sorts in front of the
-                // body from any camera above the horizon.
-                if let Some(mesh) = meshes.get_mut(&ribbon.mesh) {
-                    write_sacrifice_ribbon(mesh, &sacrifice_ribbon_trail(ribbon.index, t), eye);
-                }
+                part.translation = sacrifice_orb_point(orb.index, t);
+                part.scale =
+                    Vec3::splat(DEMONIC_SACRIFICE_ORB_GLOW_DIAMETER * DEMONIC_SACRIFICE_SIZE_MUL);
             }
         }
 
@@ -1316,36 +1227,118 @@ pub fn unhold_demonology_particles(mut particles: Query<(&BodyHeldParticle, &mut
     }
 }
 
-/// After the particles age (graphical-only): record each spark's and mote's
-/// true position and draw it held in front of its Warlock's body, its size
-/// scaled to keep its pixels.
-#[allow(clippy::type_complexity)]
-pub fn hold_demonology_particles(
-    mut particles: Query<(&mut BodyHeldParticle, &mut Transform), Without<Camera3d>>,
-    bodies: Query<
-        &Transform,
+/// `BodyPlacement` (PostUpdate), after the particles age: stand each Soul Link
+/// column on its Warlock's rendered feet and each Sacrifice triad on its
+/// rendered chest; hold every ring, orb, spark and mote in front of that
+/// rendered body (the shared body hold), its size scaled to keep its pixels;
+/// turn the orbs to the camera and rebuild the ribbons facing it. A spark's
+/// and mote's true position is recorded first, so the ager moves it and
+/// never the held one.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+pub fn place_demonology_landings(
+    hold: BodyHold,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut columns: Query<
+        (&SoulLinkColumn, &mut Transform, &Children),
         (
-            With<Combatant>,
-            Without<BodyHeldParticle>,
-            Without<Camera3d>,
+            Without<SacrificeTriad>,
+            Without<SoulLinkRune>,
+            Without<SacrificeOrb>,
+            HoldDisjoint,
         ),
     >,
-    camera: Query<
-        &Transform,
+    mut triads: Query<
+        (&SacrificeTriad, &mut Transform, &Children),
         (
-            With<Camera3d>,
-            Without<BodyHeldParticle>,
-            Without<Combatant>,
+            Without<SoulLinkColumn>,
+            Without<SoulLinkRune>,
+            Without<SacrificeOrb>,
+            HoldDisjoint,
+        ),
+    >,
+    mut runes: Query<
+        &mut Transform,
+        (
+            With<SoulLinkRune>,
+            Without<SoulLinkColumn>,
+            Without<SacrificeTriad>,
+            Without<SacrificeOrb>,
+            HoldDisjoint,
+        ),
+    >,
+    mut orbs: Query<
+        &mut Transform,
+        (
+            With<SacrificeOrb>,
+            Without<SoulLinkColumn>,
+            Without<SacrificeTriad>,
+            Without<SoulLinkRune>,
+            HoldDisjoint,
+        ),
+    >,
+    ribbons: Query<&SacrificeRibbon>,
+    mut particles: Query<
+        (&mut BodyHeldParticle, &mut Transform),
+        (
+            Without<SoulLinkColumn>,
+            Without<SacrificeTriad>,
+            Without<SoulLinkRune>,
+            Without<SacrificeOrb>,
+            HoldDisjoint,
         ),
     >,
 ) {
-    let cam = camera.iter().next();
-    for (mut held_particle, mut transform) in particles.iter_mut() {
-        held_particle.at = transform.translation;
-        let Ok(body) = bodies.get(held_particle.body) else {
+    let view = hold.view();
+    for (column, mut transform, children) in columns.iter_mut() {
+        let Some(body) = hold.body(column.warlock) else {
             continue;
         };
-        let (drawn, k) = held(held_particle.at, body.translation, cam);
+        let feet = body.point(0.0);
+        transform.translation = feet;
+        for child in children.iter() {
+            let Ok(mut part) = runes.get_mut(child) else {
+                continue;
+            };
+            let (drawn, k) = held_in(view, feet + part.translation, body.capsule());
+            part.translation = drawn - feet;
+            part.scale *= k;
+        }
+    }
+    for (triad, mut transform, children) in triads.iter_mut() {
+        let Some(body) = hold.body(triad.warlock) else {
+            continue;
+        };
+        let chest = body.point(DEMONIC_SACRIFICE_CHEST_ABOVE_FLOOR);
+        transform.translation = chest;
+        let t = triad.age / sacrifice_time_scale();
+        // The camera in the rig's frame (the rig is never turned).
+        let eye = view
+            .map(|c| c.eye - chest)
+            .unwrap_or(Vec3::new(0.0, 40.0, 40.0));
+        for child in children.iter() {
+            if let Ok(mut part) = orbs.get_mut(child) {
+                let (drawn, k) = held_in(view, chest + part.translation, body.capsule());
+                part.translation = drawn - chest;
+                part.scale *= k;
+                if let Some(c) = view {
+                    part.rotation = c.rotation;
+                }
+            } else if let Ok(ribbon) = ribbons.get(child) {
+                // No hold: a ribbon's translation is the chest on the body's
+                // own axis, above its centre, so it sorts in front of the
+                // body from any camera above the horizon.
+                if let Some(mesh) = meshes.get_mut(&ribbon.mesh) {
+                    write_sacrifice_ribbon(mesh, &sacrifice_ribbon_trail(ribbon.index, t), eye);
+                }
+            }
+        }
+    }
+    for (mut held_particle, mut transform) in particles.iter_mut() {
+        held_particle.at = transform.translation;
+        let Some(body) = hold.body(held_particle.body) else {
+            continue;
+        };
+        let (drawn, k) = held_in(view, held_particle.at, body.capsule());
         transform.translation = drawn;
         transform.scale *= k;
     }

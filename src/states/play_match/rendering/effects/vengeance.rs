@@ -55,6 +55,8 @@
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::body_hold::{BodyHold, HoldDisjoint};
+
 use super::druid_heals::keyed;
 use super::heal_cast::spell_hand_local;
 use super::paladin_oneshots::{
@@ -497,50 +499,21 @@ pub fn vengeance_hand_point(bearer: &Transform, body: &Transform, side: f32) -> 
 /// a rig is rotated, so a piece's local pose is its world one.
 #[allow(clippy::type_complexity)]
 pub fn place_vengeance_hands(
-    camera: Query<
-        &Transform,
-        (
-            With<Camera3d>,
-            Without<VengeanceHands>,
-            Without<VengeanceHand>,
-            Without<VengeanceHandPiece>,
-        ),
-    >,
+    hold: BodyHold,
     mut rigs: Query<
         (&VengeanceHands, &mut Transform, &Children),
         (
-            Without<Combatant>,
-            Without<VisualBody>,
             Without<VengeanceHand>,
             Without<VengeanceHandPiece>,
-        ),
-    >,
-    bearers: Query<
-        (&Transform, Option<&Children>),
-        (
-            With<Combatant>,
-            Without<VengeanceHands>,
-            Without<VengeanceHand>,
-            Without<VengeanceHandPiece>,
-        ),
-    >,
-    bodies: Query<
-        &Transform,
-        (
-            With<VisualBody>,
-            Without<Combatant>,
-            Without<VengeanceHands>,
-            Without<VengeanceHand>,
-            Without<VengeanceHandPiece>,
+            HoldDisjoint,
         ),
     >,
     mut hands: Query<
         (&VengeanceHand, &mut Transform, &Children),
         (
-            Without<Combatant>,
-            Without<VisualBody>,
             Without<VengeanceHands>,
             Without<VengeanceHandPiece>,
+            HoldDisjoint,
         ),
     >,
     mut pieces: Query<
@@ -550,23 +523,19 @@ pub fn place_vengeance_hands(
             &MeshMaterial3d<StandardMaterial>,
         ),
         (
-            Without<Combatant>,
-            Without<VisualBody>,
             Without<VengeanceHands>,
             Without<VengeanceHand>,
+            HoldDisjoint,
         ),
     >,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let cam = camera.iter().next().map(|c| c.rotation);
+    let cam = hold.view().map(|c| c.rotation);
     for (rig, mut rig_transform, rig_children) in rigs.iter_mut() {
-        let Ok((bearer, bearer_children)) = bearers.get(rig.bearer) else {
+        let Some(drawn) = hold.body(rig.bearer) else {
             continue;
         };
-        let body = bearer_children
-            .and_then(|kids| kids.iter().find_map(|k| bodies.get(k).ok()))
-            .copied()
-            .unwrap_or_default();
+        let (bearer, body) = (&drawn.unit, drawn.local);
         rig_transform.translation = bearer.translation;
         for hand_entity in rig_children.iter() {
             let Ok((hand, mut hand_transform, hand_children)) = hands.get_mut(hand_entity) else {

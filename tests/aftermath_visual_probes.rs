@@ -43,10 +43,9 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::talent_procs::{effect_aura, ProcEvent, TalentProcSlot};
 use arenasim::states::play_match::talents::{TalentDefinitions, TalentEffect, TalentId};
 use arenasim::states::play_match::{
-    age_aftermath_hit_particles, animate_aftermath_hits, billboard_aftermath_hit_particles,
-    cleanup_play_match, spawn_aftermath_hits, update_slow_rings, update_slow_scuffs,
-    update_slow_treatment, update_walk_animation, AbilityType, AftermathHitParticle,
-    AftermathHitRig, SlowTint,
+    age_aftermath_hit_particles, animate_aftermath_hits, cleanup_play_match, place_aftermath_hits,
+    spawn_aftermath_hits, update_slow_rings, update_slow_scuffs, update_slow_treatment,
+    update_walk_animation, AbilityType, AftermathHitParticle, AftermathHitRig, SlowTint,
 };
 use arenasim::CharacterClass;
 
@@ -376,7 +375,7 @@ impl Harness {
                 animate_aftermath_hits,
                 record_births,
                 age_aftermath_hit_particles,
-                billboard_aftermath_hit_particles,
+                place_aftermath_hits,
             )
                 .chain(),
         );
@@ -1112,7 +1111,7 @@ fn every_particle_is_drawn_in_front_of_the_body() {
 }
 
 /// How close in front of the body's nearest point a held particle stands
-/// (`SIPHON_BODY_CLEARANCE`, the hold the hit reuses).
+/// (`BODY_HOLD_CLEARANCE`, the shared hold).
 const HOLD_CLEARANCE: f32 = 0.05;
 
 /// The depth a particle at true depth `truly` is drawn at, in front of a body
@@ -1604,4 +1603,95 @@ fn the_hit_reads_at_the_match_camera() {
         .map(|p| p.truly.distance(chest(at)))
         .fold(0.0, f32::max);
     assert!(far < 2.0, "the burst reaches {far} yd from the chest");
+}
+
+/// The `VisualBody` a unit's client spawns under it, at its rest height.
+fn add_body(app: &mut App, unit: Entity, rest_y: f32) -> Entity {
+    let body = app
+        .world_mut()
+        .spawn((
+            arenasim::states::play_match::components::VisualBody { rest_y },
+            Transform::from_xyz(0.0, rest_y, 0.0),
+        ))
+        .id();
+    app.world_mut().entity_mut(unit).add_child(body);
+    body
+}
+
+/// Where a body point `height` yards above the floor stands on a drawn body
+/// whose root is `root` lifted `lift` off its rest pose: a pet's body hangs
+/// 0.45 below its root at 0.55 of a combatant's stature.
+fn drawn_point(root: Vec3, lift: f32, height: f32, pet: bool) -> Vec3 {
+    let local = if pet {
+        -0.45 + (height - 1.0) * 0.55
+    } else {
+        height - 1.0
+    };
+    root + Vec3::Y * (lift + local)
+}
+
+/// The bob and the lift `frame` frames in: the gait's 0.1 yd bob, then a
+/// Cyclone's 1.5 yd lift from frame 30.
+fn bob_and_lift(frame: u32, dt: f32) -> (Vec3, f32) {
+    let t = frame as f32 * dt;
+    let run = Vec3::new(2.0 * (t * 2.5).sin(), 0.0, 1.5 * (t * 2.3).sin());
+    (
+        run,
+        0.1 * (t * 9.0).sin() + if frame >= 30 { 1.5 } else { 0.0 },
+    )
+}
+
+/// Aftermath's fire hit rides its victim's DRAWN body, not its sim root: every
+/// frame, as a combatant or a pet runs, its `VisualBody` bobbing on the gait
+/// and then lifted 1.5 yd as a Cyclone lifts one, the rig stands at the drawn
+/// body's chest.
+#[test]
+fn the_burst_rides_the_drawn_body() {
+    for pet in [false, true] {
+        let mut h = Harness::new();
+        let (root_y, rest) = if pet {
+            (PET_SIM_Y, PET_BODY_Y)
+        } else {
+            (COMBATANT_Y, 0.0)
+        };
+        let start = Vec3::new(1.0, root_y, -2.0);
+        let victim = if pet {
+            h.pet_victim(start)
+        } else {
+            h.victim(start, vec![])
+        };
+        let body = add_body(&mut h.app, victim, rest);
+        h.land(victim, AuraLandingKind::AftermathFireHit);
+        // Into the emit window: a rig with no particle yet has nothing to
+        // stand.
+        h.tick(10);
+        for frame in 0..60 {
+            let (run, lift) = bob_and_lift(frame, TICK_SECS);
+            let root = start + run;
+            h.app
+                .world_mut()
+                .get_mut::<Transform>(victim)
+                .unwrap()
+                .translation = root;
+            h.app
+                .world_mut()
+                .get_mut::<Transform>(body)
+                .unwrap()
+                .translation
+                .y = rest + lift;
+            h.tick(1);
+            let rigs = h.rigs();
+            assert_eq!(rigs.len(), 1, "pet {pet} frame {frame}");
+            assert!(
+                h.particles().len() > 5,
+                "pet {pet} frame {frame}: the burst is on"
+            );
+            let want = drawn_point(root, lift, 1.45, pet);
+            assert!(
+                rigs[0].2.distance(want) < 1e-4,
+                "pet {pet} frame {frame}: the burst at {}, the drawn chest {want}",
+                rigs[0].2
+            );
+        }
+    }
 }

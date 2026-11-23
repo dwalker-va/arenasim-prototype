@@ -47,7 +47,7 @@
 //! `game_rng`, and every system here is registered in `states/mod.rs` only, so
 //! headless stays byte-identical.
 
-use super::heal_impact::COMBATANT_BODY_RADIUS;
+use super::body_hold::COMBATANT_BODY_RADIUS;
 use super::school_impact::impact_origin;
 use super::wand_attack::{spawn_wand_missile, wand_muzzle, wand_school};
 use crate::states::play_match::components::*;
