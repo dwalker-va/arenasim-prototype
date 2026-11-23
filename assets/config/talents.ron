@@ -1332,6 +1332,45 @@
                 },
             ),
         ],
+        Priest: [
+            // Resists crowd control for less time, reflects through its
+            // shields and hands an ally Pain Suppression (design §5.2), with
+            // Inner Focus for the emergency Flash Heal and a Holy
+            // Specialization splash.
+            (
+                name: "Discipline",
+                tree: Discipline,
+                build: {
+                    UnbreakableWill: 2, ImprovedPowerWordShield: 1, InnerFocus: 1,
+                    ReflectiveShield: 1, PainSuppression: 1,
+                    HolySpecialization: 2,
+                },
+            ),
+            // Crits that armour their target, the mana to keep healing, and
+            // Guardian Spirit to keep a dying ally alive, with a bigger shield.
+            (
+                name: "Holy",
+                tree: Holy,
+                build: {
+                    ImprovedPowerWordShield: 2,
+                    HolySpecialization: 2, Inspiration: 2, HolyConcentration: 1,
+                    GuardianSpirit: 1,
+                },
+            ),
+            // The damage dealer: Shadowform with Silence, Blackout and Mind
+            // Flay, a quicker Mind Blast, and Unbreakable Will. Silence is
+            // castable only in Shadowform, so this build plays the form
+            // (`team{1,2}_priest_forms`).
+            (
+                name: "Shadow",
+                tree: Shadow,
+                build: {
+                    UnbreakableWill: 2,
+                    ImprovedMindBlast: 2, Shadowform: 1, Blackout: 1, MindFlay: 1,
+                    Silence: 1,
+                },
+            ),
+        ],
         // The Paladin's three (AS-302). None takes Sacred Duty, so its
         // +3% maximum health a rank, the sweep's stat rank, goes on any stem.
         Paladin: [

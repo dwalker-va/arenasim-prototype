@@ -4,6 +4,8 @@
 //!
 //! Design: `docs/design/proposals/2026-10-11-talents-and-gauntlet.md` §4.
 
+mod common;
+
 use std::collections::BTreeSet;
 
 use arenasim::headless::config::HeadlessMatchConfig;
@@ -160,6 +162,69 @@ fn the_warlock_reference_builds_are_as_specified() {
         .is_none());
 }
 
+/// The Priest's three (AS-300): Discipline 6/2/0 and Holy 2/6/0, design
+/// §5.2's shapes, and Shadow 2/0/6. §5.2's Discipline-Shadow hybrid (5/0/3)
+/// takes no capstone, so it is no reference build: a sweep plays it as ranks.
+#[test]
+fn the_priest_reference_builds_are_as_specified() {
+    let defs = defs();
+    let names: Vec<&str> = defs
+        .reference_builds(CharacterClass::Priest)
+        .iter()
+        .map(|r| r.name.as_str())
+        .collect();
+    assert_eq!(names, ["Discipline", "Holy", "Shadow"]);
+    let expect = [
+        (
+            "Discipline",
+            TreeId::Discipline,
+            "6/2/0",
+            Build::of(&[
+                (UnbreakableWill, 2),
+                (ImprovedPowerWordShield, 1),
+                (InnerFocus, 1),
+                (ReflectiveShield, 1),
+                (PainSuppression, 1),
+                (HolySpecialization, 2),
+            ]),
+        ),
+        (
+            "Holy",
+            TreeId::Holy,
+            "2/6/0",
+            Build::of(&[
+                (ImprovedPowerWordShield, 2),
+                (HolySpecialization, 2),
+                (Inspiration, 2),
+                (HolyConcentration, 1),
+                (GuardianSpirit, 1),
+            ]),
+        ),
+        (
+            "Shadow",
+            TreeId::Shadow,
+            "2/0/6",
+            Build::of(&[
+                (UnbreakableWill, 2),
+                (ImprovedMindBlast, 2),
+                (Shadowform, 1),
+                (Blackout, 1),
+                (MindFlay, 1),
+                (Silence, 1),
+            ]),
+        ),
+    ];
+    for (name, tree, short, build) in expect {
+        let reference = defs
+            .reference_build(CharacterClass::Priest, name)
+            .unwrap_or_else(|| panic!("no Priest reference {name:?}"));
+        assert_eq!(reference.tree, tree, "{name}");
+        assert_eq!(reference.build, build, "{name}");
+        let spec = defs.spec(CharacterClass::Priest, &reference.build).unwrap();
+        assert_eq!(spec.short, short, "{name}");
+    }
+}
+
 /// The Rogue's three, by name: Assassination 6/2/0, Combat 2/6/0, Subtlety
 /// 0/2/6 (AS-301).
 #[test]
@@ -219,6 +284,38 @@ fn the_rogue_reference_builds_are_as_specified() {
         let spec = defs.spec(CharacterClass::Rogue, &reference.build).unwrap();
         assert_eq!(spec.short, short, "{name}");
     }
+}
+
+/// A reference build's name is unique within its CLASS only: the shipped
+/// Paladin and Priest each name one "Holy", and a config naming "Holy" for
+/// each class's slot gets that class's own.
+#[test]
+fn reference_names_are_unique_within_a_class_only() {
+    let defs = defs();
+    let paladin = defs
+        .reference_build(CharacterClass::Paladin, "Holy")
+        .expect("the Paladin's Holy");
+    let priest = defs
+        .reference_build(CharacterClass::Priest, "Holy")
+        .expect("the Priest's Holy");
+    assert_eq!(paladin.build.rank(AuraMastery), 1);
+    assert_eq!(priest.build.rank(GuardianSpirit), 1);
+    for (class, holy) in [
+        (CharacterClass::Paladin, &paladin.build),
+        (CharacterClass::Priest, &priest.build),
+    ] {
+        assert_eq!(
+            defs.resolve_spec(class, &BuildSpec::Reference("Holy".into())),
+            Ok(holy.clone()),
+            "{class:?}"
+        );
+    }
+    // Within one class the name is still refused twice.
+    let twice = edited(
+        "name: \"Discipline\",\n                tree: Discipline,",
+        "name: \"Holy\",\n                tree: Discipline,",
+    );
+    assert!(load_err(&twice).contains("Priest names the reference build \"Holy\" twice"));
 }
 
 /// Every Rogue node arm of the AS-301 sweep is a legal build: Vitality, the
@@ -688,14 +785,52 @@ fn the_loader_rejects_each_broken_reference_build() {
 /// A file with no `reference_builds` loads, with none for any class.
 #[test]
 fn reference_builds_are_optional() {
-    let text = shipped_text();
-    let start = text.find("    reference_builds: {").expect("the block");
-    let end = text.rfind(')').unwrap();
-    let without = format!("{}{}", &text[..start], &text[end..]);
+    let without = common::talents_ron::without_reference_builds(&shipped_text());
+    assert!(!without.contains("reference_builds"));
     let defs = TalentDefinitions::from_ron(&without, AbilityDefinitions::shipped())
         .expect("loads without reference builds");
     assert!(defs.reference_builds(CharacterClass::Warlock).is_empty());
+    assert!(defs.reference_builds(CharacterClass::Priest).is_empty());
     assert_eq!(defs.all_reference_builds().count(), 0);
+}
+
+/// The shared cut matches the block's brackets: moved ahead of
+/// `choice_rules`, with a bracket in a comment inside it, it still cuts the
+/// block and nothing else, so the result is the same file the shipped order
+/// gives. (A cut to the file's last `)` took `choice_rules` and the
+/// reference combatants with it.)
+#[test]
+fn the_reference_builds_cut_matches_brackets_wherever_the_block_sits() {
+    let text = shipped_text();
+    let start = text.find("    reference_builds: {").expect("the block");
+    let block = &text[start..text.rfind("\n)").unwrap() + 1];
+    assert!(
+        block.ends_with("},\n"),
+        "the block is the file's last field"
+    );
+    // A bracket in a line comment, a block comment and a string: each must
+    // be skipped, or the cut ends early.
+    let block = block
+        .replacen(
+            "Warlock: [",
+            "Warlock: [\n            // a stray } ) ] in a comment\n            /* and ) ] } here */",
+            1,
+        )
+        .replacen("name: \"Affliction\"", "name: \"Affliction }])\"", 1);
+    let rules = text.find("    choice_rules: [").expect("the choice rules");
+    let moved = format!(
+        "{}{}{}{}",
+        &text[..rules],
+        block,
+        &text[rules..start],
+        &text[text.rfind("\n)").unwrap() + 1..]
+    );
+    TalentDefinitions::from_ron(&moved, AbilityDefinitions::shipped())
+        .expect("the moved block loads");
+    let cut = common::talents_ron::without_reference_builds(&moved);
+    assert_eq!(cut, common::talents_ron::without_reference_builds(&text));
+    assert!(cut.contains("    choice_rules: ["));
+    assert!(cut.contains("    reference: {"));
 }
 
 // ---------------------------------------------------------------------------
