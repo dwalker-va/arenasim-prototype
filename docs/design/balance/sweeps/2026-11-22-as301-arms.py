@@ -210,37 +210,58 @@ HEADER = ("| %s | n | before | after | delta (pt) | flips | z | floor (pt) |%s\n
           "|---|---|---|---|---|---|---|---|%s")
 
 
-def allowance(price, vitality_value):
-    """What a stat rank of `price` may be worth over Vitality, scaling
-    Vitality's measured worth on the stem linearly in price: negative for a
-    one-rank node (11 against 20.4), slightly positive for a capstone (22)."""
-    return vitality_value * (price / VITALITY_PRICE - 1.0)
+def per_match_margin(after, before, vplus, v0, k):
+    """(margin, margin z) from per-match outcomes: four equal-length lists of
+    1 (the Rogue side won) or 0, one entry per paired match, for the node's
+    arm, its comparison, the stem + Vitality and the stem. Each match gives
+    x = 100 * [(after - before) - k * (vplus - v0)]; the margin is mean(x)
+    and its standard error sd(x) / sqrt(n).
+
+    The arms play the same matches, and a node row and its Vitality row share
+    an arm or a stem, so their two deltas are correlated: only the per-match
+    difference carries that covariance (user ruling, AS-301 r3, for every
+    talent sweep)."""
+    x = [100.0 * ((a - b) - k * (p - z)) for a, b, p, z in zip(after, before, vplus, v0)]
+    n = len(x)
+    if n < 2:
+        return (x[0] if x else 0.0), 0.0
+    mean = sum(x) / n
+    sd = math.sqrt(sum((xi - mean) ** 2 for xi in x) / (n - 1))
+    se = sd / math.sqrt(n)
+    return mean, (mean / se if se else 0.0)
 
 
-def paired_se(s):
-    """The standard error (pt) of a paired win-rate delta, from its
-    discordant pairs: 100 * sqrt(b + c - (b - c)^2 / n) / n."""
-    b, c, n = s.to_win, s.to_loss, s.n
-    if not n:
-        return 0.0
-    return 100.0 * math.sqrt(max(0.0, b + c - (b - c) ** 2 / n)) / n
+VITALITY_ARMS = {key: (plus, stem) for _, key, plus, stem in STAT_RANK}
 
 
-def margin_stats(s, price, vitality):
-    """(allowance, margin, margin z) of a node row `s` against Vitality in its
-    place, where `vitality` is Vitality's own slice on the same stem. The
-    allowance's error (k * se(v)) is folded in quadrature with the row's."""
+def node_stats(dirs, cache, arm, base, price, stem_key):
+    """One node row measured over `dirs`: (its slice, Vitality's slice on its
+    stem, allowance, margin, margin z). Everything, the allowance included,
+    is read from the same directories, so a block's row uses that block's
+    own Vitality rank."""
+    import paired_sweep as ps
+    plus, stem = VITALITY_ARMS[stem_key]
+    s, _, _ = compare(dirs, cache, arm, base)
+    vit, _, _ = compare(dirs, cache, plus, stem)
     k = price / VITALITY_PRICE - 1.0
-    allow = k * vitality.delta
-    margin = s.delta - allow
-    se = math.sqrt(paired_se(s) ** 2 + (k * paired_se(vitality)) ** 2)
-    return allow, margin, (margin / se if se else 0.0)
+    allow = k * vit.delta
+    rows = [cache[a] for a in (arm, base, plus, stem)]
+    keys = sorted(set(rows[1]).intersection(*rows))
+    buckets = ps.build_slices(keys, rows[1], {"Rogue"})
+    clean = set(buckets["clean"])
+    scored = buckets["clean"] + buckets["against"]
+
+    def wins(r):
+        return [1 if r[key][0] == ("team1" if key in clean else "team2") else 0
+                for key in scored]
+    margin, mz = per_match_margin(*(wins(r) for r in rows), k)
+    return s, vit, allow, margin, mz
 
 
-def node_cells(s, price, vitality):
+def node_cells(s, allow, margin, mz):
     """The node columns a table prints: allowance, margin, margin z (with
-    BONF when it clears the Bonferroni threshold), verdict."""
-    allow, margin, mz = margin_stats(s, price, vitality)
+    BONF when it clears the Bonferroni threshold, in either direction),
+    verdict."""
     return " %+.1f | %+.1f | %+.2f%s | %s |" % (
         allow, margin, mz, " BONF" if abs(mz) >= BONFERRONI_Z else "", verdict(s, allow))
 
@@ -252,10 +273,10 @@ NODE_RULE = "---|---|---|---|"
 def changes_at_allowance_zero(rows):
     """The node rows whose verdict changes when the allowance is dropped, so
     the node faces a full Vitality: [(label, verdict, verdict at 0)] from
-    [(label, slice, price, Vitality's slice on its stem)]."""
+    [(label, slice, allowance)]."""
     out = []
-    for label, s, price, vitality in rows:
-        modelled = verdict(s, margin_stats(s, price, vitality)[0])
+    for label, s, allow in rows:
+        modelled = verdict(s, allow)
         flat = verdict(s, 0.0)
         if flat != modelled:
             out.append((label, modelled, flat))
@@ -285,10 +306,8 @@ def table(outdir):
         print(row(label, s))
     print("\n## Vitality on each stem (7 -> 8 points)\n")
     print(HEADER % ("stem", "", ""))
-    stat = {}
     for label, key, plus, stem in STAT_RANK:
         s, _, _ = compare(outdir, cache, plus, stem)
-        stat[key] = s
         print(row(label, s))
     print("\n## Each node against Vitality in its place\n")
     print("BONF: |margin z| >= %.2f, Bonferroni over the %d rows.\n"
@@ -296,9 +315,9 @@ def table(outdir):
     print(HEADER % ("node", NODE_HEADER, NODE_RULE))
     measured = []
     for label, price, arm, base, stem in NODE_ARMS:
-        s, nc, same = compare(outdir, cache, arm, base)
-        print(row(label, s, node_cells(s, price, stat[stem])))
-        measured.append((label, s, price, stat[stem]))
+        s, _, allow, margin, mz = node_stats(outdir, cache, arm, base, price, stem)
+        print(row(label, s, node_cells(s, allow, margin, mz)))
+        measured.append((label, s, allow))
     changed = changes_at_allowance_zero(measured)
     print("\n## Verdicts that change at allowance 0 (the node against a full Vitality)\n")
     for label, modelled, flat in changed:
@@ -430,28 +449,35 @@ REPLICATED = [
 REPLICATED_ARMS = sorted({a for _, x, y in REPLICATED for a in (x, y)})
 
 
-def replicate(block1, block2):
-    """Each replicated comparison per block and pooled. A node row reads its
-    allowance from the Vitality rank on its stem in the same block (or
-    pooled), and prints its margin z against the Bonferroni threshold."""
+def replicate_rows(block1, block2, pairs=None):
+    """Each replicated comparison per block and pooled, as data: (label,
+    block name, slice, node stats or None). A node row's stats are
+    (allowance, margin, margin z) read from that block's own directories."""
     pooled = block1 + os.pathsep + block2
     blocks = (("block 1", block1), ("block 2", block2), ("pooled", pooled))
-    vitality = {}
-    for name, dirs in blocks:
-        for label, key, plus, stem in STAT_RANK:
-            vitality[(name, key)] = compare(dirs, {}, plus, stem)[0]
     node = {(arm, base): (price, stem) for _, price, arm, base, stem in NODE_ARMS}
-    print(HEADER % ("comparison", " block |" + NODE_HEADER, "---|" + NODE_RULE))
-    for label, arm, base in REPLICATED:
+    out = []
+    for label, arm, base in pairs or REPLICATED:
         for name, dirs in blocks:
-            s, _, _ = compare(dirs, {}, arm, base)
-            extra = " %s |" % name
+            cache = {}
             if (arm, base) in node:
                 price, stem = node[(arm, base)]
-                extra += node_cells(s, price, vitality[(name, stem)])
+                s, _, allow, margin, mz = node_stats(dirs, cache, arm, base, price, stem)
+                out.append((label, name, s, (allow, margin, mz)))
             else:
-                extra += " | | | |"
-            print(row(label, s, extra))
+                s, _, _ = compare(dirs, cache, arm, base)
+                out.append((label, name, s, None))
+    return out
+
+
+def replicate(block1, block2):
+    """Print `replicate_rows`: each node row with its margin z against the
+    Bonferroni threshold."""
+    print(HEADER % ("comparison", " block |" + NODE_HEADER, "---|" + NODE_RULE))
+    for label, name, s, stats in replicate_rows(block1, block2):
+        extra = " %s |" % name
+        extra += node_cells(s, *stats) if stats else " | | | |"
+        print(row(label, s, extra))
 
 
 # ---------------------------------------------------------------------------

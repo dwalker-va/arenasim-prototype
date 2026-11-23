@@ -8,18 +8,18 @@ than the run's resolution floor beyond a stat rank of the same price.
 three clear the Bonferroni threshold on their pooled margin.**
 
 - **Cheat Death** beats a stat rank of its price by +6.5pt pooled over two
-  seed blocks (margin z=21.1, floor 0.6).
-- **Hemorrhage** beats a stat rank of its price by +1.6pt (margin z=5.4,
-  floor 0.6). Its margin clears the threshold in each block alone.
-- **Swift Blades** beats a stat rank of its price by +1.7pt (margin z=3.9,
+  seed blocks (margin z=23.3, floor 0.6).
+- **Hemorrhage** beats a stat rank of its price by +1.6pt (margin z=6.4,
+  floor 0.6). Its margin clears the threshold in both blocks separately.
+- **Swift Blades** beats a stat rank of its price by +1.7pt (margin z=4.1,
   floor 0.9).
   - It is over the floor in both blocks, but clears the threshold only in
-    block 1 (z=3.4; block 2 alone z=2.1).
+    block 1 (z=3.6; block 2 alone z=2.2).
   - Its verdict does not rest on the price model: its raw +1.0pt already beats
     a full Vitality, at 1.85 ranks, by more than the floor.
 
 **Shadow Dance does not dominate.** It sits 0.9pt *below* a stat rank of its
-price (margin z=−3.5, replicated).
+price (margin z=−3.4, replicated).
 
 - A Dance applies 9.1 stun-seconds.
 - The Dance raises the chance its first victim is dead by the end of its
@@ -94,13 +94,19 @@ The verdict compares the margin (delta minus allowance) with the pair's floor:
 - **within** otherwise.
 
 **The margin z** tests the success condition's own null: that the node is
-worth a stat rank of its price. It is the margin over its standard error,
-where:
+worth a stat rank of its price. It is computed per paired match. For each
+one-sided match `i`, with 1 for a Rogue-side win and 0 otherwise:
 
-- each pair's error is `100·√(b + c − (b − c)²/n) / n`, from its `b` flips
-  toward the Rogue side and `c` away;
-- the allowance's error, `k·se(v)` with `k = p/20.4 − 1`, is added in
-  quadrature.
+- `x_i = 100·[(A_i − B_i) − k·(V+_i − V0_i)]`, where:
+  - `A` is the node's arm and `B` its comparison;
+  - `V+` is the stem plus Vitality and `V0` the stem;
+  - `k = p/20.4 − 1`;
+- the margin is `mean(x)` and its standard error is `sd(x)/√n`.
+
+The four arms play the same matches, and a node row shares an arm or a stem
+with its Vitality row, so the two deltas are correlated. The per-match form
+carries that covariance; adding the two rows' errors as if independent does
+not.
 
 The raw delta's z, also printed, tests only "equal to Vitality". Significance
 below always means the margin z.
@@ -161,18 +167,18 @@ test, both as the Rogue side's win rate.
 
 | node | before | after | delta (pt) | flips | z (delta) | floor | allowance | margin | margin z | verdict |
 |---|---|---|---|---|---|---|---|---|---|---|
-| **Cheat Death** | 58.5% | 64.9% | **+6.4** | 343 (+306/−36) | 14.55 | 0.9 | −0.6 | +7.0 | +15.68 BONF | **dominates** |
-| **Swift Blades** | 52.7% | 54.0% | **+1.3** | 680 (+368/−311) | 2.15 | 1.2 | −0.8 | +2.2 | +3.42 BONF | **dominates** |
-| **Hemorrhage** | 56.2% | 57.3% | **+1.0** | 261 (+152/−108) | 2.67 | 0.8 | −0.6 | +1.6 | +4.04 BONF | **dominates** |
-| Master Poisoner (Deadly off hand) | 53.4% | 52.2% | −1.2 | 372 (+161/−211) | 2.54 | 0.9 | −1.0 | −0.2 | −0.43 | within |
-| Initiative (rank 2) | 58.4% | 57.3% | −1.1 | 133 (+43/−90) | 3.99 | 0.6 | −0.6 | −0.5 | −1.78 | within |
-| Blood Spatter (capstone, for scale) | 54.3% | 54.0% | −0.4 | 327 (+156/−171) | 0.77 | 0.9 | +0.2 | −0.5 | −1.22 | within |
-| Master of Subtlety (rank 1) | 54.3% | 52.6% | −1.8 | 216 (+71/−145) | 4.97 | 0.7 | −1.0 | −0.8 | −2.10 | below |
-| Lightning Reflexes (rank 1) | 54.3% | 52.2% | −2.1 | 377 (+144/−232) | 4.49 | 0.9 | −1.0 | −1.1 | −2.32 | below |
-| Deflection (rank 1) | 54.3% | 52.2% | −2.1 | 377 (+144/−232) | 4.49 | 0.9 | −1.0 | −1.1 | −2.32 | below |
-| Shadow Dance (capstone) | 58.5% | 57.7% | −0.8 | 220 (+93/−127) | 2.22 | 0.7 | +0.1 | −0.9 | −2.57 | below |
-| Expose Armor (capstone) | 55.8% | 54.7% | −1.1 | 396 (+175/−221) | 2.26 | 0.9 | +0.1 | −1.2 | −2.60 | below |
-| Rupture | 54.9% | 52.2% | −2.7 | 699 (+293/−405) | 4.20 | 1.2 | −1.0 | −1.7 | −2.63 | below |
+| **Cheat Death** | 58.5% | 64.9% | **+6.4** | 343 (+306/−36) | 14.55 | 0.9 | −0.6 | +7.0 | +17.12 BONF | **dominates** |
+| **Swift Blades** | 52.7% | 54.0% | **+1.3** | 680 (+368/−311) | 2.15 | 1.2 | −0.8 | +2.2 | +3.63 BONF | **dominates** |
+| **Hemorrhage** | 56.2% | 57.3% | **+1.0** | 261 (+152/−108) | 2.67 | 0.8 | −0.6 | +1.6 | +4.86 BONF | **dominates** |
+| Master Poisoner (Deadly off hand) | 53.4% | 52.2% | −1.2 | 372 (+161/−211) | 2.54 | 0.9 | −1.0 | −0.2 | −0.49 | within |
+| Initiative (rank 2) | 58.4% | 57.3% | −1.1 | 133 (+43/−90) | 3.99 | 0.6 | −0.6 | −0.5 | **−3.38 BONF** | within |
+| Blood Spatter (capstone, for scale) | 54.3% | 54.0% | −0.4 | 327 (+156/−171) | 0.77 | 0.9 | +0.2 | −0.5 | −1.19 | within |
+| Master of Subtlety (rank 1) | 54.3% | 52.6% | −1.8 | 216 (+71/−145) | 4.97 | 0.7 | −1.0 | −0.8 | −2.78 | below |
+| Lightning Reflexes (rank 1) | 54.3% | 52.2% | −2.1 | 377 (+144/−232) | 4.49 | 0.9 | −1.0 | −1.1 | −2.56 | below |
+| Deflection (rank 1) | 54.3% | 52.2% | −2.1 | 377 (+144/−232) | 4.49 | 0.9 | −1.0 | −1.1 | −2.56 | below |
+| Shadow Dance (capstone) | 58.5% | 57.7% | −0.8 | 220 (+93/−127) | 2.22 | 0.7 | +0.1 | −0.9 | −2.47 | below |
+| Expose Armor (capstone) | 55.8% | 54.7% | −1.1 | 396 (+175/−221) | 2.26 | 0.9 | +0.1 | −1.2 | −2.55 | below |
+| Rupture | 54.9% | 52.2% | −2.7 | 699 (+293/−405) | 4.20 | 1.2 | −1.0 | −1.7 | −2.75 | below |
 
 The Lightning Reflexes and Deflection arms are the same CSV, byte for byte.
 In this sim, dodge and parry are one avoidance roll with no facing and no
@@ -195,32 +201,36 @@ Vitality rank on the same stem in the same block (or pooled).
 
 | comparison | block | before | after | delta (pt) | flips | z (delta) | floor | margin | margin z | verdict |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Cheat Death | 1 | 58.5% | 64.9% | +6.4 | 343 (+306/−36) | 14.55 | 0.9 | +7.0 | +15.68 BONF | dominates |
-| | 2 | 59.1% | 64.5% | +5.5 | 308 (+269/−38) | 13.13 | 0.8 | +6.0 | +14.18 BONF | dominates |
-| | **pooled** | 58.8% | 64.7% | **+5.9** | 651 (+575/−74) | 19.63 | 0.6 | **+6.5** | **+21.13 BONF** | **dominates** |
-| Hemorrhage | 1 | 56.2% | 57.3% | +1.0 | 261 (+152/−108) | 2.67 | 0.8 | +1.6 | +4.04 BONF | dominates |
-| | 2 | 56.9% | 57.9% | +1.0 | 311 (+176/−134) | 2.33 | 0.8 | +1.5 | +3.55 BONF | dominates |
-| | **pooled** | 56.6% | 57.6% | **+1.0** | 572 (+328/−242) | 3.56 | 0.6 | **+1.6** | **+5.35 BONF** | **dominates** |
-| Swift Blades | 1 | 52.7% | 54.0% | +1.3 | 680 (+368/−311) | 2.15 | 1.2 | +2.2 | +3.42 BONF | dominates |
-| | 2 | 54.2% | 54.8% | +0.6 | 692 (+359/−333) | 0.95 | 1.2 | +1.3 | +2.05 | dominates |
-| | **pooled** | 53.4% | 54.4% | **+1.0** | 1372 (+727/−644) | 2.21 | 0.9 | **+1.7** | **+3.86 BONF** | **dominates** |
-| Shadow Dance | 1 | 58.5% | 57.7% | −0.8 | 220 (+93/−127) | 2.22 | 0.7 | −0.9 | −2.57 | below |
-| | 2 | 59.1% | 58.3% | −0.7 | 219 (+93/−124) | 2.04 | 0.7 | −0.8 | −2.37 | below |
-| | **pooled** | 58.8% | 58.0% | **−0.8** | 439 (+186/−251) | 3.06 | 0.5 | **−0.9** | **−3.49 BONF** | below |
-| Expose Armor | 1 | 55.8% | 54.7% | −1.1 | 396 (+175/−221) | 2.26 | 0.9 | −1.2 | −2.60 | below |
-| | 2 | 56.3% | 55.6% | −0.7 | 377 (+174/−203) | 1.44 | 0.9 | −0.8 | −1.75 | within |
-| | **pooled** | 56.0% | 55.2% | **−0.9** | 773 (+349/−424) | 2.66 | 0.7 | **−1.0** | **−3.08 BONF** | below |
-| Rupture | 1 | 54.9% | 52.2% | −2.7 | 699 (+293/−405) | 4.20 | 1.2 | −1.7 | −2.63 | below |
-| | 2 | 56.0% | 52.2% | −3.8 | 676 (+258/−418) | 6.12 | 1.2 | −3.1 | −4.90 BONF | below |
-| | **pooled** | 55.4% | 52.2% | **−3.2** | 1375 (+551/−823) | 7.31 | 0.9 | **−2.4** | **−5.31 BONF** | below |
+| Cheat Death | 1 | 58.5% | 64.9% | +6.4 | 343 (+306/−36) | 14.55 | 0.9 | +7.0 | +17.12 BONF | dominates |
+| | 2 | 59.1% | 64.5% | +5.5 | 308 (+269/−38) | 13.13 | 0.8 | +6.0 | +15.74 BONF | dominates |
+| | **pooled** | 58.8% | 64.7% | **+5.9** | 651 (+575/−74) | 19.63 | 0.6 | **+6.5** | **+23.25 BONF** | **dominates** |
+| Hemorrhage | 1 | 56.2% | 57.3% | +1.0 | 261 (+152/−108) | 2.67 | 0.8 | +1.6 | +4.86 BONF | dominates |
+| | 2 | 56.9% | 57.9% | +1.0 | 311 (+176/−134) | 2.33 | 0.8 | +1.5 | +4.18 BONF | dominates |
+| | **pooled** | 56.6% | 57.6% | **+1.0** | 572 (+328/−242) | 3.56 | 0.6 | **+1.6** | **+6.36 BONF** | **dominates** |
+| Swift Blades | 1 | 52.7% | 54.0% | +1.3 | 680 (+368/−311) | 2.15 | 1.2 | +2.2 | +3.63 BONF | dominates |
+| | 2 | 54.2% | 54.8% | +0.6 | 692 (+359/−333) | 0.95 | 1.2 | +1.3 | +2.17 | dominates |
+| | **pooled** | 53.4% | 54.4% | **+1.0** | 1372 (+727/−644) | 2.21 | 0.9 | **+1.7** | **+4.10 BONF** | **dominates** |
+| Shadow Dance | 1 | 58.5% | 57.7% | −0.8 | 220 (+93/−127) | 2.22 | 0.7 | −0.9 | −2.47 | below |
+| | 2 | 59.1% | 58.3% | −0.7 | 219 (+93/−124) | 2.04 | 0.7 | −0.8 | −2.28 | below |
+| | **pooled** | 58.8% | 58.0% | **−0.8** | 439 (+186/−251) | 3.06 | 0.5 | **−0.9** | **−3.36 BONF** | below |
+| Expose Armor | 1 | 55.8% | 54.7% | −1.1 | 396 (+175/−221) | 2.26 | 0.9 | −1.2 | −2.55 | below |
+| | 2 | 56.3% | 55.6% | −0.7 | 377 (+174/−203) | 1.44 | 0.9 | −0.8 | −1.71 | within |
+| | **pooled** | 56.0% | 55.2% | **−0.9** | 773 (+349/−424) | 2.66 | 0.7 | **−1.0** | **−3.02 BONF** | below |
+| Rupture | 1 | 54.9% | 52.2% | −2.7 | 699 (+293/−405) | 4.20 | 1.2 | −1.7 | −2.75 | below |
+| | 2 | 56.0% | 52.2% | −3.8 | 676 (+258/−418) | 6.12 | 1.2 | −3.1 | −5.21 BONF | below |
+| | **pooled** | 55.4% | 52.2% | **−3.2** | 1375 (+551/−823) | 7.31 | 0.9 | **−2.4** | **−5.60 BONF** | below |
 
 **What clears the threshold:**
 
 - **Pooled:** all six replicated rows. Cheat Death, Hemorrhage and Swift
   Blades dominate; Shadow Dance, Expose Armor and Rupture are below.
-- **Each block alone:** Cheat Death and Hemorrhage only.
+- **In both blocks separately:** Cheat Death and Hemorrhage. Swift Blades
+  clears in block 1 only, Rupture in block 2 only.
+- **Block 1 only, cleared:** Initiative's second rank (margin z −3.38). It is
+  significantly below a stat rank of its price, but by less than the floor
+  (−0.5pt against 0.6pt), so its verdict stays within.
 - **Block 1 only, not cleared:** Lightning Reflexes, Deflection and Master of
-  Subtlety (margin z −2.1 to −2.3) are "below" on the floor rule only.
+  Subtlety (margin z −2.6 to −2.8) are "below" on the floor rule only.
 
 **Swift Blades** dominates by the floor rule in both blocks. Its block 2 margin
 (+1.3) is just over that block's floor (1.24), and the margin clears the
@@ -230,7 +240,7 @@ zero, an 11-point rank worth more than a 20.4-point one, would bring it back
 inside. Block 2 alone is within at allowance 0 (+0.6pt against its 1.2pt
 floor).
 
-**Expose Armor** is below pooled (margin z −3.1), but within in block 2 alone.
+**Expose Armor** is below pooled (margin z −3.0), but within in block 2 alone.
 
 ### What Vitality buys, and each reference against 0 points
 
@@ -434,7 +444,7 @@ energy for the Dance in that slice.
 - It raises the chance its victim dies in the window by 6-7pt, nearly all of
   it on an enemy healer.
 - The kill mostly comes anyway, and win rate does not register it: −0.9pt
-  past the allowance against a stat rank of its price, at margin z −3.5,
+  past the allowance against a stat rank of its price, at margin z −3.4,
   replicated.
 - No defending-side counterplay is called for by these numbers.
 
@@ -448,7 +458,7 @@ the user:
 
 ## What it says (findings for the user, not changes)
 
-1. **Cheat Death dominates** (+6.5pt past its allowance, margin z=21.1,
+1. **Cheat Death dominates** (+6.5pt past its allowance, margin z=23.3,
    replicated).
    - It is deterministic: the match's first killing blow leaves the Rogue at
      10%, with 90% less damage for 3s.
@@ -457,25 +467,25 @@ the user:
    - Direction: TBC's chance (31230 rolled 33% a rank), a smaller cut or
      window, or a higher price.
 2. **Hemorrhage dominates modestly** (+1.6pt past its allowance, margin
-   z=5.4, past the threshold in each block).
+   z=6.4, past the threshold in both blocks separately).
    - It is a 30-energy Sinister Strike that leaves +2% Physical damage taken a
      stack, up to 5, which nothing removes.
    - Direction: a smaller stack, or fewer stacks.
 3. **Swift Blades dominates modestly** (+1.7pt past its allowance, margin
-   z=3.9 pooled).
+   z=4.1 pooled).
    - It is over the floor in both blocks, and past the threshold pooled and in
-     block 1 (block 2 alone: z=2.1).
+     block 1 (block 2 alone: z=2.2).
    - Its raw +1.0pt beats a full Vitality by more than the floor, so the
      verdict does not depend on the price model.
    - Direction: +10% melee haste for one rank is worth more than 1.85 ranks of
      health. That points to a smaller haste, or a higher price.
 4. **Shadow Dance and Expose Armor, both capstones, sit below a stat rank of
    their price**, both past the threshold pooled.
-   - **Shadow Dance** (margin z −3.5): see above.
-   - **Expose Armor** (margin z −3.1 pooled, within in block 2 alone) is cast
+   - **Shadow Dance** (margin z −3.4): see above.
+   - **Expose Armor** (margin z −3.0 pooled, within in block 2 alone) is cast
      0.6 times a Rogue a match, and the Combat reference is only +0.7pt over
      its stem.
-5. **Rupture is below** (−2.4pt past its allowance, margin z −5.3,
+5. **Rupture is below** (−2.4pt past its allowance, margin z −5.6,
    replicated).
    - It is 60 damage over 12s for 25 energy, on a 20s cooldown, cast 1.2
      times a Rogue a match.
@@ -485,7 +495,7 @@ the user:
 6. **Lightning Reflexes and Deflection are one node in two places.**
    - A rank of either is worth nothing on the Assassination stem (+0.0pt).
    - It avoids 0.22 of the 6.5 melee attacks a Rogue takes a match.
-   - Their "below" (margin z −2.3) does not clear the threshold.
+   - Their "below" (margin z −2.6) does not clear the threshold.
    - Directions: give parry its own effect (TBC's parry haste, or
      front-only); and re-read their declared 11 a rank against how few melee
      hits a Rogue takes.
@@ -496,11 +506,13 @@ the user:
      Rogue uses, free or not.
    - This is a mechanic defect, not a tuning one: a follow-up card.
 8. **Master of Subtlety's first rank is below on the floor rule** (−0.8pt past
-   its allowance, margin z −2.1, block 1 only). It fires exactly once a match,
+   its allowance, margin z −2.8, block 1 only). It fires exactly once a match,
    on the opener.
 9. **Master Poisoner and Initiative's second rank are within only by the price
    model.** Against a full Vitality, at allowance 0, both are below (−1.2 and
-   −1.1pt, against floors of 0.9 and 0.6).
+   −1.1pt, against floors of 0.9 and 0.6). Initiative's second rank is also
+   significantly below a stat rank of its price (margin z −3.38, block 1),
+   but by less than its floor, so it stays within.
 
 Each item is a direction for AS-441, not a value. A directional run may not be
 cited as the Rogue's standing.
