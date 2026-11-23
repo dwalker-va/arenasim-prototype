@@ -15,8 +15,9 @@
 //! which flush comes first, so this boots it, as `animation_sandbox_boot.rs`
 //! does, and restarts every entry of a class mid-effect.
 //!
-//! Talent abilities are left out: the sandbox's staged caster has no build,
-//! so its book lacks them, and the cast cannot be previewed at all.
+//! Talent abilities are restarted too (AS-509): each is staged on a caster
+//! with the build that grants it, and leaving one restages the caster
+//! through the same sweep.
 
 use std::time::Duration;
 
@@ -29,10 +30,10 @@ use arenasim::combat::CombatPlugin;
 use arenasim::states::animation_sandbox::playback::{
     entries_for_class, SandboxEntry, SandboxPlayback,
 };
-use arenasim::states::animation_sandbox::{SandboxConfig, SandboxEntity};
+use arenasim::states::animation_sandbox::{SandboxConfig, SandboxEntity, SandboxStage};
 use arenasim::states::match_config::CharacterClass;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
-use arenasim::states::play_match::components::PlayMatchEntity;
+use arenasim::states::play_match::components::{Combatant, PlayMatchEntity};
 use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::play_match::{AbilityConfigPlugin, MapConfigPlugin, MovementConfigPlugin};
 use arenasim::states::{GameState, StatesPlugin};
@@ -117,12 +118,6 @@ fn restart_every_entry(class: CharacterClass) -> usize {
         if !listing.family.is_playable() {
             continue;
         }
-        if let SandboxEntry::Ability(ability) = listing.entry {
-            let defs = app.world().resource::<AbilityDefinitions>();
-            if defs.get(&ability).is_some_and(|c| c.talent) {
-                continue;
-            }
-        }
         app.world_mut()
             .resource_mut::<SandboxPlayback>()
             .select(listing.entry, listing.family);
@@ -146,6 +141,24 @@ fn restart_every_entry(class: CharacterClass) -> usize {
                 listing.label,
                 left.len()
             );
+            // The entry plays on a caster whose book holds it, unlocked (a
+            // pet's ability is in its pet's book).
+            let caster_ability = match listing.entry {
+                SandboxEntry::Ability(ability) => {
+                    let defs = app.world().resource::<AbilityDefinitions>();
+                    defs.get(&ability).unwrap().pet.is_none().then_some(ability)
+                }
+                SandboxEntry::Body(_) => None,
+            };
+            if let Some(ability) = caster_ability {
+                let caster = app.world().resource::<SandboxStage>().caster.unwrap();
+                let book = app.world().get::<Combatant>(caster).unwrap().book();
+                assert!(
+                    book.contains(&ability) && !book.is_locked(ability),
+                    "{}: the caster cannot cast it",
+                    listing.label
+                );
+            }
             for _ in 1..frames {
                 app.update();
             }
@@ -156,6 +169,122 @@ fn restart_every_entry(class: CharacterClass) -> usize {
         }
     }
     swept_rigs
+}
+
+/// The old caster a switch restages, and whether it was still in the world
+/// in `PostUpdate`: after every `Update` system had run.
+#[derive(Resource, Default)]
+struct OldCaster {
+    entity: Option<Entity>,
+    alive_after_update: bool,
+}
+
+fn watch_old_caster(mut watch: ResMut<OldCaster>, entities: Query<()>) {
+    if let Some(old) = watch.entity {
+        watch.alive_after_update = entities.get(old).is_ok();
+    }
+}
+
+/// Switch from each entry of `class` to the next mid-effect, with no stop
+/// between: a switch into or out of a talent entry restages the caster
+/// (`restage_caster_for_entry`), and the caster it leaves, with every rig
+/// it carries, goes through the sweep: still there for every `Update`
+/// system, which may emit onto it that frame, and gone after `Last`.
+/// Returns how many switches restaged the caster, and how many of those
+/// left one with children.
+fn switch_every_entry_mid_effect(class: CharacterClass) -> (usize, usize) {
+    let mut app = boot_app();
+    app.init_resource::<OldCaster>()
+        .add_systems(PostUpdate, watch_old_caster);
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+        16,
+    )));
+    app.update();
+    app.insert_resource(SandboxConfig {
+        caster_class: class,
+        ..Default::default()
+    });
+    app.world_mut()
+        .resource_mut::<NextState<GameState>>()
+        .set(GameState::AnimationSandbox);
+    for _ in 0..4 {
+        app.update();
+    }
+    let entries = entries_for_class(class, app.world().resource::<AbilityDefinitions>());
+    let (mut restaged, mut with_children) = (0, 0);
+    for listing in entries {
+        let old = app.world().resource::<SandboxStage>().caster.unwrap();
+        app.world_mut().resource_mut::<OldCaster>().entity = Some(old);
+        let old_tree: Vec<Entity> = app
+            .world()
+            .get::<Children>(old)
+            .map(|kids| kids.iter().collect())
+            .unwrap_or_default();
+        {
+            let mut playback = app.world_mut().resource_mut::<SandboxPlayback>();
+            playback.select(listing.entry, listing.family);
+            playback.restart_requested = true;
+        }
+        app.update();
+        if app.world().resource::<SandboxStage>().caster != Some(old) {
+            restaged += 1;
+            if !old_tree.is_empty() {
+                with_children += 1;
+            }
+            assert!(
+                app.world().resource::<OldCaster>().alive_after_update,
+                "{}: the old caster was despawned before the sweep",
+                listing.label
+            );
+            // The caster it left is gone, children and all.
+            for e in std::iter::once(old).chain(old_tree) {
+                assert!(
+                    app.world().get_entity(e).is_err(),
+                    "{}: the restage left the old caster's {e}",
+                    listing.label
+                );
+            }
+        }
+        for _ in 0..40 {
+            app.update();
+        }
+    }
+    (restaged, with_children)
+}
+
+macro_rules! switch_mid_effect {
+    ($($name:ident: $class:expr,)*) => {$(
+        #[test]
+        fn $name() {
+            let (restaged, with_children) = switch_every_entry_mid_effect($class);
+            // Not vacuous: the caster was restaged, children and all.
+            assert!(restaged > 0 && with_children > 0, "{:?}: {restaged} restages, {with_children} with children", $class);
+        }
+    )*};
+}
+
+switch_mid_effect! {
+    priest_entries_switch_mid_effect: CharacterClass::Priest,
+    rogue_entries_switch_mid_effect: CharacterClass::Rogue,
+    warlock_entries_switch_mid_effect: CharacterClass::Warlock,
+    paladin_entries_switch_mid_effect: CharacterClass::Paladin,
+}
+
+/// The classes above are every class with a talent ability, the only ones
+/// whose caster a switch restages.
+#[test]
+fn every_class_with_a_talent_ability_switches_mid_effect() {
+    let defs = AbilityDefinitions::shipped();
+    let with: std::collections::BTreeSet<String> = defs
+        .talent_abilities()
+        .iter()
+        .map(|a| format!("{:?}", defs.get(a).unwrap().class))
+        .collect();
+    let tested: std::collections::BTreeSet<String> = ["Priest", "Rogue", "Warlock", "Paladin"]
+        .map(String::from)
+        .into_iter()
+        .collect();
+    assert_eq!(with, tested);
 }
 
 macro_rules! restart_mid_effect {

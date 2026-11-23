@@ -1891,6 +1891,77 @@ impl TalentDefinitions {
         }
         self.validate_build(class, &next).ok().map(|()| next)
     }
+
+    /// The node that grants the talent ability `ability`, or `None` for an
+    /// ability no node grants (every base ability). The loader holds each
+    /// talent ability to exactly one granting node.
+    pub fn granting_node(&self, ability: AbilityType) -> Option<TalentId> {
+        self.iter()
+            .find(|(_, t)| t.per_rank.contains(&TalentEffect::Grant(ability)))
+            .map(|(id, _)| id)
+    }
+
+    /// The smallest legal build of `class` that holds a rank of `talent`,
+    /// learned rank by rank through [`learn`](Self::learn): its prerequisite
+    /// first (itself built the same way), then, while its tier is closed, a
+    /// rank of the lowest-tier node of its tree below it that can take one
+    /// (in `TalentId` order among ties). Every point below the talent's tier
+    /// counts toward opening it, a prerequisite's included, so no legal build
+    /// holding it spends fewer.
+    pub fn smallest_build_with(
+        &self,
+        class: CharacterClass,
+        talent: TalentId,
+    ) -> Result<Build, String> {
+        let mut build = Build::default();
+        self.learn_with_prerequisites(class, &mut build, talent)?;
+        Ok(build)
+    }
+
+    fn learn_with_prerequisites(
+        &self,
+        class: CharacterClass,
+        build: &mut Build,
+        talent: TalentId,
+    ) -> Result<(), String> {
+        let node = self
+            .talents
+            .get(&talent)
+            .filter(|t| t.class == class)
+            .ok_or_else(|| format!("{talent:?} is not a {class:?} talent"))?;
+        if let Some((required, rank)) = node.requires {
+            while build.rank(required) < rank {
+                self.learn_with_prerequisites(class, build, required)?;
+            }
+        }
+        loop {
+            match self.learn(class, build, talent) {
+                Ok(next) => {
+                    *build = next;
+                    return Ok(());
+                }
+                Err(LearnBlocker::TierClosed { tree, .. }) => {
+                    let filler = self
+                        .talents_for_class(class)
+                        .filter(|(_, t)| t.tree == tree && t.tier < node.tier)
+                        .filter(|(id, _)| self.learn_blocker(class, build, *id).is_none())
+                        .min_by_key(|(id, t)| (t.tier, *id))
+                        .map(|(id, _)| id)
+                        .ok_or_else(|| {
+                            format!("no rank below {talent:?} can open its tier for a {class:?}")
+                        })?;
+                    *build = self
+                        .learn(class, build, filler)
+                        .map_err(|b| format!("{filler:?} cannot be learned: {b:?}"))?;
+                }
+                Err(blocker) => {
+                    return Err(format!(
+                        "{talent:?} cannot be learned by a {class:?}: {blocker:?}"
+                    ))
+                }
+            }
+        }
+    }
 }
 
 /// A build's spec, as the team frames, Results and the talent panel name it.

@@ -31,8 +31,10 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 
 use super::match_config::{
-    ArenaMap, CharacterClass, MageArmor, PaladinAura, RogueOpener, RoguePoison, WarriorShout,
+    ArenaMap, CharacterClass, MageArmor, MatchConfig, PaladinAura, PriestForm, RogueOpener,
+    RoguePoison, WarlockCurse, WarriorShout,
 };
+use super::play_match::ability_config::AbilityDefinitions;
 use super::play_match::ai_profile::AiProfiles;
 use super::play_match::components::{
     ArenaCamera, ArenaDampening, CameraController, CameraMode, GameRng, MatchCountdown,
@@ -42,8 +44,11 @@ use super::play_match::equipment::{
     resolve_equipped_loadout, DefaultLoadouts, ItemDefinitions, Loadout,
 };
 use super::play_match::map_config::{ActiveMapGeometry, MapGeometryConfig};
+use super::play_match::talent_choices::{ChoiceOption, SlotChoices};
+use super::play_match::talents::{resolve_for_spawn, Build, TalentDefinitions};
 use super::play_match::team_plan::TeamPlans;
 use super::play_match::{spawn_combatant, PlayMatchEntity};
+use playback::{SandboxEntry, SandboxPlayback, SandboxSweep};
 
 /// Point the camera frames: the midpoint of the pair when a dummy is staged, so
 /// relational visuals sit in the middle of the shot, otherwise the caster.
@@ -129,6 +134,98 @@ pub struct SandboxStage {
     /// restorable — otherwise the next entry plays off-centre and the camera
     /// presets frame empty floor.
     pub caster_home: Vec3,
+    /// The build and choices the staged caster was spawned with
+    /// ([`staged_build`] for the selected entry).
+    pub caster_build: StagedBuild,
+}
+
+/// The talent build a staged caster is spawned with, and the per-match
+/// choices its slot made.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StagedBuild {
+    pub build: Build,
+    pub choices: SlotChoices,
+}
+
+/// The build the caster of `class` is staged with to play `entry`.
+///
+/// A talent ability is in a book only when a build grants it, so a talent
+/// entry stages the smallest legal build holding the one node that grants it
+/// (`TalentDefinitions::granting_node`, `smallest_build_with`), with the
+/// per-match choices its `Requires` rules ask for (Shadowform and Silence
+/// want the Shadowform form). Every other entry, and no entry, stages the
+/// untalented caster a match spawns from a default slot. The spawn resolves
+/// it through `resolve_for_spawn`, so the caster's book holds the ability
+/// exactly as a match's would.
+pub fn staged_build(
+    talents: &TalentDefinitions,
+    abilities: &AbilityDefinitions,
+    class: CharacterClass,
+    entry: Option<SandboxEntry>,
+) -> Result<StagedBuild, String> {
+    let base = SlotChoices::from_config(&MatchConfig::default(), 1, 0, class);
+    let talent_ability = match entry {
+        Some(SandboxEntry::Ability(ability))
+            if abilities.get(&ability).is_some_and(|c| c.talent) =>
+        {
+            ability
+        }
+        _ => {
+            return Ok(StagedBuild {
+                build: Build::default(),
+                choices: base,
+            })
+        }
+    };
+    let node = talents
+        .granting_node(talent_ability)
+        .ok_or_else(|| format!("no talent grants {talent_ability:?}"))?;
+    Ok(StagedBuild {
+        build: talents.smallest_build_with(class, node)?,
+        choices: talents.choices_to_cast(&base, talent_ability),
+    })
+}
+
+/// The menu picks `spawn_combatant` takes, read off a slot's choices: each
+/// menu's chosen option, its default where the slot chose none.
+struct MenuPicks {
+    rogue_opener: RogueOpener,
+    rogue_poison: RoguePoison,
+    warlock_curses: Vec<WarlockCurse>,
+    warrior_shout: WarriorShout,
+    mage_armor: MageArmor,
+    paladin_aura: PaladinAura,
+    priest_form: PriestForm,
+}
+
+impl MenuPicks {
+    fn of(choices: &SlotChoices) -> Self {
+        let mut picks = MenuPicks {
+            rogue_opener: RogueOpener::default(),
+            rogue_poison: RoguePoison::default(),
+            warlock_curses: Vec::new(),
+            warrior_shout: WarriorShout::default(),
+            mage_armor: MageArmor::default(),
+            paladin_aura: PaladinAura::default(),
+            priest_form: PriestForm::default(),
+        };
+        for option in choices.options() {
+            match option {
+                ChoiceOption::RogueOpener(o) => picks.rogue_opener = o,
+                ChoiceOption::RoguePoison(p) => picks.rogue_poison = p,
+                ChoiceOption::WarlockCurse(c) => picks.warlock_curses.push(c),
+                ChoiceOption::WarriorShout(s) => picks.warrior_shout = s,
+                ChoiceOption::MageArmor(a) => picks.mage_armor = a,
+                ChoiceOption::PaladinAura(a) => picks.paladin_aura = a,
+                ChoiceOption::PriestForm(f) => picks.priest_form = f,
+                // The pet a pet-command entry needs is the entry's
+                // (`drive_sandbox_pet`), and no demon is sacrificed on a
+                // stage that summons one on demand.
+                ChoiceOption::HunterPet(_) | ChoiceOption::WarlockDemon(_) => {}
+            }
+        }
+        picks
+    }
 }
 
 /// Builds the staging scene: floor, light, camera, caster, optional dummy.
@@ -143,8 +240,8 @@ pub fn setup_sandbox(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     config: Res<SandboxConfig>,
-    item_defs: Res<ItemDefinitions>,
-    default_loadouts: Res<DefaultLoadouts>,
+    defs: StageDefs,
+    playback: Res<SandboxPlayback>,
     map_geometry: Res<MapGeometryConfig>,
     mut stage: ResMut<SandboxStage>,
 ) {
@@ -199,8 +296,8 @@ pub fn setup_sandbox(
         &mut materials,
         &asset_server,
         &config,
-        &item_defs,
-        &default_loadouts,
+        &defs,
+        playback.selected,
         &mut stage,
     );
 
@@ -238,9 +335,29 @@ pub fn setup_sandbox(
     ));
 }
 
-/// Spawns the caster and, when enabled, the dummy. Split out of
-/// [`setup_sandbox`] so a config change can restage without rebuilding the
-/// floor, light and camera.
+/// The tables a staged unit is spawned from.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct StageDefs<'w> {
+    item_defs: Res<'w, ItemDefinitions>,
+    default_loadouts: Res<'w, DefaultLoadouts>,
+    talents: Res<'w, TalentDefinitions>,
+    abilities: Res<'w, AbilityDefinitions>,
+}
+
+impl StageDefs<'_> {
+    /// [`staged_build`] for `entry`, which every entry the panel lists has.
+    fn staged_build(&self, class: CharacterClass, entry: Option<SandboxEntry>) -> StagedBuild {
+        staged_build(&self.talents, &self.abilities, class, entry)
+            .unwrap_or_else(|e| panic!("the sandbox cannot stage a {class:?} for {entry:?}: {e}"))
+    }
+}
+
+const CASTER_HOME: Vec3 = Vec3::new(-STAGE_SEPARATION, 1.0, 0.0);
+const DUMMY_HOME: Vec3 = Vec3::new(STAGE_SEPARATION, 1.0, 0.0);
+
+/// Spawns the caster, with the build `entry` needs, and, when enabled, the
+/// untalented dummy. Split out of [`setup_sandbox`] so a config change can
+/// restage without rebuilding the floor, light and camera.
 #[allow(clippy::too_many_arguments)]
 fn stage_units(
     commands: &mut Commands,
@@ -248,12 +365,50 @@ fn stage_units(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     asset_server: &AssetServer,
     config: &SandboxConfig,
-    item_defs: &ItemDefinitions,
-    default_loadouts: &DefaultLoadouts,
+    defs: &StageDefs,
+    entry: Option<SandboxEntry>,
     stage: &mut SandboxStage,
 ) {
-    let caster_home = Vec3::new(-STAGE_SEPARATION, 1.0, 0.0);
-    let dummy_home = Vec3::new(STAGE_SEPARATION, 1.0, 0.0);
+    stage_caster(
+        commands,
+        meshes,
+        materials,
+        asset_server,
+        config,
+        defs,
+        entry,
+        stage,
+    );
+
+    stage.dummy = config.dummy_enabled.then(|| {
+        spawn_staged_unit(
+            commands,
+            meshes,
+            materials,
+            asset_server,
+            2,
+            config.dummy_class,
+            DUMMY_HOME,
+            CASTER_HOME,
+            defs,
+            &defs.staged_build(config.dummy_class, None),
+        )
+    });
+}
+
+/// Spawns the caster with the build `entry` needs and records it on `stage`.
+#[allow(clippy::too_many_arguments)]
+fn stage_caster(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &AssetServer,
+    config: &SandboxConfig,
+    defs: &StageDefs,
+    entry: Option<SandboxEntry>,
+    stage: &mut SandboxStage,
+) {
+    let build = defs.staged_build(config.caster_class, entry);
     // Each unit squares off against its partner. With no dummy staged the
     // caster still faces the dummy's spot — where every relational visual
     // (projectile, trap throw, launch jet) is aimed.
@@ -264,28 +419,14 @@ fn stage_units(
         asset_server,
         1,
         config.caster_class,
-        caster_home,
-        dummy_home,
-        item_defs,
-        default_loadouts,
+        CASTER_HOME,
+        DUMMY_HOME,
+        defs,
+        &build,
     );
     stage.caster = Some(caster);
-    stage.caster_home = caster_home;
-
-    stage.dummy = config.dummy_enabled.then(|| {
-        spawn_staged_unit(
-            commands,
-            meshes,
-            materials,
-            asset_server,
-            2,
-            config.dummy_class,
-            dummy_home,
-            caster_home,
-            item_defs,
-            default_loadouts,
-        )
-    });
+    stage.caster_home = CASTER_HOME;
+    stage.caster_build = build;
 }
 
 /// Spawns one combatant through the match's own spawn path, then tags it as
@@ -307,14 +448,26 @@ fn spawn_staged_unit(
     class: CharacterClass,
     position: Vec3,
     face_toward: Vec3,
-    item_defs: &ItemDefinitions,
-    default_loadouts: &DefaultLoadouts,
+    defs: &StageDefs,
+    staged: &StagedBuild,
 ) -> Entity {
+    let item_defs: &ItemDefinitions = &defs.item_defs;
     // Through the one resolver every match spawn site uses, rather than a
     // local restatement of its passes — a restatement here fell behind the
     // day `resolve_equipped_loadout` grew the class-restriction pass.
     let loadout: Loadout =
-        resolve_equipped_loadout(class, default_loadouts, &Loadout::new(), item_defs);
+        resolve_equipped_loadout(class, &defs.default_loadouts, &Loadout::new(), item_defs);
+    // The build resolves as a match's spawn resolves it.
+    let resolved = resolve_for_spawn(
+        &defs.talents,
+        &defs.abilities,
+        team,
+        0,
+        class,
+        &staged.build,
+        &staged.choices,
+    );
+    let picks = MenuPicks::of(&staged.choices);
 
     let (entity, _combatant) = spawn_combatant(
         commands,
@@ -326,20 +479,16 @@ fn spawn_staged_unit(
         class,
         position,
         0,
-        RogueOpener::default(),
-        RoguePoison::default(),
-        Vec::new(),
-        WarriorShout::default(),
-        MageArmor::default(),
-        PaladinAura::default(),
-        crate::states::match_config::PriestForm::default(),
+        picks.rogue_opener,
+        picks.rogue_poison,
+        picks.warlock_curses,
+        picks.warrior_shout,
+        picks.mage_armor,
+        picks.paladin_aura,
+        picks.priest_form,
         &loadout,
         item_defs,
-        // The sandbox stages the shipped, untalented kit.
-        &super::play_match::talents::ResolvedBuild::untalented(
-            super::play_match::ability_config::AbilityDefinitions::shipped(),
-            class,
-        ),
+        &resolved,
     );
     commands.entity(entity).insert((
         SandboxEntity,
@@ -360,8 +509,8 @@ pub fn restage_on_config_change(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     config: Res<SandboxConfig>,
-    item_defs: Res<ItemDefinitions>,
-    default_loadouts: Res<DefaultLoadouts>,
+    defs: StageDefs,
+    playback: Res<SandboxPlayback>,
     mut stage: ResMut<SandboxStage>,
 ) {
     if !config.is_changed() || config.is_added() {
@@ -388,8 +537,48 @@ pub fn restage_on_config_change(
         &mut materials,
         &asset_server,
         &config,
-        &item_defs,
-        &default_loadouts,
+        &defs,
+        playback.selected,
+        &mut stage,
+    );
+}
+
+/// Restages the caster when the selected entry needs another build: a talent
+/// ability is in the caster's book only when its build grants it
+/// ([`staged_build`]), and leaving a talent entry returns the caster to the
+/// untalented kit.
+///
+/// Runs before `drive_playback`, so the entry starts on the caster that holds
+/// it. The old caster and its pet go through the [`SandboxSweep`], in `Last`:
+/// the effect systems still emit onto the rigs they carry this frame (AS-507).
+#[allow(clippy::too_many_arguments)]
+pub fn restage_caster_for_entry(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    config: Res<SandboxConfig>,
+    defs: StageDefs,
+    playback: Res<SandboxPlayback>,
+    mut stage: ResMut<SandboxStage>,
+    mut sweep: ResMut<SandboxSweep>,
+) {
+    if stage.caster.is_none()
+        || stage.caster_build == defs.staged_build(config.caster_class, playback.selected)
+    {
+        return;
+    }
+    sweep
+        .0
+        .extend(stage.caster.take().into_iter().chain(stage.pet.take()));
+    stage_caster(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &asset_server,
+        &config,
+        &defs,
+        playback.selected,
         &mut stage,
     );
 }
