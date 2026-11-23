@@ -27,10 +27,10 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::{
     animate_client_particles, animate_mind_flay_channels, beam_flip, beam_joints, beam_segments,
-    billboard_mind_flay_particles, held_before_body, mana_funnel_flicker, sync_mind_flay_channels,
-    BeamTexture, ChannelBeam, ChannelVisual, EmitterSprite, ManaFunnelChannel, ManaFunnelStar,
-    ManaFunnelStarQuad, StarEnd, StarQuad, MANA_BEAM, MANA_FUNNEL_FLICKER, MIND_FLAY_SPARK_EMITTER,
-    MIND_FLAY_WISP_EMITTER,
+    billboard_mind_flay_particles, mana_funnel_flicker, place_mana_funnel_stars,
+    sync_mind_flay_channels, BeamTexture, ChannelBeam, ChannelVisual, EmitterSprite,
+    ManaFunnelChannel, ManaFunnelStar, ManaFunnelStarQuad, StarEnd, StarQuad, MANA_BEAM,
+    MANA_FUNNEL_FLICKER, MIND_FLAY_SPARK_EMITTER, MIND_FLAY_WISP_EMITTER,
 };
 use arenasim::CharacterClass;
 use bevy::prelude::*;
@@ -228,6 +228,8 @@ impl Harness {
                 animate_mind_flay_channels,
                 animate_client_particles,
                 billboard_mind_flay_particles,
+                // A `BodyPlacement` system (PostUpdate in the client).
+                place_mana_funnel_stars,
             )
                 .chain(),
         );
@@ -419,17 +421,53 @@ impl Harness {
 const HAND: Vec3 = Vec3::new(-9.7, 1.05, -0.72);
 /// The Warrior's chest: 0.55 above its transform.
 const CHEST: Vec3 = Vec3::new(5.0, 1.55, 0.0);
-/// The stars' lift toward the camera: the UA glow's, 0.5 + 0.18 + 0.07 yd.
-const LIFT: f32 = 0.75;
 const PRIEST_AT: Vec3 = Vec3::new(-10.0, 1.0, 0.0);
 const VICTIM_AT: Vec3 = Vec3::new(5.0, 1.0, 0.0);
 
-/// Where a star on `at`, on a body standing at `body`, is drawn: on the
-/// anchor's view ray, no farther than 0.75 yd in front of the body's axis.
-fn lifted(at: Vec3, body: Vec3, eye: Vec3) -> Vec3 {
-    let axis = Vec3::new(body.x, at.y, body.z);
-    let depth = eye.distance(at).min(eye.distance(axis) - LIFT);
-    eye + (at - eye).normalize() * depth
+/// The view depth of the nearest point of a body standing at `root`, for a
+/// camera `cam`: a combatant's capsule (radius 0.5, segment ±0.75 about its
+/// centre), a pet's bounding sphere (0.35 + 0.3 about a centre 0.45 below
+/// its root).
+fn body_near(root: Vec3, pet: bool, cam: &Transform) -> f32 {
+    let f = cam.forward().as_vec3();
+    let depth = |p: Vec3| (p - cam.translation).dot(f);
+    if pet {
+        depth(root - Vec3::Y * 0.45) - 0.65
+    } else {
+        depth(root - Vec3::Y * 0.75).min(depth(root + Vec3::Y * 0.75)) - 0.5
+    }
+}
+
+/// Where a star on `at`, on a body standing at `root`, is drawn, and the
+/// scale it is drawn at: an anchor deeper than 0.05 yd in front of the body's
+/// nearest point slides along its own view ray to that depth, scaled by the
+/// same ratio; one already nearer stays.
+fn held(at: Vec3, root: Vec3, pet: bool, cam: &Transform) -> (Vec3, f32) {
+    let f = cam.forward().as_vec3();
+    let depth = (at - cam.translation).dot(f);
+    let limit = body_near(root, pet, cam) - 0.05;
+    if depth <= limit {
+        return (at, 1.0);
+    }
+    let k = limit / depth;
+    (cam.translation + (at - cam.translation) * k, k)
+}
+
+/// The star at `end` is drawn where [`held`] puts its anchor, at its scale.
+fn assert_held(h: &Harness, root: Entity, end: StarEnd, want: (Vec3, f32)) {
+    let t = h.transform(h.star(root, end));
+    assert!(
+        near(t.translation, want.0),
+        "{end:?}: {} vs {}",
+        t.translation,
+        want.0
+    );
+    assert!(
+        (t.scale - Vec3::splat(want.1)).length() < 1e-4,
+        "{end:?}: scale {} vs {}",
+        t.scale,
+        want.1
+    );
 }
 
 fn rgb_of(c: Color) -> [f32; 3] {
@@ -523,7 +561,7 @@ fn a_mind_flay_draws_two_stars_and_a_beam_as_the_bench_does() {
 }
 
 /// The stars sit on the Priest's main spell hand and on the victim's chest,
-/// each held 0.75 yd toward the camera; they follow both units, and so does
+/// each held in front of its unit's body; they follow both units, and so does
 /// the beam, whose ends stay on the hand and the chest themselves.
 #[test]
 fn the_stars_sit_on_the_hand_and_the_chest_and_follow() {
@@ -533,13 +571,12 @@ fn the_stars_sit_on_the_hand_and_the_chest_and_follow() {
     h.channel(priest, AbilityType::MindFlay, victim);
     h.tick(2);
     let root = h.visuals()[0].0;
-    let eye = cam.translation;
-    let hand_star = h.transform(h.star(root, StarEnd::Hand)).translation;
-    let chest_star = h.transform(h.star(root, StarEnd::Chest)).translation;
-    assert!(near(hand_star, lifted(HAND, PRIEST_AT, eye)), "{hand_star}");
-    assert!(
-        near(chest_star, lifted(CHEST, VICTIM_AT, eye)),
-        "{chest_star}"
+    assert_held(&h, root, StarEnd::Hand, held(HAND, PRIEST_AT, false, &cam));
+    assert_held(
+        &h,
+        root,
+        StarEnd::Chest,
+        held(CHEST, VICTIM_AT, false, &cam),
     );
     let p = h.positions(h.beam(root));
     let (first, last) = ((p[0] + p[1]) / 2.0, (p[p.len() - 2] + p[p.len() - 1]) / 2.0);
@@ -556,14 +593,13 @@ fn the_stars_sit_on_the_hand_and_the_chest_and_follow() {
     // (0.72, 0.05, 0.30) turned half about Y: (-0.72, 0.05, -0.30).
     let hand = Vec3::new(-10.72, 1.05, -0.3);
     let chest = Vec3::new(2.0, 1.55, 8.0);
-    assert!(near(
-        h.transform(h.star(root, StarEnd::Hand)).translation,
-        lifted(hand, PRIEST_AT, eye)
-    ));
-    assert!(near(
-        h.transform(h.star(root, StarEnd::Chest)).translation,
-        lifted(chest, Vec3::new(2.0, 1.0, 8.0), eye)
-    ));
+    assert_held(&h, root, StarEnd::Hand, held(hand, PRIEST_AT, false, &cam));
+    assert_held(
+        &h,
+        root,
+        StarEnd::Chest,
+        held(chest, Vec3::new(2.0, 1.0, 8.0), false, &cam),
+    );
     let p = h.positions(h.beam(root));
     let (first, last) = ((p[0] + p[1]) / 2.0, (p[p.len() - 2] + p[p.len() - 1]) / 2.0);
     assert!(near(first, hand) && near(last, chest), "{first} .. {last}");
@@ -590,43 +626,9 @@ fn a_pet_victims_star_sits_at_the_pets_chest() {
     h.tick(1);
     let root = h.visuals()[0].0;
     let chest = Vec3::new(3.0, 0.75 - 0.45 + 0.55 * 0.55, 2.0);
-    let got = h.transform(h.star(root, StarEnd::Chest)).translation;
-    assert!(
-        near(
-            got,
-            lifted(chest, Vec3::new(3.0, 0.75, 2.0), cam.translation)
-        ),
-        "{got}"
-    );
-}
-
-/// A star is drawn on its anchor's view ray, no farther from the camera than
-/// 0.75 yd in front of its body's axis: an anchor behind or beside the axis
-/// comes forward to that depth; one already nearer stays put; with no camera,
-/// nothing moves.
-#[test]
-fn a_star_is_held_in_front_of_its_body_on_its_own_ray() {
-    let eye = Vec3::new(0.0, 0.0, 20.0);
-    let body = Vec3::new(0.0, -1.0, 0.0);
-    // Behind the axis (0.7 yd off it, away from the camera): pulled to 19.25.
-    let behind = Vec3::new(0.0, 0.0, -0.7);
-    assert!(near(
-        held_before_body(behind, body, Some(eye)),
-        Vec3::new(0.0, 0.0, 0.75)
-    ));
-    // Beside it, off the view axis: on its own ray, 0.75 yd nearer than the axis.
-    let beside = Vec3::new(0.7, 0.0, 0.0);
-    let got = held_before_body(beside, body, Some(eye));
-    assert!(
-        close(got.distance(eye), 20.0 - 0.75),
-        "{}",
-        got.distance(eye)
-    );
-    assert!((got - eye).normalize().dot((beside - eye).normalize()) > 0.99999);
-    // Already a yard in front: stays.
-    let ahead = Vec3::new(0.2, 0.0, 1.0);
-    assert!(near(held_before_body(ahead, body, Some(eye)), ahead));
-    assert!(near(held_before_body(behind, body, None), behind));
+    let (at, k) = held(chest, Vec3::new(3.0, 0.75, 2.0), true, &cam);
+    assert!(k < 1.0, "the pet's star is held");
+    assert_held(&h, root, StarEnd::Chest, (at, k));
 }
 
 /// Wherever the camera stands, rolled or not: every star quad faces it,
@@ -786,8 +788,8 @@ fn the_drawn_beam_zig_zags_and_reseeds_every_flip() {
 }
 
 /// Through the default match camera (60 yd, 38.7 degrees, FOV 45, a 1080-line
-/// screen): each star stands in front of its body's near skin and of a
-/// stacked Corruption shroud (0.68 yd), yet projects onto its anchor; the
+/// screen): each star sorts in front of its whole body (and so of a stacked
+/// Corruption shroud), yet projects onto its anchor; the
 /// beam reads at about 5 px across and the stars at about 50 and 24.
 #[test]
 fn the_match_camera_sees_the_stars_over_the_bodies_and_the_beam() {
@@ -808,22 +810,26 @@ fn the_match_camera_sees_the_stars_over_the_bodies_and_the_beam() {
         (StarEnd::Hand, HAND, Vec3::new(-10.0, 1.0, 0.0)),
         (StarEnd::Chest, CHEST, Vec3::new(5.0, 1.0, 0.0)),
     ] {
-        let star = h.transform(h.star(root, end)).translation;
-        // In front of the body's skin and the shroud, nearest the camera.
-        let axis = Vec3::new(body.x, anchor.y, body.z);
-        let skin = axis.distance(eye) - 0.68;
+        let t = h.transform(h.star(root, end));
+        let star = t.translation;
+        // Sorted in front of the whole body — and so of a stacked
+        // Corruption shroud, whose sort key is its centre, on the body's
+        // axis.
+        let depth = |p: Vec3| (p - eye).dot(cam.forward().as_vec3());
+        let near_skin = body_near(body, false, &cam);
         assert!(
-            star.distance(eye) < skin - 0.05,
-            "{end:?} star at {} behind the skin at {skin}",
-            star.distance(eye)
+            depth(star) < near_skin,
+            "{end:?} star at depth {} behind the body's nearest point {near_skin}",
+            depth(star)
         );
         // On the anchor, on screen.
         assert!(
             project(star).distance(project(anchor)) < 0.5,
             "{end:?} moved on screen"
         );
-        // The quads' size on screen: 2.38 and 1.1 yd at ~60 yd.
-        let px = |yd: f32| yd * focal / star.distance(eye);
+        // The quads' size on screen: 2.38 and 1.1 yd at ~60 yd, scaled with
+        // the star by its hold.
+        let px = |yd: f32| yd * t.scale.x * focal / depth(star);
         assert!((45.0..60.0).contains(&px(2.38)), "{}", px(2.38));
         assert!((20.0..28.0).contains(&px(1.1)), "{}", px(1.1));
     }

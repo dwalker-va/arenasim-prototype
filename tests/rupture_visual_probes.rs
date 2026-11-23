@@ -27,9 +27,9 @@ use arenasim::states::play_match::components::{
     VisualBody, WeaponHand, WeaponKind, WeaponSocket,
 };
 use arenasim::states::play_match::{
-    animate_body_lean, animate_client_particles, animate_weapon_swings, billboard_bleed_droplets,
+    animate_body_lean, animate_client_particles, animate_weapon_swings,
     consume_avoided_strike_signals, consume_instant_ability_signals, fire_bleed_sprays,
-    note_avoided_strikes, update_backhand_trails, update_bleed_sprays,
+    note_avoided_strikes, place_bleed_droplets, update_backhand_trails, update_bleed_sprays,
     update_finisher_hand_flashes, BackhandTrail, BackhandTrailSegment, BleedDroplet, BleedSpray,
     BleedSprayPending, FinisherFlashPiece, FinisherHandFlash, BACKHAND_CONTACT_SECS,
 };
@@ -106,7 +106,7 @@ impl Harness {
                 fire_bleed_sprays,
                 update_bleed_sprays,
                 animate_client_particles,
-                billboard_bleed_droplets,
+                place_bleed_droplets,
             )
                 .chain(),
         );

@@ -86,6 +86,8 @@ mod dot_state;
 pub use dot_state::*;
 mod immolate;
 pub use immolate::*;
+mod body_hold;
+pub use body_hold::*;
 mod siphon_life;
 pub use siphon_life::*;
 mod aftermath;

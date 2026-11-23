@@ -4,11 +4,11 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_2, TAU};
 
+use super::body_hold::{BodyHold, HoldDisjoint, COMBATANT_BODY_RADIUS};
 use super::conflagrate::{conflagrate_material, ConflagrateSprite, CONFLAGRATE_GLOW};
 use super::druid_heals::{keyed, keyed_color};
 use super::school_impact::{IMPACT_HEAD_Y, IMPACT_PET_BODY_Y, IMPACT_PET_STATURE};
 use super::shield::disc_texture;
-use super::siphon_life::{siphon_body_capsule, siphon_drawn_point};
 use super::spell_bolts::{soft_dot_texture, star_flash_texture};
 use super::vampiric_embrace::{
     VAMPIRIC_EMBRACE_HEAL_STREAM, VAMPIRIC_EMBRACE_HEAL_VISUAL_MIN_INTERVAL_SECS, VE_HEAL_AREA,
@@ -120,13 +120,6 @@ pub const HEALING_WAVE_BUTTERFLIES: u32 = 8;
 pub const HEALING_WAVE_ORBIT_RADIUS: f32 = 1.0;
 pub const HEALING_WAVE_SWIRL_SPEED_SCALE: f32 = 1.0;
 pub const HEALING_WAVE_GLOW_INTENSITY: f32 = 1.0;
-/// Radius of the combatant capsule (`Capsule3d::new(0.5, 1.5)`). A glow quad
-/// billboarded on the spine axis renders at or BEHIND the capsule's front
-/// surface out to this radius, so any wrap layer must clear it with margin or
-/// the body occludes the glow entirely — which is exactly how the third build
-/// (0.50/0.38/0.28 radii) lost the green glow. Pinned by
-/// `healing_wave_glow_wraps_outside_the_body`.
-pub const COMBATANT_BODY_RADIUS: f32 = 0.5;
 /// Radius of the green pool of light at the recipient's feet — the Base
 /// attach grounding the effect (blessed band 0.8–1.2).
 pub const HEALING_WAVE_UNDERGLOW_RADIUS: f32 = 1.0;
@@ -382,7 +375,7 @@ pub struct HealStyle {
     /// and size over each mote's life, as a bench keys them.
     pub mote_look: Option<HealMoteLook>,
     /// Draw every mote held in front of the recipient's body, on its own
-    /// view ray and scaled to hold its screen size (`siphon_drawn_point`),
+    /// view ray and scaled to hold its screen size (`body_held_point`),
     /// as a bench that paints the motes over the body draws them. The bodies
     /// are `AlphaMode::Blend` and write no depth, so a mote deeper than the
     /// body's centre would otherwise sort behind it and vanish.
@@ -1465,58 +1458,35 @@ pub fn animate_heal_impacts(
 /// roll about the view axis so the fan stays a fan. Butterfly wings are NOT
 /// billboarded — their 3D flutter is the design — and neither is the feet
 /// under-glow, which lies in the ground plane.
+///
+/// A `BodyPlacement` system: a held style's motes are held in front of the
+/// recipient's RENDERED body this frame (`body_hold.rs`). The rig itself
+/// still stands on the recipient's root.
 #[allow(clippy::type_complexity)]
 pub fn billboard_heal_impacts(
-    camera: Query<
-        &Transform,
-        (
-            With<Camera3d>,
-            Without<HealImpact>,
-            Without<HealSprite>,
-            Without<HealMote>,
-        ),
-    >,
-    rigs: Query<(&HealImpact, &Transform, &Children)>,
-    recipients: Query<
-        (&Transform, Option<&Pet>),
-        (
-            With<Combatant>,
-            Without<HealImpact>,
-            Without<HealSprite>,
-            Without<HealMote>,
-            Without<Camera3d>,
-        ),
-    >,
+    hold: BodyHold,
+    rigs: Query<(&HealImpact, &Transform, &Children), HoldDisjoint>,
     mut sprites: Query<
         (&HealSprite, &mut Transform),
-        (
-            Without<HealImpact>,
-            Without<Camera3d>,
-            Without<HealMote>,
-            Without<Combatant>,
-        ),
+        (Without<HealImpact>, Without<HealMote>, HoldDisjoint),
     >,
     mut motes: Query<
         (&HealMote, &mut Transform),
-        (
-            Without<HealImpact>,
-            Without<Camera3d>,
-            Without<HealSprite>,
-            Without<Combatant>,
-        ),
+        (Without<HealImpact>, Without<HealSprite>, HoldDisjoint),
     >,
 ) {
-    let Some(cam) = camera.iter().next() else {
+    let Some(cam) = hold.view() else {
         return;
     };
     for (impact, rig, children) in rigs.iter() {
         let facing = rig.rotation.inverse() * cam.rotation;
-        // A held style's motes stand in front of their recipient's body.
+        // A held style's motes stand in front of their recipient's rendered
+        // body.
         let body = heal_style(impact.kind)
             .held_before_body
-            .then(|| recipients.get(impact.target).ok())
+            .then(|| hold.body(impact.target))
             .flatten()
-            .map(|(t, pet)| siphon_body_capsule(t.translation, pet.is_some()));
+            .map(|body| body.capsule());
         for child in children.iter() {
             if let Ok((sprite, mut part)) = sprites.get_mut(child) {
                 match sprite.role {
@@ -1539,8 +1509,7 @@ pub fn billboard_heal_impacts(
                 part.rotation = facing;
                 if let Some(capsule) = body {
                     let at = rig.translation + rig.rotation * mote.offset;
-                    let (drawn, k) =
-                        siphon_drawn_point(at, capsule, cam.translation, cam.forward().as_vec3());
+                    let (drawn, k) = cam.held(at, capsule);
                     part.translation = rig.rotation.inverse() * (drawn - rig.translation);
                     part.scale *= k;
                 }

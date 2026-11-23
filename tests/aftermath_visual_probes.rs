@@ -43,10 +43,9 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::talent_procs::{effect_aura, ProcEvent, TalentProcSlot};
 use arenasim::states::play_match::talents::{TalentDefinitions, TalentEffect, TalentId};
 use arenasim::states::play_match::{
-    age_aftermath_hit_particles, animate_aftermath_hits, billboard_aftermath_hit_particles,
-    cleanup_play_match, spawn_aftermath_hits, update_slow_rings, update_slow_scuffs,
-    update_slow_treatment, update_walk_animation, AbilityType, AftermathHitParticle,
-    AftermathHitRig, SlowTint,
+    age_aftermath_hit_particles, animate_aftermath_hits, cleanup_play_match, place_aftermath_hits,
+    spawn_aftermath_hits, update_slow_rings, update_slow_scuffs, update_slow_treatment,
+    update_walk_animation, AbilityType, AftermathHitParticle, AftermathHitRig, SlowTint,
 };
 use arenasim::CharacterClass;
 
@@ -376,7 +375,7 @@ impl Harness {
                 animate_aftermath_hits,
                 record_births,
                 age_aftermath_hit_particles,
-                billboard_aftermath_hit_particles,
+                place_aftermath_hits,
             )
                 .chain(),
         );

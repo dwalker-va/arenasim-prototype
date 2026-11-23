@@ -58,7 +58,7 @@ use arenasim::states::play_match::talent_mechanics::{TalentMechanic, TalentMecha
 use arenasim::states::play_match::talents::{Build, TalentDefinitions, TalentId};
 use arenasim::states::play_match::{
     animate_client_particles, animate_empowered_flashes, animate_sacrifice_triads,
-    animate_soul_link_columns, billboard_hunter_shots, hold_demonology_particles, soul_link_forms,
+    animate_soul_link_columns, billboard_hunter_shots, place_demonology_landings, soul_link_forms,
     spawn_demonology_landings, spawn_empowered_flashes, star_flash_texture,
     unhold_demonology_particles, BodyHeldParticle, SacrificeOrb, SacrificeRibbon, SacrificeTriad,
     SoulLinkColumn, SoulLinkRune,
@@ -437,7 +437,8 @@ impl Harness {
                 .before(spawn_demonology_landings),
         );
         // The order `states/mod.rs` registers, around the shared particle
-        // ager, then the world-space billboard.
+        // ager and the world-space billboard, then the `BodyPlacement` pass
+        // (PostUpdate in the client).
         app.add_systems(
             Update,
             (
@@ -446,8 +447,8 @@ impl Harness {
                 animate_soul_link_columns,
                 animate_sacrifice_triads,
                 animate_client_particles,
-                hold_demonology_particles,
                 billboard_hunter_shots,
+                place_demonology_landings,
             )
                 .chain(),
         );

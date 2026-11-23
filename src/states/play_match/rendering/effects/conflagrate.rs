@@ -4,12 +4,12 @@ use bevy::color::LinearRgba;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::body_hold::{held_in, BodyHold, HoldDisjoint};
 use super::druid_heals::{body_point, keyed, keyed_color};
 use super::hit_reaction::{insert_flinch, PendingDepth};
 use super::hunter_shots::draw;
 use super::school_impact::IMPACT_PET_STATURE;
 use super::shield::disc_texture;
-use super::siphon_life::{siphon_body_capsule, siphon_drawn_point};
 use crate::states::play_match::components::*;
 
 // ==============================================================================
@@ -79,9 +79,9 @@ use crate::states::play_match::components::*;
 //    born at the chest, and the back of the rings — is drawn first and the
 //    body paints over it. Every particle, the fire disc and every piece of
 //    the rune ring is therefore drawn on its own view ray, slid in front of
-//    the victim's body and scaled by the same ratio — Siphon Life's hold,
-//    `siphon_drawn_point` against `siphon_body_capsule` (one shared helper
-//    is AS-501) — so it projects exactly where the bench puts it. A
+//    the victim's RENDERED body and scaled by the same ratio — the shared
+//    body hold, `body_hold.rs` — so it projects exactly where the bench puts
+//    it. A
 //    particle's true flight is `ConflagrateParticle::at`; a streak is laid in
 //    the camera's plane at its particle's depth, with its projected length,
 //    as the bench's screen line is.
@@ -754,11 +754,11 @@ pub fn animate_conflagrate_bursts(
     mut commands: Commands,
     time: Res<Time>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut rigs: Query<(Entity, &mut ConflagrateBurst, &mut Transform)>,
-    victims: Query<(&Transform, Option<&Pet>), (With<Combatant>, Without<ConflagrateBurst>)>,
+    mut rigs: Query<(Entity, &mut ConflagrateBurst)>,
+    victims: Query<(&Transform, Option<&Pet>), With<Combatant>>,
 ) {
     let dt = time.delta_secs();
-    for (rig_entity, mut rig, mut transform) in rigs.iter_mut() {
+    for (rig_entity, mut rig) in rigs.iter_mut() {
         let Ok((victim, pet)) = victims.get(rig.target) else {
             commands.entity(rig_entity).despawn();
             continue;
@@ -770,8 +770,6 @@ pub fn animate_conflagrate_bursts(
         let is_pet = pet.is_some();
         rig.age += dt;
         let ms = rig.age * 1000.0;
-        transform.translation =
-            body_point(CONFLAGRATE_CHEST_ABOVE_FLOOR, victim.translation, is_pet);
 
         for (ei, e) in CONFLAGRATE_EMITTERS.iter().enumerate() {
             if !CONFLAGRATE_LAYERS[ei] || !e.emitting_at(ms) {
@@ -842,20 +840,19 @@ pub fn animate_conflagrate_bursts(
     }
 }
 
-/// Pose (graphical-only): size, fade and show or hide each burst's two rings
-/// for its age — the fire disc and the rune ring, flat at the chest.
+/// `BodyPlacement` (PostUpdate): stand each burst at its victim's rendered
+/// chest, and size, fade and show or hide its two rings for its age — the
+/// fire disc and the rune ring, flat at the chest.
 #[allow(clippy::type_complexity)]
 pub fn pose_conflagrate_rings(
     mut materials: ResMut<Assets<StandardMaterial>>,
-    camera: Query<&GlobalTransform, With<Camera3d>>,
-    rigs: Query<(&ConflagrateBurst, &Transform, &Children)>,
-    victims: Query<
-        (&Transform, Option<&Pet>),
+    hold: BodyHold,
+    mut rigs: Query<
+        (&ConflagrateBurst, &mut Transform, &Children),
         (
-            With<Combatant>,
-            Without<ConflagrateBurst>,
             Without<ConflagrateRingPart>,
             Without<ConflagrateShockPiece>,
+            HoldDisjoint,
         ),
     >,
     mut rings: Query<
@@ -865,32 +862,35 @@ pub fn pose_conflagrate_rings(
             &mut Visibility,
             Option<&Children>,
         ),
-        (Without<ConflagrateShockPiece>, Without<ConflagrateBurst>),
+        (
+            Without<ConflagrateShockPiece>,
+            Without<ConflagrateBurst>,
+            HoldDisjoint,
+        ),
     >,
     mut pieces: Query<
         (&ConflagrateShockPiece, &mut Transform),
-        (Without<ConflagrateRingPart>, Without<ConflagrateBurst>),
+        (
+            Without<ConflagrateRingPart>,
+            Without<ConflagrateBurst>,
+            HoldDisjoint,
+        ),
     >,
 ) {
-    let view = camera.iter().next().map(|c| c.compute_transform());
-    for (rig, rig_transform, children) in rigs.iter() {
+    let view = hold.view();
+    for (rig, mut rig_transform, children) in rigs.iter_mut() {
+        let Some(body) = hold.body(rig.target) else {
+            continue;
+        };
         let (fire, shock) = conflagrate_rings(rig.age * 1000.0, rig.stature);
+        let chest = body.point(CONFLAGRATE_CHEST_ABOVE_FLOOR);
+        rig_transform.translation = chest;
+        let capsule = body.capsule();
         // Each flat piece is held in front of the body as a particle is
         // (departure 5): scaled about the eye, so it projects where it was.
-        let chest = rig_transform.translation;
         let hold = |local: Vec3| -> (Vec3, f32) {
-            match (view, victims.get(rig.target)) {
-                (Some(c), Ok((victim, pet))) => {
-                    let (drawn, k) = siphon_drawn_point(
-                        chest + local,
-                        siphon_body_capsule(victim.translation, pet.is_some()),
-                        c.translation,
-                        c.forward().as_vec3(),
-                    );
-                    (drawn - chest, k)
-                }
-                _ => (local, 1.0),
-            }
+            let (drawn, k) = held_in(view, chest + local, capsule);
+            (drawn - chest, k)
         };
         for child in children.iter() {
             let Ok((part, mut transform, mut visibility, pieces_of)) = rings.get_mut(child) else {
@@ -977,18 +977,17 @@ pub fn animate_conflagrate_particles(
     }
 }
 
-/// Billboard (graphical-only): place each particle where it is drawn — held
-/// in front of its victim's body for the camera (departure 5) — turn its
-/// sprite to the camera, sized and coloured along its life, and lay its
-/// streak back along its flight as the camera sees it.
+/// `BodyPlacement` (PostUpdate): place each particle where it is drawn —
+/// held in front of its victim's rendered body for the camera (departure 5)
+/// — turn its sprite to the camera, sized and coloured along its life, and
+/// lay its streak back along its flight as the camera sees it.
 #[allow(clippy::type_complexity)]
-pub fn billboard_conflagrate_particles(
+pub fn place_conflagrate_particles(
     mut materials: ResMut<Assets<StandardMaterial>>,
-    camera: Query<&GlobalTransform, With<Camera3d>>,
-    victims: Query<(&Transform, Option<&Pet>), (With<Combatant>, Without<ConflagrateParticle>)>,
+    hold: BodyHold,
     mut particles: Query<
         (&ConflagrateParticle, &mut Transform, &Children),
-        (Without<ConflagrateParticlePart>, Without<Combatant>),
+        (Without<ConflagrateParticlePart>, HoldDisjoint),
     >,
     mut parts: Query<
         (
@@ -996,20 +995,15 @@ pub fn billboard_conflagrate_particles(
             &mut Transform,
             &MeshMaterial3d<StandardMaterial>,
         ),
-        (Without<ConflagrateParticle>, Without<Combatant>),
+        (Without<ConflagrateParticle>, HoldDisjoint),
     >,
 ) {
-    let view = camera.iter().next().map(|c| c.compute_transform());
+    let view = hold.view();
     let cam = view.map(|c| c.rotation).unwrap_or(Quat::IDENTITY);
     for (p, mut particle_transform, children) in particles.iter_mut() {
-        let (drawn, k) = match (view, victims.get(p.victim)) {
-            (Some(c), Ok((victim, pet))) => siphon_drawn_point(
-                p.at,
-                siphon_body_capsule(victim.translation, pet.is_some()),
-                c.translation,
-                c.forward().as_vec3(),
-            ),
-            _ => (p.at, 1.0),
+        let (drawn, k) = match hold.body(p.victim) {
+            Some(body) => held_in(view, p.at, body.capsule()),
+            None => (p.at, 1.0),
         };
         particle_transform.translation = drawn;
         let e = CONFLAGRATE_EMITTERS[p.emitter];
@@ -1045,7 +1039,7 @@ pub fn billboard_conflagrate_particles(
                     // length. Without a camera it lies back along the flight.
                     let (along, length) = match view {
                         Some(c) => {
-                            let f = c.forward().as_vec3();
+                            let f = c.forward;
                             let flat = back - f * back.dot(f);
                             (flat.normalize_or_zero(), length * flat.length() * k)
                         }

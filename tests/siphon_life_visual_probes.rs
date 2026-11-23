@@ -32,10 +32,11 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::{
     age_siphon_life_particles, age_warlock_dot_particles, animate_corruption_shrouds,
     animate_curse_apparitions, animate_dot_apply_bursts, animate_siphon_life_glows,
-    animate_ua_states, billboard_siphon_life_particles, billboard_warlock_dot_visuals,
-    cleanup_play_match, cleanup_siphon_life_glows, cleanup_warlock_dot_visuals,
-    orient_curse_apparitions, spawn_warlock_dot_visuals, AbilityDefinitions, AbilityType,
-    DotStateVisual, SiphonLifePart, SiphonLifeParticle, SiphonLifeRig, CORRUPTION_AURA,
+    animate_ua_states, billboard_warlock_dot_visuals, cleanup_play_match,
+    cleanup_siphon_life_glows, cleanup_warlock_dot_visuals, hide_dot_states_on_sheep,
+    orient_curse_apparitions, place_siphon_life_glows, spawn_warlock_dot_visuals,
+    AbilityDefinitions, AbilityType, DotStateVisual, SiphonLifePart, SiphonLifeParticle,
+    SiphonLifeRig, CORRUPTION_AURA,
 };
 use arenasim::CharacterClass;
 
@@ -217,8 +218,11 @@ impl Harness {
             (
                 animate_siphon_life_glows,
                 age_siphon_life_particles,
-                billboard_siphon_life_particles,
                 cleanup_siphon_life_glows,
+                // A `BodyPlacement` system in the client (PostUpdate), and
+                // the one sheep rule beside it.
+                place_siphon_life_glows,
+                hide_dot_states_on_sheep,
             )
                 .chain()
                 // The Warlock DoT detector builds the rig (`states/mod.rs`).

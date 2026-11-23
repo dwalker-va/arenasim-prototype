@@ -34,8 +34,8 @@ use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::combat_core::{Avoidance, MeleeAvoided};
 use arenasim::states::play_match::components::{
     ActiveAuras, AuraBand, AuraBandPolarity, ClientParticle, Combatant, ImpactAnchor,
-    InstantAbilityFired, MatchCountdown, PlayMatchEntity, SwingStyle, WeaponHand, WeaponSocket,
-    HEMORRHAGE_AURA,
+    InstantAbilityFired, MatchCountdown, PlayMatchEntity, SwingStyle, VisualBody, WeaponHand,
+    WeaponSocket, HEMORRHAGE_AURA,
 };
 use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::play_match::systems::CombatSystemPhase;
@@ -301,6 +301,7 @@ fn observe_drawn(
     >,
     droplets: Query<(&BleedDroplet, &Transform, &ClientParticle)>,
     camera: Query<&Transform, With<Camera3d>>,
+    bodies: Query<(&ChildOf, &Transform, &VisualBody)>,
 ) {
     let frame = seen.frame;
     if seen.enemies.is_empty() {
@@ -310,20 +311,25 @@ fn observe_drawn(
             .map(|(e, _, _)| e)
             .collect();
     }
-    // Every droplet as drawn: never deeper than its victim's body (a
-    // combatant's capsule, radius 0.5 and 0.75 either side of its origin),
-    // and at the apparent size it has where it truly is (the bench's radius
-    // keys 0.03 / 0.11 / 0.02 at life 0 / 0.25 / 1, drawn as a diameter).
+    // Every droplet as drawn: never deeper than its victim's body as it is
+    // DRAWN (a combatant's capsule, radius 0.5 and 0.75 either side of its
+    // centre: its `VisualBody`, which the gait bobs off the root), and at the
+    // apparent size it has where it truly is (the bench's radius keys 0.03 /
+    // 0.11 / 0.02 at life 0 / 0.25 / 1, drawn as a diameter).
     if let Some(cam) = camera.iter().next() {
         let (eye, fwd) = (cam.translation, cam.forward().as_vec3());
         for (d, tf, p) in droplets.iter() {
             let Ok((_, _, victim)) = combatants.get(d.victim) else {
                 continue;
             };
-            let (a, b) = (
-                victim.translation - Vec3::Y * 0.75,
-                victim.translation + Vec3::Y * 0.75,
-            );
+            let centre = bodies
+                .iter()
+                .find(|(parent, ..)| parent.parent() == d.victim)
+                .map(|(_, local, body)| {
+                    victim.transform_point(local.translation - Vec3::Y * body.rest_y)
+                })
+                .unwrap_or(victim.translation);
+            let (a, b) = (centre - Vec3::Y * 0.75, centre + Vec3::Y * 0.75);
             let nearest = (a - eye).dot(fwd).min((b - eye).dot(fwd)) - 0.5;
             let (dt, dd) = ((d.truly - eye).dot(fwd), (tf.translation - eye).dot(fwd));
             let t = p.age / 0.5;

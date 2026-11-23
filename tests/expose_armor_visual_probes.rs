@@ -1596,8 +1596,10 @@ fn the_hold_follows_a_victim_running_under_the_camera() {
             while !h.rigs().is_empty() {
                 t += DT;
                 // Up to 3 yd toward the camera and 2 across, and back, at
-                // up to about 4.5 yd/s.
-                let at = start + toward * 3.0 * (t * 1.5).sin() + across * 2.0 * (t * 2.3).sin();
+                // up to about 9 yd/s: past a run's speed, so a hold that
+                // lagged the body by a frame (0.08-0.1 yd at a run, more than
+                // the 0.05 yd clearance) would put a piece behind it.
+                let at = start + toward * 3.0 * (t * 2.5).sin() + across * 2.0 * (t * 2.3).sin();
                 h.move_victim(at);
                 h.tick();
                 if h.rigs().is_empty() {

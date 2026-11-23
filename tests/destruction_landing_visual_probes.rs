@@ -35,12 +35,12 @@ use arenasim::states::play_match::components::{
 use arenasim::states::play_match::map_config::ActiveMapGeometry;
 use arenasim::states::play_match::{
     animate_client_particles, animate_conflagrate_bursts, animate_conflagrate_particles,
-    animate_immolate_burns, animate_school_impacts, billboard_conflagrate_particles,
-    cleanup_immolate_burns, cleanup_play_match, client_landing_style, landing_style,
-    pose_conflagrate_rings, spawn_conflagrate_landings, spawn_immolate_burns, spawn_school_impacts,
-    ConflagrateBurst, ConflagrateParticle, ConflagrateParticlePart, ConflagrateRingPart,
-    ConflagrateShockPiece, ImmolateBurnRig, CONFLAGRATE_EMITTERS, FLINCH_CRIT_MULT, FLINCH_DIP,
-    IMPACT_HEAD_Y, IMPACT_PET_STATURE,
+    animate_immolate_burns, animate_school_impacts, cleanup_immolate_burns, cleanup_play_match,
+    client_landing_style, landing_style, place_conflagrate_particles, pose_conflagrate_rings,
+    spawn_conflagrate_landings, spawn_immolate_burns, spawn_school_impacts, ConflagrateBurst,
+    ConflagrateParticle, ConflagrateParticlePart, ConflagrateRingPart, ConflagrateShockPiece,
+    ImmolateBurnRig, CONFLAGRATE_EMITTERS, FLINCH_CRIT_MULT, FLINCH_DIP, IMPACT_HEAD_Y,
+    IMPACT_PET_STATURE,
 };
 use arenasim::CharacterClass;
 
@@ -317,7 +317,7 @@ impl Harness {
                 animate_conflagrate_bursts,
                 pose_conflagrate_rings,
                 animate_conflagrate_particles,
-                billboard_conflagrate_particles,
+                place_conflagrate_particles,
             )
                 .chain()
                 .after(process_casting),
