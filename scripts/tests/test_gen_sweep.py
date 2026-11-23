@@ -296,6 +296,34 @@ class SlotFieldTests(GenTestCase):
         self.assertEqual(cfg["team1_warlock_curse_prefs"], [None, ["Exhaustion", "Exhaustion"]])
         self.assertNotIn("team2_builds", cfg)
 
+    def test_a_quoted_name_is_the_bare_name(self):
+        """`Priest="Holy"` (a JSON string, as a shell-quoted spec arrives)
+        writes the same build as `Priest=Holy`: a reference build's name, not
+        a JSON object and not a string with its quotes kept (AS-300)."""
+        quoted = self.full("--build", 'Priest="Holy"')
+        bare = self.full("--build", "Priest=Holy")
+        self.assertEqual(quoted, bare)
+        named = [cfg[team + "_builds"][cfg[team].index("Priest")]
+                 for cfg in quoted for team in ("team1", "team2")
+                 if "Priest" in cfg[team]]
+        self.assertTrue(named)
+        self.assertEqual(set(named), {"Holy"})
+
+    def test_a_priest_form_reaches_every_priest_and_pads_with_no_form(self):
+        """`--for-class Priest priest_forms` (the Shadowform arm, AS-300):
+        every Priest gets the form, a slot before it the default `NoForm`."""
+        run = self.assertOk(self.gen(
+            "--t1", "Warrior+Priest", "--t2-size", "2", "--n", "1",
+            "--build", "Priest=Shadow",
+            "--for-class", "Priest", "priest_forms", '"Shadowform"'))
+        cfgs = self.configs(run)
+        cfg = [c for c in cfgs if c["team2"] == ["Warrior", "Mage"]][0]
+        self.assertEqual(cfg["team1_builds"], [{}, "Shadow"])
+        self.assertEqual(cfg["team1_priest_forms"], ["NoForm", "Shadowform"])
+        self.assertNotIn("team2_priest_forms", cfg)
+        mirror = [c for c in cfgs if c["team2"] == ["Rogue", "Priest"]][0]
+        self.assertEqual(mirror["team2_priest_forms"], ["NoForm", "Shadowform"])
+
     def test_bad_slot_flags_are_refused(self):
         base = ["--t1", "Warlock", "--t2-size", "1", "--n", "1"]
         for argv, needle in [

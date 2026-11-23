@@ -582,3 +582,24 @@ configs on one binary, so there is no patch:
 - `-arms.jsonl.tar.gz` — the inputs as run: `block1/` (19 arms, seeds 0-3)
   and `block2/` (the 12 replicated arms, seeds 4-7).
 - `-arms.csv.tar.gz` — their batch CSVs, same layout.
+
+## `2026-11-22-as300-arms.*`
+
+Behind `2026-11-22-as300-priest-talent-sweep.md` (card AS-300): the Priest
+reference builds and node arms. 29 arms of 3,396 2v2 matches each (every
+Priest cell plus 8 control cells, three maps, 4 seeds a cell a map,
+`TeamPlan`), on two seed blocks, every Priest on either side playing the
+arm's build (and, for the Shadowform arms, choosing the form). The arms are
+configs on one binary, so there is no patch:
+
+- `-arms.py` — `gen` writes the arms (through `scripts/gen_sweep.py --build`
+  / `--for-class`), `table` and `replicate` print the findings doc's tables
+  from the CSVs, each node row with its per-match margin z against the
+  Bonferroni threshold; `sample` replays a fixed slice of each arm's Priest
+  matches with full logs for the non-vacuity counts; `mechanism` replays the
+  Mind Flay arms for the channel, damage, healing and damage-taken counts.
+  `scripts/tests/test_as300_arms.py` pins the margin z and how `mechanism`
+  reads a log.
+- `-arms.jsonl.tar.gz` — the inputs as run: `block1/` (seeds 0-3) and
+  `block2/` (seeds 4-7), 29 arms each.
+- `-arms.csv.tar.gz` — their batch CSVs, same layout.
