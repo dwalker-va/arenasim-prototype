@@ -34,7 +34,8 @@ Nothing here is retuned: tuning is AS-441's batch.
 Measured at `main` fe739fb6 plus this card's three reference builds. They are
 data only, and leave untalented play byte-identical (see *Byte-identity*).
 `main` has since gained AS-357 (Vampiric Embrace and Silence visuals), which
-draws and does not touch the sim.
+writes no combat state and draws no roll, so the measurement stands on the
+merged head.
 
 ## Method
 
