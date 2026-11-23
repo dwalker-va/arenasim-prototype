@@ -31,7 +31,9 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::super::abilities::SpellSchool;
-use super::super::components::{ActiveAuras, ArenaDampening, Combatant};
+use super::super::components::{
+    ActiveAuras, ArenaDampening, Combatant, HealImpact, PlayMatchEntity,
+};
 use super::healing::apply_healing;
 use crate::combat::log::{CombatLog, CombatantId};
 
@@ -156,6 +158,13 @@ pub fn recipients(
 ///
 /// A heal to the caster logs `"<caster>'s <source> heals for N"` (Death Coil's
 /// line since it shipped); a heal to anyone else names them.
+///
+/// A leech the client draws a heal landing for (Vampiric Embrace's party
+/// heal, [`HealImpact::kind_for_leech`]) spawns its [`HealImpact`] marker on
+/// the recipient here, the one site every leech heal lands through — the
+/// both-modes cosmetic idiom of the cast heals' landings: no `game_rng` draw,
+/// no combat state written, rendered only in graphical mode. A recipient the
+/// heal cannot reach (dead, or cycloned) gets none.
 #[allow(clippy::too_many_arguments)]
 pub fn land(
     commands: &mut Commands,
@@ -170,6 +179,18 @@ pub fn land(
 ) -> f32 {
     if !recipient.is_alive() {
         return 0.0;
+    }
+    if let Some(kind) = HealImpact::kind_for_leech(&heal.source) {
+        if !recipient_auras.is_some_and(ActiveAuras::is_cycloned) {
+            commands.spawn((
+                HealImpact {
+                    target: recipient_entity,
+                    kind,
+                    age: 0.0,
+                },
+                PlayMatchEntity,
+            ));
+        }
     }
     let effective = apply_healing(
         commands,

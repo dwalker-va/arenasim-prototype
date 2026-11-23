@@ -310,11 +310,7 @@ fn innervate_lands_the_healing_wave_splash() {
 
 #[test]
 fn ramps_are_piecewise_linear_over_the_window() {
-    let r = Ramp {
-        start: 10.0,
-        mid: 20.0,
-        end: 0.0,
-    };
+    let r = Ramp::new(10.0, 20.0, 0.0);
     assert_eq!(r.at(0.0), 10.0);
     assert_eq!(r.at(0.25), 15.0);
     assert_eq!(r.at(0.5), 20.0);
