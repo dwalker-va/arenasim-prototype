@@ -1088,6 +1088,20 @@ fn try_expose_armor(
 
     builder.choose(cleared, Some(target_entity), true);
 
+    // Caster-side gesture marker: Rupture's apply stroke (AS-366). Spawned
+    // before the avoidance roll, as Rupture's is: the Rogue strikes whether or
+    // not the blow lands, and the graphical crest asks the victim's auras
+    // whether it did.
+    commands.spawn((
+        InstantAbilityFired {
+            caster: entity,
+            target: Some(target_entity),
+            ability,
+            is_crit: false,
+        },
+        PlayMatchEntity,
+    ));
+
     combatant.current_mana -= def.mana_cost;
     combatant.start_cooldown(ability);
     combatant.global_cooldown = GCD;

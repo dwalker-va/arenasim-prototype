@@ -321,23 +321,40 @@ fn sinister_strike_is_avoided_and_deals_nothing() {
 }
 
 /// Expose Armor (the Combat capstone) on a plate-armored defender: avoided,
-/// it exposes nothing.
+/// it exposes nothing — but the Rogue still strikes, so every run, landed or
+/// avoided, spawns exactly one Expose Armor gesture marker from the attacker
+/// at the defender (the backhand and the hand flash play on a dodge or parry;
+/// only the crest waits for the debuff, AS-366).
 #[test]
 fn expose_armor_is_avoided_and_exposes_nothing() {
-    assert_avoidable(
-        AbilityType::ExposeArmor,
-        "Expose Armor",
-        |a| {
-            rogue_scene(None, a)
-                .armor(2300.0)
-                .grant(ATTACKER, AbilityType::ExposeArmor)
-                .cooldown(ATTACKER, AbilityType::KidneyShot, 10.0)
-        },
-        |v| {
-            v.auras_queued
-                .contains(&(DEFENDER, AuraType::ArmorPercentReduction))
-        },
-    );
+    let build = |a| {
+        rogue_scene(None, a)
+            .armor(2300.0)
+            .grant(ATTACKER, AbilityType::ExposeArmor)
+            .cooldown(ATTACKER, AbilityType::KidneyShot, 10.0)
+    };
+    assert_avoidable(AbilityType::ExposeArmor, "Expose Armor", build, |v| {
+        v.auras_queued
+            .contains(&(DEFENDER, AuraType::ArmorPercentReduction))
+    });
+    for (run, avoidance) in [("control", NONE), ("dodge", DODGE), ("parry", PARRY)] {
+        let view = build(avoidance).decide(ATTACKER);
+        let markers: Vec<SceneInstantMarker> = view
+            .instant_markers
+            .iter()
+            .copied()
+            .filter(|m| m.ability == AbilityType::ExposeArmor)
+            .collect();
+        assert_eq!(
+            markers,
+            vec![SceneInstantMarker {
+                caster: ATTACKER,
+                target: Some(DEFENDER),
+                ability: AbilityType::ExposeArmor,
+            }],
+            "{run}: the Rogue strikes whether or not the blow lands"
+        );
+    }
 }
 
 /// Rupture (the Assassination bleed): avoided, it opens no bleed — but the
