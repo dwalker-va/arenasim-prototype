@@ -20,6 +20,7 @@ use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use bevy::render::mesh::MeshAabb;
 use bevy::time::TimeUpdateStrategy;
+use bevy::transform::TransformSystem;
 
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::ability_config::AbilityDefinitions;
@@ -31,7 +32,7 @@ use arenasim::states::play_match::components::{
 };
 use arenasim::states::play_match::{
     billboard_heal_cast_glows, cleanup_heal_cast_glows, cleanup_play_match,
-    consume_cast_ending_signals, consume_heal_cast_endings, spawn_casting_orbs,
+    consume_cast_ending_signals, consume_heal_cast_endings, place_shadow_hands, spawn_casting_orbs,
     spawn_heal_cast_glows, spawn_instant_cast_hands, update_heal_cast_glows,
     update_heal_cast_posture,
 };
@@ -151,6 +152,12 @@ impl Harness {
             )
                 .chain(),
         );
+        // The particles are placed where `states/mod.rs` places them: in
+        // `PostUpdate`, before propagation (the `BodyPlacement` set).
+        app.add_systems(
+            PostUpdate,
+            place_shadow_hands.before(TransformSystem::TransformPropagate),
+        );
         // The first update only starts the clock (`Time` reads zero delta).
         app.update();
         Harness {
@@ -262,22 +269,18 @@ impl Harness {
     fn motes(&mut self) -> Vec<MoteView> {
         let mut q = self.app.world_mut().query::<(
             &HealCastShadowMote,
-            &ChildOf,
             &GlobalTransform,
             &MeshMaterial3d<StandardMaterial>,
             &Mesh3d,
+            Has<ChildOf>,
+            Has<PlayMatchEntity>,
         )>();
         let rows: Vec<_> = q
             .iter(self.app.world())
-            .map(|(m, c, g, mat, mesh)| {
-                (
-                    m.emitter,
-                    m.age,
-                    c.parent(),
-                    *g,
-                    mat.0.clone(),
-                    mesh.0.clone(),
-                )
+            .map(|(m, g, mat, mesh, parented, tagged)| {
+                assert!(!parented, "a Shadow particle lives in the world");
+                assert!(tagged, "a Shadow particle is swept at the match's end");
+                (m.emitter, m.age, m.rig, *g, mat.0.clone(), mesh.0.clone())
             })
             .collect();
         let materials = self.app.world().resource::<Assets<StandardMaterial>>();
@@ -555,9 +558,10 @@ fn the_licks_blend_the_rings_add_and_each_wears_its_ramp() {
     assert!(seen.iter().all(|n| *n > 20), "every emitter drew: {seen:?}");
 }
 
-/// The sprites are the decoded textures' radial profiles: the lick a soft
-/// puff full at its centre, the ring dark inside 0.35 of the radius and
-/// brightest at 0.72, white in colour with the shape in alpha.
+/// The sprites are the decoded textures: the lick `fire1a2`'s black with its
+/// alpha's radial profile (a soft puff, full at its centre), the ring
+/// `shockwave10`'s luminance as white over that profile (dark inside 0.35 of
+/// the radius, brightest at 0.72).
 #[test]
 fn the_sprites_are_the_decoded_textures_profiles() {
     let mut h = Harness::at_16ms();
@@ -566,20 +570,32 @@ fn the_sprites_are_the_decoded_textures_profiles() {
     h.tick(40);
     let motes = h.motes();
     let images = h.app.world().resource::<Assets<Image>>();
-    let alpha_at = |m: &MoteView, r: f32| {
+    let texels = |m: &MoteView| {
         let image = images
             .get(m.material.base_color_texture.as_ref().unwrap())
             .unwrap();
-        let px = image.width() as usize;
-        let data = image.data.as_ref().unwrap();
+        (image.width() as usize, image.data.clone().unwrap())
+    };
+    let alpha_at = |m: &MoteView, r: f32| {
+        let (px, data) = texels(m);
         let y = px / 2;
         let x = (((1.0 + r) * 0.5 * px as f32) as usize).min(px - 1);
-        let i = (y * px + x) * 4;
-        assert_eq!(&data[i..i + 3], &[255, 255, 255], "the sprite is white");
-        data[i + 3] as f32 / 255.0
+        data[(y * px + x) * 4 + 3] as f32 / 255.0
     };
     let lick = motes.iter().find(|m| m.emitter == 0).expect("a lick");
     let ring = motes.iter().find(|m| m.emitter == 1).expect("a ring");
+    let (_, lick_texels) = texels(lick);
+    assert!(
+        lick_texels.chunks_exact(4).all(|t| t[..3] == [0, 0, 0]),
+        "fire1a2 is black"
+    );
+    let (_, ring_texels) = texels(ring);
+    assert!(
+        ring_texels
+            .chunks_exact(4)
+            .all(|t| t[..3] == [255, 255, 255]),
+        "the ring's shape is in its alpha, over white"
+    );
     // `fire1a2`'s alpha averaged by radius: 0.96 at 0.15, 0.62 at 0.475,
     // gone by the edge.
     assert!(
@@ -617,6 +633,48 @@ fn the_sprites_are_the_decoded_textures_profiles() {
     );
 }
 
+/// The licks are black from birth to death, as the client draws them: the
+/// colour track (green to black) multiplies `fire1a2`'s black, the material
+/// is a flat blend with no light and no glow, so every drawn texel is black
+/// at the track's alpha.
+#[test]
+fn the_licks_are_black_from_birth() {
+    let mut h = Harness::at_16ms();
+    let (priest, _) = h.priest(Vec3::new(0.0, 1.0, 0.0));
+    h.fire(priest, AbilityType::ShadowWordPain);
+    let mut young = 0;
+    for _ in 0..140 {
+        h.tick(1);
+        let motes = h.motes();
+        let images = h.app.world().resource::<Assets<Image>>();
+        for m in motes.iter().filter(|m| m.emitter == 0) {
+            let material = &m.material;
+            assert_eq!(material.alpha_mode, AlphaMode::Blend);
+            assert!(material.unlit, "no light on a lick");
+            assert_eq!(material.emissive, LinearRgba::BLACK, "no glow on a lick");
+            let image = images
+                .get(material.base_color_texture.as_ref().unwrap())
+                .unwrap();
+            let c = material.base_color.to_linear();
+            let brightest = image
+                .data
+                .as_ref()
+                .unwrap()
+                .chunks_exact(4)
+                .map(|t| {
+                    let rgb = [t[0], t[1], t[2]].map(|v| v as f32 / 255.0);
+                    (c.red * rgb[0]).max(c.green * rgb[1]).max(c.blue * rgb[2])
+                })
+                .fold(0.0, f32::max);
+            assert_eq!(brightest, 0.0, "a lick {:.2} s old draws colour", m.age);
+            if m.age < 0.15 {
+                young += 1;
+            }
+        }
+    }
+    assert!(young > 0, "a lick was seen at its birth");
+}
+
 // ── facing ─────────────────────────────────────────────────────────────────
 
 /// Every particle faces the camera square: its quad's normal is the
@@ -626,16 +684,33 @@ fn the_sprites_are_the_decoded_textures_profiles() {
 #[test]
 fn every_particle_faces_the_camera_unrolled() {
     let mut h = Harness::at_16ms();
-    let cam = h.camera(Vec3::new(-14.0, 17.0, 21.0), Vec3::new(1.0, 1.0, 0.0));
+    h.camera(Vec3::new(-14.0, 17.0, 21.0), Vec3::new(1.0, 1.0, 0.0));
     let (priest, _) = h.priest(Vec3::new(1.0, 1.0, 0.0));
     h.app
         .world_mut()
         .get_mut::<Transform>(priest)
         .unwrap()
         .rotation = Quat::from_rotation_y(2.1);
-    // A Mind Blast leans the torso back through its loop.
+    // A Mind Blast leans the torso back through its loop, while the camera
+    // swings round the fight, as the match camera's orbit does.
     h.begin_mind_blast(priest);
-    h.tick(30);
+    let mut cam = Quat::IDENTITY;
+    for f in 0..30 {
+        let a = 0.04 * f as f32;
+        let eye = Vec3::new(
+            -14.0 * a.cos() + 21.0 * a.sin(),
+            17.0,
+            21.0 * a.cos() + 14.0 * a.sin(),
+        );
+        let pose = Transform::from_translation(eye).looking_at(Vec3::new(1.0, 1.0, 0.0), Vec3::Y);
+        cam = pose.rotation;
+        let mut q = h
+            .app
+            .world_mut()
+            .query_filtered::<&mut Transform, With<Camera3d>>();
+        *q.single_mut(h.app.world_mut()).unwrap() = pose;
+        h.tick(1);
+    }
     let mut rolls = Vec::new();
     for m in h.motes() {
         let (_, rot, _) = m.global.to_scale_rotation_translation();
@@ -668,7 +743,7 @@ fn every_particle_faces_the_camera_unrolled() {
 
 /// A Priest running at 7 yd/s while it turns, its rendered body bobbing:
 /// every frame, each hand sits at its socket on the body AS IT IS DRAWN
-/// THAT FRAME, and each particle rides that hand.
+/// THAT FRAME.
 #[test]
 fn the_hands_ride_the_moving_rendered_body() {
     let mut h = Harness::at_16ms();
@@ -703,43 +778,47 @@ fn the_hands_ride_the_moving_rendered_body() {
                 r.at
             );
         }
-        let rig_at: Vec<(Entity, Vec3)> = rigs.iter().map(|r| (r.entity, r.at)).collect();
-        for m in h.motes() {
-            let hand = rig_at.iter().find(|(e, _)| *e == m.rig).unwrap().1;
-            let off = m.global.translation() - hand;
-            let lift = drawn.transform_vector3(Vec3::Y).normalize();
-            assert!(
-                off.cross(lift).length() < 1e-4,
-                "frame {f}: a particle left its hand's up axis: {off}"
-            );
-            checked += 1;
-        }
+        checked += rigs.len();
     }
-    assert!(checked > 100, "{checked} particle frames checked");
+    assert_eq!(checked, 2 * 90, "both hands, every frame");
 }
 
-// ── frame-rate independence ────────────────────────────────────────────────
+/// The Priest's run, at 7 yd/s along +x: where its root stands `t` seconds
+/// into the hands' clock, and so where its `side` hand is (it faces +z).
+fn run_root(t: f32) -> Vec3 {
+    Vec3::new(-6.0 + 7.0 * t, 1.0, 2.0)
+}
 
-/// What one Shadow Word: Pain draws at `t` seconds, at frame length `tick`:
-/// every rig's age and, per hand and emitter, each particle's age and world
-/// position in birth order.
-fn played_at(tick: Duration, t: f32) -> (Vec<f32>, Vec<Vec<(f32, Vec3)>>) {
+fn run_hand(t: f32, side: f32) -> Vec3 {
+    run_root(t) + Vec3::new(SOCKET.x * side, SOCKET.y, SOCKET.z)
+}
+
+/// One Shadow Word: Pain cast on the run at 7 yd/s, at frame length `tick`,
+/// read at `t`: per hand and emitter, each particle's age and world position
+/// in birth order. The rigs' ages are checked against the frame clock.
+fn played_on_the_run(tick: Duration, t: f32) -> Vec<(f32, Vec<(f32, Vec3)>)> {
     let mut h = Harness::new(tick);
-    let (priest, _) = h.priest(Vec3::new(0.0, 1.0, 0.0));
+    let (priest, _) = h.priest(run_root(0.0));
     h.fire(priest, AbilityType::ShadowWordPain);
     let frames = frames_for(t, h.dt);
-    h.tick(frames);
-    let rigs = h.rigs();
-    let mut ages: Vec<f32> = rigs.iter().map(|r| r.age).collect();
-    ages.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    for age in &ages {
+    for n in 1..=frames {
+        h.app
+            .world_mut()
+            .get_mut::<Transform>(priest)
+            .unwrap()
+            .translation = run_root(n as f32 * h.dt);
+        h.tick(1);
+    }
+    let mut rigs = h.rigs();
+    assert_eq!(rigs.len(), 2);
+    for r in &rigs {
         assert!(
-            (age - frames as f32 * h.dt).abs() < 1e-5,
-            "rig age {age} after {frames} frames of {}",
+            (r.age - frames as f32 * h.dt).abs() < 1e-5,
+            "rig age {} after {frames} frames of {}",
+            r.age,
             h.dt
         );
     }
-    let mut rigs = rigs;
     rigs.sort_by(|a, b| a.side.partial_cmp(&b.side).unwrap());
     let motes = h.motes();
     let mut drawn = Vec::new();
@@ -751,36 +830,89 @@ fn played_at(tick: Duration, t: f32) -> (Vec<f32>, Vec<Vec<(f32, Vec3)>>) {
                 .map(|m| (m.age, m.global.translation()))
                 .collect();
             list.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-            drawn.push(list);
+            drawn.push((r.side, list));
         }
     }
-    (ages, drawn)
+    drawn
 }
 
-/// At 8, 16 and 33 ms frames the same flash draws the same particles, of
-/// the same ages, in the same places: inside the kit (0.528 s), past its
-/// end (1.056 s) and in its tail (1.584 s). Each count is the clock's.
+/// The particles live in the world (flags 0x20129: no model-space bit): each
+/// is born where its hand was at its birth and stays there, a ring still and
+/// a lick rising straight up, while the Priest runs on. Checked at 16 ms
+/// frames inside the kit and in its tail.
+#[test]
+fn the_particles_stay_where_they_were_born() {
+    let mut rings_left_behind = 0;
+    for t in [0.528, 1.056] {
+        for (index, (side, list)) in played_on_the_run(Duration::from_millis(16), t)
+            .into_iter()
+            .enumerate()
+        {
+            let e = &EMITTERS[index % 3];
+            let ages: Vec<f32> = list.iter().map(|(a, _)| *a).collect();
+            assert_ages(
+                &format!("{t} s, list {index}"),
+                &ages,
+                &live_ages(e, t, KIT_SECS),
+            );
+            for (age, at) in list {
+                let born = run_hand(t - age, side);
+                let rise = at - born;
+                assert!(
+                    rise.x.abs() < 1e-3 && rise.z.abs() < 1e-3,
+                    "{t} s: a particle {age:.3} s old is {rise} off where its hand was at its birth"
+                );
+                if e.speed == 0.0 {
+                    assert!(rise.y.abs() < 1e-3, "a ring stays put: {rise}");
+                    if (at - run_hand(t, side)).length() > 7.0 * age - 1e-2 && age > 0.05 {
+                        rings_left_behind += 1;
+                    }
+                } else {
+                    let v = rise.y / age;
+                    assert!(
+                        v >= e.speed * 0.65 - 1e-3 && v <= e.speed * 1.35 + 1e-3,
+                        "a lick rises at {v} yd/s"
+                    );
+                }
+            }
+        }
+    }
+    assert!(
+        rings_left_behind > 4,
+        "{rings_left_behind} rings left behind"
+    );
+}
+
+// ── frame-rate independence ────────────────────────────────────────────────
+
+/// At 8, 16 and 33 ms frames the same flash, cast on the run, draws the
+/// same particles, of the same ages, in the same places: inside the kit
+/// (0.528 s), past its end (1.056 s) and in its tail (1.584 s). Each count is
+/// the clock's.
 #[test]
 fn the_flash_is_the_same_at_every_frame_rate() {
     for t in [0.528, 1.056, 1.584] {
         let runs: Vec<_> = [8, 16, 33]
-            .map(|ms| played_at(Duration::from_millis(ms), t))
+            .map(|ms| played_on_the_run(Duration::from_millis(ms), t))
             .into_iter()
             .collect();
-        let (_, reference) = &runs[0];
-        for (hand, list) in reference.iter().enumerate() {
-            let e = &EMITTERS[hand % 3];
-            let want = live_ages(e, t, KIT_SECS);
+        let reference = &runs[0];
+        for (index, (_, list)) in reference.iter().enumerate() {
+            let e = &EMITTERS[index % 3];
             let got: Vec<f32> = list.iter().map(|(a, _)| *a).collect();
-            assert_ages(&format!("{t} s, list {hand}"), &got, &want);
+            assert_ages(
+                &format!("{t} s, list {index}"),
+                &got,
+                &live_ages(e, t, KIT_SECS),
+            );
         }
-        for (ms, (_, drawn)) in [8, 16, 33].iter().zip(&runs) {
+        for (ms, drawn) in [8, 16, 33].iter().zip(&runs) {
             assert_eq!(drawn.len(), reference.len());
-            for (list, ref_list) in drawn.iter().zip(reference) {
+            for ((_, list), (_, ref_list)) in drawn.iter().zip(reference) {
                 assert_eq!(list.len(), ref_list.len(), "{ms} ms at {t} s");
                 for ((a, p), (ra, rp)) in list.iter().zip(ref_list) {
                     assert!((a - ra).abs() < 1e-4, "{ms} ms at {t} s: age {a} vs {ra}");
-                    assert!(p.distance(*rp) < 1e-4, "{ms} ms at {t} s: {p} vs {rp}");
+                    assert!(p.distance(*rp) < 1e-3, "{ms} ms at {t} s: {p} vs {rp}");
                 }
             }
         }

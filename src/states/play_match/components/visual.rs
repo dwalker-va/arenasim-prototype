@@ -2023,15 +2023,20 @@ pub struct HealCastBurstMote {
     pub life: f32,
 }
 
-/// One particle of a [`HealCastKind::Shadow`] hand rig, in the rig's frame
-/// (graphical only): a lick or one of the two rings of
-/// `shadow_precast_low_hand.m2`. Its colour and alpha ride the emitter's
-/// palette (one material per ramp step, shared), its size its scale.
+/// One particle of a [`HealCastKind::Shadow`] hand rig (graphical only): a
+/// lick or one of the two rings of `shadow_precast_low_hand.m2`. It lives in
+/// the world, as the client's do: born at the hand and left where it was
+/// born. Its colour and alpha ride the emitter's palette (one material per
+/// ramp step, shared), its size its scale.
 #[derive(Component, Debug)]
 pub struct HealCastShadowMote {
+    /// The hand rig that emitted it; the particle goes with it.
+    pub rig: Entity,
     /// Which of the model's three emitters it came from (0 lick, 1 green
     /// ring, 2 violet ring).
     pub emitter: usize,
+    /// Where it was born, in the world.
+    pub origin: Vec3,
     pub velocity: Vec3,
     pub age: f32,
     pub life: f32,
@@ -2046,6 +2051,9 @@ pub struct HealCastShadowEmitter {
     /// Seconds the model has emitted: the rig's age while it loops or plays
     /// its cast kit, frozen once the kit ends.
     pub clock: f32,
+    /// The hand's world position as last placed, so a particle born
+    /// part-way through a frame is born where the hand was then.
+    pub hand: Option<Vec3>,
     /// Particles emitted per emitter so far.
     pub emitted: [u32; 3],
     /// Each emitter's palette, one material per ramp step.

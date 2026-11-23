@@ -15,8 +15,8 @@
 //! Runs with no window or GPU. Visual-only systems never touch the sim, so
 //! the matches are the seeded ones, but for one staged fact: team 1's
 //! Shadowform Priest is topped up to full health before every frame, so it
-//! lives to cast all match. (A Shadowform Priest's death trips a crash in
-//! `shadowform.rs`'s shroud that predates these hands; reported on AS-449.)
+//! lives to cast all match. (A Shadowform Priest's death tripped a crash in
+//! `shadowform.rs`'s shroud that predates these hands, AS-507.)
 
 use std::time::Duration;
 
@@ -29,7 +29,7 @@ use arenasim::combat::CombatPlugin;
 use arenasim::states::play_match::abilities::AbilityType;
 use arenasim::states::play_match::components::{
     CastEnding, CastEndingKind, CastingState, Combatant, HealCastHand, HealCastKind, HealCastPhase,
-    InstantAbilityFired, LandedCast,
+    InstantAbilityFired, LandedCast, PlayMatchEntity,
 };
 use arenasim::states::play_match::equipment::EquipmentPlugin;
 use arenasim::states::play_match::systems::CombatSystemPhase;
@@ -59,6 +59,10 @@ struct Seen {
     frame: usize,
     /// `(frame, caster, ability)` per Shadow instant, read off its marker.
     instants: Vec<(usize, Entity, AbilityType)>,
+    /// `(frame, ability)` per Shadow instant marker spawned without
+    /// `PlayMatchEntity`, which headless (where nothing consumes it) needs
+    /// for the match-end sweep to reclaim it.
+    untagged: Vec<(usize, AbilityType)>,
     /// `(frame, caster)` per Mind Blast cast begun.
     blasts: Vec<(usize, Entity)>,
     /// `(frame, caster, kind)` per Mind Blast cast ended this frame:
@@ -142,11 +146,17 @@ fn top_up_shadow_priest(mut combatants: Query<&mut Combatant>) {
     }
 }
 
-fn observe_fired(mut seen: ResMut<Seen>, fired: Query<&InstantAbilityFired>) {
+fn observe_fired(
+    mut seen: ResMut<Seen>,
+    fired: Query<(&InstantAbilityFired, Has<PlayMatchEntity>)>,
+) {
     let frame = seen.frame;
-    for f in fired.iter() {
+    for (f, tagged) in fired.iter() {
         if INSTANTS.contains(&f.ability) {
             seen.instants.push((frame, f.caster, f.ability));
+            if !tagged {
+                seen.untagged.push((frame, f.ability));
+            }
         }
     }
 }
@@ -260,6 +270,12 @@ fn every_shadow_cast_plays_its_hands_once_in_a_real_match() {
     for seed in BANK {
         let seen = play_seen(&config(seed));
 
+        // Every marker the Priest AI spawns is swept with the match.
+        assert!(
+            seen.untagged.is_empty(),
+            "seed {seed}: Shadow markers spawned without PlayMatchEntity: {:?}",
+            seen.untagged
+        );
         // Each instant: two hands, launched, on its own frame or the next.
         for &(frame, caster, ability) in &seen.instants {
             let rigs = seen
