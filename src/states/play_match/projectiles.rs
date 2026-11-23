@@ -402,7 +402,9 @@ pub fn process_projectile_hits(
 
             // Update caster damage dealt (include absorbed damage - caster dealt it)
             {
-                let Ok((_, _, mut caster, caster_auras)) = combatants.get_mut(caster_entity) else {
+                let Ok((_, caster_transform, mut caster, caster_auras)) =
+                    combatants.get_mut(caster_entity)
+                else {
                     commands.entity(projectile_entity).despawn();
                     continue;
                 };
@@ -415,6 +417,7 @@ pub fn process_projectile_hits(
                     .iter()
                     .filter(|h| h.to == LeechRecipient::Caster)
                 {
+                    let mut pattern = fct_states.get_mut(caster_entity).ok();
                     let effective = leech::land(
                         &mut commands,
                         &mut combat_log,
@@ -425,6 +428,10 @@ pub fn process_projectile_hits(
                         &mut caster,
                         caster_auras.as_deref(),
                         &caster_id,
+                        leech::HealNumberAt {
+                            position: caster_transform.translation,
+                            pattern: pattern.as_deref_mut(),
+                        },
                     );
                     credit_healing_done(&mut caster, effective);
                 }
@@ -447,6 +454,7 @@ pub fn process_projectile_hits(
                 &dampening,
                 &mut combatants,
                 &pet_query,
+                &mut fct_states,
                 caster_entity,
                 &caster_id,
                 &leech_heals,
@@ -623,6 +631,7 @@ fn land_party_leech(
     dampening: &ArenaDampening,
     combatants: &mut Query<(Entity, &Transform, &mut Combatant, Option<&mut ActiveAuras>)>,
     pet_query: &Query<&Pet>,
+    fct_states: &mut Query<&mut FloatingTextState>,
     caster: Entity,
     caster_id: &crate::combat::log::CombatantId,
     heals: &[leech::LeechHeal],
@@ -655,9 +664,18 @@ fn land_party_leech(
         &owed,
         &members,
         |e, land| match combatants.get_mut(e) {
-            Ok((_, _, mut ally, ally_auras)) => {
+            Ok((_, transform, mut ally, ally_auras)) => {
                 let id = combat_log_id_for(&ally, pet_query.get(e).ok());
-                land(&mut ally, ally_auras.as_deref(), &id)
+                let mut pattern = fct_states.get_mut(e).ok();
+                land(
+                    &mut ally,
+                    ally_auras.as_deref(),
+                    &id,
+                    leech::HealNumberAt {
+                        position: transform.translation,
+                        pattern: pattern.as_deref_mut(),
+                    },
+                )
             }
             Err(_) => 0.0,
         },
