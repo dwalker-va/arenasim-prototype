@@ -27,9 +27,9 @@
 //!
 //! A key is compared by what it deserializes as: a string, a number, a bool,
 //! a char, a unit or a unit enum variant. A map whose key is anything richer
-//! (a tuple, a struct, a variant carrying data) is refused outright, so a
-//! key this check cannot compare fails loudly at load instead of slipping
-//! past it. Teach [`CheckedVisitor`] to render such a key before adding one.
+//! (a tuple, a struct, a newtype struct, an `Option`, a variant carrying data)
+//! is refused outright, so a key this check cannot compare fails loudly at
+//! load instead of slipping past it. Teach [`CheckedVisitor`] to render such a key before adding one.
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -699,6 +699,37 @@ mod tests {
             .expect_err("an unknown variant")
             .to_string();
         assert_eq!(strict, plain);
+    }
+
+    /// Content after the config is refused exactly as the plain parser
+    /// refuses it, so a second document on a batch line, or junk after a RON
+    /// file's closing paren, never loads the first value alone.
+    #[test]
+    fn trailing_input_is_refused_as_the_plain_parser_refuses_it() {
+        for text in [
+            "(by_name: { \"a\": 1 }) (by_name: {})",
+            "(first: Some(1)) junk",
+        ] {
+            let strict = ron_from_str::<File>(text)
+                .expect_err("trailing RON is refused")
+                .to_string();
+            let plain = ron::from_str::<File>(text)
+                .expect_err("plain RON refuses it")
+                .to_string();
+            assert_eq!(strict, plain, "{text}");
+        }
+        for text in [
+            r#"{"by_name": {"a": 1}} {"by_name": {}}"#,
+            r#"{"first": 1} junk"#,
+        ] {
+            let strict = json_from_str::<File>(text)
+                .expect_err("trailing JSON is refused")
+                .to_string();
+            let plain = serde_json::from_str::<File>(text)
+                .expect_err("plain JSON refuses it")
+                .to_string();
+            assert_eq!(strict, plain, "{text}");
+        }
     }
 
     #[test]

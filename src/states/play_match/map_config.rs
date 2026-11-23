@@ -1,7 +1,7 @@
 //! Data-Driven Map Geometry Configuration (line-of-sight obstacles)
 //!
 //! Mirrors the `movement_config.rs` loading pattern exactly: serde structs with
-//! `#[serde(default)]`, direct `std::fs::read_to_string` + `ron::from_str` (no
+//! `#[serde(default)]`, direct `std::fs::read_to_string` + `config_parse::ron_from_str` (no
 //! asset server — required for headless), `validate()` collecting ALL violations
 //! into a `Vec<String>`, a `Resource`, and a plugin that panics on failure. The
 //! plugin is registered in BOTH the headless runner (`src/headless/runner.rs`,

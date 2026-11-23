@@ -1,7 +1,7 @@
 //! Data-Driven Movement Configuration (healer posture AI)
 //!
 //! Mirrors the `ability_config.rs` loading pattern exactly: serde structs with
-//! defaults, direct `std::fs::read_to_string` + `ron::from_str` (no asset
+//! defaults, direct `std::fs::read_to_string` + `config_parse::ron_from_str` (no asset
 //! server — required for headless), `validate()`, a `Resource`, and a plugin
 //! that panics on failure. The plugin is registered in BOTH the headless
 //! runner (`src/headless/runner.rs`, next to `AbilityConfigPlugin`) and the

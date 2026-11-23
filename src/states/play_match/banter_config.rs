@@ -2,7 +2,7 @@
 //!
 //! Mirrors the `movement_config.rs` loading pattern: serde structs with
 //! container-level `#[serde(default)]`, direct `std::fs::read_to_string` +
-//! `ron::from_str` (no asset server — keeps loading testable), `validate()`
+//! `config_parse::ron_from_str` (no asset server — keeps loading testable), `validate()`
 //! accumulating every violation, a `Resource`, and a plugin that panics on
 //! failure.
 //!
