@@ -8,6 +8,7 @@
 pub mod camera;
 pub mod cli;
 pub mod combat;
+pub mod config_parse;
 pub mod headless;
 pub mod keybindings;
 pub mod paths;
