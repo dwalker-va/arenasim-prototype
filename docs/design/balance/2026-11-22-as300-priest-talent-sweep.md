@@ -4,9 +4,16 @@ Tier: **directional**. Success condition (design §4, "Sweeps measure nodes and
 reference builds"): **no node dominates.** That means no node moves the Priest by
 more than the run's resolution floor beyond a stat rank of the same price.
 
-**Verdict: the condition fails on four nodes, clearly, and is at the line on a
-fifth.** Every figure below is pooled over two seed blocks and replicates in
-each block.
+**The rule, as AS-299 applied it:** a node dominates when its pooled delta
+beats the yardstick rank (plus a capstone's allowance) by more than the pair's
+floor, and its McNemar z survives the Bonferroni correction for the 16 node
+comparisons (z ≥ 2.96). Per-block replication is reported beside each verdict,
+not as part of the rule.
+
+**Verdict: the condition fails on five nodes.** Four fail clearly and
+replicate in each seed block alone. The fifth, Inner Focus, fails marginally:
+0.3pt past its floor, just past the correction pooled, and in neither block
+alone.
 
 | Node | Its delta | The line | z | Over the line by |
 |---|---|---|---|---|
@@ -14,10 +21,10 @@ each block.
 | Silence (in Shadowform) | +6.4pt | +1.0pt (allowance) | 13.4 | +5.3pt (floor 0.9) |
 | Reflective Shield | +4.4pt | 0 | 8.8 | +4.4pt (floor 1.0) |
 | Pain Suppression | +4.0pt | +0.5pt (allowance) | 8.2 | +3.5pt (floor 1.0) |
-| Inner Focus | +1.0pt | 0 | 3.0 | 0.3pt past its 0.7pt floor |
+| Inner Focus (marginal) | +1.0pt | 0 | 3.0 | +1.0pt, 0.3pt past its 0.7pt floor |
 
-- The first four are each measured against a yardstick rank. For the three capstones, the line is the capstone's allowance: what a second yardstick rank buys on the same stem.
-- Inner Focus clears the multiple-comparison bar for 16 node comparisons (z ≥ 2.96), but only just, and neither seed block clears that bar alone.
+- Each is measured against a yardstick rank. For the three capstones, the line is the capstone's allowance: what a second yardstick rank buys on the same stem.
+- Inner Focus is not replicated per block: +0.8 (z 1.61) and +1.3 (z 2.59), neither past the correction alone.
 - **Mind Flay sits well below a stat rank in both roles:** −4.8pt in Shadowform and −2.8pt healing.
 - Four more nodes sit below significantly, but none survives the correction.
 - **Guardian Spirit's save fires on 68% of its casts:** 258 saves from 381 casts, in 0.39 of the Priest's matches.
@@ -26,7 +33,10 @@ each block.
 Nothing here is retuned: tuning is AS-441's batch.
 
 Measured at `main` 27d76940 plus this card's three reference builds. Those
-leave untalented play byte-identical; see *Byte-identity*.
+leave untalented play byte-identical; see *Byte-identity*. Merged onto `main`
+f2b4dc25 (AS-357), the binary reproduces 1,700 of 1,700 sampled rows of the
+committed Shadowform, Vampiric Embrace and Guardian Spirit arms exactly, so
+nothing here was re-measured.
 
 ## Method
 
@@ -120,8 +130,9 @@ Every arm is one directional 2v2 sweep:
 - **Builds:** every Priest, on either side, plays the arm's build. The arms
   differ only in build and form, so they pair at identical (label, seed).
 - **Scoring:** for the side fielding the Priest (`paired_sweep.py --headline
-  affected`), over the 3,000 matches an arm where one side does. The 300 Priest
-  mirrors are excluded.
+  affected`), over the matches where exactly one side does: 3,000 an arm a
+  block, 6,000 pooled. The Priest mirrors (300 an arm a block, 600 pooled) are
+  excluded.
 - **Format:** 2v2 only; the directional tier does not call for 3v3.
 
 There are 29 arms:
@@ -157,7 +168,7 @@ In every table:
 | **Silence**, Shadowform (capstone, allowance +1.0) | 38.3% | 44.7% | **+6.4** | 806 (+594/−212) | 13.42 | 0.9 | **dominates** (+5.3) |
 | **Reflective Shield** | 56.0% | 60.4% | **+4.4** | 899 (+582/−317) | 8.80 | 1.0 | **dominates** |
 | **Pain Suppression** (capstone, allowance +0.5) | 60.4% | 64.4% | **+4.0** | 839 (+538/−301) | 8.15 | 1.0 | **dominates** (+3.5) |
-| **Inner Focus** | 59.4% | 60.4% | **+1.0** | 391 (+226/−165) | 3.03 | 0.7 | **at the line** |
+| **Inner Focus** | 59.4% | 60.4% | **+1.0** | 391 (+226/−165) | 3.03 | 0.7 | **dominates** (marginal; in neither block alone) |
 | Vampiric Embrace, Shadowform | 38.3% | 39.1% | +0.8 | 1108 (+578/−530) | 1.41 | 1.1 | within |
 | Unbreakable Will (rank 2) | 60.1% | 60.4% | +0.3 | 560 (+288/−272) | 0.63 | 0.8 | within |
 | Blackout (rank 1), healing | 50.6% | 50.6% | −0.0 | 779 (+389/−390) | 0.00 | 0.9 | within |
@@ -239,7 +250,8 @@ brackets):
 
 - **The four dominating nodes and both Mind Flay rows** replicate within about a
   point, and each block alone clears the correction.
-- **Inner Focus** is significant in neither block at the corrected bar.
+- **Inner Focus** dominates pooled, marginally, and is significant in neither
+  block at the corrected bar.
 - **Power Infusion's** first block is not reproduced by its second.
 
 The script's `replicate` output also carries the other rows and the yardstick
@@ -297,7 +309,8 @@ are identical in winner and duration to the 0-point arm's.
 
 - The control fields all 8 other classes on both sides (`paired_sweep.py`'s
   `CONTROL FIELDS` line).
-- 6,764-6,785 of each arm's 6,792 matches end by elimination.
+- 6,764-6,785 of every arm's 6,792 matches end by elimination (the 0-point
+  arm included, at 6,780).
 
 **The nodes fire.** The batch CSV carries outcomes only. So `sample` replays a
 fixed slice of 60 Priest matches an arm with full logs (seeds 0-3). The Holy
@@ -319,8 +332,9 @@ reference gets 600 matches, for Guardian Spirit's save rate.
 **Guardian Spirit's save rate:**
 
 - 258 saves from 381 casts, so **68% of casts save a life**.
-- That is **0.39 saves a Priest a match**: the Holy Priest prevents a death in
-  roughly two matches of five.
+- That is **0.39 saves a Priest a match**: the Holy Priest prevents a killing
+  blow in roughly two matches of five. The saved teammate may still die later
+  in the match.
 
 ## What it says (findings for the user, not changes)
 
@@ -331,7 +345,8 @@ reference gets 600 matches, for Guardian Spirit's save rate.
    - A 30%-health heal on top of the save turns a lost teammate into a won
      match. It is worth more than every other Holy node combined.
    - **Direction:** a smaller save heal, or no healing-received bonus beside the
-     save. It is already once a match, so its cooldown is not the lever.
+     save. Its 60s cooldown makes it once a match in practice, so the cooldown
+     is not the lever.
 2. **Reflective Shield dominates** (+4.4pt), and most against comps with no
    healer (+6.4).
    - 30% of every absorb the Priest's shields take is dealt back. That includes
@@ -347,34 +362,47 @@ reference gets 600 matches, for Guardian Spirit's save rate.
    - Silence is what makes Shadowform playable at all.
    - **Direction:** read it with Shadowform below, not alone. Weakening Silence
      would sink the form further.
-5. **Inner Focus is at the line:** +1.0pt pooled, past the correction by a hair
-   and in neither block alone. It fires on the emergency Flash Heal, and its
-   gain is in healer-against-healer matches (+1.6). Watch it in AS-441 rather
-   than acting on it alone.
+5. **Inner Focus dominates, marginally:** +1.0pt pooled, 0.3pt past its floor
+   and past the correction by a hair, but in neither seed block alone. It fires
+   on the emergency Flash Heal, and its gain is in healer-against-healer
+   matches (+1.6). Watch it in AS-441 rather than acting on it alone.
 6. **Mind Flay is below a stat rank in both roles**, by 2.8 to 4.8pt. That is an
-   AI question before it is a tuning one.
-   - **Healing (120 replayed matches):** each channel holds the Priest a median
-     3.0s (95 of 115 run the full channel). The node changes the healer's
-     output as follows:
+   AI question before it is a tuning one. The counts below are from
+   `mechanism` (120 replayed Priest matches an arm, seeds 0-3):
 
-     | | with Mind Flay | without |
-     |---|---|---|
-     | Mind Blast hits | 101 | 142 |
-     | Mind Blast damage | 8.8k | 12.2k |
-     | Healing done | 63.8k | 66.1k |
+   | | healing, with Mind Flay | healing, without | Shadowform, with | Shadowform, without |
+   |---|---|---|---|---|
+   | Mind Flay channels | 118 | 0 | 197 | 0 |
+   | Mind Blast hits | 101 | 142 | 140 | 169 |
+   | Mind Blast damage | 8.8k | 12.2k | 12.6k | 15.0k |
+   | Mind Flay damage | 2.7k | 0 | 4.5k | 0 |
+   | Shadow Word: Pain damage | 2.0k | 2.6k | 6.8k | 7.2k |
+   | Healing done | 63.8k | 66.1k | 0 | 0 |
+   | Damage taken (hits and crits) | **54.1k** | **48.4k** | 38.5k | 37.7k |
 
-     It adds 2.7k of Mind Flay damage. Mind Flay sits above Mind Blast in the
-     healing chain, so it displaces a harder hit, and some heals, for a slow.
+   - **Healing:** Mind Flay sits above Mind Blast in the healing chain. It
+     displaces a harder hit and some heals for 2.7k of channel damage and a
+     slow, and **the healing Priest takes 12% more damage** with it.
    - **Shadowform:** Mind Flay adds 4.5k damage against 2.8k of Mind Blast and
-     Shadow Word: Pain it displaces. The Priest takes no more damage (38.5k
-     against 37.7k). Yet the arm loses 4.8pt, 6.7pt of it against a healer.
-     - The one other thing the node changes is the Shadowform Priest's pursuit
-       stand-off: 18 yards instead of 28 when it holds Mind Flay or Silence (AS-416).
-     - That makes the stand-off a candidate cause, not a shown one. The Silence
-       arm keeps the 18 yards on both sides of its comparison, so Silence's
-       figure is not confounded by it.
-   - **Direction:** Mind Flay below Mind Blast in the healing chain, and a look
-     at the 18-yard stand-off.
+     Shadow Word: Pain it displaces, and the Priest takes about the same
+     damage. Yet the arm loses 4.8pt, 6.7pt of it against a healer.
+   - **Two candidate causes, neither shown:**
+     - **The channel roots its caster.** A channel is up to 3s of standing
+       still: 1.0 a match healing and 1.6 in Shadowform, so up to about 5s a
+       match. A channel ran its full 3s before the Priest's next cast in 95 of
+       115 (healing) and 125 of 137 (Shadowform) of the channels that had one.
+       A healing Priest channels it as a peel on a melee attacking a ranged
+       teammate, the Priest included, which is when standing still costs most.
+     - **The pursuit stand-off.** A Shadowform Priest holding Mind Flay or
+       Silence stops at 18 yards instead of 28 (AS-416). This applies in
+       Shadowform only. The Silence arm keeps the 18 yards on both sides of its
+       comparison, so Silence's figure is not confounded by it.
+   - Mind Flay also spends mana and global cooldowns, and its 50% slow is the
+     benefit both roles buy with them.
+   - **Direction:** attribute the loss before tuning it: the channel's standing
+     still (both roles) or the 18-yard stand-off (Shadowform). Then consider
+     Mind Flay below Mind Blast in the healing chain, or a peel that does not
+     root the healer.
 7. **Blackout has nothing to act on.** It rides on Mind Blast hits:
    - a Shadowform Priest lands 1.3 a match (77 of 118 begun, the rest
      interrupted or crowd-controlled);
@@ -438,16 +466,18 @@ tar -xzf $S/2026-11-22-as300-arms.csv.tar.gz -C /tmp/as300
 $S/2026-11-22-as300-arms.py table /tmp/as300/block1:/tmp/as300/block2   # pooled
 $S/2026-11-22-as300-arms.py replicate /tmp/as300/block1 /tmp/as300/block2
 $S/2026-11-22-as300-arms.py sample /tmp/as300/block1 target/release/arenasim
+$S/2026-11-22-as300-arms.py mechanism /tmp/as300/block1 target/release/arenasim
 # any one pair, with its control and slices:
 scripts/paired_sweep.py /tmp/as300/block1/holy_y.csv /tmp/as300/block1/holy.csv \
   --affects Priest --tier directional --expect nothing --headline affected
 ```
 
-Every figure above recomputes from the committed CSVs, with two exceptions:
+Every figure above recomputes from the committed CSVs, except two sets of
+counts that replay matches through the binary:
 
-- the non-vacuity counts, which replay matches through the binary (a few
-  minutes);
-- the Mind Flay mechanism counts in finding 6. Those came from a one-off replay
-  of 120 Priest matches each of `shadow_y_heal`, `shadow_mf_y_heal`, `shadow_y`
-  and `shadow_mf_y` (every n-th Priest config of seeds 0-3), summing the
-  Priest's heal, damage and damage-taken log lines.
+- the non-vacuity counts (`sample`, a few minutes);
+- the Mind Flay counts in finding 6 (`mechanism`). It replays 120 Priest
+  matches each of `shadow_y_heal`, `shadow_mf_y_heal`, `shadow_y` and
+  `shadow_mf_y`, every n-th Priest config of seeds 0-3, and sums the Priest's
+  channels, damage by spell, healing and damage taken.
+  `scripts/tests/test_as300_arms.py` pins how it reads a log.

@@ -21,6 +21,10 @@ build and form, so any two pair at identical (label, seed).
     # 5. non-vacuity: replay a fixed slice of each arm's Priest matches with
     #    full logs, and count what each node did
     2026-11-22-as300-arms.py sample OUTDIR <path to arenasim>
+    # 6. the Mind Flay mechanism counts: replay 120 Priest matches of each
+    #    Mind Flay pair with full logs, and sum the Priest's channels, heals,
+    #    damage and damage taken
+    2026-11-22-as300-arms.py mechanism OUTDIR <path to arenasim>
 
 **The yardstick.** The Priest has no `StatPercent` node near a rank's price:
 its one, Holy Concentration, prices at 3.5. A node is therefore measured
@@ -408,7 +412,8 @@ def sample_configs(path, k=SAMPLE_PER_ARM):
     return lines[::step][:k]
 
 
-def run_one(binary, config_line, workdir, index):
+def replay_log(binary, config_line, workdir, index):
+    """One config replayed through `--headless`; its full match log."""
     cfg = os.path.join(workdir, "%d.json" % index)
     log = os.path.join(workdir, "%d.txt" % index)
     with open(cfg, "w", encoding="utf-8") as f:
@@ -419,6 +424,11 @@ def run_one(binary, config_line, workdir, index):
         text = f.read()
     os.remove(cfg)
     os.remove(log)
+    return text
+
+
+def run_one(binary, config_line, workdir, index):
+    text = replay_log(binary, config_line, workdir, index)
     return [len(re.findall(pattern, text)) for _, pattern in EVENTS]
 
 
@@ -440,10 +450,118 @@ def sample(outdir, binary, jobs=5, arms=None):
               flush=True)
 
 
+# The Mind Flay mechanism: each pair is an arm holding Mind Flay and the arm
+# with its point moved onto the yardstick, in one role.
+MECHANISM_PAIRS = [
+    ("healing", "shadow_y_heal", "shadow_mf_y_heal"),
+    ("Shadowform", "shadow_y", "shadow_mf_y"),
+]
+MECHANISM_PER_ARM = 120
+MF_CHANNEL_SECS = 3.0
+
+_TIME = r"\[ *([0-9.]+)s\] "
+_PRIEST = r"Team \d Priest #\d"
+
+
+def mechanism_counts(text):
+    """What a Priest's Mind Flay did in one match log, and what it cost.
+
+    - `channels`: Mind Flay channels begun by a Priest;
+    - `channel_secs`: from each channel's start to its Priest's next cast,
+      capped at the channel's 3s: the time it stood channelling;
+    - `full_channels`: channels whose Priest cast nothing for the whole 3s;
+    - `gaps`: each channel's uncapped start-to-next-cast gap;
+    - `mind_blast_hits`; `damage`: a Priest's damage by spell (Mind Blast,
+      Mind Flay, Shadow Word: Pain);
+    - `healing`: a Priest's heals, by any spell;
+    - `damage_taken`: damage from hits and crits (and channelled ticks,
+      "ticks on") that land on a Priest. Periodic ticks ("ticks for N damage
+      on") are not counted.
+    """
+    out = {"channels": 0, "channel_secs": 0.0, "full_channels": 0, "gaps": [],
+           "mind_blast_hits": 0, "damage": {}, "healing": 0, "damage_taken": 0}
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = re.search(r"\[HEAL\] (?:\[[A-Z]+\] )?" + _PRIEST
+                      + r"'s [A-Za-z :]+ (?:CRITICALLY )?heals Team \d \w+ #\d for (\d+)", line)
+        if m:
+            out["healing"] += int(m.group(1))
+        if "[DMG]" in line:
+            m = re.search(_PRIEST + r"'s (Mind Blast|Mind Flay|Shadow Word: Pain) "
+                          r"(?:hits|CRITS|ticks)\b.*? for (\d+) damage", line)
+            if m:
+                out["damage"][m.group(1)] = out["damage"].get(m.group(1), 0) + int(m.group(2))
+                if m.group(1) == "Mind Blast":
+                    out["mind_blast_hits"] += 1
+            m = re.search(r" (?:hits|CRITS|ticks on) " + _PRIEST + r" for (\d+) damage", line)
+            if m:
+                out["damage_taken"] += int(m.group(1))
+        m = re.match(_TIME + r"\[CAST\] (" + _PRIEST + r") begins channeling Mind Flay", line)
+        if not m:
+            continue
+        out["channels"] += 1
+        start, who = float(m.group(1)), re.escape(m.group(2))
+        for later in lines[i + 1:]:
+            n = re.match(_TIME + r"\[CAST\] " + who + r" (?:casts|begins)", later)
+            if n:
+                gap = float(n.group(1)) - start
+                out["gaps"].append(gap)
+                out["channel_secs"] += min(gap, MF_CHANNEL_SECS)
+                if gap >= MF_CHANNEL_SECS - 0.1:
+                    out["full_channels"] += 1
+                break
+    return out
+
+
+def merge_counts(counts):
+    total = {"channels": 0, "channel_secs": 0.0, "full_channels": 0, "gaps": [],
+             "mind_blast_hits": 0, "damage": {}, "healing": 0, "damage_taken": 0}
+    for c in counts:
+        for key in ("channels", "channel_secs", "full_channels", "mind_blast_hits",
+                    "healing", "damage_taken"):
+            total[key] += c[key]
+        total["gaps"] += c["gaps"]
+        for spell, amount in c["damage"].items():
+            total["damage"][spell] = total["damage"].get(spell, 0) + amount
+    return total
+
+
+def mechanism_row(role, arm, n, c):
+    dmg = c["damage"]
+    gaps = c["gaps"]
+    median = "%.2f" % statistics.median(gaps) if gaps else "-"
+    return ("| %s | %s (%d) | %d | %.1f | %d of %d | %s | %d | %.1fk | %.1fk | %.1fk | %.1fk | %.1fk |"
+            % (role, arm, n, c["channels"], c["channel_secs"] / n, c["full_channels"],
+               len(gaps), median, c["mind_blast_hits"], dmg.get("Mind Blast", 0) / 1000,
+               dmg.get("Mind Flay", 0) / 1000, dmg.get("Shadow Word: Pain", 0) / 1000,
+               c["healing"] / 1000, c["damage_taken"] / 1000))
+
+
+def mechanism(outdir, binary, jobs=5):
+    from concurrent.futures import ThreadPoolExecutor
+    print("| role | arm (matches) | Mind Flay channels | channelling s a match | full "
+          "channels | median start-to-next-cast (s) | Mind Blast hits | Mind Blast dmg | "
+          "Mind Flay dmg | SW:P dmg | Priest healing | Priest damage taken |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|")
+    for role, with_mf, without in MECHANISM_PAIRS:
+        for arm in (with_mf, without):
+            work = os.path.join(outdir, ".mechanism-" + arm)
+            os.makedirs(work, exist_ok=True)
+            configs = sample_configs(os.path.join(outdir, arm + ".jsonl"), MECHANISM_PER_ARM)
+            with ThreadPoolExecutor(max_workers=jobs) as pool:
+                counts = list(pool.map(lambda a: mechanism_counts(
+                    replay_log(binary, a[1], work, a[0])), enumerate(configs)))
+            os.rmdir(work)
+            print(mechanism_row(role, arm, len(configs), merge_counts(counts)), flush=True)
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if len(argv) >= 3 and argv[0] == "sample":
         sample(argv[1], argv[2], arms=argv[3:] or None)
+        return 0
+    if len(argv) == 3 and argv[0] == "mechanism":
+        mechanism(argv[1], argv[2])
         return 0
     if len(argv) == 3 and argv[0] == "replicate":
         replicate(argv[1], argv[2])
