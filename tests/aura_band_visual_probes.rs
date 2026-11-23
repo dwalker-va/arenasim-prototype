@@ -103,7 +103,8 @@ const BAND_TYPES: &[AuraType] = &[
     // Aura Mastery's immunity (AS-420): the band for an unnamed one; Aura
     // Mastery's own is owned by its named landing (AS-374).
     AuraType::SilenceInterruptImmunity,
-    // Vampiric Embrace's leech (AS-416): the band until AS-357 draws it.
+    // A leech mark (AS-416): the band for an unnamed one; Vampiric
+    // Embrace's own is owned by its named landing (AS-357).
     AuraType::LeechMark,
 ];
 
