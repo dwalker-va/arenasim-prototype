@@ -553,6 +553,14 @@ const DIRECT_DAMAGE_MEMBERS: &[AbilityType] = &[
 ];
 
 fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
+    // An area hit with its own landing on each enemy (Holy Nova's starburst,
+    // AS-355) is judged by that landing alone: its caster-centred
+    // `InstantAbilityFired` is the cast's gesture, not a landing.
+    if let Some(scale) = StarburstLanding::scale_for_area_hit(a) {
+        return starburst_spec(scale)
+            .on
+            .then_some("holy starburst, the high scale (instant_landings.rs → holy_starburst.rs)");
+    }
     if bolt_kind_for(a).is_some() {
         return Some("bespoke bolt impact (spell_bolts.rs)");
     }
@@ -593,12 +601,6 @@ fn damage_landing(a: AbilityType, _: &AbilityConfig) -> Option<&'static str> {
         // landing router, so the router must answer for it.
         HeroicStrike if client_landing_style(a).is_some() => {
             Some("trail + decisivestrike landing (HeroicStrikeSwing → heroic_strike.rs)")
-        }
-        // The area hit's own landing on each enemy (AS-355).
-        HolyNova
-            if StarburstLanding::scale_for_area_hit(a).is_some_and(|s| starburst_spec(s).on) =>
-        {
-            Some("holy starburst, the high scale (instant_landings.rs → holy_starburst.rs)")
         }
         _ => None,
     }
