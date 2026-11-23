@@ -51,6 +51,8 @@
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::body_hold::{BodyHold, HoldDisjoint};
+
 use super::druid_heals::{body_point, keyed, BODY_CENTRE_ABOVE_FLOOR};
 use super::heal_cast::{flash_instant_hands, HealCastAssets};
 use super::paladin_oneshots::{
@@ -663,38 +665,10 @@ pub fn divine_protection_anchor(bearer: &Transform, body_local: Vec3) -> Vec3 {
 /// pose is its world one.
 #[allow(clippy::type_complexity)]
 pub fn place_divine_protection_globes(
-    camera: Query<
-        &Transform,
-        (
-            With<Camera3d>,
-            Without<DivineProtectionGlobe>,
-            Without<DivineProtectionGlobePiece>,
-        ),
-    >,
+    hold: BodyHold,
     mut globes: Query<
         (&DivineProtectionGlobe, &mut Transform, &Children),
-        (
-            Without<Combatant>,
-            Without<VisualBody>,
-            Without<DivineProtectionGlobePiece>,
-        ),
-    >,
-    bearers: Query<
-        (&Transform, Option<&Children>),
-        (
-            With<Combatant>,
-            Without<DivineProtectionGlobe>,
-            Without<DivineProtectionGlobePiece>,
-        ),
-    >,
-    bodies: Query<
-        &Transform,
-        (
-            With<VisualBody>,
-            Without<Combatant>,
-            Without<DivineProtectionGlobe>,
-            Without<DivineProtectionGlobePiece>,
-        ),
+        (Without<DivineProtectionGlobePiece>, HoldDisjoint),
     >,
     mut pieces: Query<
         (
@@ -702,24 +676,16 @@ pub fn place_divine_protection_globes(
             &mut Transform,
             &MeshMaterial3d<StandardMaterial>,
         ),
-        (
-            Without<DivineProtectionGlobe>,
-            Without<Combatant>,
-            Without<VisualBody>,
-        ),
+        (Without<DivineProtectionGlobe>, HoldDisjoint),
     >,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let cam = camera.iter().next().map(|c| c.rotation);
+    let cam = hold.view().map(|c| c.rotation);
     for (globe, mut transform, children) in globes.iter_mut() {
-        let Ok((bearer, bearer_children)) = bearers.get(globe.bearer) else {
+        let Some(body) = hold.body(globe.bearer) else {
             continue;
         };
-        let body_local = bearer_children
-            .and_then(|kids| kids.iter().find_map(|k| bodies.get(k).ok()))
-            .map(|body| body.translation)
-            .unwrap_or(Vec3::ZERO);
-        transform.translation = divine_protection_anchor(bearer, body_local);
+        transform.translation = divine_protection_anchor(&body.unit, body.local.translation);
         for child in children.iter() {
             let Ok((piece, mut part, material)) = pieces.get_mut(child) else {
                 continue;

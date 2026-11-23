@@ -134,6 +134,8 @@ use std::sync::Arc;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::body_hold::{BodyHold, HoldDisjoint};
+
 use super::hunter_shots::{draw, ramp3, ramp_color, PALETTE_STEPS};
 use super::ice_barrier::{
     ib_glint_mesh, ib_icicle_mesh, ib_mist_emit, ib_mist_texture, ib_view_yaw, IB_MIST_ALPHA_KEYS,
@@ -2061,10 +2063,8 @@ const PWS_MIN_SCALE: f32 = 1e-4;
 /// to the camera, and set its weight. Sacred Shield's sprites stand on its
 /// card, face the camera outright, and take their colour as well.
 pub fn place_shield_cards(
-    camera: Query<&Transform, (With<Camera3d>, Without<ShieldCard>)>,
+    hold: BodyHold,
     rigs: Query<(&ShieldVisual, &Children)>,
-    bearers: Query<(&Transform, Option<&Children>), (With<Combatant>, Without<ShieldCard>)>,
-    bodies: Query<&Transform, (With<VisualBody>, Without<ShieldCard>, Without<Combatant>)>,
     mut cards: Query<
         (
             &ShieldCard,
@@ -2073,23 +2073,19 @@ pub fn place_shield_cards(
             &MeshMaterial3d<StandardMaterial>,
             Option<&mut GlintSheen>,
         ),
-        Without<Combatant>,
+        HoldDisjoint,
     >,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    let Some(cam) = camera.iter().next() else {
+    let Some(cam) = hold.view() else {
         return;
     };
     for (rig, children) in rigs.iter() {
-        let Ok((bearer_tf, bearer_children)) = bearers.get(rig.bearer) else {
+        let Some(body) = hold.body(rig.bearer) else {
             continue;
         };
-        let body_local = bearer_children
-            .and_then(|kids| kids.iter().find_map(|k| bodies.get(k).ok()))
-            .map(|body| body.translation)
-            .unwrap_or(Vec3::ZERO);
-        let body_centre = bearer_tf.transform_point(body_local);
+        let body_centre = body.centre();
         let sample = shield_sample(rig);
         for child in children.iter() {
             let Ok((card, mut tf, mesh, material, sheen)) = cards.get_mut(child) else {
@@ -2120,20 +2116,14 @@ pub fn place_shield_cards(
                 }
                 continue;
             }
-            let at = pws_card_translation(
-                rig.kind,
-                body_centre,
-                card.layer,
-                sample.scale,
-                cam.translation,
-            );
+            let at = pws_card_translation(rig.kind, body_centre, card.layer, sample.scale, cam.eye);
             tf.translation = at;
-            tf.rotation = pws_card_rotation(at, cam.translation);
+            tf.rotation = pws_card_rotation(at, cam.eye);
             tf.scale = shield_card_scale(rig.kind, card.layer, sample.scale);
             // Ice Barrier's glint is view-dependent: rewrite its sheen when the
             // camera has turned about the bearer.
             if let Some(mut sheen) = sheen {
-                let yaw = ib_view_yaw(body_centre, cam.translation);
+                let yaw = ib_view_yaw(body_centre, cam.eye);
                 if (yaw - sheen.yaw).abs() > 1e-4 {
                     sheen.yaw = yaw;
                     if let Some(m) = meshes.get_mut(&mesh.0) {

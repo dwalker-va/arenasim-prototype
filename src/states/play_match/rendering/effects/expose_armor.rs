@@ -5,12 +5,12 @@ use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
 use super::bleed_spray::bleed_landed;
+use super::body_hold::{held_in, BodyHold, HoldDisjoint};
 use super::conflagrate::ConflagrateSprite;
 use super::druid_heals::{body_point, keyed};
 use super::hunter_shots::draw;
 use super::school_impact::IMPACT_PET_STATURE;
 use super::shield::disc_texture;
-use super::siphon_life::{siphon_body_capsule, siphon_drawn_point};
 use crate::states::play_match::components::*;
 
 // ==============================================================================
@@ -79,9 +79,11 @@ use crate::states::play_match::components::*;
 //    in twenty-five) stand deeper than the body's top, and from a camera
 //    nearer the horizontal everything does — the body would paint over it.
 //    So every piece — crest, glow and every particle — is drawn on its own
-//    view ray, slid in front of the victim's body and scaled by the same
-//    ratio: Siphon Life's hold, `siphon_drawn_point` against
-//    `siphon_body_capsule`, so it projects where the bench puts it.
+//    view ray, slid in front of the victim's RENDERED body and scaled by the
+//    same ratio — the shared body hold (`body_hold.rs`) — so it projects
+//    where the bench puts it. The crest stands over the rendered body's head
+//    too, so the walk bob and the Cyclone lift carry it
+//    (`pose_expose_armor_crests`).
 // 2. **The crest is a texture.** Its outline and cross are a sprite at the
 //    crest's rest aspect, so the line's width follows both axes of the
 //    squash; the bench strokes 0.16 of the CURRENT half-width, which follows
@@ -123,7 +125,8 @@ use crate::states::play_match::components::*;
 
 // Expose Armor: kit 394 (finisher hand flash) on cast; kit 3069 (exposearmor_head.m2 @Head, 3 s) on the victim. AS-336 bench.
 // swing_style_for_ability(ExposeArmor) = SwingStyle::Backhand: wind up across the body 0.22 s, outward sweep through contact at 0.33 s (mid-arc) to 0.44 s, hold to 0.54 s, recover by 0.9 s; landing at impact_at.
-pub const EXPOSE_ARMOR_HAND_FLASH: bool = true; // kept: the router plays Rupture's flash for both
+// The bench's EXPOSE_ARMOR_HAND_FLASH is no knob here: the router plays Rupture's kit-394 flash
+// for both finishers (`instant_ability.rs`), so it cannot be turned off for one.
 pub const EXPOSE_ARMOR_CREST: bool = true; // ~0.38 x 0.5 yd x1.5, 1.0 yd over the head; gold -> blue 0.667-1.0 s
 pub const EXPOSE_ARMOR_GLOW: bool = true;
 pub const EXPOSE_ARMOR_SPARKLES: bool = true;
@@ -681,9 +684,7 @@ pub struct ExposeArmorCrest {
     /// Fractional particles owed per emitter.
     pub carry: [f32; 3],
     pub emitted: u32,
-    /// Where the victim stood this frame, and whether it is a pet — the body
-    /// the pose pass holds every piece in front of.
-    pub victim_at: Vec3,
+    /// Whether the victim is a pet (its stature).
     pub is_pet: bool,
     assets: ExposeArmorAssets,
 }
@@ -829,7 +830,6 @@ pub fn fire_expose_armor_crests(
                     age: 0.0,
                     carry: [0.0; 3],
                     emitted: 0,
-                    victim_at: transform.translation,
                     is_pet,
                     assets,
                 },
@@ -846,8 +846,8 @@ pub fn fire_expose_armor_crests(
     }
 }
 
-/// Update (graphical-only): stand each crest over its victim's head (hidden
-/// while the victim is a sheep), emit its particle layers there — integrating
+/// Update (graphical-only): hide each crest while its victim is a sheep, emit
+/// its particle layers over the head — integrating
 /// the rate over the frame, so a frame-rate change does not change the
 /// density — and retire it at the end of its life, or at once when its victim
 /// dies or is gone.
@@ -856,20 +856,12 @@ pub fn animate_expose_armor_crests(
     mut commands: Commands,
     time: Res<Time>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut rigs: Query<(
-        Entity,
-        &mut ExposeArmorCrest,
-        &mut Transform,
-        &mut Visibility,
-    )>,
-    victims: Query<
-        (&Combatant, &Transform, Option<&Pet>, Has<PolymorphedVisual>),
-        Without<ExposeArmorCrest>,
-    >,
+    mut rigs: Query<(Entity, &mut ExposeArmorCrest, &mut Visibility)>,
+    victims: Query<(&Combatant, Has<Pet>, Has<PolymorphedVisual>)>,
 ) {
     let dt = time.delta_secs();
-    for (rig_entity, mut rig, mut transform, mut visibility) in rigs.iter_mut() {
-        let Ok((victim, victim_transform, pet, sheep)) = victims.get(rig.target) else {
+    for (rig_entity, mut rig, mut visibility) in rigs.iter_mut() {
+        let Ok((victim, is_pet, sheep)) = victims.get(rig.target) else {
             commands.entity(rig_entity).despawn();
             continue;
         };
@@ -877,12 +869,9 @@ pub fn animate_expose_armor_crests(
             commands.entity(rig_entity).despawn();
             continue;
         }
-        let is_pet = pet.is_some();
         let (from_ms, to_ms) = (rig.age * 1000.0, (rig.age + dt) * 1000.0);
         rig.age += dt;
-        rig.victim_at = victim_transform.translation;
         rig.is_pet = is_pet;
-        transform.translation = expose_armor_crest_point(victim_transform.translation, is_pet);
         visibility.set_if_neq(if sheep {
             Visibility::Hidden
         } else {
@@ -980,16 +969,25 @@ pub fn age_expose_armor_particles(
     }
 }
 
-/// Update (graphical-only): pose everything as drawn — each piece held in
-/// front of the victim's body for the camera (departure 1) and turned to it —
+/// `BodyPlacement` (PostUpdate): stand each crest over its victim's rendered
+/// head and pose everything as drawn — each piece held in front of the
+/// rendered body for the camera (departure 1) and turned to it —
 /// the crest and glow sized, coloured and faded for the rig's age, each
 /// particle sized and coloured along its life, and each streak laid back
 /// along its flight as the camera sees it.
 #[allow(clippy::type_complexity)]
 pub fn pose_expose_armor_crests(
     mut materials: ResMut<Assets<StandardMaterial>>,
-    camera: Query<&GlobalTransform, With<Camera3d>>,
-    rigs: Query<(&ExposeArmorCrest, &Transform, &Children)>,
+    hold: BodyHold,
+    mut rigs: Query<
+        (&ExposeArmorCrest, &mut Transform, &Children),
+        (
+            Without<ExposeArmorPiece>,
+            Without<ExposeArmorParticle>,
+            Without<ExposeArmorParticlePart>,
+            HoldDisjoint,
+        ),
+    >,
     mut pieces: Query<
         (
             &ExposeArmorPiece,
@@ -1000,6 +998,7 @@ pub fn pose_expose_armor_crests(
             Without<ExposeArmorCrest>,
             Without<ExposeArmorParticle>,
             Without<ExposeArmorParticlePart>,
+            HoldDisjoint,
         ),
     >,
     mut particles: Query<
@@ -1008,6 +1007,7 @@ pub fn pose_expose_armor_crests(
             Without<ExposeArmorCrest>,
             Without<ExposeArmorPiece>,
             Without<ExposeArmorParticlePart>,
+            HoldDisjoint,
         ),
     >,
     mut parts: Query<
@@ -1020,22 +1020,22 @@ pub fn pose_expose_armor_crests(
             Without<ExposeArmorCrest>,
             Without<ExposeArmorPiece>,
             Without<ExposeArmorParticle>,
+            HoldDisjoint,
         ),
     >,
 ) {
-    let view = camera.iter().next().map(|c| c.compute_transform());
+    let view = hold.view();
     let cam = view.map(|c| c.rotation).unwrap_or(Quat::IDENTITY);
-    for (rig, rig_transform, children) in rigs.iter() {
-        let crest = rig_transform.translation;
-        let capsule = siphon_body_capsule(rig.victim_at, rig.is_pet);
+    for (rig, mut rig_transform, children) in rigs.iter_mut() {
+        let Some(body) = hold.body(rig.target) else {
+            continue;
+        };
+        let crest = expose_armor_crest_point(body.root, body.is_pet);
+        rig_transform.translation = crest;
+        let capsule = body.capsule();
         // Where a point truly at `at` is drawn, and its scale: held in front
         // of the body on its own view ray.
-        let hold = |at: Vec3| -> (Vec3, f32) {
-            match view {
-                Some(c) => siphon_drawn_point(at, capsule, c.translation, c.forward().as_vec3()),
-                None => (at, 1.0),
-            }
-        };
+        let hold = |at: Vec3| -> (Vec3, f32) { held_in(view, at, capsule) };
         let s = stature(rig.is_pet);
         let ms = rig.age * 1000.0;
         let (fill, line, fade, size) = expose_armor_crest_look(ms);
@@ -1103,11 +1103,11 @@ pub fn pose_expose_armor_crests(
                         let tail_at = at - p.velocity / speed * length;
                         let tail_drawn = match view {
                             Some(c) => {
-                                let f = c.forward().as_vec3();
-                                let depth = (drawn - c.translation).dot(f);
-                                let tail_depth = (tail_at - c.translation).dot(f);
+                                let f = c.forward;
+                                let depth = (drawn - c.eye).dot(f);
+                                let tail_depth = (tail_at - c.eye).dot(f);
                                 if tail_depth > 1e-4 {
-                                    c.translation + (tail_at - c.translation) * (depth / tail_depth)
+                                    c.eye + (tail_at - c.eye) * (depth / tail_depth)
                                 } else {
                                     tail_at
                                 }

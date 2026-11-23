@@ -2,8 +2,8 @@ use bevy::color::LinearRgba;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
-use super::dot_state::{has_dot_state, DotStateVisual};
-use super::heal_impact::COMBATANT_BODY_RADIUS;
+use super::body_hold::COMBATANT_BODY_RADIUS;
+use super::dot_state::{has_dot_state, DotStateOn, DotStateVisual};
 use super::spell_bolts::soft_dot_texture;
 use super::warlock_dots::{dot_anchor, dot_stature};
 use crate::states::play_match::components::*;
@@ -302,6 +302,7 @@ pub fn spawn_immolate_burns(
                 quad: assets.quad.clone(),
                 sprite: assets.sprite.clone(),
             },
+            DotStateOn::new(entity, DotStateVisual::ImmolateBurn),
             Transform::from_translation(feet_anchor(transform.translation, pet.is_some())),
             Visibility::default(),
             PlayMatchEntity,

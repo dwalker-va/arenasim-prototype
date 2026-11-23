@@ -41,7 +41,7 @@
 //!
 //! 1. **Held in front of the body.** Every particle is drawn on its own view
 //!    ray, slid in front of the Priest's RENDERED body and scaled by the same
-//!    ratio ([`siphon_drawn_point`], AS-347's rule), so the half of the burst
+//!    ratio (the shared body hold, `body_hold.rs`), so the half of the burst
 //!    deeper than the body's centre is not painted over by the body.
 //! 2. **The drag is integrated exactly.** The bench slows a particle by
 //!    `1 − 3 × drag × dt` a frame; here its speed decays as
@@ -62,11 +62,10 @@ use std::f32::consts::TAU;
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::body_hold::{held_in, BodyHold, HoldDisjoint};
 use super::cheat_death::{particle_sprite_image, GLOW_SOFT};
 use super::druid_heals::{body_point, keyed};
 use super::paladin_oneshots::bench_hash;
-use super::siphon_life::{siphon_body_capsule, siphon_drawn_point};
-use super::vampiric_embrace::rendered_root;
 use crate::states::play_match::components::*;
 
 // ── The bench's constants block (signed off at version 1792207490-53c9) ─────
@@ -367,37 +366,10 @@ pub fn update_blessed_recovery_bursts(
 /// is unrotated, so a particle's local pose is its world offset.
 #[allow(clippy::type_complexity)]
 pub fn place_blessed_recovery_bursts(
-    camera: Query<
-        &Transform,
-        (
-            With<Camera3d>,
-            Without<BlessedRecoveryBurst>,
-            Without<BlessedRecoveryParticle>,
-        ),
-    >,
+    hold: BodyHold,
     mut rigs: Query<
         (&BlessedRecoveryBurst, &mut Transform, &Children),
-        (
-            Without<Combatant>,
-            Without<VisualBody>,
-            Without<BlessedRecoveryParticle>,
-        ),
-    >,
-    units: Query<
-        (&Transform, Option<&Children>),
-        (
-            With<Combatant>,
-            Without<BlessedRecoveryBurst>,
-            Without<BlessedRecoveryParticle>,
-        ),
-    >,
-    bodies: Query<
-        (&Transform, &VisualBody),
-        (
-            Without<Combatant>,
-            Without<BlessedRecoveryBurst>,
-            Without<BlessedRecoveryParticle>,
-        ),
+        (Without<BlessedRecoveryParticle>, HoldDisjoint),
     >,
     mut particles: Query<
         (
@@ -405,24 +377,18 @@ pub fn place_blessed_recovery_bursts(
             &mut Transform,
             &MeshMaterial3d<StandardMaterial>,
         ),
-        (
-            Without<Combatant>,
-            Without<VisualBody>,
-            Without<BlessedRecoveryBurst>,
-        ),
+        (Without<BlessedRecoveryBurst>, HoldDisjoint),
     >,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let view = camera.iter().next();
+    let view = hold.view();
     for (burst, mut rig_transform, children) in rigs.iter_mut() {
-        let Ok((unit, unit_children)) = units.get(burst.priest) else {
+        let Some(body) = hold.body(burst.priest) else {
             continue;
         };
-        let body = unit_children.and_then(|kids| kids.iter().find_map(|k| bodies.get(k).ok()));
-        let root = rendered_root(unit, body);
-        let chest = body_point(RECOVERY_CHEST, root, false);
+        let chest = body_point(RECOVERY_CHEST, body.root, false);
         rig_transform.translation = chest;
-        let capsule = siphon_body_capsule(root, false);
+        let capsule = body.capsule();
         for child in children.iter() {
             let Ok((particle, mut transform, material)) = particles.get_mut(child) else {
                 continue;
@@ -431,12 +397,7 @@ pub fn place_blessed_recovery_bursts(
             let (rgb, alpha) = match pose {
                 Some(p) => {
                     let at = chest + p.at;
-                    let (drawn, k) = match view {
-                        Some(c) => {
-                            siphon_drawn_point(at, capsule, c.translation, c.forward().as_vec3())
-                        }
-                        None => (at, 1.0),
-                    };
+                    let (drawn, k) = held_in(view, at, capsule);
                     transform.translation = drawn - chest;
                     transform.rotation = view.map(|c| c.rotation).unwrap_or_default()
                         * Quat::from_rotation_z(p.roll);

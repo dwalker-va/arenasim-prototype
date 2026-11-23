@@ -1596,8 +1596,10 @@ fn the_hold_follows_a_victim_running_under_the_camera() {
             while !h.rigs().is_empty() {
                 t += DT;
                 // Up to 3 yd toward the camera and 2 across, and back, at
-                // up to about 4.5 yd/s.
-                let at = start + toward * 3.0 * (t * 1.5).sin() + across * 2.0 * (t * 2.3).sin();
+                // up to about 9 yd/s: past a run's speed, so a hold that
+                // lagged the body by a frame (0.08-0.1 yd at a run, more than
+                // the 0.05 yd clearance) would put a piece behind it.
+                let at = start + toward * 3.0 * (t * 2.5).sin() + across * 2.0 * (t * 2.3).sin();
                 h.move_victim(at);
                 h.tick();
                 if h.rigs().is_empty() {
@@ -2011,5 +2013,76 @@ fn a_dodged_or_parried_expose_armor_in_a_match_raises_no_crest() {
         assert!(drawn.held > 0, "parry {parry}: Expose Armor was cast");
         assert!(!drawn.exposed_by_rogue, "parry {parry}: it never landed");
         assert!(drawn.crests.is_empty(), "parry {parry}: no crest");
+    }
+}
+
+/// The `VisualBody` a unit's client spawns under it, at its rest height.
+fn add_body(app: &mut App, unit: Entity, rest_y: f32) -> Entity {
+    let body = app
+        .world_mut()
+        .spawn((
+            arenasim::states::play_match::components::VisualBody { rest_y },
+            Transform::from_xyz(0.0, rest_y, 0.0),
+        ))
+        .id();
+    app.world_mut().entity_mut(unit).add_child(body);
+    body
+}
+
+/// Where a body point `height` yards above the floor stands on a drawn body
+/// whose root is `root` lifted `lift` off its rest pose: a pet's body hangs
+/// 0.45 below its root at 0.55 of a combatant's stature.
+fn drawn_point(root: Vec3, lift: f32, height: f32, pet: bool) -> Vec3 {
+    let local = if pet {
+        -0.45 + (height - 1.0) * 0.55
+    } else {
+        height - 1.0
+    };
+    root + Vec3::Y * (lift + local)
+}
+
+/// The bob and the lift `frame` frames in: the gait's 0.1 yd bob, then a
+/// Cyclone's 1.5 yd lift from frame 30.
+fn bob_and_lift(frame: u32, dt: f32) -> (Vec3, f32) {
+    let t = frame as f32 * dt;
+    let run = Vec3::new(2.0 * (t * 2.5).sin(), 0.0, 1.5 * (t * 2.3).sin());
+    (
+        run,
+        0.1 * (t * 9.0).sin() + if frame >= 30 { 1.5 } else { 0.0 },
+    )
+}
+
+/// Expose Armor's crest rides its victim's DRAWN body, not its sim root: every
+/// frame, as a combatant or a pet runs, its `VisualBody` bobbing on the gait
+/// and then lifted 1.5 yd as a Cyclone lifts one, the crest stands over the
+/// drawn body's head (3.25 yd above its floor).
+#[test]
+fn the_crest_rides_the_drawn_body() {
+    for pet in [false, true] {
+        let mut h = Harness::with_victim(pet);
+        let victim = h.victim;
+        let start = h.victim_at();
+        let rest = if pet { PET_BODY_Y } else { 0.0 };
+        let body = add_body(&mut h.app, victim, rest);
+        h.landed();
+        for frame in 0..60 {
+            let (run, lift) = bob_and_lift(frame, DT);
+            let root = start + run;
+            h.move_victim(root);
+            h.app
+                .world_mut()
+                .get_mut::<Transform>(body)
+                .unwrap()
+                .translation
+                .y = rest + lift;
+            h.tick();
+            assert_eq!(h.rigs().len(), 1, "pet {pet} frame {frame}");
+            let at = h.global(h.rig_entity()).translation;
+            let want = drawn_point(root, lift, 3.25, pet);
+            assert!(
+                at.distance(want) < 1e-4,
+                "pet {pet} frame {frame}: the crest at {at}, over the drawn head {want}"
+            );
+        }
     }
 }

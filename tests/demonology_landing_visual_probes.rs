@@ -58,7 +58,7 @@ use arenasim::states::play_match::talent_mechanics::{TalentMechanic, TalentMecha
 use arenasim::states::play_match::talents::{Build, TalentDefinitions, TalentId};
 use arenasim::states::play_match::{
     animate_client_particles, animate_empowered_flashes, animate_sacrifice_triads,
-    animate_soul_link_columns, billboard_hunter_shots, hold_demonology_particles, soul_link_forms,
+    animate_soul_link_columns, billboard_hunter_shots, place_demonology_landings, soul_link_forms,
     spawn_demonology_landings, spawn_empowered_flashes, star_flash_texture,
     unhold_demonology_particles, BodyHeldParticle, SacrificeOrb, SacrificeRibbon, SacrificeTriad,
     SoulLinkColumn, SoulLinkRune,
@@ -437,7 +437,8 @@ impl Harness {
                 .before(spawn_demonology_landings),
         );
         // The order `states/mod.rs` registers, around the shared particle
-        // ager, then the world-space billboard.
+        // ager and the world-space billboard, then the `BodyPlacement` pass
+        // (PostUpdate in the client).
         app.add_systems(
             Update,
             (
@@ -446,8 +447,8 @@ impl Harness {
                 animate_soul_link_columns,
                 animate_sacrifice_triads,
                 animate_client_particles,
-                hold_demonology_particles,
                 billboard_hunter_shots,
+                place_demonology_landings,
             )
                 .chain(),
         );
@@ -1932,5 +1933,86 @@ fn the_orbs_and_ribbons_face_a_rotated_camera() {
                 "ribbon {k} at {s}"
             );
         }
+    }
+}
+
+/// The `VisualBody` a unit's client spawns under it, at its rest height.
+fn add_body(app: &mut App, unit: Entity, rest_y: f32) -> Entity {
+    let body = app
+        .world_mut()
+        .spawn((
+            arenasim::states::play_match::components::VisualBody { rest_y },
+            Transform::from_xyz(0.0, rest_y, 0.0),
+        ))
+        .id();
+    app.world_mut().entity_mut(unit).add_child(body);
+    body
+}
+
+/// Where a body point `height` yards above the floor stands on a drawn body
+/// whose root is `root` lifted `lift` off its rest pose: a pet's body hangs
+/// 0.45 below its root at 0.55 of a combatant's stature.
+fn drawn_point(root: Vec3, lift: f32, height: f32, pet: bool) -> Vec3 {
+    let local = if pet {
+        -0.45 + (height - 1.0) * 0.55
+    } else {
+        height - 1.0
+    };
+    root + Vec3::Y * (lift + local)
+}
+
+/// The bob and the lift `frame` frames in: the gait's 0.1 yd bob, then a
+/// Cyclone's 1.5 yd lift from frame 30.
+fn bob_and_lift(frame: u32, dt: f32) -> (Vec3, f32) {
+    let t = frame as f32 * dt;
+    let run = Vec3::new(2.0 * (t * 2.5).sin(), 0.0, 1.5 * (t * 2.3).sin());
+    (
+        run,
+        0.1 * (t * 9.0).sin() + if frame >= 30 { 1.5 } else { 0.0 },
+    )
+}
+
+/// Soul Link's column and Demonic Sacrifice's triad ride their Warlock's DRAWN
+/// body, not its sim root: every frame, as it runs, its `VisualBody` bobbing on
+/// the gait and then lifted 1.5 yd as a Cyclone lifts one, the column stands
+/// at the drawn body's feet and the triad at its chest. (A Warlock is never a
+/// pet.)
+#[test]
+fn the_column_and_the_triad_ride_the_drawn_body() {
+    let mut h = Harness::new();
+    let start = Vec3::new(1.0, COMBATANT_Y, -2.0);
+    let warlock = h.linked(start);
+    let body = add_body(&mut h.app, warlock, 0.0);
+    h.open_gates(true);
+    h.tick(1);
+    h.land(warlock, AuraLandingKind::SacrificeTriad);
+    h.tick(1);
+    for frame in 0..60 {
+        let (run, lift) = bob_and_lift(frame, TICK_SECS);
+        let root = start + run;
+        h.move_to(warlock, root);
+        h.app
+            .world_mut()
+            .get_mut::<Transform>(body)
+            .unwrap()
+            .translation
+            .y = lift;
+        h.tick(1);
+        let (column, _) = h.columns()[0];
+        let (triad, _) = h.triads()[0];
+        let (feet, chest) = (
+            drawn_point(root, lift, 0.0, false),
+            drawn_point(root, lift, 1.45, false),
+        );
+        let at = h.global(column).translation();
+        assert!(
+            at.distance(feet) < 1e-4,
+            "frame {frame}: the column at {at}, the drawn feet {feet}"
+        );
+        let at = h.global(triad).translation();
+        assert!(
+            at.distance(chest) < 1e-4,
+            "frame {frame}: the triad at {at}, the drawn chest {chest}"
+        );
     }
 }

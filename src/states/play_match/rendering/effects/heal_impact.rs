@@ -4,11 +4,11 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_2, TAU};
 
+use super::body_hold::{BodyHold, HoldDisjoint, COMBATANT_BODY_RADIUS};
 use super::conflagrate::{conflagrate_material, ConflagrateSprite, CONFLAGRATE_GLOW};
 use super::druid_heals::{keyed, keyed_color};
 use super::school_impact::{IMPACT_HEAD_Y, IMPACT_PET_BODY_Y, IMPACT_PET_STATURE};
 use super::shield::disc_texture;
-use super::siphon_life::{siphon_body_capsule, siphon_drawn_point};
 use super::spell_bolts::{soft_dot_texture, star_flash_texture};
 use super::vampiric_embrace::{
     VAMPIRIC_EMBRACE_HEAL_STREAM, VAMPIRIC_EMBRACE_HEAL_VISUAL_MIN_INTERVAL_SECS, VE_HEAL_AREA,
@@ -120,13 +120,6 @@ pub const HEALING_WAVE_BUTTERFLIES: u32 = 8;
 pub const HEALING_WAVE_ORBIT_RADIUS: f32 = 1.0;
 pub const HEALING_WAVE_SWIRL_SPEED_SCALE: f32 = 1.0;
 pub const HEALING_WAVE_GLOW_INTENSITY: f32 = 1.0;
-/// Radius of the combatant capsule (`Capsule3d::new(0.5, 1.5)`). A glow quad
-/// billboarded on the spine axis renders at or BEHIND the capsule's front
-/// surface out to this radius, so any wrap layer must clear it with margin or
-/// the body occludes the glow entirely — which is exactly how the third build
-/// (0.50/0.38/0.28 radii) lost the green glow. Pinned by
-/// `healing_wave_glow_wraps_outside_the_body`.
-pub const COMBATANT_BODY_RADIUS: f32 = 0.5;
 /// Radius of the green pool of light at the recipient's feet — the Base
 /// attach grounding the effect (blessed band 0.8–1.2).
 pub const HEALING_WAVE_UNDERGLOW_RADIUS: f32 = 1.0;
@@ -382,7 +375,7 @@ pub struct HealStyle {
     /// and size over each mote's life, as a bench keys them.
     pub mote_look: Option<HealMoteLook>,
     /// Draw every mote held in front of the recipient's body, on its own
-    /// view ray and scaled to hold its screen size (`siphon_drawn_point`),
+    /// view ray and scaled to hold its screen size (`body_held_point`),
     /// as a bench that paints the motes over the body draws them. The bodies
     /// are `AlphaMode::Blend` and write no depth, so a mote deeper than the
     /// body's centre would otherwise sort behind it and vanish.
@@ -1173,21 +1166,8 @@ pub fn animate_heal_impacts(
         Entity,
         &mut HealImpact,
         &mut HealImpactRig,
-        &mut Transform,
         Option<&Children>,
     )>,
-    // Read-only recipient lookup, provably disjoint from the mutable part
-    // queries below or Bevy rejects the set as B0001.
-    targets: Query<
-        (&Transform, Option<&Pet>),
-        (
-            With<Combatant>,
-            Without<HealImpact>,
-            Without<HealSprite>,
-            Without<HealMote>,
-            Without<HealButterflyWing>,
-        ),
-    >,
     mut sprites: Query<
         (
             &HealSprite,
@@ -1223,7 +1203,7 @@ pub fn animate_heal_impacts(
 ) {
     let dt = time.delta_secs();
 
-    for (entity, mut impact, mut rig, mut transform, children) in impacts.iter_mut() {
+    for (entity, mut impact, mut rig, children) in impacts.iter_mut() {
         impact.age += dt;
         let age = impact.age;
         let style = heal_style(impact.kind);
@@ -1231,10 +1211,8 @@ pub fn animate_heal_impacts(
             commands.entity(entity).despawn();
             continue;
         }
-        // Attached: follow a recipient that is still moving.
-        if let Ok((target, pet)) = targets.get(impact.target) {
-            transform.translation = heal_origin(style.anchor, target.translation, pet.is_some());
-        }
+        // The rig follows its recipient's drawn body in
+        // `billboard_heal_impacts`.
 
         // Emit motes while the window is open.
         if age < style.emit_secs {
@@ -1465,62 +1443,51 @@ pub fn animate_heal_impacts(
 /// roll about the view axis so the fan stays a fan. Butterfly wings are NOT
 /// billboarded — their 3D flutter is the design — and neither is the feet
 /// under-glow, which lies in the ground plane.
+///
+/// A `BodyPlacement` system: the rig stands on the recipient's RENDERED body
+/// this frame (`body_hold.rs`) — the walk and fear bobs, the swing step, a
+/// pet's hang and a Cyclone's lift carry the landing — and a held style's
+/// motes are held in front of that body. The feet under-glow stays a pool ON
+/// the floor under the body: it is light on the ground, so it is drawn on the
+/// ground plane whatever the body does (above it, it would float under a
+/// lifted body; below it, the opaque floor would reject it).
 #[allow(clippy::type_complexity)]
 pub fn billboard_heal_impacts(
-    camera: Query<
-        &Transform,
-        (
-            With<Camera3d>,
-            Without<HealImpact>,
-            Without<HealSprite>,
-            Without<HealMote>,
-        ),
-    >,
-    rigs: Query<(&HealImpact, &Transform, &Children)>,
-    recipients: Query<
-        (&Transform, Option<&Pet>),
-        (
-            With<Combatant>,
-            Without<HealImpact>,
-            Without<HealSprite>,
-            Without<HealMote>,
-            Without<Camera3d>,
-        ),
+    hold: BodyHold,
+    mut rigs: Query<
+        (&HealImpact, &mut Transform, &Children),
+        (Without<HealSprite>, Without<HealMote>, HoldDisjoint),
     >,
     mut sprites: Query<
         (&HealSprite, &mut Transform),
-        (
-            Without<HealImpact>,
-            Without<Camera3d>,
-            Without<HealMote>,
-            Without<Combatant>,
-        ),
+        (Without<HealImpact>, Without<HealMote>, HoldDisjoint),
     >,
     mut motes: Query<
         (&HealMote, &mut Transform),
-        (
-            Without<HealImpact>,
-            Without<Camera3d>,
-            Without<HealSprite>,
-            Without<Combatant>,
-        ),
+        (Without<HealImpact>, Without<HealSprite>, HoldDisjoint),
     >,
 ) {
-    let Some(cam) = camera.iter().next() else {
-        return;
-    };
-    for (impact, rig, children) in rigs.iter() {
-        let facing = rig.rotation.inverse() * cam.rotation;
-        // A held style's motes stand in front of their recipient's body.
-        let body = heal_style(impact.kind)
+    let view = hold.view();
+    for (impact, mut rig, children) in rigs.iter_mut() {
+        let style = heal_style(impact.kind);
+        let drawn = hold.body(impact.target);
+        if let Some(body) = drawn {
+            rig.translation = heal_origin(style.anchor, body.root, body.is_pet);
+        }
+        let rig = *rig;
+        // With no camera nothing is turned or held; the rig still follows.
+        let facing = view.map(|cam| rig.rotation.inverse() * cam.rotation);
+        // A held style's motes stand in front of their recipient's rendered
+        // body.
+        let body = style
             .held_before_body
-            .then(|| recipients.get(impact.target).ok())
+            .then_some(drawn)
             .flatten()
-            .map(|(t, pet)| siphon_body_capsule(t.translation, pet.is_some()));
+            .map(|body| body.capsule());
         for child in children.iter() {
             if let Ok((sprite, mut part)) = sprites.get_mut(child) {
-                match sprite.role {
-                    HealSpriteRole::Ray { angle } => {
+                match (sprite.role, facing) {
+                    (HealSpriteRole::Ray { angle }, Some(facing)) => {
                         let roll = facing * Quat::from_rotation_z(angle);
                         part.rotation = roll;
                         // Extend outward from the flash centre along the
@@ -1528,19 +1495,28 @@ pub fn billboard_heal_impacts(
                         part.translation = roll * Vec3::Y * (part.scale.y * 0.5);
                     }
                     // The under-glow is a pool ON the ground — the ground is
-                    // its plane, so it keeps its spawn-time flat rotation.
-                    HealSpriteRole::UnderGlow => {}
-                    _ => {
+                    // its plane, so it keeps its spawn-time flat rotation,
+                    // and stands on the floor under the body wherever the
+                    // body is drawn.
+                    (HealSpriteRole::UnderGlow, _) => {
+                        let floor = ARENA_FLOOR_WORLD_Y + HEALING_WAVE_UNDERGLOW_LIFT;
+                        part.translation =
+                            rig.rotation.inverse() * (Vec3::Y * (floor - rig.translation.y));
+                    }
+                    (_, Some(facing)) => {
                         part.rotation = facing;
                     }
+                    (_, None) => {}
                 }
             }
             if let Ok((mote, mut part)) = motes.get_mut(child) {
+                let (Some(facing), Some(cam)) = (facing, view) else {
+                    continue;
+                };
                 part.rotation = facing;
                 if let Some(capsule) = body {
                     let at = rig.translation + rig.rotation * mote.offset;
-                    let (drawn, k) =
-                        siphon_drawn_point(at, capsule, cam.translation, cam.forward().as_vec3());
+                    let (drawn, k) = cam.held(at, capsule);
                     part.translation = rig.rotation.inverse() * (drawn - rig.translation);
                     part.scale *= k;
                 }
