@@ -73,7 +73,7 @@ own discordance could resolve.
 
 | node | before | after | delta (pt) | flips | z | floor (pt) | verdict |
 |---|---|---|---|---|---|---|---|
-| **Soul Link** (capstone, allowance +2.0) | 48.9% | 54.8% | **+5.9** | 520 (+382/−133) | 10.93 | 1.1 | **dominates** |
+| **Soul Link** (capstone; allowance +2.0 in block 1, +1.4 pooled, which the verdict uses) | 48.9% | 54.8% | **+5.9** | 520 (+382/−133) | 10.93 | 1.1 | **dominates** |
 | **Bane** (rank 1) | 48.9% | 49.9% | **+1.1** | 460 (+250/−205) | 2.06 | 1.0 | **at the line** |
 | Shadow Mastery (capstone, a Patch, for scale; allowance +1.4) | 47.2% | 48.5% | +1.3 | 391 (+221/−166) | 2.74 | 0.9 | within |
 | Nightfall (rank 1) | 48.9% | 48.9% | +0.0 | 829 (+412/−411) | 0.00 | 1.4 | within |
@@ -159,7 +159,10 @@ count (80, against 74 for its comparison).
 
 1. **Soul Link dominates** (+4.6pt past its allowance, replicated). Twelve
    percent of the Warlock's damage taken, unpreventable, sends 16 transfers a
-   Warlock a match to a 204-health Felhunter. Direction: a smaller share
+   Warlock a match to a Felhunter of about 210 health (45% of the reference
+   Warlock's 388, `Combatant::new_pet`, raised 20% by Fel Stamina 2/2;
+   `talents.ron`'s 204 is Fel Stamina 2/2 on an untalented Warlock's 377).
+   Direction: a smaller share
    (the design priced 12% at about two ranks of effective health), or a
    tighter condition. With it, the Demonology reference is twice either
    other's worth over 0 points.

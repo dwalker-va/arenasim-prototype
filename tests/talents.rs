@@ -6,6 +6,8 @@
 //! book: a spawn that handed a combatant the base book (or the shipped one)
 //! instead of its resolved build's fails them, on either path.
 
+mod common;
+
 use std::collections::BTreeMap;
 
 use bevy::asset::AssetPlugin;
@@ -49,11 +51,7 @@ fn abilities() -> &'static AbilityDefinitions {
 /// reference before the rule under test. `tests/reference_builds.rs` holds
 /// the references to their rules over the real file.
 fn tree_text() -> String {
-    let text = shipped_text();
-    let start = text
-        .find("    reference_builds: {")
-        .expect("the reference builds");
-    format!("{}{}", &text[..start], &text[text.rfind(')').unwrap()..])
+    common::talents_ron::without_reference_builds(&shipped_text())
 }
 
 /// The shipped trees with `from` replaced by `to` (which must occur).
