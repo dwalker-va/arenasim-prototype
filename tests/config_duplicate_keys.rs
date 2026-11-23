@@ -134,25 +134,37 @@ impl Plant {
         (text, line)
     }
 
-    fn assert_refused(&self) {
+    /// Whether the file's loader refuses the planted duplicate by name, map
+    /// and line; `Err` says how it fell short.
+    fn check(&self) -> Result<(), String> {
         let (text, line) = self.text();
-        let err = self.file.load(&text).expect_err(&format!(
-            "{}: the duplicate `{}` is refused",
-            self.file.name(),
-            self.key
-        ));
+        let at = format!("{} `{}` in `{}`", self.file.name(), self.key, self.map);
+        let err = match self.file.load(&text) {
+            Ok(()) => return Err(format!("{at}: the duplicate loaded")),
+            Err(err) => err,
+        };
         let expected = format!("duplicate key `{}` in `{}`", self.key, self.map);
-        assert!(
-            err.contains(&expected),
-            "{}: expected {expected:?} in {err}",
-            self.file.name()
-        );
-        assert!(
-            err.contains(&format!(" {line}:")),
-            "{}: the error names line {line}: {err}",
-            self.file.name()
-        );
+        if !err.contains(&expected) {
+            return Err(format!("{at}: expected {expected:?} in {err}"));
+        }
+        if !err.contains(&format!(" {line}:")) {
+            return Err(format!("{at}: the error does not name line {line}: {err}"));
+        }
+        Ok(())
     }
+}
+
+/// Every plant is refused. Each is checked before any failure is reported, so
+/// a failure lists every plant that fell short, not just the first.
+fn assert_refused(plants: &[Plant]) {
+    let failures: Vec<String> = plants.iter().filter_map(|p| p.check().err()).collect();
+    assert!(
+        failures.is_empty(),
+        "{} of {} plants fell short:\n{}",
+        failures.len(),
+        plants.len(),
+        failures.join("\n")
+    );
 }
 
 /// The whole `(...)` entry that `opener` begins, from the shipped text: up to
@@ -184,7 +196,7 @@ fn every_shipped_config_holds_no_duplicate_key() {
 #[test]
 fn talents_refuse_a_duplicate_in_every_map() {
     let talent = entry(File::Talents, "\n        ImprovedDrainLife: (");
-    for plant in [
+    assert_refused(&[
         Plant::new(
             File::Talents,
             "Warlock: [\n            (id: Affliction",
@@ -227,9 +239,7 @@ fn talents_refuse_a_duplicate_in_every_map() {
             "ImprovedDrainLife",
             "reference_builds.Warlock[0].build",
         ),
-    ] {
-        plant.assert_refused();
-    }
+    ]);
 }
 
 #[test]
@@ -264,7 +274,7 @@ fn abilities_refuse_a_duplicate_ability() {
         "Frostbolt",
         "abilities",
     );
-    plant.assert_refused();
+    assert_refused(std::slice::from_ref(&plant));
     // Control: plain RON takes the same text and keeps the last copy.
     let (text, _) = plant.text();
     ron::from_str::<AbilitiesConfig>(&text).expect("plain RON accepts the repeat");
@@ -280,14 +290,14 @@ fn items_refuse_a_duplicate_item() {
         "LionheartHelm",
         "items",
     );
-    plant.assert_refused();
+    assert_refused(std::slice::from_ref(&plant));
     let (text, _) = plant.text();
     ron::from_str::<ItemsConfig>(&text).expect("plain RON accepts the repeat");
 }
 
 #[test]
 fn loadouts_refuse_a_duplicate_class_or_slot() {
-    for plant in [
+    let plants = [
         Plant::new(
             File::Loadouts,
             "Warrior: {\n            Head: LionheartHelm",
@@ -302,8 +312,9 @@ fn loadouts_refuse_a_duplicate_class_or_slot() {
             "Head",
             "loadouts.Warrior",
         ),
-    ] {
-        plant.assert_refused();
+    ];
+    assert_refused(&plants);
+    for plant in &plants {
         let (text, _) = plant.text();
         ron::from_str::<LoadoutsConfig>(&text).expect("plain RON accepts the repeat");
     }
@@ -311,7 +322,7 @@ fn loadouts_refuse_a_duplicate_class_or_slot() {
 
 #[test]
 fn maps_movement_and_banter_refuse_a_repeated_field() {
-    for plant in [
+    assert_refused(&[
         Plant::new(
             File::Maps,
             "volumes: [],",
@@ -333,7 +344,5 @@ fn maps_movement_and_banter_refuse_a_repeated_field() {
             "opening_start",
             "timing",
         ),
-    ] {
-        plant.assert_refused();
-    }
+    ]);
 }

@@ -535,7 +535,11 @@ mod tests {
         Flat(u32),
         Tagged { tag: String },
         Ranks(BTreeMap<String, u8>),
+        Pair(u8, BTreeMap<String, u8>),
     }
+
+    #[derive(Debug, Default, Deserialize, PartialEq)]
+    struct Wrapped(BTreeMap<String, u8>);
 
     #[derive(Debug, Deserialize, PartialEq)]
     struct File {
@@ -551,6 +555,10 @@ mod tests {
         effects: Vec<Effect>,
         #[serde(default)]
         first: Option<u32>,
+        #[serde(default)]
+        maybe: Option<BTreeMap<String, u8>>,
+        #[serde(default)]
+        wrapped: Wrapped,
     }
 
     fn err(text: &str) -> String {
@@ -566,8 +574,10 @@ mod tests {
             by_name: { "a": 1, "b": 2 },
             by_number: { 1: 10, 2: 20 },
             nested: { Mage: { "x": 1 }, Priest: { "x": 1 } },
-            effects: [Flat(3), Tagged(tag: "t"), Ranks({ "r": 1 })],
+            effects: [Flat(3), Tagged(tag: "t"), Ranks({ "r": 1 }), Pair(1, { "p": 1 })],
             first: Some(4),
+            maybe: Some({ "m": 1 }),
+            wrapped: Wrapped({ "w": 1 }),
         )"#;
         let strict: File = from_str(text).expect("parses");
         let plain: File = ron::from_str(text).expect("parses");
@@ -604,6 +614,15 @@ mod tests {
         assert!(e.contains("duplicate key `x` in `nested.Priest`"), "{e}");
         let e = err(r#"(effects: [Flat(1), Ranks({ "r": 1, "r": 2 })])"#);
         assert!(e.contains("duplicate key `r` in `effects[1].Ranks`"), "{e}");
+        let e = err(r#"(effects: [Pair(1, { "p": 1, "p": 2 })])"#);
+        assert!(
+            e.contains("duplicate key `p` in `effects[0].Pair[1]`"),
+            "{e}"
+        );
+        let e = err(r#"(maybe: Some({ "m": 1, "m": 2 }))"#);
+        assert!(e.contains("duplicate key `m` in `maybe`"), "{e}");
+        let e = err(r#"(wrapped: Wrapped({ "w": 1, "w": 2 }))"#);
+        assert!(e.contains("duplicate key `w` in `wrapped`"), "{e}");
     }
 
     #[test]
@@ -629,6 +648,23 @@ mod tests {
             .to_string();
         assert!(e.contains("cannot compare"), "{e}");
         assert!(e.contains("in `m`"), "{e}");
+
+        // A variant carrying data is no unit key, though it starts with a
+        // name: `A(1)` and `A(2)` must not compare as the same `A`.
+        #[derive(Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+        #[allow(dead_code)]
+        enum Keyed {
+            A(u8),
+        }
+        #[derive(Debug, Deserialize)]
+        #[allow(dead_code)]
+        struct ByVariant {
+            m: BTreeMap<Keyed, u8>,
+        }
+        let e = from_str::<ByVariant>("(m: { A(1): 1 })")
+            .expect_err("a data-carrying variant key is refused")
+            .to_string();
+        assert!(e.contains("cannot compare"), "{e}");
     }
 
     #[test]
