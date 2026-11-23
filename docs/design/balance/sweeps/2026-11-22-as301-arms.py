@@ -31,10 +31,12 @@ Vitality.
     #    pooled: `gen OUTDIR2 4 <REPLICATED_ARMS>`, run as in 2, then
     2026-11-22-as301-arms.py replicate OUTDIR OUTDIR2
     # 6. Shadow Dance: replay every Rogue match of the Subtlety reference
-    #    (and the Kidney Shots of its stem, the baseline) with full logs
+    #    with full logs, and the Vitality twin of every match with a Dance
+    #    (the counterfactual)
     2026-11-22-as301-arms.py dance OUTDIR <path to arenasim>
     # 7. why the Dance did not go: its rejection reasons over the sample
-    #    slice of the Subtlety reference, traced
+    #    slice of the Subtlety reference, traced. The gates are checked in
+    #    order, so each share is of the decisions that reached that gate
     2026-11-22-as301-arms.py gates OUTDIR <path to arenasim>
 
 `table` reads `<arm>.csv` from OUTDIR and prints, for each comparison, the
@@ -46,6 +48,7 @@ McNemar z and the resolution floor that pair bought.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -62,6 +65,13 @@ SEEDS_PER_MAP = 4
 OFFHAND = [("rogue_offhand_poisons", "Deadly")]
 VITALITY_PRICE = 20.4  # its computed price at the reference Rogue
 RANK_PRICE = 11.0
+# Bonferroni at alpha 0.05 two-sided over the 12 rows of NODE_ARMS (10 nodes
+# under test, Blood Spatter shown for scale, and Deflection, which plays the
+# same matches as Lightning Reflexes): Phi^-1(1 - 0.025/12) = 2.865. Applied to
+# each row's MARGIN z, the test of the success condition's null ("worth a stat
+# rank of its price"), never to the raw delta's.
+BONFERRONI_Z = 2.87
+HEALERS = {"Priest", "Paladin", "Shaman", "Druid"}
 
 
 def moved(reference, remove=None, add=None):
@@ -207,6 +217,51 @@ def allowance(price, vitality_value):
     return vitality_value * (price / VITALITY_PRICE - 1.0)
 
 
+def paired_se(s):
+    """The standard error (pt) of a paired win-rate delta, from its
+    discordant pairs: 100 * sqrt(b + c - (b - c)^2 / n) / n."""
+    b, c, n = s.to_win, s.to_loss, s.n
+    if not n:
+        return 0.0
+    return 100.0 * math.sqrt(max(0.0, b + c - (b - c) ** 2 / n)) / n
+
+
+def margin_stats(s, price, vitality):
+    """(allowance, margin, margin z) of a node row `s` against Vitality in its
+    place, where `vitality` is Vitality's own slice on the same stem. The
+    allowance's error (k * se(v)) is folded in quadrature with the row's."""
+    k = price / VITALITY_PRICE - 1.0
+    allow = k * vitality.delta
+    margin = s.delta - allow
+    se = math.sqrt(paired_se(s) ** 2 + (k * paired_se(vitality)) ** 2)
+    return allow, margin, (margin / se if se else 0.0)
+
+
+def node_cells(s, price, vitality):
+    """The node columns a table prints: allowance, margin, margin z (with
+    BONF when it clears the Bonferroni threshold), verdict."""
+    allow, margin, mz = margin_stats(s, price, vitality)
+    return " %+.1f | %+.1f | %+.2f%s | %s |" % (
+        allow, margin, mz, " BONF" if abs(mz) >= BONFERRONI_Z else "", verdict(s, allow))
+
+
+NODE_HEADER = " allowance | margin | margin z | verdict |"
+NODE_RULE = "---|---|---|---|"
+
+
+def changes_at_allowance_zero(rows):
+    """The node rows whose verdict changes when the allowance is dropped, so
+    the node faces a full Vitality: [(label, verdict, verdict at 0)] from
+    [(label, slice, price, Vitality's slice on its stem)]."""
+    out = []
+    for label, s, price, vitality in rows:
+        modelled = verdict(s, margin_stats(s, price, vitality)[0])
+        flat = verdict(s, 0.0)
+        if flat != modelled:
+            out.append((label, modelled, flat))
+    return out
+
+
 def verdict(s, allow):
     """DOMINATES when the node beats Vitality by more than the allowance plus
     the floor; BELOW when it loses to a same-price stat rank by more than the
@@ -233,14 +288,23 @@ def table(outdir):
     stat = {}
     for label, key, plus, stem in STAT_RANK:
         s, _, _ = compare(outdir, cache, plus, stem)
-        stat[key] = s.delta
+        stat[key] = s
         print(row(label, s))
     print("\n## Each node against Vitality in its place\n")
-    print(HEADER % ("node", " allowance | margin | verdict |", "---|---|---|"))
+    print("BONF: |margin z| >= %.2f, Bonferroni over the %d rows.\n"
+          % (BONFERRONI_Z, len(NODE_ARMS)))
+    print(HEADER % ("node", NODE_HEADER, NODE_RULE))
+    measured = []
     for label, price, arm, base, stem in NODE_ARMS:
         s, nc, same = compare(outdir, cache, arm, base)
-        allow = allowance(price, stat[stem])
-        print(row(label, s, " %+.1f | %+.1f | %s |" % (allow, s.delta - allow, verdict(s, allow))))
+        print(row(label, s, node_cells(s, price, stat[stem])))
+        measured.append((label, s, price, stat[stem]))
+    changed = changes_at_allowance_zero(measured)
+    print("\n## Verdicts that change at allowance 0 (the node against a full Vitality)\n")
+    for label, modelled, flat in changed:
+        print("- %s: %s -> %s" % (label, modelled, flat))
+    if not changed:
+        print("- (none)")
     print("\n## Each arm against its reference\n")
     print(HEADER % ("arm", "", ""))
     refs = {"assn", "combat", "sub"}
@@ -285,6 +349,12 @@ EVENTS = [
     ("Shadow Dances", r"Rogue #\d uses Shadow Dance"),
     ("Rogue stuns", r"Rogue #\d uses (Cheap Shot|Kidney Shot) on"),
     ("crowd control broken by damage", r"broke from damage"),
+    # Melee strikes that land on a Rogue (an auto-attack is a melee weapon's
+    # or a pet's; Auto Shot and Wand Shot are named apart). With the
+    # avoidances above, the melee attacks a Rogue's dodge or parry rolls on.
+    ("melee hits on a Rogue",
+     r"'s (Auto Attack|Mortal Strike|Sinister Strike|Hemorrhage|Ambush|Crusader Strike"
+     r"|Heroic Strike) (hits|CRITS) Team \d Rogue #\d"),
 ]
 SAMPLE_PER_ARM = 60
 
@@ -361,24 +431,26 @@ REPLICATED_ARMS = sorted({a for _, x, y in REPLICATED for a in (x, y)})
 
 
 def replicate(block1, block2):
-    """Each replicated comparison per block and pooled; a node row's pooled
-    verdict reads the pooled Vitality rank on its stem for its allowance."""
+    """Each replicated comparison per block and pooled. A node row reads its
+    allowance from the Vitality rank on its stem in the same block (or
+    pooled), and prints its margin z against the Bonferroni threshold."""
     pooled = block1 + os.pathsep + block2
+    blocks = (("block 1", block1), ("block 2", block2), ("pooled", pooled))
     vitality = {}
-    for label, key, plus, stem in STAT_RANK:
-        vitality[key] = compare(pooled, {}, plus, stem)[0].delta
+    for name, dirs in blocks:
+        for label, key, plus, stem in STAT_RANK:
+            vitality[(name, key)] = compare(dirs, {}, plus, stem)[0]
     node = {(arm, base): (price, stem) for _, price, arm, base, stem in NODE_ARMS}
-    print(HEADER % ("comparison", " block | allowance | margin | verdict |", "---|---|---|---|"))
+    print(HEADER % ("comparison", " block |" + NODE_HEADER, "---|" + NODE_RULE))
     for label, arm, base in REPLICATED:
-        for name, dirs in (("block 1", block1), ("block 2", block2), ("pooled", pooled)):
+        for name, dirs in blocks:
             s, _, _ = compare(dirs, {}, arm, base)
             extra = " %s |" % name
-            if (arm, base) in node and name == "pooled":
+            if (arm, base) in node:
                 price, stem = node[(arm, base)]
-                allow = allowance(price, vitality[stem])
-                extra += " %+.1f | %+.1f | %s |" % (allow, s.delta - allow, verdict(s, allow))
+                extra += node_cells(s, price, vitality[(name, stem)])
             else:
-                extra += " | | |"
+                extra += " | | | |"
             print(row(label, s, extra))
 
 
@@ -399,9 +471,10 @@ DANCE_SECS = 8.0
 # Cheap Shot ends, which may begin up to this long after the Dance's 8s.
 HANDOFF_GRACE = 1.0
 # A Dance converts when the Rogue's team kills an enemy (pets are not team
-# members, so never count) between the Dance's cast and the end of its
-# chain's last stun plus this follow-through: one global cooldown and a half,
-# the time a burst on a target coming out of a stun still lands.
+# members, so never count) between the Dance's cast and this follow-through
+# past the LATER of the Dance's own end and its chain's last stun's end: one
+# global cooldown and a half, the time a burst on a target coming out of a
+# stun still lands.
 CONVERT_GRACE = 2.0
 
 
@@ -431,9 +504,56 @@ def stun_events(text):
     return out
 
 
-def analyse_dances(text):
-    """One record per Dance: its chain, stun-seconds and conversion."""
-    deaths = [(float(m.group(1)), m.group(2), m.group(3)) for m in map(DEATH.match, text.splitlines()) if m]
+CLASSES = ("Warrior", "Mage", "Rogue", "Priest", "Warlock", "Paladin", "Hunter", "Shaman",
+           "Druid")
+
+
+def member_deaths(text):
+    """Every team member's death, in order: (time, name, team). A pet's death
+    ("Team 2 Felhunter #1") is not a team member's and is left out."""
+    out = []
+    for m in map(DEATH.match, text.splitlines()):
+        if m and m.group(2).split()[2] in CLASSES:
+            out.append((float(m.group(1)), m.group(2), m.group(3)))
+    return out
+
+
+# Why `enemy_healer_answers` (class_ai/rogue.rs) let a Dance go, read off the
+# match: it returns false -- admitting the Dance -- when the target is the
+# team's kill window, or when no living enemy healer other than the target
+# stands outside the one the team holds locked. 2v2 with double healers
+# excluded fields at most one healer a team, so each Dance is one of these.
+ADMISSIONS = (
+    "the target is the enemy healer",
+    "no healer in the enemy team",
+    "the enemy healer is dead",
+    "a healer stands: its lock or the kill window",
+    "no stun landed (target unknown)",
+)
+
+
+def admission(config, team, victim, t0, deaths):
+    """Which branch of the gate admitted a Dance by a Rogue of `team` whose
+    chain's first victim is `victim` (None when no stun landed)."""
+    if victim is None:
+        return ADMISSIONS[4]
+    if victim.split()[2] in HEALERS:
+        return ADMISSIONS[0]
+    enemy = "2" if team == "1" else "1"
+    healers = ["Team %s %s #%d" % (enemy, cls, slot + 1)
+               for slot, cls in enumerate(config["team" + enemy]) if cls in HEALERS]
+    if not healers:
+        return ADMISSIONS[1]
+    dead = {who for when, who, _ in deaths if when <= t0}
+    if all(h in dead for h in healers):
+        return ADMISSIONS[2]
+    return ADMISSIONS[3]
+
+
+def analyse_dances(text, config):
+    """One record per Dance: its chain, stun-seconds, conversion and the gate
+    branch that admitted it."""
+    deaths = member_deaths(text)
     end = DURATION.search(text)
     match_end = float(end.group(1)) if end else None  # the log's own clock
     stuns = stun_events(text)
@@ -464,6 +584,7 @@ def analyse_dances(text):
         enemy = "2" if team == "1" else "1"
         kills = [d for d in deaths if d[2] == enemy and t0 <= d[0] <= window_end]
         victims = {s[4] for s in chain}
+        victim = chain[0][4] if chain else None
         records.append({
             "shape": " ".join("%s%s" % ("CS" if s[3] == "Cheap Shot" else "KS",
                                         "imm" if s[5] == 0.0 else ("%g" % s[5] if s[5] else "?"))
@@ -474,36 +595,44 @@ def analyse_dances(text):
             "immune": sum(1 for s in chain if s[5] == 0.0),
             "converts": bool(kills),
             "converts_victim": any(k[1] in victims for k in kills),
+            # The first victim dead by the window's end: the same reading
+            # `fates` takes of the Vitality twin's log.
+            "victim_dead": victim is not None and any(
+                who == victim and when <= window_end for when, who, _ in deaths),
             "window": window_end - t0,
+            "window_end": window_end,
+            "team": team,
+            "victim_name": victim,
             # The class of the chain's first victim ("Team 2 Paladin #2").
-            "victim": chain[0][4].split()[2] if chain else "(none)",
+            "victim": victim.split()[2] if victim else "(none)",
+            "admission": admission(config, team, victim, t0, deaths),
         })
     return records
 
 
-def analyse_kidneys(text):
-    """The baseline: every Kidney Shot a Rogue lands with no Dance, and
-    whether its team kills an enemy by the stun's end plus the same grace."""
-    deaths = [(float(m.group(1)), m.group(2), m.group(3)) for m in map(DEATH.match, text.splitlines()) if m]
-    out = []
-    for t, rogue, team, ability, target, applied, dr in stun_events(text):
-        if ability != "Kidney Shot" or not applied:
-            continue
-        enemy = "2" if team == "1" else "1"
-        window_end = t + applied + CONVERT_GRACE
-        kills = [d for d in deaths if d[2] == enemy and t <= d[0] <= window_end]
-        out.append({"converts": bool(kills), "converts_victim": any(k[1] == target for k in kills),
-                    "applied": applied})
-    return out
+def fates(text, record):
+    """In another arm's log of the same match: (the Dance's first victim is
+    dead by the Dance's window end, some enemy team member is), for the
+    counterfactual of a Dance."""
+    deaths = member_deaths(text)
+    enemy = "2" if record["team"] == "1" else "1"
+    by_end = [d for d in deaths if d[0] <= record["window_end"]]
+    return (any(d[1] == record["victim_name"] for d in by_end),
+            any(d[2] == enemy for d in by_end))
 
 
 def dance_one(binary, config_line, workdir, index):
     text = run_log(binary, config_line, workdir, index)
     cfg = json.loads(config_line)
     key = (cfg["label"], str(cfg["random_seed"]))
-    return (analyse_dances(text), analyse_kidneys(text),
+    return (analyse_dances(text, cfg), None,
             len(re.findall(r"\[EQUIPMENT\] Team \d Rogue", text)), key,
             len(re.findall(r"Rogue #\d's Initiative is spent on Shadow Dance", text)))
+
+
+def twin_one(binary, config_line, workdir, index):
+    cfg = json.loads(config_line)
+    return (cfg["label"], str(cfg["random_seed"])), run_log(binary, config_line, workdir, index)
 
 
 def dance(outdir, binary):
@@ -520,33 +649,65 @@ def dance(outdir, binary):
     print("Subtlety reference: %d Rogue matches, %d Rogues, %d Dances (%.2f a Rogue a match); "
           "%d Dances spent an Initiative discount on the free Dance itself"
           % (len(sub), rogues, n, n / max(1, rogues), sum(r[4] for r in sub)))
-    if n:
-        def mean(key):
-            return sum(d[key] for d in dances) / n
-        print("stuns a Dance: %.2f; stun-seconds applied a Dance: %.2f (held, cut at the "
-              "victim's death: %.2f); DR-immune stuns a Dance: %.2f"
-              % (mean("stuns"), mean("applied"), mean("held"), mean("immune")))
-        conv = sum(d["converts"] for d in dances)
-        convv = sum(d["converts_victim"] for d in dances)
-        print("converts (an enemy dies by the chain's end + %.0fs): %d/%d = %.1f%%; the stunned "
-              "enemy dies: %d/%d = %.1f%%; mean window %.1fs"
-              % (CONVERT_GRACE, conv, n, 100.0 * conv / n, convv, n, 100.0 * convv / n,
-                 mean("window")))
-        print("\nchain shapes:")
-        for shape, count in Counter(d["shape"] for d in dances).most_common(12):
-            print("  %5d  %s" % (count, shape))
-        healers = {"Priest", "Paladin", "Shaman", "Druid"}
-        victims = Counter(d["victim"] for d in dances)
-        print("\nthe chain's first victim: " + ", ".join(
-            "%s %d" % (k, v) for k, v in victims.most_common()) +
-            "; a healer in %.1f%%" % (100.0 * sum(v for k, v in victims.items() if k in healers) / n))
-        applied = Counter(round(d["applied"]) for d in dances)
-        print("\nstun-seconds applied a Dance (rounded): " +
-              ", ".join("%ds x%d" % (k, applied[k]) for k in sorted(applied)))
+    if not n:
+        return
+
+    def mean(key):
+        return sum(d[key] for d in dances) / n
+    print("stuns a Dance: %.2f; stun-seconds applied a Dance: %.2f (held, cut at the "
+          "victim's death: %.2f); DR-immune stuns a Dance: %.2f"
+          % (mean("stuns"), mean("applied"), mean("held"), mean("immune")))
+    conv = sum(d["converts"] for d in dances)
+    convv = sum(d["converts_victim"] for d in dances)
+    print("converts (an enemy team member dies by %.0fs past the later of the Dance's end and "
+          "its chain's last stun's end): %d/%d = %.1f%%; the stunned enemy dies: %d/%d = %.1f%%; "
+          "mean window %.1fs"
+          % (CONVERT_GRACE, conv, n, 100.0 * conv / n, convv, n, 100.0 * convv / n,
+             mean("window")))
+    print("\nchain shapes:")
+    for shape, count in Counter(d["shape"] for d in dances).most_common(12):
+        print("  %5d  %s" % (count, shape))
+    victims = Counter(d["victim"] for d in dances)
+    print("\nthe chain's first victim: " + ", ".join(
+        "%s %d" % (k, v) for k, v in victims.most_common()) +
+        "; a healer in %.1f%%" % (100.0 * sum(v for k, v in victims.items() if k in HEALERS) / n))
+    applied = Counter(round(d["applied"]) for d in dances)
+    print("\nstun-seconds applied a Dance (rounded): " +
+          ", ".join("%ds x%d" % (k, applied[k]) for k in sorted(applied)))
+
+    # The counterfactual: the same matches in the Vitality twin (the Subtlety
+    # stem with Vitality in the Dance's place), at the same window end.
+    danced = {r[3] for r in sub if r[0]}
+    twin_lines = [ln for ln in configs("sub_vit")
+                  if (json.loads(ln)["label"], str(json.loads(ln)["random_seed"])) in danced]
+    twin = dict(replay(outdir, "sub_vit", binary, twin_lines, twin_one))
+    per_key = {r[3]: r[0] for r in sub if r[0]}
+    rows = []  # (admission, dance victim dead, twin victim dead, twin enemy dead)
+    for key, recs in per_key.items():
+        for d in recs:
+            if d["victim_name"] is None:
+                continue
+            tv, te = fates(twin[key], d)
+            rows.append((d["admission"], d["victim_dead"], tv, te))
+    print("\nadmission (which branch of `enemy_healer_answers` let the Dance go), and the "
+          "Dance's first victim against the Vitality twin of the same match, both read at the "
+          "Dance's window end:\n")
+    print("| admission | Dances | share | victim dead, Dance | victim dead, twin | "
+          "any enemy dead, twin |")
+    print("|---|---|---|---|---|---|")
+    groups = [(a, [r for r in rows if r[0] == a]) for a in ADMISSIONS[:4]] + [("all", rows)]
+    for name, rs in groups:
+        if not rs:
+            continue
+        k = len(rs)
+        print("| %s | %d | %.1f%% | %.1f%% | %.1f%% | %.1f%% |"
+              % (name, k, 100.0 * k / len(rows), 100.0 * sum(r[1] for r in rs) / k,
+                 100.0 * sum(r[2] for r in rs) / k, 100.0 * sum(r[3] for r in rs) / k))
+    print("\n(%d Dances landed no stun and are left out)" % (n - len(rows)))
+
     # The matches a Dance was cast in, paired against the same match with
     # Vitality in the Dance's place: does a Dance change who wins the match
-    # it is cast in?
-    danced = {r[3] for r in sub if r[0]}
+    # it is cast in? Selected on the reference arm, which favours the Dance.
     ref, vit = read_csv(outdir, "sub"), read_csv(outdir, "sub_vit")
     import paired_sweep as ps
     buckets = ps.build_slices(sorted(danced), vit, {"Rogue"})
@@ -558,15 +719,6 @@ def dance(outdir, binary):
               "win rate, Vitality in the Dance's place -> the reference:" % (s.n, len(sub)))
         print(HEADER % ("slice", "", ""))
         print(row("matches with a Dance", s))
-    kid = [k for _, ks, _, _, _ in replay(outdir, "sub_stem", binary, configs("sub_stem"),
-                                          dance_one)
-           for k in ks]
-    if kid:
-        conv = sum(k["converts"] for k in kid)
-        convv = sum(k["converts_victim"] for k in kid)
-        print("\nbaseline, Subtlety stem (no Dance): %d Kidney Shots landed; an enemy dies by "
-              "the stun's end + %.0fs: %.1f%%; the stunned enemy: %.1f%%"
-              % (len(kid), CONVERT_GRACE, 100.0 * conv / len(kid), 100.0 * convv / len(kid)))
 
 
 def gates_one(binary, config_line, workdir, index):

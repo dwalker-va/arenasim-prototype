@@ -4,32 +4,41 @@ Tier: **directional**. Success condition (design §4, "Sweeps measure nodes and
 reference builds"): **no node dominates**. No node may move the Rogue by more
 than the run's resolution floor beyond a stat rank of the same price.
 
-**Verdict: the condition fails clearly on Cheat Death, modestly on
-Hemorrhage, and only reaches the line on Swift Blades.**
+**Verdict: the condition fails on three nodes. All three replicate, and all
+three clear the Bonferroni threshold on their pooled margin.**
 
-- **Cheat Death** beats Vitality by +5.9pt, pooled over two seed blocks
-  (z=19.6). It is priced at half of Vitality, so its margin is +6.5pt against a
-  0.6pt floor.
-- **Hemorrhage** beats Vitality by +1.0pt in each block. Pooled, that is z=3.6
-  and a margin of +1.6pt against a 0.6pt floor.
-- **Swift Blades** is over the line pooled (+1.7pt against a 0.9pt floor).
-  However, z is 2.2, which is not significant after correcting for the 12 node
-  comparisons, and its second block alone (+0.6pt) is inside the floor.
+- **Cheat Death** beats a stat rank of its price by +6.5pt pooled over two
+  seed blocks (margin z=21.1, floor 0.6).
+- **Hemorrhage** beats a stat rank of its price by +1.6pt (margin z=5.4,
+  floor 0.6). Its margin clears the threshold in each block alone.
+- **Swift Blades** beats a stat rank of its price by +1.7pt (margin z=3.9,
+  floor 0.9).
+  - It is over the floor in both blocks, but clears the threshold only in
+    block 1 (z=3.4; block 2 alone z=2.1).
+  - Its verdict does not rest on the price model: its raw +1.0pt already beats
+    a full Vitality, at 1.85 ranks, by more than the floor.
 
-**Shadow Dance does not dominate.** It is 0.9pt *below* a stat rank of its
-price in both blocks. A Dance lands 9.1 stun-seconds. Its chain's victim dies
-in 75% of Dances, against 51% after a plain Kidney Shot. The Dance is spent
-almost only when a kill is already coming, though, so the matches it is cast
-in are won about as often with Vitality in its place.
+**Shadow Dance does not dominate.** It sits 0.9pt *below* a stat rank of its
+price (margin z=−3.5, replicated).
 
-Lightning Reflexes and Deflection are the same node in effect: their arms
-played byte-identical matches.
+- A Dance applies 9.1 stun-seconds.
+- The Dance raises the chance its first victim is dead by the end of its
+  window from 70% (the same matches with Vitality in its place) to 76%.
+  Nearly all of that comes from Dances on the enemy healer.
+- In the same twin an enemy is dead by then 81% of the time, and the matches
+  with a Dance are won about as often without it.
+
+Rupture, Expose Armor and Shadow Dance are significantly **below** a stat
+rank of their price. Lightning Reflexes and Deflection are the same node in
+effect: their arms played byte-identical matches.
 
 Nothing here is retuned. Tuning is AS-441's batch, and the Dance's counterplay
 is the user's call (see *What it says*).
 
 Measured at `main` 27d76940 plus this card's three reference builds. They are
 data only, and leave untalented play byte-identical (see *Byte-identity*).
+`main` f2b4dc25, merged since, reproduces the committed CSVs row for row (the
+`sub` and `sub_vit` arms of block 1, re-run).
 
 ## Method
 
@@ -84,6 +93,18 @@ The verdict compares the margin (delta minus allowance) with the pair's floor:
 - **below** when it is under minus the floor;
 - **within** otherwise.
 
+**The margin z** tests the success condition's own null: that the node is
+worth a stat rank of its price. It is the margin over its standard error,
+where:
+
+- each pair's error is `100·√(b + c − (b − c)²/n) / n`, from its `b` flips
+  toward the Rogue side and `c` away;
+- the allowance's error, `k·se(v)` with `k = p/20.4 − 1`, is added in
+  quadrature.
+
+The raw delta's z, also printed, tests only "equal to Vitality". Significance
+below always means the margin z.
+
 | node | arm | comparison |
 |---|---|---|
 | Lightning Reflexes, Deflection, Master of Subtlety (rank 1 each) | Assassination stem + node | Assassination stem + Vitality |
@@ -115,8 +136,15 @@ three stems, their three stem + Vitality comparisons and nine node arms.
 **Block 2** (seeds 4-7) re-ran the 12 arms behind every headline and every
 allowance it reads. That is 157,728 matches in all.
 
-**Multiple comparisons:** 12 node comparisons. A Bonferroni threshold at
-α=0.05 two-sided is z ≥ 2.87.
+**Multiple comparisons.** The threshold is Bonferroni over the table's 12
+rows: |margin z| ≥ 2.87 (α=0.05, two-sided). Those rows are:
+
+- the 10 nodes under test;
+- Blood Spatter, shown for scale;
+- Deflection, which plays the same matches as Lightning Reflexes.
+
+That makes 2.87 conservative. Over the 10 distinct nodes alone the threshold
+would be 2.81, which changes no row below.
 
 ## Results
 
@@ -127,70 +155,82 @@ test, both as the Rogue side's win rate.
   from it.
 - **The floor** is the smallest delta the pair's own discordance could
   resolve.
+- **BONF** marks a margin z past the threshold.
 
 ### Each node against Vitality in its place (block 1)
 
-| node | before | after | delta (pt) | flips | z | floor | allowance | margin | verdict |
-|---|---|---|---|---|---|---|---|---|---|
-| **Cheat Death** | 58.5% | 64.9% | **+6.4** | 343 (+306/−36) | 14.55 | 0.9 | −0.6 | +7.0 | **dominates** |
-| **Swift Blades** | 52.7% | 54.0% | **+1.3** | 680 (+368/−311) | 2.15 | 1.2 | −0.8 | +2.2 | **dominates** |
-| **Hemorrhage** | 56.2% | 57.3% | **+1.0** | 261 (+152/−108) | 2.67 | 0.8 | −0.6 | +1.6 | **dominates** |
-| Master Poisoner (Deadly off hand) | 53.4% | 52.2% | −1.2 | 372 (+161/−211) | 2.54 | 0.9 | −1.0 | −0.2 | within |
-| Initiative (rank 2) | 58.4% | 57.3% | −1.1 | 133 (+43/−90) | 3.99 | 0.6 | −0.6 | −0.5 | within |
-| Blood Spatter (capstone, for scale) | 54.3% | 54.0% | −0.4 | 327 (+156/−171) | 0.77 | 0.9 | +0.2 | −0.5 | within |
-| Master of Subtlety (rank 1) | 54.3% | 52.6% | −1.8 | 216 (+71/−145) | 4.97 | 0.7 | −1.0 | −0.8 | below |
-| Shadow Dance (capstone) | 58.5% | 57.7% | −0.8 | 220 (+93/−127) | 2.22 | 0.7 | +0.1 | −0.9 | below |
-| Lightning Reflexes (rank 1) | 54.3% | 52.2% | −2.1 | 377 (+144/−232) | 4.49 | 0.9 | −1.0 | −1.1 | below |
-| Deflection (rank 1) | 54.3% | 52.2% | −2.1 | 377 (+144/−232) | 4.49 | 0.9 | −1.0 | −1.1 | below |
-| Expose Armor (capstone) | 55.8% | 54.7% | −1.1 | 396 (+175/−221) | 2.26 | 0.9 | +0.1 | −1.2 | below |
-| Rupture | 54.9% | 52.2% | −2.7 | 699 (+293/−405) | 4.20 | 1.2 | −1.0 | −1.7 | below |
+| node | before | after | delta (pt) | flips | z (delta) | floor | allowance | margin | margin z | verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **Cheat Death** | 58.5% | 64.9% | **+6.4** | 343 (+306/−36) | 14.55 | 0.9 | −0.6 | +7.0 | +15.68 BONF | **dominates** |
+| **Swift Blades** | 52.7% | 54.0% | **+1.3** | 680 (+368/−311) | 2.15 | 1.2 | −0.8 | +2.2 | +3.42 BONF | **dominates** |
+| **Hemorrhage** | 56.2% | 57.3% | **+1.0** | 261 (+152/−108) | 2.67 | 0.8 | −0.6 | +1.6 | +4.04 BONF | **dominates** |
+| Master Poisoner (Deadly off hand) | 53.4% | 52.2% | −1.2 | 372 (+161/−211) | 2.54 | 0.9 | −1.0 | −0.2 | −0.43 | within |
+| Initiative (rank 2) | 58.4% | 57.3% | −1.1 | 133 (+43/−90) | 3.99 | 0.6 | −0.6 | −0.5 | −1.78 | within |
+| Blood Spatter (capstone, for scale) | 54.3% | 54.0% | −0.4 | 327 (+156/−171) | 0.77 | 0.9 | +0.2 | −0.5 | −1.22 | within |
+| Master of Subtlety (rank 1) | 54.3% | 52.6% | −1.8 | 216 (+71/−145) | 4.97 | 0.7 | −1.0 | −0.8 | −2.10 | below |
+| Lightning Reflexes (rank 1) | 54.3% | 52.2% | −2.1 | 377 (+144/−232) | 4.49 | 0.9 | −1.0 | −1.1 | −2.32 | below |
+| Deflection (rank 1) | 54.3% | 52.2% | −2.1 | 377 (+144/−232) | 4.49 | 0.9 | −1.0 | −1.1 | −2.32 | below |
+| Shadow Dance (capstone) | 58.5% | 57.7% | −0.8 | 220 (+93/−127) | 2.22 | 0.7 | +0.1 | −0.9 | −2.57 | below |
+| Expose Armor (capstone) | 55.8% | 54.7% | −1.1 | 396 (+175/−221) | 2.26 | 0.9 | +0.1 | −1.2 | −2.60 | below |
+| Rupture | 54.9% | 52.2% | −2.7 | 699 (+293/−405) | 4.20 | 1.2 | −1.0 | −1.7 | −2.63 | below |
 
 The Lightning Reflexes and Deflection arms are the same CSV, byte for byte.
 In this sim, dodge and parry are one avoidance roll with no facing and no
 parry haste (`combat_core/avoidance.rs`). So +4% dodge and +4% parry avoid
 exactly the same attacks.
 
+**Verdicts that change at allowance 0**, with the node against a full
+Vitality:
+
+- **Block 1:** Master Poisoner and Initiative's second rank go from within to
+  **below**.
+- **Block 2 alone:** Swift Blades goes from dominates to within.
+- **Pooled:** no replicated row changes.
+
 ### The replication (seeds 4-7), and pooled
 
 Block 2 re-ran the three nodes over the line, Shadow Dance, and the two
-significant "below" rows it reaches. Each pooled verdict reads its allowance
-from the pooled Vitality rank on the same stem.
+significant "below" rows it reaches. Each row reads its allowance from the
+Vitality rank on the same stem in the same block (or pooled).
 
-| comparison | block | before | after | delta (pt) | flips | z | floor | margin | verdict |
-|---|---|---|---|---|---|---|---|---|---|
-| Cheat Death | 1 | 58.5% | 64.9% | +6.4 | 343 (+306/−36) | 14.55 | 0.9 | | |
-| | 2 | 59.1% | 64.5% | +5.5 | 308 (+269/−38) | 13.13 | 0.8 | | |
-| | **pooled** | 58.8% | 64.7% | **+5.9** | 651 (+575/−74) | 19.63 | 0.6 | +6.5 | **dominates** |
-| Hemorrhage | 1 | 56.2% | 57.3% | +1.0 | 261 (+152/−108) | 2.67 | 0.8 | | |
-| | 2 | 56.9% | 57.9% | +1.0 | 311 (+176/−134) | 2.33 | 0.8 | | |
-| | **pooled** | 56.6% | 57.6% | **+1.0** | 572 (+328/−242) | 3.56 | 0.6 | +1.6 | **dominates** |
-| Swift Blades | 1 | 52.7% | 54.0% | +1.3 | 680 (+368/−311) | 2.15 | 1.2 | | |
-| | 2 | 54.2% | 54.8% | +0.6 | 692 (+359/−333) | 0.95 | 1.2 | | |
-| | **pooled** | 53.4% | 54.4% | **+1.0** | 1372 (+727/−644) | 2.21 | 0.9 | +1.7 | **at the line** |
-| Shadow Dance | 1 | 58.5% | 57.7% | −0.8 | 220 (+93/−127) | 2.22 | 0.7 | | |
-| | 2 | 59.1% | 58.3% | −0.7 | 219 (+93/−124) | 2.04 | 0.7 | | |
-| | **pooled** | 58.8% | 58.0% | **−0.8** | 439 (+186/−251) | 3.06 | 0.5 | −0.9 | below |
-| Expose Armor | 1 | 55.8% | 54.7% | −1.1 | 396 (+175/−221) | 2.26 | 0.9 | | |
-| | 2 | 56.3% | 55.6% | −0.7 | 377 (+174/−203) | 1.44 | 0.9 | | |
-| | **pooled** | 56.0% | 55.2% | **−0.9** | 773 (+349/−424) | 2.66 | 0.7 | −1.0 | below |
-| Rupture | 1 | 54.9% | 52.2% | −2.7 | 699 (+293/−405) | 4.20 | 1.2 | | |
-| | 2 | 56.0% | 52.2% | −3.8 | 676 (+258/−418) | 6.12 | 1.2 | | |
-| | **pooled** | 55.4% | 52.2% | **−3.2** | 1375 (+551/−823) | 7.31 | 0.9 | −2.4 | below |
+| comparison | block | before | after | delta (pt) | flips | z (delta) | floor | margin | margin z | verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Cheat Death | 1 | 58.5% | 64.9% | +6.4 | 343 (+306/−36) | 14.55 | 0.9 | +7.0 | +15.68 BONF | dominates |
+| | 2 | 59.1% | 64.5% | +5.5 | 308 (+269/−38) | 13.13 | 0.8 | +6.0 | +14.18 BONF | dominates |
+| | **pooled** | 58.8% | 64.7% | **+5.9** | 651 (+575/−74) | 19.63 | 0.6 | **+6.5** | **+21.13 BONF** | **dominates** |
+| Hemorrhage | 1 | 56.2% | 57.3% | +1.0 | 261 (+152/−108) | 2.67 | 0.8 | +1.6 | +4.04 BONF | dominates |
+| | 2 | 56.9% | 57.9% | +1.0 | 311 (+176/−134) | 2.33 | 0.8 | +1.5 | +3.55 BONF | dominates |
+| | **pooled** | 56.6% | 57.6% | **+1.0** | 572 (+328/−242) | 3.56 | 0.6 | **+1.6** | **+5.35 BONF** | **dominates** |
+| Swift Blades | 1 | 52.7% | 54.0% | +1.3 | 680 (+368/−311) | 2.15 | 1.2 | +2.2 | +3.42 BONF | dominates |
+| | 2 | 54.2% | 54.8% | +0.6 | 692 (+359/−333) | 0.95 | 1.2 | +1.3 | +2.05 | dominates |
+| | **pooled** | 53.4% | 54.4% | **+1.0** | 1372 (+727/−644) | 2.21 | 0.9 | **+1.7** | **+3.86 BONF** | **dominates** |
+| Shadow Dance | 1 | 58.5% | 57.7% | −0.8 | 220 (+93/−127) | 2.22 | 0.7 | −0.9 | −2.57 | below |
+| | 2 | 59.1% | 58.3% | −0.7 | 219 (+93/−124) | 2.04 | 0.7 | −0.8 | −2.37 | below |
+| | **pooled** | 58.8% | 58.0% | **−0.8** | 439 (+186/−251) | 3.06 | 0.5 | **−0.9** | **−3.49 BONF** | below |
+| Expose Armor | 1 | 55.8% | 54.7% | −1.1 | 396 (+175/−221) | 2.26 | 0.9 | −1.2 | −2.60 | below |
+| | 2 | 56.3% | 55.6% | −0.7 | 377 (+174/−203) | 1.44 | 0.9 | −0.8 | −1.75 | within |
+| | **pooled** | 56.0% | 55.2% | **−0.9** | 773 (+349/−424) | 2.66 | 0.7 | **−1.0** | **−3.08 BONF** | below |
+| Rupture | 1 | 54.9% | 52.2% | −2.7 | 699 (+293/−405) | 4.20 | 1.2 | −1.7 | −2.63 | below |
+| | 2 | 56.0% | 52.2% | −3.8 | 676 (+258/−418) | 6.12 | 1.2 | −3.1 | −4.90 BONF | below |
+| | **pooled** | 55.4% | 52.2% | **−3.2** | 1375 (+551/−823) | 7.31 | 0.9 | **−2.4** | **−5.31 BONF** | below |
 
-Of the rows with a verdict other than "within", these stand at the
-Bonferroni threshold:
+**What clears the threshold:**
 
-- Cheat Death, Hemorrhage, Shadow Dance and Rupture;
-- in block 1 alone, Lightning Reflexes, Deflection and Master of Subtlety.
+- **Pooled:** all six replicated rows. Cheat Death, Hemorrhage and Swift
+  Blades dominate; Shadow Dance, Expose Armor and Rupture are below.
+- **Each block alone:** Cheat Death and Hemorrhage only.
+- **Block 1 only, not cleared:** Lightning Reflexes, Deflection and Master of
+  Subtlety (margin z −2.1 to −2.3) are "below" on the floor rule only.
 
-Swift Blades and Expose Armor do not. Swift Blades is "at the line" for two
-reasons:
+**Swift Blades** dominates by the floor rule in both blocks. Its block 2 margin
+(+1.3) is just over that block's floor (1.24), and the margin clears the
+threshold pooled and in block 1, not in block 2 alone. Its pooled raw +1.0pt is
+already over the 0.9pt floor against a full Vitality. Only an allowance above
+zero, an 11-point rank worth more than a 20.4-point one, would bring it back
+inside. Block 2 alone is within at allowance 0 (+0.6pt against its 1.2pt
+floor).
 
-- **Its margin rests on the allowance.** It beats a 1.85-rank Vitality by
-  +1.0pt with one rank, which the linear-price allowance turns into +1.7pt
-  over a stat rank of its price.
-- **It does not replicate.** It is not significant after correction, or in
-  its second block alone.
+**Expose Armor** is below pooled (margin z −3.1), but within in block 2 alone.
 
 ### What Vitality buys, and each reference against 0 points
 
@@ -231,8 +271,10 @@ the arms below. That slice has 696 Rogues, counting both sides.
 |---|---|
 | Assassination | Deadly Poison procs 956 (off hand), Crippling applied 1,176, Rupture cast 838 |
 | Assassination stem, Rupture's point on Vitality | Deadly 940, Rupture 0 |
+| Assassination stem + Lightning Reflexes | 155 dodges against 4,399 melee hits taken |
 | Combat | Expose Armor cast 429; the Rogue dodges 403 times and parries 345 |
 | Subtlety | Shadow Dance cast 226; Hemorrhage cast 3,495; Initiative procs 6,912, of which 5,869 are spent; Master of Subtlety procs 696 (one a Rogue: its stealth break) |
+| 0 points | 4,771 melee hits taken |
 
 | arm (60 matches, 69 Rogues) | node events |
 |---|---|
@@ -243,10 +285,18 @@ the arms below. That slice has 696 Rogues, counting both sides.
 | Subtlety stem + Cheat Death | **34 saves**: half the Rogues are saved once a match |
 | every Subtlety arm | about 10 Initiative procs a Rogue a match |
 
-The dodge and parry nodes are weightless, so these avoidance counts are their
-footprint. One rank (4%) avoids 0.23 attacks a Rogue a match: a Rogue takes
-few melee hits in the comps a Rogue fields. Avoidance counts only against
-melee, while health counts against everything.
+**Melee hits taken.** The dodge and parry nodes are weightless, so these
+avoidance counts are their footprint.
+
+- A Rogue takes about 6.5 melee attacks a match: 4,399 hits plus 155 dodges
+  over 696 Rogues.
+- Those are its melee hits landed on it: auto-attacks (a pet's included),
+  Mortal Strike, Sinister Strike, Hemorrhage, Ambush, Crusader Strike and
+  Heroic Strike. Strikes that deal no damage (Cheap Shot, Kidney Shot, Kick,
+  Pummel) are not counted.
+- One 4% rank avoids 0.22 of those attacks a match.
+
+Avoidance counts only against melee, while health counts against everything.
 
 Damage-broken crowd control is unchanged by Rupture: 225 breaks in 600 matches
 with it, 226 without.
@@ -268,30 +318,88 @@ replayed with full logs. That is 4,992 matches and 5,760 Rogues a block.
 - **Stun-seconds applied** are the durations the log reports, after
   diminishing returns.
 - **Held seconds** cut each stun at its victim's death.
-- **Converts:** a Dance converts when an enemy (never a pet) dies between the
-  Dance's cast and 2s after the end of its chain's last stun. The 2s is one
-  global cooldown and a half of follow-through. The window averages 12.1s.
-- **The baseline** applies the same rule to every Kidney Shot of the Subtlety
-  stem, which has no Dance: an enemy dies by the stun's end plus 2s.
+- **The window** runs from the Dance's cast to 2s past the *later* of the
+  Dance's own end and its chain's last stun's end. The 2s is one global
+  cooldown and a half of follow-through. The window averages 12.1s.
+- **Converts:** a Dance converts when an enemy team member (never a pet) dies
+  inside the window.
+- **The counterfactual** is the **Vitality twin**: the same match (label and
+  seed) with Vitality in the Dance's place. It asks whether the Dance's first
+  victim is dead by the Dance's window end, and whether any enemy team member
+  is.
+  - The twin diverges from the reference from the gates on, since its builds
+    differ, so this is a same-time comparison, not a frame-matched one.
+  - The Dance's own side is read the same way: the first victim dead by the
+    window's end.
 
 | | block 1 | block 2 |
 |---|---|---|
 | Dances | 1,809 (0.31 a Rogue a match) | 1,739 (0.30) |
 | stuns a Dance | 2.35 | 2.35 |
 | **stun-seconds applied a Dance** | **9.08** | **9.06** |
-| held (cut at the victim's death) | 7.04 | 6.95 |
+| held (cut at the victim's death) | 7.05 | 6.95 |
 | DR-immune stuns a Dance | 0.00 | 0.00 |
 | full chain CS4 CS2 KS6 (12s) | 946 (52%) | 899 (52%) |
 | CS4 alone | 430 (24%) | 431 (25%) |
 | CS4 CS2 | 227 (13%) | 219 (13%) |
-| **converts: an enemy dies** | **75.7%** | **76.7%** |
-| converts: the stunned enemy dies | 75.3% | 76.3% |
-| baseline: an enemy dies after a plain Kidney Shot | 51.3% (6,137 Kidney Shots) | 52.6% (6,058) |
+| **converts: an enemy dies in the window** | **75.7%** | **76.7%** |
 | first victim a healer | 58.2% | 58.0% |
 | Dances that spent Initiative's discount on the free Dance | 893 (49%) | 883 (51%) |
 
-**Does a Dance change who wins the match it is cast in?** The test pairs the
-Subtlety reference against the stem plus Vitality, restricted to one-sided
+**What lets a Dance go.** `try_shadow_dance` spends it only when the chain can
+run:
+
+- the kill target is in melee and held by nothing;
+- both stun diminishing-returns buckets are clear;
+- Kidney Shot will be ready in time;
+- `enemy_healer_answers` returns false.
+
+That last function admits the Dance when:
+
+- the target is the team's kill window; or
+- no living enemy healer, other than the target itself, stands outside the one
+  the team holds locked.
+
+So it admits a Dance:
+
+- on **any enemy healer** as the target;
+- in **any comp with no enemy healer standing** (none fielded, or dead);
+- and, with a healer standing, only when that healer is locked or the target
+  is the kill window.
+
+Only that last branch implies a kill is already coming. Each Dance, classified
+by the branch that admitted it, with its first victim read against the
+Vitality twin at the Dance's window end:
+
+| admission | block | Dances | share | victim dead, Dance | victim dead, twin | any enemy dead, twin |
+|---|---|---|---|---|---|---|
+| the target is the enemy healer | 1 | 1,052 | 58.8% | 74.5% | 64.4% | 80.0% |
+| | 2 | 1,008 | 58.3% | 75.0% | 63.3% | 79.9% |
+| no healer in the enemy team | 1 | 590 | 33.0% | 73.4% | 76.1% | 80.0% |
+| | 2 | 578 | 33.4% | 74.7% | 75.8% | 79.8% |
+| the enemy healer is dead | 1 | 37 | 2.1% | 97.3% | 70.3% | 100.0% |
+| | 2 | 47 | 2.7% | 97.9% | 80.9% | 100.0% |
+| a healer stands: its lock or the kill window | 1 | 110 | 6.1% | 98.2% | 91.8% | 92.7% |
+| | 2 | 97 | 5.6% | 93.8% | 88.7% | 88.7% |
+| **all** | 1 | 1,789 | | **76.1%** | **70.0%** | 81.2% |
+| | 2 | 1,730 | | **76.6%** | **69.4%** | 80.9% |
+
+Dances that landed no stun (20 and 9) have no victim to follow and are left
+out.
+
+**What the twin says.**
+
+- **The Dance moves its victim's fate by about 6-7pt overall:** dead by the
+  window's end 76% of the time, against 70% without it.
+- **Nearly all of that is on an enemy healer.** There the Dance kills
+  10-12pt more often (74.5% against 64.4%, 75.0% against 63.3%). The small
+  branches gain too (a dead or a locked healer, 8% of Dances).
+- **Against a team with no healer it adds nothing:** 73-75% against 76%.
+- **Most of the kill comes anyway.** In the twin some enemy is dead by the
+  same moment 81% of the time.
+
+The matches a Dance is cast in are also won about as often without it. This
+pairs the Subtlety reference against the stem plus Vitality, over one-sided
 matches where the reference cast a Dance:
 
 | block | matches | Vitality | reference | delta | flips | z | floor |
@@ -299,23 +407,10 @@ matches where the reference cast a Dance:
 | 1 | 1,561 | 68.4% | 68.8% | +0.4 | 138 (+72/−66) | 0.43 | 1.5 |
 | 2 | 1,492 | 69.1% | 70.0% | +0.9 | 133 (+72/−59) | 1.05 | 1.6 |
 
-That slice is selected on the reference arm, which favours the Dance. Even so,
-the matches with a Dance are won about as often without it.
+That slice is selected on the reference arm, which favours the Dance.
 
-**Why.** The Dance goes only when its chain can run (`try_shadow_dance`):
-
-- the kill target is in melee and held by nothing;
-- both stun diminishing-returns buckets are clear;
-- Kidney Shot will be ready in time;
-- the enemy healer cannot answer.
-
-That last condition holds when the healer is the target itself, the healer is
-locked, or the target is in the team's kill window. So the Dance is spent where
-a kill is already coming. The chain's victim then dies 76% of the time, but a
-plain Kidney Shot's dies 51% of the time, and the match was mostly won anyway.
-
-Over 39,834 traced Rogue decisions of the Subtlety reference (`gates`, the 60
-sample matches), the Dance candidate was:
+**Why the Dance did not go.** Over 39,834 traced Rogue decisions of the
+Subtlety reference (`gates`, the 60 sample matches), the Dance candidate was:
 
 | outcome | share |
 |---|---|
@@ -327,63 +422,85 @@ sample matches), the Dance candidate was:
 | refused for the enemy healer free to answer | 0.1% |
 | chosen | 0.1% |
 
-The Rogue never pooled energy for it in that slice.
+The gates are checked in that order, and a decision reports only the first
+that refused it. So each share counts the decisions that reached that gate and
+stopped there, not how often its condition held. The Rogue never pooled
+energy for the Dance in that slice.
 
 **Answer to the ruling's question: the chain does not dominate.**
 
 - It lands its designed 12s in half of Dances, and 9.1 stun-seconds on
   average.
-- Win rate does not register it: −0.8pt against a stat rank of its price,
-  replicated in both blocks.
+- It raises the chance its victim dies in the window by 6-7pt, nearly all of
+  it on an enemy healer.
+- The kill mostly comes anyway, and win rate does not register it: −0.9pt
+  past the allowance against a stat rank of its price, at margin z −3.5,
+  replicated.
 - No defending-side counterplay is called for by these numbers.
 
 If the Dance is to be Subtlety's threat in the results as well as in the log,
-the lever is when the AI spends it. Spending it to *open* a kill window, rather
-than inside one, is a design question for the user. It is not a magnitude
-change.
+two levers matter more than its magnitude, and both are design questions for
+the user:
+
+- **where the gate sends it:** a third of Dances go into comps with no healer,
+  where they add nothing;
+- **when the AI spends it.**
 
 ## What it says (findings for the user, not changes)
 
-1. **Cheat Death dominates** (+6.5pt past its allowance, replicated, z=19.6).
+1. **Cheat Death dominates** (+6.5pt past its allowance, margin z=21.1,
+   replicated).
    - It is deterministic: the match's first killing blow leaves the Rogue at
      10%, with 90% less damage for 3s.
    - It saves half of all Rogues once a match, and on the Subtlety stem it is
      worth +7.6pt alone.
    - Direction: TBC's chance (31230 rolled 33% a rank), a smaller cut or
      window, or a higher price.
-2. **Hemorrhage dominates modestly** (+1.6pt past its allowance, replicated).
+2. **Hemorrhage dominates modestly** (+1.6pt past its allowance, margin
+   z=5.4, past the threshold in each block).
    - It is a 30-energy Sinister Strike that leaves +2% Physical damage taken a
      stack, up to 5, which nothing removes.
    - Direction: a smaller stack, or fewer stacks.
-3. **Swift Blades is at the line.** It is over it pooled, but not significant
-   after correction and not in its second block alone. Watch it in AS-441
-   rather than act on it alone.
+3. **Swift Blades dominates modestly** (+1.7pt past its allowance, margin
+   z=3.9 pooled).
+   - It is over the floor in both blocks, and past the threshold pooled and in
+     block 1 (block 2 alone: z=2.1).
+   - Its raw +1.0pt beats a full Vitality by more than the floor, so the
+     verdict does not depend on the price model.
+   - Direction: +10% melee haste for one rank is worth more than 1.85 ranks of
+     health. That points to a smaller haste, or a higher price.
 4. **Shadow Dance and Expose Armor, both capstones, sit below a stat rank of
-   their price.**
-   - Shadow Dance: see above.
-   - Expose Armor is cast 0.6 times a Rogue a match, and the Combat reference
-     is only +0.7pt over its stem. Its margin of −1.0pt is not significant
-     after correction.
-5. **Rupture is below** (−2.4pt past its allowance, replicated, z=7.3).
+   their price**, both past the threshold pooled.
+   - **Shadow Dance** (margin z −3.5): see above.
+   - **Expose Armor** (margin z −3.1 pooled, within in block 2 alone) is cast
+     0.6 times a Rogue a match, and the Combat reference is only +0.7pt over
+     its stem.
+5. **Rupture is below** (−2.4pt past its allowance, margin z −5.3,
+   replicated).
    - It is 60 damage over 12s for 25 energy, on a 20s cooldown, cast 1.2
      times a Rogue a match.
    - No AI cause was found. It does not break more crowd control (225 breaks
      against 226), and its cast count is what the cooldown allows.
    - Direction: its magnitude, before Blood Spatter's +50% on it.
-6. **Lightning Reflexes and Deflection are one node in two places**, and a
-   rank of either is worth nothing on the Assassination stem (+0.0pt, 0.23
-   avoidances a Rogue a match). Directions:
-   - Give parry its own effect (TBC's parry haste, or front-only).
-   - Re-read their declared 11 a rank against how few melee hits a Rogue
-     takes.
+6. **Lightning Reflexes and Deflection are one node in two places.**
+   - A rank of either is worth nothing on the Assassination stem (+0.0pt).
+   - It avoids 0.22 of the 6.5 melee attacks a Rogue takes a match.
+   - Their "below" (margin z −2.3) does not clear the threshold.
+   - Directions: give parry its own effect (TBC's parry haste, or
+     front-only); and re-read their declared 11 a rank against how few melee
+     hits a Rogue takes.
 7. **Initiative's discount is spent on Shadow Dance itself** in half of all
    Dances (893 of 1,809).
    - The Dance costs nothing, so that discount is wasted.
    - The modifier's `applies_to: Any` is consumed by the first ability the
      Rogue uses, free or not.
    - This is a mechanic defect, not a tuning one: a follow-up card.
-8. **Master of Subtlety's first rank is below** (−0.8pt past its allowance,
-   block 1 only). It fires exactly once a match, on the opener.
+8. **Master of Subtlety's first rank is below on the floor rule** (−0.8pt past
+   its allowance, margin z −2.1, block 1 only). It fires exactly once a match,
+   on the opener.
+9. **Master Poisoner and Initiative's second rank are within only by the price
+   model.** Against a full Vitality, at allowance 0, both are below (−1.2 and
+   −1.1pt, against floors of 0.9 and 0.6).
 
 Each item is a direction for AS-441, not a value. A directional run may not be
 cited as the Rogue's standing.
@@ -430,7 +547,8 @@ $S/2026-11-22-as301-arms.py table /tmp/as301/block1
 $S/2026-11-22-as301-arms.py replicate /tmp/as301/block1 /tmp/as301/block2
 $S/2026-11-22-as301-arms.py sample /tmp/as301/block1 target/release/arenasim
 $S/2026-11-22-as301-arms.py sample /tmp/as301/block1 target/release/arenasim 600 \
-  assn_stem assn_norup_vit assn assn_vit sub sub_vit combat combat_vit
+  assn_stem assn_norup_vit assn assn_vit assn_lr sub sub_vit combat combat_vit zero
+# the Dance figures, the admission split and the Vitality twin:
 $S/2026-11-22-as301-arms.py dance /tmp/as301/block1 target/release/arenasim
 $S/2026-11-22-as301-arms.py dance /tmp/as301/block2 target/release/arenasim
 $S/2026-11-22-as301-arms.py gates /tmp/as301/block1 target/release/arenasim
@@ -439,6 +557,9 @@ scripts/paired_sweep.py /tmp/as301/block1/sub_vit.csv /tmp/as301/block1/sub_cd.c
   --affects Rogue --tier directional --expect nothing --headline affected
 ```
 
-Every figure above recomputes from the committed CSVs except three, which
-replay matches through the binary (minutes): the non-vacuity counts, the
-Shadow Dance table, and the gate histogram.
+Three sets of figures replay matches through the binary (minutes): the
+non-vacuity counts, the Shadow Dance tables, and the gate histogram. Every
+other figure recomputes from the committed CSVs. The `dance` replays the
+Vitality twin of every match with a Dance from that block's committed
+`sub_vit` JSONL. The script's printed claims (margin z, admission, the
+window, the twin) are pinned by `scripts/tests/test_as301_arms.py`.

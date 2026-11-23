@@ -573,8 +573,12 @@ configs on one binary, so there is no patch:
   / `--for-class`); `table` and `replicate` print the findings doc's tables
   from the CSVs; `sample` replays Rogue matches with full logs for the
   non-vacuity counts; `dance` replays every Rogue match of the Subtlety
-  reference for the Shadow Dance figures; `gates` traces the sample slice for
-  why the Dance did not go.
+  reference for the Shadow Dance figures, classifies each Dance by the gate
+  branch that admitted it, and replays the Vitality twin of every match with
+  a Dance for the counterfactual; `gates` traces the sample slice for why the
+  Dance did not go. `table` and `replicate` print each node row's margin z
+  against the Bonferroni threshold. `scripts/tests/test_as301_arms.py` pins
+  those printed claims.
 - `-arms.jsonl.tar.gz` — the inputs as run: `block1/` (19 arms, seeds 0-3)
   and `block2/` (the 12 replicated arms, seeds 4-7).
 - `-arms.csv.tar.gz` — their batch CSVs, same layout.
