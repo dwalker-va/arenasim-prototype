@@ -1332,5 +1332,84 @@
                 },
             ),
         ],
+        Priest: [
+            // Resists crowd control for less time, reflects through its
+            // shields and hands an ally Pain Suppression (design §5.2), with
+            // Inner Focus for the emergency Flash Heal and a Holy
+            // Specialization splash.
+            (
+                name: "Discipline",
+                tree: Discipline,
+                build: {
+                    UnbreakableWill: 2, ImprovedPowerWordShield: 1, InnerFocus: 1,
+                    ReflectiveShield: 1, PainSuppression: 1,
+                    HolySpecialization: 2,
+                },
+            ),
+            // Crits that armour their target, the mana to keep healing, and
+            // Guardian Spirit to keep a dying ally alive, with a bigger shield.
+            (
+                name: "Holy",
+                tree: Holy,
+                build: {
+                    ImprovedPowerWordShield: 2,
+                    HolySpecialization: 2, Inspiration: 2, HolyConcentration: 1,
+                    GuardianSpirit: 1,
+                },
+            ),
+            // The damage dealer: Shadowform with Silence, Blackout and Mind
+            // Flay, a quicker Mind Blast, and Unbreakable Will. Silence is
+            // castable only in Shadowform, so this build plays the form
+            // (`team{1,2}_priest_forms`).
+            (
+                name: "Shadow",
+                tree: Shadow,
+                build: {
+                    UnbreakableWill: 2,
+                    ImprovedMindBlast: 2, Shadowform: 1, Blackout: 1, MindFlay: 1,
+                    Silence: 1,
+                },
+            ),
+        ],
+        // The Paladin's three (AS-302). None takes Sacred Duty, so its
+        // +3% maximum health a rank, the sweep's stat rank, goes on any stem.
+        Paladin: [
+            // Holy Shock on a shorter cooldown priming a crit Flash of Light
+            // and a faster Holy Light, Divine Favor for the emergency, and
+            // Aura Mastery against the interrupts; Hammer of Justice more
+            // often.
+            (
+                name: "Holy",
+                tree: Holy,
+                build: {
+                    ImprovedHolyShock: 2, InfusionOfLight: 1, DivineFavor: 1, LightsGrace: 1,
+                    AuraMastery: 1,
+                    ImprovedHammerOfJustice: 2,
+                },
+            ),
+            // Damage taken cut, moved and absorbed: Divine Protection,
+            // Blessing of Sacrifice and Sacred Shield, over more armor and
+            // Hammer of Justice; Holy Shock more often.
+            (
+                name: "Protection",
+                tree: Protection,
+                build: {
+                    ImprovedHolyShock: 2,
+                    ImprovedHammerOfJustice: 2, DivineProtection: 1, Toughness: 1,
+                    BlessingOfSacrifice: 1, SacredShield: 1,
+                },
+            ),
+            // Crits that hit harder (Conviction into Vengeance), instant Flash
+            // of Lights off its swings, and Crusader Strike; Hammer of Justice
+            // more often.
+            (
+                name: "Retribution",
+                tree: Retribution,
+                build: {
+                    ImprovedHammerOfJustice: 2,
+                    Conviction: 2, Vengeance: 2, TheArtOfWar: 1, CrusaderStrike: 1,
+                },
+            ),
+        ],
     },
 )

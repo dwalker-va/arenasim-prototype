@@ -524,7 +524,9 @@ impl DruidEffect {
             | AuraLandingKind::RepentanceImpact
             | AuraLandingKind::SacrificeTriad
             | AuraLandingKind::VampiricEmbraceImplosion
-            | AuraLandingKind::AftermathFireHit => None,
+            | AuraLandingKind::AftermathFireHit
+            | AuraLandingKind::InnerFocusFlash
+            | AuraLandingKind::BlessedRecoveryRings => None,
         }
     }
 }

@@ -1007,6 +1007,19 @@ impl Plugin for StatesPlugin {
                 .before(TransformSystem::TransformPropagate)
                 .run_if(in_combat_scene),
         )
+        // Inner Focus's comets and palms and Blessed Recovery's amber burst
+        // stand on the Priest's rendered body for the same reason
+        // (`inner_focus.rs`, `blessed_recovery.rs`, AS-352).
+        .add_systems(
+            PostUpdate,
+            (
+                play_match::place_inner_focus,
+                play_match::place_blessed_recovery_bursts,
+            )
+                .after(play_match::apply_cyclone_lift)
+                .before(TransformSystem::TransformPropagate)
+                .run_if(in_combat_scene),
+        )
         // Frostbolt and Shadow Bolt: the bespoke missiles and the bursts
         // they leave on their victims.
         //
@@ -1146,6 +1159,32 @@ impl Plugin for StatesPlugin {
         .add_systems(
             Update,
             play_match::update_discipline_states
+                .after(CombatSystemPhase::CombatResolution)
+                .run_if(in_combat_scene),
+        )
+        // Inner Focus (AS-352): its landing flashes the Priest's arcane hands
+        // and raises the comets at its chest; its palm state is raised, aged,
+        // hidden on a sheep or while a cast hand holds the same hand, and
+        // taken down here, after the cast hands' own update so the yield
+        // reads this frame's rigs. Blessed Recovery's burst rides its proc's
+        // landing. Posed in PostUpdate (`place_inner_focus`,
+        // `place_blessed_recovery_bursts`).
+        .add_systems(
+            Update,
+            (
+                (
+                    play_match::spawn_inner_focus_flashes,
+                    play_match::update_inner_focus_flashes,
+                    play_match::update_inner_focus_palms,
+                )
+                    .chain()
+                    .after(play_match::cleanup_heal_cast_glows),
+                (
+                    play_match::spawn_blessed_recovery_bursts,
+                    play_match::update_blessed_recovery_bursts,
+                )
+                    .chain(),
+            )
                 .after(CombatSystemPhase::CombatResolution)
                 .run_if(in_combat_scene),
         )
