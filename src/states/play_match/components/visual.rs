@@ -1786,6 +1786,14 @@ pub enum HealCastKind {
     /// instant with no cast window (Aura Mastery, Blessing of Sacrifice,
     /// Repentance, Divine Protection). Only ever a launch.
     HolyFlash,
+    /// The Priest's Shadow casts (AS-449): `shadow_precast_low_hand.m2`
+    /// (fdid 166807), which every precast and cast kit of Shadow Word: Pain
+    /// (217/218), Vampiric Embrace (217/218), Silence (114/418) and Mind
+    /// Blast (114/218) attaches to both hands. No mesh: three emitters, green
+    /// licks that darken to black smoke, and a pulsing green and a pulsing
+    /// violet ring (`rendering/effects/heal_cast.rs`, *The Shadow hands*).
+    /// Mind Blast's cast bar loops it; an instant plays the cast kit alone.
+    Shadow,
 }
 
 impl HealCastKind {
@@ -1844,6 +1852,15 @@ impl HealCastKind {
             | AbilityType::DivineProtection
             | AbilityType::PowerInfusion
             | AbilityType::PainSuppression => Some(HealCastKind::HolyFlash),
+            // The Priest's Shadow casts (AS-449): every precast and cast kit
+            // of their four visuals attaches `shadow_precast_low_hand.m2`.
+            // Mind Blast's cast bar loops it (`spawn_heal_cast_glows`); the
+            // three instants are applied inline by the Priest AI, so their
+            // hands fire off `InstantAbilityFired`.
+            AbilityType::ShadowWordPain
+            | AbilityType::VampiricEmbrace
+            | AbilityType::Silence
+            | AbilityType::MindBlast => Some(HealCastKind::Shadow),
             _ => None,
         }
     }
@@ -1851,7 +1868,7 @@ impl HealCastKind {
     /// Whether the family has a precast loop for a hard cast to wind up
     /// through. Arcane has none in the client; Frost has one (kit 199), but
     /// Ice Barrier is an instant, so it never plays; the Holy flash is the
-    /// instant form of the Holy hands.
+    /// instant form of the Holy hands. Shadow's is Mind Blast's kit 114.
     pub fn has_precast(self) -> bool {
         !matches!(
             self,
@@ -1962,6 +1979,36 @@ pub struct HealCastBurstMote {
     pub velocity: Vec3,
     pub age: f32,
     pub life: f32,
+}
+
+/// One particle of a [`HealCastKind::Shadow`] hand rig, in the rig's frame
+/// (graphical only): a lick or one of the two rings of
+/// `shadow_precast_low_hand.m2`. Its colour and alpha ride the emitter's
+/// palette (one material per ramp step, shared), its size its scale.
+#[derive(Component, Debug)]
+pub struct HealCastShadowMote {
+    /// Which of the model's three emitters it came from (0 lick, 1 green
+    /// ring, 2 violet ring).
+    pub emitter: usize,
+    pub velocity: Vec3,
+    pub age: f32,
+    pub life: f32,
+    /// The palette step on the mesh now.
+    pub step: usize,
+}
+
+/// The emission state of a [`HealCastKind::Shadow`] hand rig (graphical
+/// only), beside its [`HealCastHand`].
+#[derive(Component)]
+pub struct HealCastShadowEmitter {
+    /// Seconds the model has emitted: the rig's age while it loops or plays
+    /// its cast kit, frozen once the kit ends.
+    pub clock: f32,
+    /// Particles emitted per emitter so far.
+    pub emitted: [u32; 3],
+    /// Each emitter's palette, one material per ramp step.
+    pub palettes: [std::sync::Arc<[Handle<StandardMaterial>]>; 3],
+    pub quad: Handle<Mesh>,
 }
 
 /// The cast body posture of a healer mid-heal (graphical only): the
@@ -3182,6 +3229,10 @@ impl InstantAbilityFired {
             // Instant and caster-centred, applied inline in the Warlock AI:
             // Life Tap's landing plays on the Warlock's own chest.
             | LifeTap
+            // The Priest's Shadow instants (AS-449), applied inline in the
+            // Priest AI: their markers carry the Shadow hands
+            // (`spawn_instant_cast_hands`).
+            | ShadowWordPain | VampiricEmbrace | Silence
         )
     }
 

@@ -429,6 +429,21 @@ pub fn try_vampiric_embrace(
     if let Some(pending) = AuraPending::from_ability(target, entity, def) {
         commands.spawn(pending);
     }
+
+    // The Shadow hands on the Priest (client kit 218, AS-449). Vampiric Embrace
+    // has no `CastingState`, so the marker is its only route to a caster
+    // gesture. Spawned on the committed-use branch in BOTH modes (headless
+    // never reads it; the match-exit `PlayMatchEntity` sweep reclaims it),
+    // per `cosmetic-marker-cross-mode-spawn-parity.md`.
+    commands.spawn((
+        InstantAbilityFired {
+            caster: entity,
+            target: Some(target),
+            ability,
+            is_crit: false,
+        },
+        PlayMatchEntity,
+    ));
     true
 }
 
@@ -518,5 +533,20 @@ pub fn try_silence(
         same_frame_cc_queue.push((target, pending.aura.clone()));
         commands.spawn(pending);
     }
+
+    // The Shadow hands on the Priest (client kit 418, AS-449). Silence
+    // has no `CastingState`, so the marker is its only route to a caster
+    // gesture. Spawned on the committed-use branch in BOTH modes (headless
+    // never reads it; the match-exit `PlayMatchEntity` sweep reclaims it),
+    // per `cosmetic-marker-cross-mode-spawn-parity.md`.
+    commands.spawn((
+        InstantAbilityFired {
+            caster: entity,
+            target: Some(target),
+            ability,
+            is_crit: false,
+        },
+        PlayMatchEntity,
+    ));
     true
 }

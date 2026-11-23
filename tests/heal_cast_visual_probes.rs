@@ -267,10 +267,14 @@ fn every_hard_cast_heal_reaches_a_cast_family() {
         HealCastKind::for_ability(AbilityType::LesserHealingWave),
         Some(HealCastKind::Nature)
     );
-    // Instants and non-heals keep their own vocabulary.
+    // Instants and non-heals keep their own vocabulary; Mind Blast's cast bar
+    // plays the Shadow hands (AS-449).
     assert_eq!(HealCastKind::for_ability(AbilityType::HolyShock), None);
     assert_eq!(HealCastKind::for_ability(AbilityType::Frostbolt), None);
-    assert_eq!(HealCastKind::for_ability(AbilityType::MindBlast), None);
+    assert_eq!(
+        HealCastKind::for_ability(AbilityType::MindBlast),
+        Some(HealCastKind::Shadow)
+    );
 }
 
 /// The orb handoff: a heal cast spawns hand rigs and NO casting orb; a

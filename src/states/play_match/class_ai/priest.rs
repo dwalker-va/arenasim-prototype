@@ -1995,6 +1995,21 @@ fn cast_shadow_word_pain(
         commands.spawn(pending);
     }
 
+    // The Shadow hands on the Priest (client kit 218, AS-449). Shadow Word: Pain
+    // has no `CastingState`, so the marker is its only route to a caster
+    // gesture. Spawned on the committed-use branch in BOTH modes (headless
+    // never reads it; the match-exit `PlayMatchEntity` sweep reclaims it),
+    // per `cosmetic-marker-cross-mode-spawn-parity.md`.
+    commands.spawn((
+        InstantAbilityFired {
+            caster: entity,
+            target: Some(target),
+            ability,
+            is_crit: false,
+        },
+        PlayMatchEntity,
+    ));
+
     true
 }
 
