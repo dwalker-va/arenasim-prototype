@@ -1954,7 +1954,7 @@ impl DefaultLoadouts {
 /// Parse and validate the text of an `items.ron`; `origin` names it in errors.
 /// Every item must sit in its tier's band ([`validate_tier_bands`]).
 pub fn parse_item_definitions(contents: &str, origin: &str) -> Result<ItemDefinitions, String> {
-    let config: ItemsConfig = crate::config_ron::from_str(contents)
+    let config: ItemsConfig = crate::config_parse::ron_from_str(contents)
         .map_err(|e| format!("Failed to parse {}: {}", origin, e))?;
 
     let definitions = ItemDefinitions::new(config);
@@ -2081,7 +2081,7 @@ pub fn parse_default_loadouts(
     origin: &str,
     items: &ItemDefinitions,
 ) -> Result<DefaultLoadouts, String> {
-    let config: LoadoutsConfig = crate::config_ron::from_str(contents)
+    let config: LoadoutsConfig = crate::config_parse::ron_from_str(contents)
         .map_err(|e| format!("Failed to parse {}: {}", origin, e))?;
 
     let loadouts = DefaultLoadouts::new(config);

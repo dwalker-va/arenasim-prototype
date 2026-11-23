@@ -1,23 +1,28 @@
-//! Strict RON parsing for the shipped configs: a map that names a key twice is
-//! an error.
+//! Strict parsing for config files: a map that names a key twice is an error.
 //!
-//! RON, like serde's own map impls, keeps the LAST value of a repeated map
-//! key and says nothing, so a second `Paladin:` block in a map silently
-//! replaces the first. Every config loader parses through [`from_str`]
-//! instead of `ron::from_str`. It runs the ordinary typed deserialization
-//! under a pass-through [`Deserializer`] that watches every map the type
-//! reads, at any depth, and refuses a key it has already seen in that map.
-//! Struct fields arrive the same way, so a field named twice gets the same
-//! message, though serde's derive already refuses one.
+//! RON and JSON, like serde's own map impls, keep the LAST value of a
+//! repeated map key and say nothing: a second `Paladin:` block in
+//! `talents.ron` silently replaced the first, and a talent named twice in a
+//! headless config's build would quietly measure the wrong build. Every config
+//! parse goes through this module instead — the RON configs under
+//! `assets/config/` through [`ron_from_str`], the headless match configs
+//! (`--headless`, `--batch`, `--replay`) through [`json_from_str`] — and
+//! `tests/config_parse_audit.rs` fails on a parse anywhere else.
 //!
-//! It is one mechanism for every file and every map type: a new map field in
-//! any config is covered with no annotation, and nothing has to remember to
-//! use a special map type. The values it produces are exactly what
-//! `ron::from_str` produces, because every call reaches the same RON
-//! deserializer with the same arguments and the same visitor.
+//! The mechanism is one pass-through [`Deserializer`], generic over the
+//! format: the ordinary typed deserialization runs under it, it watches every
+//! map the type reads, at any depth, and it refuses a key it has already seen
+//! in that map. Struct fields arrive the same way, so a field named twice gets
+//! the same message, though serde's derive already refuses one. A new map
+//! field in any config is covered with no annotation, and nothing has to
+//! remember to use a special map type. The values it produces are exactly
+//! what the format's own `from_str` produces, because every call reaches the
+//! same format deserializer with the same arguments and a visitor of the same
+//! value type. A new format is one more entry point that wraps its
+//! deserializer in [`checked`].
 //!
 //! The error names the key and the path to its map (`reference_builds`,
-//! `loadouts.Mage`, `talents.Foo.effects[0]`), and RON adds the line and
+//! `loadouts.Mage`, `team1_builds[0]`), and the format adds the line and
 //! column where the repeated key was read.
 //!
 //! A key is compared by what it deserializes as: a string, a number, a bool,
@@ -29,27 +34,45 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fmt;
-use std::marker::PhantomData;
 
 use serde::de::{
     self, DeserializeOwned, DeserializeSeed, Deserializer, EnumAccess, MapAccess, SeqAccess,
     VariantAccess, Visitor,
 };
 
-/// Parse `text` as a `T`, refusing a map that names any key twice.
+/// Parse RON `text` as a `T`, refusing a map that names any key twice.
 ///
-/// A drop-in for `ron::from_str` on config files: the same value on success,
-/// and a [`ron::error::SpannedError`] carrying the line and column on failure.
-pub fn from_str<T: DeserializeOwned>(text: &str) -> Result<T, ron::error::SpannedError> {
+/// A drop-in for `ron::from_str`: the same value on success, and a
+/// [`ron::error::SpannedError`] carrying the line and column on failure.
+pub fn ron_from_str<T: DeserializeOwned>(text: &str) -> Result<T, ron::error::SpannedError> {
+    let mut deserializer = ron::de::Deserializer::from_str(text)?;
+    let value = checked(&mut deserializer).map_err(|e| deserializer.span_error(e))?;
+    deserializer.end().map_err(|e| deserializer.span_error(e))?;
+    Ok(value)
+}
+
+/// Parse JSON `text` as a `T`, refusing an object that names any key twice.
+///
+/// A drop-in for `serde_json::from_str`: the same value on success, and a
+/// [`serde_json::Error`] carrying the line and column on failure.
+pub fn json_from_str<T: DeserializeOwned>(text: &str) -> Result<T, serde_json::Error> {
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    let value = checked(&mut deserializer)?;
+    deserializer.end()?;
+    Ok(value)
+}
+
+/// Deserialize a `T` from any serde `deserializer`, refusing a map that names
+/// any key twice. The format-agnostic core both entry points wrap.
+pub fn checked<'de, T: de::Deserialize<'de>, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<T, D::Error> {
     let path = Path::default();
-    ron::Options::default().from_str_seed(
-        text,
-        CheckedSeed {
-            inner: PhantomData::<T>,
-            path: &path,
-            key: None,
-        },
-    )
+    T::deserialize(CheckedDe {
+        inner: deserializer,
+        path: &path,
+        key: None,
+    })
 }
 
 /// Where in the file the parse is: map keys and struct fields, enum variants
@@ -350,14 +373,14 @@ impl<'de, A: MapAccess<'de>> MapAccess<'de> for CheckedMap<'_, A> {
             Captured::Nothing | Captured::Compound => {
                 return Err(de::Error::custom(format!(
                     "a map key {} has a shape the duplicate-key check cannot compare \
-                     (see src/config_ron.rs)",
+                     (see src/config_parse.rs)",
                     self.path.describe()
                 )));
             }
         };
         if !self.seen.insert(text.clone()) {
             return Err(de::Error::custom(format!(
-                "duplicate key `{text}` {} (RON would silently keep only the last)",
+                "duplicate key `{text}` {} (the parser would silently keep only the last)",
                 self.path.describe()
             )));
         }
@@ -562,7 +585,7 @@ mod tests {
     }
 
     fn err(text: &str) -> String {
-        from_str::<File>(text)
+        ron_from_str::<File>(text)
             .expect_err("the duplicate is refused")
             .to_string()
     }
@@ -579,7 +602,7 @@ mod tests {
             maybe: Some({ "m": 1 }),
             wrapped: Wrapped({ "w": 1 }),
         )"#;
-        let strict: File = from_str(text).expect("parses");
+        let strict: File = ron_from_str(text).expect("parses");
         let plain: File = ron::from_str(text).expect("parses");
         assert_eq!(strict, plain);
         assert_eq!(
@@ -643,7 +666,7 @@ mod tests {
         struct Tupled {
             m: BTreeMap<(u8, u8), u8>,
         }
-        let e = from_str::<Tupled>("(m: { (1, 2): 3 })")
+        let e = ron_from_str::<Tupled>("(m: { (1, 2): 3 })")
             .expect_err("a tuple key is refused")
             .to_string();
         assert!(e.contains("cannot compare"), "{e}");
@@ -661,7 +684,7 @@ mod tests {
         struct ByVariant {
             m: BTreeMap<Keyed, u8>,
         }
-        let e = from_str::<ByVariant>("(m: { A(1): 1 })")
+        let e = ron_from_str::<ByVariant>("(m: { A(1): 1 })")
             .expect_err("a data-carrying variant key is refused")
             .to_string();
         assert!(e.contains("cannot compare"), "{e}");
@@ -669,10 +692,51 @@ mod tests {
 
     #[test]
     fn other_errors_pass_through_unchanged() {
-        let strict = from_str::<File>("(by_class: { Druid: [] })")
+        let strict = ron_from_str::<File>("(by_class: { Druid: [] })")
             .expect_err("an unknown variant")
             .to_string();
         let plain = ron::from_str::<File>("(by_class: { Druid: [] })")
+            .expect_err("an unknown variant")
+            .to_string();
+        assert_eq!(strict, plain);
+    }
+
+    #[test]
+    fn json_goes_through_the_same_check() {
+        let text = r#"{
+            "by_class": {"Mage": [1, 2], "Priest": []},
+            "by_name": {"a": 1, "b": 2},
+            "by_number": {"1": 10, "2": 20},
+            "nested": {"Mage": {"x": 1}, "Priest": {"x": 1}},
+            "effects": [{"Flat": 3}, {"Tagged": {"tag": "t"}}, {"Ranks": {"r": 1}}, {"Pair": [1, {"p": 1}]}],
+            "first": 4,
+            "maybe": {"m": 1},
+            "wrapped": {"w": 1}
+        }"#;
+        let strict: File = json_from_str(text).expect("parses");
+        let plain: File = serde_json::from_str(text).expect("parses");
+        assert_eq!(strict, plain);
+
+        let dup = "{\n  \"by_class\": {\"Mage\": [1],\n    \"Mage\": [2]}}";
+        let plain: File = serde_json::from_str(dup).expect("plain JSON accepts it");
+        assert_eq!(plain.by_class[&Class::Mage], vec![2]);
+        let e = json_from_str::<File>(dup).expect_err("refused").to_string();
+        assert!(e.contains("duplicate key `Mage` in `by_class`"), "{e}");
+        assert!(e.contains("at line 3 column"), "names the line: {e}");
+
+        let e = json_from_str::<File>(r#"{"effects": [{"Ranks": {"r": 1, "r": 2}}]}"#)
+            .expect_err("refused")
+            .to_string();
+        assert!(e.contains("duplicate key `r` in `effects[0].Ranks`"), "{e}");
+        let e = json_from_str::<File>(r#"{"by_number": {"7": 1, "7": 2}}"#)
+            .expect_err("refused")
+            .to_string();
+        assert!(e.contains("duplicate key `7` in `by_number`"), "{e}");
+
+        let strict = json_from_str::<File>(r#"{"by_class": {"Druid": []}}"#)
+            .expect_err("an unknown variant")
+            .to_string();
+        let plain = serde_json::from_str::<File>(r#"{"by_class": {"Druid": []}}"#)
             .expect_err("an unknown variant")
             .to_string();
         assert_eq!(strict, plain);

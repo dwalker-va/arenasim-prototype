@@ -576,7 +576,7 @@ pub fn parse_map_geometry_config(
     contents: &str,
     source: &str,
 ) -> Result<MapGeometryConfig, String> {
-    let config: MapGeometryConfig = crate::config_ron::from_str(contents)
+    let config: MapGeometryConfig = crate::config_parse::ron_from_str(contents)
         .map_err(|e| format!("Failed to parse {}: {}", source, e))?;
 
     config.validate().map_err(|issues| {

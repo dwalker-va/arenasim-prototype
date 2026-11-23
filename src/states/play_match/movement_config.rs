@@ -898,7 +898,7 @@ impl MovementConfig {
 /// Parse a movement config from RON text. `source` names the origin for
 /// error messages (a path, or "inline" in tests).
 pub fn parse_movement_config(contents: &str, source: &str) -> Result<MovementConfig, String> {
-    let config: MovementConfig = crate::config_ron::from_str(contents)
+    let config: MovementConfig = crate::config_parse::ron_from_str(contents)
         .map_err(|e| format!("Failed to parse {}: {}", source, e))?;
 
     config.validate().map_err(|issues| {

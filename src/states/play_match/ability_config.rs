@@ -1262,7 +1262,7 @@ pub fn parse_ability_definitions(
     contents: &str,
     origin: &str,
 ) -> Result<AbilityDefinitions, String> {
-    let config: AbilitiesConfig = crate::config_ron::from_str(contents)
+    let config: AbilitiesConfig = crate::config_parse::ron_from_str(contents)
         .map_err(|e| format!("Failed to parse {}: {}", origin, e))?;
 
     let definitions = AbilityDefinitions::new(config);

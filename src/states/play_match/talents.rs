@@ -1018,7 +1018,7 @@ impl TalentDefinitions {
     /// Parse and validate a talents file against `abilities`.
     pub fn from_ron(text: &str, abilities: &AbilityDefinitions) -> Result<Self, String> {
         let file: TalentsFile =
-            crate::config_ron::from_str(text).map_err(|e| format!("parse error: {e}"))?;
+            crate::config_parse::ron_from_str(text).map_err(|e| format!("parse error: {e}"))?;
         let defs = Self {
             trees: file.trees,
             talents: file.talents,
