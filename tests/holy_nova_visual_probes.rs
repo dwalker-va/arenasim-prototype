@@ -904,10 +904,12 @@ fn every_piece_is_drawn_on_a_unit_quad() {
 /// The dome, frame by frame at 8, 16 and 33 ms frames: each ring at its
 /// height, its chords on its circle, the line's width, its alpha and colour,
 /// additive; the ground glow at its radius and a quarter of the weight; all
-/// gone at 767 ms, and the rig's age is its frames × dt throughout.
+/// gone at 767 ms, and the rig's age is its frames × dt throughout. A 21.9 ms
+/// frame lands one frame 0.5 ms short of 767, where the weight has faded
+/// under the bench's floor: nothing is drawn there either.
 #[test]
 fn the_dome_is_drawn_as_the_bench_draws_it_at_any_frame_rate() {
-    for dt in [0.008, 0.016, 0.033] {
+    for dt in [0.008, 0.016, 0.033, 0.0219] {
         let mut h = Harness::with_tick(dt);
         let root = Vec3::new(-1.0, COMBATANT_Y, 2.0);
         let floor = floor_under(root);
